@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, Mapping, Optional, Sequence
 from uuid import uuid4
 
-from nexus.contracts.autonomy_goal import AutonomyGoalGrant
+from nexus.contracts.autonomy_goal import AutonomyActionClass, AutonomyGoalGrant
 from nexus.contracts.collaboration_realm import CollaborationExecutionRealm
 from nexus.contracts.lifecycle_action import (
     ContractKind,
@@ -688,6 +688,45 @@ def _validated_action_request(
         effective["allowed_files"] = list(envelope.allowed_paths)
     effective["action_request_hash"] = envelope.request_hash
     return effective, envelope.model_dump(mode="json")
+
+
+def _validate_project_entry_authority_binding(
+    request: Mapping[str, Any],
+    *,
+    repository: str | None = None,
+    issue_number: int | None = None,
+) -> dict[str, str] | None:
+    """Validate the explicit authority selectors persisted for project entry."""
+    raw = request.get("project_entry_authority_binding")
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise ValueError("PROJECT_ENTRY_AUTHORITY_BINDING_INVALID")
+    required = ("repository", "issue_number", "goal_id", "coordination_scope_id", "canonical_remote", "intended_action_family")
+    if any(key not in raw for key in required):
+        raise ValueError("PROJECT_ENTRY_AUTHORITY_BINDING_INCOMPLETE")
+    try:
+        action = AutonomyActionClass(str(raw["intended_action_family"]))
+    except ValueError as exc:
+        raise ValueError("PROJECT_ENTRY_AUTHORITY_ACTION_INVALID") from exc
+    if repository is not None and str(raw["repository"]) != repository:
+        raise ValueError("PROJECT_ENTRY_AUTHORITY_REPOSITORY_MISMATCH")
+    if issue_number is not None and raw["issue_number"] != issue_number:
+        raise ValueError("PROJECT_ENTRY_AUTHORITY_ISSUE_MISMATCH")
+    values = {
+        "repository": str(raw["repository"]),
+        "issue_number": str(raw["issue_number"]),
+        "goal_id": str(raw["goal_id"]),
+        "coordination_scope_id": str(raw["coordination_scope_id"]),
+        "canonical_remote": str(raw["canonical_remote"]),
+        "intended_action_family": action.value,
+    }
+    if any(not value.strip() for value in values.values()):
+        raise ValueError("PROJECT_ENTRY_AUTHORITY_BINDING_INCOMPLETE")
+    expected = canonical_request_hash({**values, "issue_number": raw["issue_number"]})
+    if str(raw.get("binding_hash") or "") != expected:
+        raise ValueError("PROJECT_ENTRY_AUTHORITY_BINDING_HASH_MISMATCH")
+    return values
 
 
 def _retry_request(state: Mapping[str, Any]) -> dict[str, Any]:
@@ -2384,6 +2423,23 @@ class SelfHostedTaskService:
             raise KeyError(f"unknown task: {task_id}")
         if not isinstance(state, Mapping):
             raise ValueError("REHYDRATION_MALFORMED_STATE: task state must be a mapping")
+        persisted_request = state.get("request")
+        if isinstance(persisted_request, Mapping):
+            try:
+                _validate_project_entry_authority_binding(persisted_request)
+                persisted_hash = str(state.get("action_request_hash") or "")
+                if persisted_hash:
+                    if "action" in persisted_request or "bound_action_request" in persisted_request:
+                        _, envelope = _validated_action_request(persisted_request)
+                        if not isinstance(envelope, Mapping) or persisted_hash != str(envelope.get("request_hash") or ""):
+                            raise ValueError("PROJECT_ENTRY_REQUEST_HASH_MISMATCH")
+                    else:
+                        hash_input = dict(persisted_request)
+                        hash_input.pop("action_request_hash", None)
+                        if persisted_hash != canonical_request_hash(hash_input):
+                            raise ValueError("PROJECT_ENTRY_REQUEST_HASH_MISMATCH")
+            except ValueError as exc:
+                raise ValueError(f"REHYDRATION_AUTHORITY_BINDING_INVALID: {exc}") from exc
         if state.get("state_valid") is False or str(state.get("status") or "").startswith("BLOCKED_INVALID_"):
             blocker = state.get("blocker") if isinstance(state.get("blocker"), Mapping) else {}
             detail = blocker.get("detail") or "state is invalid"
@@ -2438,6 +2494,20 @@ class SelfHostedTaskService:
             task_action_envelope=task_action,
             requested_attempt_id=attempt_id,
         ).to_dict()
+
+    def project_entry_authority_binding(
+        self, task_id: str, *, repository: str, issue_number: int
+    ) -> dict[str, str] | None:
+        """Read and validate the explicit authority continuation for project entry."""
+        state = self._read_state_snapshot(task_id)
+        if not isinstance(state, Mapping):
+            raise ValueError("PROJECT_ENTRY_CONTINUATION_STATE_INVALID")
+        request = state.get("request")
+        if not isinstance(request, Mapping):
+            return None
+        return _validate_project_entry_authority_binding(
+            request, repository=repository, issue_number=issue_number
+        )
 
     @staticmethod
     def _request_hash(request: Mapping[str, Any]) -> str:
@@ -5416,6 +5486,7 @@ class SelfHostedTaskService:
 
     def submit_task(self, request: Mapping[str, Any]) -> dict[str, Any]:
         request, _ = _validated_action_request(request)
+        _validate_project_entry_authority_binding(request)
         task_id = self._resolve_current_execution_task_id(request)
         raw_autonomy_grant = request.get("autonomy_goal_grant")
         autonomy_grant: Optional[AutonomyGoalGrant] = None

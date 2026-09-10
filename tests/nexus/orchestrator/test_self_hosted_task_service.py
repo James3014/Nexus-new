@@ -9429,3 +9429,27 @@ def test_rehydrate_task_continuation_reason_not_promoted_to_observation(tmp_path
     proj = service.rehydrate_task_continuation(task_id, attempt_id)
     assert "verified_observations" not in proj["continuation"]
     assert "verified_observations" in proj["missing_durable_bindings"]
+def test_project_entry_authority_binding_is_canonical_and_strict():
+    from nexus.contracts.lifecycle_action import canonical_request_hash
+    from nexus.orchestrator.self_hosted_task_service import _validate_project_entry_authority_binding
+
+    values = {
+        "repository": "James3014/Nexus-new",
+        "issue_number": 842,
+        "goal_id": "goal-842",
+        "coordination_scope_id": "scope-842",
+        "canonical_remote": "https://github.com/James3014/Nexus-new.git",
+        "intended_action_family": "TASK_SUBMIT",
+    }
+    binding = {**values, "binding_hash": canonical_request_hash(values)}
+    assert _validate_project_entry_authority_binding(
+        {"project_entry_authority_binding": binding},
+        repository="James3014/Nexus-new",
+        issue_number=842,
+    ) == {key: str(value) for key, value in values.items()}
+    with pytest.raises(ValueError, match="BINDING_HASH_MISMATCH"):
+        _validate_project_entry_authority_binding(
+            {"project_entry_authority_binding": {**binding, "goal_id": "other"}},
+            repository="James3014/Nexus-new",
+            issue_number=842,
+        )

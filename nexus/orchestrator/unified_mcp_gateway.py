@@ -4564,6 +4564,29 @@ class UnifiedMCPGateway:
             projection = self.service.rehydrate_task_continuation(task_id, state.get("attempt_id"))
         except Exception as exc:
             return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_CONTINUATION_INVALID", str(exc), task_id=task_id)
+        try:
+            binding_reader = getattr(self.service, "project_entry_authority_binding", None)
+            authority_binding = (
+                binding_reader(task_id, repository=repository, issue_number=raw_issue)
+                if callable(binding_reader)
+                else None
+            )
+        except Exception as exc:
+            return self._project_entry_blocker(
+                repository, raw_issue, "PROJECT_ENTRY_AUTHORITY_BINDING_INVALID", str(exc), task_id=task_id
+            )
+        if authority_binding is not None:
+            readiness_args.update({
+                "task_campaign_goal_identity": authority_binding["goal_id"],
+                "durable_coordination_scope_id": authority_binding["coordination_scope_id"],
+                "durable_repository_canonical_remote": authority_binding["canonical_remote"],
+                "required_action_family": authority_binding["intended_action_family"],
+            })
+        else:
+            legacy_request = state.get("request") if isinstance(state.get("request"), Mapping) else {}
+            legacy_goal = legacy_request.get("authority_goal_id")
+            if legacy_goal:
+                readiness_args["task_campaign_goal_identity"] = str(legacy_goal)
         readiness = self._gateway_execution_readiness(readiness_args)
         result = {"schema": "nexus.project_entry.v1", "status": "TASK_REHYDRATED", "repository": repository,
                 "issue": dict(issue), "source": {"commit": head, "tree": tree, "canonical_remote": canonical_remote},
