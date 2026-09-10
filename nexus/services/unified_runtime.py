@@ -22,16 +22,19 @@ from nexus.contracts.canonical_execution import (
     CanonicalPlanningBundle,
     CanonicalTaskContext,
 )
+from nexus.contracts.unified_runtime_receipt import attach_failure_diagnostics
+from nexus.engine.canonical_execution import replan_canonical_task_bundle
 from nexus.engine.capability_contracts import (
     EXECUTION_DEPTH_FULL,
-    EXECUTION_DEPTH_LIGHT,
-    EXECUTION_DEPTH_STANDARD,
     ExecutionReplanAuthorization,
-    apply_execution_depth_floor,
     next_execution_depth_after_failure,
 )
 from nexus.engine.capability_planner import CapabilityPlanner
-from nexus.engine.canonical_execution import replan_canonical_task_bundle
+from nexus.evidence.receipt_base import (
+    attach_r3_receipt_base,
+    build_execution_attempt_id,
+    validate_receipt_base,
+)
 from nexus.services.model_workforce_policy import WorkforcePolicyLoader
 from nexus.services.runtime_workforce_admission import (
     RuntimeWorkforceAdmissionRecord,
@@ -42,12 +45,6 @@ from nexus.services.runtime_workforce_admission import (
     _sha256_json,
     evaluate_runtime_workforce_admission,
 )
-from nexus.evidence.receipt_base import (
-    attach_r3_receipt_base,
-    build_execution_attempt_id,
-    validate_receipt_base,
-)
-from nexus.contracts.unified_runtime_receipt import attach_failure_diagnostics
 
 REQUEST_SCHEMA = "nexus.unified_runtime.request.v1"
 RECEIPT_SCHEMA = "nexus.unified_runtime.receipt.v1"
@@ -159,7 +156,7 @@ def execution_replan_request_authority_projection(
     if not isinstance(value, Mapping):
         return {}
 
-    v_stage = value.get("verifier_stage") if isinstance(value.get("verifier_stage"), Mapping) else {}
+    v_stage = _mapping(value.get("verifier_stage"))
     v_refs = value.get("verifier_evidence_refs") or v_stage.get("evidence_refs") or []
     if isinstance(v_refs, (list, tuple)):
         sorted_refs = sorted(str(r) for r in v_refs)
@@ -999,21 +996,9 @@ def _repair_loop_result_from_local_stage(
     candidate/apply hash agreement, verifier PASS, and a complete disk receipt
     bound to the same task.
     """
-    response = (
-        local_stage.get("response")
-        if isinstance(local_stage.get("response"), Mapping)
-        else {}
-    )
-    candidate = (
-        response.get("candidate_summary")
-        if isinstance(response.get("candidate_summary"), Mapping)
-        else {}
-    )
-    verifier = (
-        response.get("verifier_summary")
-        if isinstance(response.get("verifier_summary"), Mapping)
-        else {}
-    )
+    response = _mapping(local_stage.get("response"))
+    candidate = _mapping(response.get("candidate_summary"))
+    verifier = _mapping(response.get("verifier_summary"))
     evidence_refs = [str(item) for item in response.get("evidence_refs", []) or []]
     candidate_hash = str(candidate.get("selected_candidate_hash") or "").strip()
     hash_matched = candidate.get("selected_candidate_hash_matches_applied") is True
@@ -1099,8 +1084,10 @@ def _repair_loop_result_from_local_stage(
 
 def _formal_local_runtime_lineage(payload: Mapping[str, Any]) -> dict[str, Any]:
     action = str(payload.get("action") or "").strip()
-    candidate = payload.get("candidate_summary") if isinstance(payload.get("candidate_summary"), Mapping) else {}
-    verifier = payload.get("verifier_summary") if isinstance(payload.get("verifier_summary"), Mapping) else {}
+    candidate_value = payload.get("candidate_summary")
+    candidate: Mapping[str, Any] = candidate_value if isinstance(candidate_value, Mapping) else {}
+    verifier_value = payload.get("verifier_summary")
+    verifier: Mapping[str, Any] = verifier_value if isinstance(verifier_value, Mapping) else {}
     claim_boundary = payload.get("claim_boundary") if isinstance(payload.get("claim_boundary"), Mapping) else {}
     receipt_path = str(payload.get("receipt_path") or "")
     physical_callable = str(payload.get("physical_callable") or "")
@@ -1909,7 +1896,7 @@ def build_subprocess_online_invoker(
                 selection_source=SELECTION_EXPLICIT_REQUEST,
                 extra={"live_provider_claim": False},
             )
-        attempt_info = context.get("execution_attempt") if isinstance(context.get("execution_attempt"), Mapping) else {}
+        attempt_info = _mapping(context.get("execution_attempt"))
         attempt_id = str(
             context.get("attempt_id")
             or attempt_info.get("attempt_id")
@@ -1929,7 +1916,26 @@ def build_subprocess_online_invoker(
             ):
                 from nexus.services.local_substitution import build_online_safe_local_forward
 
-                safe = build_online_safe_local_forward(local_stage)
+                safe = build_online_safe_local_forward(
+                    local_stage,
+                    runtime_task_id=str(context.get("task_id") or ""),
+                    runtime_canonical_execution=(
+                        context.get("canonical_execution")
+                        if isinstance(context.get("canonical_execution"), Mapping)
+                        else None
+                    ),
+                    runtime_execution_attempt=(
+                        context.get("execution_attempt")
+                        if isinstance(context.get("execution_attempt"), Mapping)
+                        else None
+                    ),
+                    runtime_source_hash=str(context.get("source_hash") or ""),
+                    runtime_execution_world=str(
+                        _mapping(context.get("canonical_execution")).get("execution_world")
+                        or "product_runtime"
+                    ),
+                    final_prompt=prompt,
+                )
                 forward = safe.get("forward", {}) if isinstance(safe, Mapping) else {}
                 if isinstance(forward, Mapping) and (
                     forward.get("concise_summary")
@@ -2880,7 +2886,10 @@ class UnifiedRuntime:
         if prior_attempt_num >= 2:
             raise ValueError("replan_attempt_budget_exhausted")
 
-        base = previous_receipt.get("receipt_base") if isinstance(previous_receipt.get("receipt_base"), Mapping) else previous_receipt
+        receipt_base = previous_receipt.get("receipt_base")
+        base: Mapping[str, Any] = (
+            receipt_base if isinstance(receipt_base, Mapping) else previous_receipt
+        )
         canonical_task_id = str(base.get("task_id") or previous_receipt.get("task_id") or "")
         canonical_workspace_revision = str(base.get("workspace_revision") or previous_receipt.get("workspace_revision") or "")
         canonical_planner_decision_id = str(base.get("planner_decision_id") or previous_receipt.get("planner_decision_id") or "")
@@ -2974,15 +2983,6 @@ class UnifiedRuntime:
         planner_decision_id = plan_hash
 
         if attempt_number == 1:
-            attempt_payload_for_id = {
-                "task_id": str(request.task_id),
-                "workspace_revision": str(request.workspace_revision),
-                "attempt_number": 1,
-                "parent_receipt_hash": "",
-                "source_replan_request_id": "",
-                "planner_decision_id": str(planner_decision_id),
-                "execution_depth": str(plan.execution_depth),
-            }
             parent_attempt_id = ""
             parent_receipt_hash = ""
             parent_run_anchor_hash = ""
@@ -2995,16 +2995,6 @@ class UnifiedRuntime:
             parent_run_anchor_hash = str((parent_receipt or {}).get("run_anchor_hash") or "")
             source_replan_request_id = str(((parent_receipt or {}).get("execution_replan_request") or {}).get("replan_request_id") or "")
             source_planner_decision_id = str((parent_receipt or {}).get("planner_decision_id") or "")
-            attempt_payload_for_id = {
-                "task_id": str(request.task_id),
-                "workspace_revision": str(request.workspace_revision),
-                "attempt_number": 2,
-                "parent_receipt_hash": parent_receipt_hash,
-                "source_replan_request_id": source_replan_request_id,
-                "planner_decision_id": str(planner_decision_id),
-                "execution_depth": str(plan.execution_depth),
-            }
-
         attempt_id = build_execution_attempt_id(
             task_id=str(request.task_id),
             workspace_revision=str(request.workspace_revision),
@@ -3458,6 +3448,8 @@ class UnifiedRuntime:
         plan_payload = dict(plan_payload)
         from nexus.services.capability_evidence_bundle import (
             consumer_view as _evidence_consumer_view,
+        )
+        from nexus.services.capability_evidence_bundle import (
             verify_capability_evidence_bundle as _verify_evidence_bundle,
         )
         sealed_verdict = _verify_evidence_bundle(evidence_bundle)
@@ -3664,6 +3656,7 @@ class UnifiedRuntime:
             request,
             plan_payload,
             workforce_admission_required=workforce_admission_required,
+            execution_attempt=execution_attempt,
         )
         if request.local_enabled:
             stages["local"] = local_stage
@@ -3760,6 +3753,8 @@ class UnifiedRuntime:
             "online_authorization_source": online_decision.online_authorization_source,
             "online_preflight_status": online_decision.preflight_status,
             "approved_online_providers": list(online_decision.approved_online_providers),
+            "execution_attempt": execution_attempt,
+            "source_hash": str(evidence_bundle.get("source_hash") or ""),
         }
         if canonical_execution is not None:
             context["canonical_execution"] = canonical_execution
@@ -3845,7 +3840,7 @@ class UnifiedRuntime:
             return bool(stage.get("invoked") and stage.get("evidence_present") and stage.get("gate_passed"))
 
         receipt_complete = all(_stage_complete(stage) for stage in required_stages)
-        outcome_contributed = any(bool(stage.get("outcome_contributed")) for stage in required_stages)
+        outcome_contributed = any(bool(stage.get("outcome_contributed")) for stage in required_stages) and _stage_complete(verifier_stage)
         # P4: full wiring closure — every selected capability must truly succeed.
         # SKIPPED / SELECTED_NOT_EXECUTED / STUB / FAILED / BLOCKED / invoked=false
         # / gate_passed=false all block capability_closure_complete.
@@ -4259,7 +4254,9 @@ class UnifiedRuntime:
                 }
             )
         # FCM coverage fields on receipt (machine-checkable)
-        from nexus.services.capability_registry import coverage_counts_from_receipt as _coverage_preview
+        from nexus.services.capability_registry import (
+            coverage_counts_from_receipt as _coverage_preview,
+        )
 
         # Temporary object for coverage helper — fill after append
         _coverage_tmp = {
@@ -4308,8 +4305,9 @@ class UnifiedRuntime:
 
                 # Prefer assembled with_nexus prompt for physical consumption binding.
                 with_nexus_prompt = ""
-                if isinstance(online_response.get("with_nexus"), Mapping):
-                    with_nexus_prompt = str(online_response["with_nexus"].get("prompt") or "")
+                with_nexus = _mapping(online_response.get("with_nexus"))
+                if with_nexus:
+                    with_nexus_prompt = str(with_nexus.get("prompt") or "")
                 assembled = str(
                     online_response.get("assembled_online_prompt")
                     or with_nexus_prompt
@@ -4317,17 +4315,48 @@ class UnifiedRuntime:
                     or ""
                 )
                 # Re-run attach with final prompt so consumption_proof binds to Online injection.
-                forward_base = build_online_safe_local_forward(local_stage)
-                from nexus.services.verified_assist_contract import attach_verified_assist_to_forward
+                forward_base = build_online_safe_local_forward(
+                    local_stage,
+                    runtime_task_id=request.task_id,
+                    runtime_canonical_execution=canonical_execution or {},
+                    runtime_execution_attempt=execution_attempt,
+                    runtime_source_hash=str(evidence_bundle.get("source_hash") or ""),
+                    runtime_execution_world=str(
+                        (canonical_execution or {}).get("execution_world") or "product_runtime"
+                    ),
+                    final_prompt=assembled,
+                )
+                from nexus.services.verified_assist_contract import (
+                    attach_verified_assist_to_forward,
+                    validate_vap_runtime_binding,
+                )
+
+                vap_binding = validate_vap_runtime_binding(
+                    vap_packet,
+                    task_id=request.task_id,
+                    canonical_execution=canonical_execution or {},
+                    execution_attempt=execution_attempt,
+                    source_hash=str(evidence_bundle.get("source_hash") or ""),
+                    execution_world=str(
+                        (canonical_execution or {}).get("execution_world") or "product_runtime"
+                    ),
+                )
+                if not vap_binding.get("ok"):
+                    raise ValueError(str(vap_binding.get("reason") or "vap_runtime_binding_failed"))
 
                 online_safe_forward = attach_verified_assist_to_forward(
                     forward_base,
                     vap_packet,
                     consume=bool(request.online_enabled and online_stage.get("invoked")),
                     consumed_by_stage="online_prompt_assembly",
-                    final_prompt=assembled if assembled else str(
-                        (forward_base.get("verified_assist") or {}).get("injection_fragment")
-                        or ""
+                    final_prompt=assembled,
+                    runtime_task_id=request.task_id,
+                    runtime_canonical_execution=canonical_execution or {},
+                    runtime_execution_attempt=execution_attempt,
+                    runtime_source_hash=str(evidence_bundle.get("source_hash") or ""),
+                    runtime_execution_world=str(
+                        (canonical_execution or {}).get("execution_world")
+                        or "product_runtime"
                     ),
                 )
                 verified_assist_block = dict(online_safe_forward.get("verified_assist") or {})
@@ -4342,6 +4371,44 @@ class UnifiedRuntime:
             except Exception:
                 online_safe_forward = {}
                 verified_assist_block = {}
+
+        if request.local_enabled and request.online_enabled:
+            verifier_response = (
+                verifier_stage.get("response")
+                if isinstance(verifier_stage.get("response"), Mapping)
+                else verifier_stage
+            )
+            if isinstance(verifier_response.get("response"), Mapping):
+                verifier_response = verifier_response["response"]
+            verifier_attempt = str(
+                verifier_response.get("attempt_id")
+                or verifier_response.get("execution_attempt_id")
+                or ""
+            )
+            verifier_task = str(verifier_response.get("task_id") or "")
+            verifier_source = str(verifier_response.get("source_hash") or "")
+            verifier_bound = bool(
+                _stage_complete(verifier_stage)
+                and verifier_task
+                and verifier_task == request.task_id
+                and execution_attempt.get("attempt_id")
+                and evidence_bundle.get("source_hash")
+                and verifier_attempt == str(execution_attempt.get("attempt_id") or "")
+                and verifier_source == str(evidence_bundle.get("source_hash") or "")
+            )
+            vap_credit = (
+                verified_assist_block.get("credit")
+                if isinstance(verified_assist_block.get("credit"), Mapping)
+                else {}
+            )
+            outcome_contributed = bool(vap_credit.get("assist_credited")) and verifier_bound
+            claim_boundary["outcome_contributed"] = outcome_contributed
+            if isinstance(local_stage.get("substitution_trace"), Mapping):
+                local_stage = dict(local_stage)
+                trace = dict(local_stage.get("substitution_trace") or {})
+                trace["final_outcome_contributed"] = outcome_contributed
+                local_stage["substitution_trace"] = trace
+                stages["local"] = local_stage
 
         codeintel_hash = _hash_json(dict(request.codeintel) if isinstance(request.codeintel, Mapping) else {})
         treatment_config = {
@@ -4650,7 +4717,58 @@ class UnifiedRuntime:
             and bool(stage.get("gate_passed"))
             for stage in required_stages
         )
-        outcome_contributed = any(bool(stage.get("outcome_contributed")) for stage in required_stages if isinstance(stage, Mapping))
+        verifier_map = verifier if isinstance(verifier, Mapping) else {}
+        expected_attempt_id = str(
+            (finalized.get("execution_attempt") or {}).get("attempt_id")
+            if isinstance(finalized.get("execution_attempt"), Mapping)
+            else ""
+        )
+        evidence_bundle = finalized.get("capability_evidence_bundle")
+        expected_source_hash = str(
+            (evidence_bundle or {}).get("source_hash")
+            if isinstance(evidence_bundle, Mapping)
+            else (finalized.get("context_trace") or {}).get("source_hash", "")
+        )
+        verifier_response = verifier_map.get("response") if isinstance(verifier_map.get("response"), Mapping) else verifier_map
+        verifier_task_id = str(verifier_response.get("task_id") or "")
+        verifier_attempt_id = str(
+            verifier_response.get("attempt_id")
+            or verifier_response.get("execution_attempt_id")
+            or ""
+        )
+        verifier_source_hash = str(verifier_response.get("source_hash") or "")
+        verifier_authoritative = bool(
+            verifier_map.get("invoked")
+            and verifier_map.get("evidence_present", bool(verifier_map.get("evidence_refs")))
+            and verifier_map.get("gate_passed")
+            and expected_attempt_id
+            and expected_source_hash
+            and verifier_attempt_id == expected_attempt_id
+            and verifier_source_hash == expected_source_hash
+            and verifier_task_id == str(finalized.get("task_id") or "")
+        )
+        vap_credit = finalized.get("verified_assist", {}).get("credit", {}) if isinstance(finalized.get("verified_assist"), Mapping) else {}
+        finalized_local = finalized.get("local") if isinstance(finalized.get("local"), Mapping) else {}
+        finalized_local_response = finalized_local.get("response") if isinstance(finalized_local.get("response"), Mapping) else {}
+        local_vap_required = bool(
+            finalized_local.get("invoked")
+            and (
+                finalized_local.get("verified_assist_packet_expected_hash")
+                or finalized_local.get("verified_assist_packet_id")
+                or finalized_local_response.get("consume_verified_assist")
+                or isinstance(finalized_local_response.get("verified_assist_packet"), Mapping)
+            )
+        )
+        physical_contribution = bool(vap_credit.get("assist_credited")) if local_vap_required else True
+        outcome_contributed = any(bool(stage.get("outcome_contributed")) for stage in required_stages if isinstance(stage, Mapping)) and verifier_authoritative and physical_contribution
+        finalized_local = finalized.get("local")
+        if isinstance(finalized_local, Mapping):
+            finalized_local = dict(finalized_local)
+            finalized_local["outcome_contributed"] = outcome_contributed
+            trace = dict(finalized_local.get("substitution_trace") or {})
+            trace["final_outcome_contributed"] = outcome_contributed
+            finalized_local["substitution_trace"] = trace
+            finalized["local"] = finalized_local
         evidence_refs: set[str] = set(str(ref) for ref in finalized.get("evidence_refs", []) or [])
         for stage in stages:
             evidence_refs.update(str(ref) for ref in stage.get("evidence_refs", []) or [])
@@ -4697,6 +4815,7 @@ class UnifiedRuntime:
         plan: Mapping[str, Any],
         *,
         workforce_admission_required: bool | None = None,
+        execution_attempt: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         if not request.local_enabled:
             return _stage("local", status="NOT_REQUESTED", reason="local_route_disabled")
@@ -4910,13 +5029,19 @@ class UnifiedRuntime:
             ),
             "verifier_passed": local_verifier_status in {"pass", "passed"},
             "online_consumed": False,
-            "final_outcome_contributed": bool(payload.get("outcome_contributed", False)),
+            "final_outcome_contributed": False,
             "partial_success_claimed": False,
             "fallback_reason": str(payload.get("fallback_reason") or ""),
         }
         # P1: produce VerifiedAssistPacket from real Local receipt (not hand-written pilot).
         # Packet rides on response so build_online_safe_local_forward can attach consumption.
-        if invoked and delivered and task_identity_valid and not payload.get("verified_assist_packet"):
+        declared_consume = bool(payload.get("consume_verified_assist"))
+        declared_packet_missing = declared_consume and not isinstance(
+            payload.get("verified_assist_packet"), Mapping
+        )
+        if declared_packet_missing:
+            stage_bits["vap_integrity_failure"] = "missing_packet"
+        if invoked and delivered and task_identity_valid and not declared_packet_missing:
             try:
                 from nexus.services.verified_assist_contract import (
                     build_vap_from_local_receipt,
@@ -4935,15 +5060,40 @@ class UnifiedRuntime:
                     task_contract_hash=plan_hash,
                     treatment_run_id=str(request.task_id),
                     plan_hash=plan_hash,
+                    canonical_execution=(
+                        plan.get("canonical_execution")
+                        if isinstance(plan.get("canonical_execution"), Mapping)
+                        else shared_snapshot.get("canonical_execution")
+                    ),
+                    execution_attempt=execution_attempt,
+                    source_hash=hashlib.sha256(
+                        f"{request.workspace_revision}:{request.task_statement}".encode("utf-8")
+                    ).hexdigest(),
+                    execution_world=str(
+                        (
+                            plan.get("canonical_execution")
+                            if isinstance(plan.get("canonical_execution"), Mapping)
+                            else {}
+                        ).get("execution_world")
+                        or "product_runtime"
+                    ),
                 )
                 if vap is not None:
                     payload = dict(payload)
+                    declared_packet = payload.get("verified_assist_packet")
+                    if isinstance(declared_packet, Mapping) and str(
+                        declared_packet.get("packet_hash") or ""
+                    ) != vap.packet_hash:
+                        payload["vap_integrity_failure"] = "packet_hash_substitution"
                     payload["verified_assist_packet"] = vap.to_dict()
                     payload["consume_verified_assist"] = True
                     payload["verified_assist_stage"] = "online_prompt_assembly"
                     refs = list(refs) + [f"local:{request.task_id}:vap:{vap.packet_hash[:16]}"]
                     stage_bits["verified_assist_packet_hash"] = vap.packet_hash
+                    stage_bits["verified_assist_packet_expected_hash"] = vap.packet_hash
                     stage_bits["verified_assist_packet_id"] = vap.packet_id
+                    if payload.get("vap_integrity_failure"):
+                        stage_bits["vap_integrity_failure"] = str(payload["vap_integrity_failure"])
             except Exception as exc:
                 # Local native outcome retained, but VAP/consumer closure fail-closed incomplete
                 payload = dict(payload)
@@ -4958,7 +5108,7 @@ class UnifiedRuntime:
             invoked=invoked,
             evidence_present=bool(payload.get("receipt_path") or refs or payload.get("verified_assist_packet")),
             gate_passed=local_boundary_passed,
-            outcome_contributed=bool(payload.get("outcome_contributed", False)),
+            outcome_contributed=False,
             evidence_refs=refs,
             planner_snapshot_hash=_hash_json(shared_snapshot),
             task_id=request.task_id,
@@ -5010,6 +5160,83 @@ class UnifiedRuntime:
 
         if invoker is None:
             return _stage("online", status="NOT_RUN", reason="online_invoker_not_supplied")
+
+        # VAP binding is a pre-provider gate.  The with_nexus wrapper is not
+        # the only possible invoker, so validate every custom/registered edge
+        # here using runtime-owned context and expected packet identity.
+        local_stage = context.get("local") if isinstance(context.get("local"), Mapping) else {}
+        local_response = (
+            local_stage.get("response")
+            if isinstance(local_stage.get("response"), Mapping)
+            else {}
+        )
+        local_packet = (
+            local_response.get("verified_assist_packet")
+            if isinstance(local_response.get("verified_assist_packet"), Mapping)
+            else None
+        )
+        vap_declared = bool(
+            local_response.get("consume_verified_assist")
+            or local_stage.get("consume_verified_assist")
+            or local_stage.get("verified_assist_packet_expected_hash")
+            or local_packet is not None
+        )
+        if vap_declared:
+            from nexus.services.verified_assist_contract import validate_vap_runtime_binding
+
+            expected_packet_hash = str(
+                local_stage.get("verified_assist_packet_expected_hash") or ""
+            )
+            expected_packet_id = str(local_stage.get("verified_assist_packet_id") or "")
+            failure_reason = str(local_stage.get("vap_integrity_failure") or "")
+            if local_packet is None:
+                failure_reason = failure_reason or "missing_packet"
+            elif expected_packet_hash and str(local_packet.get("packet_hash") or "") != expected_packet_hash:
+                failure_reason = failure_reason or "packet_hash_substitution"
+            elif expected_packet_id and str(local_packet.get("packet_id") or "") != expected_packet_id:
+                failure_reason = failure_reason or "packet_id_substitution"
+            if not failure_reason:
+                canonical = (
+                    context.get("canonical_execution")
+                    if isinstance(context.get("canonical_execution"), Mapping)
+                    else {}
+                )
+                verdict = validate_vap_runtime_binding(
+                    local_packet,
+                    task_id=str(context.get("task_id") or ""),
+                    canonical_execution=canonical,
+                    execution_attempt=(
+                        context.get("execution_attempt")
+                        if isinstance(context.get("execution_attempt"), Mapping)
+                        else {}
+                    ),
+                    source_hash=str(context.get("source_hash") or ""),
+                    execution_world=str(canonical.get("execution_world") or "product_runtime"),
+                )
+                if not verdict.get("ok"):
+                    failure_reason = str(verdict.get("reason") or "binding_mismatch")
+            if failure_reason:
+                return _stage(
+                    "online",
+                    status="FAILED",
+                    invoked=False,
+                    evidence_present=True,
+                    gate_passed=False,
+                    reason=f"vap_runtime_binding_failed:{failure_reason}",
+                    response={
+                        "task_id": str(context.get("task_id") or ""),
+                        "invoked": False,
+                        "output_delivered": False,
+                        "gate_passed": False,
+                        "provider_call_count": 0,
+                        "model_call_count": 0,
+                        "error": f"vap_runtime_binding_failed:{failure_reason}",
+                    },
+                    evidence_refs=[
+                        f"online:{context.get('task_id')}:vap_binding_failed:{failure_reason}"
+                    ],
+                    task_id=str(context.get("task_id") or ""),
+                )
 
         # Product deny / unauthorized decisions must never invoke Online transport
         # (including custom repair-style callables). Injected fixtures authorize
