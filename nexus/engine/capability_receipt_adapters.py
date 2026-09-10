@@ -194,79 +194,16 @@ def _looks_like_verifier_artifact(value: Any) -> bool:
 
 
 def _gate_verifier_ok(payload: dict[str, Any]) -> bool:
-    """Validate that verifier proof has genuine provenance and is not a caller-forged flat payload.
+    """Validate that verifier proof has genuine provenance.
 
-    Fail closed unless the proof originates from a canonical postflight gate evaluation
-    or a validated postflight context binding verifier stage, sealed source, and task identity.
+    Under ADVISORY_ONLY_FAIL_CLOSED (#453 closure contract):
+    Generic caller payloads cannot mint verifier authority.
+    Neither flat fields, nested postflight verdicts (Attack A),
+    invoker envelopes (Attack B), nor synthetic contexts evaluated
+    via evaluate_postflight_gate (Attack C) grant contribution authority
+    when passed through generic adapter payloads.
+    Fails closed until an authenticated upstream verifier authority is bound.
     """
-    if not isinstance(payload, dict):
-        return False
-
-    # Path A: canonical postflight verdict / invoker response
-    # Produced by online_nexus_context.evaluate_postflight_gate or build_plan_gated_postflight_invokers
-    postflight_verdict = payload.get("postflight_verdict") or payload.get("postflight_result")
-    if isinstance(postflight_verdict, dict):
-        proof = postflight_verdict.get("proof")
-        if isinstance(proof, dict):
-            if postflight_verdict.get("gate_passed") is True and not postflight_verdict.get("blockers"):
-                v_art = proof.get("verifier_artifact")
-                v_stat = str(proof.get("verifier_status") or "").upper()
-                v_task = str(proof.get("verifier_task_id") or "").strip()
-                task = str(proof.get("task_id") or "").strip()
-                v_src = str(proof.get("verifier_source_hash") or "").strip()
-                src = str(proof.get("source_hash") or "").strip()
-                if (
-                    _looks_like_verifier_artifact(v_art)
-                    and v_stat in {"PASS", "PASSED", "OK", "VERIFIED", "SUCCESS", "SUCCEEDED"}
-                    and bool(proof.get("verifier_invoked"))
-                    and bool(proof.get("verifier_gate_passed"))
-                    and bool(task and v_task and task == v_task)
-                    and bool(src and v_src and src == v_src)
-                ):
-                    return True
-
-    # Path B: postflight invoker envelope
-    if (
-        payload.get("action") == "evaluate_postflight_gate"
-        or str(payload.get("physical_callable") or "").startswith("online_nexus_context.evaluate_postflight_gate")
-        or payload.get("delegated_to") == "postflight"
-    ):
-        resp = payload.get("response") if isinstance(payload.get("response"), dict) else payload
-        proof = resp.get("proof") if isinstance(resp, dict) else None
-        if isinstance(proof, dict) and resp.get("status") in {"PASS", "SUCCEEDED"} and not resp.get("blockers"):
-            v_art = proof.get("verifier_artifact")
-            v_stat = str(proof.get("verifier_status") or "").upper()
-            v_task = str(proof.get("verifier_task_id") or "").strip()
-            task = str(proof.get("task_id") or payload.get("task_id") or "").strip()
-            v_src = str(proof.get("verifier_source_hash") or "").strip()
-            src = str(proof.get("source_hash") or payload.get("source_hash") or "").strip()
-            if (
-                _looks_like_verifier_artifact(v_art)
-                and v_stat in {"PASS", "PASSED", "OK", "VERIFIED", "SUCCESS", "SUCCEEDED"}
-                and bool(proof.get("verifier_invoked"))
-                and bool(proof.get("verifier_gate_passed"))
-                and bool(task and v_task and task == v_task)
-                and bool(src and v_src and src == v_src)
-            ):
-                return True
-
-    # Path C: context containing an isolated verifier stage mapping and sealed source
-    # Evaluated via canonical online_nexus_context.evaluate_postflight_gate
-    context = payload.get("context") if isinstance(payload.get("context"), dict) else payload
-    if isinstance(context, dict):
-        verifier = context.get("verifier")
-        if isinstance(verifier, dict) and verifier:
-            from nexus.services.online_nexus_context import evaluate_postflight_gate
-
-            gate_name = str(payload.get("gate_name") or payload.get("name") or "claim_gate")
-            try:
-                verdict = evaluate_postflight_gate(gate_name, context)
-                if verdict.get("gate_passed") is True and not verdict.get("blockers"):
-                    return True
-            except Exception:
-                return False
-
-    # Fail closed on flat caller-authored payload without genuine postflight/verifier provenance
     return False
 
 
@@ -528,14 +465,15 @@ class MemPalaceGateReceiptAdapter:
         refs = _as_refs(payload.get("mempalace_audit_ref") or payload.get("mempalace_refs"))
         refs = refs or _fail_closed_ref(payload, "mempalace_gate_passed", "mempalace:gate_failed")
         invoked = bool(_pillar_present(payload, "mempalace", "mempalace_gate") or refs or _explicit_bool(payload, "mempalace_gate_passed"))
-        gate_passed = bool(refs and _as_bool(payload.get("mempalace_gate_passed", True)))
+        verifier_ok = _gate_verifier_ok(payload)
+        gate_passed = bool(refs and _as_bool(payload.get("mempalace_gate_passed", True)) and verifier_ok)
         return merge_capability_receipt(
             name=self.name,
             selected=True,
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(refs and gate_passed and _gate_verifier_ok(payload)),
+            outcome_contributed=bool(refs and gate_passed and verifier_ok),
             executor_id=self.name,
             failure_reason=selected_failure_reason(
                 selected=True,
@@ -553,14 +491,15 @@ class ArtifactGateReceiptAdapter:
         refs = _as_refs(payload.get("artifact_refs") or payload.get("artifact_ref"))
         refs = refs or _fail_closed_ref(payload, "artifact_gate_passed", "artifact:gate_failed")
         invoked = bool(_pillar_present(payload, "artifact", "artifact_gate") or refs or _explicit_bool(payload, "artifact_gate_passed"))
-        gate_passed = bool(refs and _as_bool(payload.get("artifact_gate_passed", True)))
+        verifier_ok = _gate_verifier_ok(payload)
+        gate_passed = bool(refs and _as_bool(payload.get("artifact_gate_passed", True)) and verifier_ok)
         return merge_capability_receipt(
             name=self.name,
             selected=True,
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(refs and gate_passed and _gate_verifier_ok(payload)),
+            outcome_contributed=bool(refs and gate_passed and verifier_ok),
             executor_id=self.name,
             failure_reason=selected_failure_reason(
                 selected=True,
@@ -571,31 +510,6 @@ class ArtifactGateReceiptAdapter:
         )
 
 
-def _extract_gate_proof_value(payload: dict[str, Any], key: str) -> Any:
-    if key in payload and payload.get(key):
-        return payload.get(key)
-    verdict = payload.get("postflight_verdict") or payload.get("postflight_result")
-    if isinstance(verdict, dict):
-        proof = verdict.get("proof")
-        if isinstance(proof, dict) and proof.get(key):
-            return proof.get(key)
-    resp = payload.get("response")
-    if isinstance(resp, dict):
-        proof = resp.get("proof")
-        if isinstance(proof, dict) and proof.get(key):
-            return proof.get(key)
-    ctx = payload.get("context")
-    if isinstance(ctx, dict):
-        if key == "source_hash":
-            bundle = ctx.get("capability_evidence_bundle")
-            bundle = bundle if isinstance(bundle, dict) else {}
-            return ctx.get("source_hash") or bundle.get("source_hash")
-        verifier = ctx.get("verifier")
-        if isinstance(verifier, dict):
-            return verifier.get(key)
-    return None
-
-
 class ClaimGateReceiptAdapter:
     name = "claim_gate"
 
@@ -603,18 +517,17 @@ class ClaimGateReceiptAdapter:
         refs = _as_refs(payload.get("claim_refs") or payload.get("claim_ref"))
         refs = refs or _fail_closed_ref(payload, "claim_gate_invoked", "claim:gate_failed")
         invoked = bool(claim_verified or refs or _explicit_bool(payload, "claim_gate_invoked"))
-        
-        # Real validation to prevent fake payloads
+
         reasons = []
-        art = _extract_gate_proof_value(payload, "verifier_artifact")
-        stat = _extract_gate_proof_value(payload, "verifier_status")
-        src = _extract_gate_proof_value(payload, "source_hash")
-        if not art and not stat:
+        if not payload.get("verifier_artifact") and not payload.get("verifier_status"):
             reasons.append("missing_verifier_artifact")
-        if not src:
+        if not payload.get("source_hash"):
             reasons.append("missing_source_hash")
-            
-        gate_passed = bool(refs and claim_verified and not reasons)
+        verifier_ok = _gate_verifier_ok(payload)
+        if not verifier_ok and not reasons:
+            reasons.append("unbound_verifier_proof")
+
+        gate_passed = bool(refs and claim_verified and verifier_ok and not reasons)
         failure_reason = ";".join(reasons) if reasons else selected_failure_reason(
             selected=True,
             invoked=invoked,
@@ -627,7 +540,7 @@ class ClaimGateReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(refs and gate_passed and _gate_verifier_ok(payload)),
+            outcome_contributed=bool(refs and gate_passed and verifier_ok),
             executor_id=self.name,
             failure_reason=failure_reason,
         )
@@ -640,18 +553,17 @@ class DeliveryGateReceiptAdapter:
         refs = _as_refs(payload.get("delivery_refs") or payload.get("delivery_ref") or payload.get("evidence_bundle_path"))
         refs = refs or _fail_closed_ref(payload, "delivery_gate_passed", "delivery:gate_failed")
         invoked = bool(payload.get("delivery_gate_passed") is not None or refs or payload.get("delivery_gate_invoked") or claim_verified)
-        
-        # Real validation to prevent fake payloads
+
         reasons = []
-        art = _extract_gate_proof_value(payload, "verifier_artifact")
-        stat = _extract_gate_proof_value(payload, "verifier_status")
-        src = _extract_gate_proof_value(payload, "source_hash")
-        if not art and not stat:
+        if not payload.get("verifier_artifact") and not payload.get("verifier_status"):
             reasons.append("missing_verifier_artifact")
-        if not src:
+        if not payload.get("source_hash"):
             reasons.append("missing_source_hash")
-            
-        gate_passed = bool(refs and _as_bool(payload.get("delivery_gate_passed", claim_verified)) and not reasons)
+        verifier_ok = _gate_verifier_ok(payload)
+        if not verifier_ok and not reasons:
+            reasons.append("unbound_verifier_proof")
+
+        gate_passed = bool(refs and _as_bool(payload.get("delivery_gate_passed", claim_verified)) and verifier_ok and not reasons)
         failure_reason = ";".join(reasons) if reasons else selected_failure_reason(
             selected=True,
             invoked=invoked,
@@ -664,7 +576,7 @@ class DeliveryGateReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(refs and gate_passed and _gate_verifier_ok(payload)),
+            outcome_contributed=bool(refs and gate_passed and verifier_ok),
             executor_id=self.name,
             failure_reason=failure_reason,
         )

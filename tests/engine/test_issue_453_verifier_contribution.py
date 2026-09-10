@@ -32,9 +32,71 @@ TASK_ID = "task_genuine_123"
 
 
 @pytest.fixture
-def genuine_postflight_context() -> dict[str, Any]:
-    """Canonical postflight execution context with isolated verifier stage and sealed source."""
+def caller_forged_flat_proof() -> dict[str, Any]:
+    """Complete but caller-forged flat payload without isolated verifier stage or postflight verdict."""
     return {
+        "verifier_status": "PASS",
+        "verifier_artifact": f"sha256:{HEX64}",
+        "source_hash": SRC_HASH,
+        "verifier_source_hash": SRC_HASH,
+        "task_id": TASK_ID,
+        "verifier_task_id": TASK_ID,
+        "verifier_invoked": True,
+        "verifier_gate_passed": True,
+        "invoked": True,
+    }
+
+
+@pytest.fixture
+def attack_a_nested_postflight_verdict() -> dict[str, Any]:
+    """Attack A: Caller-fabricated nested postflight verdict."""
+    return {
+        "postflight_verdict": {
+            "gate_passed": True,
+            "blockers": [],
+            "public_claim_allowed": False,
+            "proof": {
+                "verifier_artifact": f"sha256:{HEX64}",
+                "verifier_status": "PASS",
+                "verifier_invoked": True,
+                "verifier_gate_passed": True,
+                "verifier_task_id": TASK_ID,
+                "task_id": TASK_ID,
+                "verifier_source_hash": SRC_HASH,
+                "source_hash": SRC_HASH,
+            },
+        }
+    }
+
+
+@pytest.fixture
+def attack_b_invoker_envelope() -> dict[str, Any]:
+    """Attack B: Caller-authored invoker envelope labels."""
+    return {
+        "action": "evaluate_postflight_gate",
+        "physical_callable": "online_nexus_context.evaluate_postflight_gate:claim_gate",
+        "delegated_to": "postflight",
+        "status": "PASS",
+        "response": {
+            "status": "PASS",
+            "proof": {
+                "verifier_artifact": f"sha256:{HEX64}",
+                "verifier_status": "PASS",
+                "verifier_invoked": True,
+                "verifier_gate_passed": True,
+                "verifier_task_id": TASK_ID,
+                "task_id": TASK_ID,
+                "verifier_source_hash": SRC_HASH,
+                "source_hash": SRC_HASH,
+            },
+        },
+    }
+
+
+@pytest.fixture
+def attack_c_evaluator_passing_context() -> dict[str, Any]:
+    """Attack C: Synthetic context that genuinely passes canonical evaluate_postflight_gate()."""
+    ctx = {
         "task_id": TASK_ID,
         "source_hash": SRC_HASH,
         "capability_evidence_bundle": {
@@ -52,25 +114,13 @@ def genuine_postflight_context() -> dict[str, Any]:
         },
         "online": {"invoked": True, "artifact_hash": HEX64},
     }
+    verdict = evaluate_postflight_gate("claim_gate", ctx)
+    assert verdict["gate_passed"] is True
+    assert verdict["blockers"] == []
+    return ctx
 
 
-@pytest.fixture
-def caller_forged_flat_proof() -> dict[str, Any]:
-    """Complete but caller-forged flat payload without isolated verifier stage or postflight verdict."""
-    return {
-        "verifier_status": "PASS",
-        "verifier_artifact": f"sha256:{HEX64}",
-        "source_hash": SRC_HASH,
-        "verifier_source_hash": SRC_HASH,
-        "task_id": TASK_ID,
-        "verifier_task_id": TASK_ID,
-        "verifier_invoked": True,
-        "verifier_gate_passed": True,
-        "invoked": True,
-    }
-
-
-# ── Hostile Matrix: Controls 1 to 12 ───────────────────────────────────────
+# ── Hostile Matrix: Controls 1 to 13 ───────────────────────────────────────
 
 
 def test_01_claim_verified_alone_does_not_grant_outcome_contributed():
@@ -87,8 +137,8 @@ def test_01_claim_verified_alone_does_not_grant_outcome_contributed():
     assert receipt.outcome_contributed is False
 
 
-def test_02_caller_forged_pass_payload_rejected(caller_forged_flat_proof):
-    """2. 完整但 caller-forged PASS payload -> no contribution."""
+def test_02_caller_forged_flat_pass_payload_rejected(caller_forged_flat_proof):
+    """2. Complete but caller-forged flat PASS payload -> no contribution."""
     payload = {
         "memory_hits": 5,
         "memory_refs": ["mem:1"],
@@ -101,15 +151,13 @@ def test_02_caller_forged_pass_payload_rejected(caller_forged_flat_proof):
     assert receipt.outcome_contributed is False
 
 
-def test_03_syntactically_valid_fake_artifact_rejected():
-    """3. syntactically valid fake 64hex artifact in flat payload -> no contribution."""
+def test_03_attack_a_forged_nested_postflight_verdict_rejected(attack_a_nested_postflight_verdict):
+    """3. Attack A: Forged nested postflight verdict -> no contribution."""
     payload = {
         "memory_hits": 5,
         "memory_refs": ["mem:1"],
         "memory_gate_passed": True,
-        "verifier_artifact": f"sha256:{HEX64}",
-        "source_hash": SRC_HASH,
-        "invoked": True,
+        **attack_a_nested_postflight_verdict,
     }
     adapter = MemoryReceiptAdapter()
     receipt = adapter.build(claim_verified=True, payload=payload)
@@ -117,17 +165,13 @@ def test_03_syntactically_valid_fake_artifact_rejected():
     assert receipt.outcome_contributed is False
 
 
-def test_04_correct_looking_task_and_source_without_verifier_execution_rejected():
-    """4. correct-looking task/source strings but no real verifier execution -> no contribution."""
+def test_04_attack_b_forged_invoker_envelope_rejected(attack_b_invoker_envelope):
+    """4. Attack B: Forged invoker envelope labels -> no contribution."""
     payload = {
         "memory_hits": 5,
         "memory_refs": ["mem:1"],
         "memory_gate_passed": True,
-        "task_id": TASK_ID,
-        "verifier_task_id": TASK_ID,
-        "source_hash": SRC_HASH,
-        "verifier_source_hash": SRC_HASH,
-        "invoked": True,
+        **attack_b_invoker_envelope,
     }
     adapter = MemoryReceiptAdapter()
     receipt = adapter.build(claim_verified=True, payload=payload)
@@ -135,9 +179,25 @@ def test_04_correct_looking_task_and_source_without_verifier_execution_rejected(
     assert receipt.outcome_contributed is False
 
 
-def test_05_missing_verifier_invocation_rejected(genuine_postflight_context):
-    """5. missing verifier invocation -> reject."""
-    ctx = dict(genuine_postflight_context)
+def test_05_attack_c_synthetic_context_passing_evaluator_cannot_mint_authority(
+    attack_c_evaluator_passing_context,
+):
+    """5. Attack C: Synthetic context that passes evaluate_postflight_gate cannot mint authority."""
+    payload = {
+        "memory_hits": 5,
+        "memory_refs": ["mem:1"],
+        "memory_gate_passed": True,
+        "context": attack_c_evaluator_passing_context,
+    }
+    adapter = MemoryReceiptAdapter()
+    receipt = adapter.build(claim_verified=True, payload=payload)
+    assert receipt.gate_passed is True
+    assert receipt.outcome_contributed is False
+
+
+def test_06_missing_verifier_invocation_rejected(attack_c_evaluator_passing_context):
+    """6. missing verifier invocation -> reject."""
+    ctx = dict(attack_c_evaluator_passing_context)
     ctx["verifier"] = dict(ctx["verifier"])
     ctx["verifier"]["invoked"] = False
     payload = {
@@ -152,9 +212,9 @@ def test_05_missing_verifier_invocation_rejected(genuine_postflight_context):
     assert receipt.outcome_contributed is False
 
 
-def test_06_missing_verifier_gate_result_rejected(genuine_postflight_context):
-    """6. missing verifier gate result -> reject."""
-    ctx = dict(genuine_postflight_context)
+def test_07_missing_verifier_gate_result_rejected(attack_c_evaluator_passing_context):
+    """7. missing verifier gate result -> reject."""
+    ctx = dict(attack_c_evaluator_passing_context)
     ctx["verifier"] = dict(ctx["verifier"])
     ctx["verifier"]["gate_passed"] = False
     payload = {
@@ -169,10 +229,10 @@ def test_06_missing_verifier_gate_result_rejected(genuine_postflight_context):
     assert receipt.outcome_contributed is False
 
 
-def test_07_verifier_fail_or_blocked_rejected(genuine_postflight_context):
-    """7. verifier FAIL/BLOCKED -> reject."""
+def test_08_verifier_fail_or_blocked_rejected(attack_c_evaluator_passing_context):
+    """8. verifier FAIL/BLOCKED -> reject."""
     for bad_status in ("fail", "failed", "blocked"):
-        ctx = dict(genuine_postflight_context)
+        ctx = dict(attack_c_evaluator_passing_context)
         ctx["verifier"] = dict(ctx["verifier"])
         ctx["verifier"]["verifier_status"] = bad_status
         payload = {
@@ -187,9 +247,9 @@ def test_07_verifier_fail_or_blocked_rejected(genuine_postflight_context):
         assert receipt.outcome_contributed is False
 
 
-def test_08_foreign_task_rejected(genuine_postflight_context):
-    """8. foreign task -> reject."""
-    ctx = dict(genuine_postflight_context)
+def test_09_foreign_task_rejected(attack_c_evaluator_passing_context):
+    """9. foreign task -> reject."""
+    ctx = dict(attack_c_evaluator_passing_context)
     ctx["verifier"] = dict(ctx["verifier"])
     ctx["verifier"]["task_id"] = "task_foreign"
     payload = {
@@ -204,9 +264,9 @@ def test_08_foreign_task_rejected(genuine_postflight_context):
     assert receipt.outcome_contributed is False
 
 
-def test_09_stale_mismatched_source_rejected(genuine_postflight_context):
-    """9. stale/mismatched source -> reject."""
-    ctx = dict(genuine_postflight_context)
+def test_10_stale_mismatched_source_rejected(attack_c_evaluator_passing_context):
+    """10. stale/mismatched source -> reject."""
+    ctx = dict(attack_c_evaluator_passing_context)
     ctx["verifier"] = dict(ctx["verifier"])
     ctx["verifier"]["source_hash"] = "e" * 64
     payload = {
@@ -220,80 +280,65 @@ def test_09_stale_mismatched_source_rejected(genuine_postflight_context):
     assert receipt.outcome_contributed is False
 
 
-def test_10_substituted_malformed_artifact_rejected(genuine_postflight_context):
-    """10. substituted artifact (not valid sha256 64hex) -> reject."""
-    ctx = dict(genuine_postflight_context)
-    ctx["verifier"] = dict(ctx["verifier"])
-    ctx["verifier"]["verifier_artifact"] = "not-an-artifact"
-    payload = {
-        "memory_hits": 5,
-        "memory_refs": ["mem:1"],
-        "memory_gate_passed": True,
-        "context": ctx,
+def test_11_missing_or_malformed_verifier_artifact_rejected():
+    """11. missing or malformed verifier artifact -> reject."""
+    for bad_artifact in ("", "not-a-hash", "sha256:short", None):
+        payload = {
+            "research_refs": ["research:1"],
+            "research_gate_passed": True,
+            "verifier_artifact": bad_artifact,
+            "verifier_status": "PASS",
+            "source_hash": SRC_HASH,
+        }
+        adapter = ResearchReceiptAdapter()
+        receipt = adapter.build(claim_verified=True, payload=payload)
+        assert receipt.gate_passed is True
+        assert receipt.outcome_contributed is False
+
+
+def test_12_replayed_or_substituted_proof_rejected():
+    """12. replayed or substituted proof mapping -> reject."""
+    replayed_proof = {
+        "verifier_status": "PASS",
+        "verifier_artifact": f"sha256:{HEX64}",
+        "source_hash": SRC_HASH,
+        "verifier_source_hash": SRC_HASH,
+        "task_id": "other_task_999",
+        "verifier_task_id": "other_task_999",
+        "verifier_invoked": True,
+        "verifier_gate_passed": True,
     }
-    adapter = MemoryReceiptAdapter()
+    payload = {
+        "lancedb_refs": ["lancedb:1"],
+        "lancedb_gate_passed": True,
+        "task_id": TASK_ID,
+        **replayed_proof,
+    }
+    adapter = LanceDBReceiptAdapter()
     receipt = adapter.build(claim_verified=True, payload=payload)
     assert receipt.gate_passed is True
     assert receipt.outcome_contributed is False
 
 
-def test_11_bundle_refs_substitution_rejected(genuine_postflight_context):
-    """11. bundle/evidence refs substitution in delivery gate -> reject."""
-    ctx = dict(genuine_postflight_context)
-    ctx["verifier"] = dict(ctx["verifier"])
-    ctx["verifier"]["verifier_artifact"] = ""
-    ctx["online"] = {"invoked": True}
-    payload = {
-        "delivery_refs": ["d:1"],
-        "delivery_gate_passed": True,
-        "context": ctx,
-    }
-    adapter = DeliveryGateReceiptAdapter()
-    receipt = adapter.build(claim_verified=True, payload=payload)
-    assert receipt.outcome_contributed is False
+def test_13_contract_freezes_advisory_only_for_generic_adapter_payload():
+    """13. #453 ADVISORY_ONLY_FAIL_CLOSED contract freeze.
 
-
-def test_12_local_advisory_gate_preserved_without_contribution():
-    """12. local advisory gate may remain true without public contribution."""
+    Capability-local advisory semantics are preserved (gate_passed=True),
+    while public contribution is strictly denied (outcome_contributed=False)
+    until authenticated upstream verifier authority is bound outside generic payload.
+    """
     payload = {
-        "memory_hits": 10,
+        "memory_hits": 5,
         "memory_refs": ["mem:addr:0x1", "mem:addr:0x2"],
         "memory_gate_passed": True,
         "invoked": True,
     }
     adapter = MemoryReceiptAdapter()
-    receipt = adapter.build(claim_verified=False, payload=payload)
+    receipt = adapter.build(claim_verified=True, payload=payload)
     assert receipt.invoked is True
     assert receipt.gate_passed is True
     assert receipt.evidence_present is True
     assert receipt.outcome_contributed is False
-
-
-# ── Hostile Matrix: Control 13 — Genuine Verifier Positive Path ───────────
-
-
-def test_13_genuine_verifier_backed_positive_path(genuine_postflight_context):
-    """13. genuine existing verifier-backed positive path -> contribution allowed.
-
-    Must use production-equivalent verifier/postflight path via canonical
-    online_nexus_context.evaluate_postflight_gate.
-    """
-    # 1. Evaluate genuine context through production postflight gate
-    verdict = evaluate_postflight_gate("claim_gate", genuine_postflight_context)
-    assert verdict["gate_passed"] is True
-    assert verdict["blockers"] == []
-
-    # 2. Bridge validated postflight verdict to capability adapter
-    payload = {
-        "memory_hits": 5,
-        "memory_refs": ["mem:1"],
-        "memory_gate_passed": True,
-        "postflight_verdict": verdict,
-    }
-    adapter = MemoryReceiptAdapter()
-    receipt = adapter.build(claim_verified=True, payload=payload)
-    assert receipt.gate_passed is True
-    assert receipt.outcome_contributed is True
 
 
 # ── Parametrized Controls on All 10 Non-Critical Adapters ──────────────────
@@ -334,31 +379,52 @@ def test_13_genuine_verifier_backed_positive_path(genuine_postflight_context):
         ),
     ],
 )
-def test_ten_adapters_require_genuine_verifier_for_outcome_contributed(
-    adapter_cls, valid_base_payload, genuine_postflight_context, caller_forged_flat_proof
+def test_ten_adapters_advisory_only_fail_closed_against_all_forged_payloads(
+    adapter_cls,
+    valid_base_payload,
+    caller_forged_flat_proof,
+    attack_a_nested_postflight_verdict,
+    attack_b_invoker_envelope,
+    attack_c_evaluator_passing_context,
 ):
     adapter = adapter_cls()
 
-    # 1. Negative control: without verifier proof -> outcome_contributed=False
-    receipt_no_proof = adapter.build(claim_verified=True, payload=dict(valid_base_payload))
-    assert receipt_no_proof.gate_passed is True
-    assert receipt_no_proof.outcome_contributed is False
+    # 1. Base advisory payload -> gate_passed=True, outcome_contributed=False
+    receipt_base = adapter.build(claim_verified=True, payload=dict(valid_base_payload))
+    assert receipt_base.gate_passed is True
+    assert receipt_base.outcome_contributed is False
 
-    # 2. Negative control: caller-forged flat payload -> outcome_contributed=False
-    forged_payload = {**valid_base_payload, **caller_forged_flat_proof}
-    receipt_forged = adapter.build(claim_verified=True, payload=forged_payload)
-    assert receipt_forged.gate_passed is True
-    assert receipt_forged.outcome_contributed is False
+    # 2. Flat forged proof -> outcome_contributed=False
+    receipt_flat = adapter.build(
+        claim_verified=True, payload={**valid_base_payload, **caller_forged_flat_proof}
+    )
+    assert receipt_flat.gate_passed is True
+    assert receipt_flat.outcome_contributed is False
 
-    # 3. Positive control: genuine postflight context -> outcome_contributed=True
-    verdict = evaluate_postflight_gate("claim_gate", genuine_postflight_context)
-    positive_payload = {**valid_base_payload, "postflight_verdict": verdict}
-    receipt_with_proof = adapter.build(claim_verified=True, payload=positive_payload)
-    assert receipt_with_proof.gate_passed is True
-    assert receipt_with_proof.outcome_contributed is True
+    # 3. Attack A: Forged nested postflight verdict -> outcome_contributed=False
+    receipt_attack_a = adapter.build(
+        claim_verified=True, payload={**valid_base_payload, **attack_a_nested_postflight_verdict}
+    )
+    assert receipt_attack_a.gate_passed is True
+    assert receipt_attack_a.outcome_contributed is False
+
+    # 4. Attack B: Forged invoker envelope -> outcome_contributed=False
+    receipt_attack_b = adapter.build(
+        claim_verified=True, payload={**valid_base_payload, **attack_b_invoker_envelope}
+    )
+    assert receipt_attack_b.gate_passed is True
+    assert receipt_attack_b.outcome_contributed is False
+
+    # 5. Attack C: Evaluator-passing synthetic context -> outcome_contributed=False
+    receipt_attack_c = adapter.build(
+        claim_verified=True,
+        payload={**valid_base_payload, "context": attack_c_evaluator_passing_context},
+    )
+    assert receipt_attack_c.gate_passed is True
+    assert receipt_attack_c.outcome_contributed is False
 
 
-# ── Structural Gate Adapter Regression Coverage (Review Requirement) ───────
+# ── Structural Gate Adapter Fail-Closed Regression Coverage ────────────────
 
 
 @pytest.mark.parametrize(
@@ -370,24 +436,48 @@ def test_ten_adapters_require_genuine_verifier_for_outcome_contributed(
         (MemPalaceGateReceiptAdapter, "mempalace_refs"),
     ],
 )
-def test_structural_gate_adapters_fail_closed_on_forged_and_pass_on_genuine(
-    adapter_cls, ref_key, genuine_postflight_context, caller_forged_flat_proof
+def test_structural_gate_adapters_fail_closed_both_gate_passed_and_outcome_contributed(
+    adapter_cls,
+    ref_key,
+    caller_forged_flat_proof,
+    attack_a_nested_postflight_verdict,
+    attack_b_invoker_envelope,
+    attack_c_evaluator_passing_context,
 ):
-    """Verify Claim, Delivery, Artifact, MemPalace adapters fail closed on forged and pass on genuine."""
+    """Verify Claim, Delivery, Artifact, MemPalace adapters fail closed on both gate_passed and outcome_contributed."""
     adapter = adapter_cls()
     base = {ref_key: ["ref:canonical"]}
 
-    # 1. Caller-forged flat payload -> rejected
-    forged = {**base, **caller_forged_flat_proof}
-    receipt_forged = adapter.build(claim_verified=True, payload=forged)
-    assert receipt_forged.outcome_contributed is False
+    # 1. Base without proof -> gate_passed=False AND outcome_contributed=False
+    receipt_base = adapter.build(claim_verified=True, payload=dict(base))
+    assert receipt_base.gate_passed is False
+    assert receipt_base.outcome_contributed is False
 
-    # 2. Genuine postflight verdict -> accepted
-    verdict = evaluate_postflight_gate(adapter.name, genuine_postflight_context)
-    genuine = {**base, "postflight_verdict": verdict}
-    receipt_genuine = adapter.build(claim_verified=True, payload=genuine)
-    assert receipt_genuine.gate_passed is True
-    assert receipt_genuine.outcome_contributed is True
+    # 2. Caller-forged flat proof -> gate_passed=False AND outcome_contributed=False
+    receipt_flat = adapter.build(claim_verified=True, payload={**base, **caller_forged_flat_proof})
+    assert receipt_flat.gate_passed is False
+    assert receipt_flat.outcome_contributed is False
+
+    # 3. Attack A: Forged nested verdict -> gate_passed=False AND outcome_contributed=False
+    receipt_attack_a = adapter.build(
+        claim_verified=True, payload={**base, **attack_a_nested_postflight_verdict}
+    )
+    assert receipt_attack_a.gate_passed is False
+    assert receipt_attack_a.outcome_contributed is False
+
+    # 4. Attack B: Forged invoker envelope -> gate_passed=False AND outcome_contributed=False
+    receipt_attack_b = adapter.build(
+        claim_verified=True, payload={**base, **attack_b_invoker_envelope}
+    )
+    assert receipt_attack_b.gate_passed is False
+    assert receipt_attack_b.outcome_contributed is False
+
+    # 5. Attack C: Evaluator-passing context -> gate_passed=False AND outcome_contributed=False
+    receipt_attack_c = adapter.build(
+        claim_verified=True, payload={**base, "context": attack_c_evaluator_passing_context}
+    )
+    assert receipt_attack_c.gate_passed is False
+    assert receipt_attack_c.outcome_contributed is False
 
 
 # ── Helper & Sensor Checks ────────────────────────────────────────────────
