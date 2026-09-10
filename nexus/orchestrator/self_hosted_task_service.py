@@ -2542,6 +2542,11 @@ class SelfHostedTaskService:
                 for field in ("authority_goal_id", "autonomy_goal_id"):
                     if state.get(field) is not None and state[field] != binding["goal_id"]:
                         raise ValueError("PROJECT_ENTRY_AUTHORITY_DUPLICATE_MISMATCH")
+                if state.get("authority_coordination_scope_id") is not None and state["authority_coordination_scope_id"] != binding["coordination_scope_id"]:
+                    raise ValueError("PROJECT_ENTRY_AUTHORITY_DUPLICATE_MISMATCH")
+                raw_submission = state.get("autonomy_submission_binding")
+                if isinstance(raw_submission, Mapping) and raw_submission.get("goal_id") is not None and raw_submission["goal_id"] != binding["goal_id"]:
+                    raise ValueError("PROJECT_ENTRY_AUTHORITY_DUPLICATE_MISMATCH")
             else:
                 _reject_unbound_project_entry_authority_hints(state)
             return {"continuation": result, "authority_binding": binding}
@@ -2554,7 +2559,9 @@ class SelfHostedTaskService:
             raise KeyError(f"unknown task: {task_id}")
         request = state.get("request") if isinstance(state.get("request"), Mapping) else {}
         request_present = bool(request.get("repository") or request.get("issue") or request.get("issue_number"))
-        if ((request_present and (request.get("repository") != repository or str(request.get("issue") or request.get("issue_number") or "") != str(issue_number))) or
+        if ((request_present and (request.get("repository") != repository or
+                ("issue" in request and str(request.get("issue")) != str(issue_number)) or
+                ("issue_number" in request and str(request.get("issue_number")) != str(issue_number)))) or
                 (state.get("repository") and state.get("repository") != repository) or
                 (state.get("issue") and str(state.get("issue")) != str(issue_number))):
             raise ValueError("PROJECT_ENTRY_AUTHORITY_SELECTOR_MISMATCH")
@@ -5552,8 +5559,24 @@ class SelfHostedTaskService:
         raise RuntimeError("CURRENT_EXECUTION_IDENTITY_REQUIRED")
 
     def submit_task(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        original_request = dict(request)
+        original_binding = original_request.get("project_entry_authority_binding")
         request, _ = _validated_action_request(request)
-        _validate_project_entry_authority_binding(request)
+        binding = _validate_project_entry_authority_binding(request)
+        if original_binding is not None:
+            for key in ("issue", "issue_number"):
+                if key in original_request and original_request[key] != int(binding["issue_number"]):
+                    raise ValueError("PROJECT_ENTRY_AUTHORITY_ISSUE_MISMATCH")
+            if "repository" in original_request and original_request["repository"] != binding["repository"]:
+                raise ValueError("PROJECT_ENTRY_AUTHORITY_REPOSITORY_MISMATCH")
+            if not isinstance(original_request.get("action"), Mapping):
+                outer_hash = str(original_request.get("action_request_hash") or "")
+                hash_input = dict(original_request)
+                hash_input.pop("action_request_hash", None)
+                if not outer_hash:
+                    raise ValueError("PROJECT_ENTRY_REQUEST_HASH_MISSING")
+                if outer_hash != canonical_request_hash(hash_input):
+                    raise ValueError("PROJECT_ENTRY_REQUEST_HASH_MISMATCH")
         task_id = self._resolve_current_execution_task_id(request)
         raw_autonomy_grant = request.get("autonomy_goal_grant")
         autonomy_grant: Optional[AutonomyGoalGrant] = None
