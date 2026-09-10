@@ -8,7 +8,7 @@ The Owner subsequently requested all deliverables be committed and merged and te
 - `frontier-audit/current-completion-matrix.{json,csv,md}`: layer-specific evidence.
 - `frontier-audit/frontier-evidence-qualification.json`: exact frozen revisions, commands, logs and skip reasons.
 - `project-entry/`: original implementation, runtime, native-entry and recovery evidence; superseded observations remain historical.
-- `artifact-manifest.json`: original paths, archived paths and archived SHA-256 (the CSV has line-ending normalization with both hashes recorded). Historical scripts use `.py.txt` to prevent accidental execution or collection as project source.
+- `artifact-manifest.json`: original paths, archived paths and archived SHA-256 (the CSV and four logs have whitespace normalization with both hashes recorded). Historical scripts use `.py.txt` to prevent accidental execution or collection as project source.
 
 Two rollback Git bundles remain in the durable local evidence folder. Their hashes are included in the manifest; they are rollback backups, not source deliverables. No secret material or live writable authority state is installed by this archive. Paths to temporary verification worktrees are historical provenance and may no longer exist after cleanup; their logs, revisions and hashes remain archived here.
 

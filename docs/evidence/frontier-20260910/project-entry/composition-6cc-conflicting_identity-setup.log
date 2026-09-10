@@ -1,0 +1,25 @@
+{"phase": "setup", "pid": 37943, "source": "6cc4c7ab4747683e01e469d60fb92dd8dafcdd42", "case": "conflicting_identity", "receipt_hash": "75ad49a99d165c8bfb2f09ff612e5251797907c9cb6640d42e66cf4f09be6470", "fixture_root": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc/conflicting_identity"}
+/Users/jameschen/Workspace/Nexus-new-worktrees/issue842-acceptance-fixture/nexus/contracts/autonomy_goal.py:113: UserWarning: Field name "schema" in "StandingGrantContext" shadows an attribute in parent "_FrozenModel"
+  class StandingGrantContext(_FrozenModel):
+/Users/jameschen/Workspace/Nexus-new-worktrees/issue842-acceptance-fixture/nexus/contracts/autonomy_goal.py:267: UserWarning: Field name "schema" in "AutonomyGoalGrantSpec" shadows an attribute in parent "_FrozenModel"
+  class AutonomyGoalGrantSpec(_FrozenModel):
+/Users/jameschen/Workspace/Nexus-new-worktrees/issue842-acceptance-fixture/nexus/contracts/collaboration_realm.py:101: UserWarning: Field name "schema" in "CollaborationExecutionRealmSpec" shadows an attribute in parent "_FrozenModel"
+  class CollaborationExecutionRealmSpec(_FrozenModel):
+/Users/jameschen/Workspace/Nexus-new-worktrees/issue842-acceptance-fixture/nexus/contracts/lifecycle_action.py:319: UserWarning: Field name "schema" in "LifecycleActionEnvelope" shadows an attribute in parent "BaseModel"
+  class LifecycleActionEnvelope(BaseModel):
+/Users/jameschen/Workspace/Nexus-new-worktrees/issue842-acceptance-fixture/nexus/contracts/lifecycle_action.py:406: UserWarning: Field name "schema" in "ExternalCandidateAdoptionRequest" shadows an attribute in parent "BaseModel"
+  class ExternalCandidateAdoptionRequest(BaseModel):
+/Users/jameschen/Workspace/Nexus-new-worktrees/issue842-acceptance-fixture/nexus/contracts/operator_outcome_receipt.py:86: UserWarning: Field name "schema" in "OperatorOutcomeReceipt" shadows an attribute in parent "BaseModel"
+  class OperatorOutcomeReceipt(BaseModel):
+/Users/jameschen/Workspace/Nexus-new-worktrees/issue842-acceptance-fixture/nexus/orchestrator/autonomy_policy.py:115: UserWarning: Field name "schema" in "StandingGrantRequest" shadows an attribute in parent "_FrozenModel"
+  class StandingGrantRequest(_FrozenModel):
+/Users/jameschen/Workspace/Nexus-new-worktrees/issue842-acceptance-fixture/nexus/orchestrator/autonomy_policy.py:137: UserWarning: Field name "schema" in "StandingGrantDecision" shadows an attribute in parent "_FrozenModel"
+  class StandingGrantDecision(_FrozenModel):
+/Users/jameschen/Workspace/Nexus-new-worktrees/issue842-acceptance-fixture/nexus/orchestrator/autonomy_policy.py:396: UserWarning: Field name "schema" in "AutonomySubmissionBindingSpec" shadows an attribute in parent "_FrozenModel"
+  class AutonomySubmissionBindingSpec(_FrozenModel):
+/Users/jameschen/Workspace/Nexus-new-worktrees/issue842-acceptance-fixture/nexus/orchestrator/autonomy_policy.py:457: UserWarning: Field name "schema" in "AutonomyEvaluationInput" shadows an attribute in parent "_FrozenModel"
+  class AutonomyEvaluationInput(_FrozenModel):
+/Users/jameschen/Workspace/Nexus-new-worktrees/issue842-acceptance-fixture/nexus/orchestrator/autonomy_policy.py:507: UserWarning: Field name "schema" in "AutonomyDecision" shadows an attribute in parent "_FrozenModel"
+  class AutonomyDecision(_FrozenModel):
+/Users/jameschen/Workspace/Nexus-new-worktrees/issue842-acceptance-fixture/nexus/orchestrator/standing_grant_store.py:67: UserWarning: Field name "schema" in "StandingGrantReceipt" shadows an attribute in parent "_FrozenModel"
+  class StandingGrantReceipt(_FrozenModel):

@@ -1148,8 +1148,9 @@
     {
       "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/807-current-main-audit.log",
       "archive": "frontier-audit/807-current-main-audit.log",
-      "sha256": "9d322cbc423e0f663f875abe5672b66cf05219f763d2789d834a543cc3820484",
-      "disposition": "Exact-byte evidence copy"
+      "sha256": "e650777e1f34c885afbbdca141c9227b5ef89df1daaafee29e816ef6a99450bf",
+      "disposition": "Trailing whitespace normalized for source archive; original byte hash and original local evidence retained",
+      "source_sha256": "9d322cbc423e0f663f875abe5672b66cf05219f763d2789d834a543cc3820484"
     },
     {
       "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/807-current-main-tests.log",
@@ -1317,20 +1318,23 @@
     {
       "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/nexus-core-frozen.log",
       "archive": "frontier-audit/nexus-core-frozen.log",
-      "sha256": "7e19c1e4869b2373f6042b615eeeba8adbb26667c40d37459a35ee95e1b86f89",
-      "disposition": "Exact-byte evidence copy"
+      "sha256": "baa699b6309236c389b55db1dc698bbc2f8b7216c4edac0452ffea30c1b171b3",
+      "disposition": "Trailing whitespace normalized for source archive; original byte hash and original local evidence retained",
+      "source_sha256": "7e19c1e4869b2373f6042b615eeeba8adbb26667c40d37459a35ee95e1b86f89"
     },
     {
       "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/nexus-core-tg8-cutover.log",
       "archive": "frontier-audit/nexus-core-tg8-cutover.log",
-      "sha256": "15052e89822dac90da216de7077d79f7c41d596617110f3584196a973e534b9c",
-      "disposition": "Exact-byte evidence copy"
+      "sha256": "3250ff8148d5f3b48c414b59f1ec4713201134d43e95e99443f96360e3a4b0b4",
+      "disposition": "Trailing whitespace normalized for source archive; original byte hash and original local evidence retained",
+      "source_sha256": "15052e89822dac90da216de7077d79f7c41d596617110f3584196a973e534b9c"
     },
     {
       "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/nexus-core-tg8-protocol.log",
       "archive": "frontier-audit/nexus-core-tg8-protocol.log",
-      "sha256": "68f312c9d2df848ad228d0ea84f9a0420c96c180420938ca73054181f0dbefdb",
-      "disposition": "Exact-byte evidence copy"
+      "sha256": "44365f8bcb49ee6cce4a24019dc497646c2b74b1859906ae77155a10a7ccd0ef",
+      "disposition": "Trailing whitespace normalized for source archive; original byte hash and original local evidence retained",
+      "source_sha256": "68f312c9d2df848ad228d0ea84f9a0420c96c180420938ca73054181f0dbefdb"
     },
     {
       "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/nexus-core-tg8.log",
