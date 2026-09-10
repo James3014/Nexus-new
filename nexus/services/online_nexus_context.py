@@ -139,6 +139,7 @@ def build_guidance_pack(
         "rules": rules,
         "source_authority": "nexus.services.online_nexus_context.build_guidance_pack",
         "ported_from": "scripts.bench.capability_ab_runner._nexus_codex_hidden_verifier_guidance",
+        "public_claim_allowed": False,
     }
     payload["guidance_hash"] = _hash_json(payload)
     return payload
