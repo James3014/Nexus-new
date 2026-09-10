@@ -4163,6 +4163,29 @@ def test_project_entry_exact_task_forwards_persisted_authority_binding(monkeypat
     assert readiness_calls[-1]["required_action_family"] == "TASK_SUBMIT"
 
 
+def test_project_entry_real_service_uses_binding_from_same_rehydration_snapshot(monkeypatch):
+    class Service(SelfHostedTaskService):
+        def __init__(self):
+            self.second_read = False
+        def find_tasks_by_repository_issue(self, *_):
+            return [{"task_id": "t842", "attempt_id": "a1"}]
+        def rehydrate_task_continuation(self, *_):
+            return {"project_entry_authority_binding": {
+                "goal_id": "goal-842", "coordination_scope_id": "scope-842",
+                "canonical_remote": "https://github.com/James3014/Nexus-new.git",
+                "intended_action_family": "TASK_SUBMIT",
+            }}
+        def project_entry_authority_binding(self, *_args, **_kwargs):
+            self.second_read = True
+            raise AssertionError("second mutable state read")
+    service = Service()
+    calls = []
+    gateway = _project_entry_gateway(monkeypatch, lambda *_: {"ok": True, "issue": {"number": 842, "state": "OPEN"}}, service=service, readiness=lambda args: calls.append(args) or {"outcome": "READY_TO_EXECUTE"})
+    gateway._project_entry({"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 842})
+    assert calls[-1]["task_campaign_goal_identity"] == "goal-842"
+    assert service.second_read is False
+
+
 def test_project_entry_ambiguous_task_blocks_before_continuation_or_readiness(monkeypatch):
     class Service:
         def find_tasks_by_repository_issue(self, *_): return [{"task_id": "a"}, {"task_id": "b"}]

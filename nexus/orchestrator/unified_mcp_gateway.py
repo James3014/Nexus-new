@@ -4565,6 +4565,16 @@ class UnifiedMCPGateway:
         except Exception as exc:
             return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_CONTINUATION_INVALID", str(exc), task_id=task_id)
         authority_binding = projection.get("project_entry_authority_binding") if isinstance(projection, Mapping) else None
+        # Compatibility for lightweight service doubles.  The real service
+        # includes this field in the rehydration projection from its one state
+        # snapshot; never perform a second mutable read on that path.
+        if authority_binding is None and not isinstance(self.service, SelfHostedTaskService):
+            reader = getattr(self.service, "project_entry_authority_binding", None)
+            if callable(reader):
+                try:
+                    authority_binding = reader(task_id, repository=repository, issue_number=raw_issue)
+                except Exception as exc:
+                    return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_CONTINUATION_INVALID", str(exc), task_id=task_id)
         if authority_binding is not None:
             readiness_args.update({
                 "task_campaign_goal_identity": authority_binding["goal_id"],
@@ -4572,11 +4582,6 @@ class UnifiedMCPGateway:
                 "durable_repository_canonical_remote": authority_binding["canonical_remote"],
                 "required_action_family": authority_binding["intended_action_family"],
             })
-        else:
-            legacy_request = state.get("request") if isinstance(state.get("request"), Mapping) else {}
-            legacy_goal = legacy_request.get("authority_goal_id")
-            if legacy_goal:
-                readiness_args["task_campaign_goal_identity"] = str(legacy_goal)
         readiness = self._gateway_execution_readiness(readiness_args)
         result = {"schema": "nexus.project_entry.v1", "status": "TASK_REHYDRATED", "repository": repository,
                 "issue": dict(issue), "source": {"commit": head, "tree": tree, "canonical_remote": canonical_remote},

@@ -9453,3 +9453,37 @@ def test_project_entry_authority_binding_is_canonical_and_strict():
             repository="James3014/Nexus-new",
             issue_number=842,
         )
+
+
+@pytest.mark.parametrize("field", ["goal_id", "coordination_scope_id", "repository", "canonical_remote", "intended_action_family"])
+def test_project_entry_authority_binding_rejects_null_typed_fields(field):
+    from nexus.contracts.lifecycle_action import canonical_request_hash
+    from nexus.orchestrator.self_hosted_task_service import _validate_project_entry_authority_binding
+
+    values = {
+        "repository": "James3014/Nexus-new", "issue_number": 842,
+        "goal_id": "goal-842", "coordination_scope_id": "scope-842",
+        "canonical_remote": "https://github.com/James3014/Nexus-new.git",
+        "intended_action_family": "TASK_SUBMIT",
+    }
+    binding = {**values, "binding_hash": canonical_request_hash(values)}
+    binding[field] = None
+    with pytest.raises(ValueError):
+        _validate_project_entry_authority_binding({"project_entry_authority_binding": binding})
+
+
+def test_project_entry_authority_binding_rejects_conflicting_legacy_goal():
+    from nexus.contracts.lifecycle_action import canonical_request_hash
+    from nexus.orchestrator.self_hosted_task_service import _validate_project_entry_authority_binding
+    values = {"repository": "James3014/Nexus-new", "issue_number": 842, "goal_id": "goal-842", "coordination_scope_id": "scope-842", "canonical_remote": "https://github.com/James3014/Nexus-new.git", "intended_action_family": "TASK_SUBMIT"}
+    binding = {**values, "binding_hash": canonical_request_hash(values)}
+    with pytest.raises(ValueError, match="DUPLICATE_MISMATCH"):
+        _validate_project_entry_authority_binding({"project_entry_authority_binding": binding, "authority_goal_id": "other-goal"})
+
+
+@pytest.mark.parametrize("hint", ["authority_goal_id", "authority_coordination_scope_id", "autonomy_goal_grant", "governed"])
+def test_rehydrate_rejects_partial_legacy_authority_hints(tmp_path, hint):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("legacy-authority", {"task_id": "legacy-authority", "attempt_id": "a1", "status": "FINAL_BLOCK", "request": {"repository": "James3014/Nexus-new", "issue": 842, hint: "legacy"}, "action_request_hash": "x"})
+    with pytest.raises(ValueError, match="AUTHORITY_BINDING"):
+        service.rehydrate_task_continuation("legacy-authority", "a1")
