@@ -2515,11 +2515,28 @@ class SelfHostedTaskService:
                 _reject_unbound_project_entry_authority_hints(state)
                 return {"continuation": result, "authority_binding": None}
             _reject_unbound_project_entry_authority_hints(persisted_request)
+            persisted_hash = str(state.get("action_request_hash") or "")
             binding = _validate_project_entry_authority_binding(
                 persisted_request,
                 repository=_project_entry_repository or str(persisted_request.get("repository") or ""),
                 issue_number=_project_entry_issue or int(persisted_request.get("issue") or persisted_request.get("issue_number") or 0),
             )
+            if binding is not None and not persisted_hash:
+                raise ValueError("PROJECT_ENTRY_REQUEST_HASH_MISSING")
+            if persisted_hash:
+                if "action" in persisted_request or "bound_action_request" in persisted_request:
+                    effective_request, envelope = _validated_action_request(persisted_request)
+                    if not isinstance(envelope, Mapping) or persisted_hash != str(envelope.get("request_hash") or ""):
+                        raise ValueError("PROJECT_ENTRY_REQUEST_HASH_MISMATCH")
+                    effective_binding = _validate_project_entry_authority_binding(effective_request)
+                    if effective_binding != binding:
+                        raise ValueError("PROJECT_ENTRY_AUTHORITY_BINDING_DUPLICATE_MISMATCH")
+                    binding = effective_binding
+                else:
+                    hash_input = dict(persisted_request)
+                    hash_input.pop("action_request_hash", None)
+                    if persisted_hash != canonical_request_hash(hash_input):
+                        raise ValueError("PROJECT_ENTRY_REQUEST_HASH_MISMATCH")
             if binding is not None:
                 for field in ("authority_goal_id", "autonomy_goal_id"):
                     if state.get(field) is not None and state[field] != binding["goal_id"]:
