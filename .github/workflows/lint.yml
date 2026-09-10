@@ -145,8 +145,13 @@ jobs:
           if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- pyproject.toml ruff.toml; then
             git diff --name-only -z "$BASE_SHA" "$HEAD_SHA" -- '*.py' > .ci-ruff/changed.nul
           else
-            { git ls-tree -r -z --name-only "$BASE_SHA" -- '*.py'; git ls-tree -r -z --name-only "$HEAD_SHA" -- '*.py'; } \
-              | sort -zu > .ci-ruff/changed.nul
+            { git ls-tree -r -z --name-only "$BASE_SHA"; git ls-tree -r -z --name-only "$HEAD_SHA"; } \
+              | .venv/bin/python -c 'import sys; paths=sorted({p for p in sys.stdin.buffer.read().split(b"\0") if p.endswith(b".py")}); sys.stdout.buffer.write(b"\0".join(paths) + (b"\0" if paths else b""))' \
+              > .ci-ruff/changed.nul
+            if [ ! -s .ci-ruff/changed.nul ]; then
+              echo "config-drift Ruff fallback found no Python files" >&2
+              exit 1
+            fi
           fi
           echo "base=$BASE_SHA" >> "$GITHUB_OUTPUT"
           echo "head=$HEAD_SHA" >> "$GITHUB_OUTPUT"

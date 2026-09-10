@@ -8735,60 +8735,6 @@ def test_tracked_cli_retry_recovers_only_pre_provider_attempt_identity_drift(
     assert durable["attempts"][0]["attempt_id"] == actual_attempt_id
 
 
-def test_tracked_retry_reseals_nested_dispatch_envelope_for_submit(
-    tmp_path, monkeypatch
-):
-    task_id = "tracked-retry-refreshes-bound-envelope"
-    service, _, old_envelope, _, _ = _m3c_repairable_workforce_state(
-        tmp_path,
-        monkeypatch,
-        task_id=task_id,
-        acceptance_decision="NOT_REPAIRABLE",
-    )
-    state = service._read_state(task_id)
-    old_state_envelope = copy.deepcopy(state["canonical_dispatch_envelope"])
-    transport = _action_transport(
-        state["request"],
-        attempt_id=old_envelope["attempt_id"],
-        action_id="action-old-bound-envelope",
-        idempotency_key=f"{task_id}:old",
-    )
-    state["request"] = transport
-    state.update(
-        action=transport["action"],
-        action_id=transport["action_id"],
-        action_request_hash=transport["action_request_hash"],
-        idempotency_key=transport["idempotency_key"],
-    )
-    service._write_state(task_id, state)
-    captured = {}
-
-    def capture(request):
-        captured.update(request)
-        return {"attempts": [], "attempt_id": request["attempt_id"]}
-
-    monkeypatch.setattr(service, "submit_task", capture)
-    result = service.retry_task(task_id)
-
-    assert result["retry"]["decision"] == "REUSED_TASK_ID"
-    outer = captured["canonical_dispatch_envelope"]
-    nested = captured["bound_action_request"]["canonical_dispatch_envelope"]
-    assert outer == nested
-    assert outer["attempt_id"] == captured["attempt_id"]
-    assert outer["attempt_id"] != old_envelope["attempt_id"]
-    assert captured["action"]["request_hash"] == canonical_request_hash(
-        captured["bound_action_request"]
-    )
-    effective, _ = _validated_action_request(captured)
-    validated = validate_workforce_dispatch_binding(effective, require_binding=True)
-    assert validated["canonical_dispatch_envelope"] == outer
-    assert service._read_state(task_id)["canonical_dispatch_envelope"] == old_state_envelope
-    tampered = copy.deepcopy(captured)
-    tampered["bound_action_request"]["canonical_dispatch_envelope"]["model"] = "tampered"
-    with pytest.raises(ValueError, match="BOUND_ACTION_REQUEST_HASH_MISMATCH"):
-        _validated_action_request(tampered)
-
-
 def test_tracked_cli_retry_does_not_recover_identity_drift_after_provider_effect(
     tmp_path, monkeypatch
 ):
@@ -9889,3 +9835,57 @@ def test_project_entry_authority_binding_rejects_conflicting_legacy_goal():
     binding = {**values, "binding_hash": canonical_request_hash(values)}
     with pytest.raises(ValueError, match="DUPLICATE_MISMATCH"):
         _validate_project_entry_authority_binding({"project_entry_authority_binding": binding, "authority_goal_id": "other-goal"})
+
+
+def test_tracked_retry_reseals_nested_dispatch_envelope_for_submit(
+    tmp_path, monkeypatch
+):
+    task_id = "tracked-retry-refreshes-bound-envelope"
+    service, _, old_envelope, _, _ = _m3c_repairable_workforce_state(
+        tmp_path,
+        monkeypatch,
+        task_id=task_id,
+        acceptance_decision="NOT_REPAIRABLE",
+    )
+    state = service._read_state(task_id)
+    old_state_envelope = copy.deepcopy(state["canonical_dispatch_envelope"])
+    transport = _action_transport(
+        state["request"],
+        attempt_id=old_envelope["attempt_id"],
+        action_id="action-old-bound-envelope",
+        idempotency_key=f"{task_id}:old",
+    )
+    state["request"] = transport
+    state.update(
+        action=transport["action"],
+        action_id=transport["action_id"],
+        action_request_hash=transport["action_request_hash"],
+        idempotency_key=transport["idempotency_key"],
+    )
+    service._write_state(task_id, state)
+    captured = {}
+
+    def capture(request):
+        captured.update(request)
+        return {"attempts": [], "attempt_id": request["attempt_id"]}
+
+    monkeypatch.setattr(service, "submit_task", capture)
+    result = service.retry_task(task_id)
+
+    assert result["retry"]["decision"] == "REUSED_TASK_ID"
+    outer = captured["canonical_dispatch_envelope"]
+    nested = captured["bound_action_request"]["canonical_dispatch_envelope"]
+    assert outer == nested
+    assert outer["attempt_id"] == captured["attempt_id"]
+    assert outer["attempt_id"] != old_envelope["attempt_id"]
+    assert captured["action"]["request_hash"] == canonical_request_hash(
+        captured["bound_action_request"]
+    )
+    effective, _ = _validated_action_request(captured)
+    validated = validate_workforce_dispatch_binding(effective, require_binding=True)
+    assert validated["canonical_dispatch_envelope"] == outer
+    assert service._read_state(task_id)["canonical_dispatch_envelope"] == old_state_envelope
+    tampered = copy.deepcopy(captured)
+    tampered["bound_action_request"]["canonical_dispatch_envelope"]["model"] = "tampered"
+    with pytest.raises(ValueError, match="BOUND_ACTION_REQUEST_HASH_MISMATCH"):
+        _validated_action_request(tampered)
