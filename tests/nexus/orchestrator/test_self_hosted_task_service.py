@@ -3585,6 +3585,11 @@ def test_terminal_retry_accepts_planner_bound_action_revision_refresh(
     tmp_path, monkeypatch, inherited_worktree_time
 ):
     task_id = "planner-bound-revision-refresh"
+    if inherited_worktree_time:
+        # The production resolver intentionally remaps /tmp roots on Linux.
+        # Bind this disposable fixture through the supported override so the
+        # persisted state and built contract observe the same isolated root.
+        monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(tmp_path / "targets"))
     service, request, old_envelope, _, _ = _m3c_repairable_workforce_state(
         tmp_path,
         monkeypatch,
