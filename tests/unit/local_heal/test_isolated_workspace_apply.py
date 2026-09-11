@@ -4,6 +4,7 @@ import hashlib
 import os
 import shutil
 import tempfile
+
 from nexus.services.local_heal.isolated_workspace_apply import (
     IsolatedApplyRequest,
     run_isolated_workspace_apply,
@@ -259,6 +260,57 @@ def test_apply_hash_ignores_git_added_unchanged_context(tmp_path) -> None:
     assert receipt.applied_patch_hash == receipt.selected_candidate_hash
 
 
+def test_apply_hash_matches_expanded_leading_context_window(tmp_path) -> None:
+    from nexus.services.local_assist_service import _canonical_candidate_hash
+    from nexus.services.local_heal.isolated_workspace_apply import _canonicalize_effective_diff
+
+    source = tmp_path / "repo"
+    source.mkdir()
+    target = source / "record.py"
+    target.write_text(
+        "class Record:\n"
+        "    count: int\n"
+        "\n"
+        "def serialize_record(record: Record) -> str:\n"
+        "    return json.dumps(asdict(record), sort_keys=True)\n",
+        encoding="utf-8",
+    )
+    selected = (
+        "--- a/record.py\n"
+        "+++ b/record.py\n"
+        "@@ -9,2 +9,2 @@\n"
+        " def serialize_record(record: Record) -> str:\n"
+        "-    return json.dumps(asdict(record), sort_keys=True)\n"
+        "+    return json.dumps(asdict(record), sort_keys=True, separators=(',', ':'))\n"
+    )
+    applied = (
+        "diff --git a/record.py b/record.py\n"
+        "@@ -7,4 +7,4 @@ class Record:\n"
+        "     count: int\n"
+        "\n"
+        " def serialize_record(record: Record) -> str:\n"
+        "-    return json.dumps(asdict(record), sort_keys=True)\n"
+        "+    return json.dumps(asdict(record), sort_keys=True, separators=(',', ':'))\n"
+    )
+    assert _canonicalize_effective_diff(selected) == _canonicalize_effective_diff(applied)
+    assert _canonical_candidate_hash(selected) == _canonical_candidate_hash(applied)
+
+    receipt = run_isolated_workspace_apply(
+        IsolatedApplyRequest(
+            task_id="expanded-leading-context",
+            source_root=str(source),
+            target_file="record.py",
+            unified_diff=selected,
+            selected_candidate_hash=_canonical_candidate_hash(selected),
+            mutation_allowed=True,
+            work_dir=str(tmp_path / "artifacts"),
+        )
+    )
+    assert receipt.patch_apply_status == "applied"
+    assert receipt.selected_candidate_hash_matches_applied is True
+    assert receipt.applied_patch_hash == receipt.selected_candidate_hash
+
+
 def test_apply_hash_still_binds_nonblank_context_and_changed_payload() -> None:
     from nexus.services.local_assist_service import _canonical_candidate_hash
 
@@ -271,3 +323,15 @@ def test_apply_hash_still_binds_nonblank_context_and_changed_payload() -> None:
     assert candidate_hash != _canonical_candidate_hash(context_tamper)
     assert candidate_hash != _canonical_candidate_hash(payload_tamper)
     assert candidate_hash != _canonical_candidate_hash(blank_line_change)
+
+    multi_change = (
+        "@@ -1,6 +1,6 @@\n"
+        " def target():\n"
+        "-    first = 1\n"
+        "+    first = 2\n"
+        "    middle_anchor = 10\n"
+        "-    second = 1\n"
+        "+    second = 2\n"
+    )
+    multi_change_tamper = multi_change.replace("middle_anchor = 10", "middle_anchor = 11")
+    assert _canonical_candidate_hash(multi_change) != _canonical_candidate_hash(multi_change_tamper)
