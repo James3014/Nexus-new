@@ -2176,8 +2176,24 @@ def test_exact_source_grounding_reads_git_blob_from_main_sha_not_filesystem(tmp_
 def _setup_canary_repo(tmp_path: Path, **contract_overrides):
     repo, _, _, _, store = _setup(tmp_path)
     canary_rel = "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
-    canary_src = Path(__file__).resolve().parents[2] / canary_rel
-    canary_text = canary_src.read_text(encoding="utf-8")
+    # Keep this fixture self-contained.  The repository card is a completed
+    # historical canary record, while these tests exercise the executable
+    # intake path and must not make that production record executable.
+    canary_text = (
+        "# Task Card: Open SWE canary transport fixture\n\n"
+        "- task_id: `open-swe-resident-five-repo-canary-20260908`\n"
+        "Campaign: open-swe-resident-five-repo-canary-20260908\n"
+        "- status: `ACTIVE`\n"
+        "- AUTO_CHAIN: `false`\n"
+        "- allow_deletions: `false`\n\n"
+        "## Allowed files\n\n"
+        "- `tests/ops/test_open_swe_resident_five_repo_canary_20260908.py`\n\n"
+        "## Verification commands\n\n"
+        "```bash\n"
+        "python3 -m pytest -q tests/ops/test_open_swe_resident_five_repo_canary_20260908.py\n"
+        "git diff --check\n"
+        "```\n"
+    )
     canary_card = repo / canary_rel
     canary_card.parent.mkdir(parents=True, exist_ok=True)
     canary_card.write_text(canary_text, encoding="utf-8")
