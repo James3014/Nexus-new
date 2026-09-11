@@ -1736,6 +1736,7 @@ class UnifiedMCPGateway:
         existing = self._assist_read(task_id)
         if existing is not None:
             return self._assist_response(self._assist_refresh(task_id) or existing, operation="submit")
+        contract_kind, contract_hash, task_card_path = self._validate_assist_submission_binding(arguments)
         provider = str(arguments.get("provider") or arguments.get("preferred_worker") or "cline").strip().lower()
         model = str(arguments.get("model") or arguments.get("preferred_model") or "glm-5.2").strip()
         if provider != "cline":
@@ -1777,6 +1778,10 @@ class UnifiedMCPGateway:
                 expected_head=base,
                 allowed_paths=allowed,
                 mutation=False,
+                task_card_path=task_card_path or None,
+                task_card_hash=contract_hash if contract_kind == ContractKind.TRACKED_TASK_CARD.value else None,
+                contract_kind=ContractKind(contract_kind),
+                contract_hash=contract_hash if contract_kind == ContractKind.OWNER_INLINE.value else None,
                 permission_profile=PermissionProfile.VERIFY,
             ).model_dump(mode="json")
         now = self._utc_now()

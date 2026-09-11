@@ -195,3 +195,91 @@ def main() -> int:
     except (GateError, subprocess.CalledProcessError) as exc: p.error(str(exc))
     return 0
 if __name__ == "__main__": raise SystemExit(main())
+
+# Issue 526 contract adapter (legacy API above remains compatibility-only).
+from nexus.contracts.gateway_deployment import ContractError, DeploymentState, EffectClass, LABEL as GATEWAY_LABEL, PLIST as GATEWAY_PLIST, ENTRYPOINT, INTERPRETER, canonical_hash
+GATEWAY_PLIST = Path(GATEWAY_PLIST)
+SUPERVISOR_DIR = STATE_DIR / "supervisor"
+STABLE_ARTIFACT = SUPERVISOR_DIR / "mcp_gateway_durable.py"
+STABLE_RECEIPT = SUPERVISOR_DIR / "mcp_gateway_durable.receipt.json"
+FENCE_RECEIPT = SUPERVISOR_DIR / "gateway-fences.json"
+GATEWAY_PROFILE = {"label": GATEWAY_LABEL, "plist": GATEWAY_PLIST, "stdout": LOG_DIR / "gateway.log", "stderr": LOG_DIR / "gateway.err.log", "entrypoint": ENTRYPOINT, "interpreter": Path(INTERPRETER)}
+GATEWAY_REQUEST_SCHEMA = "nexus.gateway.deployment.v1"
+_GATEWAY_RESULTS = {}
+
+# Issue 526 Gateway contract adapter is defined below the legacy compatibility
+# surface so legacy callers remain explicit and unchanged.
+from nexus.contracts.gateway_deployment import ContractError, DeploymentState, EffectClass, LABEL as GATEWAY_LABEL, PLIST as GATEWAY_PLIST, ENTRYPOINT, INTERPRETER, canonical_hash
+
+GATEWAY_PLIST = Path(GATEWAY_PLIST)
+SUPERVISOR_DIR = STATE_DIR / "supervisor"
+STABLE_ARTIFACT = SUPERVISOR_DIR / "mcp_gateway_durable.py"
+STABLE_RECEIPT = SUPERVISOR_DIR / "mcp_gateway_durable.receipt.json"
+FENCE_RECEIPT = SUPERVISOR_DIR / "gateway-fences.json"
+GATEWAY_PROFILE = {"label": GATEWAY_LABEL, "plist": GATEWAY_PLIST,
+                   "stdout": LOG_DIR / "gateway.log", "stderr": LOG_DIR / "gateway.err.log",
+                   "entrypoint": ENTRYPOINT, "interpreter": Path(INTERPRETER)}
+GATEWAY_REQUEST_SCHEMA = "nexus.gateway.deployment.v1"
+_GATEWAY_RESULTS: dict[tuple[str, str, str], dict] = {}
+
+def gateway_profile() -> dict[str, object]:
+    return dict(GATEWAY_PROFILE)
+
+def _gateway_hash(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+def _gateway_atomic(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            os.chmod(temporary, 0o600); handle.write(data); handle.flush(); os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary): os.unlink(temporary)
+
+def install_stable_artifact(source: Path | None = None, **_: object) -> dict:
+    source = Path(source or __file__)
+    if not source.is_file() or source.is_symlink(): raise GateError("manager source missing or symlink")
+    data = source.read_bytes(); prior = STABLE_ARTIFACT.read_bytes() if STABLE_ARTIFACT.is_file() else None
+    _gateway_atomic(STABLE_ARTIFACT, data); os.chmod(STABLE_ARTIFACT, 0o700)
+    stat = STABLE_ARTIFACT.stat()
+    receipt = {"artifact_sha256": _gateway_hash(data), "prior_artifact_sha256": _gateway_hash(prior) if prior else None,
+               "source_path": str(source), "uid": stat.st_uid, "gid": stat.st_gid, "mode": "0700"}
+    _gateway_atomic(STABLE_RECEIPT, json.dumps(receipt, sort_keys=True).encode())
+    return receipt
+
+def verify_stable_artifact() -> dict:
+    if not STABLE_ARTIFACT.is_file() or not STABLE_RECEIPT.is_file(): raise GateError("stable manager artifact missing")
+    try: receipt = json.loads(STABLE_RECEIPT.read_text())
+    except (OSError, json.JSONDecodeError): raise GateError("stable receipt unreadable")
+    if _gateway_hash(STABLE_ARTIFACT.read_bytes()) != receipt.get("artifact_sha256"): raise GateError("stable manager artifact mismatch")
+    if STABLE_ARTIFACT.stat().st_mode & 0o777 != 0o700: raise GateError("stable manager artifact mode mismatch")
+    return receipt
+
+def gateway_request_hash(request: dict) -> str:
+    return canonical_hash({key: value for key, value in request.items() if key != "request_hash"})
+
+def validate_gateway_request(request: dict, operation: str | None = None) -> dict:
+    if not isinstance(request, dict) or request.get("schema") != GATEWAY_REQUEST_SCHEMA: raise GateError("Gateway request schema invalid")
+    if operation is not None and request.get("operation") != operation: raise GateError("Gateway operation mismatch")
+    if request.get("gateway_profile") != GATEWAY_LABEL or request.get("desired_repository") != "James3014/Nexus-new": raise GateError("Gateway profile is fixed")
+    if request.get("request_hash") != gateway_request_hash(request): raise GateError("Gateway request hash mismatch")
+    return request
+
+def gateway_postflight(request: dict, observed: dict) -> dict:
+    validate_gateway_request(request)
+    for key in ("root", "head", "tree"):
+        expected = request.get("desired_root" if key == "root" else f"desired_{key}")
+        if observed.get(key) != expected: raise GateError(f"postflight {key} mismatch")
+    for key, expected in request.get("postflight_identities", {}).items():
+        if observed.get(key) != expected: raise GateError(f"postflight {key} mismatch")
+    return {"success": True, "observed": dict(observed)}
+
+def gateway_manage(request: dict, **_: object) -> dict:
+    validate_gateway_request(request)
+    if request["operation"] == "install-artifact":
+        return install_stable_artifact() | {"profile": GATEWAY_LABEL, "devspace_effects": 0}
+    raise GateError("Gateway effect requires fixed physical adapter")
+
+manage_gateway = gateway_manage

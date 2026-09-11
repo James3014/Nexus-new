@@ -37,6 +37,10 @@ from nexus.services.runtime_workforce_admission import (  # noqa: E402
     evaluate_runtime_workforce_admission,
 )
 
+
+def test_red_public_external_candidate_adoption_action_is_exposed():
+    assert "nexus_candidate_adopt_external" in PUBLIC_TOOL_NAMES
+
 _TEST_CARD_ROOT: Path | None = None
 
 

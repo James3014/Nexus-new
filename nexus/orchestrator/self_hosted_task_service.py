@@ -41,7 +41,11 @@ from nexus.contracts.target_integration_lifecycle import (
     IntegrationAuthorizationEnvelope,
 )
 from nexus.contracts.unified_runtime_receipt import build_runtime_development_mapping
-from nexus.core.task_continuity import events_from_attempt_records
+from nexus.core.task_continuity import (
+    build_rehydration_projection,
+    events_from_attempt_records,
+    project,
+)
 from nexus.engine.canonical_task_seam import build_canonical_dispatch_envelope
 from nexus.events.contracts import build_attempt_transition_event
 from nexus.events.transport import NexusEventBus
@@ -1017,7 +1021,7 @@ class SelfHostedTaskService:
 
     @staticmethod
     def _candidate_commit(state: Mapping[str, Any]) -> Optional[str]:
-        packet = state.get("promotion_packet") or {}
+        packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
         return state.get("candidate_commit_sha") or packet.get("candidate_commit_sha")
 
     def _require_integrated_replacement(self, task_id: str, superseded_by: str) -> None:
@@ -1209,7 +1213,7 @@ class SelfHostedTaskService:
             next_action = "wait_for_task"
             recommended_tool = "nexus_self_hosted_wait_task"
 
-        packet = state.get("promotion_packet") or {}
+        packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
         return {
             "schema": "nexus.self_hosted_task_action.v1",
             "task_id": state.get("task_id"),
@@ -2131,6 +2135,67 @@ class SelfHostedTaskService:
             task_id=task_id,
             attempt_id=attempt_id,
         )
+
+    def rehydrate_task_continuation(
+        self,
+        task_id: str,
+        attempt_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Deterministic, model-independent, read-only rehydration projection.
+
+        Rebuilds task continuation projection purely from physical durable state
+        and canonical attempt continuity records. Never mutates task state.
+        """
+        state = self._read_state_snapshot(task_id)
+        if state is None:
+            raise KeyError(f"unknown task: {task_id}")
+        if not isinstance(state, Mapping):
+            raise ValueError("REHYDRATION_MALFORMED_STATE: task state must be a mapping")
+        if state.get("state_valid") is False or str(state.get("status") or "").startswith("BLOCKED_INVALID_"):
+            blocker = state.get("blocker") if isinstance(state.get("blocker"), Mapping) else {}
+            detail = blocker.get("detail") or "state is invalid"
+            raise ValueError(f"REHYDRATION_MALFORMED_STATE: {detail}")
+        for key in ("candidate", "promotion_packet", "verified_receipt", "contract"):
+            val = state.get(key)
+            if val is not None and not isinstance(val, Mapping):
+                raise ValueError(f"REHYDRATION_MALFORMED_STATE: {key} must be a mapping")
+        work_claim = state.get("work_claim")
+        if work_claim is not None:
+            if not isinstance(work_claim, Mapping):
+                raise ValueError("REHYDRATION_WORK_CLAIM_MISMATCH: work_claim must be a mapping")
+            if not isinstance(work_claim.get("identity"), Mapping):
+                raise ValueError("REHYDRATION_WORK_CLAIM_MISMATCH: work_claim identity must be a mapping")
+
+        target_attempt_id = attempt_id or state.get("attempt_id")
+        if not target_attempt_id:
+            raise ValueError("REHYDRATION_ATTEMPT_ID_REQUIRED")
+        events = self.read_canonical_attempt_continuity(task_id, str(target_attempt_id))
+        snapshot = project(events)
+        task_action = self._task_action_envelope(state)
+        projection = build_rehydration_projection(
+            task_state=state,
+            continuity_snapshot=snapshot,
+            task_action_envelope=task_action,
+            requested_attempt_id=attempt_id,
+        )
+        return projection.to_dict()
+
+    @classmethod
+    def rehydrate_task_continuation_snapshot(
+        cls,
+        task_state: Mapping[str, Any],
+        attempt_continuity_events: Iterable[Any],
+        *,
+        attempt_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        snapshot = project(attempt_continuity_events)
+        task_action = cls._task_action_envelope(task_state)
+        return build_rehydration_projection(
+            task_state=task_state,
+            continuity_snapshot=snapshot,
+            task_action_envelope=task_action,
+            requested_attempt_id=attempt_id,
+        ).to_dict()
 
     @staticmethod
     def _request_hash(request: Mapping[str, Any]) -> str:
@@ -4036,6 +4101,107 @@ class SelfHostedTaskService:
             {"error": "worker lost before recoverable execution evidence", "promotion_status": "NOT_CREATED"},
             attempt_id=state.get("attempt_id"),
         )
+
+        def blocked(reason: str) -> dict[str, Any]:
+            return self._checkpoint(task_id, "FINAL_BLOCK", {
+                "error": "interrupted worker reconciliation blocked",
+                "reconcile_decision": "INTERRUPTED_WORKER_RECONCILE_BLOCKED",
+                "cleanup_decision": "CLEANUP_BLOCKED",
+                "cleanup_blocker": reason,
+                "cleanup_performed": False,
+                "terminal_status": "FINAL_BLOCK",
+                "promotion_status": "NOT_CREATED",
+            }, attempt_id=state.get("attempt_id")) or dict(state)
+
+        for field, checker in (
+            ("worker_pid", self._pid_alive),
+            ("worker_pgid", self._process_group_alive),
+            ("worker_child_pgid", self._process_group_alive),
+        ):
+            raw = state.get(field)
+            if raw and checker(int(raw)):
+                return blocked(f"live owned process: {field}")
+        try:
+            request = state.get("request")
+            raw_contract = state.get("contract")
+            if not isinstance(request, Mapping) or not isinstance(raw_contract, Mapping):
+                raise RuntimeError("durable request/contract evidence is missing")
+            contract = self._validated_persisted_contract(raw_contract)
+            if contract.task_id != task_id or state.get("task_id") != task_id:
+                raise RuntimeError("task identity drift")
+            if state.get("contract_hash") != contract.contract_hash:
+                raise RuntimeError("contract hash mismatch")
+            validate_task_card_binding(contract, request, is_ephemeral=self.ephemeral)
+            lease = self._lease_from_state(state)
+            manager = WorktreeManager(root_dir=contract.target_worktree_root)
+            manager.validate_lease_identity(contract, lease)
+            controller = Path(contract.controller_repo_root).resolve()
+            target = Path(contract.target_repo_root).resolve()
+            if Path(str(state.get("controller_worktree") or "")).resolve() != controller:
+                raise RuntimeError("controller binding drift")
+            if Path(str(state.get("target_worktree") or "")).resolve() != target:
+                raise RuntimeError("Target binding drift")
+            if not controller.is_dir() or not target.is_dir():
+                raise RuntimeError("controller or Target is missing")
+            if manager._worktree_entry(controller, target) is None:
+                raise RuntimeError("Target is not a registered worktree")
+            if manager.process_checker(target):
+                raise RuntimeError("active process uses Target")
+            if lease.target_branch != f"nexus/task/{task_id}":
+                raise RuntimeError("lease branch drift")
+            if lease.initial_head != contract.target_base_revision:
+                raise RuntimeError("lease base revision drift")
+            branch = manager._run_git(["branch", "--show-current"], cwd=target)
+            head = manager._run_git(["rev-parse", "HEAD"], cwd=target)
+            if branch != lease.target_branch or head != lease.initial_head:
+                raise RuntimeError("Target branch or HEAD drift")
+            if state.get("candidate") or state.get("promotion_packet") or state.get("verified_receipt"):
+                raise RuntimeError("candidate evidence already exists")
+        except Exception as exc:
+            return blocked(str(exc))
+
+        try:
+            attempt_id = str(state.get("attempt_id") or "")
+            salvage = manager.create_salvage_snapshot(contract, lease, attempt_id)
+            salvage_commit = str(salvage.get("salvage_commit_sha") or "")
+            salvage_ref = str(salvage.get("salvage_ref") or "")
+            if not salvage_commit or not salvage_ref or salvage.get("salvage_only") is not True:
+                raise RuntimeError("salvage evidence is incomplete")
+            self._checkpoint(task_id, "WORKER_RUNNING", {
+                **salvage, "promotion_eligible": False,
+                "provider_effect_may_have_started": True,
+                "provider_effect_status": "UNKNOWN",
+                "reconcile_decision": "INTERRUPTED_WORKER_SALVAGED",
+                "cleanup_decision": "SALVAGED", "cleanup_performed": False,
+            }, attempt_id=attempt_id)
+            cleanup = manager.cleanup_terminal_target(
+                contract, lease, salvage_commit=salvage_commit, salvage_ref=salvage_ref
+            )
+            if cleanup.decision not in {"REMOVED", "ALREADY_REMOVED"}:
+                raise RuntimeError(cleanup.blocker or cleanup.decision)
+            restore = manager.restore_task_branch_for_retry(
+                contract, lease, salvage_commit, salvage_ref
+            )
+            return self._checkpoint(task_id, "FINAL_BLOCK", {
+                **salvage, "promotion_eligible": False,
+                "provider_effect_may_have_started": True, "provider_effect_status": "UNKNOWN",
+                "reconcile_decision": "INTERRUPTED_WORKER_SALVAGED_RETRYABLE",
+                "cleanup_decision": cleanup.decision, "cleanup_performed": cleanup.performed,
+                "cleanup_performed_at": _utc_now() if cleanup.performed else None,
+                "task_branch_restore_decision": restore["decision"],
+                "task_branch_restored_to": restore["restored_to"],
+                "task_branch_restore_performed": True, "task_branch_restore_verified": True,
+                "interrupted_worker_salvage_retry": True, "terminal_status": "FINAL_BLOCK",
+                "promotion_status": "NOT_CREATED",
+            }, attempt_id=attempt_id) or dict(state)
+        except Exception as exc:
+            return self._checkpoint(task_id, "RETAINED_FOR_REVIEW", {
+                "error": "interrupted worker salvage/recovery blocked",
+                "reconcile_decision": "INTERRUPTED_WORKER_RECONCILE_BLOCKED",
+                "cleanup_decision": "CLEANUP_BLOCKED", "cleanup_blocker": str(exc),
+                "cleanup_performed": False, "promotion_status": "NOT_CREATED",
+                "terminal_status": "RETAINED_FOR_REVIEW",
+            }, attempt_id=attempt_id) or dict(state)
 
     def recover_retained_candidate(self, task_id: str) -> dict[str, Any]:
         state = self._read_state(task_id)

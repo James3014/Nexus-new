@@ -37,6 +37,7 @@ from nexus.engine.canonical_task_seam import (
     build_canonical_dispatch_envelope,
     build_canonical_planner_admission,
 )
+from nexus.events.contracts import build_attempt_transition_event
 from nexus.events.transport import NexusEventBus
 from nexus.executors.worker_contract import (
     SUPPORTED_WORKER_PROVIDERS,
@@ -7412,3 +7413,292 @@ def test_canonical_continuity_read_preserves_event_store_integrity_error(monkeyp
     monkeypatch.setattr(NexusEventBus, "_event_log_path", None)
     with pytest.raises(ValueError, match="tampered event log"):
         SelfHostedTaskService.read_canonical_attempt_events("task-1", "attempt-1")
+
+
+def test_rehydrate_task_continuation_restart_from_disk_and_read_only(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    state_dir = tmp_path / "state"
+    service1 = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+
+    task_id = "task-restart-1"
+    attempt_id = "att-1"
+    state_data = {
+        "task_id": task_id,
+        "attempt_id": attempt_id,
+        "status": "FINAL_BLOCK",
+        "controller_revision": "sha-source-1",
+        "contract_hash": "sha-contract-1",
+        "claim_ceiling": "bounded",
+        "lifecycle_revision": "life-rev-1",
+        "candidate_commit_sha": "sha-cand-1",
+    }
+    service1._write_state(task_id, state_data)
+
+    NexusEventBus.emit_attempt_transition(
+        build_attempt_transition_event(
+            task_id=task_id,
+            attempt_id=attempt_id,
+            sequence=1,
+            state="ATTEMPT_REJECTED",
+            reason="strategy failed",
+            continuity_event_type="ATTEMPT_REJECTED",
+            do_not_repeat=("bad_strat_1",),
+            evidence_refs=("ev-ref-1",),
+            unresolved_risks=("risk-a",),
+            unknowns=("unk-a",),
+            next_action="try_alt",
+            claim_ceiling="bounded",
+            source_revision="sha-source-1",
+            contract_revision="sha-contract-1",
+        )
+    )
+
+    state_file = state_dir / f"{task_id}.json"
+    event_log_file = NexusEventBus._event_log_path
+    assert event_log_file is not None and event_log_file.exists()
+    state_hash_before = hashlib.sha256(state_file.read_bytes()).hexdigest()
+    event_log_hash_before = hashlib.sha256(event_log_file.read_bytes()).hexdigest()
+
+    del service1
+
+    service2 = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+    proj = service2.rehydrate_task_continuation(task_id, attempt_id)
+
+    assert proj["schema"] == "nexus.task_rehydration_projection.v1"
+    assert proj["task_identity"] == {"task_id": task_id, "attempt_id": attempt_id}
+    assert proj["revision_binding"] == {
+        "source_revision": "sha-source-1",
+        "contract_revision": "sha-contract-1",
+    }
+    assert proj["authority_binding"]["lifecycle_revision"] == "life-rev-1"
+    assert proj["continuation"]["rejected_strategies"] == ["bad_strat_1"]
+    assert proj["continuation"]["do_not_repeat"] == ["bad_strat_1"]
+    assert proj["continuation"]["evidence_refs"] == ["ev-ref-1"]
+    assert proj["continuation"]["unresolved_risks"] == ["risk-a"]
+    assert proj["continuation"]["unknowns"] == ["unk-a"]
+    assert proj["continuation"]["next_action"] == "try_alt"
+    assert proj["continuation"]["claim_ceiling"] == "bounded"
+    assert proj["candidate_binding"]["candidate_commit_sha"] == "sha-cand-1"
+    assert proj["current_task_action"]["action_state"] == "FINAL_BLOCK"
+
+    # Read-only check: no file content changed
+    state_hash_after = hashlib.sha256(state_file.read_bytes()).hexdigest()
+    event_log_hash_after = hashlib.sha256(event_log_file.read_bytes()).hexdigest()
+    assert state_hash_after == state_hash_before
+    assert event_log_hash_after == event_log_hash_before
+    assert "authority_revision" in proj["missing_durable_bindings"]
+
+
+def test_rehydrate_task_continuation_lifecycle_path_restart_and_read_only(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    state_dir = tmp_path / "state"
+    service1 = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+
+    task_id = "task-lifecycle-e2e"
+    attempt_id = "attempt-lifecycle-1"
+
+    service1._create_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "status": "SUBMITTED",
+            "controller_revision": "sha-source-main",
+            "contract_hash": "sha-contract-main",
+            "claim_ceiling": "bounded",
+        },
+    )
+
+    service1._checkpoint(
+        task_id,
+        "ATTEMPT_REJECTED",
+        {
+            "error": "syntax check failed",
+            "continuity_event_type": "ATTEMPT_REJECTED",
+            "do_not_repeat": ["bad_import_pattern"],
+            "unresolved_risks": ["compat_risk"],
+            "next_action": "repair_imports",
+            "claim_ceiling": "bounded",
+            "controller_revision": "sha-source-main",
+            "contract_hash": "sha-contract-main",
+        },
+        attempt_id=attempt_id,
+    )
+
+    state_file = state_dir / f"{task_id}.json"
+    event_log_file = NexusEventBus._event_log_path
+    assert state_file.exists()
+    assert event_log_file is not None and event_log_file.exists()
+
+    state_hash_before = hashlib.sha256(state_file.read_bytes()).hexdigest()
+    event_log_hash_before = hashlib.sha256(event_log_file.read_bytes()).hexdigest()
+    event_count_before = len(NexusEventBus._log_store.read_recent(limit=100))
+
+    del service1
+
+    service2 = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False, ephemeral=True)
+    state_hash_before = hashlib.sha256(state_file.read_bytes()).hexdigest()
+    event_log_hash_before = hashlib.sha256(event_log_file.read_bytes()).hexdigest()
+    event_count_before = len(NexusEventBus._log_store.read_recent(limit=100))
+
+    proj = service2.rehydrate_task_continuation(task_id, attempt_id)
+
+    assert proj["schema"] == "nexus.task_rehydration_projection.v1"
+    assert proj["task_identity"] == {"task_id": task_id, "attempt_id": attempt_id}
+    assert proj["revision_binding"] == {
+        "source_revision": "sha-source-main",
+        "contract_revision": "sha-contract-main",
+    }
+    assert proj["continuation"]["rejected_strategies"] == ["bad_import_pattern"]
+    assert proj["continuation"]["do_not_repeat"] == ["bad_import_pattern"]
+    assert proj["continuation"]["unresolved_risks"] == ["compat_risk"]
+    assert proj["continuation"]["next_action"] == "repair_imports"
+    assert "authority_revision" in proj["missing_durable_bindings"]
+
+    state_hash_after = hashlib.sha256(state_file.read_bytes()).hexdigest()
+    event_log_hash_after = hashlib.sha256(event_log_file.read_bytes()).hexdigest()
+    event_count_after = len(NexusEventBus._log_store.read_recent(limit=100))
+
+    assert state_hash_after == state_hash_before
+    assert event_log_hash_after == event_log_hash_before
+    assert event_count_after == event_count_before
+
+
+def test_rehydrate_task_continuation_missing_facts_stay_missing(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    state_dir = tmp_path / "state"
+    service = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+
+    task_id = "task-missing-1"
+    attempt_id = "att-1"
+    service._write_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "status": "SUBMITTED",
+            "controller_revision": "sha-src-1",
+            "contract_hash": "sha-cnt-1",
+        },
+    )
+    NexusEventBus.emit_attempt_transition(
+        build_attempt_transition_event(
+            task_id=task_id,
+            attempt_id=attempt_id,
+            sequence=1,
+            state="SUBMITTED",
+            continuity_event_type="PLAN_FORMED",
+            source_revision="sha-src-1",
+            contract_revision="sha-cnt-1",
+        )
+    )
+
+    proj = service.rehydrate_task_continuation(task_id, attempt_id)
+    assert "completed_actions" in proj["missing_durable_bindings"]
+    assert "verified_observations" in proj["missing_durable_bindings"]
+    assert "authority_revision" in proj["missing_durable_bindings"]
+    assert "phase_receipts" in proj["missing_durable_bindings"]
+    assert proj["candidate_binding"] is None
+    assert proj["work_claim_binding"] is None
+
+
+def test_rehydrate_task_continuation_attempt_mismatch_fails_closed(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    state_dir = tmp_path / "state"
+    service = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+
+    task_id = "task-mismatch-1"
+    service._write_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": "att-1",
+            "status": "SUBMITTED",
+            "controller_revision": "sha-src-1",
+            "contract_hash": "sha-cnt-1",
+        },
+    )
+    NexusEventBus.emit_attempt_transition(
+        build_attempt_transition_event(
+            task_id=task_id,
+            attempt_id="att-2",
+            sequence=1,
+            state="SUBMITTED",
+            continuity_event_type="PLAN_FORMED",
+            source_revision="sha-src-1",
+            contract_revision="sha-cnt-1",
+        )
+    )
+
+    with pytest.raises(ValueError, match="REHYDRATION_ATTEMPT_MISMATCH"):
+        service.rehydrate_task_continuation(task_id, "att-2")
+
+
+def test_rehydrate_task_continuation_source_revision_mismatch_fails_closed(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    state_dir = tmp_path / "state"
+    service = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+
+    task_id = "task-src-mismatch-1"
+    attempt_id = "att-1"
+    service._write_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "status": "SUBMITTED",
+            "controller_revision": "sha-src-A",
+            "contract_hash": "sha-cnt-1",
+        },
+    )
+    NexusEventBus.emit_attempt_transition(
+        build_attempt_transition_event(
+            task_id=task_id,
+            attempt_id=attempt_id,
+            sequence=1,
+            state="SUBMITTED",
+            continuity_event_type="PLAN_FORMED",
+            source_revision="sha-src-B",
+            contract_revision="sha-cnt-1",
+        )
+    )
+
+    with pytest.raises(ValueError, match="REHYDRATION_SOURCE_REVISION_MISMATCH"):
+        service.rehydrate_task_continuation(task_id, attempt_id)
+
+
+@pytest.mark.parametrize(
+    "malformed_field",
+    ["candidate", "promotion_packet", "verified_receipt", "contract", "work_claim"],
+)
+def test_rehydrate_task_continuation_malformed_state_fails_closed(tmp_path, malformed_field):
+    NexusEventBus.configure(tmp_path)
+    state_dir = tmp_path / "state"
+    service = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+
+    task_id = f"task-malformed-{malformed_field}"
+    attempt_id = "att-1"
+    service._write_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "status": "SUBMITTED",
+            "controller_revision": "sha-src-1",
+            "contract_hash": "sha-cnt-1",
+            malformed_field: "malformed_string_not_dict",
+        },
+    )
+    NexusEventBus.emit_attempt_transition(
+        build_attempt_transition_event(
+            task_id=task_id,
+            attempt_id=attempt_id,
+            sequence=1,
+            state="SUBMITTED",
+            continuity_event_type="PLAN_FORMED",
+            source_revision="sha-src-1",
+            contract_revision="sha-cnt-1",
+        )
+    )
+    with pytest.raises(ValueError, match="REHYDRATION_"):
+        service.rehydrate_task_continuation(task_id, attempt_id)
