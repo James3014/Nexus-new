@@ -238,13 +238,24 @@ def _physical_repository_id() -> str:
         return ""
     if result.returncode != 0:
         return ""
-    remote = result.stdout.strip()
-    match = re.search(r"github\.com(?::|/)([^/\s]+)/([^/\s]+)$", remote)
+    # ``git config`` emits one terminal newline.  Remove only that delimiter;
+    # surrounding or embedded whitespace must fail closed below.
+    remote = result.stdout.removesuffix("\n")
+    match = re.fullmatch(
+        r"(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)"
+        r"([A-Za-z0-9._-]+)/"
+        r"([A-Za-z0-9._-]+)",
+        remote,
+    )
     if match is None:
         return ""
     owner, repository = match.groups()
+    if owner in {".", ".."}:
+        return ""
     if repository.endswith(".git"):
         repository = repository[:-4]
+    if repository in {"", ".", ".."}:
+        return ""
     return f"{owner}/{repository}" if owner and repository else ""
 
 
