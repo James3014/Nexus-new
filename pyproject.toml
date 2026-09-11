@@ -5,8 +5,10 @@ description = "Nexus Singularity OS: Hardened Governance & Swarm Engine"
 authors = [{name = "Nexus Engineers", email = "eng@nexus-singularity.os"}]
 dependencies = [
     "aiohttp>=3.13.5,<4.0.0",
+    "nexus-runtime @ git+https://github.com/James3014/nexus-runtime.git@d65e3ea7628a07bd73dee461750392bcdf85c3ac",
+    "nexus-learning @ git+https://github.com/James3014/nexus-learning.git@d09f05b942f35236562ae26e7b718d111368b0b1",
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 
 [project.optional-dependencies]
 legacy = [
@@ -65,7 +67,7 @@ packages = [
 ]
 
 [tool.poetry.dependencies]
-python = "^3.10"
+python = "^3.11"
 slack-sdk = { version = "^3.21.3", optional = true }
 websocket-client = { version = "^1.5.1", optional = true }
 langgraph = { version = "^0.0.10", optional = true }
@@ -99,7 +101,7 @@ trusted-anchor = [
 
 [tool.ruff]
 # Target Python version
-target-version = "py310"
+target-version = "py311"
 line-length = 100
 
 [tool.ruff.lint]
