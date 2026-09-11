@@ -5,6 +5,7 @@ scans all production Python under nexus/** and scripts/ops/**, binds exact
 caller/sink identities, and detects effect primitives even when a duplicate is
 placed in a new file under a different function name.
 """
+
 from __future__ import annotations
 
 import ast
