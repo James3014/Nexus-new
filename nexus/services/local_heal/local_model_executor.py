@@ -3500,7 +3500,10 @@ class LocalModelExecutor:
                 f"1. The diff header MUST use exactly: --- a/{request.target_file}  and  +++ b/{request.target_file}\n"
                 f"2. The @@ hunk header MUST use the EXACT line numbers from the source above.\n"
                 f"3. Context lines (no +/-) MUST EXACTLY match the source file character-for-character including indentation.\n"
-                f"4. Return ONLY the diff wrapped in a ```diff fenced block. No prose, no explanation.\n"
+                f"4. The hunk MUST contain an effective edit: do not emit a context-only or duplicated-context hunk.\n"
+                f"5. For a replacement, include the original line(s) with '-' and the replacement line(s) with '+'; for a pure insertion or deletion, the corresponding '+' or '-' lines are sufficient.\n"
+                f"6. The hunk body counts and context must match the lines actually emitted; never fabricate source context or line ranges.\n"
+                f"7. Return ONLY the diff wrapped in a ```diff fenced block. No prose, no explanation.\n"
             )
 
         model_name = signal_snapshot["executor_model"]
