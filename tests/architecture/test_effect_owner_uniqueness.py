@@ -39,18 +39,51 @@ class Record:
         return f"{self.path}:{self.cls + '.' if self.cls else ''}{self.fn}"
 
 
-MERGE_PORT = Ref("nexus/orchestrator/github_completion_loop.py", "GitHubCompletionPort", "cas_merge")
+MERGE_PORT = Ref(
+    "nexus/orchestrator/github_completion_loop.py", "GitHubCompletionPort", "cas_merge"
+)
 MERGE_LOOP = Ref("nexus/orchestrator/github_completion_loop.py", None, "run_github_completion_loop")
-CANDIDATE_FACADE = Ref("nexus/orchestrator/self_hosted_task_service.py", "SelfHostedTaskService", "integrate_approved")
-CANDIDATE_SINK = Ref("nexus/orchestrator/governed_integration.py", "ControlledIntegrationManager", "integrate_authorized_task_state")
-LEGACY_INTEGRATION = Ref("nexus/orchestrator/governed_integration.py", "ControlledIntegrationManager", "integrate_task_state", "RETIRED")
-UNIFIED_CALLER = Ref("nexus/orchestrator/unified_mcp_gateway.py", "UnifiedMCPGateway", "_candidate_integrate", "COMPATIBILITY_ONLY")
-SELF_HOSTED_CALLER = Ref("nexus/orchestrator/self_hosted_mcp.py", "NexusSelfHostedMCPServer", "_call_tool", "COMPATIBILITY_ONLY")
+CANDIDATE_FACADE = Ref(
+    "nexus/orchestrator/self_hosted_task_service.py", "SelfHostedTaskService", "integrate_approved"
+)
+CANDIDATE_SINK = Ref(
+    "nexus/orchestrator/governed_integration.py",
+    "ControlledIntegrationManager",
+    "integrate_authorized_task_state",
+)
+LEGACY_INTEGRATION = Ref(
+    "nexus/orchestrator/governed_integration.py",
+    "ControlledIntegrationManager",
+    "integrate_task_state",
+    "RETIRED",
+)
+UNIFIED_CALLER = Ref(
+    "nexus/orchestrator/unified_mcp_gateway.py",
+    "UnifiedMCPGateway",
+    "_candidate_integrate",
+    "COMPATIBILITY_ONLY",
+)
+SELF_HOSTED_CALLER = Ref(
+    "nexus/orchestrator/self_hosted_mcp.py",
+    "NexusSelfHostedMCPServer",
+    "_call_tool",
+    "COMPATIBILITY_ONLY",
+)
 GATEWAY_MODULE = "scripts/ops/mcp_gateway_durable.py"
 GATEWAY_MANAGER = Ref(GATEWAY_MODULE, None, "manage")
 TRANSITION_SINK = Ref("nexus/orchestrator/standing_grant_store.py", None, "_write_transition_file")
-SWITCH_CALLER = Ref("nexus/orchestrator/standing_grant_store.py", None, "switch_task_card_authority", "COMPATIBILITY_ONLY")
-RESTORE_CALLER = Ref("nexus/orchestrator/standing_grant_store.py", None, "restore_task_card_authority", "COMPATIBILITY_ONLY")
+SWITCH_CALLER = Ref(
+    "nexus/orchestrator/standing_grant_store.py",
+    None,
+    "switch_task_card_authority",
+    "COMPATIBILITY_ONLY",
+)
+RESTORE_CALLER = Ref(
+    "nexus/orchestrator/standing_grant_store.py",
+    None,
+    "restore_task_card_authority",
+    "COMPATIBILITY_ONLY",
+)
 
 DECLARED = (
     MERGE_PORT,
@@ -82,7 +115,11 @@ def _files(root: Path) -> tuple[Path, ...]:
         base = root / rel
         if not base.is_dir():
             raise AssertionError(f"PRODUCTION_SCAN_ROOT_MISSING:{rel.as_posix()}")
-        found.extend(p for p in base.rglob("*.py") if not any(x in {".git", ".venv", "__pycache__", "node_modules"} for x in p.parts))
+        found.extend(
+            p
+            for p in base.rglob("*.py")
+            if not any(x in {".git", ".venv", "__pycache__", "node_modules"} for x in p.parts)
+        )
     return tuple(sorted(found, key=lambda p: p.relative_to(root).as_posix()))
 
 
@@ -100,7 +137,11 @@ def _records(path: Path, root: Path | None) -> tuple[Record, ...]:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             out.append(Record(rel, None, node.name, node))
         elif isinstance(node, ast.ClassDef):
-            out.extend(Record(rel, node.name, x.name, x) for x in node.body if isinstance(x, (ast.FunctionDef, ast.AsyncFunctionDef)))
+            out.extend(
+                Record(rel, node.name, x.name, x)
+                for x in node.body
+                if isinstance(x, (ast.FunctionDef, ast.AsyncFunctionDef))
+            )
     return tuple(out)
 
 
@@ -133,7 +174,9 @@ def _expr(node: ast.AST) -> str | None:
 
 
 def _calls(record: Record) -> tuple[str, ...]:
-    return tuple(x for n in ast.walk(record.node) if isinstance(n, ast.Call) and (x := _expr(n.func)))
+    return tuple(
+        x for n in ast.walk(record.node) if isinstance(n, ast.Call) and (x := _expr(n.func))
+    )
 
 
 def _tail(call: str) -> str:
@@ -141,7 +184,11 @@ def _tail(call: str) -> str:
 
 
 def _strings(record: Record) -> frozenset[str]:
-    return frozenset(n.value for n in ast.walk(record.node) if isinstance(n, ast.Constant) and isinstance(n.value, str))
+    return frozenset(
+        n.value
+        for n in ast.walk(record.node)
+        if isinstance(n, ast.Constant) and isinstance(n.value, str)
+    )
 
 
 def _raise(effect: str, reason: str, rows: Iterable[Record]) -> None:
@@ -157,7 +204,9 @@ def verify(root: Path, *, extra: Iterable[Path] = ()) -> dict[str, object]:
     for caller, expected in EDGES:
         row = _get(root, caller)
         if expected not in _calls(row):
-            raise AssertionError(f"DELEGATION_EDGE_MISSING:{caller.id}->{expected};observed={sorted(_calls(row))}")
+            raise AssertionError(
+                f"DELEGATION_EDGE_MISSING:{caller.id}->{expected};observed={sorted(_calls(row))}"
+            )
 
     rows = _all(root, extra)
 
@@ -166,7 +215,12 @@ def verify(root: Path, *, extra: Iterable[Path] = ()) -> dict[str, object]:
     _raise(
         "candidate_integration",
         f"RETIRED_SYMBOL_CALLED:{LEGACY_INTEGRATION.id}",
-        (r for r in rows if r.id != LEGACY_INTEGRATION.id and any(_tail(c) == "integrate_task_state" for c in _calls(r))),
+        (
+            r
+            for r in rows
+            if r.id != LEGACY_INTEGRATION.id
+            and any(_tail(c) == "integrate_task_state" for c in _calls(r))
+        ),
     )
 
     # GitHub merge: one in-repo CAS boundary.  Different names that bypass it
@@ -177,10 +231,7 @@ def verify(root: Path, *, extra: Iterable[Path] = ()) -> dict[str, object]:
         (
             r
             for r in rows
-            if (
-                any(_tail(c) == "cas_merge" for c in _calls(r))
-                and r.id != MERGE_LOOP.id
-            )
+            if (any(_tail(c) == "cas_merge" for c in _calls(r)) and r.id != MERGE_LOOP.id)
             or any(_tail(c) in {"merge_pull_request", "git_merge_pull_request"} for c in _calls(r))
         ),
     )
@@ -235,10 +286,23 @@ def verify(root: Path, *, extra: Iterable[Path] = ()) -> dict[str, object]:
         "schema": "nexus.architecture_effect_owner_inventory.v2",
         "classification": "SINGLE_EFFECT_OWNER",
         "effects": {
-            "protected_github_merge": {"boundary": MERGE_PORT.id, "physical_sink": "EXTERNAL_PORT_EFFECT"},
-            "candidate_integration": {"boundary": CANDIDATE_FACADE.id, "physical_sink": CANDIDATE_SINK.id, "retired": LEGACY_INTEGRATION.id},
-            "gateway_durable_deployment_recovery": {"boundary": GATEWAY_MANAGER.id, "physical_sink": GATEWAY_MODULE},
-            "standing_grant_transition": {"boundary": TRANSITION_SINK.id, "physical_sink": TRANSITION_SINK.id},
+            "protected_github_merge": {
+                "boundary": MERGE_PORT.id,
+                "physical_sink": "EXTERNAL_PORT_EFFECT",
+            },
+            "candidate_integration": {
+                "boundary": CANDIDATE_FACADE.id,
+                "physical_sink": CANDIDATE_SINK.id,
+                "retired": LEGACY_INTEGRATION.id,
+            },
+            "gateway_durable_deployment_recovery": {
+                "boundary": GATEWAY_MANAGER.id,
+                "physical_sink": GATEWAY_MODULE,
+            },
+            "standing_grant_transition": {
+                "boundary": TRANSITION_SINK.id,
+                "physical_sink": TRANSITION_SINK.id,
+            },
         },
     }
 
@@ -247,7 +311,11 @@ def inventory() -> dict[str, object]:
     allowed = {"CANONICAL", "COMPATIBILITY_ONLY", "RETIRED"}
     entries = [{"target": r.id, "label": r.label} for r in DECLARED]
     assert all(e["label"] in allowed for e in entries)
-    return {"schema": "nexus.architecture_effect_owner_inventory.v2", "classification": "SINGLE_EFFECT_OWNER", "entries": entries}
+    return {
+        "schema": "nexus.architecture_effect_owner_inventory.v2",
+        "classification": "SINGLE_EFFECT_OWNER",
+        "entries": entries,
+    }
 
 
 def _expect_extra_failure(tmp_path: Path, name: str, code: str, expected_effect: str) -> None:
