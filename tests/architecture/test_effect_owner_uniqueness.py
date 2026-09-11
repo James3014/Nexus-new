@@ -1,13 +1,8 @@
 """Fail-closed regression for single ownership of critical Nexus effects (#947).
 
-This is test-only architecture evidence, never runtime routing/authority. It
-recursively scans production Python under nexus/** and scripts/ops/**, binds
-exact caller/sink identities, and detects effect primitives even when a
-hostile duplicate is added in a new file under a different function name.
-
-Tracked Candidate integration and worker-competition integration are distinct
-execution domains. The latter remains an explicit compatibility domain; it is
-not misclassified as retired tracked-Candidate authority.
+This is test-only architecture evidence, never runtime routing or authority. It
+recursively scans production Python, binds exact caller/sink identities, and
+fails when a new physical implementation appears outside the admitted seams.
 """
 
 from __future__ import annotations
@@ -64,6 +59,12 @@ CANDIDATE_SINK = Ref(
     "ControlledIntegrationManager",
     "integrate_authorized_task_state",
 )
+TARGET_LIFECYCLE_CALLER = Ref(
+    "nexus/orchestrator/target_integration_lifecycle.py",
+    "TargetIntegrationLifecycle",
+    "transactional_integration",
+    "COMPATIBILITY_ONLY",
+)
 COMPETITION_SINK = Ref(
     "nexus/orchestrator/governed_integration.py",
     "ControlledIntegrationManager",
@@ -108,11 +109,28 @@ RESTORE_CALLER = Ref(
     "COMPATIBILITY_ONLY",
 )
 
+# These exact symbols own other Git effects (salvage/durable-ref/deletion-anchor
+# maintenance). They are not Candidate integration implementations. Keeping the
+# exclusions symbol-exact preserves fail-closed behavior for any new raw Git
+# writer while avoiding a category error that treats every update-ref as
+# integration authority.
+NON_CANDIDATE_GIT_WRITERS = frozenset(
+    {
+        "nexus/orchestrator/worktree_manager.py:WorktreeManager.create_salvage_snapshot",
+        "nexus/orchestrator/worktree_manager.py:WorktreeManager.protect_candidate",
+        "nexus/orchestrator/worktree_manager.py:WorktreeManager.protect_salvage_head",
+        "nexus/orchestrator/worktree_manager.py:WorktreeManager.restore_task_branch_for_retry",
+        "scripts/ops/trusted_deletion_anchor.py:_create_git_bundle",
+        "scripts/ops/trusted_deletion_anchor.py:_prepare_executor_git_context",
+    }
+)
+
 DECLARED = (
     MERGE_PORT,
     MERGE_LOOP,
     CANDIDATE_FACADE,
     CANDIDATE_SINK,
+    TARGET_LIFECYCLE_CALLER,
     COMPETITION_SINK,
     COMPETITION_CALLER,
     UNIFIED_CALLER,
@@ -128,6 +146,7 @@ EDGES = (
     (UNIFIED_CALLER, "self.service.integrate_approved"),
     (SELF_HOSTED_CALLER, "self.service.integrate_approved"),
     (CANDIDATE_FACADE, "ControlledIntegrationManager().integrate_authorized_task_state"),
+    (TARGET_LIFECYCLE_CALLER, "manager.integrate_authorized_task_state"),
     (COMPETITION_CALLER, "ControlledIntegrationManager().integrate_task_state"),
     (SWITCH_CALLER, "_write_transition_file"),
     (RESTORE_CALLER, "_write_transition_file"),
@@ -144,7 +163,8 @@ def _files(root: Path) -> tuple[Path, ...]:
             path
             for path in base.rglob("*.py")
             if not any(
-                part in {".git", ".venv", "__pycache__", "node_modules"} for part in path.parts
+                part in {".git", ".venv", "__pycache__", "node_modules"}
+                for part in path.parts
             )
         )
     return tuple(sorted(found, key=lambda path: path.relative_to(root).as_posix()))
@@ -223,19 +243,17 @@ def _strings(record: Record) -> frozenset[str]:
 def _raise(effect: str, reason: str, rows: Iterable[Record]) -> None:
     ids = sorted({row.id for row in rows})
     if ids:
-        raise AssertionError(f"DUPLICATE_EFFECT_IMPLEMENTATION:{effect}:{reason}:" + ",".join(ids))
+        raise AssertionError(
+            f"DUPLICATE_EFFECT_IMPLEMENTATION:{effect}:{reason}:" + ",".join(ids)
+        )
 
 
 def verify(root: Path, *, extra: Iterable[Path] = ()) -> dict[str, object]:
     root = root.resolve()
 
-    # Exact declared source identities fail loudly on rename/removal.
     for ref in DECLARED:
         _get(root, ref)
 
-    # Compatibility callers must keep delegating through their exact admitted
-    # boundary. Merely calling another object with the same tail name is not
-    # accepted as a delegation witness.
     for caller, expected in EDGES:
         row = _get(root, caller)
         observed = _calls(row)
@@ -246,15 +264,16 @@ def verify(root: Path, *, extra: Iterable[Path] = ()) -> dict[str, object]:
 
     rows = _all(root, extra)
 
-    # Protected GitHub merge: only the completion loop may call the exact
-    # cas_merge port. Direct host merge connector primitives are always foreign.
     _raise(
         "protected_github_merge",
         "DIRECT_OR_SECOND_CAS_MERGE",
         (
             row
             for row in rows
-            if (any(_tail(call) == "cas_merge" for call in _calls(row)) and row.id != MERGE_LOOP.id)
+            if (
+                any(_tail(call) == "cas_merge" for call in _calls(row))
+                and row.id != MERGE_LOOP.id
+            )
             or any(
                 _tail(call) in {"merge_pull_request", "git_merge_pull_request"}
                 for call in _calls(row)
@@ -262,16 +281,16 @@ def verify(root: Path, *, extra: Iterable[Path] = ()) -> dict[str, object]:
         ),
     )
 
-    # Tracked Candidate integration and competition-winner integration are
-    # separate domains. Both physical Git seams are owned by the same
-    # ControlledIntegrationManager class. Unknown callers or a third raw Git
-    # implementation still fail closed.
+    allowed_candidate_callers = {CANDIDATE_FACADE.id, TARGET_LIFECYCLE_CALLER.id}
     allowed_git_apply = {CANDIDATE_SINK.id, COMPETITION_SINK.id}
     candidate_conflicts: list[Record] = []
     for row in rows:
         tails = {_tail(call) for call in _calls(row)}
         strings = _strings(row)
-        if "integrate_authorized_task_state" in tails and row.id != CANDIDATE_FACADE.id:
+        if (
+            "integrate_authorized_task_state" in tails
+            and row.id not in allowed_candidate_callers
+        ):
             candidate_conflicts.append(row)
         elif "integrate_task_state" in tails and row.id != COMPETITION_CALLER.id:
             candidate_conflicts.append(row)
@@ -279,20 +298,20 @@ def verify(root: Path, *, extra: Iterable[Path] = ()) -> dict[str, object]:
             "update-ref" in strings
             or "--ff-only" in strings
             or ("--no-ff" in strings and "--no-edit" in strings)
-        ) and row.id not in allowed_git_apply:
+        ) and row.id not in allowed_git_apply | NON_CANDIDATE_GIT_WRITERS:
             candidate_conflicts.append(row)
     _raise("candidate_integration", "SECOND_GIT_APPLY_PRIMITIVE", candidate_conflicts)
 
-    # Gateway durable host effect remains module-owned. A newly named function
-    # in a new module cannot silently gain launchctl effect authority.
     _raise(
         "gateway_durable_deployment_recovery",
         "LAUNCHCTL_OUTSIDE_DURABLE_MANAGER_MODULE",
-        (row for row in rows if row.path != GATEWAY_MODULE and "launchctl" in _strings(row)),
+        (
+            row
+            for row in rows
+            if row.path != GATEWAY_MODULE and "launchctl" in _strings(row)
+        ),
     )
 
-    # Standing-grant transition writer: cross-module sink calls and copied
-    # atomic transition-writer primitives both fail closed.
     transition_conflicts: list[Record] = []
     for row in rows:
         calls = _calls(row)
@@ -323,6 +342,7 @@ def verify(root: Path, *, extra: Iterable[Path] = ()) -> dict[str, object]:
                 "effect_owner_class": (
                     "nexus/orchestrator/governed_integration.py:ControlledIntegrationManager"
                 ),
+                "compatibility_callers": [TARGET_LIFECYCLE_CALLER.id],
                 "compatibility_domain": {
                     "name": "competition_winner_integration",
                     "caller": COMPETITION_CALLER.id,
@@ -382,6 +402,7 @@ def test_competition_integration_is_explicit_compatibility_domain():
     assert compatibility["classification"] == "COMPATIBILITY_ONLY"
     assert compatibility["caller"] == COMPETITION_CALLER.id
     assert compatibility["physical_sink"] == COMPETITION_SINK.id
+    assert TARGET_LIFECYCLE_CALLER.id in candidate["compatibility_callers"]
 
 
 def test_recursive_scan_discovers_new_source_file(tmp_path):
@@ -420,6 +441,15 @@ def test_new_different_named_git_apply_fails(tmp_path):
             "def apply(ref, sha, old):\n"
             "    return subprocess.run(['git','update-ref',ref,sha,old])\n"
         ),
+        "candidate_integration",
+    )
+
+
+def test_unknown_caller_to_candidate_sink_fails(tmp_path):
+    _expect_extra_failure(
+        tmp_path,
+        "new_candidate_apply.py",
+        "def apply(manager, state):\n    return manager.integrate_authorized_task_state(state)\n",
         "candidate_integration",
     )
 
