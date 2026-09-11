@@ -114,16 +114,14 @@ RESTORE_CALLER = Ref(
 # exclusions symbol-exact preserves fail-closed behavior for any new raw Git
 # writer while avoiding a category error that treats every update-ref as
 # integration authority.
-NON_CANDIDATE_GIT_WRITERS = frozenset(
-    {
-        "nexus/orchestrator/worktree_manager.py:WorktreeManager.create_salvage_snapshot",
-        "nexus/orchestrator/worktree_manager.py:WorktreeManager.protect_candidate",
-        "nexus/orchestrator/worktree_manager.py:WorktreeManager.protect_salvage_head",
-        "nexus/orchestrator/worktree_manager.py:WorktreeManager.restore_task_branch_for_retry",
-        "scripts/ops/trusted_deletion_anchor.py:_create_git_bundle",
-        "scripts/ops/trusted_deletion_anchor.py:_prepare_executor_git_context",
-    }
-)
+NON_CANDIDATE_GIT_WRITERS = frozenset({
+    "nexus/orchestrator/worktree_manager.py:WorktreeManager.create_salvage_snapshot",
+    "nexus/orchestrator/worktree_manager.py:WorktreeManager.protect_candidate",
+    "nexus/orchestrator/worktree_manager.py:WorktreeManager.protect_salvage_head",
+    "nexus/orchestrator/worktree_manager.py:WorktreeManager.restore_task_branch_for_retry",
+    "scripts/ops/trusted_deletion_anchor.py:_create_git_bundle",
+    "scripts/ops/trusted_deletion_anchor.py:_prepare_executor_git_context",
+})
 
 DECLARED = (
     MERGE_PORT,
@@ -163,8 +161,7 @@ def _files(root: Path) -> tuple[Path, ...]:
             path
             for path in base.rglob("*.py")
             if not any(
-                part in {".git", ".venv", "__pycache__", "node_modules"}
-                for part in path.parts
+                part in {".git", ".venv", "__pycache__", "node_modules"} for part in path.parts
             )
         )
     return tuple(sorted(found, key=lambda path: path.relative_to(root).as_posix()))
@@ -243,9 +240,7 @@ def _strings(record: Record) -> frozenset[str]:
 def _raise(effect: str, reason: str, rows: Iterable[Record]) -> None:
     ids = sorted({row.id for row in rows})
     if ids:
-        raise AssertionError(
-            f"DUPLICATE_EFFECT_IMPLEMENTATION:{effect}:{reason}:" + ",".join(ids)
-        )
+        raise AssertionError(f"DUPLICATE_EFFECT_IMPLEMENTATION:{effect}:{reason}:" + ",".join(ids))
 
 
 def verify(root: Path, *, extra: Iterable[Path] = ()) -> dict[str, object]:
@@ -270,10 +265,7 @@ def verify(root: Path, *, extra: Iterable[Path] = ()) -> dict[str, object]:
         (
             row
             for row in rows
-            if (
-                any(_tail(call) == "cas_merge" for call in _calls(row))
-                and row.id != MERGE_LOOP.id
-            )
+            if (any(_tail(call) == "cas_merge" for call in _calls(row)) and row.id != MERGE_LOOP.id)
             or any(
                 _tail(call) in {"merge_pull_request", "git_merge_pull_request"}
                 for call in _calls(row)
@@ -287,10 +279,7 @@ def verify(root: Path, *, extra: Iterable[Path] = ()) -> dict[str, object]:
     for row in rows:
         tails = {_tail(call) for call in _calls(row)}
         strings = _strings(row)
-        if (
-            "integrate_authorized_task_state" in tails
-            and row.id not in allowed_candidate_callers
-        ):
+        if "integrate_authorized_task_state" in tails and row.id not in allowed_candidate_callers:
             candidate_conflicts.append(row)
         elif "integrate_task_state" in tails and row.id != COMPETITION_CALLER.id:
             candidate_conflicts.append(row)
@@ -305,11 +294,7 @@ def verify(root: Path, *, extra: Iterable[Path] = ()) -> dict[str, object]:
     _raise(
         "gateway_durable_deployment_recovery",
         "LAUNCHCTL_OUTSIDE_DURABLE_MANAGER_MODULE",
-        (
-            row
-            for row in rows
-            if row.path != GATEWAY_MODULE and "launchctl" in _strings(row)
-        ),
+        (row for row in rows if row.path != GATEWAY_MODULE and "launchctl" in _strings(row)),
     )
 
     transition_conflicts: list[Record] = []
