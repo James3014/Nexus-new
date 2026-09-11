@@ -737,7 +737,11 @@ def test_gateway_status_orthogonal_drift_and_upstream_freshness(monkeypatch):
     """Verify local repository_drift and GitHub upstream_freshness are decoupled and orthogonal."""
     # Freeze local repo head so repository_drift is False
     monkeypatch.setattr(gateway_module, "SERVER_REPO_HEAD_AT_START", SHA40_A)
-    monkeypatch.setattr(gateway_module, "_git", lambda *args, **kwargs: SHA40_A if args == ("rev-parse", "HEAD") else "")
+    monkeypatch.setattr(
+        gateway_module,
+        "_git",
+        lambda *args, **kwargs: SHA40_A if args == ("rev-parse", "HEAD") else "",
+    )
     # Provide an upstream observer that returns SHA40_B (upstream is ahead/different)
     call_count = 0
 
@@ -764,7 +768,11 @@ def test_gateway_status_orthogonal_drift_and_upstream_freshness(monkeypatch):
 def test_gateway_status_upstream_cache_ttl(monkeypatch):
     """Verify upstream observation honors upstream_cache_ttl_seconds."""
     monkeypatch.setattr(gateway_module, "SERVER_REPO_HEAD_AT_START", SHA40_A)
-    monkeypatch.setattr(gateway_module, "_git", lambda *args, **kwargs: SHA40_A if args == ("rev-parse", "HEAD") else "")
+    monkeypatch.setattr(
+        gateway_module,
+        "_git",
+        lambda *args, **kwargs: SHA40_A if args == ("rev-parse", "HEAD") else "",
+    )
 
     calls = 0
 
@@ -804,7 +812,11 @@ def test_gateway_status_upstream_cache_ttl(monkeypatch):
 def test_gateway_status_upstream_observer_fail_closed(monkeypatch):
     """Verify observer exceptions fail closed to UNKNOWN without crashing gateway."""
     monkeypatch.setattr(gateway_module, "SERVER_REPO_HEAD_AT_START", SHA40_A)
-    monkeypatch.setattr(gateway_module, "_git", lambda *args, **kwargs: SHA40_A if args == ("rev-parse", "HEAD") else "")
+    monkeypatch.setattr(
+        gateway_module,
+        "_git",
+        lambda *args, **kwargs: SHA40_A if args == ("rev-parse", "HEAD") else "",
+    )
 
     def failing_observer():
         raise RuntimeError("network down")
