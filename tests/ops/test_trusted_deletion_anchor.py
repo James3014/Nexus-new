@@ -1243,26 +1243,22 @@ def test_runtime_metadata_dependency_groups_drift_fails_closed(
 
 
 @pytest.mark.parametrize(
-    ("package_index", "field", "replacement"),
+    ("field", "replacement"),
     [
-        (index, field, replacement)
-        for index in range(len(trusted_anchor.TRUSTED_EXTERNAL_RUNTIME_PACKAGES))
-        for field, replacement in (
-            ("repository", "https://github.com/James3014/hostile.git"),
-            ("commit", "f" * 40),
-            ("distribution", "hostile-learning"),
-            ("package", "hostile_learning"),
-            ("direct_url_sha256", "f" * 64),
-        )
+        ("repository", "https://github.com/James3014/hostile.git"),
+        ("commit", "f" * 40),
+        ("distribution", "hostile-learning"),
+        ("package", "hostile_learning"),
+        ("direct_url_sha256", "f" * 64),
     ],
 )
 def test_runtime_metadata_external_package_identity_drift_fails_closed(
-    package_index: int, field: str, replacement: str
+    field: str, replacement: str
 ) -> None:
     manifest = _manifest()
     metadata = dict(manifest["runtime_identity"])  # type: ignore[arg-type]
     packages = [dict(item) for item in metadata["external_packages"]]  # type: ignore[index]
-    packages[package_index][field] = replacement
+    packages[0][field] = replacement
     metadata["external_packages"] = packages
     tampered_metadata = _json(metadata) + b"\n"
     manifest_tampered = dict(manifest)
@@ -1271,6 +1267,34 @@ def test_runtime_metadata_external_package_identity_drift_fails_closed(
     evidence_tampered = _evidence(manifest_tampered)
     assert (
         _verify(manifest_tampered, evidence_tampered, runtime_metadata=tampered_metadata)
+        == "IMPACT_UNKNOWN"
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("repository", "https://github.com/James3014/hostile.git"),
+        ("commit", "f" * 40),
+        ("distribution", "hostile-runtime"),
+        ("package", "hostile_runtime"),
+        ("direct_url_sha256", "f" * 64),
+    ],
+)
+def test_runtime_metadata_second_external_package_identity_drift_fails_closed(
+    field: str, replacement: str
+) -> None:
+    manifest = _manifest()
+    metadata = dict(manifest["runtime_identity"])  # type: ignore[arg-type]
+    packages = [dict(item) for item in metadata["external_packages"]]  # type: ignore[index]
+    packages[1][field] = replacement
+    metadata["external_packages"] = packages
+    tampered_metadata = _json(metadata) + b"\n"
+    manifest_tampered = dict(manifest)
+    manifest_tampered["runtime_identity"] = metadata
+    manifest_tampered["runtime_metadata_sha256"] = trusted_anchor._sha(tampered_metadata)
+    assert (
+        _verify(manifest_tampered, _evidence(manifest_tampered), runtime_metadata=tampered_metadata)
         == "IMPACT_UNKNOWN"
     )
 
@@ -1299,6 +1323,31 @@ def test_runtime_metadata_external_package_list_shape_fails_closed(mutation: str
         )
         == "IMPACT_UNKNOWN"
     )
+
+
+def test_external_runtime_package_provenance_rejects_wrong_commit(tmp_path: Path) -> None:
+    site_packages = tmp_path / "site-packages"
+    package = site_packages / "nexus_learning"
+    dist_info = site_packages / "nexus_learning-0.1.0.dist-info"
+    package.mkdir(parents=True)
+    dist_info.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (dist_info / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: nexus-learning\nVersion: 0.1.0\n", encoding="utf-8"
+    )
+    contract = trusted_anchor._trusted_external_package_contract()[0]
+    (dist_info / "direct_url.json").write_bytes(
+        _json({
+            "url": contract["repository"],
+            "vcs_info": {
+                "vcs": "git",
+                "commit_id": "f" * 40,
+                "requested_revision": contract["commit"],
+            },
+        })
+    )
+    with pytest.raises(ValueError, match="provenance mismatch"):
+        trusted_anchor._verify_external_runtime_packages(site_packages)
 
 
 def _write_external_packages(site_packages: Path) -> None:
