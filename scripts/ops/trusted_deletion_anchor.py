@@ -40,7 +40,13 @@ TRUSTED_EXTERNAL_RUNTIME_PACKAGES: tuple[tuple[str, str, str, str], ...] = (
         "nexus-learning",
         "nexus_learning",
         "https://github.com/James3014/nexus-learning.git",
-        "3b8ece75fac4d2554245c29590748a84c5c671d5",
+        "d09f05b942f35236562ae26e7b718d111368b0b1",
+    ),
+    (
+        "nexus-runtime",
+        "nexus_runtime",
+        "https://github.com/James3014/nexus-runtime.git",
+        "d65e3ea7628a07bd73dee461750392bcdf85c3ac",
     ),
 )
 UV_VERSION = "uv 0.9.2"
@@ -402,6 +408,8 @@ def _build_runtime(args: argparse.Namespace) -> None:
         ]
         for group in TRUSTED_RUNTIME_DEPENDENCY_GROUPS:
             export_args.extend(["--group", group])
+        for distribution, _package, _repository, _commit in TRUSTED_EXTERNAL_RUNTIME_PACKAGES:
+            export_args.extend(["--no-emit-package", distribution])
         export_args.extend(
             [
                 "--no-emit-project",

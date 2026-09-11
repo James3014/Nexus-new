@@ -663,7 +663,7 @@ def test_local_authority_failures_are_zero_call_and_identical_across_receipt_sur
     monkeypatch: pytest.MonkeyPatch,
     tamper: str,
 ) -> None:
-    import nexus.services.unified_runtime as unified_runtime_module
+    import nexus_runtime_support_candidate.composition as unified_runtime_module
 
     original = unified_runtime_module.evaluate_runtime_workforce_admission
 
@@ -686,6 +686,8 @@ def test_local_authority_failures_are_zero_call_and_identical_across_receipt_sur
         "evaluate_runtime_workforce_admission",
         tampered,
     )
+    from nexus.services import runtime_compat
+    monkeypatch.setattr(sys.modules[__name__], "UnifiedRuntime", runtime_compat.build_host_runtime_exports().UnifiedRuntime)
     receipt, local = _local_case()
 
     authority = receipt["local_model_invocation_authority"]
@@ -1460,7 +1462,7 @@ def test_missing_invoker_provider_identity_is_zero_call() -> None:
 
 
 def test_admission_hash_mismatch_is_zero_call(monkeypatch: pytest.MonkeyPatch) -> None:
-    import nexus.services.unified_runtime as unified_runtime_module
+    import nexus_runtime_support_candidate.composition as unified_runtime_module
 
     original = unified_runtime_module.evaluate_runtime_workforce_admission
 
@@ -1474,6 +1476,8 @@ def test_admission_hash_mismatch_is_zero_call(monkeypatch: pytest.MonkeyPatch) -
         "evaluate_runtime_workforce_admission",
         tampered,
     )
+    from nexus.services import runtime_compat
+    monkeypatch.setattr(sys.modules[__name__], "UnifiedRuntime", runtime_compat.build_host_runtime_exports().UnifiedRuntime)
     receipt, calls = _run_online_authority_case(_online_authority_route())
     assert receipt["online"]["reason"] == "workforce_admission_record_binding_hash_mismatch"
     assert receipt["online"]["response"]["provider_call_count"] == 0
@@ -1506,13 +1510,15 @@ def test_admitted_online_authority_is_exact_and_receipt_bound() -> None:
 def test_evidence_seal_failure_preserves_admitted_online_authority_without_invoking(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import nexus.services.capability_evidence_bundle as evidence_bundle_module
+    import nexus_runtime_support_candidate.composition as evidence_bundle_module
 
     monkeypatch.setattr(
         evidence_bundle_module,
-        "verify_capability_evidence_bundle",
+        "_verify_evidence_bundle",
         lambda _bundle: {"ok": False, "blockers": ["forced_seal_failure"]},
     )
+    from nexus.services import runtime_compat
+    monkeypatch.setattr(sys.modules[__name__], "UnifiedRuntime", runtime_compat.build_host_runtime_exports().UnifiedRuntime)
     planner = _Planner(
         _demands(_demand("online", role="main_engineering", autonomy="L3_HISTORICAL")),
         selected=["memory"],
