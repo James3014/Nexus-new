@@ -123,6 +123,21 @@ NON_CANDIDATE_GIT_WRITERS = frozenset({
     "scripts/ops/trusted_deletion_anchor.py:_prepare_executor_git_context",
 })
 
+# These exact symbols own launchd effects for services other than the durable
+# Nexus Gateway. They are separate effect domains, not duplicate Gateway
+# deployment/recovery implementations. Keep the exclusions symbol-exact so any
+# newly introduced launchctl writer still fails closed until deliberately
+# classified.
+NON_GATEWAY_LAUNCHCTL_WRITERS = frozenset({
+    "scripts/ops/external_intelligence_service.py:_bootstrap",
+    "scripts/ops/external_intelligence_service.py:_launchctl",
+    "scripts/ops/external_intelligence_service.py:restart",
+    "scripts/ops/external_intelligence_service.py:service_status",
+    "scripts/ops/learn_refresh_launchd.py:install",
+    "scripts/ops/learn_refresh_launchd.py:status",
+    "scripts/ops/learn_refresh_launchd.py:uninstall",
+})
+
 DECLARED = (
     MERGE_PORT,
     MERGE_LOOP,
@@ -294,7 +309,13 @@ def verify(root: Path, *, extra: Iterable[Path] = ()) -> dict[str, object]:
     _raise(
         "gateway_durable_deployment_recovery",
         "LAUNCHCTL_OUTSIDE_DURABLE_MANAGER_MODULE",
-        (row for row in rows if row.path != GATEWAY_MODULE and "launchctl" in _strings(row)),
+        (
+            row
+            for row in rows
+            if row.path != GATEWAY_MODULE
+            and "launchctl" in _strings(row)
+            and row.id not in NON_GATEWAY_LAUNCHCTL_WRITERS
+        ),
     )
 
     transition_conflicts: list[Record] = []
