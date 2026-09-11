@@ -30,6 +30,7 @@ from nexus.orchestrator.execution_readiness import (
     PlaneObservation,
     _canonical_authority_observation,
     _canonical_provider_preflight_digest,
+    _physical_repository_id,
     evaluate_execution_readiness,
     evaluate_source_binding,
 )
@@ -1428,6 +1429,96 @@ class TestCorrectiveFalseGreenControls:
         )
         assert result.status is ExecutionReadinessStatus.BLOCKED
         assert result.blocker_code is ExecutionReadinessBlockerCode.SOURCE_REALM_MISMATCH
+
+    @pytest.mark.parametrize(
+        "remote, expected",
+        [
+            ("https://github.com/James3014/Nexus-new.git", "James3014/Nexus-new"),
+            ("https://github.com/_owner/.repo", "_owner/.repo"),
+            ("https://github.com/James3014/Nexus-new", "James3014/Nexus-new"),
+            ("git@github.com:James3014/Nexus-new.git", "James3014/Nexus-new"),
+            ("ssh://git@github.com/James3014/Nexus-new.git", "James3014/Nexus-new"),
+            ("https://github.com/James3014/repo.git.git", "James3014/repo.git"),
+        ],
+    )
+    def test_physical_repository_id_accepts_supported_github_remotes(
+        self, monkeypatch, remote, expected
+    ) -> None:
+        import nexus.orchestrator.execution_readiness as readiness_module
+
+        monkeypatch.setattr(
+            readiness_module.subprocess,
+            "run",
+            lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout=remote + "\n"),
+        )
+
+        assert _physical_repository_id() == expected
+
+    @pytest.mark.parametrize(
+        "remote",
+        [
+            "https://notgithub.com/James3014/Nexus-new.git",
+            "https://example.invalid/github.com/James3014/Nexus-new.git",
+            "https://evil.github.com/James3014/Nexus-new.git",
+            "https://github.com.evil/James3014/Nexus-new.git",
+            "https://github.com/James3014/Nexus-new.git/extra",
+            "https://github.com/James3014/Nexus-new.git?ref=main",
+            "https://github.com/James3014/Nexus-new.git#fragment",
+            "https://user@github.com/James3014/Nexus-new.git",
+            "git@github.com:James3014/Nexus-new.git/extra",
+            "ssh://other@github.com/James3014/Nexus-new.git",
+            "ssh://git@github.com/James3014/../Nexus-new.git",
+            "https://github.com/../Nexus-new.git",
+            "https://github.com/James3014/..",
+            "https://github.com/James3014/..git",
+            "https://github.com/James3014/...git",
+            " git@github.com:James3014/Nexus-new.git",
+            "",
+        ],
+    )
+    def test_physical_repository_id_rejects_malformed_or_noncanonical_remotes(
+        self, monkeypatch, remote
+    ) -> None:
+        import nexus.orchestrator.execution_readiness as readiness_module
+
+        monkeypatch.setattr(
+            readiness_module.subprocess,
+            "run",
+            lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout=remote),
+        )
+
+        assert _physical_repository_id() == ""
+
+    def test_malformed_physical_remote_blocks_source_binding(self, monkeypatch) -> None:
+        import nexus.orchestrator.execution_readiness as readiness_module
+
+        monkeypatch.setattr(
+            readiness_module.subprocess,
+            "run",
+            lambda *_args, **_kwargs: SimpleNamespace(
+                returncode=0,
+                stdout="https://github.com.evil/James3014/Nexus-new.git\n",
+            ),
+        )
+        observation = GatewayReadinessObservation(
+            gateway_instance_id="gateway-test",
+            observed_repo_head="a" * 40,
+            observed_repo_tree="b" * 40,
+            observed_runtime_sha256="c" * 64,
+            runtime_sha256_at_start="c" * 64,
+            tool_manifest_revision="manifest-test",
+            full_tool_schema_hash="d" * 64,
+            permission_policy_hash="e" * 64,
+            reload_required=False,
+        )
+
+        result = evaluate_source_binding(
+            _request(repository_owner="James3014"),
+            observation,
+        )
+
+        assert result.status is ExecutionReadinessStatus.BLOCKED
+        assert result.blocker_code is ExecutionReadinessBlockerCode.SOURCE_BINDING_REQUIRED
 
     def test_ready_result_replaces_legacy_default_evidence(self) -> None:
         result = _evaluate(_request())
