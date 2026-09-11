@@ -81,6 +81,17 @@ TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] | 
         "5933bdf1497f6d0e852fc26730dd4eec7985d72512e0ff061fc2ab7f59842961",
     ),
 )
+# Exact one-use, four-way binding for Owner-approved PR #910 (runtime
+# dependency admission).
+TRUSTED_PR910_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    910,
+    (
+        "382f05ca47059a15465515ab704d2d54b8a2a95ae83318b3f98617cd982029c3",
+        "5933bdf1497f6d0e852fc26730dd4eec7985d72512e0ff061fc2ab7f59842961",
+        "f4f3c2c390804e048d42aa30c447a64af1d079bf2881a93252a38a6674cfcf9f",
+        "26e853cd712aaf96b188f4dc9f1e2e8feea3a0d8989fc321a84b28e8b6776b45",
+    ),
+)
 REQUIRED_EVIDENCE_KEYS = {
     "schema_version",
     "status",
@@ -154,8 +165,13 @@ def _validate_trusted_dependency_contract(
         _sha(head_pyproject),
         _sha(head_uv_lock),
     )
-    authorized_transition_record = TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION
-    if authorized_transition_record is not None:
+    authorized_transition_records = (
+        TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR910_DEPENDENCY_SNAPSHOT_TRANSITION,
+    )
+    for authorized_transition_record in authorized_transition_records:
+        if authorized_transition_record is None:
+            continue
         authorized_pr, authorized_transition = authorized_transition_record
         if (
             pull_request_number == authorized_pr
