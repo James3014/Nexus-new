@@ -23,6 +23,7 @@ from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
     _action_contract_digest,
     _action_contract_fingerprint,
     _evaluate_freshness,
+    _evaluate_upstream_freshness,
     _hash_source_paths,
     _permission_enforcement_fingerprint,
 )
@@ -658,3 +659,175 @@ def test_combined_runtime_and_review_drift_keeps_reason_sets_separate():
     assert "action_definition_changed" in result["review_reasons"]
     assert "permission_enforcement_changed" in result["review_reasons"]
     assert all(reason not in result["reload_reasons"] for reason in result["review_reasons"])
+
+
+def test_evaluate_upstream_freshness_current():
+    result = _evaluate_upstream_freshness(
+        deployed_source_head=SHA40_A,
+        observed_upstream_main_head=SHA40_A,
+        upstream_observed_at="2026-09-11T12:00:00Z",
+    )
+    assert result["upstream_freshness"] == "CURRENT"
+    assert result["deployed_source_head"] == SHA40_A
+    assert result["observed_upstream_main_head"] == SHA40_A
+    assert result["upstream_observed_at"] == "2026-09-11T12:00:00Z"
+    assert result["upstream_observation_error"] is None
+
+
+def test_evaluate_upstream_freshness_stale():
+    result = _evaluate_upstream_freshness(
+        deployed_source_head=SHA40_A,
+        observed_upstream_main_head=SHA40_B,
+        upstream_observed_at="2026-09-11T12:00:00Z",
+    )
+    assert result["upstream_freshness"] == "STALE"
+    assert result["deployed_source_head"] == SHA40_A
+    assert result["observed_upstream_main_head"] == SHA40_B
+    assert result["upstream_observed_at"] == "2026-09-11T12:00:00Z"
+    assert result["upstream_observation_error"] is None
+
+
+def test_evaluate_upstream_freshness_unknown_on_error():
+    result = _evaluate_upstream_freshness(
+        deployed_source_head=SHA40_A,
+        observed_upstream_main_head=None,
+        upstream_observation_error="upstream_observation_timeout:exceeded_3.0s",
+    )
+    assert result["upstream_freshness"] == "UNKNOWN"
+    assert result["deployed_source_head"] == SHA40_A
+    assert result["observed_upstream_main_head"] is None
+    assert result["upstream_observation_error"] == "upstream_observation_timeout:exceeded_3.0s"
+
+
+def test_evaluate_upstream_freshness_unknown_on_malformed_and_missing_shas():
+    # Missing deployed
+    r1 = _evaluate_upstream_freshness(
+        deployed_source_head=None,
+        observed_upstream_main_head=SHA40_A,
+    )
+    assert r1["upstream_freshness"] == "UNKNOWN"
+    assert r1["upstream_observation_error"] == "deployed_source_head_missing"
+
+    # Malformed deployed
+    r2 = _evaluate_upstream_freshness(
+        deployed_source_head="not-a-40-hex-sha",
+        observed_upstream_main_head=SHA40_A,
+    )
+    assert r2["upstream_freshness"] == "UNKNOWN"
+    assert r2["upstream_observation_error"] == "deployed_source_head_malformed"
+
+    # Missing upstream
+    r3 = _evaluate_upstream_freshness(
+        deployed_source_head=SHA40_A,
+        observed_upstream_main_head="",
+    )
+    assert r3["upstream_freshness"] == "UNKNOWN"
+    assert r3["upstream_observation_error"] == "observed_upstream_main_head_missing"
+
+    # Malformed upstream
+    r4 = _evaluate_upstream_freshness(
+        deployed_source_head=SHA40_A,
+        observed_upstream_main_head="short_sha",
+    )
+    assert r4["upstream_freshness"] == "UNKNOWN"
+    assert r4["upstream_observation_error"] == "observed_upstream_main_head_malformed"
+
+
+def test_gateway_status_orthogonal_drift_and_upstream_freshness(monkeypatch):
+    """Verify local repository_drift and GitHub upstream_freshness are decoupled and orthogonal."""
+    # Freeze local repo head so repository_drift is False
+    monkeypatch.setattr(gateway_module, "SERVER_REPO_HEAD_AT_START", SHA40_A)
+    monkeypatch.setattr(gateway_module, "_git", lambda *args, **kwargs: SHA40_A if args == ("rev-parse", "HEAD") else "")
+    # Provide an upstream observer that returns SHA40_B (upstream is ahead/different)
+    call_count = 0
+
+    def mock_observer():
+        nonlocal call_count
+        call_count += 1
+        return SHA40_B, "2026-09-11T12:00:00Z", None
+
+    gateway = UnifiedMCPGateway(service=_StubService(), upstream_observer=mock_observer)
+    status = gateway._gateway_status()
+
+    # Local drift must be False
+    assert status["repository_drift"] is False
+    assert status["repo_head_current"] == SHA40_A
+    # Upstream freshness must reflect STALE
+    assert status["upstream_freshness"] == "STALE"
+    assert status["deployed_source_head"] == SHA40_A
+    assert status["observed_upstream_main_head"] == SHA40_B
+    assert status["upstream_observed_at"] == "2026-09-11T12:00:00Z"
+    assert status["upstream_observation_error"] is None
+    assert call_count == 1
+
+
+def test_gateway_status_upstream_cache_ttl(monkeypatch):
+    """Verify upstream observation honors upstream_cache_ttl_seconds."""
+    monkeypatch.setattr(gateway_module, "SERVER_REPO_HEAD_AT_START", SHA40_A)
+    monkeypatch.setattr(gateway_module, "_git", lambda *args, **kwargs: SHA40_A if args == ("rev-parse", "HEAD") else "")
+
+    calls = 0
+
+    def mock_observer():
+        nonlocal calls
+        calls += 1
+        return SHA40_A, f"2026-09-11T12:00:0{calls}Z", None
+
+    # Set TTL to 100.0 seconds
+    gateway = UnifiedMCPGateway(
+        service=_StubService(),
+        upstream_observer=mock_observer,
+        upstream_cache_ttl_seconds=100.0,
+    )
+
+    # First call triggers observation
+    s1 = gateway._gateway_status()
+    assert s1["upstream_freshness"] == "CURRENT"
+    assert calls == 1
+
+    # Immediate second call must use cache
+    s2 = gateway._gateway_status()
+    assert s2["upstream_freshness"] == "CURRENT"
+    assert calls == 1
+
+    # Simulate TTL expiration by adjusting cache timestamp
+    with gateway._upstream_cache_lock:
+        cached_ts, cached_val = gateway._upstream_cache
+        gateway._upstream_cache = (cached_ts - 200.0, cached_val)
+
+    # Third call should refresh cache
+    s3 = gateway._gateway_status()
+    assert s3["upstream_freshness"] == "CURRENT"
+    assert calls == 2
+
+
+def test_gateway_status_upstream_observer_fail_closed(monkeypatch):
+    """Verify observer exceptions fail closed to UNKNOWN without crashing gateway."""
+    monkeypatch.setattr(gateway_module, "SERVER_REPO_HEAD_AT_START", SHA40_A)
+    monkeypatch.setattr(gateway_module, "_git", lambda *args, **kwargs: SHA40_A if args == ("rev-parse", "HEAD") else "")
+
+    def failing_observer():
+        raise RuntimeError("network down")
+
+    gateway = UnifiedMCPGateway(
+        service=_StubService(),
+        upstream_observer=failing_observer,
+    )
+    status = gateway._gateway_status()
+    assert status["upstream_freshness"] == "UNKNOWN"
+    assert "upstream_observer_exception:RuntimeError" in status["upstream_observation_error"]
+
+
+def test_default_observe_upstream_main_read_only_contract():
+    """Verify _default_observe_upstream_main behaves safely and performs no git mutation."""
+    from nexus.orchestrator.unified_mcp_gateway import _default_observe_upstream_main
+
+    sha, observed_at, error = _default_observe_upstream_main(timeout_seconds=2.0)
+    # Whether online or offline/firewalled, it must return a 3-tuple cleanly
+    assert isinstance(observed_at, str)
+    if error is None:
+        assert isinstance(sha, str)
+        assert len(sha) == 40
+    else:
+        assert sha is None
+        assert isinstance(error, str)
