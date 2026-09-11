@@ -71,6 +71,23 @@ dev = ["pytest==9"]
     ).encode()
 
 
+def test_trusted_external_runtime_package_pair_is_exact() -> None:
+    assert trusted_anchor.TRUSTED_EXTERNAL_RUNTIME_PACKAGES == (
+        (
+            "nexus-learning",
+            "nexus_learning",
+            "https://github.com/James3014/nexus-learning.git",
+            "d09f05b942f35236562ae26e7b718d111368b0b1",
+        ),
+        (
+            "nexus-runtime",
+            "nexus_runtime",
+            "https://github.com/James3014/nexus-runtime.git",
+            "d65e3ea7628a07bd73dee461750392bcdf85c3ac",
+        ),
+    )
+
+
 @pytest.mark.parametrize(
     "packages",
     [
@@ -678,15 +695,6 @@ def _synthetic_runtime(
             b"Path('.executor-env.json').write_text(json.dumps(sorted(os.environ)))\n"
         )
     )
-    external_contract = trusted_anchor._trusted_external_package_contract()[0]
-    external_direct_url = _json({
-        "url": external_contract["repository"],
-        "vcs_info": {
-            "vcs": "git",
-            "commit_id": external_contract["commit"],
-            "requested_revision": external_contract["commit"],
-        },
-    })
     files = {
         "site-packages/pytest/__init__.py": b"",
         "site-packages/pytest/__main__.py": test_driver,
@@ -695,12 +703,34 @@ def _synthetic_runtime(
         ),
         "site-packages/pytest_asyncio.py": b"",
         "site-packages/pytest_timeout.py": b"",
-        "site-packages/nexus_learning/__init__.py": b"",
-        "site-packages/nexus_learning-0.1.0.dist-info/METADATA": (
-            b"Metadata-Version: 2.1\nName: nexus-learning\nVersion: 0.1.0\n"
-        ),
-        "site-packages/nexus_learning-0.1.0.dist-info/direct_url.json": external_direct_url,
     }
+    external_metadata = []
+    for (
+        distribution,
+        package,
+        repository,
+        commit,
+    ) in trusted_anchor.TRUSTED_EXTERNAL_RUNTIME_PACKAGES:
+        external_direct_url = _json({
+            "url": repository,
+            "vcs_info": {
+                "vcs": "git",
+                "commit_id": commit,
+                "requested_revision": commit,
+            },
+        })
+        files[f"site-packages/{package}/__init__.py"] = b""
+        files[f"site-packages/{package}-0.1.0.dist-info/METADATA"] = (
+            f"Metadata-Version: 2.1\nName: {distribution}\nVersion: 0.1.0\n".encode()
+        )
+        files[f"site-packages/{package}-0.1.0.dist-info/direct_url.json"] = external_direct_url
+        external_metadata.append({
+            "distribution": distribution,
+            "package": package,
+            "repository": repository,
+            "commit": commit,
+            "direct_url_sha256": trusted_anchor._sha(external_direct_url),
+        })
     stream = BytesIO()
     with tarfile.open(fileobj=stream, mode="w") as archive:
         for name, data in files.items():
@@ -717,12 +747,7 @@ def _synthetic_runtime(
         "requirements_sha256": hashlib.sha256(requirements).hexdigest(),
         "pytest_plugins": trusted_anchor.PYTEST_PLUGINS,
         "dependency_groups": list(trusted_anchor.TRUSTED_RUNTIME_DEPENDENCY_GROUPS),
-        "external_packages": [
-            {
-                **external_contract,
-                "direct_url_sha256": trusted_anchor._sha(external_direct_url),
-            }
-        ],
+        "external_packages": external_metadata,
     }
     (runtime_dir / "runtime.tar").write_bytes(stream.getvalue())
     (runtime_dir / "runtime-metadata.json").write_bytes(_json(metadata) + b"\n")
@@ -1106,12 +1131,13 @@ def test_runtime_builder_uses_frozen_hash_bound_binary_only_contract(tmp_path: P
     workflow_sha = _run_git(repo, "rev-parse", "HEAD")
     fake_uv = tmp_path / "uv"
     log = tmp_path / "uv.log"
-    external = trusted_anchor._trusted_external_package_contract()[0]
+    external_contracts = trusted_anchor._trusted_external_package_contract()
     fake_uv.write_text(
         f"#!{sys.executable}\n"
         "import json,os,sys\n"
         "from pathlib import Path\n"
         "args=sys.argv[1:]\n"
+        f"external_specs={external_contracts!r}\n"
         f"with Path({str(log)!r}).open('a') as f: f.write(json.dumps(args)+'\\n')\n"
         "if args == ['--version']:\n print('uv 0.9.2'); raise SystemExit\n"
         "if args[0] == 'export':\n"
@@ -1121,10 +1147,11 @@ def test_runtime_builder_uses_frozen_hash_bound_binary_only_contract(tmp_path: P
         " if '--requirements' in args:\n"
         "  (target/'pytest').mkdir(parents=True); (target/'pytest/__init__.py').write_text(''); (target/'pytest/__main__.py').write_text('')\n"
         "  (target/'pytest_asyncio.py').write_text(''); (target/'pytest_timeout.py').write_text(''); raise SystemExit\n"
-        " (target/'nexus_learning').mkdir(parents=True); (target/'nexus_learning/__init__.py').write_text('')\n"
-        " info=target/'nexus_learning-0.1.0.dist-info'; info.mkdir()\n"
-        " (info/'METADATA').write_text('Metadata-Version: 2.1\\nName: nexus-learning\\nVersion: 0.1.0\\n')\n"
-        f" (info/'direct_url.json').write_text(json.dumps({{'url': {external['repository']!r}, 'vcs_info': {{'vcs': 'git', 'commit_id': {external['commit']!r}, 'requested_revision': {external['commit']!r}}}}}, sort_keys=True, separators=(',',':')))\n"
+        " spec=next(item for item in external_specs if item['distribution'] in args[-1]); distribution=spec['distribution']; package=spec['package']; repository=spec['repository']; commit=spec['commit']\n"
+        " (target/package).mkdir(parents=True); (target/f'{package}/__init__.py').write_text('')\n"
+        " info=target/f'{package}-0.1.0.dist-info'; info.mkdir()\n"
+        " (info/'METADATA').write_text(f'Metadata-Version: 2.1\\nName: {distribution}\\nVersion: 0.1.0\\n')\n"
+        " (info/'direct_url.json').write_text(json.dumps({'url': repository, 'vcs_info': {'vcs': 'git', 'commit_id': commit, 'requested_revision': commit}}, sort_keys=True, separators=(',',':')))\n"
         " raise SystemExit\n"
         "raise SystemExit(2)\n"
     )
@@ -1142,7 +1169,7 @@ def test_runtime_builder_uses_frozen_hash_bound_binary_only_contract(tmp_path: P
     export = next(call for call in calls if call and call[0] == "export")
     installs = [call for call in calls if call[:2] == ["pip", "install"]]
     install = next(call for call in installs if "--requirements" in call)
-    external_install = next(call for call in installs if "--requirements" not in call)
+    external_installs = [call for call in installs if "--requirements" not in call]
     assert {
         "--frozen",
         "--no-default-groups",
@@ -1152,20 +1179,33 @@ def test_runtime_builder_uses_frozen_hash_bound_binary_only_contract(tmp_path: P
     } <= set(export)
     group_flags = [export[i + 1] for i, token in enumerate(export) if token == "--group"]
     assert group_flags == list(trusted_anchor.TRUSTED_RUNTIME_DEPENDENCY_GROUPS)
+    excluded_packages = [
+        export[i + 1] for i, token in enumerate(export) if token == "--no-emit-package"
+    ]
+    assert excluded_packages == [item["distribution"] for item in external_contracts]
     assert {"--require-hashes", "--only-binary", "--no-cache", "--no-python-downloads"} <= set(
         install
     )
-    assert {"--no-cache", "--no-deps", "--no-python-downloads"} <= set(external_install)
-    assert external_install[-1] == (
-        f"{external['distribution']} @ git+{external['repository']}@{external['commit']}"
+    assert len(external_installs) == len(external_contracts)
+    assert all(
+        {"--no-cache", "--no-deps", "--no-python-downloads"} <= set(call)
+        for call in external_installs
     )
+    assert {call[-1] for call in external_installs} == {
+        f"{item['distribution']} @ git+{item['repository']}@{item['commit']}"
+        for item in external_contracts
+    }
     assert all((output / name).is_file() for name in trusted_anchor.RUNTIME_FILENAMES)
     metadata = json.loads((output / "runtime-metadata.json").read_text(encoding="utf-8"))
     assert metadata["dependency_groups"] == list(trusted_anchor.TRUSTED_RUNTIME_DEPENDENCY_GROUPS)
-    assert metadata["external_packages"][0] == {
-        **external,
-        "direct_url_sha256": metadata["external_packages"][0]["direct_url_sha256"],
-    }
+    assert [
+        {key: item[key] for key in contract}
+        for item, contract in zip(metadata["external_packages"], external_contracts, strict=True)
+    ] == external_contracts
+    assert all(
+        isinstance(item["direct_url_sha256"], str) and len(item["direct_url_sha256"]) == 64
+        for item in metadata["external_packages"]
+    )
 
 
 @pytest.mark.parametrize(
@@ -1231,6 +1271,60 @@ def test_runtime_metadata_external_package_identity_drift_fails_closed(
     )
 
 
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("repository", "https://github.com/James3014/hostile.git"),
+        ("commit", "f" * 40),
+        ("distribution", "hostile-runtime"),
+        ("package", "hostile_runtime"),
+        ("direct_url_sha256", "f" * 64),
+    ],
+)
+def test_runtime_metadata_second_external_package_identity_drift_fails_closed(
+    field: str, replacement: str
+) -> None:
+    manifest = _manifest()
+    metadata = dict(manifest["runtime_identity"])  # type: ignore[arg-type]
+    packages = [dict(item) for item in metadata["external_packages"]]  # type: ignore[index]
+    packages[1][field] = replacement
+    metadata["external_packages"] = packages
+    tampered_metadata = _json(metadata) + b"\n"
+    manifest_tampered = dict(manifest)
+    manifest_tampered["runtime_identity"] = metadata
+    manifest_tampered["runtime_metadata_sha256"] = trusted_anchor._sha(tampered_metadata)
+    assert (
+        _verify(manifest_tampered, _evidence(manifest_tampered), runtime_metadata=tampered_metadata)
+        == "IMPACT_UNKNOWN"
+    )
+
+
+@pytest.mark.parametrize("mutation", ["missing-learning", "missing-runtime", "unknown-extra"])
+def test_runtime_metadata_external_package_list_shape_fails_closed(mutation: str) -> None:
+    manifest = _manifest()
+    metadata = dict(manifest["runtime_identity"])  # type: ignore[arg-type]
+    packages = [dict(item) for item in metadata["external_packages"]]  # type: ignore[index]
+    if mutation == "missing-learning":
+        packages.pop(0)
+    elif mutation == "missing-runtime":
+        packages.pop(1)
+    else:
+        packages.append({**packages[0], "distribution": "unknown-package"})
+    metadata["external_packages"] = packages
+    tampered_metadata = _json(metadata) + b"\n"
+    manifest_tampered = dict(manifest)
+    manifest_tampered["runtime_identity"] = metadata
+    manifest_tampered["runtime_metadata_sha256"] = trusted_anchor._sha(tampered_metadata)
+    assert (
+        _verify(
+            manifest_tampered,
+            _evidence(manifest_tampered),
+            runtime_metadata=tampered_metadata,
+        )
+        == "IMPACT_UNKNOWN"
+    )
+
+
 def test_external_runtime_package_provenance_rejects_wrong_commit(tmp_path: Path) -> None:
     site_packages = tmp_path / "site-packages"
     package = site_packages / "nexus_learning"
@@ -1254,6 +1348,85 @@ def test_external_runtime_package_provenance_rejects_wrong_commit(tmp_path: Path
     )
     with pytest.raises(ValueError, match="provenance mismatch"):
         trusted_anchor._verify_external_runtime_packages(site_packages)
+
+
+def _write_external_packages(site_packages: Path) -> None:
+    for (
+        distribution,
+        package,
+        repository,
+        commit,
+    ) in trusted_anchor.TRUSTED_EXTERNAL_RUNTIME_PACKAGES:
+        package_dir = site_packages / package
+        dist_info = site_packages / f"{package}-0.1.0.dist-info"
+        package_dir.mkdir(parents=True)
+        dist_info.mkdir()
+        (package_dir / "__init__.py").write_text("", encoding="utf-8")
+        (dist_info / "METADATA").write_text(
+            f"Metadata-Version: 2.1\nName: {distribution}\nVersion: 0.1.0\n",
+            encoding="utf-8",
+        )
+        (dist_info / "direct_url.json").write_bytes(
+            _json({
+                "url": repository,
+                "vcs_info": {
+                    "vcs": "git",
+                    "commit_id": commit,
+                    "requested_revision": commit,
+                },
+            })
+        )
+
+
+@pytest.mark.parametrize(
+    "missing_distribution",
+    [item[0] for item in trusted_anchor.TRUSTED_EXTERNAL_RUNTIME_PACKAGES],
+)
+def test_external_runtime_package_provenance_rejects_missing_distribution(
+    tmp_path: Path, missing_distribution: str
+) -> None:
+    site_packages = tmp_path / "site-packages"
+    _write_external_packages(site_packages)
+    contract = next(
+        item
+        for item in trusted_anchor.TRUSTED_EXTERNAL_RUNTIME_PACKAGES
+        if item[0] == missing_distribution
+    )
+    import shutil
+
+    shutil.rmtree(site_packages / contract[1])
+    with pytest.raises(ValueError, match="install is incomplete"):
+        trusted_anchor._verify_external_runtime_packages(site_packages)
+
+
+@pytest.mark.parametrize(
+    "tampered_field", ["repository", "commit_id", "requested_revision", "name"]
+)
+def test_external_runtime_package_provenance_rejects_metadata_tamper(
+    tmp_path: Path, tampered_field: str
+) -> None:
+    site_packages = tmp_path / "site-packages"
+    _write_external_packages(site_packages)
+    contract = trusted_anchor._trusted_external_package_contract()[0]
+    dist_info = site_packages / f"{contract['package']}-0.1.0.dist-info"
+    metadata = json.loads((dist_info / "direct_url.json").read_text(encoding="utf-8"))
+    if tampered_field == "name":
+        (dist_info / "METADATA").write_text(
+            "Metadata-Version: 2.1\nName: hostile\nVersion: 0.1.0\n", encoding="utf-8"
+        )
+    elif tampered_field == "repository":
+        metadata["url"] = "https://github.com/James3014/hostile.git"
+    else:
+        metadata["vcs_info"][tampered_field] = "f" * 40
+    (dist_info / "direct_url.json").write_bytes(_json(metadata))
+    with pytest.raises(ValueError):
+        trusted_anchor._verify_external_runtime_packages(site_packages)
+
+
+def test_external_runtime_package_provenance_accepts_exact_pair(tmp_path: Path) -> None:
+    site_packages = tmp_path / "site-packages"
+    _write_external_packages(site_packages)
+    assert len(trusted_anchor._verify_external_runtime_packages(site_packages)) == 2
 
 
 def test_controller_executor_verifier_path_from_non_repository_cwd():
