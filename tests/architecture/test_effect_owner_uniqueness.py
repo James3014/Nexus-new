@@ -1,9 +1,13 @@
 """Fail-closed regression for single ownership of critical Nexus effects (#947).
 
-This is test-only architecture evidence, never runtime routing/authority.  It
-scans all production Python under nexus/** and scripts/ops/**, binds exact
-caller/sink identities, and detects effect primitives even when a duplicate is
-placed in a new file under a different function name.
+This is test-only architecture evidence, never runtime routing/authority. It
+recursively scans production Python under nexus/** and scripts/ops/**, binds
+exact caller/sink identities, and detects effect primitives even when a
+hostile duplicate is added in a new file under a different function name.
+
+Tracked Candidate integration and worker-competition integration are distinct
+execution domains. The latter remains an explicit compatibility domain; it is
+not misclassified as retired tracked-Candidate authority.
 """
 
 from __future__ import annotations
@@ -41,22 +45,36 @@ class Record:
 
 
 MERGE_PORT = Ref(
-    "nexus/orchestrator/github_completion_loop.py", "GitHubCompletionPort", "cas_merge"
+    "nexus/orchestrator/github_completion_loop.py",
+    "GitHubCompletionPort",
+    "cas_merge",
 )
-MERGE_LOOP = Ref("nexus/orchestrator/github_completion_loop.py", None, "run_github_completion_loop")
+MERGE_LOOP = Ref(
+    "nexus/orchestrator/github_completion_loop.py",
+    None,
+    "run_github_completion_loop",
+)
 CANDIDATE_FACADE = Ref(
-    "nexus/orchestrator/self_hosted_task_service.py", "SelfHostedTaskService", "integrate_approved"
+    "nexus/orchestrator/self_hosted_task_service.py",
+    "SelfHostedTaskService",
+    "integrate_approved",
 )
 CANDIDATE_SINK = Ref(
     "nexus/orchestrator/governed_integration.py",
     "ControlledIntegrationManager",
     "integrate_authorized_task_state",
 )
-LEGACY_INTEGRATION = Ref(
+COMPETITION_SINK = Ref(
     "nexus/orchestrator/governed_integration.py",
     "ControlledIntegrationManager",
     "integrate_task_state",
-    "RETIRED",
+    "COMPATIBILITY_ONLY",
+)
+COMPETITION_CALLER = Ref(
+    "nexus/orchestrator/worker_competition.py",
+    "WorkerCompetitionCoordinator",
+    "integrate_winner",
+    "COMPATIBILITY_ONLY",
 )
 UNIFIED_CALLER = Ref(
     "nexus/orchestrator/unified_mcp_gateway.py",
@@ -72,7 +90,11 @@ SELF_HOSTED_CALLER = Ref(
 )
 GATEWAY_MODULE = "scripts/ops/mcp_gateway_durable.py"
 GATEWAY_MANAGER = Ref(GATEWAY_MODULE, None, "manage")
-TRANSITION_SINK = Ref("nexus/orchestrator/standing_grant_store.py", None, "_write_transition_file")
+TRANSITION_SINK = Ref(
+    "nexus/orchestrator/standing_grant_store.py",
+    None,
+    "_write_transition_file",
+)
 SWITCH_CALLER = Ref(
     "nexus/orchestrator/standing_grant_store.py",
     None,
@@ -91,7 +113,8 @@ DECLARED = (
     MERGE_LOOP,
     CANDIDATE_FACADE,
     CANDIDATE_SINK,
-    LEGACY_INTEGRATION,
+    COMPETITION_SINK,
+    COMPETITION_CALLER,
     UNIFIED_CALLER,
     SELF_HOSTED_CALLER,
     GATEWAY_MANAGER,
@@ -105,6 +128,7 @@ EDGES = (
     (UNIFIED_CALLER, "self.service.integrate_approved"),
     (SELF_HOSTED_CALLER, "self.service.integrate_approved"),
     (CANDIDATE_FACADE, "ControlledIntegrationManager().integrate_authorized_task_state"),
+    (COMPETITION_CALLER, "ControlledIntegrationManager().integrate_task_state"),
     (SWITCH_CALLER, "_write_transition_file"),
     (RESTORE_CALLER, "_write_transition_file"),
 )
@@ -117,11 +141,14 @@ def _files(root: Path) -> tuple[Path, ...]:
         if not base.is_dir():
             raise AssertionError(f"PRODUCTION_SCAN_ROOT_MISSING:{rel.as_posix()}")
         found.extend(
-            p
-            for p in base.rglob("*.py")
-            if not any(x in {".git", ".venv", "__pycache__", "node_modules"} for x in p.parts)
+            path
+            for path in base.rglob("*.py")
+            if not any(
+                part in {".git", ".venv", "__pycache__", "node_modules"}
+                for part in path.parts
+            )
         )
-    return tuple(sorted(found, key=lambda p: p.relative_to(root).as_posix()))
+    return tuple(sorted(found, key=lambda path: path.relative_to(root).as_posix()))
 
 
 def _parse(path: Path) -> ast.Module:
@@ -133,23 +160,23 @@ def _parse(path: Path) -> ast.Module:
 
 def _records(path: Path, root: Path | None) -> tuple[Record, ...]:
     rel = path.relative_to(root).as_posix() if root is not None else str(path)
-    out: list[Record] = []
+    records: list[Record] = []
     for node in _parse(path).body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            out.append(Record(rel, None, node.name, node))
+            records.append(Record(rel, None, node.name, node))
         elif isinstance(node, ast.ClassDef):
-            out.extend(
-                Record(rel, node.name, x.name, x)
-                for x in node.body
-                if isinstance(x, (ast.FunctionDef, ast.AsyncFunctionDef))
+            records.extend(
+                Record(rel, node.name, child.name, child)
+                for child in node.body
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
             )
-    return tuple(out)
+    return tuple(records)
 
 
 def _all(root: Path, extra: Iterable[Path] = ()) -> tuple[Record, ...]:
-    out = [r for p in _files(root) for r in _records(p, root)]
-    out.extend(r for p in extra for r in _records(p, None))
-    return tuple(out)
+    records = [record for path in _files(root) for record in _records(path, root)]
+    records.extend(record for path in extra for record in _records(path, None))
+    return tuple(records)
 
 
 def _get(root: Path, ref: Ref) -> Record:
@@ -176,7 +203,10 @@ def _expr(node: ast.AST) -> str | None:
 
 def _calls(record: Record) -> tuple[str, ...]:
     return tuple(
-        x for n in ast.walk(record.node) if isinstance(n, ast.Call) and (x := _expr(n.func))
+        expression
+        for node in ast.walk(record.node)
+        if isinstance(node, ast.Call)
+        and (expression := _expr(node.func)) is not None
     )
 
 
@@ -186,105 +216,116 @@ def _tail(call: str) -> str:
 
 def _strings(record: Record) -> frozenset[str]:
     return frozenset(
-        n.value
-        for n in ast.walk(record.node)
-        if isinstance(n, ast.Constant) and isinstance(n.value, str)
+        node.value
+        for node in ast.walk(record.node)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
     )
 
 
 def _raise(effect: str, reason: str, rows: Iterable[Record]) -> None:
-    ids = sorted({r.id for r in rows})
+    ids = sorted({row.id for row in rows})
     if ids:
-        raise AssertionError(f"DUPLICATE_EFFECT_IMPLEMENTATION:{effect}:{reason}:" + ",".join(ids))
+        raise AssertionError(
+            f"DUPLICATE_EFFECT_IMPLEMENTATION:{effect}:{reason}:" + ",".join(ids)
+        )
 
 
 def verify(root: Path, *, extra: Iterable[Path] = ()) -> dict[str, object]:
     root = root.resolve()
+
+    # Exact declared source identities fail loudly on rename/removal.
     for ref in DECLARED:
         _get(root, ref)
+
+    # Compatibility callers must keep delegating through their exact admitted
+    # boundary. Merely calling another object with the same tail name is not
+    # accepted as a delegation witness.
     for caller, expected in EDGES:
         row = _get(root, caller)
-        if expected not in _calls(row):
+        observed = _calls(row)
+        if expected not in observed:
             raise AssertionError(
-                f"DELEGATION_EDGE_MISSING:{caller.id}->{expected};observed={sorted(_calls(row))}"
+                f"DELEGATION_EDGE_MISSING:{caller.id}->{expected};"
+                f"observed={sorted(observed)}"
             )
 
     rows = _all(root, extra)
 
-    # Retired legacy Candidate integration code may remain for compatibility,
-    # but production code must not call it.
-    _raise(
-        "candidate_integration",
-        f"RETIRED_SYMBOL_CALLED:{LEGACY_INTEGRATION.id}",
-        (
-            r
-            for r in rows
-            if r.id != LEGACY_INTEGRATION.id
-            and any(_tail(c) == "integrate_task_state" for c in _calls(r))
-        ),
-    )
-
-    # GitHub merge: one in-repo CAS boundary.  Different names that bypass it
-    # through direct merge connector primitives are rejected too.
+    # Protected GitHub merge: only the completion loop may call the exact
+    # cas_merge port. Direct host merge connector primitives are always foreign.
     _raise(
         "protected_github_merge",
         "DIRECT_OR_SECOND_CAS_MERGE",
         (
-            r
-            for r in rows
-            if (any(_tail(c) == "cas_merge" for c in _calls(r)) and r.id != MERGE_LOOP.id)
-            or any(_tail(c) in {"merge_pull_request", "git_merge_pull_request"} for c in _calls(r))
+            row
+            for row in rows
+            if (
+                any(_tail(call) == "cas_merge" for call in _calls(row))
+                and row.id != MERGE_LOOP.id
+            )
+            or any(
+                _tail(call) in {"merge_pull_request", "git_merge_pull_request"}
+                for call in _calls(row)
+            )
         ),
     )
 
-    # Candidate integration: the façade alone may invoke the physical manager;
-    # raw Git apply primitives may live only in the canonical physical sink or
-    # the explicitly RETIRED legacy seam.
-    allowed_git_apply = {CANDIDATE_SINK.id, LEGACY_INTEGRATION.id}
+    # Tracked Candidate integration and competition-winner integration are
+    # separate domains. Both physical Git seams are owned by the same
+    # ControlledIntegrationManager class. Unknown callers or a third raw Git
+    # implementation still fail closed.
+    allowed_git_apply = {CANDIDATE_SINK.id, COMPETITION_SINK.id}
     candidate_conflicts: list[Record] = []
-    for r in rows:
-        tails = {_tail(c) for c in _calls(r)}
-        strings = _strings(r)
-        if "integrate_authorized_task_state" in tails and r.id != CANDIDATE_FACADE.id:
-            candidate_conflicts.append(r)
-        elif "integrate_task_state" in tails:
-            candidate_conflicts.append(r)
+    for row in rows:
+        tails = {_tail(call) for call in _calls(row)}
+        strings = _strings(row)
+        if (
+            "integrate_authorized_task_state" in tails
+            and row.id != CANDIDATE_FACADE.id
+        ):
+            candidate_conflicts.append(row)
+        elif "integrate_task_state" in tails and row.id != COMPETITION_CALLER.id:
+            candidate_conflicts.append(row)
         elif (
             "update-ref" in strings
             or "--ff-only" in strings
             or ("--no-ff" in strings and "--no-edit" in strings)
-        ) and r.id not in allowed_git_apply:
-            candidate_conflicts.append(r)
+        ) and row.id not in allowed_git_apply:
+            candidate_conflicts.append(row)
     _raise("candidate_integration", "SECOND_GIT_APPLY_PRIMITIVE", candidate_conflicts)
 
-    # Gateway durable host effect is module-owned.  A newly named function in a
-    # new file cannot silently gain LaunchAgent mutation authority.
+    # Gateway durable host effect remains module-owned. A newly named function
+    # in a new module cannot silently gain launchctl effect authority.
     _raise(
         "gateway_durable_deployment_recovery",
         "LAUNCHCTL_OUTSIDE_DURABLE_MANAGER_MODULE",
-        (r for r in rows if r.path != GATEWAY_MODULE and "launchctl" in _strings(r)),
+        (
+            row
+            for row in rows
+            if row.path != GATEWAY_MODULE and "launchctl" in _strings(row)
+        ),
     )
 
     # Standing-grant transition writer: cross-module sink calls and copied
-    # durable-writer primitives both fail closed.
+    # atomic transition-writer primitives both fail closed.
     transition_conflicts: list[Record] = []
-    for r in rows:
-        calls = _calls(r)
-        tails = {_tail(c) for c in calls}
-        strings = _strings(r)
-        if "_write_transition_file" in tails and r.path != TRANSITION_SINK.path:
-            transition_conflicts.append(r)
+    for row in rows:
+        calls = _calls(row)
+        tails = {_tail(call) for call in calls}
+        strings = _strings(row)
+        if "_write_transition_file" in tails and row.path != TRANSITION_SINK.path:
+            transition_conflicts.append(row)
         elif (
             ".trans-" in strings
             and "tempfile.mkstemp" in calls
             and "os.replace" in calls
-            and r.id != TRANSITION_SINK.id
+            and row.id != TRANSITION_SINK.id
         ):
-            transition_conflicts.append(r)
+            transition_conflicts.append(row)
     _raise("standing_grant_transition", "SECOND_TRANSITION_WRITER", transition_conflicts)
 
     return {
-        "schema": "nexus.architecture_effect_owner_inventory.v2",
+        "schema": "nexus.architecture_effect_owner_inventory.v3",
         "classification": "SINGLE_EFFECT_OWNER",
         "effects": {
             "protected_github_merge": {
@@ -292,9 +333,18 @@ def verify(root: Path, *, extra: Iterable[Path] = ()) -> dict[str, object]:
                 "physical_sink": "EXTERNAL_PORT_EFFECT",
             },
             "candidate_integration": {
-                "boundary": CANDIDATE_FACADE.id,
+                "authority_facade": CANDIDATE_FACADE.id,
                 "physical_sink": CANDIDATE_SINK.id,
-                "retired": LEGACY_INTEGRATION.id,
+                "effect_owner_class": (
+                    "nexus/orchestrator/governed_integration.py:"
+                    "ControlledIntegrationManager"
+                ),
+                "compatibility_domain": {
+                    "name": "competition_winner_integration",
+                    "caller": COMPETITION_CALLER.id,
+                    "physical_sink": COMPETITION_SINK.id,
+                    "classification": "COMPATIBILITY_ONLY",
+                },
             },
             "gateway_durable_deployment_recovery": {
                 "boundary": GATEWAY_MANAGER.id,
@@ -310,16 +360,21 @@ def verify(root: Path, *, extra: Iterable[Path] = ()) -> dict[str, object]:
 
 def inventory() -> dict[str, object]:
     allowed = {"CANONICAL", "COMPATIBILITY_ONLY", "RETIRED"}
-    entries = [{"target": r.id, "label": r.label} for r in DECLARED]
-    assert all(e["label"] in allowed for e in entries)
+    entries = [{"target": ref.id, "label": ref.label} for ref in DECLARED]
+    assert all(entry["label"] in allowed for entry in entries)
     return {
-        "schema": "nexus.architecture_effect_owner_inventory.v2",
+        "schema": "nexus.architecture_effect_owner_inventory.v3",
         "classification": "SINGLE_EFFECT_OWNER",
         "entries": entries,
     }
 
 
-def _expect_extra_failure(tmp_path: Path, name: str, code: str, expected_effect: str) -> None:
+def _expect_extra_failure(
+    tmp_path: Path,
+    name: str,
+    code: str,
+    expected_effect: str,
+) -> None:
     rogue = tmp_path / name
     rogue.write_text(code, encoding="utf-8")
     try:
@@ -336,12 +391,22 @@ def test_current_source_has_single_effect_owners():
     assert len(result["effects"]) == 4
 
 
+def test_competition_integration_is_explicit_compatibility_domain():
+    result = verify(Path(__file__).resolve().parents[2])
+    candidate = result["effects"]["candidate_integration"]
+    compatibility = candidate["compatibility_domain"]
+    assert compatibility["classification"] == "COMPATIBILITY_ONLY"
+    assert compatibility["caller"] == COMPETITION_CALLER.id
+    assert compatibility["physical_sink"] == COMPETITION_SINK.id
+
+
 def test_recursive_scan_discovers_new_source_file(tmp_path):
     (tmp_path / "nexus/x").mkdir(parents=True)
     (tmp_path / "scripts/ops").mkdir(parents=True)
     rogue = tmp_path / "nexus/x/brand_new.py"
     rogue.write_text("def x():\n    return 1\n", encoding="utf-8")
-    assert "nexus/x/brand_new.py" in {p.relative_to(tmp_path).as_posix() for p in _files(tmp_path)}
+    discovered = {path.relative_to(tmp_path).as_posix() for path in _files(tmp_path)}
+    assert "nexus/x/brand_new.py" in discovered
 
 
 def test_new_different_named_direct_merge_fails(tmp_path):
@@ -353,11 +418,33 @@ def test_new_different_named_direct_merge_fails(tmp_path):
     )
 
 
+def test_fake_receiver_with_cas_merge_name_fails(tmp_path):
+    _expect_extra_failure(
+        tmp_path,
+        "fake_receiver.py",
+        "def x(fake):\n    return fake.cas_merge(repository='x',pull_request_number=1)\n",
+        "protected_github_merge",
+    )
+
+
 def test_new_different_named_git_apply_fails(tmp_path):
     _expect_extra_failure(
         tmp_path,
         "new_apply.py",
-        "import subprocess\ndef apply(ref, sha, old):\n    return subprocess.run(['git','update-ref',ref,sha,old])\n",
+        (
+            "import subprocess\n"
+            "def apply(ref, sha, old):\n"
+            "    return subprocess.run(['git','update-ref',ref,sha,old])\n"
+        ),
+        "candidate_integration",
+    )
+
+
+def test_unknown_caller_to_competition_sink_fails(tmp_path):
+    _expect_extra_failure(
+        tmp_path,
+        "new_competition_apply.py",
+        "def apply(manager, state):\n    return manager.integrate_task_state(state)\n",
         "candidate_integration",
     )
 
@@ -366,7 +453,12 @@ def test_new_different_named_gateway_effect_fails(tmp_path):
     _expect_extra_failure(
         tmp_path,
         "new_gateway.py",
-        "import subprocess\ndef restart():\n    return subprocess.run(['launchctl','kickstart','gui/501/com.nexus.mcp.gateway'])\n",
+        (
+            "import subprocess\n"
+            "def restart():\n"
+            "    return subprocess.run(['launchctl','kickstart',"
+            "'gui/501/com.nexus.mcp.gateway'])\n"
+        ),
         "gateway_durable_deployment_recovery",
     )
 
@@ -375,17 +467,14 @@ def test_new_different_named_transition_writer_fails(tmp_path):
     _expect_extra_failure(
         tmp_path,
         "new_transition.py",
-        "import os,tempfile\ndef persist(path):\n    fd,tmp=tempfile.mkstemp(prefix='.trans-',dir=path.parent)\n    os.close(fd)\n    os.replace(tmp,path)\n",
+        (
+            "import os,tempfile\n"
+            "def persist(path):\n"
+            "    fd,tmp=tempfile.mkstemp(prefix='.trans-',dir=path.parent)\n"
+            "    os.close(fd)\n"
+            "    os.replace(tmp,path)\n"
+        ),
         "standing_grant_transition",
-    )
-
-
-def test_fake_receiver_with_cas_merge_name_fails(tmp_path):
-    _expect_extra_failure(
-        tmp_path,
-        "fake_receiver.py",
-        "def x(fake):\n    return fake.cas_merge(repository='x',pull_request_number=1)\n",
-        "protected_github_merge",
     )
 
 
@@ -399,8 +488,8 @@ def test_missing_declared_symbol_fails_loudly():
     raise AssertionError("missing symbol was silently ignored")
 
 
-def test_inventory_labels_are_strict_and_retired_is_explicit():
+def test_inventory_labels_are_strict_and_compatibility_is_explicit():
     report = inventory()
-    labels = {e["label"] for e in report["entries"]}
+    labels = {entry["label"] for entry in report["entries"]}
     assert labels <= {"CANONICAL", "COMPATIBILITY_ONLY", "RETIRED"}
-    assert "RETIRED" in labels
+    assert "COMPATIBILITY_ONLY" in labels
