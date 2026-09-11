@@ -3586,10 +3586,12 @@ def test_terminal_retry_accepts_planner_bound_action_revision_refresh(
 ):
     task_id = "planner-bound-revision-refresh"
     service, request, old_envelope, _, _ = _m3c_repairable_workforce_state(
-        tmp_path, monkeypatch, task_id=task_id, acceptance_decision="NOT_REPAIRABLE"
+        tmp_path,
+        monkeypatch,
+        task_id=task_id,
+        acceptance_decision="NOT_REPAIRABLE",
+        maximum_attempts_per_task=3 if inherited_worktree_time else 2,
     )
-    if inherited_worktree_time:
-        request["maximum_attempts_per_task"] = 3
     old_attempt = old_envelope["attempt_id"]
     initial = _action_transport(
         request,
@@ -3598,7 +3600,6 @@ def test_terminal_retry_accepts_planner_bound_action_revision_refresh(
         idempotency_key="key-planner-old",
     )
     state = service._read_state(task_id)
-    refreshed_contract = service.build_contract(request) if inherited_worktree_time else None
     state.update(
         request=initial,
         action=initial["action"],
@@ -3658,8 +3659,6 @@ def test_terminal_retry_accepts_planner_bound_action_revision_refresh(
                 {"status": "FINAL_BLOCK", "at": "2026-01-01T00:01:02+00:00"},
             ],
         )
-        state["contract"] = refreshed_contract.model_dump(mode="json")
-        state["contract_hash"] = refreshed_contract.contract_hash
     service._write_state(task_id, state)
 
     controller = Path(request["controller_repo_root"])
@@ -8875,7 +8874,12 @@ def test_m3c_retry_preserves_execution_history_and_aggregate_budget_blocks_invok
 
 
 def _m3c_repairable_workforce_state(
-    tmp_path, monkeypatch, *, task_id, acceptance_decision="REPAIRABLE"
+    tmp_path,
+    monkeypatch,
+    *,
+    task_id,
+    acceptance_decision="REPAIRABLE",
+    maximum_attempts_per_task=2,
 ):
     card_path = f"tasks/issue-7/{task_id}.md"
     card = tmp_path / card_path
@@ -8902,7 +8906,7 @@ def _m3c_repairable_workforce_state(
     request = _real_request(tmp_path, task_id=task_id)
     request.update({
         "execution_lane": "ISOLATED_TARGET",
-        "maximum_attempts_per_task": 2,
+        "maximum_attempts_per_task": maximum_attempts_per_task,
         "worker": "auto",
         "model": internal["binding"]["model"],
         "workforce_demands": internal["workforce_demands"],
