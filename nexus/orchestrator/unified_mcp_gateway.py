@@ -1206,6 +1206,100 @@ def _permission_enforcement_fingerprint(
     return digest.hexdigest(), True, ()
 
 
+def _evaluate_upstream_freshness(
+    *,
+    deployed_source_head: str | None,
+    observed_upstream_main_head: str | None,
+    upstream_observed_at: str | None = None,
+    upstream_observation_error: str | None = None,
+) -> dict[str, Any]:
+    """Derive upstream-main freshness for Gateway status.
+
+    Distinguishes deployment-local drift (repository_drift) from upstream freshness:
+    - repository_drift: whether local checkout drifted relative to its baseline at startup.
+    - upstream_freshness: whether deployed source equals current GitHub upstream main.
+
+    Outcomes:
+    - CURRENT: deployed_source_head == observed_upstream_main_head (both valid 40-hex)
+    - STALE: deployed_source_head != observed_upstream_main_head (both valid 40-hex)
+    - UNKNOWN: missing, network/timeout/auth failure, or malformed SHA
+    """
+    deployed_sha = str(deployed_source_head or "").strip().lower()
+    upstream_sha = (
+        str(observed_upstream_main_head or "").strip().lower()
+        if observed_upstream_main_head
+        else ""
+    )
+    error_msg = str(upstream_observation_error or "").strip() if upstream_observation_error else None
+
+    valid_deployed = bool(_SHA_RE.fullmatch(deployed_sha)) if deployed_sha else False
+    valid_upstream = bool(_SHA_RE.fullmatch(upstream_sha)) if upstream_sha else False
+
+    if error_msg or not valid_upstream or not valid_deployed:
+        freshness = "UNKNOWN"
+        observed_head = upstream_sha if valid_upstream else None
+        if not error_msg:
+            if not valid_deployed and not deployed_sha:
+                error_msg = "deployed_source_head_missing"
+            elif not valid_deployed:
+                error_msg = "deployed_source_head_malformed"
+            elif not valid_upstream and not upstream_sha:
+                error_msg = "observed_upstream_main_head_missing"
+            else:
+                error_msg = "observed_upstream_main_head_malformed"
+    elif deployed_sha == upstream_sha:
+        freshness = "CURRENT"
+        observed_head = upstream_sha
+    else:
+        freshness = "STALE"
+        observed_head = upstream_sha
+
+    return {
+        "deployed_source_head": deployed_sha if valid_deployed else (deployed_source_head or ""),
+        "observed_upstream_main_head": observed_head,
+        "upstream_observed_at": upstream_observed_at,
+        "upstream_freshness": freshness,
+        "upstream_observation_error": error_msg,
+    }
+
+
+def _default_observe_upstream_main(
+    *,
+    timeout_seconds: float = 3.0,
+    repo_root: Path | None = None,
+) -> tuple[str | None, str | None, str | None]:
+    """Pure read-only observation of upstream main ref without mutating local git state.
+
+    Uses `git ls-remote --heads origin main` with a bounded timeout.
+    Returns: (upstream_sha_or_none, observed_at_iso, error_or_none)
+    """
+    root = repo_root or CANONICAL_SOURCE_ROOT
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        proc = subprocess.run(
+            ["git", "ls-remote", "--heads", "origin", "main"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+        if proc.returncode != 0:
+            err = proc.stderr.strip() or f"exit_code_{proc.returncode}"
+            return None, now_iso, f"upstream_observation_failed:{err[:120]}"
+        output = proc.stdout.strip()
+        if not output:
+            return None, now_iso, "upstream_ref_not_found:refs/heads/main"
+        head_sha = output.split()[0].strip().lower()
+        if not _SHA_RE.fullmatch(head_sha):
+            return None, now_iso, f"upstream_head_malformed:{head_sha[:40]}"
+        return head_sha, now_iso, None
+    except subprocess.TimeoutExpired:
+        return None, now_iso, f"upstream_observation_timeout:exceeded_{timeout_seconds}s"
+    except Exception as exc:
+        return None, now_iso, f"upstream_observation_error:{exc.__class__.__name__}"
+
+
 def _evaluate_freshness(
     *,
     repo_head_at_start: str,
@@ -1280,6 +1374,8 @@ class UnifiedMCPGateway:
         model_runner: Any = None,
         apply_runner: Any = None,
         github_issue_observer: Any = None,
+        upstream_observer: Any = None,
+        upstream_cache_ttl_seconds: float = 30.0,
     ):
         self.service = service or SelfHostedTaskService()
         # These kwargs remain accepted for compatibility with older callers,
@@ -1295,6 +1391,45 @@ class UnifiedMCPGateway:
         self._assist_processes: dict[str, subprocess.Popen[str]] = {}
         self._assist_lock = threading.RLock()
         self._github_issue_observer = github_issue_observer or observe_github_issue
+        self._upstream_observer = upstream_observer or _default_observe_upstream_main
+        self._upstream_cache_ttl_seconds = float(upstream_cache_ttl_seconds)
+        self._upstream_cache: tuple[float, dict[str, Any]] | None = None
+        self._upstream_cache_lock = threading.RLock()
+
+    def _observe_upstream_freshness(self, deployed_head: str) -> dict[str, Any]:
+        """Observe upstream-main freshness with bounded caching and fail-closed isolation."""
+        with self._upstream_cache_lock:
+            now = time.monotonic()
+            if self._upstream_cache is not None:
+                cached_time, cached_obs = self._upstream_cache
+                if (now - cached_time) < self._upstream_cache_ttl_seconds:
+                    return _evaluate_upstream_freshness(
+                        deployed_source_head=deployed_head,
+                        observed_upstream_main_head=cached_obs.get("observed_upstream_main_head"),
+                        upstream_observed_at=cached_obs.get("upstream_observed_at"),
+                        upstream_observation_error=cached_obs.get("upstream_observation_error"),
+                    )
+
+            # Perform fresh observation
+            try:
+                upstream_head, observed_at, error = self._upstream_observer()
+            except subprocess.TimeoutExpired:
+                upstream_head = None
+                observed_at = self._utc_now()
+                error = "upstream_observer_timeout"
+            except Exception as exc:
+                upstream_head = None
+                observed_at = self._utc_now()
+                error = f"upstream_observer_exception:{exc.__class__.__name__}"
+
+            evaluated = _evaluate_upstream_freshness(
+                deployed_source_head=deployed_head,
+                observed_upstream_main_head=upstream_head,
+                upstream_observed_at=observed_at,
+                upstream_observation_error=error,
+            )
+            self._upstream_cache = (now, evaluated)
+            return evaluated
 
     @staticmethod
     def _utc_now() -> str:
@@ -4385,6 +4520,7 @@ class UnifiedMCPGateway:
                     pending_actions += 1
         action_sha_current, action_contract_ok, action_contract_reasons = _action_contract_fingerprint()
         permission_sha_current, permission_contract_ok, permission_contract_reasons = _permission_enforcement_fingerprint()
+        upstream_info = self._observe_upstream_freshness(deployed_head=current_head)
         freshness = _evaluate_freshness(
             repo_head_at_start=SERVER_REPO_HEAD_AT_START,
             repo_head_current=current_head,
@@ -4418,6 +4554,7 @@ class UnifiedMCPGateway:
             "repo_head_current": current_head,
             "freshness_semantics_revision": FRESHNESS_SEMANTICS_REVISION,
             **freshness,
+            **upstream_info,
             "session_tracking": "unsupported",
             "active_sessions": None,
             "pending_actions": pending_actions,
