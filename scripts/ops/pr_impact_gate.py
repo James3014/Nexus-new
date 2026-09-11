@@ -58,6 +58,7 @@ MANDATORY_TIER2_TARGETS = (
     "tests/architecture/test_boundaries_v2.py",
     "tests/architecture/test_boundaries_v3.py",
     "tests/architecture/test_boundaries_v4.py",
+    "tests/architecture/test_effect_owner_uniqueness.py",
 )
 DOC_GOVERNANCE_TARGETS = (
     "tests/ops/test_select_tests.py",
