@@ -1179,6 +1179,10 @@ def test_runtime_builder_uses_frozen_hash_bound_binary_only_contract(tmp_path: P
     } <= set(export)
     group_flags = [export[i + 1] for i, token in enumerate(export) if token == "--group"]
     assert group_flags == list(trusted_anchor.TRUSTED_RUNTIME_DEPENDENCY_GROUPS)
+    excluded_packages = [
+        export[i + 1] for i, token in enumerate(export) if token == "--no-emit-package"
+    ]
+    assert excluded_packages == [item["distribution"] for item in external_contracts]
     assert {"--require-hashes", "--only-binary", "--no-cache", "--no-python-downloads"} <= set(
         install
     )
