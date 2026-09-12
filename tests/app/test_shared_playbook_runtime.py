@@ -1,14 +1,29 @@
 from __future__ import annotations
 
+import hashlib
+import shutil
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from nexus.app import research_receipt_runtime
 from nexus.app.research_receipt_runtime import build_capability_receipt_payloads
-from nexus.learning.shared_playbook import load_selected_shared_playbook
+from nexus.learning import shared_playbook
+from tests.learning.test_shared_playbook_g10_promotion import _create_canonical_acceptance_receipt
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture(autouse=True)
+def _setup_diagnose_runtime(tmp_path: Path, monkeypatch) -> None:
+    source = REPO_ROOT / ".agents" / "skills" / "diagnose"
+    target = tmp_path / ".agents" / "skills" / "diagnose"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source, target)
+    _create_canonical_acceptance_receipt(target, set_active_status=False)
+    monkeypatch.setattr(shared_playbook, "DEFAULT_REPO_ROOT", tmp_path)
 
 
 class _Receipt:
@@ -20,9 +35,24 @@ class _Receipt:
 
 
 def _identity() -> dict[str, Any]:
-    identity = load_selected_shared_playbook("diagnose", "xray", root=REPO_ROOT, required=True)
-    assert identity is not None
-    return identity.to_dict()
+    manifest_path = (
+        shared_playbook.DEFAULT_REPO_ROOT / ".agents" / "skills" / "diagnose" / "playbook.yaml"
+    )
+    instructions_path = (
+        shared_playbook.DEFAULT_REPO_ROOT / ".agents" / "skills" / "diagnose" / "SKILL.md"
+    )
+    return {
+        "playbook_id": "diagnose",
+        "version": "1.0.0",
+        "status": "CANDIDATE",
+        "manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+        "instructions_sha256": hashlib.sha256(instructions_path.read_bytes()).hexdigest(),
+        "manifest_path": ".agents/skills/diagnose/playbook.yaml",
+        "instructions_path": ".agents/skills/diagnose/SKILL.md",
+        "primary": True,
+        "trace_authority": "DERIVED_ONLY",
+        "promotion_record_path": None,
+    }
 
 
 def _plan(shared_playbook: dict[str, Any] | None = None) -> dict[str, Any]:
