@@ -1,0 +1,242 @@
+{
+  "schema": "nexus.capability_discovery_index.v1",
+  "status": "NAVIGATION_ONLY_NOT_AUTHORITY",
+  "purpose": "Cross-repository reuse-before-invention discovery index for engineering agents. This index identifies likely donor capabilities and evidence surfaces; it does not select CapabilityPlanner routes, workers, models, approval, integration, release, or production authority.",
+  "repositories": [
+    {
+      "repository": "James3014/Nexus-new",
+      "domain": "Nexus governance, CapabilityPlanner authority, External Intelligence control-plane orchestration, canonical Task Cards, cross-repository architecture lineage and acceptance evidence"
+    },
+    {
+      "repository": "James3014/devspace",
+      "domain": "Local MCP execution plane, isolated workspaces/worktrees, bounded local-agent execution, Chat Swarm coordination, durable execution/cutover mechanics"
+    },
+    {
+      "repository": "James3014/nexus-core",
+      "domain": "Core Nexus domain/runtime logic and canonical core contracts"
+    },
+    {
+      "repository": "James3014/nexus-learning",
+      "domain": "Learning, impact, feedback and downstream learning-consumer behavior"
+    },
+    {
+      "repository": "James3014/nexus-open-swe-runtime",
+      "domain": "External Open SWE / Deep Agents execution runtime, bounded diagnosis/repair workers and OpenCLI-backed ChatGPT Web model transport"
+    },
+    {
+      "repository": "James3014/repository-intelligence-engine",
+      "domain": "Repository Intelligence analysis, revision/readiness/CI/overlap/change-impact evidence"
+    },
+    {
+      "repository": "James3014/nexus-runtime",
+      "domain": "Nexus host/runtime packaging, activation and runtime integration surfaces"
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "chatgpt_web_semantic_transport",
+      "intentKeywords": [
+        "ChatGPT Web",
+        "browser-backed model transport",
+        "authenticated ChatGPT conversation",
+        "OpenCLI",
+        "Open SWE",
+        "conversation create",
+        "conversation resume",
+        "browser worker"
+      ],
+      "canonicalOwnerRepository": "James3014/nexus-open-swe-runtime",
+      "relatedRepositories": [
+        "James3014/Nexus-new"
+      ],
+      "components": [
+        "Open SWE / Deep Agents external runtime",
+        "OpenCLI",
+        "OpenCLI ChatGPT WEB transport",
+        "External Intelligence semantic/worker transport seam"
+      ],
+      "evidenceRefs": [
+        "docs/ops/OPEN_SWE_STANDALONE_CONSUMER.md",
+        "tasks/open-swe-execution-productionization-v1/TASK-006.md",
+        "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md",
+        "docs/evidence/frontier-20260910/frontier-audit/850-853-terminal-reconciliation.md"
+      ],
+      "knownEvidence": [
+        "OpenSWE invokes the installed OpenCLI executable with an explicit profile and ephemeral site session; OpenCLI then uses its ChatGPT WEB transport.",
+        "Resident five-repository canary evidence records OpenCLI 1.8.7 with Browser Bridge 1.0.24 connected and accepted terminal evidence preserved."
+      ],
+      "liveVerification": [
+        "Verify current installed nexus-open-swe-runtime identity and configured OpenCLI executable/profile.",
+        "Verify current OpenCLI daemon and Browser Bridge/site-session state before claiming physical readiness.",
+        "Preserve unknown outcomes and no-blind-resend reconciliation semantics."
+      ],
+      "doNotDuplicateBeforeEvaluation": [
+        "A second ChatGPT browser/model transport",
+        "A second conversation/session retry controller",
+        "A second Open SWE browser bridge that bypasses the existing External Intelligence transport seam"
+      ]
+    },
+    {
+      "id": "local_agent_execution_and_chat_swarm",
+      "intentKeywords": [
+        "local agent",
+        "DevSpace",
+        "worktree",
+        "agent_start",
+        "Chat Swarm",
+        "local execution",
+        "provider catalog"
+      ],
+      "canonicalOwnerRepository": "James3014/devspace",
+      "relatedRepositories": [],
+      "components": [
+        "workspace/worktree isolation",
+        "bounded local-agent sessions",
+        "provider/model catalog admission",
+        "Chat Swarm durable task/carrier lifecycle",
+        "cutover/restart reconciliation"
+      ],
+      "evidenceRefs": [],
+      "knownEvidence": [],
+      "liveVerification": [
+        "Inspect the live DevSpace capability manifest and provider catalog instead of treating static policy as runtime truth."
+      ],
+      "doNotDuplicateBeforeEvaluation": [
+        "A second local-agent execution controller",
+        "A second provider catalog truth source",
+        "A second durable swarm/task ledger"
+      ]
+    },
+    {
+      "id": "nexus_governance_and_capability_planning",
+      "intentKeywords": [
+        "CapabilityPlanner",
+        "governance",
+        "Task Card",
+        "authority",
+        "admission",
+        "External Intelligence"
+      ],
+      "canonicalOwnerRepository": "James3014/Nexus-new",
+      "relatedRepositories": [],
+      "components": [
+        "CapabilityPlanner",
+        "Task Card and authority contracts",
+        "External Intelligence control plane",
+        "cross-repository architecture lineage"
+      ],
+      "evidenceRefs": [
+        "AGENTS.md",
+        "docs/governance/current_operating_mode.yaml",
+        "docs/agents/TASK_EXECUTION_CONTRACT.md"
+      ],
+      "knownEvidence": [],
+      "liveVerification": [
+        "Read current operating mode and active authority before mutation.",
+        "Do not treat this discovery index as a second route/capability selector."
+      ],
+      "doNotDuplicateBeforeEvaluation": [
+        "A second CapabilityPlanner/router authority",
+        "A second execution-authority ledger"
+      ]
+    },
+    {
+      "id": "nexus_core_domain_runtime",
+      "intentKeywords": [
+        "nexus-core",
+        "core contract",
+        "core runtime",
+        "domain logic"
+      ],
+      "canonicalOwnerRepository": "James3014/nexus-core",
+      "relatedRepositories": [],
+      "components": [
+        "core Nexus domain/runtime contracts"
+      ],
+      "evidenceRefs": [],
+      "knownEvidence": [],
+      "liveVerification": [
+        "Inspect current nexus-core source and consumers before moving core behavior into another repository."
+      ],
+      "doNotDuplicateBeforeEvaluation": [
+        "Core domain behavior already owned by nexus-core"
+      ]
+    },
+    {
+      "id": "nexus_learning_feedback",
+      "intentKeywords": [
+        "nexus-learning",
+        "learning",
+        "impact",
+        "feedback",
+        "learning consumer"
+      ],
+      "canonicalOwnerRepository": "James3014/nexus-learning",
+      "relatedRepositories": [],
+      "components": [
+        "learning and downstream learning-consumer behavior"
+      ],
+      "evidenceRefs": [],
+      "knownEvidence": [],
+      "liveVerification": [
+        "Inspect current learning consumers and impact contracts before creating a parallel feedback store."
+      ],
+      "doNotDuplicateBeforeEvaluation": [
+        "A second learning/impact truth source"
+      ]
+    },
+    {
+      "id": "repository_intelligence",
+      "intentKeywords": [
+        "repository intelligence",
+        "revision",
+        "PR readiness",
+        "CI triage",
+        "overlap",
+        "change impact"
+      ],
+      "canonicalOwnerRepository": "James3014/repository-intelligence-engine",
+      "relatedRepositories": [
+        "James3014/devspace"
+      ],
+      "components": [
+        "revision/staleness analysis",
+        "PR readiness",
+        "CI evidence",
+        "cross-PR overlap",
+        "change impact"
+      ],
+      "evidenceRefs": [],
+      "knownEvidence": [],
+      "liveVerification": [
+        "Inspect live Repository Intelligence tool surface and source ownership before adding another repository-analysis engine."
+      ],
+      "doNotDuplicateBeforeEvaluation": [
+        "A second repository intelligence engine"
+      ]
+    },
+    {
+      "id": "nexus_runtime_activation",
+      "intentKeywords": [
+        "nexus-runtime",
+        "runtime activation",
+        "runtime host",
+        "packaging",
+        "deployment runtime"
+      ],
+      "canonicalOwnerRepository": "James3014/nexus-runtime",
+      "relatedRepositories": [],
+      "components": [
+        "runtime host/activation and packaging surfaces"
+      ],
+      "evidenceRefs": [],
+      "knownEvidence": [],
+      "liveVerification": [
+        "Inspect current runtime packaging/activation source before adding host activation behavior elsewhere."
+      ],
+      "doNotDuplicateBeforeEvaluation": [
+        "A second runtime activation controller"
+      ]
+    }
+  ]
+}
