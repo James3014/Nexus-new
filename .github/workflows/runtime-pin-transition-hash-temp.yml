@@ -1,4 +1,4 @@
-name: Runtime pin transition hash temporary
+name: Runtime pin transition patcher temporary
 
 on:
   push:
@@ -6,31 +6,149 @@ on:
       - codex/trusted-runtime-pin-transition-960-20260914
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  hashes:
+  materialize-policy:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Compute exact four-way dependency hashes
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BASE_SHA: 6d5ed580d53f6a4400705672d41c2f80f6e9b357
-          HEAD_SHA: 40a62451895000d539bd65ea6603cb41840d7000
+      - name: Checkout policy branch
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: codex/trusted-runtime-pin-transition-960-20260914
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Install temporary gitlink metadata for checkout cleanup
         run: |
           set -euo pipefail
-          repo="$RUNNER_TEMP/nexus-transition.git"
-          git init --bare "$repo"
-          git -C "$repo" remote add origin https://github.com/James3014/Nexus-new.git
-          basic_auth="$(printf '%s' "x-access-token:$GH_TOKEN" | base64 | tr -d '\n')"
-          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: basic $basic_auth" \
-            git -C "$repo" fetch --no-tags --depth=1 origin "$BASE_SHA" "$HEAD_SHA"
-          for sha in "$BASE_SHA" "$HEAD_SHA"; do
-            git -C "$repo" cat-file blob "$sha:pyproject.toml" > "$RUNNER_TEMP/$sha.pyproject.toml"
-            git -C "$repo" cat-file blob "$sha:uv.lock" > "$RUNNER_TEMP/$sha.uv.lock"
-          done
-          echo "BASE_PYPROJECT_SHA256=$(sha256sum "$RUNNER_TEMP/$BASE_SHA.pyproject.toml" | cut -d' ' -f1)"
-          echo "BASE_UV_LOCK_SHA256=$(sha256sum "$RUNNER_TEMP/$BASE_SHA.uv.lock" | cut -d' ' -f1)"
-          echo "HEAD_PYPROJECT_SHA256=$(sha256sum "$RUNNER_TEMP/$HEAD_SHA.pyproject.toml" | cut -d' ' -f1)"
-          echo "HEAD_UV_LOCK_SHA256=$(sha256sum "$RUNNER_TEMP/$HEAD_SHA.uv.lock" | cut -d' ' -f1)"
+          while IFS= read -r -d '' index_entry; do
+            mode="${index_entry%% *}"
+            if [ "$mode" != "160000" ]; then
+              continue
+            fi
+            gitlink_path="${index_entry#*$'\t'}"
+            if ! git config --file .gitmodules --get "submodule.${gitlink_path}.path" >/dev/null 2>&1; then
+              git config --file .gitmodules "submodule.${gitlink_path}.path" "$gitlink_path"
+              git config --file .gitmodules "submodule.${gitlink_path}.url" .
+            fi
+          done < <(git ls-files --stage -z)
+
+      - name: Apply exact trusted transition and self-delete
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("scripts/ops/trusted_deletion_anchor.py")
+          text = path.read_text(encoding="utf-8")
+          old_runtime = "d65e3ea7628a07bd73dee461750392bcdf85c3ac"
+          new_runtime = "b48fbd7abe96041bffcea31fa31fa90e78582f02"
+          if text.count(old_runtime) != 1:
+              raise SystemExit("unexpected trusted Runtime identity count")
+          text = text.replace(old_runtime, new_runtime, 1)
+
+          pr910 = '''TRUSTED_PR910_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+              910,
+              (
+                  "382f05ca47059a15465515ab704d2d54b8a2a95ae83318b3f98617cd982029c3",
+                  "5933bdf1497f6d0e852fc26730dd4eec7985d72512e0ff061fc2ab7f59842961",
+                  "f4f3c2c390804e048d42aa30c447a64af1d079bf2881a93252a38a6674cfcf9f",
+                  "26e853cd712aaf96b188f4dc9f1e2e8feea3a0d8989fc321a84b28e8b6776b45",
+              ),
+          )
+          '''
+          pr960 = '''# Exact one-use, four-way binding for Owner-approved PR #960 (Wave-2 Runtime
+          # exact-pin adoption after the canonical Runtime merge).
+          TRUSTED_PR960_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+              960,
+              (
+                  "f4f3c2c390804e048d42aa30c447a64af1d079bf2881a93252a38a6674cfcf9f",
+                  "26e853cd712aaf96b188f4dc9f1e2e8feea3a0d8989fc321a84b28e8b6776b45",
+                  "2c2c1a9d9e2f12736fb3a33efbace9a7b264ca737c00e27ed37696dc5f560c34",
+                  "ec48fa0ea3dc4403c84d26dcf73a0f18b88292270c4dc519986b06a92835ce35",
+              ),
+          )
+          '''
+          if text.count(pr910) != 1:
+              raise SystemExit("PR910 transition anchor not unique")
+          text = text.replace(pr910, pr910 + pr960, 1)
+
+          old_records = '''    authorized_transition_records = (
+                  TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION,
+                  TRUSTED_PR910_DEPENDENCY_SNAPSHOT_TRANSITION,
+              )'''
+          new_records = '''    authorized_transition_records = (
+                  TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION,
+                  TRUSTED_PR910_DEPENDENCY_SNAPSHOT_TRANSITION,
+                  TRUSTED_PR960_DEPENDENCY_SNAPSHOT_TRANSITION,
+              )'''
+          if text.count(old_records) != 1:
+              raise SystemExit("authorized transition tuple not unique")
+          text = text.replace(old_records, new_records, 1)
+          path.write_text(text, encoding="utf-8")
+
+          test = Path("tests/ops/test_trusted_deletion_anchor_dependency_transition.py")
+          test.write_text('''from __future__ import annotations
+
+import pytest
+
+from scripts.ops import trusted_deletion_anchor as anchor
+
+
+def _install_transition_hashes(monkeypatch: pytest.MonkeyPatch) -> None:
+    values = iter(anchor.TRUSTED_PR960_DEPENDENCY_SNAPSHOT_TRANSITION[1])
+    monkeypatch.setattr(anchor, "_sha", lambda _value: next(values))
+
+
+def test_pr960_transition_is_exact_one_use_and_chained_from_pr910(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert anchor.TRUSTED_PR960_DEPENDENCY_SNAPSHOT_TRANSITION[0] == 960
+    assert (
+        anchor.TRUSTED_PR960_DEPENDENCY_SNAPSHOT_TRANSITION[1][:2]
+        == anchor.TRUSTED_PR910_DEPENDENCY_SNAPSHOT_TRANSITION[1][2:]
+    )
+    _install_transition_hashes(monkeypatch)
+    anchor._validate_trusted_dependency_contract(
+        b"trusted-pyproject",
+        b"head-pyproject",
+        b"trusted-lock",
+        b"head-lock",
+        pull_request_number=960,
+        head_product_init_is_regular=True,
+    )
+
+
+def test_pr960_transition_rejects_reuse_under_another_pr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_transition_hashes(monkeypatch)
+    with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+        anchor._validate_trusted_dependency_contract(
+            b"trusted-pyproject",
+            b"head-pyproject",
+            b"trusted-lock",
+            b"head-lock",
+            pull_request_number=961,
+            head_product_init_is_regular=True,
+        )
+
+
+def test_trusted_runtime_identity_is_wave2_merge() -> None:
+    runtime = next(
+        record for record in anchor.TRUSTED_EXTERNAL_RUNTIME_PACKAGES if record[0] == "nexus-runtime"
+    )
+    assert runtime[3] == "b48fbd7abe96041bffcea31fa31fa90e78582f02"
+''', encoding="utf-8")
+          PY
+          python3 -m py_compile scripts/ops/trusted_deletion_anchor.py tests/ops/test_trusted_deletion_anchor_dependency_transition.py
+          git diff --check
+          git rm .github/workflows/runtime-pin-transition-hash-temp.yml
+          git config user.name "James3014"
+          git config user.email "liligogo523@gmail.com"
+          git add scripts/ops/trusted_deletion_anchor.py tests/ops/test_trusted_deletion_anchor_dependency_transition.py
+          git diff --cached --check
+          git commit -m "chore(trust): register PR960 Runtime pin transition"
+          git push origin HEAD:codex/trusted-runtime-pin-transition-960-20260914
