@@ -15,6 +15,15 @@ from typing import Any
 from nexus_runtime import build_runtime_exports
 
 from nexus.contracts.hybrid_route import hybrid_route_decision_from_payload
+from nexus.services.capability_registry import build_real_executor_invoker
+from nexus.services.local_heal.capability_adapter import advisory_route_from_local_response
+from nexus.services.local_heal.memory_retrieval_adapter import (
+    FindingsMemoryLessonStore,
+    LocalJsonlLessonStore,
+    MemoryRepositoryLessonStore,
+    MemoryRetrievalAdapter,
+    NexusCompositeLessonStore,
+)
 
 PLANNER_AUTHORITY_OWNER = "James3014/Nexus-new"
 PLANNER_BINDING_SURFACES = (
@@ -28,15 +37,6 @@ PLANNER_BINDING_SURFACES = (
 
 # ProjectMemoryManager remains a host capability. Supply its existing physical
 # executor explicitly; the independent runtime never imports this host module.
-from nexus.services.capability_registry import build_real_executor_invoker
-from nexus.services.local_heal.capability_adapter import advisory_route_from_local_response
-from nexus.services.local_heal.memory_retrieval_adapter import (
-    FindingsMemoryLessonStore,
-    LocalJsonlLessonStore,
-    MemoryRepositoryLessonStore,
-    MemoryRetrievalAdapter,
-    NexusCompositeLessonStore,
-)
 
 
 def _build_default_memory_retrieval_adapter(project_root: str | Path) -> Any:
