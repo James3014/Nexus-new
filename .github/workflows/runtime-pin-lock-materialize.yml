@@ -5,19 +5,19 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   materialize-lock:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout exact PR head
+      - name: Checkout exact PR branch
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 1
           persist-credentials: true
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.ref }}
 
       - name: Install temporary gitlink metadata for checkout cleanup
         run: |
@@ -46,7 +46,9 @@ jobs:
           version: "0.9.2"
           enable-cache: false
 
-      - name: Materialize frozen dependency lock
+      - name: Materialize and commit exact dependency lock
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           set -euo pipefail
           uv lock
@@ -60,12 +62,13 @@ jobs:
             exit 1
           fi
           git diff --check
-          git diff -- uv.lock
-
-      - name: Upload generated uv.lock
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: runtime-wave2-lock-${{ github.event.pull_request.head.sha }}
-          path: uv.lock
-          if-no-files-found: error
-          retention-days: 1
+          git add uv.lock
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo "uv.lock already materialized"
+            exit 0
+          fi
+          git config user.name "Nexus CI"
+          git config user.email "nexus-ci@example.invalid"
+          git commit -m "chore(runtime): materialize Wave 2 Runtime lock"
+          git push origin "HEAD:${HEAD_REF}"
