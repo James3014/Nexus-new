@@ -352,7 +352,6 @@ def test_pr910_dependency_snapshot_transition_preserves_product_file_guard(monke
         )
 
 
-
 def test_pr960_dependency_snapshot_transition_is_exact_and_separate() -> None:
     assert trusted_anchor.TRUSTED_PR960_DEPENDENCY_SNAPSHOT_TRANSITION == (
         960,
@@ -370,34 +369,68 @@ def _pr960_snapshot_fixture(monkeypatch):
     hashes = trusted_anchor.TRUSTED_PR960_DEPENDENCY_SNAPSHOT_TRANSITION[1]
     original_sha = trusted_anchor._sha
     digest_by_value = dict(zip(values, hashes, strict=True))
-    monkeypatch.setattr(trusted_anchor, "_sha", lambda value: digest_by_value.get(value, original_sha(value)))
+    monkeypatch.setattr(
+        trusted_anchor, "_sha", lambda value: digest_by_value.get(value, original_sha(value))
+    )
     return values
 
 
 def test_pr960_dependency_snapshot_transition_allows_exact_values(monkeypatch) -> None:
     values = _pr960_snapshot_fixture(monkeypatch)
-    trusted_anchor._validate_trusted_dependency_contract(values[0], values[2], values[1], values[3], pull_request_number=960, head_product_init_is_regular=True)
+    trusted_anchor._validate_trusted_dependency_contract(
+        values[0],
+        values[2],
+        values[1],
+        values[3],
+        pull_request_number=960,
+        head_product_init_is_regular=True,
+    )
 
 
 @pytest.mark.parametrize("tampered_index", range(4))
-def test_pr960_dependency_snapshot_transition_rejects_each_hash_tamper(monkeypatch, tampered_index: int) -> None:
+def test_pr960_dependency_snapshot_transition_rejects_each_hash_tamper(
+    monkeypatch, tampered_index: int
+) -> None:
     values = _pr960_snapshot_fixture(monkeypatch)
     values[tampered_index] += b"tampered"
     with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
-        trusted_anchor._validate_trusted_dependency_contract(values[0], values[2], values[1], values[3], pull_request_number=960, head_product_init_is_regular=True)
+        trusted_anchor._validate_trusted_dependency_contract(
+            values[0],
+            values[2],
+            values[1],
+            values[3],
+            pull_request_number=960,
+            head_product_init_is_regular=True,
+        )
 
 
 @pytest.mark.parametrize("pull_request_number", [910, 959, 961])
-def test_pr960_dependency_snapshot_transition_rejects_other_prs(monkeypatch, pull_request_number: int) -> None:
+def test_pr960_dependency_snapshot_transition_rejects_other_prs(
+    monkeypatch, pull_request_number: int
+) -> None:
     values = _pr960_snapshot_fixture(monkeypatch)
     with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
-        trusted_anchor._validate_trusted_dependency_contract(values[0], values[2], values[1], values[3], pull_request_number=pull_request_number, head_product_init_is_regular=True)
+        trusted_anchor._validate_trusted_dependency_contract(
+            values[0],
+            values[2],
+            values[1],
+            values[3],
+            pull_request_number=pull_request_number,
+            head_product_init_is_regular=True,
+        )
 
 
 def test_pr960_dependency_snapshot_transition_preserves_product_file_guard(monkeypatch) -> None:
     values = _pr960_snapshot_fixture(monkeypatch)
     with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
-        trusted_anchor._validate_trusted_dependency_contract(values[0], values[2], values[1], values[3], pull_request_number=960, head_product_init_is_regular=False)
+        trusted_anchor._validate_trusted_dependency_contract(
+            values[0],
+            values[2],
+            values[1],
+            values[3],
+            pull_request_number=960,
+            head_product_init_is_regular=False,
+        )
 
 
 @pytest.mark.parametrize(
@@ -759,26 +792,30 @@ def _synthetic_runtime(
         repository,
         commit,
     ) in trusted_anchor.TRUSTED_EXTERNAL_RUNTIME_PACKAGES:
-        external_direct_url = _json({
-            "url": repository,
-            "vcs_info": {
-                "vcs": "git",
-                "commit_id": commit,
-                "requested_revision": commit,
-            },
-        })
+        external_direct_url = _json(
+            {
+                "url": repository,
+                "vcs_info": {
+                    "vcs": "git",
+                    "commit_id": commit,
+                    "requested_revision": commit,
+                },
+            }
+        )
         files[f"site-packages/{package}/__init__.py"] = b""
         files[f"site-packages/{package}-0.1.0.dist-info/METADATA"] = (
             f"Metadata-Version: 2.1\nName: {distribution}\nVersion: 0.1.0\n".encode()
         )
         files[f"site-packages/{package}-0.1.0.dist-info/direct_url.json"] = external_direct_url
-        external_metadata.append({
-            "distribution": distribution,
-            "package": package,
-            "repository": repository,
-            "commit": commit,
-            "direct_url_sha256": trusted_anchor._sha(external_direct_url),
-        })
+        external_metadata.append(
+            {
+                "distribution": distribution,
+                "package": package,
+                "repository": repository,
+                "commit": commit,
+                "direct_url_sha256": trusted_anchor._sha(external_direct_url),
+            }
+        )
     stream = BytesIO()
     with tarfile.open(fileobj=stream, mode="w") as archive:
         for name, data in files.items():
@@ -1385,14 +1422,16 @@ def test_external_runtime_package_provenance_rejects_wrong_commit(tmp_path: Path
     )
     contract = trusted_anchor._trusted_external_package_contract()[0]
     (dist_info / "direct_url.json").write_bytes(
-        _json({
-            "url": contract["repository"],
-            "vcs_info": {
-                "vcs": "git",
-                "commit_id": "f" * 40,
-                "requested_revision": contract["commit"],
-            },
-        })
+        _json(
+            {
+                "url": contract["repository"],
+                "vcs_info": {
+                    "vcs": "git",
+                    "commit_id": "f" * 40,
+                    "requested_revision": contract["commit"],
+                },
+            }
+        )
     )
     with pytest.raises(ValueError, match="provenance mismatch"):
         trusted_anchor._verify_external_runtime_packages(site_packages)
@@ -1415,14 +1454,16 @@ def _write_external_packages(site_packages: Path) -> None:
             encoding="utf-8",
         )
         (dist_info / "direct_url.json").write_bytes(
-            _json({
-                "url": repository,
-                "vcs_info": {
-                    "vcs": "git",
-                    "commit_id": commit,
-                    "requested_revision": commit,
-                },
-            })
+            _json(
+                {
+                    "url": repository,
+                    "vcs_info": {
+                        "vcs": "git",
+                        "commit_id": commit,
+                        "requested_revision": commit,
+                    },
+                }
+            )
         )
 
 
