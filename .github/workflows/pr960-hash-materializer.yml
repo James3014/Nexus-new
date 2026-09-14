@@ -1,0 +1,33 @@
+name: PR960 trusted transition hash materializer
+
+on:
+  push:
+    branches: [codex/pr960-trusted-admission-20260914]
+
+permissions:
+  contents: read
+
+jobs:
+  hash:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout bootstrap base
+        uses: actions/checkout@v5
+        with:
+          ref: 6d5ed580d53f6a4400705672d41c2f80f6e9b357
+          fetch-depth: 1
+      - name: Hash trusted default files
+        run: |
+          set -euo pipefail
+          echo "TRUSTED_PYPROJECT=$(sha256sum pyproject.toml | cut -d' ' -f1)"
+          echo "TRUSTED_UV_LOCK=$(sha256sum uv.lock | cut -d' ' -f1)"
+      - name: Checkout PR960 exact head
+        uses: actions/checkout@v5
+        with:
+          ref: 40a62451895000d539bd65ea6603cb41840d7000
+          fetch-depth: 1
+      - name: Hash PR960 head files
+        run: |
+          set -euo pipefail
+          echo "HEAD_PYPROJECT=$(sha256sum pyproject.toml | cut -d' ' -f1)"
+          echo "HEAD_UV_LOCK=$(sha256sum uv.lock | cut -d' ' -f1)"
