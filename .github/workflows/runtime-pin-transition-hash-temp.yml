@@ -1,0 +1,36 @@
+name: Runtime pin transition hash temporary
+
+on:
+  push:
+    branches:
+      - codex/trusted-runtime-pin-transition-960-20260914
+
+permissions:
+  contents: read
+
+jobs:
+  hashes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Compute exact four-way dependency hashes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: 6d5ed580d53f6a4400705672d41c2f80f6e9b357
+          HEAD_SHA: 40a62451895000d539bd65ea6603cb41840d7000
+        run: |
+          set -euo pipefail
+          repo="$RUNNER_TEMP/nexus-transition.git"
+          git init --bare "$repo"
+          git -C "$repo" remote add origin https://github.com/James3014/Nexus-new.git
+          basic_auth="$(printf '%s' "x-access-token:$GH_TOKEN" | base64 | tr -d '\n')"
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: basic $basic_auth" \
+            git -C "$repo" fetch --no-tags --depth=1 origin "$BASE_SHA" "$HEAD_SHA"
+          for sha in "$BASE_SHA" "$HEAD_SHA"; do
+            git -C "$repo" cat-file blob "$sha:pyproject.toml" > "$RUNNER_TEMP/$sha.pyproject.toml"
+            git -C "$repo" cat-file blob "$sha:uv.lock" > "$RUNNER_TEMP/$sha.uv.lock"
+          done
+          echo "BASE_PYPROJECT_SHA256=$(sha256sum "$RUNNER_TEMP/$BASE_SHA.pyproject.toml" | cut -d' ' -f1)"
+          echo "BASE_UV_LOCK_SHA256=$(sha256sum "$RUNNER_TEMP/$BASE_SHA.uv.lock" | cut -d' ' -f1)"
+          echo "HEAD_PYPROJECT_SHA256=$(sha256sum "$RUNNER_TEMP/$HEAD_SHA.pyproject.toml" | cut -d' ' -f1)"
+          echo "HEAD_UV_LOCK_SHA256=$(sha256sum "$RUNNER_TEMP/$HEAD_SHA.uv.lock" | cut -d' ' -f1)"
