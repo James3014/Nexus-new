@@ -4,6 +4,7 @@ This contract separates system-enforced obligations from replaceable cognitive
 strategy. It is descriptive/guardrail metadata for Planner evolution; current
 CapabilityPlanner routing and capability-selection semantics remain unchanged.
 """
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
