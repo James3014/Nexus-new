@@ -1,35 +1,39 @@
 {
   "schema": "nexus.capability_discovery_index.v1",
   "status": "NAVIGATION_ONLY_NOT_AUTHORITY",
-  "purpose": "Cross-repository reuse-before-invention discovery index for engineering agents. This index identifies likely donor capabilities and evidence surfaces; it does not select CapabilityPlanner routes, workers, models, approval, integration, release, or production authority.",
+  "purpose": "Cross-repository reuse-before-invention discovery index for engineering agents. This index identifies likely canonical owners, donor capabilities, compatibility consumers, and evidence surfaces; it does not select CapabilityPlanner routes, workers, models, approval, integration, release, or production authority.",
   "repositories": [
     {
       "repository": "James3014/Nexus-new",
-      "domain": "Nexus governance, CapabilityPlanner authority, External Intelligence control-plane orchestration, canonical Task Cards, cross-repository architecture lineage and acceptance evidence"
+      "domain": "Governance/collaboration and cross-repository integration host: current CapabilityPlanner authority, execution-lane policy, Task/Issue collaboration contracts, capability discovery, External Intelligence control-plane integration, and retained legacy/compatibility surfaces. New canonical Core/Learning/Open SWE/Repository Intelligence implementation belongs in its owner repository."
     },
     {
       "repository": "James3014/devspace",
-      "domain": "Local MCP execution plane, isolated workspaces/worktrees, bounded local-agent execution, Chat Swarm coordination, durable execution/cutover mechanics"
+      "domain": "Local execution/control transport: allowed roots, isolated workspaces/worktrees, process/session identity, bounded local-agent execution, durable operations, reconciliation, cutover/restart and host-control mechanics. Chat Swarm/provider/carrier strategies remain replaceable consumers of these control primitives and do not own Nexus routing or completion truth."
     },
     {
       "repository": "James3014/nexus-core",
-      "domain": "Core Nexus domain/runtime logic and canonical core contracts"
+      "domain": "Evidence Trust Core + Completion Certification truth: evidence ingestion/normalization/integrity, ChangeSet verification reduction, certification policy and receipts. It does not own execution-lane selection, CapabilityPlanner routing, Workforce selection, agent launching, protected merge, release or deployment authority."
     },
     {
       "repository": "James3014/nexus-learning",
-      "domain": "Learning, impact, feedback and downstream learning-consumer behavior"
+      "domain": "Evidence-bounded learning, outcome/effectiveness measurement, projections, recommendations and externally validated adoption/rollback contracts. Recommendation is not route, workforce, approval, merge or production authority."
     },
     {
       "repository": "James3014/nexus-open-swe-runtime",
-      "domain": "External Open SWE / Deep Agents execution runtime, bounded diagnosis/repair workers and OpenCLI-backed ChatGPT Web model transport"
+      "domain": "Replaceable external execution runtime: semantic execution, diagnosis, bounded repair, model transport and authorized tool execution. It does not own Completion truth, Repository Intelligence truth, routing or governance authority."
     },
     {
       "repository": "James3014/repository-intelligence-engine",
-      "domain": "Repository Intelligence analysis, revision/readiness/CI/overlap/change-impact evidence"
+      "domain": "Deterministic transport-neutral repository/PR/CI advisory intelligence: revision identity, readiness, overlap, CI evidence, change impact, CFI and external-intelligence advisory envelopes. Advisory only; no LLM, worker dispatch, approval, merge or repository-write authority."
     },
     {
       "repository": "James3014/nexus-runtime",
-      "domain": "Nexus host/runtime packaging, activation and runtime integration surfaces"
+      "domain": "Independent planning/admission and execution-coordination package: retry/replan state, writer/event boundaries, durable context/state and explicit composition contracts. Core, Learning, Open SWE and Repository Intelligence remain external owners; provider/service selection is not implicit."
+    },
+    {
+      "repository": "James3014/nexus-opencli-reviewer",
+      "domain": "Optional semantic PR-review application and compatibility consumer. It may collect/bind PR evidence, run bounded OpenCLI/ChatGPT semantic review and publish PRE_REVIEW_ONLY advisory output, while canonical deterministic Repository Intelligence remains owned by repository-intelligence-engine."
     }
   ],
   "capabilities": [
@@ -63,7 +67,7 @@
       ],
       "knownEvidence": [
         "OpenSWE invokes the installed OpenCLI executable with an explicit profile and ephemeral site session; OpenCLI then uses its ChatGPT WEB transport.",
-        "Resident five-repository canary evidence records OpenCLI 1.8.7 with Browser Bridge 1.0.24 connected and accepted terminal evidence preserved."
+        "Resident five-repository canary evidence records the accepted bounded OpenCLI/Browser Bridge lineage."
       ],
       "liveVerification": [
         "Verify current installed nexus-open-swe-runtime identity and configured OpenCLI executable/profile.",
@@ -92,19 +96,21 @@
       "components": [
         "workspace/worktree isolation",
         "bounded local-agent sessions",
-        "provider/model catalog admission",
-        "Chat Swarm durable task/carrier lifecycle",
+        "provider/model catalog projection",
+        "durable task/session/effect state",
+        "Chat Swarm coordination adapters",
         "cutover/restart reconciliation"
       ],
       "evidenceRefs": [],
       "knownEvidence": [],
       "liveVerification": [
-        "Inspect the live DevSpace capability manifest and provider catalog instead of treating static policy as runtime truth."
+        "Inspect the live DevSpace capability manifest and provider catalog instead of treating static policy as runtime truth.",
+        "Keep durable identity/reconciliation primitives separate from optional Swarm topology and provider strategy."
       ],
       "doNotDuplicateBeforeEvaluation": [
         "A second local-agent execution controller",
         "A second provider catalog truth source",
-        "A second durable swarm/task ledger"
+        "A second durable task/effect/session ledger"
       ]
     },
     {
@@ -118,22 +124,27 @@
         "External Intelligence"
       ],
       "canonicalOwnerRepository": "James3014/Nexus-new",
-      "relatedRepositories": [],
+      "relatedRepositories": [
+        "James3014/nexus-runtime"
+      ],
       "components": [
-        "CapabilityPlanner",
-        "Task Card and authority contracts",
-        "External Intelligence control plane",
+        "current CapabilityPlanner route/capability authority",
+        "execution-lane and collaboration authority contracts",
+        "Task/Issue governance contracts",
+        "External Intelligence control-plane integration",
         "cross-repository architecture lineage"
       ],
       "evidenceRefs": [
         "AGENTS.md",
         "docs/governance/current_operating_mode.yaml",
-        "docs/agents/TASK_EXECUTION_CONTRACT.md"
+        "docs/agents/TASK_EXECUTION_CONTRACT.md",
+        "docs/architecture/AI_CONTROL_PLANE_BOUNDARY.md"
       ],
       "knownEvidence": [],
       "liveVerification": [
         "Read current operating mode and active authority before mutation.",
-        "Do not treat this discovery index as a second route/capability selector."
+        "Do not treat this discovery index as a second route/capability selector.",
+        "Planner algorithm-source convergence is separate future work; do not create a third planner or infer an ownership transfer from package extraction alone."
       ],
       "doNotDuplicateBeforeEvaluation": [
         "A second CapabilityPlanner/router authority",
@@ -144,22 +155,34 @@
       "id": "nexus_core_domain_runtime",
       "intentKeywords": [
         "nexus-core",
-        "core contract",
-        "core runtime",
-        "domain logic"
+        "Evidence Trust",
+        "Completion Core",
+        "AcceptanceContract",
+        "ChangeSet",
+        "EvidenceBundle",
+        "certification receipt"
       ],
       "canonicalOwnerRepository": "James3014/nexus-core",
-      "relatedRepositories": [],
+      "relatedRepositories": [
+        "James3014/Nexus-new"
+      ],
       "components": [
-        "core Nexus domain/runtime contracts"
+        "Evidence Trust Core",
+        "Completion Certification",
+        "ChangeSet verification reduction",
+        "certification policy and receipts"
       ],
       "evidenceRefs": [],
-      "knownEvidence": [],
+      "knownEvidence": [
+        "The capability id is retained for v1 discovery-receipt compatibility; nexus-core is a truth/certification boundary, not the general planning or execution runtime."
+      ],
       "liveVerification": [
-        "Inspect current nexus-core source and consumers before moving core behavior into another repository."
+        "Inspect current nexus-core public contracts and actual consumers before moving certification behavior into another repository.",
+        "Do not move lane, route, worker, agent-launch, merge or deployment authority into Core for convenience."
       ],
       "doNotDuplicateBeforeEvaluation": [
-        "Core domain behavior already owned by nexus-core"
+        "A second Evidence Trust implementation",
+        "A second Completion/certification truth owner"
       ]
     },
     {
@@ -167,22 +190,27 @@
       "intentKeywords": [
         "nexus-learning",
         "learning",
-        "impact",
+        "effectiveness",
         "feedback",
+        "recommendation",
         "learning consumer"
       ],
       "canonicalOwnerRepository": "James3014/nexus-learning",
       "relatedRepositories": [],
       "components": [
-        "learning and downstream learning-consumer behavior"
+        "learning episodes and projections",
+        "outcome/effectiveness measurement",
+        "bounded policy recommendation/validation/adoption/rollback evidence"
       ],
       "evidenceRefs": [],
-      "knownEvidence": [],
+      "knownEvidence": [
+        "Recommendation != Authority; learning output cannot self-promote routing, workforce or approval."
+      ],
       "liveVerification": [
-        "Inspect current learning consumers and impact contracts before creating a parallel feedback store."
+        "Inspect current learning consumers and evidence contracts before creating a parallel feedback store or making Learning mandatory for task completion."
       ],
       "doNotDuplicateBeforeEvaluation": [
-        "A second learning/impact truth source"
+        "A second learning/effectiveness truth source"
       ]
     },
     {
@@ -193,49 +221,106 @@
         "PR readiness",
         "CI triage",
         "overlap",
-        "change impact"
+        "change impact",
+        "CFI",
+        "EIA advisory"
       ],
       "canonicalOwnerRepository": "James3014/repository-intelligence-engine",
       "relatedRepositories": [
-        "James3014/devspace"
+        "James3014/devspace",
+        "James3014/nexus-opencli-reviewer"
       ],
       "components": [
         "revision/staleness analysis",
         "PR readiness",
-        "CI evidence",
+        "CI evidence and CFI",
         "cross-PR overlap",
-        "change impact"
+        "change impact",
+        "external-intelligence automation advisory"
       ],
       "evidenceRefs": [],
-      "knownEvidence": [],
+      "knownEvidence": [
+        "The engine is deterministic, transport-neutral and advisory-only; semantic consumers must not reimplement its decision logic."
+      ],
       "liveVerification": [
-        "Inspect live Repository Intelligence tool surface and source ownership before adding another repository-analysis engine."
+        "Inspect the exact engine revision and consumer binding before adding another repository-analysis implementation."
       ],
       "doNotDuplicateBeforeEvaluation": [
-        "A second repository intelligence engine"
+        "A second repository intelligence engine",
+        "A duplicate readiness/CFI/overlap classifier inside a semantic consumer"
       ]
     },
     {
       "id": "nexus_runtime_activation",
       "intentKeywords": [
         "nexus-runtime",
-        "runtime activation",
-        "runtime host",
-        "packaging",
-        "deployment runtime"
+        "runtime planning",
+        "execution coordination",
+        "retry",
+        "replan",
+        "durable context",
+        "execution state"
       ],
       "canonicalOwnerRepository": "James3014/nexus-runtime",
-      "relatedRepositories": [],
-      "components": [
-        "runtime host/activation and packaging surfaces"
+      "relatedRepositories": [
+        "James3014/Nexus-new"
       ],
-      "evidenceRefs": [],
-      "knownEvidence": [],
+      "components": [
+        "planning/admission package composition",
+        "execution coordination and durable execution state",
+        "retry/replan contracts",
+        "writer/event boundaries",
+        "context assembly and explicit host bindings"
+      ],
+      "evidenceRefs": [
+        "README.md",
+        "docs/EXTRACTION_STATUS.md",
+        "docs/current-source-ownership.json"
+      ],
+      "knownEvidence": [
+        "The capability id is retained for v1 discovery-receipt compatibility; the current repository does not implicitly select providers, deploy services or own arbitrary host activation."
+      ],
       "liveVerification": [
-        "Inspect current runtime packaging/activation source before adding host activation behavior elsewhere."
+        "Resolve the repository's actual default branch before binding source; do not assume every canonical repo uses main.",
+        "Inspect current runtime public composition and downstream consumer pins before adding another planner/runtime coordinator."
       ],
       "doNotDuplicateBeforeEvaluation": [
-        "A second runtime activation controller"
+        "A second execution coordination/retry state owner",
+        "A third CapabilityPlanner implementation"
+      ]
+    },
+    {
+      "id": "semantic_pr_review_consumer",
+      "intentKeywords": [
+        "semantic PR review",
+        "OpenCLI reviewer",
+        "PRE_REVIEW",
+        "advisory comment",
+        "semantic reviewer"
+      ],
+      "canonicalOwnerRepository": "James3014/nexus-opencli-reviewer",
+      "relatedRepositories": [
+        "James3014/repository-intelligence-engine"
+      ],
+      "components": [
+        "PR/CI acquisition application flow",
+        "SHA-bound semantic review context",
+        "OpenCLI/ChatGPT semantic review transport",
+        "durable semantic attempts and reconciliation",
+        "idempotent PRE_REVIEW_ONLY advisory publication",
+        "legacy Repository Intelligence forwarding compatibility"
+      ],
+      "evidenceRefs": [],
+      "knownEvidence": [
+        "Canonical deterministic Repository Intelligence is external; reviewer.intelligence is forwarding-only compatibility and owns no classifier/readiness/CFI/EIA implementation."
+      ],
+      "liveVerification": [
+        "Verify the exact repository-intelligence-engine binding before changing reviewer intelligence behavior.",
+        "Keep semantic review/publication authority bounded to PRE_REVIEW_ONLY."
+      ],
+      "doNotDuplicateBeforeEvaluation": [
+        "A second deterministic Repository Intelligence implementation inside the reviewer",
+        "A second semantic-review attempt/publication ledger without evidence of need"
       ]
     }
   ]
