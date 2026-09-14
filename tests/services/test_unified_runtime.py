@@ -2134,16 +2134,24 @@ def test_registered_cli_spec_resolver_prefers_provider_command_env() -> None:
     assert spec.command == ("/opt/codex-wrapper", "--stdin", "--output", "plain")
 
 
-def test_registered_provider_executable_unifies_agy_aliases(monkeypatch) -> None:
-    monkeypatch.setattr("nexus.services.unified_runtime.shutil.which", lambda value: "/bin/echo")
+def test_registered_provider_executable_unifies_agy_aliases(monkeypatch, tmp_path: Path) -> None:
+    target_dir = tmp_path / "real"
+    target_dir.mkdir()
+    binary = target_dir / "agy"
+    binary.write_text("#!/bin/sh\nexit 0\n")
+    binary.chmod(0o700)
+    linked_dir = tmp_path / "linked"
+    linked_dir.symlink_to(target_dir, target_is_directory=True)
+    alias = str(linked_dir / "agy")
+    monkeypatch.setattr("nexus.services.unified_runtime.shutil.which", lambda value: alias)
     resolved = resolve_registered_provider_executable(
         "agy",
         environ={
-            "NEXUS_AGY_BIN": "/bin/echo",
-            "NEXUS_AGY_EXECUTABLE": "/bin/echo",
+            "NEXUS_AGY_BIN": alias,
+            "NEXUS_AGY_EXECUTABLE": alias,
         },
     )
-    assert resolved == str(Path("/bin/echo").resolve())
+    assert resolved == str(Path(alias).resolve())
 
 
 def test_registered_provider_executable_rejects_agy_alias_drift(monkeypatch) -> None:
