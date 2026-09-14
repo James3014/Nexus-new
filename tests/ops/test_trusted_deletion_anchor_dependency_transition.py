@@ -46,6 +46,8 @@ def test_pr960_transition_rejects_reuse_under_another_pr(
 
 def test_trusted_runtime_identity_is_wave2_merge() -> None:
     runtime = next(
-        record for record in anchor.TRUSTED_EXTERNAL_RUNTIME_PACKAGES if record[0] == "nexus-runtime"
+        record
+        for record in anchor.TRUSTED_EXTERNAL_RUNTIME_PACKAGES
+        if record[0] == "nexus-runtime"
     )
     assert runtime[3] == "b48fbd7abe96041bffcea31fa31fa90e78582f02"
