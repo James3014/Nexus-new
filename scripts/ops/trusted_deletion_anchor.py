@@ -98,6 +98,17 @@ TRUSTED_PR910_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, st
         "26e853cd712aaf96b188f4dc9f1e2e8feea3a0d8989fc321a84b28e8b6776b45",
     ),
 )
+# Exact one-use, four-way binding for Owner-approved PR #960 (Wave-2
+# nexus-runtime exact-pin adoption).
+TRUSTED_PR960_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    960,
+    (
+        "f4f3c2c390804e048d42aa30c447a64af1d079bf2881a93252a38a6674cfcf9f",
+        "26e853cd712aaf96b188f4dc9f1e2e8feea3a0d8989fc321a84b28e8b6776b45",
+        "2c2c1a9d9e2f12736fb3a33efbace9a7b264ca737c00e27ed37696dc5f560c34",
+        "ec48fa0ea3dc4403c84d26dcf73a0f18b88292270c4dc519986b06a92835ce35",
+    ),
+)
 REQUIRED_EVIDENCE_KEYS = {
     "schema_version",
     "status",
@@ -174,6 +185,7 @@ def _validate_trusted_dependency_contract(
     authorized_transition_records = (
         TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR910_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR960_DEPENDENCY_SNAPSHOT_TRANSITION,
     )
     for authorized_transition_record in authorized_transition_records:
         if authorized_transition_record is None:
