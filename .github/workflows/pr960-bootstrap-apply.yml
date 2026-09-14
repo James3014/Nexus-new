@@ -1,0 +1,45 @@
+name: PR960 bootstrap apply
+on:
+  push:
+    branches: [codex/pr960-trusted-admission-20260914]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: codex/pr960-trusted-admission-20260914
+          fetch-depth: 0
+      - name: Apply bounded trusted admission
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/ops/trusted_deletion_anchor.py')
+          s=p.read_text()
+          needle='''TRUSTED_PR910_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (\n    910,\n    (\n        "382f05ca47059a15465515ab704d2d54b8a2a95ae83318b3f98617cd982029c3",\n        "5933bdf1497f6d0e852fc26730dd4eec7985d72512e0ff061fc2ab7f59842961",\n        "f4f3c2c390804e048d42aa30c447a64af1d079bf2881a93252a38a6674cfcf9f",\n        "26e853cd712aaf96b188f4dc9f1e2e8feea3a0d8989fc321a84b28e8b6776b45",\n    ),\n)\n'''
+          add=needle+'''# Exact one-use, four-way binding for Owner-approved PR #960 (Wave-2\n# nexus-runtime exact-pin adoption).\nTRUSTED_PR960_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (\n    960,\n    (\n        "f4f3c2c390804e048d42aa30c447a64af1d079bf2881a93252a38a6674cfcf9f",\n        "26e853cd712aaf96b188f4dc9f1e2e8feea3a0d8989fc321a84b28e8b6776b45",\n        "2c2c1a9d9e2f12736fb3a33efbace9a7b264ca737c00e27ed37696dc5f560c34",\n        "ec48fa0ea3dc4403c84d26dcf73a0f18b88292270c4dc519986b06a92835ce35",\n    ),\n)\n'''
+          assert s.count(needle)==1
+          s=s.replace(needle,add)
+          old='''    authorized_transition_records = (\n        TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION,\n        TRUSTED_PR910_DEPENDENCY_SNAPSHOT_TRANSITION,\n    )\n'''
+          new='''    authorized_transition_records = (\n        TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION,\n        TRUSTED_PR910_DEPENDENCY_SNAPSHOT_TRANSITION,\n        TRUSTED_PR960_DEPENDENCY_SNAPSHOT_TRANSITION,\n    )\n'''
+          assert s.count(old)==1
+          p.write_text(s.replace(old,new))
+
+          p=Path('tests/ops/test_trusted_deletion_anchor.py')
+          s=p.read_text()
+          marker='''\n\n@pytest.mark.parametrize(\n    ("name", "head", "head_lock", "product_init_is_regular"),\n'''
+          block='''\n\n\ndef test_pr960_dependency_snapshot_transition_is_exact_and_separate() -> None:\n    assert trusted_anchor.TRUSTED_PR960_DEPENDENCY_SNAPSHOT_TRANSITION == (\n        960,\n        (\n            "f4f3c2c390804e048d42aa30c447a64af1d079bf2881a93252a38a6674cfcf9f",\n            "26e853cd712aaf96b188f4dc9f1e2e8feea3a0d8989fc321a84b28e8b6776b45",\n            "2c2c1a9d9e2f12736fb3a33efbace9a7b264ca737c00e27ed37696dc5f560c34",\n            "ec48fa0ea3dc4403c84d26dcf73a0f18b88292270c4dc519986b06a92835ce35",\n        ),\n    )\n\n\ndef _pr960_snapshot_fixture(monkeypatch):\n    values = [b"trusted pyproject\\n", b"trusted lock\\n", b"head pyproject\\n", b"head lock\\n"]\n    hashes = trusted_anchor.TRUSTED_PR960_DEPENDENCY_SNAPSHOT_TRANSITION[1]\n    original_sha = trusted_anchor._sha\n    digest_by_value = dict(zip(values, hashes, strict=True))\n    monkeypatch.setattr(trusted_anchor, "_sha", lambda value: digest_by_value.get(value, original_sha(value)))\n    return values\n\n\ndef test_pr960_dependency_snapshot_transition_allows_exact_values(monkeypatch) -> None:\n    values = _pr960_snapshot_fixture(monkeypatch)\n    trusted_anchor._validate_trusted_dependency_contract(values[0], values[2], values[1], values[3], pull_request_number=960, head_product_init_is_regular=True)\n\n\n@pytest.mark.parametrize("tampered_index", range(4))\ndef test_pr960_dependency_snapshot_transition_rejects_each_hash_tamper(monkeypatch, tampered_index: int) -> None:\n    values = _pr960_snapshot_fixture(monkeypatch)\n    values[tampered_index] += b"tampered"\n    with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):\n        trusted_anchor._validate_trusted_dependency_contract(values[0], values[2], values[1], values[3], pull_request_number=960, head_product_init_is_regular=True)\n\n\n@pytest.mark.parametrize("pull_request_number", [910, 959, 961])\ndef test_pr960_dependency_snapshot_transition_rejects_other_prs(monkeypatch, pull_request_number: int) -> None:\n    values = _pr960_snapshot_fixture(monkeypatch)\n    with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):\n        trusted_anchor._validate_trusted_dependency_contract(values[0], values[2], values[1], values[3], pull_request_number=pull_request_number, head_product_init_is_regular=True)\n\n\ndef test_pr960_dependency_snapshot_transition_preserves_product_file_guard(monkeypatch) -> None:\n    values = _pr960_snapshot_fixture(monkeypatch)\n    with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):\n        trusted_anchor._validate_trusted_dependency_contract(values[0], values[2], values[1], values[3], pull_request_number=960, head_product_init_is_regular=False)\n'''
+          assert s.count(marker)==1
+          p.write_text(s.replace(marker,block+marker))
+          Path('.github/workflows/pr960-bootstrap-apply.yml').unlink()
+          PY
+          python -m pytest tests/ops/test_trusted_deletion_anchor.py -q
+          git diff --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scripts/ops/trusted_deletion_anchor.py tests/ops/test_trusted_deletion_anchor.py .github/workflows/pr960-bootstrap-apply.yml
+          git commit -m 'fix(ci): admit exact PR960 Runtime pin transition'
+          git push origin HEAD:codex/pr960-trusted-admission-20260914
