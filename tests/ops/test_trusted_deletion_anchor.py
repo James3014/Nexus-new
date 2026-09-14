@@ -83,7 +83,7 @@ def test_trusted_external_runtime_package_pair_is_exact() -> None:
             "nexus-runtime",
             "nexus_runtime",
             "https://github.com/James3014/nexus-runtime.git",
-            "d65e3ea7628a07bd73dee461750392bcdf85c3ac",
+            "b48fbd7abe96041bffcea31fa31fa90e78582f02",
         ),
     )
 
