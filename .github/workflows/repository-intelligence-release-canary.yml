@@ -1,0 +1,45 @@
+name: Repository Intelligence Release Canary
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/repository-intelligence-release-canary.yml"
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to inspect
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: read
+  statuses: read
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - id: ri
+        uses: James3014/repository-intelligence-engine@v0.1.1
+        with:
+          pr-number: ${{ github.event.pull_request.number || inputs.pr_number }}
+
+      - name: Assert bounded canary outputs
+        shell: bash
+        env:
+          RI_CLAIM_CEILING: ${{ steps.ri.outputs.claim-ceiling }}
+          RI_CONTENT_SHA256: ${{ steps.ri.outputs.content-sha256 }}
+          RI_REPORT_PATH: ${{ steps.ri.outputs.report-path }}
+        run: |
+          set -euo pipefail
+          test "$RI_CLAIM_CEILING" = "ADVISORY_EVIDENCE_ONLY"
+          test "${#RI_CONTENT_SHA256}" -eq 64
+          test -s "$RI_REPORT_PATH"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: repository-intelligence-v0.1.1-canary
+          path: ${{ steps.ri.outputs.report-path }}
+          if-no-files-found: error
