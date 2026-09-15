@@ -13,6 +13,36 @@ default_execution:
   primary_bounded_work: DIRECT_CANONICAL
   delegated_bounded_work: DIRECT_DELEGATED
 
+lane_selection_basis: AUTHORITY_EFFECT_AND_RISK_NOT_REPOSITORY_IDENTITY
+
+protected_merge:
+  DIRECT_CANONICAL:
+    eligible_outcome: DIRECT_MERGE_ELIGIBLE
+    merge_sink: git_merge_pull_request
+    owner_confirmation_required: true
+    exact_repository_pr_base_head_required: true
+    scope_and_deletion_audit_required: true
+    relevant_tests_and_required_checks_required: true
+    branch_protection_and_expected_head_cas_required: true
+    third_party_independent_review_required: false
+    independent_acceptance_hash_required: false
+    standing_grant_required: false
+  DIRECT_DELEGATED:
+    eligible_outcome: DIRECT_MERGE_ELIGIBLE
+    merge_sink: git_merge_pull_request
+    owner_confirmation_required: true
+    worker_may_merge: false
+    coordinator_independent_verification_required: true
+    third_party_independent_review_required: false
+    independent_acceptance_hash_required: false
+    standing_grant_required: false
+  GOVERNED:
+    merge_sink: github_complete_pull_request
+    independent_acceptance_required: true
+    machine_verifiable_acceptance_provenance_required: true
+    standing_grant_required: true
+    github_merge_action_required: true
+
 task_card_required_by_default: false
 auto_chain: false
 
@@ -37,20 +67,29 @@ readiness_for_nexus_governance_default:
   post_decision_effect: SEPARATE_POLICY_CHANGE_REQUIRED
 
 escalate_to_governed_when:
-  - nexus_lifecycle_or_candidate_authority_required
+  - nexus_lifecycle_authority_change
   - route_or_capability_authority_change
-  - workforce_authority_change
+  - workforce_admission_or_worker_authority_change
   - security_boundary_weakening
+  - authentication_or_authorization_security_semantics
   - migration_or_schema_authority_change
   - production_data_mutation_authority
-  - protected_integration_or_ref_operation
-  - release_or_public_production_claim
+  - protected_ref_operation_outside_exact_owner_confirmed_pr_merge
+  - release_authority
+  - production_activation
+  - external_irreversible_effect
+  - public_production_claim
+  - break_glass_governance_recovery
+  - owner_selected_governed
 
 fail_closed:
   missing_invalid_or_ambiguous_mode: REQUIRE_EXPLICIT_CURRENT_OWNER_LANE
 
 principles:
   - GOVERNANCE_INTENSITY_SCALES_WITH_CLAIM_AND_CONSEQUENCE
+  - REPOSITORY_IDENTITY_DOES_NOT_SELECT_EXECUTION_OR_MERGE_LANE
+  - NEXUS_SELF_MODIFICATION_DOES_NOT_BY_ITSELF_REQUIRE_NEXUS_GOVERNANCE
+  - DIRECT_AND_GOVERNED_PROTECTED_MERGE_SEMANTICS_ARE_DISTINCT
   - OPERATING_MODE_SELECTS_ENGINEERING_EXECUTION_LANE_NOT_CAPABILITYPLANNER_ROUTE
   - G10_PROVES_GOVERNED_PATH_NOT_DEFAULT_CUTOVER
   - GOVERNED_ATTEMPT_NEVER_SILENTLY_DOWNGRADES
