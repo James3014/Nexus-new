@@ -411,7 +411,10 @@ def test_task_execution_contract_preserves_direct_delegated_exception():
     assert "exceeds the `DIRECT_DELEGATED` boundary" in normalized
     assert "Nexus lifecycle/Candidate authority" in normalized
     assert "changes route/lifecycle/workforce/security authority" in normalized
-    assert "An exact Owner-confirmed protected PR merge is not by itself such a condition" in normalized
+    assert (
+        "An exact Owner-confirmed protected PR merge is not by itself such a condition"
+        in normalized
+    )
     assert "production/public claim" in normalized
     assert (
         "Escalate to this governed contract before mutation when implementation is delegated"
