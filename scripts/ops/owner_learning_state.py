@@ -6,7 +6,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, TypedDict
 
 SCHEMA = "owner_learning.current_state.v1"
 CURRENT_HEADING = "## Current Learning State — bounded bootstrap projection"
@@ -20,6 +20,21 @@ class LedgerContractError(ValueError):
     """Raised when the Owner Learning Ledger violates the projection contract."""
 
 
+class DomainRecord(TypedDict):
+    domain: str
+    level: str
+    evidence_boundary: str
+    next_case: str
+
+
+class Projection(TypedDict):
+    schema: str
+    source: str
+    source_sha256: str
+    priorities: list[str]
+    domains: list[DomainRecord]
+
+
 @dataclass(frozen=True)
 class DomainState:
     domain: str
@@ -27,7 +42,7 @@ class DomainState:
     evidence_boundary: str
     next_case: str
 
-    def as_dict(self) -> dict[str, str]:
+    def as_dict(self) -> DomainRecord:
         return {
             "domain": self.domain,
             "level": self.level,
@@ -47,7 +62,9 @@ def _find_unique_section(text: str, heading: str, next_prefix: str = "## ") -> s
     if line_end == -1:
         return ""
     body_start = line_end + 1
-    next_match = re.search(rf"(?m)^{re.escape(next_prefix)}(?!#)", text[body_start:])
+    next_match = re.search(
+        rf"(?m)^{re.escape(next_prefix)}(?!#)", text[body_start:]
+    )
     if next_match is None:
         return text[body_start:]
     return text[body_start : body_start + next_match.start()]
@@ -131,7 +148,7 @@ def _ensure_unique_event_ids(text: str) -> None:
         )
 
 
-def build_projection(text: str, *, source: str) -> dict[str, object]:
+def build_projection(text: str, *, source: str) -> Projection:
     """Project reviewed Ledger state without inferring mastery from prose."""
 
     _ensure_unique_event_ids(text)
@@ -156,7 +173,7 @@ def projection_json(text: str, *, source: str) -> str:
     )
 
 
-def load_projection(path: Path) -> dict[str, object]:
+def load_projection(path: Path) -> Projection:
     text = path.read_text(encoding="utf-8")
     return build_projection(text, source=path.as_posix())
 
