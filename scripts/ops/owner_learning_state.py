@@ -117,11 +117,9 @@ def _parse_domains(section: str) -> list[DomainState]:
         if cells[0] == "Architecture domain" or set(cells[0]) <= {"-", ":"}:
             continue
         if cells[1] not in ALLOWED_LEVELS:
-            if cells[1]:
-                raise LedgerContractError(
-                    f"unsupported mastery level {cells[1]!r} for domain {cells[0]!r}"
-                )
-            continue
+            raise LedgerContractError(
+                f"unsupported mastery level {cells[1]!r} for domain {cells[0]!r}"
+            )
         rows.append(DomainState(*cells))
     if not rows:
         raise LedgerContractError("Current Learning State has no parsed architecture domains")

@@ -61,6 +61,11 @@ def test_projection_rejects_unknown_mastery_level() -> None:
         build_projection(_ledger(level="L5"), source="ledger.md")
 
 
+def test_projection_rejects_blank_mastery_level() -> None:
+    with pytest.raises(LedgerContractError, match="unsupported mastery level"):
+        build_projection(_ledger(level=""), source="ledger.md")
+
+
 def test_projection_rejects_duplicate_event_ids() -> None:
     events = """### LA-20260915-001 — first
 
@@ -68,6 +73,16 @@ def test_projection_rejects_duplicate_event_ids() -> None:
 """
     with pytest.raises(LedgerContractError, match="duplicate learning-event IDs"):
         build_projection(_ledger(events=events), source="ledger.md")
+
+
+def test_projection_rejects_duplicate_domain_rows() -> None:
+    text = _ledger().replace(
+        "| Domain B | L1 | Evidence B | Next B |",
+        "| Domain A | L1 | Evidence B | Next B |",
+    )
+
+    with pytest.raises(LedgerContractError, match="duplicate domain rows"):
+        build_projection(text, source="ledger.md")
 
 
 def test_projection_rejects_missing_current_state() -> None:
