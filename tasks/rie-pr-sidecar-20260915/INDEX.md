@@ -8,40 +8,40 @@
 - **Source basis snapshot:** `James3014/Nexus-new#969 @ 2026-09-15T07:02:30Z`; `nexus.project_entry` binding `8f9f1b4e6563f8aabb5c0a2397af0daa78b95bf10070adfda11a13cce6453206`; GitHub `main` `68d8b5408f3d4fe60a701d9c79ccd6a2129549c5`; PR #968 original head `32bc3b6844c24fc4ed9be691ce55674a27aab6ae`
 - **Auto-chain:** `false`
 - **Parallel execution:** `false`
-- **Current frontier:** `TASK-001`
+- **Current frontier:** `none`
 - **Maximum campaign claim:** `NEXUS_NEW_RIE_READ_ONLY_PR_SIDECAR_INTEGRATED`
 
 ## 1. Source handoff import
 
 | Source group | Requirements | Acceptance | Observable outcome | Dependency seam | Verification seam | Maximum claim | Scope class | Minimum MCP profile | Known blocker | Compiled tasks |
 |---|---|---|---|---|---|---|---|---|---|---|
-| `ISSUE-969-RIE-SIDECAR` | `REQ-969-1` | `AC-969-1`–`AC-969-8` | Nexus-new PRs automatically emit read-only RIE advisory evidence from the accepted workflow | immutable `repository-intelligence-engine@v0.1.1`; existing Nexus-new CI remains authoritative for CI | exact PR head/base/main; changed paths; exact-head CI; RIE artifact; independent acceptance; protected merge/readback | `NEXUS_NEW_RIE_READ_ONLY_PR_SIDECAR_INTEGRATED` | `small` | `CANDIDATE` | final protected merge requires fresh canonical completion-host source and a valid current `GITHUB_MERGE` standing grant | `TASK-001` |
+| `ISSUE-969-RIE-SIDECAR` | `REQ-969` | `AC-9691`; `AC-9692`; `AC-9693`; `AC-9694`; `AC-9695`; `AC-9696`; `AC-9697`; `AC-9698` | Nexus-new PRs automatically emit read-only RIE advisory evidence from the accepted workflow | immutable `repository-intelligence-engine@v0.1.1`; existing Nexus-new CI remains authoritative for CI | exact PR head/base/main; changed paths; exact-head CI; RIE artifact; independent acceptance; protected merge/readback | `NEXUS_NEW_RIE_READ_ONLY_PR_SIDECAR_INTEGRATED` | `small` | `CANDIDATE` | final protected merge must re-prove current completion-host source identity and a valid current `GITHUB_MERGE` standing grant | `TASK-001` |
 
 ## 2. Requirement coverage
 
 | Requirement | Acceptance | Implementing task | Witness task | Coverage status |
 |---|---|---|---|---|
-| `REQ-969-1` | `AC-969-1` | `TASK-001` | `TASK-001` | `FULL` |
-| `REQ-969-1` | `AC-969-2` | `TASK-001` | `TASK-001` | `FULL` |
-| `REQ-969-1` | `AC-969-3` | `TASK-001` | `TASK-001` | `FULL` |
-| `REQ-969-1` | `AC-969-4` | `TASK-001` | `TASK-001` | `FULL` |
-| `REQ-969-1` | `AC-969-5` | `TASK-001` | `TASK-001` | `FULL` |
-| `REQ-969-1` | `AC-969-6` | `TASK-001` | `TASK-001` | `FULL` |
-| `REQ-969-1` | `AC-969-7` | `TASK-001` | `TASK-001` | `FULL` |
-| `REQ-969-1` | `AC-969-8` | `TASK-001` | `TASK-001` | `FULL` |
+| `REQ-969` | `AC-9691` | `TASK-001` | `TASK-001` | `FULL` |
+| `REQ-969` | `AC-9692` | `TASK-001` | `TASK-001` | `FULL` |
+| `REQ-969` | `AC-9693` | `TASK-001` | `TASK-001` | `FULL` |
+| `REQ-969` | `AC-9694` | `TASK-001` | `TASK-001` | `FULL` |
+| `REQ-969` | `AC-9695` | `TASK-001` | `TASK-001` | `FULL` |
+| `REQ-969` | `AC-9696` | `TASK-001` | `TASK-001` | `FULL` |
+| `REQ-969` | `AC-9697` | `TASK-001` | `TASK-001` | `FULL` |
+| `REQ-969` | `AC-9698` | `TASK-001` | `TASK-001` | `FULL` |
 
 ## 3. Dependency graph
 
 | Task ID | Status | Type | Slicing strategy | Blocked by | Edge type | Unlock evidence | Observable outcome | Verification seam | Maximum claim | Scope class | MCP profile | Transport status |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `TASK-001` | `ACTIVE` | `INTEGRATION_VERIFY` | `TRACER_BULLET` | `none` | `none` | `none` | accepted workflow + inert governance artifacts are independently verified and eligible for the repository's protected-merge gate | exact-head diff/CI/RIE artifact + independent acceptance + fresh merge preflight | before merge: `NEXUS_NEW_RIE_READ_ONLY_PR_SIDECAR_CANDIDATE_VERIFIED`; after verified merge/readback: campaign maximum claim | `small` | `CANDIDATE` | candidate/acceptance transport available; merge transport must rebind current completion host before mutation |
+| `TASK-001` | `PLANNED` | `INTEGRATION_VERIFY` | `TRACER_BULLET` | `none` | `none` | `none` | The exact governed PR candidate is independently verified and eligible to enter the repository's protected-merge gate without expanding RIE authority. | exact-head diff/CI/RIE artifact + independent acceptance + fresh merge preflight | `NEXUS_NEW_RIE_READ_ONLY_PR_SIDECAR_INTEGRATED` | `small` | `CANDIDATE` | `READY` |
 
 ## 4. Ready candidates and frontier selection
 
 - **Dependency-ready candidates:** `TASK-001`
-- **Selected frontier:** `TASK-001`
-- **Selection rationale:** the implementation already exists in PR #968 and has prior canary evidence; the smallest remaining work is exact-head re-verification, independent acceptance, and protected integration without reopening implementation design.
-- **Exact unblock condition:** `none` for candidate/acceptance work. Protected merge separately requires fresh `NEXUS_CANONICAL_SOURCE_ROOT == GitHub main`, a valid current `GITHUB_MERGE` standing grant, exact accepted head/base, and terminal required checks.
+- **Selected frontier:** `none`
+- **Selection rationale:** the approved non-spec Issue compiles to one bounded candidate-verification task; this Task Card bundle intentionally stops at Owner review and does not self-authorize execution.
+- **Exact unblock condition:** execution proceeds only under the separate current Owner instruction plus fresh repository evidence; protected merge additionally requires a current canonical completion host, valid exact standing grant, independent acceptance and terminal checks.
 
 ## 5. Campaign authority and non-goals
 
