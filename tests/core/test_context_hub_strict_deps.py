@@ -116,7 +116,10 @@ def test_context_hub_builds_context_assembly_contract(tmp_path):
     assert contract["task_id"] == "ctx-contract"
     assert contract["preserved_L0_L1"] is True
     assert contract["receipt"]["dropped_sources"][0]["drop_reason_code"] == "budget_exhausted"
-    assert contract["claim_boundary"][0] == "Context assembly contracts select context under budget only."
+    assert (
+        contract["claim_boundary"][0]
+        == "Context assembly contracts materialize already-selected context under budget only."
+    )
 
 
 def test_context_hub_uses_split_context_budget_source_builder(tmp_path, monkeypatch):
