@@ -119,14 +119,17 @@ as `workspace_clone` and `dependency_sync` remain valid stabilization tools and
 are not considered governance defects solely because they are not yet
 `NEXUS_GOVERNED`.
 
-Direct work becomes governed before mutation when it changes
-route/lifecycle/workforce authority, weakens security, changes migration or
-schema authority, requires protected branch/ref operations, or makes
-production/public claims, or otherwise exceeds the `DIRECT_CANONICAL` or
-`DIRECT_DELEGATED` boundary. Direct work does not commit, push, merge, delete,
-or auto-chain without exact Owner authority. The standing coordinator grant does
-not expand `DIRECT_CANONICAL`; it applies only to the governed GitHub Ready-Issue
-actions defined below.
+Direct work becomes governed before mutation when it changes CapabilityPlanner
+route/capability authority, Workforce admission/worker authority, Nexus
+lifecycle authority, authentication/authorization or another security boundary,
+migration/schema or production-data authority, release authority, production
+activation, an external irreversible effect, a public production claim,
+break-glass recovery, a protected ref outside an exact Owner-confirmed PR merge,
+or when the Owner explicitly selects `GOVERNED`. Repository identity and Nexus
+self-modification alone are not escalation triggers. Direct work does not
+commit, push, merge, delete, or auto-chain without exact Owner authority. The
+standing coordinator grant does not expand a direct lane; it applies only to
+the governed GitHub actions defined below.
 
 ## Direct delegated boundary
 
@@ -134,14 +137,16 @@ This governed contract is not required solely because implementation is
 delegated when the root `AGENTS.md` `DIRECT_DELEGATED` contract is satisfied.
 Escalate to this governed contract when delegated work exceeds the
 `DIRECT_DELEGATED` boundary, requires Nexus lifecycle/Candidate authority,
-changes route/lifecycle/workforce/security authority, requires protected
-integration, or otherwise meets a governed-work condition.
+changes route/lifecycle/workforce/security authority, or otherwise meets a
+governed-work condition. An exact Owner-confirmed protected PR merge is not by
+itself such a condition.
 
 `DIRECT_DELEGATED` means:
 
 Owner -> primary coordinator -> approved non-Nexus control plane such as
 DevSpace -> exactly one bounded external implementation worker -> independent
-primary-coordinator verification -> STOP.
+primary-coordinator verification -> optional exact Owner-confirmed protected PR
+merge -> STOP.
 
 It is not Nexus runtime, Task Card, Nexus lifecycle, CapabilityPlanner routing,
 Nexus Workforce Admission, or Candidate lifecycle authority. An explicit current
@@ -160,8 +165,9 @@ Eligibility requires, at minimum:
   release, or make production/public claims;
 - the worker cannot act as its own required independent verifier;
 - the primary coordinator independently inspects the physical changes and reruns
-  the applicable verification; worker-reported PASS is implementation evidence
-  only;
+  the applicable verification; this is the direct lane's independent
+  verification and requires no third reviewer; worker-reported PASS is
+  implementation evidence only;
 - `AUTO_CHAIN=false`;
 - timeout/disconnect reconciles the same durable worker/session and
   filesystem/Git/provider state before retry; do not blindly launch a
@@ -182,7 +188,7 @@ Card or switching to Nexus -- when the work materially requires:
 - unresolved product/business semantics;
 - potentially executed historical migration rewrite;
 - ambiguous production-data mutation/backfill;
-- protected merge/push/ref operations;
+- protected ref operations other than an exact Owner-confirmed PR merge;
 - release or production/public claim authority;
 - milestone/program-level `AUTO_CHAIN`;
 - the worker acting as its own required independent verifier.
@@ -305,29 +311,40 @@ receipt. Candidate, approval, integration, push, cleanup, and production/public
 claims are separate lifecycle states. A failed required commit is a block, not
 completion.
 
-The primary coordinator may prepare `MERGE_INTENT` and continue through normal
-GitHub workflow phases under a current standing grant whose exact repository,
-Goal, coordinator, and action binding remains valid. Before protected merge it
-must perform an independent exact-head review, terminal success for every
-ruleset-required check, an up-to-date base, complete scope/deletion audits,
-branch-protection verification, and expected-head/CAS. A normal phase
+Every protected merge first requires fresh exact repository/PR/base/head/diff,
+an up-to-date current `main`, complete scope/deletion audits, relevant tests,
+terminal success for every ruleset-required check, readable branch protection,
+mergeability, current Owner confirmation, and expected-head/CAS. Any
+PR/head/base/main or evidence drift invalidates the current merge attempt and
+must be revalidated before CAS.
+
+For `DIRECT_CANONICAL`, the primary coordinator may use the server-bound
+`git_merge_pull_request` once those gates pass. For `DIRECT_DELEGATED`, the same
+path is permitted only after the coordinator, distinct from the worker, has
+independently inspected the physical diff and rerun the applicable verifier.
+Neither direct lane requires a third-party GitHub `APPROVED` review, an
+`IndependentReviewReceipt`, `independent_acceptance_hash`, a standing-grant
+receipt, `GITHUB_MERGE`, or `github_complete_pull_request`.
+
+For `GOVERNED`, the primary coordinator may prepare `MERGE_INTENT` and continue
+under a current standing grant whose exact repository, Goal, coordinator, and
+action binding remains valid. Governed merge additionally requires independent
+acceptance and machine-verifiable acceptance provenance. A normal phase
 transition does not require redundant Owner reauthorization. A real authority
 boundary (scope widening, expiry/revocation/invalid binding, security change,
 new irreversible external effect, release/production, or genuine external
 platform approval) fails closed and requires the corresponding new decision.
-Any PR/head/base/main or evidence drift invalidates the current merge attempt
-and must be revalidated before CAS.
 `MERGE_INTENT` is evidence and standing authority is authorization only; neither
 substitutes for the verification gates. This GitHub action does not approve or
 integrate local Nexus lifecycle state.
-When the live MCP surface exposes `github_complete_pull_request`, ordinary
-protected-merge completion after independent acceptance uses that action rather
-than reconstructing merge evidence by hand. The action binds
+When the live MCP surface exposes `github_complete_pull_request`, governed
+protected-merge completion after independent acceptance uses that action. It binds
 `run_github_completion_loop()` to server-configured `NEXUS_CANONICAL_SOURCE_ROOT`
 and `NEXUS_PYTHON_BIN`; required checks still execute on the exact current
 integration subject; physical merge remains expected-head/CAS. Absence of the
 action is not a new Owner-approval boundary; fall back to the existing
-coordinator CAS path. The action cannot mint standing-grant or merge authority.
+governed coordinator CAS path. The action cannot mint standing-grant or merge
+authority.
 
 ## Blocks and residual debt
 
