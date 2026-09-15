@@ -10,9 +10,7 @@ from scripts.ops.owner_learning_state import (
 
 
 def _ledger(*, priorities: int = 3, level: str = "UNASSESSED", events: str = "") -> str:
-    priority_lines = "\n".join(
-        f"{idx}. **P{idx}** — detail" for idx in range(1, priorities + 1)
-    )
+    priority_lines = "\n".join(f"{idx}. **P{idx}** — detail" for idx in range(1, priorities + 1))
     return f"""# Ledger
 
 ## Current Learning State — bounded bootstrap projection
@@ -81,9 +79,7 @@ def test_repository_ledger_satisfies_projection_contract() -> None:
     root = Path(__file__).resolve().parents[2]
     ledger = root / "docs/learning/OWNER_ENGINEERING_LEARNING_LEDGER.md"
 
-    projection = build_projection(
-        ledger.read_text(encoding="utf-8"), source=ledger.as_posix()
-    )
+    projection = build_projection(ledger.read_text(encoding="utf-8"), source=ledger.as_posix())
 
     assert projection["schema"] == "owner_learning.current_state.v1"
     assert len(projection["priorities"]) <= 3
