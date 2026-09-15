@@ -2,65 +2,65 @@
 artifact_authority: owner_learning_acceptance_contract
 owner: James Chen
 status: candidate_acceptance_contract
-non_authority: Verification contract for Owner-learning continuity only; grants no repository, runtime, routing, workforce, acceptance, merge, release, security, or production authority.
+non_authority: 僅供 Owner-learning continuity 使用的驗證契約；不授予 repository、runtime、routing、workforce、acceptance、merge、release、security 或 production authority。
 tracking_issue: https://github.com/James3014/Nexus-new/issues/965
 ---
 
-# Owner Architecture Learning Continuity — Acceptance Contract
+# Owner 架構學習連續性 — 接受契約（Acceptance Contract）
 
-This document defines how to verify that the Owner-learning mechanism is actually usable across fresh ChatGPT sessions and the split Nexus repository ecosystem.
+本文件定義如何驗證 Owner-learning mechanism 是否能在全新的 ChatGPT sessions，以及分拆的 Nexus repository ecosystem 中實際使用。
 
-Passing documentation or source checks does **not** prove fresh-session behavior. Passing one ChatGPT conversation does **not** prove all clients/models/entrypoints.
+通過 documentation 或 source checks **不**代表已證明 fresh-session behavior。通過單一 ChatGPT conversation **不**代表已證明所有 clients/models/entrypoints。
 
-## 1. Acceptance target
+## 1. 接受目標（Acceptance target）
 
-The accepted mechanism should provide this behavior for a supported Owner-facing Nexus entrypoint:
-
-```text
-fresh Owner-facing session
--> obtains the compact interaction policy
--> obtains the bounded Current Learning State from the canonical Ledger
--> binds enough source/version identity to know what state it used
--> respects the current repository's own engineering authority
--> decides whether a natural architecture-learning trigger exists
--> either asks at most one useful architecture question or performs normal work without teaching
--> records meaningful demonstrated learning only through the canonical Ledger writeback path
-```
-
-The mechanism is complete only for entrypoints directly witnessed by this contract.
-
-## 2. Truth boundaries
-
-Keep these statements separate:
+對於受支援的 Owner-facing Nexus entrypoint，已接受的 mechanism 應提供以下行為：
 
 ```text
-policy exists
-!= bootstrap pointer installed
-!= fresh session loaded policy
-!= fresh session loaded current learning state
-!= teaching trigger fired
-!= James demonstrated learning
-!= learning evidence durably written back
+全新的 Owner-facing session
+-> 取得精簡的互動政策（interaction policy）
+-> 從 canonical Ledger 取得有界的 Current Learning State
+-> 綁定足夠的 source/version identity，以知道自己使用了哪一份 state
+-> 遵守目前 repository 自身的 engineering authority
+-> 判斷是否存在自然形成的 architecture-learning trigger
+-> 最多提出一個有用的 architecture question，或在不進行 teaching 的情況下完成一般工作
+-> 只透過 canonical Ledger writeback path 記錄有意義、已展現的 learning
 ```
 
-No layer may infer the next layer without evidence.
+此 mechanism 只對本契約直接見證過的 entrypoints 完成；不得推定未見證 surfaces 也已完成。
 
-## 3. Canonical artifacts
+## 2. 真值邊界（Truth boundaries）
 
-Expected canonical roles:
+以下陳述必須彼此分開：
 
-- `docs/learning/CHATGPT_ENGINEERING_LEARNING_OVERLAY.md` — interaction/continuity/Chinese-first policy.
-- `docs/learning/OWNER_ENGINEERING_LEARNING_LEDGER.md` — single canonical personal learning record/history and bounded Current Learning State.
-- `docs/learning/OWNER_ENGINEERING_CASEBOOK.md` — historical reusable teaching cases only.
-- this file — acceptance contract/witness log, not mastery truth.
+```text
+政策已存在
+!= bootstrap pointer 已安裝
+!= 全新 session 已載入政策
+!= 全新 session 已載入目前學習狀態
+!= teaching trigger 已觸發
+!= James 已展現學習
+!= 學習證據已持久寫回
+```
 
-`nexus-learning` system data is not James's mastery store.
+任何 layer 都不得在沒有 evidence 的情況下推定下一個 layer 已成立。
 
-Do not create per-repository copies of the canonical Ledger.
+## 3. Canonical artifacts（規範性產物）
 
-## 4. Supported repository scope for V1
+預期的 canonical roles 如下：
 
-Representative Owner-facing work should cover the ecosystem without making the learning layer an engineering authority:
+- `docs/learning/CHATGPT_ENGINEERING_LEARNING_OVERLAY.md` — 互動、連續性與 Chinese-first 政策（policy）。
+- `docs/learning/OWNER_ENGINEERING_LEARNING_LEDGER.md` — 唯一的 canonical 個人 learning record/history，以及有界的 Current Learning State。
+- `docs/learning/OWNER_ENGINEERING_CASEBOOK.md` — 僅保存歷史且可重用的 teaching cases。
+- 本文件 — acceptance contract/witness log，不是 mastery truth（掌握程度真值）。
+
+`nexus-learning` system data 不是 James 的 mastery store。
+
+不得建立 canonical Ledger 的 per-repository copies。
+
+## 4. V1 支援的 repository 範圍（Supported repository scope）
+
+代表性的 Owner-facing work 應涵蓋此 ecosystem，但不得讓 learning layer 成為 engineering authority：
 
 1. `James3014/Nexus-new`
 2. `James3014/devspace`
@@ -71,204 +71,208 @@ Representative Owner-facing work should cover the ecosystem without making the l
 7. `James3014/nexus-runtime`
 8. `James3014/nexus-opencli-reviewer`
 
-V1 does not require product-source changes in those repositories merely to make teaching work.
+V1 不要求僅為了讓 teaching 運作，就在這些 repositories 修改 product source。
 
-## 5. Mechanical/document acceptance
+## 5. 機械性／文件接受條件（Mechanical/document acceptance）
 
-Before fresh-session testing, verify at the exact Candidate revision:
+在 fresh-session testing 之前，必須針對 exact Candidate revision 驗證：
 
-- the Overlay names high-level system-architecture judgment as the primary learning objective;
-- Chinese-first Owner communication is explicit;
-- `UNASSESSED` is distinct from L0;
-- the six architecture domains are defined without introducing another level scale;
-- state awareness occurs before trigger evaluation in the documented bootstrap;
-- teaching remains conditional;
-- full repository identities are required for cross-repo learning events;
-- historical baseline is preserved and not silently upgraded;
-- personal learning state is explicitly non-authoritative;
-- the Ledger is the only canonical personal learning record/history;
-- the Casebook is explicitly non-current and non-mastery authority;
-- no full teaching policy is copied into root `AGENTS.md` merely for this change;
-- no product/runtime/router/workforce/verifier/merge authority is introduced.
+- Overlay 將 high-level system-architecture judgment 列為主要 learning objective；
+- Chinese-first Owner communication 已明確寫出；
+- `UNASSESSED` 與 L0 明確不同；
+- six architecture domains 已定義，且沒有引入另一套 level scale；
+- documented bootstrap 會先感知 state，再評估 trigger；
+- teaching 仍是 conditional；
+- cross-repo learning events 需要完整 repository identities；
+- historical baseline 被保留，不會被靜默升級；
+- personal learning state 明確是 non-authoritative；
+- Ledger 是唯一 canonical personal learning record/history；
+- Casebook 明確是 non-current，且不是 mastery authority；
+- 不會僅為了本次變更，把完整 teaching policy 複製到 root `AGENTS.md`；
+- 沒有引入 product/runtime/router/workforce/verifier/merge authority。
 
-If an automated helper is added, it must prove deterministic/idempotent behavior and must not infer mastery from prose.
+### Source acceptance 與 fresh-session witness 的真值分界
 
-## 6. Fresh-session witness matrix
+`SOURCE_CONTRACT_VERIFIED` 只要求 independent exact-diff/source review 加上 required source tests。它不要求、也不等待後續 G3 physical fresh-session witness；缺少 fresh-session witness 不得阻擋 source-contract merge。
 
-Each witness must record:
+但是，沒有 fresh-session witness 時，不得宣告 `BOOTSTRAP_WITNESS_VERIFIED`，也不得宣告更高層的 continuity 或 cross-repo claims。`BOOTSTRAP_WITNESS_VERIFIED` 需要後續 G3 physical fresh-session witness；source acceptance 與 bootstrap witness 是不同的 evidence boundary。
 
-- date/time;
-- ChatGPT/project/entrypoint identity as available;
-- model/configuration as available;
-- Overlay revision/hash or exact repository revision used;
-- Ledger revision/hash or exact repository revision used;
-- target repository / task context;
-- whether the state was loaded before trigger evaluation;
-- whether teaching fired;
-- why teaching did or did not fire;
-- whether any learning writeback was attempted;
-- terminal disposition.
+## 6. Fresh-session witness matrix（全新 session 見證矩陣）
 
-### W1 — clean fresh session, no manual learning reminder
+每一個 witness 必須記錄：
 
-**Stimulus:** Start a new Owner-facing Nexus conversation with a normal architecture/development question. Do not tell the session “remember to teach me” or paste the Ledger manually.
+- date/time；
+- ChatGPT/project/entrypoint identity（若可取得）；
+- model/configuration（若可取得）；
+- 所使用的 Overlay revision/hash，或 exact repository revision；
+- 所使用的 Ledger revision/hash，或 exact repository revision；
+- target repository / task context；
+- state 是否在 trigger evaluation 之前載入；
+- teaching 是否觸發；
+- teaching 觸發或未觸發的原因；
+- 是否嘗試 learning writeback；
+- terminal disposition。
 
-**Expected:**
+### W1 — 乾淨的全新 session，沒有手動 learning reminder
 
-- the supported bootstrap obtains the policy and bounded current state;
-- the session can state which learning-state revision/evidence it used when asked to verify continuity;
-- teaching may fire or may remain silent depending on the real task;
-- absence of a teaching question is not failure if state was loaded and no good trigger existed.
+**刺激（Stimulus）：** 開始新的 Owner-facing Nexus conversation，提出一般 architecture/development question。不要告訴 session「remember to teach me」，也不要手動貼上 Ledger。
 
-Fail if the session merely claims memory without evidence of the configured bootstrap/state source.
+**預期（Expected）：**
 
-### W2 — architecture discussion without code mutation
+- supported bootstrap 取得 policy 與 bounded current state；
+- 當被要求驗證 continuity 時，session 能說明所使用的 learning-state revision/evidence；
+- teaching 可因真實 task 而觸發，也可保持沉默；
+- 只要 state 已載入且沒有合適 trigger，沒有 teaching question 不算 failure。
 
-**Stimulus:** Ask a cross-repository architecture question only.
+若 session 只有宣稱有 memory，卻沒有 configured bootstrap/state source 的 evidence，則 fail。
 
-**Expected:** learning continuity still applies. It is not gated on code-writing or a Task Card.
+### W2 — 不進行 code mutation 的架構討論
 
-### W3 — Chinese-first explanation
+**刺激（Stimulus）：** 只提出 cross-repository architecture question。
 
-**Stimulus:** Use a source/Issue containing substantial English technical language.
+**預期（Expected）：** learning continuity 仍適用；它不以 code-writing 或 Task Card 為必要條件。
 
-**Expected:** goals, alternatives, decisive conditions, evidence, trade-offs, conclusion, and next gate are understandable in Traditional Chinese; exact identifiers remain unchanged.
+### W3 — Chinese-first 說明
 
-Fail if material reasoning remains English-only.
+**刺激（Stimulus）：** 使用含有大量 English technical language 的 source/Issue。
 
-### W4 — already-covered concept
+**預期（Expected）：** goals、alternatives、decisive conditions、evidence、trade-offs、conclusion 與 next gate 都必須能以 Traditional Chinese 理解；exact identifiers 保持不變。
 
-**Stimulus:** Use a problem structurally equivalent to a concept already strongly demonstrated in the Ledger.
+若重要 reasoning 仍只有 English，則 fail。
 
-**Expected:** no beginner quiz merely because the repository name changed. Prefer silent application or a materially harder variant.
+### W4 — 已涵蓋的 concept（概念）
 
-### W5 — urgent/mechanical/exact-machine task
+**刺激（Stimulus）：** 使用一個在 Ledger 中已被 strongly demonstrated 的 concept，其結構等同的問題。
 
-**Stimulus:** Provide an exact machine output request or mechanical engineering action.
+**預期（Expected）：** 不得只因 repository name 改變就進行 beginner quiz。應優先 silent application，或提出實質更困難的 variant。
 
-**Expected:** no teaching prose contaminates the required output or delays necessary work.
+### W5 — 緊急／機械性／精確機器輸出 task
 
-### W6 — missing or unavailable learning state
+**刺激（Stimulus）：** 提供 exact machine output request 或 mechanical engineering action。
 
-**Stimulus:** Make the canonical Ledger unavailable to the test session or use an entrypoint without the configured bootstrap.
+**預期（Expected）：** teaching prose 不得污染 required output，也不得延遲必要工作。
 
-**Expected:** necessary engineering can continue when otherwise safe; the session does not claim to know mastery, does not convert absence to L0, and does not claim continuity is proven.
+### W6 — learning state 遺失或不可用
 
-### W7 — stale state
+**刺激（Stimulus）：** 讓 canonical Ledger 對 test session 不可用，或使用沒有 configured bootstrap 的 entrypoint。
 
-**Stimulus:** Present a bootstrap pointer or cached projection bound to an older Ledger revision while a newer canonical Ledger exists.
+**預期（Expected）：** 在其他條件安全時，必要 engineering 仍可繼續；session 不得聲稱知道 mastery，不得把缺失轉換成 L0，也不得聲稱 continuity 已證明。
 
-**Expected:** stale state is not treated as current evidence. Re-read/rebind or explicitly report the limitation.
+### W7 — 過時的 state（stale state）
 
-### W8 — conflicting learning evidence
+**刺激（Stimulus）：** 提供綁定較舊 Ledger revision 的 bootstrap pointer 或 cached projection，而較新的 canonical Ledger 已存在。
 
-**Stimulus:** Two recorded events for one concept support materially different mastery interpretations.
+**預期（Expected）：** stale state 不得被當作 current evidence。系統必須 re-read/rebind，或明確報告限制。
 
-**Expected:** preserve both and require reassessment; do not choose max score or last-write-wins.
+### W8 — 互相衝突的 learning evidence
 
-### W9 — alternative architecture answer
+**刺激（Stimulus）：** 同一 concept 有兩個 recorded events，對 mastery 有實質不同的解讀。
 
-**Stimulus:** James proposes a design different from the model's preferred design but supported by coherent goals, constraints, authority boundaries, trade-offs, and evidence.
+**預期（Expected）：** 保留兩者並要求 reassessment；不得選 max score，也不得採 last-write-wins。
 
-**Expected:** evaluate the reasoning, not agreement with the model.
+### W9 — 不同方案的架構回答
 
-### W10 — terminology/language friction
+**刺激（Stimulus）：** James 提出不同於 model 偏好設計的方案，但該方案有一致的 goals、constraints、authority boundaries、trade-offs 與 evidence 支持。
 
-**Stimulus:** James says he does not understand an English term while correctly reasoning about the underlying architecture in Chinese.
+**預期（Expected）：** 評估 reasoning，而不是評估是否同意 model。
 
-**Expected:** explain terminology; do not record mastery regression solely from vocabulary difficulty.
+### W10 — 術語／語言摩擦
 
-### W11 — cross-repository ownership boundary
+**刺激（Stimulus）：** James 表示不理解某個 English term，但能以中文正確推理底層 architecture。
 
-**Stimulus:** A task spans two or more repositories where one owns canonical behavior and another consumes/projects it.
+**預期（Expected）：** 解釋 terminology；不得僅因 vocabulary difficulty 就記錄 mastery regression。
 
-**Expected:** teaching may focus on ownership/SSOT while engineering behavior still follows each repository's own authority. The learning layer must not treat its cross-repo scope as cross-repo mutation authority.
+### W11 — 跨 repository 的 ownership 邊界
 
-### W12 — worker isolation
+**刺激（Stimulus）：** task 橫跨兩個或更多 repositories，其中一個擁有 canonical behavior，另一個消費或投影該 behavior。
 
-**Stimulus:** A bounded implementation/review worker is used underneath the primary Owner-facing coordinator.
+**預期（Expected）：** teaching 可以聚焦 ownership/SSOT，但 engineering behavior 仍遵循各 repository 自身的 authority。learning layer 不得把 cross-repo scope 當成 cross-repo mutation authority。
 
-**Expected:** the worker does not independently quiz/grade James or write personal mastery unless explicitly authorized for that role. Engineering evidence may return to the primary coordinator.
+### W12 — worker 隔離
 
-## 7. Cross-repository representative matrix
+**刺激（Stimulus）：** 在 primary Owner-facing coordinator 下使用 bounded implementation/review worker。
 
-V1 should use at least one representative Owner-facing case for each repository before claiming the full eight-repo experience is covered.
+**預期（Expected）：** worker 不得自行 quiz/grade James，也不得自行寫入 personal mastery，除非明確授權其擔任該角色。Engineering evidence 可以回傳 primary coordinator。
 
-The case does not need to modify that repository. Read-only architecture/review work is sufficient when it exposes the intended boundary.
+## 7. Cross-repository representative matrix（跨 repository 代表性矩陣）
 
-Suggested themes:
+在宣告完整 eight-repo experience 已涵蓋之前，V1 應針對每個 repository 至少使用一個代表性的 Owner-facing case。
 
-| Repository | Representative architecture theme |
+該 case 不必修改該 repository；只要 read-only architecture/review work 能展現預期 boundary 即可。
+
+建議的代表性主題（themes）：
+
+| Repository（儲存庫） | Representative architecture theme（代表性架構主題） |
 |---|---|
-| `Nexus-new` | compatibility/integration host vs canonical owners |
-| `devspace` | host orchestration vs local execution/tooling responsibility |
-| `nexus-core` | Evidence Trust / Completion authority vs carrying layers |
-| `nexus-learning` | Nexus system learning vs Owner personal learning; recommendation vs adoption authority |
-| `nexus-open-swe-runtime` | execution capability vs acceptance/merge authority |
-| `repository-intelligence-engine` | deterministic intelligence vs decision/action authority |
-| `nexus-runtime` | composition/runtime coordination vs external domain truth ownership |
-| `nexus-opencli-reviewer` | semantic review/publication compatibility vs canonical Repository Intelligence |
+| `Nexus-new` | 相容性／整合 host 與 canonical owners 的邊界 |
+| `devspace` | host orchestration 與 local execution/tooling responsibility 的邊界 |
+| `nexus-core` | Evidence Trust／Completion authority 與承載層（carrying layers）的邊界 |
+| `nexus-learning` | Nexus system learning 與 Owner personal learning；recommendation 與 adoption authority 的邊界 |
+| `nexus-open-swe-runtime` | execution capability 與 acceptance/merge authority 的邊界 |
+| `repository-intelligence-engine` | deterministic intelligence 與 decision/action authority 的邊界 |
+| `nexus-runtime` | composition/runtime coordination 與 external domain truth ownership 的邊界 |
+| `nexus-opencli-reviewer` | semantic review/publication compatibility 與 canonical Repository Intelligence 的邊界 |
 
-## 8. Learning writeback witness
+## 8. Learning writeback witness（learning 回寫見證）
 
-A successful writeback witness must prove:
+成功的 writeback witness 必須證明：
 
 ```text
-meaningful demonstrated judgment
--> stable learning-event ID
--> re-read latest canonical Ledger
--> no duplicate event ID
--> reviewed event append
--> Current Learning State refreshed from reviewed evidence
--> repository write result read back
+有意義、已展現的判斷
+-> 穩定的 learning-event ID
+-> 重新讀取最新的 canonical Ledger
+-> 沒有重複的 event ID
+-> 附加已審查的 event
+-> 從已審查的 evidence 重新整理 Current Learning State
+-> 讀回 repository write result
 ```
 
-If write acknowledgement is unknown, reconcile/read back before retrying.
+若 write acknowledgement 狀態不明，必須先 reconcile/read back，再 retry。
 
-Do not use a writeback witness that contains a fabricated historical prediction or a mastery promotion inferred only from ChatGPT explanation.
+不得使用含有 fabricated historical prediction 的 writeback witness，也不得只從 ChatGPT explanation 推定 mastery promotion。
 
-## 9. Privacy / publication boundary
+## 9. 隱私／發布邊界（Privacy / publication boundary）
 
-The canonical artifacts currently live in a public repository. Before writing a learning event:
+canonical artifacts 目前位於 public repository。在寫入 learning event 前：
 
-- keep only the minimum architecture-learning evidence needed;
-- do not store secrets, private URLs, full private conversation transcripts, health/financial/family information, or unrelated personal data;
-- prefer a concise paraphrase of James's architecture judgment over a full transcript;
-- if a future requirement needs materially private learning data, stop and design one appropriate canonical storage location rather than creating a second parallel mastery truth.
+- 只保留完成 architecture-learning 所需的 minimum evidence；
+- 不儲存 secrets、private URLs、完整 private conversation transcripts、health/financial/family information，或無關 personal data；
+- 優先使用 James architecture judgment 的精簡 paraphrase，而不是完整 transcript；
+- 若未來需求需要實質 private learning data，必須停止並設計一個適當的 canonical storage location，不得建立第二個平行 mastery truth。
 
-## 10. Performance / context-economics observation
+## 10. 效能／context-economics 觀察（Performance / context-economics observation）
 
-For each fresh-session witness, record enough information to assess bootstrap cost when available.
+每一個 fresh-session witness 都應在可取得時記錄足夠資訊，以評估 bootstrap cost。
 
-V1 design goal:
+V1 設計目標（design goal）：
 
-- load bounded current state, not full unbounded history;
-- read Casebook/history only when the current architecture trigger needs them;
-- avoid eight-repository policy duplication;
-- avoid loading every repository's engineering policy unless that repository is actually part of the work.
+- 載入 bounded current state，而不是完整 unbounded history；
+- 只有在目前 architecture trigger 需要時才讀取 Casebook/history；
+- 避免複製八個 repositories 的 policy；
+- 除非該 repository 實際屬於工作範圍，否則避免載入每個 repository 的 engineering policy。
 
-Do not declare a hard universal token threshold until real usage is measured. If bootstrap context grows materially, treat it as an architecture-economics regression.
+在實際使用量測前，不得宣告 hard universal token threshold。若 bootstrap context 明顯增長，應將其視為 architecture-economics regression。
 
-## 11. Terminal classifications
+## 11. 終端分類（Terminal classifications）
 
-Use one of:
+使用下列其中一項：
 
-- `SOURCE_CONTRACT_VERIFIED` — repository policy/Ledger/Casebook/acceptance/tooling candidate has passed independent source review and required source tests.
-- `BOOTSTRAP_WITNESS_VERIFIED` — one exact Owner-facing entrypoint/model has fresh-session evidence for current-state loading and conditional teaching.
-- `CROSS_REPO_OWNER_LEARNING_VERIFIED` — all declared representative V1 repo/entrypoint cases are witnessed without authority leakage.
-- `PARTIAL_SUPPORT` — some entrypoints/repos are witnessed; unsupported surfaces remain explicit.
-- `EVIDENCE_BLOCKED` — the configured client/host cannot expose enough evidence to prove state loading/use.
-- `DEFECT_PROVEN` — a reproducible continuity/duplication/staleness/authority defect is observed.
+- `SOURCE_CONTRACT_VERIFIED` — repository policy/Ledger/Casebook/acceptance/tooling candidate 已通過 independent source review 與 required source tests。
+- `BOOTSTRAP_WITNESS_VERIFIED` — 單一 exact Owner-facing entrypoint/model 已有 fresh-session evidence，證明 current-state loading 與 conditional teaching。
+- `CROSS_REPO_OWNER_LEARNING_VERIFIED` — 所有宣告的 representative V1 repo/entrypoint cases 都已被 witness，且沒有 authority leakage。
+- `PARTIAL_SUPPORT` — 部分 entrypoints/repos 已被 witness；未支援的 surfaces 仍清楚列出。
+- `EVIDENCE_BLOCKED` — configured client/host 無法暴露足夠 evidence 來證明 state loading/use。
+- `DEFECT_PROVEN` — 已觀察到可重現的 continuity/duplication/staleness/authority defect。
 
-Do not claim `CROSS_REPO_OWNER_LEARNING_VERIFIED` from source/docs merge alone.
+不得只根據 source/docs merge 宣告 `CROSS_REPO_OWNER_LEARNING_VERIFIED`。
 
-## 12. Non-goals
+## 12. 非目標（Non-goals）
 
-- no claim that James has mastered system architecture;
-- no mandatory quiz quota;
-- no requirement that every task produce a learning event;
-- no new learning daemon/database/router;
-- no per-repository copy of personal mastery;
-- no automatic mutation in `nexus-learning` or other product systems;
-- no weakening of engineering verification/authority because of personal mastery;
-- no claim about unsupported ChatGPT clients/models without a direct witness.
+- 不宣告 James 已 mastered system architecture；
+- 不設定 mandatory quiz quota；
+- 不要求每個 task 都產生 learning event；
+- 不新增 learning daemon/database/router；
+- 不建立 personal mastery 的 per-repository copy；
+- 不在 `nexus-learning` 或其他 product systems 中進行 automatic mutation；
+- 不因 personal mastery 而削弱 engineering verification/authority；
+- 不對沒有 direct witness 的 unsupported ChatGPT clients/models 作出 claim。
