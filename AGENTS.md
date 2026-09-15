@@ -2,6 +2,15 @@
 
 Scope: all coding agents.
 
+## RepoLearn activation
+
+- RepoLearn: `ENABLED`.
+- Canonical source: `James3014/repo-learning`.
+- Capability: `repo-learning`.
+- Mode: `guided`.
+- If RepoLearn or its learning-state backend is unavailable, continue normal engineering without weakening this repository's authority or verification requirements.
+- This pointer activates/references canonical RepoLearn only; it does not redefine trigger, assessment, mastery, persistence, or cue-fading policy.
+
 ## Authority bootstrap
 
 - Repository authority: root `AGENTS.md`.
