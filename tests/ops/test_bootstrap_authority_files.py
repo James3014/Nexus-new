@@ -49,17 +49,176 @@ def test_bootstrap_files_use_current_worktree_authority():
     assert "../GEMINI.md" in contents[".gemini/GEMINI.md"]
 
 
+def test_current_operating_mode_bootstrap_is_direct_first_and_fail_closed():
+    import yaml
+
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    contract = (ROOT / "docs/agents/TASK_EXECUTION_CONTRACT.md").read_text(encoding="utf-8")
+    mode_path = ROOT / "docs/governance/current_operating_mode.yaml"
+    mode = yaml.safe_load(mode_path.read_text(encoding="utf-8"))
+
+    assert mode["schema"] == "nexus.operating_mode.v1"
+    assert mode["mode"] == "BOOTSTRAP"
+    assert mode["effective_scope"] == ["nexus-core", "open-swe", "learning-wiring"]
+    assert mode["default_execution"]["primary_bounded_work"] == "DIRECT_CANONICAL"
+    assert mode["default_execution"]["delegated_bounded_work"] == "DIRECT_DELEGATED"
+    assert mode["task_card_required_by_default"] is False
+    assert mode["auto_chain"] is False
+    assert (
+        mode["transition"]["existing_active_work"]
+        == "PRESERVE_CURRENT_EXECUTION_CONTRACT_UNTIL_COMPLETION"
+    )
+    assert mode["transition"]["new_work"] == "READ_CURRENT_OPERATING_MODE"
+    assert mode["transition"]["successor_work"] == "READ_CURRENT_OPERATING_MODE"
+    assert mode["transition"]["g10_completion"] == "DOES_NOT_CHANGE_DEFAULT_EXECUTION"
+    assert mode["transition"]["governance_default_ready"] == "REQUIRES_EXPLICIT_OWNER_DECISION"
+    assert mode["transition"]["governed_attempt_authority_failure"] == "BLOCK_REBIND_OR_RECONCILE"
+    assert mode["transition"]["silent_governed_to_direct_downgrade"] == "FORBIDDEN"
+    readiness = mode["readiness_for_nexus_governance_default"]
+    assert readiness["decision_authority"] == "OWNER_ONLY"
+    assert readiness["post_decision_effect"] == "SEPARATE_POLICY_CHANGE_REQUIRED"
+    assert set(readiness["required_evidence"]) == {
+        "representative_real_tasks_end_to_end_under_governed_authority",
+        "continuation_timeout_reconcile_and_restart_exercised",
+        "nexus_self_modification_without_routine_authority_recursion",
+        "task_card_grant_admission_and_execution_contracts_stable_for_normal_work",
+        "common_engineering_no_longer_requires_routine_direct_bypass",
+        "direct_recovery_path_restores_failed_governance_plane",
+    }
+    assert (
+        mode["fail_closed"]["missing_invalid_or_ambiguous_mode"]
+        == "REQUIRE_EXPLICIT_CURRENT_OWNER_LANE"
+    )
+
+    escalation = set(mode["escalate_to_governed_when"])
+    for required in (
+        "nexus_lifecycle_authority_change",
+        "route_or_capability_authority_change",
+        "workforce_admission_or_worker_authority_change",
+        "security_boundary_weakening",
+        "authentication_or_authorization_security_semantics",
+        "migration_or_schema_authority_change",
+        "production_data_mutation_authority",
+        "protected_ref_operation_outside_exact_owner_confirmed_pr_merge",
+        "release_authority",
+        "production_activation",
+        "external_irreversible_effect",
+        "public_production_claim",
+        "break_glass_governance_recovery",
+        "owner_selected_governed",
+    ):
+        assert required in escalation
+
+    assert "read `docs/governance/current_operating_mode.yaml`" in agents.lower()
+    assert "Existing active work keeps its\ncurrent execution contract until completion" in agents
+    assert "does not switch lanes mid-task" in agents
+    assert "fail closed to an\nexplicit current Owner lane decision" in agents
+    assert "cannot select\nor override a `CapabilityPlanner` route/capability" in agents
+    assert "Current self-hosting stabilization semantics" in agents
+    assert "does not by itself change the repository default\nexecution lane" in agents
+    assert "must never silently downgrade that attempt" in agents
+    assert "`NEXUS_GOVERNANCE_DEFAULT_READY` is an Owner-only transition decision" in agents
+    assert "Self-hosting stabilization and future default transition" in contract
+    assert "not an automatic repository-wide switch to governed-by-default work" in contract
+    assert "must never fall back\nto a direct / `OWNER_DIRECT` attempt" in contract
+    assert "may be declared only by the Owner" in contract
+
+
+def test_direct_canonical_protected_merge_does_not_require_governed_acceptance():
+    import yaml
+
+    mode = yaml.safe_load(
+        (ROOT / "docs/governance/current_operating_mode.yaml").read_text(encoding="utf-8")
+    )
+    direct = mode["protected_merge"]["DIRECT_CANONICAL"]
+
+    assert direct["eligible_outcome"] == "DIRECT_MERGE_ELIGIBLE"
+    assert direct["merge_sink"] == "git_merge_pull_request"
+    assert direct["owner_confirmation_required"] is True
+    assert direct["third_party_independent_review_required"] is False
+    assert direct["independent_acceptance_hash_required"] is False
+    assert direct["standing_grant_required"] is False
+
+
+def test_direct_delegated_uses_coordinator_verification_not_a_third_reviewer():
+    import yaml
+
+    mode = yaml.safe_load(
+        (ROOT / "docs/governance/current_operating_mode.yaml").read_text(encoding="utf-8")
+    )
+    delegated = mode["protected_merge"]["DIRECT_DELEGATED"]
+
+    assert delegated["merge_sink"] == "git_merge_pull_request"
+    assert delegated["worker_may_merge"] is False
+    assert delegated["coordinator_independent_verification_required"] is True
+    assert delegated["third_party_independent_review_required"] is False
+    assert delegated["standing_grant_required"] is False
+
+
+def test_governed_protected_merge_keeps_acceptance_and_authority_fail_closed():
+    import yaml
+
+    mode = yaml.safe_load(
+        (ROOT / "docs/governance/current_operating_mode.yaml").read_text(encoding="utf-8")
+    )
+    governed = mode["protected_merge"]["GOVERNED"]
+
+    assert governed["merge_sink"] == "github_complete_pull_request"
+    assert governed["independent_acceptance_required"] is True
+    assert governed["machine_verifiable_acceptance_provenance_required"] is True
+    assert governed["standing_grant_required"] is True
+    assert governed["github_merge_action_required"] is True
+
+
+def test_high_risk_authority_effects_still_escalate_to_governed():
+    import yaml
+
+    mode = yaml.safe_load(
+        (ROOT / "docs/governance/current_operating_mode.yaml").read_text(encoding="utf-8")
+    )
+    escalation = set(mode["escalate_to_governed_when"])
+
+    assert {
+        "route_or_capability_authority_change",
+        "workforce_admission_or_worker_authority_change",
+        "nexus_lifecycle_authority_change",
+        "security_boundary_weakening",
+        "authentication_or_authorization_security_semantics",
+        "production_data_mutation_authority",
+        "migration_or_schema_authority_change",
+        "release_authority",
+        "production_activation",
+        "external_irreversible_effect",
+        "public_production_claim",
+        "break_glass_governance_recovery",
+        "owner_selected_governed",
+    }.issubset(escalation)
+
+
+def test_repository_identity_never_selects_governed_merge_lane():
+    import yaml
+
+    mode = yaml.safe_load(
+        (ROOT / "docs/governance/current_operating_mode.yaml").read_text(encoding="utf-8")
+    )
+
+    assert mode["lane_selection_basis"] == "AUTHORITY_EFFECT_AND_RISK_NOT_REPOSITORY_IDENTITY"
+    assert "James3014/Nexus-new" not in mode["escalate_to_governed_when"]
+    assert "REPOSITORY_IDENTITY_DOES_NOT_SELECT_EXECUTION_OR_MERGE_LANE" in mode["principles"]
+
+
 def test_execution_domains_and_candidate_namespaces_are_unambiguous():
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     contract = (ROOT / "docs/agents/TASK_EXECUTION_CONTRACT.md").read_text(encoding="utf-8")
     launch = (ROOT / ".agents/skills/nexus-task-launch/SKILL.md").read_text(encoding="utf-8")
     merge = (ROOT / ".agents/skills/nexus-merge-gate/SKILL.md").read_text(encoding="utf-8")
 
-    assert "The Owner chooses the execution lane" in agents
+    assert "current_operating_mode.yaml" in agents
+    assert "the Owner explicitly selects a different lane" in agents
     assert "does not select local lifecycle" in agents
     assert "A GitHub PR Candidate" in agents
     assert "a local lifecycle Candidate" in agents
-    assert "never substitutes for program correctness" in agents
+    assert "never substitutes for program correctness" in _norm(agents)
     assert "Reviewer block/card omission is not\n  terminal `REJECTED`" in agents
 
     assert "GitHub collaboration and local lifecycle domains" in contract
@@ -100,7 +259,7 @@ def test_ready_issue_claim_contract_is_worker_neutral_and_fail_closed():
 
 
 def test_protected_merge_requires_exact_owner_slot_not_standing_grant():
-    """Legacy node ID retained for CI continuity; current assertions govern superseding semantics."""
+    """Legacy node ID retained; assertions enforce DIRECT/GOVERNED lane separation."""
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     contract = (ROOT / "docs/agents/TASK_EXECUTION_CONTRACT.md").read_text(encoding="utf-8")
     merge = (ROOT / ".agents/skills/nexus-merge-gate/SKILL.md").read_text(encoding="utf-8")
@@ -111,18 +270,19 @@ def test_protected_merge_requires_exact_owner_slot_not_standing_grant():
         ROOT / "tasks/standing-owner-autonomy-20260811/01-standing-coordinator-authority.md"
     ).read_text(encoding="utf-8")
 
-    assert "valid\n  covered standing grant remains valid across normal workflow phase" in agents
+    normalized_agents = _norm(agents)
+    assert "Merge follows lane, not repository" in normalized_agents
+    assert "DIRECT uses `git_merge_pull_request`" in normalized_agents
+    assert "no Task Card, third-party approval, acceptance receipt/hash" in normalized_agents
+    assert "GOVERNED retains independent acceptance" in normalized_agents
     assert "It grants no delegated-worker merge authority" in agents
-    assert (
-        "The primary coordinator may use protected PR merge only when the separate physical standing-grant receipt explicitly includes `GITHUB_MERGE`"
-        in agents
-    )
-    assert "It grants no delegated-worker or protected-merge\n  authority." not in agents
-    assert "normal\nGitHub workflow phases" in contract
-    assert "bound to the exact repository, PR, head, and base" in agents
-    assert "`MERGE_INTENT` is evidence" in agents
-    assert "Any PR/head/base/main or evidence drift invalidates" in contract
-    assert "valid\ncurrent standing grant explicitly covering" in merge
+    assert "For `DIRECT_CANONICAL`, the primary coordinator may use" in contract
+    assert "Neither direct lane requires a third-party GitHub `APPROVED` review" in contract
+    assert "For `GOVERNED`, the primary coordinator may prepare `MERGE_INTENT`" in contract
+    assert "Any PR/head/base/main or evidence drift invalidates" in _norm(contract)
+    assert "protected-merge semantics follow the already-selected execution lane" in _norm(merge)
+    assert "The direct merge sink is the server-bound `git_merge_pull_request`" in _norm(merge)
+    assert "For `GOVERNED`, keep the existing independent acceptance" in merge
     assert "ordinary phases from Task Card through main" in current
     assert "PLATFORM_APPROVAL_REQUIRED" in current
     assert "status: HISTORICAL_SUPERSEDED_BY_ISSUE_163_NORMAL_PHASE_AUTHORITY" in historical_card
@@ -161,15 +321,27 @@ def test_standing_grant_receipt_path_is_machine_local_and_loader_is_required():
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     store = (ROOT / "nexus/orchestrator/standing_grant_store.py").read_text(encoding="utf-8")
 
-    assert ".local/state/nexus/authority/standing-grant.json" in contract
+    assert ".local/state/nexus/authority/standing-grants/" in contract
+    assert "independent lock/CAS" in contract
+    assert "read-only compatibility" in contract
     assert "durable" in agents
     assert "load_standing_grant_receipt" in store
+    assert "write_standing_grant_receipt" in store
+    assert "StandingGrantKey" in store
     assert "Atomic durable write" in store
 
 
 def test_bootstrap_file_set_is_complete_and_tracked():
     for path in BOOTSTRAP_FILES:
         assert (ROOT / path).is_file(), path
+
+
+def test_open_swe_task_cards_have_exact_bindings_and_disable_auto_chain():
+    campaign_root = ROOT / "tasks/open-swe-execution-productionization-v1"
+    for task_id in ("TASK-001", "TASK-002", "TASK-003", "TASK-004"):
+        card = (campaign_root / f"{task_id}.md").read_text(encoding="utf-8")
+        assert card.count(f"task_id: `{task_id}`") == 1
+        assert "- **Auto-chain:** `false`" in card
 
 
 def test_external_bootstrap_recovery_boundary_is_fail_closed():
@@ -217,7 +389,7 @@ def test_direct_delegated_contract_is_explicit_and_bounded():
     assert "DIRECT_DELEGATED" in agents
     assert "exactly one bounded external worker" in agents
     assert "No Nexus Task Card, Nexus lifecycle, CapabilityPlanner routing" in agents
-    assert "Delegated implementation alone does not force governed execution" in agents
+    assert "delegation alone does not escalate" in agents
     assert "independently inspects the physical diff" in agents
     assert "AUTO_CHAIN=false" in agents
     assert "DIRECT_DELEGATED_BLOCKED" in combined
@@ -240,7 +412,10 @@ def test_task_execution_contract_preserves_direct_delegated_exception():
     assert "exceeds the `DIRECT_DELEGATED` boundary" in normalized
     assert "Nexus lifecycle/Candidate authority" in normalized
     assert "changes route/lifecycle/workforce/security authority" in normalized
-    assert "requires protected integration" in normalized
+    assert (
+        "An exact Owner-confirmed protected PR merge is not by itself such a condition"
+        in normalized
+    )
     assert "production/public claim" in normalized
     assert (
         "Escalate to this governed contract before mutation when implementation is delegated"

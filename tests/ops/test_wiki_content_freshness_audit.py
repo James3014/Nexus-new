@@ -45,6 +45,60 @@ def test_freshness_audit_requires_live_source_and_symbol(tmp_path: Path):
     assert report["symbols"][0]["symbols"] == [{"name": "main", "exists": True}]
 
 
+def test_python_symbols_traverses_module_conditionals_only(tmp_path: Path):
+    source = tmp_path / "conditional_symbols.py"
+    source.write_text(
+        """
+if ENABLED:
+    def branch_command():
+        pass
+else:
+    def branch_else_command():
+        pass
+
+try:
+    async def try_command():
+        pass
+except Exception:
+    def except_command():
+        pass
+else:
+    def try_else_command():
+        pass
+finally:
+    def finally_command():
+        pass
+
+def outer():
+    def nested_helper():
+        pass
+
+class Container:
+    if ENABLED:
+        def class_branch_helper():
+            pass
+
+    def method(self):
+        pass
+""",
+        encoding="utf-8",
+    )
+
+    symbols = audit._python_symbols(source)
+
+    assert {
+        "branch_command",
+        "branch_else_command",
+        "try_command",
+        "except_command",
+        "try_else_command",
+        "finally_command",
+    } <= symbols
+    assert "nested_helper" not in symbols
+    assert "class_branch_helper" not in symbols
+    assert "Container.method" in symbols
+
+
 def test_missing_source_path_fails_closed(tmp_path: Path):
     repo, vault, manifest = _fixture(tmp_path)
     manifest["content_freshness"]["page_overrides"]["01_System/Authority.md"][

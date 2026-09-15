@@ -1,0 +1,299 @@
+{
+  "objective": "807 corrective/live;850/853 resident five-repo;842project-entry;regression sweep",
+  "updated_at": "2026-09-10T07:58:28.152332+00:00",
+  "frozen_main": "d1b02c15fda5700fa60db07f8fffc70652f2f98d",
+  "requirements": {
+    "807_G9": {
+      "status": "PHYSICAL_RECEIPT_VERIFIED",
+      "head": "0ce450d6a96da665945a709d0731e185587cfe01",
+      "hashes": {
+        "g9-0ce450d6.md": "c61e25fb4a55a770c2694039c0dcbb2766028851f03b03573693530e2606b5d7",
+        "TERMINAL-POSTMERGE.md": "56f3cebb3167ffb6fab0ec6bfc050ea7c9852f8434b5d2ed04e6eefbbb4dee4e",
+        "g10-authority-transition.json": "78fc980e29a75c4d4cd0b700e009f63801ade0c666dc1750eec3a9102d0e6e19"
+      },
+      "current_regression": {
+        "source": "d1b02c15fda5700fa60db07f8fffc70652f2f98d",
+        "passed": 266,
+        "log": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/807-current-main-tests.log"
+      }
+    },
+    "807_G10": {
+      "status": "COMPLETED_PUBLICATION_RECONCILED",
+      "merge": "d0e269c83aad20f7d09b0d79f067180254a3ebd7",
+      "next": null,
+      "issue_comment": 5614924246,
+      "pr_comment": 5614924618
+    },
+    "807_live": {
+      "status": "CURRENT_GATEWAY_IDENTITY_MATCHES_ACCEPTED_R10",
+      "source": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "instance": "81c3389f257d433491579dd5ad296739"
+    },
+    "850_853": {
+      "status": "ACCEPTED_R28_REVALIDATED",
+      "owner": "recovery_path",
+      "terminal_comment": 5607138986,
+      "attempt_inventory": "issue853-attempts-r1-r28.json",
+      "attempt_count": 28,
+      "legacy_unknown": "Preserved; missing joins explicit; no resend authorized",
+      "runtime_readback": "issue850-resident-current-readback.json",
+      "publication_readback": "resident-publication-readback.json"
+    },
+    "842": {
+      "status": "COMPLETED_WITH_NATIVE_WITNESS",
+      "terminal_comment": 5613422356,
+      "source": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "fresh_readback": "gateway-final-readback.json"
+    },
+    "regression": {
+      "status": "PASS_REQUIRED_BOUNDED_REGRESSION",
+      "owner": "frontier_regression_audit",
+      "gap": null,
+      "evidence": "frontier-evidence-qualification.json",
+      "independent_readback": "controller-regression-readback.json",
+      "optional_skips": [
+        "2 Nexus optional deepagents tests",
+        "1 standalone cross-repo import test requiring a checkout at hard-coded canonical paths; accepted real r28 witness separately revalidated"
+      ]
+    }
+  },
+  "mutation": "No source or service mutation; #807/#851 terminal evidence publication reconciled",
+  "shared_resources": "no runtime lease claimed; peer confirmed no active daemon/Gateway work",
+  "layers": [
+    {
+      "item": "807",
+      "layer": "Implementation",
+      "status": "PASS",
+      "source": "807-terminal-reconciliation.md",
+      "revision": "0ce450d6a96da665945a709d0731e185587cfe01",
+      "freshness": "frozen source; original accepted merge independently read back",
+      "gap": "none within accepted milestone"
+    },
+    {
+      "item": "807",
+      "layer": "Source verification",
+      "status": "PASS",
+      "source": "807-current-main-tests.log",
+      "revision": "d1b02c15fda5700fa60db07f8fffc70652f2f98d",
+      "freshness": "frozen source; original accepted merge independently read back",
+      "gap": "none within accepted milestone"
+    },
+    {
+      "item": "807",
+      "layer": "Integration",
+      "status": "PASS",
+      "source": "final-issue-pr-readback.json; 807-terminal-reconciliation.md",
+      "revision": "d0e269c83aad20f7d09b0d79f067180254a3ebd7",
+      "freshness": "frozen source; original accepted merge independently read back",
+      "gap": "none within accepted milestone"
+    },
+    {
+      "item": "807",
+      "layer": "Install/package",
+      "status": "PASS",
+      "source": "gateway-final-readback.json; ../r10-runtime-outcome.json",
+      "revision": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "freshness": "frozen source; original accepted merge independently read back",
+      "gap": "none within accepted milestone"
+    },
+    {
+      "item": "807",
+      "layer": "Runtime",
+      "status": "PASS",
+      "source": "gateway-final-readback.json; ../r10-runtime-outcome.json",
+      "revision": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "freshness": "frozen source; original accepted merge independently read back",
+      "gap": "none within accepted milestone"
+    },
+    {
+      "item": "807",
+      "layer": "Deployment",
+      "status": "PASS",
+      "source": "gateway-final-readback.json; ../r10-runtime-outcome.json",
+      "revision": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "freshness": "frozen source; original accepted merge independently read back",
+      "gap": "none within accepted milestone"
+    },
+    {
+      "item": "807",
+      "layer": "Native / real entrypoint",
+      "status": "PASS",
+      "source": "../native-r10-witness.json",
+      "revision": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "freshness": "frozen source; original accepted merge independently read back",
+      "gap": "none within accepted milestone"
+    },
+    {
+      "item": "807",
+      "layer": "Authorization",
+      "status": "COMPLETED_ACTIONS_RECORDED",
+      "source": "807-terminal-reconciliation.md; historical g10-authority-transition.json",
+      "revision": "0ce450d6a96da665945a709d0731e185587cfe01",
+      "freshness": "frozen source; original accepted merge independently read back",
+      "gap": "No standing authority inferred for future actions; verification-only PE2 grant revoked"
+    },
+    {
+      "item": "850/853",
+      "layer": "Implementation",
+      "status": "PASS",
+      "source": "issue850-resident-current-readback.json",
+      "revision": "6a4527bcb585aaaa0a53a0b71b7ca0a8a1414b39",
+      "freshness": "accepted r28 artifacts rehashed; daemon fresh poll",
+      "gap": "none within accepted milestone"
+    },
+    {
+      "item": "850/853",
+      "layer": "Source verification",
+      "status": "PASS",
+      "source": "issue850-resident-current-readback.json",
+      "revision": "6a4527bcb585aaaa0a53a0b71b7ca0a8a1414b39",
+      "freshness": "accepted r28 artifacts rehashed; daemon fresh poll",
+      "gap": "none within accepted milestone"
+    },
+    {
+      "item": "850/853",
+      "layer": "Integration",
+      "status": "DEPLOYMENT_INTEGRATED_CANDIDATE_ACCEPTED",
+      "source": "issue850-resident-current-readback.json",
+      "revision": "6a4527bcb585aaaa0a53a0b71b7ca0a8a1414b39",
+      "freshness": "accepted r28 artifacts rehashed; daemon fresh poll",
+      "gap": "Canary Candidate intentionally unmerged per contract"
+    },
+    {
+      "item": "850/853",
+      "layer": "Install/package",
+      "status": "PASS",
+      "source": "issue850-resident-current-readback.json; resident-final-poll.json",
+      "revision": "runtime 3eb673bfcfd874043a70743e34761784fda39c10; module b3b45530e4447a8ebcd97d9795e1fb7b04a2ad57503aa584babeb798a883d829",
+      "freshness": "accepted r28 artifacts rehashed; daemon fresh poll",
+      "gap": "none within accepted milestone"
+    },
+    {
+      "item": "850/853",
+      "layer": "Runtime",
+      "status": "PASS",
+      "source": "issue850-resident-current-readback.json; resident-final-poll.json",
+      "revision": "runtime 3eb673bfcfd874043a70743e34761784fda39c10; module b3b45530e4447a8ebcd97d9795e1fb7b04a2ad57503aa584babeb798a883d829",
+      "freshness": "accepted r28 artifacts rehashed; daemon fresh poll",
+      "gap": "none within accepted milestone"
+    },
+    {
+      "item": "850/853",
+      "layer": "Deployment",
+      "status": "PASS",
+      "source": "five-mount-current-identity.json; issue850-resident-current-readback.json",
+      "revision": "Nexus 6a4527bcb585aaaa0a53a0b71b7ca0a8a1414b39; standalone runtime 3eb673bfcfd874043a70743e34761784fda39c10",
+      "freshness": "accepted r28 artifacts rehashed; daemon fresh poll",
+      "gap": "none within accepted milestone"
+    },
+    {
+      "item": "850/853",
+      "layer": "Native / real entrypoint",
+      "status": "PASS",
+      "source": "issue850-resident-current-readback.json: terminal_artifacts.r28-independent-acceptance.json",
+      "revision": "r28 base a59b8ab23a91ae4470300a34b4691567255c12af; Candidate c5979ffbc664e019f6790bc5f6c84210749fa43c",
+      "freshness": "accepted r28 artifacts rehashed; daemon fresh poll",
+      "gap": "none within accepted milestone"
+    },
+    {
+      "item": "850/853",
+      "layer": "Authorization",
+      "status": "COMPLETED_ACTIONS_RECORDED",
+      "source": "issue850-resident-current-readback.json",
+      "revision": "6a4527bcb585aaaa0a53a0b71b7ca0a8a1414b39",
+      "freshness": "accepted r28 artifacts rehashed; daemon fresh poll",
+      "gap": "No standing authority inferred for future actions; verification-only PE2 grant revoked"
+    },
+    {
+      "item": "842",
+      "layer": "Implementation",
+      "status": "PASS",
+      "source": "native-r10-witness.json (parent directory)",
+      "revision": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "freshness": "native witness 2026-09-10; exact loaded identity revalidated",
+      "gap": "none within accepted milestone"
+    },
+    {
+      "item": "842",
+      "layer": "Source verification",
+      "status": "PASS",
+      "source": "../source-acceptance-final-6d.json; ../composition-final-6d-summary.json",
+      "revision": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "freshness": "native witness 2026-09-10; exact loaded identity revalidated",
+      "gap": "none within accepted milestone"
+    },
+    {
+      "item": "842",
+      "layer": "Integration",
+      "status": "PASS",
+      "source": "final-issue-pr-readback.json",
+      "revision": "e810851af7a83e1a3700747480163b62b1b596ba",
+      "freshness": "native witness 2026-09-10; exact loaded identity revalidated",
+      "gap": "none within accepted milestone"
+    },
+    {
+      "item": "842",
+      "layer": "Install/package",
+      "status": "PASS",
+      "source": "gateway-final-readback.json; ../r10-runtime-outcome.json",
+      "revision": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "freshness": "native witness 2026-09-10; exact loaded identity revalidated",
+      "gap": "none within accepted milestone"
+    },
+    {
+      "item": "842",
+      "layer": "Runtime",
+      "status": "PASS",
+      "source": "gateway-final-readback.json; ../r10-runtime-outcome.json",
+      "revision": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "freshness": "native witness 2026-09-10; exact loaded identity revalidated",
+      "gap": "none within accepted milestone"
+    },
+    {
+      "item": "842",
+      "layer": "Deployment",
+      "status": "PASS",
+      "source": "gateway-final-readback.json; ../r10-runtime-outcome.json",
+      "revision": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "freshness": "native witness 2026-09-10; exact loaded identity revalidated",
+      "gap": "none within accepted milestone"
+    },
+    {
+      "item": "842",
+      "layer": "Native / real entrypoint",
+      "status": "PASS",
+      "source": "native-r10-witness.json (parent directory)",
+      "revision": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "freshness": "native witness 2026-09-10; exact loaded identity revalidated",
+      "gap": "none within accepted milestone"
+    },
+    {
+      "item": "842",
+      "layer": "Authorization",
+      "status": "COMPLETED_ACTIONS_RECORDED",
+      "source": "../pe2-continuity-witness.json; ../r10-runtime-outcome.json",
+      "revision": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "freshness": "native witness 2026-09-10; exact loaded identity revalidated",
+      "gap": "No standing authority inferred for future actions; verification-only PE2 grant revoked"
+    },
+    {
+      "item": "regression",
+      "layer": "Source verification",
+      "status": "PASS",
+      "source": "frontier-evidence-qualification.json; controller-regression-readback.json",
+      "revision": "five frozen revisions listed in artifact",
+      "freshness": "2026-09-10 exact HEAD/tree/log hash independently checked",
+      "gap": "3 optional environment-dependent skips disclosed; required bounded checks executed"
+    }
+  ],
+  "overall_status": "COMPLETED_WITH_EXPLICIT_CLAIM_CEILING",
+  "owner_decision_required": false,
+  "independent_completeness_review": {
+    "reviewer": "/root/recovery_path",
+    "result": "No additional live acceptance gap; two reporting corrections resolved",
+    "corrections": [
+      "Standalone runtime revision separated from resident Nexus source",
+      "All seven evidence groups now independently read back including G8/G9"
+    ]
+  }
+}

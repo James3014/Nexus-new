@@ -8,6 +8,7 @@ must not need to know its Target paths or internal action names.
 from __future__ import annotations
 
 import ast
+import copy
 import difflib
 import hashlib
 import json
@@ -25,10 +26,22 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional
+from urllib.parse import urlsplit
 from uuid import uuid4
 
+from nexus.contracts.autonomy_goal import AutonomyActionClass, RepositoryIdentity
+from nexus.contracts.execution_readiness import (
+    COMPLETION_AUTHORITY_KIND,
+    HOST_GATEWAY_SERVICE_LABEL,
+    ExecutionReadinessBlockerCode,
+    ExecutionReadinessPlane,
+    ExecutionReadinessRequest,
+    ExecutionReadinessStatus,
+)
 from nexus.contracts.lifecycle_action import (
     ContractKind,
+    ExternalCandidateAdoptionRequest,
+    LifecycleActionEnvelope,
     LifecycleActionType,
     MutationDomain,
     PermissionProfile,
@@ -41,9 +54,27 @@ from nexus.engine.canonical_task_seam import (
     build_canonical_planner_admission,
     execute_canonical_product_task,
 )
+from nexus.engine.learning_policy_loader import (
+    DEFAULT_GOVERNED_ADOPTION_PATH,
+    DEFAULT_GOVERNED_ROLLBACK_PATH,
+)
 from nexus.orchestrator.canonical_mcp_ingress import (
     build_mcp_execution_context,
     reject_caller_route_overrides,
+)
+from nexus.orchestrator.execution_readiness import (
+    _COMPLETION_REQUIRED_CAPABILITIES,
+    COMPLETION_INTERFACE_REVISION,
+    COMPLETION_REPOSITORY,
+    CompletionAuthorityObservation,
+    GatewayReadinessObservation,
+    PlaneObservation,
+    evaluate_completion_contract,
+    evaluate_execution_readiness,
+    evaluate_source_binding,
+)
+from nexus.orchestrator.learning_policy_control import (
+    apply_learning_policy_effect,
 )
 from nexus.orchestrator.lifecycle_guards import (
     LifecycleGuardError,
@@ -58,6 +89,13 @@ from nexus.orchestrator.self_hosted_task_service import (
     resolve_contract_identity,
     resolve_lifecycle_identity,
     validate_task_card_binding,
+)
+from nexus.orchestrator.standing_grant_store import (
+    StandingGrantKey,
+    StandingGrantReceiptError,
+    authorize_durable_standing_grant_effect,
+    restore_task_card_authority,
+    switch_task_card_authority,
 )
 from nexus.services.model_capability_lineage import (
     CHANGE_KIND_VALUES,
@@ -90,6 +128,9 @@ PERMISSION_POLICY = {
 PERMISSION_POLICY_HASH = hashlib.sha256(
     json.dumps(PERMISSION_POLICY, sort_keys=True, separators=(",", ":")).encode("utf-8")
 ).hexdigest()
+EPB_CAMPAIGN_ID = "CAMPAIGN-EVIDENCE-PRODUCER-BRIDGE-01"
+EPB_SPEC_ID = "SPEC-EPB-EXTERNAL-CANDIDATE-ADOPTION-EXEC-001"
+EPB_SPEC_SHA256 = "9e841f43d63ffc10704f00b4d21b88f9fbf78f3a473839a1409f278a951251a1"
 MAX_READ_BYTES = 1024 * 1024
 MAX_RESULT_BYTES = 1024 * 1024
 MAX_SEARCH_RESULTS = 200
@@ -102,6 +143,11 @@ MAX_SEARCH_STDERR_BYTES = 64 * 1024
 FRESHNESS_SEMANTICS_REVISION = "nexus.gateway_freshness.v3"
 CLINE_RUN_TIMEOUT_SECONDS = 60
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_SHA64_RE = re.compile(r"^[0-9a-f]{64}$")
+GITHUB_REPOSITORY = RepositoryIdentity(
+    repository_id="James3014/Nexus-new",
+    canonical_remote="https://github.com/James3014/Nexus-new.git",
+)
 
 # Populated from ``UnifiedMCPGateway.tool_specs()`` after the class definition.
 # There must be one public manifest truth; status, health, recovery validation,
@@ -191,6 +237,249 @@ def _text(value: Any, field: str, *, max_length: int = 4096) -> str:
     return result
 
 
+EXECUTION_READINESS_TOOL_NAME = "nexus_execution_readiness"
+# In-process preflight realm only: each status variable accepts exactly
+# "PASSED" or "BLOCKED"; anything else fails closed.
+_READINESS_ENV_STATUS_VARS: dict[ExecutionReadinessPlane, str] = {
+    ExecutionReadinessPlane.GOVERNANCE: "NEXUS_READINESS_GOVERNANCE_STATUS",
+    ExecutionReadinessPlane.AUTHORITY: "NEXUS_READINESS_AUTHORITY_STATUS",
+    ExecutionReadinessPlane.REPLAY_FENCE: "NEXUS_READINESS_REPLAY_FENCE_STATUS",
+    ExecutionReadinessPlane.WORKFORCE: "NEXUS_READINESS_WORKFORCE_STATUS",
+}
+# Planes that default to PASSED in the in-process preflight realm, each with an
+# explicit evidence identity.  Source is never defaulted: it is derived from
+# the exact requested commit/tree versus the canonical checkout.  Gateway,
+# host-binding, and action-surface planes carry derived evidence separately.
+_READINESS_DEFAULTED_PASSED_PLANES = {
+    ExecutionReadinessPlane.GOVERNANCE: "governance_plane:default_no_open_recovery",
+    ExecutionReadinessPlane.AUTHORITY: "authority_plane:in_process_caller_context",
+    ExecutionReadinessPlane.REPLAY_FENCE: "replay_fence_plane:in_process_first_observation",
+}
+
+
+def _in_process_readiness_plane_observations(
+    gateway_observation: GatewayReadinessObservation,
+    *,
+    request: ExecutionReadinessRequest,
+    completion_observation: CompletionAuthorityObservation | None = None,
+    required_completion_contract: object | None = None,
+) -> dict[ExecutionReadinessPlane, tuple[PlaneObservation, ...]]:
+    """Gather in-process plane observations for the local preflight realm.
+
+    The gateway plane reuses the exact freshness primitives that
+    ``nexus_gateway_status`` uses (same digest, same ``reload_required``
+    semantics), so the readiness gate can never disagree with the running
+    instance's own status payload.  Remaining env-declared planes accept
+    exactly ``PASSED`` or ``BLOCKED``; anything else fails closed.
+    """
+
+    observations: dict[ExecutionReadinessPlane, tuple[PlaneObservation, ...]] = {
+        ExecutionReadinessPlane.SOURCE: (evaluate_source_binding(request, gateway_observation),)
+    }
+
+    if gateway_observation.reload_required:
+        observations[ExecutionReadinessPlane.GATEWAY] = (
+            PlaneObservation(
+                plane=ExecutionReadinessPlane.GATEWAY,
+                status=ExecutionReadinessStatus.BLOCKED,
+                blocker_code=ExecutionReadinessBlockerCode.GATEWAY_REBIND_REQUIRED,
+                evidence_identities=gateway_observation.to_observation_payload(),
+            ),
+        )
+    else:
+        observations[ExecutionReadinessPlane.GATEWAY] = (
+            PlaneObservation(
+                plane=ExecutionReadinessPlane.GATEWAY,
+                status=ExecutionReadinessStatus.PASSED,
+                evidence_identities=(
+                    f"gateway_instance={gateway_observation.gateway_instance_id}",
+                    "gateway_reload_required=false",
+                    f"gateway_runtime_sha256={gateway_observation.observed_runtime_sha256}",
+                ),
+            ),
+        )
+
+    observations[ExecutionReadinessPlane.HOST_BINDING] = (
+        PlaneObservation(
+            plane=ExecutionReadinessPlane.HOST_BINDING,
+            status=ExecutionReadinessStatus.PASSED,
+            evidence_identities=(f"host_binding:{HOST_GATEWAY_SERVICE_LABEL}:in_process",),
+        ),
+    )
+    if required_completion_contract is not None:
+        completion_ok, completion_code, completion_evidence = evaluate_completion_contract(
+            required_completion_contract, completion_observation
+        )
+        surface_evidence = (
+            f"action_surface:manifest={gateway_observation.tool_manifest_revision}",
+            f"action_surface:schema={gateway_observation.full_tool_schema_hash}",
+            f"action_surface:permission={gateway_observation.permission_policy_hash}",
+        )
+        if completion_ok:
+            observations[ExecutionReadinessPlane.ACTION_SURFACE] = (
+                PlaneObservation(
+                    plane=ExecutionReadinessPlane.ACTION_SURFACE,
+                    status=ExecutionReadinessStatus.PASSED,
+                    evidence_identities=surface_evidence + tuple(completion_evidence),
+                ),
+            )
+        else:
+            observations[ExecutionReadinessPlane.ACTION_SURFACE] = (
+                PlaneObservation(
+                    plane=ExecutionReadinessPlane.ACTION_SURFACE,
+                    status=ExecutionReadinessStatus.BLOCKED,
+                    blocker_code=(
+                        completion_code
+                        or ExecutionReadinessBlockerCode.COMPLETION_CONTRACT_BINDING_REQUIRED
+                    ),
+                    evidence_identities=surface_evidence + tuple(completion_evidence),
+                ),
+            )
+    else:
+        observations[ExecutionReadinessPlane.ACTION_SURFACE] = (
+            PlaneObservation(
+                plane=ExecutionReadinessPlane.ACTION_SURFACE,
+                status=ExecutionReadinessStatus.PASSED,
+                evidence_identities=(
+                    f"action_surface:manifest={gateway_observation.tool_manifest_revision}",
+                    f"action_surface:schema={gateway_observation.full_tool_schema_hash}",
+                    f"action_surface:permission={gateway_observation.permission_policy_hash}",
+                ),
+            ),
+        )
+
+    _env_declared_blockers = {
+        ExecutionReadinessPlane.GOVERNANCE: (
+            ExecutionReadinessBlockerCode.GOVERNANCE_PLANE_RECOVERY_REQUIRED
+        ),
+        ExecutionReadinessPlane.AUTHORITY: ExecutionReadinessBlockerCode.TASK_AUTHORITY_MISSING,
+        ExecutionReadinessPlane.REPLAY_FENCE: ExecutionReadinessBlockerCode.SEMANTIC_REPLAY_FENCE,
+        ExecutionReadinessPlane.WORKFORCE: ExecutionReadinessBlockerCode.WORKFORCE_NOT_READY,
+    }
+    # Banded env statuses are processed in G0 precedence order.  An unset
+    # status for a plane that has no default (workforce) is UNPROVEN whenever
+    # any higher-precedence plane already observed a BLOCK, and fails closed
+    # otherwise (a READY verdict can never be fabricated from missing evidence).
+    for plane in tuple(_READINESS_ENV_STATUS_VARS):
+        env_var = _READINESS_ENV_STATUS_VARS[plane]
+        raw = os.environ.get(env_var)
+        if raw is None:
+            if plane is ExecutionReadinessPlane.WORKFORCE and request.workforce_dispatch_binding:
+                observations[plane] = (
+                    PlaneObservation(
+                        plane=plane,
+                        status=ExecutionReadinessStatus.PASSED,
+                        evidence_identities=("workforce_plane:canonical_binding_supplied",),
+                        workforce_dispatch_binding=request.workforce_dispatch_binding,
+                    ),
+                )
+                continue
+            # Workforce evidence is completed by the canonical evaluator.  A
+            # missing env status must not prevent the evaluator from proving
+            # the non-material case or returning WORKFORCE_NOT_READY for
+            # material constraints without a typed binding.
+            if plane is ExecutionReadinessPlane.WORKFORCE:
+                observations[plane] = (
+                    PlaneObservation(
+                        plane=plane,
+                        status=ExecutionReadinessStatus.PASSED,
+                        evidence_identities=("workforce_plane:canonical_evaluator_pending",),
+                    ),
+                )
+                continue
+            default_identity = _READINESS_DEFAULTED_PASSED_PLANES.get(plane)
+            if default_identity is not None:
+                observations[plane] = (
+                    PlaneObservation(
+                        plane=plane,
+                        status=ExecutionReadinessStatus.PASSED,
+                        evidence_identities=(default_identity,),
+                    ),
+                )
+                continue
+            higher_unproven = any(
+                observation.status is ExecutionReadinessStatus.BLOCKED
+                for higher_plane, higher_observations in observations.items()
+                for observation in higher_observations
+                if higher_plane.precedence < plane.precedence
+            )
+            if higher_unproven:
+                observations[plane] = (
+                    PlaneObservation(
+                        plane=plane,
+                        status=ExecutionReadinessStatus.UNPROVEN,
+                        evidence_identities=(),
+                    ),
+                )
+                continue
+            raise GatewayInputError(f"{env_var} is required for in-process preflight")
+        normalized = raw.strip().upper()
+        if normalized == "PASSED":
+            observations[plane] = (
+                PlaneObservation(
+                    plane=plane,
+                    status=ExecutionReadinessStatus.PASSED,
+                    evidence_identities=(f"{env_var}=PASSED",),
+                    workforce_dispatch_binding=(
+                        request.workforce_dispatch_binding
+                        if plane is ExecutionReadinessPlane.WORKFORCE
+                        else None
+                    ),
+                ),
+            )
+            continue
+        if normalized != "BLOCKED":
+            raise GatewayInputError(f"{env_var} must be PASSED or BLOCKED")
+        blocker = _env_declared_blockers.get(plane)
+        if blocker is None:
+            raise GatewayInputError(f"{env_var}=BLOCKED is not evaluable in-process")
+        observations[plane] = (
+            PlaneObservation(
+                plane=plane,
+                status=ExecutionReadinessStatus.BLOCKED,
+                blocker_code=blocker,
+                evidence_identities=(f"{env_var}=BLOCKED",),
+            ),
+        )
+    return observations
+
+
+def _completion_authority_observation_from_environment() -> (
+    CompletionAuthorityObservation | None
+):
+    """Read the observed completion authority identity from the environment.
+
+    Returns ``None`` when no completion environment is configured, which is
+    itself a fail-closed blocker whenever the request requires one.
+    """
+
+    artifact = os.environ.get("NEXUS_READINESS_COMPLETION_ARTIFACT_IDENTITY")
+    if not artifact:
+        return None
+    return CompletionAuthorityObservation(
+        observed_authority_kind=os.environ.get(
+            "NEXUS_READINESS_COMPLETION_AUTHORITY_KIND",
+            COMPLETION_AUTHORITY_KIND,
+        ),
+        observed_repository=os.environ.get(
+            "NEXUS_READINESS_COMPLETION_REPOSITORY", COMPLETION_REPOSITORY
+        ),
+        observed_artifact_identity=artifact.strip(),
+        observed_interface_revision=os.environ.get(
+            "NEXUS_READINESS_COMPLETION_INTERFACE_REVISION",
+            COMPLETION_INTERFACE_REVISION,
+        ),
+        observed_capabilities=tuple(
+            item.strip()
+            for item in os.environ.get(
+                "NEXUS_READINESS_COMPLETION_CAPABILITIES",
+                ",".join(_COMPLETION_REQUIRED_CAPABILITIES),
+            ).split(",")
+            if item.strip()
+        ),
+    )
+
+
 def _safe_relative_path(value: Any, field: str = "path") -> Path:
     raw = _text(value, field, max_length=1024)
     candidate = Path(raw)
@@ -250,6 +539,68 @@ def _git(*args: str, timeout: float = 3.0) -> str:
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or f"git command failed: {' '.join(args)}")
     return result.stdout
+
+
+def observe_github_issue(repository: str, issue_number: int) -> dict[str, Any]:
+    """Fresh, bounded GitHub observation; never writes or infers missing state."""
+    try:
+        result = subprocess.run(
+            [
+                "gh", "issue", "view", str(issue_number), "--repo", repository,
+                "--json", "number,state,updatedAt,url",
+            ],
+            cwd=CANONICAL_SOURCE_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {
+            "ok": False,
+            "blocker": "GITHUB_ISSUE_OBSERVER_UNAVAILABLE",
+            "detail": str(exc),
+        }
+    if result.returncode != 0:
+        return {
+            "ok": False,
+            "blocker": "GITHUB_ISSUE_OBSERVER_UNAVAILABLE",
+            "detail": result.stderr.strip(),
+        }
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        return {
+            "ok": False,
+            "blocker": "GITHUB_ISSUE_OBSERVER_UNAVAILABLE",
+            "detail": str(exc),
+        }
+    if not isinstance(payload, Mapping) or str(payload.get("number")) != str(issue_number):
+        return {
+            "ok": False,
+            "blocker": "GITHUB_ISSUE_OBSERVER_UNAVAILABLE",
+            "detail": "issue identity mismatch",
+        }
+    return {
+        "ok": True,
+        "issue": dict(payload),
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _canonical_remote_matches(origin: str, repository: str) -> bool:
+    value = str(origin).strip()
+    if value.startswith("git@"):
+        host_path = value[4:]
+        host, sep, path = host_path.partition(":")
+        return sep == ":" and host.lower() == "github.com" and path.removesuffix(".git") == repository
+    parsed = urlsplit(value)
+    return (
+        parsed.scheme.lower() == "https" and parsed.hostname
+        and parsed.hostname.lower() == "github.com" and not parsed.username
+        and not parsed.password and not parsed.query and not parsed.fragment
+        and parsed.path.removesuffix("/").removesuffix(".git").lstrip("/") == repository
+    )
 
 
 def _bounded_text(value: str, field: str) -> str:
@@ -855,6 +1206,100 @@ def _permission_enforcement_fingerprint(
     return digest.hexdigest(), True, ()
 
 
+def _evaluate_upstream_freshness(
+    *,
+    deployed_source_head: str | None,
+    observed_upstream_main_head: str | None,
+    upstream_observed_at: str | None = None,
+    upstream_observation_error: str | None = None,
+) -> dict[str, Any]:
+    """Derive upstream-main freshness for Gateway status.
+
+    Distinguishes deployment-local drift (repository_drift) from upstream freshness:
+    - repository_drift: whether local checkout drifted relative to its baseline at startup.
+    - upstream_freshness: whether deployed source equals current GitHub upstream main.
+
+    Outcomes:
+    - CURRENT: deployed_source_head == observed_upstream_main_head (both valid 40-hex)
+    - STALE: deployed_source_head != observed_upstream_main_head (both valid 40-hex)
+    - UNKNOWN: missing, network/timeout/auth failure, or malformed SHA
+    """
+    deployed_sha = str(deployed_source_head or "").strip().lower()
+    upstream_sha = (
+        str(observed_upstream_main_head or "").strip().lower()
+        if observed_upstream_main_head
+        else ""
+    )
+    error_msg = str(upstream_observation_error or "").strip() if upstream_observation_error else None
+
+    valid_deployed = bool(_SHA_RE.fullmatch(deployed_sha)) if deployed_sha else False
+    valid_upstream = bool(_SHA_RE.fullmatch(upstream_sha)) if upstream_sha else False
+
+    if error_msg or not valid_upstream or not valid_deployed:
+        freshness = "UNKNOWN"
+        observed_head = upstream_sha if valid_upstream else None
+        if not error_msg:
+            if not valid_deployed and not deployed_sha:
+                error_msg = "deployed_source_head_missing"
+            elif not valid_deployed:
+                error_msg = "deployed_source_head_malformed"
+            elif not valid_upstream and not upstream_sha:
+                error_msg = "observed_upstream_main_head_missing"
+            else:
+                error_msg = "observed_upstream_main_head_malformed"
+    elif deployed_sha == upstream_sha:
+        freshness = "CURRENT"
+        observed_head = upstream_sha
+    else:
+        freshness = "STALE"
+        observed_head = upstream_sha
+
+    return {
+        "deployed_source_head": deployed_sha if valid_deployed else (deployed_source_head or ""),
+        "observed_upstream_main_head": observed_head,
+        "upstream_observed_at": upstream_observed_at,
+        "upstream_freshness": freshness,
+        "upstream_observation_error": error_msg,
+    }
+
+
+def _default_observe_upstream_main(
+    *,
+    timeout_seconds: float = 3.0,
+    repo_root: Path | None = None,
+) -> tuple[str | None, str | None, str | None]:
+    """Pure read-only observation of upstream main ref without mutating local git state.
+
+    Uses `git ls-remote --heads origin main` with a bounded timeout.
+    Returns: (upstream_sha_or_none, observed_at_iso, error_or_none)
+    """
+    root = repo_root or CANONICAL_SOURCE_ROOT
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        proc = subprocess.run(
+            ["git", "ls-remote", "--heads", "origin", "main"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+        if proc.returncode != 0:
+            err = proc.stderr.strip() or f"exit_code_{proc.returncode}"
+            return None, now_iso, f"upstream_observation_failed:{err[:120]}"
+        output = proc.stdout.strip()
+        if not output:
+            return None, now_iso, "upstream_ref_not_found:refs/heads/main"
+        head_sha = output.split()[0].strip().lower()
+        if not _SHA_RE.fullmatch(head_sha):
+            return None, now_iso, f"upstream_head_malformed:{head_sha[:40]}"
+        return head_sha, now_iso, None
+    except subprocess.TimeoutExpired:
+        return None, now_iso, f"upstream_observation_timeout:exceeded_{timeout_seconds}s"
+    except Exception as exc:
+        return None, now_iso, f"upstream_observation_error:{exc.__class__.__name__}"
+
+
 def _evaluate_freshness(
     *,
     repo_head_at_start: str,
@@ -922,7 +1367,16 @@ def _evaluate_freshness(
 class UnifiedMCPGateway:
     """JSON-RPC MCP server with one public identity and bounded tools."""
 
-    def __init__(self, service: Optional[SelfHostedTaskService] = None, *, model_runner: Any = None, apply_runner: Any = None):
+    def __init__(
+        self,
+        service: Optional[SelfHostedTaskService] = None,
+        *,
+        model_runner: Any = None,
+        apply_runner: Any = None,
+        github_issue_observer: Any = None,
+        upstream_observer: Any = None,
+        upstream_cache_ttl_seconds: float = 30.0,
+    ):
         self.service = service or SelfHostedTaskService()
         # These kwargs remain accepted for compatibility with older callers,
         # but neither runner is a gateway authority.  Assisted jobs are
@@ -936,10 +1390,88 @@ class UnifiedMCPGateway:
         self._calibration_planner = CalibrationPlanner(self._lineage_registry)
         self._assist_processes: dict[str, subprocess.Popen[str]] = {}
         self._assist_lock = threading.RLock()
+        self._github_issue_observer = github_issue_observer or observe_github_issue
+        self._upstream_observer = upstream_observer or _default_observe_upstream_main
+        self._upstream_cache_ttl_seconds = float(upstream_cache_ttl_seconds)
+        self._upstream_cache: tuple[float, dict[str, Any]] | None = None
+        self._upstream_cache_lock = threading.RLock()
+
+    def _observe_upstream_freshness(self, deployed_head: str) -> dict[str, Any]:
+        """Observe upstream-main freshness with bounded caching and fail-closed isolation."""
+        with self._upstream_cache_lock:
+            now = time.monotonic()
+            if self._upstream_cache is not None:
+                cached_time, cached_obs = self._upstream_cache
+                if (now - cached_time) < self._upstream_cache_ttl_seconds:
+                    return _evaluate_upstream_freshness(
+                        deployed_source_head=deployed_head,
+                        observed_upstream_main_head=cached_obs.get("observed_upstream_main_head"),
+                        upstream_observed_at=cached_obs.get("upstream_observed_at"),
+                        upstream_observation_error=cached_obs.get("upstream_observation_error"),
+                    )
+
+            # Perform fresh observation
+            try:
+                upstream_head, observed_at, error = self._upstream_observer()
+            except subprocess.TimeoutExpired:
+                upstream_head = None
+                observed_at = self._utc_now()
+                error = "upstream_observer_timeout"
+            except Exception as exc:
+                upstream_head = None
+                observed_at = self._utc_now()
+                error = f"upstream_observer_exception:{exc.__class__.__name__}"
+
+            evaluated = _evaluate_upstream_freshness(
+                deployed_source_head=deployed_head,
+                observed_upstream_main_head=upstream_head,
+                upstream_observed_at=observed_at,
+                upstream_observation_error=error,
+            )
+            self._upstream_cache = (now, evaluated)
+            return evaluated
 
     @staticmethod
     def _utc_now() -> str:
         return datetime.now(timezone.utc).isoformat()
+
+    @staticmethod
+    def _require_owner_effect_authority(
+        action: AutonomyActionClass,
+        effect: Mapping[str, Any],
+        *,
+        key: StandingGrantKey,
+    ) -> dict[str, Any]:
+        try:
+            return authorize_durable_standing_grant_effect(
+                repository=GITHUB_REPOSITORY,
+                action=action,
+                effect=effect,
+                key=key,
+            )
+        except StandingGrantReceiptError as exc:
+            raise GatewayInputError(f"OWNER_AUTHORITY_REQUIRED:{exc}") from exc
+
+    @staticmethod
+    def _owner_effect_key(arguments: Mapping[str, Any]) -> StandingGrantKey:
+        """Resolve the explicit Goal/coordination scope for durable effects."""
+        try:
+            goal_id = _text(arguments.get("authority_goal_id"), "authority_goal_id", max_length=128)
+            scope_id = _text(
+                arguments.get("authority_coordination_scope_id"),
+                "authority_coordination_scope_id",
+                max_length=128,
+            )
+            return StandingGrantKey(GITHUB_REPOSITORY, goal_id, scope_id)
+        except (GatewayInputError, TypeError, ValueError) as exc:
+            raise GatewayInputError(f"OWNER_AUTHORITY_KEY_REQUIRED:{exc}") from exc
+
+    @staticmethod
+    def _standing_key(goal_id: str, thread_id: str) -> StandingGrantKey:
+        try:
+            return StandingGrantKey(GITHUB_REPOSITORY, goal_id, thread_id)
+        except (TypeError, ValueError) as exc:
+            raise GatewayInputError(f"OWNER_AUTHORITY_KEY_REQUIRED:{exc}") from exc
 
     def _assist_root(self) -> Path:
         configured = getattr(self.service, "state_dir", None)
@@ -1753,7 +2285,18 @@ class UnifiedMCPGateway:
             raise GatewayInputError("allowed_files must contain 1-4 bounded paths")
         for path in allowed:
             _safe_relative_path(path, "allowed_files")
-        prompt = self._assist_prompt(str(arguments.get("what") or "assist"), str(arguments.get("why") or "assist"), allowed, list(arguments.get("verifier_commands") or ["git diff --check"]))
+        what = str(arguments.get("what") or "assist")
+        why = str(arguments.get("why") or "assist")
+        verifiers = [str(command).strip() for command in arguments.get("verifier_commands") or ["git diff --check"] if str(command).strip()]
+        bound_action_request = {
+            "task_id": task_id,
+            "what": what,
+            "why": why,
+            "allowed_files": allowed,
+            "verifier_commands": verifiers,
+            "apply": False,
+        }
+        prompt = self._assist_prompt(what, why, allowed, verifiers)
         command = self._assist_command(executable=executable, provider=provider, model=model, prompt=prompt)
         job_id = f"assist-{uuid4().hex}"
         root = self._assist_root()
@@ -1766,13 +2309,7 @@ class UnifiedMCPGateway:
             action_value = build_action_envelope(
                 task_id=task_id,
                 action_type=LifecycleActionType.TASK_RUN,
-                request={
-                    "task_id": task_id,
-                    "what": str(arguments.get("what") or "assist"),
-                    "why": str(arguments.get("why") or "assist"),
-                    "allowed_files": allowed,
-                    "apply": False,
-                },
+                request=bound_action_request,
                 tool_manifest_hash=TOOL_MANIFEST_REVISION,
                 expected_head=base,
                 allowed_paths=allowed,
@@ -1788,6 +2325,7 @@ class UnifiedMCPGateway:
             "attempt_history": [],
             "action_id": action_value.get("action_id") or f"action-{uuid4().hex}",
             "attempt_id": action_value.get("attempt_id") or f"attempt-{uuid4().hex}",
+            "idempotency_key": action_value.get("idempotency_key"),
             "status": "SUBMITTED",
             "execution_lane": "ASSISTED_CANONICAL",
             "candidate_only": True,
@@ -1814,6 +2352,7 @@ class UnifiedMCPGateway:
             "stdout_artifact": str(stdout_path),
             "stderr_artifact": str(stderr_path),
             "action": action_value,
+            "bound_action_request": bound_action_request,
             "connector_disconnected_at": None,
             "reconnected_at": None,
         }
@@ -1972,9 +2511,147 @@ class UnifiedMCPGateway:
             raise KeyError(f"unknown task_id: {task_id}")
         if job.get("status") not in {"FAILED", "CANCELLED"}:
             raise GatewayInputError("ASSIST_RETRY_REQUIRES_TERMINAL_FAILURE")
-        command = job.get("command")
-        if not isinstance(command, list) or not command:
+
+        action_dict = job.get("action")
+        if not isinstance(action_dict, Mapping):
+            raise LifecycleGuardError("ACTION_ENVELOPE_INVALID", "assisted job missing action envelope")
+        try:
+            original_action = LifecycleActionEnvelope.model_validate(action_dict)
+        except Exception as exc:
+            raise LifecycleGuardError(
+                "ACTION_ENVELOPE_INVALID",
+                "lifecycle action envelope is invalid",
+                details={"error": str(exc)},
+            ) from exc
+        if original_action.task_id != task_id:
+            raise LifecycleGuardError(
+                "RETRY_SEMANTIC_TASK_MISMATCH",
+                "action envelope task_id does not match retry task_id",
+            )
+        if original_action.action_type is not LifecycleActionType.TASK_RUN:
+            raise LifecycleGuardError(
+                "RETRY_SEMANTIC_ACTION_MISMATCH",
+                "assisted retry requires an original TASK_RUN action",
+            )
+
+        live_head = _git("rev-parse", "HEAD").strip()
+        if original_action.tool_manifest_hash != TOOL_MANIFEST_REVISION:
+            raise LifecycleGuardError(
+                "TOOL_MANIFEST_NAME_DRIFT",
+                "action was created against a different public tool-name manifest",
+                details={
+                    "expected": TOOL_MANIFEST_REVISION,
+                    "received": original_action.tool_manifest_hash,
+                    "definition_scope": "tool_names_only",
+                },
+            )
+        if original_action.expected_head is not None and original_action.expected_head != live_head:
+            raise LifecycleGuardError(
+                "EXPECTED_HEAD_MISMATCH",
+                "action expected a different repository HEAD",
+                details={"expected": original_action.expected_head, "observed": live_head},
+            )
+
+        bound_request = job.get("bound_action_request")
+        if not isinstance(bound_request, Mapping) or not bound_request:
+            raise LifecycleGuardError(
+                "BOUND_ACTION_REQUEST_MISSING",
+                "assisted retry cannot re-authorize a legacy job without its exact bound request",
+            )
+        bound_request = dict(bound_request)
+        if not original_action.verify_request(bound_request):
+            raise LifecycleGuardError(
+                "REQUEST_HASH_MISMATCH",
+                "persisted action request hash does not match bound request",
+            )
+        requested_paths = [
+            str(path).strip()
+            for path in bound_request.get("allowed_files", ())
+            if str(path).strip()
+        ]
+        if not requested_paths or len(requested_paths) > 4:
+            raise GatewayInputError("allowed_files must contain 1-4 bounded paths")
+        for path in requested_paths:
+            _safe_relative_path(path, "allowed_files")
+        if set(requested_paths) != set(original_action.allowed_paths):
+            raise LifecycleGuardError(
+                "ALLOWED_PATH_MISMATCH",
+                "request paths exceed or differ from action envelope",
+            )
+        pre_action_guard(
+            original_action,
+            request=bound_request,
+            current_head=live_head,
+            tool_manifest_hash=TOOL_MANIFEST_REVISION,
+        )
+
+        provider = str(job.get("provider") or "cline").strip().lower()
+        model = str(job.get("model") or "glm-5.2").strip()
+        if provider != "cline":
+            raise GatewayInputError("ASSIST_ASYNC_PROVIDER_UNSUPPORTED")
+        metadata = ONLINE_CLI_SPEC_REGISTRY.get(provider)
+        if metadata is None:
+            raise GatewayInputError("ASSIST_PROVIDER_NOT_REGISTERED")
+        binary_env = metadata.get("binary_env", "")
+        configured = os.environ.get(binary_env, "").strip() if binary_env else ""
+        executable = configured or shutil.which(metadata.get("binary_name", provider))
+        if not executable or not Path(executable).is_file():
+            raise GatewayInputError("ASSIST_PROVIDER_UNAVAILABLE")
+        what = str(bound_request.get("what") or "assist")
+        why = str(bound_request.get("why") or "assist")
+        verifiers = [
+            str(command).strip()
+            for command in bound_request.get("verifier_commands") or ["git diff --check"]
+            if str(command).strip()
+        ]
+        prompt = self._assist_prompt(what, why, requested_paths, verifiers)
+        canonical_command = self._assist_command(
+            executable=executable,
+            provider=provider,
+            model=model,
+            prompt=prompt,
+        )
+        stored_command = job.get("command")
+        if not isinstance(stored_command, list) or not stored_command:
             raise GatewayInputError("ASSIST_RETRY_COMMAND_NOT_RETAINED")
+        if stored_command != canonical_command:
+            raise LifecycleGuardError(
+                "COMMAND_SUBSTITUTION_DETECTED",
+                "persisted command bytes do not match reconstructed canonical command",
+            )
+
+        token = uuid4().hex
+        new_attempt_id = f"attempt-{token}"
+        new_action_id = f"action-{token}"
+        previous_key = str(job.get("idempotency_key") or original_action.idempotency_key or task_id)
+        base_key = previous_key.split(":retry-", 1)[0]
+        suffix = f":retry-{token}"
+        new_idempotency_key = f"{base_key[: max(1, 256 - len(suffix))]}{suffix}"
+        retry_action = build_action_envelope(
+            task_id=task_id,
+            action_type=LifecycleActionType.TASK_RETRY,
+            request=bound_request,
+            tool_manifest_hash=TOOL_MANIFEST_REVISION,
+            expected_head=live_head,
+            allowed_paths=requested_paths,
+            mutation=False,
+            task_card_path=original_action.task_card_path,
+            task_card_hash=original_action.task_card_hash,
+            contract_kind=original_action.contract_kind,
+            contract_hash=original_action.contract_hash,
+            attempt_id=new_attempt_id,
+            action_id=new_action_id,
+            idempotency_key=new_idempotency_key,
+            permission_profile=original_action.permission_profile,
+            approval_scope=original_action.approval_scope,
+        ).model_dump(mode="json")
+        pre_action_guard(
+            retry_action,
+            request=bound_request,
+            current_head=live_head,
+            tool_manifest_hash=TOOL_MANIFEST_REVISION,
+        )
+
         history = list(job.get("attempt_history") or [])
         history.append({
             "job_id": job.get("job_id"),
@@ -1983,7 +2660,7 @@ class UnifiedMCPGateway:
             "exit_code": job.get("exit_code"),
             "result_artifact": job.get("result_artifact"),
         })
-        new_job_id = f"{str(job.get('job_kind') or 'assist')}-{uuid4().hex}"
+        new_job_id = f"{str(job.get('job_kind') or 'assist')}-{token}"
         root = self._assist_root()
         stdout_path = root / f"{new_job_id}.stdout"
         stderr_path = root / f"{new_job_id}.stderr"
@@ -1991,7 +2668,9 @@ class UnifiedMCPGateway:
         new_job = dict(job)
         new_job.update({
             "job_id": new_job_id,
-            "attempt_id": f"attempt-{uuid4().hex}",
+            "action_id": new_action_id,
+            "attempt_id": new_attempt_id,
+            "idempotency_key": new_idempotency_key,
             "attempt_history": history,
             "status": "SUBMITTED",
             "submitted_at": self._utc_now(),
@@ -2003,6 +2682,10 @@ class UnifiedMCPGateway:
             "blocker": None,
             "provider_error": "",
             "result": None,
+            "command": canonical_command,
+            "command_hash": hashlib.sha256(
+                json.dumps(canonical_command, separators=(",", ":")).encode("utf-8")
+            ).hexdigest(),
             "stdout_artifact": str(stdout_path),
             "stderr_artifact": str(stderr_path),
             "result_artifact": str(self._assist_path(task_id)),
@@ -2014,21 +2697,40 @@ class UnifiedMCPGateway:
             "process_killed": False,
             "connector_disconnected_at": None,
             "reconnected_at": self._utc_now(),
+            "action": retry_action,
+            "bound_action_request": bound_request,
         })
         self._assist_write(new_job)
         stdout_handle = stdout_path.open("w", encoding="utf-8")
         stderr_handle = stderr_path.open("w", encoding="utf-8")
         try:
-            process = subprocess.Popen(command, cwd=workspace_root, stdout=stdout_handle, stderr=stderr_handle, text=True, start_new_session=True)
+            process = subprocess.Popen(
+                canonical_command,
+                cwd=workspace_root,
+                stdout=stdout_handle,
+                stderr=stderr_handle,
+                text=True,
+                start_new_session=True,
+            )
         except Exception:
             stdout_handle.close()
             stderr_handle.close()
             shutil.rmtree(workspace_root, ignore_errors=True)
-            new_job.update({"status": "FAILED", "finished_at": self._utc_now(), "blocker": "ASSIST_PROVIDER_FAILED", "provider_error": "provider process could not start"})
+            new_job.update({
+                "status": "FAILED",
+                "finished_at": self._utc_now(),
+                "blocker": "ASSIST_PROVIDER_FAILED",
+                "provider_error": "provider process could not start",
+            })
             return self._assist_response(self._assist_write(new_job), operation="retry")
         stdout_handle.close()
         stderr_handle.close()
-        new_job.update({"status": "RUNNING", "pid": process.pid, "pgid": process.pid, "started_at": self._utc_now()})
+        new_job.update({
+            "status": "RUNNING",
+            "pid": process.pid,
+            "pgid": process.pid,
+            "started_at": self._utc_now(),
+        })
         with self._assist_lock:
             self._assist_processes[task_id] = process
         return self._assist_response(self._assist_write(new_job), operation="retry")
@@ -2082,6 +2784,7 @@ class UnifiedMCPGateway:
             "binary_sha256": None,
             "cli_version": None,
             "authenticated": False,
+            "authentication_required": self._provider_requires_authentication(provider),
             "model_reachable": False,
             "probe_requested": bool(arguments.get("probe", False)),
             "probe_latency_ms": 0,
@@ -2156,6 +2859,7 @@ class UnifiedMCPGateway:
     def _task_card_create(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         if arguments.get("owner_confirmation") is not True:
             raise GatewayInputError("OWNER_CONFIRMATION_REQUIRED")
+        owner_key = self._owner_effect_key(arguments)
         campaign = self._safe_slug(arguments.get("campaign_id"), "campaign_id")
         task_id = self._safe_slug(arguments.get("task_id"), "task_id")
         objective = _text(arguments.get("objective"), "objective", max_length=4000)
@@ -2167,6 +2871,19 @@ class UnifiedMCPGateway:
         verifiers = [str(command).strip() for command in arguments.get("verifier_commands") or [] if str(command).strip()]
         if not verifiers:
             raise GatewayInputError("verifier_commands is required")
+        head = self._exact_hash(_git("rev-parse", "HEAD").strip(), "expected_head", 40)
+        owner_authority = self._require_owner_effect_authority(
+            AutonomyActionClass.TASK_CARD_CREATE,
+            {
+                "campaign_id": campaign,
+                "task_id": task_id,
+                "expected_head": head,
+                "allowed_files": allowed,
+                "verifier_commands": verifiers,
+                "objective_sha256": hashlib.sha256(objective.encode("utf-8")).hexdigest(),
+            },
+            key=owner_key,
+        )
         campaign_root = CANONICAL_SOURCE_ROOT / "tasks" / campaign
         index_path = campaign_root / "INDEX.md"
         card_path = campaign_root / f"00-{task_id}.md"
@@ -2219,12 +2936,286 @@ class UnifiedMCPGateway:
             "index_path": str(index_path.relative_to(CANONICAL_SOURCE_ROOT)),
             "card_path": str(card_path.relative_to(CANONICAL_SOURCE_ROOT)),
             "card_hash": card_sha256,
+            "index_hash": hashlib.sha256(index.encode("utf-8")).hexdigest(),
             "git_blob_sha": card_hash,
             "exact_card_diff": "".join(diff_lines),
             "exact_index_diff": "".join(index_diff_lines),
             "successor_execution": "NOT_STARTED",
             "owner_confirmation": True,
+            "owner_authority": owner_authority,
         }
+
+    def _task_card_commit(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        if arguments.get("owner_confirmation") is not True:
+            raise GatewayInputError("OWNER_CONFIRMATION_REQUIRED")
+        owner_key = self._owner_effect_key(arguments)
+        campaign = self._safe_slug(arguments.get("campaign_id"), "campaign_id")
+        task_id = self._safe_slug(arguments.get("task_id"), "task_id")
+        expected_head = str(arguments.get("expected_head") or "").strip().lower()
+        expected_card_hash = str(arguments.get("card_hash") or "").strip().lower()
+        expected_index_hash = str(arguments.get("index_hash") or "").strip().lower()
+        if not _SHA_RE.fullmatch(expected_head):
+            raise GatewayInputError("expected_head must be a lowercase 40-hex SHA")
+        if not re.fullmatch(r"[0-9a-f]{64}", expected_card_hash):
+            raise GatewayInputError("card_hash must be a lowercase 64-hex SHA-256")
+        if not re.fullmatch(r"[0-9a-f]{64}", expected_index_hash):
+            raise GatewayInputError("index_hash must be a lowercase 64-hex SHA-256")
+
+        campaign_root = CANONICAL_SOURCE_ROOT / "tasks" / campaign
+        index_path = campaign_root / "INDEX.md"
+        card_path = campaign_root / f"00-{task_id}.md"
+        if not index_path.is_file() or not card_path.is_file():
+            raise GatewayInputError("TASK_CARD_COMMIT_SOURCE_MISSING")
+        for path in (index_path, card_path):
+            if path.is_symlink():
+                raise GatewayInputError("TASK_CARD_COMMIT_SYMLINK_FORBIDDEN")
+            try:
+                path.resolve().relative_to(CANONICAL_SOURCE_ROOT.resolve())
+            except ValueError as exc:
+                raise GatewayInputError("TASK_CARD_COMMIT_PATH_ESCAPE") from exc
+
+        card_bytes = card_path.read_bytes()
+        index_bytes = index_path.read_bytes()
+        card_text = card_bytes.decode("utf-8")
+        index_text = index_bytes.decode("utf-8")
+        if hashlib.sha256(card_bytes).hexdigest() != expected_card_hash:
+            raise GatewayInputError("TASK_CARD_COMMIT_HASH_MISMATCH")
+        if hashlib.sha256(index_bytes).hexdigest() != expected_index_hash:
+            raise GatewayInputError("TASK_CARD_COMMIT_INDEX_HASH_MISMATCH")
+        if f"task_id: `{task_id}`" not in card_text or "status: ACTIVE" not in card_text or "AUTO_CHAIN: false" not in card_text:
+            raise GatewayInputError("TASK_CARD_COMMIT_CARD_NOT_ACTIVE")
+        if f"# Campaign Index: {campaign}" not in index_text or "AUTO_CHAIN: false" not in index_text:
+            raise GatewayInputError("TASK_CARD_COMMIT_INDEX_NOT_BOUND")
+
+        current_head = _git("rev-parse", "HEAD").strip()
+        if current_head != expected_head:
+            raise GatewayInputError("TASK_CARD_COMMIT_HEAD_MISMATCH")
+        owner_authority = self._require_owner_effect_authority(
+            AutonomyActionClass.TASK_CARD_COMMIT,
+            {
+                "campaign_id": campaign,
+                "task_id": task_id,
+                "expected_head": expected_head,
+                "card_hash": expected_card_hash,
+                "index_hash": expected_index_hash,
+            },
+            key=owner_key,
+        )
+        branch = subprocess.run(
+            ["git", "symbolic-ref", "-q", "--short", "HEAD"],
+            cwd=CANONICAL_SOURCE_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=3.0,
+            check=False,
+        )
+        if branch.returncode == 0 and branch.stdout.strip():
+            raise GatewayInputError("TASK_CARD_COMMIT_REQUIRES_DETACHED_CONTROLLER")
+        if branch.returncode not in (0, 1):
+            raise RuntimeError(branch.stderr.strip() or "failed to inspect controller branch state")
+
+        index_rel = str(index_path.relative_to(CANONICAL_SOURCE_ROOT))
+        card_rel = str(card_path.relative_to(CANONICAL_SOURCE_ROOT))
+        status = subprocess.run(
+            ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+            cwd=CANONICAL_SOURCE_ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=3.0,
+            check=False,
+        )
+        if status.returncode != 0:
+            raise RuntimeError(status.stderr.decode("utf-8", errors="replace").strip() or "git status failed")
+        entries = {os.fsdecode(raw) for raw in status.stdout.split(b"\0") if raw}
+        expected_entries = {f"?? {index_rel}", f"?? {card_rel}"}
+        if entries != expected_entries:
+            raise GatewayInputError("TASK_CARD_COMMIT_CONTROLLER_NOT_EXACTLY_PENDING_CARD")
+
+        _git("add", "--", index_rel, card_rel)
+        staged = {line for line in _git("diff", "--cached", "--name-only", "--", index_rel, card_rel).splitlines() if line}
+        if staged != {index_rel, card_rel}:
+            _git("reset", "--", index_rel, card_rel)
+            raise RuntimeError("TASK_CARD_COMMIT_STAGE_MISMATCH")
+
+        def staged_sha256(relative: str) -> str:
+            result = subprocess.run(
+                ["git", "show", f":{relative}"],
+                cwd=CANONICAL_SOURCE_ROOT,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=3.0,
+                check=False,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr.decode("utf-8", errors="replace").strip() or "failed to read staged task-card content")
+            return hashlib.sha256(result.stdout).hexdigest()
+
+        try:
+            if staged_sha256(card_rel) != expected_card_hash or staged_sha256(index_rel) != expected_index_hash:
+                raise RuntimeError("TASK_CARD_COMMIT_STAGED_HASH_MISMATCH")
+            _git("commit", "-m", f"chore(tasks): bind {task_id}", timeout=30.0)
+        except Exception:
+            _git("reset", "--", index_rel, card_rel)
+            raise
+
+        commit_sha = _git("rev-parse", "HEAD").strip()
+        parent_sha = _git("rev-parse", "HEAD^").strip()
+        tree_sha = _git("rev-parse", "HEAD^{tree}").strip()
+        if parent_sha != expected_head or not _SHA_RE.fullmatch(commit_sha) or not _SHA_RE.fullmatch(tree_sha):
+            raise RuntimeError("TASK_CARD_COMMIT_IDENTITY_MISMATCH")
+        remaining = subprocess.run(
+            ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+            cwd=CANONICAL_SOURCE_ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=3.0,
+            check=False,
+        )
+        if remaining.returncode != 0:
+            raise RuntimeError(remaining.stderr.decode("utf-8", errors="replace").strip() or "git status failed")
+        if remaining.stdout:
+            raise RuntimeError("TASK_CARD_COMMIT_CONTROLLER_NOT_CLEAN_AFTER_COMMIT")
+        committed_paths = {
+            line for line in _git("diff-tree", "--no-commit-id", "--name-only", "-r", commit_sha).splitlines() if line
+        }
+        if committed_paths != {index_rel, card_rel}:
+            raise RuntimeError("TASK_CARD_COMMIT_SCOPE_MISMATCH")
+        return {
+            "schema": "nexus.task_card_commit.v1",
+            "status": "COMMITTED",
+            "campaign_id": campaign,
+            "task_id": task_id,
+            "previous_head": expected_head,
+            "commit_sha": commit_sha,
+            "tree_sha": tree_sha,
+            "index_path": index_rel,
+            "card_path": card_rel,
+            "card_hash": expected_card_hash,
+            "index_hash": expected_index_hash,
+            "committed_paths": sorted(committed_paths),
+            "controller_clean": True,
+            "successor_execution": "READY_FOR_GOVERNED_START",
+            "owner_confirmation": True,
+            "owner_authority": owner_authority,
+        }
+
+    def _task_card_authority_switch(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        allowed_keys = {
+            "ownerConfirmation",
+            "attemptKey",
+            "expectedCurrentReceiptHash",
+            "expectedCurrentGoalId",
+            "expectedCurrentThreadId",
+            "successorGoalId",
+            "successorThreadId",
+            "ttlMinutes",
+        }
+        unknown_keys = set(arguments.keys()) - allowed_keys
+        if unknown_keys:
+            raise GatewayInputError(f"unknown arguments: {', '.join(sorted(unknown_keys))}")
+        owner_confirmation = arguments.get("ownerConfirmation")
+        if owner_confirmation is not True:
+            raise GatewayInputError("OWNER_CONFIRMATION_REQUIRED")
+        attempt_key = _text(arguments.get("attemptKey"), "attemptKey", max_length=128)
+        expected_current_receipt_hash = _text(
+            arguments.get("expectedCurrentReceiptHash"),
+            "expectedCurrentReceiptHash",
+            max_length=64,
+        ).lower()
+        if not _SHA64_RE.fullmatch(expected_current_receipt_hash):
+            raise GatewayInputError("expectedCurrentReceiptHash must be a lowercase 64-hex SHA-256")
+        expected_current_goal_id = _text(
+            arguments.get("expectedCurrentGoalId"),
+            "expectedCurrentGoalId",
+            max_length=128,
+        )
+        expected_current_thread_id = _text(
+            arguments.get("expectedCurrentThreadId"),
+            "expectedCurrentThreadId",
+            max_length=128,
+        )
+        successor_goal_id = _text(
+            arguments.get("successorGoalId"),
+            "successorGoalId",
+            max_length=128,
+        )
+        successor_thread_id = _text(
+            arguments.get("successorThreadId"),
+            "successorThreadId",
+            max_length=128,
+        )
+        raw_ttl = arguments.get("ttlMinutes")
+        if raw_ttl is None:
+            raise GatewayInputError("ttlMinutes is required")
+        if isinstance(raw_ttl, bool) or not isinstance(raw_ttl, int) or raw_ttl < 1 or raw_ttl > 30:
+            raise GatewayInputError("ttlMinutes must be an integer between 1 and 30")
+        ttl_minutes = raw_ttl
+
+        try:
+            return switch_task_card_authority(
+                current_key=self._standing_key(
+                    expected_current_goal_id, expected_current_thread_id
+                ),
+                attempt_key=attempt_key,
+                expected_current_receipt_hash=expected_current_receipt_hash,
+                expected_current_goal_id=expected_current_goal_id,
+                successor_goal_id=successor_goal_id,
+                successor_thread_id=successor_thread_id,
+                ttl_minutes=ttl_minutes,
+                owner_confirmation=True,
+            )
+        except StandingGrantReceiptError as exc:
+            raise GatewayInputError(str(exc)) from exc
+
+    def _task_card_authority_restore(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        allowed_keys = {
+            "ownerConfirmation",
+            "attemptKey",
+            "switchOperationId",
+            "expectedTemporaryReceiptHash",
+            "expectedCurrentGoalId",
+            "expectedCurrentThreadId",
+        }
+        unknown_keys = set(arguments.keys()) - allowed_keys
+        if unknown_keys:
+            raise GatewayInputError(f"unknown arguments: {', '.join(sorted(unknown_keys))}")
+        owner_confirmation = arguments.get("ownerConfirmation")
+        if owner_confirmation is not True:
+            raise GatewayInputError("OWNER_CONFIRMATION_REQUIRED")
+        attempt_key = _text(arguments.get("attemptKey"), "attemptKey", max_length=128)
+        switch_operation_id = _text(
+            arguments.get("switchOperationId"),
+            "switchOperationId",
+            max_length=128,
+        )
+        expected_temporary_receipt_hash = _text(
+            arguments.get("expectedTemporaryReceiptHash"),
+            "expectedTemporaryReceiptHash",
+            max_length=64,
+        ).lower()
+        expected_current_goal_id = _text(
+            arguments.get("expectedCurrentGoalId"), "expectedCurrentGoalId", max_length=128
+        )
+        expected_current_thread_id = _text(
+            arguments.get("expectedCurrentThreadId"), "expectedCurrentThreadId", max_length=128
+        )
+        if not _SHA64_RE.fullmatch(expected_temporary_receipt_hash):
+            raise GatewayInputError(
+                "expectedTemporaryReceiptHash must be a lowercase 64-hex SHA-256"
+            )
+
+        try:
+            return restore_task_card_authority(
+                current_key=self._standing_key(
+                    expected_current_goal_id, expected_current_thread_id
+                ),
+                attempt_key=attempt_key,
+                switch_operation_id=switch_operation_id,
+                expected_temporary_receipt_hash=expected_temporary_receipt_hash,
+                owner_confirmation=True,
+            )
+        except StandingGrantReceiptError as exc:
+            raise GatewayInputError(str(exc)) from exc
 
     def _model_probe_submit(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         provider = str(arguments.get("provider") or "cline").strip().lower()
@@ -2823,6 +3814,102 @@ class UnifiedMCPGateway:
                 "inputSchema": {"type": "object", "properties": {}},
             },
             {
+                "name": "nexus_project_entry",
+                "description": (
+                    "Freshly observe one GitHub Issue and rehydrate only its exact "
+                    "canonical task binding; observe-only."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["repository_owner", "repository_name", "issue_number"],
+                    "properties": {
+                        "repository_owner": {"type": "string", "maxLength": 128},
+                        "repository_name": {"type": "string", "maxLength": 128},
+                        "issue_number": {"type": "integer", "minimum": 1},
+                    },
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "nexus_execution_readiness",
+                "description": (
+                    "Evaluate the pre-execution readiness convergence gate: exactly one typed "
+                    "result, READY_TO_EXECUTE or one primary blocker with a canonical next "
+                    "action. Observe-only; never repairs, reloads, routes, admits, or certifies."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "required": [
+                        "repository_owner",
+                        "repository_name",
+                        "intended_source_commit",
+                        "intended_source_tree",
+                        "execution_realm",
+                        "required_action_family",
+                        "execution_contract_kind",
+                    ],
+                    "properties": {
+                        "repository_owner": {"type": "string", "maxLength": 128},
+                        "repository_name": {"type": "string", "maxLength": 128},
+                        "intended_source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "intended_source_tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "task_campaign_goal_identity": {"type": "string", "maxLength": 4096},
+                        "durable_coordination_scope_id": {"type": "string", "maxLength": 4096},
+                        "durable_repository_canonical_remote": {"type": "string", "maxLength": 4096},
+                        "desired_deployment_identity": {"type": "string", "maxLength": 4096},
+                        "execution_realm": {"type": "string", "enum": ["in_process_preflight"]},
+                        "required_action_family": {"type": "string", "maxLength": 128},
+                        "execution_contract_kind": {"type": "string", "maxLength": 128},
+                        "worker_constraints": {
+                            "type": "array",
+                            "items": {"type": "string", "maxLength": 256},
+                            "maxItems": 8,
+                        },
+                        "workforce_dispatch_binding": {
+                            "type": "object",
+                            "required": [
+                                "planner_output", "workforce_demands", "workforce_admission",
+                                "canonical_dispatch_envelope", "task_id", "attempt_id",
+                                "task_card_path", "task_card_hash",
+                            ],
+                            "properties": {
+                                "planner_output": {"type": "object"},
+                                "workforce_demands": {"type": "object"},
+                                "workforce_admission": {"type": "object"},
+                                "canonical_dispatch_envelope": {"type": "object"},
+                                "task_id": {"type": "string"},
+                                "attempt_id": {"type": "string"},
+                                "task_card_path": {"type": "string"},
+                                "task_card_hash": {"type": "string"},
+                            },
+                            "additionalProperties": False,
+                        },
+                        "required_completion_contract": {
+                            "type": "object",
+                            "required": [
+                                "authority_kind",
+                                "repository",
+                                "artifact_or_source_identity",
+                                "interface_revision",
+                            ],
+                            "properties": {
+                                "authority_kind": {"type": "string"},
+                                "repository": {"type": "string"},
+                                "artifact_or_source_identity": {"type": "string"},
+                                "interface_revision": {"type": "string"},
+                                "required_capabilities": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "maxItems": 8,
+                                },
+                            },
+                            "additionalProperties": False,
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+            },
+            {
                 "name": "nexus_workspace_snapshot",
                 "description": "Read the canonical checkout snapshot without creating state or a Target.",
                 "inputSchema": {"type": "object", "properties": {}},
@@ -3020,7 +4107,8 @@ class UnifiedMCPGateway:
                 "description": "Create exactly one new governed campaign INDEX and Task Card after explicit owner confirmation.",
                 "inputSchema": {
                     "type": "object",
-                    "required": ["owner_confirmation", "campaign_id", "task_id", "objective", "allowed_files", "verifier_commands"],
+                    "additionalProperties": False,
+                    "required": ["owner_confirmation", "campaign_id", "task_id", "objective", "allowed_files", "verifier_commands", "authority_goal_id", "authority_coordination_scope_id"],
                     "properties": {
                         "owner_confirmation": {"type": "boolean"},
                         "campaign_id": {"type": "string"},
@@ -3028,6 +4116,79 @@ class UnifiedMCPGateway:
                         "objective": {"type": "string"},
                         "allowed_files": {"type": "array", "items": {"type": "string"}, "maxItems": 10},
                         "verifier_commands": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+                        "authority_goal_id": {"type": "string", "maxLength": 128},
+                        "authority_coordination_scope_id": {"type": "string", "maxLength": 128},
+                    },
+                },
+            },
+            {
+                "name": "nexus_task_card_commit",
+                "description": "Commit exactly one pending Task Card and INDEX on a detached clean Controller after explicit owner confirmation.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["owner_confirmation", "campaign_id", "task_id", "expected_head", "card_hash", "index_hash", "authority_goal_id", "authority_coordination_scope_id"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "owner_confirmation": {"type": "boolean"},
+                        "campaign_id": {"type": "string"},
+                        "task_id": {"type": "string"},
+                        "expected_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "card_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "index_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "authority_goal_id": {"type": "string", "maxLength": 128},
+                        "authority_coordination_scope_id": {"type": "string", "maxLength": 128},
+                    },
+                },
+            },
+            {
+                "name": "nexus_task_card_authority_switch",
+                "description": "Switch canonical standing grant to a bounded temporary task-card authority scope.",
+                "inputSchema": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "ownerConfirmation",
+                        "attemptKey",
+                        "expectedCurrentReceiptHash",
+                        "expectedCurrentGoalId",
+                        "expectedCurrentThreadId",
+                        "successorGoalId",
+                        "successorThreadId",
+                        "ttlMinutes",
+                    ],
+                    "properties": {
+                        "ownerConfirmation": {"type": "boolean", "const": True},
+                        "attemptKey": {"type": "string", "maxLength": 128},
+                        "expectedCurrentReceiptHash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "expectedCurrentGoalId": {"type": "string", "maxLength": 128},
+                        "expectedCurrentThreadId": {"type": "string", "maxLength": 128},
+                        "successorGoalId": {"type": "string", "maxLength": 128},
+                        "successorThreadId": {"type": "string", "maxLength": 128},
+                        "ttlMinutes": {"type": "integer", "minimum": 1, "maximum": 30},
+                    },
+                },
+            },
+            {
+                "name": "nexus_task_card_authority_restore",
+                "description": "Restore canonical standing grant from a temporary task-card authority scope to exact predecessor.",
+                "inputSchema": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "ownerConfirmation",
+                        "attemptKey",
+                        "switchOperationId",
+                        "expectedTemporaryReceiptHash",
+                        "expectedCurrentGoalId",
+                        "expectedCurrentThreadId",
+                    ],
+                    "properties": {
+                        "ownerConfirmation": {"type": "boolean", "const": True},
+                        "attemptKey": {"type": "string", "maxLength": 128},
+                        "switchOperationId": {"type": "string", "maxLength": 128},
+                        "expectedTemporaryReceiptHash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "expectedCurrentGoalId": {"type": "string", "maxLength": 128},
+                        "expectedCurrentThreadId": {"type": "string", "maxLength": 128},
                     },
                 },
             },
@@ -3080,6 +4241,100 @@ class UnifiedMCPGateway:
                         "target_role": {"type": "string"},
                         "change_kind": {"type": "string", "enum": list(CHANGE_KIND_VALUES)},
                         "description": {"type": "string", "maxLength": 512},
+                    },
+                },
+            },
+            {
+                "name": "nexus_candidate_adopt_external",
+                "description": "Adopt one immutable externally accepted Candidate and stop at pending human approval.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": [
+                        "campaign_id", "spec_id", "spec_sha256", "server_instance_id", "lifecycle_revision",
+                        "tool_manifest_hash", "full_tool_schema_hash", "permission_policy_hash", "controller_repo_root",
+                        "controller_branch", "controller_head", "schema", "repository", "task_id",
+                        "attempt_id", "action_id", "idempotency_key", "task_card_path", "task_card_hash",
+                        "controller_revision", "target_base_revision", "candidate_commit_sha",
+                        "candidate_tree_sha", "candidate_diff_sha256", "validation_receipt_sha256",
+                        "acceptance_receipt_sha256", "validation_receipt_b64", "acceptance_receipt_b64",
+                        "allowed_files", "forbidden_files", "authorized_deletions",
+                        "verifier_commands", "protected_contracts", "action",
+                        "authority_goal_id", "authority_coordination_scope_id",
+                    ],
+                    "additionalProperties": False,
+                    "properties": {
+                        "campaign_id": {"type": "string", "const": EPB_CAMPAIGN_ID},
+                        "spec_id": {"type": "string", "const": EPB_SPEC_ID},
+                        "server_instance_id": {"type": "string"}, "lifecycle_revision": {"type": "string"},
+                        "spec_sha256": {"type": "string", "const": EPB_SPEC_SHA256},
+                        "tool_manifest_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "full_tool_schema_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "permission_policy_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "controller_repo_root": {"type": "string"}, "controller_branch": {"type": "string"},
+                        "controller_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "schema": {"type": "string", "const": "nexus.external_candidate_adoption_request.v1"},
+                        "repository": {"type": "string", "const": GITHUB_REPOSITORY.repository_id},
+                        "task_id": {"type": "string"}, "attempt_id": {"type": "string"},
+                        "action_id": {"type": "string"}, "idempotency_key": {"type": "string"},
+                        "task_card_path": {"type": "string"}, "task_card_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "controller_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "target_base_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "candidate_commit_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "candidate_tree_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "candidate_diff_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "validation_receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "acceptance_receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "validation_receipt_b64": {"type": "string"}, "acceptance_receipt_b64": {"type": "string"},
+                        "allowed_files": {"type": "array", "items": {"type": "string"}},
+                        "forbidden_files": {"type": "array", "items": {"type": "string"}},
+                        "authorized_deletions": {"type": "array", "items": {"type": "string"}},
+                        "verifier_commands": {"type": "array", "items": {"type": "string"}},
+                        "protected_contracts": {"type": "array", "items": {"type": "string"}},
+                        "authority_goal_id": {"type": "string", "maxLength": 128},
+                        "authority_coordination_scope_id": {"type": "string", "maxLength": 128},
+                        "action": {
+                            "type": "object", "additionalProperties": False,
+                            "required": ["schema", "task_id", "attempt_id", "action_id", "idempotency_key", "action_type", "task_card_path", "task_card_hash", "contract_kind", "expected_head", "allowed_paths", "permission_profile", "approval_scope", "mutation_domain", "tool_manifest_hash", "request_hash", "mutation"],
+                            "properties": {
+                                "schema": {"type": "string", "const": "nexus.lifecycle_action.v1"},
+                                "task_id": {"type": "string"}, "attempt_id": {"type": "string"}, "action_id": {"type": "string"}, "idempotency_key": {"type": "string"},
+                                "action_type": {"type": "string", "const": "CANDIDATE_ADOPT_EXTERNAL"},
+                                "task_card_path": {"type": "string"}, "task_card_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                                "contract_kind": {"type": "string", "const": "TRACKED_TASK_CARD"}, "contract_hash": {"type": ["string", "null"]},
+                                "expected_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"}, "allowed_paths": {"type": "array", "items": {"type": "string"}},
+                                "permission_profile": {"type": "string", "const": "CANDIDATE"}, "approval_scope": {"type": "string", "const": "ALLOW_ACTION_ONCE"},
+                                "mutation_domain": {"type": "string", "const": "CANDIDATE_REF"}, "tool_manifest_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                                "request_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "mutation": {"type": "boolean", "const": True},
+                            },
+                        },
+                    },
+                },
+            },
+            {
+                "name": "nexus_learning_policy_adopt",
+                "description": "Apply one exact, Owner-authorized governed Learning policy adoption through single-file CAS.",
+                "inputSchema": {
+                    "type": "object", "additionalProperties": False,
+                    "required": ["artifact", "recommendation", "validation", "expected_current_digest", "operation_id", "idempotency_key", "source_revision", "task_family", "model_name", "runtime_identity", "authority_goal_id", "authority_coordination_scope_id"],
+                    "properties": {
+                        "artifact": {"type": "object"}, "recommendation": {"type": "object"}, "validation": {"type": "object"},
+                        "expected_current_digest": {"type": ["string", "null"]}, "operation_id": {"type": "string"}, "idempotency_key": {"type": "string"},
+                        "source_revision": {"type": "string"}, "task_family": {"type": "string"}, "model_name": {"type": "string"}, "runtime_identity": {"type": "string"},
+                        "authority_goal_id": {"type": "string", "maxLength": 128}, "authority_coordination_scope_id": {"type": "string", "maxLength": 128},
+                    },
+                },
+            },
+            {
+                "name": "nexus_learning_policy_rollback",
+                "description": "Apply one exact, Owner-authorized governed Learning policy rollback through single-file CAS.",
+                "inputSchema": {
+                    "type": "object", "additionalProperties": False,
+                    "required": ["artifact", "previous_adoption", "expected_current_digest", "operation_id", "idempotency_key", "authority_goal_id", "authority_coordination_scope_id"],
+                    "properties": {
+                        "artifact": {"type": "object"}, "previous_adoption": {"type": "object"},
+                        "expected_current_digest": {"type": ["string", "null"]}, "operation_id": {"type": "string"}, "idempotency_key": {"type": "string"},
+                        "source_revision": {"type": "string"}, "task_family": {"type": "string"}, "model_name": {"type": "string"}, "runtime_identity": {"type": "string"},
+                        "authority_goal_id": {"type": "string", "maxLength": 128}, "authority_coordination_scope_id": {"type": "string", "maxLength": 128},
                     },
                 },
             },
@@ -3199,7 +4454,7 @@ class UnifiedMCPGateway:
             {
                 "name": "nexus_candidate_dispose",
                 "description": "Dispose a pending Candidate as REJECTED or SUPERSEDED through cleanup authority.",
-                "inputSchema": {"type": "object", "required": ["task_id", "disposition"], "properties": {"task_id": {"type": "string"}, "disposition": {"type": "string", "enum": ["REJECTED", "SUPERSEDED"]}, "superseded_by": {"type": "string"}}},
+                "inputSchema": {"type": "object", "additionalProperties": False, "required": ["task_id", "disposition", "authority_goal_id", "authority_coordination_scope_id"], "properties": {"task_id": {"type": "string"}, "disposition": {"type": "string", "enum": ["REJECTED", "SUPERSEDED"]}, "superseded_by": {"type": "string"}, "authority_goal_id": {"type": "string", "maxLength": 128}, "authority_coordination_scope_id": {"type": "string", "maxLength": 128}}},
             },
         ]
 
@@ -3265,6 +4520,7 @@ class UnifiedMCPGateway:
                     pending_actions += 1
         action_sha_current, action_contract_ok, action_contract_reasons = _action_contract_fingerprint()
         permission_sha_current, permission_contract_ok, permission_contract_reasons = _permission_enforcement_fingerprint()
+        upstream_info = self._observe_upstream_freshness(deployed_head=current_head)
         freshness = _evaluate_freshness(
             repo_head_at_start=SERVER_REPO_HEAD_AT_START,
             repo_head_current=current_head,
@@ -3298,6 +4554,7 @@ class UnifiedMCPGateway:
             "repo_head_current": current_head,
             "freshness_semantics_revision": FRESHNESS_SEMANTICS_REVISION,
             **freshness,
+            **upstream_info,
             "session_tracking": "unsupported",
             "active_sessions": None,
             "pending_actions": pending_actions,
@@ -3307,6 +4564,225 @@ class UnifiedMCPGateway:
             "canonical_repo_root": str(CANONICAL_SOURCE_ROOT),
             "lifecycle": lifecycle,
         }
+
+    def _gateway_execution_readiness(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        """Evaluate the #807 pre-execution readiness convergence gate.
+
+        One typed request in, one typed result out (READY_TO_EXECUTE or
+        BLOCKED with exactly one primary blocker).  This tool observes and
+        reports only: it never repairs, reloads, routes, admits, grants,
+        approves, or certifies.
+        """
+
+        required_fields = (
+            "repository_owner",
+            "repository_name",
+            "intended_source_commit",
+            "intended_source_tree",
+            "execution_realm",
+            "required_action_family",
+            "execution_contract_kind",
+        )
+        fields: dict[str, str] = {}
+        for field in required_fields:
+            raw = arguments.get(field)
+            if raw is None:
+                raise GatewayInputError(f"{field} is required")
+            fields[field] = _text(raw, field, max_length=4096)
+        optional_fields = (
+            "task_campaign_goal_identity",
+            "durable_coordination_scope_id",
+            "durable_repository_canonical_remote",
+            "desired_deployment_identity",
+        )
+        optionals: dict[str, str] = {}
+        for field in optional_fields:
+            raw = arguments.get(field)
+            if raw is not None:
+                optionals[field] = _text(raw, field, max_length=4096)
+        worker_constraints = arguments.get("worker_constraints") or []
+        if not isinstance(worker_constraints, (list, tuple)):
+            raise GatewayInputError("worker_constraints must be an array of strings")
+        worker_constraint_values = tuple(
+            _text(item, "worker_constraints[]", max_length=256) for item in worker_constraints
+        )
+        completion_contract = arguments.get("required_completion_contract")
+        if completion_contract is not None and not isinstance(completion_contract, Mapping):
+            raise GatewayInputError("required_completion_contract must be an object")
+
+        try:
+            request = ExecutionReadinessRequest(
+                repository_owner=fields["repository_owner"],
+                repository_name=fields["repository_name"],
+                intended_source_commit=fields["intended_source_commit"],
+                intended_source_tree=fields["intended_source_tree"],
+                execution_realm=fields["execution_realm"],
+                required_action_family=fields["required_action_family"],
+                execution_contract_kind=fields["execution_contract_kind"],
+                task_campaign_goal_identity=optionals.get("task_campaign_goal_identity"),
+                durable_coordination_scope_id=optionals.get("durable_coordination_scope_id"),
+                durable_repository_canonical_remote=optionals.get(
+                    "durable_repository_canonical_remote"
+                ),
+                desired_deployment_identity=optionals.get("desired_deployment_identity"),
+                worker_constraints=worker_constraint_values,
+                workforce_dispatch_binding=arguments.get("workforce_dispatch_binding"),
+                required_completion_contract=completion_contract,
+            )
+        except ValueError as exc:
+            raise GatewayInputError(str(exc)) from exc
+
+        realm = fields["execution_realm"]
+        if realm == "in_process_preflight":
+            observed_runtime_sha256 = _hash_source_paths(RUNTIME_SOURCE_PATHS)
+            try:
+                observed_repo_head = _git("rev-parse", "HEAD").strip()
+                observed_repo_tree = _git("rev-parse", "HEAD^{tree}").strip()
+            except RuntimeError:
+                observed_repo_head = ""
+                observed_repo_tree = ""
+            gateway_observation = GatewayReadinessObservation(
+                gateway_instance_id=SERVER_INSTANCE_ID,
+                observed_repo_head=observed_repo_head,
+                observed_repo_tree=observed_repo_tree,
+                observed_runtime_sha256=observed_runtime_sha256,
+                runtime_sha256_at_start=RUNTIME_SOURCE_SHA256_AT_START,
+                tool_manifest_revision=TOOL_MANIFEST_REVISION,
+                full_tool_schema_hash=FULL_TOOL_SCHEMA_HASH,
+                permission_policy_hash=PERMISSION_POLICY_HASH,
+                reload_required=observed_runtime_sha256 != RUNTIME_SOURCE_SHA256_AT_START,
+            )
+            completion_observation = _completion_authority_observation_from_environment()
+            plane_observations = _in_process_readiness_plane_observations(
+                gateway_observation,
+                request=request,
+                completion_observation=completion_observation,
+                required_completion_contract=request.required_completion_contract,
+            )
+        else:
+            raise GatewayInputError(f"execution_realm {realm!r} is not a supported observation realm")
+
+        result = evaluate_execution_readiness(
+            request,
+            plane_observations,
+            completion_observation=completion_observation,
+            provider_preflight_observer=lambda provider, model: self._provider_preflight(
+                {"provider": provider, "model": model}
+            ),
+            provider_authentication_required_observer=self._provider_requires_authentication,
+        )
+        payload = result.model_dump(mode="json")
+        payload["certification_fence"] = {
+            "ready_vocabulary": ["READY_TO_EXECUTE"],
+            "forbidden_vocabulary_ref": "NEXUS_EXECUTION_READINESS_FORBIDDEN_CERTIFICATION_VOCABULARY",
+            "satisfied": result.request_satisfies_certification_fence(),
+        }
+        return payload
+
+    def _project_entry(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        owner = _text(arguments.get("repository_owner"), "repository_owner", max_length=128)
+        name = _text(arguments.get("repository_name"), "repository_name", max_length=128)
+        raw_issue = arguments.get("issue_number")
+        if isinstance(raw_issue, bool) or not isinstance(raw_issue, int) or raw_issue <= 0:
+            raise GatewayInputError("issue_number must be a positive integer")
+        repository = f"{owner}/{name}"
+        if repository != GITHUB_REPOSITORY.repository_id:
+            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_REPOSITORY_MISMATCH", "repository is outside canonical scope")
+        try:
+            origin = _git("config", "--get", "remote.origin.url").strip()
+            head = _git("rev-parse", "HEAD").strip()
+            tree = _git("rev-parse", "HEAD^{tree}").strip()
+        except RuntimeError as exc:
+            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_SOURCE_OBSERVER_FAILED", str(exc))
+        if not _SHA_RE.fullmatch(head) or not _SHA_RE.fullmatch(tree):
+            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_SOURCE_OBSERVER_FAILED", "invalid source identity")
+        if not _canonical_remote_matches(origin, repository):
+            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_REPOSITORY_MISMATCH", "origin identity mismatch")
+        canonical_remote = GITHUB_REPOSITORY.canonical_remote
+        observation = self._github_issue_observer(repository, raw_issue)
+        if not isinstance(observation, Mapping) or observation.get("ok") is not True:
+            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_GITHUB_OBSERVER_FAILED", "fresh Issue observation unavailable")
+        issue = observation.get("issue")
+        if not isinstance(issue, Mapping) or str(issue.get("number")) != str(raw_issue) or not issue.get("state"):
+            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_GITHUB_OBSERVER_FAILED", "fresh Issue identity/state unavailable")
+        if str(issue.get("state")).upper() != "OPEN":
+            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_ISSUE_NOT_OPEN", "Issue is not open")
+        try:
+            matches = self.service.find_tasks_by_repository_issue(repository, raw_issue)
+        except Exception as exc:
+            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_TASK_RESOLUTION_FAILED", str(exc))
+        if len(matches) > 1:
+            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_AMBIGUOUS_TASK_BINDING", "multiple exact task bindings")
+        readiness_args = {
+            "repository_owner": owner, "repository_name": name,
+            "intended_source_commit": head, "intended_source_tree": tree,
+            "execution_realm": "in_process_preflight",
+            "required_action_family": "project_entry_observe",
+            "execution_contract_kind": "observe_only",
+        }
+        if not matches:
+            readiness = self._gateway_execution_readiness(readiness_args)
+            result = {"schema": "nexus.project_entry.v1", "status": "NO_TASK", "repository": repository,
+                    "issue": dict(issue), "source": {"commit": head, "tree": tree, "canonical_remote": canonical_remote},
+                    "issue_observation": dict(observation), "task_resolution": {"status": "NO_EXACT_TASK"},
+                    "readiness_request": readiness_args, "readiness_result": readiness,
+                    "readiness_scope": "PROJECT_ENTRY_OBSERVATION_ONLY",
+                    "claim_ceiling": "PROJECT_ENTRY_OBSERVE_ONLY_NO_DOWNSTREAM_EFFECTS",
+                    "claim_ceiling_excludes": ["execution", "verification", "acceptance", "merge", "release", "production"]}
+            result["project_binding_hash"] = self._project_entry_binding_hash(result)
+            return result
+        state = matches[0]
+        task_id = str(state.get("task_id") or "")
+        try:
+            entry = self.service.rehydrate_project_entry(
+                task_id, state.get("attempt_id"), repository=repository, issue_number=raw_issue
+            )
+            projection = entry["continuation"]
+        except Exception as exc:
+            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_CONTINUATION_INVALID", str(exc), task_id=task_id)
+        authority_binding = entry.get("authority_binding") if isinstance(entry, Mapping) else None
+        if authority_binding is not None:
+            readiness_args.update({
+                "task_campaign_goal_identity": authority_binding["goal_id"],
+                "durable_coordination_scope_id": authority_binding["coordination_scope_id"],
+                "durable_repository_canonical_remote": authority_binding["canonical_remote"],
+                "required_action_family": authority_binding["intended_action_family"],
+            })
+        readiness = self._gateway_execution_readiness(readiness_args)
+        result = {"schema": "nexus.project_entry.v1", "status": "TASK_REHYDRATED", "repository": repository,
+                "issue": dict(issue), "source": {"commit": head, "tree": tree, "canonical_remote": canonical_remote},
+                "issue_observation": dict(observation), "task_resolution": {"status": "EXACT_TASK", "task_id": task_id},
+                "continuation": projection, "readiness_request": readiness_args, "readiness_result": readiness,
+                "readiness_scope": "PROJECT_ENTRY_OBSERVATION_ONLY",
+                "claim_ceiling": "PROJECT_ENTRY_OBSERVE_ONLY_NO_DOWNSTREAM_EFFECTS",
+                "claim_ceiling_excludes": ["execution", "verification", "acceptance", "merge", "release", "production"]}
+        result["project_binding_hash"] = self._project_entry_binding_hash(result)
+        return result
+
+    @staticmethod
+    def _project_entry_binding_hash(payload: Mapping[str, Any]) -> str:
+        volatile = {"evaluated_at", "observed_at", "timestamp", "created_at", "updated_at_runtime"}
+        def scrub(value: Any) -> Any:
+            if isinstance(value, Mapping):
+                return {str(k): scrub(v) for k, v in value.items() if k not in volatile and k != "project_binding_hash"}
+            if isinstance(value, list):
+                return [scrub(item) for item in value]
+            return value
+        stable = scrub(json.loads(json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)))
+        return hashlib.sha256(json.dumps(stable, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+    @staticmethod
+    def _project_entry_blocker(repository: str, issue: int, code: str, detail: str, *, task_id: str | None = None) -> dict[str, Any]:
+        safe_detail = f"diagnostic_class={code}; diagnostic_sha256={hashlib.sha256(str(detail).encode()).hexdigest()}"
+        result = {"schema": "nexus.project_entry.v1", "status": "BLOCKED", "repository": repository,
+                  "issue_number": issue, "task_resolution": {"status": "NOT_RESOLVED"},
+                  "blocker": {"code": code, "detail": safe_detail},
+                  "claim_ceiling": "PROJECT_ENTRY_OBSERVE_ONLY_NO_DOWNSTREAM_EFFECTS",
+                  "claim_ceiling_excludes": ["execution", "verification", "acceptance", "merge", "release", "production"]}
+        if task_id:
+            result["task_resolution"] = {"status": "INVALID_CONTINUATION", "task_id": task_id}
+        result["project_binding_hash"] = UnifiedMCPGateway._project_entry_binding_hash(result)
+        return result
 
     @staticmethod
     def _recovery_payload(state: Mapping[str, Any], *, operation: str = "status", include_state: bool = False) -> dict[str, Any]:
@@ -3510,6 +4986,335 @@ class UnifiedMCPGateway:
         payload["approval_receipt"] = approval_receipt
         return payload
 
+    def _candidate_adopt_external(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        """Adopt one externally accepted Candidate, stopping at approval pending.
+
+        The gateway owns only the public/runtime and Owner-authority boundary;
+        physical Candidate verification remains exclusively in the lifecycle
+        service.  Keep the transport envelope closed so callers cannot smuggle
+        internal state or downstream approval/integration fields.
+        """
+        runtime_fields = {
+            "server_instance_id", "lifecycle_revision", "full_tool_schema_hash",
+            "permission_policy_hash", "controller_repo_root", "controller_branch",
+            "controller_head", "campaign_id", "spec_id", "spec_sha256",
+            "authority_goal_id", "authority_coordination_scope_id",
+        }
+        request_fields = set(ExternalCandidateAdoptionRequest.model_fields)
+        unknown = set(arguments) - request_fields - runtime_fields
+        if unknown:
+            raise GatewayInputError("CANDIDATE_ADOPTION_SCHEMA_CLOSED")
+        missing_runtime = runtime_fields - set(arguments)
+        if missing_runtime:
+            raise GatewayInputError(
+                "CANDIDATE_ADOPTION_RUNTIME_BINDING_REQUIRED:" + ",".join(sorted(missing_runtime))
+            )
+        if str(arguments["server_instance_id"]) != SERVER_INSTANCE_ID:
+            raise GatewayInputError("CANDIDATE_ADOPTION_SERVER_INSTANCE_MISMATCH")
+        if str(arguments["lifecycle_revision"]) != LIFECYCLE_REVISION:
+            raise GatewayInputError("CANDIDATE_ADOPTION_LIFECYCLE_REVISION_MISMATCH")
+        if str(arguments["full_tool_schema_hash"]) != FULL_TOOL_SCHEMA_HASH:
+            raise GatewayInputError("CANDIDATE_ADOPTION_TOOL_SCHEMA_MISMATCH")
+        if str(arguments["permission_policy_hash"]) != PERMISSION_POLICY_HASH:
+            raise GatewayInputError("CANDIDATE_ADOPTION_PERMISSION_POLICY_MISMATCH")
+        if str(arguments["campaign_id"]) != EPB_CAMPAIGN_ID:
+            raise GatewayInputError("CANDIDATE_ADOPTION_CAMPAIGN_MISMATCH")
+        if str(arguments["spec_id"]) != EPB_SPEC_ID or str(arguments.get("spec_sha256")) != EPB_SPEC_SHA256:
+            raise GatewayInputError("CANDIDATE_ADOPTION_SPEC_MISMATCH")
+        if str(arguments.get("repository")) != GITHUB_REPOSITORY.repository_id:
+            raise GatewayInputError("CANDIDATE_ADOPTION_REPOSITORY_MISMATCH")
+
+        controller_root = Path(str(arguments["controller_repo_root"])).expanduser().resolve()
+        if controller_root != CANONICAL_SOURCE_ROOT.resolve():
+            raise GatewayInputError("CANDIDATE_ADOPTION_CONTROLLER_ROOT_MISMATCH")
+        current_branch = _git("branch", "--show-current").strip()
+        if str(arguments["controller_branch"]) != current_branch:
+            raise GatewayInputError("CANDIDATE_ADOPTION_CONTROLLER_BRANCH_MISMATCH")
+        current_head = _git("rev-parse", "HEAD").strip()
+        if str(arguments["controller_head"]) != current_head:
+            raise GatewayInputError("CANDIDATE_ADOPTION_CONTROLLER_HEAD_MISMATCH")
+        if str(arguments.get("controller_head")) != str(arguments.get("controller_revision")):
+            raise GatewayInputError("CANDIDATE_ADOPTION_CONTROLLER_REVISION_MISMATCH")
+
+        request_data = {key: arguments[key] for key in request_fields if key in arguments}
+        try:
+            request = ExternalCandidateAdoptionRequest.model_validate(request_data)
+        except Exception as exc:
+            raise GatewayInputError(f"CANDIDATE_ADOPTION_REQUEST_INVALID:{exc}") from exc
+        if request.action.tool_manifest_hash != TOOL_MANIFEST_REVISION:
+            raise GatewayInputError("CANDIDATE_ADOPTION_ACTION_MANIFEST_MISMATCH")
+        if request.tool_manifest_hash != TOOL_MANIFEST_REVISION:
+            raise GatewayInputError("CANDIDATE_ADOPTION_REQUEST_MANIFEST_MISMATCH")
+        if request.action.expected_head != request.controller_revision:
+            raise GatewayInputError("CANDIDATE_ADOPTION_ACTION_HEAD_MISMATCH")
+        effect = {
+            "campaign_id": str(arguments["campaign_id"]),
+            "spec_id": str(arguments["spec_id"]),
+            "spec_sha256": EPB_SPEC_SHA256,
+            "repository": request.repository,
+            "task_id": request.task_id,
+            "attempt_id": request.attempt_id,
+            "action_id": request.action_id,
+            "idempotency_key": request.idempotency_key,
+            "task_card_path": request.task_card_path,
+            "task_card_hash": request.task_card_hash,
+            "target_base_revision": request.target_base_revision,
+            "controller_revision": request.controller_revision,
+            "candidate_commit_sha": request.candidate_commit_sha,
+            "candidate_tree_sha": request.candidate_tree_sha,
+            "candidate_diff_sha256": request.candidate_diff_sha256,
+            "validation_receipt_sha256": request.validation_receipt_sha256,
+            "acceptance_receipt_sha256": request.acceptance_receipt_sha256,
+            "adoption_request_hash": request.semantic_hash(),
+            "server_instance_id": SERVER_INSTANCE_ID,
+            "lifecycle_revision": LIFECYCLE_REVISION,
+            "tool_manifest_hash": TOOL_MANIFEST_REVISION,
+            "full_tool_schema_hash": FULL_TOOL_SCHEMA_HASH,
+            "permission_policy_hash": PERMISSION_POLICY_HASH,
+            "controller_repo_root": str(controller_root),
+            "controller_branch": current_branch,
+            "controller_head": current_head,
+            "action": request.action.model_dump(mode="json"),
+        }
+        owner_authority = self._require_owner_effect_authority(
+            AutonomyActionClass.CANDIDATE_ADOPT_EXTERNAL, effect,
+            key=self._owner_effect_key(arguments),
+        )
+        rebound_root = Path(str(arguments["controller_repo_root"])).expanduser().resolve()
+        rebound_branch = _git("branch", "--show-current").strip()
+        rebound_head = _git("rev-parse", "HEAD").strip()
+        if rebound_root != controller_root or rebound_branch != current_branch or rebound_head != current_head:
+            raise GatewayInputError("CANDIDATE_ADOPTION_CONTROLLER_DRIFT_AFTER_AUTHORITY")
+        if rebound_head != request.controller_revision:
+            raise GatewayInputError("CANDIDATE_ADOPTION_CONTROLLER_REVISION_DRIFT_AFTER_AUTHORITY")
+        result = self.service.adopt_external_candidate(request)
+        self._validate_external_adoption_result(result, request)
+        return {
+            "schema": "nexus.candidate_adoption_gateway_result.v1",
+            "operation": "candidate_adopt_external",
+            "task_id": result.get("task_id"),
+            "status": result.get("status"),
+            "promotion_status": result.get("promotion_status"),
+            "candidate_commit_sha": result.get("candidate_commit_sha"),
+            "candidate_tree_sha": result.get("candidate_tree_sha"),
+            "candidate_state_hash": result.get("candidate_state_hash"),
+            "verified_receipt_hash": result.get("verified_receipt_hash"),
+            "candidate_ref": result.get("candidate_ref"),
+            "adoption_receipt": result.get("adoption_receipt"),
+            "adoption_receipt_hash": result.get("adoption_receipt_hash"),
+            "owner_authority": owner_authority,
+            "claim_ceiling": [
+                "CANDIDATE_ADOPTED_PENDING_HUMAN_APPROVAL_ONLY",
+                "NO_APPROVAL", "NO_INTEGRATION", "NO_MERGE", "NO_PUSH",
+                "NO_RELEASE", "NO_PRODUCTION",
+            ],
+        }
+
+    def _learning_policy_control(
+        self,
+        arguments: Mapping[str, Any],
+        *,
+        action: AutonomyActionClass,
+    ) -> dict[str, Any]:
+        """Validate one closed Learning effect, authorize it, then CAS it."""
+        common = {
+            "artifact", "expected_current_digest", "operation_id", "idempotency_key",
+            "source_revision", "task_family", "model_name", "runtime_identity",
+            "authority_goal_id", "authority_coordination_scope_id",
+        }
+        allowed = common | ({"recommendation", "validation"} if action is AutonomyActionClass.LEARNING_POLICY_ADOPT else {"previous_adoption"})
+        unknown = set(arguments) - allowed
+        if unknown:
+            raise GatewayInputError("LEARNING_POLICY_CONTROL_SCHEMA_CLOSED")
+        missing = common - set(arguments)
+        if missing:
+            raise GatewayInputError("LEARNING_POLICY_CONTROL_FIELDS_REQUIRED:" + ",".join(sorted(missing)))
+        if action is AutonomyActionClass.LEARNING_POLICY_ADOPT and not {"recommendation", "validation"} <= set(arguments):
+            raise GatewayInputError("LEARNING_POLICY_PROVENANCE_REQUIRED")
+        if action is AutonomyActionClass.LEARNING_POLICY_ROLLBACK and "previous_adoption" not in arguments:
+            raise GatewayInputError("LEARNING_POLICY_ROLLBACK_ADOPTION_BINDING_REQUIRED")
+        # Freeze every nested request object before hashing or authority lookup.
+        arguments = copy.deepcopy(dict(arguments))
+        artifact = arguments.get("artifact")
+        if not isinstance(artifact, Mapping):
+            raise GatewayInputError("LEARNING_POLICY_ARTIFACT_INVALID")
+        previous = arguments.get("previous_adoption")
+        if previous is not None and not isinstance(previous, Mapping):
+            raise GatewayInputError("LEARNING_POLICY_ROLLBACK_ADOPTION_INVALID")
+        artifact_hash = hashlib.sha256(json.dumps(dict(artifact), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+        def input_hash(value: Any) -> str | None:
+            if not isinstance(value, Mapping):
+                return None
+            return hashlib.sha256(json.dumps(dict(value), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+        effect = {
+            "repository": GITHUB_REPOSITORY.repository_id,
+            "action": action.value,
+            "operation_id": str(arguments["operation_id"]),
+            "idempotency_key": str(arguments["idempotency_key"]),
+            "artifact_hash": artifact_hash,
+            "target_path": str(CANONICAL_SOURCE_ROOT / (DEFAULT_GOVERNED_ADOPTION_PATH if action is AutonomyActionClass.LEARNING_POLICY_ADOPT else DEFAULT_GOVERNED_ROLLBACK_PATH)),
+            "expected_current_digest": arguments.get("expected_current_digest"),
+            "source_revision": str(arguments["source_revision"]),
+            "task_family": str(arguments["task_family"]),
+            "model_name": str(arguments["model_name"]),
+            "runtime_identity": str(arguments["runtime_identity"]),
+            "recommendation_input_hash": input_hash(arguments.get("recommendation")),
+            "validation_input_hash": input_hash(arguments.get("validation")),
+            "previous_adoption_input_hash": input_hash(previous),
+        }
+        owner_authority = self._require_owner_effect_authority(
+            action, effect, key=self._owner_effect_key(arguments)
+        )
+        try:
+            result = apply_learning_policy_effect(
+                action=action,
+                project_root=CANONICAL_SOURCE_ROOT,
+                artifact=artifact,
+                recommendation=arguments.get("recommendation"),
+                validation=arguments.get("validation"),
+                expected_current_digest=arguments.get("expected_current_digest"),
+                operation_id=str(arguments["operation_id"]),
+                idempotency_key=str(arguments["idempotency_key"]),
+                source_revision=str(arguments["source_revision"]),
+                task_family=str(arguments["task_family"]),
+                model_name=str(arguments["model_name"]),
+                runtime_identity=str(arguments["runtime_identity"]),
+                previous_adoption_id=(str(previous.get("adoption_id")) if isinstance(previous, Mapping) else None),
+                previous_adoption_hash=(str(previous.get("adoption_hash")) if isinstance(previous, Mapping) else None),
+                previous_adoption=previous,
+            )
+        except Exception as exc:
+            raise GatewayInputError(str(exc)) from exc
+        return {**result, "owner_authority": owner_authority}
+
+    @staticmethod
+    def _validate_external_adoption_result(
+        result: Any,
+        request: ExternalCandidateAdoptionRequest | None = None,
+    ) -> None:
+        if not isinstance(result, Mapping):
+            raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_INVALID")
+        if result.get("status") != "PENDING_HUMAN_APPROVAL" or result.get("promotion_status") != "PENDING_HUMAN_APPROVAL":
+            raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_NOT_PENDING")
+        authority_tokens = (
+            "approval", "approved", "integrat", "merge", "push",
+            "release", "activat", "deploy", "production",
+        )
+
+        def is_negative(value: Any) -> bool:
+            return value in (
+                None, False, "", "PENDING", "NOT_CREATED",
+                "PENDING_HUMAN_APPROVAL", [], {},
+            )
+
+        for key, value in result.items():
+            if any(token in key.lower() for token in authority_tokens) and not is_negative(value):
+                raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_UNEXPECTED_DOWNSTREAM_FIELD")
+        adoption_receipt = result.get("adoption_receipt")
+        adoption_receipt_hash = str(result.get("adoption_receipt_hash") or "")
+        if not isinstance(adoption_receipt, Mapping) or not re.fullmatch(r"[0-9a-f]{64}", adoption_receipt_hash):
+            raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_RECEIPT_REQUIRED")
+        computed_receipt_hash = hashlib.sha256(json.dumps(
+            dict(adoption_receipt), sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        ).encode("utf-8")).hexdigest()
+        if computed_receipt_hash != adoption_receipt_hash:
+            raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_RECEIPT_HASH_MISMATCH")
+        receipt_fields = {
+            "schema", "task_id", "attempt_id", "action_id", "idempotency_key",
+            "adoption_request_hash", "task_card_path", "task_card_hash", "contract_hash",
+            "controller_revision", "target_base_revision", "candidate_commit_sha",
+            "candidate_tree_sha", "candidate_diff_sha256", "candidate_state_hash",
+            "verified_receipt_hash", "validation_receipt_sha256",
+            "acceptance_receipt_sha256", "repository_contract_policy_revision_hash",
+            "derived_contract_projection", "forbidden_repository_patterns", "reviewer_id",
+            "candidate_ref", "promotion_packet_hash", "worker_invocations",
+            "candidate_rewritten", "approval_performed", "integration_performed",
+            "merge_performed", "push_performed", "public_claim_allowed",
+            "production_ready", "claim_ceiling", "issued_at",
+        }
+        if set(adoption_receipt) != receipt_fields:
+            raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_RECEIPT_FIELDS_INVALID")
+        if (
+            adoption_receipt.get("schema") != "nexus.external_candidate_adoption_receipt.v1"
+            or adoption_receipt.get("worker_invocations") != 0
+            or adoption_receipt.get("candidate_rewritten") is not False
+            or adoption_receipt.get("approval_performed") is not False
+            or adoption_receipt.get("integration_performed") is not False
+            or adoption_receipt.get("merge_performed") is not False
+            or adoption_receipt.get("push_performed") is not False
+            or adoption_receipt.get("public_claim_allowed") is not False
+            or adoption_receipt.get("production_ready") is not False
+            or adoption_receipt.get("claim_ceiling")
+            != ["CANDIDATE_ADOPTED_PENDING_HUMAN_APPROVAL_ONLY"]
+        ):
+            raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_RECEIPT_SEMANTICS_INVALID")
+        if request is not None:
+            expected_subject = {
+                "task_id": request.task_id,
+                "attempt_id": request.attempt_id,
+                "action_id": request.action_id,
+                "idempotency_key": request.idempotency_key,
+                "adoption_request_hash": request.semantic_hash(),
+                "task_card_path": request.task_card_path,
+                "task_card_hash": request.task_card_hash,
+                "controller_revision": request.controller_revision,
+                "target_base_revision": request.target_base_revision,
+                "candidate_commit_sha": request.candidate_commit_sha,
+                "candidate_tree_sha": request.candidate_tree_sha,
+                "candidate_diff_sha256": request.candidate_diff_sha256,
+                "validation_receipt_sha256": request.validation_receipt_sha256,
+                "acceptance_receipt_sha256": request.acceptance_receipt_sha256,
+            }
+            if any(adoption_receipt.get(key) != value for key, value in expected_subject.items()):
+                raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_RECEIPT_SUBJECT_MISMATCH")
+        for field in (
+            "contract_hash", "candidate_state_hash", "verified_receipt_hash",
+            "repository_contract_policy_revision_hash", "promotion_packet_hash",
+        ):
+            if not re.fullmatch(r"[0-9a-f]{64}", str(adoption_receipt.get(field) or "")):
+                raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_RECEIPT_HASH_FIELD_INVALID")
+        if (
+            result.get("candidate_commit_sha") != adoption_receipt.get("candidate_commit_sha")
+            or result.get("candidate_tree_sha") != adoption_receipt.get("candidate_tree_sha")
+            or result.get("candidate_state_hash") != adoption_receipt.get("candidate_state_hash")
+            or result.get("verified_receipt_hash") != adoption_receipt.get("verified_receipt_hash")
+            or result.get("candidate_ref") != adoption_receipt.get("candidate_ref")
+        ):
+            raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_RECEIPT_STATE_MISMATCH")
+        for key, value in adoption_receipt.items():
+            if any(token in key.lower() for token in authority_tokens) and not is_negative(value):
+                raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_RECEIPT_DOWNSTREAM_EFFECT")
+        allowed_downstream_fields = {
+            "approved_binding", "integration_authorization", "integration_receipt",
+            "merge_performed", "push_performed", "production_ready",
+        }
+        downstream_prefixes = (
+            "approval_", "approved_", "integration_", "merge_", "push_",
+            "release_", "activation_", "deployment_", "production_",
+        )
+        unexpected_downstream = sorted(
+            key for key in result
+            if key.startswith(downstream_prefixes) and key not in allowed_downstream_fields
+        )
+        if unexpected_downstream or any(
+            key in result for key in ("final_disposition", "terminal_status", "release_receipt")
+        ):
+            raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_UNEXPECTED_DOWNSTREAM_FIELD")
+        for field in ("approved_binding", "integration_authorization", "integration_receipt"):
+            if result.get(field) not in (None, {}):
+                raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_DOWNSTREAM_AUTHORITY")
+        for field in ("merge_performed", "push_performed", "public_claim_allowed", "production_ready"):
+            if result.get(field) is not False:
+                raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_DOWNSTREAM_EFFECT")
+        ceiling = result.get("claim_ceiling")
+        if ceiling is not None and (
+            not isinstance(ceiling, (list, tuple)) or any(
+                any(token in str(item).upper() for token in ("APPROVED", "INTEGRATED", "MERGE", "PUSH", "PRODUCTION"))
+                for item in ceiling
+            )
+        ):
+            raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_CLAIM_CEILING")
+
     def _candidate_bind_integration(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         forbidden = {"integration_authorization", "action_set", "approval_context", "shell"}
         if forbidden.intersection(arguments):
@@ -3680,6 +5485,14 @@ class UnifiedMCPGateway:
         return payload
 
     def _candidate_dispose(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        allowed_keys = {
+            "task_id", "disposition", "superseded_by",
+            "authority_goal_id", "authority_coordination_scope_id",
+        }
+        unknown_keys = set(arguments) - allowed_keys
+        if unknown_keys:
+            raise GatewayInputError(f"unknown arguments: {', '.join(sorted(unknown_keys))}")
+        owner_key = self._owner_effect_key(arguments)
         task_id = _text(arguments.get("task_id"), "task_id")
         disposition = str(arguments.get("disposition") or "").strip().upper()
         if disposition not in {"REJECTED", "SUPERSEDED"}:
@@ -3687,6 +5500,8 @@ class UnifiedMCPGateway:
         superseded_by = str(arguments.get("superseded_by") or "").strip() or None
         if disposition == "SUPERSEDED" and not superseded_by:
             raise GatewayInputError("superseded_by is required for SUPERSEDED")
+        if superseded_by is not None:
+            superseded_by = self._safe_slug(superseded_by, "superseded_by")
         state = self.service.get_task_snapshot(task_id, include_details=True)
         if not isinstance(state, Mapping):
             raise GatewayInputError("CANDIDATE_TASK_STATE_REQUIRED")
@@ -3694,6 +5509,40 @@ class UnifiedMCPGateway:
         if not re.fullmatch(r"[0-9a-f]{40}", base):
             raise GatewayInputError("CANDIDATE_CONTROLLER_REVISION_REQUIRED")
         packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
+        try:
+            contract_identity = resolve_contract_identity(
+                state,
+                expected_task_id=task_id,
+                expected_head=base,
+            )
+        except RuntimeError as exc:
+            raise GatewayInputError(str(exc)) from exc
+        candidate_binding = {
+            "candidate_commit_sha": packet.get("candidate_commit_sha") or state.get("candidate_commit_sha"),
+            "candidate_tree_sha": packet.get("candidate_tree_sha") or state.get("candidate_tree_sha"),
+            "candidate_state_hash": packet.get("candidate_state_hash") or state.get("candidate_state_hash"),
+            "verified_receipt_hash": packet.get("verified_receipt_hash") or state.get("verified_receipt_hash"),
+        }
+        owner_action = (
+            AutonomyActionClass.CANDIDATE_REJECT
+            if disposition == "REJECTED"
+            else AutonomyActionClass.CANDIDATE_SUPERSEDE
+        )
+        owner_authority = self._require_owner_effect_authority(
+            owner_action,
+            {
+                "task_id": task_id,
+                "attempt_id": str(state.get("attempt_id") or ""),
+                "controller_revision": base,
+                "contract_kind": contract_identity["contract_kind"],
+                "contract_hash": contract_identity["contract_hash"],
+                "task_card_hash": contract_identity["task_card_hash"],
+                "disposition": disposition,
+                "superseded_by": superseded_by,
+                **candidate_binding,
+            },
+            key=owner_key,
+        )
         action_request = {**dict(arguments), "source_attempt_id": state.get("attempt_id"), "candidate_binding": {
             "candidate_commit_sha": packet.get("candidate_commit_sha") or state.get("candidate_commit_sha"),
             "candidate_tree_sha": packet.get("candidate_tree_sha") or state.get("candidate_tree_sha"),
@@ -3715,6 +5564,7 @@ class UnifiedMCPGateway:
         result = self.service.dispose_candidate(task_id, disposition=disposition, superseded_by=superseded_by)
         payload = self._recovery_payload(result, operation="candidate_dispose", include_state=True)
         payload["guard_receipt"] = guard_receipt
+        payload["owner_authority"] = owner_authority
         return payload
 
     def _workspace_snapshot(self) -> dict[str, Any]:
@@ -4073,6 +5923,10 @@ class UnifiedMCPGateway:
     def _call_tool(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         if name == "nexus_gateway_status":
             return self._gateway_status()
+        if name == EXECUTION_READINESS_TOOL_NAME:
+            return self._gateway_execution_readiness(arguments)
+        if name == "nexus_project_entry":
+            return self._project_entry(arguments)
         if name == "nexus_workspace_snapshot":
             return self._workspace_snapshot()
         if name == "nexus_read":
@@ -4134,6 +5988,12 @@ class UnifiedMCPGateway:
             return self._provider_preflight(arguments)
         if name == "nexus_task_card_create":
             return self._task_card_create(arguments)
+        if name == "nexus_task_card_commit":
+            return self._task_card_commit(arguments)
+        if name == "nexus_task_card_authority_switch":
+            return self._task_card_authority_switch(arguments)
+        if name == "nexus_task_card_authority_restore":
+            return self._task_card_authority_restore(arguments)
         if name == "nexus_model_probe":
             return self._model_probe_submit(arguments)
         if name == "nexus_model_probe_result":
@@ -4148,6 +6008,16 @@ class UnifiedMCPGateway:
             return self._model_calibration_plan(arguments)
         if name == "nexus_candidate_approve":
             return self._candidate_approve(arguments)
+        if name == "nexus_candidate_adopt_external":
+            return self._candidate_adopt_external(arguments)
+        if name == "nexus_learning_policy_adopt":
+            return self._learning_policy_control(
+                arguments, action=AutonomyActionClass.LEARNING_POLICY_ADOPT
+            )
+        if name == "nexus_learning_policy_rollback":
+            return self._learning_policy_control(
+                arguments, action=AutonomyActionClass.LEARNING_POLICY_ROLLBACK
+            )
         if name == "nexus_candidate_bind_integration":
             return self._candidate_bind_integration(arguments)
         if name == "nexus_candidate_integrate":

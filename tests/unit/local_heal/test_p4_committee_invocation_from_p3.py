@@ -10,38 +10,47 @@ from nexus.services.local_heal.local_model_executor import (
 from nexus.services.local_heal.receipt import build_repair_receipt
 
 
-class FakeProvider:
+from nexus.services.local_heal.local_model_provider import (
+    LocalModelProvider,
+    LocalModelProviderRequest,
+    LocalModelProviderResponse,
+)
+
+
+class FakeProvider(LocalModelProvider):
     """Fake provider that returns empty output (retry fails)."""
-    def generate(self, req):
-        class R:
-            output_text = ""
-            output_truncated = False
-            error = ""
-            timed_out = False
-            requested_timeout_sec = 120.0
-            effective_timeout_sec = 120.0
-            elapsed_sec = 0.1
-            provider_invoked = True
-            model_called = True
-            model_name = "test-local-model"
-        return R()
+    def generate(self, req: LocalModelProviderRequest) -> LocalModelProviderResponse:
+        return LocalModelProviderResponse(
+            provider_invoked=True,
+            model_called=True,
+            model_name="test-local-model",
+            output_text="",
+            output_truncated=False,
+            error="",
+            timed_out=False,
+            requested_timeout_sec=120.0,
+            effective_timeout_sec=120.0,
+            elapsed_sec=0.1,
+            ollama_metrics_available=False,
+        )
 
 
-class PatchProvider:
+class PatchProvider(LocalModelProvider):
     """Fake provider that returns a real patch (retry succeeds)."""
-    def generate(self, req):
-        class R:
-            output_text = "--- a/foo.py\n+++ b/foo.py\n@@ -1,3 +1,3 @@\n def foo():\n-    pass\n+    return 42\n"
-            output_truncated = False
-            error = ""
-            timed_out = False
-            requested_timeout_sec = 120.0
-            effective_timeout_sec = 120.0
-            elapsed_sec = 0.1
-            provider_invoked = True
-            model_called = True
-            model_name = "test-local-model"
-        return R()
+    def generate(self, req: LocalModelProviderRequest) -> LocalModelProviderResponse:
+        return LocalModelProviderResponse(
+            provider_invoked=True,
+            model_called=True,
+            model_name="test-local-model",
+            output_text="--- a/foo.py\n+++ b/foo.py\n@@ -1,3 +1,3 @@\n def foo():\n-    pass\n+    return 42\n",
+            output_truncated=False,
+            error="",
+            timed_out=False,
+            requested_timeout_sec=120.0,
+            effective_timeout_sec=120.0,
+            elapsed_sec=0.1,
+            ollama_metrics_available=False,
+        )
 
 
 @pytest.fixture(autouse=True)

@@ -4,11 +4,13 @@ import json
 import os
 import stat
 import subprocess
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
+import nexus.orchestrator.standing_grant_store as standing_grant_store
 from nexus.contracts.autonomy_goal import (
     AutonomyActionClass,
     RepositoryIdentity,
@@ -16,16 +18,231 @@ from nexus.contracts.autonomy_goal import (
 )
 from nexus.orchestrator.standing_grant_store import (
     DEFAULT_RECEIPT_PATH,
+    StandingGrantKey,
     StandingGrantReceipt,
     StandingGrantReceiptError,
+    _authorize_durable_standing_grant_effect_at,
     _check_dir,
     _load_receipt_at,
+    _load_receipt_structural_at,
+    _restore_task_card_authority_at,
+    _switch_task_card_authority_at,
     _write_standing_grant_receipt_at,
+    authorize_durable_standing_grant_effect,
+    load_keyed_standing_grant_receipt,
     load_standing_grant_receipt,
+    restore_task_card_authority,
+    switch_task_card_authority,
+    write_keyed_standing_grant_receipt,
     write_standing_grant_receipt,
 )
 
 NOW = datetime.now(timezone.utc)
+
+
+def test_keyed_task_card_switch_preserves_predecessor_and_restore_revokes_temp(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    predecessor = StandingGrantReceipt.issue(
+        grant_id="keyed-predecessor",
+        context=_make_context(goal_id="keyed-goal", thread_id="keyed-thread"),
+    )
+    predecessor_key = StandingGrantKey(_repository(), "keyed-goal", "keyed-thread")
+    write_keyed_standing_grant_receipt(predecessor)
+    result = switch_task_card_authority(
+        current_key=predecessor_key,
+        attempt_key="keyed-switch",
+        expected_current_receipt_hash=predecessor.receipt_hash,
+        expected_current_goal_id="keyed-goal",
+        successor_goal_id="keyed-successor",
+        successor_thread_id="keyed-successor-thread",
+        ttl_minutes=5,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    assert result["predecessor_key"] == predecessor_key.digest
+    assert load_keyed_standing_grant_receipt(predecessor_key, now=NOW) == predecessor
+    restored = restore_task_card_authority(
+        current_key=predecessor_key,
+        attempt_key="keyed-restore",
+        switch_operation_id=result["switch_operation_id"],
+        expected_temporary_receipt_hash=result["temporary_receipt_hash"],
+        owner_confirmation=True,
+        now=NOW,
+    )
+    assert restored["predecessor_receipt_hash"] == predecessor.receipt_hash
+    temporary_key = StandingGrantKey(_repository(), "keyed-successor", "keyed-successor-thread")
+    with pytest.raises(StandingGrantReceiptError, match="REVOKED"):
+        load_keyed_standing_grant_receipt(temporary_key, now=NOW)
+
+
+def test_keyed_switch_retry_conflict_and_occupied_successor(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    predecessor = StandingGrantReceipt.issue(
+        grant_id="keyed-retry",
+        context=_make_context(goal_id="retry-goal", thread_id="retry-thread"),
+    )
+    key = StandingGrantKey(_repository(), "retry-goal", "retry-thread")
+    write_keyed_standing_grant_receipt(predecessor)
+    kwargs = dict(
+        current_key=key,
+        attempt_key="retry-attempt",
+        expected_current_receipt_hash=predecessor.receipt_hash,
+        expected_current_goal_id="retry-goal",
+        successor_goal_id="retry-successor",
+        successor_thread_id="retry-successor-thread",
+        ttl_minutes=5,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    first = switch_task_card_authority(**kwargs)
+    assert switch_task_card_authority(**kwargs) == first
+    with pytest.raises(StandingGrantReceiptError, match="ATTEMPT_KEY_CONFLICT"):
+        switch_task_card_authority(**{**kwargs, "successor_goal_id": "other-successor"})
+    occupied = StandingGrantReceipt.issue(
+        grant_id="occupied",
+        context=_make_context(goal_id="occupied-goal", thread_id="occupied-thread"),
+    )
+    write_keyed_standing_grant_receipt(occupied)
+    with pytest.raises(StandingGrantReceiptError, match="SUCCESSOR_KEY_OCCUPIED"):
+        switch_task_card_authority(**{
+            **kwargs,
+            "attempt_key": "occupied-attempt",
+            "successor_goal_id": "occupied-goal",
+            "successor_thread_id": "occupied-thread",
+        })
+
+
+def test_keyed_restore_rejects_changed_predecessor(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    predecessor = StandingGrantReceipt.issue(
+        grant_id="changed-predecessor",
+        context=_make_context(goal_id="changed-goal", thread_id="changed-thread"),
+    )
+    key = StandingGrantKey(_repository(), "changed-goal", "changed-thread")
+    write_keyed_standing_grant_receipt(predecessor)
+    switched = switch_task_card_authority(
+        current_key=key,
+        attempt_key="changed-switch",
+        expected_current_receipt_hash=predecessor.receipt_hash,
+        expected_current_goal_id="changed-goal",
+        successor_goal_id="changed-successor",
+        successor_thread_id="changed-successor-thread",
+        ttl_minutes=5,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    changed = StandingGrantReceipt.issue(
+        grant_id="renewed-predecessor",
+        context=_make_context(goal_id="changed-goal", thread_id="changed-thread"),
+        supersedes_grant_hash=predecessor.receipt_hash,
+    )
+    write_keyed_standing_grant_receipt(changed, expected_receipt_hash=predecessor.receipt_hash)
+    with pytest.raises(StandingGrantReceiptError, match="PREDECESSOR_RECEIPT_CHANGED"):
+        restore_task_card_authority(
+            current_key=key,
+            attempt_key="changed-restore",
+            switch_operation_id=switched["switch_operation_id"],
+            expected_temporary_receipt_hash=switched["temporary_receipt_hash"],
+            owner_confirmation=True,
+            now=NOW,
+        )
+    temporary_key = StandingGrantKey(_repository(), "changed-successor", "changed-successor-thread")
+    assert (
+        load_keyed_standing_grant_receipt(temporary_key, now=NOW).receipt_hash
+        == switched["temporary_receipt_hash"]
+    )
+
+
+def test_keyed_switch_races_normal_successor_writer_without_overwrite(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    predecessor = StandingGrantReceipt.issue(
+        grant_id="race-predecessor",
+        context=_make_context(goal_id="race-goal", thread_id="race-thread"),
+    )
+    predecessor_key = StandingGrantKey(_repository(), "race-goal", "race-thread")
+    write_keyed_standing_grant_receipt(predecessor)
+    predecessor_path = standing_grant_store._keyed_receipt_path(predecessor_key)
+    predecessor_bytes = predecessor_path.read_bytes()
+    successor_key = StandingGrantKey(_repository(), "race-successor", "race-successor-thread")
+    normal_receipt = StandingGrantReceipt.issue(
+        grant_id="normal-winner",
+        context=_make_context(goal_id="race-successor", thread_id="race-successor-thread"),
+    )
+    successor_path = standing_grant_store._keyed_receipt_path(successor_key)
+    entered = threading.Event()
+    release = threading.Event()
+    original_write = standing_grant_store._write_bytes_locked
+
+    def hooked_write(canonical, supersedes, destination, expected):
+        if Path(destination) == successor_path and not entered.is_set():
+            entered.set()
+            assert release.wait(timeout=5)
+        return original_write(canonical, supersedes, destination, expected)
+
+    monkeypatch.setattr(standing_grant_store, "_write_bytes_locked", hooked_write)
+    normal_result = {}
+    switch_result = {}
+
+    def normal_writer():
+        try:
+            normal_result["receipt"] = write_keyed_standing_grant_receipt(normal_receipt)
+        except Exception as exc:  # pragma: no cover - asserted below
+            normal_result["error"] = exc
+
+    def switch_writer():
+        try:
+            switch_result["result"] = switch_task_card_authority(
+                current_key=predecessor_key,
+                attempt_key="race-switch",
+                expected_current_receipt_hash=predecessor.receipt_hash,
+                expected_current_goal_id="race-goal",
+                successor_goal_id="race-successor",
+                successor_thread_id="race-successor-thread",
+                ttl_minutes=5,
+                owner_confirmation=True,
+                now=NOW,
+            )
+        except Exception as exc:  # pragma: no cover - asserted below
+            switch_result["error"] = exc
+
+    normal_thread = threading.Thread(target=normal_writer)
+    switch_thread = threading.Thread(target=switch_writer)
+    normal_thread.start()
+    assert entered.wait(timeout=5)
+    switch_thread.start()
+    release.set()
+    normal_thread.join(timeout=5)
+    switch_thread.join(timeout=5)
+    assert not normal_thread.is_alive() and not switch_thread.is_alive()
+    assert ("receipt" in normal_result) ^ ("result" in switch_result)
+    loser = switch_result.get("error") or normal_result.get("error")
+    assert isinstance(loser, StandingGrantReceiptError)
+    assert str(loser) in {"SUCCESSOR_KEY_OCCUPIED", "STALE_WRITER_CAS_MISMATCH"}
+    final = _load_receipt_structural_at(successor_path)
+    winning_receipt = (
+        normal_receipt
+        if "receipt" in normal_result
+        else StandingGrantReceipt.model_validate(
+            standing_grant_store._read_transition_file(
+                standing_grant_store._transition_root().parent
+                / "transitions"
+                / f"keyed_op_{switch_result['result']['switch_operation_id']}.json"
+            )["temporary_receipt"]
+        )
+    )
+    assert final.receipt_hash == winning_receipt.receipt_hash
+    assert predecessor_path.read_bytes() == predecessor_bytes
+    assert standing_grant_store.standing_grant_key(final) == successor_key
 
 
 def _repository() -> RepositoryIdentity:
@@ -67,8 +284,10 @@ def test_red_default_receipt_path_is_canonical_machine_local(tmp_path):
     assert path.name == "standing-grant.json"
 
 
-def test_default_receipt_is_absent_without_operator_issuance(tmp_path):
-    assert not Path(DEFAULT_RECEIPT_PATH).exists()
+def test_default_receipt_is_absent_without_operator_issuance(tmp_path, monkeypatch):
+    missing = tmp_path / "authority" / "standing-grant.json"
+    monkeypatch.setattr(standing_grant_store, "DEFAULT_RECEIPT_PATH", missing)
+    assert not missing.exists()
     outcome = load_standing_grant_receipt()
     assert outcome is None
 
@@ -265,7 +484,310 @@ def test_two_requests_and_fresh_reader_reuse_same_grant_without_mutation(tmp_pat
     assert path.read_text(encoding="utf-8") == before
 
 
-def test_expired_or_revoked_receipt_fails_closed_without_mutation(tmp_path):
+def test_keyed_batch1_exact_and_partial_selection(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    a = StandingGrantReceipt.issue(
+        grant_id="batch-a", context=_make_context(goal_id="batch-goal", thread_id="thread-a")
+    )
+    b = StandingGrantReceipt.issue(
+        grant_id="batch-b", context=_make_context(goal_id="batch-goal", thread_id="thread-b")
+    )
+    c = StandingGrantReceipt.issue(
+        grant_id="batch-c", context=_make_context(goal_id="batch-other", thread_id="thread-c")
+    )
+    for item in (a, b, c):
+        standing_grant_store.write_standing_grant_receipt(item)
+    for item in (a, b, c):
+        assert (
+            standing_grant_store.load_keyed_standing_grant_receipt(
+                standing_grant_store.standing_grant_key(item)
+            )
+            == item
+        )
+    assert (
+        standing_grant_store.load_standing_grant_receipt(
+            repository=_repository(), goal_id="batch-other"
+        )
+        == c
+    )
+    with pytest.raises(StandingGrantReceiptError, match="AMBIGUOUS_GRANT_KEY"):
+        standing_grant_store.load_standing_grant_receipt(
+            repository=_repository(), goal_id="batch-goal"
+        )
+
+
+def test_keyed_batch1_legacy_selection_and_duplicate_detection(tmp_path, monkeypatch):
+    legacy_path = tmp_path / "authority" / "standing-grant.json"
+    monkeypatch.setattr(standing_grant_store, "DEFAULT_RECEIPT_PATH", legacy_path)
+    legacy = StandingGrantReceipt.issue(
+        grant_id="legacy", context=_make_context(goal_id="legacy-goal", thread_id="legacy-thread")
+    )
+    unrelated = StandingGrantReceipt.issue(
+        grant_id="unrelated", context=_make_context(goal_id="other-goal", thread_id="other-thread")
+    )
+    _write_standing_grant_receipt_at(legacy, legacy_path)
+    standing_grant_store.write_standing_grant_receipt(unrelated)
+    assert (
+        standing_grant_store.load_standing_grant_receipt(
+            repository=_repository(), goal_id="legacy-goal", thread_id="legacy-thread"
+        )
+        == legacy
+    )
+    with pytest.raises(StandingGrantReceiptError, match="AMBIGUOUS_GRANT_KEY"):
+        standing_grant_store.load_standing_grant_receipt()
+    assert standing_grant_store.inspect_standing_grant_receipt()["status"] == "INVALID"
+    same = StandingGrantReceipt.issue(grant_id="same", context=legacy.context)
+    standing_grant_store.write_keyed_standing_grant_receipt(same)
+    with pytest.raises(StandingGrantReceiptError, match="DUPLICATE_GRANT_KEY"):
+        standing_grant_store.load_keyed_standing_grant_receipt(
+            standing_grant_store.standing_grant_key(same)
+        )
+
+
+def test_keyed_batch1_public_writer_never_changes_legacy_bytes(tmp_path, monkeypatch):
+    legacy_path = tmp_path / "authority" / "standing-grant.json"
+    monkeypatch.setattr(standing_grant_store, "DEFAULT_RECEIPT_PATH", legacy_path)
+    legacy = _make_context(goal_id="legacy-only")
+    old = StandingGrantReceipt.issue(grant_id="legacy-only", context=legacy)
+    _write_standing_grant_receipt_at(old, legacy_path)
+    before = legacy_path.read_bytes()
+    fresh = StandingGrantReceipt.issue(
+        grant_id="fresh-keyed", context=_make_context(goal_id="fresh-only")
+    )
+    destination = standing_grant_store.write_standing_grant_receipt(fresh)
+    assert destination != legacy_path
+    assert legacy_path.read_bytes() == before
+
+
+def test_keyed_batch2_cas_isolation_and_stale_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    a = StandingGrantReceipt.issue(grant_id="iso-a", context=_make_context(goal_id="iso-a"))
+    b = StandingGrantReceipt.issue(grant_id="iso-b", context=_make_context(goal_id="iso-b"))
+    standing_grant_store.write_standing_grant_receipt(a)
+    standing_grant_store.write_standing_grant_receipt(b)
+    ap = standing_grant_store._keyed_receipt_path(standing_grant_store.standing_grant_key(a))
+    before = ap.read_bytes()
+    successor = StandingGrantReceipt.issue(
+        grant_id="iso-b2", context=b.context, supersedes_grant_hash=b.receipt_hash
+    )
+    standing_grant_store.write_standing_grant_receipt(
+        successor, expected_receipt_hash=b.receipt_hash
+    )
+    assert ap.read_bytes() == before
+    with pytest.raises(StandingGrantReceiptError):
+        standing_grant_store.write_standing_grant_receipt(
+            successor, expected_receipt_hash=b.receipt_hash
+        )
+    assert ap.read_bytes() == before
+    assert (
+        standing_grant_store.load_keyed_standing_grant_receipt(
+            standing_grant_store.standing_grant_key(successor)
+        )
+        == successor
+    )
+
+
+def test_exact_key_authorizes_only_its_goal_and_no_key_fails_ambiguous(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    a = StandingGrantReceipt.issue(
+        grant_id="caller-a",
+        context=_make_context(goal_id="caller-goal-a", thread_id="caller-thread-a"),
+    )
+    b = StandingGrantReceipt.issue(
+        grant_id="caller-b",
+        context=_make_context(goal_id="caller-goal-b", thread_id="caller-thread-b"),
+    )
+    standing_grant_store.write_standing_grant_receipt(a)
+    standing_grant_store.write_standing_grant_receipt(b)
+    key_a = standing_grant_store.standing_grant_key(a)
+    authority = authorize_durable_standing_grant_effect(
+        repository=_repository(),
+        action=AutonomyActionClass.REPOSITORY_PUSH,
+        effect={"goal_id": "caller-goal-a"},
+        requested_at=NOW,
+        key=key_a,
+    )
+    assert authority["grant_id"] == a.grant_id
+    with pytest.raises(StandingGrantReceiptError, match="AMBIGUOUS_GRANT_KEY"):
+        authorize_durable_standing_grant_effect(
+            repository=_repository(),
+            action=AutonomyActionClass.REPOSITORY_PUSH,
+            effect={},
+            requested_at=NOW,
+        )
+
+
+def test_exact_key_ignores_corrupt_unrelated_sibling_and_rejects_substitution(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    a = StandingGrantReceipt.issue(grant_id="stable-a", context=_make_context(goal_id="stable-a"))
+    b = StandingGrantReceipt.issue(grant_id="broken-b", context=_make_context(goal_id="broken-b"))
+    standing_grant_store.write_standing_grant_receipt(a)
+    standing_grant_store.write_standing_grant_receipt(b)
+    b_path = standing_grant_store._keyed_receipt_path(standing_grant_store.standing_grant_key(b))
+    b_path.write_text("{corrupt", encoding="utf-8")
+    assert (
+        standing_grant_store.load_keyed_standing_grant_receipt(
+            standing_grant_store.standing_grant_key(a), now=NOW
+        )
+        == a
+    )
+    wrong = standing_grant_store.StandingGrantKey(_repository(), "missing-goal", "missing-thread")
+    with pytest.raises(StandingGrantReceiptError, match="RECEIPT_MISSING"):
+        authorize_durable_standing_grant_effect(
+            repository=_repository(),
+            action=AutonomyActionClass.REPOSITORY_PUSH,
+            effect={},
+            requested_at=NOW,
+            key=wrong,
+        )
+    other_repo = RepositoryIdentity(
+        repository_id="other/repo", canonical_remote="https://github.com/other/repo.git"
+    )
+    with pytest.raises(StandingGrantReceiptError, match="KEY_SCOPE_MISMATCH"):
+        authorize_durable_standing_grant_effect(
+            repository=other_repo,
+            action=AutonomyActionClass.REPOSITORY_PUSH,
+            effect={},
+            requested_at=NOW,
+            key=standing_grant_store.standing_grant_key(a),
+        )
+
+
+def test_keyed_batch2_wrong_digest_symlinks_permissions_and_tamper_fail_closed(
+    tmp_path, monkeypatch
+):
+    root = tmp_path / "authority" / "standing-grants"
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    receipt = StandingGrantReceipt.issue(
+        grant_id="physical", context=_make_context(goal_id="physical")
+    )
+    standing_grant_store.write_standing_grant_receipt(receipt)
+    key = standing_grant_store.standing_grant_key(receipt)
+    path = standing_grant_store._keyed_receipt_path(key)
+    wrong = root / ("0" * 64)
+    wrong.mkdir(mode=0o700, parents=True)
+    (wrong / ("0" * 64 + ".json")).write_bytes(path.read_bytes())
+    os.chmod(wrong / ("0" * 64 + ".json"), 0o600)
+    with pytest.raises(StandingGrantReceiptError, match="KEY_PATH_MISMATCH"):
+        standing_grant_store.load_standing_grant_receipt()
+    (wrong / ("0" * 64 + ".json")).unlink()
+    wrong.rmdir()
+    os.chmod(path, 0o644)
+    with pytest.raises(StandingGrantReceiptError, match="UNSAFE_PERMISSIONS"):
+        standing_grant_store.load_keyed_standing_grant_receipt(key)
+
+
+def test_keyed_batch2_inspection_expired_and_revoked(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    expired = StandingGrantReceipt.issue(
+        grant_id="expired-key",
+        context=_make_context(goal_id="expired-key", expires_at=NOW - timedelta(minutes=1)),
+    )
+    revoked = StandingGrantReceipt.issue(
+        grant_id="revoked-key",
+        context=_make_context(goal_id="revoked-key", revoked_at=NOW, revocation_reason="owner"),
+    )
+    standing_grant_store.write_standing_grant_receipt(expired)
+    standing_grant_store.write_standing_grant_receipt(revoked)
+    assert (
+        standing_grant_store.inspect_standing_grant_receipt(
+            key=standing_grant_store.standing_grant_key(expired), now=NOW
+        )["status"]
+        == "EXPIRED"
+    )
+    result = standing_grant_store.inspect_standing_grant_receipt(
+        key=standing_grant_store.standing_grant_key(revoked), now=NOW
+    )
+    assert result["status"] == "REVOKED" and result["goal_id"] == "revoked-key"
+
+
+def test_exact_key_ignores_unrelated_corrupt_key(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    a = StandingGrantReceipt.issue(grant_id="exact-a", context=_make_context(goal_id="exact-a"))
+    b = StandingGrantReceipt.issue(grant_id="exact-b", context=_make_context(goal_id="exact-b"))
+    standing_grant_store.write_standing_grant_receipt(a)
+    standing_grant_store.write_standing_grant_receipt(b)
+    ap = standing_grant_store._keyed_receipt_path(standing_grant_store.standing_grant_key(a))
+    before = ap.read_bytes()
+    bp = standing_grant_store._keyed_receipt_path(standing_grant_store.standing_grant_key(b))
+    bp.write_text("{broken")
+    assert (
+        standing_grant_store.load_standing_grant_receipt(
+            repository=_repository(), goal_id="exact-a", thread_id="thread-163"
+        )
+        == a
+    )
+    assert (
+        standing_grant_store.inspect_standing_grant_receipt(
+            repository=_repository(), goal_id="exact-a", thread_id="thread-163"
+        )["status"]
+        == "VALID"
+    )
+    assert ap.read_bytes() == before
+    with pytest.raises(StandingGrantReceiptError):
+        standing_grant_store.load_standing_grant_receipt()
+
+
+def test_keyed_batch3_dangling_root_directory_and_leaf_symlinks(tmp_path, monkeypatch):
+    base = tmp_path / "authority" / "standing-grant.json"
+    monkeypatch.setattr(standing_grant_store, "DEFAULT_RECEIPT_PATH", base)
+    receipt = StandingGrantReceipt.issue(grant_id="links", context=_make_context(goal_id="links"))
+    standing_grant_store.write_standing_grant_receipt(receipt)
+    key = standing_grant_store.standing_grant_key(receipt)
+    root = base.parent / "standing-grants"
+    path = standing_grant_store._keyed_receipt_path(key)
+    path.unlink()
+    path.symlink_to(tmp_path / "missing-leaf")
+    with pytest.raises(StandingGrantReceiptError, match="KEYED_LEAF_UNSAFE"):
+        standing_grant_store.load_keyed_standing_grant_receipt(key)
+    path.unlink()
+    directory = standing_grant_store._keyed_directory(key)
+    directory.rename(tmp_path / "real-key-dir")
+    directory.symlink_to(tmp_path / "missing-key-dir", target_is_directory=True)
+    with pytest.raises(StandingGrantReceiptError, match="KEYED_DIRECTORY_UNSAFE"):
+        standing_grant_store.load_standing_grant_receipt()
+    directory.unlink()
+    root.rename(tmp_path / "real-root")
+    root.symlink_to(tmp_path / "missing-root", target_is_directory=True)
+    with pytest.raises(StandingGrantReceiptError, match="KEYED_DIRECTORY_UNSAFE"):
+        standing_grant_store.load_standing_grant_receipt()
+
+
+def test_keyed_batch3_malformed_duplicate_noncanonical_and_rehashed_context_tamper(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    receipt = StandingGrantReceipt.issue(grant_id="tamper", context=_make_context(goal_id="tamper"))
+    standing_grant_store.write_standing_grant_receipt(receipt)
+    key = standing_grant_store.standing_grant_key(receipt)
+    path = standing_grant_store._keyed_receipt_path(key)
+    path.write_text("{not-json")
+    with pytest.raises(StandingGrantReceiptError, match="MALFORMED"):
+        standing_grant_store.load_keyed_standing_grant_receipt(key)
+    path.write_text('{"grant_id":1,"grant_id":2}')
+    with pytest.raises(StandingGrantReceiptError, match="MALFORMED"):
+        standing_grant_store.load_keyed_standing_grant_receipt(key)
+
+
+def test_expired_or_revoked_receipt_fails_closed_without_mutation(tmp_path, monkeypatch):
     _receipt, expired_path = _make_receipt(
         tmp_path, grant_id="expired", expires_at=(NOW - timedelta(minutes=1))
     )
@@ -279,7 +801,9 @@ def test_expired_or_revoked_receipt_fails_closed_without_mutation(tmp_path):
     )
     with pytest.raises(StandingGrantReceiptError, match="REVOKED"):
         _load_receipt_at(revoked_path)
-    # Evaluation over a missing/default path mutates nothing and yields None.
+    # Evaluation over a missing canonical path mutates nothing and yields None.
+    missing = tmp_path / "missing-authority" / "standing-grant.json"
+    monkeypatch.setattr(standing_grant_store, "DEFAULT_RECEIPT_PATH", missing)
     assert load_standing_grant_receipt(now=NOW) is None
 
 
@@ -336,6 +860,70 @@ def test_write_requires_cas_when_file_exists(tmp_path):
     )
     with pytest.raises(StandingGrantReceiptError, match="EXISTS_NO_CAS"):
         _write_standing_grant_receipt_at(replacement, path)
+
+
+def test_red_keyed_goals_and_threads_coexist_without_transport_identity(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    a = StandingGrantReceipt.issue(
+        grant_id="key-a", context=_make_context(goal_id="goal-a", thread_id="scope-a")
+    )
+    b = StandingGrantReceipt.issue(
+        grant_id="key-b", context=_make_context(goal_id="goal-a", thread_id="scope-b")
+    )
+    c = StandingGrantReceipt.issue(
+        grant_id="key-c", context=_make_context(goal_id="goal-c", thread_id="scope-a")
+    )
+    for receipt in (a, b, c):
+        standing_grant_store.write_keyed_standing_grant_receipt(receipt)
+    assert (
+        standing_grant_store.load_keyed_standing_grant_receipt(
+            standing_grant_store.standing_grant_key(b)
+        )
+        == b
+    )
+
+
+def test_red_keyed_cas_isolated_and_stale_writer_leaves_other_key_unchanged(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    a = StandingGrantReceipt.issue(grant_id="cas-a", context=_make_context(goal_id="ga"))
+    b = StandingGrantReceipt.issue(grant_id="cas-b", context=_make_context(goal_id="gb"))
+    standing_grant_store.write_keyed_standing_grant_receipt(a)
+    standing_grant_store.write_keyed_standing_grant_receipt(b)
+    a_path = standing_grant_store._keyed_receipt_path(standing_grant_store.standing_grant_key(a))
+    before = a_path.read_bytes()
+    successor = StandingGrantReceipt.issue(
+        grant_id="cas-b2", context=b.context, supersedes_grant_hash=b.receipt_hash
+    )
+    standing_grant_store.write_keyed_standing_grant_receipt(
+        successor, expected_receipt_hash=b.receipt_hash
+    )
+    assert a_path.read_bytes() == before
+    with pytest.raises(StandingGrantReceiptError):
+        standing_grant_store.write_keyed_standing_grant_receipt(
+            successor, expected_receipt_hash=b.receipt_hash
+        )
+
+
+def test_red_exact_key_context_path_substitution_and_tamper_fail_closed(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    receipt = StandingGrantReceipt.issue(grant_id="substitution", context=_make_context())
+    standing_grant_store.write_keyed_standing_grant_receipt(receipt)
+    path = standing_grant_store._keyed_receipt_path(
+        standing_grant_store.standing_grant_key(receipt)
+    )
+    data = json.loads(path.read_text())
+    data["grant_id"] = "tampered"
+    path.write_text(json.dumps(data, separators=(",", ":"), sort_keys=True))
+    with pytest.raises(StandingGrantReceiptError):
+        standing_grant_store.load_keyed_standing_grant_receipt(
+            standing_grant_store.standing_grant_key(receipt)
+        )
 
 
 def test_initial_write_rejects_predecessor_or_cas(tmp_path):
@@ -404,9 +992,1459 @@ def test_interprocess_cas_race_allows_exactly_one_successor(tmp_path):
     assert winner.grant_id in {"race-a", "race-b"}
 
 
+def test_effect_authorization_binds_exact_action_and_effect_without_mutating_grant(tmp_path):
+    _receipt, path = _make_receipt(
+        tmp_path,
+        grant_id="effect-authority",
+        allowed_actions=(AutonomyActionClass.TASK_CARD_CREATE,),
+    )
+    before = path.read_bytes()
+    effect = {
+        "campaign_id": "g3-security",
+        "task_id": "authority-closure",
+        "expected_head": "a" * 40,
+        "allowed_files": ["nexus/orchestrator/unified_mcp_gateway.py"],
+    }
+
+    authority = _authorize_durable_standing_grant_effect_at(
+        path,
+        repository=_repository(),
+        action=AutonomyActionClass.TASK_CARD_CREATE,
+        effect=effect,
+        requested_at=NOW,
+    )
+
+    assert authority["mutation_authorized"] is True
+    assert authority["action"] == "TASK_CARD_CREATE"
+    assert authority["effect"] == effect
+    assert len(authority["effect_hash"]) == 64
+    assert len(authority["authorization_hash"]) == 64
+    assert authority["grant_receipt_hash"]
+    assert path.read_bytes() == before
+
+
+def test_effect_authorization_fails_closed_when_action_is_out_of_scope(tmp_path):
+    _receipt, path = _make_receipt(
+        tmp_path,
+        grant_id="effect-out-of-scope",
+        allowed_actions=(AutonomyActionClass.CANDIDATE_REJECT,),
+    )
+
+    with pytest.raises(StandingGrantReceiptError, match="AUTHORIZATION_OUT_OF_SCOPE"):
+        _authorize_durable_standing_grant_effect_at(
+            path,
+            repository=_repository(),
+            action=AutonomyActionClass.CANDIDATE_SUPERSEDE,
+            effect={"task_id": "candidate-1", "superseded_by": "candidate-2"},
+            requested_at=NOW,
+        )
+
+
+def test_effect_authorization_allows_external_candidate_adoption(tmp_path):
+    _receipt, path = _make_receipt(
+        tmp_path,
+        grant_id="effect-adopt-external",
+        allowed_actions=(AutonomyActionClass.CANDIDATE_ADOPT_EXTERNAL,),
+    )
+
+    authority = _authorize_durable_standing_grant_effect_at(
+        path,
+        repository=_repository(),
+        action=AutonomyActionClass.CANDIDATE_ADOPT_EXTERNAL,
+        effect={"task_id": "TASK-EPB-001-R1", "candidate_commit_sha": "a" * 40},
+        requested_at=NOW,
+    )
+
+    assert authority["mutation_authorized"] is True
+    assert authority["action"] == "CANDIDATE_ADOPT_EXTERNAL"
+
+
+def test_effect_authorization_rejects_repository_substitution(tmp_path):
+    _receipt, path = _make_receipt(
+        tmp_path,
+        grant_id="effect-repository",
+        allowed_actions=(AutonomyActionClass.REPOSITORY_PUSH,),
+    )
+    wrong = RepositoryIdentity(
+        repository_id="James3014/Other",
+        canonical_remote="https://github.com/James3014/Other.git",
+    )
+
+    with pytest.raises(StandingGrantReceiptError, match="AUTHORIZATION_REPOSITORY_MISMATCH"):
+        _authorize_durable_standing_grant_effect_at(
+            path,
+            repository=wrong,
+            action=AutonomyActionClass.REPOSITORY_PUSH,
+            effect={
+                "remote": "origin",
+                "branch": "nexus/integration/main",
+                "expected_sha": "b" * 40,
+            },
+            requested_at=NOW,
+        )
+
+
 def test_exact_mode_and_size(tmp_path):
     receipt, path = _make_receipt(tmp_path)
     mode = stat.S_IMODE(os.stat(path).st_mode)
     assert mode == 0o600
     size = os.stat(path).st_size
     assert 0 < size < 16 * 1024
+
+
+def test_switch_task_card_authority_success(tmp_path):
+    receipt, path = _make_receipt(
+        tmp_path,
+        grant_id="grant-orig",
+        goal_id="goal-orig",
+        thread_id="thread-orig",
+        allowed_actions=(AutonomyActionClass.REPOSITORY_PUSH,),
+    )
+    res = _switch_task_card_authority_at(
+        path,
+        attempt_key="attempt-switch-1",
+        expected_current_receipt_hash=receipt.receipt_hash,
+        expected_current_goal_id="goal-orig",
+        successor_goal_id="goal-temp",
+        successor_thread_id="thread-temp",
+        ttl_minutes=15,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    assert res["schema"] == "nexus.task_card_authority_switch.v1"
+    assert res["status"] == "SWITCHED"
+    assert res["predecessor_receipt_hash"] == receipt.receipt_hash
+    assert res["predecessor_goal_id"] == "goal-orig"
+    assert res["temporary_goal_id"] == "goal-temp"
+    assert res["temporary_thread_id"] == "thread-temp"
+    assert res["allowed_actions"] == ["TASK_CARD_COMMIT", "TASK_CARD_CREATE"]
+    assert res["owner_confirmation"] is True
+    assert res["temporary_receipt_hash"] != receipt.receipt_hash
+
+    current = _load_receipt_at(path, now=NOW)
+    assert current.receipt_hash == res["temporary_receipt_hash"]
+    assert current.context.goal_id == "goal-temp"
+    assert current.context.thread_id == "thread-temp"
+    assert set(current.context.allowed_actions) == {
+        AutonomyActionClass.TASK_CARD_COMMIT,
+        AutonomyActionClass.TASK_CARD_CREATE,
+    }
+    assert current.supersedes_grant_hash == receipt.receipt_hash
+
+
+def test_switch_task_card_authority_bounds_expiry_by_predecessor(tmp_path):
+    predecessor_expiry = NOW + timedelta(minutes=10)
+    receipt, path = _make_receipt(
+        tmp_path,
+        grant_id="grant-short-lived",
+        goal_id="goal-orig",
+        thread_id="thread-orig",
+        allowed_actions=(AutonomyActionClass.REPOSITORY_PUSH,),
+        expires_at=predecessor_expiry,
+    )
+    res = _switch_task_card_authority_at(
+        path,
+        attempt_key="attempt-switch-bounded-expiry",
+        expected_current_receipt_hash=receipt.receipt_hash,
+        expected_current_goal_id="goal-orig",
+        successor_goal_id="goal-temp",
+        successor_thread_id="thread-temp",
+        ttl_minutes=25,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    assert res["schema"] == "nexus.task_card_authority_switch.v1"
+    assert res["status"] == "SWITCHED"
+    assert res["expires_at"] == predecessor_expiry.isoformat()
+
+    current = _load_receipt_at(path, now=NOW)
+    assert current.receipt_hash == res["temporary_receipt_hash"]
+    assert current.context.expires_at == predecessor_expiry
+    assert current.context.expires_at < NOW + timedelta(minutes=25)
+
+
+def test_switch_task_card_authority_idempotency_and_conflict(tmp_path):
+    receipt, path = _make_receipt(tmp_path, goal_id="goal-orig")
+    res1 = _switch_task_card_authority_at(
+        path,
+        attempt_key="attempt-switch-idem",
+        expected_current_receipt_hash=receipt.receipt_hash,
+        expected_current_goal_id="goal-orig",
+        successor_goal_id="goal-temp",
+        successor_thread_id="thread-temp",
+        ttl_minutes=15,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    res2 = _switch_task_card_authority_at(
+        path,
+        attempt_key="attempt-switch-idem",
+        expected_current_receipt_hash=receipt.receipt_hash,
+        expected_current_goal_id="goal-orig",
+        successor_goal_id="goal-temp",
+        successor_thread_id="thread-temp",
+        ttl_minutes=15,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    assert res1 == res2
+
+    with pytest.raises(StandingGrantReceiptError, match="ATTEMPT_KEY_CONFLICT"):
+        _switch_task_card_authority_at(
+            path,
+            attempt_key="attempt-switch-idem",
+            expected_current_receipt_hash=receipt.receipt_hash,
+            expected_current_goal_id="goal-orig",
+            successor_goal_id="goal-different",
+            successor_thread_id="thread-temp",
+            ttl_minutes=15,
+            owner_confirmation=True,
+            now=NOW,
+        )
+
+
+def test_switch_task_card_authority_fails_closed(tmp_path):
+    receipt, path = _make_receipt(tmp_path, goal_id="goal-orig")
+    # Missing owner confirmation
+    with pytest.raises(StandingGrantReceiptError, match="OWNER_CONFIRMATION_REQUIRED"):
+        _switch_task_card_authority_at(
+            path,
+            attempt_key="attempt-fail-1",
+            expected_current_receipt_hash=receipt.receipt_hash,
+            expected_current_goal_id="goal-orig",
+            successor_goal_id="goal-temp",
+            successor_thread_id="thread-temp",
+            ttl_minutes=15,
+            owner_confirmation=False,
+            now=NOW,
+        )
+    # TTL > 30 minutes
+    with pytest.raises(StandingGrantReceiptError, match="TTL_MINUTES_INVALID"):
+        _switch_task_card_authority_at(
+            path,
+            attempt_key="attempt-fail-2",
+            expected_current_receipt_hash=receipt.receipt_hash,
+            expected_current_goal_id="goal-orig",
+            successor_goal_id="goal-temp",
+            successor_thread_id="thread-temp",
+            ttl_minutes=31,
+            owner_confirmation=True,
+            now=NOW,
+        )
+    # Current hash mismatch
+    with pytest.raises(StandingGrantReceiptError, match="CURRENT_RECEIPT_HASH_MISMATCH"):
+        _switch_task_card_authority_at(
+            path,
+            attempt_key="attempt-fail-3",
+            expected_current_receipt_hash="0" * 64,
+            expected_current_goal_id="goal-orig",
+            successor_goal_id="goal-temp",
+            successor_thread_id="thread-temp",
+            ttl_minutes=15,
+            owner_confirmation=True,
+            now=NOW,
+        )
+    # Current goal mismatch
+    with pytest.raises(StandingGrantReceiptError, match="CURRENT_GOAL_MISMATCH"):
+        _switch_task_card_authority_at(
+            path,
+            attempt_key="attempt-fail-4",
+            expected_current_receipt_hash=receipt.receipt_hash,
+            expected_current_goal_id="wrong-goal",
+            successor_goal_id="goal-temp",
+            successor_thread_id="thread-temp",
+            ttl_minutes=15,
+            owner_confirmation=True,
+            now=NOW,
+        )
+
+
+def test_restore_task_card_authority_success(tmp_path):
+    receipt, path = _make_receipt(
+        tmp_path,
+        grant_id="grant-pred",
+        goal_id="goal-pred",
+        thread_id="thread-pred",
+        allowed_actions=(AutonomyActionClass.GITHUB_MERGE,),
+    )
+    switched = _switch_task_card_authority_at(
+        path,
+        attempt_key="attempt-switch-for-restore",
+        expected_current_receipt_hash=receipt.receipt_hash,
+        expected_current_goal_id="goal-pred",
+        successor_goal_id="goal-temp",
+        successor_thread_id="thread-temp",
+        ttl_minutes=10,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    temp_hash = switched["temporary_receipt_hash"]
+    op_id = switched["switch_operation_id"]
+
+    restored = _restore_task_card_authority_at(
+        path,
+        attempt_key="attempt-restore-1",
+        switch_operation_id=op_id,
+        expected_temporary_receipt_hash=temp_hash,
+        owner_confirmation=True,
+        now=NOW + timedelta(minutes=2),
+    )
+    assert restored["schema"] == "nexus.task_card_authority_restore.v1"
+    assert restored["status"] == "RESTORED"
+    assert restored["restored_goal_id"] == "goal-pred"
+    assert restored["restored_thread_id"] == "thread-pred"
+    assert restored["restored_allowed_actions"] == ["GITHUB_MERGE"]
+    assert restored["temporary_receipt_hash"] == temp_hash
+
+    current = _load_receipt_at(path, now=NOW + timedelta(minutes=2))
+    assert current.receipt_hash == restored["restored_receipt_hash"]
+    assert current.context.goal_id == "goal-pred"
+    assert current.context.thread_id == "thread-pred"
+    assert current.context.allowed_actions == (AutonomyActionClass.GITHUB_MERGE,)
+    assert current.supersedes_grant_hash == temp_hash
+
+
+def test_restore_task_card_authority_idempotency_and_conflict(tmp_path):
+    receipt, path = _make_receipt(tmp_path, goal_id="goal-pred")
+    switched = _switch_task_card_authority_at(
+        path,
+        attempt_key="attempt-switch-idem-restore",
+        expected_current_receipt_hash=receipt.receipt_hash,
+        expected_current_goal_id="goal-pred",
+        successor_goal_id="goal-temp",
+        successor_thread_id="thread-temp",
+        ttl_minutes=10,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    temp_hash = switched["temporary_receipt_hash"]
+    op_id = switched["switch_operation_id"]
+
+    r1 = _restore_task_card_authority_at(
+        path,
+        attempt_key="attempt-restore-idem",
+        switch_operation_id=op_id,
+        expected_temporary_receipt_hash=temp_hash,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    r2 = _restore_task_card_authority_at(
+        path,
+        attempt_key="attempt-restore-idem",
+        switch_operation_id=op_id,
+        expected_temporary_receipt_hash=temp_hash,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    assert r1 == r2
+
+    with pytest.raises(StandingGrantReceiptError, match="ATTEMPT_KEY_CONFLICT"):
+        _restore_task_card_authority_at(
+            path,
+            attempt_key="attempt-restore-idem",
+            switch_operation_id="other_op",
+            expected_temporary_receipt_hash=temp_hash,
+            owner_confirmation=True,
+            now=NOW,
+        )
+
+
+def test_restore_task_card_authority_fails_closed(tmp_path):
+    receipt, path = _make_receipt(tmp_path, goal_id="goal-pred")
+    switched = _switch_task_card_authority_at(
+        path,
+        attempt_key="attempt-switch-fail-restore",
+        expected_current_receipt_hash=receipt.receipt_hash,
+        expected_current_goal_id="goal-pred",
+        successor_goal_id="goal-temp",
+        successor_thread_id="thread-temp",
+        ttl_minutes=10,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    temp_hash = switched["temporary_receipt_hash"]
+    op_id = switched["switch_operation_id"]
+
+    # Unknown operation id
+    with pytest.raises(StandingGrantReceiptError, match="SWITCH_OPERATION_NOT_FOUND"):
+        _restore_task_card_authority_at(
+            path,
+            attempt_key="attempt-r-fail-1",
+            switch_operation_id="nonexistent_op",
+            expected_temporary_receipt_hash=temp_hash,
+            owner_confirmation=True,
+            now=NOW,
+        )
+
+    # Expected temporary hash mismatch
+    with pytest.raises(StandingGrantReceiptError, match="TEMPORARY_RECEIPT_HASH_MISMATCH"):
+        _restore_task_card_authority_at(
+            path,
+            attempt_key="attempt-r-fail-2",
+            switch_operation_id=op_id,
+            expected_temporary_receipt_hash="0" * 64,
+            owner_confirmation=True,
+            now=NOW,
+        )
+
+    # Missing owner confirmation
+    with pytest.raises(StandingGrantReceiptError, match="OWNER_CONFIRMATION_REQUIRED"):
+        _restore_task_card_authority_at(
+            path,
+            attempt_key="attempt-r-fail-3",
+            switch_operation_id=op_id,
+            expected_temporary_receipt_hash=temp_hash,
+            owner_confirmation=False,
+            now=NOW,
+        )
+
+
+def test_restore_succeeds_even_when_temporary_grant_expired(tmp_path):
+    receipt, path = _make_receipt(
+        tmp_path,
+        grant_id="grant-exp-pred",
+        goal_id="goal-exp-pred",
+        allowed_actions=(AutonomyActionClass.REPOSITORY_PUSH,),
+    )
+    switched = _switch_task_card_authority_at(
+        path,
+        attempt_key="attempt-switch-exp",
+        expected_current_receipt_hash=receipt.receipt_hash,
+        expected_current_goal_id="goal-exp-pred",
+        successor_goal_id="goal-temp-exp",
+        successor_thread_id="thread-temp-exp",
+        ttl_minutes=5,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    temp_hash = switched["temporary_receipt_hash"]
+    op_id = switched["switch_operation_id"]
+
+    # At NOW + 10 minutes, the 5-minute temporary grant is expired
+    with pytest.raises(StandingGrantReceiptError, match="EXPIRED"):
+        _load_receipt_at(path, now=NOW + timedelta(minutes=10))
+
+    # Restore must still succeed
+    restored = _restore_task_card_authority_at(
+        path,
+        attempt_key="attempt-restore-exp",
+        switch_operation_id=op_id,
+        expected_temporary_receipt_hash=temp_hash,
+        owner_confirmation=True,
+        now=NOW + timedelta(minutes=10),
+    )
+    assert restored["status"] == "RESTORED"
+    assert restored["restored_goal_id"] == "goal-exp-pred"
+
+
+def test_public_switch_and_restore_use_canonical_path_and_reject_receipt_path(
+    monkeypatch, tmp_path
+):
+    canonical_path = tmp_path / "authority" / "standing-grant.json"
+    monkeypatch.setattr(standing_grant_store, "DEFAULT_RECEIPT_PATH", canonical_path)
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_TRANSITIONS_DIR", tmp_path / "authority" / "transitions"
+    )
+
+    context = _make_context(
+        goal_id="goal-pub",
+        thread_id="thread-pub",
+        allowed_actions=(AutonomyActionClass.REPOSITORY_PUSH,),
+    )
+    orig_receipt = StandingGrantReceipt.issue(grant_id="grant-pub", context=context)
+    _write_standing_grant_receipt_at(orig_receipt, canonical_path)
+    predecessor_key = StandingGrantKey(_repository(), "goal-pub", "thread-pub")
+    predecessor_path = standing_grant_store._keyed_receipt_path(predecessor_key)
+    write_keyed_standing_grant_receipt(orig_receipt)
+    predecessor_bytes = predecessor_path.read_bytes()
+    legacy_bytes = canonical_path.read_bytes()
+
+    # Public APIs require an exact key and reject arbitrary receipt_path args.
+    with pytest.raises(TypeError):
+        switch_task_card_authority(  # type: ignore[call-arg]
+            attempt_key="attempt-pub-1",
+            expected_current_receipt_hash=orig_receipt.receipt_hash,
+            expected_current_goal_id="goal-pub",
+            successor_goal_id="goal-succ",
+            successor_thread_id="thread-succ",
+            ttl_minutes=15,
+            owner_confirmation=True,
+            receipt_path=canonical_path,
+        )
+
+    with pytest.raises(TypeError):
+        restore_task_card_authority(  # type: ignore[call-arg]
+            attempt_key="attempt-pub-2",
+            switch_operation_id="switch_123",
+            expected_temporary_receipt_hash=orig_receipt.receipt_hash,
+            owner_confirmation=True,
+            receipt_path=canonical_path,
+        )
+
+    switched = switch_task_card_authority(
+        current_key=predecessor_key,
+        attempt_key="attempt-pub-switch",
+        expected_current_receipt_hash=orig_receipt.receipt_hash,
+        expected_current_goal_id="goal-pub",
+        successor_goal_id="goal-succ",
+        successor_thread_id="thread-succ",
+        ttl_minutes=15,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    assert switched["status"] == "SWITCHED"
+    temp_hash = switched["temporary_receipt_hash"]
+    op_id = switched["switch_operation_id"]
+
+    restored = restore_task_card_authority(
+        current_key=predecessor_key,
+        attempt_key="attempt-pub-restore",
+        switch_operation_id=op_id,
+        expected_temporary_receipt_hash=temp_hash,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    assert restored["status"] == "RESTORED"
+    assert predecessor_path.read_bytes() == predecessor_bytes
+    assert canonical_path.read_bytes() == legacy_bytes
+    temporary_key = StandingGrantKey(_repository(), "goal-succ", "thread-succ")
+    with pytest.raises(StandingGrantReceiptError, match="REVOKED"):
+        load_keyed_standing_grant_receipt(temporary_key, now=NOW)
+
+
+def test_switch_crash_before_cas_replay_succeeds(tmp_path, monkeypatch):
+    receipt, path = _make_receipt(tmp_path, grant_id="grant-crash-1", goal_id="goal-crash-1")
+
+    # Fault injection: raise error on the first CAS call
+    real_write_bytes_locked = standing_grant_store._write_bytes_locked
+    cas_calls = 0
+
+    def faulty_write_bytes_locked(*args, **kwargs):
+        nonlocal cas_calls
+        cas_calls += 1
+        raise RuntimeError("SIMULATED_CRASH_BEFORE_SWITCH_CAS")
+
+    monkeypatch.setattr(standing_grant_store, "_write_bytes_locked", faulty_write_bytes_locked)
+
+    with pytest.raises(RuntimeError, match="SIMULATED_CRASH_BEFORE_SWITCH_CAS"):
+        _switch_task_card_authority_at(
+            path,
+            attempt_key="attempt-switch-crash-before-cas",
+            expected_current_receipt_hash=receipt.receipt_hash,
+            expected_current_goal_id="goal-crash-1",
+            successor_goal_id="goal-succ-1",
+            successor_thread_id="thread-succ-1",
+            ttl_minutes=15,
+            owner_confirmation=True,
+            now=NOW,
+        )
+
+    # Verify state on disk: physical receipt has NOT changed (predecessor still present)
+    current = _load_receipt_at(path, now=NOW)
+    assert current.receipt_hash == receipt.receipt_hash
+
+    # Verify attempt record was PREPARED
+    attempt_path = (
+        tmp_path / "authority" / "transitions" / "attempt_attempt-switch-crash-before-cas.json"
+    )
+    attempt_record = json.loads(attempt_path.read_text(encoding="utf-8"))
+    assert attempt_record["status"] == "PREPARED"
+
+    # Restore un-faulted writer and replay exact same attempt
+    monkeypatch.setattr(standing_grant_store, "_write_bytes_locked", real_write_bytes_locked)
+    replay_result = _switch_task_card_authority_at(
+        path,
+        attempt_key="attempt-switch-crash-before-cas",
+        expected_current_receipt_hash=receipt.receipt_hash,
+        expected_current_goal_id="goal-crash-1",
+        successor_goal_id="goal-succ-1",
+        successor_thread_id="thread-succ-1",
+        ttl_minutes=15,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    assert replay_result["status"] == "SWITCHED"
+    assert replay_result["predecessor_receipt_hash"] == receipt.receipt_hash
+
+    # Physical receipt was updated to temporary receipt
+    current_after = _load_receipt_at(path, now=NOW)
+    assert current_after.receipt_hash == replay_result["temporary_receipt_hash"]
+
+    # Journal finalized to COMMITTED / ACTIVE
+    final_attempt = json.loads(attempt_path.read_text(encoding="utf-8"))
+    assert final_attempt["status"] == "COMMITTED"
+    op_path = (
+        tmp_path / "authority" / "transitions" / f"op_{replay_result['switch_operation_id']}.json"
+    )
+    final_op = json.loads(op_path.read_text(encoding="utf-8"))
+    assert final_op["status"] == "ACTIVE"
+
+
+def test_switch_crash_after_cas_replay_succeeds_without_duplicate_cas(tmp_path, monkeypatch):
+    receipt, path = _make_receipt(tmp_path, grant_id="grant-crash-2", goal_id="goal-crash-2")
+
+    real_write_transition_file = standing_grant_store._write_transition_file
+    transition_writes = 0
+
+    def faulty_write_transition_file(p, payload):
+        nonlocal transition_writes
+        transition_writes += 1
+        # First write is op_record PREPARED, second is attempt_record PREPARED.
+        # Crash on third write (which is op_record ACTIVE after CAS).
+        if transition_writes == 3:
+            raise RuntimeError("SIMULATED_CRASH_AFTER_SWITCH_CAS")
+        real_write_transition_file(p, payload)
+
+    monkeypatch.setattr(
+        standing_grant_store, "_write_transition_file", faulty_write_transition_file
+    )
+
+    with pytest.raises(RuntimeError, match="SIMULATED_CRASH_AFTER_SWITCH_CAS"):
+        _switch_task_card_authority_at(
+            path,
+            attempt_key="attempt-switch-crash-after-cas",
+            expected_current_receipt_hash=receipt.receipt_hash,
+            expected_current_goal_id="goal-crash-2",
+            successor_goal_id="goal-succ-2",
+            successor_thread_id="thread-succ-2",
+            ttl_minutes=15,
+            owner_confirmation=True,
+            now=NOW,
+        )
+
+    # Physical receipt on disk has already been updated to temporary receipt
+    temp_receipt = _load_receipt_at(path, now=NOW)
+    assert temp_receipt.receipt_hash != receipt.receipt_hash
+    assert temp_receipt.context.goal_id == "goal-succ-2"
+
+    # Attempt record is still in PREPARED state
+    attempt_path = (
+        tmp_path / "authority" / "transitions" / "attempt_attempt-switch-crash-after-cas.json"
+    )
+    attempt_record = json.loads(attempt_path.read_text(encoding="utf-8"))
+    assert attempt_record["status"] == "PREPARED"
+
+    # Replay with un-faulted transition writer
+    monkeypatch.setattr(standing_grant_store, "_write_transition_file", real_write_transition_file)
+
+    # Track CAS writes during replay: should be 0 because CAS already took effect
+    cas_writes_during_replay = 0
+    real_write_bytes_locked = standing_grant_store._write_bytes_locked
+
+    def counting_write_bytes_locked(*args, **kwargs):
+        nonlocal cas_writes_during_replay
+        cas_writes_during_replay += 1
+        return real_write_bytes_locked(*args, **kwargs)
+
+    monkeypatch.setattr(standing_grant_store, "_write_bytes_locked", counting_write_bytes_locked)
+
+    replay_result = _switch_task_card_authority_at(
+        path,
+        attempt_key="attempt-switch-crash-after-cas",
+        expected_current_receipt_hash=receipt.receipt_hash,
+        expected_current_goal_id="goal-crash-2",
+        successor_goal_id="goal-succ-2",
+        successor_thread_id="thread-succ-2",
+        ttl_minutes=15,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    assert replay_result["status"] == "SWITCHED"
+    assert replay_result["temporary_receipt_hash"] == temp_receipt.receipt_hash
+    assert cas_writes_during_replay == 0  # No redundant CAS mutation
+
+    # Transition records finalized
+    final_attempt = json.loads(attempt_path.read_text(encoding="utf-8"))
+    assert final_attempt["status"] == "COMMITTED"
+    op_path = (
+        tmp_path / "authority" / "transitions" / f"op_{replay_result['switch_operation_id']}.json"
+    )
+    final_op = json.loads(op_path.read_text(encoding="utf-8"))
+    assert final_op["status"] == "ACTIVE"
+
+
+def test_switch_prepared_foreign_current_fails_closed_no_mutation(tmp_path):
+    receipt, path = _make_receipt(
+        tmp_path, grant_id="grant-orig-foreign", goal_id="goal-orig-foreign"
+    )
+
+    # Initiate a switch that is interrupted after PREPARED
+    transitions_dir = tmp_path / "authority" / "transitions"
+
+    attempt_key = "attempt-foreign-switch"
+    attempt_path = transitions_dir / f"attempt_{attempt_key}.json"
+    op_id = "switch_foreign_123"
+    op_path = transitions_dir / f"op_{op_id}.json"
+
+    request_payload = {
+        "operation": "SWITCH",
+        "attempt_key": attempt_key,
+        "expected_current_receipt_hash": receipt.receipt_hash,
+        "expected_current_goal_id": "goal-orig-foreign",
+        "successor_goal_id": "goal-temp-foreign",
+        "successor_thread_id": "thread-temp-foreign",
+        "ttl_minutes": 15,
+    }
+    request_hash = standing_grant_store.canonical_autonomy_hash(request_payload)
+
+    temp_context = StandingGrantContext.issue(
+        owner_id=receipt.context.owner_id,
+        coordinator_id=receipt.context.coordinator_id,
+        repository=receipt.context.repository,
+        thread_id="thread-temp-foreign",
+        goal_id="goal-temp-foreign",
+        allowed_actions=(
+            AutonomyActionClass.TASK_CARD_COMMIT,
+            AutonomyActionClass.TASK_CARD_CREATE,
+        ),
+        issued_at=NOW,
+        expires_at=NOW + timedelta(minutes=15),
+    )
+    temp_receipt = StandingGrantReceipt.issue(
+        grant_id="grant-temp-foreign",
+        context=temp_context,
+        supersedes_grant_hash=receipt.receipt_hash,
+    )
+
+    result_payload = {
+        "schema": "nexus.task_card_authority_switch.v1",
+        "status": "SWITCHED",
+        "switch_operation_id": op_id,
+        "attempt_key": attempt_key,
+        "predecessor_receipt_hash": receipt.receipt_hash,
+        "predecessor_goal_id": "goal-orig-foreign",
+        "temporary_grant_id": temp_receipt.grant_id,
+        "temporary_receipt_hash": temp_receipt.receipt_hash,
+        "temporary_goal_id": "goal-temp-foreign",
+        "temporary_thread_id": "thread-temp-foreign",
+        "allowed_actions": ["TASK_CARD_COMMIT", "TASK_CARD_CREATE"],
+        "expires_at": temp_context.expires_at.isoformat(),
+        "owner_confirmation": True,
+    }
+
+    op_record = {
+        "schema": "nexus.task_card_authority_switch_record.v1",
+        "switch_operation_id": op_id,
+        "attempt_key": attempt_key,
+        "status": "PREPARED",
+        "predecessor_receipt": receipt.model_dump(mode="json"),
+        "predecessor_receipt_hash": receipt.receipt_hash,
+        "predecessor_goal_id": "goal-orig-foreign",
+        "temporary_receipt": temp_receipt.model_dump(mode="json"),
+        "temporary_receipt_hash": temp_receipt.receipt_hash,
+        "temporary_goal_id": "goal-temp-foreign",
+        "temporary_thread_id": "thread-temp-foreign",
+        "allowed_actions": ["TASK_CARD_COMMIT", "TASK_CARD_CREATE"],
+        "created_at": NOW.isoformat(),
+        "expires_at": temp_context.expires_at.isoformat(),
+        "restored_at": None,
+        "restored_receipt_hash": None,
+    }
+    standing_grant_store._write_transition_file(op_path, op_record)
+
+    attempt_record = {
+        "schema": "nexus.task_card_authority_transition_attempt.v1",
+        "attempt_key": attempt_key,
+        "operation_type": "SWITCH",
+        "status": "PREPARED",
+        "switch_operation_id": op_id,
+        "request": request_payload,
+        "request_hash": request_hash,
+        "predecessor_receipt_hash": receipt.receipt_hash,
+        "intended_successor_receipt_hash": temp_receipt.receipt_hash,
+        "result": result_payload,
+        "created_at": NOW.isoformat(),
+    }
+    standing_grant_store._write_transition_file(attempt_path, attempt_record)
+
+    # Now replace the physical receipt on disk with an unrelated foreign receipt
+    foreign_context = _make_context(goal_id="goal-foreign-unrelated")
+    foreign_receipt = StandingGrantReceipt.issue(
+        grant_id="grant-foreign-unrelated",
+        context=foreign_context,
+        supersedes_grant_hash=receipt.receipt_hash,
+    )
+    standing_grant_store._write_bytes_locked(
+        standing_grant_store._canonical_json(foreign_receipt.model_dump(mode="json")),
+        foreign_receipt.supersedes_grant_hash,
+        path,
+        receipt.receipt_hash,
+    )
+    foreign_bytes_before = path.read_bytes()
+
+    # Replaying the PREPARED attempt when disk has a foreign receipt must fail closed without mutating disk
+    with pytest.raises(StandingGrantReceiptError, match="CURRENT_RECEIPT_HASH_MISMATCH"):
+        _switch_task_card_authority_at(
+            path,
+            attempt_key=attempt_key,
+            expected_current_receipt_hash=receipt.receipt_hash,
+            expected_current_goal_id="goal-orig-foreign",
+            successor_goal_id="goal-temp-foreign",
+            successor_thread_id="thread-temp-foreign",
+            ttl_minutes=15,
+            owner_confirmation=True,
+            now=NOW,
+        )
+
+    # Zero mutation on foreign receipt
+    assert path.read_bytes() == foreign_bytes_before
+
+
+def test_restore_crash_before_cas_replay_succeeds(tmp_path, monkeypatch):
+    receipt, path = _make_receipt(
+        tmp_path, grant_id="grant-pred-rcrash", goal_id="goal-pred-rcrash"
+    )
+    switched = _switch_task_card_authority_at(
+        path,
+        attempt_key="attempt-switch-for-restore-crash1",
+        expected_current_receipt_hash=receipt.receipt_hash,
+        expected_current_goal_id="goal-pred-rcrash",
+        successor_goal_id="goal-temp-rcrash",
+        successor_thread_id="thread-temp-rcrash",
+        ttl_minutes=15,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    temp_hash = switched["temporary_receipt_hash"]
+    op_id = switched["switch_operation_id"]
+
+    real_write_bytes_locked = standing_grant_store._write_bytes_locked
+
+    def faulty_write_bytes_locked(*args, **kwargs):
+        raise RuntimeError("SIMULATED_CRASH_BEFORE_RESTORE_CAS")
+
+    monkeypatch.setattr(standing_grant_store, "_write_bytes_locked", faulty_write_bytes_locked)
+
+    with pytest.raises(RuntimeError, match="SIMULATED_CRASH_BEFORE_RESTORE_CAS"):
+        _restore_task_card_authority_at(
+            path,
+            attempt_key="attempt-restore-crash-before-cas",
+            switch_operation_id=op_id,
+            expected_temporary_receipt_hash=temp_hash,
+            owner_confirmation=True,
+            now=NOW,
+        )
+
+    # Physical receipt is still temporary receipt
+    current = _load_receipt_at(path, now=NOW)
+    assert current.receipt_hash == temp_hash
+
+    # Restore attempt record is PREPARED
+    attempt_path = (
+        tmp_path / "authority" / "transitions" / "attempt_attempt-restore-crash-before-cas.json"
+    )
+    attempt_record = json.loads(attempt_path.read_text(encoding="utf-8"))
+    assert attempt_record["status"] == "PREPARED"
+
+    # Replay with un-faulted writer
+    monkeypatch.setattr(standing_grant_store, "_write_bytes_locked", real_write_bytes_locked)
+    replay_result = _restore_task_card_authority_at(
+        path,
+        attempt_key="attempt-restore-crash-before-cas",
+        switch_operation_id=op_id,
+        expected_temporary_receipt_hash=temp_hash,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    assert replay_result["status"] == "RESTORED"
+    assert replay_result["restored_goal_id"] == "goal-pred-rcrash"
+
+    # Physical receipt is now restored
+    current_after = _load_receipt_at(path, now=NOW)
+    assert current_after.receipt_hash == replay_result["restored_receipt_hash"]
+
+    # Journal finalized
+    final_attempt = json.loads(attempt_path.read_text(encoding="utf-8"))
+    assert final_attempt["status"] == "COMMITTED"
+    op_path = tmp_path / "authority" / "transitions" / f"op_{op_id}.json"
+    final_op = json.loads(op_path.read_text(encoding="utf-8"))
+    assert final_op["status"] == "RESTORED"
+
+
+def test_restore_crash_after_cas_replay_succeeds_without_duplicate_cas(tmp_path, monkeypatch):
+    receipt, path = _make_receipt(
+        tmp_path, grant_id="grant-pred-rcrash2", goal_id="goal-pred-rcrash2"
+    )
+    switched = _switch_task_card_authority_at(
+        path,
+        attempt_key="attempt-switch-for-restore-crash2",
+        expected_current_receipt_hash=receipt.receipt_hash,
+        expected_current_goal_id="goal-pred-rcrash2",
+        successor_goal_id="goal-temp-rcrash2",
+        successor_thread_id="thread-temp-rcrash2",
+        ttl_minutes=15,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    temp_hash = switched["temporary_receipt_hash"]
+    op_id = switched["switch_operation_id"]
+
+    real_write_transition_file = standing_grant_store._write_transition_file
+    writes = 0
+
+    def faulty_write_transition_file(p, payload):
+        nonlocal writes
+        writes += 1
+        # First write is attempt_record PREPARED.
+        # Crash on second write (op_record RESTORED after CAS).
+        if writes == 2:
+            raise RuntimeError("SIMULATED_CRASH_AFTER_RESTORE_CAS")
+        real_write_transition_file(p, payload)
+
+    monkeypatch.setattr(
+        standing_grant_store, "_write_transition_file", faulty_write_transition_file
+    )
+
+    with pytest.raises(RuntimeError, match="SIMULATED_CRASH_AFTER_RESTORE_CAS"):
+        _restore_task_card_authority_at(
+            path,
+            attempt_key="attempt-restore-crash-after-cas",
+            switch_operation_id=op_id,
+            expected_temporary_receipt_hash=temp_hash,
+            owner_confirmation=True,
+            now=NOW,
+        )
+
+    # Physical receipt on disk has already been updated to restored receipt
+    restored_receipt = _load_receipt_at(path, now=NOW)
+    assert restored_receipt.receipt_hash != temp_hash
+    assert restored_receipt.context.goal_id == "goal-pred-rcrash2"
+
+    # Attempt record is still in PREPARED state
+    attempt_path = (
+        tmp_path / "authority" / "transitions" / "attempt_attempt-restore-crash-after-cas.json"
+    )
+    attempt_record = json.loads(attempt_path.read_text(encoding="utf-8"))
+    assert attempt_record["status"] == "PREPARED"
+
+    # Replay with un-faulted transition writer
+    monkeypatch.setattr(standing_grant_store, "_write_transition_file", real_write_transition_file)
+
+    # Track CAS writes during replay: should be 0 because CAS already completed
+    cas_writes_during_replay = 0
+    real_write_bytes_locked = standing_grant_store._write_bytes_locked
+
+    def counting_write_bytes_locked(*args, **kwargs):
+        nonlocal cas_writes_during_replay
+        cas_writes_during_replay += 1
+        return real_write_bytes_locked(*args, **kwargs)
+
+    monkeypatch.setattr(standing_grant_store, "_write_bytes_locked", counting_write_bytes_locked)
+
+    replay_result = _restore_task_card_authority_at(
+        path,
+        attempt_key="attempt-restore-crash-after-cas",
+        switch_operation_id=op_id,
+        expected_temporary_receipt_hash=temp_hash,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    assert replay_result["status"] == "RESTORED"
+    assert replay_result["restored_receipt_hash"] == restored_receipt.receipt_hash
+    assert cas_writes_during_replay == 0  # No duplicate CAS
+
+    # Finalized transition records
+    final_attempt = json.loads(attempt_path.read_text(encoding="utf-8"))
+    assert final_attempt["status"] == "COMMITTED"
+    op_path = tmp_path / "authority" / "transitions" / f"op_{op_id}.json"
+    final_op = json.loads(op_path.read_text(encoding="utf-8"))
+    assert final_op["status"] == "RESTORED"
+
+
+def test_restore_prepared_foreign_current_fails_closed_no_mutation(tmp_path):
+    receipt, path = _make_receipt(tmp_path, grant_id="grant-pred-rf", goal_id="goal-pred-rf")
+    switched = _switch_task_card_authority_at(
+        path,
+        attempt_key="attempt-switch-for-restore-foreign",
+        expected_current_receipt_hash=receipt.receipt_hash,
+        expected_current_goal_id="goal-pred-rf",
+        successor_goal_id="goal-temp-rf",
+        successor_thread_id="thread-temp-rf",
+        ttl_minutes=15,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    temp_hash = switched["temporary_receipt_hash"]
+    op_id = switched["switch_operation_id"]
+
+    # Craft PREPARED restore attempt
+    attempt_key = "attempt-foreign-restore"
+    transitions_dir = tmp_path / "authority" / "transitions"
+    attempt_path = transitions_dir / f"attempt_{attempt_key}.json"
+
+    request_payload = {
+        "operation": "RESTORE",
+        "attempt_key": attempt_key,
+        "switch_operation_id": op_id,
+        "expected_temporary_receipt_hash": temp_hash,
+    }
+    request_hash = standing_grant_store.canonical_autonomy_hash(request_payload)
+
+    restored_receipt = StandingGrantReceipt.issue(
+        grant_id="grant-pred-rf-restored-foreign",
+        context=receipt.context,
+        supersedes_grant_hash=temp_hash,
+    )
+
+    result_payload = {
+        "schema": "nexus.task_card_authority_restore.v1",
+        "status": "RESTORED",
+        "switch_operation_id": op_id,
+        "attempt_key": attempt_key,
+        "restored_grant_id": restored_receipt.grant_id,
+        "restored_receipt_hash": restored_receipt.receipt_hash,
+        "restored_goal_id": "goal-pred-rf",
+        "restored_thread_id": "thread-pred-rf",
+        "restored_allowed_actions": [a.value for a in receipt.context.allowed_actions],
+        "temporary_receipt_hash": temp_hash,
+        "owner_confirmation": True,
+    }
+
+    attempt_record = {
+        "schema": "nexus.task_card_authority_transition_attempt.v1",
+        "attempt_key": attempt_key,
+        "operation_type": "RESTORE",
+        "status": "PREPARED",
+        "switch_operation_id": op_id,
+        "request": request_payload,
+        "request_hash": request_hash,
+        "expected_temporary_receipt_hash": temp_hash,
+        "intended_restored_receipt": restored_receipt.model_dump(mode="json"),
+        "intended_restored_receipt_hash": restored_receipt.receipt_hash,
+        "result": result_payload,
+        "created_at": NOW.isoformat(),
+    }
+    standing_grant_store._write_transition_file(attempt_path, attempt_record)
+
+    # Overwrite physical receipt with unrelated foreign receipt
+    foreign_context = _make_context(goal_id="goal-restore-foreign-unrelated")
+    foreign_receipt = StandingGrantReceipt.issue(
+        grant_id="grant-restore-foreign-unrelated",
+        context=foreign_context,
+        supersedes_grant_hash=temp_hash,
+    )
+    standing_grant_store._write_bytes_locked(
+        standing_grant_store._canonical_json(foreign_receipt.model_dump(mode="json")),
+        foreign_receipt.supersedes_grant_hash,
+        path,
+        temp_hash,
+    )
+    foreign_bytes_before = path.read_bytes()
+
+    # Replaying PREPARED restore on foreign receipt fails closed without mutation
+    with pytest.raises(StandingGrantReceiptError, match="CURRENT_RECEIPT_HASH_MISMATCH"):
+        _restore_task_card_authority_at(
+            path,
+            attempt_key=attempt_key,
+            switch_operation_id=op_id,
+            expected_temporary_receipt_hash=temp_hash,
+            owner_confirmation=True,
+            now=NOW,
+        )
+
+    assert path.read_bytes() == foreign_bytes_before
+
+
+def test_transition_files_contain_valid_record_hash(tmp_path):
+    receipt, path = _make_receipt(tmp_path, grant_id="grant-rh-test", goal_id="goal-rh-test")
+    switched = _switch_task_card_authority_at(
+        path,
+        attempt_key="attempt-rh-switch",
+        expected_current_receipt_hash=receipt.receipt_hash,
+        expected_current_goal_id="goal-rh-test",
+        successor_goal_id="goal-rh-succ",
+        successor_thread_id="thread-rh-succ",
+        ttl_minutes=15,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    transitions_dir = tmp_path / "authority" / "transitions"
+    attempt_path = transitions_dir / "attempt_attempt-rh-switch.json"
+    op_path = transitions_dir / f"op_{switched['switch_operation_id']}.json"
+
+    attempt_data = json.loads(attempt_path.read_text(encoding="utf-8"))
+    op_data = json.loads(op_path.read_text(encoding="utf-8"))
+
+    assert "record_hash" in attempt_data
+    assert "record_hash" in op_data
+    assert (
+        standing_grant_store.canonical_autonomy_hash({
+            k: v for k, v in attempt_data.items() if k != "record_hash"
+        })
+        == attempt_data["record_hash"]
+    )
+    assert (
+        standing_grant_store.canonical_autonomy_hash({
+            k: v for k, v in op_data.items() if k != "record_hash"
+        })
+        == op_data["record_hash"]
+    )
+
+
+def test_switch_journal_tamper_fails_closed_zero_mutation(tmp_path):
+    receipt, path = _make_receipt(tmp_path, grant_id="grant-tamper-sw", goal_id="goal-tamper-sw")
+    transitions_dir = tmp_path / "authority" / "transitions"
+    attempt_key = "attempt-tamper-sw"
+    attempt_path = transitions_dir / f"attempt_{attempt_key}.json"
+    op_id = "switch_tamper_123"
+    op_path = transitions_dir / f"op_{op_id}.json"
+
+    # Set up a PREPARED switch attempt
+    switched_sim = _switch_task_card_authority_at(
+        path,
+        attempt_key="attempt-seed-sw",
+        expected_current_receipt_hash=receipt.receipt_hash,
+        expected_current_goal_id="goal-tamper-sw",
+        successor_goal_id="goal-seed-succ",
+        successor_thread_id="thread-seed-succ",
+        ttl_minutes=15,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    # Restore back to original so disk is at receipt.receipt_hash
+    _restore_task_card_authority_at(
+        path,
+        attempt_key="attempt-seed-rest",
+        switch_operation_id=switched_sim["switch_operation_id"],
+        expected_temporary_receipt_hash=switched_sim["temporary_receipt_hash"],
+        owner_confirmation=True,
+        now=NOW,
+    )
+    current_orig = _load_receipt_at(path, now=NOW)
+    disk_bytes_before = path.read_bytes()
+
+    # Create PREPARED records for attempt-tamper-sw
+    temp_context = StandingGrantContext.issue(
+        owner_id=receipt.context.owner_id,
+        coordinator_id=receipt.context.coordinator_id,
+        repository=receipt.context.repository,
+        thread_id="thread-tamper-succ",
+        goal_id="goal-tamper-succ",
+        allowed_actions=(
+            AutonomyActionClass.TASK_CARD_COMMIT,
+            AutonomyActionClass.TASK_CARD_CREATE,
+        ),
+        issued_at=NOW,
+        expires_at=NOW + timedelta(minutes=15),
+    )
+    temp_receipt = StandingGrantReceipt.issue(
+        grant_id="grant-tamper-temp",
+        context=temp_context,
+        supersedes_grant_hash=current_orig.receipt_hash,
+    )
+
+    request_payload = {
+        "operation": "SWITCH",
+        "attempt_key": attempt_key,
+        "expected_current_receipt_hash": current_orig.receipt_hash,
+        "expected_current_goal_id": current_orig.context.goal_id,
+        "successor_goal_id": "goal-tamper-succ",
+        "successor_thread_id": "thread-tamper-succ",
+        "ttl_minutes": 15,
+    }
+    request_hash = standing_grant_store.canonical_autonomy_hash(request_payload)
+
+    result_payload = {
+        "schema": "nexus.task_card_authority_switch.v1",
+        "status": "SWITCHED",
+        "switch_operation_id": op_id,
+        "attempt_key": attempt_key,
+        "predecessor_receipt_hash": current_orig.receipt_hash,
+        "predecessor_goal_id": current_orig.context.goal_id,
+        "temporary_grant_id": temp_receipt.grant_id,
+        "temporary_receipt_hash": temp_receipt.receipt_hash,
+        "temporary_goal_id": "goal-tamper-succ",
+        "temporary_thread_id": "thread-tamper-succ",
+        "allowed_actions": ["TASK_CARD_COMMIT", "TASK_CARD_CREATE"],
+        "expires_at": temp_context.expires_at.isoformat(),
+        "owner_confirmation": True,
+    }
+
+    base_op_record = {
+        "schema": "nexus.task_card_authority_switch_record.v1",
+        "switch_operation_id": op_id,
+        "attempt_key": attempt_key,
+        "status": "PREPARED",
+        "predecessor_receipt": current_orig.model_dump(mode="json"),
+        "predecessor_receipt_hash": current_orig.receipt_hash,
+        "predecessor_goal_id": current_orig.context.goal_id,
+        "temporary_receipt": temp_receipt.model_dump(mode="json"),
+        "temporary_receipt_hash": temp_receipt.receipt_hash,
+        "temporary_goal_id": "goal-tamper-succ",
+        "temporary_thread_id": "thread-tamper-succ",
+        "allowed_actions": ["TASK_CARD_COMMIT", "TASK_CARD_CREATE"],
+        "created_at": NOW.isoformat(),
+        "expires_at": temp_context.expires_at.isoformat(),
+        "restored_at": None,
+        "restored_receipt_hash": None,
+    }
+
+    base_attempt_record = {
+        "schema": "nexus.task_card_authority_transition_attempt.v1",
+        "attempt_key": attempt_key,
+        "operation_type": "SWITCH",
+        "status": "PREPARED",
+        "switch_operation_id": op_id,
+        "request": request_payload,
+        "request_hash": request_hash,
+        "predecessor_receipt_hash": current_orig.receipt_hash,
+        "intended_successor_receipt_hash": temp_receipt.receipt_hash,
+        "result": result_payload,
+        "created_at": NOW.isoformat(),
+    }
+
+    # Test tampering various fields directly on disk without recomputing record_hash
+    tamper_cases = [
+        ("op", "predecessor_goal_id", "goal-hacked"),
+        ("op", "temporary_receipt_hash", "0" * 64),
+        ("op", "status", "COMMITTED"),
+        ("op", "record_hash", "f" * 64),
+        ("attempt", "intended_successor_receipt_hash", "1" * 64),
+        ("attempt", "predecessor_receipt_hash", "2" * 64),
+        ("attempt", "status", "COMMITTED"),
+        ("attempt", "record_hash", "bad_hash_format"),
+    ]
+
+    for target_rec, field, evil_val in tamper_cases:
+        standing_grant_store._write_transition_file(op_path, dict(base_op_record))
+        standing_grant_store._write_transition_file(attempt_path, dict(base_attempt_record))
+
+        target_file = op_path if target_rec == "op" else attempt_path
+        raw_json = json.loads(target_file.read_text(encoding="utf-8"))
+        raw_json[field] = evil_val
+        target_file.write_text(
+            standing_grant_store._canonical_json(raw_json) + "\n", encoding="utf-8"
+        )
+
+        with pytest.raises(StandingGrantReceiptError, match="TRANSITION_TAMPERED"):
+            _switch_task_card_authority_at(
+                path,
+                attempt_key=attempt_key,
+                expected_current_receipt_hash=current_orig.receipt_hash,
+                expected_current_goal_id=current_orig.context.goal_id,
+                successor_goal_id="goal-tamper-succ",
+                successor_thread_id="thread-tamper-succ",
+                ttl_minutes=15,
+                owner_confirmation=True,
+                now=NOW,
+            )
+        assert path.read_bytes() == disk_bytes_before
+
+
+def test_restore_journal_tamper_fails_closed_zero_mutation(tmp_path):
+    receipt, path = _make_receipt(
+        tmp_path, grant_id="grant-tamper-rest", goal_id="goal-tamper-rest"
+    )
+    switched = _switch_task_card_authority_at(
+        path,
+        attempt_key="attempt-sw-for-tamper-rest",
+        expected_current_receipt_hash=receipt.receipt_hash,
+        expected_current_goal_id="goal-tamper-rest",
+        successor_goal_id="goal-temp-rest",
+        successor_thread_id="thread-temp-rest",
+        ttl_minutes=15,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    temp_hash = switched["temporary_receipt_hash"]
+    op_id = switched["switch_operation_id"]
+    disk_bytes_before = path.read_bytes()
+
+    transitions_dir = tmp_path / "authority" / "transitions"
+    attempt_key = "attempt-tamper-rest"
+    attempt_path = transitions_dir / f"attempt_{attempt_key}.json"
+
+    # Craft PREPARED restore attempt
+    restored_receipt = StandingGrantReceipt.issue(
+        grant_id=f"{receipt.grant_id}-restored-tamper",
+        context=receipt.context,
+        supersedes_grant_hash=temp_hash,
+    )
+    request_payload = {
+        "operation": "RESTORE",
+        "attempt_key": attempt_key,
+        "switch_operation_id": op_id,
+        "expected_temporary_receipt_hash": temp_hash,
+    }
+    request_hash = standing_grant_store.canonical_autonomy_hash(request_payload)
+
+    result_payload = {
+        "schema": "nexus.task_card_authority_restore.v1",
+        "status": "RESTORED",
+        "switch_operation_id": op_id,
+        "attempt_key": attempt_key,
+        "restored_grant_id": restored_receipt.grant_id,
+        "restored_receipt_hash": restored_receipt.receipt_hash,
+        "restored_goal_id": "goal-tamper-rest",
+        "restored_thread_id": "thread-tamper-rest",
+        "restored_allowed_actions": [a.value for a in receipt.context.allowed_actions],
+        "temporary_receipt_hash": temp_hash,
+        "owner_confirmation": True,
+    }
+
+    base_attempt_record = {
+        "schema": "nexus.task_card_authority_transition_attempt.v1",
+        "attempt_key": attempt_key,
+        "operation_type": "RESTORE",
+        "status": "PREPARED",
+        "switch_operation_id": op_id,
+        "request": request_payload,
+        "request_hash": request_hash,
+        "expected_temporary_receipt_hash": temp_hash,
+        "intended_restored_receipt": restored_receipt.model_dump(mode="json"),
+        "intended_restored_receipt_hash": restored_receipt.receipt_hash,
+        "result": result_payload,
+        "created_at": NOW.isoformat(),
+    }
+
+    tamper_cases = [
+        ("intended_restored_receipt_hash", "3" * 64),
+        ("expected_temporary_receipt_hash", "4" * 64),
+        ("status", "COMMITTED"),
+        ("record_hash", "0" * 64),
+    ]
+
+    for field, evil_val in tamper_cases:
+        standing_grant_store._write_transition_file(attempt_path, dict(base_attempt_record))
+        raw_json = json.loads(attempt_path.read_text(encoding="utf-8"))
+        raw_json[field] = evil_val
+        attempt_path.write_text(
+            standing_grant_store._canonical_json(raw_json) + "\n", encoding="utf-8"
+        )
+
+        with pytest.raises(StandingGrantReceiptError, match="TRANSITION_TAMPERED"):
+            _restore_task_card_authority_at(
+                path,
+                attempt_key=attempt_key,
+                switch_operation_id=op_id,
+                expected_temporary_receipt_hash=temp_hash,
+                owner_confirmation=True,
+                now=NOW,
+            )
+        assert path.read_bytes() == disk_bytes_before
+
+
+def test_cross_record_substitution_fails_closed_zero_mutation(tmp_path):
+    receipt, path = _make_receipt(tmp_path, grant_id="grant-xrec", goal_id="goal-xrec")
+    transitions_dir = tmp_path / "authority" / "transitions"
+
+    # Case 1: PREPARED switch attempt references an op_record with mismatched switch_operation_id
+    attempt_key = "attempt-xrec-switch"
+    attempt_path = transitions_dir / f"attempt_{attempt_key}.json"
+    op_id = "switch_xrec_1"
+    op_path = transitions_dir / f"op_{op_id}.json"
+
+    temp_context = StandingGrantContext.issue(
+        owner_id=receipt.context.owner_id,
+        coordinator_id=receipt.context.coordinator_id,
+        repository=receipt.context.repository,
+        thread_id="thread-xrec-succ",
+        goal_id="goal-xrec-succ",
+        allowed_actions=(
+            AutonomyActionClass.TASK_CARD_COMMIT,
+            AutonomyActionClass.TASK_CARD_CREATE,
+        ),
+        issued_at=NOW,
+        expires_at=NOW + timedelta(minutes=15),
+    )
+    temp_receipt = StandingGrantReceipt.issue(
+        grant_id="grant-xrec-temp",
+        context=temp_context,
+        supersedes_grant_hash=receipt.receipt_hash,
+    )
+    request_payload = {
+        "operation": "SWITCH",
+        "attempt_key": attempt_key,
+        "expected_current_receipt_hash": receipt.receipt_hash,
+        "expected_current_goal_id": "goal-xrec",
+        "successor_goal_id": "goal-xrec-succ",
+        "successor_thread_id": "thread-xrec-succ",
+        "ttl_minutes": 15,
+    }
+    request_hash = standing_grant_store.canonical_autonomy_hash(request_payload)
+
+    # Write op_record with internal switch_operation_id="switch_foreign_id"
+    op_record = {
+        "schema": "nexus.task_card_authority_switch_record.v1",
+        "switch_operation_id": "switch_foreign_id",  # Mismatch!
+        "attempt_key": attempt_key,
+        "status": "PREPARED",
+        "predecessor_receipt": receipt.model_dump(mode="json"),
+        "predecessor_receipt_hash": receipt.receipt_hash,
+        "predecessor_goal_id": "goal-xrec",
+        "temporary_receipt": temp_receipt.model_dump(mode="json"),
+        "temporary_receipt_hash": temp_receipt.receipt_hash,
+        "temporary_goal_id": "goal-xrec-succ",
+        "temporary_thread_id": "thread-xrec-succ",
+        "allowed_actions": ["TASK_CARD_COMMIT", "TASK_CARD_CREATE"],
+        "created_at": NOW.isoformat(),
+        "expires_at": temp_context.expires_at.isoformat(),
+        "restored_at": None,
+        "restored_receipt_hash": None,
+    }
+    standing_grant_store._write_transition_file(op_path, op_record)
+
+    attempt_record = {
+        "schema": "nexus.task_card_authority_transition_attempt.v1",
+        "attempt_key": attempt_key,
+        "operation_type": "SWITCH",
+        "status": "PREPARED",
+        "switch_operation_id": op_id,
+        "request": request_payload,
+        "request_hash": request_hash,
+        "predecessor_receipt_hash": receipt.receipt_hash,
+        "intended_successor_receipt_hash": temp_receipt.receipt_hash,
+        "result": {
+            "schema": "nexus.task_card_authority_switch.v1",
+            "status": "SWITCHED",
+            "switch_operation_id": op_id,
+            "attempt_key": attempt_key,
+            "predecessor_receipt_hash": receipt.receipt_hash,
+            "predecessor_goal_id": "goal-xrec",
+            "temporary_grant_id": temp_receipt.grant_id,
+            "temporary_receipt_hash": temp_receipt.receipt_hash,
+            "temporary_goal_id": "goal-xrec-succ",
+            "temporary_thread_id": "thread-xrec-succ",
+            "allowed_actions": ["TASK_CARD_COMMIT", "TASK_CARD_CREATE"],
+            "expires_at": temp_context.expires_at.isoformat(),
+            "owner_confirmation": True,
+        },
+        "created_at": NOW.isoformat(),
+    }
+    standing_grant_store._write_transition_file(attempt_path, attempt_record)
+
+    disk_bytes_before = path.read_bytes()
+    with pytest.raises(StandingGrantReceiptError, match="TRANSITION_RECORD_INCONSISTENT"):
+        _switch_task_card_authority_at(
+            path,
+            attempt_key=attempt_key,
+            expected_current_receipt_hash=receipt.receipt_hash,
+            expected_current_goal_id="goal-xrec",
+            successor_goal_id="goal-xrec-succ",
+            successor_thread_id="thread-xrec-succ",
+            ttl_minutes=15,
+            owner_confirmation=True,
+            now=NOW,
+        )
+    assert path.read_bytes() == disk_bytes_before
+
+    # Case 2: Op record with mismatched temporary_receipt_hash vs internal temporary_receipt
+    op_record["switch_operation_id"] = op_id
+    op_record["temporary_receipt_hash"] = (
+        "9" * 64
+    )  # Recomputed record_hash, but hash mismatch internally
+    standing_grant_store._write_transition_file(op_path, op_record)
+
+    with pytest.raises(StandingGrantReceiptError, match="TRANSITION_RECORD_INCONSISTENT"):
+        _switch_task_card_authority_at(
+            path,
+            attempt_key=attempt_key,
+            expected_current_receipt_hash=receipt.receipt_hash,
+            expected_current_goal_id="goal-xrec",
+            successor_goal_id="goal-xrec-succ",
+            successor_thread_id="thread-xrec-succ",
+            ttl_minutes=15,
+            owner_confirmation=True,
+            now=NOW,
+        )
+    assert path.read_bytes() == disk_bytes_before

@@ -17,7 +17,23 @@ from nexus.services.external_account_pool import (
     is_rotation_eligible,
 )
 
-SENSITIVE_API_KEYS = ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY")
+# GitHub credential keys are stripped from every worker execution environment
+# so a delegated worker never inherits a broad Owner GitHub credential that
+# could be interpreted as external-publication authority.
+GITHUB_CREDENTIAL_KEYS = (
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GH_ENTERPRISE_TOKEN",
+    "GITHUB_ENTERPRISE_TOKEN",
+    "GITHUB_PAT",
+    "GITHUB_ACTIONS_TOKEN",
+)
+
+SENSITIVE_API_KEYS = (
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GOOGLE_GENAI_API_KEY",
+) + GITHUB_CREDENTIAL_KEYS
 
 
 class AgyAccountPoolError(RuntimeError):

@@ -84,6 +84,201 @@ def _assert_canonical_admission(receipt: Mapping[str, Any], attempt: int) -> Non
             raise RuntimeError(f"workforce_admission_{field}_mismatch:attempt{attempt}")
 
 
+def _assert_non_invoked_admission_terminal(
+    receipt: Mapping[str, Any], attempt: int
+) -> None:
+    """Validate a non-admitted attempt without granting replan authority."""
+    admission = receipt.get("workforce_admission")
+    decision = admission.get("overall_decision") if isinstance(admission, Mapping) else ""
+    expected_status = {"BLOCK": "BLOCKED", "ESCALATE": "INCOMPLETE"}.get(str(decision))
+    if expected_status is None:
+        raise RuntimeError(f"workforce_admission_decision_invalid:attempt{attempt}")
+    if receipt.get("terminal_status") != expected_status:
+        raise RuntimeError(
+            f"non_admitted_terminal_status_mismatch:attempt{attempt}:"
+            f"expected={expected_status}:actual={receipt.get('terminal_status')}"
+        )
+
+    # Capability preparation may have run before an authority projection.  The
+    # physical provider boundary and online continuation are the zero-call
+    # invariants this contract protects.
+    zero_count_fields = (
+        "local_call_count",
+        "online_call_count",
+        "verifier_call_count",
+        "learning_call_count",
+        "provider_call_count",
+    )
+    for field in zero_count_fields:
+        if field not in receipt or receipt.get(field) != 0:
+            raise RuntimeError(f"non_admitted_call_count_nonzero:{field}:attempt{attempt}")
+    invocation_counts = receipt.get("invocation_counts")
+    if not isinstance(invocation_counts, Mapping):
+        raise RuntimeError(f"non_admitted_invocation_counts_missing:attempt{attempt}")
+    if "capability_call_count" not in receipt or "capability" not in invocation_counts:
+        raise RuntimeError(f"non_admitted_capability_count_missing:attempt{attempt}")
+    for field in ("local", "online", "verifier", "learning"):
+        if field not in invocation_counts or invocation_counts.get(field) != 0:
+            raise RuntimeError(f"non_admitted_invocation_count_nonzero:{field}:attempt{attempt}")
+    capability_zero = invocation_counts.get("capability") == 0 and receipt.get("capability_call_count") == 0
+
+    def has_replan_authority(value: Any, path: tuple[str, ...] = ()) -> bool:
+        if isinstance(value, Mapping):
+            for key, nested in value.items():
+                key_text = str(key)
+                if key_text in {"execution_replan_request", "replan_authorization"}:
+                    return True
+                if key_text in {
+                    "execution_replan_request_id",
+                    "replan_request_id",
+                }:
+                    return True
+                # UnifiedRuntime always carries an empty source lineage field
+                # in execution_attempt/context_trace, which is not authority
+                # to replan. A non-empty value remains fail-closed.
+                if key_text == "source_replan_request_id":
+                    if nested or path[-1:] not in {("execution_attempt",), ("context_trace",)}:
+                        return True
+                    continue
+                if has_replan_authority(nested, path + (key_text,)):
+                    return True
+        elif isinstance(value, list):
+            return any(has_replan_authority(item, path) for item in value)
+        return False
+
+    if has_replan_authority(receipt):
+        raise RuntimeError(f"non_admitted_replan_authority_present:attempt{attempt}")
+
+    stages = receipt.get("stages")
+    if not isinstance(stages, list):
+        raise RuntimeError(f"non_admitted_stages_missing:attempt{attempt}")
+    seen_names: set[str] = set()
+    for stage in stages:
+        if not isinstance(stage, Mapping) or not stage.get("name"):
+            raise RuntimeError(f"non_admitted_stage_name_missing:attempt{attempt}")
+        name = str(stage["name"])
+        if name in seen_names:
+            raise RuntimeError(f"non_admitted_duplicate_stage:{name}:attempt{attempt}")
+        seen_names.add(name)
+    expected_names = {"local", "online", "verifier", "learning"}
+    if not expected_names.issubset(seen_names):
+        raise RuntimeError(f"non_admitted_stage_set_incomplete:attempt{attempt}")
+    stage_map = {
+        str(stage.get("name")): stage
+        for stage in stages
+        if isinstance(stage, Mapping) and stage.get("name")
+    }
+    for name in ("local", "online", "verifier", "learning"):
+        stage = stage_map.get(name)
+        if not isinstance(stage, Mapping):
+            raise RuntimeError(f"non_admitted_stage_requested:{name}:attempt{attempt}")
+        status = stage.get("status")
+        authority_projection = stage.get("response")
+        is_authority_projection = (
+            status == "FAILED"
+            and isinstance(authority_projection, Mapping)
+            and (
+                isinstance(authority_projection.get("gateway_invocation_authority"), Mapping)
+                or isinstance(authority_projection.get("local_model_invocation_authority"), Mapping)
+            )
+        )
+        if status != "NOT_REQUESTED" and not is_authority_projection:
+            raise RuntimeError(f"non_admitted_stage_requested:{name}:attempt{attempt}")
+        if bool(stage.get("invoked")):
+            raise RuntimeError(f"non_admitted_stage_invoked:{name}:attempt{attempt}")
+        stage_counts = ("provider_call_count", "model_call_count", "local_model_call_count")
+        for field in stage_counts:
+            if field in stage and stage.get(field) != 0:
+                raise RuntimeError(f"non_admitted_stage_call_count_nonzero:{name}:{field}:attempt{attempt}")
+        if is_authority_projection:
+            has_gateway_authority = isinstance(
+                authority_projection.get("gateway_invocation_authority"), Mapping
+            )
+            has_local_authority = isinstance(
+                authority_projection.get("local_model_invocation_authority"), Mapping
+            )
+            required_stage_counts = (
+                ("local_call_count", "local_model_call_count", "model_call_count", "provider_call_count")
+                if name == "local"
+                else ("provider_call_count",)
+            )
+            if any(field not in stage or stage.get(field) != 0 for field in required_stage_counts):
+                raise RuntimeError(f"non_admitted_authority_call_count_missing:{name}:attempt{attempt}")
+            required_response_counts = (
+                ("local_model_call_count", "model_call_count", "provider_call_count")
+                if has_local_authority
+                else ("provider_call_count",)
+            )
+            if any(
+                field not in authority_projection or authority_projection.get(field) != 0
+                for field in required_response_counts
+            ):
+                raise RuntimeError(f"non_admitted_authority_response_count_missing:{name}:attempt{attempt}")
+            if has_gateway_authority and authority_projection.get("invoked") is not False:
+                raise RuntimeError(f"non_admitted_gateway_authority_invoked:{name}:attempt{attempt}")
+            if has_local_authority:
+                if "local_model_invoked" not in authority_projection:
+                    raise RuntimeError(f"non_admitted_local_model_invoked_missing:{name}:attempt{attempt}")
+                if authority_projection.get("local_model_invoked") is not False:
+                    raise RuntimeError(f"non_admitted_local_model_invoked:{name}:attempt{attempt}")
+                if "invoked" in authority_projection and authority_projection.get("invoked") is not False:
+                    raise RuntimeError(f"non_admitted_local_authority_invoked:{name}:attempt{attempt}")
+    if not capability_zero and not any(
+        isinstance(stage, Mapping)
+        and stage.get("status") == "FAILED"
+        and isinstance(stage.get("response"), Mapping)
+        and (
+            isinstance(stage["response"].get("gateway_invocation_authority"), Mapping)
+            or isinstance(stage["response"].get("local_model_invocation_authority"), Mapping)
+        )
+        for stage in stages
+    ):
+        raise RuntimeError(f"non_admitted_capability_call_count_nonzero:attempt{attempt}")
+
+
+def _assert_replanable_provider_failure(
+    receipt: Mapping[str, Any], attempt: int
+) -> None:
+    """Require admitted provider delivery and trusted verifier failure for replan."""
+    admission = receipt.get("workforce_admission")
+    if not isinstance(admission, Mapping) or admission.get("overall_decision") != "ALLOW":
+        raise RuntimeError(f"replan_requires_admitted_workforce:attempt{attempt}")
+    if receipt.get("terminal_status") != "INCOMPLETE":
+        raise RuntimeError(f"replan_requires_incomplete_attempt:attempt{attempt}")
+    online = receipt.get("online")
+    response = online.get("response") if isinstance(online, Mapping) else None
+    if not isinstance(online, Mapping) or not online.get("invoked"):
+        raise RuntimeError(f"replan_requires_provider_invocation:attempt{attempt}")
+    if (
+        not isinstance(response, Mapping)
+        or response.get("invoked") is not True
+        or not response.get("output_delivered")
+    ):
+        raise RuntimeError(f"replan_requires_provider_delivery:attempt{attempt}")
+    verifier = receipt.get("verifier")
+    if (
+        not isinstance(verifier, Mapping)
+        or verifier.get("status") != "FAILED"
+        or verifier.get("invoked") is not True
+        or verifier.get("gate_passed") is not False
+        or verifier.get("evidence_present") is not True
+        or verifier.get("task_identity_shared") is not True
+        or not verifier.get("evidence_refs")
+    ):
+        raise RuntimeError(f"replan_requires_trusted_verifier_failure:attempt{attempt}")
+    request = receipt.get("execution_replan_request")
+    if (
+        not isinstance(request, Mapping)
+        or request.get("schema") != "nexus.execution_replan_request.v1"
+        or not request.get("replan_required")
+        or not request.get("verifier_outcome_trusted")
+        or request.get("verifier_status") != "FAILED"
+        or request.get("trigger") not in {"verifier_failed", "verifier_failed_at_full_depth"}
+        or not request.get("verifier_evidence_refs")
+    ):
+        raise RuntimeError(f"replan_requires_trusted_verifier_failure:attempt{attempt}")
+
+
 def get_git_status(project_root: str) -> str:
     res = subprocess.run(
         ["git", "status", "--porcelain"],
@@ -304,10 +499,17 @@ def run_canary_campaign(
         v1_check = validate_receipt_base(r1, mode="strict")
         if not v1_check.get("ok"):
             raise RuntimeError(f"Attempt 1 strict receipt validation failed: {v1_check.get('blockers')}")
-        _assert_canonical_admission(r1, 1)
+        admission = r1.get("workforce_admission")
+        admission_decision = admission.get("overall_decision") if isinstance(admission, Mapping) else ""
+        if admission_decision != "ALLOW":
+            _assert_non_invoked_admission_terminal(r1, 1)
+            raise RuntimeError(
+                f"Attempt 1 admission {admission_decision}: terminal "
+                f"{r1.get('terminal_status')}; provider call and replan not allowed"
+            )
 
-        if r1.get("terminal_status") != "INCOMPLETE":
-            raise RuntimeError(f"Attempt 1 terminal status unexpected: {r1.get('terminal_status')}")
+        _assert_canonical_admission(r1, 1)
+        _assert_replanable_provider_failure(r1, 1)
 
         previous_receipt = json.loads(receipt1_path.read_text(encoding="utf-8"))
 

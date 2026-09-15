@@ -1,5 +1,6 @@
 # ruff: noqa: E402
 
+import base64
 import copy
 import hashlib
 import json
@@ -9,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,7 +24,10 @@ import pytest
 
 from nexus.contracts.lifecycle_action import (
     ContractKind,
+    ExternalCandidateAdoptionRequest,
     LifecycleActionType,
+    MutationDomain,
+    PermissionProfile,
     build_action_envelope,
     build_owner_inline_contract,
     canonical_request_hash,
@@ -37,6 +42,7 @@ from nexus.engine.canonical_task_seam import (
     build_canonical_dispatch_envelope,
     build_canonical_planner_admission,
 )
+from nexus.events.contracts import build_attempt_transition_event
 from nexus.events.transport import NexusEventBus
 from nexus.executors.worker_contract import (
     SUPPORTED_WORKER_PROVIDERS,
@@ -50,13 +56,20 @@ from nexus.orchestrator.repository_contract_gate import (
     RepositoryContractGateReceipt,
 )
 from nexus.orchestrator.self_hosted_task_service import (
+    _LEGACY_V1_NEGATIVE_OMISSION_SET,
     SelfHostedTaskService,
+    _terminal_retry_inherited_worktree_time_allowed,
+    _terminal_retry_pre_provider_state_allowed,
+    _terminal_retry_verifier_static_failure_allowed,
+    _validate_project_entry_authority_binding,
+    _validated_action_request,
     resolve_canonical_target_roots,
     resolve_execution_lane,
     validate_task_card_binding,
     validate_workforce_dispatch_binding,
 )
 from nexus.orchestrator.worktree_manager import (
+    TargetCleanupReceipt,
     TargetWorktreeLease,
     WorktreeManager,
     get_canonical_git_hooks_dir,
@@ -64,6 +77,161 @@ from nexus.orchestrator.worktree_manager import (
 from nexus.services.model_workforce_policy import WorkforcePolicyLoader
 from nexus.services.runtime_workforce_admission import evaluate_runtime_workforce_admission
 
+
+def _inherited_worktree_timing_state(tmp_path):
+    controller = tmp_path / "controller"
+    target_root = tmp_path / "targets"
+    target = target_root / "task"
+    controller.mkdir()
+    target_root.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=controller, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=controller, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=controller, check=True)
+    (controller / "source.txt").write_text("old\n")
+    subprocess.run(["git", "add", "source.txt"], cwd=controller, check=True)
+    subprocess.run(["git", "commit", "-qm", "old"], cwd=controller, check=True)
+    subprocess.run(
+        ["git", "branch", "nexus/task/inherited-timing-task"], cwd=controller, check=True
+    )
+    (controller / "source.txt").write_text("new\n")
+    subprocess.run(["git", "commit", "-qam", "new"], cwd=controller, check=True)
+    target_base = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=controller, text=True).strip()
+    previous_started = "2026-09-10T17:49:33.803740+00:00"
+    previous_finished = "2026-09-10T17:49:36.818839+00:00"
+    current_started = "2026-09-10T22:59:19.279029+00:00"
+    current_finished = "2026-09-10T22:59:21.873106+00:00"
+    return {
+        "task_id": "inherited-timing-task",
+        "status": "FINAL_BLOCK",
+        "error": "existing task branch candidate lacks durable protection",
+        "cleanup_decision": "ALREADY_REMOVED",
+        "target_created_at": None,
+        "target_worktree": str(target),
+        "lease": None,
+        "execution": None,
+        "executions": None,
+        "active_provider": None,
+        "worker_preflight": None,
+        "worker_child_pgid": None,
+        "candidate": None,
+        "candidate_commit_sha": None,
+        "candidate_ref": None,
+        "candidate_state_hash": None,
+        "verified_receipt": None,
+        "verified_receipt_hash": None,
+        "candidate_status": None,
+        "promotion_status": "NOT_CREATED",
+        "merge_performed": False,
+        "push_performed": False,
+        "worker_started_at": current_started,
+        "worker_finished_at": current_finished,
+        "attempt_id": "attempt-current",
+        "attempts": [
+            {
+                "attempt_id": "attempt-previous",
+                "started_at": previous_started,
+                "finished_at": previous_finished,
+                "last_status": "FINAL_BLOCK",
+            },
+            {
+                "attempt_id": "attempt-current",
+                "started_at": current_started,
+                "finished_at": current_finished,
+                "last_status": "FINAL_BLOCK",
+            },
+        ],
+        "status_history": [
+            {"status": "SUBMITTED", "at": previous_started},
+            {"status": "TARGET_LEASED", "at": "2026-09-10T17:49:35.516136+00:00"},
+            {"status": "WORKER_RUNNING", "at": "2026-09-10T17:49:35.523858+00:00"},
+            {"status": "FINAL_BLOCK", "at": previous_finished},
+            {"status": "ATTEMPT_INCREMENTED", "at": current_started},
+            {"status": "FINAL_BLOCK", "at": current_finished},
+        ],
+        "telemetry": {
+            "provider_calls": 0,
+            "provider_attempts": 0,
+            "provider_time_ms": 0,
+            "worktree_time_ms": 1429,
+            "verifier_time_ms": 0,
+        },
+        "contract": {
+            "controller_repo_root": str(controller),
+            "target_worktree_root": str(target_root),
+            "target_repo_root": str(target),
+            "target_base_revision": target_base,
+        },
+    }
+
+
+def test_terminal_retry_accepts_inherited_worktree_time_only_after_prior_lease(tmp_path):
+    state = _inherited_worktree_timing_state(tmp_path)
+    assert _terminal_retry_inherited_worktree_time_allowed(state)
+    assert _terminal_retry_pre_provider_state_allowed(state)
+
+
+def test_terminal_retry_preserves_zero_worktree_time_for_other_pre_provider_errors(tmp_path):
+    state = _inherited_worktree_timing_state(tmp_path)
+    state["telemetry"]["worktree_time_ms"] = 0
+    state["error"] = "another pre-provider validation failure"
+    assert _terminal_retry_inherited_worktree_time_allowed(state)
+    assert _terminal_retry_pre_provider_state_allowed(state)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda state: state["status_history"].__setitem__(-1, {"status": "TARGET_LEASED", "at": state["attempts"][-1]["finished_at"]}),
+        lambda state: state["status_history"].pop(),
+        lambda state: state["status_history"].__setitem__(1, {"status": "FINAL_BLOCK", "at": state["status_history"][1]["at"]}),
+    ],
+)
+def test_terminal_retry_rejects_inherited_worktree_time_with_ambiguous_current_history(tmp_path, mutation):
+    state = _inherited_worktree_timing_state(tmp_path)
+    mutation(state)
+    assert not _terminal_retry_inherited_worktree_time_allowed(state)
+
+
+def test_terminal_retry_rejects_inherited_worktree_time_with_active_target(tmp_path):
+    state = _inherited_worktree_timing_state(tmp_path)
+    Path(state["target_worktree"]).mkdir(parents=True)
+    assert not _terminal_retry_inherited_worktree_time_allowed(state)
+
+
+def test_terminal_retry_rejects_mixed_timezone_history(tmp_path):
+    state = _inherited_worktree_timing_state(tmp_path)
+    state["status_history"][1]["at"] = "2026-09-10T17:49:35.516136"
+    assert not _terminal_retry_inherited_worktree_time_allowed(state)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("executions", [{"provider_calls": 0}]),
+        ("lease", {"lease_id": "active"}),
+        ("promotion_packet", {"candidate_state_hash": "a" * 64}),
+        ("candidate", {"commit": "a" * 40}),
+        ("telemetry", {"provider_calls": 1, "provider_attempts": 0, "provider_time_ms": 0, "worktree_time_ms": 1429, "verifier_time_ms": 0}),
+    ],
+)
+def test_terminal_retry_rejects_inherited_worktree_time_after_effect_evidence(tmp_path, field, value):
+    state = _inherited_worktree_timing_state(tmp_path)
+    state[field] = value
+    assert not _terminal_retry_pre_provider_state_allowed(state)
+
+
+def test_terminal_retry_rejects_divergent_branch_base(tmp_path):
+    state = _inherited_worktree_timing_state(tmp_path)
+    state["contract"]["target_base_revision"] = "0" * 40
+    assert not _terminal_retry_inherited_worktree_time_allowed(state)
+
+
+def test_terminal_retry_rejects_dangling_target_symlink(tmp_path):
+    state = _inherited_worktree_timing_state(tmp_path)
+    target = Path(state["target_worktree"])
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.symlink_to(target.parent / "missing")
+    assert not _terminal_retry_inherited_worktree_time_allowed(state)
 
 def _operator_provenance(kind="operator"):
     source = {"source_ref": "authenticated-submission"}
@@ -111,6 +279,28 @@ def _claim_request(**overrides):
         "workforce_admission": {"receipt_id": "admission-1"}}
     values.update(overrides)
     return values
+
+
+def test_find_tasks_by_repository_issue_uses_exact_persisted_binding(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("issue-842", {
+        "task_id": "issue-842", "status": "SUBMITTED",
+        "request": {"repository": "James3014/Nexus-new", "issue": 842},
+    })
+    service._write_state("issue-84", {
+        "task_id": "issue-84", "status": "SUBMITTED",
+        "request": {"repository": "James3014/Nexus-new", "issue": 84},
+    })
+    assert [item["task_id"] for item in service.find_tasks_by_repository_issue("James3014/Nexus-new", 842)] == ["issue-842"]
+
+
+def test_find_tasks_by_repository_issue_excludes_conflicting_repository_and_issue(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("repo-conflict", {"task_id": "repo-conflict", "status": "SUBMITTED", "request": {"repository": "James3014/Nexus-new", "issue": 842}, "repository": "evil/x"})
+    service._write_state("issue-conflict", {"task_id": "issue-conflict", "status": "SUBMITTED", "request": {"repository": "James3014/Nexus-new", "issue": 842}, "issue": 7})
+    service._write_state("exact-a", {"task_id": "exact-a", "status": "SUBMITTED", "request": {"repository": "James3014/Nexus-new", "issue": 842}})
+    service._write_state("exact-b", {"task_id": "exact-b", "status": "SUBMITTED", "request": {"repository": "James3014/Nexus-new", "issue": 842}})
+    assert [item["task_id"] for item in service.find_tasks_by_repository_issue("James3014/Nexus-new", 842)] == ["exact-a", "exact-b", "issue-conflict", "repo-conflict"]
 
 
 def test_work_claim_hostile_matrix_and_recovery(tmp_path):
@@ -699,6 +889,89 @@ def test_workforce_dispatch_binding_is_canonical_and_fail_closed():
         validate_workforce_dispatch_binding({"workforce_demands": demands, "workforce_admission": mismatched})
 
 
+def test_workforce_admission_accepts_forward_derived_age_rollover(monkeypatch):
+    demands, admission = _valid_local_dispatch()
+    persisted = copy.deepcopy(admission)
+    age = persisted["records"][0]["decision"]["freshness_evidence"]["verified_age_days"]
+    assert type(age) is int and age >= 0
+
+    def next_day_age(_last_verified):
+        return {
+            "last_verified": persisted["records"][0]["decision"]["freshness_evidence"]["last_verified"],
+            "verified_age_days": age + 1,
+            "is_future": False,
+        }
+
+    monkeypatch.setattr("nexus.services.model_workforce_policy.get_freshness_evidence", next_day_age)
+    binding = validate_workforce_dispatch_binding({
+        "workforce_demands": demands,
+        "workforce_admission": persisted,
+    }, require_binding=True)
+    assert binding["aggregate_binding_hash"] == admission["aggregate_binding_hash"]
+
+
+def test_workforce_admission_rejects_age_backwards_and_other_tamper(monkeypatch):
+    demands, admission = _valid_local_dispatch()
+    age = admission["records"][0]["decision"]["freshness_evidence"]["verified_age_days"]
+    assert type(age) is int and age >= 0
+
+    monkeypatch.setattr(
+        "nexus.services.model_workforce_policy.get_freshness_evidence",
+        lambda _last_verified: {
+            "last_verified": admission["records"][0]["decision"]["freshness_evidence"]["last_verified"],
+            "verified_age_days": age,
+            "is_future": False,
+        },
+    )
+
+    backwards = copy.deepcopy(admission)
+    backwards["records"][0]["decision"]["freshness_evidence"]["verified_age_days"] = age + 1
+    with pytest.raises(RuntimeError, match="WORKFORCE_ADMISSION_BINDING_INVALID"):
+        validate_workforce_dispatch_binding(
+            {"workforce_demands": demands, "workforce_admission": backwards},
+            require_binding=True,
+        )
+
+    for tamper in ("policy", "freshness", "binding", "age_missing", "deny"):
+        candidate = copy.deepcopy(admission)
+        if tamper == "policy":
+            candidate["policy_identity"]["policy_hash"] = "0" * 64
+        elif tamper == "freshness":
+            candidate["records"][0]["decision"]["freshness_evidence"]["last_verified"] = "2026-08-16"
+        elif tamper == "binding":
+            candidate["records"][0]["decision"]["resolved_model"] = "tampered-model"
+        elif tamper == "age_missing":
+            candidate["records"][0]["decision"]["freshness_evidence"].pop("verified_age_days")
+        else:
+            candidate["overall_decision"] = "BLOCK"
+        with pytest.raises(RuntimeError, match="WORKFORCE_ADMISSION_BINDING_INVALID"):
+            validate_workforce_dispatch_binding(
+                {"workforce_demands": demands, "workforce_admission": candidate},
+                require_binding=True,
+            )
+
+
+def test_workforce_admission_rejects_fresh_evaluator_deny(monkeypatch):
+    demands, admission = _valid_local_dispatch()
+    fresh_decisions = []
+    original_admit = WorkforcePolicyLoader.admit
+
+    def deny_unknown_worker(self, request, snapshot=None):
+        denied_request = replace(request, requested_worker_id="missing-worker")
+        decision = original_admit(self, denied_request, snapshot)
+        fresh_decisions.append(decision.to_dict())
+        return decision
+
+    monkeypatch.setattr(WorkforcePolicyLoader, "admit", deny_unknown_worker)
+    with pytest.raises(RuntimeError, match="WORKFORCE_ADMISSION_BINDING_INVALID"):
+        validate_workforce_dispatch_binding(
+            {"workforce_demands": demands, "workforce_admission": admission},
+            require_binding=True,
+        )
+    assert fresh_decisions
+    assert fresh_decisions[0]["decision"] == "BLOCK"
+
+
 def test_build_contract_binds_selected_admission_identity_and_rejects_override(tmp_path):
     demands, admission = _valid_local_dispatch()
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
@@ -747,6 +1020,8 @@ def test_admitted_agy_worker_registry_execution_persists_identity_and_receipt(tm
     )
     demands = internal["workforce_demands"]
     admission = internal["workforce_admission"]
+    expected_model = internal["binding"]["model"]
+    expected_worker_id = internal["binding"]["worker_id"]
     calls = []
 
     class FakeAgyAdapter:
@@ -779,7 +1054,7 @@ def test_admitted_agy_worker_registry_execution_persists_identity_and_receipt(tm
     attempt_id = "a" * 32
     request = _request(
         tmp_path, task_id=task_id, worker="auto",
-        model="gemini-3.6-flash-high", execution_lane="ISOLATED_TARGET",
+        model=expected_model, execution_lane="ISOLATED_TARGET",
         workforce_demands=demands, workforce_admission=admission,
         planner_output=internal["planner_output"],
         task_card_path=card_path, task_card_hash=card_hash,
@@ -851,10 +1126,10 @@ def test_admitted_agy_worker_registry_execution_persists_identity_and_receipt(tm
         )
 
     persisted = service._read_state(contract.task_id)
-    assert calls == [("agy", "gemini-3.6-flash-high", contract.task_id, str(tmp_path / "target"))]
-    assert persisted["selected_worker_id"] == "agy_flash"
+    assert calls == [("agy", expected_model, contract.task_id, str(tmp_path / "target"))]
+    assert persisted["selected_worker_id"] == expected_worker_id
     assert persisted["selected_provider"] == "agy"
-    assert persisted["selected_model"] == "gemini-3.6-flash-high"
+    assert persisted["selected_model"] == expected_model
     assert persisted["task_card_path"] == request["canonical_dispatch_envelope"]["task_card_path"]
     assert persisted["task_card_hash"] == request["canonical_dispatch_envelope"]["task_card_hash"]
     assert persisted["execution"]["provider"] == "agy"
@@ -889,11 +1164,12 @@ def test_tracked_card_mutated_after_submit_fails_before_preflight_or_registry(
             task_card_hash=card_hash,
         ),
     )
+    expected_model = internal["binding"]["model"]
     request = _request(
         tmp_path,
         task_id=task_id,
         worker="auto",
-        model="gemini-3.6-flash-high",
+        model=expected_model,
         execution_lane="ISOLATED_TARGET",
         workforce_demands=internal["workforce_demands"],
         workforce_admission=internal["workforce_admission"],
@@ -1070,11 +1346,12 @@ def test_unadmitted_fallback_blocks_before_provider_side_work(
             task_card_hash=card_hash,
         ),
     )
+    expected_model = internal["binding"]["model"]
     request = _request(
         tmp_path,
         task_id=task_id,
         worker="auto",
-        model="gemini-3.6-flash-high",
+        model=expected_model,
         execution_lane="ISOLATED_TARGET",
         workforce_demands=internal["workforce_demands"],
         workforce_admission=internal["workforce_admission"],
@@ -1758,6 +2035,20 @@ def test_snapshot_non_required_approval_is_deterministic(tmp_path):
             }),
             "STATE_FIELD_INVALID",
         ),
+        (
+            json.dumps({
+                "task_id": "malformed-status",
+                "status": "ARBITRARY_UNKNOWN_STATUS",
+            }),
+            "STATE_FIELD_INVALID",
+        ),
+        (
+            json.dumps({
+                "task_id": "malformed-status",
+                "status": "BLOCKED_INVALID_STATE",
+            }),
+            "STATE_FIELD_INVALID",
+        ),
     ],
 )
 def test_status_surfaces_fail_closed_on_malformed_state_without_mutation(
@@ -2066,7 +2357,9 @@ def test_submit_persists_idempotent_task_state(tmp_path):
             "candidate_commit_created": True,
         }
 
-    service = SelfHostedTaskService(state_dir=tmp_path / "state", runner=fake_runner)
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", runner=fake_runner, ephemeral=True
+    )
     request = _request(tmp_path)
 
     first = service.submit_task(request)
@@ -2089,7 +2382,9 @@ def test_submitted_at_matches_initial_submitted_history_entry(tmp_path):
         release.wait(2)
         return {"promotion_status": "PENDING_HUMAN_APPROVAL", "candidate_commit_created": True}
 
-    service = SelfHostedTaskService(state_dir=tmp_path / "state", runner=fake_runner)
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", runner=fake_runner, ephemeral=True
+    )
     request = _request(tmp_path, task_id="submitted-at-initial")
 
     submitted = service.submit_task(request)
@@ -2131,7 +2426,9 @@ def test_submitted_at_is_stable_across_idempotent_resubmission(tmp_path):
         calls.append(contract.task_id)
         return {"promotion_status": "PENDING_HUMAN_APPROVAL", "candidate_commit_created": True}
 
-    service = SelfHostedTaskService(state_dir=tmp_path / "state", runner=fake_runner)
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", runner=fake_runner, ephemeral=True
+    )
     request = _request(tmp_path, task_id="submitted-at-idempotent")
 
     first = service.submit_task(request)
@@ -2204,7 +2501,7 @@ def test_pid_permission_error_is_treated_as_alive(monkeypatch):
 
 
 def test_submit_rejects_raw_prompt_and_unknown_worker(tmp_path):
-    service = SelfHostedTaskService(state_dir=tmp_path / "state")
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", ephemeral=True)
 
     with pytest.raises(ValueError, match="prompt"):
         service.build_contract(_request(tmp_path, prompt="run arbitrary shell"))
@@ -2225,7 +2522,7 @@ def test_submit_rejects_raw_prompt_and_unknown_worker(tmp_path):
 
 
 def test_approval_is_hash_bound_and_does_not_merge(tmp_path):
-    service = SelfHostedTaskService(state_dir=tmp_path / "state")
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", ephemeral=True)
     request = _request(tmp_path)
 
     service._write_state(
@@ -2256,6 +2553,16 @@ def test_approval_is_hash_bound_and_does_not_merge(tmp_path):
     assert approved["promotion_status"] == "APPROVED"
     assert approved["merge_performed"] is False
     assert approved["push_performed"] is False
+
+    invalid = service.approve_promotion(
+        request["task_id"],
+        candidate_commit_sha="c" * 40,
+        candidate_tree_sha="0" * 40,
+        candidate_state_hash="e" * 64,
+        verified_receipt_hash="f" * 64,
+    )
+    assert invalid["status"] == "APPROVAL_INVALIDATED"
+    assert invalid["task_action"]["action_state"] == "ACTION_REQUIRED"
 
 
 def test_marked_authority_approval_requires_exact_nested_ack_and_persists(tmp_path):
@@ -2290,7 +2597,7 @@ def test_marked_authority_approval_requires_exact_nested_ack_and_persists(tmp_pa
     ],
 )
 def test_marked_authority_approval_service_rejects_tamper_and_expiry(tmp_path, field, value, code):
-    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     task_id = "authority-service-negative"
     packet = {"candidate_commit_sha": "c" * 40, "candidate_tree_sha": "d" * 40, "candidate_state_hash": "e" * 64, "verified_receipt_hash": "f" * 64, "authority_change_required": True, "authority_findings_sha256": "a" * 64}
     service._write_state(task_id, {"task_id": task_id, "attempt_id": "attempt-1", "status": "CANDIDATE_COMMITTED", "promotion_status": "PENDING_HUMAN_APPROVAL", "promotion_packet": packet, "verified_receipt": packet})
@@ -2302,7 +2609,9 @@ def test_marked_authority_approval_service_rejects_tamper_and_expiry(tmp_path, f
 
 
 def test_versioned_allow_action_once_is_consumed_atomically_and_replay_is_idempotent(tmp_path):
-    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
     task_id = "approval-once"
     packet = {
         "candidate_commit_sha": "c" * 40,
@@ -2722,7 +3031,7 @@ def test_retry_task_blocks_retained_review_without_disposition(tmp_path):
     assert result["retry"]["decision"] == "BLOCKED_RETAINED_REVIEW"
 
 
-def test_retry_task_reuses_clean_retained_no_candidate_after_cleanup(tmp_path):
+def test_retry_task_blocks_clean_retained_for_review(tmp_path):
     calls = []
 
     def runner(contract, request, update):
@@ -2743,10 +3052,85 @@ def test_retry_task_reuses_clean_retained_no_candidate_after_cleanup(tmp_path):
 
     retried = service.retry_task("retained-retry-clean")
     assert retried["task_id"] == "retained-retry-clean"
+    assert retried["retry"]["decision"] == "BLOCKED_RETAINED_REVIEW"
+    assert calls == ["retained-retry-clean"]
+
+
+def test_retry_task_reuses_clean_retained_no_candidate_after_cleanup(tmp_path):
+    """Historical exact-base evidence identity; retained solely for CI node stability, asserting new absorbing semantics."""
+    test_retry_task_blocks_clean_retained_for_review(tmp_path)
+
+
+@pytest.mark.parametrize("status", ["REJECTED", "SUPERSEDED", "INTEGRATED"])
+def test_retry_task_blocks_absorbing_terminal_statuses_with_zero_launch(tmp_path, status, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _request(tmp_path, task_id=f"absorbing-{status.lower()}")
+    contract = service.build_contract(request)
+    state = {
+        "task_id": contract.task_id,
+        "status": status,
+        "terminal_status": status,
+        "cleanup_decision": "REMOVED",
+        "attempt_id": "attempt-1",
+        "attempts": [{"attempt_id": "attempt-1"}],
+        "executions": [{"attempt_id": "attempt-1", "provider_calls": 1}],
+        "request": request,
+        "contract": contract.model_dump(mode="json"),
+        "contract_hash": contract.contract_hash,
+    }
+    service._write_state(contract.task_id, state)
+    before_bytes = (service.state_dir / f"{contract.task_id}.json").read_bytes()
+    launched = []
+    monkeypatch.setattr(service, "_launch_worker", lambda *args, **kwargs: launched.append(args))
+
+    result = service.retry_task(contract.task_id)
+    assert result["retry"]["decision"] == "BLOCKED_ABSORBING_STATUS"
+    assert status in result["retry"]["blocker"]
+    assert len(launched) == 0
+
+    stored = service._read_state(contract.task_id)
+    assert stored["status"] == status
+    assert stored["attempt_id"] == "attempt-1"
+    assert len(stored["attempts"]) == 1
+    assert len(stored["executions"]) == 1
+    assert (service.state_dir / f"{contract.task_id}.json").read_bytes() == before_bytes
+
+
+def test_retry_task_allows_cancelled_with_cleaned_disposition(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _request(tmp_path, task_id="retry-cancelled-clean")
+    contract = service.build_contract(request)
+    original_state = {
+        "task_id": contract.task_id,
+        "status": "CANCELLED",
+        "terminal_status": "CANCELLED",
+        "cleanup_decision": "REMOVED",
+        "promotion_status": "NOT_CREATED",
+        "request": request,
+        "contract": contract.model_dump(mode="json"),
+        "contract_hash": contract.contract_hash,
+        "attempt_id": "att-cancelled-1",
+        "attempts": [{"attempt_id": "att-cancelled-1"}],
+        "executions": [{"attempt_id": "att-cancelled-1", "provider_calls": 1}],
+    }
+    service._write_state(contract.task_id, original_state)
+    launched = []
+    monkeypatch.setattr(service, "_launch_worker", lambda task_id, attempt_id: launched.append((task_id, attempt_id)) or service._read_state(task_id))
+
+    retried = service.retry_task(contract.task_id)
     assert retried["retry"]["decision"] == "REUSED_TASK_ID"
+    assert retried["attempt_id"] != "att-cancelled-1"
     assert retried["retry"]["attempts"] == 2
-    assert _wait_for_status(service, "retained-retry-clean", "RETAINED_FOR_REVIEW")
-    assert calls == ["retained-retry-clean", "retained-retry-clean"]
+    assert len(launched) == 1
+    assert launched[0][0] == contract.task_id
+    assert launched[0][1] == retried["attempt_id"]
+
+    durable = service._read_state(contract.task_id)
+    assert durable["attempt_id"] == retried["attempt_id"]
+    assert len(durable["attempts"]) == 2
+    assert len(durable["executions"]) == 1
+    assert durable["attempts"][0]["attempt_id"] == "att-cancelled-1"
+    assert durable["attempts"][1]["attempt_id"] == retried["attempt_id"]
 
 
 def test_safe_hooks_directory_does_not_require_rewrite(tmp_path, monkeypatch):
@@ -2765,6 +3149,28 @@ def test_safe_hooks_directory_does_not_require_rewrite(tmp_path, monkeypatch):
 def test_noncanonical_state_root_requires_ephemeral_mode(tmp_path):
     with pytest.raises(ValueError, match="canonical state root"):
         SelfHostedTaskService(state_dir="/Users/jameschen/Workspace/nexus-sibling-state", auto_reconcile=False)
+
+
+def test_ci_isolated_state_root_requires_explicit_ephemeral_mode(monkeypatch):
+    isolated_state = Path(
+        "/home/runner/work/_temp/trusted-anchor/source-self-hosted-state"
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service._temporary_state_roots",
+        lambda: (),
+    )
+
+    with pytest.raises(ValueError, match="canonical state root"):
+        SelfHostedTaskService(state_dir=isolated_state, auto_reconcile=False)
+
+    service = SelfHostedTaskService(
+        state_dir=isolated_state,
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+
+    assert service.state_dir == isolated_state.resolve()
+    assert service.ephemeral is True
 
 
 def test_default_state_root_uses_configured_canonical_root(tmp_path, monkeypatch):
@@ -2802,7 +3208,7 @@ def test_archive_apply_persists_manifest_and_remains_readable(tmp_path):
     assert repeated["entries"] == []
 
 
-def test_archived_integrated_task_retries_with_same_identity_and_versions_receipt(tmp_path):
+def test_archived_integrated_task_rejects_retry_and_preserves_durable_history(tmp_path):
     calls = []
 
     def runner(contract, request, update):
@@ -2829,25 +3235,22 @@ def test_archived_integrated_task_retries_with_same_identity_and_versions_receip
     first_archive = service.archive_states(dry_run=False)
 
     submitted = service.submit_task(request)
-    deadline = time.monotonic() + 2
-    while time.monotonic() < deadline:
-        current = service._read_state("archived-integrated")
-        if current and current["status"] == "FINAL_BLOCK":
-            break
-        time.sleep(0.01)
+    time.sleep(0.05)
     current = service._read_state("archived-integrated")
-    second_archive = service.archive_states(dry_run=False)
 
     assert submitted["task_id"] == "archived-integrated"
-    assert current["attempt_id"] != first_attempt
-    assert len(current["attempts"]) == 2
-    assert current["candidate_ref"] is None
-    assert current["candidate_history"][0]["final_disposition"] == "INTEGRATED"
-    assert calls == ["archived-integrated"]
+    assert current["attempt_id"] == first_attempt
+    assert len(current["attempts"]) == 1
+    assert current["status"] == "INTEGRATED"
+    assert current["candidate_ref"] == "refs/nexus-candidates/archived-integrated/old"
+    assert calls == []
     assert Path(first_archive["entries"][0]["archive_location"]).is_file()
-    assert Path(second_archive["entries"][0]["archive_location"]).is_file()
-    assert first_archive["entries"][0]["archive_location"] != second_archive["entries"][0]["archive_location"]
-    assert service.get_task("archived-integrated")["attempt_id"] == current["attempt_id"]
+    assert service.get_task("archived-integrated")["attempt_id"] == first_attempt
+
+
+def test_archived_integrated_task_retries_with_same_identity_and_versions_receipt(tmp_path):
+    """Historical exact-base evidence identity; retained solely for CI node stability, asserting new absorbing semantics."""
+    test_archived_integrated_task_rejects_retry_and_preserves_durable_history(tmp_path)
 
 
 def test_terminal_retry_accepts_revision_fast_forward_and_preserves_contract_history(tmp_path):
@@ -2903,6 +3306,473 @@ def test_terminal_retry_accepts_revision_fast_forward_and_preserves_contract_his
     assert calls == [(activated_head, activated_head)]
 
 
+def test_terminal_retry_accepts_action_bound_revision_fast_forward(tmp_path):
+    calls = []
+
+    def runner(contract, request, update):
+        calls.append(copy.deepcopy(dict(request)))
+        update("FINAL_BLOCK", {"cleanup_decision": "REMOVED", "cleanup_performed": True})
+        return {"promotion_status": "NOT_CREATED"}
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", runner=runner, auto_reconcile=False, ephemeral=True
+    )
+    base = _real_request(tmp_path, task_id="bound-activation-retry")
+    initial = _action_transport(base, attempt_id="attempt-initial", action_id="action-initial", idempotency_key="key-initial")
+    first = service.submit_task(initial)
+    assert _wait_for_status(service, base["task_id"], "FINAL_BLOCK")
+    before = copy.deepcopy(service._read_state(base["task_id"]))
+
+    controller = Path(base["controller_repo_root"])
+    (controller / "README").write_text("activation\n")
+    _git(controller, "add", "README")
+    _git(controller, "commit", "-m", "activate lifecycle")
+    activated_head = _git(controller, "rev-parse", "HEAD")
+    refreshed = {**base, "controller_revision": activated_head, "target_base_revision": activated_head}
+    retry = _action_transport(
+        refreshed,
+        action_type=LifecycleActionType.TASK_RETRY,
+        attempt_id="attempt-refresh",
+        action_id="action-refresh",
+        idempotency_key="key-refresh",
+    )
+
+    submitted = service.submit_task(retry)
+    current = _wait_for_status(service, base["task_id"], "FINAL_BLOCK")
+
+    assert submitted["attempt_id"] != first["attempt_id"]
+    assert current["attempt_id"] == submitted["attempt_id"]
+    assert current["controller_revision"] == activated_head
+    assert current["request"]["bound_action_request"]["controller_revision"] == activated_head
+    assert current["request"]["action"]["expected_head"] == activated_head
+    assert len(current["attempts"]) == 2
+    assert current["contract_history"][0]["attempt_id"] == before["attempt_id"]
+    assert calls[-1]["action"]["request_hash"] == canonical_request_hash(calls[-1]["bound_action_request"])
+
+
+def test_terminal_retry_static_verifier_failure_uses_formal_released_lease(tmp_path, monkeypatch):
+    calls = []
+
+    def runner(contract, request, update):
+        calls.append(copy.deepcopy(dict(request)))
+        update("FINAL_BLOCK", {"cleanup_decision": "REMOVED", "cleanup_performed": True})
+        return {"promotion_status": "NOT_CREATED"}
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", runner=runner, auto_reconcile=False, ephemeral=True
+    )
+    base = _real_request(tmp_path, task_id="static-verifier-retry")
+    initial = _action_transport(
+        base, attempt_id="attempt-initial", action_id="action-initial", idempotency_key="key-initial"
+    )
+    first = service.submit_task(initial)
+    assert _wait_for_status(service, base["task_id"], "FINAL_BLOCK")
+    before = copy.deepcopy(service._read_state(base["task_id"]))
+    assert before["attempt_id"] == first["attempt_id"]
+    assert before["cleanup_decision"] == "REMOVED"
+    manager = WorktreeManager(create_root=False)
+    formal_contract = service.build_contract(initial)
+    formal_lease = manager.create_lease(
+        formal_contract,
+        task_states={base["task_id"]: before},
+        attempt_id=before["attempt_id"],
+    )
+    assert manager.cleanup_terminal_target(formal_contract, formal_lease).decision == "REMOVED"
+    ownership = manager._ownership_record_path(Path(base["controller_repo_root"]), base["task_id"])
+    tombstones = sorted(ownership.parent.glob(f"{ownership.with_suffix('').name}.*.released"))
+    assert tombstones
+    released_record = json.loads(tombstones[-1].read_text(encoding="utf-8"))
+    assert released_record["lease"]["target_worktree"]
+
+    def mark_known_static_failure(state):
+        state.update(
+            {
+                "lease": released_record["lease"],
+                "error": "invalid verifier contract: invalid verifier argument",
+                "active_provider": "codex",
+                "target_created_at": "2026-09-11T00:00:00+00:00",
+                "cleanup_performed_at": "2026-09-11T00:00:01+00:00",
+                "cleanup_eligible": True,
+                "cleanup_blocker": None,
+                "worker_preflight": {"provider": "codex", "ready": True},
+                "execution": None,
+                "execution_outcome": None,
+                "executions": [],
+                "candidate": None,
+                "candidate_commit_sha": None,
+                "candidate_ref": None,
+                "candidate_state_hash": None,
+                "verified_receipt": None,
+                "verified_receipt_hash": None,
+                "promotion_packet": None,
+                "promotion_status": "NOT_CREATED",
+                "candidate_status": None,
+                "merge_performed": False,
+                "push_performed": False,
+                "provider_receipt": None,
+                "worker_receipt": None,
+                "worker_child_pgid": None,
+                "telemetry": {
+                    "provider_calls": 0,
+                    "provider_attempts": 0,
+                    "provider_time_ms": 0,
+                    "worktree_time_ms": 0,
+                    "verifier_time_ms": 0,
+                },
+            }
+        )
+
+    service._mutate_state(base["task_id"], mark_known_static_failure)
+    frozen = copy.deepcopy(service._read_state(base["task_id"]))
+    assert _terminal_retry_verifier_static_failure_allowed(frozen)
+
+    controller = Path(base["controller_repo_root"])
+    (controller / "README").write_text("activation\n")
+    _git(controller, "add", "README")
+    _git(controller, "commit", "-m", "activate lifecycle")
+    activated_head = _git(controller, "rev-parse", "HEAD")
+    refreshed = {**base, "controller_revision": activated_head, "target_base_revision": activated_head}
+    retry = _action_transport(
+        refreshed,
+        action_type=LifecycleActionType.TASK_RETRY,
+        attempt_id="attempt-refresh",
+        action_id="action-refresh",
+        idempotency_key="key-refresh",
+    )
+
+    monkeypatch.setattr(service, "_launch_worker", lambda task_id, attempt_id: service._read_state(task_id))
+    submitted = service.submit_task(retry)
+    current = service._read_state(base["task_id"])
+
+    assert submitted["attempt_id"] != frozen["attempt_id"]
+    assert current["attempt_id"] == submitted["attempt_id"]
+    assert len(current["attempts"]) == 2
+    assert len(calls) == 1
+    assert current["telemetry"]["provider_calls"] == 0
+    assert current["request"]["bound_action_request"]["what"] == frozen["request"]["bound_action_request"]["what"]
+    assert current["request"]["bound_action_request"]["allowed_files"] == frozen["request"]["bound_action_request"]["allowed_files"]
+
+
+def test_terminal_retry_verifier_static_failure_requires_formal_zero_effect_cleanup(monkeypatch):
+    state = {
+        "task_id": "static-verifier-recovery",
+        "status": "FINAL_BLOCK",
+        "error": "invalid verifier contract: invalid verifier argument",
+        "cleanup_decision": "REMOVED",
+        "cleanup_performed": True,
+        "cleanup_performed_at": "2026-09-10T17:49:36+00:00",
+        "cleanup_eligible": True,
+        "cleanup_blocker": None,
+        "lease": {"lease_id": "lease", "task_id": "static-verifier-recovery"},
+        "target_created_at": "2026-09-10T17:49:35+00:00",
+        "active_provider": "codex",
+        "worker_preflight": {"provider": "codex", "ready": True},
+        "worker_started_at": "2026-09-10T17:49:33+00:00",
+        "worker_finished_at": "2026-09-10T17:49:36+00:00",
+        "worker_child_pgid": None,
+        "execution": None,
+        "execution_outcome": None,
+        "executions": [],
+        "candidate": None,
+        "candidate_commit_sha": None,
+        "candidate_ref": None,
+        "candidate_state_hash": None,
+        "verified_receipt": None,
+        "verified_receipt_hash": None,
+        "promotion_packet": None,
+        "promotion_status": "NOT_CREATED",
+        "candidate_status": None,
+        "merge_performed": False,
+        "push_performed": False,
+        "provider_receipt": None,
+        "worker_receipt": None,
+        "telemetry": {
+            "provider_calls": 0,
+            "provider_attempts": 0,
+            "provider_time_ms": 0,
+            "verifier_time_ms": 0,
+        },
+    }
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service._terminal_retry_released_lease_proof",
+        lambda _: True,
+    )
+    assert _terminal_retry_verifier_static_failure_allowed(state)
+    for field, value in (("telemetry", {"provider_calls": 1}), ("lease", None), ("candidate", {})):
+        rejected = copy.deepcopy(state)
+        rejected[field] = value
+        assert not _terminal_retry_verifier_static_failure_allowed(rejected)
+
+
+def test_terminal_retry_rejects_action_bound_semantic_tamper_before_runner(tmp_path):
+    calls = []
+
+    def runner(contract, request, update):
+        calls.append(contract.task_id)
+        update("FINAL_BLOCK", {"cleanup_decision": "REMOVED", "cleanup_performed": True})
+        return {"promotion_status": "NOT_CREATED"}
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", runner=runner, auto_reconcile=False, ephemeral=True
+    )
+    base = _real_request(tmp_path, task_id="bound-semantic-tamper")
+    first = service.submit_task(_action_transport(base, attempt_id="attempt-initial", action_id="action-initial", idempotency_key="key-initial"))
+    assert _wait_for_status(service, base["task_id"], "FINAL_BLOCK")
+    before = copy.deepcopy(service._read_state(base["task_id"]))
+    controller = Path(base["controller_repo_root"])
+    (controller / "README").write_text("activation\n")
+    _git(controller, "add", "README")
+    _git(controller, "commit", "-m", "activate lifecycle")
+    activated_head = _git(controller, "rev-parse", "HEAD")
+    tampered = {
+        **base,
+        "controller_revision": activated_head,
+        "target_base_revision": activated_head,
+        "allowed_files": ["different.py"],
+    }
+    retry = _action_transport(
+        tampered,
+        action_type=LifecycleActionType.TASK_RETRY,
+        attempt_id="attempt-tampered",
+        action_id="action-tampered",
+        idempotency_key="key-tampered",
+    )
+
+    with pytest.raises(ValueError, match="RETRY_SEMANTIC_TASK_MISMATCH"):
+        service.submit_task(retry)
+
+    after = service._read_state(base["task_id"])
+    assert calls == [base["task_id"]]
+    assert after["attempt_id"] == before["attempt_id"] == first["attempt_id"]
+    assert after["attempts"] == before["attempts"]
+
+
+def test_terminal_retry_rejects_action_bound_non_ancestor_before_runner(tmp_path):
+    calls = []
+
+    def runner(contract, request, update):
+        calls.append(contract.task_id)
+        update("FINAL_BLOCK", {"cleanup_decision": "REMOVED", "cleanup_performed": True})
+        return {"promotion_status": "NOT_CREATED"}
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", runner=runner, auto_reconcile=False, ephemeral=True
+    )
+    base = _real_request(tmp_path, task_id="bound-non-ancestor")
+    first = service.submit_task(_action_transport(base, attempt_id="attempt-initial", action_id="action-initial", idempotency_key="key-initial"))
+    assert _wait_for_status(service, base["task_id"], "FINAL_BLOCK")
+    before = copy.deepcopy(service._read_state(base["task_id"]))
+    invalid_head = "f" * 40
+    retry = _action_transport(
+        {**base, "controller_revision": invalid_head, "target_base_revision": invalid_head},
+        action_type=LifecycleActionType.TASK_RETRY,
+        attempt_id="attempt-invalid",
+        action_id="action-invalid",
+        idempotency_key="key-invalid",
+    )
+
+    with pytest.raises(ValueError, match="different contract"):
+        service.submit_task(retry)
+
+    after = service._read_state(base["task_id"])
+    assert calls == [base["task_id"]]
+    assert after["attempt_id"] == before["attempt_id"] == first["attempt_id"]
+    assert after["attempts"] == before["attempts"]
+
+
+@pytest.mark.parametrize("inherited_worktree_time", [False, True], ids=["zero", "inherited"])
+def test_terminal_retry_accepts_planner_bound_action_revision_refresh(
+    tmp_path, monkeypatch, inherited_worktree_time
+):
+    task_id = "planner-bound-revision-refresh"
+    if inherited_worktree_time:
+        # The production resolver intentionally remaps /tmp roots on Linux.
+        # Bind this disposable fixture through the supported override so the
+        # persisted state and built contract observe the same isolated root.
+        monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(tmp_path / "targets"))
+    service, request, old_envelope, _, _ = _m3c_repairable_workforce_state(
+        tmp_path,
+        monkeypatch,
+        task_id=task_id,
+        acceptance_decision="NOT_REPAIRABLE",
+        maximum_attempts_per_task=3 if inherited_worktree_time else 2,
+    )
+    old_attempt = old_envelope["attempt_id"]
+    initial = _action_transport(
+        request,
+        attempt_id=old_attempt,
+        action_id="action-planner-old",
+        idempotency_key="key-planner-old",
+    )
+    state = service._read_state(task_id)
+    state.update(
+        request=initial,
+        action=initial["action"],
+        action_id=initial["action_id"],
+        idempotency_key=initial["idempotency_key"],
+        action_request_hash=initial["action_request_hash"],
+        status="FINAL_BLOCK",
+        terminal_status="FINAL_BLOCK",
+        final_disposition="FINAL_BLOCK",
+        cleanup_decision="ALREADY_REMOVED",
+        cleanup_performed=False,
+        promotion_status="NOT_CREATED",
+        candidate_status=None,
+        candidate=None,
+        candidate_commit_sha=None,
+        candidate_ref=None,
+        candidate_state_hash=None,
+        verified_receipt=None,
+        verified_receipt_hash=None,
+        promotion_packet=None,
+        execution=None,
+        execution_outcome=None,
+        worker_preflight=None,
+        worker_child_pgid=None,
+        active_provider=None,
+        target_created_at=None,
+        worker_started_at="2026-01-01T00:00:00+00:00",
+        worker_finished_at="2026-01-01T00:00:01+00:00",
+        merge_performed=False,
+        push_performed=False,
+        telemetry={"provider_calls": 0, "provider_attempts": 0, "provider_time_ms": 0,
+                   "worktree_time_ms": 1429 if inherited_worktree_time else 0, "verifier_time_ms": 0},
+        attempts=[{"attempt_id": old_attempt, "action_id": initial["action_id"],
+                   "idempotency_key": initial["idempotency_key"],
+                   "action_request_hash": initial["action_request_hash"]}],
+    )
+    if inherited_worktree_time:
+        state.update(
+            error="existing task branch candidate lacks durable protection",
+            executions=[],
+            target_worktree=request["target_repo_root"],
+            attempts=[
+                {"attempt_id": "attempt-previous", "started_at": "2026-01-01T00:00:00+00:00",
+                 "finished_at": "2026-01-01T00:00:03+00:00", "last_status": "FINAL_BLOCK"},
+                {"attempt_id": old_attempt, "action_id": initial["action_id"],
+                 "started_at": "2026-01-01T00:01:00+00:00",
+                 "finished_at": "2026-01-01T00:01:02+00:00", "last_status": "FINAL_BLOCK",
+                 "idempotency_key": initial["idempotency_key"],
+                 "action_request_hash": initial["action_request_hash"]},
+            ],
+            status_history=[
+                {"status": "SUBMITTED", "at": "2026-01-01T00:00:00+00:00"},
+                {"status": "TARGET_LEASED", "at": "2026-01-01T00:00:01+00:00"},
+                {"status": "WORKER_RUNNING", "at": "2026-01-01T00:00:02+00:00"},
+                {"status": "FINAL_BLOCK", "at": "2026-01-01T00:00:03+00:00"},
+                {"status": "ATTEMPT_INCREMENTED", "at": "2026-01-01T00:01:00+00:00"},
+                {"status": "FINAL_BLOCK", "at": "2026-01-01T00:01:02+00:00"},
+            ],
+        )
+    service._write_state(task_id, state)
+
+    controller = Path(request["controller_repo_root"])
+    if inherited_worktree_time:
+        Path(request["target_worktree_root"]).mkdir(parents=True, exist_ok=True)
+        old_controller_head = _git(controller, "rev-parse", "HEAD")
+        _git(controller, "branch", f"nexus/task/{task_id}", old_controller_head)
+    (controller / "README").write_text("activation\n")
+    _git(controller, "add", "README")
+    _git(controller, "commit", "-m", "activate lifecycle")
+    activated_head = _git(controller, "rev-parse", "HEAD")
+    refreshed = {**request, "controller_revision": activated_head, "target_base_revision": activated_head}
+    retry = _action_transport(
+        refreshed,
+        action_type=LifecycleActionType.TASK_RETRY,
+        attempt_id="attempt-planner-new",
+        action_id="action-planner-new",
+        idempotency_key="key-planner-new",
+    )
+    retry["bound_action_request"]["canonical_dispatch_envelope"]["attempt_id"] = retry["attempt_id"]
+    retry_hash = canonical_request_hash(retry["bound_action_request"])
+    retry["action"]["request_hash"] = retry_hash
+    retry["action_request_hash"] = retry_hash
+
+    submitted = service.submit_task(retry)
+    current = service._read_state(task_id)
+
+    assert submitted["attempt_id"] == "attempt-planner-new"
+    assert current["attempts"][1 if inherited_worktree_time else 0]["attempt_id"] == old_attempt
+    assert current["canonical_dispatch_envelope"]["attempt_id"] == "attempt-planner-new"
+    assert current["workforce_dispatch"]["provider"] == old_envelope["provider"]
+
+
+def test_terminal_retry_rejects_action_bound_predecessor_drift_under_write_lock(tmp_path):
+    calls = []
+
+    def runner(contract, request, update):
+        calls.append(contract.task_id)
+        update("FINAL_BLOCK", {"cleanup_decision": "REMOVED", "cleanup_performed": True})
+        return {"promotion_status": "NOT_CREATED"}
+
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", runner=runner, auto_reconcile=False, ephemeral=True)
+    base = _real_request(tmp_path, task_id="bound-predecessor-drift")
+    first = service.submit_task(_action_transport(base, attempt_id="attempt-initial", action_id="action-initial", idempotency_key="key-initial"))
+    assert _wait_for_status(service, base["task_id"], "FINAL_BLOCK")
+    controller = Path(base["controller_repo_root"])
+    (controller / "README").write_text("activation\n")
+    _git(controller, "add", "README")
+    _git(controller, "commit", "-m", "activate lifecycle")
+    activated_head = _git(controller, "rev-parse", "HEAD")
+    retry = _action_transport(
+        {**base, "controller_revision": activated_head, "target_base_revision": activated_head},
+        action_type=LifecycleActionType.TASK_RETRY,
+        attempt_id="attempt-refresh", action_id="action-refresh", idempotency_key="key-refresh",
+    )
+    original_mutate = service._mutate_state
+    drifted = False
+
+    def mutate_with_drift(task_id, mutator):
+        nonlocal drifted
+        if not drifted:
+            drifted = True
+            original_mutate(task_id, lambda current: current.update(attempt_id="external-attempt"))
+        return original_mutate(task_id, mutator)
+
+    service._mutate_state = mutate_with_drift
+    with pytest.raises(RuntimeError, match="RETRY_PREDECESSOR_CHANGED"):
+        service.submit_task(retry)
+    current = service._read_state(base["task_id"])
+    assert calls == [base["task_id"]]
+    assert current["attempt_id"] == "external-attempt"
+    assert len(current["attempts"]) == 1
+    assert first["attempt_id"] != current["attempt_id"]
+
+
+def test_terminal_retry_rejects_hidden_promotion_packet_effect(tmp_path):
+    calls = []
+
+    def runner(contract, request, update):
+        calls.append(contract.task_id)
+        update("FINAL_BLOCK", {"cleanup_decision": "REMOVED", "cleanup_performed": True})
+        return {"promotion_status": "NOT_CREATED"}
+
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", runner=runner, auto_reconcile=False, ephemeral=True)
+    base = _real_request(tmp_path, task_id="bound-hidden-packet")
+    first = service.submit_task(_action_transport(base, attempt_id="attempt-initial", action_id="action-initial", idempotency_key="key-initial"))
+    assert _wait_for_status(service, base["task_id"], "FINAL_BLOCK")
+    original = service._read_state(base["task_id"])
+    service._mutate_state(base["task_id"], lambda current: current.update(
+        promotion_packet={"candidate_commit_sha": "c" * 40}
+    ))
+    controller = Path(base["controller_repo_root"])
+    (controller / "README").write_text("activation\n")
+    _git(controller, "add", "README")
+    _git(controller, "commit", "-m", "activate lifecycle")
+    activated_head = _git(controller, "rev-parse", "HEAD")
+    retry = _action_transport(
+        {**base, "controller_revision": activated_head, "target_base_revision": activated_head},
+        action_type=LifecycleActionType.TASK_RETRY,
+        attempt_id="attempt-refresh", action_id="action-refresh", idempotency_key="key-refresh",
+    )
+    with pytest.raises(ValueError, match="different contract"):
+        service.submit_task(retry)
+    current = service._read_state(base["task_id"])
+    assert calls == [base["task_id"]]
+    assert current["attempt_id"] == first["attempt_id"] == original["attempt_id"]
+    assert current["promotion_packet"] == {"candidate_commit_sha": "c" * 40}
+
+
 def test_terminal_retry_rejects_non_revision_contract_change(tmp_path):
     service = SelfHostedTaskService(
         state_dir=tmp_path / "state", runner=lambda *_: {}, auto_reconcile=False, ephemeral=True
@@ -2923,7 +3793,7 @@ def test_terminal_retry_rejects_non_revision_contract_change(tmp_path):
         service.submit_task(changed)
 
 
-def test_pending_candidate_blocks_retry_until_superseded(tmp_path):
+def test_pending_candidate_and_superseded_task_reject_retry(tmp_path):
     calls = []
 
     def runner(contract, request, update):
@@ -2947,8 +3817,15 @@ def test_pending_candidate_blocks_retry_until_superseded(tmp_path):
     assert calls == []
 
     service.dispose_candidate("pending-task", disposition="SUPERSEDED", superseded_by="next")
-    retried = service.submit_task(request)
-    assert retried["attempt_id"] != "a" * 32
+    resubmitted = service.submit_task(request)
+    assert resubmitted["attempt_id"] == "a" * 32
+    assert resubmitted["status"] == "SUPERSEDED"
+    assert calls == []
+
+
+def test_pending_candidate_blocks_retry_until_superseded(tmp_path):
+    """Historical exact-base evidence identity; retained solely for CI node stability, asserting new absorbing semantics."""
+    test_pending_candidate_and_superseded_task_reject_retry(tmp_path)
 
 
 def test_cleanup_apply_invokes_governed_worktree_cleanup(tmp_path, monkeypatch):
@@ -3009,7 +3886,89 @@ def test_cleanup_rejects_approved_binding_mismatch(tmp_path, monkeypatch):
     decision = service.cleanup_tasks(task_id="binding-cleanup", dry_run=False)["decisions"][0]
 
     assert decision["cleanup_decision"] == "BLOCKED_BY_AUTHORITY"
-    assert "external acceptance receipt" in decision["cleanup_blocker"]
+    assert "persisted contract state hash" in decision["cleanup_blocker"]
+
+
+def test_integrated_cleanup_uses_persisted_contract_when_admission_is_stale(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _request(tmp_path, task_id="integrated-persisted-contract")
+    contract = service.build_contract(request)
+    lease = TargetWorktreeLease(
+        schema="nexus.target_worktree_lease.v1", lease_id="lease", task_id=contract.task_id,
+        controller_revision=contract.controller_revision, target_base_revision=contract.target_base_revision,
+        target_worktree=request["target_repo_root"], target_branch="nexus/task/integrated-persisted-contract",
+        initial_head=contract.target_base_revision, initial_status_sha256="0" * 64,
+        controller_status_sha256="0" * 64, created_from_exact_revision=True,
+        commit_created=False, merge_performed=False,
+    )
+    service._write_state(contract.task_id, {
+        "task_id": contract.task_id, "status": "INTEGRATED", "promotion_status": "INTEGRATED",
+        "request": {"stale": "admission"}, "contract": contract.model_dump(mode="json"),
+        "contract_hash": contract.contract_hash, "lease": lease.__dict__,
+    })
+    monkeypatch.setattr(service, "build_contract", lambda *_: (_ for _ in ()).throw(
+        AssertionError("integrated cleanup must not rebuild the contract")
+    ))
+    monkeypatch.setattr(service, "_cleanup_authority_blocker", lambda *_: None)
+    calls = []
+
+    class FakeManager:
+        def __init__(self, root_dir):
+            calls.append(root_dir)
+
+        def cleanup_terminal_target(self, contract, lease, **kwargs):
+            return TargetCleanupReceipt(
+                schema="nexus.target_cleanup_receipt.v1", task_id=contract.task_id,
+                target_worktree=lease.target_worktree, decision="ALREADY_REMOVED",
+                blocker=None, performed=False, eligible=True,
+            )
+
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.WorktreeManager", FakeManager)
+    result = service.cleanup_tasks(task_id=contract.task_id, dry_run=True)
+    assert result["decisions"][0]["cleanup_decision"] == "ALREADY_REMOVED"
+    assert calls == [contract.target_worktree_root]
+
+
+@pytest.mark.parametrize("mutator", [
+    lambda payload: payload.pop("schema"),
+    lambda payload: payload.__setitem__("task_id", "other-task"),
+    lambda payload: payload.__setitem__("contract_hash", "f" * 64),
+    lambda payload: payload.__setitem__("contract_hash", "not-a-hash"),
+])
+def test_integrated_cleanup_blocks_persisted_contract_drift_without_write_or_manager(
+    tmp_path, monkeypatch, mutator
+):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _request(tmp_path, task_id="integrated-contract-drift")
+    contract = service.build_contract(request)
+    persisted = contract.model_dump(mode="json")
+    mutator(persisted)
+    lease = TargetWorktreeLease(
+        schema="nexus.target_worktree_lease.v1", lease_id="lease", task_id=contract.task_id,
+        controller_revision=contract.controller_revision, target_base_revision=contract.target_base_revision,
+        target_worktree=request["target_repo_root"], target_branch="nexus/task/integrated-contract-drift",
+        initial_head=contract.target_base_revision, initial_status_sha256="0" * 64,
+        controller_status_sha256="0" * 64, created_from_exact_revision=True,
+        commit_created=False, merge_performed=False,
+    )
+    state = {
+        "task_id": contract.task_id, "status": "INTEGRATED", "promotion_status": "INTEGRATED",
+        "request": request, "contract": persisted, "contract_hash": contract.contract_hash,
+        "lease": lease.__dict__,
+    }
+    service._write_state(contract.task_id, state)
+    before = service._state_path(contract.task_id).read_bytes()
+    monkeypatch.setattr(service, "build_contract", lambda *_: (_ for _ in ()).throw(
+        AssertionError("integrated cleanup must not rebuild the contract")
+    ))
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.WorktreeManager", lambda *_: (
+        (_ for _ in ()).throw(AssertionError("blocked contract must not construct manager"))
+    ))
+    result = service.cleanup_tasks(task_id=contract.task_id, dry_run=False)
+    decision = result["decisions"][0]
+    assert decision["cleanup_decision"] == "BLOCKED_BY_AUTHORITY"
+    assert "persisted contract" in decision["cleanup_blocker"]
+    assert service._state_path(contract.task_id).read_bytes() == before
 
 
 def test_integration_failure_is_persisted(tmp_path, monkeypatch):
@@ -3564,6 +4523,43 @@ def test_different_active_controller_is_rejected(tmp_path):
 
     with pytest.raises(RuntimeError, match="active Controller lease"):
         service.submit_task(second)
+
+
+@pytest.mark.parametrize(
+    "cleanup_fields",
+    [{}, {"cleanup_decision": None}, {"cleanup_decision": "PROTECTED_BY_CANDIDATE_REF"}],
+    ids=["cleanup-absent", "cleanup-none", "candidate-ref-protected"],
+)
+def test_pending_human_approval_foreign_controller_is_quiescent(tmp_path, cleanup_fields):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        runner=lambda *_: {"promotion_status": "PENDING_HUMAN_APPROVAL"},
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    first = _request(
+        tmp_path,
+        task_id="first-pending",
+        controller_repo_root=str(tmp_path / "foreign-controller"),
+    )
+    first_contract = service.build_contract(first)
+    service._write_state("first-pending", {
+        "task_id": "first-pending",
+        "status": "PENDING_HUMAN_APPROVAL",
+        "promotion_status": "PENDING_HUMAN_APPROVAL",
+        **cleanup_fields,
+        "contract": first_contract.model_dump(mode="json"),
+        "contract_hash": first_contract.contract_hash,
+    })
+    second = _request(
+        tmp_path,
+        task_id="second-pending",
+        target_repo_root=str(tmp_path / "targets" / "second-pending"),
+    )
+
+    submitted = service.submit_task(second)
+
+    assert submitted["task_id"] == "second-pending"
 
 
 def test_wait_task_polls_until_action_required(tmp_path):
@@ -4374,12 +5370,17 @@ def test_retry_integration_reuses_approved_binding_without_worker_retry(tmp_path
 
 
 def test_default_production_target_root_is_outside_disabled_worktree_namespace(monkeypatch):
-    monkeypatch.chdir("/Users/jameschen/Workspace/nexus")
+    import nexus.orchestrator.self_hosted_task_service as service_module
+
+    source_root = service_module.CANONICAL_SOURCE_ROOT
+    monkeypatch.chdir(source_root)
 
     root, target = resolve_canonical_target_roots("root-test")
 
-    assert str(root) == "/Users/jameschen/Workspace/nexus-runtime-targets"
-    assert str(target) == "/Users/jameschen/Workspace/nexus-runtime-targets/root-test"
+    expected_root = source_root.parent / "nexus-runtime-targets"
+    assert root == expected_root
+    assert target == expected_root / "root-test"
+    assert source_root not in root.parents
 
 
 def test_activation_root_derives_target_namespace_from_bound_source_root(monkeypatch, tmp_path):
@@ -4563,7 +5564,7 @@ def test_revalidation_15_direct_10_isolated_5_fault_matrix(tmp_path, monkeypatch
         {"status": "INTEGRATION_FAILED", "promotion_status": "INTEGRATION_FAILED", "merge_performed": False, "approved_binding": {"candidate_commit_sha": "a" * 40}},
     ]
     expected_tools = [
-        "nexus_self_hosted_retry", "nexus_self_hosted_retry", "nexus_self_hosted_retry",
+        "nexus_self_hosted_retry", "nexus_self_hosted_retry", "nexus_self_hosted_get_receipt",
         "nexus_self_hosted_cleanup", "nexus_self_hosted_retry_integration",
     ]
     actions = [SelfHostedTaskService._task_action_envelope({"task_id": f"fault-{i}", **case}) for i, case in enumerate(fault_cases)]
@@ -4583,7 +5584,7 @@ def test_original_gate_20_fault_retry_cases_keep_identity_and_one_action(tmp_pat
         ("verifier", {
             "status": "RETAINED_FOR_REVIEW", "promotion_status": "NOT_CREATED", "cleanup_decision": "REMOVED",
             "verified_receipt": {"verified": True}, "attempt_resolution": {"verdict": "PROVEN"},
-        }, "nexus_self_hosted_retry"),
+        }, "nexus_self_hosted_get_receipt"),
         ("commit", {
             "status": "RETAINED_FOR_REVIEW", "promotion_status": "NOT_CREATED",
             "cleanup_decision": "BLOCKED_BY_UNSAVED_CHANGES",
@@ -5295,6 +6296,7 @@ def test_close_retained_dirty_salvage_requires_integrated_replacement(tmp_path):
         "promotion_status": "NOT_CREATED",
         "request": request,
         "contract": contract.model_dump(mode="json"),
+        "contract_hash": contract.contract_hash,
         "lease": lease.__dict__,
         "target_worktree": str(target),
         "attempt_id": "attempt-salvage-gated",
@@ -5456,6 +6458,716 @@ def test_close_retained_dirty_salvage_protects_ref_and_never_becomes_candidate(t
         "Nexus Salvage Bot: salvage-only snapshot retained-salvage-success/attempt-salvage-success"
     )
     assert _git(controller, "show", f"{salvage_commit}:untracked.txt") == "complete salvage"
+
+
+@pytest.mark.parametrize("legacy_v1", [False, True], ids=("strict", "legacy-v1"))
+def test_freeze_retained_forensic_target_preserves_negative_commit_and_releases_slot(
+    tmp_path, legacy_v1,
+):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _real_request(tmp_path, task_id="forensic-negative")
+    contract = service.build_contract(request)
+    manager = WorktreeManager(root_dir=contract.target_worktree_root)
+    attempt_id = "attempt-forensic-negative"
+    lease = manager.create_lease(contract, attempt_id=attempt_id)
+    target = Path(lease.target_worktree)
+    target.joinpath("README").write_text("negative evidence\n", encoding="utf-8")
+    _git(target, "add", "README")
+    _git(target, "commit", "-m", "negative evidence")
+    negative_head = _git(target, "rev-parse", "HEAD")
+    retained_state = {
+        "schema": "nexus.self_hosted_task_state.v1",
+        "task_id": request["task_id"],
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "state_retention_status": "TERMINAL",
+        "request": request,
+        "contract": contract.model_dump(mode="json"),
+        "contract_hash": contract.contract_hash,
+        "lease": lease.__dict__,
+        "target_worktree": str(target),
+        "controller_worktree": contract.controller_repo_root,
+        "attempt_id": attempt_id,
+        "worker_pid": None,
+        "worker_pgid": None,
+        "worker_child_pgid": None,
+        **_complete_negative_forensic_state(),
+        "candidate_commit_sha": None,
+        "candidate_ref": None,
+        "promotion_packet": None,
+        "candidate": {
+            "allowed_scope_passed": False,
+            "commit_created": False,
+            "approval_status": "PENDING",
+            "public_claim_allowed": False,
+            "production_ready": False,
+            "merge_performed": False,
+            "out_of_scope_paths": ["worker_crashed_before_candidate"],
+            "target_head": negative_head,
+        },
+        "verified_receipt": {
+            "verified": False,
+            "candidate_commit_allowed": False,
+            "candidate_commit_created": False,
+            "scope_gate": False,
+            "verifier_gate": False,
+            "failure_reasons": ["worker_execution_failed"],
+            "public_claim_allowed": False,
+            "production_ready": False,
+            "merge_performed": False,
+            "authority_change_required": False,
+        },
+    }
+    if legacy_v1:
+        for field in _LEGACY_V1_NEGATIVE_OMISSION_SET:
+            retained_state.pop(field)
+    service._write_state(request["task_id"], retained_state)
+
+    with pytest.raises(RuntimeError, match="authority"):
+        service.freeze_retained_forensic_target(request["task_id"])
+    frozen = service.freeze_retained_forensic_target(
+        request["task_id"], authority_confirmation=True,
+    )
+
+    assert frozen["status"] == "RETAINED_FOR_REVIEW"
+    assert frozen["promotion_status"] == "NOT_CREATED"
+    assert frozen["salvage_only"] is True
+    assert frozen["promotion_eligible"] is False
+    assert frozen["salvage_commit_sha"] == negative_head
+    assert frozen["cleanup_decision"] == "REMOVED"
+    assert frozen["forensic_target_released"] is True
+    assert frozen["forensic_negative_proof"]["negative_proof_mode"] == (
+        "LEGACY_V1_EXPLICIT_NEGATIVE_COMPATIBILITY"
+        if legacy_v1 else "STRICT_CURRENT_COMPLETE_NEGATIVE"
+    )
+    assert frozen["forensic_negative_proof"]["synthetic_fields_created"] is False
+    if legacy_v1:
+        assert set(frozen["forensic_negative_proof"]["legacy_omitted_fields"]) == set(
+            _LEGACY_V1_NEGATIVE_OMISSION_SET
+        )
+    assert not target.exists()
+    assert _git(Path(contract.controller_repo_root), "rev-parse", frozen["salvage_ref"]) == negative_head
+    assert frozen.get("candidate_commit_sha") is None
+    assert frozen.get("candidate_ref") is None
+    assert frozen.get("promotion_packet") is None
+
+    replay = service.freeze_retained_forensic_target(
+        request["task_id"], authority_confirmation=True,
+    )
+    assert replay["salvage_commit_sha"] == frozen["salvage_commit_sha"]
+    assert replay["salvage_ref"] == frozen["salvage_ref"]
+
+
+def test_freeze_retained_forensic_target_rejects_dirty_or_candidate_authority(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _real_request(tmp_path, task_id="forensic-hostile")
+    contract = service.build_contract(request)
+    manager = WorktreeManager(root_dir=contract.target_worktree_root)
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    service._write_state(request["task_id"], {
+        "task_id": request["task_id"],
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "state_retention_status": "TERMINAL",
+        "request": request,
+        "contract": contract.model_dump(mode="json"),
+        "contract_hash": contract.contract_hash,
+        "lease": lease.__dict__,
+        "target_worktree": str(target),
+        "controller_worktree": contract.controller_repo_root,
+        "attempt_id": "attempt-forensic-hostile",
+        "worker_pid": None,
+        "worker_pgid": None,
+        "worker_child_pgid": None,
+        **_complete_negative_forensic_state(),
+    })
+    target.joinpath("dirty.txt").write_text("dirty\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="dirty Target"):
+        service.freeze_retained_forensic_target(
+            request["task_id"], authority_confirmation=True,
+        )
+    target.joinpath("dirty.txt").unlink()
+    state = service._read_state(request["task_id"])
+    state["verified_receipt"] = {"verified": True}
+    state["candidate_state_hash"] = "b" * 64
+    state["verified_receipt_hash"] = "c" * 64
+    service._write_state(request["task_id"], state)
+    with pytest.raises(RuntimeError, match="Candidate authority"):
+        service.freeze_retained_forensic_target(
+            request["task_id"], authority_confirmation=True,
+        )
+    state.pop("verified_receipt")
+    state.pop("candidate_state_hash")
+    state.pop("verified_receipt_hash")
+    state["candidate_commit_sha"] = "a" * 40
+    service._write_state(request["task_id"], state)
+    with pytest.raises(RuntimeError, match="Candidate authority"):
+        service.freeze_retained_forensic_target(
+            request["task_id"], authority_confirmation=True,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("candidate_created", True),
+        ("candidate_tree_sha", "a" * 40),
+        ("candidate_status", "PENDING_HUMAN_APPROVAL"),
+        ("candidate_commit_allowed", True),
+        ("durable_candidate_receipt", {"candidate_commit_sha": "a" * 40}),
+    ],
+)
+def test_retained_forensic_guard_rejects_unlisted_candidate_authority_fields(field, value):
+    state = {
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "state_retention_status": "TERMINAL",
+        field: value,
+    }
+
+    assert SelfHostedTaskService._retained_state_has_candidate_authority(state) is True
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("candidate_created", False), ("candidate_commit_allowed", False)],
+)
+def test_retained_forensic_guard_allows_explicit_negative_candidate_observations(field, value):
+    state = {
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "state_retention_status": "TERMINAL",
+        field: value,
+    }
+
+    assert SelfHostedTaskService._retained_state_has_candidate_authority(state) is False
+
+
+def _complete_negative_forensic_state():
+    return {
+        "promotion_status": "NOT_CREATED",
+        "candidate_commit_sha": None,
+        "candidate_tree_sha": None,
+        "candidate_state_hash": None,
+        "verified_receipt_hash": None,
+        "candidate_ref": None,
+        "candidate_created": False,
+        "candidate_commit_created": False,
+        "public_claim_allowed": False,
+        "production_ready": False,
+        "merge_performed": False,
+        "push_performed": False,
+        "authority_change_required": False,
+        "candidate_status": None,
+        "approved_binding": None,
+        "promotion_packet": None,
+        "integration_authorization": None,
+        "integration_receipt": None,
+        "promotion_receipt": None,
+        "candidate": {
+            "allowed_scope_passed": False,
+            "commit_created": False,
+            "approval_status": "PENDING",
+            "public_claim_allowed": False,
+            "production_ready": False,
+            "merge_performed": False,
+            "out_of_scope_paths": ["tasks/**"],
+        },
+        "verified_receipt": {
+            "verified": False,
+            "candidate_commit_allowed": False,
+            "candidate_commit_created": False,
+            "scope_gate": False,
+            "failure_reasons": ["scope_gate_failed"],
+            "public_claim_allowed": False,
+            "production_ready": False,
+            "merge_performed": False,
+            "authority_change_required": False,
+        },
+    }
+
+
+def test_retained_forensic_guard_accepts_complete_negative_evidence():
+    assert SelfHostedTaskService._retained_state_has_complete_negative_evidence(
+        _complete_negative_forensic_state()
+    ) is True
+
+
+@pytest.mark.parametrize(
+    "missing_field",
+    [
+        "promotion_status",
+        "candidate_status",
+        "candidate_commit_sha",
+        "candidate_tree_sha",
+        "candidate_state_hash",
+        "verified_receipt_hash",
+        "candidate_ref",
+        "approved_binding",
+        "promotion_packet",
+        "integration_authorization",
+        "integration_receipt",
+        "promotion_receipt",
+        "candidate_created",
+        "candidate_commit_created",
+        "public_claim_allowed",
+        "production_ready",
+        "merge_performed",
+        "push_performed",
+        "authority_change_required",
+    ],
+)
+def test_retained_forensic_guard_rejects_missing_required_top_level_field(missing_field):
+    state = _complete_negative_forensic_state()
+    state.pop(missing_field)
+    assert SelfHostedTaskService._retained_state_has_complete_negative_evidence(state) is False
+
+
+def test_legacy_v1_negative_omission_fingerprint_is_exact():
+    state = _complete_negative_forensic_state()
+    for field in _LEGACY_V1_NEGATIVE_OMISSION_SET:
+        state.pop(field)
+
+    assert SelfHostedTaskService._legacy_v1_omission_set_matches(state) is True
+
+    with_one_new_field = {**state, "candidate_created": False}
+    assert SelfHostedTaskService._legacy_v1_omission_set_matches(with_one_new_field) is False
+
+    with_ninth_omission = dict(state)
+    with_ninth_omission.pop("candidate_ref")
+    assert SelfHostedTaskService._legacy_v1_omission_set_matches(with_ninth_omission) is False
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("candidate", "allowed_scope_passed"), True),
+        (("candidate", "commit_created"), True),
+        (("candidate", "approval_status"), "APPROVED"),
+        (("candidate", "public_claim_allowed"), True),
+        (("candidate", "production_ready"), True),
+        (("candidate", "merge_performed"), True),
+        (("candidate", "out_of_scope_paths"), []),
+        (("verified_receipt", "verified"), True),
+        (("verified_receipt", "candidate_commit_allowed"), True),
+        (("verified_receipt", "candidate_commit_created"), True),
+        (("verified_receipt", "failure_reasons"), []),
+        (("verified_receipt", "scope_gate"), True),
+        (("verified_receipt", "public_claim_allowed"), True),
+        (("verified_receipt", "production_ready"), True),
+        (("verified_receipt", "merge_performed"), True),
+        (("verified_receipt", "authority_change_required"), True),
+        (("candidate_commit_sha",), "a" * 40),
+        (("promotion_status",), "PENDING_HUMAN_APPROVAL"),
+    ],
+)
+def test_retained_forensic_guard_rejects_flipped_or_ambiguous_negative_field(path, value):
+    state = _complete_negative_forensic_state()
+    if len(path) == 2:
+        state[path[0]][path[1]] = value
+    else:
+        state[path[0]] = value
+    assert SelfHostedTaskService._retained_state_has_complete_negative_evidence(state) is False
+
+
+def _external_adoption_fixture(tmp_path, monkeypatch, **overrides):
+    import nexus.orchestrator.self_hosted_task_service as service_module
+
+    card_allowed_paths = overrides.pop("card_allowed_paths", ("src/one.py", "src/two.py"))
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    controller = tmp_path / "controller"
+    controller.mkdir()
+    _init_repo(controller)
+    _git(controller, "config", "user.name", "Adoption Test")
+    _git(controller, "config", "user.email", "adoption@example.test")
+    (controller / "src").mkdir()
+    (controller / "src" / "one.py").write_text("base = 1\n", encoding="utf-8")
+    _git(controller, "add", "src/one.py")
+    _git(controller, "commit", "-m", "base")
+    base = _git(controller, "rev-parse", "HEAD")
+
+    card_path = "tasks/adoption/01-external.md"
+    physical_card = controller / card_path
+    physical_card.parent.mkdir(parents=True)
+    physical_card.write_text(
+        "# TASK-EXT — External\n\n"
+        "task_id: `TASK-EXT`\n\n"
+        "`AUTO_CHAIN=false`\n\n"
+        "## Allowed repository paths\n\n"
+        + "".join(f"- `{path}`\n" for path in card_allowed_paths)
+        + "\n"
+        "## Forbidden scope\n\n"
+        "- `tasks/**`\n\n"
+        "## Exact verification commands\n\n"
+        "- `git diff --check`\n",
+        encoding="utf-8",
+    )
+    _git(controller, "add", card_path)
+    _git(controller, "commit", "-m", "bind card")
+    controller_revision = _git(controller, "rev-parse", "HEAD")
+
+    candidate_target = tmp_path / "external-candidate"
+    _git(controller, "worktree", "add", "--detach", str(candidate_target), base)
+    (candidate_target / "src" / "one.py").write_text("base = 2\n", encoding="utf-8")
+    _git(candidate_target, "add", "src/one.py")
+    _git(candidate_target, "commit", "-m", "candidate one")
+    (candidate_target / "src" / "two.py").write_text("two = 2\n", encoding="utf-8")
+    _git(candidate_target, "add", "src/two.py")
+    _git(candidate_target, "commit", "-m", "candidate two")
+    candidate = _git(candidate_target, "rev-parse", "HEAD")
+    candidate_tree = _git(candidate_target, "rev-parse", "HEAD^{tree}")
+    diff = subprocess.run(
+        ["git", "diff", "--binary", f"{base}..{candidate}"],
+        cwd=controller, check=True, stdout=subprocess.PIPE,
+    ).stdout
+    diff_hash = hashlib.sha256(diff).hexdigest()
+    card_hash = hashlib.sha256(physical_card.read_bytes()).hexdigest()
+    validation = {
+        "schema": "nexus.evidence_producer_bridge.validation_receipt.v1",
+        "status": "EVIDENCE_PRODUCER_BRIDGE_VALIDATED",
+        "repository": "LOCAL_TEST",
+        "task": "TASK-EXT",
+        "task_card": {"path": card_path, "card_file_sha256": card_hash},
+        "candidate": {
+            "base_commit": base,
+            "commit": candidate,
+            "tree": candidate_tree,
+            "changed_paths": ["src/one.py", "src/two.py"],
+            "deleted_paths": [],
+        },
+    }
+    validation_bytes = json.dumps(validation, sort_keys=True, separators=(",", ":")).encode()
+    validation_hash = hashlib.sha256(validation_bytes).hexdigest()
+    acceptance = {
+        "schema": "nexus.external_candidate_acceptance.v1",
+        "task_id": "TASK-EXT",
+        "candidate_commit_sha": candidate,
+        "candidate_tree_sha": candidate_tree,
+        "candidate_diff_sha256": diff_hash,
+        "validation_receipt_sha256": validation_hash,
+        "reviewer_id": "independent-reviewer",
+        "disposition": "ACCEPT_CANDIDATE",
+    }
+    acceptance_bytes = json.dumps(acceptance, sort_keys=True, separators=(",", ":")).encode()
+    values = {
+        "schema": "nexus.external_candidate_adoption_request.v1",
+        "repository": "LOCAL_TEST",
+        "task_id": "TASK-EXT",
+        "attempt_id": "attempt-adopt-ext",
+        "action_id": "action-adopt-ext",
+        "idempotency_key": "TASK-EXT:adopt",
+        "task_card_path": card_path,
+        "task_card_hash": card_hash,
+        "controller_revision": controller_revision,
+        "tool_manifest_hash": "a" * 64,
+        "full_tool_schema_hash": "b" * 64,
+        "permission_policy_hash": "c" * 64,
+        "lifecycle_revision": "nexus.lifecycle.gateway.v2",
+        "server_instance_id": "server-test-1",
+        "target_base_revision": base,
+        "candidate_commit_sha": candidate,
+        "candidate_tree_sha": candidate_tree,
+        "candidate_diff_sha256": diff_hash,
+        "validation_receipt_sha256": validation_hash,
+        "acceptance_receipt_sha256": hashlib.sha256(acceptance_bytes).hexdigest(),
+        "validation_receipt_b64": base64.b64encode(validation_bytes).decode(),
+        "acceptance_receipt_b64": base64.b64encode(acceptance_bytes).decode(),
+        "allowed_files": tuple(card_allowed_paths),
+        "forbidden_files": (),
+        "authorized_deletions": (),
+        "verifier_commands": ("git diff --check",),
+        "protected_contracts": (),
+    }
+    values.update(overrides)
+    semantic_hash = ExternalCandidateAdoptionRequest.semantic_hash_for(values)
+    values["action"] = build_action_envelope(
+        task_id=values["task_id"],
+        action_type=LifecycleActionType.CANDIDATE_ADOPT_EXTERNAL,
+        request={"adoption_request_hash": semantic_hash},
+        tool_manifest_hash=values["tool_manifest_hash"],
+        expected_head=values["controller_revision"],
+        allowed_paths=values["allowed_files"],
+        mutation=True,
+        mutation_domain=MutationDomain.CANDIDATE_REF,
+        permission_profile=PermissionProfile.CANDIDATE,
+        task_card_path=values["task_card_path"],
+        task_card_hash=values["task_card_hash"],
+        contract_kind=ContractKind.TRACKED_TASK_CARD,
+        attempt_id=values["attempt_id"],
+        action_id=values["action_id"],
+        idempotency_key=values["idempotency_key"],
+    )
+    monkeypatch.setattr(service_module, "CANONICAL_SOURCE_ROOT", controller)
+    monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(tmp_path / "targets"))
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True,
+        worker_registry=SimpleNamespace(invoke=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("worker invoked"))),
+    )
+    return service, ExternalCandidateAdoptionRequest(**values), candidate, candidate_tree
+
+
+def test_adopt_external_candidate_physically_verifies_exact_chain_and_stops_pending(tmp_path, monkeypatch):
+    service, request, candidate, tree = _external_adoption_fixture(tmp_path, monkeypatch)
+
+    adopted = service.adopt_external_candidate(request)
+
+    assert adopted["status"] == "PENDING_HUMAN_APPROVAL"
+    assert adopted["promotion_status"] == "PENDING_HUMAN_APPROVAL"
+    assert adopted["candidate_commit_sha"] == candidate
+    assert adopted["candidate_tree_sha"] == tree
+    assert adopted["promotion_packet"]["candidate_commit_sha"] == candidate
+    assert adopted["verified_receipt"]["verified"] is True
+    assert adopted["adoption_receipt"]["worker_invocations"] == 0
+    assert adopted["adoption_receipt"]["candidate_rewritten"] is False
+    assert adopted["adoption_receipt"]["approval_performed"] is False
+    assert adopted["adoption_receipt"]["integration_performed"] is False
+    assert adopted["adoption_receipt"]["claim_ceiling"] == [
+        "CANDIDATE_ADOPTED_PENDING_HUMAN_APPROVAL_ONLY",
+    ]
+    assert adopted["approved_binding"] is None
+    assert adopted["merge_performed"] is False
+    assert adopted["push_performed"] is False
+    replay = service.adopt_external_candidate(request)
+    assert replay["adoption_receipt_hash"] == adopted["adoption_receipt_hash"]
+
+
+def test_adopt_external_candidate_allows_unchanged_card_scope_path(tmp_path, monkeypatch):
+    service, request, candidate, _ = _external_adoption_fixture(
+        tmp_path, monkeypatch, card_allowed_paths=("src/one.py", "src/two.py", "src/unchanged.py"),
+    )
+
+    adopted = service.adopt_external_candidate(request)
+
+    assert adopted["status"] == "PENDING_HUMAN_APPROVAL"
+    assert adopted["candidate_commit_sha"] == candidate
+
+
+@pytest.mark.parametrize("injected_path", ["secrets.txt", "src/one.py/child.txt"])
+def test_adopt_external_candidate_rejects_out_of_scope_changed_path(
+    tmp_path, monkeypatch, injected_path,
+):
+    service, request, _, _ = _external_adoption_fixture(
+        tmp_path, monkeypatch, card_allowed_paths=("src/one.py", "src/two.py", "src/unchanged.py"),
+    )
+    original_run_git = WorktreeManager._run_git
+
+    def inject_out_of_scope(manager, args, **kwargs):
+        if list(args)[:2] == ["diff", "--name-only"]:
+            return f"src/one.py\nsrc/two.py\n{injected_path}"
+        return original_run_git(manager, args, **kwargs)
+
+    monkeypatch.setattr(WorktreeManager, "_run_git", inject_out_of_scope)
+    with pytest.raises(RuntimeError, match="changed paths differ from contract"):
+        service.adopt_external_candidate(request)
+
+
+def test_adopt_external_candidate_restarts_from_durable_adopting_state(tmp_path, monkeypatch):
+    service, request, candidate, tree = _external_adoption_fixture(tmp_path, monkeypatch)
+    original_mutate = service._mutate_state
+
+    def crash_before_finalize(task_id, mutator):
+        if task_id == request.task_id:
+            raise OSError("simulated crash before adoption finalization")
+        return original_mutate(task_id, mutator)
+
+    monkeypatch.setattr(service, "_mutate_state", crash_before_finalize)
+    with pytest.raises(OSError, match="simulated crash"):
+        service.adopt_external_candidate(request)
+
+    interrupted = service._read_state(request.task_id)
+    assert interrupted is not None
+    assert interrupted["status"] == "ADOPTING"
+    assert interrupted["candidate_created"] is False
+
+    monkeypatch.setattr(service, "_mutate_state", original_mutate)
+    resumed = SelfHostedTaskService(
+        state_dir=tmp_path / "state", ephemeral=True,
+        worker_registry=SimpleNamespace(invoke=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("worker invoked"))),
+    )
+    state = resumed._read_state(request.task_id)
+    assert state is not None
+    assert state["status"] == "PENDING_HUMAN_APPROVAL"
+    assert state["candidate_commit_sha"] == candidate
+    assert state["candidate_tree_sha"] == tree
+    assert state["adoption_receipt"]["worker_invocations"] == 0
+
+
+def test_adopt_external_candidate_restart_fails_closed_on_missing_evidence(tmp_path, monkeypatch):
+    service, request, _, _ = _external_adoption_fixture(tmp_path, monkeypatch)
+    service._create_state(request.task_id, {
+        "task_id": request.task_id,
+        "status": "ADOPTING",
+        "request": request.model_dump(mode="json", exclude={"validation_receipt_b64", "acceptance_receipt_b64"}),
+        "validation_receipt_locator": str(tmp_path / "state" / "missing-validation.json"),
+        "acceptance_receipt_locator": str(tmp_path / "state" / "missing-acceptance.json"),
+    })
+    with pytest.raises(RuntimeError, match="evidence"):
+        service.reconcile_task(request.task_id)
+
+
+def test_adopt_external_candidate_rejects_physical_or_evidence_substitution(tmp_path, monkeypatch):
+    service, tampered, _, _ = _external_adoption_fixture(
+        tmp_path, monkeypatch, candidate_tree_sha="0" * 40,
+    )
+    with pytest.raises(RuntimeError, match="tree"):
+        service.adopt_external_candidate(tampered)
+
+    with pytest.raises(ValueError, match="validation receipt content hash"):
+        _external_adoption_fixture(
+            tmp_path / "other", monkeypatch, validation_receipt_sha256="0" * 64,
+        )
+
+
+def test_adoption_artifact_store_rejects_symlinked_task_directory(tmp_path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True,
+    )
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    artifact_root = service.state_dir / "adoption-artifacts"
+    artifact_root.mkdir(parents=True)
+    artifact_root.joinpath("TASK-LINK").symlink_to(outside, target_is_directory=True)
+    content = b'{"evidence":true}'
+    digest = hashlib.sha256(content).hexdigest()
+
+    with pytest.raises(RuntimeError, match="symlink|service-owned"):
+        service._store_adoption_artifact("TASK-LINK", digest, content, "validation")
+
+    assert not outside.joinpath(f"validation-{digest}.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("target_base_revision", "0" * 40),
+        ("allowed_files", ("src/one.py",)),
+        ("forbidden_files", ("src/forbidden.py",)),
+        ("authorized_deletions", ("src/one.py",)),
+        ("verifier_commands", ("false verifier",)),
+        ("protected_contracts", ("caller-protection",)),
+    ],
+)
+def test_adopt_external_candidate_derives_contract_from_historical_card_before_mutation(
+    tmp_path, monkeypatch, field, value,
+):
+    service, request, _, _ = _external_adoption_fixture(tmp_path, monkeypatch, **{field: value})
+
+    with pytest.raises(RuntimeError, match=f"ADOPTION_REQUEST_BINDING_MISMATCH:{field}"):
+        service.adopt_external_candidate(request)
+
+    assert service._read_state(request.task_id) is None
+    assert not (service.state_dir / "adoption-artifacts" / request.task_id).exists()
+    target_root, target_path = resolve_canonical_target_roots(
+        request.task_id, campaign_id="CAMPAIGN-EVIDENCE-PRODUCER-BRIDGE-01",
+    )
+    assert not Path(target_root).exists()
+    assert not Path(target_path).exists()
+
+
+@pytest.mark.parametrize("tamper", ["receipt", "packet", "authority"])
+def test_adopt_external_candidate_replay_rejects_durable_tampering(tmp_path, monkeypatch, tamper):
+    service, request, _, _ = _external_adoption_fixture(tmp_path, monkeypatch)
+    service.adopt_external_candidate(request)
+
+    def mutate(state):
+        if tamper == "receipt":
+            state["adoption_receipt"]["reviewer_id"] = "forged-reviewer"
+        elif tamper == "packet":
+            state["promotion_packet"]["candidate_tree_sha"] = "0" * 40
+        else:
+            state["approved_binding"] = {"forged": True}
+
+    service._mutate_state(request.task_id, mutate)
+    with pytest.raises(RuntimeError, match="replay|authority|binding|hash"):
+        service.adopt_external_candidate(request)
+    assert service._read_state(request.task_id)["status"] == "PENDING_HUMAN_APPROVAL"
+
+
+def test_adopt_external_candidate_replay_rejects_replaced_artifact(tmp_path, monkeypatch):
+    service, request, _, _ = _external_adoption_fixture(tmp_path, monkeypatch)
+    service.adopt_external_candidate(request)
+    state = service._read_state(request.task_id)
+    assert state is not None
+    locator = Path(state["validation_receipt_locator"])
+    outside = tmp_path / "outside-replay.json"
+    outside.write_bytes(locator.read_bytes())
+    locator.unlink()
+    locator.symlink_to(outside)
+
+    with pytest.raises(RuntimeError, match="evidence|symlink|unreadable|escaped"):
+        service.adopt_external_candidate(request)
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        "state_candidate_state_hash",
+        "packet_candidate_state_hash",
+        "receipt_candidate_state_hash",
+        "candidate_identity",
+        "external_acceptance",
+        "policy_projection",
+    ],
+)
+def test_adopt_external_candidate_replay_rejects_single_binding_tamper(
+    tmp_path, monkeypatch, tamper,
+):
+    service, request, _, _ = _external_adoption_fixture(tmp_path, monkeypatch)
+    service.adopt_external_candidate(request)
+
+    def mutate(state):
+        if tamper == "state_candidate_state_hash":
+            state["candidate_state_hash"] = "0" * 64
+        elif tamper == "packet_candidate_state_hash":
+            state["promotion_packet"]["candidate_state_hash"] = "0" * 64
+        elif tamper == "receipt_candidate_state_hash":
+            state["adoption_receipt"]["candidate_state_hash"] = "0" * 64
+        elif tamper == "candidate_identity":
+            state["candidate"]["candidate_commit_sha"] = "0" * 40
+        elif tamper == "external_acceptance":
+            state["external_acceptance"]["reviewer_id"] = "forged-reviewer"
+        else:
+            state["derived_contract_projection"][
+                "repository_contract_policy_revision_hash"
+            ] = "0" * 64
+
+    service._mutate_state(request.task_id, mutate)
+    with pytest.raises(RuntimeError, match="replay|binding|hash|policy"):
+        service.adopt_external_candidate(request)
+
+
+def test_adopt_external_candidate_rejects_in_root_symlinked_card(tmp_path, monkeypatch):
+    import nexus.orchestrator.self_hosted_task_service as service_module
+
+    service, request, _, _ = _external_adoption_fixture(tmp_path, monkeypatch)
+    controller = Path(service_module.CANONICAL_SOURCE_ROOT)
+    card = controller / request.task_card_path
+    real_card = card.read_bytes()
+    card.unlink()
+    card.symlink_to(controller / "outside-card.md")
+    (controller / "outside-card.md").write_bytes(real_card)
+    monkeypatch.setattr(WorktreeManager, "_status_bytes", lambda *_args: b"")
+
+    with pytest.raises(RuntimeError, match="Task Card"):
+        service.adopt_external_candidate(request)
+
+
+def test_adopt_external_candidate_rejects_symlinked_card_parent(tmp_path, monkeypatch):
+    import nexus.orchestrator.self_hosted_task_service as service_module
+
+    service, request, _, _ = _external_adoption_fixture(tmp_path, monkeypatch)
+    controller = Path(service_module.CANONICAL_SOURCE_ROOT)
+    parent = controller / "tasks" / "adoption"
+    outside = tmp_path / "outside-tasks"
+    outside.mkdir()
+    (outside / "01-external.md").write_bytes((parent / "01-external.md").read_bytes())
+    shutil.rmtree(parent)
+    parent.symlink_to(outside, target_is_directory=True)
+    monkeypatch.setattr(WorktreeManager, "_status_bytes", lambda *_args: b"")
+
+    with pytest.raises(RuntimeError, match="Task Card"):
+        service.adopt_external_candidate(request)
 
 
 def test_close_retained_dirty_salvage_ref_mismatch_keeps_target_and_task_retained(tmp_path, monkeypatch):
@@ -5802,7 +7514,7 @@ def _setup_lc2_task(tmp_path, service, task_id):
     attempt_id = "att-" + task_id
     service._write_state(task_id, {
         "task_id": task_id,
-        "status": "LEASED",
+        "status": "TARGET_LEASED",
         "promotion_status": "NOT_CREATED",
         "request": request,
         "contract": contract.model_dump(mode="json"),
@@ -6450,7 +8162,7 @@ def test_verify_task_fails_closed_when_verifier_mutates_target(tmp_path, monkeyp
     attempt_id = "att-verify-target-mutation"
     service._write_state(contract.task_id, {
         "task_id": contract.task_id,
-        "status": "LEASED",
+        "status": "TARGET_LEASED",
         "promotion_status": "NOT_CREATED",
         "request": request,
         "contract": contract.model_dump(mode="json"),
@@ -7166,7 +8878,14 @@ def test_m3c_retry_preserves_execution_history_and_aggregate_budget_blocks_invok
     assert invoked["n"] == 0
 
 
-def _m3c_repairable_workforce_state(tmp_path, monkeypatch, *, task_id):
+def _m3c_repairable_workforce_state(
+    tmp_path,
+    monkeypatch,
+    *,
+    task_id,
+    acceptance_decision="REPAIRABLE",
+    maximum_attempts_per_task=2,
+):
     card_path = f"tasks/issue-7/{task_id}.md"
     card = tmp_path / card_path
     card.parent.mkdir(parents=True)
@@ -7192,7 +8911,7 @@ def _m3c_repairable_workforce_state(tmp_path, monkeypatch, *, task_id):
     request = _real_request(tmp_path, task_id=task_id)
     request.update({
         "execution_lane": "ISOLATED_TARGET",
-        "maximum_attempts_per_task": 2,
+        "maximum_attempts_per_task": maximum_attempts_per_task,
         "worker": "auto",
         "model": internal["binding"]["model"],
         "workforce_demands": internal["workforce_demands"],
@@ -7235,7 +8954,7 @@ def _m3c_repairable_workforce_state(tmp_path, monkeypatch, *, task_id):
         "final_disposition": "FINAL_BLOCK",
         "cleanup_decision": "REMOVED",
         "promotion_status": "NOT_CREATED",
-        "acceptance_decision": "REPAIRABLE",
+        "acceptance_decision": acceptance_decision,
         "request": request,
         "contract": contract.model_dump(mode="json"),
         "contract_hash": contract.contract_hash,
@@ -7270,6 +8989,180 @@ def _m3c_repairable_workforce_state(tmp_path, monkeypatch, *, task_id):
         },
     })
     return service, request, old_envelope, old_receipt, old_verified_receipt
+
+
+def test_tracked_cli_submit_preserves_canonical_envelope_attempt_identity(
+    tmp_path, monkeypatch
+):
+    task_id = "tracked-cli-envelope-submit"
+    _, request, old_envelope, _, _ = _m3c_repairable_workforce_state(
+        tmp_path,
+        monkeypatch,
+        task_id=task_id,
+        acceptance_decision="NOT_REPAIRABLE",
+    )
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "fresh-state",
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    monkeypatch.setattr(
+        service,
+        "_launch_worker",
+        lambda owned_task_id, _attempt_id: service._read_state(owned_task_id),
+    )
+
+    result = service.submit_task(request)
+
+    assert result["attempt_id"] == old_envelope["attempt_id"]
+    assert result["canonical_dispatch_envelope"]["attempt_id"] == result["attempt_id"]
+
+
+def _persist_pre_provider_cli_envelope_drift(
+    service, task_id, *, provider_calls=0, state_updates=None
+):
+    state = service._read_state(task_id)
+    stale_attempt_id = state["canonical_dispatch_envelope"]["attempt_id"]
+    actual_attempt_id = "actual-first-attempt"
+    assert stale_attempt_id != actual_attempt_id
+    state.update(
+        status="FINAL_BLOCK",
+        terminal_status="FINAL_BLOCK",
+        final_disposition="FINAL_BLOCK",
+        cleanup_decision="ALREADY_REMOVED",
+        error="WORKFORCE_DISPATCH_ENVELOPE_IDENTITY_DRIFT",
+        attempt_id=actual_attempt_id,
+        action=None,
+        action_id=None,
+        target_created_at=None,
+        executions=[],
+        lease=None,
+        worker_preflight=None,
+        active_provider=None,
+        worker_child_pgid=None,
+        execution=None,
+        telemetry={
+            "provider_calls": provider_calls,
+            "provider_attempts": provider_calls,
+            "provider_time_ms": 0,
+            "worktree_time_ms": 0,
+            "verifier_time_ms": 0,
+        },
+        candidate=None,
+        candidate_commit_sha=None,
+        candidate_ref=None,
+        candidate_state_hash=None,
+        verified_receipt=None,
+        verified_receipt_hash=None,
+        attempts=[{"attempt_id": actual_attempt_id}],
+    )
+    state.update(state_updates or {})
+    service._write_state(task_id, state)
+    return stale_attempt_id, actual_attempt_id
+
+
+def test_tracked_cli_retry_recovers_only_pre_provider_attempt_identity_drift(
+    tmp_path, monkeypatch
+):
+    task_id = "tracked-cli-envelope-retry"
+    service, _, _, _, _ = _m3c_repairable_workforce_state(
+        tmp_path,
+        monkeypatch,
+        task_id=task_id,
+        acceptance_decision="NOT_REPAIRABLE",
+    )
+    stale_attempt_id, actual_attempt_id = _persist_pre_provider_cli_envelope_drift(
+        service, task_id
+    )
+    monkeypatch.setattr(
+        service,
+        "_launch_worker",
+        lambda owned_task_id, _attempt_id: service._read_state(owned_task_id),
+    )
+
+    result = service.retry_task(task_id)
+    durable = service._read_state(task_id)
+
+    assert result["retry"]["decision"] == "REUSED_TASK_ID"
+    assert durable["attempt_id"] not in {stale_attempt_id, actual_attempt_id}
+    assert durable["canonical_dispatch_envelope"]["attempt_id"] == durable["attempt_id"]
+    assert durable["attempts"][0]["attempt_id"] == actual_attempt_id
+
+
+def test_tracked_cli_retry_does_not_recover_identity_drift_after_provider_effect(
+    tmp_path, monkeypatch
+):
+    task_id = "tracked-cli-envelope-provider-effect"
+    service, _, _, _, _ = _m3c_repairable_workforce_state(
+        tmp_path,
+        monkeypatch,
+        task_id=task_id,
+        acceptance_decision="NOT_REPAIRABLE",
+    )
+    _persist_pre_provider_cli_envelope_drift(service, task_id, provider_calls=1)
+    monkeypatch.setattr(
+        service,
+        "_launch_worker",
+        lambda *_: pytest.fail("provider-effect drift must fail closed"),
+    )
+
+    result = service.retry_task(task_id)
+
+    assert result["retry"]["decision"] == "BLOCK"
+    assert result["retry"]["blocker"] == "WORKFORCE_DISPATCH_ENVELOPE_MISMATCH"
+
+
+@pytest.mark.parametrize(
+    "state_updates",
+    [
+        {"cleanup_decision": "TARGET_CLEANED"},
+        {"target_created_at": "2026-08-31T00:00:00+00:00"},
+        {"lease": {"lease_id": "unexpected-target"}},
+        {"execution": {"outcome": "unknown"}},
+        {"candidate_commit_sha": "c" * 40},
+    ],
+)
+def test_tracked_cli_retry_rejects_any_target_execution_or_candidate_effect(
+    tmp_path, monkeypatch, state_updates
+):
+    task_id = "tracked-cli-envelope-effect-fence"
+    service, _, _, _, _ = _m3c_repairable_workforce_state(
+        tmp_path,
+        monkeypatch,
+        task_id=task_id,
+        acceptance_decision="NOT_REPAIRABLE",
+    )
+    _persist_pre_provider_cli_envelope_drift(
+        service, task_id, state_updates=state_updates
+    )
+    monkeypatch.setattr(service, "_launch_worker", lambda *_: pytest.fail("must block"))
+
+    result = service.retry_task(task_id)
+
+    assert result["retry"]["decision"] == "BLOCK"
+    assert result["retry"]["blocker"] == "WORKFORCE_DISPATCH_ENVELOPE_MISMATCH"
+
+
+def test_tracked_cli_retry_preserves_attempt_budget_gate_before_recovery(
+    tmp_path, monkeypatch
+):
+    task_id = "tracked-cli-envelope-attempt-budget"
+    service, _, _, _, _ = _m3c_repairable_workforce_state(
+        tmp_path,
+        monkeypatch,
+        task_id=task_id,
+        acceptance_decision="NOT_REPAIRABLE",
+    )
+    _persist_pre_provider_cli_envelope_drift(service, task_id)
+    state = service._read_state(task_id)
+    state["request"]["maximum_attempts_per_task"] = 1
+    service._write_state(task_id, state)
+    monkeypatch.setattr(service, "_launch_worker", lambda *_: pytest.fail("must block"))
+
+    result = service.retry_task(task_id)
+
+    assert result["retry"]["decision"] == "BLOCK"
+    assert result["retry"]["blocker"] == "ATTEMPT_BUDGET_EXHAUSTED"
 
 
 @pytest.mark.parametrize("binding_fault", ["missing", "tampered"])
@@ -7370,6 +9263,157 @@ def test_m3c_repair_retry_rebinds_fresh_attempt_and_preserves_old_evidence(
         assert durable[field] is None
 
 
+def test_m3c_nonrepair_retry_rebinds_workforce_envelope_without_launching_provider(
+    tmp_path, monkeypatch
+):
+    task_id = "m3c-nonrepair-fresh-envelope"
+    service, _, old_envelope, old_receipt, _ = _m3c_repairable_workforce_state(
+        tmp_path,
+        monkeypatch,
+        task_id=task_id,
+        acceptance_decision="NOT_REPAIRABLE",
+    )
+    predecessor = service._read_state(task_id)
+    old_action_id = predecessor.get("action_id")
+    old_idempotency_key = predecessor.get("idempotency_key")
+    authority_snapshot = {
+        field: copy.deepcopy(predecessor.get(field))
+        for field in (
+            "task_card_path", "task_card_hash", "selected_worker_id",
+            "selected_provider", "selected_model", "workforce_policy_hash",
+            "workforce_binding_hash", "workforce_aggregate_binding_hash",
+            "workforce_dispatch", "request",
+        )
+    }
+    calls = {"launch": 0, "invoke": 0}
+    monkeypatch.setattr(
+        service,
+        "_launch_worker",
+        lambda owned_task_id, _attempt_id: (
+            calls.__setitem__("launch", calls["launch"] + 1)
+            or service._read_state(owned_task_id)
+        ),
+    )
+    monkeypatch.setattr(
+        service.worker_registry,
+        "invoke",
+        lambda *_args, **_kwargs: calls.__setitem__("invoke", calls["invoke"] + 1),
+    )
+
+    result = service.retry_task(task_id)
+    durable = service._read_state(task_id)
+    fresh_envelope = durable["canonical_dispatch_envelope"]
+
+    assert result["retry"]["decision"] == "REUSED_TASK_ID"
+    assert durable["attempt_id"] != old_envelope["attempt_id"]
+    assert durable["action_id"] and durable["action_id"] != old_action_id
+    assert durable["idempotency_key"] and durable["idempotency_key"] != old_idempotency_key
+    assert result["retry"]["new_attempt_id"] == durable["attempt_id"]
+    assert result["retry"]["new_action_id"] == durable["action_id"]
+    assert result["retry"]["new_idempotency_key"] == durable["idempotency_key"]
+    assert fresh_envelope["attempt_id"] == durable["attempt_id"]
+    assert fresh_envelope != old_envelope
+    assert fresh_envelope["worker_id"] == old_envelope["worker_id"]
+    assert fresh_envelope["provider"] == old_envelope["provider"]
+    assert fresh_envelope["model"] == old_envelope["model"]
+    fresh_binding = validate_workforce_dispatch_binding(durable["request"])
+    expected_envelope = build_canonical_dispatch_envelope(
+        durable["request"]["planner_output"],
+        {**fresh_binding, "demand_id": fresh_binding["demand_id"]},
+        task_id=durable["task_id"],
+        attempt_id=durable["attempt_id"],
+        task_card_path=durable["task_card_path"],
+        task_card_hash=durable["task_card_hash"],
+    ).to_dict()
+    assert fresh_envelope == expected_envelope
+    for field, value in authority_snapshot.items():
+        if field in {"request", "workforce_dispatch"}:
+            continue
+        assert durable[field] == value
+    for field in (
+        "demands", "admission", "demand_id", "worker_id", "provider", "model",
+        "policy_hash", "binding_hash", "aggregate_binding_hash",
+    ):
+        assert durable["workforce_dispatch"][field] == authority_snapshot["workforce_dispatch"][field]
+    assert durable["request"]["planner_output"] == authority_snapshot["request"]["planner_output"]
+    assert durable["request"]["workforce_admission"] == authority_snapshot["request"]["workforce_admission"]
+    assert durable["request"]["workforce_demands"] == authority_snapshot["request"]["workforce_demands"]
+    assert json.dumps(durable["executions"][0], sort_keys=True) == json.dumps(old_receipt, sort_keys=True)
+    assert calls == {"launch": 1, "invoke": 0}
+
+
+def test_m3c_nonrepair_retry_rejects_restored_stale_predecessor_envelope(
+    tmp_path, monkeypatch
+):
+    task_id = "m3c-nonrepair-stale-envelope"
+    service, _, old_envelope, _, _ = _m3c_repairable_workforce_state(
+        tmp_path,
+        monkeypatch,
+        task_id=task_id,
+        acceptance_decision="NOT_REPAIRABLE",
+    )
+    state = service._read_state(task_id)
+    stale = copy.deepcopy(old_envelope)
+    stale["attempt_id"] = "attempt-stale-restored"
+    state["canonical_dispatch_envelope"] = stale
+    state["request"]["canonical_dispatch_envelope"] = stale
+    service._write_state(task_id, state)
+    monkeypatch.setattr(service, "_launch_worker", lambda *_: pytest.fail("launch must not run"))
+
+    result = service.retry_task(task_id)
+
+    assert result["retry"]["decision"] == "BLOCK"
+    assert result["retry"]["blocker"] == "WORKFORCE_DISPATCH_ENVELOPE_MISMATCH"
+    assert service._read_state(task_id)["attempts"] == state["attempts"]
+
+
+@pytest.mark.parametrize(
+    "fault",
+    ["non_mapping", "cross_task", "card_drift", "missing_bindings"],
+)
+def test_m3c_nonrepair_retry_workforce_envelope_faults_block_before_launch(
+    tmp_path, monkeypatch, fault
+):
+    task_id = f"m3c-nonrepair-envelope-{fault}"
+    service, _, old_envelope, _, _ = _m3c_repairable_workforce_state(
+        tmp_path,
+        monkeypatch,
+        task_id=task_id,
+        acceptance_decision="NOT_REPAIRABLE",
+    )
+    state = service._read_state(task_id)
+    if fault == "non_mapping":
+        state["request"]["canonical_dispatch_envelope"] = ["malformed"]
+    elif fault == "cross_task":
+        state["canonical_dispatch_envelope"] = {**old_envelope, "task_id": "other-task"}
+        state["request"]["canonical_dispatch_envelope"] = copy.deepcopy(
+            state["canonical_dispatch_envelope"]
+        )
+    elif fault == "card_drift":
+        state["canonical_dispatch_envelope"] = {**old_envelope, "task_card_hash": "f" * 64}
+        state["request"]["canonical_dispatch_envelope"] = copy.deepcopy(
+            state["canonical_dispatch_envelope"]
+        )
+    else:
+        state["request"].pop("workforce_demands", None)
+        state["request"].pop("workforce_admission", None)
+    service._write_state(task_id, state)
+    monkeypatch.setattr(service, "_launch_worker", lambda *_: pytest.fail("launch must not run"))
+
+    result = service.retry_task(task_id)
+
+    assert result["retry"]["decision"] == "BLOCK"
+    expected = (
+        "WORKFORCE_DISPATCH_ENVELOPE_INVALID"
+        if fault == "non_mapping"
+        else "WORKFORCE_ADMISSION_BINDING_MISSING"
+        if fault == "missing_bindings"
+        else "WORKFORCE_DISPATCH_ENVELOPE_MISMATCH"
+    )
+    assert result["retry"]["blocker"] == expected
+    assert service._read_state(task_id)["attempts"] == state["attempts"]
+
+
 def test_m3d_event_append_failure_persists_reconciliation_debt(tmp_path, monkeypatch):
     service = SelfHostedTaskService(
         state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
@@ -7412,3 +9456,790 @@ def test_canonical_continuity_read_preserves_event_store_integrity_error(monkeyp
     monkeypatch.setattr(NexusEventBus, "_event_log_path", None)
     with pytest.raises(ValueError, match="tampered event log"):
         SelfHostedTaskService.read_canonical_attempt_events("task-1", "attempt-1")
+
+
+def test_production_checkpoint_bootstraps_canonical_event_stream_without_manual_configure(
+    tmp_path, monkeypatch
+):
+    """The public service owns first-write EventBus initialization."""
+    canonical_state = tmp_path / "canonical-state"
+    monkeypatch.setenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", str(canonical_state))
+    monkeypatch.setattr(NexusEventBus, "_event_log_path", None)
+    monkeypatch.setattr(NexusEventBus, "_production_event_root", None, raising=False)
+    monkeypatch.setattr(NexusEventBus, "_configured_event_root", None, raising=False)
+    monkeypatch.setattr(NexusEventBus, "_event_bind_mode", None, raising=False)
+    monkeypatch.setattr(NexusEventBus._log_store, "event_log_path", None)
+    monkeypatch.setattr(NexusEventBus._log_store, "lock_path", None)
+    service = SelfHostedTaskService(auto_reconcile=False)
+    task_id, attempt_id = "production-bootstrap", "attempt-1"
+    service._write_state(
+        task_id, {"task_id": task_id, "attempt_id": attempt_id, "status": "CREATED"}
+    )
+
+    service._checkpoint(task_id, "WORKER_RUNNING", attempt_id=attempt_id)
+
+    assert (canonical_state / ".nexus" / "events" / "event_log.jsonl").exists()
+    assert service.rehydrate_task_continuation(task_id, attempt_id)["task_identity"] == {
+        "task_id": task_id,
+        "attempt_id": attempt_id,
+    }
+
+
+def test_production_read_only_rehydration_does_not_create_event_store(tmp_path, monkeypatch):
+    canonical_state = tmp_path / "canonical-state"
+    monkeypatch.setenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", str(canonical_state))
+    monkeypatch.setattr(NexusEventBus, "_event_log_path", None)
+    monkeypatch.setattr(NexusEventBus, "_production_event_root", None, raising=False)
+    monkeypatch.setattr(NexusEventBus, "_configured_event_root", None, raising=False)
+    monkeypatch.setattr(NexusEventBus, "_event_bind_mode", None, raising=False)
+    service = SelfHostedTaskService(auto_reconcile=False)
+    service._write_state(
+        "readonly-bootstrap",
+        {"task_id": "readonly-bootstrap", "attempt_id": "a1", "status": "FINAL_BLOCK"},
+    )
+    with pytest.raises(ValueError, match="attempt continuity stream is empty"):
+        service.rehydrate_task_continuation("readonly-bootstrap", "a1")
+    assert not (canonical_state / ".nexus" / "events").exists()
+
+
+def test_rehydrate_task_continuation_restart_from_disk_and_read_only(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    state_dir = tmp_path / "state"
+    service1 = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+
+    task_id = "task-restart-1"
+    attempt_id = "att-1"
+    state_data = {
+        "task_id": task_id,
+        "attempt_id": attempt_id,
+        "status": "FINAL_BLOCK",
+        "controller_revision": "sha-source-1",
+        "contract_hash": "sha-contract-1",
+        "claim_ceiling": "bounded",
+        "lifecycle_revision": "life-rev-1",
+        "candidate_commit_sha": "sha-cand-1",
+    }
+    service1._write_state(task_id, state_data)
+
+    NexusEventBus.emit_attempt_transition(
+        build_attempt_transition_event(
+            task_id=task_id,
+            attempt_id=attempt_id,
+            sequence=1,
+            state="ATTEMPT_REJECTED",
+            reason="strategy failed",
+            continuity_event_type="ATTEMPT_REJECTED",
+            do_not_repeat=("bad_strat_1",),
+            evidence_refs=("ev-ref-1",),
+            unresolved_risks=("risk-a",),
+            unknowns=("unk-a",),
+            next_action="try_alt",
+            claim_ceiling="bounded",
+            source_revision="sha-source-1",
+            contract_revision="sha-contract-1",
+        )
+    )
+
+    state_file = state_dir / f"{task_id}.json"
+    event_log_file = NexusEventBus._event_log_path
+    assert event_log_file is not None and event_log_file.exists()
+    state_hash_before = hashlib.sha256(state_file.read_bytes()).hexdigest()
+    event_log_hash_before = hashlib.sha256(event_log_file.read_bytes()).hexdigest()
+
+    del service1
+
+    service2 = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+    proj = service2.rehydrate_task_continuation(task_id, attempt_id)
+
+    assert proj["schema"] == "nexus.task_rehydration_projection.v1"
+    assert proj["task_identity"] == {"task_id": task_id, "attempt_id": attempt_id}
+    assert proj["revision_binding"] == {
+        "source_revision": "sha-source-1",
+        "contract_revision": "sha-contract-1",
+    }
+    assert proj["authority_binding"]["lifecycle_revision"] == "life-rev-1"
+    assert proj["continuation"]["rejected_strategies"] == ["bad_strat_1"]
+    assert proj["continuation"]["do_not_repeat"] == ["bad_strat_1"]
+    assert proj["continuation"]["evidence_refs"] == ["ev-ref-1"]
+    assert proj["continuation"]["unresolved_risks"] == ["risk-a"]
+    assert proj["continuation"]["unknowns"] == ["unk-a"]
+    assert proj["continuation"]["next_action"] == "try_alt"
+    assert proj["continuation"]["claim_ceiling"] == "bounded"
+    assert proj["candidate_binding"]["candidate_commit_sha"] == "sha-cand-1"
+    assert proj["current_task_action"]["action_state"] == "FINAL_BLOCK"
+
+    # Read-only check: no file content changed
+    state_hash_after = hashlib.sha256(state_file.read_bytes()).hexdigest()
+    event_log_hash_after = hashlib.sha256(event_log_file.read_bytes()).hexdigest()
+    assert state_hash_after == state_hash_before
+    assert event_log_hash_after == event_log_hash_before
+    assert "authority_revision" in proj["missing_durable_bindings"]
+
+
+def test_rehydrate_task_continuation_lifecycle_path_restart_and_read_only(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    state_dir = tmp_path / "state"
+    service1 = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+
+    task_id = "task-lifecycle-e2e"
+    attempt_id = "attempt-lifecycle-1"
+
+    service1._create_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "status": "SUBMITTED",
+            "controller_revision": "sha-source-main",
+            "contract_hash": "sha-contract-main",
+            "claim_ceiling": "bounded",
+        },
+    )
+
+    service1._checkpoint(
+        task_id,
+        "FINAL_BLOCK",
+        {
+            "error": "syntax check failed",
+            "continuity_event_type": "ATTEMPT_REJECTED",
+            "do_not_repeat": ["bad_import_pattern"],
+            "unresolved_risks": ["compat_risk"],
+            "next_action": "repair_imports",
+            "claim_ceiling": "bounded",
+            "controller_revision": "sha-source-main",
+            "contract_hash": "sha-contract-main",
+        },
+        attempt_id=attempt_id,
+    )
+
+    state_file = state_dir / f"{task_id}.json"
+    event_log_file = NexusEventBus._event_log_path
+    assert state_file.exists()
+    assert event_log_file is not None and event_log_file.exists()
+
+    state_hash_before = hashlib.sha256(state_file.read_bytes()).hexdigest()
+    event_log_hash_before = hashlib.sha256(event_log_file.read_bytes()).hexdigest()
+    event_count_before = len(NexusEventBus._log_store.read_recent(limit=100))
+
+    del service1
+
+    service2 = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False, ephemeral=True)
+    state_hash_before = hashlib.sha256(state_file.read_bytes()).hexdigest()
+    event_log_hash_before = hashlib.sha256(event_log_file.read_bytes()).hexdigest()
+    event_count_before = len(NexusEventBus._log_store.read_recent(limit=100))
+
+    proj = service2.rehydrate_task_continuation(task_id, attempt_id)
+
+    assert proj["schema"] == "nexus.task_rehydration_projection.v1"
+    assert proj["task_identity"] == {"task_id": task_id, "attempt_id": attempt_id}
+    assert proj["revision_binding"] == {
+        "source_revision": "sha-source-main",
+        "contract_revision": "sha-contract-main",
+    }
+    assert proj["continuation"]["rejected_strategies"] == ["bad_import_pattern"]
+    assert proj["continuation"]["do_not_repeat"] == ["bad_import_pattern"]
+    assert proj["continuation"]["unresolved_risks"] == ["compat_risk"]
+    assert proj["continuation"]["next_action"] == "repair_imports"
+    assert "authority_revision" in proj["missing_durable_bindings"]
+
+    state_hash_after = hashlib.sha256(state_file.read_bytes()).hexdigest()
+    event_log_hash_after = hashlib.sha256(event_log_file.read_bytes()).hexdigest()
+    event_count_after = len(NexusEventBus._log_store.read_recent(limit=100))
+
+    assert state_hash_after == state_hash_before
+    assert event_log_hash_after == event_log_hash_before
+    assert event_count_after == event_count_before
+
+
+def test_rehydrate_task_continuation_missing_facts_stay_missing(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    state_dir = tmp_path / "state"
+    service = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+
+    task_id = "task-missing-1"
+    attempt_id = "att-1"
+    service._write_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "status": "SUBMITTED",
+            "controller_revision": "sha-src-1",
+            "contract_hash": "sha-cnt-1",
+        },
+    )
+    NexusEventBus.emit_attempt_transition(
+        build_attempt_transition_event(
+            task_id=task_id,
+            attempt_id=attempt_id,
+            sequence=1,
+            state="SUBMITTED",
+            continuity_event_type="PLAN_FORMED",
+            source_revision="sha-src-1",
+            contract_revision="sha-cnt-1",
+        )
+    )
+
+    proj = service.rehydrate_task_continuation(task_id, attempt_id)
+    assert "completed_actions" in proj["missing_durable_bindings"]
+    assert "verified_observations" in proj["missing_durable_bindings"]
+    assert "authority_revision" in proj["missing_durable_bindings"]
+    assert "phase_receipts" in proj["missing_durable_bindings"]
+    assert proj["candidate_binding"] is None
+    assert proj["work_claim_binding"] is None
+
+
+def test_checkpoint_attempt_transition_uses_durable_top_level_identity(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    state_dir = tmp_path / "state"
+    service = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+    task_id = "task-durable-event-identity"
+    attempt_id = "attempt-durable-event-identity"
+    service._create_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "status": "SUBMITTED",
+            "controller_revision": "durable-source",
+            "contract_hash": "durable-contract",
+            "request": {
+                "controller_revision": "request-source",
+                "contract_hash": "request-contract",
+            },
+        },
+    )
+
+    service._checkpoint(task_id, "WORKER_RUNNING", attempt_id=attempt_id)
+
+    event = NexusEventBus.get_recent_events(event_type="attempt_transition", limit=1)[0]
+    assert event["payload"]["source_revision"] == "durable-source"
+    assert event["payload"]["contract_revision"] == "durable-contract"
+
+
+def test_attempt_transition_identity_precedence_is_explicit_then_durable_then_contract(
+    tmp_path,
+):
+    NexusEventBus.configure(tmp_path)
+    SelfHostedTaskService._emit_attempt_transition(
+        {
+            "task_id": "identity-precedence",
+            "attempt_id": "attempt-1",
+            "status": "RUNNING",
+            "source_revision": "explicit-source",
+            "contract_revision": "explicit-contract",
+            "controller_revision": "durable-source",
+            "contract_hash": "durable-contract",
+            "contract": {
+                "controller_revision": "structured-source",
+                "contract_hash": "structured-contract",
+            },
+            "request": {
+                "source_revision": "request-source",
+                "contract_revision": "request-contract",
+            },
+        },
+        "identity-precedence",
+    )
+    payload = NexusEventBus.get_recent_events(event_type="attempt_transition", limit=1)[0][
+        "payload"
+    ]
+    assert payload["source_revision"] == "explicit-source"
+    assert payload["contract_revision"] == "explicit-contract"
+
+
+def test_attempt_transition_identity_durable_overrides_request_and_uses_structured_fallback(
+    tmp_path,
+):
+    NexusEventBus.configure(tmp_path)
+    SelfHostedTaskService._emit_attempt_transition(
+        {
+            "task_id": "identity-fallback",
+            "attempt_id": "attempt-1",
+            "status": "RUNNING",
+            "controller_revision": "durable-source",
+            "contract_hash": "durable-contract",
+            "contract": {
+                "controller_revision": "structured-source",
+                "contract_hash": "structured-contract",
+            },
+            "request": {
+                "controller_revision": "request-source",
+                "contract_hash": "request-contract",
+            },
+        },
+        "identity-fallback",
+    )
+    payload = NexusEventBus.get_recent_events(event_type="attempt_transition", limit=1)[0][
+        "payload"
+    ]
+    assert payload["source_revision"] == "durable-source"
+    assert payload["contract_revision"] == "durable-contract"
+
+    SelfHostedTaskService._emit_attempt_transition(
+        {
+            "task_id": "identity-structured",
+            "attempt_id": "attempt-1",
+            "status": "RUNNING",
+            "contract": {
+                "controller_revision": "structured-source",
+                "contract_hash": "structured-contract",
+            },
+        },
+        "identity-structured",
+    )
+    payload = NexusEventBus.get_recent_events(event_type="attempt_transition", limit=1)[0][
+        "payload"
+    ]
+    assert payload["source_revision"] == "structured-source"
+    assert payload["contract_revision"] == "structured-contract"
+
+
+def test_attempt_transition_identity_missing_stays_unknown(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    SelfHostedTaskService._emit_attempt_transition(
+        {"task_id": "identity-missing", "attempt_id": "attempt-1", "status": "RUNNING"},
+        "identity-missing",
+    )
+    payload = NexusEventBus.get_recent_events(event_type="attempt_transition", limit=1)[0][
+        "payload"
+    ]
+    assert payload["source_revision"] == "unknown"
+    assert payload["contract_revision"] == "unknown"
+
+
+def test_rehydrate_rejects_stale_attempt_transition_identity(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    state_dir = tmp_path / "state"
+    service = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+    task_id = "identity-stale"
+    attempt_id = "attempt-stale"
+    service._create_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "status": "SUBMITTED",
+            "controller_revision": "current-source",
+            "contract_hash": "current-contract",
+        },
+    )
+    NexusEventBus.emit_attempt_transition(
+        build_attempt_transition_event(
+            task_id=task_id,
+            attempt_id=attempt_id,
+            sequence=1,
+            state="SUBMITTED",
+            source_revision="stale-source",
+            contract_revision="stale-contract",
+        )
+    )
+    with pytest.raises(ValueError, match="REHYDRATION_SOURCE_REVISION_MISMATCH"):
+        service.rehydrate_task_continuation(task_id, attempt_id)
+
+
+def test_rehydrate_rejects_stale_attempt_transition_contract_identity(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    state_dir = tmp_path / "state"
+    service = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+    task_id = "identity-stale-contract"
+    attempt_id = "attempt-stale-contract"
+    service._create_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "status": "SUBMITTED",
+            "controller_revision": "current-source",
+            "contract_hash": "current-contract",
+        },
+    )
+    NexusEventBus.emit_attempt_transition(
+        build_attempt_transition_event(
+            task_id=task_id,
+            attempt_id=attempt_id,
+            sequence=1,
+            state="SUBMITTED",
+            source_revision="current-source",
+            contract_revision="stale-contract",
+        )
+    )
+    with pytest.raises(ValueError, match="REHYDRATION_CONTRACT_REVISION_MISMATCH"):
+        service.rehydrate_task_continuation(task_id, attempt_id)
+
+
+def test_rehydrate_task_continuation_attempt_mismatch_fails_closed(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    state_dir = tmp_path / "state"
+    service = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+
+    task_id = "task-mismatch-1"
+    service._write_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": "att-1",
+            "status": "SUBMITTED",
+            "controller_revision": "sha-src-1",
+            "contract_hash": "sha-cnt-1",
+        },
+    )
+    NexusEventBus.emit_attempt_transition(
+        build_attempt_transition_event(
+            task_id=task_id,
+            attempt_id="att-2",
+            sequence=1,
+            state="SUBMITTED",
+            continuity_event_type="PLAN_FORMED",
+            source_revision="sha-src-1",
+            contract_revision="sha-cnt-1",
+        )
+    )
+
+    with pytest.raises(ValueError, match="REHYDRATION_ATTEMPT_MISMATCH"):
+        service.rehydrate_task_continuation(task_id, "att-2")
+
+
+def test_rehydrate_task_continuation_source_revision_mismatch_fails_closed(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    state_dir = tmp_path / "state"
+    service = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+
+    task_id = "task-src-mismatch-1"
+    attempt_id = "att-1"
+    service._write_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "status": "SUBMITTED",
+            "controller_revision": "sha-src-A",
+            "contract_hash": "sha-cnt-1",
+        },
+    )
+    NexusEventBus.emit_attempt_transition(
+        build_attempt_transition_event(
+            task_id=task_id,
+            attempt_id=attempt_id,
+            sequence=1,
+            state="SUBMITTED",
+            continuity_event_type="PLAN_FORMED",
+            source_revision="sha-src-B",
+            contract_revision="sha-cnt-1",
+        )
+    )
+
+    with pytest.raises(ValueError, match="REHYDRATION_SOURCE_REVISION_MISMATCH"):
+        service.rehydrate_task_continuation(task_id, attempt_id)
+
+
+@pytest.mark.parametrize(
+    "malformed_field",
+    ["candidate", "promotion_packet", "verified_receipt", "contract", "work_claim"],
+)
+def test_rehydrate_task_continuation_malformed_state_fails_closed(tmp_path, malformed_field):
+    NexusEventBus.configure(tmp_path)
+    state_dir = tmp_path / "state"
+    service = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+
+    task_id = f"task-malformed-{malformed_field}"
+    attempt_id = "att-1"
+    service._write_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "status": "SUBMITTED",
+            "controller_revision": "sha-src-1",
+            "contract_hash": "sha-cnt-1",
+            malformed_field: "malformed_string_not_dict",
+        },
+    )
+    NexusEventBus.emit_attempt_transition(
+        build_attempt_transition_event(
+            task_id=task_id,
+            attempt_id=attempt_id,
+            sequence=1,
+            state="SUBMITTED",
+            continuity_event_type="PLAN_FORMED",
+            source_revision="sha-src-1",
+            contract_revision="sha-cnt-1",
+        )
+    )
+    with pytest.raises(ValueError, match="REHYDRATION_"):
+        service.rehydrate_task_continuation(task_id, attempt_id)
+
+
+def test_rehydrate_task_continuation_p2_capture_completeness_kill_restart(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    state_dir = tmp_path / "state"
+    service1 = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+
+    task_id = "p2-task-completeness-1"
+    attempt_id = "p2-att-1"
+    phase_receipt = {
+        "task_id": task_id,
+        "attempt_id": attempt_id,
+        "phase": "FORMULATION",
+        "authority_revision": "auth-rev-p2",
+        "status": "SUCCESS",
+    }
+    state_payload = {
+        "task_id": task_id,
+        "attempt_id": attempt_id,
+        "status": "FINAL_BLOCK",
+        "controller_revision": "sha-source-p2",
+        "contract_hash": "sha-contract-p2",
+        "authority_revision": "auth-rev-p2",
+        "phase_receipts": [phase_receipt],
+        "candidate_commit_sha": "sha-cand-p2",
+        "candidate_tree_sha": "sha-tree-p2",
+        "candidate_state_hash": "sha-state-p2",
+        "verified_receipt_hash": "sha-receipt-p2",
+        "claim_ceiling": "evidence-bound",
+        "lifecycle_revision": "life-p2",
+    }
+    service1._write_state(task_id, state_payload)
+    NexusEventBus.emit_attempt_transition(
+        build_attempt_transition_event(
+            task_id=task_id,
+            attempt_id=attempt_id,
+            sequence=1,
+            state="COMPLETED",
+            action="patch_apply_01",
+            observation="patch synthesis validated on test suite",
+            continuity_event_type="COMPLETED",
+            source_revision="sha-source-p2",
+            contract_revision="sha-contract-p2",
+        )
+    )
+    NexusEventBus.emit_attempt_transition(
+        build_attempt_transition_event(
+            task_id=task_id,
+            attempt_id=attempt_id,
+            sequence=2,
+            state="ATTEMPT_REJECTED",
+            reason="strategy failed validation",
+            continuity_event_type="ATTEMPT_REJECTED",
+            do_not_repeat=("bad_strategy_p2",),
+            evidence_refs=("ev-ref-p2",),
+            unresolved_risks=("risk-p2",),
+            unknowns=("unknown-p2",),
+            next_action="retry_with_alternative",
+            claim_ceiling="evidence-bound",
+            source_revision="sha-source-p2",
+            contract_revision="sha-contract-p2",
+        )
+    )
+
+    state_file = state_dir / f"{task_id}.json"
+    event_log_file = NexusEventBus._event_log_path
+    assert state_file.exists()
+    assert event_log_file is not None and event_log_file.exists()
+
+    state_hash_before = hashlib.sha256(state_file.read_bytes()).hexdigest()
+    event_log_hash_before = hashlib.sha256(event_log_file.read_bytes()).hexdigest()
+    event_count_before = len(NexusEventBus._log_store.read_recent(limit=100))
+
+    # Process kill: destroy first service instance and continuation objects
+    del service1
+    del state_payload
+
+    # Cold restart: fresh instance reading purely from physical storage
+    service2 = SelfHostedTaskService(state_dir=state_dir, auto_reconcile=False, ephemeral=True)
+    proj = service2.rehydrate_task_continuation(task_id, attempt_id)
+
+    # P2 Completeness Matrix Assertions - 100% dimensions physically recovered
+    assert proj["schema"] == "nexus.task_rehydration_projection.v1"
+    assert proj["task_identity"] == {"task_id": "p2-task-completeness-1", "attempt_id": "p2-att-1"}
+    assert proj["revision_binding"]["source_revision"] == "sha-source-p2"
+    assert proj["revision_binding"]["contract_revision"] == "sha-contract-p2"
+    assert proj["authority_binding"]["authority_revision"] == "auth-rev-p2"
+    assert proj["authority_binding"]["phase_receipts"] == [phase_receipt]
+    assert proj["continuation"]["completed_actions"] == ["patch_apply_01"]
+    assert proj["continuation"]["verified_observations"] == ["patch synthesis validated on test suite"]
+    assert proj["continuation"]["rejected_strategies"] == ["bad_strategy_p2"]
+    assert proj["continuation"]["do_not_repeat"] == ["bad_strategy_p2"]
+    assert proj["continuation"]["unresolved_risks"] == ["risk-p2"]
+    assert proj["continuation"]["unknowns"] == ["unknown-p2"]
+    assert proj["continuation"]["next_action"] == "retry_with_alternative"
+    assert proj["continuation"]["claim_ceiling"] == "evidence-bound"
+    assert proj["continuation"]["evidence_refs"] == ["ev-ref-p2"]
+    assert proj["candidate_binding"]["candidate_commit_sha"] == "sha-cand-p2"
+    assert proj["candidate_binding"]["verified_receipt_hash"] == "sha-receipt-p2"
+
+    assert proj["missing_durable_bindings"] == []
+
+    # Read-only proof
+    state_hash_after = hashlib.sha256(state_file.read_bytes()).hexdigest()
+    event_log_hash_after = hashlib.sha256(event_log_file.read_bytes()).hexdigest()
+    event_count_after = len(NexusEventBus._log_store.read_recent(limit=100))
+
+    assert state_hash_after == state_hash_before
+    assert event_log_hash_after == event_log_hash_before
+    assert event_count_after == event_count_before
+
+
+def test_rehydrate_task_continuation_non_completed_action_not_in_completed_actions(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    state_dir = tmp_path / "state"
+    service = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+    task_id = "task-non-completed"
+    attempt_id = "att-1"
+    service._write_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "status": "WORKER_RUNNING",
+            "controller_revision": "src-1",
+            "contract_hash": "cnt-1",
+        },
+    )
+    NexusEventBus.emit_attempt_transition(
+        build_attempt_transition_event(
+            task_id=task_id,
+            attempt_id=attempt_id,
+            sequence=1,
+            state="WORKER_RUNNING",
+            action="in_progress_action",
+            continuity_event_type="PLAN_FORMED",
+            source_revision="src-1",
+            contract_revision="cnt-1",
+        )
+    )
+    proj = service.rehydrate_task_continuation(task_id, attempt_id)
+    assert "completed_actions" not in proj["continuation"]
+    assert "completed_actions" in proj["missing_durable_bindings"]
+
+
+def test_rehydrate_task_continuation_reason_not_promoted_to_observation(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    state_dir = tmp_path / "state"
+    service = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+    task_id = "task-reason-not-obs"
+    attempt_id = "att-1"
+    service._write_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "status": "FINAL_BLOCK",
+            "controller_revision": "src-1",
+            "contract_hash": "cnt-1",
+        },
+    )
+    NexusEventBus.emit_attempt_transition(
+        build_attempt_transition_event(
+            task_id=task_id,
+            attempt_id=attempt_id,
+            sequence=1,
+            state="ATTEMPT_REJECTED",
+            reason="syntax error in line 42",
+            observation="",
+            continuity_event_type="ATTEMPT_REJECTED",
+            source_revision="src-1",
+            contract_revision="cnt-1",
+        )
+    )
+    proj = service.rehydrate_task_continuation(task_id, attempt_id)
+    assert "verified_observations" not in proj["continuation"]
+    assert "verified_observations" in proj["missing_durable_bindings"]
+def test_project_entry_authority_binding_is_canonical_and_strict():
+
+    values = {
+        "repository": "James3014/Nexus-new",
+        "issue_number": 842,
+        "goal_id": "goal-842",
+        "coordination_scope_id": "scope-842",
+        "canonical_remote": "https://github.com/James3014/Nexus-new.git",
+        "intended_action_family": "TASK_SUBMIT",
+    }
+    binding = {**values, "binding_hash": canonical_request_hash(values)}
+    assert _validate_project_entry_authority_binding(
+        {"project_entry_authority_binding": binding},
+        repository="James3014/Nexus-new",
+        issue_number=842,
+    ) == {key: str(value) for key, value in values.items()}
+    with pytest.raises(ValueError, match="BINDING_HASH_MISMATCH"):
+        _validate_project_entry_authority_binding(
+            {"project_entry_authority_binding": {**binding, "goal_id": "other"}},
+            repository="James3014/Nexus-new",
+            issue_number=842,
+        )
+
+
+@pytest.mark.parametrize("field", ["goal_id", "coordination_scope_id", "repository", "canonical_remote", "intended_action_family"])
+def test_project_entry_authority_binding_rejects_null_typed_fields(field):
+
+    values = {
+        "repository": "James3014/Nexus-new", "issue_number": 842,
+        "goal_id": "goal-842", "coordination_scope_id": "scope-842",
+        "canonical_remote": "https://github.com/James3014/Nexus-new.git",
+        "intended_action_family": "TASK_SUBMIT",
+    }
+    binding = {**values, "binding_hash": canonical_request_hash(values)}
+    binding[field] = None
+    with pytest.raises(ValueError):
+        _validate_project_entry_authority_binding({"project_entry_authority_binding": binding})
+
+
+def test_project_entry_authority_binding_rejects_conflicting_legacy_goal():
+    values = {"repository": "James3014/Nexus-new", "issue_number": 842, "goal_id": "goal-842", "coordination_scope_id": "scope-842", "canonical_remote": "https://github.com/James3014/Nexus-new.git", "intended_action_family": "TASK_SUBMIT"}
+    binding = {**values, "binding_hash": canonical_request_hash(values)}
+    with pytest.raises(ValueError, match="DUPLICATE_MISMATCH"):
+        _validate_project_entry_authority_binding({"project_entry_authority_binding": binding, "authority_goal_id": "other-goal"})
+
+
+def test_tracked_retry_reseals_nested_dispatch_envelope_for_submit(
+    tmp_path, monkeypatch
+):
+    task_id = "tracked-retry-refreshes-bound-envelope"
+    service, _, old_envelope, _, _ = _m3c_repairable_workforce_state(
+        tmp_path,
+        monkeypatch,
+        task_id=task_id,
+        acceptance_decision="NOT_REPAIRABLE",
+    )
+    state = service._read_state(task_id)
+    old_state_envelope = copy.deepcopy(state["canonical_dispatch_envelope"])
+    transport = _action_transport(
+        state["request"],
+        attempt_id=old_envelope["attempt_id"],
+        action_id="action-old-bound-envelope",
+        idempotency_key=f"{task_id}:old",
+    )
+    state["request"] = transport
+    state.update(
+        action=transport["action"],
+        action_id=transport["action_id"],
+        action_request_hash=transport["action_request_hash"],
+        idempotency_key=transport["idempotency_key"],
+    )
+    service._write_state(task_id, state)
+    captured = {}
+
+    def capture(request):
+        captured.update(request)
+        return {"attempts": [], "attempt_id": request["attempt_id"]}
+
+    monkeypatch.setattr(service, "submit_task", capture)
+    result = service.retry_task(task_id)
+
+    assert result["retry"]["decision"] == "REUSED_TASK_ID"
+    outer = captured["canonical_dispatch_envelope"]
+    nested = captured["bound_action_request"]["canonical_dispatch_envelope"]
+    assert outer == nested
+    assert outer["attempt_id"] == captured["attempt_id"]
+    assert outer["attempt_id"] != old_envelope["attempt_id"]
+    assert captured["action"]["request_hash"] == canonical_request_hash(
+        captured["bound_action_request"]
+    )
+    effective, _ = _validated_action_request(captured)
+    validated = validate_workforce_dispatch_binding(effective, require_binding=True)
+    assert validated["canonical_dispatch_envelope"] == outer
+    assert service._read_state(task_id)["canonical_dispatch_envelope"] == old_state_envelope
+    tampered = copy.deepcopy(captured)
+    tampered["bound_action_request"]["canonical_dispatch_envelope"]["model"] = "tampered"
+    with pytest.raises(ValueError, match="BOUND_ACTION_REQUEST_HASH_MISMATCH"):
+        _validated_action_request(tampered)

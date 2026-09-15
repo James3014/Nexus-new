@@ -1,0 +1,2536 @@
+{
+  "schema": "read_only.issue853.durable_attempt_audit.v1",
+  "observed_at": "2026-09-10T07:41:15.992147+00:00",
+  "attempt_count": 28,
+  "automation_count": 28,
+  "attempts": [
+    {
+      "revision": "r1",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "campaign task inferred from exact canonical task_card_ref",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "4fb49d5f05e42d47554824f4e39581849a5ca552",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r1",
+        "task_card_hash": "0f618035267d3dcf371169b9a5c4a1aec90c4891520489e605989183642b7912",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "d41a25633c3e8d4173365ff6c36fe23d40090bfa263f623a9c48cf6ae264dc3d",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/d41a25633c3e8d4173365ff6c36fe23d40090bfa263f623a9c48cf6ae264dc3d.json",
+        "sha256": "445973fcf17228276f57b78fed913d735376beecfa1b1212bc6fddc923227e08"
+      },
+      "automation": [
+        {
+          "evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-eba338237bcd84e0524f4392c221b2ebb55a94de8a34382acf24d8e0feede419.json",
+            "sha256": "96b1cb99950191584aeb6b37a49737b54597d8f2f4923446c4ff5d2250699ca2"
+          },
+          "record": {
+            "error": "ExternalIntelligenceError",
+            "identity_hash": "eba338237bcd84e0524f4392c221b2ebb55a94de8a34382acf24d8e0feede419",
+            "intelligence_effect_id": "d41a25633c3e8d4173365ff6c36fe23d40090bfa263f623a9c48cf6ae264dc3d",
+            "issue_number": 853,
+            "prior_state": "INTELLIGENCE_DISPATCHING",
+            "reconcile_only": true,
+            "repository": "James3014/Nexus-new",
+            "schema": "nexus.external_intelligence_automation_state.v1",
+            "semantic_dispatched": false,
+            "state": "RECONCILIATION_REQUIRED"
+          }
+        }
+      ],
+      "worker_operations": [],
+      "missing": [
+        "worker attempt/operation missing: canonical fanout/attempts has no exact task/unit revision file; semantic dispatch is not worker dispatch"
+      ],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r2",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "campaign task inferred from exact canonical task_card_ref",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "4fb49d5f05e42d47554824f4e39581849a5ca552",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r2",
+        "task_card_hash": "0f618035267d3dcf371169b9a5c4a1aec90c4891520489e605989183642b7912",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "8f4f2a54f459f769c040e7f7f798159f794480cfcf6c4a3854341eb922c506ce",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/8f4f2a54f459f769c040e7f7f798159f794480cfcf6c4a3854341eb922c506ce.json",
+        "sha256": "90aded8d46eeb37336beee628174db381944c3ed18b5ce255553d8921d0a66ba"
+      },
+      "automation": [
+        {
+          "evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-919dc2e6585d7724d9eeefa04facbc2579ba8a94d113c4a8382cf919d2e04ec8.json",
+            "sha256": "49b8c9a5c8a0701ab7f037264cfe38532bb0c1222606263e1280d336ff649c43"
+          },
+          "record": {
+            "error": "ExternalIntelligenceError",
+            "identity_hash": "919dc2e6585d7724d9eeefa04facbc2579ba8a94d113c4a8382cf919d2e04ec8",
+            "intelligence_effect_id": "8f4f2a54f459f769c040e7f7f798159f794480cfcf6c4a3854341eb922c506ce",
+            "issue_number": 853,
+            "prior_state": "INTELLIGENCE_DISPATCHING",
+            "reconcile_only": true,
+            "repository": "James3014/Nexus-new",
+            "schema": "nexus.external_intelligence_automation_state.v1",
+            "semantic_dispatched": false,
+            "state": "RECONCILIATION_REQUIRED"
+          }
+        }
+      ],
+      "worker_operations": [],
+      "missing": [
+        "worker attempt/operation missing: canonical fanout/attempts has no exact task/unit revision file; semantic dispatch is not worker dispatch"
+      ],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r3",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "campaign task inferred from exact canonical task_card_ref",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "b822b3030427e3838e035163fdd07d9077b1ce55",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r3",
+        "task_card_hash": "0f618035267d3dcf371169b9a5c4a1aec90c4891520489e605989183642b7912",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "cd6d916d6844edece0dd366abe371a08b525c815aa131b0e8152f29afcd673a9",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/cd6d916d6844edece0dd366abe371a08b525c815aa131b0e8152f29afcd673a9.json",
+        "sha256": "f428b4fb9956e3e33d87385ffad5cd17a05def5bd9c7301c9c6970d496f548d0"
+      },
+      "automation": [
+        {
+          "evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-a5a4e5d9f38dd64fef12f4653edb27de823bd5cfd2d10ecea45a95fabcaf4d21.json",
+            "sha256": "499fd7ed5d591073aad778c72da325c471fb74793a4213d24ea85ecfd689bedd"
+          },
+          "record": {
+            "error": "ExternalIntelligenceError",
+            "identity_hash": "a5a4e5d9f38dd64fef12f4653edb27de823bd5cfd2d10ecea45a95fabcaf4d21",
+            "intelligence_effect_id": "cd6d916d6844edece0dd366abe371a08b525c815aa131b0e8152f29afcd673a9",
+            "issue_number": 853,
+            "prior_state": "INTELLIGENCE_DISPATCHING",
+            "reconcile_only": true,
+            "repository": "James3014/Nexus-new",
+            "schema": "nexus.external_intelligence_automation_state.v1",
+            "semantic_dispatched": false,
+            "state": "RECONCILIATION_REQUIRED"
+          }
+        }
+      ],
+      "worker_operations": [],
+      "missing": [
+        "worker attempt/operation missing: canonical fanout/attempts has no exact task/unit revision file; semantic dispatch is not worker dispatch"
+      ],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r4",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "campaign task inferred from exact canonical task_card_ref",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "66650aeb4e50c20de1ca8dc21150caaad87d20b8",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r4",
+        "task_card_hash": "0f618035267d3dcf371169b9a5c4a1aec90c4891520489e605989183642b7912",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "41c6f9b27e60d6f1eb53dccde40579992d718c477aeea6367f96a4fc7d643e9d",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/41c6f9b27e60d6f1eb53dccde40579992d718c477aeea6367f96a4fc7d643e9d.json",
+        "sha256": "7e4e1af11bd0dac935505aade5f60870e6bf8301a67f912babdffe0f6f7630a6"
+      },
+      "automation": [],
+      "worker_operations": [],
+      "missing": [
+        "automation revision binding absent: 28 canonical automation records inspected; no intelligence_effect_id or fanout_attempt unit_id matches this exact revision",
+        "worker attempt/operation missing: canonical fanout/attempts has no exact task/unit revision file; semantic dispatch is not worker dispatch"
+      ],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r5",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "campaign task inferred from exact canonical task_card_ref",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "66650aeb4e50c20de1ca8dc21150caaad87d20b8",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r5",
+        "task_card_hash": "0f618035267d3dcf371169b9a5c4a1aec90c4891520489e605989183642b7912",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "826ee879f81211579a125404299bd3879e0a8b1bc6c45cc38af3edd729273421",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/826ee879f81211579a125404299bd3879e0a8b1bc6c45cc38af3edd729273421.json",
+        "sha256": "834e4627009c536a4c52452eba83472e2857599de7e153446620bd571fc97605"
+      },
+      "automation": [
+        {
+          "evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-811d08f99b27856023267f980733a7ea0a6c5f00ca896e3c6b447fa9e8a11b4f.json",
+            "sha256": "e8e40659564e977b03d71a93618a48a4235a8d214eb99a5ed0ecf32ccd79dc91"
+          },
+          "record": {
+            "error": "FanoutError",
+            "identity_hash": "811d08f99b27856023267f980733a7ea0a6c5f00ca896e3c6b447fa9e8a11b4f",
+            "intelligence_effect_id": "826ee879f81211579a125404299bd3879e0a8b1bc6c45cc38af3edd729273421",
+            "issue_number": 853,
+            "prior_state": "FANOUT_DISPATCHING",
+            "reconcile_only": true,
+            "repository": "James3014/Nexus-new",
+            "schema": "nexus.external_intelligence_automation_state.v1",
+            "semantic_dispatched": true,
+            "state": "RECONCILIATION_REQUIRED"
+          }
+        }
+      ],
+      "worker_operations": [],
+      "missing": [
+        "worker attempt/operation missing: canonical fanout/attempts has no exact task/unit revision file; semantic dispatch is not worker dispatch"
+      ],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r6",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "canonical fanout attempt",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "66650aeb4e50c20de1ca8dc21150caaad87d20b8",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r6",
+        "task_card_hash": "0f618035267d3dcf371169b9a5c4a1aec90c4891520489e605989183642b7912",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "b4f75a68090dee9886fab558244c4778e349b394bb38a28d3a36b5c9e4240acd",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/b4f75a68090dee9886fab558244c4778e349b394bb38a28d3a36b5c9e4240acd.json",
+        "sha256": "bc7c73b705fb6ded63ee9c3c76eeb632fdf5d9a37858b09babbc42d7bcecc2b2"
+      },
+      "automation": [],
+      "worker_operations": [
+        {
+          "attempt": {
+            "attempt_id": "fb3e79e1-bb66-48ec-be9e-b4a9504187ba",
+            "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/b4f75a68090dee9886fab558244c4778e349b394bb38a28d3a36b5c9e4240acd.json",
+            "envelope_sha256": "2932139a4ae2a0f58da689da2ed7d5f331e667e8a80ef692c0f7e56608e2e62a",
+            "expected_base_sha": "66650aeb4e50c20de1ca8dc21150caaad87d20b8",
+            "mode": "INITIAL",
+            "operation_id": "2794ea8a9f17588e83f17dd7bd97cce4a4645847bac909c25d4b04a1714ac2a5",
+            "retry_safe": false,
+            "schema": "external_intelligence_dispatch_attempt.v1",
+            "state": "OUTCOME_UNKNOWN",
+            "task_id": "open-swe-resident-five-repo-canary-20260908",
+            "transport_status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "unit_id": "resident-canary-r6",
+            "unit_identity_sha256": "472a0467b5fc6fa0301b2e37bfea3e7107d81f0ada881aa4224475e33d511998",
+            "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r6-f05d0f63184e",
+            "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r6-f05d0f63184e"
+          },
+          "attempt_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/fanout/attempts/open-swe-resident-five-repo-canary-20260908--resident-canary-r6--initial.json",
+            "sha256": "e3c9ea891b71d939341a94368f5623c69b5879fb8ca91fd4d37f4d766280f92d"
+          },
+          "runtime_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/operations/2794ea8a9f17588e83f17dd7bd97cce4a4645847bac909c25d4b04a1714ac2a5.json",
+            "sha256": "bc62a5c5de07d57a593b3192ed4e9281d72aa9aadda6b4f393a3a22d83c86a73"
+          },
+          "runtime": {
+            "operation_id": "2794ea8a9f17588e83f17dd7bd97cce4a4645847bac909c25d4b04a1714ac2a5",
+            "status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "outcome_unknown": true,
+            "retry_safe": false,
+            "process_started": true,
+            "provider_id": "opencli_chatgpt",
+            "model_id": "balanced"
+          },
+          "recovery_journal": null,
+          "recovery_evidence": null,
+          "worker_mutation": "UNKNOWN: process_started is not mutation proof"
+        }
+      ],
+      "missing": [
+        "automation revision binding absent: 28 canonical automation records inspected; no intelligence_effect_id or fanout_attempt unit_id matches this exact revision"
+      ],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r7",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "canonical fanout attempt",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "4c2268f7ae11d0dcac924d6608a48247a6b1629f",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r7",
+        "task_card_hash": "0f618035267d3dcf371169b9a5c4a1aec90c4891520489e605989183642b7912",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "b442ff082555b18d006b769e2930ddb03f139debaafd6abff0aa71a1fb121866",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/b442ff082555b18d006b769e2930ddb03f139debaafd6abff0aa71a1fb121866.json",
+        "sha256": "794fca4e7891f64ae3022d77deafd68f7d74b32063ab78ce80487bac6b1caeed"
+      },
+      "automation": [],
+      "worker_operations": [
+        {
+          "attempt": {
+            "attempt_id": "6a2db787-47ab-4919-a5ad-3eb640e68664",
+            "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/b442ff082555b18d006b769e2930ddb03f139debaafd6abff0aa71a1fb121866.json",
+            "envelope_sha256": "e4302b96666eea696e4fe85a12e6569219d7ea1f47c167828f6dbdb151b7dcc5",
+            "expected_base_sha": "4c2268f7ae11d0dcac924d6608a48247a6b1629f",
+            "mode": "INITIAL",
+            "operation_id": "651a1fc55e01fce04e1620a27f2067dc11a6ab4a8ca8a5c28c20e411b46cd38b",
+            "retry_safe": false,
+            "schema": "external_intelligence_dispatch_attempt.v1",
+            "state": "OUTCOME_UNKNOWN",
+            "task_id": "open-swe-resident-five-repo-canary-20260908",
+            "transport_status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "unit_id": "resident-canary-r7",
+            "unit_identity_sha256": "7e7a657b37171e6bbbae04b59a45239061f5b61c6129600e19faec30493827f3",
+            "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r7-557bbac92461",
+            "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r7-557bbac92461"
+          },
+          "attempt_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/fanout/attempts/open-swe-resident-five-repo-canary-20260908--resident-canary-r7--initial.json",
+            "sha256": "78dbfb2a1cdd26015a47e51ea13b71b83fedcfee28b8958c81ef400449ad496c"
+          },
+          "runtime_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/operations/651a1fc55e01fce04e1620a27f2067dc11a6ab4a8ca8a5c28c20e411b46cd38b.json",
+            "sha256": "6293a81f705569c22071dfb37e12af73a65b3c12d6ad673e0351c893567ebb14"
+          },
+          "runtime": {
+            "operation_id": "651a1fc55e01fce04e1620a27f2067dc11a6ab4a8ca8a5c28c20e411b46cd38b",
+            "status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "outcome_unknown": true,
+            "retry_safe": false,
+            "process_started": true,
+            "provider_id": "opencli_chatgpt",
+            "model_id": "balanced"
+          },
+          "recovery_journal": null,
+          "recovery_evidence": null,
+          "worker_mutation": "UNKNOWN: process_started is not mutation proof"
+        }
+      ],
+      "missing": [
+        "automation revision binding absent: 28 canonical automation records inspected; no intelligence_effect_id or fanout_attempt unit_id matches this exact revision"
+      ],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r8",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "campaign task inferred from exact canonical task_card_ref",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "c05005088564afc1bba5111f9c4036c82e175f30",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r8",
+        "task_card_hash": "d39a297583ebf37cdfbd0efa09a8c16f3ecf11ec7b9ced8a43dcc07d18d31fb1",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "4ac872bf4b9a0ebcf44300375fee6e6c87a37ee14c386ad757fbe8ad59202905",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/4ac872bf4b9a0ebcf44300375fee6e6c87a37ee14c386ad757fbe8ad59202905.json",
+        "sha256": "9d063c644908a4416f6e61d5e6a10da24a6d4340fdafb093b433ad9f6a1a0502"
+      },
+      "automation": [
+        {
+          "evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-b7df55feee6a459012d060d9d1099ea2773cb30a1ec0fe6704db1aef84adc937.json",
+            "sha256": "c7361b20ad863eb0e17be5fd2e554a363319236ce8e2b01c493ca5fa3c994485"
+          },
+          "record": {
+            "error": "ExternalIntelligenceError",
+            "identity_hash": "b7df55feee6a459012d060d9d1099ea2773cb30a1ec0fe6704db1aef84adc937",
+            "intelligence_effect_id": "4ac872bf4b9a0ebcf44300375fee6e6c87a37ee14c386ad757fbe8ad59202905",
+            "issue_number": 853,
+            "prior_state": "INTELLIGENCE_DISPATCHING",
+            "reconcile_only": true,
+            "repository": "James3014/Nexus-new",
+            "schema": "nexus.external_intelligence_automation_state.v1",
+            "semantic_dispatched": false,
+            "state": "RECONCILIATION_REQUIRED",
+            "worker_binding": {
+              "admission_evidence_hash": "59af4edf3bac5ca66026ff701f34a1801f465b75fb65853cec39211a815d17ee",
+              "admission_evidence_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/canonical-workforce-evidence/admission-59af4edf3bac5ca66026ff701f34a1801f465b75fb65853cec39211a815d17ee.json",
+              "model": "opencli_chatgpt/balanced",
+              "provider": "opencli_chatgpt",
+              "role_ceiling": "bounded_candidate_generation",
+              "selection_evidence_hash": "265b8be3e9323d595b861622ac65ee88743cb2c2441d7ecc113beaacaa3ad76a",
+              "selection_evidence_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/canonical-workforce-evidence/planner-265b8be3e9323d595b861622ac65ee88743cb2c2441d7ecc113beaacaa3ad76a.json",
+              "worker_id": "opencli_chatgpt_balanced_web"
+            }
+          }
+        }
+      ],
+      "worker_operations": [],
+      "missing": [
+        "worker attempt/operation missing: canonical fanout/attempts has no exact task/unit revision file; semantic dispatch is not worker dispatch"
+      ],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r9",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "canonical fanout attempt",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "c05005088564afc1bba5111f9c4036c82e175f30",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r9",
+        "task_card_hash": "d39a297583ebf37cdfbd0efa09a8c16f3ecf11ec7b9ced8a43dcc07d18d31fb1",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "f20a01bef63972d8a112cb398139cfd43e4f26616fd73d5a9e7cd7b37fa11130",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/f20a01bef63972d8a112cb398139cfd43e4f26616fd73d5a9e7cd7b37fa11130.json",
+        "sha256": "bdd6e41c348853e546339e399e61ecfa5cd700960ea5c0f61b0da14878cef310"
+      },
+      "automation": [],
+      "worker_operations": [
+        {
+          "attempt": {
+            "attempt_id": "3c481288-894a-4975-9d46-5eaaac8ef43b",
+            "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/f20a01bef63972d8a112cb398139cfd43e4f26616fd73d5a9e7cd7b37fa11130.json",
+            "envelope_sha256": "d3636f569a096dc8d8730d93319adb4002c5d8ab7014263a353c6b0304d0a3f0",
+            "expected_base_sha": "c05005088564afc1bba5111f9c4036c82e175f30",
+            "mode": "INITIAL",
+            "operation_id": "4a906e81d06eeb5fef639a21d7f7683d27ff0295c91975361988a935dca6d4ad",
+            "retry_safe": false,
+            "schema": "external_intelligence_dispatch_attempt.v1",
+            "state": "OUTCOME_UNKNOWN",
+            "task_id": "open-swe-resident-five-repo-canary-20260908",
+            "transport_status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "unit_id": "resident-canary-r9",
+            "unit_identity_sha256": "fae440ea06ed7bf6647e4c606d8558167666ea9dc1ea425a5e571f15da512dda",
+            "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r9-0aa0cae361d6",
+            "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r9-0aa0cae361d6"
+          },
+          "attempt_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/fanout/attempts/open-swe-resident-five-repo-canary-20260908--resident-canary-r9--initial.json",
+            "sha256": "f8307d4c2e9ec4f9c4858b51c193f310bb9d6a11c6dc88b52b3c837149a780f5"
+          },
+          "runtime_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/operations/4a906e81d06eeb5fef639a21d7f7683d27ff0295c91975361988a935dca6d4ad.json",
+            "sha256": "f98430d0102e02efe49c53a6f0f193c86b28cea9c3dde540d488636f91541bf4"
+          },
+          "runtime": {
+            "operation_id": "4a906e81d06eeb5fef639a21d7f7683d27ff0295c91975361988a935dca6d4ad",
+            "status": "STARTED",
+            "outcome_unknown": false,
+            "retry_safe": false,
+            "process_started": true,
+            "provider_id": "opencli_chatgpt",
+            "model_id": "balanced"
+          },
+          "recovery_journal": null,
+          "recovery_evidence": null,
+          "worker_mutation": "UNKNOWN: process_started is not mutation proof"
+        }
+      ],
+      "missing": [
+        "automation revision binding absent: 28 canonical automation records inspected; no intelligence_effect_id or fanout_attempt unit_id matches this exact revision"
+      ],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r10",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "campaign task inferred from exact canonical task_card_ref",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "c05005088564afc1bba5111f9c4036c82e175f30",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r10",
+        "task_card_hash": "d39a297583ebf37cdfbd0efa09a8c16f3ecf11ec7b9ced8a43dcc07d18d31fb1",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "a5a1a6b4556988c5393935ad627167a11665c7c970ec7088abc94e6155510b9e",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/a5a1a6b4556988c5393935ad627167a11665c7c970ec7088abc94e6155510b9e.json",
+        "sha256": "2caba8258e93acc8fc277870b248c1640fbacabd03d2c1f870c772d348acf6fd"
+      },
+      "automation": [
+        {
+          "evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-dbf82376793b7956e8bddc30f9123c46b3b44d33b73e07e9f80c0d7b8c87e928.json",
+            "sha256": "0ccf02bf894a3ffdc4c96eb80a846fec172565bf48d7da7172da66fcb65bee3d"
+          },
+          "record": {
+            "error": "ExternalIntelligenceError",
+            "identity_hash": "dbf82376793b7956e8bddc30f9123c46b3b44d33b73e07e9f80c0d7b8c87e928",
+            "intelligence_effect_id": "a5a1a6b4556988c5393935ad627167a11665c7c970ec7088abc94e6155510b9e",
+            "issue_number": 853,
+            "prior_state": "INTELLIGENCE_DISPATCHING",
+            "reconcile_only": true,
+            "repository": "James3014/Nexus-new",
+            "schema": "nexus.external_intelligence_automation_state.v1",
+            "semantic_dispatched": false,
+            "state": "RECONCILIATION_REQUIRED",
+            "worker_binding": {
+              "admission_evidence_hash": "59af4edf3bac5ca66026ff701f34a1801f465b75fb65853cec39211a815d17ee",
+              "admission_evidence_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/canonical-workforce-evidence/admission-59af4edf3bac5ca66026ff701f34a1801f465b75fb65853cec39211a815d17ee.json",
+              "model": "opencli_chatgpt/balanced",
+              "provider": "opencli_chatgpt",
+              "role_ceiling": "bounded_candidate_generation",
+              "selection_evidence_hash": "265b8be3e9323d595b861622ac65ee88743cb2c2441d7ecc113beaacaa3ad76a",
+              "selection_evidence_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/canonical-workforce-evidence/planner-265b8be3e9323d595b861622ac65ee88743cb2c2441d7ecc113beaacaa3ad76a.json",
+              "worker_id": "opencli_chatgpt_balanced_web"
+            }
+          }
+        }
+      ],
+      "worker_operations": [],
+      "missing": [
+        "worker attempt/operation missing: canonical fanout/attempts has no exact task/unit revision file; semantic dispatch is not worker dispatch"
+      ],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r11",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "campaign task inferred from exact canonical task_card_ref",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "c05005088564afc1bba5111f9c4036c82e175f30",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r11",
+        "task_card_hash": "d39a297583ebf37cdfbd0efa09a8c16f3ecf11ec7b9ced8a43dcc07d18d31fb1",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "0ccf7fdcee87040225ceec214d08aa71905981be518654299a3ed156c1fa7a8b",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/0ccf7fdcee87040225ceec214d08aa71905981be518654299a3ed156c1fa7a8b.json",
+        "sha256": "2e632752fbfadae184213e553390ef9b4e8d6d77965fe0ebb5a5bc71ed3f02cf"
+      },
+      "automation": [
+        {
+          "evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-eaa064f97b21beedacb54d528c734aba0538c6f749049308b65e36d4a20f0de9.json",
+            "sha256": "7f4df63ade5f6fe739b85afe2c351d5ae01a3480cb81adf809648072e7fb655a"
+          },
+          "record": {
+            "error": "ExternalIntelligenceError",
+            "identity_hash": "eaa064f97b21beedacb54d528c734aba0538c6f749049308b65e36d4a20f0de9",
+            "intelligence_effect_id": "0ccf7fdcee87040225ceec214d08aa71905981be518654299a3ed156c1fa7a8b",
+            "issue_number": 853,
+            "prior_state": "INTELLIGENCE_DISPATCHING",
+            "reconcile_only": true,
+            "repository": "James3014/Nexus-new",
+            "schema": "nexus.external_intelligence_automation_state.v1",
+            "semantic_dispatched": false,
+            "state": "RECONCILIATION_REQUIRED",
+            "worker_binding": {
+              "admission_evidence_hash": "59af4edf3bac5ca66026ff701f34a1801f465b75fb65853cec39211a815d17ee",
+              "admission_evidence_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/canonical-workforce-evidence/admission-59af4edf3bac5ca66026ff701f34a1801f465b75fb65853cec39211a815d17ee.json",
+              "model": "opencli_chatgpt/balanced",
+              "provider": "opencli_chatgpt",
+              "role_ceiling": "bounded_candidate_generation",
+              "selection_evidence_hash": "265b8be3e9323d595b861622ac65ee88743cb2c2441d7ecc113beaacaa3ad76a",
+              "selection_evidence_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/canonical-workforce-evidence/planner-265b8be3e9323d595b861622ac65ee88743cb2c2441d7ecc113beaacaa3ad76a.json",
+              "worker_id": "opencli_chatgpt_balanced_web"
+            }
+          }
+        }
+      ],
+      "worker_operations": [],
+      "missing": [
+        "worker attempt/operation missing: canonical fanout/attempts has no exact task/unit revision file; semantic dispatch is not worker dispatch"
+      ],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r12",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "canonical fanout attempt",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "62f4b019e7bcde78b78e143d973ff0dbbdca1173",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r12",
+        "task_card_hash": "d39a297583ebf37cdfbd0efa09a8c16f3ecf11ec7b9ced8a43dcc07d18d31fb1",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "a90592a63097f5cb642fb0ec0f61f48dc7c32864768a1334b62ee413b860c66a",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/a90592a63097f5cb642fb0ec0f61f48dc7c32864768a1334b62ee413b860c66a.json",
+        "sha256": "c75b034dcd53a670089b6bc59939af2f43301d474a6fa0ef56d2c40b33faac56"
+      },
+      "automation": [],
+      "worker_operations": [
+        {
+          "attempt": {
+            "attempt_id": "317ee9ba-680d-437c-956b-1743537cc9d4",
+            "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/a90592a63097f5cb642fb0ec0f61f48dc7c32864768a1334b62ee413b860c66a.json",
+            "envelope_sha256": "299fd60dc62bb566062a5cffa388bdfec34cfad76d9bf6611ca52cc8b533800a",
+            "expected_base_sha": "62f4b019e7bcde78b78e143d973ff0dbbdca1173",
+            "mode": "INITIAL",
+            "operation_id": "f9f70297ba27ee6155548b0efea615e09ed5108711574a0cddc8ab3c07a2aa63",
+            "retry_safe": false,
+            "schema": "external_intelligence_dispatch_attempt.v1",
+            "state": "TERMINAL_BLOCKED",
+            "task_id": "open-swe-resident-five-repo-canary-20260908",
+            "transport_status": "COMPLETED",
+            "unit_id": "resident-canary-r12",
+            "unit_identity_sha256": "2af3b6388f23f0f58158eb4f6336e9d63bc66142554f91d22431050c6d126702",
+            "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r12-8a4414522ff8",
+            "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r12-8a4414522ff8"
+          },
+          "attempt_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/fanout/attempts/open-swe-resident-five-repo-canary-20260908--resident-canary-r12--initial.json",
+            "sha256": "0fa982d3a1dcec2c7d2be9e7eb5b327a4963ad7026d760417d29009f230d1842"
+          },
+          "runtime_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/operations/f9f70297ba27ee6155548b0efea615e09ed5108711574a0cddc8ab3c07a2aa63.json",
+            "sha256": "0baaee20c327df5fc5d2a5761e12a247dea18c0634ba62ab399c0cf0cd058532"
+          },
+          "runtime": {
+            "operation_id": "f9f70297ba27ee6155548b0efea615e09ed5108711574a0cddc8ab3c07a2aa63",
+            "status": "COMPLETED",
+            "outcome_unknown": false,
+            "retry_safe": false,
+            "process_started": true,
+            "provider_id": "opencli_chatgpt",
+            "model_id": "balanced"
+          },
+          "recovery_journal": null,
+          "recovery_evidence": null,
+          "worker_mutation": "UNKNOWN: process_started is not mutation proof"
+        }
+      ],
+      "missing": [
+        "automation revision binding absent: 28 canonical automation records inspected; no intelligence_effect_id or fanout_attempt unit_id matches this exact revision"
+      ],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r13",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "campaign task inferred from exact canonical task_card_ref",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "c6e54888d87c3194e23088feee52718862faa632",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r13",
+        "task_card_hash": "d39a297583ebf37cdfbd0efa09a8c16f3ecf11ec7b9ced8a43dcc07d18d31fb1",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "17c66f15b2fba51a6bcb8f8790605ad596751cd339a4d9e67e9f13b618674fda",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/17c66f15b2fba51a6bcb8f8790605ad596751cd339a4d9e67e9f13b618674fda.json",
+        "sha256": "19115e1cee3055e69f2f46f836b8c1e21cdfcdf78678cc126f68a23831ea22c1"
+      },
+      "automation": [
+        {
+          "evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-c45055a2a013114b6fe13c22dfd2b396f31395931d471e83e49176c74159f1e7.json",
+            "sha256": "eca25f119a37778d0920c1e4fc5605fe2c77fc3c08719a158f82d4798e383562"
+          },
+          "record": {
+            "error": "ExternalIntelligenceError",
+            "identity_hash": "c45055a2a013114b6fe13c22dfd2b396f31395931d471e83e49176c74159f1e7",
+            "intelligence_effect_id": "17c66f15b2fba51a6bcb8f8790605ad596751cd339a4d9e67e9f13b618674fda",
+            "issue_number": 853,
+            "prior_state": "INTELLIGENCE_DISPATCHING",
+            "reconcile_only": true,
+            "repository": "James3014/Nexus-new",
+            "schema": "nexus.external_intelligence_automation_state.v1",
+            "semantic_dispatched": false,
+            "state": "RECONCILIATION_REQUIRED",
+            "worker_binding": {
+              "admission_evidence_hash": "09a7bed3bd1d966dac7ef1118155c827c170edfaeac750342c9c0e824e284f5b",
+              "admission_evidence_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/canonical-workforce-evidence/admission-09a7bed3bd1d966dac7ef1118155c827c170edfaeac750342c9c0e824e284f5b.json",
+              "model": "opencli_chatgpt/balanced",
+              "provider": "opencli_chatgpt",
+              "role_ceiling": "bounded_candidate_generation",
+              "selection_evidence_hash": "265b8be3e9323d595b861622ac65ee88743cb2c2441d7ecc113beaacaa3ad76a",
+              "selection_evidence_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/canonical-workforce-evidence/planner-265b8be3e9323d595b861622ac65ee88743cb2c2441d7ecc113beaacaa3ad76a.json",
+              "worker_id": "opencli_chatgpt_balanced_web"
+            }
+          }
+        }
+      ],
+      "worker_operations": [],
+      "missing": [
+        "worker attempt/operation missing: canonical fanout/attempts has no exact task/unit revision file; semantic dispatch is not worker dispatch"
+      ],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r14",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "canonical fanout attempt",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "c6e54888d87c3194e23088feee52718862faa632",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r14",
+        "task_card_hash": "d39a297583ebf37cdfbd0efa09a8c16f3ecf11ec7b9ced8a43dcc07d18d31fb1",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "384ea362ea178fffad6f879a9844113a8a0ea2135a6509a83b25ef8cdb66b5f8",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/384ea362ea178fffad6f879a9844113a8a0ea2135a6509a83b25ef8cdb66b5f8.json",
+        "sha256": "ed55ad80600cf19dda723953ee2168e66f4a63b597d5a28ea08563a1a8b68642"
+      },
+      "automation": [],
+      "worker_operations": [
+        {
+          "attempt": {
+            "attempt_id": "cdd8fc67-2d80-433e-9ac6-6745bcf56593",
+            "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/384ea362ea178fffad6f879a9844113a8a0ea2135a6509a83b25ef8cdb66b5f8.json",
+            "envelope_sha256": "c5d21451827d8c678d732ec4bf9fac68981699d760c8bdda7676bf89b02ef64e",
+            "expected_base_sha": "c6e54888d87c3194e23088feee52718862faa632",
+            "mode": "INITIAL",
+            "operation_id": "3968f5e172cf36cf83f17493c92f14b2d8d1206626dfc6ab5025791a1584e344",
+            "retry_safe": false,
+            "schema": "external_intelligence_dispatch_attempt.v1",
+            "state": "OUTCOME_UNKNOWN",
+            "task_id": "open-swe-resident-five-repo-canary-20260908",
+            "transport_status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "unit_id": "resident-canary-r14",
+            "unit_identity_sha256": "c866b793749167c72d263a18b4c7c5f0eb0034698a7e4bc5c532200279511229",
+            "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r14-645601abdb6e",
+            "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r14-645601abdb6e"
+          },
+          "attempt_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/fanout/attempts/open-swe-resident-five-repo-canary-20260908--resident-canary-r14--initial.json",
+            "sha256": "3488a702512f84b672b23532e01b2daa154cd13ca686ebd45795ba93a611931e"
+          },
+          "runtime_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/operations/3968f5e172cf36cf83f17493c92f14b2d8d1206626dfc6ab5025791a1584e344.json",
+            "sha256": "7fad6db92dc700630d9812ab5fcbc414bcbbac96994029bbaf5df0ed6abe29f7"
+          },
+          "runtime": {
+            "operation_id": "3968f5e172cf36cf83f17493c92f14b2d8d1206626dfc6ab5025791a1584e344",
+            "status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "outcome_unknown": true,
+            "retry_safe": false,
+            "process_started": true,
+            "provider_id": "opencli_chatgpt",
+            "model_id": "balanced"
+          },
+          "recovery_journal": null,
+          "recovery_evidence": null,
+          "worker_mutation": "UNKNOWN: process_started is not mutation proof"
+        }
+      ],
+      "missing": [
+        "automation revision binding absent: 28 canonical automation records inspected; no intelligence_effect_id or fanout_attempt unit_id matches this exact revision"
+      ],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r15",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "canonical fanout attempt",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "c6e54888d87c3194e23088feee52718862faa632",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r15",
+        "task_card_hash": "d39a297583ebf37cdfbd0efa09a8c16f3ecf11ec7b9ced8a43dcc07d18d31fb1",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "845bf1b0c0d665925a3601723831dc1db419f22bc6bd2f4d8d871de312dcbd9d",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/845bf1b0c0d665925a3601723831dc1db419f22bc6bd2f4d8d871de312dcbd9d.json",
+        "sha256": "a31aff7e97ab9ff0ade02d476574a20d0fa6882fb868ddb261534179afe1f7f0"
+      },
+      "automation": [],
+      "worker_operations": [
+        {
+          "attempt": {
+            "attempt_id": "35d321f8-0fd6-4d0f-a5ef-48121354ed6e",
+            "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/845bf1b0c0d665925a3601723831dc1db419f22bc6bd2f4d8d871de312dcbd9d.json",
+            "envelope_sha256": "bb593019dc2e0e9d704b8cc58aa8aedd76d1af94ee500a90948379ce37f0f4cb",
+            "expected_base_sha": "c6e54888d87c3194e23088feee52718862faa632",
+            "mode": "INITIAL",
+            "operation_id": "7919e0ce36742851c2e39e4ac72b3dc09d4a7c21110e752321bf0bbd68b60a78",
+            "retry_safe": false,
+            "schema": "external_intelligence_dispatch_attempt.v1",
+            "state": "OUTCOME_UNKNOWN",
+            "task_id": "open-swe-resident-five-repo-canary-20260908",
+            "transport_status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "unit_id": "resident-canary-r15",
+            "unit_identity_sha256": "10834d5280bdc4dbe689ef878d2aaaac69ddfa3e021c4bc71be275665feb4f30",
+            "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r15-ec3d3b17e889",
+            "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r15-ec3d3b17e889"
+          },
+          "attempt_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/fanout/attempts/open-swe-resident-five-repo-canary-20260908--resident-canary-r15--initial.json",
+            "sha256": "212b8e76a4da372c847f30c4965be427d143f764f1569cd43cc1f368c2cf4f86"
+          },
+          "runtime_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/operations/7919e0ce36742851c2e39e4ac72b3dc09d4a7c21110e752321bf0bbd68b60a78.json",
+            "sha256": "8a4c008bf8323249271078d0e199ade5bfb94cd8379e675162856c8b4aea4142"
+          },
+          "runtime": {
+            "operation_id": "7919e0ce36742851c2e39e4ac72b3dc09d4a7c21110e752321bf0bbd68b60a78",
+            "status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "outcome_unknown": true,
+            "retry_safe": false,
+            "process_started": true,
+            "provider_id": "opencli_chatgpt",
+            "model_id": "balanced"
+          },
+          "recovery_journal": null,
+          "recovery_evidence": null,
+          "worker_mutation": "UNKNOWN: process_started is not mutation proof"
+        }
+      ],
+      "missing": [
+        "automation revision binding absent: 28 canonical automation records inspected; no intelligence_effect_id or fanout_attempt unit_id matches this exact revision"
+      ],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r16",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "canonical fanout attempt",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "c6e54888d87c3194e23088feee52718862faa632",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r16",
+        "task_card_hash": "d39a297583ebf37cdfbd0efa09a8c16f3ecf11ec7b9ced8a43dcc07d18d31fb1",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "2584f0e532eb52bf3627afcda452924a442cb9e7794721625de32e5b5c0a454f",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/2584f0e532eb52bf3627afcda452924a442cb9e7794721625de32e5b5c0a454f.json",
+        "sha256": "6fb9a243f3a32e60dc395943ccf6840f28bdff9819b21df7689e485fb55aeda2"
+      },
+      "automation": [],
+      "worker_operations": [
+        {
+          "attempt": {
+            "attempt_id": "860b2dd2-268d-4b3f-9b94-d6cb13a509c9",
+            "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/2584f0e532eb52bf3627afcda452924a442cb9e7794721625de32e5b5c0a454f.json",
+            "envelope_sha256": "278418aefe458d5a8d4639f20aaa800133b433b644b86da69d5be52a283895b8",
+            "expected_base_sha": "c6e54888d87c3194e23088feee52718862faa632",
+            "mode": "INITIAL",
+            "operation_id": "3e9fb38162c9d364ea68a2d506d28635c58e092baa49d3a6746a0bd7681b77bf",
+            "retry_safe": false,
+            "schema": "external_intelligence_dispatch_attempt.v1",
+            "state": "OUTCOME_UNKNOWN",
+            "task_id": "open-swe-resident-five-repo-canary-20260908",
+            "transport_status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "unit_id": "resident-canary-r16",
+            "unit_identity_sha256": "5f085c580ea38b0c2460cd671e91d515ab4a23b02ca1457a4cfd6592b8f6ff51",
+            "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r16-0951da2bb3d1",
+            "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r16-0951da2bb3d1"
+          },
+          "attempt_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/fanout/attempts/open-swe-resident-five-repo-canary-20260908--resident-canary-r16--initial.json",
+            "sha256": "9e76ba16312fb9a300c12d5eaa4f70fb00a2832c69ba61ce5f93abc237f0f57e"
+          },
+          "runtime_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/operations/3e9fb38162c9d364ea68a2d506d28635c58e092baa49d3a6746a0bd7681b77bf.json",
+            "sha256": "efea6b1e9b9db3f3bbc3094477e028bf351890a68267f138f607bc9c2d9430da"
+          },
+          "runtime": {
+            "operation_id": "3e9fb38162c9d364ea68a2d506d28635c58e092baa49d3a6746a0bd7681b77bf",
+            "status": "STARTED",
+            "outcome_unknown": false,
+            "retry_safe": false,
+            "process_started": true,
+            "provider_id": "opencli_chatgpt",
+            "model_id": "balanced"
+          },
+          "recovery_journal": null,
+          "recovery_evidence": null,
+          "worker_mutation": "UNKNOWN: process_started is not mutation proof"
+        }
+      ],
+      "missing": [
+        "automation revision binding absent: 28 canonical automation records inspected; no intelligence_effect_id or fanout_attempt unit_id matches this exact revision"
+      ],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r17",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "canonical fanout attempt",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "4d4ff33aa58deb67d5f1c2a791ff853b9f054bcb",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r17",
+        "task_card_hash": "d39a297583ebf37cdfbd0efa09a8c16f3ecf11ec7b9ced8a43dcc07d18d31fb1",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "d124e5c430e9d8617a3b8d96604ad99b4cfcd676c0277c4010733ebc447923bb",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/d124e5c430e9d8617a3b8d96604ad99b4cfcd676c0277c4010733ebc447923bb.json",
+        "sha256": "61f9a5fc7b372a2491c41dc3ae1fb79d9224d76aafafea94b9befa854b15e240"
+      },
+      "automation": [],
+      "worker_operations": [
+        {
+          "attempt": {
+            "attempt_id": "036f255c-3baa-45f2-9514-930dc575534a",
+            "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/d124e5c430e9d8617a3b8d96604ad99b4cfcd676c0277c4010733ebc447923bb.json",
+            "envelope_sha256": "962261f42848b42bb2ac9411e6fcc8fd329ce8c04080a11048c900c5fae93d41",
+            "expected_base_sha": "4d4ff33aa58deb67d5f1c2a791ff853b9f054bcb",
+            "mode": "INITIAL",
+            "operation_id": "7685e0bd30f920f824f4c79f948c14d4f3ad900c3e9241f64950286057263cd8",
+            "retry_safe": false,
+            "schema": "external_intelligence_dispatch_attempt.v1",
+            "state": "OUTCOME_UNKNOWN",
+            "task_id": "open-swe-resident-five-repo-canary-20260908",
+            "transport_status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "unit_id": "resident-canary-r17",
+            "unit_identity_sha256": "6f777a291d364142048309d5feadb1134808091300ae1c719c610f27b50a3532",
+            "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r17-38c29e9bff86",
+            "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r17-38c29e9bff86"
+          },
+          "attempt_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/fanout/attempts/open-swe-resident-five-repo-canary-20260908--resident-canary-r17--initial.json",
+            "sha256": "db7720312056a9e12040b1b953f1676bc68d201cc1ab67c859633f41cc809a81"
+          },
+          "runtime_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/operations/7685e0bd30f920f824f4c79f948c14d4f3ad900c3e9241f64950286057263cd8.json",
+            "sha256": "e0a740f9505a78ef9fba46cb808738d913365b0d8a66d16ac2f2c23498e43f12"
+          },
+          "runtime": {
+            "operation_id": "7685e0bd30f920f824f4c79f948c14d4f3ad900c3e9241f64950286057263cd8",
+            "status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "outcome_unknown": true,
+            "retry_safe": false,
+            "process_started": true,
+            "provider_id": "opencli_chatgpt",
+            "model_id": "balanced"
+          },
+          "recovery_journal": null,
+          "recovery_evidence": null,
+          "worker_mutation": "UNKNOWN: process_started is not mutation proof"
+        }
+      ],
+      "missing": [
+        "automation revision binding absent: 28 canonical automation records inspected; no intelligence_effect_id or fanout_attempt unit_id matches this exact revision"
+      ],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r18",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "canonical fanout attempt",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "4d4ff33aa58deb67d5f1c2a791ff853b9f054bcb",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r18",
+        "task_card_hash": "d39a297583ebf37cdfbd0efa09a8c16f3ecf11ec7b9ced8a43dcc07d18d31fb1",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "40816abeb1b31eb0a980199037edd36582a8ea34087306e3de3efbc71e039d7e",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/40816abeb1b31eb0a980199037edd36582a8ea34087306e3de3efbc71e039d7e.json",
+        "sha256": "5d736ff7ea0edb98fd5133bffc3a7957f056385f72f7f35d9e18007563019e3a"
+      },
+      "automation": [],
+      "worker_operations": [
+        {
+          "attempt": {
+            "attempt_id": "5427194f-cc50-420e-b4e5-4474e7014323",
+            "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/40816abeb1b31eb0a980199037edd36582a8ea34087306e3de3efbc71e039d7e.json",
+            "envelope_sha256": "103b2e60afaaefa954d42d4173631534ea1140bd5bd580db80c461bb41da2f9e",
+            "expected_base_sha": "4d4ff33aa58deb67d5f1c2a791ff853b9f054bcb",
+            "mode": "INITIAL",
+            "operation_id": "8cec0bdac0509c259bf371fcc5c761fe495e5cb38d0906dd27f02ee8fb3013bd",
+            "retry_safe": false,
+            "schema": "external_intelligence_dispatch_attempt.v1",
+            "state": "OUTCOME_UNKNOWN",
+            "task_id": "open-swe-resident-five-repo-canary-20260908",
+            "transport_status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "unit_id": "resident-canary-r18",
+            "unit_identity_sha256": "088e15de1fe2461d60e64e976fdc935d1c2b203c3cef03f565837ee647fa4720",
+            "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r18-8a68e6623c6f",
+            "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r18-8a68e6623c6f"
+          },
+          "attempt_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/fanout/attempts/open-swe-resident-five-repo-canary-20260908--resident-canary-r18--initial.json",
+            "sha256": "199b176fcecabf269e3634f38d2934769ed2bdc0bc0936f967f66b3565c38d99"
+          },
+          "runtime_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/operations/8cec0bdac0509c259bf371fcc5c761fe495e5cb38d0906dd27f02ee8fb3013bd.json",
+            "sha256": "72807c1ef860d80d7b00069012cf107af02fead9e546869806509054bbd02efe"
+          },
+          "runtime": {
+            "operation_id": "8cec0bdac0509c259bf371fcc5c761fe495e5cb38d0906dd27f02ee8fb3013bd",
+            "status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "outcome_unknown": true,
+            "retry_safe": false,
+            "process_started": true,
+            "provider_id": "opencli_chatgpt",
+            "model_id": "balanced"
+          },
+          "recovery_journal": null,
+          "recovery_evidence": null,
+          "worker_mutation": "UNKNOWN: process_started is not mutation proof"
+        }
+      ],
+      "missing": [
+        "automation revision binding absent: 28 canonical automation records inspected; no intelligence_effect_id or fanout_attempt unit_id matches this exact revision"
+      ],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r19",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "canonical fanout attempt",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "4d4ff33aa58deb67d5f1c2a791ff853b9f054bcb",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r19",
+        "task_card_hash": "d39a297583ebf37cdfbd0efa09a8c16f3ecf11ec7b9ced8a43dcc07d18d31fb1",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "b360768cd1cbbd2b76ea8e260693feb67777083fa670ed426cabbac15afec077",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/b360768cd1cbbd2b76ea8e260693feb67777083fa670ed426cabbac15afec077.json",
+        "sha256": "b62545b4a1b14779dcc4fd865225f7df34f46c6a4a49ec603cc13ade697ab9b6"
+      },
+      "automation": [],
+      "worker_operations": [
+        {
+          "attempt": {
+            "attempt_id": "2ed54931-d56f-45bc-9244-7e485638903d",
+            "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/b360768cd1cbbd2b76ea8e260693feb67777083fa670ed426cabbac15afec077.json",
+            "envelope_sha256": "db8ac1b16683e8882c350bdc7cdcd73b189a8fba729c4c4911701387f937de49",
+            "expected_base_sha": "4d4ff33aa58deb67d5f1c2a791ff853b9f054bcb",
+            "mode": "INITIAL",
+            "operation_id": "93b4f874179f5569d59220681321df353a6970229999ddd1bb05968627df60b3",
+            "retry_safe": false,
+            "schema": "external_intelligence_dispatch_attempt.v1",
+            "state": "OUTCOME_UNKNOWN",
+            "task_id": "open-swe-resident-five-repo-canary-20260908",
+            "transport_status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "unit_id": "resident-canary-r19",
+            "unit_identity_sha256": "ae14ab201a386a4d37d9543af6218d51e096e7bb915b71542cc618d1766b95bb",
+            "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r19-4665cdbdcaa5",
+            "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r19-4665cdbdcaa5"
+          },
+          "attempt_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/fanout/attempts/open-swe-resident-five-repo-canary-20260908--resident-canary-r19--initial.json",
+            "sha256": "a4090ed5f14959fa225c2e35c7c91ecc4c95f2d6374c2f860c2e849a9606f2aa"
+          },
+          "runtime_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/operations/93b4f874179f5569d59220681321df353a6970229999ddd1bb05968627df60b3.json",
+            "sha256": "a822a3c308997b2761dc7294d4005ff2c79b5fef312aecebd432aeba952017e2"
+          },
+          "runtime": {
+            "operation_id": "93b4f874179f5569d59220681321df353a6970229999ddd1bb05968627df60b3",
+            "status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "outcome_unknown": true,
+            "retry_safe": false,
+            "process_started": true,
+            "provider_id": "opencli_chatgpt",
+            "model_id": "balanced"
+          },
+          "recovery_journal": null,
+          "recovery_evidence": null,
+          "worker_mutation": "UNKNOWN: process_started is not mutation proof"
+        }
+      ],
+      "missing": [
+        "automation revision binding absent: 28 canonical automation records inspected; no intelligence_effect_id or fanout_attempt unit_id matches this exact revision"
+      ],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r20",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "canonical fanout attempt",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "f7fe4b7e48076236910fcbdb0248936e81de2cad",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r20",
+        "task_card_hash": "d39a297583ebf37cdfbd0efa09a8c16f3ecf11ec7b9ced8a43dcc07d18d31fb1",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "63ae5b297018108901740b0bbc277fc3af692c979e48cd4e0592719159d7d2a7",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/63ae5b297018108901740b0bbc277fc3af692c979e48cd4e0592719159d7d2a7.json",
+        "sha256": "341213c105d16645ac6662d5f2885e2629a3d1a049a500e3fb86ff0b00da38cf"
+      },
+      "automation": [],
+      "worker_operations": [
+        {
+          "attempt": {
+            "attempt_id": "64520a23-41e7-4efb-a54b-fae6edbe0cc8",
+            "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/63ae5b297018108901740b0bbc277fc3af692c979e48cd4e0592719159d7d2a7.json",
+            "envelope_sha256": "432faf808f67fd6400bf5b0891b163ebe74f5695127d425e4408af611582345e",
+            "expected_base_sha": "f7fe4b7e48076236910fcbdb0248936e81de2cad",
+            "mode": "INITIAL",
+            "operation_id": "7b28b54c245f8171a1e7000449d0509a0994a8e46988b757b450133c502eb65f",
+            "retry_safe": false,
+            "schema": "external_intelligence_dispatch_attempt.v1",
+            "state": "OUTCOME_UNKNOWN",
+            "task_id": "open-swe-resident-five-repo-canary-20260908",
+            "transport_status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "unit_id": "resident-canary-r20",
+            "unit_identity_sha256": "3f2dcb22bca097f1a988876ec2d0c32140ef3fa03eff397d9d0b34a5c94af9ab",
+            "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r20-afcb3c531b5c",
+            "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r20-afcb3c531b5c"
+          },
+          "attempt_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/fanout/attempts/open-swe-resident-five-repo-canary-20260908--resident-canary-r20--initial.json",
+            "sha256": "71e335535d43cd9bd3a2b05acb88e5119fd642d6d54b6edd5dd8163d0b861c80"
+          },
+          "runtime_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/operations/7b28b54c245f8171a1e7000449d0509a0994a8e46988b757b450133c502eb65f.json",
+            "sha256": "1361b39a5619eeebe334b299488b5ee096320b40419f07e0ffa2a74db94ce4f4"
+          },
+          "runtime": {
+            "operation_id": "7b28b54c245f8171a1e7000449d0509a0994a8e46988b757b450133c502eb65f",
+            "status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "outcome_unknown": true,
+            "retry_safe": false,
+            "process_started": true,
+            "provider_id": "opencli_chatgpt",
+            "model_id": "balanced"
+          },
+          "recovery_journal": null,
+          "recovery_evidence": null,
+          "worker_mutation": "UNKNOWN: process_started is not mutation proof"
+        }
+      ],
+      "missing": [
+        "automation revision binding absent: 28 canonical automation records inspected; no intelligence_effect_id or fanout_attempt unit_id matches this exact revision"
+      ],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r21",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "canonical fanout attempt",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "f7fe4b7e48076236910fcbdb0248936e81de2cad",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r21",
+        "task_card_hash": "d39a297583ebf37cdfbd0efa09a8c16f3ecf11ec7b9ced8a43dcc07d18d31fb1",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "a3f6e9feadcdd73cf2b8b9c16848d13a4198dbf4931fa34ca23ac7f25d07b1ea",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/a3f6e9feadcdd73cf2b8b9c16848d13a4198dbf4931fa34ca23ac7f25d07b1ea.json",
+        "sha256": "ab7a6d49eb732e494b2961963ac80d3a3b7c106261c9c9559464d6bdd8058e10"
+      },
+      "automation": [
+        {
+          "evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-abc13a7dc82a87c6e4b0ba265ba8427754d961cd2a756c8aa80a75818c0cab43.json",
+            "sha256": "b88c7c883d44d727dfc44e60f50c36ca7075d2dca91f00577ee10b1460317130"
+          },
+          "record": {
+            "error": "FANOUT_RECONCILIATION_REQUIRED",
+            "fanout_attempts": {
+              "resident-canary-r21": {
+                "attempt_id": "7fbdbb87-591e-4a8d-92a2-dc28ed5f30e0",
+                "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/a3f6e9feadcdd73cf2b8b9c16848d13a4198dbf4931fa34ca23ac7f25d07b1ea.json",
+                "envelope_sha256": "a7eac9b541e81ddae958d12251b13be57e34afc71d682bf6369814bf78eb4d0a",
+                "expected_base_sha": "f7fe4b7e48076236910fcbdb0248936e81de2cad",
+                "mode": "INITIAL",
+                "operation_id": "5c13dddb4ed6def8685b885998d1cd85a4c9e9ee5708ea71dbc857dfc92c3be5",
+                "retry_safe": false,
+                "schema": "external_intelligence_dispatch_attempt.v1",
+                "state": "OUTCOME_UNKNOWN",
+                "task_id": "open-swe-resident-five-repo-canary-20260908",
+                "transport_status": "OPEN_SWE_OUTCOME_UNKNOWN",
+                "unit_id": "resident-canary-r21",
+                "unit_identity_sha256": "2107979ee1f85289d60a8f0b0e200b8fd53373841ccb45efe0722e3c79c23bad",
+                "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r21-bfd6e639044a",
+                "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r21-bfd6e639044a"
+              }
+            },
+            "identity_hash": "abc13a7dc82a87c6e4b0ba265ba8427754d961cd2a756c8aa80a75818c0cab43",
+            "intelligence_effect_id": "a3f6e9feadcdd73cf2b8b9c16848d13a4198dbf4931fa34ca23ac7f25d07b1ea",
+            "issue_number": 853,
+            "prior_state": "FANOUT_DISPATCHING",
+            "reconcile_only": true,
+            "repository": "James3014/Nexus-new",
+            "schema": "nexus.external_intelligence_automation_state.v1",
+            "semantic_dispatched": true,
+            "state": "RECONCILIATION_REQUIRED",
+            "worker_binding": {
+              "admission_evidence_hash": "09a7bed3bd1d966dac7ef1118155c827c170edfaeac750342c9c0e824e284f5b",
+              "admission_evidence_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/canonical-workforce-evidence/admission-09a7bed3bd1d966dac7ef1118155c827c170edfaeac750342c9c0e824e284f5b.json",
+              "model": "opencli_chatgpt/balanced",
+              "provider": "opencli_chatgpt",
+              "role_ceiling": "bounded_candidate_generation",
+              "selection_evidence_hash": "265b8be3e9323d595b861622ac65ee88743cb2c2441d7ecc113beaacaa3ad76a",
+              "selection_evidence_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/canonical-workforce-evidence/planner-265b8be3e9323d595b861622ac65ee88743cb2c2441d7ecc113beaacaa3ad76a.json",
+              "worker_id": "opencli_chatgpt_balanced_web"
+            }
+          }
+        }
+      ],
+      "worker_operations": [
+        {
+          "attempt": {
+            "attempt_id": "7fbdbb87-591e-4a8d-92a2-dc28ed5f30e0",
+            "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/a3f6e9feadcdd73cf2b8b9c16848d13a4198dbf4931fa34ca23ac7f25d07b1ea.json",
+            "envelope_sha256": "a7eac9b541e81ddae958d12251b13be57e34afc71d682bf6369814bf78eb4d0a",
+            "expected_base_sha": "f7fe4b7e48076236910fcbdb0248936e81de2cad",
+            "mode": "INITIAL",
+            "operation_id": "5c13dddb4ed6def8685b885998d1cd85a4c9e9ee5708ea71dbc857dfc92c3be5",
+            "retry_safe": false,
+            "schema": "external_intelligence_dispatch_attempt.v1",
+            "state": "OUTCOME_UNKNOWN",
+            "task_id": "open-swe-resident-five-repo-canary-20260908",
+            "transport_status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "unit_id": "resident-canary-r21",
+            "unit_identity_sha256": "2107979ee1f85289d60a8f0b0e200b8fd53373841ccb45efe0722e3c79c23bad",
+            "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r21-bfd6e639044a",
+            "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r21-bfd6e639044a"
+          },
+          "attempt_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/fanout/attempts/open-swe-resident-five-repo-canary-20260908--resident-canary-r21--initial.json",
+            "sha256": "41c3cb194d9735cb1d5f9c91d4d423289d092f44760b2ad3e9985986a8455c86"
+          },
+          "runtime_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/operations/5c13dddb4ed6def8685b885998d1cd85a4c9e9ee5708ea71dbc857dfc92c3be5.json",
+            "sha256": "f401d6a9b9af97af9aad4a1f23f68bc33cba9326f5b23a1561c28fbb05ce5374"
+          },
+          "runtime": {
+            "operation_id": "5c13dddb4ed6def8685b885998d1cd85a4c9e9ee5708ea71dbc857dfc92c3be5",
+            "status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "outcome_unknown": true,
+            "retry_safe": false,
+            "process_started": true,
+            "provider_id": "opencli_chatgpt",
+            "model_id": "balanced"
+          },
+          "recovery_journal": {
+            "checkpoint_id": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/recovery/checkpoints/5c13dddb4ed6def8685b885998d1cd85a4c9e9ee5708ea71dbc857dfc92c3be5.sqlite",
+            "checkpoint_namespace": "open-swe-repair-v1",
+            "checkpoint_status": "BOUND",
+            "conversation_id": "6aa0f2db-fee0-83e9-b369-7968ea5e956f",
+            "identity": {
+              "allowed_paths": [
+                "tests/ops/test_open_swe_resident_five_repo_canary_20260908.py"
+              ],
+              "checkpoint_namespace": "open-swe-repair-v1",
+              "execution_material_sha256": "d2b2f6d6869426e79648d81f843ffb0dc75433c90411e54b247eda28a12225fd",
+              "model_id": "balanced",
+              "operation_id": "5c13dddb4ed6def8685b885998d1cd85a4c9e9ee5708ea71dbc857dfc92c3be5",
+              "provider_id": "opencli_chatgpt",
+              "runtime_identity_sha256": "fc451b0f4543f4d44728d98510f43b58798f0ecfffacecda052348c35c5e4af9",
+              "session_id": "ses_open_swe_107d2576f178e04a1c02",
+              "task_id": "open-swe-resident-five-repo-canary-20260908",
+              "transport_config_sha256": "cfb8b3c84b620f3a4c0dfc1d21722b09f8467830b0b815fa62719c0e0d597d91",
+              "unit_id": "resident-canary-r21",
+              "worker_identity_sha256": "75452ca81355a2cf2f9db0ce5085707640993729dd2cb0e45fa9d62a4d87bc2e",
+              "workspace": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r21-bfd6e639044a"
+            },
+            "lease_epoch": 14,
+            "prompt_sha256": "056bff4f374437a32d5b9ec04e2c166b9a2f0eefcd6e26c0982bc45ea95517a4",
+            "recovered_response": "{\"type\":\"tool_call\",\"name\":\"write_file\",\"arguments\":{\"file_path\":\"/tests/ops/test_open_swe_resident_five_repo_canary_20260908.py\",\"content\":\"def test_open_swe_resident_five_repo_canary_20260908():\\n mounted_repository_ids = (\\n \"James3014/Nexus-new\",\\n \"James3014/devspace\",\\n \"James3014/nexus-core\",\\n \"James3014/nexus-learning\",\\n \"James3014/nexus-open-swe-runtime\",\\n )\\n\\n assert mounted_repository_ids == (\\n \"James3014/Nexus-new\",\\n \"James3014/devspace\",\\n \"James3014/nexus-core\",\\n \"James3014/nexus-learning\",\\n \"James3014/nexus-open-swe-runtime\",\\n )\\n\"}}",
+            "response_sha256": "c6678974ee29b92f49cc1b90e49202b3c0a5f863d36279a5c81dc4ac7381f610",
+            "status": "RESPONSE_RECOVERED",
+            "turn_id": "turn_95395ef8ae1d74b65c272267",
+            "turn_ordinal": 3
+          },
+          "recovery_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/recovery/operations/5c13dddb4ed6def8685b885998d1cd85a4c9e9ee5708ea71dbc857dfc92c3be5.json",
+            "sha256": "6c337f085cd7c3f3fe2c7eaf06d3491bda8f3957913efbbc31385102135c7360"
+          },
+          "worker_mutation": "UNKNOWN: process_started is not mutation proof"
+        }
+      ],
+      "missing": [],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r22",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "canonical fanout attempt",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "e10e35af9de9ceb4296c0ab36a11f9cd16a15378",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r22",
+        "task_card_hash": "d39a297583ebf37cdfbd0efa09a8c16f3ecf11ec7b9ced8a43dcc07d18d31fb1",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "47e91cbf7ed4894a517f88fe9d9fe9ef66a9d5ec9809538ecc30f4e1614f1da2",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/47e91cbf7ed4894a517f88fe9d9fe9ef66a9d5ec9809538ecc30f4e1614f1da2.json",
+        "sha256": "1778be482d867aae5bc53d5dfd113312e4082e5593a1212d5e47c5bce2e4d8b5"
+      },
+      "automation": [
+        {
+          "evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-a878a8d1081061dbc1831982adfb271e2220422431b63f38058096f77d2e1aa8.json",
+            "sha256": "4207df0d8cb86c793df8eb4351ec3873bab053b36a086d025636240dc0bd2bae"
+          },
+          "record": {
+            "error": "FANOUT_RECONCILIATION_REQUIRED",
+            "fanout_attempts": {
+              "resident-canary-r22": {
+                "attempt_id": "11d2e469-8012-4e0b-bee9-898aa5abdd1d",
+                "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/47e91cbf7ed4894a517f88fe9d9fe9ef66a9d5ec9809538ecc30f4e1614f1da2.json",
+                "envelope_sha256": "64e5dac4f491947890b8bd8678404f063f282ef8035589e3dac9d92efbbf4919",
+                "expected_base_sha": "e10e35af9de9ceb4296c0ab36a11f9cd16a15378",
+                "mode": "INITIAL",
+                "operation_id": "b1403a987d348c82548523c6b64b4c41915bed304d7cbae866e75c78e9dbe9b7",
+                "retry_safe": false,
+                "schema": "external_intelligence_dispatch_attempt.v1",
+                "state": "OUTCOME_UNKNOWN",
+                "task_id": "open-swe-resident-five-repo-canary-20260908",
+                "transport_status": "OPEN_SWE_OUTCOME_UNKNOWN",
+                "unit_id": "resident-canary-r22",
+                "unit_identity_sha256": "7a65486295363ec60489fa3b6ddd8436e5dd3119cc4ee7b6de5feff51a724768",
+                "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r22-c1d485ecfd51",
+                "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r22-c1d485ecfd51"
+              }
+            },
+            "identity_hash": "a878a8d1081061dbc1831982adfb271e2220422431b63f38058096f77d2e1aa8",
+            "intelligence_effect_id": "47e91cbf7ed4894a517f88fe9d9fe9ef66a9d5ec9809538ecc30f4e1614f1da2",
+            "issue_number": 853,
+            "prior_state": "FANOUT_DISPATCHING",
+            "reconcile_only": true,
+            "repository": "James3014/Nexus-new",
+            "schema": "nexus.external_intelligence_automation_state.v1",
+            "semantic_dispatched": true,
+            "state": "RECONCILIATION_REQUIRED",
+            "worker_binding": {
+              "admission_evidence_hash": "09a7bed3bd1d966dac7ef1118155c827c170edfaeac750342c9c0e824e284f5b",
+              "admission_evidence_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/canonical-workforce-evidence/admission-09a7bed3bd1d966dac7ef1118155c827c170edfaeac750342c9c0e824e284f5b.json",
+              "model": "opencli_chatgpt/balanced",
+              "provider": "opencli_chatgpt",
+              "role_ceiling": "bounded_candidate_generation",
+              "selection_evidence_hash": "265b8be3e9323d595b861622ac65ee88743cb2c2441d7ecc113beaacaa3ad76a",
+              "selection_evidence_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/canonical-workforce-evidence/planner-265b8be3e9323d595b861622ac65ee88743cb2c2441d7ecc113beaacaa3ad76a.json",
+              "worker_id": "opencli_chatgpt_balanced_web"
+            }
+          }
+        }
+      ],
+      "worker_operations": [
+        {
+          "attempt": {
+            "attempt_id": "11d2e469-8012-4e0b-bee9-898aa5abdd1d",
+            "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/47e91cbf7ed4894a517f88fe9d9fe9ef66a9d5ec9809538ecc30f4e1614f1da2.json",
+            "envelope_sha256": "64e5dac4f491947890b8bd8678404f063f282ef8035589e3dac9d92efbbf4919",
+            "expected_base_sha": "e10e35af9de9ceb4296c0ab36a11f9cd16a15378",
+            "mode": "INITIAL",
+            "operation_id": "b1403a987d348c82548523c6b64b4c41915bed304d7cbae866e75c78e9dbe9b7",
+            "retry_safe": false,
+            "schema": "external_intelligence_dispatch_attempt.v1",
+            "state": "OUTCOME_UNKNOWN",
+            "task_id": "open-swe-resident-five-repo-canary-20260908",
+            "transport_status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "unit_id": "resident-canary-r22",
+            "unit_identity_sha256": "7a65486295363ec60489fa3b6ddd8436e5dd3119cc4ee7b6de5feff51a724768",
+            "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r22-c1d485ecfd51",
+            "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r22-c1d485ecfd51"
+          },
+          "attempt_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/fanout/attempts/open-swe-resident-five-repo-canary-20260908--resident-canary-r22--initial.json",
+            "sha256": "49241857a809b3c04f5b2b15c9b3c65dcdd8802b56f0c94c4f59ac19b155457c"
+          },
+          "runtime_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/operations/b1403a987d348c82548523c6b64b4c41915bed304d7cbae866e75c78e9dbe9b7.json",
+            "sha256": "ffb4c577b6adf103ea7359b4f6fb41a63860467b480858339d64e47c9e00ac73"
+          },
+          "runtime": {
+            "operation_id": "b1403a987d348c82548523c6b64b4c41915bed304d7cbae866e75c78e9dbe9b7",
+            "status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "outcome_unknown": true,
+            "retry_safe": false,
+            "process_started": true,
+            "provider_id": "opencli_chatgpt",
+            "model_id": "balanced"
+          },
+          "recovery_journal": {
+            "checkpoint_id": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/recovery/checkpoints/b1403a987d348c82548523c6b64b4c41915bed304d7cbae866e75c78e9dbe9b7.sqlite",
+            "checkpoint_namespace": "open-swe-repair-v1",
+            "checkpoint_status": "BOUND",
+            "conversation_id": "6aa11858-6064-83e8-b6bd-934cf990f21b",
+            "identity": {
+              "allowed_paths": [
+                "tests/ops/test_open_swe_resident_five_repo_canary_20260908.py"
+              ],
+              "checkpoint_namespace": "open-swe-repair-v1",
+              "execution_material_sha256": "ad2120cef32e8605c2b290defe5c1265eedff60f6884122911d97e9430f640f9",
+              "model_id": "balanced",
+              "operation_id": "b1403a987d348c82548523c6b64b4c41915bed304d7cbae866e75c78e9dbe9b7",
+              "provider_id": "opencli_chatgpt",
+              "runtime_identity_sha256": "84f8acbf5a19ee199fcf65dfe0aa96b8c7ef546d6159f4957fb9c2ebde941d19",
+              "session_id": "ses_open_swe_699892cee6f2d47819ea",
+              "task_id": "open-swe-resident-five-repo-canary-20260908",
+              "transport_config_sha256": "cfb8b3c84b620f3a4c0dfc1d21722b09f8467830b0b815fa62719c0e0d597d91",
+              "unit_id": "resident-canary-r22",
+              "worker_identity_sha256": "75452ca81355a2cf2f9db0ce5085707640993729dd2cb0e45fa9d62a4d87bc2e",
+              "workspace": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r22-c1d485ecfd51"
+            },
+            "lease_epoch": 18,
+            "prompt_sha256": "bb2514fb43c6efbaef522bb3afffe6b3cc52982d15750bd39627bc30ebf7c295",
+            "protocol_repair_origin": "{\"type\":\"tool_call\",\"name\":\"write_file\",\"arguments\":{\"file_path\":\"/tests/ops/test_open_swe_resident_five_repo_canary_20260908.py\",\"content\":\"def test_resident_five_repository_mount_order() -> None:\\n mounted_repository_ids = (\\n \"James3014/Nexus-new\",\\n \"James3014/devspace\",\\n \"James3014/nexus-core\",\\n \"James3014/nexus-learning\",\\n \"James3014/nexus-open-swe-runtime\",\\n )\\n\\n assert mounted_repository_ids == (\\n \"James3014/Nexus-new\",\\n \"James3014/devspace\",\\n \"James3014/nexus-core\",\\n \"James3014/nexus-learning\",\\n \"James3014/nexus-open-swe-runtime\",\\n )\\n\"}}",
+            "protocol_repair_origin_sha256": "9760ac50c011ddbaaf3e361f8168ad2f3fc71bbe0f2db20211f0e05d52988164",
+            "protocol_repair_original_conversation_id": "6aa11858-6064-83e8-b6bd-934cf990f21b",
+            "protocol_repair_response": "{\"type\":\"tool_call\",\"name\":\"write_file\",\"arguments\":{\"file_path\":\"/tests/ops/test_open_swe_resident_five_repo_canary_20260908.py\",\"content\":\"def test_resident_five_repository_mount_order() -> None:\\n mounted_repository_ids = (\\n \\\"James3014/Nexus-new\\\",\\n \\\"James3014/devspace\\\",\\n \\\"James3014/nexus-core\\\",\\n \\\"James3014/nexus-learning\\\",\\n \\\"James3014/nexus-open-swe-runtime\\\",\\n )\\n\\n assert mounted_repository_ids == (\\n \\\"James3014/Nexus-new\\\",\\n \\\"James3014/devspace\\\",\\n \\\"James3014/nexus-core\\\",\\n \\\"James3014/nexus-learning\\\",\\n \\\"James3014/nexus-open-swe-runtime\\\",\\n )\\n\"}}",
+            "protocol_repair_response_sha256": "e79646a17fd2c7a4919f16271841d3790e00794ad69946df06bbe22abbb9ed97",
+            "protocol_repair_status": "RECOVERED",
+            "protocol_repair_turn_id": "turn_repair_42c74a2701365eae65e4",
+            "recovered_response": "{\"type\":\"tool_call\",\"name\":\"write_file\",\"arguments\":{\"file_path\":\"/tests/ops/test_open_swe_resident_five_repo_canary_20260908.py\",\"content\":\"def test_resident_five_repository_mount_order() -> None:\\n mounted_repository_ids = (\\n \\\"James3014/Nexus-new\\\",\\n \\\"James3014/devspace\\\",\\n \\\"James3014/nexus-core\\\",\\n \\\"James3014/nexus-learning\\\",\\n \\\"James3014/nexus-open-swe-runtime\\\",\\n )\\n\\n assert mounted_repository_ids == (\\n \\\"James3014/Nexus-new\\\",\\n \\\"James3014/devspace\\\",\\n \\\"James3014/nexus-core\\\",\\n \\\"James3014/nexus-learning\\\",\\n \\\"James3014/nexus-open-swe-runtime\\\",\\n )\\n\"}}",
+            "response_sha256": "e79646a17fd2c7a4919f16271841d3790e00794ad69946df06bbe22abbb9ed97",
+            "status": "RESPONSE_RECOVERED",
+            "turn_id": "turn_repair_42c74a2701365eae65e4",
+            "turn_ordinal": 4
+          },
+          "recovery_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/recovery/operations/b1403a987d348c82548523c6b64b4c41915bed304d7cbae866e75c78e9dbe9b7.json",
+            "sha256": "35a82273766b71eb612a4f635e115aa78a831e99784884f75998a2ad075a6f59"
+          },
+          "worker_mutation": "UNKNOWN: process_started is not mutation proof"
+        }
+      ],
+      "missing": [],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r23",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "canonical fanout attempt",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "e1c95acb041390d96f4379a8de9c98093211da8e",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r23",
+        "task_card_hash": "d39a297583ebf37cdfbd0efa09a8c16f3ecf11ec7b9ced8a43dcc07d18d31fb1",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "0bcaf87f055e8793f593b6ead858f8e557a23c322f3520f915e15846f76567c5",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/0bcaf87f055e8793f593b6ead858f8e557a23c322f3520f915e15846f76567c5.json",
+        "sha256": "35efd5f0dffe9c97796288650dce2e52a6a717d0dc4616fc787ee4aa8721e012"
+      },
+      "automation": [
+        {
+          "evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-ab83f5dcdd81179bad3b9d9a3e858cff198218b62ac0615f73cbc1103f82cecb.json",
+            "sha256": "ba7bef002ec350ce95396c5adb38d8e00714598b120b74b7f852ef549465090c"
+          },
+          "record": {
+            "error": "FANOUT_RECONCILIATION_REQUIRED",
+            "fanout_attempts": {
+              "resident-canary-r23": {
+                "attempt_id": "0d9c1a37-585c-43bc-9d25-5209ade2a2d8",
+                "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/0bcaf87f055e8793f593b6ead858f8e557a23c322f3520f915e15846f76567c5.json",
+                "envelope_sha256": "18be428d2a03a209bf7c57ae6d86be426a7e3285125f9905500471d23ce21528",
+                "expected_base_sha": "e1c95acb041390d96f4379a8de9c98093211da8e",
+                "mode": "INITIAL",
+                "operation_id": "2f89796402bfce32cc2775d3fdfb471fbae5ff0038e8f1cdc534c3883ce47b02",
+                "retry_safe": false,
+                "schema": "external_intelligence_dispatch_attempt.v1",
+                "state": "OUTCOME_UNKNOWN",
+                "task_id": "open-swe-resident-five-repo-canary-20260908",
+                "transport_status": "OPEN_SWE_OUTCOME_UNKNOWN",
+                "unit_id": "resident-canary-r23",
+                "unit_identity_sha256": "9b0f0cc9fa300fd04393bc28a92f543bf5d1b8a33bf6f76195b4b2fc96fc9446",
+                "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r23-a464dcea067a",
+                "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r23-a464dcea067a"
+              }
+            },
+            "identity_hash": "ab83f5dcdd81179bad3b9d9a3e858cff198218b62ac0615f73cbc1103f82cecb",
+            "intelligence_effect_id": "0bcaf87f055e8793f593b6ead858f8e557a23c322f3520f915e15846f76567c5",
+            "issue_number": 853,
+            "prior_state": "FANOUT_DISPATCHING",
+            "reconcile_only": true,
+            "repository": "James3014/Nexus-new",
+            "schema": "nexus.external_intelligence_automation_state.v1",
+            "semantic_dispatched": true,
+            "state": "RECONCILIATION_REQUIRED",
+            "worker_binding": {
+              "admission_evidence_hash": "09a7bed3bd1d966dac7ef1118155c827c170edfaeac750342c9c0e824e284f5b",
+              "admission_evidence_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/canonical-workforce-evidence/admission-09a7bed3bd1d966dac7ef1118155c827c170edfaeac750342c9c0e824e284f5b.json",
+              "model": "opencli_chatgpt/balanced",
+              "provider": "opencli_chatgpt",
+              "role_ceiling": "bounded_candidate_generation",
+              "selection_evidence_hash": "265b8be3e9323d595b861622ac65ee88743cb2c2441d7ecc113beaacaa3ad76a",
+              "selection_evidence_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/canonical-workforce-evidence/planner-265b8be3e9323d595b861622ac65ee88743cb2c2441d7ecc113beaacaa3ad76a.json",
+              "worker_id": "opencli_chatgpt_balanced_web"
+            }
+          }
+        }
+      ],
+      "worker_operations": [
+        {
+          "attempt": {
+            "attempt_id": "0d9c1a37-585c-43bc-9d25-5209ade2a2d8",
+            "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/0bcaf87f055e8793f593b6ead858f8e557a23c322f3520f915e15846f76567c5.json",
+            "envelope_sha256": "18be428d2a03a209bf7c57ae6d86be426a7e3285125f9905500471d23ce21528",
+            "expected_base_sha": "e1c95acb041390d96f4379a8de9c98093211da8e",
+            "mode": "INITIAL",
+            "operation_id": "2f89796402bfce32cc2775d3fdfb471fbae5ff0038e8f1cdc534c3883ce47b02",
+            "retry_safe": false,
+            "schema": "external_intelligence_dispatch_attempt.v1",
+            "state": "OUTCOME_UNKNOWN",
+            "task_id": "open-swe-resident-five-repo-canary-20260908",
+            "transport_status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "unit_id": "resident-canary-r23",
+            "unit_identity_sha256": "9b0f0cc9fa300fd04393bc28a92f543bf5d1b8a33bf6f76195b4b2fc96fc9446",
+            "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r23-a464dcea067a",
+            "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r23-a464dcea067a"
+          },
+          "attempt_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/fanout/attempts/open-swe-resident-five-repo-canary-20260908--resident-canary-r23--initial.json",
+            "sha256": "6fff2f9090a8beb2e86e7bc5dfa606691206988e08ba751725f00add48c608e0"
+          },
+          "runtime_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/operations/2f89796402bfce32cc2775d3fdfb471fbae5ff0038e8f1cdc534c3883ce47b02.json",
+            "sha256": "167dd8a6c5b42670a4f066690ff0ff04260259757e1b63b3189022a5ccfe1aa9"
+          },
+          "runtime": {
+            "operation_id": "2f89796402bfce32cc2775d3fdfb471fbae5ff0038e8f1cdc534c3883ce47b02",
+            "status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "outcome_unknown": true,
+            "retry_safe": false,
+            "process_started": true,
+            "provider_id": "opencli_chatgpt",
+            "model_id": "balanced"
+          },
+          "recovery_journal": {
+            "checkpoint_id": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/recovery/checkpoints/2f89796402bfce32cc2775d3fdfb471fbae5ff0038e8f1cdc534c3883ce47b02.sqlite",
+            "checkpoint_namespace": "open-swe-repair-v1",
+            "checkpoint_status": "BOUND",
+            "conversation_id": "6aa137b0-b79c-83e8-b269-4f9a0d1545b4",
+            "identity": {
+              "allowed_paths": [
+                "tests/ops/test_open_swe_resident_five_repo_canary_20260908.py"
+              ],
+              "checkpoint_namespace": "open-swe-repair-v1",
+              "execution_material_sha256": "d999e23803ad501b3d3404a24a05807e459524b2f87d82695c835bcb7e2158eb",
+              "model_id": "balanced",
+              "operation_id": "2f89796402bfce32cc2775d3fdfb471fbae5ff0038e8f1cdc534c3883ce47b02",
+              "provider_id": "opencli_chatgpt",
+              "runtime_identity_sha256": "6c54fe44ed3685d44d6ac039f7a5bcf2b2a4f5cc83f2412ad770e8c0cf11a06d",
+              "session_id": "ses_open_swe_f04ec57a3f38777f62ce",
+              "task_id": "open-swe-resident-five-repo-canary-20260908",
+              "transport_config_sha256": "cfb8b3c84b620f3a4c0dfc1d21722b09f8467830b0b815fa62719c0e0d597d91",
+              "unit_id": "resident-canary-r23",
+              "worker_identity_sha256": "75452ca81355a2cf2f9db0ce5085707640993729dd2cb0e45fa9d62a4d87bc2e",
+              "workspace": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r23-a464dcea067a"
+            },
+            "lease_epoch": 20,
+            "prompt_sha256": "f462dc93151d12c22e93ede9f50a820beb551a64a6169938bc31b588db8723b7",
+            "protocol_repair_origin": "{\"type\":\"tool_call\",\"name\":\"write_file\",\"arguments\":{\"file_path\":\"/tests/ops/test_open_swe_resident_five_repo_canary_20260908.py\",\"content\":\"def test_resident_five_repository_mount_order() -> None:\\n mounted_repository_ids = (\\n \"James3014/Nexus-new\",\\n \"James3014/devspace\",\\n \"James3014/nexus-core\",\\n \"James3014/nexus-learning\",\\n \"James3014/nexus-open-swe-runtime\",\\n )\\n\\n assert mounted_repository_ids == (\\n \"James3014/Nexus-new\",\\n \"James3014/devspace\",\\n \"James3014/nexus-core\",\\n \"James3014/nexus-learning\",\\n \"James3014/nexus-open-swe-runtime\",\\n )\\n\"}}",
+            "protocol_repair_origin_sha256": "9760ac50c011ddbaaf3e361f8168ad2f3fc71bbe0f2db20211f0e05d52988164",
+            "protocol_repair_original_conversation_id": "6aa137b0-b79c-83e8-b269-4f9a0d1545b4",
+            "protocol_repair_response": "{\"type\":\"tool_call\",\"name\":\"write_file\",\"arguments\":{\"file_path\":\"/tests/ops/test_open_swe_resident_five_repo_canary_20260908.py\",\"content\":\"def test_resident_five_repository_mount_order() -> None:\\n mounted_repository_ids = (\\n \\\"James3014/Nexus-new\\\",\\n \\\"James3014/devspace\\\",\\n \\\"James3014/nexus-core\\\",\\n \\\"James3014/nexus-learning\\\",\\n \\\"James3014/nexus-open-swe-runtime\\\",\\n )\\n\\n assert mounted_repository_ids == (\\n \\\"James3014/Nexus-new\\\",\\n \\\"James3014/devspace\\\",\\n \\\"James3014/nexus-core\\\",\\n \\\"James3014/nexus-learning\\\",\\n \\\"James3014/nexus-open-swe-runtime\\\",\\n )\\n\"}}",
+            "protocol_repair_response_sha256": "e79646a17fd2c7a4919f16271841d3790e00794ad69946df06bbe22abbb9ed97",
+            "protocol_repair_status": "RECOVERED",
+            "protocol_repair_turn_id": "turn_repair_39e318e9597f047894fe",
+            "recovered_response": "{\"type\":\"tool_call\",\"name\":\"write_file\",\"arguments\":{\"file_path\":\"/tests/ops/test_open_swe_resident_five_repo_canary_20260908.py\",\"content\":\"def test_resident_five_repository_mount_order() -> None:\\n mounted_repository_ids = (\\n \\\"James3014/Nexus-new\\\",\\n \\\"James3014/devspace\\\",\\n \\\"James3014/nexus-core\\\",\\n \\\"James3014/nexus-learning\\\",\\n \\\"James3014/nexus-open-swe-runtime\\\",\\n )\\n\\n assert mounted_repository_ids == (\\n \\\"James3014/Nexus-new\\\",\\n \\\"James3014/devspace\\\",\\n \\\"James3014/nexus-core\\\",\\n \\\"James3014/nexus-learning\\\",\\n \\\"James3014/nexus-open-swe-runtime\\\",\\n )\\n\"}}",
+            "response_sha256": "e79646a17fd2c7a4919f16271841d3790e00794ad69946df06bbe22abbb9ed97",
+            "status": "ASK_DISPATCHING",
+            "turn_id": "turn_29058057d995c3591451a7e9",
+            "turn_ordinal": 5
+          },
+          "recovery_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/recovery/operations/2f89796402bfce32cc2775d3fdfb471fbae5ff0038e8f1cdc534c3883ce47b02.json",
+            "sha256": "6b1d60ffac480a3e234a083bc015f26f27176a172c98bf47253417694a290cca"
+          },
+          "worker_mutation": "UNKNOWN: process_started is not mutation proof"
+        }
+      ],
+      "missing": [],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r24",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "canonical fanout attempt",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "a59b8ab23a91ae4470300a34b4691567255c12af",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r24",
+        "task_card_hash": "d39a297583ebf37cdfbd0efa09a8c16f3ecf11ec7b9ced8a43dcc07d18d31fb1",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "c2acc12af835e1668f7ba6c6814b9d8c2f47005bbea6a3bb617fc2903bab6611",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/c2acc12af835e1668f7ba6c6814b9d8c2f47005bbea6a3bb617fc2903bab6611.json",
+        "sha256": "c6ffd7a9f48203f60f6c5e846723078e5d1b0635e6b1aae8b333f41048479a52"
+      },
+      "automation": [
+        {
+          "evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-7deabffd8b4dac4b9891bd4014b8b979dd188eb9c7475f79fd9c083a9164b42a.json",
+            "sha256": "ea314ab02729d0f595a7b97a3e353d5d2c4f7b4d2c359af0475ed51c97e1fa4c"
+          },
+          "record": {
+            "error": "FANOUT_RECONCILIATION_REQUIRED",
+            "fanout_attempts": {
+              "resident-canary-r24": {
+                "attempt_id": "cb0a1013-da2f-4d50-b6f5-fe75761b9e80",
+                "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/c2acc12af835e1668f7ba6c6814b9d8c2f47005bbea6a3bb617fc2903bab6611.json",
+                "envelope_sha256": "20c0a8a06a4128106bb00eecdec65e20660edb6c60f1c117fd5aab11559c97d1",
+                "expected_base_sha": "a59b8ab23a91ae4470300a34b4691567255c12af",
+                "mode": "INITIAL",
+                "operation_id": "40cedd453df86d171fc89cb599758c794219c52afd3c6b0678b491b5287196fc",
+                "retry_safe": false,
+                "schema": "external_intelligence_dispatch_attempt.v1",
+                "state": "OUTCOME_UNKNOWN",
+                "task_id": "open-swe-resident-five-repo-canary-20260908",
+                "transport_status": "OPEN_SWE_OUTCOME_UNKNOWN",
+                "unit_id": "resident-canary-r24",
+                "unit_identity_sha256": "6f03cb0c226238f4e2665b90277b420078a9d31b13be2a254facff28f03ae8f1",
+                "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r24-8e2dfcfd0d9c",
+                "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r24-8e2dfcfd0d9c"
+              }
+            },
+            "identity_hash": "7deabffd8b4dac4b9891bd4014b8b979dd188eb9c7475f79fd9c083a9164b42a",
+            "intelligence_effect_id": "c2acc12af835e1668f7ba6c6814b9d8c2f47005bbea6a3bb617fc2903bab6611",
+            "issue_number": 853,
+            "prior_state": "FANOUT_DISPATCHING",
+            "reconcile_only": true,
+            "repository": "James3014/Nexus-new",
+            "schema": "nexus.external_intelligence_automation_state.v1",
+            "semantic_dispatched": true,
+            "state": "RECONCILIATION_REQUIRED",
+            "worker_binding": {
+              "admission_evidence_hash": "09a7bed3bd1d966dac7ef1118155c827c170edfaeac750342c9c0e824e284f5b",
+              "admission_evidence_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/canonical-workforce-evidence/admission-09a7bed3bd1d966dac7ef1118155c827c170edfaeac750342c9c0e824e284f5b.json",
+              "model": "opencli_chatgpt/balanced",
+              "provider": "opencli_chatgpt",
+              "role_ceiling": "bounded_candidate_generation",
+              "selection_evidence_hash": "265b8be3e9323d595b861622ac65ee88743cb2c2441d7ecc113beaacaa3ad76a",
+              "selection_evidence_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/canonical-workforce-evidence/planner-265b8be3e9323d595b861622ac65ee88743cb2c2441d7ecc113beaacaa3ad76a.json",
+              "worker_id": "opencli_chatgpt_balanced_web"
+            }
+          }
+        }
+      ],
+      "worker_operations": [
+        {
+          "attempt": {
+            "attempt_id": "cb0a1013-da2f-4d50-b6f5-fe75761b9e80",
+            "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/c2acc12af835e1668f7ba6c6814b9d8c2f47005bbea6a3bb617fc2903bab6611.json",
+            "envelope_sha256": "20c0a8a06a4128106bb00eecdec65e20660edb6c60f1c117fd5aab11559c97d1",
+            "expected_base_sha": "a59b8ab23a91ae4470300a34b4691567255c12af",
+            "mode": "INITIAL",
+            "operation_id": "40cedd453df86d171fc89cb599758c794219c52afd3c6b0678b491b5287196fc",
+            "retry_safe": false,
+            "schema": "external_intelligence_dispatch_attempt.v1",
+            "state": "OUTCOME_UNKNOWN",
+            "task_id": "open-swe-resident-five-repo-canary-20260908",
+            "transport_status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "unit_id": "resident-canary-r24",
+            "unit_identity_sha256": "6f03cb0c226238f4e2665b90277b420078a9d31b13be2a254facff28f03ae8f1",
+            "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r24-8e2dfcfd0d9c",
+            "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r24-8e2dfcfd0d9c"
+          },
+          "attempt_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/fanout/attempts/open-swe-resident-five-repo-canary-20260908--resident-canary-r24--initial.json",
+            "sha256": "60e33ba5402392e53594778f266d77b212c59dfdcbf54e44b914551c872777e6"
+          },
+          "runtime_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/operations/40cedd453df86d171fc89cb599758c794219c52afd3c6b0678b491b5287196fc.json",
+            "sha256": "b8e2877f6b432186f87c677722444ec573aa6db5c380d8610ebc108915ca0f69"
+          },
+          "runtime": {
+            "operation_id": "40cedd453df86d171fc89cb599758c794219c52afd3c6b0678b491b5287196fc",
+            "status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "outcome_unknown": true,
+            "retry_safe": false,
+            "process_started": true,
+            "provider_id": "opencli_chatgpt",
+            "model_id": "balanced"
+          },
+          "recovery_journal": null,
+          "recovery_evidence": null,
+          "worker_mutation": "UNKNOWN: process_started is not mutation proof"
+        }
+      ],
+      "missing": [],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r25",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "canonical fanout attempt",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "a59b8ab23a91ae4470300a34b4691567255c12af",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r25",
+        "task_card_hash": "d39a297583ebf37cdfbd0efa09a8c16f3ecf11ec7b9ced8a43dcc07d18d31fb1",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "1abff220fb026f32a3c303fc2eff427b0e2829bf5a4ac995ac6320cae3581fdd",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/1abff220fb026f32a3c303fc2eff427b0e2829bf5a4ac995ac6320cae3581fdd.json",
+        "sha256": "b135a0d4e449b7601e7810f9ac82f6c2184b431cfbc100e1ecfcb6dc46f4fabc"
+      },
+      "automation": [
+        {
+          "evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-803f8dfaf02b7ea470612242d19f61bc5d06768d506f3ca043294edcddd58131.json",
+            "sha256": "9ad7233506fad02d88e869fafd221a0ca344d4442289913ee60f93a86f769414"
+          },
+          "record": {
+            "error": "FANOUT_RECONCILIATION_REQUIRED",
+            "fanout_attempts": {
+              "resident-canary-r25": {
+                "attempt_id": "f9c2d021-d8f8-4dec-862f-b51cfe5d2d5b",
+                "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/1abff220fb026f32a3c303fc2eff427b0e2829bf5a4ac995ac6320cae3581fdd.json",
+                "envelope_sha256": "0b10dcdc94de168ed5d9051af030adfec07530afa45d79d2637608c63a386c29",
+                "expected_base_sha": "a59b8ab23a91ae4470300a34b4691567255c12af",
+                "mode": "INITIAL",
+                "operation_id": "379b5ba4c4e4e1217569f75d5d01448053213f33a145c106458060354c50b39f",
+                "retry_safe": false,
+                "schema": "external_intelligence_dispatch_attempt.v1",
+                "state": "OUTCOME_UNKNOWN",
+                "task_id": "open-swe-resident-five-repo-canary-20260908",
+                "transport_status": "OPEN_SWE_OUTCOME_UNKNOWN",
+                "unit_id": "resident-canary-r25",
+                "unit_identity_sha256": "38309e4408cf0aab73a071752989c05e88cd900e5de806dc8657c588217aa20c",
+                "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r25-8e32607348d4",
+                "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r25-8e32607348d4"
+              }
+            },
+            "identity_hash": "803f8dfaf02b7ea470612242d19f61bc5d06768d506f3ca043294edcddd58131",
+            "intelligence_effect_id": "1abff220fb026f32a3c303fc2eff427b0e2829bf5a4ac995ac6320cae3581fdd",
+            "issue_number": 853,
+            "prior_state": "FANOUT_DISPATCHING",
+            "reconcile_only": true,
+            "repository": "James3014/Nexus-new",
+            "schema": "nexus.external_intelligence_automation_state.v1",
+            "semantic_dispatched": true,
+            "state": "RECONCILIATION_REQUIRED",
+            "worker_binding": {
+              "admission_evidence_hash": "09a7bed3bd1d966dac7ef1118155c827c170edfaeac750342c9c0e824e284f5b",
+              "admission_evidence_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/canonical-workforce-evidence/admission-09a7bed3bd1d966dac7ef1118155c827c170edfaeac750342c9c0e824e284f5b.json",
+              "model": "opencli_chatgpt/balanced",
+              "provider": "opencli_chatgpt",
+              "role_ceiling": "bounded_candidate_generation",
+              "selection_evidence_hash": "265b8be3e9323d595b861622ac65ee88743cb2c2441d7ecc113beaacaa3ad76a",
+              "selection_evidence_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/canonical-workforce-evidence/planner-265b8be3e9323d595b861622ac65ee88743cb2c2441d7ecc113beaacaa3ad76a.json",
+              "worker_id": "opencli_chatgpt_balanced_web"
+            }
+          }
+        }
+      ],
+      "worker_operations": [
+        {
+          "attempt": {
+            "attempt_id": "f9c2d021-d8f8-4dec-862f-b51cfe5d2d5b",
+            "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/1abff220fb026f32a3c303fc2eff427b0e2829bf5a4ac995ac6320cae3581fdd.json",
+            "envelope_sha256": "0b10dcdc94de168ed5d9051af030adfec07530afa45d79d2637608c63a386c29",
+            "expected_base_sha": "a59b8ab23a91ae4470300a34b4691567255c12af",
+            "mode": "INITIAL",
+            "operation_id": "379b5ba4c4e4e1217569f75d5d01448053213f33a145c106458060354c50b39f",
+            "retry_safe": false,
+            "schema": "external_intelligence_dispatch_attempt.v1",
+            "state": "OUTCOME_UNKNOWN",
+            "task_id": "open-swe-resident-five-repo-canary-20260908",
+            "transport_status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "unit_id": "resident-canary-r25",
+            "unit_identity_sha256": "38309e4408cf0aab73a071752989c05e88cd900e5de806dc8657c588217aa20c",
+            "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r25-8e32607348d4",
+            "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r25-8e32607348d4"
+          },
+          "attempt_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/fanout/attempts/open-swe-resident-five-repo-canary-20260908--resident-canary-r25--initial.json",
+            "sha256": "ee2319b493be25d5ed112d98c9fbc81850624ec62a57e7d661b572eddc8585e8"
+          },
+          "runtime_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/operations/379b5ba4c4e4e1217569f75d5d01448053213f33a145c106458060354c50b39f.json",
+            "sha256": "81d3d4abc70e0aec2c5cd776f9437c9f4ea156bad469cd91e40557d9aada9b66"
+          },
+          "runtime": {
+            "operation_id": "379b5ba4c4e4e1217569f75d5d01448053213f33a145c106458060354c50b39f",
+            "status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "outcome_unknown": true,
+            "retry_safe": false,
+            "process_started": true,
+            "provider_id": "opencli_chatgpt",
+            "model_id": "balanced"
+          },
+          "recovery_journal": {
+            "checkpoint_id": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/recovery/checkpoints/379b5ba4c4e4e1217569f75d5d01448053213f33a145c106458060354c50b39f.sqlite",
+            "checkpoint_namespace": "open-swe-repair-v1",
+            "checkpoint_status": "BOUND",
+            "conversation_id": "6aa1786e-cca0-83e8-82b1-7626df172ca9",
+            "identity": {
+              "allowed_paths": [
+                "tests/ops/test_open_swe_resident_five_repo_canary_20260908.py"
+              ],
+              "checkpoint_namespace": "open-swe-repair-v1",
+              "composite_admitted": true,
+              "execution_material_sha256": "fea0db07269b378be745dafb46777cbbd1e1512aaa634970e73e48bb77fbb502",
+              "model_id": "balanced",
+              "operation_id": "379b5ba4c4e4e1217569f75d5d01448053213f33a145c106458060354c50b39f",
+              "provider_id": "opencli_chatgpt",
+              "runtime_identity_sha256": "b9de268a4c41afe3eb21d278d4b4cc5c33d57aa72cf480b0da800a07dd5d8cae",
+              "session_id": "ses_open_swe_1f2233332c5174efe45d",
+              "task_id": "open-swe-resident-five-repo-canary-20260908",
+              "transport_config_sha256": "cfb8b3c84b620f3a4c0dfc1d21722b09f8467830b0b815fa62719c0e0d597d91",
+              "unit_id": "resident-canary-r25",
+              "worker_identity_sha256": "75452ca81355a2cf2f9db0ce5085707640993729dd2cb0e45fa9d62a4d87bc2e",
+              "workspace": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r25-8e32607348d4"
+            },
+            "lease_epoch": 13,
+            "prompt_sha256": "a710380c78dce96f73c9cfa19928cef1cdaa0ef78ac76fc4bc4d5adc94f4ec79",
+            "recovered_response": "{\"type\":\"write_file_and_record_worker_result\",\"file_path\":\"/tests/ops/test_open_swe_resident_five_repo_canary_20260908.py\",\"content\":\"def test_resident_five_repository_mount_order() -> None:\\n mounted_repository_ids = (\\n \"James3014/Nexus-new\",\\n \"James3014/devspace\",\\n \"James3014/nexus-core\",\\n \"James3014/nexus-learning\",\\n \"James3014/nexus-open-swe-runtime\",\\n )\\n\\n assert mounted_repository_ids == (\\n \"James3014/Nexus-new\",\\n \"James3014/devspace\",\\n \"James3014/nexus-core\",\\n \"James3014/nexus-learning\",\\n \"James3014/nexus-open-swe-runtime\",\\n )\\n\",\"envelope\":{\"schema\":\"external_intelligence_worker_result.v1\",\"status\":\"IMPLEMENTATION_COMPLETED\",\"summary\":\"Created the sole authorized canary test file with one deterministic ordered-tuple equality assertion matching the five repository IDs required by the bound Task Card; no verifier result is claimed.\",\"task_id\":\"open-swe-resident-five-repo-canary-20260908\",\"unit_id\":\"resident-canary-r25\"}}",
+            "response_sha256": "eb30d29468b7ec84c146043c40bb35511f2acc0c1549ffe298e00fdd0343346b",
+            "status": "RESPONSE_RECOVERED",
+            "turn_id": "turn_7193fad91f0a4d7e7cd8a404",
+            "turn_ordinal": 3
+          },
+          "recovery_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/recovery/operations/379b5ba4c4e4e1217569f75d5d01448053213f33a145c106458060354c50b39f.json",
+            "sha256": "1256972d3e6462da591b3566f4b3a6a2c003a7b3d54aed488bd415f62911ba48"
+          },
+          "worker_mutation": "UNKNOWN: process_started is not mutation proof"
+        }
+      ],
+      "missing": [],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r26",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "canonical fanout attempt",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "a59b8ab23a91ae4470300a34b4691567255c12af",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r26",
+        "task_card_hash": "d39a297583ebf37cdfbd0efa09a8c16f3ecf11ec7b9ced8a43dcc07d18d31fb1",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "f831d5ebd4086714051b9a749f973e50f254a1125a20d0cb7c050e3e81e87b20",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/f831d5ebd4086714051b9a749f973e50f254a1125a20d0cb7c050e3e81e87b20.json",
+        "sha256": "da4e43ece9c525d5220cbebb075c1bdfe40c257320e4132759d9e856f934c26e"
+      },
+      "automation": [
+        {
+          "evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-385b042f4b9a43b9909095f391a9de1cad11cca41fff2faa7c4bc15b6fdf5609.json",
+            "sha256": "233576bb7e5dcf0e9bb4580a500239890980ac0898830df0dd04140333598542"
+          },
+          "record": {
+            "error": "FANOUT_RECONCILIATION_REQUIRED",
+            "fanout_attempts": {
+              "resident-canary-r26": {
+                "attempt_id": "88bc9f66-d845-44b8-9873-e4ac1110761c",
+                "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/f831d5ebd4086714051b9a749f973e50f254a1125a20d0cb7c050e3e81e87b20.json",
+                "envelope_sha256": "321660457d3f0c74bc9f8a040063edfe23a5498b5e435397ae21c4dbde6a0e68",
+                "expected_base_sha": "a59b8ab23a91ae4470300a34b4691567255c12af",
+                "mode": "INITIAL",
+                "operation_id": "8dbc99bc4055694338e73f10166077fd5dd62d08edc3d745579bfe7c6c598b32",
+                "retry_safe": false,
+                "schema": "external_intelligence_dispatch_attempt.v1",
+                "state": "OUTCOME_UNKNOWN",
+                "task_id": "open-swe-resident-five-repo-canary-20260908",
+                "transport_status": "OPEN_SWE_OUTCOME_UNKNOWN",
+                "unit_id": "resident-canary-r26",
+                "unit_identity_sha256": "55a42a14c11d1c27d99394c506dcbce3e8fdb796e4d0bdcddde9dbb558279a74",
+                "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r26-dddc6cd488dc",
+                "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r26-dddc6cd488dc"
+              }
+            },
+            "identity_hash": "385b042f4b9a43b9909095f391a9de1cad11cca41fff2faa7c4bc15b6fdf5609",
+            "intelligence_effect_id": "f831d5ebd4086714051b9a749f973e50f254a1125a20d0cb7c050e3e81e87b20",
+            "issue_number": 853,
+            "prior_state": "FANOUT_DISPATCHING",
+            "reconcile_only": true,
+            "repository": "James3014/Nexus-new",
+            "schema": "nexus.external_intelligence_automation_state.v1",
+            "semantic_dispatched": true,
+            "state": "RECONCILIATION_REQUIRED",
+            "worker_binding": {
+              "admission_evidence_hash": "bfa74e334c2f36290a1849d7812f2170908ec98faf42e82d2e33e7a9d659f7ff",
+              "admission_evidence_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/canonical-workforce-evidence/admission-bfa74e334c2f36290a1849d7812f2170908ec98faf42e82d2e33e7a9d659f7ff.json",
+              "model": "opencli_chatgpt/balanced",
+              "provider": "opencli_chatgpt",
+              "role_ceiling": "bounded_candidate_generation",
+              "selection_evidence_hash": "265b8be3e9323d595b861622ac65ee88743cb2c2441d7ecc113beaacaa3ad76a",
+              "selection_evidence_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/canonical-workforce-evidence/planner-265b8be3e9323d595b861622ac65ee88743cb2c2441d7ecc113beaacaa3ad76a.json",
+              "worker_id": "opencli_chatgpt_balanced_web"
+            }
+          }
+        }
+      ],
+      "worker_operations": [
+        {
+          "attempt": {
+            "attempt_id": "88bc9f66-d845-44b8-9873-e4ac1110761c",
+            "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/f831d5ebd4086714051b9a749f973e50f254a1125a20d0cb7c050e3e81e87b20.json",
+            "envelope_sha256": "321660457d3f0c74bc9f8a040063edfe23a5498b5e435397ae21c4dbde6a0e68",
+            "expected_base_sha": "a59b8ab23a91ae4470300a34b4691567255c12af",
+            "mode": "INITIAL",
+            "operation_id": "8dbc99bc4055694338e73f10166077fd5dd62d08edc3d745579bfe7c6c598b32",
+            "retry_safe": false,
+            "schema": "external_intelligence_dispatch_attempt.v1",
+            "state": "OUTCOME_UNKNOWN",
+            "task_id": "open-swe-resident-five-repo-canary-20260908",
+            "transport_status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "unit_id": "resident-canary-r26",
+            "unit_identity_sha256": "55a42a14c11d1c27d99394c506dcbce3e8fdb796e4d0bdcddde9dbb558279a74",
+            "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r26-dddc6cd488dc",
+            "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r26-dddc6cd488dc"
+          },
+          "attempt_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/fanout/attempts/open-swe-resident-five-repo-canary-20260908--resident-canary-r26--initial.json",
+            "sha256": "113c1d6458849901d10a8252b8e12359498c796a64bda59a2e871d91fdde8fe7"
+          },
+          "runtime_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/operations/8dbc99bc4055694338e73f10166077fd5dd62d08edc3d745579bfe7c6c598b32.json",
+            "sha256": "d99e3a2d00eb88483b3b1b8b9ca55cd3456f8552413fd002d4e1c33a09f0f5fd"
+          },
+          "runtime": {
+            "operation_id": "8dbc99bc4055694338e73f10166077fd5dd62d08edc3d745579bfe7c6c598b32",
+            "status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "outcome_unknown": true,
+            "retry_safe": false,
+            "process_started": true,
+            "provider_id": "opencli_chatgpt",
+            "model_id": "balanced"
+          },
+          "recovery_journal": null,
+          "recovery_evidence": null,
+          "worker_mutation": "UNKNOWN: process_started is not mutation proof"
+        }
+      ],
+      "missing": [],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r27",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "canonical fanout attempt",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "a59b8ab23a91ae4470300a34b4691567255c12af",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r27",
+        "task_card_hash": "d39a297583ebf37cdfbd0efa09a8c16f3ecf11ec7b9ced8a43dcc07d18d31fb1",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "0b4bd4db130bab7452246dcb117e0b50a349aea7ed7d3ac3e4228f0d15bafed4",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/0b4bd4db130bab7452246dcb117e0b50a349aea7ed7d3ac3e4228f0d15bafed4.json",
+        "sha256": "eb8ad8a816f6000bc1467e9d74548c17efa00b6f60d25fd57abe9874ec90182b"
+      },
+      "automation": [
+        {
+          "evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-9156a3fba0d75fe1f4839afb31a4cb83c396cf9e07f4d9dbe2ef17325a837786.json",
+            "sha256": "c07e3725c5268e7b871f43a5c1e7f13dd23e6561afcb4f0050ff75629587c724"
+          },
+          "record": {
+            "error": "FANOUT_RECONCILIATION_REQUIRED",
+            "fanout_attempts": {
+              "resident-canary-r27": {
+                "attempt_id": "ef4a1fdf-f039-43a7-a612-36ff8b0a127e",
+                "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/0b4bd4db130bab7452246dcb117e0b50a349aea7ed7d3ac3e4228f0d15bafed4.json",
+                "envelope_sha256": "e02f3527d285e78b4056e73c60b3ba33ed196155a0522c90713fe01d85424144",
+                "expected_base_sha": "a59b8ab23a91ae4470300a34b4691567255c12af",
+                "mode": "INITIAL",
+                "operation_id": "4dcc8eb451be8112d11918a78f98c3af02244f59381e24bb125838ac3d135f27",
+                "retry_safe": false,
+                "schema": "external_intelligence_dispatch_attempt.v1",
+                "state": "OUTCOME_UNKNOWN",
+                "task_id": "open-swe-resident-five-repo-canary-20260908",
+                "transport_status": "OPEN_SWE_OUTCOME_UNKNOWN",
+                "unit_id": "resident-canary-r27",
+                "unit_identity_sha256": "a46389ae7da41712109d4ca11534f0f1acea04a1b7bc7bf56680df9c2bcec419",
+                "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r27-15451c86128d",
+                "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r27-15451c86128d"
+              }
+            },
+            "identity_hash": "9156a3fba0d75fe1f4839afb31a4cb83c396cf9e07f4d9dbe2ef17325a837786",
+            "intelligence_effect_id": "0b4bd4db130bab7452246dcb117e0b50a349aea7ed7d3ac3e4228f0d15bafed4",
+            "issue_number": 853,
+            "prior_state": "FANOUT_DISPATCHING",
+            "reconcile_only": true,
+            "repository": "James3014/Nexus-new",
+            "schema": "nexus.external_intelligence_automation_state.v1",
+            "semantic_dispatched": true,
+            "state": "RECONCILIATION_REQUIRED",
+            "worker_binding": {
+              "admission_evidence_hash": "bfa74e334c2f36290a1849d7812f2170908ec98faf42e82d2e33e7a9d659f7ff",
+              "admission_evidence_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/canonical-workforce-evidence/admission-bfa74e334c2f36290a1849d7812f2170908ec98faf42e82d2e33e7a9d659f7ff.json",
+              "model": "opencli_chatgpt/balanced",
+              "provider": "opencli_chatgpt",
+              "role_ceiling": "bounded_candidate_generation",
+              "selection_evidence_hash": "265b8be3e9323d595b861622ac65ee88743cb2c2441d7ecc113beaacaa3ad76a",
+              "selection_evidence_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/canonical-workforce-evidence/planner-265b8be3e9323d595b861622ac65ee88743cb2c2441d7ecc113beaacaa3ad76a.json",
+              "worker_id": "opencli_chatgpt_balanced_web"
+            }
+          }
+        }
+      ],
+      "worker_operations": [
+        {
+          "attempt": {
+            "attempt_id": "ef4a1fdf-f039-43a7-a612-36ff8b0a127e",
+            "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/0b4bd4db130bab7452246dcb117e0b50a349aea7ed7d3ac3e4228f0d15bafed4.json",
+            "envelope_sha256": "e02f3527d285e78b4056e73c60b3ba33ed196155a0522c90713fe01d85424144",
+            "expected_base_sha": "a59b8ab23a91ae4470300a34b4691567255c12af",
+            "mode": "INITIAL",
+            "operation_id": "4dcc8eb451be8112d11918a78f98c3af02244f59381e24bb125838ac3d135f27",
+            "retry_safe": false,
+            "schema": "external_intelligence_dispatch_attempt.v1",
+            "state": "OUTCOME_UNKNOWN",
+            "task_id": "open-swe-resident-five-repo-canary-20260908",
+            "transport_status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "unit_id": "resident-canary-r27",
+            "unit_identity_sha256": "a46389ae7da41712109d4ca11534f0f1acea04a1b7bc7bf56680df9c2bcec419",
+            "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r27-15451c86128d",
+            "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r27-15451c86128d"
+          },
+          "attempt_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/fanout/attempts/open-swe-resident-five-repo-canary-20260908--resident-canary-r27--initial.json",
+            "sha256": "ac3290cc6a00d0d7870c7c246c5ac13d8cf9c84e7ebac851dcb0890d752ddee3"
+          },
+          "runtime_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/operations/4dcc8eb451be8112d11918a78f98c3af02244f59381e24bb125838ac3d135f27.json",
+            "sha256": "3ec22f575502a0406ec22ef4c8eacf075df6e5ecc679ba8749752c9a1e72421b"
+          },
+          "runtime": {
+            "operation_id": "4dcc8eb451be8112d11918a78f98c3af02244f59381e24bb125838ac3d135f27",
+            "status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "outcome_unknown": true,
+            "retry_safe": false,
+            "process_started": true,
+            "provider_id": "opencli_chatgpt",
+            "model_id": "balanced"
+          },
+          "recovery_journal": {
+            "checkpoint_id": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/recovery/checkpoints/4dcc8eb451be8112d11918a78f98c3af02244f59381e24bb125838ac3d135f27.sqlite",
+            "checkpoint_namespace": "open-swe-repair-v1",
+            "checkpoint_status": "BOUND",
+            "conversation_id": "6aa1944e-69c8-83ee-bc66-9e543215abab",
+            "identity": {
+              "allowed_paths": [
+                "tests/ops/test_open_swe_resident_five_repo_canary_20260908.py"
+              ],
+              "checkpoint_namespace": "open-swe-repair-v1",
+              "composite_admitted": true,
+              "execution_material_sha256": "4cf054ef38d2422346e457b2c8c31e3c8fdc6d266bc72ff083649ef4a6a1af12",
+              "model_id": "balanced",
+              "operation_id": "4dcc8eb451be8112d11918a78f98c3af02244f59381e24bb125838ac3d135f27",
+              "provider_id": "opencli_chatgpt",
+              "runtime_identity_sha256": "69daccdf10d29a117edb3329dc2607ffc7b06343b7541e932d1292e9cf37fb74",
+              "session_id": "ses_open_swe_c1ce91d137635914cdef",
+              "task_id": "open-swe-resident-five-repo-canary-20260908",
+              "transport_config_sha256": "cfb8b3c84b620f3a4c0dfc1d21722b09f8467830b0b815fa62719c0e0d597d91",
+              "unit_id": "resident-canary-r27",
+              "worker_identity_sha256": "8ca684927db2207bc4d844e49c9c81885b003accc287eaae7d5b86a1b4b1145e",
+              "workspace": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r27-15451c86128d"
+            },
+            "lease_epoch": 14,
+            "prompt_sha256": "4f88a5ab2268b4f3bb8fdfaa1956a56c574c0c9bf6579ea70279e828256131be",
+            "recovered_response": "{\"type\":\"write_file_and_record_worker_result\",\"file_path\":\"/tests/ops/test_open_swe_resident_five_repo_canary_20260908.py\",\"content\":\"def test_resident_five_repository_mount_order() -> None:\\n mounted_repository_ids = (\\n \"James3014/Nexus-new\",\\n \"James3014/devspace\",\\n \"James3014/nexus-core\",\\n \"James3014/nexus-learning\",\\n \"James3014/nexus-open-swe-runtime\",\\n )\\n\\n assert mounted_repository_ids == (\\n \"James3014/Nexus-new\",\\n \"James3014/devspace\",\\n \"James3014/nexus-core\",\\n \"James3014/nexus-learning\",\\n \"James3014/nexus-open-swe-runtime\",\\n )\\n\",\"envelope\":{\"schema\":\"external_intelligence_worker_result.v1\",\"status\":\"IMPLEMENTATION_COMPLETED\",\"summary\":\"Created the single authorized deterministic canary test with the exact required ordered tuple; no other mutation is requested by this worker result.\",\"task_id\":\"open-swe-resident-five-repo-canary-20260908\",\"unit_id\":\"resident-canary-r27\"}}",
+            "response_sha256": "d21ec33736c1c803d7f7630152ff9a3ea00620317341331682efa83713d657ae",
+            "status": "RESPONSE_RECOVERED",
+            "turn_id": "turn_2db757ea191742c9a7552620",
+            "turn_ordinal": 3
+          },
+          "recovery_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/recovery/operations/4dcc8eb451be8112d11918a78f98c3af02244f59381e24bb125838ac3d135f27.json",
+            "sha256": "8204d3ca2e240cc65f447ee8186c28e8fe7240a1983ea307929103245109d525"
+          },
+          "worker_mutation": "UNKNOWN: process_started is not mutation proof"
+        }
+      ],
+      "missing": [],
+      "resend_authorized": false
+    },
+    {
+      "revision": "r28",
+      "task_id": "open-swe-resident-five-repo-canary-20260908",
+      "task_binding": "canonical fanout attempt",
+      "identity": {
+        "dependency_state": {},
+        "item_id": "853",
+        "item_type": "issue",
+        "main_sha": "a59b8ab23a91ae4470300a34b4691567255c12af",
+        "overlap_state": {},
+        "repository": "James3014/Nexus-new",
+        "revision": "r28",
+        "task_card_hash": "d39a297583ebf37cdfbd0efa09a8c16f3ecf11ec7b9ced8a43dcc07d18d31fb1",
+        "task_card_ref": "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+      },
+      "semantic_effect_id": "55432d61934404412d57e3a840113f2896ffd0f23f4f391bcdfeca37bb179569",
+      "request": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/requests/55432d61934404412d57e3a840113f2896ffd0f23f4f391bcdfeca37bb179569.json",
+        "sha256": "3010942b5491cccd4005eb6d9dc2535bfe04b0a9be16dc02d3c8eae8b4cb6c9c"
+      },
+      "automation": [
+        {
+          "evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-ed0204f8bcd77bfb5a1c1bf27fef0d0f33e76a9269fac168350be1e266b876a3.json",
+            "sha256": "110dc433d9be2a9f4cd622be37d30404d482f06eb1dfaa4f1f9dafc6957a0033"
+          },
+          "record": {
+            "closure_run_id": "4576e00043524da85d7129472f7df04489a9d02e2064b89988833a5eb0e63188",
+            "fanout_run_sha256": "40fa74f72ccf0b1fa5e6767130ac6e8b74b53f164145943036e5c0565dc9fb60",
+            "identity_hash": "ed0204f8bcd77bfb5a1c1bf27fef0d0f33e76a9269fac168350be1e266b876a3",
+            "intelligence_effect_id": "55432d61934404412d57e3a840113f2896ffd0f23f4f391bcdfeca37bb179569",
+            "intelligence_receipt_id": "492b41e5cbbf9dc75ed45926c8ec45910c1529b8ec20ea33fdf11333e75f16fb",
+            "issue_number": 853,
+            "publication": {
+              "acceptance_packet_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/closure/acceptance-packets/open-swe-resident-five-repo-canary-20260908--1b089e62d2077fbc18e96e37952128155c63cec4d07d86b798075a9fef555b93.json",
+              "acceptance_packet_sha256": "bdea84330f4a25d45b8e98bcde943b098a7bd347bbdbf7255b8c04086fbb9648",
+              "candidate_commit": "c5979ffbc664e019f6790bc5f6c84210749fa43c",
+              "candidate_tree": "a85cd07d4dc2d17f7551869565fcbc2fcf6512f3",
+              "claim_ceiling": "TASK_CANDIDATE_VERIFIED_PENDING_INDEPENDENT_ACCEPTANCE",
+              "current_gate": "PENDING_INDEPENDENT_ACCEPTANCE",
+              "next_action": "run_independent_candidate_acceptance_audit",
+              "stop_condition": "independent_acceptance_not_explicitly_granted",
+              "task_id": "open-swe-resident-five-repo-canary-20260908",
+              "verification_state": "WHOLE_TASK_PASS"
+            },
+            "publication_record": {
+              "comment_id": 5606491416,
+              "marker": "<!-- nexus-external-intelligence:a2ad9c08f69dc1f76c6931772111310762621f19c922c14ad2d087e73e7c95d0 -->",
+              "payload": {
+                "acceptance_packet_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/closure/acceptance-packets/open-swe-resident-five-repo-canary-20260908--1b089e62d2077fbc18e96e37952128155c63cec4d07d86b798075a9fef555b93.json",
+                "acceptance_packet_sha256": "bdea84330f4a25d45b8e98bcde943b098a7bd347bbdbf7255b8c04086fbb9648",
+                "candidate_commit": "c5979ffbc664e019f6790bc5f6c84210749fa43c",
+                "candidate_tree": "a85cd07d4dc2d17f7551869565fcbc2fcf6512f3",
+                "claim_ceiling": "TASK_CANDIDATE_VERIFIED_PENDING_INDEPENDENT_ACCEPTANCE",
+                "current_gate": "PENDING_INDEPENDENT_ACCEPTANCE",
+                "next_action": "run_independent_candidate_acceptance_audit",
+                "stop_condition": "independent_acceptance_not_explicitly_granted",
+                "task_id": "open-swe-resident-five-repo-canary-20260908",
+                "verification_state": "WHOLE_TASK_PASS"
+              },
+              "publication_id": "a2ad9c08f69dc1f76c6931772111310762621f19c922c14ad2d087e73e7c95d0",
+              "state": "COMPLETED"
+            },
+            "repository": "James3014/Nexus-new",
+            "schema": "nexus.external_intelligence_automation_state.v1",
+            "semantic_dispatched": true,
+            "state": "COMPLETE",
+            "worker_binding": {
+              "admission_evidence_hash": "bfa74e334c2f36290a1849d7812f2170908ec98faf42e82d2e33e7a9d659f7ff",
+              "admission_evidence_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/canonical-workforce-evidence/admission-bfa74e334c2f36290a1849d7812f2170908ec98faf42e82d2e33e7a9d659f7ff.json",
+              "model": "opencli_chatgpt/balanced",
+              "provider": "opencli_chatgpt",
+              "role_ceiling": "bounded_candidate_generation",
+              "selection_evidence_hash": "265b8be3e9323d595b861622ac65ee88743cb2c2441d7ecc113beaacaa3ad76a",
+              "selection_evidence_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/canonical-workforce-evidence/planner-265b8be3e9323d595b861622ac65ee88743cb2c2441d7ecc113beaacaa3ad76a.json",
+              "worker_id": "opencli_chatgpt_balanced_web"
+            }
+          }
+        }
+      ],
+      "worker_operations": [
+        {
+          "attempt": {
+            "attempt_id": "a356b06b-8905-4128-bc45-cb960993051d",
+            "envelope_ref": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/intelligence/envelopes/55432d61934404412d57e3a840113f2896ffd0f23f4f391bcdfeca37bb179569.json",
+            "envelope_sha256": "ef5a47f83cf8460014371b81568b2e517931ed1a5cb316e2ba20b96d60ad42f6",
+            "expected_base_sha": "a59b8ab23a91ae4470300a34b4691567255c12af",
+            "mode": "INITIAL",
+            "operation_id": "96b83c02de43ff8e6bc37d49e0efabd3f113ac60135ea214c367094b24806574",
+            "retry_safe": false,
+            "schema": "external_intelligence_dispatch_attempt.v1",
+            "state": "COMPLETED",
+            "task_id": "open-swe-resident-five-repo-canary-20260908",
+            "transport_status": "COMPLETED",
+            "unit_id": "resident-canary-r28",
+            "unit_identity_sha256": "382cf65abc6bafd5bd319bb2377e9dad84e0dc34bf971fdf3ca46b03e281e7fe",
+            "workspace_id": "ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r28-5c038f076e17",
+            "workspace_path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r28-5c038f076e17"
+          },
+          "attempt_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/fanout/attempts/open-swe-resident-five-repo-canary-20260908--resident-canary-r28--initial.json",
+            "sha256": "b6b0913b439627588a16bba11ee87a020c66ac7f9ae544ec0803d4f8a7ab4a2d"
+          },
+          "runtime_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/operations/96b83c02de43ff8e6bc37d49e0efabd3f113ac60135ea214c367094b24806574.json",
+            "sha256": "362e512d67416ce42768e90c5d5f6d368fab59fd6301ad216bd7ae048d16e8d9"
+          },
+          "runtime": {
+            "operation_id": "96b83c02de43ff8e6bc37d49e0efabd3f113ac60135ea214c367094b24806574",
+            "status": "COMPLETED",
+            "outcome_unknown": false,
+            "retry_safe": false,
+            "process_started": true,
+            "provider_id": "opencli_chatgpt",
+            "model_id": "balanced"
+          },
+          "recovery_journal": {
+            "checkpoint_id": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/recovery/checkpoints/96b83c02de43ff8e6bc37d49e0efabd3f113ac60135ea214c367094b24806574.sqlite",
+            "checkpoint_namespace": "open-swe-repair-v1",
+            "checkpoint_status": "BOUND",
+            "conversation_id": "6aa19e4a-8ee8-83e8-8e53-3dc49968f612",
+            "identity": {
+              "allowed_paths": [
+                "tests/ops/test_open_swe_resident_five_repo_canary_20260908.py"
+              ],
+              "checkpoint_namespace": "open-swe-repair-v1",
+              "composite_admitted": true,
+              "execution_material_sha256": "5f7d14f44393b42e9995735a8d6096a4287a0759043ff68c9a56a286e7ef0711",
+              "model_id": "balanced",
+              "operation_id": "96b83c02de43ff8e6bc37d49e0efabd3f113ac60135ea214c367094b24806574",
+              "provider_id": "opencli_chatgpt",
+              "runtime_identity_sha256": "02f89b0826273247d5206cb4ca23385e2627f6a7f2c152b1b54d703420484024",
+              "session_id": "ses_open_swe_e3f8b3744fe29c3f9e35",
+              "task_id": "open-swe-resident-five-repo-canary-20260908",
+              "transport_config_sha256": "cfb8b3c84b620f3a4c0dfc1d21722b09f8467830b0b815fa62719c0e0d597d91",
+              "unit_id": "resident-canary-r28",
+              "worker_identity_sha256": "8ca684927db2207bc4d844e49c9c81885b003accc287eaae7d5b86a1b4b1145e",
+              "workspace": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r28-5c038f076e17"
+            },
+            "lease_epoch": 17,
+            "prompt_sha256": "6f2de3cadd926569d340d45bd6cd796650b0c1849e8c61778636ab3dcc88b20c",
+            "protocol_repair_origin": "{\"type\":\"write_file_and_record_worker_result\",\"file_path\":\"/tests/ops/test_open_swe_resident_five_repo_canary_20260908.py\",\"content\":\"def test_resident_five_repository_mount_order() -> None:\\n mounted_repository_ids = (\\n \"James3014/Nexus-new\",\\n \"James3014/devspace\",\\n \"James3014/nexus-core\",\\n \"James3014/nexus-learning\",\\n \"James3014/nexus-open-swe-runtime\",\\n )\\n\\n assert mounted_repository_ids == (\\n \"James3014/Nexus-new\",\\n \"James3014/devspace\",\\n \"James3014/nexus-core\",\\n \"James3014/nexus-learning\",\\n \"James3014/nexus-open-swe-runtime\",\\n )\\n\",\"envelope\":{\"schema\":\"external_intelligence_worker_result.v1\",\"status\":\"IMPLEMENTATION_COMPLETED\",\"summary\":\"Created the single authorized canary test file with one deterministic ordered-tuple assertion matching the active Task Card; no other mutation is requested or claimed.\",\"task_id\":\"open-swe-resident-five-repo-canary-20260908\",\"unit_id\":\"resident-canary-r28\"}}",
+            "protocol_repair_origin_sha256": "424dbdcaa4cf6b2eaf1513c17fa97b5fac04fcb0a1072927d31c5ee74308c458",
+            "protocol_repair_original_conversation_id": "6aa19e4a-8ee8-83e8-8e53-3dc49968f612",
+            "protocol_repair_response": "{\"type\":\"tool_call\",\"name\":\"write_file_and_record_worker_result\",\"arguments\":{\"file_path\":\"tests/ops/test_open_swe_resident_five_repo_canary_20260908.py\",\"content\":\"def test_resident_five_repository_mount_order() -> None:\\n mounted_repository_ids = (\\n \\\"James3014/Nexus-new\\\",\\n \\\"James3014/devspace\\\",\\n \\\"James3014/nexus-core\\\",\\n \\\"James3014/nexus-learning\\\",\\n \\\"James3014/nexus-open-swe-runtime\\\",\\n )\\n\\n assert mounted_repository_ids == (\\n \\\"James3014/Nexus-new\\\",\\n \\\"James3014/devspace\\\",\\n \\\"James3014/nexus-core\\\",\\n \\\"James3014/nexus-learning\\\",\\n \\\"James3014/nexus-open-swe-runtime\\\",\\n )\\n\",\"envelope\":{\"summary\":\"Created the single authorized canary test file with one deterministic ordered-tuple assertion matching the active Task Card; no other mutation is requested or claimed.\"}}}",
+            "protocol_repair_response_sha256": "cd4b9409978bb1899dea01227a07ac86dc5adb309089901801ec88cbf2ac2549",
+            "protocol_repair_status": "RECOVERED",
+            "protocol_repair_turn_id": "turn_a6797b0427e12ffc966ad97a",
+            "recovered_response": "{\"type\":\"tool_call\",\"name\":\"write_file_and_record_worker_result\",\"arguments\":{\"file_path\":\"tests/ops/test_open_swe_resident_five_repo_canary_20260908.py\",\"content\":\"def test_resident_five_repository_mount_order() -> None:\\n mounted_repository_ids = (\\n \\\"James3014/Nexus-new\\\",\\n \\\"James3014/devspace\\\",\\n \\\"James3014/nexus-core\\\",\\n \\\"James3014/nexus-learning\\\",\\n \\\"James3014/nexus-open-swe-runtime\\\",\\n )\\n\\n assert mounted_repository_ids == (\\n \\\"James3014/Nexus-new\\\",\\n \\\"James3014/devspace\\\",\\n \\\"James3014/nexus-core\\\",\\n \\\"James3014/nexus-learning\\\",\\n \\\"James3014/nexus-open-swe-runtime\\\",\\n )\\n\",\"envelope\":{\"summary\":\"Created the single authorized canary test file with one deterministic ordered-tuple assertion matching the active Task Card; no other mutation is requested or claimed.\"}}}",
+            "response_sha256": "cd4b9409978bb1899dea01227a07ac86dc5adb309089901801ec88cbf2ac2549",
+            "status": "COMPLETED",
+            "terminal_result": {
+              "diagnosis_evidence_paths": [
+                "tests/ops/test_open_swe_resident_five_repo_canary_20260908.py"
+              ],
+              "diagnosis_sha256": "8bb130ec0e5d8a0705c99763fc9a6d3ec682f56198c1b0653655da78f3130485",
+              "diagnosis_status": "ROOT_CAUSE_SUPPORTED",
+              "directory": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/workspaces/fanout/James3014_Nexus-new/ei-open-swe-resident-five-repo-canary-20260908-resident-canary-r28-5c038f076e17",
+              "execution_material_sha256": "5f7d14f44393b42e9995735a8d6096a4287a0759043ff68c9a56a286e7ef0711",
+              "export_sha256": "81edb7dc47ac637f7e5b68ca8be45158f6c62bd20941192e78df1d85c2e6a75f",
+              "finished_at": "2026-09-09T18:01:59Z",
+              "kind": "worker",
+              "model_id": "balanced",
+              "operation_id": "96b83c02de43ff8e6bc37d49e0efabd3f113ac60135ea214c367094b24806574",
+              "outcome_unknown": false,
+              "process_started": true,
+              "provider_id": "opencli_chatgpt",
+              "repair_admitted": true,
+              "repair_phase_count": 1,
+              "response_text": "{\"schema\":\"external_intelligence_worker_result.v1\",\"status\":\"IMPLEMENTATION_COMPLETED\",\"summary\":\"Created the single authorized canary test file with one deterministic ordered-tuple assertion matching the active Task Card; no other mutation is requested or claimed.\",\"task_id\":\"open-swe-resident-five-repo-canary-20260908\",\"unit_id\":\"resident-canary-r28\"}",
+              "retry_safe": false,
+              "schema": "nexus.open_swe_runtime.result.v1",
+              "session_id": "ses_open_swe_e3f8b3744fe29c3f9e35",
+              "started_at": "2026-09-09T17:56:49Z",
+              "status": "COMPLETED",
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stdout_sha256": "81edb7dc47ac637f7e5b68ca8be45158f6c62bd20941192e78df1d85c2e6a75f",
+              "version": "0.7.6",
+              "worker_identity_sha256": "8ca684927db2207bc4d844e49c9c81885b003accc287eaae7d5b86a1b4b1145e"
+            },
+            "turn_id": "turn_a6797b0427e12ffc966ad97a",
+            "turn_ordinal": 3
+          },
+          "recovery_evidence": {
+            "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/recovery/operations/96b83c02de43ff8e6bc37d49e0efabd3f113ac60135ea214c367094b24806574.json",
+            "sha256": "dab8273a4ee3c5c82cf91731d514ba8660e444694cdde271bc8a02e995883352"
+          },
+          "worker_mutation": "RESULT_EFFECT_ACCEPTED"
+        }
+      ],
+      "missing": [],
+      "resend_authorized": false
+    }
+  ],
+  "unbound_legacy_automation_records": [
+    {
+      "evidence": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-c99d64781bb05fe01920ef3aa7bf972c184d4665f96cd3400dee88d6e186f1fe.json",
+        "sha256": "6a2ded2ab52bc204cb1a57c7d0c83f800f9c0a13cc1f6957333bfc7f81d41fb9"
+      },
+      "record": {
+        "error": "FANOUT_RECEIPT_NOT_READY",
+        "identity_hash": "c99d64781bb05fe01920ef3aa7bf972c184d4665f96cd3400dee88d6e186f1fe",
+        "issue_number": 853,
+        "repository": "James3014/Nexus-new",
+        "schema": "nexus.external_intelligence_automation_state.v1",
+        "semantic_dispatched": true,
+        "state": "BLOCKED"
+      },
+      "revision": "MISSING: receipt stores only opaque contract identity hash; no reversible revision field"
+    },
+    {
+      "evidence": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-7259319eea6d0288a3384a8ba2430b2b658fbfd0cafcbec519b939c52d217133.json",
+        "sha256": "32fc5c536f4a1b47d8f037aa74603f7db525f4f8a297ce0bf2b4122009c051f1"
+      },
+      "record": {
+        "error": "FANOUT_INCOMPLETE",
+        "identity_hash": "7259319eea6d0288a3384a8ba2430b2b658fbfd0cafcbec519b939c52d217133",
+        "issue_number": 853,
+        "repository": "James3014/Nexus-new",
+        "schema": "nexus.external_intelligence_automation_state.v1",
+        "semantic_dispatched": true,
+        "state": "BLOCKED"
+      },
+      "revision": "MISSING: receipt stores only opaque contract identity hash; no reversible revision field"
+    },
+    {
+      "evidence": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-501cfe6ed2ae7148e057525ac6e905a477538f30d858952e7d6a76be0832eaa4.json",
+        "sha256": "ec90c1b8a3f82def198127f66c4db948248619f9037a59f89d4ed44ca896f8ca"
+      },
+      "record": {
+        "error": "FANOUT_INCOMPLETE",
+        "identity_hash": "501cfe6ed2ae7148e057525ac6e905a477538f30d858952e7d6a76be0832eaa4",
+        "issue_number": 853,
+        "repository": "James3014/Nexus-new",
+        "schema": "nexus.external_intelligence_automation_state.v1",
+        "semantic_dispatched": true,
+        "state": "BLOCKED"
+      },
+      "revision": "MISSING: receipt stores only opaque contract identity hash; no reversible revision field"
+    },
+    {
+      "evidence": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-c5ad3c5e76553c3a4726513b7a9157ea155731a249d7e4bc91cf4efdd4779b11.json",
+        "sha256": "494679d11a741b52c1962a4b74ff25b494f4485370949844c417c272299d9c19"
+      },
+      "record": {
+        "error": "FANOUT_INCOMPLETE",
+        "identity_hash": "c5ad3c5e76553c3a4726513b7a9157ea155731a249d7e4bc91cf4efdd4779b11",
+        "issue_number": 853,
+        "repository": "James3014/Nexus-new",
+        "schema": "nexus.external_intelligence_automation_state.v1",
+        "semantic_dispatched": true,
+        "state": "BLOCKED"
+      },
+      "revision": "MISSING: receipt stores only opaque contract identity hash; no reversible revision field"
+    },
+    {
+      "evidence": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-08a031eeca6cd6efae3ab0f9b9cdf7986bc7f8a1039850524b69535344fc9d92.json",
+        "sha256": "825091fbbd03bf3f7bc99726f797aa5b2e007e0fc4ac0212788b70f09224934f"
+      },
+      "record": {
+        "error": "FANOUT_INCOMPLETE",
+        "identity_hash": "08a031eeca6cd6efae3ab0f9b9cdf7986bc7f8a1039850524b69535344fc9d92",
+        "issue_number": 853,
+        "repository": "James3014/Nexus-new",
+        "schema": "nexus.external_intelligence_automation_state.v1",
+        "semantic_dispatched": true,
+        "state": "BLOCKED"
+      },
+      "revision": "MISSING: receipt stores only opaque contract identity hash; no reversible revision field"
+    },
+    {
+      "evidence": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-97aac6f2c79948e65f3f94e07be5ae88d84255128391c41c0aab1908c20efd9e.json",
+        "sha256": "1e25934b4c10a1ff7d43ea6ab5da7380810d885f47390dce6b8dac8850758e02"
+      },
+      "record": {
+        "error": "FANOUT_INCOMPLETE",
+        "identity_hash": "97aac6f2c79948e65f3f94e07be5ae88d84255128391c41c0aab1908c20efd9e",
+        "issue_number": 853,
+        "repository": "James3014/Nexus-new",
+        "schema": "nexus.external_intelligence_automation_state.v1",
+        "semantic_dispatched": true,
+        "state": "BLOCKED"
+      },
+      "revision": "MISSING: receipt stores only opaque contract identity hash; no reversible revision field"
+    },
+    {
+      "evidence": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-a836596381365be846902d653540e9b6bfa82b132414e392e235e71e3efd5a68.json",
+        "sha256": "ef4f0e4d0e9db230d49ceb52b8ebec2e6d044e4bdcb24b7b478fd6740beb399c"
+      },
+      "record": {
+        "error": "FANOUT_INCOMPLETE",
+        "identity_hash": "a836596381365be846902d653540e9b6bfa82b132414e392e235e71e3efd5a68",
+        "issue_number": 853,
+        "repository": "James3014/Nexus-new",
+        "schema": "nexus.external_intelligence_automation_state.v1",
+        "semantic_dispatched": true,
+        "state": "BLOCKED"
+      },
+      "revision": "MISSING: receipt stores only opaque contract identity hash; no reversible revision field"
+    },
+    {
+      "evidence": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-b609609cf8b1735b13a77914a9d0a93573862c948a1e02a8996c04610f3a8899.json",
+        "sha256": "dbf9120e5f048f2185da01809f89e59c4c88fe464cabf1ede5f84b72dc58c92e"
+      },
+      "record": {
+        "error": "FANOUT_INCOMPLETE",
+        "identity_hash": "b609609cf8b1735b13a77914a9d0a93573862c948a1e02a8996c04610f3a8899",
+        "issue_number": 853,
+        "repository": "James3014/Nexus-new",
+        "schema": "nexus.external_intelligence_automation_state.v1",
+        "semantic_dispatched": true,
+        "state": "BLOCKED"
+      },
+      "revision": "MISSING: receipt stores only opaque contract identity hash; no reversible revision field"
+    },
+    {
+      "evidence": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-4eb95d9de58eeceec61a620da966cded731c916264bcb4372baa3da9464b3e20.json",
+        "sha256": "3c4c0e3ce0e7b2ab1841fd7f97680ac4e968155fb704f0524439915ba1cf1a54"
+      },
+      "record": {
+        "error": "FANOUT_INCOMPLETE",
+        "identity_hash": "4eb95d9de58eeceec61a620da966cded731c916264bcb4372baa3da9464b3e20",
+        "issue_number": 853,
+        "repository": "James3014/Nexus-new",
+        "schema": "nexus.external_intelligence_automation_state.v1",
+        "semantic_dispatched": true,
+        "state": "BLOCKED"
+      },
+      "revision": "MISSING: receipt stores only opaque contract identity hash; no reversible revision field"
+    },
+    {
+      "evidence": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-11de41d36563af188227a6f996485c8bb37c137bee7fb4a63b14467a08e3b4f3.json",
+        "sha256": "b988569bd5c153ce130e051fdaad1baeb5b68ce79d235d432359633bc792e4ee"
+      },
+      "record": {
+        "error": "FANOUT_INCOMPLETE",
+        "identity_hash": "11de41d36563af188227a6f996485c8bb37c137bee7fb4a63b14467a08e3b4f3",
+        "issue_number": 853,
+        "repository": "James3014/Nexus-new",
+        "schema": "nexus.external_intelligence_automation_state.v1",
+        "semantic_dispatched": true,
+        "state": "BLOCKED"
+      },
+      "revision": "MISSING: receipt stores only opaque contract identity hash; no reversible revision field"
+    },
+    {
+      "evidence": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-cb814f1ebb69cad958e6571f3d3d765d818451c376d31190fcbb03e754f57ec1.json",
+        "sha256": "6427fba289c86002a134e7fb577ac69728118ae813211a16d0b94808d2812648"
+      },
+      "record": {
+        "error": "FANOUT_INCOMPLETE",
+        "identity_hash": "cb814f1ebb69cad958e6571f3d3d765d818451c376d31190fcbb03e754f57ec1",
+        "issue_number": 853,
+        "repository": "James3014/Nexus-new",
+        "schema": "nexus.external_intelligence_automation_state.v1",
+        "semantic_dispatched": true,
+        "state": "BLOCKED"
+      },
+      "revision": "MISSING: receipt stores only opaque contract identity hash; no reversible revision field"
+    },
+    {
+      "evidence": {
+        "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/automation/James3014_Nexus-new/issue-853-22e67ec932b6fd62c853514670c989bd9de61007d6df070e384425d174c1c40f.json",
+        "sha256": "7d1fb1068b5cdc322717c362ab84ca9262431400b026f2ac7f9f58043950abce"
+      },
+      "record": {
+        "error": "FANOUT_INCOMPLETE",
+        "identity_hash": "22e67ec932b6fd62c853514670c989bd9de61007d6df070e384425d174c1c40f",
+        "issue_number": 853,
+        "repository": "James3014/Nexus-new",
+        "schema": "nexus.external_intelligence_automation_state.v1",
+        "semantic_dispatched": true,
+        "state": "BLOCKED"
+      },
+      "revision": "MISSING: receipt stores only opaque contract identity hash; no reversible revision field"
+    }
+  ],
+  "claim": "All 28 revision request records inspected. Missing legacy automation edges explicitly retained; UNKNOWN is not success and no operation replayed."
+}

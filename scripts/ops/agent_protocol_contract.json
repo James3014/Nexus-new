@@ -7,7 +7,8 @@
     "report changed files/evidence",
     "docs/agents/TASK_EXECUTION_CONTRACT.md",
     "docs/agents/LEARNING_WRITEBACK_OVERLAY.md",
-    "CapabilityPlanner"
+    "CapabilityPlanner",
+    "G12 Fast Start advisory-cache gate"
   ],
   "boundaries": {
     "allowed_paths": ["."],

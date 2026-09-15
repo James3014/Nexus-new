@@ -1,0 +1,82 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.7, pytest-9.0.2, pluggy-1.6.0
+rootdir: /private/tmp/nexus-frontier-audit
+configfile: pytest.ini
+plugins: anyio-4.12.1, asyncio-1.3.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 272 items
+
+tests/nexus/orchestrator/test_owner_representation.py .................. [  6%]
+........................................................................ [ 33%]
+.....                                                                    [ 34%]
+tests/services/test_open_swe_worker_transport.py .....................s  [ 43%]
+tests/services/test_external_intelligence_closure.py ................... [ 50%]
+......                                                                   [ 52%]
+tests/services/test_external_intelligence_fanout.py .................... [ 59%]
+...............................................                          [ 76%]
+tests/services/test_open_swe_external_intelligence.py .................. [ 83%]
+............................................s                            [100%]
+
+=============================== warnings summary ===============================
+nexus/contracts/autonomy_goal.py:113
+  /private/tmp/nexus-frontier-audit/nexus/contracts/autonomy_goal.py:113: UserWarning: Field name "schema" in "StandingGrantContext" shadows an attribute in parent "_FrozenModel"
+    class StandingGrantContext(_FrozenModel):
+
+nexus/contracts/autonomy_goal.py:267
+  /private/tmp/nexus-frontier-audit/nexus/contracts/autonomy_goal.py:267: UserWarning: Field name "schema" in "AutonomyGoalGrantSpec" shadows an attribute in parent "_FrozenModel"
+    class AutonomyGoalGrantSpec(_FrozenModel):
+
+nexus/contracts/owner_representation.py:131
+  /private/tmp/nexus-frontier-audit/nexus/contracts/owner_representation.py:131: UserWarning: Field name "schema" in "ExternalDestination" shadows an attribute in parent "_FrozenModel"
+    class ExternalDestination(_FrozenModel):
+
+nexus/contracts/owner_representation.py:162
+  /private/tmp/nexus-frontier-audit/nexus/contracts/owner_representation.py:162: UserWarning: Field name "schema" in "ExternalContentEnvelope" shadows an attribute in parent "_FrozenModel"
+    class ExternalContentEnvelope(_FrozenModel):
+
+nexus/contracts/owner_representation.py:183
+  /private/tmp/nexus-frontier-audit/nexus/contracts/owner_representation.py:183: UserWarning: Field name "schema" in "ExternalPublicationProposal" shadows an attribute in parent "_FrozenModel"
+    class ExternalPublicationProposal(_FrozenModel):
+
+nexus/contracts/owner_representation.py:243
+  /private/tmp/nexus-frontier-audit/nexus/contracts/owner_representation.py:243: UserWarning: Field name "schema" in "OwnerRepresentationGrantSpec" shadows an attribute in parent "_FrozenModel"
+    class OwnerRepresentationGrantSpec(_FrozenModel):
+
+nexus/contracts/owner_representation.py:346
+  /private/tmp/nexus-frontier-audit/nexus/contracts/owner_representation.py:346: UserWarning: Field name "schema" in "OwnerExactPublicationAuthorizationSpec" shadows an attribute in parent "_FrozenModel"
+    class OwnerExactPublicationAuthorizationSpec(_FrozenModel):
+
+nexus/contracts/owner_representation.py:459
+  /private/tmp/nexus-frontier-audit/nexus/contracts/owner_representation.py:459: UserWarning: Field name "schema" in "InternalCollaborationBound" shadows an attribute in parent "_FrozenModel"
+    class InternalCollaborationBound(_FrozenModel):
+
+nexus/contracts/owner_representation.py:543
+  /private/tmp/nexus-frontier-audit/nexus/contracts/owner_representation.py:543: UserWarning: Field name "schema" in "OwnerRepresentationDecision" shadows an attribute in parent "_FrozenModel"
+    class OwnerRepresentationDecision(_FrozenModel):
+
+nexus/orchestrator/autonomy_policy.py:115
+  /private/tmp/nexus-frontier-audit/nexus/orchestrator/autonomy_policy.py:115: UserWarning: Field name "schema" in "StandingGrantRequest" shadows an attribute in parent "_FrozenModel"
+    class StandingGrantRequest(_FrozenModel):
+
+nexus/orchestrator/autonomy_policy.py:137
+  /private/tmp/nexus-frontier-audit/nexus/orchestrator/autonomy_policy.py:137: UserWarning: Field name "schema" in "StandingGrantDecision" shadows an attribute in parent "_FrozenModel"
+    class StandingGrantDecision(_FrozenModel):
+
+nexus/orchestrator/autonomy_policy.py:396
+  /private/tmp/nexus-frontier-audit/nexus/orchestrator/autonomy_policy.py:396: UserWarning: Field name "schema" in "AutonomySubmissionBindingSpec" shadows an attribute in parent "_FrozenModel"
+    class AutonomySubmissionBindingSpec(_FrozenModel):
+
+nexus/orchestrator/autonomy_policy.py:457
+  /private/tmp/nexus-frontier-audit/nexus/orchestrator/autonomy_policy.py:457: UserWarning: Field name "schema" in "AutonomyEvaluationInput" shadows an attribute in parent "_FrozenModel"
+    class AutonomyEvaluationInput(_FrozenModel):
+
+nexus/orchestrator/autonomy_policy.py:507
+  /private/tmp/nexus-frontier-audit/nexus/orchestrator/autonomy_policy.py:507: UserWarning: Field name "schema" in "AutonomyDecision" shadows an attribute in parent "_FrozenModel"
+    class AutonomyDecision(_FrozenModel):
+
+nexus/orchestrator/standing_grant_store.py:67
+  /private/tmp/nexus-frontier-audit/nexus/orchestrator/standing_grant_store.py:67: UserWarning: Field name "schema" in "StandingGrantReceipt" shadows an attribute in parent "_FrozenModel"
+    class StandingGrantReceipt(_FrozenModel):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================= 270 passed, 2 skipped, 15 warnings in 32.56s =================

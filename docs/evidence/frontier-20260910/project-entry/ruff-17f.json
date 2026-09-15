@@ -1,0 +1,162 @@
+[
+  {
+    "cell": null,
+    "code": "F841",
+    "end_location": {
+      "column": 68,
+      "row": 3793
+    },
+    "filename": "/Users/jameschen/Workspace/Nexus-new-worktrees/issue842-project-entry-r9/nexus/orchestrator/self_hosted_task_service.py",
+    "fix": null,
+    "location": {
+      "column": 57,
+      "row": 3793
+    },
+    "message": "Local variable `restore_exc` is assigned to but never used",
+    "noqa_row": 3793,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-variable"
+  },
+  {
+    "cell": null,
+    "code": "F601",
+    "end_location": {
+      "column": 28,
+      "row": 5839
+    },
+    "filename": "/Users/jameschen/Workspace/Nexus-new-worktrees/issue842-project-entry-r9/nexus/orchestrator/self_hosted_task_service.py",
+    "fix": null,
+    "location": {
+      "column": 13,
+      "row": 5839
+    },
+    "message": "Dictionary key literal `\"contract_hash\"` repeated",
+    "noqa_row": 5839,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/multi-value-repeated-key-literal"
+  },
+  {
+    "cell": null,
+    "code": "F601",
+    "end_location": {
+      "column": 34,
+      "row": 5841
+    },
+    "filename": "/Users/jameschen/Workspace/Nexus-new-worktrees/issue842-project-entry-r9/nexus/orchestrator/self_hosted_task_service.py",
+    "fix": null,
+    "location": {
+      "column": 13,
+      "row": 5841
+    },
+    "message": "Dictionary key literal `\"controller_revision\"` repeated",
+    "noqa_row": 5841,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/multi-value-repeated-key-literal"
+  },
+  {
+    "cell": null,
+    "code": "F841",
+    "end_location": {
+      "column": 24,
+      "row": 9256
+    },
+    "filename": "/Users/jameschen/Workspace/Nexus-new-worktrees/issue842-project-entry-r9/nexus/orchestrator/self_hosted_task_service.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 9256
+    },
+    "message": "Local variable `contract_fields` is assigned to but never used",
+    "noqa_row": 9256,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-variable"
+  },
+  {
+    "cell": null,
+    "code": "I001",
+    "end_location": {
+      "column": 92,
+      "row": 73
+    },
+    "filename": "/Users/jameschen/Workspace/Nexus-new-worktrees/issue842-project-entry-r9/tests/nexus/orchestrator/test_self_hosted_task_service.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "import pytest\n\nfrom nexus.contracts.lifecycle_action import (\n    ContractKind,\n    ExternalCandidateAdoptionRequest,\n    LifecycleActionType,\n    MutationDomain,\n    PermissionProfile,\n    build_action_envelope,\n    build_owner_inline_contract,\n    canonical_request_hash,\n)\nfrom nexus.contracts.operator_outcome_receipt import build_operator_outcome_receipt\nfrom nexus.contracts.target_integration_lifecycle import (\n    ExternalAcceptanceReceipt,\n    IntegrationAuthorizationEnvelope,\n)\nfrom nexus.engine.canonical_task_seam import (\n    VerifiedTaskCardIdentity,\n    build_canonical_dispatch_envelope,\n    build_canonical_planner_admission,\n)\nfrom nexus.events.contracts import build_attempt_transition_event\nfrom nexus.events.transport import NexusEventBus\nfrom nexus.executors.worker_contract import (\n    SUPPORTED_WORKER_PROVIDERS,\n    WorkerExecutionReceipt,\n    WorkerOutcome,\n    WorkerPreflight,\n)\nfrom nexus.executors.worker_registry import WorkerRegistry\nfrom nexus.orchestrator.repository_contract_gate import (\n    RepositoryContractGate,\n    RepositoryContractGateReceipt,\n)\nfrom nexus.orchestrator.self_hosted_task_service import (\n    _LEGACY_V1_NEGATIVE_OMISSION_SET,\n    SelfHostedTaskService,\n    _validate_project_entry_authority_binding,\n    resolve_canonical_target_roots,\n    resolve_execution_lane,\n    validate_task_card_binding,\n    validate_workforce_dispatch_binding,\n)\nfrom nexus.orchestrator.worktree_manager import (\n    TargetCleanupReceipt,\n    TargetWorktreeLease,\n    WorktreeManager,\n    get_canonical_git_hooks_dir,\n)\nfrom nexus.services.model_workforce_policy import WorkforcePolicyLoader\nfrom nexus.services.runtime_workforce_admission import evaluate_runtime_workforce_admission\n\n\n",
+          "end_location": {
+            "column": 1,
+            "row": 76
+          },
+          "location": {
+            "column": 1,
+            "row": 22
+          }
+        }
+      ],
+      "message": "Organize imports"
+    },
+    "location": {
+      "column": 1,
+      "row": 22
+    },
+    "message": "Import block is un-sorted or un-formatted",
+    "noqa_row": 22,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+  },
+  {
+    "cell": null,
+    "code": "F841",
+    "end_location": {
+      "column": 15,
+      "row": 4490
+    },
+    "filename": "/Users/jameschen/Workspace/Nexus-new-worktrees/issue842-project-entry-r9/tests/nexus/orchestrator/test_self_hosted_task_service.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 4490
+    },
+    "message": "Local variable `integrated` is assigned to but never used",
+    "noqa_row": 4490,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-variable"
+  },
+  {
+    "cell": null,
+    "code": "F841",
+    "end_location": {
+      "column": 12,
+      "row": 4870
+    },
+    "filename": "/Users/jameschen/Workspace/Nexus-new-worktrees/issue842-project-entry-r9/tests/nexus/orchestrator/test_self_hosted_task_service.py",
+    "fix": null,
+    "location": {
+      "column": 5,
+      "row": 4870
+    },
+    "message": "Local variable `service` is assigned to but never used",
+    "noqa_row": 4870,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-variable"
+  },
+  {
+    "cell": null,
+    "code": "F541",
+    "end_location": {
+      "column": 54,
+      "row": 7161
+    },
+    "filename": "/Users/jameschen/Workspace/Nexus-new-worktrees/issue842-project-entry-r9/tests/nexus/orchestrator/test_self_hosted_task_service.py",
+    "fix": null,
+    "location": {
+      "column": 26,
+      "row": 7161
+    },
+    "message": "f-string without any placeholders",
+    "noqa_row": 7161,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/f-string-missing-placeholders"
+  }
+]

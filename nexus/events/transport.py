@@ -53,17 +53,30 @@ class NexusEventBus:
     _observer_error_count = 0
     _last_observer_error: Optional[Dict[str, Any]] = None
     _attempt_sequences: Dict[tuple[str, str], int] = {}
+    _production_event_root: Optional[Path] = None
+    _configured_event_root: Optional[Path] = None
+    _event_bind_mode: Optional[str] = None
 
     @classmethod
     def set_remote_broadcaster(cls, broadcaster: Callable[[str, Dict[str, Any]], None]) -> None:
         cls._remote_broadcaster = broadcaster
 
     @classmethod
-    def configure(cls, project_root: Path) -> None:
+    def configure(
+        cls, project_root: Path, *, create: bool = True, production: bool = False
+    ) -> None:
         """初始化持久化路徑"""
-        log_dir, event_log_path = cls._log_store.configure(project_root)
+        project_root = Path(project_root).expanduser().resolve()
+        if cls._production_event_root is not None and cls._production_event_root != project_root:
+            raise RuntimeError("conflicting production event root")
+        if production:
+            cls._production_event_root = project_root
+        log_dir, event_log_path = cls._log_store.configure(project_root, create=create)
         cls._event_log_path = event_log_path
-        cls._developer_feedback_store.configure(project_root)
+        cls._configured_event_root = project_root
+        cls._event_bind_mode = "write" if create else "read"
+        if create:
+            cls._developer_feedback_store.configure(project_root)
         with cls._sequence_lock:
             cls._attempt_sequences = {
                 key: tail
@@ -73,6 +86,20 @@ class NexusEventBus:
             }
         signal_file = log_dir / "signal_inbox.jsonl"
         cls._signal_queue = cls._signal_queue_svc.load_from_inbox(signal_file)
+
+    @classmethod
+    def ensure_configured(cls, project_root: Path, *, production: bool = False) -> None:
+        """Bind the event store once, upgrading a read-only bind when needed."""
+        project_root = Path(project_root).expanduser().resolve()
+        if (
+            cls._configured_event_root == project_root
+            and cls._event_log_path is not None
+            and cls._event_bind_mode == "write"
+        ):
+            if production:
+                cls._production_event_root = project_root
+            return
+        cls.configure(project_root, create=True, production=production)
 
     @classmethod
     def _sync_signal_queue_from_legacy(cls) -> None:

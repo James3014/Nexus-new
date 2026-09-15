@@ -1,0 +1,36 @@
+=== src/execution-protocol.test.ts
+✔ controller DispatchIntent is deterministic, model-neutral, and cannot express verification/acceptance authority (8.668125ms)
+✔ OWNER_DIRECT binding hashes deterministically and requires trusted owner evidence (0.314083ms)
+✔ NEXUS_GOVERNED cannot self-validate or silently accept mismatched grant evidence (0.079292ms)
+✔ canonical Nexus grant bytes are revision/hash/task-card bound before semantic authorization (0.731959ms)
+✔ Nexus grant narrows task, attempt, base, profile, scope, claim, time, and revocation authority (1.219709ms)
+✔ mutating execution binding fails closed without explicit isolation (0.065667ms)
+✔ execution generation accepts exact generation and rejects substitution or legacy absence (0.139958ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 13.778125
+=== src/local-agent-execution-contract.test.ts
+
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'better-sqlite3' imported from /Users/jameschen/Workspace/nexus-automation-repos/devspace/src/local-agent-execution-contract.test.ts
+    at Object.getPackageJSONURL (node:internal/modules/package_json_reader:268:9)
+    at packageResolve (node:internal/modules/esm/resolve:768:81)
+    at moduleResolve (node:internal/modules/esm/resolve:858:18)
+    at defaultResolve (node:internal/modules/esm/resolve:990:11)
+    at nextResolve (node:internal/modules/esm/hooks:748:28)
+    at resolveBase (file:///Users/jameschen/.npm/_npx/fd45a72a545557e9/node_modules/tsx/dist/register-SoqaU4rg.mjs:2:10334)
+    at resolveDirectory (file:///Users/jameschen/.npm/_npx/fd45a72a545557e9/node_modules/tsx/dist/register-SoqaU4rg.mjs:2:11421)
+    at resolveTsPaths (file:///Users/jameschen/.npm/_npx/fd45a72a545557e9/node_modules/tsx/dist/register-SoqaU4rg.mjs:2:13062)
+    at resolve (file:///Users/jameschen/.npm/_npx/fd45a72a545557e9/node_modules/tsx/dist/register-SoqaU4rg.mjs:2:14748)
+    at nextResolve (node:internal/modules/esm/hooks:748:28) {
+  code: 'ERR_MODULE_NOT_FOUND'
+}
+
+Node.js v24.5.0

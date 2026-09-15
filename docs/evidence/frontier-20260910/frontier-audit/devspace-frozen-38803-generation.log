@@ -1,0 +1,219 @@
+=== src/execution-protocol.test.ts
+✔ controller DispatchIntent is deterministic, model-neutral, and cannot express verification/acceptance authority (11.06575ms)
+✔ OWNER_DIRECT binding hashes deterministically and requires trusted owner evidence (0.239625ms)
+✔ NEXUS_GOVERNED cannot self-validate or silently accept mismatched grant evidence (0.071125ms)
+✔ canonical Nexus grant bytes are revision/hash/task-card bound before semantic authorization (0.555333ms)
+✔ Nexus grant narrows task, attempt, base, profile, scope, claim, time, and revocation authority (0.7035ms)
+✔ mutating execution binding fails closed without explicit isolation (0.066458ms)
+✔ execution generation accepts exact generation and rejects substitution or legacy absence (0.165ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 16.276041
+=== src/local-agent-execution-contract.test.ts
+✔ AC-2 agent_start rejects STALE_WORKSPACE before worker mutation when HEAD mismatches (438.494833ms)
+✔ AC-3 executionContract writePaths are durable (84.604584ms)
+✔ R2 dispatchIntent is durable, injected into the worker prompt, and never upgrades DONE to VERIFIED (134.914458ms)
+✔ G9 NEXUS_GOVERNED rejects mismatched canonical grant before durable record or worker launch (68.828541ms)
+✔ G9 NEXUS_GOVERNED starts only after canonical grant validation and revalidates before continuation (107.009667ms)
+✔ R2 controller dispatch requires a durable attemptKey before worker launch (76.56975ms)
+✔ R2 semantic attemptId must exactly match durable attemptKey (69.481958ms)
+✔ R2 dispatchIntent and executionContract cannot define different write-scope authorities (74.595125ms)
+✔ R3 duplicate controller attempt replays exactly and rejects materially changed intent (80.624834ms)
+✔ R3 same-workspace overlapping mutation ownership is rejected while disjoint ownership remains dispatchable (80.886042ms)
+✔ R3 identical write paths remain parallelizable when physical workspace roots are isolated (152.155625ms)
+✔ R3 mutation dispatch fails closed when an active same-workspace worker has unprovable ownership (77.897917ms)
+✔ AC-1 preflight dispatchState is UNKNOWN when auth/readiness are unresolved (133.509125ms)
+✔ AC-1 Codex preflight fails closed when the configured executable is invalid (126.077166ms)
+✔ preflight dispatchState is BLOCKED when a known blocker exists (169.66775ms)
+✔ AC-4 superviseActiveAgents detects out-of-scope write -> SCOPE_VIOLATION (560.838208ms)
+✔ AC-6 reconcile preserves candidate after provider timeout (175.319041ms)
+✔ AC-7 reconcile distinguishes no-candidate after provider timeout (127.540583ms)
+✔ AC-8 status exposes terminal reason and lifecycle timestamps (121.743292ms)
+✔ AC-9 startAgent without executionContract remains compatible (93.205542ms)
+✔ AC-10 continueAgent preserves provider session binding (128.810042ms)
+✔ AC-10b continuation maxWallMs fences the new turn, not durable session age (293.098958ms)
+✔ AC-5 missing toolchain fails explicitly without creating .venv or mutating repo (88.091209ms)
+✔ G3 TEST A — slow startup does not consume maxExecutionMs (194.533458ms)
+✔ G3 TEST B — startup timeout terminates worker with startup evidence (259.190375ms)
+✔ G3 TEST C — execution timeout terminates worker after execution start (255.986625ms)
+✔ G3 TEST D — legacy maxWallMs preserved as whole-turn ceiling (259.499833ms)
+✔ G3 TEST E — maxExecutionMs does not fire before execution start (141.404542ms)
+✔ G3 TEST F — continuation resets phase clock (291.539916ms)
+✔ G3 TEST G — updatedAt noise does not reset authoritative clocks (247.981541ms)
+✔ G3 TEST H — executionStartedAt written before semantic run (245.651667ms)
+✔ G3 TEST I — executionStartedAt is write-once (85.433ms)
+✔ G3 TEST J — late callback after startup timeout fails closed (261.037667ms)
+✔ G3 TEST K — wrong workerToken fails closed (85.635584ms)
+✔ G3 TEST L — timeout vs execution-start race (361.370625ms)
+✔ G3 TEST M — DriverBacked production boundary order (21.943375ms)
+✔ G3 TEST N — OMP production boundary order (0.441917ms)
+✔ G3 TEST N1 — Codex session identity is persisted before execution (0.33825ms)
+✔ G3 TEST N2 — Codex session callback failure blocks prompt dispatch (0.188166ms)
+✔ G3 TEST O — OMP slow readiness does not consume execution budget (207.755125ms)
+✔ G3 TEST P — durable timeout fence precedes terminator completion (325.264667ms)
+✔ G3 TEST U/W — verified termination unlocks continuation with a new turn (285.472625ms)
+✔ G3 TEST V — terminator false keeps cancellation pending (80.943209ms)
+✔ G3 TEST V — terminator throw keeps cancellation pending (78.897667ms)
+✔ G3 TEST Y — termination-pending worker consumes execution capacity (260.332ms)
+✔ G3 adversarial — scope violation uses the same durable cleanup primitive (406.165708ms)
+✔ G3 XA2 I1-I13 — lifecycle store exposes the full generation-CAS kill list (2.729ms)
+✔ G3 TEST Z1 — valid pending termination survives reopen and blocks (321.325208ms)
+✔ G3 TEST Z1b — malformed pending state fails closed after reopen (127.059666ms)
+✔ G3 TEST Z2 — launching generation without PID remains pending when termination is unprovable (184.096791ms)
+✔ G3 XA2 I11 — verified kill snapshots before unlock and later foreign edits block continuation (390.40975ms)
+✔ G3 T18 — legacy manager rows remain outside detached capacity and reconciliation (125.031208ms)
+✔ G3 T18b — exact legacy detached PID and token adopt and settle one generation (177.381083ms)
+✔ G3 T19 — failed termination is not retried by every supervisor tick (107.726875ms)
+✔ G3 T8 — concurrent continuation admits one generation and one launcher (138.338833ms)
+✔ G3 T12 — launcher PID is persisted under the active generation before claim (184.155167ms)
+✔ G3 P1 — invalid persisted execution timestamp reopens corrupt and cannot bypass supervision (138.197542ms)
+✔ G3 TEST Q — execution transition wins stale startup timeout race (79.457667ms)
+✔ G3 TEST R — completion wins before stale timeout fence (75.031208ms)
+✔ G3 TEST S — real production helper slow readiness (42.875583ms)
+✔ G3 TEST T — OMP callback failure prevents prompt dispatch (0.425125ms)
+✔ G3 TEST U — continuation blocked while terminator pending (240.256458ms)
+✔ G3 TEST V — termination failure keeps continuation blocked (132.193166ms)
+✔ G3 TEST W — successful termination unlocks continuation (294.997083ms)
+✔ G3 TEST X — stale cleanup callback cannot touch newer generation (129.125541ms)
+✔ G3 TEST Y — termination-pending counts against capacity (75.273459ms)
+✔ AC-5 dependency bridge rejects stale workspace evidence before worker launch (92.349583ms)
+✔ AC-11 no secrets in preflight or reconcile output (227.953959ms)
+✔ scope helpers classify worker-caused changes correctly (0.339458ms)
+✔ agent_start returns NO_EXECUTION_CAPACITY when at capacity (82.640583ms)
+✔ agent_start attemptKey concurrently reuses one durable launch (90.372667ms)
+✔ agent_start attemptKey binding survives store reopen and rejects material conflicts (77.012042ms)
+✔ agent_start replay survives restart when reopen returns a new workspaceId for the same physical checkout (177.014084ms)
+✔ agent_start without attemptKey remains non-idempotent (87.148041ms)
+✔ provider failure preserves session, response evidence, and physical candidate (551.968375ms)
+✔ physical snapshot fingerprints modified, untracked, and deleted paths (244.734583ms)
+✔ candidate diffHash changes with untracked bytes at a stable path (358.551958ms)
+✔ delta does not attribute an untouched pre-existing dirty path (261.555625ms)
+✔ delta attributes a pre-existing dirty path modified again (321.34725ms)
+✔ supervisor ignores untouched pre-existing dirty path and terminates on re-modification (683.542042ms)
+✔ supervisor enforces maxFiles-only file-count bound (485.339791ms)
+✔ legacy baseline without fingerprints yields UNKNOWN, never false WITHIN_SCOPE (451.32275ms)
+✔ partial fingerprint baseline yields UNKNOWN but reports definite changed paths (215.156916ms)
+✔ delta detects a stage-only mutation via gitStateHash (286.9265ms)
+✔ baseline fingerprint without gitStateHash degrades attribution to UNKNOWN (159.58325ms)
+✔ overlap with missing current fingerprint is not definite and yields UNKNOWN (0.1635ms)
+✔ symlink fingerprint derives from link target text, not external target bytes (261.531334ms)
+✔ pathspec-magic-looking filename is fingerprinted literally (311.879208ms)
+ℹ tests 88
+ℹ suites 0
+ℹ pass 88
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 16224.64925
+=== src/server.test.ts
+✔ configures Express with an exact trusted proxy hop count (32.052875ms)
+{"ts":"2026-09-10T07:49:31.652Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_3cc9d7a45f","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-RSJT3x/project","success":true,"durationMs":91}
+{"ts":"2026-09-10T07:49:31.666Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_3cc9d7a45f","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-RSJT3x/project","success":true,"durationMs":14}
+✔ open_workspace keeps lifecycle flags out of model output and preserves complete card metadata (173.239625ms)
+{"ts":"2026-09-10T07:49:31.764Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_d38c3c0e62","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-ZSgxz8/project","success":true,"durationMs":38}
+{"ts":"2026-09-10T07:49:31.808Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_e6cb23f29a","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-ZSgxz8/project","success":true,"durationMs":44}
+✔ open_workspace refreshes provider availability for each catalog (97.551ms)
+{"ts":"2026-09-10T07:49:31.856Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_7d8ef5a41b","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-XgnQLS/project","success":true,"durationMs":33}
+✔ open_workspace omits providers disabled by configuration (47.490917ms)
+{"ts":"2026-09-10T07:49:31.903Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_3c20a11d8f","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-S6qFJY/project","success":true,"durationMs":38}
+{"ts":"2026-09-10T07:49:31.904Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_3c20a11d8f","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-S6qFJY/project","success":true,"durationMs":38}
+✔ concurrent checkout opens return one full context and one reuse instruction (47.796084ms)
+{"ts":"2026-09-10T07:49:32.003Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_4d6a4dbfaa","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-S504oB/project","success":true,"durationMs":24}
+{"ts":"2026-09-10T07:49:32.083Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_e3bf9f82f3","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-S504oB/.worktrees/project-44196b25","success":true,"durationMs":79}
+{"ts":"2026-09-10T07:49:32.177Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_968037c7ee","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-S504oB/.worktrees/project-1b1f9878","success":true,"durationMs":94}
+{"ts":"2026-09-10T07:49:32.180Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_4d6a4dbfaa","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-S504oB/project","success":true,"durationMs":3}
+✔ new worktrees always receive a fresh workspace and complete worktree context (279.091958ms)
+{"ts":"2026-09-10T07:49:32.321Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_c01ca5760d","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-w3IAtu/.worktrees/project-bc9e2126","success":true,"durationMs":71}
+{"ts":"2026-09-10T07:49:32.341Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_7fd8df27c5","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-w3IAtu/project","success":true,"durationMs":20}
+{"ts":"2026-09-10T07:49:32.344Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_7fd8df27c5","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-w3IAtu/project","success":true,"durationMs":2}
+✔ checkout opened after a worktree receives its own complete context (163.234209ms)
+{"ts":"2026-09-10T07:49:32.395Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_a84e58346d","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-DQI6NS/project","success":true,"durationMs":39}
+{"ts":"2026-09-10T07:49:32.415Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_f71e4c8a08","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-DQI6NS/project","success":true,"durationMs":20}
+✔ a host without conversation metadata receives normal explicit-workspace behavior (68.820291ms)
+{"ts":"2026-09-10T07:49:32.448Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_ce6f977aab","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-CAyfd8/project","success":true,"durationMs":23}
+{"ts":"2026-09-10T07:49:32.472Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_ce6f977aab","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-CAyfd8/project","success":true,"durationMs":19}
+✔ checkout reuse and context suppression survive a registry restart (56.032917ms)
+✔ cutover MCP control exposes bounded lease lifecycle and schedules self restart once (49.057417ms)
+✔ cutover restart tool is absent when no bounded self actuator is available (19.917167ms)
+✔ cutover finish proves real durable agent and workspace reconciliation after replacement (83.625917ms)
+✔ subagents disabled: agent tools are absent (20.261542ms)
+{"ts":"2026-09-10T07:49:32.710Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_beb4d84f08","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-WUhOXi/project","success":true,"durationMs":33}
+{"ts":"2026-09-10T07:49:32.878Z","level":"info","event":"tool_call","tool":"agent_start","workspaceId":"ws_beb4d84f08","success":true,"durationMs":0}
+{"ts":"2026-09-10T07:49:32.891Z","level":"info","event":"tool_call","tool":"agent_start","workspaceId":"ws_beb4d84f08","success":true,"durationMs":0}
+{"ts":"2026-09-10T07:49:32.935Z","level":"info","event":"tool_call","tool":"agent_continue","workspaceId":"ws_beb4d84f08","success":true,"durationMs":0}
+{"ts":"2026-09-10T07:49:32.952Z","level":"info","event":"tool_call","tool":"agent_cancel","workspaceId":"ws_beb4d84f08","success":true,"durationMs":0}
+✔ subagents enabled: agent tools are present and functional (308.043916ms)
+{"ts":"2026-09-10T07:49:32.998Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_b3e2a4550e","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-rqLbLI/project","success":true,"durationMs":33}
+{"ts":"2026-09-10T07:49:33.014Z","level":"info","event":"tool_call","tool":"agent_start","workspaceId":"ws_b3e2a4550e","success":true,"durationMs":0}
+✔ subagents: continuation fails closed when execution generation changes (75.555375ms)
+{"ts":"2026-09-10T07:49:33.095Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_9241c43a31","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-GKfXgw/project","success":true,"durationMs":52}
+{"ts":"2026-09-10T07:49:33.112Z","level":"info","event":"tool_call","tool":"agent_start","workspaceId":"ws_9241c43a31","success":true,"durationMs":0}
+✔ subagents: legacy durable session without execution generation does not silently upgrade (98.682667ms)
+✔ subagents: unknown/invalid workspaceId fails closed before durable-agent access (13.235583ms)
+{"ts":"2026-09-10T07:49:33.264Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_bd6e552dcb","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-Ywr3YI/project","success":true,"durationMs":53}
+✔ subagents: agent_preflight returns structured readiness without secrets (227.30425ms)
+{"ts":"2026-09-10T07:49:33.474Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_1f530db30f","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-YhElUF/project","success":true,"durationMs":38}
+{"ts":"2026-09-10T07:49:33.500Z","level":"info","event":"tool_call","tool":"agent_start","workspaceId":"ws_1f530db30f","success":true,"durationMs":0}
+✔ subagents: controller dispatchIntent crosses the MCP schema without gaining verification authority (134.036208ms)
+{"ts":"2026-09-10T07:49:33.624Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_1a4cfc02b7","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-YLyQ35/project","success":true,"durationMs":52}
+✔ subagents: NEXUS_GOVERNED fails closed at the MCP boundary without complete canonical grant evidence (168.588834ms)
+{"ts":"2026-09-10T07:49:33.810Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_ad67e3fedd","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-3f8J04/project","success":true,"durationMs":69}
+{"ts":"2026-09-10T07:49:33.889Z","level":"info","event":"tool_call","tool":"agent_start","workspaceId":"ws_ad67e3fedd","success":true,"durationMs":0}
+✔ subagents: agent_start executionContract expectedHead mismatch fails closed (219.698125ms)
+{"ts":"2026-09-10T07:49:34.014Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_2b257273c3","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-N2J91k/project","success":true,"durationMs":47}
+{"ts":"2026-09-10T07:49:34.038Z","level":"info","event":"tool_call","tool":"agent_start","workspaceId":"ws_2b257273c3","success":true,"durationMs":0}
+✔ subagents: agent_reconcile reports physical diff as candidate evidence (346.613875ms)
+{"ts":"2026-09-10T07:49:34.305Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_6ef5bffdbb","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-FP6ZAa/project","success":true,"durationMs":31}
+✔ subagents: workspace_verify always present, returns structured TOOLCHAIN_UNAVAILABLE without config (68.152167ms)
+{"ts":"2026-09-10T07:49:34.371Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_83a8a28d08","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-1b6Z4L/project","success":true,"durationMs":33}
+✔ subagents: workspace_verify structured TOOLCHAIN_UNAVAILABLE when a toolchain exists but the verifier does not (66.111625ms)
+{"ts":"2026-09-10T07:49:34.497Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_727527b65d","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-ipjOQQ/project","success":true,"durationMs":48}
+✔ subagents: workspace_verify executes a configured verifier normally (460.020125ms)
+✔ gitCandidates disabled: git tools are absent (19.8175ms)
+{"ts":"2026-09-10T07:49:34.957Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_980cbba82e","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-5KrUD1/project","success":true,"durationMs":26}
+✔ gitCandidates enabled: git tools are present with schema validation (108.42525ms)
+✔ agent_start schema preserves #28 heartbeat and G9/G10 authority capabilities (27.391292ms)
+{"ts":"2026-09-10T07:49:35.201Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_a4dfdc9ec2","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-Aq7D0Y/.worktrees/project-98c5e7e4","success":true,"durationMs":67}
+✔ git candidates tools - MCP managed worktree end-to-end integration test (499.931459ms)
+{"ts":"2026-09-10T07:49:35.525Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_f4fb5c4506","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-hnsb18/project","success":true,"durationMs":28}
+{"ts":"2026-09-10T07:49:35.530Z","level":"info","event":"tool_call","tool":"bash","workspaceId":"ws_f4fb5c4506","workingDirectory":".","commandLength":20,"success":true,"durationMs":5}
+{"ts":"2026-09-10T07:49:35.583Z","level":"info","event":"tool_call","tool":"bash","workspaceId":"ws_f4fb5c4506","workingDirectory":".","commandLength":119,"success":true,"durationMs":52}
+{"ts":"2026-09-10T07:49:35.873Z","level":"info","event":"tool_call","tool":"command_status","workspaceId":"ws_f4fb5c4506","attemptKey":"bash:g2:test01","running":false,"success":true,"durationMs":290}
+{"ts":"2026-09-10T07:49:35.876Z","level":"info","event":"tool_call","tool":"bash","workspaceId":"ws_f4fb5c4506","workingDirectory":".","commandLength":119,"success":true,"durationMs":1}
+✔ bash and command_status: attemptKey reconciliation and idempotent execution (392.807292ms)
+✔ nexus_gateway_recover exposes only the fixed typed recovery contract (113.289333ms)
+{"ts":"2026-09-10T07:49:36.158Z","level":"info","event":"tool_call","tool":"open_workspace","workspaceId":"ws_3d1a581165","path":"/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/devspace-server-test-dTJx0V/typed-clone","success":true,"durationMs":33}
+✔ OWNER_DIRECT workspace_clone and dependency_sync run through typed MCP tools (491.773417ms)
+✔ command_status metadata annotations and minimal mode visibility (19.513917ms)
+✔ P0-2: durable reconciliation witness fails closed on empty inventory, mismatches, or missing records (97.685291ms)
+✔ manual exact-pair witness bypasses aggregate enumeration and accepts reconciled error state (0.302917ms)
+✔ P0-3: recovery and finish share identical semantics and idempotently rendezvous without second effect (58.21075ms)
+{"ts":"2026-09-10T07:49:36.693Z","level":"info","event":"mcp_session_created","requestId":"dbfbe148-caa5-4f30-8fe0-645509dc425e","sessionIdPrefix":"70a0483c","ip":"::ffff:127.0.0.1","host":"127.0.0.1:59508","userAgent":"node","contentLength":"168"}
+{"ts":"2026-09-10T07:49:36.695Z","level":"info","event":"http_request","requestId":"dbfbe148-caa5-4f30-8fe0-645509dc425e","method":"POST","path":"/mcp","status":200,"durationMs":6,"ip":"::ffff:127.0.0.1","host":"127.0.0.1:59508","userAgent":"node","contentLength":"168"}
+{"ts":"2026-09-10T07:49:36.704Z","level":"info","event":"http_request","requestId":"44feccd2-ae6c-4a71-ad83-a515c6cd1df7","method":"POST","path":"/mcp","status":200,"durationMs":5,"ip":"::ffff:127.0.0.1","host":"127.0.0.1:59508","userAgent":"node","contentLength":"190"}
+{"ts":"2026-09-10T07:49:36.709Z","level":"info","event":"mcp_session_created","requestId":"6b268126-75bf-4e84-8e7b-facdc04acb69","sessionIdPrefix":"433118b0","ip":"::ffff:127.0.0.1","host":"127.0.0.1:59508","userAgent":"node","contentLength":"179"}
+{"ts":"2026-09-10T07:49:36.710Z","level":"info","event":"http_request","requestId":"6b268126-75bf-4e84-8e7b-facdc04acb69","method":"POST","path":"/mcp","status":200,"durationMs":4,"ip":"::ffff:127.0.0.1","host":"127.0.0.1:59508","userAgent":"node","contentLength":"179"}
+{"ts":"2026-09-10T07:49:36.713Z","level":"info","event":"http_request","requestId":"568614f2-bfd6-4f61-adba-2f401ab0b61e","method":"POST","path":"/mcp","status":200,"durationMs":2,"ip":"::ffff:127.0.0.1","host":"127.0.0.1:59508","userAgent":"node","contentLength":"97"}
+{"ts":"2026-09-10T07:49:36.721Z","level":"info","event":"http_request","requestId":"1fb31f80-2885-4ad5-9958-46a27c23cee6","method":"POST","path":"/mcp","status":200,"durationMs":5,"ip":"::ffff:127.0.0.1","host":"127.0.0.1:59508","userAgent":"node","contentLength":"147"}
+{"ts":"2026-09-10T07:49:36.725Z","level":"info","event":"http_request","requestId":"603197e7-1d09-4b09-ba5f-59d2c2678c85","method":"POST","path":"/mcp","status":409,"durationMs":1,"ip":"::ffff:127.0.0.1","host":"127.0.0.1:59508","userAgent":"node","contentLength":"188"}
+{"ts":"2026-09-10T07:49:36.725Z","level":"info","event":"mcp_session_closed","reason":"server_shutdown","sessionIdPrefix":"70a0483c"}
+{"ts":"2026-09-10T07:49:36.725Z","level":"info","event":"mcp_session_closed","reason":"server_shutdown","sessionIdPrefix":"433118b0"}
+✔ P0-4: real server /mcp HTTP boundary permits transport reconnect during drain, allows safe tools, blocks consequential tools (64.116584ms)
+✔ prepared stale-target MCP recovery preserves successor and supersession summary (24.711792ms)
+ℹ tests 38
+ℹ suites 0
+ℹ pass 38
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5252.404291
+=== src/local-agent-profile-source.test.ts
+=== src/local-agent-opencode-catalog.test.ts
+local-agent-opencode-catalog tests passed!

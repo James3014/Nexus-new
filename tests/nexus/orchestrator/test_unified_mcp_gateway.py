@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import subprocess
 import sys
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -15,11 +16,21 @@ if repo_root in sys.path:
     sys.path.remove(repo_root)
 sys.path.insert(0, repo_root)
 
+from nexus.contracts.autonomy_goal import (  # noqa: E402
+    AutonomyActionClass,
+    RepositoryIdentity,
+    StandingGrantContext,
+)
 from nexus.engine.canonical_task_seam import (  # noqa: E402
+    VerifiedCampaignIdentity,
     VerifiedTaskCardIdentity,
+    _derive_campaign_id_from_task_card,
     build_canonical_planner_admission,
 )
+from nexus.orchestrator.execution_readiness import PlaneObservation  # noqa: E402
+from nexus.orchestrator.lifecycle_guards import LifecycleGuardError  # noqa: E402
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService  # noqa: E402
+from nexus.orchestrator.standing_grant_store import StandingGrantReceipt  # noqa: E402
 from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
     FULL_TOOL_SCHEMA_HASH,
     GATEWAY_NAME,
@@ -36,6 +47,21 @@ from nexus.services.model_workforce_policy import WorkforcePolicyLoader  # noqa:
 from nexus.services.runtime_workforce_admission import (  # noqa: E402
     evaluate_runtime_workforce_admission,
 )
+
+
+def _readiness_observation(plane: str, status: str) -> PlaneObservation:
+    """Minimal typed observation bridge (tests may monkeypatch _readiness_plane_observations)."""
+
+    from nexus.contracts.execution_readiness import (
+        ExecutionReadinessPlane,
+        ExecutionReadinessStatus,
+    )
+
+    return PlaneObservation(
+        plane=ExecutionReadinessPlane(plane),
+        status=ExecutionReadinessStatus(status),
+        evidence_identities=(f"{plane}:{status}",),
+    )
 
 _TEST_CARD_ROOT: Path | None = None
 
@@ -170,6 +196,236 @@ class FakeService(SelfHostedTaskService):
         return super().build_contract(request)
 
 
+def _allow_owner_effect_authority(monkeypatch):
+    def allow(action, effect, key):
+        assert key.repository.repository_id == "James3014/Nexus-new"
+        return {
+            "schema": "nexus.standing_grant_effect_authorization.v1",
+            "action": action.value,
+            "effect": dict(effect),
+            "mutation_authorized": True,
+            "authorization_hash": "f" * 64,
+        }
+
+    monkeypatch.setattr(
+        UnifiedMCPGateway,
+        "_require_owner_effect_authority",
+        staticmethod(allow),
+    )
+
+
+AUTHORITY_ARGS = {
+    "authority_goal_id": "goal-test",
+    "authority_coordination_scope_id": "thread-test",
+}
+
+
+def test_candidate_adopt_external_public_schema_is_closed_and_registered():
+    names = {spec["name"] for spec in UnifiedMCPGateway.tool_specs()}
+    spec = next(spec for spec in UnifiedMCPGateway.tool_specs() if spec["name"] == "nexus_candidate_adopt_external")
+    assert "nexus_candidate_adopt_external" in names
+    assert spec["inputSchema"]["additionalProperties"] is False
+    assert "action" in spec["inputSchema"]["required"]
+
+
+def test_durable_owner_effect_schemas_require_explicit_authority_selectors():
+    specs = {spec["name"]: spec["inputSchema"] for spec in UnifiedMCPGateway.tool_specs()}
+    for name in (
+        "nexus_task_card_create",
+        "nexus_task_card_commit",
+        "nexus_candidate_adopt_external",
+        "nexus_candidate_dispose",
+    ):
+        schema = specs[name]
+        assert {"authority_goal_id", "authority_coordination_scope_id"}.issubset(
+            schema["required"]
+        )
+        assert schema["additionalProperties"] is False
+
+    assert "expectedCurrentThreadId" in specs["nexus_task_card_authority_switch"]["required"]
+    assert "expectedCurrentGoalId" in specs["nexus_task_card_authority_restore"]["required"]
+    assert "expectedCurrentThreadId" in specs["nexus_task_card_authority_restore"]["required"]
+
+
+def test_candidate_adopt_external_rejects_unknown_field_without_service_call(monkeypatch):
+    service = FakeService()
+    calls = []
+    service.adopt_external_candidate = lambda request: calls.append(request)  # type: ignore[attr-defined]
+    gateway = UnifiedMCPGateway(service=service)
+    response = gateway.handle({
+        "jsonrpc": "2.0", "id": 4601, "method": "tools/call",
+        "params": {"name": "nexus_candidate_adopt_external", "arguments": {
+            "campaign_id": "campaign", "spec_id": "spec", "unexpected_downstream": True,
+        }},
+    })
+    assert response["result"]["isError"] is True
+    assert "CANDIDATE_ADOPTION_SCHEMA_CLOSED" in response["result"]["structuredContent"]["error"]
+    assert calls == []
+
+
+def test_candidate_adopt_external_rejects_runtime_server_mismatch_without_service_call():
+    service = FakeService()
+    calls = []
+    service.adopt_external_candidate = lambda request: calls.append(request)  # type: ignore[attr-defined]
+    gateway = UnifiedMCPGateway(service=service)
+    response = gateway.handle({
+        "jsonrpc": "2.0", "id": 4602, "method": "tools/call",
+        "params": {"name": "nexus_candidate_adopt_external", "arguments": {
+            "campaign_id": "campaign", "spec_id": "spec", "spec_sha256": "0" * 64, "server_instance_id": "wrong",
+            **AUTHORITY_ARGS,
+            "lifecycle_revision": LIFECYCLE_REVISION, "full_tool_schema_hash": FULL_TOOL_SCHEMA_HASH,
+            "permission_policy_hash": PERMISSION_POLICY_HASH, "controller_repo_root": str(Path.cwd()),
+            "controller_branch": "main", "controller_head": "a" * 40,
+        }},
+    })
+    assert response["result"]["isError"] is True
+    assert "CANDIDATE_ADOPTION_SERVER_INSTANCE_MISMATCH" in response["result"]["structuredContent"]["error"]
+    assert calls == []
+
+
+def test_candidate_adopt_external_positive_binds_runtime_and_calls_service_once(monkeypatch):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+    from nexus.contracts.lifecycle_action import (
+        ApprovalScope,
+        ContractKind,
+        ExternalCandidateAdoptionRequest,
+        LifecycleActionType,
+        MutationDomain,
+        PermissionProfile,
+        build_action_envelope,
+    )
+
+    service = FakeService()
+    calls = []
+
+    def adopt(request):
+        calls.append(request)
+        receipt = {
+            "schema": "nexus.external_candidate_adoption_receipt.v1",
+            "task_id": request.task_id, "attempt_id": request.attempt_id,
+            "action_id": request.action_id, "idempotency_key": request.idempotency_key,
+            "adoption_request_hash": request.semantic_hash(),
+            "task_card_path": request.task_card_path, "task_card_hash": request.task_card_hash,
+            "contract_hash": "2" * 64, "controller_revision": request.controller_revision,
+            "target_base_revision": request.target_base_revision,
+            "candidate_commit_sha": request.candidate_commit_sha,
+            "candidate_tree_sha": request.candidate_tree_sha,
+            "candidate_diff_sha256": request.candidate_diff_sha256,
+            "candidate_state_hash": "3" * 64, "verified_receipt_hash": "4" * 64,
+            "validation_receipt_sha256": request.validation_receipt_sha256,
+            "acceptance_receipt_sha256": request.acceptance_receipt_sha256,
+            "repository_contract_policy_revision_hash": "5" * 64,
+            "derived_contract_projection": {}, "forbidden_repository_patterns": [],
+            "reviewer_id": "independent-reviewer",
+            "candidate_ref": f"refs/nexus-candidates/{request.task_id}/{request.candidate_commit_sha}",
+            "promotion_packet_hash": "6" * 64, "worker_invocations": 0,
+            "candidate_rewritten": False, "approval_performed": False,
+            "integration_performed": False, "merge_performed": False,
+            "push_performed": False, "public_claim_allowed": False,
+            "production_ready": False,
+            "claim_ceiling": ["CANDIDATE_ADOPTED_PENDING_HUMAN_APPROVAL_ONLY"],
+            "issued_at": "2026-08-30T00:00:00+00:00",
+        }
+        receipt_hash = hashlib.sha256(json.dumps(
+            receipt, sort_keys=True, separators=(",", ":"),
+        ).encode()).hexdigest()
+        return {
+            "task_id": request.task_id, "status": "PENDING_HUMAN_APPROVAL",
+            "promotion_status": "PENDING_HUMAN_APPROVAL",
+            "candidate_commit_sha": request.candidate_commit_sha,
+            "candidate_tree_sha": request.candidate_tree_sha,
+            "candidate_state_hash": receipt["candidate_state_hash"],
+            "verified_receipt_hash": receipt["verified_receipt_hash"],
+            "candidate_ref": receipt["candidate_ref"],
+            "approved_binding": None, "integration_authorization": None,
+            "integration_receipt": None, "merge_performed": False,
+            "push_performed": False, "public_claim_allowed": False,
+            "production_ready": False, "adoption_receipt": receipt,
+            "adoption_receipt_hash": receipt_hash,
+        }
+
+    service.adopt_external_candidate = adopt  # type: ignore[attr-defined]
+    gateway = UnifiedMCPGateway(service=service)
+    head = "a" * 40
+    monkeypatch.setattr(gateway_module, "_git", lambda *args, **kwargs: "main" if args[:2] == ("branch", "--show-current") else head)
+    owner_effects = []
+
+    def allow(action, effect, key):
+        owner_effects.append((action, dict(effect)))
+        return {"action": action.value, "mutation_authorized": True, "authorization_hash": "f" * 64}
+
+    monkeypatch.setattr(UnifiedMCPGateway, "_require_owner_effect_authority", staticmethod(allow))
+    validation = json.dumps({"schema": "validation"}).encode()
+    acceptance = json.dumps({"schema": "acceptance"}).encode()
+    base = {
+        "schema": "nexus.external_candidate_adoption_request.v1", "repository": gateway_module.GITHUB_REPOSITORY.repository_id,
+        "task_id": "adopt-positive", "attempt_id": "attempt-1", "action_id": "action-1",
+        "idempotency_key": "idem-1", "task_card_path": "tasks/test/adopt-positive.md", "task_card_hash": "c" * 64,
+        "controller_revision": head, "tool_manifest_hash": TOOL_MANIFEST_REVISION,
+        "full_tool_schema_hash": FULL_TOOL_SCHEMA_HASH, "permission_policy_hash": PERMISSION_POLICY_HASH,
+        "lifecycle_revision": LIFECYCLE_REVISION, "server_instance_id": SERVER_INSTANCE_ID,
+        "target_base_revision": "b" * 40, "candidate_commit_sha": "d" * 40, "candidate_tree_sha": "e" * 40,
+        "candidate_diff_sha256": "1" * 64, "validation_receipt_sha256": hashlib.sha256(validation).hexdigest(),
+        "acceptance_receipt_sha256": hashlib.sha256(acceptance).hexdigest(),
+        "validation_receipt_b64": __import__("base64").b64encode(validation).decode(),
+        "acceptance_receipt_b64": __import__("base64").b64encode(acceptance).decode(),
+        "allowed_files": ("README.md",), "verifier_commands": ("git diff --check",),
+        "forbidden_files": (), "authorized_deletions": (), "protected_contracts": (),
+    }
+    semantic_hash = ExternalCandidateAdoptionRequest.model_construct(**base, action=None).semantic_hash()
+    action = build_action_envelope(
+        task_id=base["task_id"], action_type=LifecycleActionType.CANDIDATE_ADOPT_EXTERNAL,
+        request={"adoption_request_hash": semantic_hash}, tool_manifest_hash=TOOL_MANIFEST_REVISION,
+        expected_head=head, allowed_paths=["README.md"], mutation=True,
+        task_card_path=base["task_card_path"], task_card_hash=base["task_card_hash"],
+        contract_kind=ContractKind.TRACKED_TASK_CARD, permission_profile=PermissionProfile.CANDIDATE,
+        approval_scope=ApprovalScope.ALLOW_ACTION_ONCE, mutation_domain=MutationDomain.CANDIDATE_REF,
+        attempt_id=base["attempt_id"], action_id=base["action_id"], idempotency_key=base["idempotency_key"],
+    ).model_dump(mode="json")
+    arguments = {
+        **base, **AUTHORITY_ARGS, "action": action, "campaign_id": gateway_module.EPB_CAMPAIGN_ID,
+        "spec_id": gateway_module.EPB_SPEC_ID, "spec_sha256": gateway_module.EPB_SPEC_SHA256,
+        "controller_repo_root": str(gateway_module.CANONICAL_SOURCE_ROOT), "controller_branch": "main",
+        "controller_head": head,
+    }
+    response = gateway.handle({"jsonrpc": "2.0", "id": 4603, "method": "tools/call", "params": {"name": "nexus_candidate_adopt_external", "arguments": arguments}})
+    assert response["result"]["isError"] is False, response
+    assert response["result"]["structuredContent"]["status"] == "PENDING_HUMAN_APPROVAL"
+    assert len(calls) == 1 and isinstance(calls[0], ExternalCandidateAdoptionRequest)
+    assert len(owner_effects) == 1
+    assert owner_effects[0][0] is gateway_module.AutonomyActionClass.CANDIDATE_ADOPT_EXTERNAL
+    assert owner_effects[0][1]["spec_sha256"] == gateway_module.EPB_SPEC_SHA256
+    assert owner_effects[0][1]["full_tool_schema_hash"] == FULL_TOOL_SCHEMA_HASH
+    assert "NO_MERGE" in response["result"]["structuredContent"]["claim_ceiling"]
+
+
+@pytest.mark.parametrize("bad_result", [
+    {"status": "APPROVED", "promotion_status": "APPROVED"},
+    {"status": "PENDING_HUMAN_APPROVAL", "promotion_status": "PENDING_HUMAN_APPROVAL", "merge_performed": True},
+    {"status": "PENDING_HUMAN_APPROVAL", "promotion_status": "PENDING_HUMAN_APPROVAL", "approved_binding": {"approval": True}},
+    {
+        "status": "PENDING_HUMAN_APPROVAL", "promotion_status": "PENDING_HUMAN_APPROVAL",
+        "approved_binding": None, "integration_authorization": None,
+        "integration_receipt": None, "merge_performed": False,
+        "push_performed": False, "public_claim_allowed": False,
+        "production_ready": False, "approval_performed": True,
+        "integration_performed": True, "release_performed": True,
+        "activation_performed": True,
+    },
+    {
+        "status": "PENDING_HUMAN_APPROVAL", "promotion_status": "PENDING_HUMAN_APPROVAL",
+        "approved_binding": None, "integration_authorization": None,
+        "integration_receipt": None, "merge_performed": False,
+        "push_performed": False, "public_claim_allowed": False,
+        "production_ready": False, "approval": {"approved": True},
+        "integrated": True, "released": True, "activated": True,
+    },
+])
+def test_candidate_adopt_external_rejects_downstream_service_result(monkeypatch, bad_result):
+    with pytest.raises(GatewayInputError, match="SERVICE_RESULT"):
+        UnifiedMCPGateway._validate_external_adoption_result(bad_result)
+
+
 def _ready_preflight(**overrides):
     """A positive worker mock must model verified execution, not version-only."""
     payload = {
@@ -223,7 +479,7 @@ def _valid_online_agy_dispatch():
     }
     admission = evaluate_runtime_workforce_admission(
         demands,
-        {"online": {"worker_id": "agy_flash", "provider": "agy", "model": "gemini-3.6-flash-high", "controls": ["task_card", "allowed_files", "mandatory_commands", "independent_verification"]}},
+        {"online": {"worker_id": "agy_flash_37_medium", "provider": "agy", "model": "gemini-3.7-flash-medium", "controls": ["task_card", "allowed_files", "mandatory_commands", "parser", "verifier", "independent_verification"]}},
         WorkforcePolicyLoader(Path(repo_root) / "nexus/config/model_workforce.yaml"),
     ).to_dict()
     return demands, admission
@@ -249,7 +505,7 @@ def _actual_dispatch(task_id, what, why):
 
 
 def test_canonical_planner_admission_uses_policy_routing_not_worker_iteration(
-    monkeypatch,
+    monkeypatch, tmp_path,
 ):
     loader = WorkforcePolicyLoader()
     snapshot = loader.load()
@@ -274,6 +530,9 @@ def test_canonical_planner_admission_uses_policy_routing_not_worker_iteration(
     )
     monkeypatch.setattr(WorkforcePolicyLoader, "load", lambda _self: reordered)
 
+    card_path = tmp_path / "canonical-policy-routing.md"
+    card_bytes = b"task_id: `canonical-policy-routing`\nAUTO_CHAIN: false\n"
+    card_path.write_bytes(card_bytes)
     result = build_canonical_planner_admission(
         task_id="canonical-policy-routing",
         task_text="implement one bounded change",
@@ -282,16 +541,114 @@ def test_canonical_planner_admission_uses_policy_routing_not_worker_iteration(
         task_card_identity=VerifiedTaskCardIdentity(
             task_id="canonical-policy-routing",
             task_card_path="tasks/test/canonical-policy-routing.md",
-            canonical_task_card_path="/tmp/canonical-policy-routing.md",
-            task_card_hash="a" * 64,
+            canonical_task_card_path=str(card_path),
+            task_card_hash=hashlib.sha256(card_bytes).hexdigest(),
         ),
     )
 
-    assert reordered.routing["online"]["fast_bounded_implementation"] == "agy_flash"
-    assert result["binding"]["worker_id"] == "agy_flash"
+    assert reordered.routing["online"]["fast_bounded_implementation"] == "agy_flash_37_medium"
+    assert result["binding"]["worker_id"] == "agy_flash_37_medium"
     assert result["workforce_admission"]["records"][0]["request"][
         "requested_worker_id"
-    ] == "agy_flash"
+    ] == "agy_flash_37_medium"
+
+
+def test_campaign_identity_requires_canonical_bytes_and_hash(tmp_path):
+    card = tmp_path / "card.md"
+    card.write_text("Campaign: `CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01`\n", encoding="utf-8")
+    identity = VerifiedTaskCardIdentity(
+        task_id="campaign-proof",
+        task_card_path="tasks/test/card.md",
+        canonical_task_card_path=str(card),
+        task_card_hash=hashlib.sha256(card.read_bytes()).hexdigest(),
+    )
+    assert _derive_campaign_id_from_task_card(identity) == "CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01"
+    tampered = replace(identity, task_card_hash="0" * 64)
+    with pytest.raises(ValueError, match="hash_mismatch"):
+        _derive_campaign_id_from_task_card(tampered)
+
+
+def test_authenticated_campaign_identity_is_bound_and_conflicts_fail(tmp_path):
+    card = tmp_path / "card.md"
+    card_bytes = b"Campaign: `CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01`\n"
+    card.write_bytes(card_bytes)
+    task_card = VerifiedTaskCardIdentity(
+        task_id="campaign-bound",
+        task_card_path="tasks/test/card.md",
+        canonical_task_card_path=str(card),
+        task_card_hash=hashlib.sha256(card_bytes).hexdigest(),
+    )
+    exact = VerifiedCampaignIdentity(
+        campaign_id="CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01",
+        task_id=task_card.task_id,
+        task_card_hash=task_card.task_card_hash,
+    )
+    result = build_canonical_planner_admission(
+        task_id=task_card.task_id, task_text="bounded change",
+        allowed_files=("bounded.py",), verifier_command=("git diff --check",),
+        task_card_identity=task_card, campaign_identity=exact,
+    )
+    assert result["binding"]["worker_id"] == "agy_flash_37_medium"
+    conflict = replace(exact, campaign_id="CAMPAIGN-PLANNER-WORKFORCE-SELECTION-REPAIR-01")
+    with pytest.raises(ValueError, match="campaign_identity_conflict"):
+        build_canonical_planner_admission(
+            task_id=task_card.task_id, task_text="bounded change",
+            allowed_files=("bounded.py",), verifier_command=("git diff --check",),
+            task_card_identity=task_card, campaign_identity=conflict,
+        )
+    with pytest.raises(ValueError, match="canonical_campaign_identity_unverified"):
+        build_canonical_planner_admission(
+            task_id=task_card.task_id, task_text="bounded change",
+            allowed_files=("bounded.py",), verifier_command=("git diff --check",),
+            task_card_identity=task_card, campaign_identity="CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01",  # type: ignore[arg-type]
+        )
+
+
+def test_open_swe_canary_task_card_produces_canonical_opencli_chatgpt_allow_binding() -> None:
+    canary_rel_path = "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+    canary_path = Path(repo_root) / canary_rel_path
+    assert canary_path.is_file()
+    card_bytes = canary_path.read_bytes()
+    card_hash = hashlib.sha256(card_bytes).hexdigest()
+
+    task_card = VerifiedTaskCardIdentity(
+        task_id="open-swe-resident-five-repo-canary-20260908",
+        task_card_path=canary_rel_path,
+        canonical_task_card_path=str(canary_path),
+        task_card_hash=card_hash,
+    )
+
+    derived_campaign = _derive_campaign_id_from_task_card(task_card)
+    assert derived_campaign == "open-swe-resident-five-repo-canary-20260908"
+
+    result = build_canonical_planner_admission(
+        task_id=task_card.task_id,
+        task_text="Open SWE resident unattended canary",
+        allowed_files=("tests/ops/test_open_swe_resident_five_repo_canary_20260908.py",),
+        verifier_command=(
+            "python3 -m pytest -q tests/ops/test_open_swe_resident_five_repo_canary_20260908.py",
+            "git diff --check",
+        ),
+        task_card_identity=task_card,
+    )
+
+    admission = result["workforce_admission"]
+    assert admission["overall_decision"] == "ALLOW"
+    records = admission.get("records") or []
+    assert len(records) == 1
+    record = records[0]
+    assert record["decision"]["decision"] == "ALLOW"
+    assert record["decision"]["resolved_worker_id"] == "opencli_chatgpt_balanced_web"
+    assert record["decision"]["resolved_provider"] == "opencli_chatgpt"
+    assert record["decision"]["resolved_model"] == "opencli_chatgpt/balanced"
+    assert record["request"]["role"] == "bounded_candidate_generation"
+    assert record["request"]["autonomy"] == "L1"
+    assert record["demand"]["minimum_autonomy"] == "L1"
+
+    binding = result["binding"]
+    assert binding["worker_id"] == "opencli_chatgpt_balanced_web"
+    assert binding["provider"] == "opencli_chatgpt"
+    assert binding["model"] == "opencli_chatgpt/balanced"
 
 
 def _worker_args(
@@ -414,7 +771,7 @@ def test_worker_candidate_forwards_tracked_task_run_once(monkeypatch):
         **_task_card_evidence("worker-candidate-1"),
     }
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
-        requested_model="gemini-3.6-flash-high", resolved_model="gemini-3.6-flash-high",
+        requested_model="gemini-3.7-flash-medium", resolved_model="gemini-3.7-flash-medium",
     ))
     response = gateway.handle({"jsonrpc": "2.0", "id": 44, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": arguments}})
     assert response is not None
@@ -429,9 +786,9 @@ def test_worker_candidate_forwards_tracked_task_run_once(monkeypatch):
     assert effective["task_card_path"] == arguments["task_card_path"]
     assert effective["task_card_hash"] == arguments["task_card_hash"]
     assert request["provider"] == "agy"
-    assert request["model"] == "gemini-3.6-flash-high"
+    assert request["model"] == "gemini-3.7-flash-medium"
     assert request["worker"] == "agy"
-    assert request["worker_id"] == "agy_flash"
+    assert request["worker_id"] == "agy_flash_37_medium"
     readiness_fields = {
         "provider_probe_evidence_hash": "e" * 64,
         "provider_binary_path": "/usr/bin/true",
@@ -469,7 +826,7 @@ def test_worker_candidate_uses_planner_admission_identity_and_rejects_override(m
     internal = _actual_dispatch("governed-dispatch-1", "bounded change", "admitted dispatch")
     demands, admission = internal["workforce_demands"], internal["workforce_admission"]
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
-        provider="agy", requested_model="gemini-3.6-flash-high", resolved_model="gemini-3.6-flash-high",
+        provider="agy", requested_model="gemini-3.7-flash-medium", resolved_model="gemini-3.7-flash-medium",
     ))
     arguments = {
         "task_id": "governed-dispatch-1", "what": "bounded change", "why": "admitted dispatch",
@@ -505,7 +862,7 @@ def test_worker_candidate_auto_dispatches_admitted_online_agy_end_to_end(monkeyp
     internal = _actual_dispatch("governed-online-agy-1", "bounded online change", "prove agy admission seam")
     demands, admission = internal["workforce_demands"], internal["workforce_admission"]
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
-        provider="agy", requested_model="gemini-3.6-flash-high", resolved_model="gemini-3.6-flash-high",
+        provider="agy", requested_model="gemini-3.7-flash-medium", resolved_model="gemini-3.7-flash-medium",
     ))
     arguments = {
         "task_id": "governed-online-agy-1", "what": "bounded online change", "why": "prove agy admission seam",
@@ -573,8 +930,8 @@ def test_worker_candidate_rejects_preflight_identity_mismatch_before_submit(
     internal = _actual_dispatch(task_id, what, why)
     demands, admission = internal["workforce_demands"], internal["workforce_admission"]
     preflight = _ready_preflight(
-        provider="agy", requested_model="gemini-3.6-flash-high",
-        resolved_model="gemini-3.6-flash-high",
+        provider="agy", requested_model="gemini-3.7-flash-medium",
+        resolved_model="gemini-3.7-flash-medium",
     )
     preflight[field] = value
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: preflight)
@@ -800,7 +1157,7 @@ def test_worker_candidate_preserves_service_status(monkeypatch):
     service = StatusService()
     gateway = UnifiedMCPGateway(service=service)
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
-        requested_model="gemini-3.6-flash-high", resolved_model="gemini-3.6-flash-high",
+        requested_model="gemini-3.7-flash-medium", resolved_model="gemini-3.7-flash-medium",
     ))
     args = _worker_args("preserve-service-status")
     response = gateway.handle({"jsonrpc": "2.0", "id": 49, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": args}})
@@ -829,7 +1186,7 @@ def test_worker_candidate_semantic_replay_and_conflict_use_service_gate(monkeypa
     service = FakeService()
     gateway = UnifiedMCPGateway(service=service)
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
-        requested_model="gemini-3.6-flash-high", resolved_model="gemini-3.6-flash-high",
+        requested_model="gemini-3.7-flash-medium", resolved_model="gemini-3.7-flash-medium",
     ))
     args = _worker_args("semantic-replay")
     gateway.handle({"jsonrpc": "2.0", "id": 60, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": args}})
@@ -861,7 +1218,7 @@ def test_worker_candidate_explicit_authority_confirmation_binds_marker(monkeypat
     service = FakeService()
     gateway = UnifiedMCPGateway(service=service)
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
-        requested_model="gemini-3.6-flash-high", resolved_model="gemini-3.6-flash-high",
+        requested_model="gemini-3.7-flash-medium", resolved_model="gemini-3.7-flash-medium",
     ))
     args = _worker_args(
         "authority-candidate", what="authority change", why="explicit owner review",
@@ -904,7 +1261,7 @@ def test_worker_candidate_authority_confirmation_tamper_breaks_bound_hash(monkey
     service = FakeService()
     gateway = UnifiedMCPGateway(service=service)
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
-        requested_model="gemini-3.6-flash-high", resolved_model="gemini-3.6-flash-high",
+        requested_model="gemini-3.7-flash-medium", resolved_model="gemini-3.7-flash-medium",
     ))
     args = _worker_args(
         "authority-tamper", what="authority change", why="explicit owner review",
@@ -925,7 +1282,7 @@ def test_worker_candidate_explicit_authority_binding_rejects_identity_tamper(mon
 
     gateway = UnifiedMCPGateway(service=FakeService())
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
-        requested_model="gemini-3.6-flash-high", resolved_model="gemini-3.6-flash-high",
+        requested_model="gemini-3.7-flash-medium", resolved_model="gemini-3.7-flash-medium",
     ))
     args = _worker_args(
         "authority-identity", what="authority change", why="explicit owner review",
@@ -937,7 +1294,7 @@ def test_worker_candidate_explicit_authority_binding_rejects_identity_tamper(mon
     service = FakeService()
     gateway = UnifiedMCPGateway(service=service)
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
-        requested_model="gemini-3.6-flash-high", resolved_model="gemini-3.6-flash-high",
+        requested_model="gemini-3.7-flash-medium", resolved_model="gemini-3.7-flash-medium",
     ))
     gateway.handle({"jsonrpc": "2.0", "id": 75, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": args}})
     original = service.submitted[0]
@@ -959,7 +1316,7 @@ def test_worker_candidate_ordinary_to_authority_same_task_remains_tracked(monkey
     service = FakeService()
     gateway = UnifiedMCPGateway(service=service)
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
-        requested_model="gemini-3.6-flash-high", resolved_model="gemini-3.6-flash-high",
+        requested_model="gemini-3.7-flash-medium", resolved_model="gemini-3.7-flash-medium",
     ))
     ordinary = _worker_args("authority-replay", what="bounded change", why="ordinary request")
     gateway.handle({"jsonrpc": "2.0", "id": 76, "method": "tools/call", "params": {"name": "nexus_worker_candidate", "arguments": ordinary}})
@@ -978,7 +1335,7 @@ def test_worker_candidate_head_drift_fails_before_submit(monkeypatch):
     service = FakeService()
     gateway = UnifiedMCPGateway(service=service)
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
-        requested_model="gemini-3.6-flash-high", resolved_model="gemini-3.6-flash-high",
+        requested_model="gemini-3.7-flash-medium", resolved_model="gemini-3.7-flash-medium",
     ))
     from nexus.orchestrator.lifecycle_guards import LifecycleGuardError
     monkeypatch.setattr(sys.modules["nexus.orchestrator.unified_mcp_gateway"], "pre_action_guard", lambda *args, **kwargs: (_ for _ in ()).throw(LifecycleGuardError("HEAD_DRIFT", "head changed")))
@@ -1451,7 +1808,8 @@ def test_minimal_direct_finish_accepts_public_base_sha_alias():
     assert service.completed[0]["controller_revision"] == base
 
 
-def test_public_recovery_surface_has_one_actionable_contract():
+def test_public_recovery_surface_has_one_actionable_contract(monkeypatch):
+    _allow_owner_effect_authority(monkeypatch)
     service = FakeService()
     gateway = UnifiedMCPGateway(service=service)
     base40 = "a" * 40
@@ -1463,7 +1821,7 @@ def test_public_recovery_surface_has_one_actionable_contract():
         ("nexus_task_resume", {"task_id": "recover-1"}),
         ("nexus_candidate_approve", {"task_id": "recover-1", "candidate_commit_sha": base40, "candidate_tree_sha": base40, "candidate_state_hash": base64, "verified_receipt_hash": base64, "approval": _approval()}),
         ("nexus_candidate_integrate", {"task_id": "recover-1"}),
-        ("nexus_candidate_dispose", {"task_id": "recover-1", "disposition": "REJECTED"}),
+            ("nexus_candidate_dispose", {**AUTHORITY_ARGS, "task_id": "recover-1", "disposition": "REJECTED"}),
     ]
     for index, (name, arguments) in enumerate(calls):
         response = gateway.handle({"jsonrpc": "2.0", "id": 500 + index, "method": "tools/call", "params": {"name": name, "arguments": arguments}})
@@ -1786,10 +2144,13 @@ def test_gateway_provider_executable_uses_shared_registered_resolver(monkeypatch
 def test_task_card_create_is_owner_confirmed_non_overwriting_and_hashed(monkeypatch, tmp_path):
     import nexus.orchestrator.unified_mcp_gateway as gateway_module
 
+    _allow_owner_effect_authority(monkeypatch)
+
     monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
     monkeypatch.setattr(gateway_module.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="f" * 40, stderr=""))
     gateway = UnifiedMCPGateway(service=FakeService())
     arguments = {
+        **AUTHORITY_ARGS,
         "owner_confirmation": True,
         "campaign_id": "chatgpt-bootstrap",
         "task_id": "first-card",
@@ -1801,6 +2162,7 @@ def test_task_card_create_is_owner_confirmed_non_overwriting_and_hashed(monkeypa
     payload = response["result"]["structuredContent"]
     assert payload["status"] == "CREATED_PENDING_COMMIT"
     assert len(payload["card_hash"]) == 64
+    assert len(payload["index_hash"]) == 64
     assert payload["git_blob_sha"] == "f" * 40
     assert (tmp_path / "tasks/chatgpt-bootstrap/INDEX.md").exists()
     assert (tmp_path / "tasks/chatgpt-bootstrap/00-first-card.md").exists()
@@ -1812,13 +2174,96 @@ def test_task_card_create_is_owner_confirmed_non_overwriting_and_hashed(monkeypa
 def test_task_card_create_hash_failure_leaves_no_campaign(monkeypatch, tmp_path):
     import nexus.orchestrator.unified_mcp_gateway as gateway_module
 
+    _allow_owner_effect_authority(monkeypatch)
+
     monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
     monkeypatch.setattr(gateway_module.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout="", stderr="hash failed"))
     gateway = UnifiedMCPGateway(service=FakeService())
-    response = gateway.handle({"jsonrpc": "2.0", "id": 7051, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": {"owner_confirmation": True, "campaign_id": "atomic-failure", "task_id": "card", "objective": "bounded", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"]}}})
+    response = gateway.handle({"jsonrpc": "2.0", "id": 7051, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": {**AUTHORITY_ARGS, "owner_confirmation": True, "campaign_id": "atomic-failure", "task_id": "card", "objective": "bounded", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"]}}})
     assert response["result"]["isError"] is True
     assert not (tmp_path / "tasks/atomic-failure").exists()
     assert not list((tmp_path / "tasks").glob(".atomic-failure.create-*"))
+
+
+def _init_detached_git_repo(root: Path) -> str:
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "Nexus Test"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "nexus-test@example.invalid"], cwd=root, check=True)
+    (root / "README.md").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "base"], cwd=root, check=True)
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, check=True).stdout.strip()
+    subprocess.run(["git", "checkout", "-q", "--detach", head], cwd=root, check=True)
+    return head
+
+
+def test_task_card_commit_closes_pending_card_bootstrap_and_leaves_controller_clean(monkeypatch, tmp_path):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    _allow_owner_effect_authority(monkeypatch)
+
+    head = _init_detached_git_repo(tmp_path)
+    monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
+    gateway = UnifiedMCPGateway(service=FakeService())
+    create = gateway.handle({"jsonrpc": "2.0", "id": 7052, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": {**AUTHORITY_ARGS, "owner_confirmation": True, "campaign_id": "bootstrap-close", "task_id": "first-card", "objective": "Close the task-card bootstrap loop.", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"]}}})
+    created = create["result"]["structuredContent"]
+    assert created["status"] == "CREATED_PENDING_COMMIT"
+
+    commit = gateway.handle({"jsonrpc": "2.0", "id": 7053, "method": "tools/call", "params": {"name": "nexus_task_card_commit", "arguments": {**AUTHORITY_ARGS, "owner_confirmation": True, "campaign_id": "bootstrap-close", "task_id": "first-card", "expected_head": head, "card_hash": created["card_hash"], "index_hash": created["index_hash"]}}})
+    payload = commit["result"]["structuredContent"]
+
+    assert payload["status"] == "COMMITTED"
+    assert payload["previous_head"] == head
+    assert payload["commit_sha"] != head
+    assert payload["controller_clean"] is True
+    assert payload["committed_paths"] == [
+        "tasks/bootstrap-close/00-first-card.md",
+        "tasks/bootstrap-close/INDEX.md",
+    ]
+    assert subprocess.run(["git", "status", "--porcelain=v1"], cwd=tmp_path, capture_output=True, text=True, check=True).stdout == ""
+    changed = subprocess.run(["git", "diff-tree", "--no-commit-id", "--name-only", "-r", payload["commit_sha"]], cwd=tmp_path, capture_output=True, text=True, check=True).stdout.splitlines()
+    assert set(changed) == set(payload["committed_paths"])
+
+
+def test_task_card_commit_fails_closed_on_unrelated_dirty_state(monkeypatch, tmp_path):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    _allow_owner_effect_authority(monkeypatch)
+
+    head = _init_detached_git_repo(tmp_path)
+    monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
+    gateway = UnifiedMCPGateway(service=FakeService())
+    create = gateway.handle({"jsonrpc": "2.0", "id": 7054, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": {**AUTHORITY_ARGS, "owner_confirmation": True, "campaign_id": "bootstrap-dirty", "task_id": "first-card", "objective": "Close the task-card bootstrap loop.", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"]}}})
+    created = create["result"]["structuredContent"]
+    (tmp_path / "unrelated.txt").write_text("do not absorb\n", encoding="utf-8")
+
+    commit = gateway.handle({"jsonrpc": "2.0", "id": 7055, "method": "tools/call", "params": {"name": "nexus_task_card_commit", "arguments": {**AUTHORITY_ARGS, "owner_confirmation": True, "campaign_id": "bootstrap-dirty", "task_id": "first-card", "expected_head": head, "card_hash": created["card_hash"], "index_hash": created["index_hash"]}}})
+
+    assert commit["result"]["isError"] is True
+    assert "TASK_CARD_COMMIT_CONTROLLER_NOT_EXACTLY_PENDING_CARD" in commit["result"]["structuredContent"]["error"]
+    assert subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True, check=True).stdout.strip() == head
+    assert subprocess.run(["git", "diff", "--cached", "--name-only"], cwd=tmp_path, capture_output=True, text=True, check=True).stdout == ""
+
+
+def test_task_card_commit_rejects_index_content_drift(monkeypatch, tmp_path):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    _allow_owner_effect_authority(monkeypatch)
+
+    head = _init_detached_git_repo(tmp_path)
+    monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
+    gateway = UnifiedMCPGateway(service=FakeService())
+    create = gateway.handle({"jsonrpc": "2.0", "id": 7056, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": {**AUTHORITY_ARGS, "owner_confirmation": True, "campaign_id": "bootstrap-index-drift", "task_id": "first-card", "objective": "Close the task-card bootstrap loop.", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"]}}})
+    created = create["result"]["structuredContent"]
+    index_path = tmp_path / "tasks/bootstrap-index-drift/INDEX.md"
+    index_path.write_text(index_path.read_text(encoding="utf-8") + "\nunauthorized drift\n", encoding="utf-8")
+
+    commit = gateway.handle({"jsonrpc": "2.0", "id": 7057, "method": "tools/call", "params": {"name": "nexus_task_card_commit", "arguments": {**AUTHORITY_ARGS, "owner_confirmation": True, "campaign_id": "bootstrap-index-drift", "task_id": "first-card", "expected_head": head, "card_hash": created["card_hash"], "index_hash": created["index_hash"]}}})
+
+    assert commit["result"]["isError"] is True
+    assert "TASK_CARD_COMMIT_INDEX_HASH_MISMATCH" in commit["result"]["structuredContent"]["error"]
+    assert subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True, check=True).stdout.strip() == head
+    assert subprocess.run(["git", "diff", "--cached", "--name-only"], cwd=tmp_path, capture_output=True, text=True, check=True).stdout == ""
 
 
 def test_model_probe_isolated_receipt_validates_schema_and_cleans_workspace(monkeypatch, tmp_path):
@@ -1906,7 +2351,7 @@ def test_model_probe_feedback_loop_preflight_then_worker_candidate_once(monkeypa
         assert raw_field not in evidence
 
     monkeypatch.setattr(gateway, "_provider_preflight", lambda arguments: _ready_preflight(
-        requested_model="gemini-3.6-flash-high", resolved_model="gemini-3.6-flash-high",
+        requested_model="gemini-3.7-flash-medium", resolved_model="gemini-3.7-flash-medium",
     ))
     args = _worker_args("feedback-worker")
     response = gateway._worker_candidate(args)
@@ -2397,3 +2842,1376 @@ def test_unrelated_providers_keep_existing_command_contracts(monkeypatch):
     assert cline[cline.index("--model") + 1] == "cline-pass/glm-5.2"
     with pytest.raises(GatewayInputError):
         gateway._assist_command(executable="/usr/local/bin/unknown", provider="unknown", model="any", prompt="probe")
+
+
+def test_task_card_boolean_confirmation_without_durable_authority_is_zero_mutation(monkeypatch, tmp_path):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
+    monkeypatch.setattr(gateway_module, "_git", lambda *args, **kwargs: "a" * 40)
+
+    def deny(**_kwargs):
+        raise gateway_module.StandingGrantReceiptError("RECEIPT_MISSING")
+
+    monkeypatch.setattr(gateway_module, "authorize_durable_standing_grant_effect", deny)
+    gateway = UnifiedMCPGateway(service=FakeService())
+    response = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 801,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_task_card_create",
+                "arguments": {
+                    "owner_confirmation": True,
+                    **AUTHORITY_ARGS,
+                "campaign_id": "authority-missing",
+                "task_id": "first-card",
+                "objective": "Must not create without durable authority.",
+                "allowed_files": ["README.md"],
+                "verifier_commands": ["git diff --check"],
+            },
+        },
+    })
+
+    payload = response["result"]["structuredContent"]
+    assert payload["schema"] == "nexus.mcp_gateway_error.v1"
+    assert "OWNER_AUTHORITY_REQUIRED" in payload["error"]
+    assert not (tmp_path / "tasks").exists()
+
+
+def test_task_card_create_authority_does_not_authorize_commit(monkeypatch, tmp_path):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    head = _init_detached_git_repo(tmp_path)
+    monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
+    actions = []
+
+    def one_action_only(action, effect, key):
+        actions.append(action.value)
+        if action.value != "TASK_CARD_CREATE":
+            raise GatewayInputError("OWNER_AUTHORITY_REQUIRED:OUT_OF_SCOPE")
+        return {"action": action.value, "effect": dict(effect), "mutation_authorized": True}
+
+    monkeypatch.setattr(
+        UnifiedMCPGateway,
+        "_require_owner_effect_authority",
+        staticmethod(one_action_only),
+    )
+    gateway = UnifiedMCPGateway(service=FakeService())
+    created = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 802,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_task_card_create",
+            "arguments": {
+                **AUTHORITY_ARGS,
+                "owner_confirmation": True,
+                "campaign_id": "create-only",
+                "task_id": "first-card",
+                "objective": "Create authority cannot commit.",
+                "allowed_files": ["README.md"],
+                "verifier_commands": ["git diff --check"],
+            },
+        },
+    })["result"]["structuredContent"]
+    before = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    response = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 803,
+        "method": "tools/call",
+        "params": {
+                "name": "nexus_task_card_commit",
+            "arguments": {
+                **AUTHORITY_ARGS,
+                "owner_confirmation": True,
+                "campaign_id": "create-only",
+                "task_id": "first-card",
+                "expected_head": head,
+                "card_hash": created["card_hash"],
+                "index_hash": created["index_hash"],
+            },
+        },
+    })
+
+    assert response["result"]["structuredContent"]["schema"] == "nexus.mcp_gateway_error.v1"
+    after = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert after == before == head
+    assert actions == ["TASK_CARD_CREATE", "TASK_CARD_COMMIT"]
+
+
+def test_candidate_disposition_missing_owner_authority_is_zero_mutation(monkeypatch):
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    dispose_calls = 0
+
+    def deny(_action, _effect, key=None):
+        raise GatewayInputError("OWNER_AUTHORITY_REQUIRED:OUT_OF_SCOPE")
+
+    def dispose_candidate(*_args, **_kwargs):
+        nonlocal dispose_calls
+        dispose_calls += 1
+        raise AssertionError("candidate disposal must not run without Owner authority")
+
+    monkeypatch.setattr(
+        UnifiedMCPGateway,
+        "_require_owner_effect_authority",
+        staticmethod(deny),
+    )
+    monkeypatch.setattr(service, "dispose_candidate", dispose_candidate)
+
+    with pytest.raises(GatewayInputError, match="OWNER_AUTHORITY_REQUIRED"):
+        gateway._candidate_dispose({**AUTHORITY_ARGS, "task_id": "candidate-reject", "disposition": "REJECTED"})
+
+    assert dispose_calls == 0
+
+
+def test_candidate_disposition_requires_distinct_durable_owner_action(monkeypatch):
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    observed = []
+
+    def allow(action, effect, key):
+        observed.append((action.value, dict(effect)))
+        return {"action": action.value, "effect": dict(effect), "mutation_authorized": True}
+
+    monkeypatch.setattr(
+        UnifiedMCPGateway,
+        "_require_owner_effect_authority",
+        staticmethod(allow),
+    )
+    rejected = gateway._candidate_dispose({**AUTHORITY_ARGS, "task_id": "candidate-reject", "disposition": "REJECTED"})
+    superseded = gateway._candidate_dispose({
+        **AUTHORITY_ARGS, "task_id": "candidate-supersede",
+        "disposition": "SUPERSEDED",
+        "superseded_by": "candidate-successor",
+    })
+
+    assert rejected["owner_authority"]["action"] == "CANDIDATE_REJECT"
+    assert superseded["owner_authority"]["action"] == "CANDIDATE_SUPERSEDE"
+    assert observed[1][1]["superseded_by"] == "candidate-successor"
+
+
+def _failed_assist_for_retry(monkeypatch, tmp_path, task_id):
+    popen_calls = []
+
+    class FakePopen:
+        pid = 54001
+        returncode = None
+
+        def __init__(self, command, **_kwargs):
+            self.command = list(command)
+            popen_calls.append(list(command))
+
+        def poll(self):
+            return self.returncode
+
+    monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", FakePopen)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    service = FakeService()
+    service.state_dir = tmp_path / task_id
+    gateway = UnifiedMCPGateway(service=service)
+    response = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_assist_submit",
+            "arguments": {
+                "task_id": task_id,
+                "what": "Fix README",
+                "why": "Retry authority regression",
+                "allowed_files": ["README.md"],
+            },
+        },
+    })
+    assert response["result"]["structuredContent"]["status"] == "RUNNING"
+    job = gateway._assist_read(task_id)
+    job["status"] = "FAILED"
+    job["exit_code"] = 1
+    gateway._assist_write(job)
+    return gateway, popen_calls
+
+
+def test_assisted_retry_revalidates_request_hash_before_provider_restart(monkeypatch, tmp_path):
+    gateway, popen_calls = _failed_assist_for_retry(monkeypatch, tmp_path, "retry-request-hash")
+    job = gateway._assist_read("retry-request-hash")
+    job["action"]["request_hash"] = "0" * 64
+    gateway._assist_write(job)
+
+    with pytest.raises(LifecycleGuardError, match="REQUEST_HASH_MISMATCH"):
+        gateway._assist_retry("retry-request-hash")
+
+    assert len(popen_calls) == 1
+
+
+def test_assisted_retry_revalidates_manifest_and_head_before_provider_restart(monkeypatch, tmp_path):
+    gateway, popen_calls = _failed_assist_for_retry(monkeypatch, tmp_path, "retry-manifest")
+    job = gateway._assist_read("retry-manifest")
+    job["action"]["tool_manifest_hash"] = "c" * 64
+    gateway._assist_write(job)
+    with pytest.raises(LifecycleGuardError, match="TOOL_MANIFEST_NAME_DRIFT"):
+        gateway._assist_retry("retry-manifest")
+    assert len(popen_calls) == 1
+
+    gateway2, popen_calls2 = _failed_assist_for_retry(monkeypatch, tmp_path, "retry-head")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "b" * 40)
+    with pytest.raises(LifecycleGuardError, match="EXPECTED_HEAD_MISMATCH"):
+        gateway2._assist_retry("retry-head")
+    assert len(popen_calls2) == 1
+
+
+def test_assisted_retry_rejects_scope_and_command_substitution_before_provider_restart(monkeypatch, tmp_path):
+    gateway, popen_calls = _failed_assist_for_retry(monkeypatch, tmp_path, "retry-scope")
+    job = gateway._assist_read("retry-scope")
+    job["bound_action_request"]["allowed_files"] = ["README.md", "OTHER.md"]
+    gateway._assist_write(job)
+    with pytest.raises(LifecycleGuardError, match="REQUEST_HASH_MISMATCH|ALLOWED_PATH_MISMATCH"):
+        gateway._assist_retry("retry-scope")
+    assert len(popen_calls) == 1
+
+    gateway2, popen_calls2 = _failed_assist_for_retry(monkeypatch, tmp_path, "retry-command")
+    job2 = gateway2._assist_read("retry-command")
+    job2["command"] = ["/bin/echo", "substituted"]
+    gateway2._assist_write(job2)
+    with pytest.raises(LifecycleGuardError, match="COMMAND_SUBSTITUTION_DETECTED"):
+        gateway2._assist_retry("retry-command")
+    assert len(popen_calls2) == 1
+
+
+def test_assisted_retry_valid_same_task_uses_fresh_attempt_action_and_idempotency(monkeypatch, tmp_path):
+    gateway, popen_calls = _failed_assist_for_retry(monkeypatch, tmp_path, "retry-valid")
+    first = gateway._assist_read("retry-valid")
+
+    result = gateway._assist_retry("retry-valid")
+    second = gateway._assist_read("retry-valid")
+
+    assert result["status"] == "RUNNING"
+    assert len(popen_calls) == 2
+    assert second["task_id"] == first["task_id"]
+    assert second["attempt_id"] != first["attempt_id"]
+    assert second["action_id"] != first["action_id"]
+    assert second["idempotency_key"] != first["idempotency_key"]
+    assert second["action"]["action_type"] == "TASK_RETRY"
+    assert second["bound_action_request"] == first["bound_action_request"]
+    assert second["attempt_history"][0]["attempt_id"] == first["attempt_id"]
+
+
+def test_gateway_task_card_authority_switch_and_restore_workflow(monkeypatch, tmp_path):
+    import nexus.orchestrator.standing_grant_store as sg_store
+
+    receipt_path = tmp_path / "authority" / "standing-grant.json"
+    monkeypatch.setattr(sg_store, "DEFAULT_RECEIPT_PATH", receipt_path)
+    monkeypatch.setattr(sg_store, "DEFAULT_TRANSITIONS_DIR", tmp_path / "authority" / "transitions")
+
+    context = StandingGrantContext.issue(
+        owner_id="owner-james",
+        coordinator_id="coordinator-codex",
+        repository=RepositoryIdentity(
+            repository_id="James3014/Nexus-new",
+            canonical_remote="https://github.com/James3014/Nexus-new.git",
+        ),
+        thread_id="thread-orig",
+        goal_id="goal-orig",
+        allowed_actions=(AutonomyActionClass.REPOSITORY_PUSH,),
+        issued_at=datetime.now(timezone.utc) - timedelta(minutes=5),
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    orig_receipt = StandingGrantReceipt.issue(grant_id="grant-orig", context=context)
+    sg_store.write_keyed_standing_grant_receipt(orig_receipt)
+
+    gateway = UnifiedMCPGateway(service=FakeService())
+
+    # Switch using settled camelCase fields
+    switch_res = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 901,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_task_card_authority_switch",
+            "arguments": {
+                "ownerConfirmation": True,
+                "attemptKey": "attempt-gw-switch",
+                "expectedCurrentReceiptHash": orig_receipt.receipt_hash,
+                    "expectedCurrentGoalId": "goal-orig",
+                    "expectedCurrentThreadId": "thread-orig",
+                "successorGoalId": "goal-succ",
+                "successorThreadId": "thread-succ",
+                "ttlMinutes": 15,
+            },
+        },
+    })
+    payload = switch_res["result"]["structuredContent"]
+    assert payload["status"] == "SWITCHED"
+    assert payload["temporary_goal_id"] == "goal-succ"
+    assert payload["temporary_thread_id"] == "thread-succ"
+    assert payload["allowed_actions"] == ["TASK_CARD_COMMIT", "TASK_CARD_CREATE"]
+    temp_hash = payload["temporary_receipt_hash"]
+    op_id = payload["switch_operation_id"]
+
+    # Restore using camelCase inputs
+    restore_res = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 902,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_task_card_authority_restore",
+            "arguments": {
+                "ownerConfirmation": True,
+                "attemptKey": "attempt-gw-restore",
+                    "switchOperationId": op_id,
+                    "expectedTemporaryReceiptHash": temp_hash,
+                    "expectedCurrentGoalId": "goal-orig",
+                    "expectedCurrentThreadId": "thread-orig",
+            },
+        },
+    })
+    restore_payload = restore_res["result"]["structuredContent"]
+    assert restore_payload["status"] == "RESTORED"
+    assert restore_payload.get("restored_goal_id", "goal-orig") == "goal-orig"
+    assert restore_payload.get("restored_thread_id", "thread-orig") == "thread-orig"
+    assert restore_payload.get("restored_allowed_actions", ["REPOSITORY_PUSH"]) == ["REPOSITORY_PUSH"]
+
+
+def test_gateway_task_card_authority_switch_and_restore_fail_closed(monkeypatch, tmp_path):
+    import nexus.orchestrator.standing_grant_store as sg_store
+
+    receipt_path = tmp_path / "authority" / "standing-grant.json"
+    monkeypatch.setattr(sg_store, "DEFAULT_RECEIPT_PATH", receipt_path)
+    monkeypatch.setattr(sg_store, "DEFAULT_TRANSITIONS_DIR", tmp_path / "authority" / "transitions")
+
+    context = StandingGrantContext.issue(
+        owner_id="owner-james",
+        coordinator_id="coordinator-codex",
+        repository=RepositoryIdentity(
+            repository_id="James3014/Nexus-new",
+            canonical_remote="https://github.com/James3014/Nexus-new.git",
+        ),
+        thread_id="thread-orig",
+        goal_id="goal-orig",
+        allowed_actions=(AutonomyActionClass.REPOSITORY_PUSH,),
+        issued_at=datetime.now(timezone.utc) - timedelta(minutes=5),
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    orig_receipt = StandingGrantReceipt.issue(grant_id="grant-orig", context=context)
+    sg_store.write_keyed_standing_grant_receipt(orig_receipt)
+
+    gateway = UnifiedMCPGateway(service=FakeService())
+
+    # Switch rejected without ownerConfirmation
+    res = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 903,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_task_card_authority_switch",
+            "arguments": {
+                "ownerConfirmation": False,
+                "attemptKey": "attempt-gw-fail-1",
+                "expectedCurrentReceiptHash": orig_receipt.receipt_hash,
+                    "expectedCurrentGoalId": "goal-orig",
+                    "expectedCurrentThreadId": "thread-orig",
+                "successorGoalId": "goal-succ",
+                "successorThreadId": "thread-succ",
+                "ttlMinutes": 15,
+            },
+        },
+    })
+    assert res["result"]["isError"] is True
+    assert "OWNER_CONFIRMATION_REQUIRED" in res["result"]["structuredContent"]["error"]
+
+    # Switch rejected with ttlMinutes > 30
+    res = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 904,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_task_card_authority_switch",
+            "arguments": {
+                "ownerConfirmation": True,
+                "attemptKey": "attempt-gw-fail-2",
+                "expectedCurrentReceiptHash": orig_receipt.receipt_hash,
+                "expectedCurrentGoalId": "goal-orig",
+                "expectedCurrentThreadId": "thread-orig",
+                "successorGoalId": "goal-succ",
+                "successorThreadId": "thread-succ",
+                "ttlMinutes": 45,
+            },
+        },
+    })
+    assert res["result"]["isError"] is True
+    assert "ttlMinutes" in res["result"]["structuredContent"]["error"]
+
+    # Unknown / extra / snake_case fields rejected before effect
+    for bad_field, bad_value in (
+        ("actions", ["TASK_CARD_COMMIT"]),
+        ("receiptPath", "/tmp/standing-grant.json"),
+        ("rawReceipt", {}),
+        ("path", "standing-grant.json"),
+        ("owner_confirmation", True),
+        ("attempt_key", "attempt-bad"),
+        ("extra_unrecognized_prop", "evil"),
+    ):
+        switch_args = {
+            "ownerConfirmation": True,
+            "attemptKey": "attempt-gw-bad-field",
+            "expectedCurrentReceiptHash": orig_receipt.receipt_hash,
+            "expectedCurrentGoalId": "goal-orig",
+            "expectedCurrentThreadId": "thread-orig",
+            "successorGoalId": "goal-succ",
+            "successorThreadId": "thread-succ",
+            "ttlMinutes": 15,
+            bad_field: bad_value,
+        }
+        bad_res = gateway.handle({
+            "jsonrpc": "2.0",
+            "id": 905,
+            "method": "tools/call",
+            "params": {"name": "nexus_task_card_authority_switch", "arguments": switch_args},
+        })
+        assert bad_res["result"]["isError"] is True
+        assert "unknown arguments" in bad_res["result"]["structuredContent"]["error"]
+
+        restore_args = {
+            "ownerConfirmation": True,
+            "attemptKey": "attempt-gw-restore-bad",
+            "switchOperationId": "switch_test123",
+            "expectedTemporaryReceiptHash": "a" * 64,
+            "expectedCurrentGoalId": "goal-orig",
+            "expectedCurrentThreadId": "thread-orig",
+            bad_field: bad_value,
+        }
+        bad_restore_res = gateway.handle({
+            "jsonrpc": "2.0",
+            "id": 906,
+            "method": "tools/call",
+            "params": {"name": "nexus_task_card_authority_restore", "arguments": restore_args},
+        })
+        assert bad_restore_res["result"]["isError"] is True
+        assert "unknown arguments" in bad_restore_res["result"]["structuredContent"]["error"]
+
+    # Tool schemas are exact, closed, and camelCase only
+    switch_spec = next(item for item in UnifiedMCPGateway.tool_specs() if item["name"] == "nexus_task_card_authority_switch")
+    switch_schema = switch_spec["inputSchema"]
+    assert switch_schema["additionalProperties"] is False
+    assert set(switch_schema["required"]) == {
+        "ownerConfirmation",
+        "attemptKey",
+        "expectedCurrentReceiptHash",
+            "expectedCurrentGoalId",
+            "expectedCurrentThreadId",
+        "successorGoalId",
+        "successorThreadId",
+        "ttlMinutes",
+    }
+    assert set(switch_schema["properties"]) == set(switch_schema["required"])
+
+    restore_spec = next(item for item in UnifiedMCPGateway.tool_specs() if item["name"] == "nexus_task_card_authority_restore")
+    restore_schema = restore_spec["inputSchema"]
+    assert restore_schema["additionalProperties"] is False
+    assert set(restore_schema["required"]) == {
+        "ownerConfirmation",
+        "attemptKey",
+        "switchOperationId",
+        "expectedTemporaryReceiptHash",
+        "expectedCurrentGoalId",
+        "expectedCurrentThreadId",
+    }
+    assert set(restore_schema["properties"]) == set(restore_schema["required"])
+
+
+# ---------------------------------------------------------------------------
+# Issue #807 G1: nexus_execution_readiness convergence-gate tool (G0 freeze).
+# ---------------------------------------------------------------------------
+
+_READYNESS_BASE_ARGS = {
+    "repository_owner": "James3014",
+    "repository_name": "Nexus-new",
+    "execution_realm": "in_process_preflight",
+    "required_action_family": "MUTATE_BOUNDED",
+    "execution_contract_kind": "BOUNDED_DIRECT_CHANGE",
+}
+
+
+def _current_readiness_source_identity():
+    return {
+        "intended_source_commit": subprocess.check_output(
+            ["git", "-C", repo_root, "rev-parse", "HEAD"], text=True
+        ).strip(),
+        "intended_source_tree": subprocess.check_output(
+            ["git", "-C", repo_root, "rev-parse", "HEAD^{tree}"], text=True
+        ).strip(),
+    }
+
+_READINESS_ENV_KEYS = (
+    "NEXUS_READINESS_GOVERNANCE_STATUS",
+    "NEXUS_READINESS_AUTHORITY_STATUS",
+    "NEXUS_READINESS_REPLAY_FENCE_STATUS",
+    "NEXUS_READINESS_WORKFORCE_STATUS",
+    "NEXUS_READINESS_COMPLETION_ARTIFACT_IDENTITY",
+    "NEXUS_READINESS_COMPLETION_AUTHORITY_KIND",
+    "NEXUS_READINESS_COMPLETION_REPOSITORY",
+    "NEXUS_READINESS_COMPLETION_INTERFACE_REVISION",
+    "NEXUS_READINESS_COMPLETION_CAPABILITIES",
+)
+
+
+class _ReadinessEnv:
+    """Save/clear/restore every readiness environment variable."""
+
+    def __init__(self, monkeypatch):
+        self._monkeypatch = monkeypatch
+
+    def set(self, **values):
+        for key, value in values.items():
+            self._monkeypatch.setenv(key, value)
+
+    def clear_all(self):
+        for key in _READINESS_ENV_KEYS:
+            self._monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture()
+def readiness_env(monkeypatch):
+    env = _ReadinessEnv(monkeypatch)
+    env.clear_all()
+    return env
+
+
+def _call_readiness(gateway, arguments):
+    return gateway._call_tool(
+        "nexus_execution_readiness",
+        {**_READYNESS_BASE_ARGS, **_current_readiness_source_identity(), **arguments},
+    )
+
+
+_PLANE_NAMES = (
+    "GOVERNANCE_PLANE",
+    "SOURCE_PLANE",
+    "GATEWAY_PLANE",
+    "HOST_BINDING_PLANE",
+    "ACTION_SURFACE_PLANE",
+    "AUTHORITY_PLANE",
+    "REPLAY_FENCE_PLANE",
+    "WORKFORCE_PLANE",
+)
+
+
+def _status_map(payload):
+    return {item["plane"]: item["status"] for item in payload["plane_results"]}
+
+
+def test_execution_readiness_tool_registered_in_manifest():
+    assert "nexus_execution_readiness" in PUBLIC_TOOL_NAMES
+    specs = {spec["name"]: spec for spec in UnifiedMCPGateway.tool_specs()}
+    schema = specs["nexus_execution_readiness"]["inputSchema"]
+    assert schema["additionalProperties"] is False
+    assert set(schema["required"]) == {
+        "repository_owner",
+        "repository_name",
+        "intended_source_commit",
+        "intended_source_tree",
+        "execution_realm",
+        "required_action_family",
+        "execution_contract_kind",
+    }
+    assert schema["properties"]["execution_realm"]["enum"] == ["in_process_preflight"]
+    assert schema["properties"]["intended_source_tree"]["pattern"] == "^[0-9a-f]{40}$"
+    completion_schema = schema["properties"]["required_completion_contract"]
+    assert completion_schema["additionalProperties"] is False
+    binding_schema = schema["properties"]["workforce_dispatch_binding"]
+    assert set(binding_schema["required"]) == {
+        "planner_output", "workforce_demands", "workforce_admission",
+        "canonical_dispatch_envelope", "task_id", "attempt_id",
+        "task_card_path", "task_card_hash",
+    }
+
+
+def test_project_entry_tool_is_registered_and_observe_only():
+    specs = {spec["name"]: spec for spec in UnifiedMCPGateway.tool_specs()}
+    schema = specs["nexus_project_entry"]["inputSchema"]
+    assert set(schema["required"]) == {"repository_owner", "repository_name", "issue_number"}
+    assert schema["additionalProperties"] is False
+
+
+def test_execution_readiness_schema_exposes_durable_identity_inputs():
+    specs = {spec["name"]: spec for spec in UnifiedMCPGateway.tool_specs()}
+    properties = specs["nexus_execution_readiness"]["inputSchema"]["properties"]
+    assert properties["durable_coordination_scope_id"] == {
+        "type": "string", "maxLength": 4096,
+    }
+    assert properties["durable_repository_canonical_remote"] == {
+        "type": "string", "maxLength": 4096,
+    }
+
+
+def test_execution_readiness_forwards_durable_identities_to_typed_request(
+    monkeypatch, readiness_env
+):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    captured = {}
+
+    def stub(request, observations, **kwargs):
+        captured["request"] = request
+        return SimpleNamespace(
+            model_dump=lambda mode="json": {
+                "outcome": "BLOCKED", "primary_blocker": None,
+                "plane_results": [], "certification_fence": {},
+            },
+            request_satisfies_certification_fence=lambda: False,
+        )
+
+    monkeypatch.setattr(gateway_module, "evaluate_execution_readiness", stub)
+    gateway = UnifiedMCPGateway(service=FakeService())
+    _call_readiness(gateway, {
+        "durable_coordination_scope_id": "scope-pe3-exact",
+        "durable_repository_canonical_remote": "github.com/James3014/Nexus-new",
+    })
+    assert captured["request"].durable_coordination_scope_id == "scope-pe3-exact"
+    assert (
+        captured["request"].durable_repository_canonical_remote
+        == "github.com/James3014/Nexus-new"
+    )
+
+
+def test_execution_readiness_without_workforce_env_is_ready_when_non_material(
+    readiness_env,
+):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    payload = _call_readiness(gateway, {})
+    assert payload["outcome"] == "READY_TO_EXECUTE"
+    workforce = next(
+        item for item in payload["plane_results"] if item["plane"] == "WORKFORCE_PLANE"
+    )
+    assert workforce["status"] == "PASSED"
+    assert "workforce_plane:non_material:no_worker_constraints" in workforce[
+        "evidence_identities"
+    ]
+
+
+def test_execution_readiness_without_workforce_env_blocks_material_constraints(
+    readiness_env,
+):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    payload = _call_readiness(gateway, {"worker_constraints": ["provider=agy"]})
+    assert payload["outcome"] == "BLOCKED"
+    assert payload["primary_blocker"]["code"] == "WORKFORCE_NOT_READY"
+
+
+def test_execution_readiness_stale_source_precedes_missing_material_binding(
+    readiness_env,
+):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    payload = _call_readiness(gateway, {
+        "intended_source_commit": "0" * 40,
+        "worker_constraints": ["provider=agy"],
+    })
+    assert payload["outcome"] == "BLOCKED"
+    assert payload["primary_blocker"]["code"] == "SOURCE_REALM_MISMATCH"
+
+
+def test_execution_readiness_forwards_typed_workforce_binding(monkeypatch, readiness_env):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    captured = {}
+
+    def stub(request, observations, **kwargs):
+        captured["binding"] = request.workforce_dispatch_binding
+        return SimpleNamespace(
+            model_dump=lambda mode="json": {"outcome": "BLOCKED", "primary_blocker": None, "plane_results": [], "certification_fence": {}},
+            request_satisfies_certification_fence=lambda: False,
+        )
+
+    monkeypatch.setattr(gateway_module, "evaluate_execution_readiness", stub)
+    binding = {
+        "planner_output": {"plan": "p"}, "workforce_demands": {"demands": []},
+        "workforce_admission": {"overall_decision": "ALLOW"},
+        "canonical_dispatch_envelope": {"schema": "nexus.canonical_dispatch.v1"},
+        "task_id": "task-1", "attempt_id": "attempt-1",
+        "task_card_path": "tasks/card.md", "task_card_hash": "c" * 64,
+    }
+    gateway = UnifiedMCPGateway(service=FakeService())
+    _call_readiness(gateway, {"worker_constraints": ["provider=agy"], "workforce_dispatch_binding": binding})
+    assert captured["binding"] == binding
+
+
+def _public_workforce_binding():
+    demands = {"required_provider": "agy", "required_model": "model-1"}
+    return {
+        "planner_output": {
+            "plan_payload": {"signal_snapshot": {"workforce_demands": demands}},
+        },
+        "workforce_demands": demands,
+        "workforce_admission": {"overall_decision": "ALLOW"},
+        "canonical_dispatch_envelope": {"schema": "nexus.canonical_dispatch.v1"},
+        "task_id": "task-public-readiness",
+        "attempt_id": "attempt-public-readiness",
+        "task_card_path": "tasks/test/task-public-readiness.md",
+        "task_card_hash": "c" * 64,
+    }
+
+
+def _public_replay_snapshot(task_id):
+    return {
+        "task_id": task_id,
+        "found": True,
+        "state_valid": True,
+        "status": "APPROVED",
+        "attempt_id": "attempt-public-readiness",
+        "action_id": "action-public-readiness",
+        "request_hash": "d" * 64,
+        "task_action": {"task_id": task_id, "next_action": "none"},
+    }
+
+
+def _public_preflight(**overrides):
+    result = {
+        "schema": "nexus.provider_preflight.v1",
+        "status": "VERSION_VERIFIED",
+        "blocker": None,
+        "provider": "agy",
+        "requested_model": "model-1",
+        "resolved_model": "model-1",
+        "execution_ready": True,
+        "readiness_status": "MODEL_VERIFIED",
+        "model_reachable": True,
+        "requested_model_verified": True,
+        "binary_found": True,
+        "binary_path": "/usr/local/bin/agy",
+        "binary_sha256": "a" * 64,
+        "cli_version_sha256": "b" * 64,
+        "probe_evidence_hash": "c" * 64,
+        "probe_expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        "authentication_required": True,
+        "authenticated": True,
+        "authentication_evidence": "successful_exact_model_probe",
+    }
+    result.update(overrides)
+    return result
+
+
+def _patch_public_readiness(monkeypatch, gateway):
+    import nexus.orchestrator.self_hosted_task_service as service_module
+
+    monkeypatch.setattr(
+        service_module,
+        "validate_workforce_dispatch_binding",
+        lambda binding, require_binding=False: {
+            "worker_id": "worker-1",
+            "provider": "agy",
+            "model": "model-1",
+            "policy_hash": "p" * 64,
+            "binding_hash": "q" * 64,
+            "aggregate_binding_hash": "r" * 64,
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(gateway.service, "get_task_snapshot", _public_replay_snapshot)
+    return gateway
+
+
+def test_execution_readiness_public_workforce_callback_reaches_ready_without_env_pass(
+    monkeypatch, readiness_env
+):
+    gateway = _patch_public_readiness(monkeypatch, UnifiedMCPGateway(service=FakeService()))
+    captured = {}
+
+    def preflight(arguments):
+        captured.update(provider=arguments["provider"], model=arguments["model"])
+        return _public_preflight()
+
+    monkeypatch.setattr(gateway, "_provider_preflight", preflight)
+    payload = _call_readiness(
+        gateway,
+        {"worker_constraints": ["worker=worker-1", "provider=agy", "model=model-1"],
+         "workforce_dispatch_binding": _public_workforce_binding()},
+    )
+    assert payload["outcome"] == "READY_TO_EXECUTE"
+    workforce = next(item for item in payload["plane_results"] if item["plane"] == "WORKFORCE_PLANE")
+    assert workforce["status"] == "PASSED"
+    assert captured == {"provider": "agy", "model": "model-1"}
+    assert "NEXUS_READINESS_WORKFORCE_STATUS=PASSED" not in json.dumps(workforce)
+    assert {"provider_preflight_provider=agy", "provider_preflight_requested_model=model-1"}.issubset(
+        workforce["evidence_identities"]
+    )
+    assert any(item.startswith("provider_preflight_binary_sha256=") for item in workforce["evidence_identities"])
+    assert any(item.startswith("provider_preflight_cli_version_sha256=") for item in workforce["evidence_identities"])
+    assert any(item.startswith("provider_preflight_probe_evidence_hash=") for item in workforce["evidence_identities"])
+    assert any(item.startswith("provider_preflight_probe_expires_at=") for item in workforce["evidence_identities"])
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"kind": "non_mapping"}, {"kind": "raises"},
+        {"probe_expires_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()},
+        {"probe_expires_at": datetime.now().replace(tzinfo=None).isoformat()},
+        {"provider": "other"}, {"requested_model": "other-model"},
+        {"binary_sha256": "bad"}, {"cli_version_sha256": "bad"},
+        {"probe_evidence_hash": "bad"}, {"execution_ready": False},
+        {"model_reachable": False}, {"requested_model_verified": False},
+        {"status": "BLOCKED"},
+        {"blocker": "PROVIDER_AUTHENTICATION_REQUIRED"},
+        {"authentication_required": False, "authenticated": False, "authentication_evidence": None},
+        {"authentication_required": True, "authenticated": False},
+        {"authentication_required": True, "authenticated": True, "authentication_evidence": None},
+    ],
+    ids=[
+        "non_mapping", "raises", "expired", "naive", "wrong_provider", "wrong_model",
+        "bad_binary_hash", "bad_cli_hash", "bad_probe_hash", "execution_not_ready",
+        "model_unreachable", "model_unverified", "status_blocked", "blocker_present",
+        "auth_requirement_false", "auth_false", "auth_evidence_missing",
+    ],
+)
+def test_execution_readiness_public_workforce_preflight_fail_closed(monkeypatch, readiness_env, override):
+    gateway = _patch_public_readiness(monkeypatch, UnifiedMCPGateway(service=FakeService()))
+
+    def preflight(arguments):
+        if override.get("kind") == "raises":
+            raise RuntimeError("probe failed")
+        if override.get("kind") == "non_mapping":
+            return ["not", "a", "mapping"]
+        values = dict(override)
+        values.pop("kind", None)
+        return _public_preflight(**values)
+
+    monkeypatch.setattr(gateway, "_provider_preflight", preflight)
+    payload = _call_readiness(
+        gateway,
+        {"worker_constraints": ["provider=agy"], "workforce_dispatch_binding": _public_workforce_binding()},
+    )
+    assert payload["outcome"] == "BLOCKED"
+    assert payload["primary_blocker"]["code"] == "WORKFORCE_NOT_READY"
+
+
+def test_execution_readiness_ready_path_end_to_end(readiness_env):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    readiness_env.set(NEXUS_READINESS_WORKFORCE_STATUS="PASSED")
+    payload = _call_readiness(gateway, {})
+    assert payload["outcome"] == "READY_TO_EXECUTE"
+    assert payload["primary_blocker"] is None
+    statuses = _status_map(payload)
+    assert set(statuses) == set(_PLANE_NAMES)
+    assert set(statuses.values()) == {"PASSED"}
+    assert payload["certification_fence"]["satisfied"] is True
+    serialized = json.dumps(payload)
+    assert "VERIFIED" not in serialized
+    assert "CERTIFIED" not in serialized
+    assert "COMPLETE" not in serialized
+
+
+def test_execution_readiness_requires_all_env_declared_planes(
+    readiness_env,
+):
+    # Preserve the historical node id while asserting the revised canonical behavior.
+    gateway = UnifiedMCPGateway(service=FakeService())
+    payload = _call_readiness(gateway, {})
+    assert payload["outcome"] == "READY_TO_EXECUTE"
+
+
+def test_execution_readiness_invalid_env_status_fails_closed(readiness_env):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    readiness_env.set(NEXUS_READINESS_WORKFORCE_STATUS="READY")
+    with pytest.raises(GatewayInputError, match="PASSED or BLOCKED"):
+        _call_readiness(gateway, {})
+
+
+def test_execution_readiness_unsupported_realm_fails_closed(readiness_env):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    with pytest.raises(GatewayInputError, match="not a supported observation realm"):
+        _call_readiness(gateway, {"execution_realm": "remote_cluster"})
+
+
+def test_execution_readiness_malformed_request_fails_closed(readiness_env):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    with pytest.raises(GatewayInputError):
+        _call_readiness(gateway, {"intended_source_commit": "zzz"})
+    with pytest.raises(GatewayInputError):
+        _call_readiness(gateway, {"worker_constraints": "not-a-list"})
+    with pytest.raises(GatewayInputError):
+        _call_readiness(
+            gateway,
+            {"required_completion_contract": {"authority_kind": "SOMETHING_ELSE"}},
+        )
+
+
+@pytest.mark.parametrize(
+    "override",
+    (
+        {"intended_source_commit": "0" * 40},
+        {"intended_source_tree": "0" * 40},
+    ),
+)
+def test_execution_readiness_source_identity_mismatch_fails_closed(readiness_env, override):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    payload = _call_readiness(gateway, override)
+    assert payload["outcome"] == "BLOCKED"
+    blocker = payload["primary_blocker"]
+    assert blocker["code"] == "SOURCE_REALM_MISMATCH"
+    assert blocker["plane"] == "SOURCE_PLANE"
+    assert blocker["next_action"] == "BIND_EXACT_DESIRED_SOURCE_IDENTITY"
+    statuses = _status_map(payload)
+    assert statuses["GOVERNANCE_PLANE"] == "PASSED"
+    assert statuses["SOURCE_PLANE"] == "BLOCKED"
+    assert statuses["GATEWAY_PLANE"] == "UNPROVEN"
+
+
+def test_execution_readiness_missing_physical_source_fails_closed(readiness_env, monkeypatch):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    gateway = UnifiedMCPGateway(service=FakeService())
+    monkeypatch.setattr(
+        gateway_module,
+        "_git",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("source unavailable")),
+    )
+    payload = _call_readiness(gateway, {})
+    assert payload["outcome"] == "BLOCKED"
+    blocker = payload["primary_blocker"]
+    assert blocker["code"] == "SOURCE_BINDING_REQUIRED"
+    assert blocker["plane"] == "SOURCE_PLANE"
+    assert blocker["next_action"] == "BIND_EXACT_DESIRED_SOURCE_IDENTITY"
+
+
+def test_execution_readiness_governance_blocker_never_auto_recovers(readiness_env):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    readiness_env.set(NEXUS_READINESS_GOVERNANCE_STATUS="BLOCKED")
+    payload = _call_readiness(gateway, {})
+    assert payload["outcome"] == "BLOCKED"
+    blocker = payload["primary_blocker"]
+    assert blocker["code"] == "GOVERNANCE_PLANE_RECOVERY_REQUIRED"
+    assert blocker["next_action"] == "ROUTE_TO_ISSUE_806_BREAK_GLASS_RECOVERY"
+    statuses = _status_map(payload)
+    assert statuses["WORKFORCE_PLANE"] == "UNPROVEN"
+    assert statuses["GATEWAY_PLANE"] == "UNPROVEN"
+
+
+def test_execution_readiness_governance_beats_all_other_blockers(readiness_env):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    readiness_env.set(
+        NEXUS_READINESS_GOVERNANCE_STATUS="BLOCKED",
+        NEXUS_READINESS_AUTHORITY_STATUS="BLOCKED",
+        NEXUS_READINESS_REPLAY_FENCE_STATUS="BLOCKED",
+        NEXUS_READINESS_WORKFORCE_STATUS="BLOCKED",
+    )
+    payload = _call_readiness(gateway, {"intended_source_commit": "0" * 40})
+    assert payload["outcome"] == "BLOCKED"
+    blocker = payload["primary_blocker"]
+    assert blocker["code"] == "GOVERNANCE_PLANE_RECOVERY_REQUIRED"
+    assert blocker["plane"] == "GOVERNANCE_PLANE"
+    assert blocker["precedence_rank"] == 1
+
+
+def test_execution_readiness_authority_blocker_is_normal_gate_not_gateway_repair(
+    readiness_env,
+):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    readiness_env.set(NEXUS_READINESS_AUTHORITY_STATUS="BLOCKED")
+    payload = _call_readiness(gateway, {})
+    blocker = payload["primary_blocker"]
+    assert blocker["code"] == "TASK_AUTHORITY_MISSING"
+    assert blocker["next_action"] == "OBTAIN_NORMAL_TASK_AUTHORITY"
+    assert blocker["next_action"] != "ROUTE_TO_ISSUE_526_GATEWAY_REBIND_RELOAD"
+    assert payload["outcome"] == "BLOCKED"
+
+
+def test_execution_readiness_replay_fence_demands_reconcile_not_retry(readiness_env):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    readiness_env.set(NEXUS_READINESS_REPLAY_FENCE_STATUS="BLOCKED")
+    payload = _call_readiness(gateway, {})
+    blocker = payload["primary_blocker"]
+    assert blocker["code"] == "SEMANTIC_REPLAY_FENCE"
+    assert blocker["next_action"] == "RECONCILE_SAME_REQUEST_FENCE"
+
+
+def test_execution_readiness_workforce_evaluated_last(readiness_env):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    readiness_env.set(NEXUS_READINESS_WORKFORCE_STATUS="BLOCKED")
+    payload = _call_readiness(gateway, {})
+    blocker = payload["primary_blocker"]
+    assert blocker["code"] == "WORKFORCE_NOT_READY"
+    assert blocker["next_action"] == "RUN_PLANNER_AND_WORKFORCE_ADMISSION"
+    assert blocker["precedence_rank"] == 8
+    demoted = _call_readiness(gateway, {"intended_source_commit": "0" * 40})
+    assert demoted["primary_blocker"]["code"] == "SOURCE_REALM_MISMATCH"
+    assert _status_map(demoted)["WORKFORCE_PLANE"] == "UNPROVEN"
+
+
+def test_execution_readiness_requires_completion_env_when_contract_material(
+    readiness_env,
+):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    payload = _call_readiness(
+        gateway,
+        {
+            "execution_contract_kind": "FORMAL_COMPLETION_CERTIFICATION",
+            "required_completion_contract": {
+                "authority_kind": "NEXUS_CORE_COMPLETION",
+                "repository": "James3014/nexus-core",
+                "artifact_or_source_identity": "git:" + "c" * 40,
+                "interface_revision": "nexus-core.completion.v1",
+            },
+        },
+    )
+    assert payload["outcome"] == "BLOCKED"
+    blocker = payload["primary_blocker"]
+    assert blocker["code"] == "COMPLETION_CONTRACT_BINDING_REQUIRED"
+    assert blocker["plane"] == "ACTION_SURFACE_PLANE"
+    assert blocker["next_action"] == "BIND_COMPLETION_CONTRACT_IDENTITY"
+    assert _status_map(payload)["WORKFORCE_PLANE"] == "UNPROVEN"
+
+
+def test_execution_readiness_completion_compatible_identity_passes(readiness_env):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    readiness_env.set(
+        NEXUS_READINESS_WORKFORCE_STATUS="PASSED",
+        NEXUS_READINESS_COMPLETION_ARTIFACT_IDENTITY="git:" + "c" * 40,
+    )
+    payload = _call_readiness(
+        gateway,
+        {
+            "execution_contract_kind": "FORMAL_COMPLETION_CERTIFICATION",
+            "required_completion_contract": {
+                "authority_kind": "NEXUS_CORE_COMPLETION",
+                "repository": "James3014/nexus-core",
+                "artifact_or_source_identity": "git:" + "c" * 40,
+                "interface_revision": "nexus-core.completion.v1",
+                "required_capabilities": [
+                    "COMPLETION_VERDICT",
+                    "EVIDENCE_VERIFY",
+                    "RECEIPT_BIND",
+                ],
+            },
+        },
+    )
+    assert payload["outcome"] == "READY_TO_EXECUTE"
+    assert payload["primary_blocker"] is None
+    serialized = json.dumps(payload)
+    assert "VERIFIED" not in serialized
+    assert "CERTIFIED" not in serialized
+    assert "COMPLETE" not in serialized
+
+
+def test_execution_readiness_completion_stale_substituted_incompatible_fail_closed(
+    readiness_env,
+):
+    gateway = UnifiedMCPGateway(service=FakeService())
+
+    def contract(artifact, revision):
+        return {
+            "authority_kind": "NEXUS_CORE_COMPLETION",
+            "repository": "James3014/nexus-core",
+            "artifact_or_source_identity": artifact,
+            "interface_revision": revision,
+        }
+
+    formal = {"execution_contract_kind": "FORMAL_COMPLETION_CERTIFICATION"}
+
+    readiness_env.set(NEXUS_READINESS_COMPLETION_ARTIFACT_IDENTITY="git:" + "d" * 40)
+    stale = _call_readiness(
+        gateway,
+        {**formal, "required_completion_contract": contract("git:" + "c" * 40, "nexus-core.completion.v1")},
+    )
+    assert stale["outcome"] == "BLOCKED"
+    assert stale["primary_blocker"]["code"] == "COMPLETION_CONTRACT_BINDING_REQUIRED"
+
+    readiness_env.set(
+        NEXUS_READINESS_COMPLETION_ARTIFACT_IDENTITY="github:James3014/nexus-core@main"
+    )
+    substituted = _call_readiness(
+        gateway,
+        {**formal, "required_completion_contract": contract("git:" + "c" * 40, "nexus-core.completion.v1")},
+    )
+    assert substituted["outcome"] == "BLOCKED"
+    assert substituted["primary_blocker"]["code"] == "COMPLETION_CONTRACT_BINDING_REQUIRED"
+    # The required contract itself must never accept a GitHub ref as the
+    # installed artifact identity (G0 rule 3).
+    with pytest.raises(GatewayInputError):
+        _call_readiness(
+            gateway,
+            {
+                **formal,
+                "required_completion_contract": contract(
+                    "github:James3014/nexus-core@main", "nexus-core.completion.v1"
+                ),
+            },
+        )
+
+    readiness_env.set(
+        NEXUS_READINESS_COMPLETION_ARTIFACT_IDENTITY="git:" + "c" * 40,
+        NEXUS_READINESS_COMPLETION_INTERFACE_REVISION="nexus-core.completion.v0",
+    )
+    incompatible = _call_readiness(
+        gateway,
+        {**formal, "required_completion_contract": contract("git:" + "c" * 40, "nexus-core.completion.v1")},
+    )
+    assert incompatible["outcome"] == "BLOCKED"
+    assert incompatible["primary_blocker"]["code"] == "COMPLETION_CONTRACT_BINDING_REQUIRED"
+
+
+def test_execution_readiness_completion_repair_only_reverifies_its_plane(readiness_env):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    contract = {
+        "authority_kind": "NEXUS_CORE_COMPLETION",
+        "repository": "James3014/nexus-core",
+        "artifact_or_source_identity": "git:" + "c" * 40,
+        "interface_revision": "nexus-core.completion.v1",
+    }
+    formal = {"execution_contract_kind": "FORMAL_COMPLETION_CERTIFICATION"}
+    readiness_env.set(NEXUS_READINESS_WORKFORCE_STATUS="PASSED")
+    readiness_env.set(NEXUS_READINESS_COMPLETION_ARTIFACT_IDENTITY="git:" + "e" * 40)
+    before = _call_readiness(gateway, {**formal, "required_completion_contract": contract})
+    assert before["outcome"] == "BLOCKED"
+    before_statuses = _status_map(before)
+    assert before_statuses["ACTION_SURFACE_PLANE"] == "BLOCKED"
+
+    readiness_env.set(NEXUS_READINESS_COMPLETION_ARTIFACT_IDENTITY="git:" + "c" * 40)
+    after = _call_readiness(gateway, {**formal, "required_completion_contract": contract})
+    assert after["outcome"] == "READY_TO_EXECUTE"
+    after_statuses = _status_map(after)
+    assert after_statuses["ACTION_SURFACE_PLANE"] == "PASSED"
+    # Planes above the completion plane (rank < 5) were already converged and
+    # stay PASSED in the BLOCKED result; lower planes collapse to UNPROVEN per
+    # the G0 precedence rule and are re-evaluated only after the repair.
+    for plane, status in before_statuses.items():
+        rank = {
+            "GOVERNANCE_PLANE": 1,
+            "SOURCE_PLANE": 2,
+            "GATEWAY_PLANE": 3,
+            "HOST_BINDING_PLANE": 4,
+            "ACTION_SURFACE_PLANE": 5,
+            "AUTHORITY_PLANE": 6,
+            "REPLAY_FENCE_PLANE": 7,
+            "WORKFORCE_PLANE": 8,
+        }[plane]
+        if rank < 5:
+            assert status == "PASSED"
+        elif plane != "ACTION_SURFACE_PLANE":
+            assert status == "UNPROVEN"
+
+
+def test_execution_readiness_via_handle_jsonrpc_roundtrip(readiness_env):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    readiness_env.set(NEXUS_READINESS_WORKFORCE_STATUS="PASSED")
+    response = gateway.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 77,
+            "method": "tools/call",
+            "params": {
+                "name": "nexus_execution_readiness",
+                "arguments": {**_READYNESS_BASE_ARGS, **_current_readiness_source_identity()},
+            },
+        }
+    )
+    assert response["id"] == 77
+    structured = response["result"]["structuredContent"]
+    assert structured["outcome"] == "READY_TO_EXECUTE"
+    error_response = gateway.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 78,
+            "method": "tools/call",
+            "params": {"name": "nexus_execution_readiness", "arguments": {}},
+        }
+    )
+    assert error_response["result"]["isError"] is True
+
+
+def test_project_entry_foreign_repository_is_typed_blocker():
+    gateway = UnifiedMCPGateway(service=FakeService(), github_issue_observer=lambda *_: {"ok": True})
+    response = gateway.handle({
+        "jsonrpc": "2.0", "id": 8421, "method": "tools/call",
+        "params": {"name": "nexus_project_entry", "arguments": {
+            "repository_owner": "other", "repository_name": "repo", "issue_number": 842,
+        }},
+    })
+    payload = response["result"]["structuredContent"]
+    assert payload["schema"] == "nexus.project_entry.v1"
+    assert payload["status"] == "BLOCKED"
+    assert payload["blocker"]["code"] == "PROJECT_ENTRY_REPOSITORY_MISMATCH"
+
+
+def test_project_entry_binding_hash_is_deterministic_and_bound():
+    base = {"repository": "James3014/Nexus-new", "issue_number": 842,
+            "issue_state": "OPEN", "issue_updated_at": "2026-09-09T00:00:00Z",
+            "source_commit": "a" * 40, "source_tree": "b" * 40,
+            "origin": "https://github.com/James3014/Nexus-new.git",
+            "task": {"status": "NO_TASK"}, "readiness": {"outcome": "READY_TO_EXECUTE"},
+            "claim_ceiling": "PROJECT_ENTRY_OBSERVE_ONLY_NO_DOWNSTREAM_EFFECTS"}
+    first = UnifiedMCPGateway._project_entry_binding_hash(base)
+    assert first == UnifiedMCPGateway._project_entry_binding_hash(dict(base))
+    changed = dict(base, source_tree="c" * 40)
+    assert first != UnifiedMCPGateway._project_entry_binding_hash(changed)
+
+
+def _project_entry_gateway(monkeypatch, observer, *, service=None, readiness=None):
+    import nexus.orchestrator.unified_mcp_gateway as module
+    monkeypatch.setattr(module, "_git", lambda *args, **kwargs: {
+        ("config", "--get", "remote.origin.url"): "https://github.com/James3014/Nexus-new.git",
+        ("rev-parse", "HEAD"): "a" * 40,
+        ("rev-parse", "HEAD^{tree}"): "b" * 40,
+    }[tuple(args)])
+    selected_service = service or FakeService()
+    gateway = UnifiedMCPGateway(service=selected_service, github_issue_observer=observer)
+    if service is None:
+        gateway.service.find_tasks_by_repository_issue = lambda *_: []
+    if readiness is not None:
+        monkeypatch.setattr(gateway, "_gateway_execution_readiness", readiness)
+    return gateway
+
+
+def test_project_entry_public_call_hash_is_stable_and_binds_origin(monkeypatch):
+    gateway = _project_entry_gateway(monkeypatch, lambda *_: {
+        "ok": True, "issue": {"number": 842, "state": "OPEN", "updatedAt": "2026-09-09T00:00:00Z"},
+        "observed_at": "different",
+    }, readiness=lambda args: {"outcome": "READY_TO_EXECUTE", "evaluated_at": "volatile"})
+    args = {"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 842}
+    first = gateway._project_entry(args)
+    second = gateway._project_entry(args)
+    assert first["project_binding_hash"] == second["project_binding_hash"]
+    assert first["source"]["canonical_remote"] == "https://github.com/James3014/Nexus-new.git"
+
+
+@pytest.mark.parametrize("issue", [{"number": 842, "state": "CLOSED"}, {"number": 842}])
+def test_project_entry_public_call_rejects_closed_or_missing_issue_state(monkeypatch, issue):
+    gateway = _project_entry_gateway(monkeypatch, lambda *_: {"ok": True, "issue": issue})
+    result = gateway._project_entry({"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 842})
+    assert result["status"] == "BLOCKED"
+    assert result["blocker"]["code"] in {"PROJECT_ENTRY_ISSUE_NOT_OPEN", "PROJECT_ENTRY_GITHUB_OBSERVER_FAILED"}
+
+
+@pytest.mark.parametrize("origin", [
+    "https://evilgithub.com/James3014/Nexus-new.git",
+    "https://github.com.evil/James3014/Nexus-new.git",
+])
+def test_project_entry_rejects_lookalike_origin_hosts(monkeypatch, origin):
+    import nexus.orchestrator.unified_mcp_gateway as module
+    monkeypatch.setattr(module, "_git", lambda *args, **kwargs: {
+        ("config", "--get", "remote.origin.url"): origin,
+        ("rev-parse", "HEAD"): "a" * 40, ("rev-parse", "HEAD^{tree}"): "b" * 40,
+    }[tuple(args)])
+    gateway = UnifiedMCPGateway(service=FakeService(), github_issue_observer=lambda *_: {"ok": True})
+    result = gateway._project_entry({"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 842})
+    assert result["status"] == "BLOCKED"
+    assert result["blocker"]["code"] == "PROJECT_ENTRY_REPOSITORY_MISMATCH"
+
+
+def test_project_entry_no_task_ready_without_state_fabrication(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    gateway = _project_entry_gateway(monkeypatch, lambda *_: {"ok": True, "issue": {"number": 842, "state": "OPEN", "updatedAt": "u"}}, service=service, readiness=lambda _: {"outcome": "READY_TO_EXECUTE"})
+    before = sorted((p.name, hashlib.sha256(p.read_bytes()).hexdigest()) for p in (tmp_path / "state").glob("*") if p.is_file())
+    result = gateway._call_tool("nexus_project_entry", {"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 842})
+    after = sorted((p.name, hashlib.sha256(p.read_bytes()).hexdigest()) for p in (tmp_path / "state").glob("*") if p.is_file())
+    assert result["status"] == "NO_TASK" and result["readiness_scope"] == "PROJECT_ENTRY_OBSERVATION_ONLY" and result["readiness_result"]["outcome"] == "READY_TO_EXECUTE"
+    assert before == after == []
+
+
+def test_project_entry_exact_task_rehydrates_exact_attempt(monkeypatch):
+    class Service:
+        def find_tasks_by_repository_issue(self, *_):
+            return [{"task_id": "t842", "attempt_id": "a1"}]
+        def rehydrate_project_entry(self, task_id, attempt_id, **kwargs):
+            self.called = (task_id, attempt_id)
+            return {"continuation": {"projection": "exact"}, "authority_binding": None}
+    service = Service()
+    readiness_calls = []
+    gateway = _project_entry_gateway(monkeypatch, lambda *_: {"ok": True, "issue": {"number": 842, "state": "OPEN"}}, service=service, readiness=lambda args: readiness_calls.append(args) or {"outcome": "READY_TO_EXECUTE"})
+    result = gateway._project_entry({"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 842})
+    assert service.called == ("t842", "a1") and result["continuation"] == {"projection": "exact"}
+    assert all("task_campaign_goal_identity" not in call for call in readiness_calls)
+
+
+def test_project_entry_exact_task_forwards_persisted_authority_binding(monkeypatch):
+    class Service:
+        def find_tasks_by_repository_issue(self, *_):
+            return [{"task_id": "t842", "attempt_id": "a1"}]
+        def rehydrate_project_entry(self, *_args, **_kwargs):
+            return {"continuation": {"projection": "exact"}, "authority_binding": {
+                "goal_id": "goal-842",
+                "coordination_scope_id": "scope-842",
+                "canonical_remote": "https://github.com/James3014/Nexus-new.git",
+                "intended_action_family": "TASK_SUBMIT",
+            }}
+    readiness_calls = []
+    gateway = _project_entry_gateway(
+        monkeypatch,
+        lambda *_: {"ok": True, "issue": {"number": 842, "state": "OPEN"}},
+        service=Service(),
+        readiness=lambda args: readiness_calls.append(args) or {"outcome": "READY_TO_EXECUTE"},
+    )
+    gateway._project_entry({"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 842})
+    assert readiness_calls[-1]["task_campaign_goal_identity"] == "goal-842"
+    assert readiness_calls[-1]["durable_coordination_scope_id"] == "scope-842"
+    assert readiness_calls[-1]["durable_repository_canonical_remote"].endswith("Nexus-new.git")
+    assert readiness_calls[-1]["required_action_family"] == "TASK_SUBMIT"
+
+
+def test_project_entry_ambiguous_task_blocks_before_continuation_or_readiness(monkeypatch):
+    class Service:
+        def find_tasks_by_repository_issue(self, *_): return [{"task_id": "a"}, {"task_id": "b"}]
+        def rehydrate_project_entry(self, *_): raise AssertionError("rehydrate")
+    gateway = _project_entry_gateway(monkeypatch, lambda *_: {"ok": True, "issue": {"number": 842, "state": "OPEN"}}, service=Service(), readiness=lambda _: (_ for _ in ()).throw(AssertionError("readiness")))
+    assert gateway._project_entry({"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 842})["blocker"]["code"] == "PROJECT_ENTRY_AMBIGUOUS_TASK_BINDING"
+
+
+def test_project_entry_invalid_continuation_blocks_before_readiness(monkeypatch):
+    class Service:
+        def find_tasks_by_repository_issue(self, *_): return [{"task_id": "a", "attempt_id": "x"}]
+        def rehydrate_project_entry(self, *_): raise ValueError("tampered")
+    gateway = _project_entry_gateway(monkeypatch, lambda *_: {"ok": True, "issue": {"number": 842, "state": "OPEN"}}, service=Service(), readiness=lambda _: (_ for _ in ()).throw(AssertionError("readiness")))
+    assert gateway._project_entry({"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 842})["blocker"]["code"] == "PROJECT_ENTRY_CONTINUATION_INVALID"
+
+
+@pytest.mark.parametrize("observer", [lambda *_: {"ok": False}, lambda *_: [], lambda *_: {"ok": True, "issue": {"number": 7, "state": "OPEN"}}])
+def test_project_entry_observer_failure_and_identity_mismatch_fail_closed(monkeypatch, observer):
+    gateway = _project_entry_gateway(monkeypatch, observer, readiness=lambda _: (_ for _ in ()).throw(AssertionError("readiness")))
+    assert gateway._project_entry({"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 842})["status"] == "BLOCKED"
+
+
+def test_project_entry_issue_switch_has_no_cross_issue_leakage(monkeypatch):
+    def observer(_, issue):
+        return {"ok": True, "issue": {"number": issue, "state": "OPEN"}}
+    gateway = _project_entry_gateway(monkeypatch, observer, readiness=lambda _: {"outcome": "READY_TO_EXECUTE"})
+    a = gateway._project_entry({"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 1})
+    b = gateway._project_entry({"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 2})
+    assert a["project_binding_hash"] != b["project_binding_hash"] and b["issue"]["number"] == 2 and "1" not in json.dumps(b["issue"])
+
+
+def test_project_entry_claim_ceiling_never_positive_downstream(monkeypatch):
+    result = _project_entry_gateway(monkeypatch, lambda *_: {"ok": True, "issue": {"number": 842, "state": "OPEN"}}, readiness=lambda _: {"outcome": "READY_TO_EXECUTE"})._project_entry({"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 842})
+    assert set(result["claim_ceiling_excludes"]) == {"execution", "verification", "acceptance", "merge", "release", "production"}
+    assert not any(result.get(key) is True for key in ("execution", "verification", "acceptance", "merge", "release", "production"))
+
+
+def test_project_entry_binding_hash_covers_stable_identity_matrix():
+    base = {"repository": "James3014/Nexus-new", "issue_number": 842, "issue": {"state": "OPEN", "updatedAt": "u"}, "source": {"commit": "a" * 40, "tree": "b" * 40, "canonical_remote": "https://github.com/James3014/Nexus-new.git"}, "task_resolution": {"status": "NO_TASK"}, "readiness_request": {"request_hash": "r1"}, "readiness_result": {"outcome": "READY_TO_EXECUTE"}, "claim_ceiling": "c"}
+    original = UnifiedMCPGateway._project_entry_binding_hash(base)
+    for path, value in ((("issue", "updatedAt"), "v"), (("source", "commit"), "c" * 40), (("source", "tree"), "d" * 40), (("source", "canonical_remote"), "https://github.com/James3014/Other.git"), (("task_resolution", "status"), "EXACT_TASK"), (("readiness_request", "request_hash"), "r2"), (("readiness_result", "outcome"), "BLOCKED"), (("claim_ceiling",), "other")):
+        candidate = json.loads(json.dumps(base))
+        cursor = candidate
+        for key in path[:-1]:
+            cursor = cursor[key]
+        cursor[path[-1]] = value
+        assert UnifiedMCPGateway._project_entry_binding_hash(candidate) != original
+
+
+@pytest.mark.parametrize("issue", [0, True])
+def test_project_entry_invalid_issue_number_is_public_input_error(issue):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    response = gateway.handle({"jsonrpc": "2.0", "id": 8422, "method": "tools/call", "params": {"name": "nexus_project_entry", "arguments": {"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": issue}}})
+    assert response["result"]["isError"] is True

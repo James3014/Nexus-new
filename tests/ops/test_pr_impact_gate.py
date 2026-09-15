@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from scripts.ops.pr_impact_gate import (
+    EXACT_CONFIG_TARGETS,
     EXACT_GIT_EVIDENCE_ONLY,
+    MANDATORY_TIER2_TARGETS,
     PytestRunResult,
     _git_changed_paths,
     build_impact_plan,
@@ -19,6 +23,7 @@ from scripts.ops.pr_impact_gate import (
     parse_raw_diff_z,
     run_pytest_plan,
     verify_exact_git_deletion_evidence,
+    verify_exact_git_main_movement_paths,
 )
 
 
@@ -154,6 +159,24 @@ def _with_node_outcomes(
             impact_class=run.impact_class,
         ),
     )
+
+
+def _write_pytest_plan(tmp_path: Path, targets: list[str]) -> Path:
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(
+        json.dumps({
+            "base_sha": "a" * 40,
+            "head_sha": "b" * 40,
+            "base_source_tree": "9" * 40,
+            "base_test_inventory_tree": "8" * 40,
+            "source_tree": "c" * 40,
+            "test_inventory_tree": "d" * 40,
+            "impact_class": "SCOPED_IMPLEMENTATION",
+            "pytest_targets": targets,
+        }),
+        encoding="utf-8",
+    )
+    return plan_path
 
 
 def _make_exact_git_repo(tmp_path: Path, *, include_addition: bool) -> dict[str, object]:
@@ -316,6 +339,429 @@ def test_unknown_impact_fails_closed_to_broader_verification():
     assert "tests/ops/test_pr_impact_gate.py" in plan.pytest_targets
 
 
+def test_external_open_swe_runtime_maps_to_existing_boundary_tests():
+    plan = build_impact_plan(["runtimes/open_swe/nexus_open_swe_runtime/cli.py"])
+
+    assert plan.tier == 2
+    assert plan.impact_class == "HIGH_RISK_INTEGRATION"
+    assert plan.unmatched_paths == []
+    assert "tests/services/test_external_intelligence_service.py" in plan.pytest_targets
+    assert "tests/services/test_open_swe_external_intelligence.py" in plan.pytest_targets
+    assert "tests/services/test_open_swe_worker_transport.py" in plan.pytest_targets
+    assert set(MANDATORY_TIER2_TARGETS).issubset(plan.pytest_targets)
+
+
+def test_issue526_exact_authority_bundle_json_selects_high_risk_tier2_contracts():
+    exact_path = (
+        "tasks/github-issue-526-host-authority-and-canary-20260823/"
+        "02-host-effect-authority-receipt.json"
+    )
+
+    plan = build_impact_plan([exact_path])
+
+    assert plan.tier == 2
+    assert plan.impact_class == "HIGH_RISK_INTEGRATION"
+    assert plan.confidence == 0.85
+    assert plan.unmatched_paths == []
+    assert "tests/contracts/test_gateway_deployment_contract.py" in plan.pytest_targets
+    assert "tests/ops/test_mcp_gateway_durable.py" in plan.pytest_targets
+    assert set(MANDATORY_TIER2_TARGETS).issubset(plan.pytest_targets)
+
+
+def test_issue526_r1_evidence_jsons_select_high_risk_tier2_contracts():
+    exact_paths = [
+        (
+            "tasks/github-issue-526-host-authority-and-canary-20260823/"
+            "10-durable-recovery-authority-receipt.json"
+        ),
+        (
+            "tasks/github-issue-526-host-authority-and-canary-20260823/"
+            "10-r1-source-acceptance-evidence.json"
+        ),
+    ]
+
+    plan = build_impact_plan(exact_paths)
+
+    assert plan.changed_paths == exact_paths
+    assert plan.tier == 2
+    assert plan.impact_class == "HIGH_RISK_INTEGRATION"
+    assert plan.unmatched_paths == []
+    assert "tests/contracts/test_gateway_deployment_contract.py" in plan.pytest_targets
+    assert "tests/ops/test_mcp_gateway_durable.py" in plan.pytest_targets
+    assert set(MANDATORY_TIER2_TARGETS).issubset(plan.pytest_targets)
+
+
+def test_issue526_adjacent_authority_json_remains_unknown_broader_fallback():
+    adjacent_path = (
+        "tasks/github-issue-526-host-authority-and-canary-20260823/"
+        "03-host-effect-authority-receipt.json"
+    )
+
+    plan = build_impact_plan([adjacent_path])
+
+    assert plan.tier == 2
+    assert plan.impact_class == "IMPACT_UNKNOWN"
+    assert plan.confidence == 0.4
+    assert plan.unmatched_paths == [adjacent_path]
+    assert set(MANDATORY_TIER2_TARGETS).issubset(plan.pytest_targets)
+    assert "tests/contracts/test_gateway_deployment_contract.py" not in plan.pytest_targets
+    assert "tests/ops/test_mcp_gateway_durable.py" not in plan.pytest_targets
+
+
+def test_codex_dx_failure_prevention_config_selects_exact_test(tmp_path: Path):
+    config = tmp_path / "configs" / "codex_dx_failure_prevention.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.touch()
+    target = tmp_path / "tests" / "ops" / "test_codex_dx_failure_prevention.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.touch()
+
+    plan = build_impact_plan(
+        ["configs/codex_dx_failure_prevention.json"],
+        root=tmp_path,
+    )
+
+    assert plan.tier == 1
+    assert plan.impact_class == "SCOPED_IMPLEMENTATION"
+    assert plan.confidence == 0.9
+    assert plan.pytest_required is True
+    assert plan.pytest_targets == ["tests/ops/test_codex_dx_failure_prevention.py"]
+    assert plan.unmatched_paths == []
+    assert plan.reasons == [
+        "configs/codex_dx_failure_prevention.json: matched exact config contract"
+    ]
+    assert plan.workflow_validation_required is False
+    assert plan.wiki_required is False
+
+
+def test_codex_task_context_index_config_selects_exact_test(tmp_path: Path):
+    config = tmp_path / "configs" / "codex_task_context_index.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.touch()
+    target = tmp_path / "tests" / "ops" / "test_codex_task_context_index.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.touch()
+
+    plan = build_impact_plan(
+        ["configs/codex_task_context_index.json"],
+        root=tmp_path,
+    )
+
+    assert plan.tier == 1
+    assert plan.impact_class == "SCOPED_IMPLEMENTATION"
+    assert plan.confidence == 0.9
+    assert plan.pytest_required is True
+    assert plan.pytest_targets == ["tests/ops/test_codex_task_context_index.py"]
+    assert plan.unmatched_paths == []
+    assert plan.reasons == ["configs/codex_task_context_index.json: matched exact config contract"]
+
+
+def test_codex_dx_both_exact_configs_cooccur_in_plan(tmp_path: Path):
+    config1 = tmp_path / "configs" / "codex_dx_failure_prevention.json"
+    config2 = tmp_path / "configs" / "codex_task_context_index.json"
+    config1.parent.mkdir(parents=True, exist_ok=True)
+    config1.touch()
+    config2.touch()
+    target1 = tmp_path / "tests" / "ops" / "test_codex_dx_failure_prevention.py"
+    target2 = tmp_path / "tests" / "ops" / "test_codex_task_context_index.py"
+    target1.parent.mkdir(parents=True, exist_ok=True)
+    target1.touch()
+    target2.touch()
+
+    plan = build_impact_plan(
+        [
+            "configs/codex_dx_failure_prevention.json",
+            "configs/codex_task_context_index.json",
+        ],
+        root=tmp_path,
+    )
+
+    assert plan.tier == 1
+    assert plan.impact_class == "SCOPED_IMPLEMENTATION"
+    assert plan.pytest_required is True
+    assert set(plan.pytest_targets) == {
+        "tests/ops/test_codex_dx_failure_prevention.py",
+        "tests/ops/test_codex_task_context_index.py",
+    }
+    assert plan.unmatched_paths == []
+
+
+def test_codex_dx_config_and_mapped_test_diff_selects_only_exact_target(tmp_path: Path):
+    config = tmp_path / "configs" / "codex_dx_failure_prevention.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.touch()
+    target = tmp_path / "tests" / "ops" / "test_codex_dx_failure_prevention.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.touch()
+
+    plan = build_impact_plan(
+        [
+            "configs/codex_dx_failure_prevention.json",
+            "tests/ops/test_codex_dx_failure_prevention.py",
+        ],
+        root=tmp_path,
+    )
+
+    assert plan.tier == 1
+    assert plan.impact_class == "SCOPED_IMPLEMENTATION"
+    assert plan.pytest_required is True
+    assert plan.pytest_targets == ["tests/ops/test_codex_dx_failure_prevention.py"]
+    assert plan.unmatched_paths == []
+
+
+def test_codex_dx_before_v1_benchmark_config_selects_exact_tests(tmp_path: Path):
+    config = tmp_path / "configs" / "benchmarks" / "codex_dx_before_v1.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.touch()
+    target1 = tmp_path / "tests" / "benchmark" / "test_codex_dx_benchmark.py"
+    target2 = tmp_path / "tests" / "benchmark" / "test_codex_dx_history.py"
+    target1.parent.mkdir(parents=True, exist_ok=True)
+    target1.touch()
+    target2.touch()
+
+    plan = build_impact_plan(
+        ["configs/benchmarks/codex_dx_before_v1.json"],
+        root=tmp_path,
+    )
+
+    assert plan.tier == 1
+    assert plan.impact_class == "SCOPED_IMPLEMENTATION"
+    assert plan.confidence == 0.9
+    assert plan.pytest_required is True
+    assert plan.pytest_targets == [
+        "tests/benchmark/test_codex_dx_benchmark.py",
+        "tests/benchmark/test_codex_dx_history.py",
+    ]
+    assert plan.unmatched_paths == []
+    assert plan.reasons == [
+        "configs/benchmarks/codex_dx_before_v1.json: matched exact config contract"
+    ]
+    assert plan.workflow_validation_required is False
+    assert plan.wiki_required is False
+
+
+def test_codex_dx_all_exact_configs_cooccur_in_plan(tmp_path: Path):
+    config1 = tmp_path / "configs" / "codex_dx_failure_prevention.json"
+    config2 = tmp_path / "configs" / "codex_task_context_index.json"
+    config3 = tmp_path / "configs" / "benchmarks" / "codex_dx_before_v1.json"
+    config1.parent.mkdir(parents=True, exist_ok=True)
+    config3.parent.mkdir(parents=True, exist_ok=True)
+    config1.touch()
+    config2.touch()
+    config3.touch()
+    target1 = tmp_path / "tests" / "ops" / "test_codex_dx_failure_prevention.py"
+    target2 = tmp_path / "tests" / "ops" / "test_codex_task_context_index.py"
+    target3 = tmp_path / "tests" / "benchmark" / "test_codex_dx_benchmark.py"
+    target4 = tmp_path / "tests" / "benchmark" / "test_codex_dx_history.py"
+    target1.parent.mkdir(parents=True, exist_ok=True)
+    target3.parent.mkdir(parents=True, exist_ok=True)
+    target1.touch()
+    target2.touch()
+    target3.touch()
+    target4.touch()
+
+    plan = build_impact_plan(
+        [
+            "configs/codex_dx_failure_prevention.json",
+            "configs/codex_task_context_index.json",
+            "configs/benchmarks/codex_dx_before_v1.json",
+        ],
+        root=tmp_path,
+    )
+
+    assert plan.tier == 1
+    assert plan.impact_class == "SCOPED_IMPLEMENTATION"
+    assert plan.pytest_required is True
+    assert set(plan.pytest_targets) == {
+        "tests/ops/test_codex_dx_failure_prevention.py",
+        "tests/ops/test_codex_task_context_index.py",
+        "tests/benchmark/test_codex_dx_benchmark.py",
+        "tests/benchmark/test_codex_dx_history.py",
+    }
+    assert plan.unmatched_paths == []
+
+
+def test_codex_dx_before_v1_config_and_single_mapped_test_diff_selects_exact_targets(
+    tmp_path: Path,
+):
+    config = tmp_path / "configs" / "benchmarks" / "codex_dx_before_v1.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.touch()
+    target1 = tmp_path / "tests" / "benchmark" / "test_codex_dx_benchmark.py"
+    target2 = tmp_path / "tests" / "benchmark" / "test_codex_dx_history.py"
+    target1.parent.mkdir(parents=True, exist_ok=True)
+    target1.touch()
+    target2.touch()
+
+    plan = build_impact_plan(
+        [
+            "configs/benchmarks/codex_dx_before_v1.json",
+            "tests/benchmark/test_codex_dx_benchmark.py",
+        ],
+        root=tmp_path,
+    )
+
+    assert plan.tier == 1
+    assert plan.impact_class == "SCOPED_IMPLEMENTATION"
+    assert plan.pytest_required is True
+    assert plan.pytest_targets == [
+        "tests/benchmark/test_codex_dx_benchmark.py",
+        "tests/benchmark/test_codex_dx_history.py",
+    ]
+    assert plan.unmatched_paths == []
+
+
+def test_codex_dx_before_v1_config_and_both_mapped_tests_diff_selects_exact_targets(
+    tmp_path: Path,
+):
+    config = tmp_path / "configs" / "benchmarks" / "codex_dx_before_v1.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.touch()
+    target1 = tmp_path / "tests" / "benchmark" / "test_codex_dx_benchmark.py"
+    target2 = tmp_path / "tests" / "benchmark" / "test_codex_dx_history.py"
+    target1.parent.mkdir(parents=True, exist_ok=True)
+    target1.touch()
+    target2.touch()
+
+    plan = build_impact_plan(
+        [
+            "configs/benchmarks/codex_dx_before_v1.json",
+            "tests/benchmark/test_codex_dx_benchmark.py",
+            "tests/benchmark/test_codex_dx_history.py",
+        ],
+        root=tmp_path,
+    )
+
+    assert plan.tier == 1
+    assert plan.impact_class == "SCOPED_IMPLEMENTATION"
+    assert plan.pytest_required is True
+    assert plan.pytest_targets == [
+        "tests/benchmark/test_codex_dx_benchmark.py",
+        "tests/benchmark/test_codex_dx_history.py",
+    ]
+    assert plan.unmatched_paths == []
+
+
+@pytest.mark.parametrize(
+    "unknown_config",
+    [
+        "configs/codex_unknown.json",
+        "configs/codex_dx_unknown.json",
+        "configs/codex_task_context_index_v2.json",
+        "configs/benchmarks/codex_dx_unknown.json",
+        "configs/benchmarks/codex_dx_after_v1.json",
+        "configs/benchmarks/codex_dx_before_v2.json",
+        "configs/benchmarks/unknown_benchmark.json",
+        "configs/benchmarks/benchmark_manifest.json",
+        "configs/ask_policy.yaml",
+        "configs/model_candidates/t4_1_frozen_model_candidate_registry.yaml",
+    ],
+)
+def test_unknown_sibling_and_unrelated_configs_fail_closed(unknown_config, tmp_path: Path):
+    plan = build_impact_plan([unknown_config], root=tmp_path)
+
+    assert plan.tier == 2
+    assert plan.impact_class == "IMPACT_UNKNOWN"
+    assert plan.confidence <= 0.4
+    assert plan.pytest_required is True
+    assert plan.unmatched_paths == [unknown_config]
+    assert "unmatched paths fail closed to broader verification" in plan.reasons
+
+
+@pytest.mark.parametrize(
+    "absent_config",
+    [
+        "configs/codex_dx_failure_prevention.json",
+        "configs/codex_task_context_index.json",
+        "configs/benchmarks/codex_dx_before_v1.json",
+    ],
+)
+@pytest.mark.parametrize("materialize_target", [False, True])
+def test_absent_or_deleted_exact_config_fails_closed_as_unmatched(
+    absent_config: str, materialize_target: bool, tmp_path: Path
+):
+    if materialize_target:
+        for target_path in EXACT_CONFIG_TARGETS[absent_config]:
+            target = tmp_path / target_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.touch()
+
+    plan = build_impact_plan([absent_config], root=tmp_path)
+
+    assert plan.tier == 2
+    assert plan.impact_class == "IMPACT_UNKNOWN"
+    assert plan.confidence <= 0.4
+    assert plan.pytest_required is True
+    assert plan.unmatched_paths == [absent_config]
+    assert "unmatched paths fail closed to broader verification" in plan.reasons
+
+
+@pytest.mark.parametrize(
+    "malformed_path",
+    [
+        "configs/codex_dx_failure_prevention.json.bak",
+        "configs/codex_dx_failure_prevention.json/nested",
+        "nested/configs/codex_dx_failure_prevention.json",
+        "configs/codex_task_context_index.json.tmp",
+        "configs/benchmarks/codex_dx_before_v1.json.bak",
+        "configs/benchmarks/codex_dx_before_v1.json/nested",
+        "nested/configs/benchmarks/codex_dx_before_v1.json",
+        "configs/benchmarks/codex_dx_before_v1.json.tmp",
+        "configs/benchmarks/codex_dx_before_v1.json.patch",
+    ],
+)
+def test_malformed_and_spoofed_config_paths_fail_closed(malformed_path, tmp_path: Path):
+    plan = build_impact_plan([malformed_path], root=tmp_path)
+
+    assert plan.tier == 2
+    assert plan.impact_class == "IMPACT_UNKNOWN"
+    assert plan.unmatched_paths == [malformed_path]
+
+
+def test_codex_dx_exact_config_cross_wiring_prevented():
+    assert EXACT_CONFIG_TARGETS["configs/codex_dx_failure_prevention.json"] == (
+        "tests/ops/test_codex_dx_failure_prevention.py",
+    )
+    assert EXACT_CONFIG_TARGETS["configs/codex_task_context_index.json"] == (
+        "tests/ops/test_codex_task_context_index.py",
+    )
+    assert EXACT_CONFIG_TARGETS["configs/benchmarks/codex_dx_before_v1.json"] == (
+        "tests/benchmark/test_codex_dx_benchmark.py",
+        "tests/benchmark/test_codex_dx_history.py",
+    )
+    assert len(EXACT_CONFIG_TARGETS) == 3
+
+
+def test_codex_dx_target_omission_fails_closed(tmp_path: Path):
+    config = tmp_path / "configs" / "codex_dx_failure_prevention.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.touch()
+
+    plan = build_impact_plan(
+        ["configs/codex_dx_failure_prevention.json"],
+        root=tmp_path,
+    )
+
+    assert plan.tier == 2
+    assert plan.impact_class == "IMPACT_UNKNOWN"
+    assert "empty verification set failed closed" in plan.reasons
+
+
+def test_codex_dx_before_v1_target_omission_fails_closed(tmp_path: Path):
+    config = tmp_path / "configs" / "benchmarks" / "codex_dx_before_v1.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.touch()
+
+    plan = build_impact_plan(
+        ["configs/benchmarks/codex_dx_before_v1.json"],
+        root=tmp_path,
+    )
+
+    assert plan.tier == 2
+    assert plan.impact_class == "IMPACT_UNKNOWN"
+    assert "empty verification set failed closed" in plan.reasons
+
+
 def test_preexisting_exact_base_failure_is_distinguished_from_new_regression():
     result = classify_regression(
         _run(1, ["tests.test_contract::test_existing_debt"], revision="base"),
@@ -443,6 +889,235 @@ def test_aware_iso_timestamp_parameter_drift_preserves_logical_node_identity():
 
     assert result.classification == "PASS"
     assert result.blocking is False
+
+
+def test_unparameterized_base_expands_to_all_passing_head_parameterizations():
+    base_node = "tests.test_contract::test_matrix"
+    head_nodes = [f"{base_node}[alpha]", f"{base_node}[beta]"]
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[base_node])
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=head_nodes,
+        test_inventory_tree="f" * 40,
+    )
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "PASS"
+    assert result.blocking is False
+
+
+@pytest.mark.parametrize("outcome", ["failed", "errors"])
+def test_unparameterized_base_expansion_failure_is_a_new_regression(outcome):
+    base_node = "tests.test_contract::test_matrix"
+    passing = f"{base_node}[alpha]"
+    failing = f"{base_node}[beta]"
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[base_node])
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[passing],
+        test_inventory_tree="f" * 40,
+        **{outcome: [failing]},
+    )
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "NEW_REGRESSION"
+    assert result.blocking is True
+    assert result.new_failures == [failing]
+
+
+@pytest.mark.parametrize("outcome", ["failed", "errors", "skipped"])
+def test_nonpassing_unparameterized_base_cannot_expand_to_passing_parameters(outcome):
+    base_node = "tests.test_contract::test_matrix"
+    base = _with_node_outcomes(
+        _run(0 if outcome == "skipped" else 1, [], revision="base"),
+        passed=[] if outcome != "skipped" else [],
+        **{outcome: [base_node]},
+    )
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[f"{base_node}[alpha]", f"{base_node}[beta]"],
+        test_inventory_tree="f" * 40,
+    )
+
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
+
+
+def test_unparameterized_base_expansion_requires_inventory_tree_delta():
+    base_node = "tests.test_contract::test_matrix"
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[f"{base_node}[alpha]"],
+    )
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[base_node])
+
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
+
+
+def test_unparameterized_base_expansion_missing_family_fails_closed():
+    base_node = "tests.test_contract::test_matrix"
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[base_node])
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=["tests.test_contract::test_other[alpha]"],
+        test_inventory_tree="f" * 40,
+    )
+
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
+
+
+def test_unparameterized_base_expansion_does_not_hide_unrelated_removal():
+    expanded = "tests.test_contract::test_matrix"
+    retained = "tests.test_contract::test_retained"
+    base = _with_node_outcomes(
+        _run(0, [], revision="base"),
+        passed=[expanded, retained],
+    )
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[f"{expanded}[alpha]"],
+        test_inventory_tree="f" * 40,
+    )
+
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
+
+
+def test_unparameterized_base_expansion_with_retained_unparameterized_node_is_ambiguous():
+    base_node = "tests.test_contract::test_matrix"
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[base_node])
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[base_node, f"{base_node}[alpha]"],
+        test_inventory_tree="f" * 40,
+    )
+
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
+
+
+def test_passing_parameterized_case_replacement_with_passing_guards_is_trusted():
+    family = (
+        "tests.ops.test_codex_dx_failure_prevention::"
+        "test_evidence_reference_negative_controls_fail_closed"
+    )
+    old_case = f"{family}[tests/ops/test_repo_doctor.py#missing]"
+    replacement = (
+        f"{family}[pyproject.toml#NEXUS_INTENTIONALLY_ABSENT_EVIDENCE_ANCHOR_ISSUE_459_V1]"
+    )
+    guards = [
+        "tests.ops.test_codex_dx_failure_prevention::"
+        "test_absent_evidence_anchor_is_not_in_pyproject_toml",
+        "tests.ops.test_codex_dx_failure_prevention::"
+        "test_missing_anchor_fails_with_intended_reason",
+    ]
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[old_case])
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[replacement, *guards],
+        test_inventory_tree="f" * 40,
+    )
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "PASS"
+    assert result.blocking is False
+
+
+@pytest.mark.parametrize("outcome", ["failed", "errors"])
+def test_parameterized_case_replacement_failure_is_a_new_regression(outcome):
+    family = "tests.test_contract::test_matrix"
+    old_case = f"{family}[old]"
+    replacement = f"{family}[new]"
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[old_case])
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[],
+        test_inventory_tree="f" * 40,
+        **{outcome: [replacement]},
+    )
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "NEW_REGRESSION"
+    assert result.blocking is True
+    assert result.new_failures == [replacement]
+
+
+def test_parameterized_case_replacement_requires_inventory_tree_delta():
+    family = "tests.test_contract::test_matrix"
+    old_case = f"{family}[old]"
+    replacement = f"{family}[new]"
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[old_case])
+    head = _with_node_outcomes(_run(0, [], revision="head"), passed=[replacement])
+
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
+
+
+def test_parameterized_case_replacement_does_not_hide_unrelated_removal():
+    family = "tests.test_contract::test_matrix"
+    old_case = f"{family}[old]"
+    replacement = f"{family}[new]"
+    unrelated = "tests.test_contract::test_unrelated"
+    base = _with_node_outcomes(
+        _run(0, [], revision="base"),
+        passed=[old_case, unrelated],
+    )
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[replacement],
+        test_inventory_tree="f" * 40,
+    )
+
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
+
+
+def test_parameterized_case_replacement_requires_same_family():
+    old_case = "tests.test_contract::test_matrix[old]"
+    replacement = "tests.test_contract::test_other[new]"
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[old_case])
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[replacement],
+        test_inventory_tree="f" * 40,
+    )
+
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
+
+
+@pytest.mark.parametrize("outcome", ["failed", "errors", "skipped"])
+def test_nonpassing_parameterized_base_cannot_be_laundered_into_passing_replacement(
+    outcome,
+):
+    family = "tests.test_contract::test_matrix"
+    old_case = f"{family}[old]"
+    replacement = f"{family}[new]"
+    base = _with_node_outcomes(
+        _run(0 if outcome == "skipped" else 1, [], revision="base"),
+        passed=[],
+        **{outcome: [old_case]},
+    )
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[replacement],
+        test_inventory_tree="f" * 40,
+    )
+
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
+
+
+def test_multiple_missing_parameterized_base_cases_are_ambiguous():
+    family = "tests.test_contract::test_matrix"
+    base = _with_node_outcomes(
+        _run(0, [], revision="base"),
+        passed=[f"{family}[old-a]", f"{family}[old-b]"],
+    )
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[f"{family}[new]"],
+        test_inventory_tree="f" * 40,
+    )
+
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
 
 
 def test_dynamic_failure_identity_preserves_raw_evidence_without_false_regression():
@@ -834,6 +1509,214 @@ def test_pytest_run_rejects_missing_or_drifted_plan_tree_binding(monkeypatch, tm
     assert status == 5
     assert payload["status"] == "IMPACT_UNKNOWN"
     assert "drifted" in stdout_path.read_text(encoding="utf-8")
+
+
+def test_pytest_plan_with_exact_core_adds_single_optional_browser_exclusion(
+    monkeypatch, tmp_path: Path
+):
+    (tmp_path / "tests" / "core").mkdir(parents=True)
+    (tmp_path / "tests" / "core" / "test_web_dom_mapper.py").write_text(
+        "# optional browser test\n", encoding="utf-8"
+    )
+    (tmp_path / "tests" / "core" / "test_other.py").write_text(
+        "def test_other(): pass\n", encoding="utf-8"
+    )
+    (tmp_path / "tests" / "ops").mkdir(parents=True)
+    (tmp_path / "tests" / "ops" / "test_select_tests.py").write_text(
+        "def test_select(): pass\n", encoding="utf-8"
+    )
+
+    targets = ["tests/ops/test_select_tests.py", "tests/core"]
+    plan_path = _write_pytest_plan(tmp_path, targets)
+    junit_path = tmp_path / "result.xml"
+    result_path = tmp_path / "run.json"
+    stdout_path = tmp_path / "stdout.log"
+
+    captured_commands: list[list[str]] = []
+
+    def fake_run(command, **_kwargs):
+        if Path(command[0]).name == "git" and command[1] == "rev-parse":
+            values = {
+                f"{'b' * 40}^{{commit}}": "b" * 40,
+                f"{'b' * 40}^{{tree}}": "c" * 40,
+                f"{'b' * 40}:tests": "d" * 40,
+            }
+            return SimpleNamespace(
+                returncode=0,
+                stdout=values[command[2]] + "\n",
+                stderr="",
+            )
+        captured_commands.append(list(command))
+        junit_path.write_text(
+            '<testsuite tests="2" failures="0">'
+            '<testcase classname="tests.ops.test_select_tests" name="test_select"/>'
+            '<testcase classname="tests.core.test_other" name="test_other"/>'
+            "</testsuite>",
+            encoding="utf-8",
+        )
+        return SimpleNamespace(returncode=0, stdout="..", stderr="")
+
+    monkeypatch.setattr("scripts.ops.pr_impact_gate.subprocess.run", fake_run)
+
+    status = run_pytest_plan(
+        plan_path,
+        result_path,
+        junit_path,
+        stdout_path,
+        cwd=tmp_path,
+        revision="b" * 40,
+    )
+
+    assert status == 0
+    assert len(captured_commands) == 1
+    cmd = captured_commands[0]
+    assert cmd[0] == sys.executable
+    assert cmd[1:3] == ["-m", "pytest"]
+    assert "tests/ops/test_select_tests.py" in cmd
+    assert "tests/core" in cmd
+    exclusion_arg = "--ignore=tests/core/test_web_dom_mapper.py"
+    assert exclusion_arg in cmd
+    assert cmd.count(exclusion_arg) == 1
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    assert payload["status"] == "COMPLETE"
+    assert payload["executed_targets"] == targets
+    assert payload["missing_targets"] == []
+
+
+def test_pytest_plan_without_exact_core_does_not_add_browser_exclusion(monkeypatch, tmp_path: Path):
+    (tmp_path / "tests" / "core").mkdir(parents=True)
+    (tmp_path / "tests" / "core" / "test_web_dom_mapper.py").write_text(
+        "# optional browser test\n", encoding="utf-8"
+    )
+    (tmp_path / "tests" / "core" / "test_other.py").write_text(
+        "def test_other(): pass\n", encoding="utf-8"
+    )
+    (tmp_path / "tests" / "ops").mkdir(parents=True)
+    (tmp_path / "tests" / "ops" / "test_select_tests.py").write_text(
+        "def test_select(): pass\n", encoding="utf-8"
+    )
+
+    targets = ["tests/ops/test_select_tests.py", "tests/core/test_other.py"]
+    plan_path = _write_pytest_plan(tmp_path, targets)
+    junit_path = tmp_path / "result.xml"
+    result_path = tmp_path / "run.json"
+    stdout_path = tmp_path / "stdout.log"
+
+    captured_commands: list[list[str]] = []
+
+    def fake_run(command, **_kwargs):
+        if Path(command[0]).name == "git" and command[1] == "rev-parse":
+            values = {
+                f"{'b' * 40}^{{commit}}": "b" * 40,
+                f"{'b' * 40}^{{tree}}": "c" * 40,
+                f"{'b' * 40}:tests": "d" * 40,
+            }
+            return SimpleNamespace(
+                returncode=0,
+                stdout=values[command[2]] + "\n",
+                stderr="",
+            )
+        captured_commands.append(list(command))
+        junit_path.write_text(
+            '<testsuite tests="2" failures="0">'
+            '<testcase classname="tests.ops.test_select_tests" name="test_select"/>'
+            '<testcase classname="tests.core.test_other" name="test_other"/>'
+            "</testsuite>",
+            encoding="utf-8",
+        )
+        return SimpleNamespace(returncode=0, stdout="..", stderr="")
+
+    monkeypatch.setattr("scripts.ops.pr_impact_gate.subprocess.run", fake_run)
+
+    status = run_pytest_plan(
+        plan_path,
+        result_path,
+        junit_path,
+        stdout_path,
+        cwd=tmp_path,
+        revision="b" * 40,
+    )
+
+    assert status == 0
+    assert len(captured_commands) == 1
+    cmd = captured_commands[0]
+    assert cmd[0] == sys.executable
+    assert cmd[1:3] == ["-m", "pytest"]
+    assert "tests/ops/test_select_tests.py" in cmd
+    assert "tests/core/test_other.py" in cmd
+    assert "--ignore=tests/core/test_web_dom_mapper.py" not in cmd
+    assert not any(arg.startswith("--ignore=") for arg in cmd)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    assert payload["status"] == "COMPLETE"
+    assert payload["executed_targets"] == targets
+    assert payload["missing_targets"] == []
+
+
+@pytest.mark.parametrize(
+    ("invalid_exclusion", "diagnostic"),
+    [
+        ("missing", "missing declared optional exclusion"),
+        ("directory", "not a regular file"),
+        ("outside_symlink", "must not be a symlink"),
+    ],
+)
+def test_pytest_plan_with_exact_core_fails_closed_for_invalid_exclusion(
+    monkeypatch, tmp_path: Path, invalid_exclusion: str, diagnostic: str
+):
+    (tmp_path / "tests" / "core").mkdir(parents=True)
+    (tmp_path / "tests" / "core" / "test_other.py").write_text(
+        "def test_other(): pass\n", encoding="utf-8"
+    )
+    exclusion = tmp_path / "tests" / "core" / "test_web_dom_mapper.py"
+    if invalid_exclusion == "directory":
+        exclusion.mkdir()
+    elif invalid_exclusion == "outside_symlink":
+        outside = tmp_path.parent / f"{tmp_path.name}-outside.py"
+        outside.write_text("# outside exclusion\n", encoding="utf-8")
+        exclusion.symlink_to(outside)
+
+    targets = ["tests/core"]
+    plan_path = _write_pytest_plan(tmp_path, targets)
+    junit_path = tmp_path / "result.xml"
+    result_path = tmp_path / "run.json"
+    stdout_path = tmp_path / "stdout.log"
+
+    captured_pytest_invocations: list[list[str]] = []
+
+    def fake_run(command, **_kwargs):
+        if Path(command[0]).name == "git" and command[1] == "rev-parse":
+            values = {
+                f"{'b' * 40}^{{commit}}": "b" * 40,
+                f"{'b' * 40}^{{tree}}": "c" * 40,
+                f"{'b' * 40}:tests": "d" * 40,
+            }
+            return SimpleNamespace(
+                returncode=0,
+                stdout=values[command[2]] + "\n",
+                stderr="",
+            )
+        captured_pytest_invocations.append(list(command))
+        junit_path.write_text('<testsuite tests="0" failures="0"/>', encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("scripts.ops.pr_impact_gate.subprocess.run", fake_run)
+
+    status = run_pytest_plan(
+        plan_path,
+        result_path,
+        junit_path,
+        stdout_path,
+        cwd=tmp_path,
+        revision="b" * 40,
+    )
+
+    assert len(captured_pytest_invocations) == 0
+    assert status != 0
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    assert payload["status"] in {"CI_BOOTSTRAP_DEFECT", "IMPACT_UNKNOWN"}
+    assert payload["exit_code"] != 0
+    stdout = stdout_path.read_text(encoding="utf-8")
+    assert diagnostic in stdout
 
 
 def test_raw_diff_parser_rejects_malformed_duplicate_and_divergent_streams():
@@ -1232,3 +2115,176 @@ def test_exact_git_result_cannot_enter_current_resolution_or_candidate_commit_pa
             None,
             SimpleNamespace(**evidence),
         )
+
+
+def _make_main_movement_repo(tmp_path: Path) -> dict[str, Any]:
+    repo = tmp_path / "movement_repo"
+    repo.mkdir()
+
+    def git(*args: str, text: bool = True):
+        return subprocess.check_output(["git", *args], cwd=repo, text=text)
+
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    (repo / "docs").mkdir()
+    (repo / "docs" / "unrelated.md").write_text("initial\n", encoding="utf-8")
+    (repo / "AGENTS.md").write_text("agents initial\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Nexus Test",
+            "-c",
+            "user.email=nexus@example.invalid",
+            "commit",
+            "-qm",
+            "old_main",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    old_main_sha = git("rev-parse", "HEAD").strip()
+    old_main_tree = git("rev-parse", "HEAD^{tree}").strip()
+
+    (repo / "docs" / "unrelated.md").write_text("updated\n", encoding="utf-8")
+    (repo / "AGENTS.md").write_text("agents updated\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Nexus Test",
+            "-c",
+            "user.email=nexus@example.invalid",
+            "commit",
+            "-qm",
+            "new_main",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    new_main_sha = git("rev-parse", "HEAD").strip()
+    new_main_tree = git("rev-parse", "HEAD^{tree}").strip()
+
+    return {
+        "repo": repo,
+        "old_main_sha": old_main_sha,
+        "old_main_tree_sha": old_main_tree,
+        "new_main_sha": new_main_sha,
+        "new_main_tree_sha": new_main_tree,
+        "changed_paths": ["AGENTS.md", "docs/unrelated.md"],
+    }
+
+
+def test_verify_exact_git_main_movement_paths_exact_match(tmp_path: Path):
+    fixture = _make_main_movement_repo(tmp_path)
+    result = verify_exact_git_main_movement_paths(
+        old_main_sha=fixture["old_main_sha"],
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha=fixture["new_main_tree_sha"],
+        changed_main_paths=fixture["changed_paths"],
+        root=fixture["repo"],
+    )
+    assert result["status"] == EXACT_GIT_EVIDENCE_ONLY
+    assert result["valid"] is True
+    assert result["blocking"] is False
+    assert result["reasons"] == ()
+    assert result["proven_paths"] == ("AGENTS.md", "docs/unrelated.md")
+    assert result["merge_authority"] is False
+    assert result["approval_authority"] is False
+    assert result["candidate_commit_allowed"] is False
+    assert result["public_claim_allowed"] is False
+
+
+def test_verify_exact_git_main_movement_paths_omitted_path_fails_closed(tmp_path: Path):
+    fixture = _make_main_movement_repo(tmp_path)
+    # Hostile caller supplies only docs/unrelated.md, omitting AGENTS.md
+    result = verify_exact_git_main_movement_paths(
+        old_main_sha=fixture["old_main_sha"],
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha=fixture["new_main_tree_sha"],
+        changed_main_paths=["docs/unrelated.md"],
+        root=fixture["repo"],
+    )
+    assert result["status"] == "IMPACT_UNKNOWN"
+    assert result["valid"] is False
+    assert result["blocking"] is True
+    assert any("omits physical paths" in r and "AGENTS.md" in r for r in result["reasons"])
+
+
+def test_verify_exact_git_main_movement_paths_spurious_path_fails_closed(tmp_path: Path):
+    fixture = _make_main_movement_repo(tmp_path)
+    # Caller supplies an extra path not in physical git diff
+    result = verify_exact_git_main_movement_paths(
+        old_main_sha=fixture["old_main_sha"],
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha=fixture["new_main_tree_sha"],
+        changed_main_paths=["AGENTS.md", "docs/unrelated.md", "nexus/extra.py"],
+        root=fixture["repo"],
+    )
+    assert result["status"] == "IMPACT_UNKNOWN"
+    assert result["valid"] is False
+    assert result["blocking"] is True
+    assert any("spurious paths" in r and "nexus/extra.py" in r for r in result["reasons"])
+
+
+def test_verify_exact_git_main_movement_paths_tree_mismatch_fails_closed(tmp_path: Path):
+    fixture = _make_main_movement_repo(tmp_path)
+    result = verify_exact_git_main_movement_paths(
+        old_main_sha=fixture["old_main_sha"],
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha="0" * 40,
+        changed_main_paths=fixture["changed_paths"],
+        root=fixture["repo"],
+    )
+    assert result["status"] == "IMPACT_UNKNOWN"
+    assert result["valid"] is False
+    assert result["blocking"] is True
+    assert any("new_main_tree_sha does not match physical Git tree" in r for r in result["reasons"])
+
+
+def test_verify_exact_git_main_movement_paths_unresolvable_endpoint_fails_closed(tmp_path: Path):
+    fixture = _make_main_movement_repo(tmp_path)
+    result = verify_exact_git_main_movement_paths(
+        old_main_sha="f" * 40,
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha=fixture["new_main_tree_sha"],
+        changed_main_paths=fixture["changed_paths"],
+        root=fixture["repo"],
+    )
+    assert result["status"] == "IMPACT_UNKNOWN"
+    assert result["valid"] is False
+    assert result["blocking"] is True
+
+
+def test_verify_exact_git_main_movement_paths_malformed_sha():
+    result = verify_exact_git_main_movement_paths(
+        old_main_sha="invalid-sha",
+        old_main_tree_sha="1" * 40,
+        new_main_sha="2" * 40,
+        new_main_tree_sha="3" * 40,
+        changed_main_paths=["docs/unrelated.md"],
+    )
+    assert result["status"] == "IMPACT_UNKNOWN"
+    assert result["valid"] is False
+    assert result["blocking"] is True
+
+
+def test_verify_exact_git_main_movement_paths_untrusted_root():
+    result = verify_exact_git_main_movement_paths(
+        old_main_sha="a" * 40,
+        old_main_tree_sha="1" * 40,
+        new_main_sha="b" * 40,
+        new_main_tree_sha="2" * 40,
+        changed_main_paths=["docs/unrelated.md"],
+        root=Path("/non/existent/path/for/git/root"),
+    )
+    assert result["status"] == "IMPACT_UNKNOWN"
+    assert result["valid"] is False
+    assert result["blocking"] is True
+    assert "trusted Git root is required" in result["reasons"]

@@ -1,32 +1,54 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
+import os
 import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Any
 
 import pytest
 
+import scripts.ops.external_intelligence_service as service_module
+from nexus.core.exit_codes import NexusExitCode
 from scripts.ops.external_intelligence_service import (
+    READINESS_SUCCESS_THRESHOLD,
+    GhIssueTransport,
     ServiceConfig,
     ServiceError,
+    ServiceReadiness,
+    _parse_launchctl,
+    _safe_error,
     build_automation,
     load_config,
     plist_xml,
     refresh_remote_main,
     render_comment,
     run_once,
+    service_status,
+    write_service_receipt,
 )
 
 
 class FakeGh:
-    def __init__(self, issues):
+    def __init__(self, issues, comments=None):
         self.issues = issues
-        self.comments = []
+        self.comments = list(comments or [])
         self.calls = []
 
     def list_open_labeled(self, repository, label):
         self.calls.append((repository, label))
         return list(self.issues.get(repository, []))
+
+    def list_comments(self, repository, issue_number):
+        return [
+            {"id": i + 1, "body": c[2]}
+            for i, c in enumerate(self.comments)
+            if c[0] == repository and c[1] == issue_number
+        ]
 
     def comment(self, repository, issue_number, body):
         self.comments.append((repository, issue_number, body))
@@ -50,26 +72,53 @@ def _config(tmp_path, **overrides):
         workspace_root=tmp_path / "workspaces",
         opencli_profile="test-profile",
         opencode_executable="/tmp/opencode",
+        open_swe_executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+        open_swe_runtime_artifact_sha256="a" * 64,
     )
     values.update(overrides)
     return ServiceConfig(**values)
 
 
-def _complete(reuse=False):
+def _config_file(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps({
+            "repositories": ["o/r"],
+            "repository_roots": {"o/r": str(tmp_path / "repo")},
+            "state_root": str(tmp_path / "state"),
+            "workspace_root": str(tmp_path / "workspaces"),
+        }),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _complete(reuse=False, publication_state="COMPLETED"):
+    pub_payload = {
+        "task_id": "t1",
+        "candidate_commit": "a" * 40,
+        "candidate_tree": "b" * 40,
+        "verification_state": "PASS",
+        "current_gate": "PENDING_INDEPENDENT_ACCEPTANCE",
+        "acceptance_packet_ref": "state/a.json",
+        "acceptance_packet_sha256": "c" * 64,
+        "next_action": "independent_acceptance",
+        "stop_condition": "acceptance_failed",
+        "claim_ceiling": "TASK_CANDIDATE_VERIFIED_PENDING_INDEPENDENT_ACCEPTANCE",
+    }
+    from nexus.services.external_intelligence_automation import compute_publication_id
+
+    pub_id = compute_publication_id("o/r", 1, "h" * 64, pub_payload)
     return {
         "state": "COMPLETE",
         "reuse": reuse,
-        "publication": {
-            "task_id": "t1",
-            "candidate_commit": "a" * 40,
-            "candidate_tree": "b" * 40,
-            "verification_state": "PASS",
-            "current_gate": "PENDING_INDEPENDENT_ACCEPTANCE",
-            "acceptance_packet_ref": "state/a.json",
-            "acceptance_packet_sha256": "c" * 64,
-            "next_action": "independent_acceptance",
-            "stop_condition": "acceptance_failed",
-            "claim_ceiling": "TASK_CANDIDATE_VERIFIED_PENDING_INDEPENDENT_ACCEPTANCE",
+        "identity_hash": "h" * 64,
+        "publication": pub_payload,
+        "publication_record": {
+            "publication_id": pub_id,
+            "state": publication_state if reuse else "PREPARED",
+            "marker": f"<!-- nexus-external-intelligence:{pub_id} -->",
+            "payload": pub_payload,
         },
     }
 
@@ -94,6 +143,394 @@ def test_load_config_is_strict_and_profile_is_configurable(tmp_path):
     cfg.write_text(json.dumps(raw), encoding="utf-8")
     with pytest.raises(ServiceError):
         load_config(cfg)
+
+
+def test_semantic_backend_defaults_to_opencli(tmp_path):
+    loaded = load_config(_config_file(tmp_path))
+
+    assert getattr(loaded, "semantic_backend", None) == "opencli"
+
+
+def test_unknown_semantic_backend_is_rejected_explicitly(tmp_path):
+    config_path = _config_file(tmp_path)
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    raw["semantic_backend"] = "unknown"
+    config_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(ServiceError, match="CONFIG_SEMANTIC_BACKEND_INVALID"):
+        load_config(config_path)
+
+    with pytest.raises(ServiceError, match="CONFIG_SEMANTIC_BACKEND_INVALID"):
+        build_automation(_config(tmp_path, semantic_backend="unknown"), "o/r")
+
+
+def test_open_swe_backend_requires_explicit_model_binding(tmp_path):
+    config = _config(tmp_path, semantic_backend="open_swe")
+
+    with pytest.raises(ServiceError, match="CONFIG_OPEN_SWE_MODEL_BINDING_REQUIRED"):
+        build_automation(config, "o/r")
+
+
+def test_worker_backend_defaults_to_opencode(tmp_path):
+    loaded = load_config(_config_file(tmp_path))
+
+    assert loaded.worker_backend == "opencode"
+
+
+def test_unknown_worker_backend_is_rejected(tmp_path):
+    config_path = _config_file(tmp_path)
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    raw["worker_backend"] = "unknown"
+    config_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(ServiceError, match="CONFIG_WORKER_BACKEND_INVALID"):
+        load_config(config_path)
+
+
+def test_build_automation_selects_open_swe_worker_only_when_explicit(tmp_path, monkeypatch):
+    calls = []
+
+    class FakeOpenSWEWorkerTransport:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+
+    monkeypatch.setattr(
+        service_module,
+        "OpenSWEWorkerTransport",
+        FakeOpenSWEWorkerTransport,
+        raising=False,
+    )
+    config = _config(
+        tmp_path,
+        worker_backend="open_swe",
+        open_swe_model_provider="google_genai",
+        open_swe_model="gemini-test",
+    )
+
+    automation = build_automation(config, "o/r")
+
+    assert isinstance(automation.c_runtime.transport, FakeOpenSWEWorkerTransport)
+    assert calls == [
+        {
+            "model_provider": "google_genai",
+            "model_id": "gemini-test",
+            "executable": "/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+            "expected_artifact_sha256": "a" * 64,
+            "runtime_state_root": tmp_path / "state" / "open_swe_runtime",
+            "timeout": 300.0,
+            "require_worker_binding": True,
+            "transport_config": {},
+        }
+    ]
+
+
+def test_load_config_binds_open_swe_provider_and_model(tmp_path):
+    config_path = _config_file(tmp_path)
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    raw.update(
+        semantic_backend="open_swe",
+        open_swe_model_provider="google_genai",
+        open_swe_model="gemini-test",
+        open_swe_executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+        open_swe_runtime_artifact_sha256="a" * 64,
+    )
+    config_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    loaded = load_config(config_path)
+
+    assert loaded.semantic_backend == "open_swe"
+    assert loaded.open_swe_model_provider == "google_genai"
+    assert loaded.open_swe_model == "gemini-test"
+    assert loaded.open_swe_executable == "/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime"
+    assert loaded.open_swe_runtime_artifact_sha256 == "a" * 64
+
+
+def test_open_swe_activation_overlay_merges_with_host_and_binds_both_consumers(
+    tmp_path, monkeypatch
+):
+    overlay = json.loads(
+        Path("scripts/ops/configs/external_intelligence_open_swe_activation_v1.json").read_text()
+    )
+    overlay["open_swe_executable"] = str(tmp_path / "runtime" / "bin" / "nexus-open-swe-runtime")
+    overlay["open_swe_runtime_artifact_sha256"] = "b" * 64
+    host = {
+        "repositories": ["o/r"],
+        "repository_roots": {"o/r": str(tmp_path / "repo")},
+        "state_root": str(tmp_path / "state"),
+        "workspace_root": str(tmp_path / "workspaces"),
+    }
+    config_path = tmp_path / "merged.json"
+    config_path.write_text(json.dumps({**host, **overlay}), encoding="utf-8")
+    loaded = load_config(config_path)
+    assert loaded.state_root == (tmp_path / "state").resolve()
+    calls = []
+
+    class FakeSemantic:
+        def __init__(self, **kwargs):
+            calls.append(("semantic", kwargs))
+
+    class FakeWorker:
+        def __init__(self, **kwargs):
+            calls.append(("worker", kwargs))
+
+    monkeypatch.setattr(service_module, "OpenSWEExternalIntelligenceTransport", FakeSemantic)
+    monkeypatch.setattr(service_module, "OpenSWEWorkerTransport", FakeWorker)
+    build_automation(loaded, "o/r")
+    assert calls[0][1]["executable"] == calls[1][1]["executable"]
+    assert calls[0][1]["executable"] == overlay["open_swe_executable"]
+    assert calls[0][1]["expected_artifact_sha256"] == calls[1][1]["expected_artifact_sha256"]
+    assert calls[0][1]["expected_artifact_sha256"] == overlay["open_swe_runtime_artifact_sha256"]
+    assert calls[0][1]["model_provider"] == calls[1][1]["model_provider"] == "opencli_chatgpt"
+    assert calls[0][1]["model_id"] == calls[1][1]["model_id"] == "balanced"
+    expected_transport = {
+        "executable": overlay["open_swe_opencli_executable"],
+        "profile": overlay["open_swe_opencli_profile"],
+        "site_session": "ephemeral",
+        "timeout_seconds": 180,
+    }
+    assert calls[0][1]["transport_config"] == calls[1][1]["transport_config"] == expected_transport
+    assert calls[0][1]["timeout"] == 1200.0
+    assert calls[1][1]["timeout"] == 2400.0
+    assert (
+        calls[0][1]["runtime_state_root"]
+        == calls[1][1]["runtime_state_root"]
+        == tmp_path / "state" / "open_swe_runtime"
+    )
+
+
+def test_open_swe_activation_overlay_placeholders_fail_closed(tmp_path):
+    overlay = json.loads(
+        Path("scripts/ops/configs/external_intelligence_open_swe_activation_v1.json").read_text()
+    )
+    host = {
+        "repositories": ["o/r"],
+        "repository_roots": {"o/r": str(tmp_path / "repo")},
+        "state_root": str(tmp_path / "state"),
+        "workspace_root": str(tmp_path / "workspaces"),
+    }
+    config_path = tmp_path / "merged.json"
+    config_path.write_text(json.dumps({**host, **overlay}), encoding="utf-8")
+    with pytest.raises(ServiceError, match="CONFIG_OPEN_SWE_EXECUTABLE_ABSOLUTE_REQUIRED"):
+        load_config(config_path)
+    overlay["open_swe_executable"] = str(tmp_path / "runtime" / "bin" / "nexus-open-swe-runtime")
+    config_path.write_text(json.dumps({**host, **overlay}), encoding="utf-8")
+    with pytest.raises(ServiceError, match="CONFIG_OPEN_SWE_EXPECTED_ARTIFACT_HASH_REQUIRED"):
+        load_config(config_path)
+
+
+def test_load_config_rejects_open_swe_without_complete_model_binding(tmp_path):
+    config_path = _config_file(tmp_path)
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    raw["semantic_backend"] = "open_swe"
+    config_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(ServiceError, match="CONFIG_OPEN_SWE_MODEL_BINDING_REQUIRED"):
+        load_config(config_path)
+
+
+def test_build_automation_keeps_opencli_as_default(tmp_path):
+    automation = build_automation(_config(tmp_path), "o/r")
+
+    assert isinstance(
+        automation.sidecar.transport, service_module.OpenCLIExternalIntelligenceTransport
+    )
+
+
+def test_build_automation_selects_open_swe_only_when_explicit(tmp_path, monkeypatch):
+    calls = []
+
+    class FakeOpenSWETransport:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+
+    monkeypatch.setattr(
+        service_module,
+        "OpenSWEExternalIntelligenceTransport",
+        FakeOpenSWETransport,
+        raising=False,
+    )
+    config = _config(
+        tmp_path,
+        semantic_backend="open_swe",
+        open_swe_model_provider="google_genai",
+        open_swe_model="gemini-test",
+    )
+
+    automation = build_automation(config, "o/r")
+
+    assert isinstance(automation.sidecar.transport, FakeOpenSWETransport)
+    assert calls == [
+        {
+            "repository_root": (tmp_path / "repo").resolve(),
+            "model_provider": "google_genai",
+            "model_id": "gemini-test",
+            "executable": "/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+            "expected_artifact_sha256": "a" * 64,
+            "runtime_state_root": tmp_path / "state" / "open_swe_runtime",
+            "timeout": 180.0,
+            "transport_config": {},
+        }
+    ]
+
+
+def test_open_swe_opencli_binding_is_explicit_and_bounded(tmp_path, monkeypatch):
+    semantic_calls = []
+    worker_calls = []
+
+    class FakeSemanticTransport:
+        def __init__(self, **kwargs):
+            semantic_calls.append(kwargs)
+
+    class FakeWorkerTransport:
+        def __init__(self, **kwargs):
+            worker_calls.append(kwargs)
+
+    monkeypatch.setattr(
+        service_module, "OpenSWEExternalIntelligenceTransport", FakeSemanticTransport
+    )
+    monkeypatch.setattr(service_module, "OpenSWEWorkerTransport", FakeWorkerTransport)
+    config = _config(
+        tmp_path,
+        semantic_backend="open_swe",
+        worker_backend="open_swe",
+        open_swe_model_provider="opencli_chatgpt",
+        open_swe_model="very-high",
+        open_swe_opencli_executable="/opt/opencli",
+        open_swe_opencli_profile="profile-a",
+        open_swe_opencli_site_session="session-a",
+        open_swe_opencli_timeout_seconds=240,
+    )
+
+    build_automation(config, "o/r")
+
+    expected = {
+        "executable": "/opt/opencli",
+        "profile": "profile-a",
+        "site_session": "session-a",
+        "timeout_seconds": 240,
+    }
+    assert semantic_calls[0]["transport_config"] == expected
+    assert worker_calls[0]["transport_config"] == expected
+
+
+def test_load_config_rejects_invalid_opencli_transport_binding(tmp_path):
+    for timeout in (29, 901):
+        config_path = _config_file(tmp_path)
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+        raw.update(
+            semantic_backend="open_swe",
+            open_swe_model_provider="opencli_chatgpt",
+            open_swe_model="very-high",
+            open_swe_opencli_timeout_seconds=timeout,
+        )
+        config_path.write_text(json.dumps(raw), encoding="utf-8")
+        with pytest.raises(ServiceError, match="CONFIG_OPEN_SWE_TRANSPORT_INVALID"):
+            load_config(config_path)
+
+
+def test_load_config_rejects_opencli_transport_fields_for_other_provider(tmp_path):
+    config_path = _config_file(tmp_path)
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    raw.update(
+        semantic_backend="open_swe",
+        open_swe_model_provider="google_genai",
+        open_swe_model="gemini-test",
+        open_swe_opencli_timeout_seconds=120,
+    )
+    config_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(ServiceError, match="CONFIG_OPEN_SWE_TRANSPORT_PROVIDER_MISMATCH"):
+        load_config(config_path)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("open_swe_semantic_timeout_seconds", 29),
+        ("open_swe_worker_timeout_seconds", 3601),
+        ("open_swe_semantic_timeout_seconds", True),
+    ],
+)
+def test_load_config_rejects_invalid_open_swe_consumer_timeout(tmp_path, field, value):
+    config_path = _config_file(tmp_path)
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    raw.update(
+        semantic_backend="open_swe",
+        open_swe_model_provider="google_genai",
+        open_swe_model="gemini-test",
+        **{field: value},
+    )
+    config_path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(ServiceError, match="CONFIG_OPEN_SWE_TIMEOUT_INVALID"):
+        load_config(config_path)
+
+
+def test_load_config_rejects_empty_open_swe_external_executable(tmp_path):
+    config_path = _config_file(tmp_path)
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    raw.update(
+        semantic_backend="open_swe",
+        open_swe_model_provider="google_genai",
+        open_swe_model="gemini-test",
+        open_swe_executable="",
+    )
+    config_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(ServiceError, match="CONFIG_OPEN_SWE_EXECUTABLE_REQUIRED"):
+        load_config(config_path)
+
+
+def test_load_config_requires_absolute_runtime_and_independent_artifact_hash(tmp_path):
+    config_path = _config_file(tmp_path)
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    raw.update(
+        semantic_backend="open_swe",
+        open_swe_model_provider="google_genai",
+        open_swe_model="gemini-test",
+        open_swe_executable="relative-runtime",
+        open_swe_runtime_artifact_sha256="a" * 64,
+    )
+    config_path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(ServiceError, match="CONFIG_OPEN_SWE_EXECUTABLE_ABSOLUTE_REQUIRED"):
+        load_config(config_path)
+    raw["open_swe_executable"] = "/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime"
+    raw.pop("open_swe_runtime_artifact_sha256")
+    config_path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(ServiceError, match="CONFIG_OPEN_SWE_EXPECTED_ARTIFACT_HASH_REQUIRED"):
+        load_config(config_path)
+    raw["open_swe_runtime_artifact_sha256"] = "a" * 64
+    config_path.write_text(json.dumps(raw), encoding="utf-8")
+    loaded = load_config(config_path)
+    assert loaded.open_swe_executable.startswith("/opt/")
+    assert loaded.open_swe_runtime_artifact_sha256 == "a" * 64
+
+
+# Historical exact-base node retained across the in-process -> external-runtime
+# ownership move. A missing external runtime remains fail-closed at construction.
+def test_build_automation_fails_closed_when_open_swe_optional_runtime_is_missing(
+    tmp_path, monkeypatch
+):
+    module = importlib.import_module("nexus.services.open_swe_external_intelligence")
+
+    class MissingOpenSWETransport:
+        def __init__(self, **_kwargs):
+            raise module.OpenSWEExternalIntelligenceError("OPEN_SWE_RUNTIME_NOT_FOUND")
+
+    monkeypatch.setattr(
+        service_module,
+        "OpenSWEExternalIntelligenceTransport",
+        MissingOpenSWETransport,
+        raising=False,
+    )
+    config = _config(
+        tmp_path,
+        semantic_backend="open_swe",
+        open_swe_model_provider="google_genai",
+        open_swe_model="gemini-test",
+    )
+
+    with pytest.raises(ServiceError, match="OPEN_SWE_RUNTIME_NOT_FOUND"):
+        build_automation(config, "o/r")
 
 
 def test_run_once_processes_at_most_one_issue_and_publishes_compact_result(tmp_path):
@@ -227,6 +664,85 @@ def test_run_once_skips_source_lineage_blocked_issue_to_reach_eligible_next(tmp_
     assert result["issue_number"] == 2
     assert len(gh.comments) == 1
     assert gh.comments[0][1] == 2
+
+
+@pytest.mark.parametrize(
+    "disposition",
+    [
+        {"state": "REPAIR_BUDGET_EXHAUSTED", "semantic_dispatched": True},
+        {"state": "UNIT_REPAIR_REQUIRED", "semantic_dispatched": True},
+        {"state": "COMPOSITION_REPAIR_REQUIRED", "semantic_dispatched": True},
+        {"state": "SCOPE_DELTA_REQUIRED", "semantic_dispatched": True},
+        {
+            "state": "RECONCILIATION_REQUIRED",
+            "prior_state": "CLOSURE_DISPATCHING",
+            "semantic_dispatched": True,
+        },
+    ],
+)
+def test_run_once_skips_terminal_or_reconcile_issue_to_reach_eligible_next(tmp_path, disposition):
+    config = _config(tmp_path)
+    calls = []
+
+    class SequencedAutomation:
+        def run_issue(self, repository, issue_number, title, body):
+            calls.append(issue_number)
+            if issue_number == 1:
+                return dict(disposition)
+            return _complete()
+
+    gh = FakeGh({
+        "o/r": [
+            {"number": 2, "title": "eligible", "body": "b"},
+            {"number": 1, "title": "durable-stop", "body": "a"},
+        ]
+    })
+    result = run_once(
+        config,
+        gh=gh,
+        automation_factory=lambda _c, _r: SequencedAutomation(),
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert calls == [1, 2]
+    assert result["issue_number"] == 2
+    assert len(gh.comments) == 1
+    assert gh.comments[0][1] == 2
+
+
+def test_run_once_skips_dispatched_blocked_issue_to_reach_eligible_next(tmp_path):
+    config = _config(tmp_path)
+    calls = []
+
+    class SequencedAutomation:
+        def run_issue(self, repository, issue_number, title, body):
+            calls.append(issue_number)
+            if issue_number == 1:
+                return {
+                    "state": "BLOCKED",
+                    "stage": "CLOSURE",
+                    "closure_status": "CLOSURE_NON_TERMINAL_FAILURE",
+                    "semantic_dispatched": True,
+                }
+            return _complete()
+
+    gh = FakeGh({
+        "o/r": [
+            {"number": 2, "title": "eligible", "body": "b"},
+            {"number": 1, "title": "dispatched-blocked", "body": "a"},
+        ]
+    })
+    result = run_once(
+        config,
+        gh=gh,
+        automation_factory=lambda _c, _r: SequencedAutomation(),
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert calls == [1, 2]
+    assert result["status"] == "COMPLETE"
+    assert result["issue_number"] == 2
+    assert len(gh.comments) == 1
+    assert gh.comments[0][1] == 2
+    assert "External Intelligence automation completed" in gh.comments[0][2]
 
 
 def test_idle_when_no_labeled_issue(tmp_path):
@@ -467,7 +983,7 @@ def test_critical_regression_eia_unattended_freshness_end_to_end(tmp_path):
             self.store = store
             self.calls = []
 
-        def analyze(self, record, sources):
+        def analyze(self, record, sources, selected_worker=None):
             self.calls.append((record, list(sources)))
             envelope = {"schema": "external_execution_envelope.v1", "x": 1}
             req_sha = "b" * 64
@@ -565,6 +1081,476 @@ def test_plist_is_local_launchagent_daemon_and_has_no_hardcoded_profile(tmp_path
     assert "/Users/jameschen/.opencode/bin" in xml
 
 
+def test_plist_derives_logs_from_state_root(tmp_path):
+    state_root = tmp_path / "state"
+    xml = plist_xml(tmp_path / "config.json", state_root=state_root)
+    assert f"{state_root}/service/daemon.stdout.log" in xml
+    assert f"{state_root}/service/daemon.stderr.log" in xml
+    assert "/dev/null" not in xml
+
+
+def test_service_receipt_is_atomic_restrictive_and_identity_bound(tmp_path):
+    path = tmp_path / "state" / "service" / "daemon.json"
+    write_service_receipt(
+        path,
+        {
+            "schema": "nexus.external_intelligence_daemon_receipt.v1",
+            "status": ServiceReadiness.STARTING.value,
+            "run_id": "run-1",
+            "pid": 123,
+            "source_path": "/tmp/service.py",
+            "source_sha256": "a" * 64,
+            "config_path": "/tmp/config.json",
+            "config_sha256": "b" * 64,
+            "started_at": 99.0,
+            "heartbeat_at": 100.0,
+            "successful_polls": 1,
+            "last_error": None,
+        },
+    )
+    assert json.loads(path.read_text(encoding="utf-8"))["run_id"] == "run-1"
+    assert os.stat(path).st_mode & 0o077 == 0
+    assert not list(path.parent.glob("*.tmp"))
+
+
+def test_service_error_surface_is_bounded_and_redacted():
+    safe = _safe_error(ServiceError("GH_COMMAND_FAILED"))
+    assert safe == {"type": "ServiceError", "code": "GH_COMMAND_FAILED"}
+    redacted = _safe_error(ServiceError("token=secret-value"))
+    assert redacted["code"] == "ServiceError"
+    assert "secret-value" not in json.dumps(redacted)
+
+
+def test_service_status_registered_alone_never_ready(tmp_path):
+    config = _config_file(tmp_path)
+
+    def launchctl(*_args):
+        return subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = 0\n", ""
+        )
+
+    result = service_status(config, launchctl_runner=launchctl, process_snapshot=lambda: [])
+    assert result["status"] == ServiceReadiness.STARTING.value
+    assert result["ready"] is False
+
+
+def test_service_status_reconciles_identity_heartbeat_and_last_exit(tmp_path):
+    config = _config_file(tmp_path)
+    receipt = tmp_path / "state" / "service" / "daemon.json"
+    source_sha = hashlib.sha256(
+        Path(__file__)
+        .resolve()
+        .parents[2]
+        .joinpath("scripts/ops/external_intelligence_service.py")
+        .read_bytes()
+    ).hexdigest()
+    config_sha = hashlib.sha256(config.read_bytes()).hexdigest()
+    write_service_receipt(
+        receipt,
+        {
+            "schema": "nexus.external_intelligence_daemon_receipt.v1",
+            "status": ServiceReadiness.READY.value,
+            "run_id": "run-1",
+            "pid": 123,
+            "source_path": str(
+                Path(__file__).resolve().parents[2] / "scripts/ops/external_intelligence_service.py"
+            ),
+            "source_sha256": source_sha,
+            "config_path": str(config.resolve()),
+            "config_sha256": config_sha,
+            "started_at": 99.0,
+            "heartbeat_at": 100.0,
+            "successful_polls": READINESS_SUCCESS_THRESHOLD,
+            "last_error": None,
+        },
+    )
+
+    def launchctl(*_args):
+        return subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = 0\n", ""
+        )
+
+    expected_command = (
+        f"{Path(sys.executable).resolve()} -m scripts.ops.external_intelligence_service daemon "
+        f"--config {config.resolve()}"
+    )
+
+    good = service_status(
+        config,
+        launchctl_runner=launchctl,
+        process_snapshot=lambda: [(123, expected_command)],
+        now=100.5,
+        receipt_path=receipt,
+    )
+    assert good["status"] == ServiceReadiness.READY.value
+    assert good["ready"] is True
+
+    bad_exit = service_status(
+        config,
+        launchctl_runner=lambda *_args: subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = 1\n", ""
+        ),
+        process_snapshot=lambda: [(123, expected_command)],
+        now=100.5,
+        receipt_path=receipt,
+    )
+    assert bad_exit["status"] == ServiceReadiness.DEGRADED.value
+
+    stale = service_status(
+        config,
+        launchctl_runner=launchctl,
+        process_snapshot=lambda: [(123, expected_command)],
+        now=100.0 + 10_000,
+        receipt_path=receipt,
+    )
+    assert stale["status"] == ServiceReadiness.STALE.value
+
+
+def test_parse_launchctl_handles_numeric_never_exited_and_missing():
+    parsed_zero = _parse_launchctl(
+        subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = 0\n", ""
+        )
+    )
+    assert parsed_zero["registered"] is True
+    assert parsed_zero["state"] == "running"
+    assert parsed_zero["pid"] == 123
+    assert parsed_zero["last_exit_code"] == 0
+    assert parsed_zero["last_exit_state"] == "EXITED_WITH_CODE"
+
+    parsed_never = _parse_launchctl(
+        subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = (never exited)\n", ""
+        )
+    )
+    assert parsed_never["registered"] is True
+    assert parsed_never["state"] == "running"
+    assert parsed_never["pid"] == 123
+    assert parsed_never["last_exit_code"] is None
+    assert parsed_never["last_exit_state"] == "NEVER_EXITED"
+
+    parsed_nonzero = _parse_launchctl(
+        subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = 256\n", ""
+        )
+    )
+    assert parsed_nonzero["last_exit_code"] == 256
+    assert parsed_nonzero["last_exit_state"] == "EXITED_WITH_CODE"
+
+    parsed_missing = _parse_launchctl(
+        subprocess.CompletedProcess(["launchctl"], 0, "state = running\npid = 123\n", "")
+    )
+    assert parsed_missing["last_exit_code"] is None
+    assert parsed_missing["last_exit_state"] == "UNKNOWN_OR_MISSING"
+
+    parsed_malformed = _parse_launchctl(
+        subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = unknown_status\n", ""
+        )
+    )
+    assert parsed_malformed["last_exit_code"] is None
+    assert parsed_malformed["last_exit_state"] == "UNKNOWN_OR_MISSING"
+
+
+def test_service_status_handles_launchd_never_exited_and_regression_cases(tmp_path):
+    config = _config_file(tmp_path)
+    receipt = tmp_path / "state" / "service" / "daemon.json"
+    source_sha = hashlib.sha256(
+        Path(__file__)
+        .resolve()
+        .parents[2]
+        .joinpath("scripts/ops/external_intelligence_service.py")
+        .read_bytes()
+    ).hexdigest()
+    config_sha = hashlib.sha256(config.read_bytes()).hexdigest()
+
+    def make_receipt(
+        *,
+        status=ServiceReadiness.READY.value,
+        pid=123,
+        polls=READINESS_SUCCESS_THRESHOLD,
+        heartbeat=100.0,
+    ):
+        write_service_receipt(
+            receipt,
+            {
+                "schema": "nexus.external_intelligence_daemon_receipt.v1",
+                "status": status,
+                "run_id": "run-1",
+                "pid": pid,
+                "source_path": str(
+                    Path(__file__).resolve().parents[2]
+                    / "scripts/ops/external_intelligence_service.py"
+                ),
+                "source_sha256": source_sha,
+                "config_path": str(config.resolve()),
+                "config_sha256": config_sha,
+                "started_at": 99.0,
+                "heartbeat_at": heartbeat,
+                "successful_polls": polls,
+                "last_error": None,
+            },
+        )
+
+    make_receipt()
+    expected_command = (
+        f"{Path(sys.executable).resolve()} -m scripts.ops.external_intelligence_service daemon "
+        f"--config {config.resolve()}"
+    )
+
+    # CASE A — explicit never exited: READY when all other gates pass
+    never_exited = service_status(
+        config,
+        launchctl_runner=lambda *_args: subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = (never exited)\n", ""
+        ),
+        process_snapshot=lambda: [(123, expected_command)],
+        now=100.5,
+        receipt_path=receipt,
+    )
+    assert never_exited["status"] == ServiceReadiness.READY.value
+    assert never_exited["ready"] is True
+
+    # CASE B — numeric zero: READY
+    num_zero = service_status(
+        config,
+        launchctl_runner=lambda *_args: subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = 0\n", ""
+        ),
+        process_snapshot=lambda: [(123, expected_command)],
+        now=100.5,
+        receipt_path=receipt,
+    )
+    assert num_zero["status"] == ServiceReadiness.READY.value
+    assert num_zero["ready"] is True
+
+    # CASE C — numeric nonzero: DEGRADED
+    num_nonzero = service_status(
+        config,
+        launchctl_runner=lambda *_args: subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = 1\n", ""
+        ),
+        process_snapshot=lambda: [(123, expected_command)],
+        now=100.5,
+        receipt_path=receipt,
+    )
+    assert num_nonzero["status"] == ServiceReadiness.DEGRADED.value
+    assert num_nonzero["ready"] is False
+
+    # CASE D — missing last exit code: DEGRADED (fail-closed)
+    missing_exit = service_status(
+        config,
+        launchctl_runner=lambda *_args: subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\n", ""
+        ),
+        process_snapshot=lambda: [(123, expected_command)],
+        now=100.5,
+        receipt_path=receipt,
+    )
+    assert missing_exit["status"] == ServiceReadiness.DEGRADED.value
+    assert missing_exit["ready"] is False
+
+    # CASE D.2 — malformed last exit code: DEGRADED (fail-closed)
+    malformed_exit = service_status(
+        config,
+        launchctl_runner=lambda *_args: subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = abnormal_term\n", ""
+        ),
+        process_snapshot=lambda: [(123, expected_command)],
+        now=100.5,
+        receipt_path=receipt,
+    )
+    assert malformed_exit["status"] == ServiceReadiness.DEGRADED.value
+    assert malformed_exit["ready"] is False
+
+    # Negative checks: never_exited does NOT bypass other gates
+    # 1. Stale heartbeat
+    stale_heartbeat = service_status(
+        config,
+        launchctl_runner=lambda *_args: subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = (never exited)\n", ""
+        ),
+        process_snapshot=lambda: [(123, expected_command)],
+        now=100.0 + 10_000,
+        receipt_path=receipt,
+    )
+    assert stale_heartbeat["status"] == ServiceReadiness.STALE.value
+    assert stale_heartbeat["ready"] is False
+
+    # 2. PID mismatch
+    make_receipt(pid=999)
+    pid_mismatch = service_status(
+        config,
+        launchctl_runner=lambda *_args: subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = (never exited)\n", ""
+        ),
+        process_snapshot=lambda: [(123, expected_command)],
+        now=100.5,
+        receipt_path=receipt,
+    )
+    assert pid_mismatch["status"] == ServiceReadiness.IDENTITY_MISMATCH.value
+    assert pid_mismatch["ready"] is False
+
+    # 3. Successful polls below threshold
+    make_receipt(polls=0)
+    starting = service_status(
+        config,
+        launchctl_runner=lambda *_args: subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = (never exited)\n", ""
+        ),
+        process_snapshot=lambda: [(123, expected_command)],
+        now=100.5,
+        receipt_path=receipt,
+    )
+    assert starting["status"] == ServiceReadiness.STARTING.value
+    assert starting["ready"] is False
+
+    # 4. Receipt DEGRADED
+    make_receipt(status=ServiceReadiness.DEGRADED.value)
+    receipt_degraded = service_status(
+        config,
+        launchctl_runner=lambda *_args: subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = (never exited)\n", ""
+        ),
+        process_snapshot=lambda: [(123, expected_command)],
+        now=100.5,
+        receipt_path=receipt,
+    )
+    assert receipt_degraded["status"] == ServiceReadiness.DEGRADED.value
+    assert receipt_degraded["ready"] is False
+
+
+def test_service_status_rejects_identity_mismatch_and_duplicate_processes(tmp_path):
+    config = _config_file(tmp_path)
+    receipt = tmp_path / "state" / "service" / "daemon.json"
+    write_service_receipt(
+        receipt,
+        {
+            "schema": "nexus.external_intelligence_daemon_receipt.v1",
+            "status": ServiceReadiness.READY.value,
+            "run_id": "run-1",
+            "pid": 123,
+            "source_path": str(
+                Path(__file__).resolve().parents[2] / "scripts/ops/external_intelligence_service.py"
+            ),
+            "source_sha256": "0" * 64,
+            "config_path": str(config.resolve()),
+            "config_sha256": "0" * 64,
+            "started_at": time.time(),
+            "heartbeat_at": time.time(),
+            "successful_polls": READINESS_SUCCESS_THRESHOLD,
+            "last_error": None,
+        },
+    )
+
+    def launchctl(*_args):
+        return subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = 0\n", ""
+        )
+
+    expected_command = (
+        f"{Path(sys.executable).resolve()} -m scripts.ops.external_intelligence_service daemon "
+        f"--config {config.resolve()}"
+    )
+
+    mismatch = service_status(
+        config,
+        launchctl_runner=launchctl,
+        process_snapshot=lambda: [(123, expected_command.replace("daemon", "daemon-worker", 1))],
+        receipt_path=receipt,
+    )
+    assert mismatch["status"] == ServiceReadiness.IDENTITY_MISMATCH.value
+    write_service_receipt(
+        receipt,
+        {
+            "schema": "nexus.external_intelligence_daemon_receipt.v1",
+            "status": ServiceReadiness.READY.value,
+            "run_id": "run-1",
+            "pid": 123,
+            "source_path": mismatch["source_path"],
+            "source_sha256": mismatch["source_sha256"],
+            "config_path": mismatch["config_path"],
+            "config_sha256": mismatch["config_sha256"],
+            "started_at": time.time(),
+            "heartbeat_at": time.time(),
+            "successful_polls": READINESS_SUCCESS_THRESHOLD,
+            "last_error": None,
+        },
+    )
+    duplicate = service_status(
+        config,
+        launchctl_runner=launchctl,
+        process_snapshot=lambda: [(123, expected_command), (456, expected_command)],
+        receipt_path=receipt,
+    )
+    assert duplicate["status"] == ServiceReadiness.DUPLICATE_PROCESS.value
+    wrong_config = service_status(
+        config,
+        launchctl_runner=launchctl,
+        process_snapshot=lambda: [
+            (123, expected_command.replace(str(config.resolve()), str(tmp_path / "other.json")))
+        ],
+        receipt_path=receipt,
+    )
+    assert wrong_config["status"] == ServiceReadiness.DUPLICATE_PROCESS.value
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("run_id", None),
+        ("run_id", ""),
+        ("run_id", 123),
+        ("successful_polls", "two"),
+        ("pid", "123"),
+        ("heartbeat_at", "now"),
+        ("schema", "wrong.schema"),
+        ("source_sha256", "not-a-hash"),
+        ("last_error", {"code": "only"}),
+    ],
+)
+def test_service_status_malformed_receipt_fails_degraded_without_exception(tmp_path, field, value):
+    config = _config_file(tmp_path)
+    receipt = tmp_path / "state" / "service" / "daemon.json"
+    payload = {
+        "schema": "nexus.external_intelligence_daemon_receipt.v1",
+        "status": ServiceReadiness.READY.value,
+        "run_id": "run-1",
+        "pid": 123,
+        "source_path": str(
+            Path(__file__).resolve().parents[2] / "scripts/ops/external_intelligence_service.py"
+        ),
+        "source_sha256": hashlib.sha256(
+            (
+                Path(__file__).resolve().parents[2] / "scripts/ops/external_intelligence_service.py"
+            ).read_bytes()
+        ).hexdigest(),
+        "config_path": str(config.resolve()),
+        "config_sha256": hashlib.sha256(config.read_bytes()).hexdigest(),
+        "started_at": 100.0,
+        "heartbeat_at": 100.0,
+        "successful_polls": READINESS_SUCCESS_THRESHOLD,
+        "last_error": None,
+    }
+    payload[field] = value
+    receipt.parent.mkdir(parents=True)
+    receipt.write_text(json.dumps(payload), encoding="utf-8")
+
+    def launchctl(*_args):
+        return subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = 0\n", ""
+        )
+
+    result = service_status(
+        config,
+        launchctl_runner=launchctl,
+        process_snapshot=lambda: [],
+        receipt_path=receipt,
+    )
+    assert result["status"] == ServiceReadiness.DEGRADED.value
+    assert result["ready"] is False
+
+
 def test_render_comment_contains_only_compact_fields():
     result = _complete()
     result["raw_prompt"] = "SECRET_PROMPT"
@@ -573,3 +1559,1096 @@ def test_render_comment_contains_only_compact_fields():
     assert "SECRET_PROMPT" not in body
     assert "SECRET_ENVELOPE" not in body
     assert "TASK_CANDIDATE_VERIFIED_PENDING_INDEPENDENT_ACCEPTANCE" in body
+
+
+@pytest.mark.parametrize(
+    ("command", "returncode", "expected_status", "expected_exit"),
+    [
+        ("start", 0, "STARTED", NexusExitCode.SUCCESS),
+        ("start", 1, "START_FAILED", NexusExitCode.FAILED),
+        ("stop", 0, "STOPPED", NexusExitCode.SUCCESS),
+        ("stop", 1, "STOP_FAILED", NexusExitCode.FAILED),
+        ("restart", 0, "RESTARTED", NexusExitCode.SUCCESS),
+        ("restart", 1, "RESTART_FAILED", NexusExitCode.FAILED),
+    ],
+)
+def test_main_maps_service_control_outcomes_to_canonical_exit_codes(
+    monkeypatch, capsys, command, returncode, expected_status, expected_exit
+):
+    monkeypatch.setattr(service_module, "load_config", lambda _path: object())
+    result = subprocess.CompletedProcess(["launchctl"], returncode, "", "bounded-detail")
+    monkeypatch.setattr(service_module, "start", lambda _path: result)
+    monkeypatch.setattr(service_module, "stop", lambda: result)
+    monkeypatch.setattr(service_module, "restart", lambda _path: result)
+
+    exit_code = service_module.main([command, "--config", "/tmp/config.json"])
+
+    assert exit_code == expected_exit
+    assert json.loads(capsys.readouterr().out) == {
+        "detail": "bounded-detail",
+        "status": expected_status,
+    }
+
+
+@pytest.mark.parametrize(
+    ("status", "expected_exit"),
+    [
+        ("IDLE", NexusExitCode.SUCCESS),
+        ("COMPLETE", NexusExitCode.SUCCESS),
+        ("FAILED", NexusExitCode.FAILED),
+        ("UNRECOGNIZED_NON_SUCCESS", NexusExitCode.FAILED),
+        ("REPAIR_BUDGET_EXHAUSTED", NexusExitCode.ESCALATED),
+        ("UNIT_REPAIR_REQUIRED", NexusExitCode.ESCALATED),
+        ("COMPOSITION_REPAIR_REQUIRED", NexusExitCode.ESCALATED),
+        ("SCOPE_DELTA_REQUIRED", NexusExitCode.ESCALATED),
+        ("RECONCILIATION_REQUIRED", NexusExitCode.ESCALATED),
+        ("ESCALATED", NexusExitCode.ESCALATED),
+        ("HUMAN_REVIEW", NexusExitCode.HUMAN_REVIEW),
+        ("BLOCKED", NexusExitCode.HUMAN_REVIEW),
+    ],
+)
+def test_main_maps_run_once_typed_outcomes_without_changing_payload(
+    monkeypatch, capsys, status, expected_exit
+):
+    payload = {"status": status, "result": {"state": status}}
+    monkeypatch.setattr(service_module, "load_config", lambda _path: object())
+    monkeypatch.setattr(service_module, "run_once", lambda _config: payload)
+
+    exit_code = service_module.main(["run-once", "--config", "/tmp/config.json"])
+
+    assert exit_code == expected_exit
+    assert json.loads(capsys.readouterr().out) == payload
+
+
+def test_t3_prepared_persists_dispatching_posts_reads_back_and_next_poll_no_extra(tmp_path):
+    config = _config(tmp_path)
+    events: list[str] = []
+
+    class SpyingStateStore:
+        def __init__(self):
+            self.records: dict[str, Any] = {}
+
+        def update_publication_record(self, repository, issue_number, identity_hash, record):
+            state = record.get("state")
+            events.append(f"store:{state}")
+            self.records[f"{repository}:{issue_number}"] = dict(record)
+            return dict(record)
+
+    class SpyingGh(FakeGh):
+        def comment(self, repository, issue_number, body):
+            events.append("gh:comment")
+            super().comment(repository, issue_number, body)
+
+    spy_store = SpyingStateStore()
+    spying_gh = SpyingGh({"o/r": [{"number": 1, "title": "t", "body": "b"}]})
+
+    automation = FakeAutomation(_complete(reuse=False))
+    automation.state_store = spy_store
+
+    # First poll: PREPARED -> persisted DISPATCHING -> one POST -> readback -> COMPLETED
+    r1 = run_once(
+        config,
+        gh=spying_gh,
+        automation_factory=lambda _c, _r: automation,
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert r1["status"] == "COMPLETE"
+    assert len(spying_gh.comments) == 1
+    assert "<!-- nexus-external-intelligence:" in spying_gh.comments[0][2]
+    assert events == ["store:DISPATCHING", "gh:comment", "store:COMPLETED"]
+    assert spy_store.records["o/r:1"]["state"] == "COMPLETED"
+
+    # Second poll: next poll sees already completed publication -> no extra comments
+    automation_reuse = FakeAutomation({
+        **_complete(reuse=True),
+        "publication_record": spy_store.records["o/r:1"],
+    })
+    automation_reuse.state_store = spy_store
+    r2 = run_once(
+        config,
+        gh=spying_gh,
+        automation_factory=lambda _c, _r: automation_reuse,
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert r2["status"] == "COMPLETE"
+    assert len(spying_gh.comments) == 1
+
+
+def test_t4_remote_accepted_before_local_confirm_reconciles_without_post(tmp_path):
+    config = _config(tmp_path)
+    pub_payload = _complete()["publication"]
+    from nexus.services.external_intelligence_automation import compute_publication_id
+
+    pub_id = compute_publication_id("o/r", 1, "", pub_payload)
+    existing_comment_body = (
+        f"<!-- nexus-external-intelligence:{pub_id} -->\n"
+        "External Intelligence automation completed.\n"
+    )
+    gh = FakeGh(
+        {"o/r": [{"number": 1, "title": "t", "body": "b"}]},
+        comments=[("o/r", 1, existing_comment_body)],
+    )
+    # Restart from DISPATCHING/OUTCOME_UNKNOWN with marker present
+    automation = FakeAutomation({
+        "state": "COMPLETE",
+        "publication": pub_payload,
+        "publication_record": {
+            "publication_id": pub_id,
+            "state": "DISPATCHING",
+            "payload": pub_payload,
+        },
+    })
+    r = run_once(
+        config,
+        gh=gh,
+        automation_factory=lambda _c, _r: automation,
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert r["status"] == "COMPLETE"
+    assert len(gh.comments) == 1  # create=0 (no new comment added)
+    assert r["result"]["publication_record"]["state"] == "COMPLETED"
+
+
+def test_t5_dispatching_or_outcome_unknown_with_zero_marker_fails_closed(tmp_path):
+    config = _config(tmp_path)
+    pub_payload = _complete()["publication"]
+    from nexus.services.external_intelligence_automation import compute_publication_id
+
+    pub_id = compute_publication_id("o/r", 1, "", pub_payload)
+    gh = FakeGh({"o/r": [{"number": 1, "title": "t", "body": "b"}]})
+
+    automation = FakeAutomation({
+        "state": "COMPLETE",
+        "publication": pub_payload,
+        "publication_record": {
+            "publication_id": pub_id,
+            "state": "DISPATCHING",
+            "payload": pub_payload,
+        },
+    })
+    r = run_once(
+        config,
+        gh=gh,
+        automation_factory=lambda _c, _r: automation,
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert r["status"] == "RECONCILIATION_REQUIRED"
+    assert r["result"]["error"] == "PUBLICATION_UNCONFIRMED_ZERO_MARKER"
+    assert len(gh.comments) == 0  # create=0
+
+
+def test_t6_duplicate_marker_fails_closed(tmp_path):
+    config = _config(tmp_path)
+    pub_payload = _complete()["publication"]
+    from nexus.services.external_intelligence_automation import compute_publication_id
+
+    pub_id = compute_publication_id("o/r", 1, "", pub_payload)
+    dup_body = (
+        f"<!-- nexus-external-intelligence:{pub_id} -->\n"
+        "External Intelligence automation completed.\n"
+    )
+    gh = FakeGh(
+        {"o/r": [{"number": 1, "title": "t", "body": "b"}]},
+        comments=[("o/r", 1, dup_body), ("o/r", 1, dup_body)],
+    )
+    automation = FakeAutomation({
+        "state": "COMPLETE",
+        "publication": pub_payload,
+        "publication_record": {
+            "publication_id": pub_id,
+            "state": "PREPARED",
+            "payload": pub_payload,
+        },
+    })
+    r = run_once(
+        config,
+        gh=gh,
+        automation_factory=lambda _c, _r: automation,
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert r["status"] == "RECONCILIATION_REQUIRED"
+    assert r["result"]["error"] == "DUPLICATE_PUBLICATION_MARKER"
+    assert len(gh.comments) == 2  # create=0 (no extra comments posted)
+
+
+def test_persistence_failure_before_dispatching_causes_zero_comment(tmp_path):
+    config = _config(tmp_path)
+    gh = FakeGh({"o/r": [{"number": 1, "title": "t", "body": "b"}]})
+
+    class FailingStateStore:
+        def update_publication_record(self, repository, issue_number, identity_hash, record):
+            return None
+
+    automation = FakeAutomation(_complete(reuse=False))
+    automation.state_store = FailingStateStore()
+
+    r = run_once(
+        config,
+        gh=gh,
+        automation_factory=lambda _c, _r: automation,
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert r["status"] == "RECONCILIATION_REQUIRED"
+    assert r["result"]["error"] == "PUBLICATION_PERSISTENCE_FAILED"
+    assert len(gh.comments) == 0
+
+
+def test_legacy_reuse_without_publication_record_fails_closed_without_starving_next(tmp_path):
+    config = _config(tmp_path)
+    calls: list[int] = []
+
+    class SequencedLegacyAutomation:
+        def run_issue(self, repository, issue_number, title, body):
+            calls.append(issue_number)
+            if issue_number == 1:
+                return {
+                    "state": "COMPLETE",
+                    "reuse": True,
+                    "publication": {"task_id": "t1"},
+                }
+            return _complete(reuse=False)
+
+    gh = FakeGh({
+        "o/r": [
+            {"number": 2, "title": "eligible", "body": "b"},
+            {"number": 1, "title": "legacy", "body": "a"},
+        ]
+    })
+    r = run_once(
+        config,
+        gh=gh,
+        automation_factory=lambda _c, _r: SequencedLegacyAutomation(),
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert calls == [1, 2]
+    assert r["issue_number"] == 2
+    assert len(gh.comments) == 1
+    assert gh.comments[0][1] == 2
+
+
+def test_missing_list_comments_capability_fails_closed(tmp_path):
+    config = _config(tmp_path)
+
+    class BareGh:
+        def list_open_labeled(self, repository, label):
+            return [{"number": 1, "title": "t", "body": "b"}]
+
+        def comment(self, repository, issue_number, body):
+            pass
+
+    r = run_once(
+        config,
+        gh=BareGh(),
+        automation_factory=lambda _c, _r: FakeAutomation(_complete(reuse=False)),
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert r["status"] == "RECONCILIATION_REQUIRED"
+    assert r["result"]["error"] == "GH_COMMENTS_LIST_FAILED"
+
+
+def test_invalid_publication_state_fails_closed(tmp_path):
+    config = _config(tmp_path)
+    gh = FakeGh({"o/r": [{"number": 1, "title": "t", "body": "b"}]})
+    invalid_res = _complete(reuse=False)
+    invalid_res["publication_record"]["state"] = "CORRUPTED_STATE"
+
+    r = run_once(
+        config,
+        gh=gh,
+        automation_factory=lambda _c, _r: FakeAutomation(invalid_res),
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert r["status"] == "RECONCILIATION_REQUIRED"
+    assert r["result"]["error"] == "PUBLICATION_STATE_INVALID"
+    assert len(gh.comments) == 0
+
+
+def test_post_readback_duplicate_marker_fails_closed(tmp_path):
+    config = _config(tmp_path)
+    pub_payload = _complete()["publication"]
+    from nexus.services.external_intelligence_automation import compute_publication_id
+
+    pub_id = compute_publication_id("o/r", 1, "h" * 64, pub_payload)
+    dup_comment = f"<!-- nexus-external-intelligence:{pub_id} -->\ncompleted\n"
+
+    class DuplicateOnReadbackGh(FakeGh):
+        def comment(self, repository, issue_number, body):
+            self.comments.append((repository, issue_number, dup_comment))
+            self.comments.append((repository, issue_number, dup_comment))
+
+    gh = DuplicateOnReadbackGh({"o/r": [{"number": 1, "title": "t", "body": "b"}]})
+    r = run_once(
+        config,
+        gh=gh,
+        automation_factory=lambda _c, _r: FakeAutomation(_complete(reuse=False)),
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert r["status"] == "RECONCILIATION_REQUIRED"
+    assert r["result"]["error"] == "DUPLICATE_PUBLICATION_MARKER"
+
+
+def test_gh_issue_transport_list_comments_paginated_api(monkeypatch):
+    gh = GhIssueTransport()
+    recorded_argv: list[list[str]] = []
+
+    def fake_run(argv):
+        recorded_argv.append(argv)
+        return json.dumps([
+            [{"id": 10, "body": "comment 1"}, {"id": 11, "body": "comment 2"}],
+            [{"id": 12, "body": "comment 3"}],
+        ])
+
+    monkeypatch.setattr(gh, "_run", fake_run)
+    comments = gh.list_comments("James3014/Nexus-new", 438)
+
+    assert len(recorded_argv) == 1
+    argv = recorded_argv[0]
+    assert argv == [
+        "gh",
+        "api",
+        "repos/James3014/Nexus-new/issues/438/comments",
+        "--paginate",
+        "--slurp",
+    ]
+    assert len(comments) == 3
+    assert [c["id"] for c in comments] == [10, 11, 12]
+
+
+def test_publication_disabled_reused_complete_does_not_starve_next_eligible_issue(tmp_path):
+    config = _config(tmp_path, publication_enabled=False)
+    calls: list[int] = []
+
+    class SequencedDisabledAutomation:
+        def run_issue(self, repository, issue_number, title, body):
+            calls.append(issue_number)
+            if issue_number == 1:
+                return _complete(reuse=True, publication_state="PREPARED")
+            return _complete(reuse=False, publication_state="PREPARED")
+
+    gh = FakeGh({
+        "o/r": [
+            {"number": 2, "title": "eligible", "body": "b"},
+            {"number": 1, "title": "already-done", "body": "a"},
+        ]
+    })
+    r = run_once(
+        config,
+        gh=gh,
+        automation_factory=lambda _c, _r: SequencedDisabledAutomation(),
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert calls == [1, 2]
+    assert r["status"] == "COMPLETE"
+    assert r["issue_number"] == 2
+    assert len(gh.comments) == 0
+    assert r["result"]["publication_record"]["state"] == "PREPARED"
+
+
+def test_process_matches_accepts_current_executable_and_exact_argv(tmp_path):
+    config = tmp_path / "config.json"
+    config.write_text("{}", encoding="utf-8")
+    expected = (
+        f"{Path(sys.executable).resolve()} -m scripts.ops.external_intelligence_service daemon "
+        f"--config {config.resolve()}"
+    )
+    assert service_module._process_matches(expected, config) is True
+
+
+def test_process_matches_accepts_equivalent_macos_framework_app_executable(tmp_path, monkeypatch):
+    config = tmp_path / "config.json"
+    config.write_text("{}", encoding="utf-8")
+
+    simulated_bin = Path(
+        "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/bin/python3.14"
+    )
+    simulated_app = Path(
+        "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
+    )
+
+    monkeypatch.setattr(sys, "executable", str(simulated_bin))
+    orig_resolve = Path.resolve
+    monkeypatch.setattr(
+        Path,
+        "resolve",
+        lambda self, *args, **kwargs: (
+            self
+            if "Frameworks/Python.framework" in str(self)
+            else orig_resolve(self, *args, **kwargs)
+        ),
+    )
+
+    cmd_bin = f"{simulated_bin} -m scripts.ops.external_intelligence_service daemon --config {config.resolve()}"
+    cmd_app = f"{simulated_app} -m scripts.ops.external_intelligence_service daemon --config {config.resolve()}"
+
+    assert service_module._process_matches(cmd_bin, config) is True
+    assert service_module._process_matches(cmd_app, config) is True
+
+
+def test_process_matches_rejects_arbitrary_or_unrelated_interpreter(tmp_path, monkeypatch):
+    config = tmp_path / "config.json"
+    config.write_text("{}", encoding="utf-8")
+
+    simulated_bin = Path(
+        "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/bin/python3.14"
+    )
+    monkeypatch.setattr(sys, "executable", str(simulated_bin))
+    orig_resolve = Path.resolve
+    monkeypatch.setattr(
+        Path,
+        "resolve",
+        lambda self, *args, **kwargs: (
+            self
+            if "Frameworks/Python.framework" in str(self)
+            else orig_resolve(self, *args, **kwargs)
+        ),
+    )
+
+    unrelated_app = "/opt/homebrew/Cellar/python@3.13/3.13.0/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python"
+    unrelated_bin = "/usr/local/bin/python3"
+    fake_app = "/tmp/fake/Resources/Python.app/Contents/MacOS/Python"
+
+    for bad_exe in (unrelated_app, unrelated_bin, fake_app):
+        cmd = f"{bad_exe} -m scripts.ops.external_intelligence_service daemon --config {config.resolve()}"
+        assert service_module._process_matches(cmd, config) is False
+
+
+def test_process_matches_rejects_wrong_config_or_extra_arguments(tmp_path):
+    config = tmp_path / "config.json"
+    config.write_text("{}", encoding="utf-8")
+    other_config = tmp_path / "other_config.json"
+    other_config.write_text("{}", encoding="utf-8")
+
+    current_exe = Path(sys.executable).resolve()
+    wrong_config_cmd = (
+        f"{current_exe} -m scripts.ops.external_intelligence_service daemon "
+        f"--config {other_config.resolve()}"
+    )
+    assert service_module._process_matches(wrong_config_cmd, config) is False
+
+    extra_arg_cmd = (
+        f"{current_exe} -m scripts.ops.external_intelligence_service daemon "
+        f"--config {config.resolve()} --verbose"
+    )
+    assert service_module._process_matches(extra_arg_cmd, config) is False
+
+    missing_arg_cmd = f"{current_exe} -m scripts.ops.external_intelligence_service daemon"
+    assert service_module._process_matches(missing_arg_cmd, config) is False
+
+
+def test_process_matches_rejects_malformed_command(tmp_path):
+    config = tmp_path / "config.json"
+    config.write_text("{}", encoding="utf-8")
+    malformed_cmd = f'{sys.executable} -m "unclosed quote'
+    assert service_module._process_matches(malformed_cmd, config) is False
+
+
+def test_process_matches_preserves_exact_executable_behavior_on_non_framework_layout(
+    tmp_path, monkeypatch
+):
+    config = tmp_path / "config.json"
+    config.write_text("{}", encoding="utf-8")
+
+    simulated_bin = Path("/usr/bin/python3")
+    monkeypatch.setattr(sys, "executable", str(simulated_bin))
+    orig_resolve = Path.resolve
+    monkeypatch.setattr(
+        Path,
+        "resolve",
+        lambda self, *args, **kwargs: (
+            self if str(self) == "/usr/bin/python3" else orig_resolve(self, *args, **kwargs)
+        ),
+    )
+
+    matching_cmd = (
+        f"/usr/bin/python3 -m scripts.ops.external_intelligence_service daemon "
+        f"--config {config.resolve()}"
+    )
+    app_cmd = (
+        f"/usr/Resources/Python.app/Contents/MacOS/Python -m scripts.ops.external_intelligence_service daemon "
+        f"--config {config.resolve()}"
+    )
+
+    assert service_module._process_matches(matching_cmd, config) is True
+    assert service_module._process_matches(app_cmd, config) is False
+
+
+def test_service_status_accepts_macos_framework_python_app_process(tmp_path):
+    config = _config_file(tmp_path)
+    receipt = tmp_path / "state" / "service" / "daemon.json"
+    source_sha = hashlib.sha256(
+        Path(__file__)
+        .resolve()
+        .parents[2]
+        .joinpath("scripts/ops/external_intelligence_service.py")
+        .read_bytes()
+    ).hexdigest()
+    config_sha = hashlib.sha256(config.read_bytes()).hexdigest()
+    write_service_receipt(
+        receipt,
+        {
+            "schema": "nexus.external_intelligence_daemon_receipt.v1",
+            "status": ServiceReadiness.READY.value,
+            "run_id": "run-1",
+            "pid": 41257,
+            "source_path": str(
+                Path(__file__).resolve().parents[2] / "scripts/ops/external_intelligence_service.py"
+            ),
+            "source_sha256": source_sha,
+            "config_path": str(config.resolve()),
+            "config_sha256": config_sha,
+            "started_at": 99.0,
+            "heartbeat_at": 100.0,
+            "successful_polls": READINESS_SUCCESS_THRESHOLD,
+            "last_error": None,
+        },
+    )
+
+    def launchctl(*_args):
+        return subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 41257\nlast exit code = (never exited)\n", ""
+        )
+
+    current_exe = Path(sys.executable).resolve()
+    framework_root = current_exe.parent.parent
+    app_exe = framework_root / "Resources" / "Python.app" / "Contents" / "MacOS" / "Python"
+    proc_exe = app_exe if app_exe.is_file() else current_exe
+    command = f"{proc_exe} -m scripts.ops.external_intelligence_service daemon --config {config.resolve()}"
+
+    result = service_status(
+        config,
+        launchctl_runner=launchctl,
+        process_snapshot=lambda: [(41257, command)],
+        now=100.5,
+        receipt_path=receipt,
+    )
+    assert result["status"] == ServiceReadiness.READY.value
+    assert result["ready"] is True
+
+
+def test_service_status_duplicate_detection_fails_closed_across_bin_and_app(tmp_path, monkeypatch):
+    config = _config_file(tmp_path)
+    receipt = tmp_path / "state" / "service" / "daemon.json"
+    source_sha = hashlib.sha256(
+        Path(__file__)
+        .resolve()
+        .parents[2]
+        .joinpath("scripts/ops/external_intelligence_service.py")
+        .read_bytes()
+    ).hexdigest()
+    config_sha = hashlib.sha256(config.read_bytes()).hexdigest()
+    write_service_receipt(
+        receipt,
+        {
+            "schema": "nexus.external_intelligence_daemon_receipt.v1",
+            "status": ServiceReadiness.READY.value,
+            "run_id": "run-1",
+            "pid": 123,
+            "source_path": str(
+                Path(__file__).resolve().parents[2] / "scripts/ops/external_intelligence_service.py"
+            ),
+            "source_sha256": source_sha,
+            "config_path": str(config.resolve()),
+            "config_sha256": config_sha,
+            "started_at": 99.0,
+            "heartbeat_at": 100.0,
+            "successful_polls": READINESS_SUCCESS_THRESHOLD,
+            "last_error": None,
+        },
+    )
+
+    def launchctl(*_args):
+        return subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = 0\n", ""
+        )
+
+    simulated_bin = Path(
+        "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/bin/python3.14"
+    )
+    simulated_app = Path(
+        "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
+    )
+    monkeypatch.setattr(sys, "executable", str(simulated_bin))
+    orig_resolve = Path.resolve
+    monkeypatch.setattr(
+        Path,
+        "resolve",
+        lambda self, *args, **kwargs: (
+            self
+            if "Frameworks/Python.framework" in str(self)
+            else orig_resolve(self, *args, **kwargs)
+        ),
+    )
+
+    cmd1 = f"{simulated_bin} -m scripts.ops.external_intelligence_service daemon --config {config.resolve()}"
+    cmd2 = f"{simulated_app} -m scripts.ops.external_intelligence_service daemon --config {config.resolve()}"
+
+    result = service_status(
+        config,
+        launchctl_runner=launchctl,
+        process_snapshot=lambda: [(123, cmd1), (456, cmd2)],
+        now=100.5,
+        receipt_path=receipt,
+    )
+    assert result["status"] == ServiceReadiness.DUPLICATE_PROCESS.value
+    assert result["ready"] is False
+
+
+# ---------------------------------------------------------------------------
+# H19 restart durability repair (Issue #695)
+#
+# After bootout, confirm exact service label is unloaded before bootstrap.
+# No blind loop, no root escalation, no alternate label/config.
+# ---------------------------------------------------------------------------
+
+LAUNCHCTL_PRINT_REGISTERED = "state = running\npid = 12345\nlast exit code = (never exited)\n"
+# Real macOS shape: launchctl print returns nonzero when label not found
+LAUNCHCTL_PRINT_UNLOADED = "Could not find service: com.nexus.external-intelligence\n"
+LAUNCHCTL_PRINT_IO_ERROR = "Could not read domain: 5: Input/output error\n"
+
+
+def _make_config(tmp_path: Path) -> str:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({
+            "repositories": ["o/r"],
+            "repository_roots": {"o/r": str(tmp_path / "repo")},
+            "state_root": str(tmp_path / "state"),
+            "workspace_root": str(tmp_path / "workspaces"),
+        }),
+        encoding="utf-8",
+    )
+    return str(config_path)
+
+
+class _RecordingLaunchctl:
+    """Records all calls.  Call ``set_print_response`` to control the
+    next print-returncode, stdout, and stderr."""
+
+    def __init__(
+        self, *, print_returncode: int = 0, print_stdout: str = "", print_stderr: str = ""
+    ):
+        self.calls: list[tuple[str, ...]] = []
+        self._print_returncode = print_returncode
+        self._print_stdout = print_stdout
+        self._print_stderr = print_stderr
+
+    def set_print_response(self, *, returncode: int = 0, stdout: str = "", stderr: str = ""):
+        self._print_returncode = returncode
+        self._print_stdout = stdout
+        self._print_stderr = stderr
+
+    def __call__(self, *args: str) -> subprocess.CompletedProcess[str]:
+        self.calls.append(args)
+        action = args[0] if args else ""
+        if action == "bootout":
+            return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+        if action == "print":
+            return subprocess.CompletedProcess(
+                ["launchctl", *args], self._print_returncode, self._print_stdout, self._print_stderr
+            )
+        if action == "bootstrap":
+            return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+        return subprocess.CompletedProcess(["launchctl", *args], 1, "", "unknown")
+
+
+class _UnloadingLaunchctl:
+    """Simulates delayed unload: label still registered for *checks*
+    print calls, then gone (real macOS nonzero + not-found)."""
+
+    def __init__(self, checks: int = 3):
+        self._remaining = checks
+        self.calls: list[tuple[str, ...]] = []
+
+    def __call__(self, *args: str) -> subprocess.CompletedProcess[str]:
+        self.calls.append(args)
+        action = args[0] if args else ""
+        if action == "bootout":
+            return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+        if action == "print":
+            if self._remaining > 0:
+                self._remaining -= 1
+                return subprocess.CompletedProcess(
+                    ["launchctl", *args], 0, LAUNCHCTL_PRINT_REGISTERED, ""
+                )
+            # Real macOS shape: nonzero returncode with not-found text
+            return subprocess.CompletedProcess(
+                ["launchctl", *args], 1, LAUNCHCTL_PRINT_UNLOADED, ""
+            )
+        if action == "bootstrap":
+            return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+        return subprocess.CompletedProcess(["launchctl", *args], 1, "", "unknown")
+
+
+class _FailBootoutLaunchctl:
+    """bootout returns nonzero with I/O error text."""
+
+    def __init__(self):
+        self.calls: list[tuple[str, ...]] = []
+
+    def __call__(self, *args: str) -> subprocess.CompletedProcess[str]:
+        self.calls.append(args)
+        action = args[0] if args else ""
+        if action == "bootout":
+            return subprocess.CompletedProcess(
+                ["launchctl", *args], 1, "", " bootout failed: Input/output error"
+            )
+        if action == "print":
+            return subprocess.CompletedProcess(
+                ["launchctl", *args], 0, LAUNCHCTL_PRINT_REGISTERED, ""
+            )
+        return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+
+
+# ---- _is_label_loaded unit tests ----
+
+
+def test_is_label_loaded_true_when_registered():
+    def runner(*args):
+        return subprocess.CompletedProcess(["launchctl", *args], 0, LAUNCHCTL_PRINT_REGISTERED, "")
+
+    assert (
+        service_module._is_label_loaded(service_module.SERVICE_LABEL, launchctl_runner=runner)
+        is True
+    )
+
+
+def test_is_label_loaded_false_on_nonzero_not_found():
+    """Real macOS: returncode != 0 + 'Could not find service' → unloaded."""
+
+    def runner(*args):
+        return subprocess.CompletedProcess(["launchctl", *args], 1, LAUNCHCTL_PRINT_UNLOADED, "")
+
+    assert (
+        service_module._is_label_loaded(service_module.SERVICE_LABEL, launchctl_runner=runner)
+        is False
+    )
+
+
+def test_is_label_loaded_fail_closed_on_zero_empty_stdout():
+    def runner(*args):
+        return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+
+    with pytest.raises(ServiceError, match="TERMINAL_PRINT_FAILURE"):
+        service_module._is_label_loaded(service_module.SERVICE_LABEL, launchctl_runner=runner)
+
+
+def test_is_label_loaded_fail_closed_on_zero_unknown_stdout():
+    def runner(*args):
+        return subprocess.CompletedProcess(["launchctl", *args], 0, "unexpected", "")
+
+    with pytest.raises(ServiceError, match="TERMINAL_PRINT_FAILURE"):
+        service_module._is_label_loaded(service_module.SERVICE_LABEL, launchctl_runner=runner)
+
+
+def test_is_label_loaded_fail_closed_on_io_error():
+    """returncode != 0 + unknown error text → terminal error, not 'loaded'."""
+
+    def runner(*args):
+        return subprocess.CompletedProcess(["launchctl", *args], 1, LAUNCHCTL_PRINT_IO_ERROR, "")
+
+    with pytest.raises(ServiceError, match="TERMINAL_PRINT_FAILURE"):
+        service_module._is_label_loaded(service_module.SERVICE_LABEL, launchctl_runner=runner)
+
+
+def test_is_label_loaded_fail_closed_on_permission_error():
+    def runner(*args):
+        return subprocess.CompletedProcess(["launchctl", *args], 1, "", "Operation not permitted")
+
+    with pytest.raises(ServiceError, match="TERMINAL_PRINT_FAILURE"):
+        service_module._is_label_loaded(service_module.SERVICE_LABEL, launchctl_runner=runner)
+
+
+# ---- start() tests ----
+
+
+def test_start_ordinary_unaffected(tmp_path, monkeypatch):
+    """Normal start (best-effort bootout then bootstrap) still works."""
+    config_path = _make_config(tmp_path)
+    monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+    rl = _RecordingLaunchctl()
+    monkeypatch.setattr(service_module, "_launchctl", rl)
+
+    result = service_module.start(config_path)
+
+    assert result.returncode == 0
+    assert rl.calls[0][0] == "bootout"
+    assert rl.calls[1][0] == "bootstrap"
+
+
+def test_start_from_stopped_succeeds(tmp_path, monkeypatch):
+    """start() from STOPPED (bootout returns nonzero not-found) should
+    succeed because bootout is best-effort."""
+    config_path = _make_config(tmp_path)
+    monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+
+    def bootout_not_found(*args):
+        return subprocess.CompletedProcess(["launchctl", *args], 1, LAUNCHCTL_PRINT_UNLOADED, "")
+
+    calls = []
+
+    def tracking(*args):
+        calls.append(args)
+        if args[0] == "bootout":
+            return bootout_not_found(*args)
+        return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+
+    # start() uses _launchctl, not our runner — monkeypatch _launchctl
+    monkeypatch.setattr(service_module, "_launchctl", tracking)
+
+    result = service_module.start(config_path)
+
+    assert result.returncode == 0
+    actions = [c[0] for c in calls]
+    assert "bootout" in actions
+    assert "bootstrap" in actions
+
+
+def test_start_preserves_old_behavior_no_wait(tmp_path, monkeypatch):
+    """start() does NOT wait for unload — it just bootout + bootstrap."""
+    config_path = _make_config(tmp_path)
+    monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+    rl = _RecordingLaunchctl()
+
+    # Monkeypatch _launchctl so start() uses our recorder
+    monkeypatch.setattr(service_module, "_launchctl", rl)
+
+    service_module.start(config_path)
+
+    # Should have exactly bootout + bootstrap, NO print calls
+    actions = [c[0] for c in rl.calls]
+    assert actions == ["bootout", "bootstrap"]
+
+
+# ---- stop() tests ----
+
+
+def test_stop_ordinary_unaffected():
+    calls = []
+
+    def tracking(*args):
+        calls.append(args)
+        return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+
+    service_module.stop(launchctl_runner=tracking)
+
+    assert calls == [("bootout", f"gui/{os.getuid()}/{service_module.SERVICE_LABEL}")]
+
+
+# ---- _bootstrap tests ----
+
+
+def test_bootstrap_distinct_failure_code(tmp_path, monkeypatch):
+    """bootstrap failure produces TERMINAL_BOOTSTRAP_FAILURE, not TERMINAL_BOOTOUT_FAILURE."""
+    monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+
+    def fail_bootstrap(*args):
+        return subprocess.CompletedProcess(
+            ["launchctl", *args], 1, "", "Bootstrap failed: 5: Input/output error"
+        )
+
+    monkeypatch.setattr(service_module, "_launchctl", fail_bootstrap)
+
+    result = service_module._bootstrap("gui/0/test", "/tmp/test.plist", runner=fail_bootstrap)
+    assert result.returncode == 1
+    assert "TERMINAL_BOOTSTRAP_FAILURE" in result.stderr
+
+
+# ---- restart() tests (durability-aware) ----
+
+
+def test_restart_waits_for_unload_before_bootstrap(tmp_path, monkeypatch):
+    """restart() calls stop, waits for unload, then bootstraps once."""
+    config_path = _make_config(tmp_path)
+    monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+    launchctl = _UnloadingLaunchctl(checks=3)
+
+    result = service_module.restart(
+        config_path,
+        launchctl_runner=launchctl,
+        deadline=10.0,
+        poll_interval=0.01,
+    )
+
+    assert result.returncode == 0
+    actions = [c[0] for c in launchctl.calls]
+    # stop (bootout) + polls (print) + bootstrap = no duplicate bootout
+    assert actions[0] == "bootout"
+    print_indices = [i for i, a in enumerate(actions) if a == "print"]
+    assert len(print_indices) >= 2  # waited at least 2 polls
+    assert actions[-1] == "bootstrap"
+
+
+def test_restart_unload_timeout_fails_closed(tmp_path, monkeypatch):
+    """Label never unloads → BOOTOUT_UNLOAD_TIMEOUT, no bootstrap."""
+    config_path = _make_config(tmp_path)
+    installs = []
+
+    def recording_install(_config_path):
+        installs.append(_config_path)
+        return tmp_path / "dummy.plist"
+
+    monkeypatch.setattr(service_module, "install", recording_install)
+    rl = _RecordingLaunchctl(print_returncode=0, print_stdout=LAUNCHCTL_PRINT_REGISTERED)
+
+    result = service_module.restart(
+        config_path,
+        launchctl_runner=rl,
+        deadline=0.05,
+        poll_interval=0.01,
+    )
+
+    assert result.returncode != 0
+    assert "BOOTOUT_UNLOAD_TIMEOUT" in result.stderr
+    assert result.stdout.strip() == "BOOTOUT_UNLOAD_TIMEOUT"
+    assert installs == []
+    # No bootstrap attempted
+    assert not any(c[0] == "bootstrap" for c in rl.calls)
+
+
+def test_restart_print_io_error_fails_closed(tmp_path, monkeypatch):
+    """print returns I/O error (nonzero, no not-found) → TERMINAL_PRINT_FAILURE."""
+    config_path = _make_config(tmp_path)
+    monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+    rl = _RecordingLaunchctl(
+        print_returncode=1, print_stdout=LAUNCHCTL_PRINT_IO_ERROR, print_stderr=""
+    )
+
+    result = service_module.restart(
+        config_path,
+        launchctl_runner=rl,
+        deadline=10.0,
+        poll_interval=0.01,
+    )
+
+    assert result.returncode != 0
+    assert "TERMINAL_PRINT_FAILURE" in result.stderr
+    assert not any(c[0] == "bootstrap" for c in rl.calls)
+
+
+def test_restart_bootstrap_failure_terminates(tmp_path, monkeypatch):
+    """bootstrap returns nonzero → TERMINAL_BOOTSTRAP_FAILURE."""
+    config_path = _make_config(tmp_path)
+    monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+
+    calls = []
+
+    def bootstrap_fail(*args):
+        calls.append(args)
+        action = args[0] if args else ""
+        if action == "bootout":
+            return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+        if action == "print":
+            # Immediately unloaded (real shape)
+            return subprocess.CompletedProcess(
+                ["launchctl", *args], 1, LAUNCHCTL_PRINT_UNLOADED, ""
+            )
+        if action == "bootstrap":
+            return subprocess.CompletedProcess(
+                ["launchctl", *args], 1, "", "Bootstrap failed: 5: Input/output error"
+            )
+        return subprocess.CompletedProcess(["launchctl", *args], 1, "", "")
+
+    result = service_module.restart(
+        config_path,
+        launchctl_runner=bootstrap_fail,
+        deadline=10.0,
+        poll_interval=0.01,
+    )
+
+    assert result.returncode != 0
+    assert "TERMINAL_BOOTSTRAP_FAILURE" in result.stderr
+    assert calls[-1][0] == "bootstrap"
+
+
+def test_restart_from_stopped_succeeds(tmp_path, monkeypatch):
+    """restart() from STOPPED (stop returns not-found) → unload confirmed → bootstrap."""
+    config_path = _make_config(tmp_path)
+    monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+    rl = _RecordingLaunchctl(
+        print_returncode=1, print_stdout=LAUNCHCTL_PRINT_UNLOADED, print_stderr=""
+    )
+
+    result = service_module.restart(
+        config_path,
+        launchctl_runner=rl,
+        deadline=10.0,
+        poll_interval=0.01,
+    )
+
+    assert result.returncode == 0
+    actions = [c[0] for c in rl.calls]
+    assert actions[0] == "bootout"
+    # print confirms unloaded, then bootstrap
+    assert actions[-1] == "bootstrap"
+
+
+def test_restart_bootout_failure_does_not_install_or_bootstrap(tmp_path, monkeypatch):
+    """An unknown bootout failure is terminal before plist installation."""
+    config_path = _make_config(tmp_path)
+    calls = []
+
+    def fail_bootout(*args):
+        calls.append(args)
+        return subprocess.CompletedProcess(
+            ["launchctl", *args], 1, "", "Could not read domain: 5: Input/output error"
+        )
+
+    def forbidden_install(_config_path):
+        raise AssertionError("install must not run after failed bootout")
+
+    monkeypatch.setattr(service_module, "install", forbidden_install)
+    result = service_module.restart(config_path, launchctl_runner=fail_bootout)
+
+    assert result.returncode != 0
+    assert "TERMINAL_BOOTOUT_FAILURE" in result.stderr
+    assert [call[0] for call in calls] == ["bootout"]
+
+
+# ---- CLI command-level restart tests ----
+
+
+def test_cli_restart_uses_restart_function(tmp_path, monkeypatch):
+    """CLI 'restart' dispatches to restart(), never ordinary start/stop."""
+    config_path = _make_config(tmp_path)
+    calls = []
+
+    def fake_restart(path):
+        calls.append(("restart", path))
+        return subprocess.CompletedProcess(["restart"], 0, "", "")
+
+    def forbidden_start(_path):
+        raise AssertionError("CLI restart must not dispatch start")
+
+    def forbidden_stop():
+        raise AssertionError("CLI restart must not dispatch stop")
+
+    monkeypatch.setattr(service_module, "restart", fake_restart)
+    monkeypatch.setattr(service_module, "start", forbidden_start)
+    monkeypatch.setattr(service_module, "stop", forbidden_stop)
+
+    exit_code = service_module.main(["restart", "--config", config_path])
+
+    assert exit_code == NexusExitCode.SUCCESS
+    assert calls == [("restart", config_path)]
+
+
+def test_main_restart_success(tmp_path, monkeypatch):
+    """main() with command='restart' calls restart() and returns SUCCESS."""
+    config_path = _make_config(tmp_path)
+    monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+    rl = _RecordingLaunchctl(print_returncode=1, print_stdout=LAUNCHCTL_PRINT_UNLOADED)
+    monkeypatch.setattr(service_module, "_launchctl", rl)
+
+    exit_code = service_module.main(["restart", "--config", str(config_path)])
+    assert exit_code == NexusExitCode.SUCCESS
+
+
+def test_main_restart_failure(tmp_path, monkeypatch):
+    """main() with command='restart' returns FAILED when restart() fails."""
+    config_path = _make_config(tmp_path)
+    monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+    rl = _RecordingLaunchctl(print_returncode=0, print_stdout=LAUNCHCTL_PRINT_REGISTERED)
+    monkeypatch.setattr(service_module, "_launchctl", rl)
+
+    exit_code = service_module.main(["restart", "--config", str(config_path)])
+    assert exit_code == NexusExitCode.FAILED

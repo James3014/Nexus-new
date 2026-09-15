@@ -50,8 +50,23 @@ class TestCodeReviewStrategy:
         
         result = strategy.execute(mock_reviewer)
         
-        assert result["status"] == "REJECTED"
+        assert result["status"] == "RECOVERABLE_BLOCK"
+        assert result["retryable"] is True
+        assert result["next_action"] == "REVISE"
         assert result["summary"] == "Bug found"
+
+    def test_execute_explicit_rejected_is_terminal_and_not_retryable(self, mock_reviewer):
+        strategy = CodeReviewStrategy()
+        mock_reviewer.git.get_changes.return_value = (["test.py"], "diff")
+        mock_reviewer.llm.ask.return_value = (
+            {"status": "REJECTED", "summary": "Owner disposition"}, "raw"
+        )
+
+        result = strategy.execute(mock_reviewer)
+
+        assert result["status"] == "REJECTED"
+        assert result["retryable"] is False
+        assert result["next_action"] == "none"
 
 class TestConversationReviewStrategy:
     def test_execute_skip_level(self, mock_reviewer):
@@ -73,6 +88,18 @@ class TestConversationReviewStrategy:
         
         assert result["status"] == "APPROVED"
         assert mock_reviewer.llm.ask.called is True
+
+    def test_failed_audit_is_reviseable_not_terminal(self, mock_reviewer):
+        strategy = ConversationReviewStrategy()
+        mock_reviewer.context_hub.make_pre_routing_decision.return_value = {"audit_level": "full"}
+        mock_reviewer.context_hub.assemble_conversation_pack.return_value = {"history": []}
+        mock_reviewer.llm.ask.return_value = ({"status": "FAILED", "summary": "retry"}, "raw")
+
+        result = strategy.execute(mock_reviewer)
+
+        assert result["status"] == "RECOVERABLE_BLOCK"
+        assert result["retryable"] is True
+        assert result["next_action"] == "REVISE"
 
 class TestReviewerFactory:
     def test_create_conversation(self):

@@ -1,0 +1,18 @@
+{
+  "observed_at": "2026-09-10T07:51:33.278224+00:00",
+  "pid_exists": true,
+  "daemon": {
+    "config_path": "/Users/jameschen/.config/nexus-external-intelligence/config.json",
+    "config_sha256": "c102afc9aad3af38510fa0d5e8540136096ba12556ba5c19d8e08c6f94161ce8",
+    "heartbeat_at": 1789026627.285161,
+    "last_error": null,
+    "pid": 82559,
+    "run_id": "203f681959ff496eac3182e5f54e1e14",
+    "schema": "nexus.external_intelligence_daemon_receipt.v1",
+    "source_path": "/Users/jameschen/Workspace/nexus-automation-repos/Nexus-new/scripts/ops/external_intelligence_service.py",
+    "source_sha256": "d9bcd12192316f6b8d06382b81d49cf1677f1d430ae2122184522605677c9b4b",
+    "started_at": 1788979728.751651,
+    "status": "READY",
+    "successful_polls": 34
+  }
+}

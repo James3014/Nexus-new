@@ -141,7 +141,7 @@ def test_candidate_generation_only_rejects_missing_contradictory_or_malformed_fa
         )
 
 
-def test_canonical_context_allows_formal_route_receipt_evidence() -> None:
+def test_canonical_context_allows_formal_route_receipt_evidence(monkeypatch) -> None:
     context = CanonicalTaskContext(
         task_id="task-route-receipt-evidence",
         task_type="audit",
@@ -164,6 +164,16 @@ def test_canonical_context_allows_formal_route_receipt_evidence() -> None:
             "gate_passed": True,
         }
     ]
+    planner = _RecordingPlanner()
+    monkeypatch.setattr(
+        CapabilityPlanner,
+        "plan",
+        lambda _self, **kwargs: planner.plan(**kwargs),
+    )
+    decision, projection = plan_canonical_task(context)
+    assert decision.authority == "CapabilityPlanner"
+    assert projection.execution_decision_authority == "CapabilityPlanner"
+    assert planner.calls[0]["route"]["route_features"] == {}
 
 
 def test_forged_route_receipt_cannot_replace_planner_authority(monkeypatch) -> None:
@@ -188,6 +198,78 @@ def test_missing_workforce_demands_fail_at_canonical_consumer(monkeypatch) -> No
         _resolve_policy_workforce_bindings(
             {"signal_snapshot": {}}, allowed_files=("x.py",), verifier_command=()
         )
+
+
+@pytest.mark.parametrize(
+    ("channel", "demands"),
+    [
+        (
+            "local",
+            [
+                {"execution_channel": "local", "requested_role": "bounded_code_candidate"},
+                {"execution_channel": "local", "requested_role": "compact_diagnosis"},
+            ],
+        ),
+        (
+            "local",
+            [
+                {"execution_channel": "local", "requested_role": "bounded_code_candidate"},
+                {"execution_channel": "local", "requested_role": "bounded_code_candidate"},
+            ],
+        ),
+        (
+            "online",
+            [
+                {"execution_channel": "online", "requested_role": "fast_bounded_implementation"},
+                {"execution_channel": "online", "requested_role": "main_engineering"},
+            ],
+        ),
+        (
+            "online",
+            [
+                {"execution_channel": "online", "requested_role": "fast_bounded_implementation"},
+                {"execution_channel": "online", "requested_role": "fast_bounded_implementation"},
+            ],
+        ),
+    ],
+    ids=("local-conflict", "local-duplicate", "online-conflict", "online-duplicate"),
+)
+def test_canonical_workforce_consumer_rejects_repeated_execution_channel(channel, demands):
+    from nexus.engine.canonical_task_seam import _resolve_policy_workforce_bindings
+
+    with pytest.raises(ValueError, match=f"canonical_workforce_demand_conflict:{channel}"):
+        _resolve_policy_workforce_bindings(
+            {"signal_snapshot": {"workforce_demands": {"demands": demands}}},
+            allowed_files=("x.py",),
+            verifier_command=(),
+        )
+
+
+def test_canonical_workforce_consumer_resolves_legitimate_hybrid_channels():
+    from nexus.engine.canonical_task_seam import _resolve_policy_workforce_bindings
+
+    bindings, providers = _resolve_policy_workforce_bindings(
+        {
+            "signal_snapshot": {
+                "workforce_demands": {
+                    "demands": [
+                        {"execution_channel": "local", "requested_role": "bounded_code_candidate"},
+                        {
+                            "execution_channel": "online",
+                            "requested_role": "fast_bounded_implementation",
+                        },
+                    ]
+                }
+            }
+        },
+        allowed_files=("x.py",),
+        verifier_command=(),
+    )
+    assert set(bindings) == {"local", "online"}
+    assert set(providers) == {"local", "online"}
+    assert bindings["local"]["worker_id"] == "local_coder_7b"
+    assert bindings["online"]["worker_id"] == "agy_flash_37_medium"
+    assert providers == {"local": "ollama", "online": "agy"}
 
 
 def test_canonical_planning_bundle_binds_the_exact_plan_without_replanning(monkeypatch):
@@ -257,6 +339,29 @@ def test_canonical_context_requires_workforce_demands_for_available_execution_ch
         "online_enabled": True,
         "local_enabled": True,
     }
+    from nexus.engine.canonical_task_seam import _resolve_policy_workforce_bindings
+
+    with pytest.raises(ValueError, match="canonical_workforce_demand_malformed"):
+        _resolve_policy_workforce_bindings(
+            {"signal_snapshot": {"workforce_demands": {"demands": ["forged"]}}},
+            allowed_files=("x.py",),
+            verifier_command=(),
+        )
+    with pytest.raises(ValueError, match="canonical_workforce_demand_conflict:local"):
+        _resolve_policy_workforce_bindings(
+            {
+                "signal_snapshot": {
+                    "workforce_demands": {
+                        "demands": [
+                            {"execution_channel": "local", "requested_role": "bounded_code_candidate"},
+                            {"execution_channel": "local", "requested_role": "compact_diagnosis"},
+                        ]
+                    }
+                }
+            },
+            allowed_files=("x.py",),
+            verifier_command=(),
+        )
 
 
 def test_canonical_replan_builds_one_fresh_bundle_from_explicit_authorization(monkeypatch):
@@ -482,12 +587,37 @@ def test_real_capability_planner_produces_bound_canonical_projection():
 
 
 def test_context_budget_rejects_policy_or_memory_injection():
-    with pytest.raises(ValueError, match="canonical_context_budget_key_forbidden:learning_policy"):
+    """Keep the Golden node identity while covering the evolved budget contract."""
+    accepted = CanonicalTaskContext(
+        task_id="task-policy-data",
+        task_type="bugfix",
+        task_desc="Carry governed policy evidence as planner input.",
+        budget={
+            "learning_policy": {"promoted_capabilities": ["memory"]},
+            "policy_overlay": {"source": "governed-evidence"},
+        },
+    )
+    assert accepted.budget["learning_policy"]["promoted_capabilities"] == ("memory",)
+    assert accepted.budget["policy_overlay"]["source"] == "governed-evidence"
+
+    for forbidden_key, error in (
+        ("memory", "canonical_context_budget_key_forbidden:memory"),
+        ("route_override", "canonical_context_route_override_forbidden:budget.route_override"),
+    ):
+        with pytest.raises(ValueError, match=error):
+            CanonicalTaskContext(
+                task_id="task-1",
+                task_type="bugfix",
+                task_desc="Reject an unknown or authority-bearing budget key.",
+                budget={forbidden_key: {"promoted_capabilities": ["swarm"]}},
+            )
+
+    with pytest.raises(ValueError, match="canonical_context_route_override_forbidden:budget.execution_topology"):
         CanonicalTaskContext(
             task_id="task-1",
             task_type="bugfix",
             task_desc="Fix a bounded parser defect.",
-            budget={"learning_policy": {"promoted_capabilities": ["swarm"]}},
+            budget={"execution_topology": "alternate"},
         )
 
 

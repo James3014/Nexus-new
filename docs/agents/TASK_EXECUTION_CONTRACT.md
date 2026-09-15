@@ -26,14 +26,110 @@ must not relabel that explicit choice. The lane governs authorization, not
 correctness: source behavior, tests, and required verifiers decide whether the
 program works.
 
-Direct work becomes governed before mutation when it changes
-route/lifecycle/workforce authority, weakens security, changes migration or
-schema authority, requires protected branch/ref operations, or makes
-production/public claims, or otherwise exceeds the `DIRECT_CANONICAL` or
-`DIRECT_DELEGATED` boundary. Direct work does not commit, push, merge, delete,
-or auto-chain without exact Owner authority. The standing coordinator grant does
-not expand `DIRECT_CANONICAL`; it applies only to the governed GitHub Ready-Issue
-actions defined below.
+### Self-hosting stabilization and future default transition
+
+The current repository operating mode remains `BOOTSTRAP`, which is the
+self-hosting stabilization phase for execution-lane selection. G10 proves that a
+canonical Nexus grant can drive a live `NEXUS_GOVERNED` DevSpace execution; it
+is not an automatic repository-wide switch to governed-by-default work.
+Eligible bounded Nexus development may therefore continue through
+`DIRECT_CANONICAL` or `DIRECT_DELEGATED` while this operating mode remains in
+force, subject to every existing direct-lane scope, verification, escalation,
+and authority boundary in this contract.
+
+Nexus execution lanes (`DIRECT_CANONICAL`, `DIRECT_DELEGATED`, `GOVERNED`) and
+DevSpace authority modes (`OWNER_DIRECT`, `NEXUS_GOVERNED`) are related but not
+identical. DevSpace is execution plumbing and does not choose the Nexus lane.
+An attempt already admitted as governed / `NEXUS_GOVERNED` must never fall back
+to a direct / `OWNER_DIRECT` attempt merely because authority is missing, stale,
+expired, unreachable, or a transport fails. The same attempt must fail closed to
+block, rebind, or reconciliation; any direct recovery is a separately
+Owner-authorized attempt with a distinct authority identity.
+
+### Governance-plane break-glass recovery
+
+When independent evidence classifies the exact failed seam as
+`GOVERNANCE_PLANE_RECOVERY_REQUIRED`, and the normal authority plane needed to
+authorize its own repair is unavailable, stale, cyclic, or itself under repair,
+use the one-shot Owner recovery contract in
+`docs/specs/NEXUS_BREAK_GLASS_RECOVERY_001.md` plus the external bootstrap
+procedure in `docs/governance/rollback_runbook.md`. This is not a normal direct
+lane and is not a fallback from the failed governed attempt.
+
+The recovery root is an externally fetched Owner GitHub activation comment bound
+to exact repository/Issue, base HEAD/tree, qualifying failure evidence,
+recovery/attempt identity, effect class, allowed/forbidden scope, verifier set,
+expiry, and claim ceiling. A caller `ownerConfirmation` Boolean, worker/model
+assertion, failed/expired Task Card or standing grant, connector session, or
+Gateway state cannot mint this authority. The break-glass consumer remains
+operationally independent of the Gateway, Task Card, normal standing-grant,
+lifecycle dispatch, Workforce Admission, and CapabilityPlanner plane it may
+need to repair.
+
+`SOURCE_REPAIR`, `EMERGENCY_INTEGRATION`, and `RUNTIME_RECOVERY` are separate
+authority effects. Source-repair authority can produce only an immutable repair
+commit/tree/full-diff plus verification evidence; it cannot approve, merge,
+mutate protected refs, reload runtime, release, or make production/public
+claims. `VERIFIED` requires an externally re-read Owner verification comment
+bound to the same commit/tree/full-diff and successful exact-head checks; a
+caller-provided verifier name or opaque hash is not sufficient. The host-local
+source evidence chain is `PREPARED -> APPLIED -> VERIFIED -> CONSUMED`, with
+exact-attempt reconciliation, tamper/symlink protection, and replay denial after
+terminal consumption. SOURCE_REPAIR becomes CONSUMED only after a fresh Owner
+GitHub canary comment binds physical normal-governance evidence for loaded
+source/runtime identity, action binding, normal authority readback, one bounded
+governance operation, and verifier receipt. Caller-local JSON, booleans, or
+opaque hashes are not sufficient canary provenance. After successful recovery
+the Owner also publishes a canonical terminal/revocation comment bound to the
+original source activation;
+recovery consumers scan #806 for that global terminal witness before later
+source mutation so a new session cannot replay the old grant. Emergency
+integration or runtime recovery requires a new exact Owner authority artifact
+for that effect.
+
+When normal merge authority is itself inside the failed plane, a separately
+validated `EMERGENCY_INTEGRATION` Owner grant may authorize only one exact PR,
+accepted head/tree/diff, the freshly observed integration-time base/main,
+`merge` method, and successful exact-head check set. The immutable SOURCE_REPAIR
+base remains provenance and may be older after benign concurrent main movement;
+the integration grant must rebind current main rather than reuse that old base.
+Squash/rebase are not break-glass integration effects. The controller then
+delegates the physical merge to an existing
+bounded exact-head/CAS sink such as `git_merge_pull_request`; its
+`ownerConfirmation=true` is effect confirmation, not the recovery authority
+source. Force push, ref deletion, unrelated merge, runtime activation, release,
+and production/public claims remain forbidden.
+
+`NEXUS_GOVERNANCE_DEFAULT_READY` may be declared only by the Owner after a fresh
+readiness review. At minimum, that review should bind evidence that:
+
+- representative real tasks complete end to end under governed authority;
+- continuation, timeout, reconciliation, and restart behavior has been exercised;
+- Nexus can modify itself without routine authority-recursion deadlocks;
+- Task Card, grant, admission, and execution contracts are stable enough for
+  normal work rather than repeated bootstrap exceptions;
+- common Nexus engineering no longer requires routine direct bypass; and
+- the direct recovery path can restore a failed governance plane.
+
+G10, CI, tests, Task Cards, agents, or runtime state cannot self-declare this
+milestone. After the Owner declares it, a separate policy revision may make
+governed execution the default and narrow direct authority. Until then,
+narrowly typed DevSpace `OWNER_DIRECT` bootstrap/environment capabilities such
+as `workspace_clone` and `dependency_sync` remain valid stabilization tools and
+are not considered governance defects solely because they are not yet
+`NEXUS_GOVERNED`.
+
+Direct work becomes governed before mutation when it changes CapabilityPlanner
+route/capability authority, Workforce admission/worker authority, Nexus
+lifecycle authority, authentication/authorization or another security boundary,
+migration/schema or production-data authority, release authority, production
+activation, an external irreversible effect, a public production claim,
+break-glass recovery, a protected ref outside an exact Owner-confirmed PR merge,
+or when the Owner explicitly selects `GOVERNED`. Repository identity and Nexus
+self-modification alone are not escalation triggers. Direct work does not
+commit, push, merge, delete, or auto-chain without exact Owner authority. The
+standing coordinator grant does not expand a direct lane; it applies only to
+the governed GitHub actions defined below.
 
 ## Direct delegated boundary
 
@@ -41,14 +137,16 @@ This governed contract is not required solely because implementation is
 delegated when the root `AGENTS.md` `DIRECT_DELEGATED` contract is satisfied.
 Escalate to this governed contract when delegated work exceeds the
 `DIRECT_DELEGATED` boundary, requires Nexus lifecycle/Candidate authority,
-changes route/lifecycle/workforce/security authority, requires protected
-integration, or otherwise meets a governed-work condition.
+changes route/lifecycle/workforce/security authority, or otherwise meets a
+governed-work condition. An exact Owner-confirmed protected PR merge is not by
+itself such a condition.
 
 `DIRECT_DELEGATED` means:
 
 Owner -> primary coordinator -> approved non-Nexus control plane such as
 DevSpace -> exactly one bounded external implementation worker -> independent
-primary-coordinator verification -> STOP.
+primary-coordinator verification -> optional exact Owner-confirmed protected PR
+merge -> STOP.
 
 It is not Nexus runtime, Task Card, Nexus lifecycle, CapabilityPlanner routing,
 Nexus Workforce Admission, or Candidate lifecycle authority. An explicit current
@@ -67,8 +165,9 @@ Eligibility requires, at minimum:
   release, or make production/public claims;
 - the worker cannot act as its own required independent verifier;
 - the primary coordinator independently inspects the physical changes and reruns
-  the applicable verification; worker-reported PASS is implementation evidence
-  only;
+  the applicable verification; this is the direct lane's independent
+  verification and requires no third reviewer; worker-reported PASS is
+  implementation evidence only;
 - `AUTO_CHAIN=false`;
 - timeout/disconnect reconciles the same durable worker/session and
   filesystem/Git/provider state before retry; do not blindly launch a
@@ -89,7 +188,7 @@ Card or switching to Nexus -- when the work materially requires:
 - unresolved product/business semantics;
 - potentially executed historical migration rewrite;
 - ambiguous production-data mutation/backfill;
-- protected merge/push/ref operations;
+- protected ref operations other than an exact Owner-confirmed PR merge;
 - release or production/public claim authority;
 - milestone/program-level `AUTO_CHAIN`;
 - the worker acting as its own required independent verifier.
@@ -116,19 +215,44 @@ receipt is current, the primary Codex coordinator may create and commit a
 missing Task Card/INDEX for an already Ready Issue after freezing the effective
 Issue contract, current baseline, overlap, Workforce receipt, verification,
 and claim ceiling. The canonical active machine-local receipt is read from the
-single durable path `.local/state/nexus/authority/standing-grant.json` (the
-`nexus.orchestrator.standing_grant_store` loader); there is no
-environment-selected second authority root. A missing, malformed, tampered,
+deterministic keyed directory `.local/state/nexus/authority/standing-grants/`
+derived only from exact repository identity, Goal, and durable coordination
+thread; each key has independent lock/CAS. The legacy single file remains
+read-only compatibility input, and there is no environment-selected authority
+root. A missing, malformed, tampered,
 unsafe-permission, expired, or revoked receipt fails closed. Delegated workers cannot create or widen their own
 authority; they begin only after the card is physically committed and its hash
 is read back. The grant does not authorize local runtime/lifecycle actions,
 direct protected-main push, force-push, ref deletion, successor work outside
 the active Goal, release, or production/public claims.
 
+Task-card authority handoff is a keyed, non-destructive transition. A switch
+loads the exact predecessor key, leaves its bytes and path unchanged, and
+creates a temporary receipt at the deterministic successor key. The sealed
+transition record binds both key digests and receipt hashes; the temporary
+receipt does not supersede or revoke its predecessor. Restore is an exact
+CAS transition that terminalizes only the temporary key and proves the
+predecessor remains loadable and unchanged. Transition attempts are
+idempotent and conflicting, occupied, corrupt, or unsafe paths fail closed;
+receipt and transition references are never deleted.
+
 Only the primary coordinator under the current grant may create and commit a
 missing card once, then read back its hash. A delegated worker, reviewer, or
 launcher must not create, widen, or recursively bootstrap the card that would
 authorize its own work.
+
+For a fresh coordinator/chat/agent session, load and validate the canonical
+standing-grant receipt before evaluating an already-authorized GitHub action.
+The receipt context `thread_id` is the Owner-issued durable coordination-scope
+identifier; a replaceable chat, provider, or agent session identifier is
+transport provenance and must not replace that authority identity. Rehydrate
+the durable coordination scope from the validated receipt, then re-check Owner,
+coordinator, repository, Goal, action, expiry/revocation, and receipt integrity.
+A session change alone is not a new Owner authorization boundary.
+
+## G12 Fast Start advisory-cache gate
+
+Apply the root `AGENTS.md` #549 `ADVISORY_CACHE_ONLY` preflight before any implementation source/test body reads.
 
 ## GitHub collaboration and local lifecycle domains
 
@@ -187,21 +311,40 @@ receipt. Candidate, approval, integration, push, cleanup, and production/public
 claims are separate lifecycle states. A failed required commit is a block, not
 completion.
 
-The primary coordinator may prepare `MERGE_INTENT` and continue through normal
-GitHub workflow phases under a current standing grant whose exact repository,
-Goal, coordinator, and action binding remains valid. Before protected merge it
-must perform an independent exact-head review, terminal success for every
-ruleset-required check, an up-to-date base, complete scope/deletion audits,
-branch-protection verification, and expected-head/CAS. A normal phase
+Every protected merge first requires fresh exact repository/PR/base/head/diff,
+an up-to-date current `main`, complete scope/deletion audits, relevant tests,
+terminal success for every ruleset-required check, readable branch protection,
+mergeability, current Owner confirmation, and expected-head/CAS. Any
+PR/head/base/main or evidence drift invalidates the current merge attempt and
+must be revalidated before CAS.
+
+For `DIRECT_CANONICAL`, the primary coordinator may use the server-bound
+`git_merge_pull_request` once those gates pass. For `DIRECT_DELEGATED`, the same
+path is permitted only after the coordinator, distinct from the worker, has
+independently inspected the physical diff and rerun the applicable verifier.
+Neither direct lane requires a third-party GitHub `APPROVED` review, an
+`IndependentReviewReceipt`, `independent_acceptance_hash`, a standing-grant
+receipt, `GITHUB_MERGE`, or `github_complete_pull_request`.
+
+For `GOVERNED`, the primary coordinator may prepare `MERGE_INTENT` and continue
+under a current standing grant whose exact repository, Goal, coordinator, and
+action binding remains valid. Governed merge additionally requires independent
+acceptance and machine-verifiable acceptance provenance. A normal phase
 transition does not require redundant Owner reauthorization. A real authority
 boundary (scope widening, expiry/revocation/invalid binding, security change,
 new irreversible external effect, release/production, or genuine external
 platform approval) fails closed and requires the corresponding new decision.
-Any PR/head/base/main or evidence drift invalidates the current merge attempt
-and must be revalidated before CAS.
 `MERGE_INTENT` is evidence and standing authority is authorization only; neither
 substitutes for the verification gates. This GitHub action does not approve or
 integrate local Nexus lifecycle state.
+When the live MCP surface exposes `github_complete_pull_request`, governed
+protected-merge completion after independent acceptance uses that action. It binds
+`run_github_completion_loop()` to server-configured `NEXUS_CANONICAL_SOURCE_ROOT`
+and `NEXUS_PYTHON_BIN`; required checks still execute on the exact current
+integration subject; physical merge remains expected-head/CAS. Absence of the
+action is not a new Owner-approval boundary; fall back to the existing
+governed coordinator CAS path. The action cannot mint standing-grant or merge
+authority.
 
 ## Blocks and residual debt
 

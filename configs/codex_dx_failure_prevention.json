@@ -1,0 +1,68 @@
+{
+  "schema_version": "codex-dx-failure-prevention-v1",
+  "authority": "navigation_and_evidence_only",
+  "known_classes": ["command", "context", "convention", "environment", "fixture", "secret", "setup"],
+  "unassessed_classes": ["secret"],
+  "entries": [
+    {
+      "id": "setup-preflight",
+      "failure_class": "setup",
+      "summary": "Repository setup must be checked before a task can rely on local tooling.",
+      "evidence_refs": ["AGENTS.md#Authority bootstrap"],
+      "prevention_seam": {"id": "bootstrap-authority-check", "kind": "test", "path": "tests/ops/test_bootstrap_authority_files.py", "anchor": "test_bootstrap_files_use_current_worktree_authority"},
+      "owner": "developer-experience",
+      "status": "active",
+      "removal_condition": "Retire only when an approved replacement setup contract is verified."
+    },
+    {
+      "id": "fixture-materialization",
+      "failure_class": "fixture",
+      "summary": "Fixture paths must reject undeclared files and path escapes before execution.",
+      "evidence_refs": ["tests/benchmark/test_fixture_materialization.py#test_materialize_local_fixture_rejects_extra_file_path_escape"],
+      "prevention_seam": {"id": "fixture-path-negative-control", "kind": "test", "path": "tests/benchmark/test_fixture_materialization.py", "anchor": "test_resolve_external_fixture_fails_closed_until_clone_adapter_exists"},
+      "owner": "benchmark-maintainers",
+      "status": "active",
+      "removal_condition": "Retire only when the fixture contract is replaced by an approved equivalent."
+    },
+    {
+      "id": "smoke-command-catalog",
+      "failure_class": "command",
+      "summary": "Canonical verification commands must remain explicit and discoverable.",
+      "evidence_refs": ["docs/testing/test_runbook.md#Lint Gate (P1)"],
+      "prevention_seam": {"id": "canonical-command-runbook", "kind": "instruction", "path": "docs/testing/test_runbook.md", "anchor": "### 1. Pytest Collect Gate (P0)"},
+      "owner": "ci-maintainers",
+      "status": "active",
+      "removal_condition": "Retire when an approved canonical command catalog replaces the runbook."
+    },
+    {
+      "id": "temp-environment",
+      "failure_class": "environment",
+      "summary": "Environment-bound execution must fail closed when its required runtime preconditions are absent.",
+      "evidence_refs": ["tests/ops/test_unified_runtime_scenarios.py#test_scenarios_fail_closed_without_live_flag"],
+      "prevention_seam": {"id": "runtime-precondition-negative-control", "kind": "test", "path": "tests/ops/test_unified_runtime_scenarios.py", "anchor": "test_external_scenarios_require_both_live_and_external_authorization"},
+      "owner": "developer-experience",
+      "status": "active",
+      "removal_condition": "Retire only after supported environments have an approved replacement canary."
+    },
+    {
+      "id": "canonical-runbook",
+      "failure_class": "convention",
+      "summary": "Developer instructions must identify the repository-owned verification contract.",
+      "evidence_refs": ["docs/testing/test_runbook.md#Forbidden Actions"],
+      "prevention_seam": {"id": "runbook-contract-heading", "kind": "instruction", "path": "docs/testing/test_runbook.md", "anchor": "# Nexus Testing Runbook"},
+      "owner": "developer-experience",
+      "status": "active",
+      "removal_condition": "Retire when the runbook is superseded by an approved canonical contract."
+    },
+    {
+      "id": "bounded-context",
+      "failure_class": "context",
+      "summary": "Task orientation must preserve bounded repository authority context.",
+      "evidence_refs": ["tests/ops/test_bootstrap_authority_files.py#test_execution_domains_and_candidate_namespaces_are_unambiguous"],
+      "prevention_seam": {"id": "authority-context-boundary", "kind": "test", "path": "tests/ops/test_bootstrap_authority_files.py", "anchor": "test_ready_issue_claim_contract_is_worker_neutral_and_fail_closed"},
+      "owner": "developer-experience",
+      "status": "active",
+      "removal_condition": "Retire when bounded task-context retrieval is replaced by an approved contract."
+    }
+  ]
+}

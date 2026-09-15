@@ -63,7 +63,7 @@ def resolve_local_armor_profile(route_context: dict) -> LocalArmorProfile:
         and "recursion" not in task_desc.lower()
         and "recursive" not in task_desc.lower()
         and "stateful" not in task_desc.lower()
-        and reasoning_mode == "FAST"
+        and (reasoning_mode == "FAST" or os.environ.get("NEXUS_FAST_MODE") == "1")
     )
 
     # 2. Determine FULL preconditions
@@ -97,10 +97,6 @@ def resolve_local_armor_profile(route_context: dict) -> LocalArmorProfile:
 
 def build_profile_controls(profile: str, reason: str, routing_tier: str) -> LocalArmorProfile:
     """Construct granular context control switches for the specified profile."""
-    # Debug bypass / force overrides
-    if os.environ.get("NEXUS_FAST_MODE") == "1":
-        profile = "LITE"
-        reason = "env_override_fast_mode"
 
     if profile == "LITE":
         return LocalArmorProfile(

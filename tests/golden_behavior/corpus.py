@@ -505,13 +505,13 @@ CASES: tuple[GoldenCase, ...] = (
     ),
     _c(
         "GB-039",
-        "Pending candidate blocks retry",
+        "Pending candidate and superseded task reject retry",
         "invariant",
         "partial_state",
-        "A pending Candidate must be disposed or superseded before retry.",
+        "Pending Candidate blocks retry; after a SUPERSEDED disposition the same semantic task remains non-retryable/absorbing.",
         LIFECYCLE,
         (
-            "tests/nexus/orchestrator/test_self_hosted_task_service.py::test_pending_candidate_blocks_retry_until_superseded",
+            "tests/nexus/orchestrator/test_self_hosted_task_service.py::test_pending_candidate_and_superseded_task_reject_retry",
         ),
     ),
     _c(

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
 import re
 import shlex
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Optional
 
@@ -23,8 +23,11 @@ from nexus.orchestrator.repository_contract_gate import (
     RepositoryContractGate,
 )
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
-from nexus.orchestrator.worktree_manager import CandidateDiffReceipt, TargetWorktreeLease, WorktreeManager
-
+from nexus.orchestrator.worktree_manager import (
+    CandidateDiffReceipt,
+    TargetWorktreeLease,
+    WorktreeManager,
+)
 
 _VERIFIER_ENV_ALLOWLIST = frozenset({"PYTHONDONTWRITEBYTECODE"})
 
@@ -174,8 +177,15 @@ class CandidateVerifier:
         if any(token in {";", "&&", "||", "|", "<", ">"} for token in tokens[index + 1:]):
             raise ValueError("shell operators are not allowed in verifier command")
         verifier_args = tokens[index + 1 :]
+        python_code_argument = (
+            Path(executable).name in {"python", "python3"}
+            and len(verifier_args) == 2
+            and verifier_args[0] == "-c"
+        )
         for arg_index, token in enumerate(verifier_args):
-            if re.search(r"[\x00\r\n]", token):
+            if "\x00" in token or "\r" in token or ("\n" in token and not (
+                python_code_argument and arg_index == 1
+            )):
                 raise ValueError("invalid verifier argument")
             if any(char in token for char in ";&|<>()$`") and not (
                 arg_index > 0 and verifier_args[arg_index - 1] == "-c"

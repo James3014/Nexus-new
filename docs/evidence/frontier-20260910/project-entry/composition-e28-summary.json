@@ -1,0 +1,268 @@
+[
+  {
+    "case": "positive",
+    "exit": 0,
+    "pid": 69396,
+    "ephemeral": false,
+    "read_only": true,
+    "status": "TASK_REHYDRATED",
+    "outcome": "READY_TO_EXECUTE",
+    "blocker": null
+  },
+  {
+    "case": "material_bound",
+    "exit": 0,
+    "pid": 70436,
+    "ephemeral": false,
+    "read_only": true,
+    "status": "TASK_REHYDRATED",
+    "outcome": "READY_TO_EXECUTE",
+    "blocker": null
+  },
+  {
+    "case": "legacy_state_only",
+    "exit": 0,
+    "pid": 71510,
+    "ephemeral": false,
+    "read_only": true,
+    "status": "TASK_REHYDRATED",
+    "outcome": "READY_TO_EXECUTE",
+    "blocker": null
+  },
+  {
+    "case": "envelope_positive",
+    "exit": 1,
+    "pid": 72745,
+    "ephemeral": false,
+    "read_only": true,
+    "status": "NO_TASK",
+    "outcome": "READY_TO_EXECUTE",
+    "blocker": null
+  },
+  {
+    "case": "revoked",
+    "exit": 0,
+    "pid": 74103,
+    "ephemeral": false,
+    "read_only": true,
+    "status": "TASK_REHYDRATED",
+    "outcome": "BLOCKED",
+    "blocker": {
+      "schema_name": "nexus.execution_readiness_blocker.v1",
+      "code": "TASK_AUTHORITY_MISSING",
+      "plane": "AUTHORITY_PLANE",
+      "precedence_rank": 6,
+      "message": "obtain the normal task/goal/standing-grant authority before execution",
+      "evidence_identities": [
+        "authority_receipt_status=REVOKED",
+        "authority_receipt_hash=61b64af0d241dfdc1373d49a9a1c46f5fa3263086a6f24f3f89cae9b2cb1673c",
+        "authority_owner_id=fixture-owner",
+        "authority_coordinator_id=fixture-coordinator",
+        "authority_repository_id=James3014/Nexus-new",
+        "authority_goal_id=pe2-fixture-goal",
+        "authority_action=CANDIDATE_VERIFY",
+        "authority_expires_at=2026-09-10T05:31:32.352105+00:00",
+        "request_hash=c703571b65a5d1863184806372255e480ca0f3307a4bfc46b32b9bd1adfea8aa"
+      ],
+      "next_action": "OBTAIN_NORMAL_TASK_AUTHORITY"
+    }
+  },
+  {
+    "case": "expired",
+    "exit": 0,
+    "pid": 75270,
+    "ephemeral": false,
+    "read_only": true,
+    "status": "TASK_REHYDRATED",
+    "outcome": "BLOCKED",
+    "blocker": {
+      "schema_name": "nexus.execution_readiness_blocker.v1",
+      "code": "TASK_AUTHORITY_MISSING",
+      "plane": "AUTHORITY_PLANE",
+      "precedence_rank": 6,
+      "message": "obtain the normal task/goal/standing-grant authority before execution",
+      "evidence_identities": [
+        "authority_receipt_status=EXPIRED",
+        "authority_receipt_hash=d596276b650ce51049ae477d39c8f8bdd9fb28203ec870cdf2e3b2512a43d038",
+        "authority_owner_id=fixture-owner",
+        "authority_coordinator_id=fixture-coordinator",
+        "authority_repository_id=James3014/Nexus-new",
+        "authority_goal_id=pe2-fixture-goal",
+        "authority_action=CANDIDATE_VERIFY",
+        "authority_expires_at=2026-09-10T03:31:33.606913+00:00",
+        "request_hash=c703571b65a5d1863184806372255e480ca0f3307a4bfc46b32b9bd1adfea8aa"
+      ],
+      "next_action": "OBTAIN_NORMAL_TASK_AUTHORITY"
+    }
+  },
+  {
+    "case": "foreign_goal",
+    "exit": 0,
+    "pid": 76495,
+    "ephemeral": false,
+    "read_only": true,
+    "status": "TASK_REHYDRATED",
+    "outcome": "BLOCKED",
+    "blocker": {
+      "schema_name": "nexus.execution_readiness_blocker.v1",
+      "code": "TASK_AUTHORITY_MISSING",
+      "plane": "AUTHORITY_PLANE",
+      "precedence_rank": 6,
+      "message": "obtain the normal task/goal/standing-grant authority before execution",
+      "evidence_identities": [
+        "authority_receipt_status=MISSING",
+        "authority_receipt_hash=<missing>",
+        "authority_owner_id=<missing>",
+        "authority_coordinator_id=<missing>",
+        "authority_repository_id=<missing>",
+        "authority_goal_id=pe2-fixture-goal",
+        "authority_action=CANDIDATE_VERIFY",
+        "authority_expires_at=<missing>",
+        "request_hash=c703571b65a5d1863184806372255e480ca0f3307a4bfc46b32b9bd1adfea8aa"
+      ],
+      "next_action": "OBTAIN_NORMAL_TASK_AUTHORITY"
+    }
+  },
+  {
+    "case": "wrong_action",
+    "exit": 0,
+    "pid": 77848,
+    "ephemeral": false,
+    "read_only": true,
+    "status": "TASK_REHYDRATED",
+    "outcome": "BLOCKED",
+    "blocker": {
+      "schema_name": "nexus.execution_readiness_blocker.v1",
+      "code": "AUTHORITY_OUT_OF_SCOPE",
+      "plane": "AUTHORITY_PLANE",
+      "precedence_rank": 6,
+      "message": "intended action family is outside the granted authority scope",
+      "evidence_identities": [
+        "authority_receipt_status=VALID",
+        "authority_receipt_hash=8689040fc2e144d32c2215f39f963ed87e5fa1b3b25ff84af971f9d5d83057ba",
+        "authority_owner_id=fixture-owner",
+        "authority_coordinator_id=fixture-coordinator",
+        "authority_repository_id=James3014/Nexus-new",
+        "authority_goal_id=pe2-fixture-goal",
+        "authority_action=CANDIDATE_VERIFY",
+        "authority_expires_at=2026-09-10T05:31:35.756896+00:00",
+        "authority_context_hash=bf04621d0ff3dcbbca30fa5635cfcb6a1940e1ce41c57a0e233d46ca3923dd18",
+        "authority_decision_hash=3f82cf57bbad0d3810f972cee0d83c39f0b550a021eec4594e964ac6e7341b47",
+        "authority_outcome=OUT_OF_SCOPE",
+        "request_hash=c703571b65a5d1863184806372255e480ca0f3307a4bfc46b32b9bd1adfea8aa"
+      ],
+      "next_action": "OBTAIN_NORMAL_TASK_AUTHORITY"
+    }
+  },
+  {
+    "case": "foreign_issue",
+    "exit": 0,
+    "pid": 79073,
+    "ephemeral": false,
+    "read_only": true,
+    "status": "BLOCKED",
+    "outcome": null,
+    "blocker": {
+      "code": "PROJECT_ENTRY_CONTINUATION_INVALID",
+      "detail": "diagnostic_class=PROJECT_ENTRY_CONTINUATION_INVALID; diagnostic_sha256=edd63c88b9fdd4dce9ca87a6aac4dfd73feaa1667392294c60fb7e4c43b66ded"
+    }
+  },
+  {
+    "case": "foreign_repository",
+    "exit": 0,
+    "pid": 80138,
+    "ephemeral": false,
+    "read_only": true,
+    "status": "BLOCKED",
+    "outcome": null,
+    "blocker": {
+      "code": "PROJECT_ENTRY_CONTINUATION_INVALID",
+      "detail": "diagnostic_class=PROJECT_ENTRY_CONTINUATION_INVALID; diagnostic_sha256=a0f89d51a3f3650c91b1d1c480dab8314249589011a43de4a3a69aa5a875d6a9"
+    }
+  },
+  {
+    "case": "rehashed_tamper",
+    "exit": 0,
+    "pid": 80779,
+    "ephemeral": false,
+    "read_only": true,
+    "status": "BLOCKED",
+    "outcome": null,
+    "blocker": {
+      "code": "PROJECT_ENTRY_CONTINUATION_INVALID",
+      "detail": "diagnostic_class=PROJECT_ENTRY_CONTINUATION_INVALID; diagnostic_sha256=a1f1aa1c8a64227b68148f2aa9eb6ad3dcc7e609fa6953ab084c83cfc13a3601"
+    }
+  },
+  {
+    "case": "missing_hash",
+    "exit": 0,
+    "pid": 81305,
+    "ephemeral": false,
+    "read_only": true,
+    "status": "BLOCKED",
+    "outcome": null,
+    "blocker": {
+      "code": "PROJECT_ENTRY_CONTINUATION_INVALID",
+      "detail": "diagnostic_class=PROJECT_ENTRY_CONTINUATION_INVALID; diagnostic_sha256=1e83d9380429fcc9ea0218c9eb8e6d5d158b737a9bc65bdc744fb7469bb0e80e"
+    }
+  },
+  {
+    "case": "legacy_material",
+    "exit": 0,
+    "pid": 82014,
+    "ephemeral": false,
+    "read_only": true,
+    "status": "BLOCKED",
+    "outcome": null,
+    "blocker": {
+      "code": "PROJECT_ENTRY_CONTINUATION_INVALID",
+      "detail": "diagnostic_class=PROJECT_ENTRY_CONTINUATION_INVALID; diagnostic_sha256=f6d01114a416b21a229cf2f30fdfb9df6cc71f5d1f44f516a1178bebf80bc8bc"
+    }
+  },
+  {
+    "case": "conflicting_identity",
+    "exit": 0,
+    "pid": 82675,
+    "ephemeral": false,
+    "read_only": true,
+    "status": "BLOCKED",
+    "outcome": null,
+    "blocker": {
+      "code": "PROJECT_ENTRY_CONTINUATION_INVALID",
+      "detail": "diagnostic_class=PROJECT_ENTRY_CONTINUATION_INVALID; diagnostic_sha256=76fb0dc87f25b89adcd879685006a59cb675606ef2a8e01cbd9aa98a3c5734af"
+    }
+  },
+  {
+    "case": "envelope_outer_tamper",
+    "exit": 1,
+    "pid": 83324,
+    "ephemeral": false,
+    "read_only": true,
+    "status": "NO_TASK",
+    "outcome": "READY_TO_EXECUTE",
+    "blocker": null
+  },
+  {
+    "case": "envelope_binding_deleted",
+    "exit": 1,
+    "pid": 83872,
+    "ephemeral": false,
+    "read_only": true,
+    "status": "NO_TASK",
+    "outcome": "READY_TO_EXECUTE",
+    "blocker": null
+  },
+  {
+    "case": "duplicate_issue",
+    "exit": 0,
+    "pid": 84371,
+    "ephemeral": false,
+    "read_only": true,
+    "status": "BLOCKED",
+    "outcome": null,
+    "blocker": {
+      "code": "PROJECT_ENTRY_CONTINUATION_INVALID",
+      "detail": "diagnostic_class=PROJECT_ENTRY_CONTINUATION_INVALID; diagnostic_sha256=76fb0dc87f25b89adcd879685006a59cb675606ef2a8e01cbd9aa98a3c5734af"
+    }
+  }
+]

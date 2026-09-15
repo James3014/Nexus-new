@@ -286,42 +286,42 @@ class RecordingLocalModelProvider(LocalModelProvider):
                 model_resolution_source=resolution.resolution_source,
                 model_alias_applied=resolution.alias_applied,
                 ollama_total_duration=(
-                    resp.ollama_total_duration
-                    if resp is not None and resp.ollama_metrics_available
+                    getattr(resp, "ollama_total_duration", None)
+                    if getattr(resp, "ollama_metrics_available", False)
                     else None
                 ),
                 ollama_load_duration=(
-                    resp.ollama_load_duration
-                    if resp is not None and resp.ollama_metrics_available
+                    getattr(resp, "ollama_load_duration", None)
+                    if getattr(resp, "ollama_metrics_available", False)
                     else None
                 ),
                 ollama_prompt_eval_count=(
-                    resp.ollama_prompt_eval_count
-                    if resp is not None and resp.ollama_metrics_available
+                    getattr(resp, "ollama_prompt_eval_count", None)
+                    if getattr(resp, "ollama_metrics_available", False)
                     else None
                 ),
                 ollama_prompt_eval_duration=(
-                    resp.ollama_prompt_eval_duration
-                    if resp is not None and resp.ollama_metrics_available
+                    getattr(resp, "ollama_prompt_eval_duration", None)
+                    if getattr(resp, "ollama_metrics_available", False)
                     else None
                 ),
                 ollama_eval_count=(
-                    resp.ollama_eval_count
-                    if resp is not None and resp.ollama_metrics_available
+                    getattr(resp, "ollama_eval_count", None)
+                    if getattr(resp, "ollama_metrics_available", False)
                     else None
                 ),
                 ollama_eval_duration=(
-                    resp.ollama_eval_duration
-                    if resp is not None and resp.ollama_metrics_available
+                    getattr(resp, "ollama_eval_duration", None)
+                    if getattr(resp, "ollama_metrics_available", False)
                     else None
                 ),
                 ollama_done_reason=(
-                    resp.ollama_done_reason
-                    if resp is not None and resp.ollama_metrics_available
+                    getattr(resp, "ollama_done_reason", None)
+                    if getattr(resp, "ollama_metrics_available", False)
                     else None
                 ),
                 ollama_metrics_available=bool(
-                    resp is not None and resp.ollama_metrics_available
+                    getattr(resp, "ollama_metrics_available", False)
                 ),
             )
             self.ledger.append(record)

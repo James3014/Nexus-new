@@ -11,7 +11,7 @@ from nexus.research.epistemic_benchmark.phase1a_contracts import (
     Phase1AArm,
     compute_canonical_sha256,
 )
-from nexus.services.verified_assist_contract import evaluate_assist_credit
+from nexus.services.verified_assist_contract import verify_consumption_projection
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _OBSERVATION_SET_MARKER = "admissible_observation_set_sha256="
@@ -538,19 +538,20 @@ def verify_observation_set_consumption(
     assertions = {str(value) for value in assertions_raw}
     if observation_set.vap_identity_marker not in assertions:
         return {"ok": False, "reason": "observation_set_identity_not_bound"}
-    credit = evaluate_assist_credit(verified_assist_consumption)
-    if credit.get("assist_credited") is not True:
+    projection = verify_consumption_projection(verified_assist_consumption)
+    if projection.get("measurement_consumption_eligible") is not True:
         return {
             "ok": False,
-            "reason": f"vap_credit_denied:{credit.get('reason') or 'unknown'}",
+            "reason": f"vap_projection_denied:{projection.get('reason') or 'unknown'}",
         }
-    if str(credit.get("packet_hash") or "") != packet_hash:
+    if str(projection.get("packet_hash") or "") != packet_hash:
         return {"ok": False, "reason": "consumption_packet_hash_mismatch"}
     return {
         "ok": True,
-        "reason": "physical_consumption_verified",
+        "reason": "measurement_consumption_projection_verified",
         "packet_hash": packet_hash,
-        "consumption_proof": str(credit.get("consumption_proof") or ""),
+        "consumption_proof": str(projection.get("consumption_proof") or ""),
+        "product_credit_allowed": False,
     }
 
 

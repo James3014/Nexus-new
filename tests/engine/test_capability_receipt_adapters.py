@@ -38,8 +38,11 @@ def test_swarm_receipt_requires_report_evidence_for_public_claim():
     }
 
     assert missing["swarm"].public_claim_safe is False
+    assert missing["swarm"].gate_passed is False
     assert missing["swarm"].failure_reason == "invoked_without_evidence"
-    assert proven["swarm"].public_claim_safe is True
+    assert proven["swarm"].gate_passed is True
+    assert proven["swarm"].outcome_contributed is False
+    assert proven["swarm"].public_claim_safe is False
     assert "report:.nexus/reports/swarm/run.json" in proven["swarm"].evidence_refs
     assert "role_findings:2" in proven["swarm"].evidence_refs
 
@@ -80,8 +83,11 @@ def test_nightshift_receipt_requires_invoked_recovered_report():
     }
 
     assert recommended["nightshift"].public_claim_safe is False
+    assert recommended["nightshift"].gate_passed is False
     assert recommended["nightshift"].failure_reason == "recommended_without_report"
-    assert proven["nightshift"].public_claim_safe is True
+    assert proven["nightshift"].gate_passed is True
+    assert proven["nightshift"].outcome_contributed is False
+    assert proven["nightshift"].public_claim_safe is False
     assert proven["nightshift"].evidence_refs == (".nexus/reports/nightshift/run.json",)
 
 
@@ -101,7 +107,9 @@ def test_semantic_searcher_receipt_requires_refs_and_gate():
         )
     }
 
-    assert receipts["semantic_searcher"].public_claim_safe is True
+    assert receipts["semantic_searcher"].gate_passed is True
+    assert receipts["semantic_searcher"].outcome_contributed is False
+    assert receipts["semantic_searcher"].public_claim_safe is False
     assert receipts["semantic_searcher"].evidence_refs == ("semantic:policy:r1",)
 
 
@@ -156,12 +164,13 @@ def test_harness_receipts_fail_closed_without_typed_evidence():
         )
     }
 
-    assert missing["harness_preflight_sensor"].public_claim_safe is False
-    assert missing["semantic_failure_sensor"].public_claim_safe is False
-    assert missing["bdd_acceptance_skill"].public_claim_safe is False
-    assert proven["harness_preflight_sensor"].public_claim_safe is True
-    assert proven["semantic_failure_sensor"].public_claim_safe is True
-    assert proven["bdd_acceptance_skill"].public_claim_safe is True
+    for name, receipt in missing.items():
+        assert receipt.gate_passed is False, name
+        assert receipt.public_claim_safe is False, name
+    for name, receipt in proven.items():
+        assert receipt.gate_passed is True, name
+        assert receipt.outcome_contributed is False, name
+        assert receipt.public_claim_safe is False, name
 
     diagnostic_only = {
         item.name: item
@@ -182,7 +191,9 @@ def test_harness_receipts_fail_closed_without_typed_evidence():
             },
         )
     }
-    assert diagnostic_only["semantic_failure_sensor"].public_claim_safe is True
+    assert diagnostic_only["semantic_failure_sensor"].gate_passed is True
+    assert diagnostic_only["semantic_failure_sensor"].outcome_contributed is False
+    assert diagnostic_only["semantic_failure_sensor"].public_claim_safe is False
 
 
 def test_codeintel_receipt_includes_dci_refs():
@@ -205,7 +216,9 @@ def test_codeintel_receipt_includes_dci_refs():
         )
     }
 
-    assert receipts["codeintel"].public_claim_safe is True
+    assert receipts["codeintel"].gate_passed is True
+    assert receipts["codeintel"].outcome_contributed is False
+    assert receipts["codeintel"].public_claim_safe is False
     assert ".nexus/reports/codeintel/dci.json" in receipts["codeintel"].evidence_refs
     assert "dci:nexus/parser.py:L1" in receipts["codeintel"].evidence_refs
 
@@ -230,7 +243,9 @@ def test_swarm_quiet_moment_receipt_requires_non_mutating_event():
         )
     }
 
-    assert receipts["swarm_quiet_moment"].public_claim_safe is True
+    assert receipts["swarm_quiet_moment"].gate_passed is False
+    assert receipts["swarm_quiet_moment"].outcome_contributed is False
+    assert receipts["swarm_quiet_moment"].public_claim_safe is False
     assert "observe:observed" in receipts["swarm_quiet_moment"].evidence_refs
 
 
@@ -303,10 +318,13 @@ def test_semantic_research_runtime_receipts_require_evidence_and_gate():
 
     for name, receipt in missing.items():
         assert receipt.public_claim_safe is False, name
+        assert receipt.gate_passed is False, name
         assert receipt.failure_reason in {"invoked_without_evidence", "selected_without_invocation", "evidence_without_gate_pass"}
 
     for name, receipt in proven.items():
-        assert receipt.public_claim_safe is True, name
+        assert receipt.gate_passed is True, name
+        assert receipt.outcome_contributed is False, name
+        assert receipt.public_claim_safe is False, name
         assert receipt.evidence_refs
     assert "lookup_matches:1" in proven["asi_constraint_extractor"].evidence_refs
     assert "verified_sources:1" in proven["external_doc_scout"].evidence_refs
@@ -371,7 +389,9 @@ def test_legacy_llm_judge_panel_selected_capability_canonicalizes_to_judge_panel
     }
 
     assert "llm_judge_panel" not in receipts
-    assert receipts["judge_panel"].public_claim_safe is True
+    assert receipts["judge_panel"].gate_passed is True
+    assert receipts["judge_panel"].outcome_contributed is False
+    assert receipts["judge_panel"].public_claim_safe is False
 
 
 def test_autoreason_receipt_records_discriminator_and_blocks_fatal_winner():
@@ -412,9 +432,13 @@ def test_autoreason_receipt_records_discriminator_and_blocks_fatal_winner():
         )
     }
 
-    assert safe_winner["autoreason"].public_claim_safe is True
+    assert safe_winner["autoreason"].gate_passed is True
+    assert safe_winner["autoreason"].outcome_contributed is False
+    assert safe_winner["autoreason"].public_claim_safe is False
     assert "discriminator_fatal:unsafe" in safe_winner["autoreason"].evidence_refs
     assert "discriminator_defenses:safe:1" in safe_winner["autoreason"].evidence_refs
+    assert fatal_winner["autoreason"].gate_passed is False
+    assert fatal_winner["autoreason"].outcome_contributed is False
     assert fatal_winner["autoreason"].public_claim_safe is False
     assert fatal_winner["autoreason"].failure_reason == "evidence_without_gate_pass"
 
@@ -434,7 +458,9 @@ def test_belief_receipt_can_cite_semantic_searcher_evidence_ref():
         )
     }
 
-    assert receipts["belief"].public_claim_safe is True
+    assert receipts["belief"].gate_passed is True
+    assert receipts["belief"].outcome_contributed is False
+    assert receipts["belief"].public_claim_safe is False
     assert "semantic:policy:r1" in receipts["belief"].evidence_refs
     assert "confidence_source:semantic_searcher:policy:r1" in receipts["belief"].evidence_refs
 
@@ -459,9 +485,12 @@ def test_repair_loop_receipt_requires_trace_and_verified_claim():
         )
     }
 
+    assert missing["repair_loop"].gate_passed is False
     assert missing["repair_loop"].public_claim_safe is False
     assert missing["repair_loop"].failure_reason == "selected_without_invocation"
-    assert proven["repair_loop"].public_claim_safe is True
+    assert proven["repair_loop"].gate_passed is True
+    assert proven["repair_loop"].outcome_contributed is False
+    assert proven["repair_loop"].public_claim_safe is False
     assert proven["repair_loop"].evidence_refs == (".nexus/reports/rlm/trace.jsonl",)
 
 
@@ -482,7 +511,72 @@ def test_repair_loop_receipt_cites_readable_trace_and_attempt_id(tmp_path):
         )
     }
 
-    assert receipts["repair_loop"].public_claim_safe is True
+    assert receipts["repair_loop"].gate_passed is True
+    assert receipts["repair_loop"].outcome_contributed is False
+    assert receipts["repair_loop"].public_claim_safe is False
     assert f"{trace}" in receipts["repair_loop"].evidence_refs
     assert "rlm_attempt:r1" in receipts["repair_loop"].evidence_refs
     assert "rlm_trace_status:readable_jsonl" in receipts["repair_loop"].evidence_refs
+
+
+def test_contract_valid_measured_receipt_is_public_claim_safe():
+    """G10 Positive Control: prove public_claim_safe is True when all contracts (basic + honest measured telemetry) are met."""
+    from nexus.engine.capability_contracts import CapabilityReceipt
+
+    valid_positive = CapabilityReceipt(
+        name="test_capability",
+        selected=True,
+        invoked=True,
+        evidence_present=True,
+        gate_passed=True,
+        outcome_contributed=True,
+        evidence_alignment=True,
+        telemetries={
+            "telemetry_source": "measured",
+            "wall_time_ms": 120.0,
+            "token_usage": 450,
+            "provider_costs": 0.002,
+            "overhead_ms": 15.0,
+            "model_calls": 1,
+            "claimable": True,
+        },
+    )
+    assert valid_positive.public_claim_safe is True
+
+    # G9 Negative Controls: fail-closed on missing key or unavailable source
+    missing_key = CapabilityReceipt(
+        name="test_capability",
+        selected=True,
+        invoked=True,
+        evidence_present=True,
+        gate_passed=True,
+        outcome_contributed=True,
+        evidence_alignment=True,
+        telemetries={
+            "telemetry_source": "measured",
+            "wall_time_ms": 120.0,
+            # token_usage missing
+            "provider_costs": 0.002,
+            "overhead_ms": 15.0,
+        },
+    )
+    assert missing_key.public_claim_safe is False
+
+    unavailable_telemetry = CapabilityReceipt(
+        name="test_capability",
+        selected=True,
+        invoked=True,
+        evidence_present=True,
+        gate_passed=True,
+        outcome_contributed=True,
+        evidence_alignment=True,
+        telemetries={
+            "telemetry_source": "unavailable",
+            "wall_time_ms": None,
+            "token_usage": None,
+            "provider_costs": None,
+            "overhead_ms": None,
+            "claimable": False,
+        },
+    )
+    assert unavailable_telemetry.public_claim_safe is False

@@ -19,6 +19,12 @@ QUOTA_RUN_MANIFESTS = 50
 QUOTA_OUTCOME_EVENTS = 1000
 _DB_CACHE: Dict[str, Any] = {}
 
+
+def stable_hash(*parts: str) -> str:
+    """生成穩定 ID 用於冪等 Upsert"""
+    joined = "||".join(str(p or "") for p in parts)
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
 def connect_memory_db(repo_root: Path):
     import lancedb
     db_path = repo_root / DB_CORE_PATH

@@ -272,7 +272,7 @@ class SkillsRouter:
         return []
 
     def route_candidates(self, phase: str, context: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """🛡️ Autonomic Selector Facade for SPXDRAC ecosystem (P29 merged)."""
+        """Legacy SPXDRAC skill projection downstream of CapabilityPlanner truth."""
         phase_key = str(phase or "R").lower()
         decision_id = f"dec_{phase_key}_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
         
@@ -299,6 +299,9 @@ class SkillsRouter:
             return []
 
         if not isinstance(plan, dict):
+            if plan.constraints.get("selection_authority") != "CapabilityPlanner":
+                logger.error("[SkillsRouter] refusing non-Planner capability projection")
+                return []
             receipts = controller.execute_plan(plan)
         else:
             receipts = []

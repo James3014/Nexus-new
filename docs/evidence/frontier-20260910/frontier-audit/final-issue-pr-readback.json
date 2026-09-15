@@ -1,0 +1,51 @@
+{
+  "observed_at": "2026-09-10T07:52:21.478871+00:00",
+  "items": [
+    {
+      "number": 807,
+      "state": "closed",
+      "state_reason": "completed",
+      "closed_at": "2026-09-07T23:11:50Z",
+      "html_url": "https://github.com/James3014/Nexus-new/issues/807"
+    },
+    {
+      "number": 850,
+      "state": "closed",
+      "state_reason": "completed",
+      "closed_at": "2026-09-09T18:57:53Z",
+      "html_url": "https://github.com/James3014/Nexus-new/issues/850"
+    },
+    {
+      "number": 853,
+      "state": "closed",
+      "state_reason": "completed",
+      "closed_at": "2026-09-09T18:20:15Z",
+      "html_url": "https://github.com/James3014/Nexus-new/issues/853"
+    },
+    {
+      "number": 842,
+      "state": "closed",
+      "state_reason": "completed",
+      "closed_at": "2026-09-10T04:59:24Z",
+      "html_url": "https://github.com/James3014/Nexus-new/issues/842"
+    },
+    {
+      "number": 851,
+      "state": "closed",
+      "merged": true,
+      "head": "0ce450d6a96da665945a709d0731e185587cfe01",
+      "base": "4c2268f7ae11d0dcac924d6608a48247a6b1629f",
+      "merge_commit": "d0e269c83aad20f7d09b0d79f067180254a3ebd7",
+      "url": "https://github.com/James3014/Nexus-new/pull/851"
+    },
+    {
+      "number": 925,
+      "state": "closed",
+      "merged": true,
+      "head": "16758457f552e874358f5566b9a70a11d5b4dfbb",
+      "base": "9d768a527078eb82dde4048e83e029f0c4f2e73e",
+      "merge_commit": "e810851af7a83e1a3700747480163b62b1b596ba",
+      "url": "https://github.com/James3014/Nexus-new/pull/925"
+    }
+  ]
+}

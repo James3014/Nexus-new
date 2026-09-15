@@ -27,7 +27,7 @@ _BUNDLE_SCHEMA = "nexus.canonical_planning_bundle.v1"
 _ROUTE_AUTHORITY = "CapabilityPlanner"
 _VALID_EXECUTION_DEPTHS = frozenset({"LIGHT", "STANDARD", "FULL"})
 _VALID_EXECUTION_CHANNELS = frozenset({"online", "local"})
-_ALLOWED_BUDGET_KEYS = frozenset({"max_cost", "scoring"})
+_ALLOWED_BUDGET_KEYS = frozenset({"max_cost", "scoring", "learning_policy", "policy_overlay"})
 _ALLOWED_SCORING_KEYS = frozenset({"benefit_weight", "risk_weight", "cost_weight"})
 _ALLOWED_TASK_FACT_KEYS = frozenset(
     {

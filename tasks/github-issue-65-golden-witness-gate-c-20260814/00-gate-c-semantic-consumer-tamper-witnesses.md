@@ -89,3 +89,14 @@ report a separate bounded issue. This card grants no self-acceptance authority.
 - Exit only as a scoped Gate C Candidate PR pending independent acceptance.
   Maximum later implementation claim:
   `GOLDEN_WITNESS_GATE_C_SEMANTIC_TESTS_CANDIDATE_ONLY`.
+
+## Owner-goal current-source rebind — 2026-09-08
+
+Owner active engineering goal resumes #65 remaining witness hardening.
+- Baseline: `ca01d72cdd3d09f9df0078cba53608bf54a0594f`.
+- PR226 confirmed MERGED at a787e8e703cc9f0df6a5bb96024db1f10157b04d; #31 CLOSED.
+- Existing eight-file ceiling and forbidden scopes remain unchanged.
+- Implement only missing behavioral/hostile checks inside existing mapped nodes. GB029 already covered, preserve it.
+- No corpus/evaluator/production edits and no invented default-value assertions.
+- GB019 remains a separate unresolved GateA finding, not silently closed by GateC.
+- worker_may_commit=false; independent controller acceptance required.

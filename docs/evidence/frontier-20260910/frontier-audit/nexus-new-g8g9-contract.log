@@ -1,0 +1,13 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.7, pytest-9.0.2, pluggy-1.6.0
+rootdir: /private/tmp/nexus-frontier-audit
+configfile: pytest.ini
+plugins: anyio-4.12.1, asyncio-1.3.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 44 items
+
+tests/product/test_client_conformance.py ........                        [ 18%]
+tests/product/test_github_action_core_binding.py .........               [ 38%]
+tests/product/test_github_adapter.py ...........................         [100%]
+
+============================== 44 passed in 3.81s ==============================

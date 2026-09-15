@@ -26,7 +26,7 @@ jobs:
           printf '%s\n' '{"status":"CI_BOOTSTRAP_DEFECT","reason":"impact gate did not reach classification"}' > "$RUNNER_TEMP/nexus-ci-impact/classification.json"
 
       - name: Checkout exact head
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
           persist-credentials: true
@@ -66,18 +66,52 @@ jobs:
             exit 1
           fi
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
       - name: Install uv
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: "0.9.2"
+          enable-cache: false
 
       - name: Install dependencies
         run: |
           uv sync --frozen --all-groups --all-extras
         env:
           UV_SYSTEM_PYTHON: 0
+
+      - name: Install exact canonical Learning package
+        run: |
+          set -euo pipefail
+          uv pip install --python .venv/bin/python --requirement requirements/canonical-learning.txt
+      - name: Install exact canonical runtime package
+        run: |
+          set -euo pipefail
+          uv pip install --python .venv/bin/python --requirement requirements/canonical-runtime.txt
+          EXPECTED_RUNTIME_COMMIT="$(sed -n 's/.*@\([0-9a-f]\{40\}\).*/\1/p' requirements/canonical-runtime.txt)"
+          test -n "$EXPECTED_RUNTIME_COMMIT"
+          EXPECTED_RUNTIME_COMMIT="$EXPECTED_RUNTIME_COMMIT" .venv/bin/python - <<'PY'
+          import importlib.metadata as metadata
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          dist = metadata.distribution("nexus-runtime")
+          direct_url = json.loads((Path(dist._path) / "direct_url.json").read_text(encoding="utf-8"))
+          commit = direct_url.get("vcs_info", {}).get("commit_id")
+          expected = os.environ["EXPECTED_RUNTIME_COMMIT"]
+          if commit != expected:
+              raise SystemExit(f"nexus-runtime commit mismatch: {commit!r} != {expected!r}")
+          import nexus_runtime
+          print(f"Python {sys.version.split()[0]}")
+          print(f"sys.executable={sys.executable}")
+          print(f"nexus-runtime commit_id={commit}")
+          print(f"nexus-runtime direct_url={Path(dist._path) / 'direct_url.json'}")
+          print(f"nexus_runtime.__file__={nexus_runtime.__file__}")
+          PY
 
       - name: Resolve exact comparison base
         id: base
@@ -191,11 +225,44 @@ jobs:
           UV_PROJECT_ENVIRONMENT="$BASE_WORKTREE/.venv" uv sync \
             --directory "$BASE_WORKTREE" \
             --frozen --all-groups --all-extras
+          if [ -f "$BASE_WORKTREE/requirements/canonical-learning.txt" ]; then
+            uv pip install --python "$BASE_WORKTREE/.venv/bin/python" \
+              --requirement "$BASE_WORKTREE/requirements/canonical-learning.txt"
+          fi
+          if [ -f "$BASE_WORKTREE/requirements/canonical-runtime.txt" ]; then
+            test -f "$BASE_WORKTREE/requirements/canonical-learning.txt"
+            uv pip install --python "$BASE_WORKTREE/.venv/bin/python" \
+              --requirement "$BASE_WORKTREE/requirements/canonical-runtime.txt"
+            EXPECTED_RUNTIME_COMMIT="$(sed -n 's/.*@\([0-9a-f]\{40\}\).*/\1/p' "$BASE_WORKTREE/requirements/canonical-runtime.txt")"
+            test -n "$EXPECTED_RUNTIME_COMMIT"
+            EXPECTED_RUNTIME_COMMIT="$EXPECTED_RUNTIME_COMMIT" "$BASE_WORKTREE/.venv/bin/python" - <<'PY'
+          import importlib.metadata as metadata
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          dist = metadata.distribution("nexus-runtime")
+          direct_url = json.loads((Path(dist._path) / "direct_url.json").read_text(encoding="utf-8"))
+          commit = direct_url.get("vcs_info", {}).get("commit_id")
+          expected = os.environ["EXPECTED_RUNTIME_COMMIT"]
+          if commit != expected:
+              raise SystemExit(f"nexus-runtime commit mismatch: {commit!r} != {expected!r}")
+          import nexus_runtime
+          print(f"Python {sys.version.split()[0]}")
+          print(f"sys.executable={sys.executable}")
+          print(f"nexus-runtime commit_id={commit}")
+          print(f"nexus-runtime direct_url={Path(dist._path) / 'direct_url.json'}")
+          print(f"nexus_runtime.__file__={nexus_runtime.__file__}")
+          PY
+          fi
 
       - name: Run mapped tests on exact base source
+        env:
+          BASE_WORKTREE: ${{ steps.base-worktree.outputs.path }}
         run: |
           set +e
-          .venv/bin/python "$GITHUB_WORKSPACE/scripts/ops/pr_impact_gate.py" run \
+          "$BASE_WORKTREE/.venv/bin/python" "$GITHUB_WORKSPACE/scripts/ops/pr_impact_gate.py" run \
             --plan .ci-impact/plan.json \
             --cwd "${{ steps.base-worktree.outputs.path }}" \
             --revision "${{ steps.base.outputs.sha }}" \
@@ -277,7 +344,7 @@ jobs:
 
       - name: Archive impact evidence 📦
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: exact-base-impact-${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/nexus-ci-impact/
@@ -294,7 +361,7 @@ jobs:
         run: |
           printf '%s\n' '<testsuite name="ci-bootstrap" tests="1" failures="1"><testcase name="full-regression"><failure message="full regression did not reach execution"/></testcase></testsuite>' > "$RUNNER_TEMP/full-regression.xml"
       - name: Checkout exact head
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
           persist-credentials: true
@@ -332,13 +399,46 @@ jobs:
             echo "checkout credentials remain configured" >&2
             exit 1
           fi
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
       - name: Install uv
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: "0.9.2"
+          enable-cache: false
       - name: Install dependencies
         run: uv sync --frozen --all-groups --all-extras
+      - name: Install exact canonical Learning package
+        run: |
+          set -euo pipefail
+          uv pip install --python .venv/bin/python --requirement requirements/canonical-learning.txt
+      - name: Install exact canonical runtime package
+        run: |
+          set -euo pipefail
+          uv pip install --python .venv/bin/python --requirement requirements/canonical-runtime.txt
+          EXPECTED_RUNTIME_COMMIT="$(sed -n 's/.*@\([0-9a-f]\{40\}\).*/\1/p' requirements/canonical-runtime.txt)"
+          test -n "$EXPECTED_RUNTIME_COMMIT"
+          EXPECTED_RUNTIME_COMMIT="$EXPECTED_RUNTIME_COMMIT" .venv/bin/python - <<'PY'
+          import importlib.metadata as metadata
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          dist = metadata.distribution("nexus-runtime")
+          direct_url = json.loads((Path(dist._path) / "direct_url.json").read_text(encoding="utf-8"))
+          commit = direct_url.get("vcs_info", {}).get("commit_id")
+          expected = os.environ["EXPECTED_RUNTIME_COMMIT"]
+          if commit != expected:
+              raise SystemExit(f"nexus-runtime commit mismatch: {commit!r} != {expected!r}")
+          import nexus_runtime
+          print(f"Python {sys.version.split()[0]}")
+          print(f"sys.executable={sys.executable}")
+          print(f"nexus-runtime commit_id={commit}")
+          print(f"nexus-runtime direct_url={Path(dist._path) / 'direct_url.json'}")
+          print(f"nexus_runtime.__file__={nexus_runtime.__file__}")
+          PY
       - name: Run full repository regression
         run: uv run pytest tests/ -v --timeout=300 --junitxml="$RUNNER_TEMP/full-regression.xml"
         env:
@@ -360,7 +460,7 @@ jobs:
             fi
           done < <(git ls-files --stage -z)
           git submodule foreach --recursive ':'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: full-regression-${{ github.sha }}

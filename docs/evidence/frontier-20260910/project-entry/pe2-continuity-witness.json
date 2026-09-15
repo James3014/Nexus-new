@@ -1,0 +1,115 @@
+{
+  "issued": {
+    "exit_code": 0,
+    "result": {
+      "grant_id": "issue842-pe2-verification-continuity-20260910-r1",
+      "path": "/Users/jameschen/.local/state/nexus/authority/standing-grants/73bcfa53d42f2773f96e666d8b5d41b1ad6a95fa951d24a1ad155b25f949092d/73bcfa53d42f2773f96e666d8b5d41b1ad6a95fa951d24a1ad155b25f949092d.json",
+      "receipt_hash": "f1f75015ea4d5bf3d3938c43c836ccbcc61f19f818b5d04e603fef11d830d1d0",
+      "status": "ISSUED"
+    }
+  },
+  "test_only": "Observe canonical verification grant; no Candidate action performed",
+  "processes": [
+    {
+      "pid": 73870,
+      "positive": {
+        "schema": "nexus.standing_grant_decision.v2",
+        "outcome": "GRANT_MATCH",
+        "context_hash": "36a60b993adf6cc067c7a38e362479bd998fdee802c5073dbf044b0b701af655",
+        "decision_hash": "a1a84ff5b59a39e4a46cd49eeb27dfb9a5e872761e7cd26b70f0baf57bb4796f",
+        "mutation_authorized": true,
+        "claim_ceiling": "AUTHORIZATION_ONLY_VERIFICATION_REQUIRED"
+      },
+      "wrong_owner": {
+        "schema": "nexus.standing_grant_decision.v2",
+        "outcome": "OUT_OF_SCOPE",
+        "context_hash": "36a60b993adf6cc067c7a38e362479bd998fdee802c5073dbf044b0b701af655",
+        "decision_hash": "869eecc9da1c1080a51adc485c96266273b2fa465dedd60070b0585b8e8a4d0d",
+        "mutation_authorized": false,
+        "claim_ceiling": "NO_MUTATION_AUTHORITY"
+      },
+      "wrong_action": {
+        "schema": "nexus.standing_grant_decision.v2",
+        "outcome": "OUT_OF_SCOPE",
+        "context_hash": "36a60b993adf6cc067c7a38e362479bd998fdee802c5073dbf044b0b701af655",
+        "decision_hash": "869eecc9da1c1080a51adc485c96266273b2fa465dedd60070b0585b8e8a4d0d",
+        "mutation_authorized": false,
+        "claim_ceiling": "NO_MUTATION_AUTHORITY"
+      },
+      "expired": {
+        "schema": "nexus.standing_grant_decision.v2",
+        "outcome": "INVALID",
+        "context_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "decision_hash": "e1d4740e737010ca4d53bff815aa56d0e5bf7d5e50ef26cbd807eae4e72e35f2",
+        "mutation_authorized": false,
+        "claim_ceiling": "NO_MUTATION_AUTHORITY"
+      }
+    },
+    {
+      "pid": 73991,
+      "positive": {
+        "schema": "nexus.standing_grant_decision.v2",
+        "outcome": "GRANT_MATCH",
+        "context_hash": "36a60b993adf6cc067c7a38e362479bd998fdee802c5073dbf044b0b701af655",
+        "decision_hash": "a1a84ff5b59a39e4a46cd49eeb27dfb9a5e872761e7cd26b70f0baf57bb4796f",
+        "mutation_authorized": true,
+        "claim_ceiling": "AUTHORIZATION_ONLY_VERIFICATION_REQUIRED"
+      },
+      "wrong_owner": {
+        "schema": "nexus.standing_grant_decision.v2",
+        "outcome": "OUT_OF_SCOPE",
+        "context_hash": "36a60b993adf6cc067c7a38e362479bd998fdee802c5073dbf044b0b701af655",
+        "decision_hash": "869eecc9da1c1080a51adc485c96266273b2fa465dedd60070b0585b8e8a4d0d",
+        "mutation_authorized": false,
+        "claim_ceiling": "NO_MUTATION_AUTHORITY"
+      },
+      "wrong_action": {
+        "schema": "nexus.standing_grant_decision.v2",
+        "outcome": "OUT_OF_SCOPE",
+        "context_hash": "36a60b993adf6cc067c7a38e362479bd998fdee802c5073dbf044b0b701af655",
+        "decision_hash": "869eecc9da1c1080a51adc485c96266273b2fa465dedd60070b0585b8e8a4d0d",
+        "mutation_authorized": false,
+        "claim_ceiling": "NO_MUTATION_AUTHORITY"
+      },
+      "expired": {
+        "schema": "nexus.standing_grant_decision.v2",
+        "outcome": "INVALID",
+        "context_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "decision_hash": "e1d4740e737010ca4d53bff815aa56d0e5bf7d5e50ef26cbd807eae4e72e35f2",
+        "mutation_authorized": false,
+        "claim_ceiling": "NO_MUTATION_AUTHORITY"
+      }
+    }
+  ],
+  "revocation": {
+    "exit_code": 0,
+    "result": {
+      "grant_id": "issue842-pe2-verification-continuity-20260910-r1-revoked",
+      "receipt_hash": "263528ccfeb3969b8cec69b6ebcb905470cf2d13e2325c02962aa1bbb11b2113",
+      "status": "REVOKED",
+      "supersedes_grant_hash": "f1f75015ea4d5bf3d3938c43c836ccbcc61f19f818b5d04e603fef11d830d1d0"
+    }
+  },
+  "final_inspection": {
+    "exit_code": 2,
+    "result": {
+      "allowed_actions": [
+        "CANDIDATE_VERIFY"
+      ],
+      "canonical_remote": "https://github.com/James3014/Nexus-new.git",
+      "coordination_scope_id": "ISSUE-842-PE2-CONTINUITY-20260910-R1",
+      "coordinator_id": "primary-codex-coordinator",
+      "expires_at": "2026-09-10T03:42:14.802494+00:00",
+      "goal_id": "ISSUE-842-PROJECT-ENTRY",
+      "grant_id": "issue842-pe2-verification-continuity-20260910-r1-revoked",
+      "issued_at": "2026-09-10T03:37:14.802494+00:00",
+      "owner_id": "James3014",
+      "receipt_hash": "263528ccfeb3969b8cec69b6ebcb905470cf2d13e2325c02962aa1bbb11b2113",
+      "repository_id": "James3014/Nexus-new",
+      "revocation_reason": "PE2_READ_ONLY_CONTINUITY_WITNESS_COMPLETE_NO_CANDIDATE_ACTION",
+      "revoked_at": "2026-09-10T03:37:15.243028+00:00",
+      "schema": "nexus.standing_grant_inspection.v1",
+      "status": "REVOKED"
+    }
+  }
+}

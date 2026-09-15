@@ -1,0 +1,12 @@
+........................................................................ [ 46%]
+........................................................................ [ 93%]
+.........s                                                               [100%]
+=============================== warnings summary ===============================
+tests/test_runtime.py::test_worker_reconcile_real_graph_replays_write_effect_once_after_restart
+  /private/tmp/nexus-runtime-frozen-audit/.venv/lib/python3.14/site-packages/google/genai/types.py:42: DeprecationWarning: '_UnionGenericAlias' is deprecated and slated for removal in Python 3.17
+    VersionedUnionType = Union[builtin_types.UnionType, _UnionGenericAlias]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+SKIPPED [1] tests/test_cross_repo_acceptance.py:33: Nexus-new checkout not available for live cross-repo import
+153 passed, 1 skipped, 1 warning in 2.51s

@@ -29,6 +29,8 @@ def test_episode_identity_and_stages_are_stable_and_fail_closed() -> None:
     assert first["stages"]["outcome_measured"] is True
     assert first["stages"]["outcome_uplift_observed"] is False
     assert first["qualification_status"] == "QUALIFIED"
+    with pytest.raises(ValueError, match="IDENTITY_MISMATCH"):
+        validate_nexus_learning_episode(dict(first, episode_id="lep:" + "0" * 24))
 
 
 def test_episode_id_and_idempotency_key_tamper_fail_closed() -> None:

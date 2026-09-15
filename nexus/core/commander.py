@@ -126,21 +126,21 @@ class Commander:
             "project_root": self.project_root,
         }
         
-        tool_name = "repair" # 這裡是邏輯工具名
+        # 🛡️ Issue #464: Canonical conservative R-stage mutation preflight sentinel.
+        # Validates physical mutation authority and budget under Phase R without
+        # claiming Commander has selected the exact downstream repair executor tool.
+        mutation_preflight_tool = "safe_patch"
         args = state.metadata.get("next_params", {"target_file": state.metadata.get("target_file")})
-        
-        status, messages = default_director.run_pre_execute(tool_name, args, harness_context)
-        
+
+        status, messages = default_director.run_pre_execute(mutation_preflight_tool, args, harness_context)
+
         if status == "BLOCKED":
-            enforce_block = bool(state.metadata.get("harness_enforce_block", False))
-            if enforce_block:
-                logger.error(f"🛑 [Commander:HARNESS] Blocked! Reason: {'; '.join(messages)}")
-                return "HARNESS_BLOCKED"
-            logger.warning(f"⚠️ [Commander:HARNESS] Soft-block bypassed: {'; '.join(messages)}")
-            
+            logger.error(f"🛑 [Commander:HARNESS] Blocked! Reason: {'; '.join(messages)}")
+            return "HARNESS_BLOCKED"
+
         if status == "WARN":
             logger.warning(f"⚠️ [Commander:HARNESS] Warning: {'; '.join(messages)}")
-            
+
         return "RUN_SKILL:repair"
 
     def _orchestrate_a(self, state):

@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -10,7 +11,12 @@ from nexus.orchestrator.task_contract import (
     MutationMode,
     SelfHostedTaskContract,
 )
-from nexus.orchestrator.worktree_manager import WorktreeManager
+from nexus.orchestrator.worktree_manager import (
+    WorktreeManager,
+    _contract_digest,
+    _domain_fingerprint,
+    _source_identity,
+)
 
 
 @pytest.fixture
@@ -379,10 +385,11 @@ def test_serial_target_budget_ignores_retained_dirty_target(sh2_repo):
     Path(retained_lease.target_worktree, "retained.txt").write_text("evidence\n", encoding="utf-8")
 
     second = _contract(sh2_repo, task_id="second")
-    manager.create_lease(
-        second,
-        task_states={"retained": {"status": "FINAL_BLOCK", "lease": retained_lease.__dict__}},
-    )
+    with pytest.raises(RuntimeError, match="serial Target budget"):
+        manager.create_lease(
+            second,
+            task_states={"retained": {"status": "FINAL_BLOCK", "lease": retained_lease.__dict__}},
+        )
     assert Path(retained_lease.target_worktree, "retained.txt").exists()
 
 
@@ -432,6 +439,20 @@ def test_candidate_cleanup_requires_durable_ref_and_is_idempotent(sh2_repo):
     )
     assert removed.decision == "REMOVED"
     assert not target.exists()
+    assert manager.released_lease_proof(
+        Path(contract.controller_repo_root),
+        task_id=contract.task_id,
+        attempt_id=lease.attempt_id,
+        lease_id=lease.lease_id,
+        target_worktree=target,
+    )
+    assert not manager.released_lease_proof(
+        Path(contract.controller_repo_root),
+        task_id=contract.task_id,
+        attempt_id="wrong-attempt",
+        lease_id=lease.lease_id,
+        target_worktree=target,
+    )
     assert manager.cleanup_terminal_target(
         contract, lease, candidate_commit=candidate, candidate_ref=candidate_ref
     ).decision == "ALREADY_REMOVED"
@@ -440,6 +461,60 @@ def test_candidate_cleanup_requires_durable_ref_and_is_idempotent(sh2_repo):
     assert retried.initial_head == contract.target_base_revision
     assert retried.target_detached is True
     assert _git(sh2_repo["controller"], "rev-parse", f"refs/heads/{retried.target_branch}") == candidate
+
+
+def test_released_lease_proof_rejects_active_symlink_target_and_tampered_tombstone(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="release-proof-negative")
+    receipt = manager.cleanup_terminal_target(contract, lease)
+    assert receipt.decision == "REMOVED"
+    controller = Path(contract.controller_repo_root)
+    assert manager.released_lease_proof(
+        controller,
+        task_id=contract.task_id,
+        attempt_id=lease.attempt_id,
+        lease_id=lease.lease_id,
+        target_worktree=target,
+    )
+    ownership = manager._ownership_record_path(controller, contract.task_id)
+    tombstones = sorted(ownership.parent.glob(f"{ownership.with_suffix('').name}.*.released"))
+    assert tombstones
+    tombstone = tombstones[-1]
+    ownership.symlink_to(tombstone)
+    assert not manager.released_lease_proof(
+        controller,
+        task_id=contract.task_id,
+        attempt_id=lease.attempt_id,
+        lease_id=lease.lease_id,
+        target_worktree=target,
+    )
+    ownership.unlink()
+    target.symlink_to(controller, target_is_directory=True)
+    assert not manager.released_lease_proof(
+        controller,
+        task_id=contract.task_id,
+        attempt_id=lease.attempt_id,
+        lease_id=lease.lease_id,
+        target_worktree=target,
+    )
+    target.unlink()
+    target.symlink_to(target.parent / "missing-target")
+    assert not manager.released_lease_proof(
+        controller,
+        task_id=contract.task_id,
+        attempt_id=lease.attempt_id,
+        lease_id=lease.lease_id,
+        target_worktree=target,
+    )
+    target.unlink()
+    original = tombstone.read_text(encoding="utf-8")
+    tombstone.write_text(original.replace(lease.lease_id, "wrong-lease", 1), encoding="utf-8")
+    assert not manager.released_lease_proof(
+        controller,
+        task_id=contract.task_id,
+        attempt_id=lease.attempt_id,
+        lease_id=lease.lease_id,
+        target_worktree=target,
+    )
 
 
 def test_create_lease_accepts_verified_salvage_parent_on_revision_refresh(sh2_repo):
@@ -482,6 +557,64 @@ def test_create_lease_accepts_verified_salvage_parent_on_revision_refresh(sh2_re
     assert retried.target_detached is True
     assert retried.initial_head == refreshed_sha
     assert _git(sh2_repo["controller"], "rev-parse", f"refs/heads/{retried.target_branch}") == original.target_base_revision
+
+
+def test_create_lease_accepts_unprotected_ancestor_task_branch_on_refresh(sh2_repo):
+    original = _contract(sh2_repo, task_id="ancestor-refresh")
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    lease = manager.create_lease(original)
+    assert manager.cleanup_terminal_target(original, lease).decision == "REMOVED"
+
+    (sh2_repo["controller"] / "controller.txt").write_text("refreshed\n", encoding="utf-8")
+    _git(sh2_repo["controller"], "add", "controller.txt")
+    _git(sh2_repo["controller"], "commit", "-m", "refreshed integration base")
+    refreshed_sha = _git(sh2_repo["controller"], "rev-parse", "HEAD")
+    refreshed = original.model_copy(
+        update={"controller_revision": refreshed_sha, "target_base_revision": refreshed_sha}
+    )
+
+    retried = manager.create_lease(refreshed)
+
+    assert retried.target_detached is True
+    assert retried.initial_head == refreshed_sha
+    assert Path(retried.target_worktree).exists()
+    assert _git(Path(retried.target_worktree), "rev-parse", "HEAD") == refreshed_sha
+    assert _git(Path(retried.target_worktree), "branch", "--show-current") == ""
+    assert _git(sh2_repo["controller"], "rev-parse", f"refs/heads/{retried.target_branch}") == original.target_base_revision
+
+
+def test_create_lease_rejects_unprotected_divergent_task_branch_on_refresh(sh2_repo):
+    original = _contract(sh2_repo, task_id="divergent-refresh")
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    lease = manager.create_lease(original)
+    assert manager.cleanup_terminal_target(original, lease).decision == "REMOVED"
+
+    divergent_target = sh2_repo["target_root"] / "divergent-source"
+    _git(sh2_repo["controller"], "worktree", "add", "--detach", str(divergent_target), original.target_base_revision)
+    (divergent_target / "src" / "allowed.txt").write_text("divergent\n", encoding="utf-8")
+    _git(divergent_target, "add", "src/allowed.txt")
+    _git(divergent_target, "commit", "-m", "unprotected divergent task branch")
+    divergent_head = _git(divergent_target, "rev-parse", "HEAD")
+    _git(sh2_repo["controller"], "worktree", "remove", "--force", str(divergent_target))
+    _git(
+        sh2_repo["controller"],
+        "update-ref",
+        f"refs/heads/{lease.target_branch}",
+        divergent_head,
+    )
+
+    (sh2_repo["controller"] / "controller.txt").write_text("refreshed\n", encoding="utf-8")
+    _git(sh2_repo["controller"], "add", "controller.txt")
+    _git(sh2_repo["controller"], "commit", "-m", "refreshed integration base")
+    refreshed_sha = _git(sh2_repo["controller"], "rev-parse", "HEAD")
+    refreshed = original.model_copy(
+        update={"controller_revision": refreshed_sha, "target_base_revision": refreshed_sha}
+    )
+
+    with pytest.raises(RuntimeError, match="lacks durable protection"):
+        manager.create_lease(refreshed)
+    assert not (sh2_repo["target_root"] / original.task_id).exists()
+    assert _git(sh2_repo["controller"], "rev-parse", f"refs/heads/{lease.target_branch}") == divergent_head
 
 
 def test_dirty_unique_target_is_retained_for_review(sh2_repo):
@@ -570,6 +703,7 @@ def test_candidate_ref_is_immutable_per_candidate_commit(sh2_repo):
 
     assert candidate_ref.endswith(candidate)
     assert _git(sh2_repo["controller"], "rev-parse", candidate_ref) == candidate
+    assert manager.protect_candidate(contract, lease, candidate) == candidate_ref
 
 
 def test_candidate_ref_uses_immutable_fallback_when_legacy_parent_exists(sh2_repo):
@@ -587,6 +721,161 @@ def test_candidate_ref_uses_immutable_fallback_when_legacy_parent_exists(sh2_rep
 
     assert candidate_ref == f"refs/nexus-candidate-commits/{contract.task_id}/{candidate}"
     assert _git(sh2_repo["controller"], "rev-parse", candidate_ref) == candidate
+
+
+def test_create_precommitted_lease_adopts_exact_candidate_without_moving_task_branch(sh2_repo):
+    contract, manager, base_lease, target = _prepare_candidate(sh2_repo)
+    (target / "src" / "allowed.txt").write_text("candidate\n", encoding="utf-8")
+    _git(target, "add", "src/allowed.txt")
+    _git(target, "commit", "-m", "external candidate")
+    candidate = _git(target, "rev-parse", "HEAD")
+    candidate_tree = _git(target, "rev-parse", "HEAD^{tree}")
+    _git(sh2_repo["controller"], "worktree", "remove", "--force", str(target))
+    _git(sh2_repo["controller"], "update-ref", f"refs/heads/{base_lease.target_branch}", contract.target_base_revision)
+
+    lease = manager.create_precommitted_lease(contract, candidate, candidate_tree)
+
+    assert lease.initial_head == contract.target_base_revision
+    assert lease.target_detached is True
+    assert _git(Path(lease.target_worktree), "rev-parse", "HEAD") == candidate
+    assert _git(Path(lease.target_worktree), "branch", "--show-current") == ""
+    assert _git(Path(lease.target_worktree), "status", "--porcelain") == ""
+    assert _git(sh2_repo["controller"], "rev-parse", f"refs/heads/{lease.target_branch}") == contract.target_base_revision
+
+
+def test_create_precommitted_lease_rejects_non_descendant_and_tree_mismatch(sh2_repo):
+    contract = _contract(sh2_repo)
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    unrelated = "1" * 40
+    with pytest.raises(RuntimeError, match="missing"):
+        manager.create_precommitted_lease(contract, unrelated)
+
+    _git(sh2_repo["controller"], "commit", "--allow-empty", "-m", "candidate")
+    candidate = _git(sh2_repo["controller"], "rev-parse", "HEAD")
+    contract = contract.model_copy(update={"controller_revision": candidate})
+    with pytest.raises(RuntimeError, match="tree"):
+        manager.create_precommitted_lease(contract, candidate, "0" * 40)
+
+
+def test_protect_candidate_rejects_concurrent_different_ref_without_overwrite(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo)
+    (target / "src" / "allowed.txt").write_text("candidate\n", encoding="utf-8")
+    _git(target, "add", "src/allowed.txt")
+    _git(target, "commit", "-m", "candidate")
+    candidate = _git(target, "rev-parse", "HEAD")
+    candidate_ref = f"refs/nexus-candidates/{contract.task_id}/{candidate}"
+    _git(sh2_repo["controller"], "commit", "--allow-empty", "-m", "other")
+    other = _git(sh2_repo["controller"], "rev-parse", "HEAD")
+    _git(sh2_repo["controller"], "update-ref", candidate_ref, other)
+
+    with pytest.raises(RuntimeError, match="different commit"):
+        manager.protect_candidate(contract, lease, candidate)
+    assert _git(sh2_repo["controller"], "rev-parse", candidate_ref) == other
+
+
+def test_create_precommitted_lease_rolls_back_when_detach_fails(sh2_repo, monkeypatch):
+    contract = _contract(sh2_repo, task_id="rollback-adoption")
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    _git(sh2_repo["controller"], "commit", "--allow-empty", "-m", "candidate")
+    candidate = _git(sh2_repo["controller"], "rev-parse", "HEAD")
+    contract = contract.model_copy(update={"controller_revision": candidate})
+    original_run_git = manager._run_git
+
+    def fail_detach(args, **kwargs):
+        if args[:3] == ["checkout", "--detach", candidate]:
+            raise RuntimeError("injected detach failure")
+        return original_run_git(args, **kwargs)
+
+    monkeypatch.setattr(manager, "_run_git", fail_detach)
+    with pytest.raises(RuntimeError, match="injected detach failure"):
+        manager.create_precommitted_lease(contract, candidate)
+    assert not (sh2_repo["target_root"] / contract.task_id).exists()
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.run(
+            ["git", "show-ref", "--verify", f"refs/heads/nexus/task/{contract.task_id}"],
+            cwd=sh2_repo["controller"], check=True, capture_output=True, text=True,
+        )
+    assert not manager._ownership_record_path(sh2_repo["controller"], contract.task_id).exists()
+
+
+def test_create_precommitted_lease_rolls_back_when_ownership_write_fails(sh2_repo, monkeypatch):
+    contract = _contract(sh2_repo, task_id="rollback-ownership")
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    _git(sh2_repo["controller"], "commit", "--allow-empty", "-m", "candidate")
+    candidate = _git(sh2_repo["controller"], "rev-parse", "HEAD")
+    contract = contract.model_copy(update={"controller_revision": candidate})
+    original_write = manager._write_target_ownership
+
+    def fail_write(*args, **kwargs):
+        if args[1].target_detached:
+            raise RuntimeError("injected ownership failure")
+        return original_write(*args, **kwargs)
+
+    monkeypatch.setattr(manager, "_write_target_ownership", fail_write)
+    with pytest.raises(RuntimeError, match="injected ownership failure"):
+        manager.create_precommitted_lease(contract, candidate)
+    assert not (sh2_repo["target_root"] / contract.task_id).exists()
+    assert not manager._ownership_record_path(sh2_repo["controller"], contract.task_id).exists()
+
+
+def test_create_precommitted_lease_is_byte_equivalent_on_exact_retry(sh2_repo):
+    contract = _contract(sh2_repo, task_id="retry-adoption")
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    _git(sh2_repo["controller"], "commit", "--allow-empty", "-m", "candidate")
+    candidate = _git(sh2_repo["controller"], "rev-parse", "HEAD")
+    tree = _git(sh2_repo["controller"], "rev-parse", "HEAD^{tree}")
+    contract = contract.model_copy(update={"controller_revision": candidate})
+    first = manager.create_precommitted_lease(contract, candidate, tree, attempt_id="attempt-1")
+    second = manager.create_precommitted_lease(contract, candidate, tree, attempt_id="attempt-1")
+    assert second == first
+    with pytest.raises(RuntimeError, match="attempt"):
+        manager.create_precommitted_lease(contract, candidate, tree, attempt_id="attempt-2")
+
+
+def test_precommitted_retry_rejects_controller_drift_or_dirty_contract_domain(sh2_repo):
+    contract = _contract(sh2_repo, task_id="retry-identity")
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    _git(sh2_repo["controller"], "commit", "--allow-empty", "-m", "candidate")
+    candidate = _git(sh2_repo["controller"], "rev-parse", "HEAD")
+    contract = contract.model_copy(update={"controller_revision": candidate})
+    lease = manager.create_precommitted_lease(contract, candidate)
+    (sh2_repo["controller"] / "controller.txt").write_text("dirty\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="clean"):
+        manager.create_precommitted_lease(contract, candidate)
+    (sh2_repo["controller"] / "controller.txt").unlink()
+    _git(sh2_repo["controller"], "commit", "--allow-empty", "-m", "drift")
+    with pytest.raises(RuntimeError, match="revision"):
+        manager.create_precommitted_lease(contract, candidate)
+
+    # Restore the controller revision only to exercise caller-domain binding.
+    _git(sh2_repo["controller"], "update-ref", "HEAD", candidate)
+    (sh2_repo["controller"] / "controller.txt").write_text("controller\n", encoding="utf-8")
+    altered = contract.model_copy(update={"allowed_files": ["outside/"]})
+    with pytest.raises(RuntimeError, match="contract"):
+        manager.create_precommitted_lease(altered, candidate)
+    assert lease.target_detached is True
+
+
+def test_detached_precommitted_lease_is_an_active_owned_target_for_disjoint_conflict_checks(sh2_repo):
+    contract = _contract(sh2_repo, task_id="detached-owner")
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]), process_checker=lambda _path: False)
+    _git(sh2_repo["controller"], "commit", "--allow-empty", "-m", "candidate")
+    candidate = _git(sh2_repo["controller"], "rev-parse", "HEAD")
+    contract = contract.model_copy(update={"controller_revision": candidate})
+    manager.create_precommitted_lease(contract, candidate)
+    ownership = json.loads(
+        manager._ownership_record_path(sh2_repo["controller"], contract.task_id).read_text()
+    )
+    other = _contract(sh2_repo, task_id="other", allowed_files=["outside/"]).model_copy(
+        update={"controller_revision": candidate}
+    )
+    assert manager.target_conflict(other, task_states={contract.task_id: ownership}) is False
+    assert manager.target_conflict(
+        _contract(sh2_repo, task_id="other", allowed_files=["src/"]).model_copy(
+            update={"controller_revision": candidate}
+        ),
+        task_states={contract.task_id: ownership},
+    ) is True
 
 
 def test_ten_clean_attempts_do_not_grow_worktrees(sh2_repo):
@@ -971,7 +1260,7 @@ def test_restore_rejects_wrong_salvage_parent(sh2_repo):
         manager.restore_task_branch_for_retry(contract, lease, wrong_salvage, salvage_ref)
 
 
-def test_restore_rejects_registered_target(sh2_repo):
+def test_restore_rejects_registered_target_lc2(sh2_repo):
     """LC2 test 7: Target still registered → fail closed."""
     contract = _contract(sh2_repo, task_id="reg-target-lc2")
     manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
@@ -1483,3 +1772,424 @@ def test_different_base_slot_reuse_blocks_until_verified_release(sh2_repo):
     )
     assert blocked_lease.status == "BLOCKED"
     assert "BLOCKED_UNPROTECTED_UNIQUE_COMMIT" in (blocked_lease.blocker or "")
+
+
+# ---------------------------------------------------------------------------
+# Physical Ownership Record Lifecycle & Safety Tests
+# ---------------------------------------------------------------------------
+
+def test_cleanup_terminal_target_successful_exact_release_removes_ownership_record(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-release")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+
+    assert target.exists()
+    assert record_path.exists()
+
+    receipt = manager.cleanup_terminal_target(contract, lease)
+    assert receipt.decision == "REMOVED"
+    assert receipt.performed is True
+    assert not target.exists()
+    assert not record_path.exists()
+
+    # Idempotent second cleanup call
+    second = manager.cleanup_terminal_target(contract, lease)
+    assert second.decision == "ALREADY_REMOVED"
+    assert not record_path.exists()
+
+
+def test_cleanup_terminal_target_failed_release_preserves_ownership_record(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-failed")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+    (target / "src" / "allowed.txt").write_text("uncommitted dirty\n", encoding="utf-8")
+
+    receipt = manager.cleanup_terminal_target(contract, lease)
+    assert receipt.decision == "BLOCKED_BY_UNSAVED_CHANGES"
+    assert receipt.performed is False
+    assert target.exists()
+    assert record_path.exists()
+
+
+def test_cleanup_terminal_target_process_blocked_preserves_ownership_record(sh2_repo):
+    contract = _contract(sh2_repo, task_id="owner-process")
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]), process_checker=lambda _: True)
+    lease = manager.create_lease(contract)
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+
+    receipt = manager.cleanup_terminal_target(contract, lease)
+    assert receipt.decision == "BLOCKED_BY_PROCESS"
+    assert receipt.performed is False
+    assert record_path.exists()
+
+
+def test_cleanup_terminal_target_rejects_symlink_or_non_regular_ownership_record(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-symlink")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+
+    # Replace ownership record with a symlink to outside file
+    outside = controller / "outside.txt"
+    record_path.unlink()
+    record_path.symlink_to(outside)
+
+    receipt = manager.cleanup_terminal_target(contract, lease)
+    assert receipt.decision == "BLOCKED_BY_UNSAVED_CHANGES"
+    assert "not a regular file" in (receipt.blocker or "")
+    assert target.exists()
+
+
+def test_cleanup_terminal_target_rejects_tampered_integrity_ownership_record(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-tamper")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record["integrity_sha256"] = "0" * 64
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    receipt = manager.cleanup_terminal_target(contract, lease)
+    assert receipt.decision == "BLOCKED_BY_UNSAVED_CHANGES"
+    assert "integrity is invalid" in (receipt.blocker or "")
+    assert target.exists()
+
+
+def test_cleanup_terminal_target_rejects_mismatched_lease_binding(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-mismatch")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record["lease_id"] = "different-lease-id"
+    record["attempt_id"] = "different-lease-id"
+    record["expected_lease_id"] = "different-lease-id"
+    record["expected_attempt_id"] = "different-lease-id"
+    record["integrity_sha256"] = manager._ownership_digest(record)
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    receipt = manager.cleanup_terminal_target(contract, lease)
+    assert receipt.decision == "BLOCKED_BY_UNSAVED_CHANGES"
+    assert "identity binding mismatch" in (receipt.blocker or "")
+    assert target.exists()
+
+
+def test_cleanup_terminal_target_dry_run_preserves_worktree_and_ownership_record(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-dryrun")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+
+    receipt = manager.cleanup_terminal_target(contract, lease, dry_run=True)
+    assert receipt.decision == "REMOVED"
+    assert receipt.performed is False
+    assert receipt.eligible is True
+    assert target.exists()
+    assert record_path.exists()
+
+
+def test_cleanup_terminal_target_with_salvage_removes_ownership_record(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-salvage")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+
+    (target / "src" / "allowed.txt").write_text("salvaged\n", encoding="utf-8")
+    _git(target, "add", "src/allowed.txt")
+    _git(target, "commit", "-m", "salvage commit")
+    salvage_sha = _git(target, "rev-parse", "HEAD")
+    salvage_ref = manager.salvage_ref_for(contract.task_id, "attempt-1")
+    _git(controller, "update-ref", salvage_ref, salvage_sha)
+
+    receipt = manager.cleanup_terminal_target(
+        contract,
+        lease,
+        salvage_commit=salvage_sha,
+        salvage_ref=salvage_ref,
+    )
+    assert receipt.decision == "REMOVED"
+    assert receipt.performed is True
+    assert not target.exists()
+    assert not record_path.exists()
+
+
+def test_cleanup_terminal_target_with_candidate_removes_ownership_record(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-candidate")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+
+    (target / "src" / "allowed.txt").write_text("candidate\n", encoding="utf-8")
+    _git(target, "add", "src/allowed.txt")
+    _git(target, "commit", "-m", "candidate commit")
+    candidate_sha = _git(target, "rev-parse", "HEAD")
+    candidate_ref = manager.protect_candidate(contract, lease, candidate_sha)
+
+    receipt = manager.cleanup_terminal_target(
+        contract,
+        lease,
+        candidate_commit=candidate_sha,
+        candidate_ref=candidate_ref,
+    )
+    assert receipt.decision == "REMOVED"
+    assert receipt.performed is True
+    assert not target.exists()
+    assert not record_path.exists()
+
+
+def test_cleanup_terminal_target_cas_swap_race_preserves_record(sh2_repo, monkeypatch):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-cas-swap")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+
+    orig_run_git = manager._run_git
+
+    def swapped_run_git(args, **kwargs):
+        res = orig_run_git(args, **kwargs)
+        if args and args[0] == "worktree" and args[1] == "remove":
+            # Simulate a swap race: unlink and recreate a new file with different content/inode
+            record = json.loads(record_path.read_text(encoding="utf-8"))
+            record["lease_id"] = "swapped-lease-id"
+            record["integrity_sha256"] = manager._ownership_digest(record)
+            record_path.unlink()
+            record_path.write_text(json.dumps(record), encoding="utf-8")
+        return res
+
+    monkeypatch.setattr(manager, "_run_git", swapped_run_git)
+
+    receipt = manager.cleanup_terminal_target(contract, lease)
+    assert receipt.decision == "BLOCKED_BY_UNSAVED_CHANGES"
+    assert "ownership record" in (receipt.blocker or "")
+    # The swapped record must be preserved
+    assert record_path.exists()
+
+
+def test_ownership_record_distinct_attempt_id_binding(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-attempt-binding")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+    assert record_path.exists()
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record.get("attempt_id") == lease.attempt_id
+    assert record.get("lease_id") == lease.lease_id
+
+    record["attempt_id"] = "attempt-forged-9999"
+    record["integrity_sha256"] = manager._ownership_digest(record)
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    entry = {"branch": f"refs/heads/nexus/task/{contract.task_id}", "worktree": str(target)}
+    with pytest.raises(ValueError, match="MUTATION_IDENTITY_INVALID: attempt_id is stale"):
+        manager._read_target_ownership(controller, entry, contract.task_id)
+
+
+def test_ownership_recomputed_digest_after_allowed_files_tamper_fails_closed(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-tamper-allowed")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+    assert record_path.exists()
+
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record["contract"]["allowed_files"] = ["src/forged.txt"]
+    record["integrity_sha256"] = manager._ownership_digest(record)
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    entry = {"branch": f"refs/heads/nexus/task/{contract.task_id}", "worktree": str(target)}
+    with pytest.raises(ValueError, match="MUTATION_IDENTITY_INVALID"):
+        manager._read_target_ownership(controller, entry, contract.task_id)
+
+
+def test_cleanup_cas_staging_swap_never_deletes_replacement_file(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-cas-no-replace-del")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+    assert record_path.exists()
+
+    _, original_record, expected_identity, expected_digest = manager._validate_exact_ownership_for_cleanup(
+        controller, contract, lease
+    )
+
+    replacement_content = json.dumps({"schema": "nexus.target_ownership.v1", "task_id": "replacement-b"})
+    orig_replace = os.replace
+
+    def hooked_replace(src, dst):
+        orig_replace(src, dst)
+        if str(src) == str(record_path):
+            record_path.write_text(replacement_content, encoding="utf-8")
+
+    import unittest.mock as mock
+    with mock.patch("os.replace", side_effect=hooked_replace):
+        manager._delete_ownership_record_cas(
+            record_path,
+            expected_identity,
+            expected_digest,
+            lease.lease_id,
+            contract.task_id,
+            expected_attempt_id=lease.attempt_id,
+        )
+
+    assert record_path.exists()
+    assert record_path.read_text(encoding="utf-8") == replacement_content
+
+
+def test_orphan_ownership_record_after_failed_cleanup_blocks_later_admission(sh2_repo):
+    contract_a, manager, lease_a, target_a = _prepare_candidate(sh2_repo, task_id="task-held-a")
+    controller = Path(contract_a.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract_a.task_id)
+    assert record_path.exists()
+
+    _git(controller, "worktree", "remove", "--force", str(target_a))
+    assert not target_a.exists()
+    assert record_path.exists()
+
+    contract_b = _contract(sh2_repo, task_id="task-held-b", allowed_files=["src/allowed.txt"])
+
+    assert manager.target_conflict(contract_b) is True
+    with pytest.raises(RuntimeError, match="serial Target budget exceeded: active Target limit is 1"):
+        manager.create_lease(contract_b)
+
+
+def test_ownership_source_identity_mismatch_fails_closed(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-source-id")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+    assert record_path.exists()
+
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record.get("source_identity", "").startswith("controller:")
+
+    record["source_identity"] = "controller:/wrong/path:badrev:badhash;authority:FORGED"
+    record["integrity_sha256"] = manager._ownership_digest(record)
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    entry = {"branch": f"refs/heads/nexus/task/{contract.task_id}", "worktree": str(target)}
+    with pytest.raises(ValueError, match="MUTATION_IDENTITY_INVALID"):
+        manager._read_target_ownership(controller, entry, contract.task_id)
+
+
+def test_orphan_ownership_tampered_allowed_files_recomputed_hashes_blocks_with_unchanged_snapshot(sh2_repo):
+    contract_a, manager, lease_a, target_a = _prepare_candidate(
+        sh2_repo, task_id="task-tamper-orphan", allowed_files=["src/overlap.txt"]
+    )
+    controller = Path(contract_a.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract_a.task_id)
+    assert record_path.exists()
+
+    _git(controller, "worktree", "remove", "--force", str(target_a))
+    assert not target_a.exists()
+    assert record_path.exists()
+
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record["contract"]["allowed_files"] = ["src/disjoint_tampered.txt"]
+    new_contract_hash = _contract_digest(record["contract"])
+    record["contract_hash"] = new_contract_hash
+    record["expected_contract_hash"] = new_contract_hash
+    record["domain_fingerprint"] = _domain_fingerprint(record)
+    record["expected_domain_fingerprint"] = record["domain_fingerprint"]
+    record["source_identity"] = _source_identity(
+        str(controller),
+        contract_a.controller_revision,
+        new_contract_hash,
+        execution_authority="WORKER_REGISTRY",
+    )
+    record["expected_source_identity"] = record["source_identity"]
+    record["integrity_sha256"] = manager._ownership_digest(record)
+    record_path.write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
+
+    snapshot_a = {
+        "task_id": contract_a.task_id,
+        "status": "CANDIDATE_CAPTURED",
+        "attempt_id": lease_a.attempt_id,
+        "lease_id": lease_a.lease_id,
+        "controller_revision": contract_a.controller_revision,
+        "controller_worktree": str(controller),
+        "contract": contract_a.model_dump(mode="json"),
+        "lease": lease_a.__dict__,
+        "expected_attempt_id": lease_a.attempt_id,
+        "expected_lease_id": lease_a.lease_id,
+        "expected_controller_revision": contract_a.controller_revision,
+        "expected_controller_worktree": str(controller),
+    }
+
+    contract_b = _contract(sh2_repo, task_id="task-b", allowed_files=["src/disjoint_b.txt"])
+
+    # Even though tampered orphan record claims disjoint path, mismatch with snapshot fails closed
+    assert manager.target_conflict(contract_b, task_states={contract_a.task_id: snapshot_a}) is True
+    with pytest.raises(RuntimeError, match="serial Target budget exceeded: active Target limit is 1"):
+        manager.create_lease(contract_b, task_states={contract_a.task_id: snapshot_a})
+
+
+def test_orphan_ownership_without_authoritative_snapshot_fails_closed_even_if_path_disjoint(sh2_repo):
+    contract_a, manager, lease_a, target_a = _prepare_candidate(
+        sh2_repo, task_id="task-orphan-no-snap", allowed_files=["src/a_scope.txt"]
+    )
+    controller = Path(contract_a.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract_a.task_id)
+    assert record_path.exists()
+
+    _git(controller, "worktree", "remove", "--force", str(target_a))
+    assert not target_a.exists()
+    assert record_path.exists()
+
+    contract_b = _contract(sh2_repo, task_id="task-b-disjoint", allowed_files=["src/b_scope.txt"])
+
+    # With no snapshot for task A in task_states, must fail closed even though paths appear disjoint
+    assert manager.target_conflict(contract_b, task_states={}) is True
+    with pytest.raises(RuntimeError, match="serial Target budget exceeded: active Target limit is 1"):
+        manager.create_lease(contract_b, task_states={})
+
+
+def test_valid_orphan_ownership_with_matching_snapshot_allows_genuinely_disjoint_target(sh2_repo):
+    contract_a, manager, lease_a, target_a = _prepare_candidate(
+        sh2_repo, task_id="task-orphan-valid", allowed_files=["src/a_scope.txt"]
+    )
+    controller = Path(contract_a.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract_a.task_id)
+    assert record_path.exists()
+
+    _git(controller, "worktree", "remove", "--force", str(target_a))
+    assert not target_a.exists()
+    assert record_path.exists()
+
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    snapshot_a = {
+        "task_id": contract_a.task_id,
+        "status": "CANDIDATE_CAPTURED",
+        "attempt_id": lease_a.attempt_id,
+        "lease_id": lease_a.lease_id,
+        "controller_revision": contract_a.controller_revision,
+        "controller_worktree": str(controller),
+        "contract": contract_a.model_dump(mode="json"),
+        "lease": lease_a.__dict__,
+        "expected_attempt_id": lease_a.attempt_id,
+        "expected_lease_id": lease_a.lease_id,
+        "expected_controller_revision": contract_a.controller_revision,
+        "expected_controller_worktree": str(controller),
+        "contract_hash": record.get("contract_hash"),
+        "source_identity": record.get("source_identity"),
+    }
+
+    # Genuinely disjoint task B can proceed
+    contract_b = _contract(sh2_repo, task_id="task-b-allowed", allowed_files=["src/b_scope.txt"])
+    assert manager.target_conflict(contract_b, task_states={contract_a.task_id: snapshot_a}) is False
+    lease_b = manager.create_lease(contract_b, task_states={contract_a.task_id: snapshot_a})
+    assert lease_b.task_id == "task-b-allowed"
+    assert Path(lease_b.target_worktree).exists()
+
+    # But overlapping task C remains blocked
+    contract_c = _contract(sh2_repo, task_id="task-c-overlap", allowed_files=["src/a_scope.txt"])
+    assert (
+        manager.target_conflict(
+            contract_c,
+            task_states={
+                contract_a.task_id: snapshot_a,
+                "task-b-allowed": {
+                    "task_id": "task-b-allowed",
+                    "status": "CANDIDATE_CAPTURED",
+                    "attempt_id": lease_b.attempt_id,
+                    "lease_id": lease_b.lease_id,
+                    "controller_revision": contract_b.controller_revision,
+                    "controller_worktree": str(controller),
+                    "contract": contract_b.model_dump(mode="json"),
+                    "lease": lease_b.__dict__,
+                },
+            },
+        )
+        is True
+    )

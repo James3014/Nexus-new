@@ -1295,13 +1295,24 @@ class LocalModelExecutor:
                 )
                 from nexus.services.local_heal.memory_trace import build_memory_trace_from_adapter
                 adapter = MemoryRetrievalAdapter(enabled=True)
+                source_rev = str(request.route_context.get("source_revision") or request.route_context.get("workspace_revision") or "").strip()
+                contract_rev = str(request.route_context.get("contract_revision") or "").strip()
+                current_state = {
+                    "runtime_identity": "local_model_executor",
+                }
+                if source_rev:
+                    current_state["source_revision"] = source_rev
+                if contract_rev:
+                    current_state["contract_revision"] = contract_rev
+
                 lessons = adapter.retrieve_reranked(
                     query_text=request.problem_statement,
                     anchor_symbol=request.route_context.get("target_symbol") or "",
                     anchor_file=request.target_file,
                     limit=3,
                     max_chars=800,
-                    task_id=request.task_id
+                    task_id=request.task_id,
+                    current_state=current_state,
                 )
                 adapter.last_metadata["prompt_included"] = bool(lessons)
                 memory_adapter_metadata = dict(adapter.last_metadata)
@@ -3489,7 +3500,10 @@ class LocalModelExecutor:
                 f"1. The diff header MUST use exactly: --- a/{request.target_file}  and  +++ b/{request.target_file}\n"
                 f"2. The @@ hunk header MUST use the EXACT line numbers from the source above.\n"
                 f"3. Context lines (no +/-) MUST EXACTLY match the source file character-for-character including indentation.\n"
-                f"4. Return ONLY the diff wrapped in a ```diff fenced block. No prose, no explanation.\n"
+                f"4. The hunk MUST contain an effective edit: do not emit a context-only or duplicated-context hunk.\n"
+                f"5. For a replacement, include the original line(s) with '-' and the replacement line(s) with '+'; for a pure insertion or deletion, the corresponding '+' or '-' lines are sufficient.\n"
+                f"6. The hunk body counts and context must match the lines actually emitted; never fabricate source context or line ranges.\n"
+                f"7. Return ONLY the diff wrapped in a ```diff fenced block. No prose, no explanation.\n"
             )
 
         model_name = signal_snapshot["executor_model"]

@@ -17,6 +17,7 @@ from nexus.services.external_intelligence import (
     ENVELOPE_SCHEMA,
     ExternalIntelligenceError,
     parse_external_execution_envelope,
+    validate_selected_worker,
 )
 
 FANOUT_DECISION_SCHEMA = "external_intelligence_fanout_decision.v1"
@@ -46,6 +47,26 @@ def _canonical_json(value: Any) -> str:
 def _sha256(value: bytes | str) -> str:
     raw = value.encode("utf-8") if isinstance(value, str) else value
     return hashlib.sha256(raw).hexdigest()
+
+
+def _worker_selection_sha256(
+    selected_worker: Mapping[str, Any] | None, *, provider: str, model: str
+) -> str:
+    if selected_worker is None:
+        material: Mapping[str, Any] = {
+            "selected_worker": None,
+            "provider": provider,
+            "model": model,
+        }
+    else:
+        try:
+            worker = validate_selected_worker(selected_worker)
+        except ExternalIntelligenceError as exc:
+            raise FanoutError("INVALID_SELECTED_WORKER") from exc
+        if worker["provider"] != provider or worker["model"] != model:
+            raise FanoutError("SESSION_WORKER_PROVIDER_MODEL_CONFLICT")
+        material = {"selected_worker": worker, "provider": provider, "model": model}
+    return _sha256(_canonical_json(material))
 
 
 def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
@@ -90,7 +111,10 @@ def _safe_slug(value: Any, field: str) -> str:
 
 
 def _safe_relative_path(value: Any) -> str:
-    text = str(value or "").strip()
+    raw = str(value or "")
+    if any(not character.isprintable() for character in raw):
+        raise FanoutError("INVALID_MUTATION_PATH")
+    text = raw.strip()
     try:
         path = PurePosixPath(text)
     except (TypeError, ValueError) as exc:
@@ -125,6 +149,9 @@ class ExecutionUnit:
     dependencies_ready: bool = True
     priority: int = 0
     allow_deletions: bool = False
+    selected_worker: Mapping[str, Any] | None = None
+    provider: str = PROVIDER
+    model: str = MODEL
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "ExecutionUnit":
@@ -146,6 +173,24 @@ class ExecutionUnit:
         priority = value.get("priority", 0)
         if not isinstance(priority, int):
             raise FanoutError("INVALID_PRIORITY")
+        selected_worker_raw = value.get("selected_worker")
+        if selected_worker_raw is not None:
+            try:
+                selected_worker = validate_selected_worker(selected_worker_raw)
+            except ExternalIntelligenceError as exc:
+                raise FanoutError("INVALID_SELECTED_WORKER") from exc
+        else:
+            selected_worker = None
+        provider = str(
+            (selected_worker.get("provider") if selected_worker else None)
+            or value.get("provider")
+            or PROVIDER
+        )
+        model = str(
+            (selected_worker.get("model") if selected_worker else None)
+            or value.get("model")
+            or MODEL
+        )
         return cls(
             task_id=task_id,
             unit_id=unit_id,
@@ -156,10 +201,13 @@ class ExecutionUnit:
             dependencies_ready=bool(value.get("dependencies_ready", True)),
             priority=priority,
             allow_deletions=bool(value.get("allow_deletions", False)),
+            selected_worker=selected_worker,
+            provider=provider,
+            model=model,
         )
 
     def identity(self) -> dict[str, Any]:
-        return {
+        result = {
             "task_id": self.task_id,
             "unit_id": self.unit_id,
             "envelope_ref": self.envelope_ref,
@@ -169,7 +217,12 @@ class ExecutionUnit:
             "dependencies_ready": self.dependencies_ready,
             "priority": self.priority,
             "allow_deletions": self.allow_deletions,
+            "provider": self.provider,
+            "model": self.model,
         }
+        if self.selected_worker is not None:
+            result["selected_worker"] = dict(self.selected_worker)
+        return result
 
     @property
     def identity_sha256(self) -> str:
@@ -232,6 +285,7 @@ class WorkspaceLease:
 @dataclass(frozen=True)
 class OpenCodeRunResult:
     status: str
+    worker_backend: str = "opencode"
     session_id: str = ""
     response_text: str = ""
     provider_id: str = ""
@@ -246,10 +300,20 @@ class OpenCodeRunResult:
     outcome_unknown: bool = False
     retry_safe: bool = False
     error: str = ""
+    diagnosis_status: str = ""
+    diagnosis_sha256: str = ""
+    diagnosis_evidence_paths: tuple[str, ...] = ()
+    repair_admitted: bool = False
+    repair_phase_count: int = 0
+    worker_identity_sha256: str = ""
+    operation_id: str = ""
 
 
 def plan_fanout(
-    units: Iterable[Mapping[str, Any] | ExecutionUnit], lease: CapacityLease
+    units: Iterable[Mapping[str, Any] | ExecutionUnit],
+    lease: CapacityLease,
+    *,
+    completed_unit_ids: Iterable[str] = (),
 ) -> dict[str, Any]:
     parsed = [
         unit if isinstance(unit, ExecutionUnit) else ExecutionUnit.from_mapping(unit)
@@ -265,15 +329,24 @@ def plan_fanout(
         raise FanoutError("DUPLICATE_UNIT_ID")
 
     capacity, pressure = lease.effective_capacity()
+    completed_ids = set(completed_unit_ids)
+    if not completed_ids.issubset(unit_ids):
+        raise FanoutError("COMPLETED_UNIT_UNKNOWN")
     ordered = sorted(parsed, key=lambda unit: (-unit.priority, unit.unit_id))
     admitted: list[ExecutionUnit] = []
     blocked_dependencies: list[str] = []
     deferred_overlap: list[str] = []
     deferred_capacity: list[str] = []
 
+    completed_paths = [unit.mutation_paths for unit in ordered if unit.unit_id in completed_ids]
     for unit in ordered:
+        if unit.unit_id in completed_ids:
+            continue
         if not unit.dependencies_ready:
             blocked_dependencies.append(unit.unit_id)
+            continue
+        if any(_sets_overlap(unit.mutation_paths, paths) for paths in completed_paths):
+            deferred_overlap.append(unit.unit_id)
             continue
         if any(
             _sets_overlap(unit.mutation_paths, selected.mutation_paths) for selected in admitted
@@ -285,6 +358,14 @@ def plan_fanout(
             continue
         admitted.append(unit)
 
+    providers = {unit.provider for unit in parsed}
+    models = {unit.model for unit in parsed}
+    workers = {
+        _canonical_json(unit.selected_worker) if unit.selected_worker else "" for unit in parsed
+    }
+    if len(providers) > 1 or len(models) > 1 or len(workers) > 1:
+        raise FanoutError("MIXED_WORKER_FANOUT_FORBIDDEN")
+
     material = {
         "schema": FANOUT_DECISION_SCHEMA,
         "task_id": next(iter(task_ids)),
@@ -292,13 +373,16 @@ def plan_fanout(
         "effective_capacity": capacity,
         "control_pressure": pressure,
         "admitted_units": [unit.unit_id for unit in admitted],
+        "completed_units": sorted(completed_ids),
         "blocked_dependencies": blocked_dependencies,
         "deferred_mutation_overlap": deferred_overlap,
         "deferred_capacity": deferred_capacity,
         "fixed_worker_pool": False,
-        "provider": PROVIDER,
-        "model": MODEL,
+        "provider": parsed[0].provider,
+        "model": parsed[0].model,
     }
+    if parsed[0].selected_worker is not None:
+        material["selected_worker"] = dict(parsed[0].selected_worker)
     material["decision_sha256"] = _sha256(_canonical_json(material))
     return material
 
@@ -389,11 +473,17 @@ class FanoutStore:
 
     def prepare_initial(self, unit: ExecutionUnit, workspace: WorkspaceLease) -> dict[str, Any]:
         path = self._attempt_path(unit.task_id, unit.unit_id)
+        previous: dict[str, Any] | None = None
         if path.exists():
             value = json.loads(path.read_text(encoding="utf-8"))
-            if value.get("state") in {"PREPARED", "DISPATCHING", "OUTCOME_UNKNOWN"}:
+            if value.get("state") == "RETRY_SAFE" and value.get("retry_safe") is True:
+                if int(value.get("retry_count", 0)) >= 1:
+                    raise FanoutError("FANOUT_REPLAY_FORBIDDEN")
+                previous = value
+            elif value.get("state") in {"PREPARED", "DISPATCHING", "OUTCOME_UNKNOWN"}:
                 raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
-            raise FanoutError("FANOUT_REPLAY_FORBIDDEN")
+            else:
+                raise FanoutError("FANOUT_REPLAY_FORBIDDEN")
         attempt = {
             "schema": DISPATCH_ATTEMPT_SCHEMA,
             "task_id": unit.task_id,
@@ -409,6 +499,11 @@ class FanoutStore:
             "envelope_ref": unit.envelope_ref,
             "envelope_sha256": unit.envelope_sha256,
         }
+        if previous is not None:
+            attempt.update({
+                "retry_of_attempt_id": previous.get("attempt_id"),
+                "retry_count": int(previous.get("retry_count", 0)) + 1,
+            })
         _atomic_json(path, attempt)
         return attempt
 
@@ -436,6 +531,9 @@ class FanoutStore:
             task_id=task_id,
             unit_id=unit_id,
             workspace_id=str(previous_receipt.get("workspace_id") or ""),
+            selected_worker=previous_receipt.get("selected_worker"),
+            provider=str(previous_receipt.get("provider") or PROVIDER),
+            model=str(previous_receipt.get("model") or MODEL),
         )
         attempt = {
             "schema": DISPATCH_ATTEMPT_SCHEMA,
@@ -465,6 +563,16 @@ class FanoutStore:
         _atomic_json(self._attempt_path(value["task_id"], value["unit_id"], suffix), value)
         return value
 
+    def bind_operation_id(
+        self, attempt: Mapping[str, Any], operation_id: str, *, suffix: str = "initial"
+    ) -> dict[str, Any]:
+        if not isinstance(operation_id, str) or _SHA256_RE.fullmatch(operation_id) is None:
+            raise FanoutError("OPERATION_ID_REQUIRED")
+        value = dict(attempt)
+        value["operation_id"] = operation_id
+        _atomic_json(self._attempt_path(value["task_id"], value["unit_id"], suffix), value)
+        return value
+
     def finish_attempt(
         self,
         attempt: Mapping[str, Any],
@@ -473,15 +581,33 @@ class FanoutStore:
         transport_status: str,
         suffix: str = "initial",
     ) -> dict[str, Any]:
-        if state not in {"COMPLETED", "TERMINAL_BLOCKED", "FAILED", "OUTCOME_UNKNOWN"}:
+        if state not in {
+            "COMPLETED",
+            "TERMINAL_BLOCKED",
+            "FAILED",
+            "RETRY_SAFE",
+            "OUTCOME_UNKNOWN",
+        }:
             raise FanoutError("INVALID_ATTEMPT_STATE")
         value = dict(attempt)
-        value.update({"state": state, "retry_safe": False, "transport_status": transport_status})
+        value.update({
+            "state": state,
+            "retry_safe": state == "RETRY_SAFE",
+            "transport_status": transport_status,
+        })
         _atomic_json(self._attempt_path(value["task_id"], value["unit_id"], suffix), value)
         return value
 
     def claim_session(
-        self, session_id: str, *, task_id: str, unit_id: str, workspace_id: str
+        self,
+        session_id: str,
+        *,
+        task_id: str,
+        unit_id: str,
+        workspace_id: str,
+        selected_worker: Mapping[str, Any] | None = None,
+        provider: str = PROVIDER,
+        model: str = MODEL,
     ) -> None:
         if not _SESSION_RE.fullmatch(session_id):
             raise FanoutError("INVALID_SESSION_ID")
@@ -491,8 +617,11 @@ class FanoutStore:
             "task_id": task_id,
             "unit_id": unit_id,
             "workspace_id": workspace_id,
-            "provider": PROVIDER,
-            "model": MODEL,
+            "provider": provider,
+            "model": model,
+            "worker_selection_sha256": _worker_selection_sha256(
+                selected_worker, provider=provider, model=model
+            ),
         }
         if path.exists():
             existing = json.loads(path.read_text(encoding="utf-8"))
@@ -502,20 +631,34 @@ class FanoutStore:
         _atomic_json(path, binding)
 
     def assert_session_owner(
-        self, session_id: str, *, task_id: str, unit_id: str, workspace_id: str
+        self,
+        session_id: str,
+        *,
+        task_id: str,
+        unit_id: str,
+        workspace_id: str,
+        selected_worker: Mapping[str, Any] | None = None,
+        provider: str = PROVIDER,
+        model: str = MODEL,
     ) -> None:
         path = self._session_path(session_id)
         if not path.exists():
             raise FanoutError("SESSION_BINDING_MISSING")
         binding = json.loads(path.read_text(encoding="utf-8"))
-        if binding != {
+        expected = {
             "session_id": session_id,
             "task_id": task_id,
             "unit_id": unit_id,
             "workspace_id": workspace_id,
-            "provider": PROVIDER,
-            "model": MODEL,
-        }:
+            "provider": provider,
+            "model": model,
+            "worker_selection_sha256": _worker_selection_sha256(
+                selected_worker, provider=provider, model=model
+            ),
+        }
+        if binding.get("worker_selection_sha256") != expected["worker_selection_sha256"]:
+            raise FanoutError("SESSION_WORKER_SELECTION_CONFLICT")
+        if binding != expected:
             raise FanoutError("SESSION_BINDING_CONFLICT")
 
     def write_receipt(self, receipt: Mapping[str, Any], *, suffix: str = "initial") -> Path:
@@ -524,19 +667,38 @@ class FanoutStore:
         return path
 
 
-class OpenCodeDeepSeekTransport:
+class OpenCodeWorkerTransport:
     """Fresh OpenCode session per initial unit; exact-session continuation for repair only."""
 
-    def __init__(self, executable: str = "opencode", *, model: str = MODEL, timeout: float = 300.0):
-        if model != MODEL:
-            raise FanoutError("MODEL_SUBSTITUTION_FORBIDDEN")
+    def __init__(
+        self,
+        executable: str = "opencode",
+        *,
+        model: str = MODEL,
+        provider_id: str = "",
+        model_id: str = "",
+        timeout: float = 300.0,
+    ):
         self.executable = executable
         self.model = model
+        if provider_id and model_id:
+            self.provider_id = provider_id
+            self.model_id = model_id
+        elif "/" in model:
+            p_id, m_id = model.split("/", 1)
+            self.provider_id = provider_id or p_id
+            self.model_id = model_id or m_id
+        else:
+            self.provider_id = provider_id or PROVIDER_ID
+            self.model_id = model_id or MODEL_ID
         self.timeout = float(timeout)
 
     def run_new(self, *, prompt: str, artifact_path: str, workspace_path: str) -> OpenCodeRunResult:
         return self._run(
-            prompt=prompt, artifact_path=artifact_path, workspace_path=workspace_path, session_id=""
+            prompt=prompt,
+            artifact_path=artifact_path,
+            workspace_path=workspace_path,
+            session_id="",
         )
 
     def continue_session(
@@ -559,8 +721,6 @@ class OpenCodeDeepSeekTransport:
     def _run(
         self, *, prompt: str, artifact_path: str, workspace_path: str, session_id: str
     ) -> OpenCodeRunResult:
-        # OpenCode 1.18.x defines --file as a variadic array. Keep the message
-        # positional before -f so it cannot be consumed as another file path.
         argv = [
             self.executable,
             "run",
@@ -684,11 +844,6 @@ class OpenCodeDeepSeekTransport:
             row = json.loads(raw)
             if not isinstance(row, dict):
                 raise FanoutError("OPENCODE_EVENT_INVALID")
-            # OpenCode 1.18.x serializes the stream as domain events:
-            #   {"type":"message.part.updated","data":{"sessionID":...,"part":{...}}}
-            # Earlier CLI versions emitted flat per-part events:
-            #   {"type":"text","sessionID":...,"part":{"text":...}}
-            #   {"type":"step_finish","sessionID":...}
             data = row.get("data")
             if row.get("type") == "message.part.updated" and isinstance(data, Mapping):
                 session = str(data.get("sessionID") or "")
@@ -763,7 +918,7 @@ class OpenCodeDeepSeekTransport:
             raise FanoutError("OPENCODE_RECONCILE_MODEL_INVALID")
         provider_id = str(model.get("providerID") or "")
         model_id = str(model.get("id") or "")
-        if provider_id != PROVIDER_ID or model_id != MODEL_ID:
+        if provider_id != self.provider_id or model_id != self.model_id:
             raise FanoutError("OPENCODE_MODEL_ATTESTATION_MISMATCH")
         if (
             str(Path(str(session.get("directory") or "")).expanduser().resolve())
@@ -793,8 +948,8 @@ class OpenCodeDeepSeekTransport:
         if latest.get("finish") != "stop" or not latest_message_id or not response_text:
             raise FanoutError("OPENCODE_RECONCILE_NOT_TERMINAL")
         if (
-            str(latest.get("provider_id") or "") != PROVIDER_ID
-            or str(latest.get("model_id") or "") != MODEL_ID
+            str(latest.get("provider_id") or "") != self.provider_id
+            or str(latest.get("model_id") or "") != self.model_id
         ):
             raise FanoutError("OPENCODE_MODEL_ATTESTATION_MISMATCH")
         evidence = {
@@ -831,10 +986,6 @@ class OpenCodeDeepSeekTransport:
         if result.returncode != 0:
             raise FanoutError("OPENCODE_EXPORT_FAILED")
         stdout = result.stdout or ""
-        # OpenCode 1.18.x may cap `export` stdout at 64 KiB for large sessions.
-        # The attestation fields live in the leading `info` object, so parse
-        # that complete object directly instead of requiring the trailing
-        # messages array to be present and valid JSON.
         info_key = stdout.find('"info"')
         if info_key < 0:
             raise FanoutError("OPENCODE_EXPORT_INVALID")
@@ -857,7 +1008,7 @@ class OpenCodeDeepSeekTransport:
         expected_directory = str(Path(workspace_path).expanduser().resolve())
         if observed_session != session_id:
             raise FanoutError("OPENCODE_EXPORT_SESSION_MISMATCH")
-        if provider_id != PROVIDER_ID or model_id != MODEL_ID:
+        if provider_id != self.provider_id or model_id != self.model_id:
             raise FanoutError("OPENCODE_MODEL_ATTESTATION_MISMATCH")
         if directory != expected_directory:
             raise FanoutError("OPENCODE_DIRECTORY_ATTESTATION_MISMATCH")
@@ -868,6 +1019,27 @@ class OpenCodeDeepSeekTransport:
             "version": str(info.get("version") or ""),
             "export_sha256": _sha256(stdout),
         }
+
+
+class OpenCodeDeepSeekTransport(OpenCodeWorkerTransport):
+    def __init__(
+        self,
+        executable: str = "opencode",
+        *,
+        model: str = MODEL,
+        provider_id: str = "",
+        model_id: str = "",
+        timeout: float = 300.0,
+    ):
+        if model != MODEL:
+            raise FanoutError("MODEL_SUBSTITUTION_FORBIDDEN")
+        super().__init__(
+            executable=executable,
+            model=model,
+            provider_id=provider_id,
+            model_id=model_id,
+            timeout=timeout,
+        )
 
 
 def _load_and_verify_artifact(path_value: str, expected_sha256: str) -> tuple[Path, str]:
@@ -897,11 +1069,20 @@ def _verify_envelope_scope(unit: ExecutionUnit) -> Path:
         raise FanoutError("ENVELOPE_CONTRACT_INVALID") from exc
     if _sha256(_canonical_json(envelope)) != unit.envelope_sha256:
         raise FanoutError("ENVELOPE_SHA256_MISMATCH")
-    if envelope.get("schema") != ENVELOPE_SCHEMA:
+    if envelope.get("schema") not in (ENVELOPE_SCHEMA, "external_execution_envelope.v2"):
         raise FanoutError("ENVELOPE_CONTRACT_INVALID")
     binding = envelope.get("binding") or {}
     if binding.get("main_sha") != unit.expected_base_sha:
         raise FanoutError("ENVELOPE_BASE_MISMATCH")
+    if envelope.get("schema") == "external_execution_envelope.v2":
+        env_worker = envelope.get("selected_worker")
+        if not unit.selected_worker or not env_worker:
+            raise FanoutError("ENVELOPE_WORKER_BINDING_MISSING")
+        if env_worker != dict(unit.selected_worker):
+            raise FanoutError("ENVELOPE_WORKER_BINDING_MISMATCH")
+    elif envelope.get("selected_worker") and unit.selected_worker:
+        if envelope.get("selected_worker") != dict(unit.selected_worker):
+            raise FanoutError("ENVELOPE_WORKER_BINDING_MISMATCH")
     scope = envelope.get("scope_signal") or {}
     allowed = [
         *scope.get("production_edit_paths", []),
@@ -920,22 +1101,78 @@ def _verify_envelope_scope(unit: ExecutionUnit) -> Path:
     return path
 
 
+def _workspace_virtual_path(relative_ref: Any, *, required_prefix: str | None = None) -> str:
+    """Map a validated repository-relative ref into the worker's virtual root."""
+    safe = _safe_relative_path(relative_ref)
+    if required_prefix and not safe.startswith(required_prefix.rstrip("/") + "/"):
+        raise FanoutError("TASK_CARD_REF_REQUIRED")
+    return "/" + safe
+
+
+def _bootstrap_evidence_refs(unit: ExecutionUnit, envelope_text: str) -> tuple[str, list[str]]:
+    try:
+        envelope = parse_external_execution_envelope(envelope_text)
+    except ExternalIntelligenceError as exc:
+        raise FanoutError("ENVELOPE_CONTRACT_INVALID") from exc
+    binding = envelope.get("binding")
+    if not isinstance(binding, Mapping):
+        raise FanoutError("ENVELOPE_CONTRACT_INVALID")
+    task_card_ref = binding.get("task_card_ref")
+    if not isinstance(task_card_ref, str) or not task_card_ref.strip():
+        raise FanoutError("TASK_CARD_REF_REQUIRED")
+    task_card_path = _workspace_virtual_path(task_card_ref, required_prefix="tasks")
+    target_paths = [_workspace_virtual_path(mutation_path) for mutation_path in unit.mutation_paths]
+    return task_card_path, target_paths
+
+
 def build_worker_bootstrap(unit: ExecutionUnit, workspace: WorkspaceLease) -> str:
-    """Compact controller-to-worker bootstrap. The envelope body is never embedded."""
+    """Build a self-contained handoff with provenance-only artifact metadata."""
+    artifact = _verify_envelope_scope(unit)
+    envelope_text = artifact.read_text(encoding="utf-8")
+    task_card_path, target_paths = _bootstrap_evidence_refs(unit, envelope_text)
+    if unit.selected_worker:
+        worker_name = (
+            unit.selected_worker.get("worker_id")
+            or unit.selected_worker.get("model")
+            or "the bounded task engineer"
+        )
+        role = unit.selected_worker.get("role_ceiling") or "bounded task execution"
+        header = f"You are {worker_name}, the {role} for exactly one Nexus execution unit."
+        model_adapt_line = (
+            "Read and follow the model_adaptation / task brief inside the embedded envelope above."
+        )
+        guard_line = "Apply only the task-relevant failure guards; encode one evidence-guided same-unit repair and no blind retry or auto-chain."
+    elif unit.model != MODEL:
+        header = (
+            f"You are {unit.model}, the bounded task engineer for exactly one Nexus execution unit."
+        )
+        model_adapt_line = (
+            "Read and follow the model_adaptation / task brief inside the embedded envelope above."
+        )
+        guard_line = "Apply only the task-relevant failure guards; encode one evidence-guided same-unit repair and no blind retry or auto-chain."
+    else:
+        header = "You are DeepSeek V4 Flash, the bounded L2 Task Engineer for exactly one Nexus execution unit."
+        model_adapt_line = "Read and follow the model_adaptation brief inside the embedded envelope above: role_contract, task_local_invariants, known_failure_guards, execution_strategy, forbidden_inferences, repair_policy."
+        guard_line = "Apply only the task-relevant known_failure_guards; encode one evidence-guided same-unit repair and no blind retry or auto-chain."
+
     return "\n".join([
-        "You are DeepSeek V4 Flash, the bounded L2 Task Engineer for exactly one Nexus execution unit.",
+        header,
         f"task_id={unit.task_id}",
         f"unit_id={unit.unit_id}",
         f"expected_base_sha={unit.expected_base_sha}",
         f"workspace_id={workspace.workspace_id}",
-        f"envelope_artifact_ref={unit.envelope_ref}",
+        f"envelope_artifact_ref={json.dumps(unit.envelope_ref, ensure_ascii=True)}",
         f"envelope_sha256={unit.envelope_sha256}",
-        "The full external_execution_envelope.v1 is attached as a file. Read it before editing and do not ask the controller to restate it.",
-        "Read and follow the model_adaptation brief inside the attached envelope: role_contract, task_local_invariants, known_failure_guards, execution_strategy, forbidden_inferences, repair_policy.",
+        "The full external_execution_envelope.v1 is embedded in Controller evidence above; use it as the authoritative task brief.",
+        "envelope_artifact_ref is provenance/readback metadata only. Do not open envelope_artifact_ref through workspace tools.",
+        f"task_card_workspace_path={task_card_path}",
+        f"allowed_target_probe_paths={_canonical_json(target_paths)}",
+        "Probe only the exact workspace-virtual Task Card and allowed target paths above. Do not use broad glob discovery.",
+        model_adapt_line,
         f"authorized_mutation_paths={_canonical_json(list(unit.mutation_paths))}",
         "Do not modify any path outside authorized_mutation_paths. Do not commit, push, merge, approve, integrate, or spawn a replacement model.",
-        "Use the attached envelope as semantic guidance but never widen the Task Card authority.",
-        "Apply only the task-relevant known_failure_guards; encode one evidence-guided same-unit repair and no blind retry or auto-chain.",
+        "Use the embedded envelope as semantic guidance but never widen the Task Card authority.",
+        guard_line,
         "When finished, return exactly one JSON object and no markdown/prose:",
         _canonical_json({
             "schema": WORKER_RESULT_SCHEMA,
@@ -948,7 +1185,11 @@ def build_worker_bootstrap(unit: ExecutionUnit, workspace: WorkspaceLease) -> st
 
 
 def build_repair_bootstrap(
-    previous_receipt: Mapping[str, Any], *, repair_id: str, repair_ref: str, repair_sha256: str
+    previous_receipt: Mapping[str, Any],
+    *,
+    repair_id: str,
+    repair_ref: str,
+    repair_sha256: str,
 ) -> str:
     return "\n".join([
         "Continue the exact same execution unit session for a bounded repair.",
@@ -964,12 +1205,7 @@ def build_repair_bootstrap(
 
 
 def _extract_worker_result_object(text: str) -> dict[str, Any]:
-    """Return the single JSON object in worker text, tolerating surrounding prose.
-
-    Live OpenCode 1.18.x workers sometimes prefix their final JSON result with a
-    prose summary line. Keep fail-closed semantics: exactly one JSON object must
-    be present; a full-text direct parse is tried first and stays authoritative.
-    """
+    """Return the single JSON object in worker text, tolerating surrounding prose."""
     if not isinstance(text, str) or not text.strip():
         raise FanoutError("WORKER_RESULT_PARSE_FAILED")
     try:
@@ -1094,17 +1330,68 @@ def _capture_candidate(
     }
 
 
-class AdaptiveDeepSeekFanoutRuntime:
+def _resolve_worker_transport_identity(
+    worker: Mapping[str, Any] | None,
+) -> tuple[str, str, str] | None:
+    if not worker:
+        return None
+    model_val = str(worker.get("model") or "").strip()
+    provider_val = str(worker.get("provider") or "").strip()
+    if "/" in model_val:
+        p_id, m_id = model_val.split("/", 1)
+        provider_id = p_id.strip()
+        model_id = m_id.strip()
+        if provider_id != provider_val:
+            raise FanoutError("INVALID_SELECTED_WORKER")
+        exec_model = model_val
+    elif provider_val in ("opencode", "opencode-go"):
+        provider_id = "opencode-go"
+        model_id = model_val
+        exec_model = f"opencode-go/{model_id}" if model_id else ""
+    elif provider_val == "deepseek":
+        provider_id = "deepseek"
+        model_id = model_val
+        exec_model = f"deepseek/{model_id}" if model_id else ""
+    else:
+        raise FanoutError("UNSUPPORTED_WORKER_TRANSPORT")
+    if not provider_id or not model_id or not exec_model:
+        raise FanoutError("UNSUPPORTED_WORKER_TRANSPORT")
+    return exec_model, provider_id, model_id
+
+
+class AdaptiveWorkerFanoutRuntime:
     def __init__(
         self,
         *,
         allocator: GitWorktreeAllocator,
         store: FanoutStore,
-        transport: OpenCodeDeepSeekTransport | Any | None = None,
+        transport: OpenCodeWorkerTransport | Any | None = None,
     ):
         self.allocator = allocator
         self.store = store
-        self.transport = transport or OpenCodeDeepSeekTransport()
+        self.transport = transport or OpenCodeWorkerTransport()
+
+    def _transport_for_unit(self, unit_or_receipt: ExecutionUnit | Mapping[str, Any]) -> Any:
+        selected_worker = (
+            unit_or_receipt.selected_worker
+            if isinstance(unit_or_receipt, ExecutionUnit)
+            else unit_or_receipt.get("selected_worker")
+        )
+        resolved = _resolve_worker_transport_identity(selected_worker)
+        if resolved is not None:
+            exec_model, provider_id, model_id = resolved
+            if isinstance(self.transport, OpenCodeWorkerTransport):
+                return OpenCodeWorkerTransport(
+                    executable=self.transport.executable,
+                    model=exec_model,
+                    provider_id=provider_id,
+                    model_id=model_id,
+                    timeout=self.transport.timeout,
+                )
+            if hasattr(self.transport, "bind_worker"):
+                return self.transport.bind_worker(selected_worker)
+            return self.transport
+        return self.transport
 
     def run(
         self,
@@ -1115,12 +1402,21 @@ class AdaptiveDeepSeekFanoutRuntime:
             unit if isinstance(unit, ExecutionUnit) else ExecutionUnit.from_mapping(unit)
             for unit in units
         ]
-        decision = plan_fanout(parsed, lease)
+        completed_ids: set[str] = set()
+        for unit in parsed:
+            existing_receipt = self.store.existing_initial_receipt(unit)
+            if existing_receipt is not None:
+                completed_ids.add(unit.unit_id)
+        decision = plan_fanout(parsed, lease, completed_unit_ids=completed_ids)
         selected_ids = set(decision["admitted_units"])
         selected = [unit for unit in parsed if unit.unit_id in selected_ids]
         leases: dict[str, WorkspaceLease] = {}
         actions: dict[str, str] = {}
-        receipts: dict[str, Any] = {}
+        receipts: dict[str, Any] = {
+            unit.unit_id: self.store.existing_initial_receipt(unit)
+            for unit in parsed
+            if unit.unit_id in completed_ids
+        }
         errors: dict[str, str] = {}
         seen_paths: set[str] = set()
         for unit in selected:
@@ -1131,14 +1427,25 @@ class AdaptiveDeepSeekFanoutRuntime:
             existing_attempt = self.store.existing_initial_attempt(unit)
             if existing_attempt is not None:
                 state = str(existing_attempt.get("state") or "")
-                if state not in {"PREPARED", "DISPATCHING", "OUTCOME_UNKNOWN"}:
+                if state not in {
+                    "PREPARED",
+                    "DISPATCHING",
+                    "RETRY_SAFE",
+                    "OUTCOME_UNKNOWN",
+                }:
                     errors[unit.unit_id] = "FANOUT_REPLAY_FORBIDDEN"
                     continue
-                workspace = WorkspaceLease(
-                    workspace_id=str(existing_attempt.get("workspace_id") or ""),
-                    path=str(existing_attempt.get("workspace_path") or ""),
-                    expected_base_sha=str(existing_attempt.get("expected_base_sha") or ""),
-                )
+                if state == "RETRY_SAFE":
+                    if int(existing_attempt.get("retry_count", 0)) >= 1:
+                        errors[unit.unit_id] = "FANOUT_REPLAY_FORBIDDEN"
+                        continue
+                    workspace = self.allocator.allocate(unit)
+                else:
+                    workspace = WorkspaceLease(
+                        workspace_id=str(existing_attempt.get("workspace_id") or ""),
+                        path=str(existing_attempt.get("workspace_path") or ""),
+                        expected_base_sha=str(existing_attempt.get("expected_base_sha") or ""),
+                    )
                 if (
                     not workspace.workspace_id
                     or not workspace.path
@@ -1146,7 +1453,13 @@ class AdaptiveDeepSeekFanoutRuntime:
                 ):
                     errors[unit.unit_id] = "FANOUT_ATTEMPT_WORKSPACE_INVALID"
                     continue
-                actions[unit.unit_id] = "DISPATCH" if state == "PREPARED" else "RECONCILE"
+                actions[unit.unit_id] = (
+                    "DISPATCH"
+                    if state == "PREPARED"
+                    else "RETRY"
+                    if state == "RETRY_SAFE"
+                    else "RECONCILE"
+                )
             else:
                 workspace = self.allocator.allocate(unit)
                 actions[unit.unit_id] = "NEW"
@@ -1196,6 +1509,7 @@ class AdaptiveDeepSeekFanoutRuntime:
         resume_prepared: bool = False,
     ) -> dict[str, Any]:
         artifact = _verify_envelope_scope(unit)
+        transport = self._transport_for_unit(unit)
         if resume_prepared:
             attempt = self.store.existing_initial_attempt(unit)
             if attempt is None or attempt.get("state") != "PREPARED":
@@ -1205,28 +1519,52 @@ class AdaptiveDeepSeekFanoutRuntime:
         prompt = build_worker_bootstrap(unit, workspace)
         if artifact.read_text(encoding="utf-8") in prompt:
             raise FanoutError("FULL_ENVELOPE_IN_CONTROLLER_PROMPT")
+        if hasattr(transport, "prepare_operation_id"):
+            operation_id = transport.prepare_operation_id(
+                "worker_run",
+                prompt=prompt,
+                artifact_path=str(artifact),
+                workspace_path=workspace.path,
+                session_id="",
+            )
+            attempt = self.store.bind_operation_id(attempt, operation_id)
         attempt = self.store.mark_dispatching(attempt)
-        result: OpenCodeRunResult = self.transport.run_new(
-            prompt=prompt,
-            artifact_path=str(artifact),
-            workspace_path=workspace.path,
-        )
-        return self._finalize_initial(unit, workspace, attempt, result)
+        if hasattr(transport, "prepare_operation_id"):
+            result: OpenCodeRunResult = transport.run_new(
+                prompt=prompt,
+                artifact_path=str(artifact),
+                workspace_path=workspace.path,
+                operation_id=operation_id,
+            )
+        else:
+            result = transport.run_new(
+                prompt=prompt,
+                artifact_path=str(artifact),
+                workspace_path=workspace.path,
+            )
+        return self._finalize_initial(unit, workspace, attempt, result, transport=transport)
 
     def _reconcile_initial(
         self,
         unit: ExecutionUnit,
         workspace: WorkspaceLease,
-        _resume_prepared: bool = False,
+        resume_prepared: bool = False,
     ) -> dict[str, Any]:
         _verify_envelope_scope(unit)
+        transport = self._transport_for_unit(unit)
         attempt = self.store.existing_initial_attempt(unit)
         if attempt is None or attempt.get("state") not in {"DISPATCHING", "OUTCOME_UNKNOWN"}:
             raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
-        result: OpenCodeRunResult = self.transport.reconcile_workspace(
-            workspace_path=workspace.path
-        )
-        return self._finalize_initial(unit, workspace, attempt, result)
+        operation_id = attempt.get("operation_id")
+        if hasattr(transport, "prepare_operation_id"):
+            if not isinstance(operation_id, str) or _SHA256_RE.fullmatch(operation_id) is None:
+                raise FanoutError("OPERATION_ID_REQUIRED")
+            result: OpenCodeRunResult = transport.reconcile_workspace(
+                workspace_path=workspace.path, operation_id=operation_id
+            )
+        else:
+            result = transport.reconcile_workspace(workspace_path=workspace.path)
+        return self._finalize_initial(unit, workspace, attempt, result, transport=transport)
 
     def _finalize_initial(
         self,
@@ -1234,21 +1572,49 @@ class AdaptiveDeepSeekFanoutRuntime:
         workspace: WorkspaceLease,
         attempt: Mapping[str, Any],
         result: OpenCodeRunResult,
+        transport: Any = None,
     ) -> dict[str, Any]:
+        active_transport = transport or self._transport_for_unit(unit)
         if result.status != "COMPLETED":
-            state = "OUTCOME_UNKNOWN" if result.process_started else "FAILED"
+            if result.outcome_unknown or result.process_started:
+                state = "OUTCOME_UNKNOWN"
+            elif result.retry_safe:
+                state = "RETRY_SAFE"
+            else:
+                state = "FAILED"
             self.store.finish_attempt(attempt, state=state, transport_status=result.status)
-            if result.process_started:
+            if state == "OUTCOME_UNKNOWN":
                 raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
             raise FanoutError(result.status)
-        if result.provider_id != PROVIDER_ID or result.model_id != MODEL_ID:
+        expected_operation_id = attempt.get("operation_id")
+        if hasattr(active_transport, "prepare_operation_id"):
+            if (
+                not isinstance(expected_operation_id, str)
+                or _SHA256_RE.fullmatch(expected_operation_id) is None
+            ):
+                self.store.finish_attempt(
+                    attempt, state="OUTCOME_UNKNOWN", transport_status="OPERATION_ID_REQUIRED"
+                )
+                raise FanoutError("OPERATION_ID_REQUIRED")
+            if result.operation_id != expected_operation_id:
+                self.store.finish_attempt(
+                    attempt, state="OUTCOME_UNKNOWN", transport_status="OPERATION_ID_MISMATCH"
+                )
+                raise FanoutError("OPERATION_ID_MISMATCH")
+        expected_provider_id = getattr(active_transport, "provider_id", PROVIDER_ID)
+        expected_model_id = getattr(active_transport, "model_id", MODEL_ID)
+        if result.provider_id != expected_provider_id or result.model_id != expected_model_id:
             self.store.finish_attempt(
-                attempt, state="OUTCOME_UNKNOWN", transport_status="MODEL_ATTESTATION_MISMATCH"
+                attempt,
+                state="OUTCOME_UNKNOWN",
+                transport_status="MODEL_ATTESTATION_MISMATCH",
             )
             raise FanoutError("MODEL_ATTESTATION_MISMATCH")
         if str(Path(result.directory).resolve()) != str(Path(workspace.path).resolve()):
             self.store.finish_attempt(
-                attempt, state="OUTCOME_UNKNOWN", transport_status="WORKSPACE_ATTESTATION_MISMATCH"
+                attempt,
+                state="OUTCOME_UNKNOWN",
+                transport_status="WORKSPACE_ATTESTATION_MISMATCH",
             )
             raise FanoutError("WORKSPACE_ATTESTATION_MISMATCH")
         try:
@@ -1257,7 +1623,9 @@ class AdaptiveDeepSeekFanoutRuntime:
             )
         except FanoutError:
             self.store.finish_attempt(
-                attempt, state="OUTCOME_UNKNOWN", transport_status="WORKER_RESULT_INVALID"
+                attempt,
+                state="OUTCOME_UNKNOWN",
+                transport_status="WORKER_RESULT_INVALID",
             )
             raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
         self.store.claim_session(
@@ -1265,6 +1633,9 @@ class AdaptiveDeepSeekFanoutRuntime:
             task_id=unit.task_id,
             unit_id=unit.unit_id,
             workspace_id=workspace.workspace_id,
+            selected_worker=unit.selected_worker,
+            provider=unit.provider,
+            model=unit.model,
         )
         if worker["status"] == "BLOCKED":
             receipt = self._build_receipt(
@@ -1283,7 +1654,31 @@ class AdaptiveDeepSeekFanoutRuntime:
             return receipt
         try:
             candidate = _capture_candidate(unit, workspace, expected_head=unit.expected_base_sha)
-        except FanoutError:
+        except FanoutError as exc:
+            hard_block = (
+                str(exc) == "EMPTY_IMPLEMENTATION_RESULT"
+                or str(exc) == "DELETION_NOT_AUTHORIZED"
+                or str(exc).startswith("OUT_OF_SCOPE_MUTATION:")
+            )
+            if hard_block:
+                blocked_worker = {
+                    "status": "BLOCKED",
+                    "summary": str(exc),
+                }
+                receipt = self._build_receipt(
+                    unit=unit,
+                    workspace=workspace,
+                    attempt=attempt,
+                    result=result,
+                    worker=blocked_worker,
+                    candidate=None,
+                    status="WORKER_BLOCKED",
+                )
+                self.store.write_receipt(receipt)
+                self.store.finish_attempt(
+                    attempt, state="TERMINAL_BLOCKED", transport_status=str(exc)
+                )
+                return receipt
             self.store.finish_attempt(
                 attempt, state="OUTCOME_UNKNOWN", transport_status="CANDIDATE_CAPTURE_FAILED"
             )
@@ -1313,7 +1708,15 @@ class AdaptiveDeepSeekFanoutRuntime:
             raise FanoutError("INVALID_PARENT_RECEIPT")
         if previous_receipt.get("status") != "CANDIDATE_READY_FOR_VERIFICATION":
             raise FanoutError("PARENT_CANDIDATE_REQUIRED")
-        if previous_receipt.get("provider") != PROVIDER or previous_receipt.get("model") != MODEL:
+        transport = self._transport_for_unit(previous_receipt)
+        transport_model = getattr(transport, "model", MODEL)
+        transport_provider_id = getattr(transport, "provider_id", PROVIDER_ID)
+        transport_model_id = getattr(transport, "model_id", MODEL_ID)
+        if (
+            previous_receipt.get("model") != transport_model
+            or previous_receipt.get("provider_id") != transport_provider_id
+            or previous_receipt.get("model_id") != transport_model_id
+        ):
             raise FanoutError("MODEL_SUBSTITUTION_FORBIDDEN")
         repair_path, _ = _load_and_verify_artifact(repair_ref, repair_sha256)
         task_id = _safe_slug(previous_receipt.get("task_id"), "task_id")
@@ -1332,6 +1735,9 @@ class AdaptiveDeepSeekFanoutRuntime:
             task_id=task_id,
             unit_id=unit_id,
             workspace_id=workspace.workspace_id,
+            selected_worker=previous_receipt.get("selected_worker"),
+            provider=str(previous_receipt.get("provider") or PROVIDER),
+            model=str(previous_receipt.get("model") or MODEL),
         )
         suffix = f"repair-{_safe_slug(repair_id, 'repair_id')}"
         attempt = self.store.prepare_repair(
@@ -1340,25 +1746,67 @@ class AdaptiveDeepSeekFanoutRuntime:
             repair_ref=str(repair_path),
             repair_sha256=repair_sha256,
         )
-        attempt = self.store.mark_dispatching(attempt, suffix=suffix)
         prompt = build_repair_bootstrap(
             previous_receipt,
             repair_id=repair_id,
             repair_ref=str(repair_path),
             repair_sha256=repair_sha256,
         )
-        result: OpenCodeRunResult = self.transport.continue_session(
-            session_id=str(previous_receipt["session_id"]),
-            prompt=prompt,
-            artifact_path=str(repair_path),
-            workspace_path=workspace.path,
-        )
+        if hasattr(transport, "prepare_operation_id"):
+            operation_id = transport.prepare_operation_id(
+                "worker_continue",
+                prompt=prompt,
+                artifact_path=str(repair_path),
+                workspace_path=workspace.path,
+                session_id=str(previous_receipt["session_id"]),
+            )
+            attempt = self.store.bind_operation_id(attempt, operation_id, suffix=suffix)
+        attempt = self.store.mark_dispatching(attempt, suffix=suffix)
+        if hasattr(transport, "prepare_operation_id"):
+            result: OpenCodeRunResult = transport.continue_session(
+                session_id=str(previous_receipt["session_id"]),
+                prompt=prompt,
+                artifact_path=str(repair_path),
+                workspace_path=workspace.path,
+                operation_id=operation_id,
+            )
+        else:
+            result = transport.continue_session(
+                session_id=str(previous_receipt["session_id"]),
+                prompt=prompt,
+                artifact_path=str(repair_path),
+                workspace_path=workspace.path,
+            )
         if result.status != "COMPLETED" or result.session_id != previous_receipt["session_id"]:
             self.store.finish_attempt(
-                attempt, state="OUTCOME_UNKNOWN", transport_status=result.status, suffix=suffix
+                attempt,
+                state="OUTCOME_UNKNOWN",
+                transport_status=result.status,
+                suffix=suffix,
             )
             raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
-        if result.provider_id != PROVIDER_ID or result.model_id != MODEL_ID:
+        expected_operation_id = attempt.get("operation_id")
+        if hasattr(transport, "prepare_operation_id"):
+            if (
+                not isinstance(expected_operation_id, str)
+                or _SHA256_RE.fullmatch(expected_operation_id) is None
+            ):
+                self.store.finish_attempt(
+                    attempt,
+                    state="OUTCOME_UNKNOWN",
+                    transport_status="OPERATION_ID_REQUIRED",
+                    suffix=suffix,
+                )
+                raise FanoutError("OPERATION_ID_REQUIRED")
+            if result.operation_id != expected_operation_id:
+                self.store.finish_attempt(
+                    attempt,
+                    state="OUTCOME_UNKNOWN",
+                    transport_status="OPERATION_ID_MISMATCH",
+                    suffix=suffix,
+                )
+                raise FanoutError("OPERATION_ID_MISMATCH")
+        if result.provider_id != transport_provider_id or result.model_id != transport_model_id:
             self.store.finish_attempt(
                 attempt,
                 state="OUTCOME_UNKNOWN",
@@ -1384,6 +1832,9 @@ class AdaptiveDeepSeekFanoutRuntime:
             "expected_base_sha": previous_receipt["base_sha"],
             "mutation_paths": previous_receipt["mutation_paths"],
             "allow_deletions": previous_receipt.get("allow_deletions", False),
+            "selected_worker": previous_receipt.get("selected_worker"),
+            "provider": previous_receipt.get("provider", PROVIDER),
+            "model": previous_receipt.get("model", MODEL),
         })
         if worker["status"] == "BLOCKED":
             receipt = self._build_receipt(
@@ -1399,7 +1850,10 @@ class AdaptiveDeepSeekFanoutRuntime:
             )
             self.store.write_receipt(receipt, suffix=suffix)
             self.store.finish_attempt(
-                attempt, state="TERMINAL_BLOCKED", transport_status=result.status, suffix=suffix
+                attempt,
+                state="TERMINAL_BLOCKED",
+                transport_status=result.status,
+                suffix=suffix,
             )
             return receipt
         candidate = _capture_candidate(
@@ -1422,8 +1876,8 @@ class AdaptiveDeepSeekFanoutRuntime:
         )
         return receipt
 
-    @staticmethod
     def _build_receipt(
+        self,
         *,
         unit: ExecutionUnit,
         workspace: WorkspaceLease,
@@ -1442,8 +1896,8 @@ class AdaptiveDeepSeekFanoutRuntime:
             "unit_id": unit.unit_id,
             "attempt_id": attempt["attempt_id"],
             "mode": attempt["mode"],
-            "provider": PROVIDER,
-            "model": MODEL,
+            "provider": unit.provider,
+            "model": unit.model,
             "provider_id": result.provider_id,
             "model_id": result.model_id,
             "session_id": result.session_id,
@@ -1459,6 +1913,14 @@ class AdaptiveDeepSeekFanoutRuntime:
             "stdout_sha256": result.stdout_sha256,
             "export_sha256": result.export_sha256,
             "opencode_version": result.version,
+            "worker_backend": result.worker_backend,
+            "diagnosis_status": result.diagnosis_status,
+            "diagnosis_sha256": result.diagnosis_sha256,
+            "diagnosis_evidence_paths": list(result.diagnosis_evidence_paths),
+            "repair_admitted": result.repair_admitted,
+            "repair_phase_count": result.repair_phase_count,
+            "worker_identity_sha256": result.worker_identity_sha256,
+            "operation_id": result.operation_id,
             "parent_receipt_id": parent_receipt_id,
             "repair_id": repair_id,
             "claim_ceiling": CLAIM_CEILING,
@@ -1467,12 +1929,22 @@ class AdaptiveDeepSeekFanoutRuntime:
             "candidate_diff_sha256": "",
             "changed_paths": [],
             "deleted_paths": [],
+            "telemetry": {
+                "worker_tokens": "NOT_OBSERVED",
+                "provider": unit.provider,
+                "model": unit.model,
+            },
         }
+        if unit.selected_worker is not None:
+            receipt["selected_worker"] = dict(unit.selected_worker)
         if candidate is not None:
             receipt.update(candidate)
         material = dict(receipt)
         receipt["receipt_id"] = _sha256(_canonical_json(material))
         return receipt
+
+
+AdaptiveDeepSeekFanoutRuntime = AdaptiveWorkerFanoutRuntime
 
 
 __all__ = [
@@ -1487,6 +1959,7 @@ __all__ = [
     "WORKER_RECEIPT_SCHEMA",
     "WORKER_RESULT_SCHEMA",
     "AdaptiveDeepSeekFanoutRuntime",
+    "AdaptiveWorkerFanoutRuntime",
     "CapacityLease",
     "ExecutionUnit",
     "FanoutError",
@@ -1494,6 +1967,7 @@ __all__ = [
     "GitWorktreeAllocator",
     "OpenCodeDeepSeekTransport",
     "OpenCodeRunResult",
+    "OpenCodeWorkerTransport",
     "WorkspaceLease",
     "build_repair_bootstrap",
     "build_worker_bootstrap",

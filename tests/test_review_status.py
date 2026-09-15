@@ -18,9 +18,18 @@ def test_normalize_skipped():
 
 def test_normalize_unknown():
     s, success = ReviewStatusNormalizer.normalize("GARBAGE")
-    assert s == "UNKNOWN"
+    assert s == "RECOVERABLE_BLOCK"
     assert success is False
 
 def test_normalize_aliases():
     assert ReviewStatusNormalizer.normalize("PASS") == ("APPROVED", True)
     assert ReviewStatusNormalizer.normalize("SUCCESS") == ("APPROVED", True)
+
+
+@pytest.mark.parametrize("status", ["FAIL", "FAILED", "REVISE", "UNKNOWN", "GARBAGE"])
+def test_repairable_reviewer_failures_never_become_terminal(status):
+    assert ReviewStatusNormalizer.normalize(status) == ("RECOVERABLE_BLOCK", False)
+
+
+def test_explicit_rejected_remains_terminal_disposition():
+    assert ReviewStatusNormalizer.normalize("REJECTED") == ("REJECTED", False)

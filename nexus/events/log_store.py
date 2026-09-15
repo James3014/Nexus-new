@@ -28,9 +28,10 @@ class JsonlEventLogStore:
         self._attempt_tails: Dict[Tuple[str, str], Tuple[int, str]] = {}
         self._lock = threading.RLock()
 
-    def configure(self, project_root: Path) -> Tuple[Path, Path]:
+    def configure(self, project_root: Path, *, create: bool = True) -> Tuple[Path, Path]:
         log_dir = project_root / ".nexus" / "events"
-        log_dir.mkdir(parents=True, exist_ok=True)
+        if create:
+            log_dir.mkdir(parents=True, exist_ok=True)
         self.event_log_path = log_dir / "event_log.jsonl"
         self.lock_path = log_dir / "event_log.lock"
         with self._lock:

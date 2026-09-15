@@ -1,6 +1,7 @@
 import hashlib
 import importlib
 import json
+import os
 import re
 import shlex
 from dataclasses import dataclass
@@ -149,6 +150,24 @@ class VerifiedTaskCardIdentity:
             raise ValueError("verified_task_card_hash_invalid")
         if self.contract_kind != "TRACKED_TASK_CARD":
             raise ValueError("verified_task_card_contract_kind_invalid")
+
+
+@dataclass(frozen=True)
+class VerifiedCampaignIdentity:
+    """Authenticated campaign source bound to one verified Task Card."""
+
+    campaign_id: str
+    task_id: str
+    task_card_hash: str
+    contract_kind: str = "TRACKED_TASK_CARD"
+
+    def __post_init__(self) -> None:
+        if not self.campaign_id or self.campaign_id != self.campaign_id.strip():
+            raise ValueError("verified_campaign_id_invalid")
+        if not self.task_id.strip() or len(self.task_card_hash) != 64:
+            raise ValueError("verified_campaign_binding_invalid")
+        if self.contract_kind != "TRACKED_TASK_CARD":
+            raise ValueError("verified_campaign_contract_kind_invalid")
 
 
 @dataclass(frozen=True)
@@ -370,21 +389,55 @@ def _actual_runtime_controls(
     return controls
 
 
+def _derive_campaign_id_from_task_card(task_card_identity: 'VerifiedTaskCardIdentity') -> str:
+    """Derive campaign identity from verified Task Card path or content.
+
+    Campaign identity is exact-match only; blank, missing, or unrelated
+    paths use the global route. Task-ID prose/prefix alone cannot mint
+    campaign identity.
+    """
+    known_campaigns = {
+        "CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01",
+        "CAMPAIGN-PLANNER-WORKFORCE-SELECTION-REPAIR-01",
+        "open-swe-resident-five-repo-canary-20260908",
+    }
+    canonical_path = Path(task_card_identity.canonical_task_card_path)
+    try:
+        card_bytes = canonical_path.read_bytes()
+    except OSError as exc:
+        raise ValueError("verified_task_card_canonical_bytes_missing") from exc
+    actual_hash = hashlib.sha256(card_bytes).hexdigest()
+    if actual_hash != task_card_identity.task_card_hash:
+        raise ValueError("verified_task_card_hash_mismatch")
+    content = card_bytes.decode("utf-8")
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("Campaign:"):
+            value = stripped.split(":", 1)[1].strip().strip("`")
+            return value if value in known_campaigns else ""
+    return ""
+
+
 def _resolve_policy_workforce_bindings(
     plan_payload: Mapping[str, Any],
     *,
     allowed_files: tuple[str, ...],
     verifier_command: tuple[str, ...],
+    campaign_id: str = "",
 ) -> tuple[dict[str, Any], dict[str, str]]:
     """Resolve Planner demands through the tracked Workforce policy.
 
     Callers cannot supply worker, provider, or model identities.  This function
     projects each Planner demand through the policy's canonical routing map;
     only Workforce Admission evaluates that mapped identity's eligibility.
+
+    Campaign resolution is exact-match only; blank, missing, prefixed,
+    or unrelated campaign IDs use the global route.
     """
     from nexus.services.model_workforce_policy import WorkforcePolicyLoader
 
-    snapshot = WorkforcePolicyLoader().load()
+    policy = WorkforcePolicyLoader()
+    snapshot = policy.load()
     signal_snapshot = plan_payload.get("signal_snapshot")
     demands_payload = (
         signal_snapshot.get("workforce_demands")
@@ -401,14 +454,22 @@ def _resolve_policy_workforce_bindings(
     )
     bindings: dict[str, Any] = {}
     providers: dict[str, str] = {}
+    seen_channels: set[str] = set()
     for demand in demands:
         if not isinstance(demand, Mapping):
             raise ValueError("canonical_workforce_demand_malformed")
         channel = str(demand.get("execution_channel") or "")
         role = str(demand.get("requested_role") or "")
-        route_group_name = "local_first" if channel == "local" else channel
-        route_group = snapshot.routing.get(route_group_name)
-        worker_id = route_group.get(role) if isinstance(route_group, Mapping) else None
+        if channel in seen_channels:
+            raise ValueError(f"canonical_workforce_demand_conflict:{channel}")
+        seen_channels.add(channel)
+        if channel == "online":
+            # Use campaign-aware resolution for online channel
+            worker_id = policy.resolve_route(role, campaign_id=campaign_id)
+        else:
+            route_group_name = "local_first" if channel == "local" else channel
+            route_group = snapshot.routing.get(route_group_name)
+            worker_id = route_group.get(role) if isinstance(route_group, Mapping) else None
         if not isinstance(worker_id, str) or not worker_id.strip():
             raise ValueError(f"canonical_workforce_route_missing:{channel}:{role}")
         worker = snapshot.workers.get(worker_id)
@@ -431,6 +492,7 @@ def build_canonical_planner_admission(
     allowed_files: tuple[str, ...],
     verifier_command: tuple[str, ...],
     task_card_identity: VerifiedTaskCardIdentity,
+    campaign_identity: VerifiedCampaignIdentity | None = None,
 ) -> dict[str, Any]:
     """Run the sole planner and current Workforce Admission for one gateway task."""
     from nexus.contracts.canonical_execution import CanonicalTaskContext
@@ -442,6 +504,10 @@ def build_canonical_planner_admission(
     if task_card_identity.task_id != task_id:
         raise ValueError("canonical_task_card_task_mismatch")
 
+    task_card_campaign_id = _derive_campaign_id_from_task_card(task_card_identity)
+    candidate_generation_only = (
+        task_card_campaign_id == "open-swe-resident-five-repo-canary-20260908"
+    )
     context = CanonicalTaskContext(
         task_id=str(task_id),
         task_type="feature" if infer_task_kind(task_text) == "feature" else "repair",
@@ -450,8 +516,9 @@ def build_canonical_planner_admission(
         transport_ingress="mcp",
         execution_channels=("online",),
         task_facts={
-            "mutation_requested": bool(allowed_files),
+            "mutation_requested": bool(allowed_files) and not candidate_generation_only,
             "candidate_required": True,
+            **({"candidate_generation_only": True} if candidate_generation_only else {}),
         },
         authority_inputs={
             "direct_canonical_eligible": False,
@@ -478,10 +545,24 @@ def build_canonical_planner_admission(
         raise ValueError("canonical_workforce_demands_missing")
     policy = WorkforcePolicyLoader()
     snapshot = policy.load()
+    campaign_id = task_card_campaign_id
+    if campaign_identity is not None:
+        if not isinstance(campaign_identity, VerifiedCampaignIdentity):
+            raise ValueError("canonical_campaign_identity_unverified")
+        if (
+            campaign_identity.task_id != task_card_identity.task_id
+            or campaign_identity.task_card_hash != task_card_identity.task_card_hash
+            or campaign_identity.contract_kind != task_card_identity.contract_kind
+        ):
+            raise ValueError("canonical_campaign_identity_binding_mismatch")
+        if campaign_id and campaign_identity.campaign_id != campaign_id:
+            raise ValueError("canonical_campaign_identity_conflict")
+        campaign_id = campaign_identity.campaign_id
     policy_bindings, _ = _resolve_policy_workforce_bindings(
         plan_payload,
         allowed_files=allowed_files,
         verifier_command=verifier_command,
+        campaign_id=campaign_id,
     )
     runtime_bindings: dict[str, Any] = {}
     for channel, policy_binding in policy_bindings.items():
@@ -509,6 +590,9 @@ def build_canonical_planner_admission(
     if not isinstance(decision, Mapping) or decision.get("decision") != "ALLOW":
         raise ValueError("canonical_workforce_admission_not_single_allow")
     demand = demands["demands"][0]
+    policy_identity = admission.get("policy_identity")
+    if not isinstance(policy_identity, Mapping):
+        policy_identity = {}
     return {
         "planner_output": planner_output,
         "workforce_demands": demands,
@@ -518,7 +602,7 @@ def build_canonical_planner_admission(
             "worker_id": str(decision.get("resolved_worker_id") or ""),
             "provider": str(decision.get("resolved_provider") or ""),
             "model": str(decision.get("resolved_model") or ""),
-            "policy_hash": str((admission.get("policy_identity") or {}).get("policy_hash") or ""),
+            "policy_hash": str(policy_identity.get("policy_hash") or ""),
             "binding_hash": str(record.get("binding_hash") or ""),
             "aggregate_binding_hash": str(admission.get("aggregate_binding_hash") or ""),
         },
@@ -528,8 +612,10 @@ def build_canonical_planner_admission(
 def _execution_learning_observer(context: Mapping[str, Any]) -> dict[str, Any]:
     """Bind observed runtime evidence without promoting a reusable lesson."""
     task_id = str(context.get("task_id") or "")
-    local = context.get("local") if isinstance(context.get("local"), Mapping) else {}
-    online = context.get("online") if isinstance(context.get("online"), Mapping) else {}
+    local_raw = context.get("local")
+    online_raw = context.get("online")
+    local = local_raw if isinstance(local_raw, Mapping) else {}
+    online = online_raw if isinstance(online_raw, Mapping) else {}
     evidence = bool(local.get("evidence_present") or online.get("evidence_present"))
     gate = bool(local.get("gate_passed") or online.get("gate_passed"))
     passed = bool(task_id and evidence and gate)
@@ -582,6 +668,8 @@ def execute_canonical_product_task(
         "recommended_flow",
         "route",
         "runtime_selector",
+        "worker",
+        "worker_id",
     }
     supplied_forbidden = sorted(forbidden.intersection(context))
     if supplied_forbidden:
@@ -595,12 +683,7 @@ def execute_canonical_product_task(
     mode = str(context.get("local_assist_mode") or "disabled").strip().lower()
     if mode not in {"disabled", "shadow", "advisor"}:
         raise ValueError("canonical_product_local_policy_invalid")
-    raw_online_policy = context.get("online_policy")
-    online_policy = (
-        normalize_online_policy(str(raw_online_policy))
-        if raw_online_policy is not None
-        else ""
-    )
+    online_policy = normalize_online_policy(context.get("online_policy"))
 
     raw_allowed = context.get("target_files") or ()
     if isinstance(raw_allowed, str):
@@ -678,6 +761,17 @@ def execute_canonical_product_task(
         execution_channels = (
             ("local",) if online_policy == "deny" else ("online", "local")
         )
+    from nexus.engine.learning_policy_loader import merge_runtime_learning_policy
+
+    runtime_budget = merge_runtime_learning_policy(
+        root,
+        context.get("budget") or {},
+        task_desc=str(task_text),
+        target_model=os.environ.get("NEXUS_LOCAL_MODEL_EXECUTOR_MODEL", "qwen2.5-coder:7b"),
+        runtime_identity="local_model_executor",
+        source_revision=revision,
+    )
+
     canonical_context = CanonicalTaskContext(
         task_id=task_id,
         task_type=task_type,
@@ -697,6 +791,7 @@ def execute_canonical_product_task(
         },
         route_features=route_features,
         codeintel=codeintel,
+        budget=runtime_budget,
     )
     bundle = plan_canonical_task_bundle(canonical_context)
     plan_payload = bundle.to_dict()["plan_payload"]
@@ -761,6 +856,7 @@ def execute_canonical_product_task(
         task_statement=str(task_text),
         task_type=task_type,
         route=route,
+        budget=runtime_budget,
         online_enabled=online_decision.online_execution_requested,
         local_enabled=local_enabled,
         online_prompt=str(task_text),
