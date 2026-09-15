@@ -6,7 +6,7 @@
 - **Source spec SHA-256:** `none`
 - **Source groups:** `ISSUE-969-RIE-SIDECAR`
 - **Requirements:** `REQ-969`
-- **Acceptance:** `AC-9691`; `AC-9692`; `AC-9693`; `AC-9694`; `AC-9695`; `AC-9696`; `AC-9697`; `AC-9698`
+- **Acceptance:** `AC-9691; AC-9692; AC-9693; AC-9694; AC-9695; AC-9696; AC-9697; AC-9698`
 - **Auto-chain:** `false`
 - **Maximum claim:** `NEXUS_NEW_RIE_READ_ONLY_PR_SIDECAR_INTEGRATED`
 - **Depends on:** `none`
@@ -76,7 +76,7 @@ The exact governed PR candidate is independently verified and eligible to enter 
 ## MCP execution profile
 
 - **App/server and action snapshot:** GitHub connector plus Nexus protected completion surface; identities are rebound at use time.
-- **Exact required actions:** `get_pr_info`; `list_pr_changed_filenames`; `fetch_pr_patch`; `fetch_commit_workflow_runs`; `fetch_workflow_run_artifacts`; `github_complete_pull_request`
+- **Exact required actions:** `get_pr_info; list_pr_changed_filenames; fetch_pr_patch; fetch_commit_workflow_runs; fetch_workflow_run_artifacts; github_complete_pull_request`
 - **Confirmation-required actions:** `github_complete_pull_request`
 - **Idempotency and attempt rule:** every mutation is bound to exact expected head/base; after an unknown merge outcome, reconcile PR/main before any further mutation.
 - **Reconnect reconciliation:** re-read PR merged state, exact `main`, accepted paths and current standing-grant state before retrying any external effect.
