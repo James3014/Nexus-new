@@ -153,7 +153,7 @@ No product defect is claimed. The existing guard is the Nexus-new governance req
 
 | ID | cwd | Exact command/argv | Purpose | Required result |
 |---|---|---|---|---|
-| `CMD-001` | `TARGET_ROOT` | `git diff --check` | verify patch whitespace integrity on an exact Candidate checkout | exit code `0` |
+| `CMD-001` | `TARGET_ROOT` | `git diff --check 68d8b5408f3d4fe60a701d9c79ccd6a2129549c5 HEAD` | verify whitespace integrity across the exact accepted-base to Candidate range | exit code `0` |
 
 ## Physical evidence
 
