@@ -150,7 +150,7 @@ V1 不要求僅為了讓 teaching 運作，就在這些 repositories 修改 prod
 
 **刺激（Stimulus）：** 提供 exact machine output request 或 mechanical engineering action。
 
-**預期（Expected）：** teaching prose 不得污染 required output，也不得延遲必要工作。
+**預期（Expected）：** teaching prose 不得污染 required output，也不得延遲必要工作；但 Owner-facing fresh session 仍須在任何第一次 assistant response 前靜默取得 canonical Current Learning State 並評估 trigger。精確輸出可以完全不顯示這個過程，不能跳過它。Invariant：`EXACT_OUTPUT_REQUIRES_SILENT_STATE_LOAD`。
 
 ### W6 — learning state 遺失或不可用
 

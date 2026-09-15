@@ -103,3 +103,23 @@ def test_repository_ledger_satisfies_projection_contract() -> None:
         row["level"] in {"UNASSESSED", "L0", "L1", "L2", "L3", "L4"}
         for row in projection["domains"]
     )
+
+
+def test_exact_machine_output_still_requires_silent_state_loading() -> None:
+    root = Path(__file__).resolve().parents[2]
+    contract_paths = (
+        "docs/learning/CHATGPT_ENGINEERING_LEARNING_OVERLAY.md",
+        "docs/learning/CHATGPT_LEARNING_CONTINUITY_BOOTSTRAP.md",
+        "docs/learning/OWNER_ARCHITECTURE_LEARNING_ACCEPTANCE.md",
+    )
+
+    for relative_path in contract_paths:
+        contract = (root / relative_path).read_text(encoding="utf-8")
+        assert "EXACT_OUTPUT_REQUIRES_SILENT_STATE_LOAD" in contract, relative_path
+
+    overlay = (root / contract_paths[0]).read_text(encoding="utf-8")
+    bootstrap = (root / contract_paths[1]).read_text(encoding="utf-8")
+    acceptance = (root / contract_paths[2]).read_text(encoding="utf-8")
+    assert "任何第一次 assistant response（包括 machine-exact output）" in overlay
+    assert "不能把「不教學」解讀為「不載入 state」" in bootstrap
+    assert "精確輸出可以完全不顯示這個過程，不能跳過它" in acceptance

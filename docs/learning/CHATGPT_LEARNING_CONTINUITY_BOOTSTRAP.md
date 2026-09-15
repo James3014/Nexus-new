@@ -21,9 +21,9 @@ tracking_issue: https://github.com/James3014/Nexus-new/issues/965
 當新的 ChatGPT／Owner-facing session 要處理 Nexus 架構、開發、審閱、整合或故障問題時，依序：
 
 1. **先遵守目前 host／Project Instructions 與當前 repository 的工程 authority。** Owner learning 不覆蓋任何 `AGENTS.md`、Issue／Task contract、verifier、merge 或 production gate。
-2. **辨識這是不是 James 的 Owner-facing Nexus 工作。** 純 worker／machine-exact 子任務不需要啟動教學互動。
+2. **辨識這是不是 James 的 Owner-facing Nexus 工作。** 純 worker 不啟動 Owner 教學互動。Owner-facing 的 machine-exact task 不進行 quiz 或輸出教學文字，但仍必須在任何 assistant response 前靜默完成 canonical state loading；不能把「不教學」解讀為「不載入 state」。Invariant：`EXACT_OUTPUT_REQUIRES_SILENT_STATE_LOAD`。
 3. **取得這份 bootstrap 與 canonical Overlay 的目前版本。** 不從舊聊天印象重建 policy。
-4. **在判斷要不要教之前，先取得 Ledger 的 bounded `Current Learning State`。** 若可使用 deterministic projection，可由 `scripts/ops/owner_learning_state.py` 驗證／投影已明示的 reviewed state；該工具不能自行評分。
+4. **在任何第一次回答及判斷要不要教之前，先取得 Ledger 的 bounded `Current Learning State`。** 這包含 exact-machine-output；載入可以靜默，輸出仍必須完全符合要求。若可使用 deterministic projection，可由 `scripts/ops/owner_learning_state.py` 驗證／投影已明示的 reviewed state；該工具不能自行評分。
 5. **盡可能綁定實際使用的 policy／Ledger revision 或 content identity。** 之後若要聲稱 continuity 成功，要能指出這次用了哪個 state。
 6. **再判斷目前真實工作是否出現高價值系統架構學習 trigger。** State awareness 應可靠；teaching 仍是 conditional。
 7. **如果沒有值得打斷的 learning trigger，就正常完成工作。** `state loaded -> no teaching needed` 是合法成功結果。
@@ -44,7 +44,7 @@ tracking_issue: https://github.com/James3014/Nexus-new/issues/965
 
 ChatGPT Project Instructions 或等價的 Owner-facing host，可以使用以下短 pointer 作為入口：
 
-> James 的 Nexus 工作以高階系統架構判斷學習為主。Owner-facing 說明使用繁體中文，必要的英文技術原名與機器識別保留。開始決定 teaching depth 前，先依 `docs/learning/CHATGPT_LEARNING_CONTINUITY_BOOTSTRAP.md` 取得 canonical Overlay 與 Ledger 的 bounded Current Learning State；learning-state awareness 優先，teaching 仍為 conditional。James 的個人 learning state 不得改變任何 repository authority、verification、acceptance、merge、release、security 或 production gate。
+> James 的 Nexus 工作以高階系統架構判斷學習為主。Owner-facing 說明使用繁體中文，必要的英文技術原名與機器識別保留。在任何第一次回答前，先依 `docs/learning/CHATGPT_LEARNING_CONTINUITY_BOOTSTRAP.md` 取得 canonical Overlay 與 Ledger 的 bounded Current Learning State；exact-machine-output 也必須靜默載入 state，但輸出不得加入其他文字。Learning-state awareness 優先，teaching 仍為 conditional。James 的個人 learning state 不得改變任何 repository authority、verification、acceptance、merge、release、security 或 production gate。
 
 這段 pointer 只是啟動 projection。**pointer 已安裝 != fresh session 已讀取 state != learning continuity 已驗證。** `SOURCE_CONTRACT_VERIFIED` 可在沒有 fresh-session witness 時成立；實際的 bootstrap continuity 成功，必須在後續 `G3` 由 `OWNER_ARCHITECTURE_LEARNING_ACCEPTANCE.md` 記錄 physical fresh-session witness。缺少該 witness 只會阻止 `BOOTSTRAP_WITNESS_VERIFIED` 與更高階 cross-repo claim，不會阻止 source contract 的 merge。
 
@@ -84,7 +84,7 @@ James 應該能只靠繁體中文理解重要意思。
 - 中文先說清概念；必要時附英文原名。
 - file／API／schema／state code／commit SHA 等精確識別名稱保持原文。
 - 不要把重要條件只放在英文。
-- machine-exact output 不插入教學文字。
+- machine-exact output 不插入教學文字，但仍先靜默載入 canonical state（`EXACT_OUTPUT_REQUIRES_SILENT_STATE_LOAD`）。
 - James 不懂英文術語不等於架構理解退步。
 
 重要工程結論仍優先回答：

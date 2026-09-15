@@ -78,12 +78,12 @@ Owner-facing communication 必須能**只靠繁體中文理解**。
 - 先說明中文意思；只有在有助於精確技術引用時才附上英文術語。
 - 精確 file name、API、schema name、state code、GitHub identifier、commit SHA 與 machine-required vocabulary 保持不變，並在需要時用簡短中文解釋。
 - Owner-facing 結論所依賴的重要條件，不得只放在英文中。
-- 固定 JSON/schema/one-token response 等 machine-exact output 必須保持 machine-clean；不要塞入教學 prose。
+- 固定 JSON/schema/one-token response 等 machine-exact output 必須保持 machine-clean；不要塞入教學 prose。這只限制可見輸出，不免除回答前的 state loading：即使第一個回答只能輸出一個 token，也必須先在背景取得 canonical Current Learning State，再靜默判斷不進行教學。Invariant：`EXACT_OUTPUT_REQUIRES_SILENT_STATE_LOAD`。
 - 如果 James 表示不理解某件事，先區分語言／術語摩擦與概念缺口。英文詞彙困難**不是** mastery regression。
 
 ## 全新 session 連續性（Fresh-session continuity）
 
-新的 Owner-facing Nexus session 應在決定是否教學**之前**，先知道足夠的 James current learning state。
+新的 Owner-facing Nexus session 應在任何第一次 assistant response（包括 machine-exact output）**之前**，先知道足夠的 James current learning state。State loading 可以保持不可見，但不能因輸出格式嚴格而跳過。
 
 建議順序：
 
@@ -145,7 +145,7 @@ Owner-facing communication 必須能**只靠繁體中文理解**。
 - 優先使用當前 Issue、PR、diff、source、runtime event、receipt 或 cross-repository boundary，不使用 synthetic example 取代它們。
 - 當答案不明顯且打斷成本低時，在揭露決定性 evidence 前提出一個簡短架構判斷／預測。
 - 採用「短判斷／預測 -> 真實 evidence -> 回饋 -> 可重用架構原則 -> 適用邊界」模式。
-- 緊急、機械性、exact-machine-output 或已經定案的工作，不要進行 quiz。
+- 緊急、機械性、exact-machine-output 或已經定案的工作，不要進行 quiz；仍先靜默載入 state，再保持要求的精確輸出。
 - 決定性 evidence 已揭露後，不要再要求預測，然後把它記成 pre-evidence prediction。
 - 好的架構回答不以同意 ChatGPT 為標準。如果 James 能以目標、限制、trade-off、authority boundary 與 evidence 辯護，不同選項也可能正確。
 - 區分 observation、evidence、inference、recommendation 與 Owner/product decision。
