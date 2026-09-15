@@ -54,17 +54,13 @@ class DomainState:
 def _find_unique_section(text: str, heading: str, next_prefix: str = "## ") -> str:
     occurrences = [m.start() for m in re.finditer(re.escape(heading), text)]
     if len(occurrences) != 1:
-        raise LedgerContractError(
-            f"expected exactly one {heading!r}; found {len(occurrences)}"
-        )
+        raise LedgerContractError(f"expected exactly one {heading!r}; found {len(occurrences)}")
     start = occurrences[0]
     line_end = text.find("\n", start)
     if line_end == -1:
         return ""
     body_start = line_end + 1
-    next_match = re.search(
-        rf"(?m)^{re.escape(next_prefix)}(?!#)", text[body_start:]
-    )
+    next_match = re.search(rf"(?m)^{re.escape(next_prefix)}(?!#)", text[body_start:])
     if next_match is None:
         return text[body_start:]
     return text[body_start : body_start + next_match.start()]
@@ -143,9 +139,7 @@ def _ensure_unique_event_ids(text: str) -> None:
     ids = _event_ids(text)
     duplicates = sorted({event_id for event_id in ids if ids.count(event_id) > 1})
     if duplicates:
-        raise LedgerContractError(
-            "duplicate learning-event IDs: " + ", ".join(duplicates)
-        )
+        raise LedgerContractError("duplicate learning-event IDs: " + ", ".join(duplicates))
 
 
 def build_projection(text: str, *, source: str) -> Projection:
