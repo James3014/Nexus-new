@@ -11,15 +11,29 @@ binding is approved.
 
 This skill applies exclusively to a local Nexus lifecycle Candidate and local
 integration. It is not the merge procedure for a GitHub PR Candidate. GitHub
-Ready Issues instead use fresh PR/base/head/diff, required CI, independent
-acceptance, `MERGE_INTENT`, and expected-head/CAS merge authority. A valid
-current standing grant explicitly covering the exact repository, Goal,
-coordinator, and normal GitHub action remains valid across ordinary phase
-transitions; do not request redundant Owner reauthorization. Reauthorize only
-for a real authority boundary or genuine external-platform approval. Standing
-authority never bypasses verification, branch protection, or CAS. Local
-lifecycle approval cannot bootstrap a Task Card or manufacture GitHub merge
-authority.
+protected-merge semantics follow the already-selected execution lane, not the
+repository name.
+
+For `DIRECT_CANONICAL` and `DIRECT_DELEGATED`, require fresh exact
+repository/PR/base/head/diff, intended scope, deletion audit, relevant tests,
+terminal-success required checks, readable branch protection, mergeability,
+current Owner confirmation, and expected-head/CAS. `DIRECT_DELEGATED` also
+requires the primary coordinator, distinct from the worker, to inspect the
+physical diff and rerun the applicable verifier. That coordinator verification
+is sufficient; no third reviewer is required. The direct merge sink is the
+server-bound `git_merge_pull_request`. Direct merge does not require a Task
+Card, GitHub `APPROVED` review, independent acceptance receipt/hash, standing
+grant, `GITHUB_MERGE`, or `github_complete_pull_request`.
+
+For `GOVERNED`, keep the existing independent acceptance,
+machine-verifiable provenance, `MERGE_INTENT`, standing-grant `GITHUB_MERGE`,
+and `github_complete_pull_request` completion-loop rules. A valid current
+standing grant explicitly covering the exact repository, Goal, coordinator,
+and normal GitHub action remains valid across ordinary phase transitions; do
+not request redundant Owner reauthorization. Reauthorize only for a real
+authority boundary or genuine external-platform approval. No lane may bypass
+verification, branch protection, or CAS. Local lifecycle approval cannot
+bootstrap a Task Card or manufacture GitHub merge authority.
 
 ## Gate sequence
 
