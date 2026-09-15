@@ -54,9 +54,7 @@ def _assert_exact_head_identity_contract(workflow: dict[str, Any]) -> None:
     resolved_head = _step_from_workflow(workflow, "Resolve exact comparison base")["env"][
         "HEAD_SHA"
     ]
-    artifact_name = _step_from_workflow(workflow, "Archive impact evidence 📦")["with"][
-        "name"
-    ]
+    artifact_name = _step_from_workflow(workflow, "Archive impact evidence 📦")["with"]["name"]
 
     assert checkout_ref == EXACT_HEAD_EXPRESSION
     assert resolved_head == EXACT_HEAD_EXPRESSION
@@ -143,7 +141,5 @@ def test_exact_head_expression_truth_table(
     """Keep the intended PR-head/push-SHA branch semantics explicit."""
     expression = _artifact_name().removeprefix("exact-base-impact-")
     assert expression == EXACT_HEAD_EXPRESSION
-    selected_sha = (
-        pull_request_head_sha if event_name == "pull_request" else github_sha
-    )
+    selected_sha = pull_request_head_sha if event_name == "pull_request" else github_sha
     assert selected_sha == expected_sha
