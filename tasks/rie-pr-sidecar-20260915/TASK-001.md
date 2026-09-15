@@ -80,7 +80,7 @@ The exact governed PR candidate is independently verified and eligible to enter 
 - **Confirmation-required actions:** `github_complete_pull_request`
 - **Idempotency and attempt rule:** every mutation is bound to exact expected head/base; after an unknown merge outcome, reconcile PR/main before any further mutation.
 - **Reconnect reconciliation:** re-read PR merged state, exact `main`, accepted paths and current standing-grant state before retrying any external effect.
-- **Transport blocker:** `none`
+- **Transport blocker:** `protected-merge-only: fresh completion-host identity and valid current GITHUB_MERGE standing-grant receipt must be re-proved before merge`
 
 ## Authority map
 
