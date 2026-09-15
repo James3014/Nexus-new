@@ -2,32 +2,67 @@
 artifact_authority: owner_learning_reference
 owner: James Chen
 status: active_learning_reference
-purpose: Reusable real-case library for building James's engineering judgment during Nexus work.
-non_authority: Learning reference only; never repository, product, routing, verification, acceptance, merge, release, or production authority.
+purpose: Reusable real-case library for building James's system-architecture judgment during Nexus work.
+non_authority: Learning reference only; never current repository truth, product truth, routing, workforce, verification, acceptance, merge, release, security, or production authority.
+canonical_learning_record: docs/learning/OWNER_ENGINEERING_LEARNING_LEDGER.md
+interaction_policy: docs/learning/CHATGPT_ENGINEERING_LEARNING_OVERLAY.md
+tracking_issue: https://github.com/James3014/Nexus-new/issues/965
 ---
 
-# Owner Engineering Casebook
+# Owner System Architecture Casebook
 
-This casebook turns real Nexus engineering events into reusable judgment exercises. It is intentionally separate from the system Learning Closure Matrix: that matrix records Nexus prevention rules; this file records what an Owner can learn from selected cases.
+This Casebook turns real Nexus events into reusable **architecture-judgment exercises**.
+
+It is intentionally separate from:
+
+- Nexus system Learning Closure / `nexus-learning` product state;
+- the canonical Owner Learning Ledger, which records James's demonstrated learning;
+- current repository/runtime truth, which must come from current source, contracts, tests, receipts, and runtime evidence.
+
+The historical file name is retained for continuity.
 
 ## How to use this file
 
-Use a case only when it matches the current engineering problem. Prefer this sequence:
+Use a case only when it matches the current architecture problem structure.
 
-1. Present the **Owner question** without revealing the answer when a prediction would help.
-2. Capture James's short prediction.
-3. Inspect current physical evidence rather than trusting this historical case as live truth.
-4. Compare the prediction with the evidence.
-5. Extract one reusable rule.
-6. Record demonstrated learning in `OWNER_ENGINEERING_LEARNING_LEDGER.md` only if judgment actually changed or transferred.
+Preferred sequence:
 
-Historical case facts are examples, not current runtime truth. Re-bind repository/revision/runtime evidence for any current decision.
+1. State the current system problem in Traditional Chinese.
+2. When a prediction would help and decisive evidence has not yet been revealed, present one short **Owner architecture question**.
+3. Capture James's short judgment only if he actually provides one.
+4. Inspect current physical/source evidence instead of trusting this historical case as live truth.
+5. Compare the judgment with evidence, constraints, and alternatives.
+6. Extract one reusable architecture rule and its applicability boundary.
+7. Record demonstrated learning in `OWNER_ENGINEERING_LEARNING_LEDGER.md` only if judgment was actually demonstrated, corrected, or transferred.
+
+Do not grade based on agreement with the historical solution or ChatGPT's preferred option. A different design may be sound if the goals, constraints, authority boundaries, trade-offs, and evidence support it.
+
+Historical case facts are examples, not current runtime truth. Re-bind repository/revision/runtime evidence for every current decision.
+
+## Case schema for new architecture cases
+
+New cases should prefer these fields:
+
+- **Architecture domain**
+- **Repositories involved**
+- **Historical problem / decision**
+- **Goal and constraints**
+- **Owner question**
+- **Plausible alternatives**
+- **Common misread**
+- **What the evidence showed**
+- **Why the boundary mattered**
+- **Reusable architecture rule**
+- **Applicability boundary / falsifier**
+- **Next harder variant**
+
+Existing historical cases below are preserved even where they use the older compact format.
 
 ---
 
 ## Case 001 — 73 failing tests were not 73 independent bugs
 
-**Learning domain:** Root cause / failure clustering
+**Architecture domain:** 整體運作與失敗控制 / root-cause clustering
 
 **Historical case:** A Nexus closure run reported 236 tests: 159 pass, 73 fail, 4 skip. The 73 failures clustered into four shared domains: provider binding (61), fixture-contract drift (9), workforce mismatch (1), and required-gate mismatch (2).
 
@@ -37,9 +72,9 @@ Historical case facts are examples, not current runtime truth. Re-bind repositor
 
 **What the evidence showed:** Most failures shared a small number of common seams. The dominant provider-binding failure alone accounted for 61 tests.
 
-**Reusable rule:** Count root causes before counting fixes. A failure total is an observation surface, not a defect count.
+**Reusable architecture rule:** Count root causes before counting fixes. A failure total is an observation surface, not a defect count. Shared failure clusters often reveal a boundary/seam problem rather than many local defects.
 
-**High-value falsification:** Pick failures from different apparent modules and test whether the same shared dependency or fixture explains them. If not, split the cluster.
+**Applicability boundary / falsifier:** Sample failures from different apparent modules and test whether the same dependency or contract explains them. If not, split the cluster.
 
 **Next harder variant:** A mixed cluster where one shared root cause explains 80% of failures and several true independent regressions remain.
 
@@ -47,7 +82,7 @@ Historical case facts are examples, not current runtime truth. Re-bind repositor
 
 ## Case 002 — Workforce Admission was not real until the deny path could stop execution
 
-**Learning domain:** Fail-closed / authority enforcement
+**Architecture domain:** 責任、介面與權責劃分 / authority enforcement
 
 **Historical case:** Workforce Admission existed and had tests before it was wired into the gateway path. By 2026-08-16 the mainline path validated `gateway_invocation_authority` before dispatch and `unified_runtime.py` failed closed when admission was missing or blocked.
 
@@ -57,9 +92,9 @@ Historical case facts are examples, not current runtime truth. Re-bind repositor
 
 **What the evidence showed:** The decisive property is downstream enforcement: a missing/BLOCK admission must prevent executor/provider start.
 
-**Reusable rule:** An authority check is real only when the protected side effect cannot occur without it.
+**Reusable architecture rule:** A decision authority is real only when the protected side effect cannot occur without its decision. Policy definition and enforcement point are different architecture responsibilities.
 
-**High-value falsification:** Force BLOCK or missing admission and prove provider/executor call count remains zero.
+**Applicability boundary / falsifier:** Force BLOCK/missing admission and prove the protected call count remains zero; also inspect retry/fallback paths.
 
 **Next harder variant:** Admission is checked once, then a retry/fallback path bypasses it.
 
@@ -67,7 +102,7 @@ Historical case facts are examples, not current runtime truth. Re-bind repositor
 
 ## Case 003 — MiMo reasoned at a high level but still could not receive high mutation authority
 
-**Learning domain:** AI worker capability / reliability / tool discipline / authority
+**Architecture domain:** 責任、介面與權責劃分 / capability vs reliability vs authority
 
 **Historical case:** MiMo V2.5 accumulated strong semantic evidence, including L3 milestone reasoning and 15/15 frontier-stress semantic results. In one bounded task, however, it created out-of-scope caller files and ran pytest despite explicit restrictions. The resulting judgment kept trusted mutation authority at L1.
 
@@ -77,37 +112,37 @@ Historical case facts are examples, not current runtime truth. Re-bind repositor
 
 **What the evidence showed:** The model could reason beyond the authority that was safe to grant. Tool/scope discipline was an independent hard gate.
 
-**Reusable rule:** `capability != reliability != authority`. Higher reasoning ability justifies harder candidate work, not automatic permission expansion.
+**Reusable architecture rule:** `capability != reliability != authority`. Intelligence is an input to task design, not automatic permission expansion.
 
-**High-value falsification:** Give a bounded task with explicit `writePaths`/file-count limits and verify the physical filesystem/diff, not the model's declared scope.
+**Applicability boundary / falsifier:** Give a bounded task with explicit mutation/file/tool constraints and verify physical effects, not the model's declared compliance.
 
-**Next harder variant:** The model stays in scope but performs an unauthorized network or Git side effect.
+**Next harder variant:** The model stays in file scope but performs an unauthorized network/Git/external side effect.
 
 ---
 
 ## Case 004 — A passing test result belongs to a revision, not to a project forever
 
-**Learning domain:** Git / revision-bound evidence
+**Architecture domain:** 假設、證據與反證 / revision-bound evidence
 
 **Historical case:** A workforce-admission-focused suite recorded 115 passing tests at one historical HEAD. Later commits changed repository state. The old result remained valid historical evidence but was not automatically claimed as a fresh result for the newer HEAD.
 
 **Owner question:** If a suite passed yesterday and today's changes appear unrelated, can we still say the current branch passed it?
 
-**Common misread:** A green test result is a property of the feature rather than of an exact source/environment identity.
+**Common misread:** A green result is a property of the feature rather than of an exact source/environment identity.
 
 **What the evidence showed:** The evidence remained tied to the tested revision. Reuse requires a justified impact argument; otherwise the new HEAD is unverified for that claim.
 
-**Reusable rule:** Always ask, "Which exact revision did this evidence test?"
+**Reusable architecture rule:** Evidence has an identity clock. Always ask which exact source/package/runtime/environment state the evidence observed.
 
-**High-value falsification:** Compare candidate/merged HEAD and inspect whether changed paths, dependencies, configuration, or environment can affect the tested behavior.
+**Applicability boundary / falsifier:** Compare Candidate/merged HEAD and dependencies/configuration/environment to determine whether the old evidence can legitimately transfer.
 
-**Next harder variant:** Source files are unchanged but a dependency lockfile, workflow, environment, or generated contract changed.
+**Next harder variant:** Source files are unchanged but dependency lockfile, installed package, workflow, environment, or loaded runtime changed.
 
 ---
 
 ## Case 005 — Components existed, but World A and World C were still not one runtime
 
-**Learning domain:** Architecture / wiring / SSOT
+**Architecture domain:** 整體運作與失敗控制 / reachability and wiring
 
 **Historical case:** Nexus had a proven Agent-Operated world, a proven Local Armor pipeline, adapters, planners, executors, verifiers, and receipts. Yet the Core Mental Model still identified no runtime bridge between daily World A dispatch and World C LocalModelExecutor.
 
@@ -117,17 +152,17 @@ Historical case facts are examples, not current runtime truth. Re-bind repositor
 
 **What the evidence showed:** The missing caller/wiring path meant the capability was not reachable from the daily execution flow.
 
-**Reusable rule:** `defined/implemented != reachable/invoked`. Trace the golden path from user entry to side effect.
+**Reusable architecture rule:** `defined/implemented != reachable/invoked`. Architecture completeness depends on the real user/control path, not component inventory alone.
 
-**High-value falsification:** Start at the real entrypoint and prove the intended executor is physically called with the expected lineage and evidence.
+**Applicability boundary / falsifier:** Start at the real entrypoint and prove the intended executor is physically called with the expected lineage/evidence.
 
-**Next harder variant:** The path is wired but only under a test flag or benchmark-only entrypoint.
+**Next harder variant:** The path is wired but only under a test flag, benchmark-only entrypoint, stale adapter, or non-default runtime.
 
 ---
 
 ## Case 006 — Benchmark success was not runtime or product proof
 
-**Learning domain:** Verification / claim boundaries
+**Architecture domain:** 假設、證據與反證 / claim boundaries
 
 **Historical case:** Nexus World B benchmark harness could prove comparative behavior and World C could demonstrate a full local execution pipeline, while documents still explicitly separated benchmark evidence from product runtime and kept public/production claims false.
 
@@ -137,32 +172,72 @@ Historical case facts are examples, not current runtime truth. Re-bind repositor
 
 **What the evidence showed:** The benchmark was a verification instrument with different entrypoints and conditions. Runtime integration and real-world value required separate evidence.
 
-**Reusable rule:** Benchmark, integration, runtime, and outcome are different claim layers.
+**Reusable architecture rule:** Benchmark, integration, loaded runtime, user outcome, and public/product claims are different evidence layers and may have different owners.
 
-**High-value falsification:** Reproduce the claimed behavior from the real daily entrypoint and measure the same outcome under production-relevant conditions.
+**Applicability boundary / falsifier:** Reproduce the claimed behavior from the real daily entrypoint and measure the same outcome under relevant conditions.
 
-**Next harder variant:** Runtime canary works technically, but cost/latency/value gate remains inconclusive.
+**Next harder variant:** Runtime canary works technically, but cost/latency/operator-attention/value evidence remains inconclusive.
 
 ---
 
-## Candidate cases to add only when fresh evidence warrants them
+## Architecture case candidates — promote only after fresh evidence
 
-Do not pre-fill these as lessons. Promote them into full cases after a real event provides evidence:
+Do not pre-fill these as if James already encountered or answered them. Promote one into a numbered case only after a real, revision-bound event provides enough evidence.
 
-- retry after timeout with uncertain remote state;
-- idempotency and duplicate external effects;
-- lost acknowledgement and reconciliation;
-- test-oracle weakness / false-green suite;
-- mutation-testing style evidence that a suite constrains the intended behavior;
-- rollback that restores source state but not external side effects;
-- two documents or tools claiming the same authority;
-- independent reviewer that merely repeats the implementer's assumptions.
+### A. Cross-repository owner vs consumer
+
+Potential question: a compatibility host and a standalone owner repository both expose similar behavior. Which one may define the canonical contract, and which must forward/consume it?
+
+Architecture value: responsibility, SSOT, compatibility, migration, retirement.
+
+### B. Runtime composition vs truth ownership
+
+Potential question: a runtime composes Core, Learning, Open SWE, and Repository Intelligence. Does composition imply ownership of their truth or policy?
+
+Architecture value: composition root vs domain owner.
+
+### C. Compact projection vs second source of truth
+
+Potential question: a fresh session needs a small current-state summary. Under what rules is a derived projection safe, and when does it become a competing authority?
+
+Architecture value: canonical/derived state, context economics, consistency.
+
+### D. Durable semantic identity vs replaceable transport/session identity
+
+Potential question: durable authorization/learning state remains valid while a chat, process, connector, or loaded service is replaced. Which identity should survive?
+
+Architecture value: durable/ephemeral state and lifecycle boundaries.
+
+### E. Repository split economics
+
+Potential question: when does extracting a repository reduce ownership and release coupling, and when does it simply create more version, integration, CI, and coordination cost?
+
+Architecture value: system evolution and organizational/operational economics.
+
+### F. Native replacement vs Nexus-specific mechanism
+
+Potential question: if DevSpace/GitHub/provider-native functionality now covers a previously Nexus-specific mechanism, what invariant must survive if the custom implementation is retired?
+
+Architecture value: minimal core, native replacement, sunk-cost resistance.
+
+### G. Retry after timeout with unknown remote effect
+
+Architecture value: idempotency, acknowledgement loss, durable operation identity, reconciliation.
+
+### H. Test-oracle weakness / false green
+
+Architecture value: verification design, evidence ceiling, negative controls.
+
+---
 
 ## Maintenance rules
 
-- Add a case only when it teaches a reusable engineering distinction.
-- Prefer one case per failure mechanism, not one per Issue number.
+- Add a case only when it teaches a reusable architecture distinction.
+- Prefer one case per problem mechanism, not one per Issue number.
 - Preserve the original misconception; do not rewrite history to make the lesson look obvious.
-- Keep current-state decisions out of this file. Current repository truth must come from current source/tests/receipts/authoritative policy.
-- Link to exact Issue/PR/revision when a future case is created from live work.
+- Record full `owner/repo` identity for cross-repository cases; Issue numbers alone are ambiguous across repositories.
+- Separate source revision, accepted package/pin, installed artifact, loaded service/runtime, and runtime witness identities when they matter.
+- Keep current-state decisions out of this file. Current truth must come from current source/tests/receipts/contracts/runtime evidence.
+- Link exact Issue/PR/revision when a future case is promoted from live work.
 - A case may be retired from active teaching when James repeatedly transfers the concept correctly; keep it as historical reference rather than deleting it.
+- Do not turn a public Casebook into a transcript archive. Preserve only the minimum reusable, non-sensitive architecture lesson.
