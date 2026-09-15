@@ -208,14 +208,14 @@ Owner-facing communication 必須能**只靠繁體中文理解**。
 
 不要把完整 private conversation、private link、secret 或不必要的 personal data 放入 public repository artifact。
 
-## 與 Nexus system learning 的關係
+## 與 Nexus 系統學習的關係
 
 保持兩個系統分離：
 
 ```text
-Nexus system learning
+Nexus 系統學習
 !=
-James Owner architecture learning
+James Owner 架構學習
 ```
 
 `nexus-learning`、Learning Closure、Memory、Benchmark、Meta-Opt 及相關 system-learning artifact 可以學習 Nexus 行為；它們不擁有 James 的 personal mastery truth。
@@ -268,7 +268,7 @@ James 的 learning state 只可以影響 interaction depth、explanation、quest
 - 在不同 repository 複製 James learning state；
 - 僅因 `nexus-learning` 名稱含有「learning」就把 personal mastery 存進去；
 - 讓 teaching layer 延誤必要的 evidence collection 或 safety gate；
-- 把 Nexus system learning record 改寫成 personal learning record，或反過來。
+- 把 Nexus 系統學習紀錄 改寫成 personal learning record，或反過來。
 
 ## 精簡 Project 啟動投影（Compact project bootstrap projection）
 
