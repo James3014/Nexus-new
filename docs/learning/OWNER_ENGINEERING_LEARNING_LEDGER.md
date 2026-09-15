@@ -27,13 +27,13 @@ tracking_issue: https://github.com/James3014/Nexus-new/issues/965
 
 **投影規則：**本節源自同一 Ledger 中已審閱的證據，不是獨立的熟練度權威。沒有下方相應的證據／歷史時，不得在此手動提升熟練度。
 
-**目前狀態修訂：** `2026-09-15 / Issue #965 candidate design`
+**目前狀態修訂：** `2026-09-15 / LA-20260915-001`
 
 **適用範圍：**目前生態系中面向 Owner 的 Nexus 架構／開發工作，包括 `Nexus-new`、`devspace`、`nexus-core`、`nexus-learning`、`nexus-open-swe-runtime`、`repository-intelligence-engine`、`nexus-runtime` 與 `nexus-opencli-reviewer`。
 
 ### Current priority frontiers — maximum three
 
-1. **跨 repository 的責任 / authority / SSOT 邊界** — 學會在 runtime、compatibility host、intelligence engine、reviewer、Core、Learning 與 execution repos 互動時，辨認正確的負責者。
+1. **跨 repository 的責任 / authority / SSOT 邊界** — `LA-20260915-001` 已支持 repo-local authority-contract 子主題的跨案例判斷；下一步使用 breaking cross-repo contract 測試 owner、migration 與 compatibility 邊界。
 2. **durable / ephemeral identity and state continuity** — 學會判斷哪些身分／狀態必須在 session／process／runtime 替換後存續，哪些應留在傳輸範圍內。
 3. **architecture evolution and context economics** — 學會判斷新的抽象、repository、投影、相容層或 bootstrap 機制何時能降低複雜度，何時只是搬移或複製複雜度。
 
@@ -44,7 +44,7 @@ tracking_issue: https://github.com/James3014/Nexus-new/issues/965
 | Architecture domain | 目前等級 | 證據邊界 | 下一個有用的真實案例 |
 |---|---|---|---|
 | 問題與目標界定 | UNASSESSED | 尚無直接的跨案例評估 | 提出新機制，但重用／不變更也是可信替代方案 |
-| 責任、介面與權責劃分 | UNASSESSED | 歷史 SSOT／authority 子主題為 L1，但尚未評估跨整個領域的遷移 | 判斷跨 repo 的 owner 與 compatibility-consumer |
+| 責任、介面與權責劃分 | L1 | `LA-20260915-001` 支持 repo-local authority-contract 狹窄概念的 L3 transfer；不足以把整個領域提升至 L3 | breaking cross-repo public contract 的 owner／migration authority |
 | 資料、狀態與身分設計 | UNASSESSED | 有相關討論，但尚未記錄經審閱的目前遷移證據 | durable semantic identity 與可替換的 session／runtime identity |
 | 整體運作與失敗控制 | UNASSESSED | retry／reconciliation 曾列入歷史佇列，但未作為架構領域評估 | 帶有外部副作用的 timeout／lost-ack／retry 案例 |
 | 成本、組織與系統演進取捨 | UNASSESSED | 尚無直接評估證據 | 判斷新投影／repo／service 是否降低總維護／context 成本 |
@@ -227,6 +227,26 @@ Teach-back 可以支持 L2；沒有遷移或主動反證證據時，不能證明
 - **下一個挑戰：**實質上最小但更難的真實變體。
 
 不要追加例行狀態更新。不要捏造歷史預測或展現。
+
+---
+
+### LA-20260915-001 — repo-local authority contract without governance cloning
+
+- **觀察日期：** 2026-09-15
+- **Repositories：** `James3014/Nexus-new`、`James3014/repository-intelligence-engine`、`James3014/nexus-runtime`、`James3014/nexus-opencli-reviewer`
+- **真實案例：** Issue #965 G4 發現三個 standalone repositories 的 current default revisions 沒有 root `AGENTS.md`；Owner 判斷應補各自最小的 repo-local authority contract，而不是複製 Nexus-new 或延後到第一次 mutation。
+- **Revision／runtime refs：** `Nexus-new@2999d62e0fb463646a12a659eefeee0aaf3367ea`；`repository-intelligence-engine@b65fb7a0a38685b69aff6866d56243ed9856f625`；`nexus-runtime@9096eabc9783fa6480fb6e18ee4b9d87d1c54620`；`nexus-opencli-reviewer@2e78e770496d900480a60b3c2ae1297753480c1c`。這是 source／repository evidence，不是 loaded runtime、acceptance、merge 或 production evidence。
+- **Architecture domain：**責任、介面與權責劃分。
+- **測試概念：**共用最小 contract 骨架與 repo-local authority semantics 的分離。
+- **關鍵證據前：**未記錄 pre-evidence prediction；缺少 `AGENTS.md` 的 evidence 與三個 alternatives 已先揭露，不得回填為未提示預測。
+- **Scaffold 等級：** `LIGHT`；問題提供三個方向並要求比較最大好處與風險。
+- **檢視的證據：**八 repo G4 source-bound audit、primary coordinator 對 default branch 與 root `AGENTS.md` 的 readback，以及三個 repo README 的 ownership／non-authority boundary。
+- **結果／回饋：**James 選擇每個 repo 的薄型 local contract，理由是 authority 必須與 repository ownership 對齊；同時主動指出多份政策可能 drift，並提出「共用骨架、只讓各 repo 定義自己的 authority／禁止事項／驗證／cross-repo boundary」作為控制方式。他明確拒絕 wholesale 複製 Nexus-new ceremony，也拒絕讓第一次 mutation 在隱含 authority 下發生。
+- **可重用原則：**共享 contract structure，不共享未經證明等價的 authority semantics；storage／template reuse 不等於 policy ownership。
+- **適用邊界：**若 repository 永遠只作 immutable mirror、完全不接受 mutation，或已有更高權威且明確涵蓋它的 repo-local contract，新增 `AGENTS.md` 可能沒有價值。若共用骨架可自行改變所有 repos 的規則，它會成為新的跨 repo policy authority，必須拒絕。
+- **預測分類：** `CORRECT_BUT_CUED`；答案在有 alternatives 的提示下仍展現實質不同案例的合理 transfer 與 trade-off reasoning。
+- **熟練度影響：**狹窄概念 `repo-local authority contract vs governance cloning` 支持 L3；整個「責任、介面與權責劃分」領域只提升為 L1，且不支持 L4，因為關鍵風險是題目要求的一部分。
+- **下一個挑戰：**面對一個 breaking cross-repo public contract，判斷 canonical owner、consumer compatibility、migration authority 與可推翻設計的 evidence。
 
 ---
 
