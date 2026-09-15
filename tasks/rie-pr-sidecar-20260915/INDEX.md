@@ -15,7 +15,7 @@
 
 | Source group | Requirements | Acceptance | Observable outcome | Dependency seam | Verification seam | Maximum claim | Scope class | Minimum MCP profile | Known blocker | Compiled tasks |
 |---|---|---|---|---|---|---|---|---|---|---|
-| `ISSUE-969-RIE-SIDECAR` | `REQ-969` | `AC-9691`; `AC-9692`; `AC-9693`; `AC-9694`; `AC-9695`; `AC-9696`; `AC-9697`; `AC-9698` | Nexus-new PRs automatically emit read-only RIE advisory evidence from the accepted workflow | immutable `repository-intelligence-engine@v0.1.1`; existing Nexus-new CI remains authoritative for CI | exact PR head/base/main; changed paths; exact-head CI; RIE artifact; independent acceptance; protected merge/readback | `NEXUS_NEW_RIE_READ_ONLY_PR_SIDECAR_INTEGRATED` | `small` | `CANDIDATE` | final protected merge must re-prove current completion-host source identity and a valid current `GITHUB_MERGE` standing grant | `TASK-001` |
+| `ISSUE-969-RIE-SIDECAR` | `REQ-969` | `AC-9691; AC-9692; AC-9693; AC-9694; AC-9695; AC-9696; AC-9697; AC-9698` | Nexus-new PRs automatically emit read-only RIE advisory evidence from the accepted workflow | immutable `repository-intelligence-engine@v0.1.1`; existing Nexus-new CI remains authoritative for CI | exact PR head/base/main; changed paths; exact-head CI; RIE artifact; independent acceptance; protected merge/readback | `NEXUS_NEW_RIE_READ_ONLY_PR_SIDECAR_INTEGRATED` | `small` | `CANDIDATE` | final protected merge must re-prove current completion-host source identity and a valid current `GITHUB_MERGE` standing grant | `TASK-001` |
 
 ## 2. Requirement coverage
 
