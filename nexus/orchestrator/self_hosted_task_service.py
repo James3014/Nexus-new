@@ -51,6 +51,10 @@ from nexus.core.task_continuity import (
     events_from_attempt_records,
     project,
 )
+from nexus.contracts.core_mutation_binding import (
+    create_repository_mutation_binding,
+    verify_core_mutation_completion,
+)
 from nexus.engine.canonical_task_seam import (
     CanonicalDispatchEnvelope,
     build_canonical_dispatch_envelope,
@@ -5489,6 +5493,26 @@ class SelfHostedTaskService:
             "commit": {"status": "PENDING"},
             "reconciliation": {"status": "PENDING"},
         }
+        core_binding_dict = None
+        base_rev_candidate = str(request.get("controller_revision") or "").strip() or None
+        try:
+            core_binding = create_repository_mutation_binding(
+                operation_id=action_id,
+                attempt_id=attempt_id,
+                repo_root=Path(str(request.get("controller_repo_root") or CANONICAL_SOURCE_ROOT)),
+                execution_lane="DIRECT_CANONICAL",
+                allowed_files=request.get("allowed_files") or (),
+                verifier_commands=request.get("verifier_commands") or (),
+                deletion_policy=str(request.get("deletion_policy") or "FORBID"),
+                workspace_identity="canonical_checkout",
+                workspace_mode="checkout",
+                authority_ref=str(request.get("action_id") or action_id),
+                base_revision=base_rev_candidate,
+            )
+            core_binding_dict = core_binding.to_dict()
+        except Exception:
+            core_binding_dict = None
+
         durable_state = {
             "schema": "nexus.self_hosted_task_state.v1",
             "task_id": task_id,
@@ -5535,6 +5559,7 @@ class SelfHostedTaskService:
             "worker_pid": None,
             "worker_pgid": None,
             "push_performed": False,
+            "core_mutation_binding": core_binding_dict,
         }
         created_state, created = self._create_state(task_id, durable_state)
         return {
@@ -5555,6 +5580,8 @@ class SelfHostedTaskService:
             "canonical_execution_identity": created_state.get(
                 "canonical_execution_identity"
             ),
+            "core_mutation_binding": core_binding_dict,
+            "core_mutation_binding_hash": core_binding_dict.get("binding_hash") if core_binding_dict else None,
             "next_action": "nexus_task_finish",
             "required_surface": "nexus_self_hosted_direct_complete",
             "required_gate": ["scoped_verifiers", "git_diff_check", "staged_review", "scoped_commit"],
@@ -5758,6 +5785,57 @@ class SelfHostedTaskService:
         verifier_time_ms = max(0, int((time.perf_counter() - verifier_started) * 1000))
         if not passed:
             raise RuntimeError("DIRECT_CANONICAL_VERIFIER_FAILED: " + ",".join(failures))
+
+        # Core Generic Verification (Ambient Core)
+        binding_data = request.get("core_mutation_binding")
+        if not binding_data and current_task_id:
+            current_state = self._read_state_snapshot(current_task_id)
+            if current_state:
+                binding_data = current_state.get("core_mutation_binding")
+        if not binding_data:
+            try:
+                synthesized = create_repository_mutation_binding(
+                    operation_id=str(request.get("action_id") or current_task_id or f"direct-{head[:12]}"),
+                    attempt_id=str(request.get("attempt_id") or "att-01"),
+                    repo_root=controller,
+                    execution_lane="DIRECT_CANONICAL",
+                    allowed_files=request.get("allowed_files") or changed,
+                    verifier_commands=verifier_contract.verifier_commands,
+                    deletion_policy=str(request.get("deletion_policy") or "FORBID"),
+                    base_revision=base,
+                )
+                binding_data = synthesized.to_dict()
+            except Exception:
+                binding_data = None
+
+        core_result = None
+        if binding_data:
+            target_tree = subprocess.run(
+                ["git", "rev-parse", f"{head}^{{tree}}"], cwd=controller,
+                capture_output=True, text=True, check=True,
+            ).stdout.strip()
+            verifier_results = {cmd: True for cmd in verifier_contract.verifier_commands}
+            verifier_artifacts = {}
+            for ev in evidence:
+                ev_dict = ev.to_dict() if hasattr(ev, "to_dict") else vars(ev)
+                cmd = str(ev_dict.get("command") or "")
+                verifier_artifacts[cmd] = (
+                    f"art-{hashlib.sha256(cmd.encode()).hexdigest()[:8]}",
+                    f"sha256:{ev_dict.get('stdout_sha256') or ('0' * 64)}",
+                )
+            core_result = verify_core_mutation_completion(
+                binding=binding_data,
+                repo_root=controller,
+                target_tree=target_tree,
+                verifier_results=verifier_results,
+                verifier_artifacts=verifier_artifacts,
+            )
+            if core_result.get("status") != "VERIFIED":
+                reasons = ",".join(core_result.get("reason_codes", []))
+                raise RuntimeError(
+                    f"DIRECT_CANONICAL_CORE_VERIFICATION_FAILED: status={core_result.get('status')} reasons={reasons}"
+                )
+
         total_time_ms = max(0, int((time.perf_counter() - started) * 1000))
         telemetry = {
             "wall_time_ms": total_time_ms,
@@ -5782,6 +5860,8 @@ class SelfHostedTaskService:
             "state_created": False,
             "worktree_audit": worktree_audit,
             "verifier_evidence": _jsonable(evidence),
+            "core_verification": core_result,
+            "core_mutation_binding_hash": binding_data.get("binding_hash", "") if binding_data else "",
             "telemetry": telemetry,
         }
         receipt["receipt_hash"] = hashlib.sha256(

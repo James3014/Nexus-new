@@ -5903,6 +5903,8 @@ class UnifiedMCPGateway:
             request.setdefault("execution_lane", "DIRECT_CANONICAL")
             request.setdefault("primary_agent", True)
             request.setdefault("worker", "primary")
+            if arguments.get("core_mutation_binding"):
+                request["core_mutation_binding"] = arguments.get("core_mutation_binding")
             result = self.service.complete_direct_canonical(request, expected_commit_sha=arguments.get("expected_commit_sha"))
             action_payload = request.get("action") if isinstance(request.get("action"), Mapping) else None
             if action_payload is not None:

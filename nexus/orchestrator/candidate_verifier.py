@@ -86,6 +86,8 @@ class VerifiedCandidateReceipt:
     changed_file_budget_passed: bool = True
     deleted_file_count: int = 0
     deleted_file_budget_passed: bool = True
+    core_mutation_binding_hash: str = ""
+    core_verification_status: str = ""
 
 
 class CandidateVerifier:
@@ -443,4 +445,6 @@ class CandidateVerifier:
             changed_file_budget_passed=changed_file_budget_passed,
             deleted_file_count=deleted_file_count,
             deleted_file_budget_passed=deleted_file_budget_passed,
+            core_mutation_binding_hash=str(getattr(contract, "core_mutation_binding_hash", "") or ""),
+            core_verification_status="VERIFIED" if verified else "FAILED_VERIFICATION",
         )

@@ -93,6 +93,8 @@ class CandidateCommitter:
     ) -> PromotionApprovalPacket:
         if not receipt.verified or not receipt.candidate_commit_allowed:
             raise RuntimeError("Verified Candidate Receipt is required before candidate commit")
+        if receipt.core_verification_status and receipt.core_verification_status != "VERIFIED":
+            raise RuntimeError(f"Candidate Core verification is not VERIFIED: {receipt.core_verification_status}")
         expected_authorized_deletions = tuple(sorted(set(contract.authorized_deletions)))
         expected_authorized_deletions_hash = hashlib.sha256(
             json.dumps(expected_authorized_deletions, separators=(",", ":")).encode("utf-8")
