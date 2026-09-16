@@ -907,6 +907,69 @@ def test_r1b1_strict_evidence_seam_precedes_worktree_promotion(tmp_path, monkeyp
     ]
 
 
+def test_r1b1_persistent_bare_fsck_has_dedicated_timeout(tmp_path, monkeypatch):
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    repository = tmp_path / "repository.git"
+    repository.mkdir(mode=0o700)
+    bundle = tmp_path / "source.bundle"
+    bundle.write_bytes(b"bundle")
+    monkeypatch.setattr(g, "GATEWAY_STATE_ROOT", state)
+    monkeypatch.setattr(g, "GATEWAY_REPOSITORY", repository)
+    monkeypatch.setattr(g, "HOST_UID", os.getuid())
+    monkeypatch.setattr(g, "HOST_GID", os.getgid())
+    monkeypatch.setattr(g, "_r1_verify_bare_repository", lambda: None)
+
+    heads = (
+        g.BundleRoleHead(
+            role="fresh-main", ref="refs/nexus-r1/fresh-main", commit="a" * 40
+        ),
+        g.BundleRoleHead(
+            role="desired", ref="refs/nexus-r1/desired", commit="b" * 40
+        ),
+        g.BundleRoleHead(
+            role="predecessor", ref="refs/nexus-r1/predecessor", commit="c" * 40
+        ),
+    )
+    commits = {head.ref: head.commit for head in heads}
+    calls = []
+
+    def recording_run(*command, **kwargs):
+        normalized = tuple(str(value) for value in command)
+        calls.append((normalized, dict(kwargs)))
+        if "rev-parse" in normalized:
+            return commits[normalized[-1]]
+        if "rev-list" in normalized:
+            return "\n".join(f"{head.commit} path-{head.role}" for head in heads)
+        return ""
+
+    monkeypatch.setattr(g, "_r1_run", recording_run)
+    g._r1_import_bundle(bundle, heads)
+
+    fsck_calls = [
+        (command, kwargs)
+        for command, kwargs in calls
+        if command[-3:] == ("fsck", "--full", "--strict")
+    ]
+    assert g._R1_PERSISTENT_FSCK_TIMEOUT_SECONDS == 120
+    assert fsck_calls == [
+        (
+            (
+                "git",
+                "--git-dir",
+                str(repository),
+                "fsck",
+                "--full",
+                "--strict",
+            ),
+            {"timeout": g._R1_PERSISTENT_FSCK_TIMEOUT_SECONDS},
+        )
+    ]
+    assert [kwargs for _, kwargs in calls if "timeout" in kwargs] == [
+        {"timeout": g._R1_PERSISTENT_FSCK_TIMEOUT_SECONDS}
+    ]
+
+
 def test_r1b1_named_role_swap_extra_refs_and_valid_bundle_encodings(tmp_path, monkeypatch):
     fixture = _r1b1_fixture(tmp_path, monkeypatch)
     source = tmp_path / "bundle-source.git"
