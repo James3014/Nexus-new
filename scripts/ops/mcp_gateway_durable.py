@@ -316,6 +316,7 @@ GATEWAY_DEPLOYMENTS_ROOT = GATEWAY_STATE_ROOT / "deployments"
 GATEWAY_SOURCE_BUNDLES_ROOT = GATEWAY_STATE_ROOT / "source-bundles"
 GATEWAY_PREDECESSOR_ARTIFACT_ROOT = GATEWAY_STATE_ROOT / "predecessor-artifacts"
 GATEWAY_REPOSITORY = GATEWAY_STATE_ROOT / "repository.git"
+_R1_PERSISTENT_FSCK_TIMEOUT_SECONDS = 120
 GATEWAY_RECOVERY_AUTHORITY_STORE = GATEWAY_STATE_ROOT / "recovery-authority.json"
 RECOVERY_AUTHORITY_SOURCE_PATH = RECOVERY_RECEIPT_PATH
 RECOVERY_CONTINUATION_AUTHORITY_SOURCE_PATH = (
@@ -1257,7 +1258,15 @@ def _r1_import_bundle(
             "git", "--git-dir", str(repository), "fetch", "--no-tags",
             str(bundle), f"+{head.ref}:{head.ref}",
         )
-    _r1_run("git", "--git-dir", str(repository), "fsck", "--full", "--strict")
+    _r1_run(
+        "git",
+        "--git-dir",
+        str(repository),
+        "fsck",
+        "--full",
+        "--strict",
+        timeout=_R1_PERSISTENT_FSCK_TIMEOUT_SECONDS,
+    )
     for head in heads:
         if _r1_run("git", "--git-dir", str(repository), "rev-parse", head.ref) != head.commit:
             raise _gateway_error("R1 bare repository role head mismatch")
