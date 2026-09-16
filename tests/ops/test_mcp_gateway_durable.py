@@ -908,11 +908,16 @@ def test_r1b1_strict_evidence_seam_precedes_worktree_promotion(tmp_path, monkeyp
 
 
 def test_r1b1_persistent_bare_fsck_has_dedicated_timeout(tmp_path, monkeypatch):
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
     repository = tmp_path / "repository.git"
     repository.mkdir(mode=0o700)
     bundle = tmp_path / "source.bundle"
     bundle.write_bytes(b"bundle")
+    monkeypatch.setattr(g, "GATEWAY_STATE_ROOT", state)
     monkeypatch.setattr(g, "GATEWAY_REPOSITORY", repository)
+    monkeypatch.setattr(g, "HOST_UID", os.getuid())
+    monkeypatch.setattr(g, "HOST_GID", os.getgid())
     monkeypatch.setattr(g, "_r1_verify_bare_repository", lambda: None)
 
     heads = (
