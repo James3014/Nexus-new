@@ -1292,6 +1292,11 @@ def resolve_canonical_target_roots(
     requested_target_worktree_root: Optional[str] = None,
     requested_target_repo_root: Optional[str] = None,
 ) -> tuple[Path, Path]:
+    disabled_parts = {"nexus-worktrees"}
+    for requested_root in (requested_target_worktree_root, requested_target_repo_root):
+        if requested_root and disabled_parts.intersection(Path(requested_root).expanduser().parts):
+            raise ValueError("DISABLED_TARGET_ROOT: nexus-worktrees is retired; use /Users/jameschen/Workspace/nexus-runtime-targets")
+
     override = os.getenv("NEXUS_TARGET_ROOT_OVERRIDE", "").strip()
     if override:
         base_worktree_root = Path(override).expanduser().resolve()
@@ -1314,7 +1319,6 @@ def resolve_canonical_target_roots(
     else:
         target_repo_root = base_worktree_root / task_id
 
-    disabled_parts = {"nexus-worktrees"}
     if disabled_parts.intersection(base_worktree_root.parts) or disabled_parts.intersection(target_repo_root.parts):
         raise ValueError("DISABLED_TARGET_ROOT: nexus-worktrees is retired; use /Users/jameschen/Workspace/nexus-runtime-targets")
     return base_worktree_root, target_repo_root
