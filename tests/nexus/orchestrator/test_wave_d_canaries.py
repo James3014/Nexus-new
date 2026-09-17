@@ -108,14 +108,12 @@ def _setup_canary_service(tmp_path: Path, worker_invoked: list[dict[str, Any]]):
 
     def mock_invoke(provider, contract_arg, lease_arg, *, prompt, **kwargs):
         target_path = Path(lease_arg.target_worktree)
-        worker_invoked.append(
-            {
-                "provider": provider,
-                "prompt": prompt,
-                "target": str(target_path),
-                "contract": contract_arg,
-            }
-        )
+        worker_invoked.append({
+            "provider": provider,
+            "prompt": prompt,
+            "target": str(target_path),
+            "contract": contract_arg,
+        })
         # Simulate worker creating bounded mutation
         src = target_path / "src"
         src.mkdir(parents=True, exist_ok=True)
