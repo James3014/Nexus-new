@@ -231,8 +231,6 @@ class ManagedLocalAgentLauncher:
             "deletion_policy": dict(request.deletion_policy),
             "managed_binding_hash": binding_identity.binding_hash,
         }
-        if request.execution_lane == ManagedExecutionLane.GOVERNED.value:
-            service_request["execution_lane"] = ManagedExecutionLane.GOVERNED.value
         if request.idempotency_key:
             service_request["idempotency_key"] = request.idempotency_key
 
