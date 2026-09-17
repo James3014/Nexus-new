@@ -70,16 +70,16 @@ from nexus.orchestrator.acceptance_loop import (
     IndependentReviewReceipt,
     reduce_candidate_acceptance,
 )
-from nexus.orchestrator.autonomy_policy import (
-    AutonomySubmissionBinding,
-    project_autonomy_submission,
-)
 from nexus.orchestrator.ambient_core import (
     AmbientCoreControlPort,
     ambient_core_required,
     normalize_preparation,
     normalize_verification_projection,
     projection_hash,
+)
+from nexus.orchestrator.autonomy_policy import (
+    AutonomySubmissionBinding,
+    project_autonomy_submission,
 )
 from nexus.orchestrator.candidate_commit import CandidateCommitter
 from nexus.orchestrator.candidate_verifier import CandidateVerifier, VerifiedCandidateReceipt

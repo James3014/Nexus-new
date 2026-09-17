@@ -268,16 +268,21 @@ class RuntimeCoordinationBridge:
         processes = _Processes()
         processes.service = self.service
         finalization = _Finalization(self.service, update=update)
-        finalization.task_id, finalization.attempt_id = task_id, attempt_id
-        return ExecutionCoordinator(
+        args = [
             _State(self.service, request=request, update=update),
             _Contract(self.service),
             _Worker(self.service),
             _Target(self.service),
             processes,
             finalization,
-            _Preparation(self.service),
+        ]
+        sig = inspect.signature(ExecutionCoordinator.__init__)
+        has_var_positional = any(
+            p.kind == inspect.Parameter.VAR_POSITIONAL for p in sig.parameters.values()
         )
+        if "preparation" in sig.parameters or len(sig.parameters) > 7 or has_var_positional:
+            args.append(_Preparation(self.service))
+        return ExecutionCoordinator(*args)
 
     def run_owned_attempt(self, task_id, attempt_id, custom_runner=None):
         return self._coordinator(task_id, attempt_id).run_owned_attempt(
