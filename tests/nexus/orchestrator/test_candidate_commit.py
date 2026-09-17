@@ -15,7 +15,13 @@ from nexus.orchestrator.worktree_manager import WorktreeManager
 
 
 def _git(cwd: Path, *args: str) -> str:
-    result = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", *args], cwd=cwd, check=True, capture_output=True, text=True)
+    result = subprocess.run(
+        ["git", "-c", "core.hooksPath=/dev/null", *args],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
     return result.stdout.strip()
 
 
@@ -73,7 +79,9 @@ def test_core_required_candidate_cannot_commit_from_local_verifier_alone(tmp_pat
         CandidateCommitter(manager).create_candidate_commit(contract, lease, local_only)
 
 
-def test_candidate_commit_rejects_incomplete_core_provenance_even_if_commit_flag_is_forged(tmp_path):
+def test_candidate_commit_rejects_incomplete_core_provenance_even_if_commit_flag_is_forged(
+    tmp_path,
+):
     contract, lease, verified, manager = _scenario(tmp_path)
     incomplete = replace(
         verified,
@@ -84,6 +92,70 @@ def test_candidate_commit_rejects_incomplete_core_provenance_even_if_commit_flag
 
     with pytest.raises(RuntimeError, match="Core-verified physical Candidate provenance"):
         CandidateCommitter(manager).create_candidate_commit(contract, lease, incomplete)
+
+
+def test_candidate_commit_rejects_malformed_prefixed_core_provenance(tmp_path):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    valid_hash = "sha256:" + "a" * 64
+    valid_session = "cms_" + "b" * 32
+    valid_params = {
+        "core_provenance_required": True,
+        "candidate_commit_allowed": True,
+        "core_verification_status": "VERIFIED",
+        "core_binding_hash": valid_hash,
+        "core_mutation_session_id": valid_session,
+        "core_change_set_hash": valid_hash,
+        "core_evidence_bundle_hash": valid_hash,
+        "core_verification_result_hash": valid_hash,
+    }
+    test_cases = [
+        {"core_binding_hash": "sha256:"},
+        {"core_binding_hash": "sha256:x"},
+        {"core_binding_hash": "sha256:" + "a" * 63},
+        {"core_binding_hash": "sha256:" + "a" * 65},
+        {"core_binding_hash": "sha256:" + "g" * 64},
+        {"core_binding_hash": "sha256:" + "A" * 64},
+        {"core_mutation_session_id": "cms_"},
+        {"core_mutation_session_id": "cms_x"},
+        {"core_mutation_session_id": "cms_" + "b" * 31},
+        {"core_mutation_session_id": "cms_" + "b" * 33},
+        {"core_mutation_session_id": "cms_" + "z" * 32},
+        {"core_mutation_session_id": "cms_" + "B" * 32},
+        {"core_change_set_hash": "sha256:not64chars"},
+        {"core_evidence_bundle_hash": "sha256:" + "g" * 64},
+        {"core_verification_result_hash": "sha256:" + "0" * 63},
+        {"core_verification_status": "PENDING"},
+        {"core_verification_status": "FAILED"},
+        {"core_verification_status": "verified"},
+    ]
+    for override in test_cases:
+        params = dict(valid_params)
+        params.update(override)
+        malformed = replace(verified, **params)
+        with pytest.raises(
+            RuntimeError,
+            match="Core-verified physical Candidate provenance",
+        ):
+            CandidateCommitter(manager).create_candidate_commit(contract, lease, malformed)
+
+
+def test_candidate_commit_accepts_valid_exact_core_provenance(tmp_path):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    valid_hash = "sha256:" + "a" * 64
+    valid_session = "cms_" + "b" * 32
+    core_verified = replace(
+        verified,
+        core_provenance_required=True,
+        candidate_commit_allowed=True,
+        core_verification_status="VERIFIED",
+        core_binding_hash=valid_hash,
+        core_mutation_session_id=valid_session,
+        core_change_set_hash=valid_hash,
+        core_evidence_bundle_hash=valid_hash,
+        core_verification_result_hash=valid_hash,
+    )
+    packet = CandidateCommitter(manager).create_candidate_commit(contract, lease, core_verified)
+    assert packet.candidate_commit_created is True
 
 
 def test_candidate_commit_is_automatic_but_promotion_pending(tmp_path):
@@ -105,7 +177,14 @@ def test_candidate_commit_is_automatic_but_promotion_pending(tmp_path):
     assert packet.authority_findings_sha256 == verified.authority_findings_sha256
     assert _git(Path(lease.target_worktree), "status", "--short") == ""
     assert _git(Path(lease.target_worktree), "rev-parse", "HEAD") == packet.candidate_commit_sha
-    changed = _git(Path(lease.target_worktree), "diff-tree", "--no-commit-id", "--name-only", "-r", packet.candidate_commit_sha)
+    changed = _git(
+        Path(lease.target_worktree),
+        "diff-tree",
+        "--no-commit-id",
+        "--name-only",
+        "-r",
+        packet.candidate_commit_sha,
+    )
     assert changed.splitlines() == ["bounded.txt"]
 
 
@@ -170,7 +249,10 @@ def test_precommitted_multi_commit_candidate_reuses_exact_tip_and_full_range_pat
     assert packet.candidate_commit_created is True
     assert packet.candidate_commit_sha == worker_head
     assert _git(target, "rev-list", "--count", f"{lease.initial_head}..HEAD") == "2"
-    assert _git(target, "diff", "--name-only", lease.initial_head, worker_head).splitlines() == ["bounded.txt", "second.txt"]
+    assert _git(target, "diff", "--name-only", lease.initial_head, worker_head).splitlines() == [
+        "bounded.txt",
+        "second.txt",
+    ]
 
 
 def test_precommitted_clean_head_advancement_after_capture_is_rejected(tmp_path, monkeypatch):
@@ -223,13 +305,15 @@ def test_candidate_commit_requires_independent_commit_authority(tmp_path):
         CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
 
 
-def test_candidate_commit_forces_muse_run_codex_loop_zero_via_subprocess_env_and_preserves_outer_env(tmp_path, monkeypatch):
+def test_candidate_commit_forces_muse_run_codex_loop_zero_via_subprocess_env_and_preserves_outer_env(
+    tmp_path, monkeypatch
+):
     contract, lease, verified, manager = _scenario(tmp_path)
     hooks_dir = tmp_path / "custom_hooks_1"
     hooks_dir.mkdir(parents=True, exist_ok=True)
     pre_commit = hooks_dir / "pre-commit"
     pre_commit.write_text(
-        "#!/bin/sh\nif [ \"$MUSE_RUN_CODEX_LOOP\" != \"0\" ]; then\n  echo \"HOOK FAIL: MUSE_RUN_CODEX_LOOP=$MUSE_RUN_CODEX_LOOP\" >&2\n  exit 1\nfi\n",
+        '#!/bin/sh\nif [ "$MUSE_RUN_CODEX_LOOP" != "0" ]; then\n  echo "HOOK FAIL: MUSE_RUN_CODEX_LOOP=$MUSE_RUN_CODEX_LOOP" >&2\n  exit 1\nfi\n',
         encoding="utf-8",
     )
     pre_commit.chmod(0o755)
@@ -249,7 +333,7 @@ def test_candidate_commit_subprocess_env_preserves_absent_outer_variable(tmp_pat
     hooks_dir.mkdir(parents=True, exist_ok=True)
     pre_commit = hooks_dir / "pre-commit"
     pre_commit.write_text(
-        "#!/bin/sh\nif [ \"$MUSE_RUN_CODEX_LOOP\" != \"0\" ]; then\n  echo \"HOOK FAIL: MUSE_RUN_CODEX_LOOP=$MUSE_RUN_CODEX_LOOP\" >&2\n  exit 1\nfi\n",
+        '#!/bin/sh\nif [ "$MUSE_RUN_CODEX_LOOP" != "0" ]; then\n  echo "HOOK FAIL: MUSE_RUN_CODEX_LOOP=$MUSE_RUN_CODEX_LOOP" >&2\n  exit 1\nfi\n',
         encoding="utf-8",
     )
     pre_commit.chmod(0o755)
@@ -263,13 +347,15 @@ def test_candidate_commit_subprocess_env_preserves_absent_outer_variable(tmp_pat
     assert "MUSE_RUN_CODEX_LOOP" not in os.environ
 
 
-def test_candidate_commit_does_not_mutate_global_env_concurrent_sentinel_thread(tmp_path, monkeypatch):
+def test_candidate_commit_does_not_mutate_global_env_concurrent_sentinel_thread(
+    tmp_path, monkeypatch
+):
     contract, lease, verified, manager = _scenario(tmp_path)
     hooks_dir = tmp_path / "custom_hooks_sentinel"
     hooks_dir.mkdir(parents=True, exist_ok=True)
     pre_commit = hooks_dir / "pre-commit"
     pre_commit.write_text(
-        "#!/bin/sh\nif [ \"$MUSE_RUN_CODEX_LOOP\" != \"0\" ]; then\n  echo \"HOOK FAIL: MUSE_RUN_CODEX_LOOP=$MUSE_RUN_CODEX_LOOP\" >&2\n  exit 1\nfi\nsleep 0.05\n",
+        '#!/bin/sh\nif [ "$MUSE_RUN_CODEX_LOOP" != "0" ]; then\n  echo "HOOK FAIL: MUSE_RUN_CODEX_LOOP=$MUSE_RUN_CODEX_LOOP" >&2\n  exit 1\nfi\nsleep 0.05\n',
         encoding="utf-8",
     )
     pre_commit.chmod(0o755)
@@ -322,7 +408,9 @@ def test_candidate_commit_uses_nexus_git_home_when_set(tmp_path, monkeypatch):
     assert os.environ.get("NEXUS_GIT_HOME") == str(custom_git_home)
 
 
-def test_candidate_commit_uses_posix_os_account_home_independent_of_outer_home(tmp_path, monkeypatch):
+def test_candidate_commit_uses_posix_os_account_home_independent_of_outer_home(
+    tmp_path, monkeypatch
+):
     import pwd
 
     contract, lease, verified, manager = _scenario(tmp_path)
@@ -375,8 +463,12 @@ def test_candidate_commit_preserves_outer_home_and_muse_env(tmp_path, monkeypatc
 def test_candidate_commit_fails_closed_when_git_home_unresolvable(tmp_path, monkeypatch):
     contract, lease, verified, manager = _scenario(tmp_path)
     monkeypatch.delenv("NEXUS_GIT_HOME", raising=False)
+
     def _fail_resolve():
-        raise RuntimeError("Failed to resolve safe Git HOME: NEXUS_GIT_HOME is unset/empty and POSIX OS-account home resolution failed")
+        raise RuntimeError(
+            "Failed to resolve safe Git HOME: NEXUS_GIT_HOME is unset/empty and POSIX OS-account home resolution failed"
+        )
+
     monkeypatch.setattr(CandidateCommitter, "_resolve_git_home", staticmethod(_fail_resolve))
 
     with pytest.raises(RuntimeError, match="Failed to resolve safe Git HOME"):

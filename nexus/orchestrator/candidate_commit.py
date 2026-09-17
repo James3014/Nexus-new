@@ -5,9 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from nexus.orchestrator.candidate_verifier import VerifiedCandidateReceipt
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
@@ -38,6 +39,18 @@ class PromotionApprovalPacket:
     authority_change_required: bool = False
     authority_findings_sha256: str = ""
     collaboration_provenance: Optional[dict[str, object]] = None
+
+
+_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_SESSION_RE = re.compile(r"^cms_[0-9a-f]{32}$")
+
+
+def _is_valid_hash(value: Any) -> bool:
+    return isinstance(value, str) and bool(_HASH_RE.fullmatch(value))
+
+
+def _is_valid_session(value: Any) -> bool:
+    return isinstance(value, str) and bool(_SESSION_RE.fullmatch(value))
 
 
 class CandidateCommitter:
@@ -96,11 +109,11 @@ class CandidateCommitter:
         if receipt.core_provenance_required:
             if (
                 receipt.core_verification_status != "VERIFIED"
-                or not receipt.core_binding_hash.startswith("sha256:")
-                or not receipt.core_mutation_session_id.startswith("cms_")
-                or not receipt.core_change_set_hash.startswith("sha256:")
-                or not receipt.core_evidence_bundle_hash.startswith("sha256:")
-                or not receipt.core_verification_result_hash.startswith("sha256:")
+                or not _is_valid_hash(receipt.core_binding_hash)
+                or not _is_valid_session(receipt.core_mutation_session_id)
+                or not _is_valid_hash(receipt.core_change_set_hash)
+                or not _is_valid_hash(receipt.core_evidence_bundle_hash)
+                or not _is_valid_hash(receipt.core_verification_result_hash)
             ):
                 raise RuntimeError(
                     "Core-verified physical Candidate provenance is required before candidate commit"
@@ -135,9 +148,7 @@ class CandidateCommitter:
         if staged_before:
             raise RuntimeError("Target index must be clean before candidate commit")
         paths = sorted(
-            set(current.changed_files)
-            | set(current.untracked_files)
-            | set(current.deleted_files)
+            set(current.changed_files) | set(current.untracked_files) | set(current.deleted_files)
         )
         unauthorized_deletions = sorted(
             set(current.deleted_files) - set(contract.authorized_deletions)
@@ -173,7 +184,8 @@ class CandidateCommitter:
             if merge_commits:
                 raise RuntimeError("precommitted candidate chain must not contain merge commits")
             committed_paths = self.worktree_manager._run_git(
-                ["diff", "--name-only", lease.initial_head, target_head], cwd=target,
+                ["diff", "--name-only", lease.initial_head, target_head],
+                cwd=target,
             ).splitlines()
             if sorted(committed_paths) != paths:
                 raise RuntimeError("committed candidate paths differ from verified paths")
@@ -212,10 +224,12 @@ class CandidateCommitter:
         if final_head != commit_sha:
             raise RuntimeError("candidate tip changed during commit")
         tree_sha = self.worktree_manager._run_git(
-            ["rev-parse", f"{commit_sha}^{{tree}}"], cwd=target,
+            ["rev-parse", f"{commit_sha}^{{tree}}"],
+            cwd=target,
         )
         committed_paths = self.worktree_manager._run_git(
-            ["diff", "--name-only", lease.initial_head, commit_sha], cwd=target,
+            ["diff", "--name-only", lease.initial_head, commit_sha],
+            cwd=target,
         ).splitlines()
         if sorted(committed_paths) != paths:
             raise RuntimeError("candidate commit range differs from verified paths")
