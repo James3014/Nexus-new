@@ -200,3 +200,99 @@ def test_actual_resumable_negative_receipt_budget_fails_closed(tmp_path, monkeyp
         )
     assert calls == ["codex"]
     assert service._read_state(contract.task_id)["status"] == "WORKER_RUNNING"
+
+
+def test_runtime_bridge_installs_ambient_core_preparation_port(tmp_path, monkeypatch):
+    captured = {}
+
+    class FakeCoordinator:
+        def __init__(self, *args):
+            captured["args"] = args
+
+    monkeypatch.setattr(bridge, "ExecutionCoordinator", FakeCoordinator)
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", ephemeral=True, auto_reconcile=False
+    )
+    coordinator = bridge.RuntimeCoordinationBridge(service)._coordinator("task", "attempt")
+
+    assert isinstance(coordinator, FakeCoordinator)
+    assert len(captured["args"]) == 7
+    assert isinstance(captured["args"][-1], bridge._Preparation)
+
+
+def test_ambient_core_required_path_fails_closed_without_control_port(tmp_path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", ephemeral=True, auto_reconcile=False
+    )
+    request = _request(tmp_path)
+    request["core_envelope_required"] = True
+    contract = service.build_contract(request)
+    preparation = bridge._Preparation(service)
+
+    with pytest.raises(RuntimeError, match="AMBIENT_CORE_CONTROL_PORT_REQUIRED"):
+        preparation.prepare_before_worker(
+            contract,
+            request,
+            SimpleNamespace(target_worktree=str(tmp_path)),
+            {},
+            task_id=contract.task_id,
+            attempt_id="attempt",
+        )
+
+
+def test_ambient_core_preparation_reuses_exact_host_identity(tmp_path):
+    calls = []
+
+    class FakeCore:
+        def open_or_reuse_mutation_binding(self, **kwargs):
+            calls.append(("open", kwargs["attempt_id"]))
+            return {
+                "session_id": "cms_" + "1" * 32,
+                "binding_id": "binding-1",
+                "binding_hash": "sha256:" + "2" * 64,
+                "operation_id": "operation-1",
+                "attempt_id": kwargs["attempt_id"],
+                "acceptance_contract_hash": "sha256:" + "3" * 64,
+                "source_revision": "git-commit:" + "4" * 40,
+                "source_tree": "git-tree:" + "5" * 40,
+            }
+
+        def revalidate_mutation_binding(self, preparation, **kwargs):
+            calls.append(("revalidate", preparation["binding_hash"], kwargs["active_provider"]))
+
+        def verify_candidate(self, **kwargs):
+            raise AssertionError("not part of preparation test")
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        ephemeral=True,
+        auto_reconcile=False,
+        ambient_core_port=FakeCore(),
+    )
+    request = _request(tmp_path)
+    request["core_envelope_required"] = True
+    contract = service.build_contract(request)
+    port = bridge._Preparation(service)
+    preparation = port.prepare_before_worker(
+        contract,
+        request,
+        SimpleNamespace(target_worktree=str(tmp_path)),
+        {},
+        task_id=contract.task_id,
+        attempt_id="attempt",
+    )
+    port.revalidate_before_worker(
+        preparation,
+        contract,
+        request,
+        SimpleNamespace(target_worktree=str(tmp_path)),
+        {},
+        task_id=contract.task_id,
+        attempt_id="attempt",
+        active_provider="codex",
+    )
+
+    assert calls == [
+        ("open", "attempt"),
+        ("revalidate", "sha256:" + "2" * 64, "codex"),
+    ]

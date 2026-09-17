@@ -111,6 +111,47 @@ class _Contract:
     def materialize_worker_context(self, **kwargs):
         return self.service._worker_context_materialization(**kwargs)
 
+    def host_preparation_required(self, contract, request):
+        return self.service._ambient_core_required(contract, request)
+
+
+class _Preparation:
+    def __init__(self, service):
+        self.service = service
+
+    def prepare_before_worker(self, contract, request, lease, state, *, task_id, attempt_id):
+        return self.service._prepare_ambient_core(
+            contract,
+            request,
+            lease,
+            state,
+            task_id=task_id,
+            attempt_id=attempt_id,
+        )
+
+    def revalidate_before_worker(
+        self,
+        preparation,
+        contract,
+        request,
+        lease,
+        state,
+        *,
+        task_id,
+        attempt_id,
+        active_provider,
+    ):
+        return self.service._revalidate_ambient_core(
+            preparation,
+            contract,
+            request,
+            lease,
+            state,
+            task_id=task_id,
+            attempt_id=attempt_id,
+            active_provider=active_provider,
+        )
+
 
 class _Worker:
     def __init__(self, service):
@@ -196,17 +237,26 @@ class _Processes:
 
 
 class _Finalization:
-    def __init__(self, service, update=None):
+    def __init__(self, service, update=None, task_id=None, attempt_id=None):
         self.service, self.update = service, update
+        self.task_id, self.attempt_id = task_id, attempt_id
         self.terminal_statuses = _service_module.TERMINAL_STATUSES
 
     def bound_custom_runner_values(self, values):
         return self.service._bound_custom_runner_values(values)
 
     def finalize_completed(self, contract, request, lease, state, attempts, *, execution, status):
+        task_id = (
+            self.task_id
+            or getattr(contract, "task_id", None)
+            or (state.get("task_id") if isinstance(state, Mapping) else None)
+        )
+        attempt_id = self.attempt_id or (
+            state.get("attempt_id") if isinstance(state, Mapping) else None
+        )
         update = self.update or (
             lambda status, values: self.service._checkpoint(
-                self.task_id, status, values, attempt_id=self.attempt_id
+                task_id, status, values, attempt_id=attempt_id
             )
         )
         return self.service._finalize_runtime_candidate(
@@ -224,16 +274,24 @@ class RuntimeCoordinationBridge:
     def _coordinator(self, task_id, attempt_id, *, request=None, update=None):
         processes = _Processes()
         processes.service = self.service
-        finalization = _Finalization(self.service, update=update)
-        finalization.task_id, finalization.attempt_id = task_id, attempt_id
-        return ExecutionCoordinator(
+        finalization = _Finalization(
+            self.service, update=update, task_id=task_id, attempt_id=attempt_id
+        )
+        args = [
             _State(self.service, request=request, update=update),
             _Contract(self.service),
             _Worker(self.service),
             _Target(self.service),
             processes,
             finalization,
+        ]
+        sig = inspect.signature(ExecutionCoordinator.__init__)
+        has_var_positional = any(
+            p.kind == inspect.Parameter.VAR_POSITIONAL for p in sig.parameters.values()
         )
+        if "preparation" in sig.parameters or len(sig.parameters) > 7 or has_var_positional:
+            args.append(_Preparation(self.service))
+        return ExecutionCoordinator(*args)
 
     def run_owned_attempt(self, task_id, attempt_id, custom_runner=None):
         return self._coordinator(task_id, attempt_id).run_owned_attempt(

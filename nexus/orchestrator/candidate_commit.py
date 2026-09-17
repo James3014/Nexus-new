@@ -93,6 +93,18 @@ class CandidateCommitter:
     ) -> PromotionApprovalPacket:
         if not receipt.verified or not receipt.candidate_commit_allowed:
             raise RuntimeError("Verified Candidate Receipt is required before candidate commit")
+        if receipt.core_provenance_required:
+            if (
+                receipt.core_verification_status != "VERIFIED"
+                or not receipt.core_binding_hash.startswith("sha256:")
+                or not receipt.core_mutation_session_id.startswith("cms_")
+                or not receipt.core_change_set_hash.startswith("sha256:")
+                or not receipt.core_evidence_bundle_hash.startswith("sha256:")
+                or not receipt.core_verification_result_hash.startswith("sha256:")
+            ):
+                raise RuntimeError(
+                    "Core-verified physical Candidate provenance is required before candidate commit"
+                )
         expected_authorized_deletions = tuple(sorted(set(contract.authorized_deletions)))
         expected_authorized_deletions_hash = hashlib.sha256(
             json.dumps(expected_authorized_deletions, separators=(",", ":")).encode("utf-8")

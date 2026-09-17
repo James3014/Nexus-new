@@ -61,6 +61,31 @@ def _scenario(tmp_path: Path):
     return contract, lease, verified, manager
 
 
+def test_core_required_candidate_cannot_commit_from_local_verifier_alone(tmp_path):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    local_only = replace(
+        verified,
+        core_provenance_required=True,
+        candidate_commit_allowed=False,
+    )
+
+    with pytest.raises(RuntimeError, match="Verified Candidate Receipt"):
+        CandidateCommitter(manager).create_candidate_commit(contract, lease, local_only)
+
+
+def test_candidate_commit_rejects_incomplete_core_provenance_even_if_commit_flag_is_forged(tmp_path):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    incomplete = replace(
+        verified,
+        core_provenance_required=True,
+        candidate_commit_allowed=True,
+        core_verification_status="VERIFIED",
+    )
+
+    with pytest.raises(RuntimeError, match="Core-verified physical Candidate provenance"):
+        CandidateCommitter(manager).create_candidate_commit(contract, lease, incomplete)
+
+
 def test_candidate_commit_is_automatic_but_promotion_pending(tmp_path):
     contract, lease, verified, manager = _scenario(tmp_path)
     verified = replace(verified, authority_change_required=True, authority_findings_sha256="a" * 64)

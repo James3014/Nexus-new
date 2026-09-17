@@ -51,6 +51,7 @@ from nexus.executors.worker_contract import (
     WorkerPreflight,
 )
 from nexus.executors.worker_registry import WorkerRegistry
+from nexus.orchestrator.candidate_verifier import VerifiedCandidateReceipt
 from nexus.orchestrator.repository_contract_gate import (
     RepositoryContractGate,
     RepositoryContractGateReceipt,
@@ -76,6 +77,30 @@ from nexus.orchestrator.worktree_manager import (
 )
 from nexus.services.model_workforce_policy import WorkforcePolicyLoader
 from nexus.services.runtime_workforce_admission import evaluate_runtime_workforce_admission
+
+
+def _core_required_local_receipt(task_id="ambient-core-task"):
+    return VerifiedCandidateReceipt(
+        schema="nexus.verified_candidate_receipt.v1",
+        task_id=task_id,
+        contract_hash="contract-hash",
+        lease_id="lease-1",
+        candidate_state_hash="candidate-state",
+        scope_gate_passed=True,
+        deletion_gate_passed=True,
+        controller_gate_passed=True,
+        protected_contract_gate_passed=True,
+        verifier_gate_passed=True,
+        verified=True,
+        candidate_commit_allowed=False,
+        public_claim_allowed=False,
+        production_ready=False,
+        failure_reasons=[],
+        verifier_evidence=(),
+        candidate_commit_created=False,
+        merge_performed=False,
+        core_provenance_required=True,
+    )
 
 
 def _inherited_worktree_timing_state(tmp_path):
@@ -10243,3 +10268,130 @@ def test_tracked_retry_reseals_nested_dispatch_envelope_for_submit(
     tampered["bound_action_request"]["canonical_dispatch_envelope"]["model"] = "tampered"
     with pytest.raises(ValueError, match="BOUND_ACTION_REQUEST_HASH_MISMATCH"):
         _validated_action_request(tampered)
+
+
+def test_ambient_core_verified_projection_unlocks_candidate_commit_gate(tmp_path):
+    binding_hash = "sha256:" + "2" * 64
+    contract_hash = "sha256:" + "3" * 64
+    session_id = "cms_" + "1" * 32
+
+    class FakeCore:
+        def open_or_reuse_mutation_binding(self, **kwargs):
+            raise AssertionError("preparation is already persisted for this verification test")
+
+        def revalidate_mutation_binding(self, preparation, **kwargs):
+            return None
+
+        def verify_candidate(self, **kwargs):
+            return {
+                "session_id": session_id,
+                "binding_hash": binding_hash,
+                "candidate_state_hash": "candidate-state",
+                "core_response": {
+                    "protocol_version": "0.1.0-experimental",
+                    "schema": "nexus.core.generic-verification-response.v1-experimental",
+                    "verification": {
+                        "status": "VERIFIED",
+                        "reason_codes": [],
+                        "integrity": "VALID",
+                    },
+                    "hashes": {
+                        "acceptance_contract_hash": contract_hash,
+                        "change_set_hash": "sha256:" + "4" * 64,
+                        "verification_plan_hash": "sha256:" + "5" * 64,
+                        "evidence_bundle_hash": "sha256:" + "6" * 64,
+                        "change_manifest_hash": "sha256:" + "7" * 64,
+                    },
+                    "certification": None,
+                },
+            }
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        ephemeral=True,
+        auto_reconcile=False,
+        ambient_core_port=FakeCore(),
+    )
+    request = {"core_envelope_required": True}
+    state = {
+        "attempt_id": "attempt",
+        "host_preparation": {
+            "schema": "nexus.ambient-core-preparation.v1",
+            "session_id": session_id,
+            "binding_id": "binding-1",
+            "binding_hash": binding_hash,
+            "operation_id": "operation-1",
+            "attempt_id": "attempt",
+            "acceptance_contract_hash": contract_hash,
+            "source_revision": "git-commit:" + "8" * 40,
+            "source_tree": "git-tree:" + "9" * 40,
+        },
+    }
+    verified = service._verify_ambient_core_candidate(
+        contract=SimpleNamespace(task_id="ambient-core-task"),
+        request=request,
+        lease=SimpleNamespace(target_worktree=str(tmp_path)),
+        state=state,
+        candidate=SimpleNamespace(candidate_state_hash="candidate-state"),
+        verified=_core_required_local_receipt(),
+    )
+
+    assert verified.candidate_commit_allowed is True
+    assert verified.core_provenance_required is True
+    assert verified.core_verification_status == "VERIFIED"
+    assert verified.core_binding_hash == binding_hash
+    assert verified.core_mutation_session_id == session_id
+    assert verified.core_change_set_hash == "sha256:" + "4" * 64
+    assert verified.core_evidence_bundle_hash == "sha256:" + "6" * 64
+    assert verified.core_verification_result_hash.startswith("sha256:")
+
+
+def test_ambient_core_failed_verification_does_not_unlock_candidate(tmp_path):
+    class FailingCore:
+        def verify_candidate(self, **kwargs):
+            return {
+                "session_id": "cms_" + "1" * 32,
+                "binding_hash": "sha256:" + "2" * 64,
+                "candidate_state_hash": "candidate-state",
+                "core_response": {
+                    "protocol_version": "0.1.0-experimental",
+                    "schema": "nexus.core.generic-verification-response.v1-experimental",
+                    "verification": {
+                        "status": "FAILED_VERIFICATION",
+                        "reason_codes": ["REQUIRED_VERIFIER_FAILED"],
+                        "integrity": "VALID",
+                    },
+                    "hashes": {},
+                    "certification": None,
+                },
+            }
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        ephemeral=True,
+        auto_reconcile=False,
+        ambient_core_port=FailingCore(),
+    )
+    state = {
+        "attempt_id": "attempt",
+        "host_preparation": {
+            "schema": "nexus.ambient-core-preparation.v1",
+            "session_id": "cms_" + "1" * 32,
+            "binding_id": "binding-1",
+            "binding_hash": "sha256:" + "2" * 64,
+            "operation_id": "operation-1",
+            "attempt_id": "attempt",
+            "acceptance_contract_hash": "sha256:" + "3" * 64,
+            "source_revision": "git-commit:" + "8" * 40,
+            "source_tree": "git-tree:" + "9" * 40,
+        },
+    }
+    with pytest.raises(RuntimeError, match="AMBIENT_CORE_FAILED_VERIFICATION"):
+        service._verify_ambient_core_candidate(
+            contract=SimpleNamespace(task_id="ambient-core-task"),
+            request={"core_envelope_required": True},
+            lease=SimpleNamespace(target_worktree=str(tmp_path)),
+            state=state,
+            candidate=SimpleNamespace(candidate_state_hash="candidate-state"),
+            verified=_core_required_local_receipt(),
+        )
