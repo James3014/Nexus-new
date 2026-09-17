@@ -61,6 +61,84 @@ def _scenario(tmp_path: Path):
     return contract, lease, verified, manager
 
 
+def test_core_required_candidate_cannot_commit_from_local_verifier_alone(tmp_path):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    local_only = replace(
+        verified,
+        core_provenance_required=True,
+        candidate_commit_allowed=False,
+    )
+
+    with pytest.raises(RuntimeError, match="Verified Candidate Receipt"):
+        CandidateCommitter(manager).create_candidate_commit(contract, lease, local_only)
+
+
+def test_candidate_commit_rejects_incomplete_core_provenance_even_if_commit_flag_is_forged(tmp_path):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    incomplete = replace(
+        verified,
+        core_provenance_required=True,
+        candidate_commit_allowed=True,
+        core_verification_status="VERIFIED",
+    )
+
+    with pytest.raises(RuntimeError, match="Core-verified physical Candidate provenance"):
+        CandidateCommitter(manager).create_candidate_commit(contract, lease, incomplete)
+
+
+def test_candidate_commit_rejects_malformed_prefixed_core_provenance(tmp_path):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    valid_hash = "sha256:" + "a" * 64
+    valid_session = "cms_" + "b" * 32
+    valid_params = {
+        "core_provenance_required": True,
+        "candidate_commit_allowed": True,
+        "core_verification_status": "VERIFIED",
+        "core_binding_hash": valid_hash,
+        "core_mutation_session_id": valid_session,
+        "core_change_set_hash": valid_hash,
+        "core_evidence_bundle_hash": valid_hash,
+        "core_verification_result_hash": valid_hash,
+    }
+    test_cases = [
+        {"core_binding_hash": "sha256:"},
+        {"core_mutation_session_id": "cms_"},
+        {"core_mutation_session_id": "cms_x"},
+        {"core_change_set_hash": "sha256:not64chars"},
+        {"core_evidence_bundle_hash": "sha256:" + "g" * 64},
+        {"core_verification_result_hash": "sha256:" + "0" * 63},
+        {"core_verification_status": "PENDING"},
+    ]
+    for override in test_cases:
+        params = dict(valid_params)
+        params.update(override)
+        malformed = replace(verified, **params)
+        with pytest.raises(
+            RuntimeError,
+            match="Core-verified physical Candidate provenance",
+        ):
+            CandidateCommitter(manager).create_candidate_commit(contract, lease, malformed)
+
+
+def test_candidate_commit_accepts_valid_exact_core_provenance(tmp_path):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    valid_hash = "sha256:" + "a" * 64
+    valid_session = "cms_" + "b" * 32
+    core_verified = replace(
+        verified,
+        core_provenance_required=True,
+        candidate_commit_allowed=True,
+        core_verification_status="VERIFIED",
+        core_binding_hash=valid_hash,
+        core_mutation_session_id=valid_session,
+        core_change_set_hash=valid_hash,
+        core_evidence_bundle_hash=valid_hash,
+        core_verification_result_hash=valid_hash,
+    )
+    packet = CandidateCommitter(manager).create_candidate_commit(contract, lease, core_verified)
+    assert packet.candidate_commit_created is True
+
+
 def test_candidate_commit_is_automatic_but_promotion_pending(tmp_path):
     contract, lease, verified, manager = _scenario(tmp_path)
     verified = replace(verified, authority_change_required=True, authority_findings_sha256="a" * 64)

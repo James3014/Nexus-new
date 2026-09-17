@@ -16,7 +16,7 @@ import tempfile
 import threading
 import time
 from contextlib import contextmanager
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, is_dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -73,6 +73,13 @@ from nexus.orchestrator.acceptance_loop import (
 from nexus.orchestrator.autonomy_policy import (
     AutonomySubmissionBinding,
     project_autonomy_submission,
+)
+from nexus.orchestrator.ambient_core import (
+    AmbientCoreControlPort,
+    ambient_core_required,
+    normalize_preparation,
+    normalize_verification_projection,
+    projection_hash,
 )
 from nexus.orchestrator.candidate_commit import CandidateCommitter
 from nexus.orchestrator.candidate_verifier import CandidateVerifier, VerifiedCandidateReceipt
@@ -1601,6 +1608,7 @@ class SelfHostedTaskService:
         auto_reconcile: bool = True,
         worker_registry: Optional[WorkerRegistry] = None,
         ephemeral: bool = False,
+        ambient_core_port: Optional[AmbientCoreControlPort] = None,
     ):
         canonical = self.canonical_state_dir()
         raw_state_dir = Path(state_dir).expanduser() if state_dir is not None else canonical
@@ -1620,6 +1628,7 @@ class SelfHostedTaskService:
         self.runner = runner or self._run_default
         self.stale_after_seconds = stale_after_seconds
         self.worker_registry = worker_registry or WorkerRegistry.default()
+        self.ambient_core_port = ambient_core_port
         self._threads: dict[str, threading.Thread] = {}
         self._runtime_state_bridge = RuntimeStateBridge(
             self.state_dir,
@@ -3829,6 +3838,105 @@ class SelfHostedTaskService:
             attempt_id=str((self._read_state(contract.task_id) or {}).get("attempt_id", "")),
         )
 
+    def _ambient_core_required(self, contract, request: Mapping[str, Any]) -> bool:
+        return ambient_core_required(request)
+
+    def _prepare_ambient_core(
+        self,
+        contract,
+        request: Mapping[str, Any],
+        lease,
+        state: Mapping[str, Any],
+        *,
+        task_id: str,
+        attempt_id: str,
+    ) -> Mapping[str, Any]:
+        if not self._ambient_core_required(contract, request):
+            raise RuntimeError("AMBIENT_CORE_PREPARATION_NOT_REQUIRED")
+        if self.ambient_core_port is None:
+            raise RuntimeError("AMBIENT_CORE_CONTROL_PORT_REQUIRED")
+        prepared = self.ambient_core_port.open_or_reuse_mutation_binding(
+            contract=contract,
+            request=request,
+            lease=lease,
+            state=state,
+            task_id=task_id,
+            attempt_id=attempt_id,
+        )
+        return normalize_preparation(prepared, attempt_id=attempt_id)
+
+    def _revalidate_ambient_core(
+        self,
+        preparation: Mapping[str, Any],
+        contract,
+        request: Mapping[str, Any],
+        lease,
+        state: Mapping[str, Any],
+        *,
+        task_id: str,
+        attempt_id: str,
+        active_provider: str,
+    ) -> None:
+        if not self._ambient_core_required(contract, request):
+            raise RuntimeError("AMBIENT_CORE_PREPARATION_UNEXPECTED")
+        if self.ambient_core_port is None:
+            raise RuntimeError("AMBIENT_CORE_CONTROL_PORT_REQUIRED")
+        normalized = normalize_preparation(preparation, attempt_id=attempt_id)
+        self.ambient_core_port.revalidate_mutation_binding(
+            normalized,
+            contract=contract,
+            request=request,
+            lease=lease,
+            state=state,
+            task_id=task_id,
+            attempt_id=attempt_id,
+            active_provider=active_provider,
+        )
+
+    def _verify_ambient_core_candidate(
+        self,
+        *,
+        contract,
+        request: Mapping[str, Any],
+        lease,
+        state: Mapping[str, Any],
+        candidate,
+        verified: VerifiedCandidateReceipt,
+    ) -> VerifiedCandidateReceipt:
+        if not self._ambient_core_required(contract, request):
+            return verified
+        if self.ambient_core_port is None:
+            raise RuntimeError("AMBIENT_CORE_CONTROL_PORT_REQUIRED")
+        attempt_id = str(state.get("attempt_id") or "")
+        preparation = normalize_preparation(
+            state.get("host_preparation") or {}, attempt_id=attempt_id
+        )
+        projection = normalize_verification_projection(
+            self.ambient_core_port.verify_candidate(
+                preparation=preparation,
+                contract=contract,
+                request=request,
+                lease=lease,
+                state=state,
+                candidate=candidate,
+                verifier_evidence=verified.verifier_evidence,
+            ),
+            preparation=preparation,
+            candidate_state_hash=verified.candidate_state_hash,
+        )
+        hashes = projection["core_response"]["hashes"]
+        return replace(
+            verified,
+            core_provenance_required=True,
+            core_binding_hash=preparation["binding_hash"],
+            core_mutation_session_id=preparation["session_id"],
+            core_verification_status="VERIFIED",
+            core_change_set_hash=hashes["change_set_hash"],
+            core_evidence_bundle_hash=hashes["evidence_bundle_hash"],
+            core_verification_result_hash=projection_hash(projection),
+            candidate_commit_allowed=verified.verified,
+        )
+
     def _finalize_runtime_candidate(
         self, contract, request, lease, state, attempts, update, *, execution, status
     ):
@@ -3848,6 +3956,23 @@ class SelfHostedTaskService:
             lease,
             candidate,
             protected_paths=request.get("protected_paths") or {},
+        )
+        if self._ambient_core_required(contract, request):
+            # CandidateVerifier remains a repository-local evidence producer.
+            # The host, not the verifier, owns the requirement to obtain Core
+            # physical verification before this receipt can authorize commit.
+            verified = replace(
+                verified,
+                core_provenance_required=True,
+                candidate_commit_allowed=False,
+            )
+        verified = self._verify_ambient_core_candidate(
+            contract=contract,
+            request=request,
+            lease=lease,
+            state=self._read_state(task_id) or state,
+            candidate=candidate,
+            verified=verified,
         )
         latest_execution = attempts[-1] if attempts else self._receipt_from_state(execution)
         if latest_execution is None:
