@@ -120,7 +120,7 @@ class _Preparation:
         self.service = service
 
     def prepare_before_worker(self, contract, request, lease, state, *, task_id, attempt_id):
-        return self.service._prepare_ambient_core(
+        prep = self.service._prepare_ambient_core(
             contract,
             request,
             lease,
@@ -128,6 +128,8 @@ class _Preparation:
             task_id=task_id,
             attempt_id=attempt_id,
         )
+        self.service._mutate_state(task_id, lambda s: s.update({"host_preparation": prep}))
+        return prep
 
     def revalidate_before_worker(
         self,
@@ -161,6 +163,18 @@ class _Worker:
         return self.service.worker_registry.preflight(provider)
 
     def invoke(self, provider, contract, lease, **kwargs):
+        task_id = getattr(contract, "task_id", None)
+        if task_id:
+            state = self.service._read_state(task_id) or {}
+            request = state.get("request") or {}
+            if self.service._ambient_core_required(contract, request) and not state.get(
+                "host_preparation"
+            ):
+                attempt_id = str(state.get("attempt_id") or "")
+                prep = self.service._prepare_ambient_core(
+                    contract, request, lease, state, task_id=task_id, attempt_id=attempt_id
+                )
+                self.service._mutate_state(task_id, lambda s: s.update({"host_preparation": prep}))
         return self.service.worker_registry.invoke(provider, contract, lease, **kwargs)
 
 
@@ -259,6 +273,14 @@ class _Finalization:
                 task_id, status, values, attempt_id=attempt_id
             )
         )
+        if self.service._ambient_core_required(contract, request) and not (
+            state.get("host_preparation") if isinstance(state, Mapping) else None
+        ):
+            prep = self.service._prepare_ambient_core(
+                contract, request, lease, state, task_id=task_id, attempt_id=attempt_id
+            )
+            self.service._mutate_state(task_id, lambda s: s.update({"host_preparation": prep}))
+            state = self.service._read_state(task_id) or state
         return self.service._finalize_runtime_candidate(
             contract, request, lease, state, attempts, update, execution=execution, status=status
         )
@@ -293,7 +315,32 @@ class RuntimeCoordinationBridge:
             args.append(_Preparation(self.service))
         return ExecutionCoordinator(*args)
 
+    def _ensure_preparation_compat(self, task_id, attempt_id, *, request=None):
+        sig = inspect.signature(ExecutionCoordinator.__init__)
+        has_var_positional = any(
+            p.kind == inspect.Parameter.VAR_POSITIONAL for p in sig.parameters.values()
+        )
+        if "preparation" in sig.parameters or len(sig.parameters) > 7 or has_var_positional:
+            return
+        state = self.service._read_state(task_id) or {}
+        req = request or state.get("request") or {}
+        if not state.get("lease"):
+            return
+        try:
+            contract = self.service._contract_from_state(state)
+        except Exception:
+            return
+        if not self.service._ambient_core_required(contract, req):
+            return
+        if not state.get("host_preparation"):
+            lease = self.service._lease_from_state(state)
+            prep = self.service._prepare_ambient_core(
+                contract, req, lease, state, task_id=task_id, attempt_id=attempt_id
+            )
+            self.service._mutate_state(task_id, lambda s: s.update({"host_preparation": prep}))
+
     def run_owned_attempt(self, task_id, attempt_id, custom_runner=None):
+        self._ensure_preparation_compat(task_id, attempt_id)
         return self._coordinator(task_id, attempt_id).run_owned_attempt(
             task_id, attempt_id, custom_runner
         )
@@ -308,6 +355,7 @@ class RuntimeCoordinationBridge:
         )
 
     def execute(self, task_id, attempt_id, *, contract=None, request=None, update=None):
+        self._ensure_preparation_compat(task_id, attempt_id, request=request)
         return self._coordinator(
             task_id, attempt_id, request=request, update=update
         ).execute_attempt(task_id, attempt_id, contract=contract, request=request)
