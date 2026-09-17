@@ -111,6 +111,49 @@ class _Contract:
     def materialize_worker_context(self, **kwargs):
         return self.service._worker_context_materialization(**kwargs)
 
+    def host_preparation_required(self, contract, request):
+        return self.service._ambient_core_required(contract, request)
+
+
+class _Preparation:
+    def __init__(self, service):
+        self.service = service
+
+    def prepare_before_worker(
+        self, contract, request, lease, state, *, task_id, attempt_id
+    ):
+        return self.service._prepare_ambient_core(
+            contract,
+            request,
+            lease,
+            state,
+            task_id=task_id,
+            attempt_id=attempt_id,
+        )
+
+    def revalidate_before_worker(
+        self,
+        preparation,
+        contract,
+        request,
+        lease,
+        state,
+        *,
+        task_id,
+        attempt_id,
+        active_provider,
+    ):
+        return self.service._revalidate_ambient_core(
+            preparation,
+            contract,
+            request,
+            lease,
+            state,
+            task_id=task_id,
+            attempt_id=attempt_id,
+            active_provider=active_provider,
+        )
+
 
 class _Worker:
     def __init__(self, service):
@@ -233,6 +276,7 @@ class RuntimeCoordinationBridge:
             _Target(self.service),
             processes,
             finalization,
+            _Preparation(self.service),
         )
 
     def run_owned_attempt(self, task_id, attempt_id, custom_runner=None):

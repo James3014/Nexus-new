@@ -86,6 +86,13 @@ class VerifiedCandidateReceipt:
     changed_file_budget_passed: bool = True
     deleted_file_count: int = 0
     deleted_file_budget_passed: bool = True
+    core_provenance_required: bool = False
+    core_binding_hash: str = ""
+    core_mutation_session_id: str = ""
+    core_verification_status: str = ""
+    core_change_set_hash: str = ""
+    core_evidence_bundle_hash: str = ""
+    core_verification_result_hash: str = ""
 
 
 class CandidateVerifier:
