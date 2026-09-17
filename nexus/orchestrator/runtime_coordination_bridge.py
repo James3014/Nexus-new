@@ -237,17 +237,26 @@ class _Processes:
 
 
 class _Finalization:
-    def __init__(self, service, update=None):
+    def __init__(self, service, update=None, task_id=None, attempt_id=None):
         self.service, self.update = service, update
+        self.task_id, self.attempt_id = task_id, attempt_id
         self.terminal_statuses = _service_module.TERMINAL_STATUSES
 
     def bound_custom_runner_values(self, values):
         return self.service._bound_custom_runner_values(values)
 
     def finalize_completed(self, contract, request, lease, state, attempts, *, execution, status):
+        task_id = (
+            self.task_id
+            or getattr(contract, "task_id", None)
+            or (state.get("task_id") if isinstance(state, Mapping) else None)
+        )
+        attempt_id = self.attempt_id or (
+            state.get("attempt_id") if isinstance(state, Mapping) else None
+        )
         update = self.update or (
             lambda status, values: self.service._checkpoint(
-                self.task_id, status, values, attempt_id=self.attempt_id
+                task_id, status, values, attempt_id=attempt_id
             )
         )
         return self.service._finalize_runtime_candidate(
@@ -265,7 +274,9 @@ class RuntimeCoordinationBridge:
     def _coordinator(self, task_id, attempt_id, *, request=None, update=None):
         processes = _Processes()
         processes.service = self.service
-        finalization = _Finalization(self.service, update=update)
+        finalization = _Finalization(
+            self.service, update=update, task_id=task_id, attempt_id=attempt_id
+        )
         args = [
             _State(self.service, request=request, update=update),
             _Contract(self.service),
