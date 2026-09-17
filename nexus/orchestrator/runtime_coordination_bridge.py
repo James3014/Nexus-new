@@ -119,9 +119,7 @@ class _Preparation:
     def __init__(self, service):
         self.service = service
 
-    def prepare_before_worker(
-        self, contract, request, lease, state, *, task_id, attempt_id
-    ):
+    def prepare_before_worker(self, contract, request, lease, state, *, task_id, attempt_id):
         return self.service._prepare_ambient_core(
             contract,
             request,

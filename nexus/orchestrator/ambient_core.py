@@ -19,7 +19,9 @@ class AmbientCoreControlPort(Protocol):
 
     def open_or_reuse_mutation_binding(self, **kwargs: Any) -> Mapping[str, Any]: ...
 
-    def revalidate_mutation_binding(self, preparation: Mapping[str, Any], **kwargs: Any) -> None: ...
+    def revalidate_mutation_binding(
+        self, preparation: Mapping[str, Any], **kwargs: Any
+    ) -> None: ...
 
     def verify_candidate(self, **kwargs: Any) -> Mapping[str, Any]: ...
 
@@ -103,9 +105,7 @@ def normalize_verification_projection(
         if not _HASH_RE.fullmatch(item):
             raise RuntimeError(f"AMBIENT_CORE_INVALID:{field}")
         normalized_hashes[field] = item
-    if normalized_hashes["acceptance_contract_hash"] != preparation.get(
-        "acceptance_contract_hash"
-    ):
+    if normalized_hashes["acceptance_contract_hash"] != preparation.get("acceptance_contract_hash"):
         raise RuntimeError("AMBIENT_CORE_CONTRACT_HASH_MISMATCH")
     projection = {
         "schema": VERIFICATION_PROJECTION_SCHEMA,
