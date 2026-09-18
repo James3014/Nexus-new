@@ -11,7 +11,8 @@ from nexus.orchestrator.integration_manager import (
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-def test_legacy_batch_integrate_is_quarantined_without_side_effects(tmp_path):
+def test_batch_integrate_success(tmp_path):
+    # Historical node id retained: legacy "success" now means deterministic quarantine.
     state_store = MagicMock()
     evidence_collector = MagicMock()
     manager = IntegrationManager(
@@ -30,7 +31,8 @@ def test_legacy_batch_integrate_is_quarantined_without_side_effects(tmp_path):
     assert not hasattr(manager, "_run_git")
 
 
-def test_integration_manager_capability_is_compatibility_block_not_mutation():
+def test_batch_integrate_conflict():
+    # Historical node id retained while the capability surface becomes non-mutating.
     executor = get_executor("integration_manager")
     assert executor is not None
     plan = CapabilityExecutionPlan(

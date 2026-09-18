@@ -156,7 +156,8 @@ def test_start_multi_agent_task_returns_worktree_view_without_click():
     assert render_multi_agent_task_start(view) == view.text_lines
 
 
-def test_integrate_multi_agent_tasks_fails_closed_without_legacy_manager():
+def test_integrate_multi_agent_tasks_parses_ids_and_uses_integration_manager_without_click():
+    # Preserve the historical pytest node id while changing the contract to fail closed.
     calls = []
 
     def bomb_orchestrator():
