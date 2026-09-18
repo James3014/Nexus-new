@@ -297,3 +297,44 @@ def test_canary_4_raw_copy_paste_negative_control(tmp_path: Path):
     assert receipt.worker_invocation_count == 0
     # 4. Status reflects raw path
     assert receipt.status == "RAW_MUTATION_CAPTURED"
+
+
+def test_canonical_core_transport_binds_executing_checkout_revision(tmp_path: Path, monkeypatch):
+    import nexus.orchestrator.canonical_core_transport as transport
+
+    source_root = Path(transport.__file__).resolve().parents[2]
+    expected_head = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=source_root, text=True
+    ).strip()
+    expected_tree = subprocess.check_output(
+        ["git", "rev-parse", "HEAD^{tree}"], cwd=source_root, text=True
+    ).strip()
+
+    captured_binding_payloads: list[str] = []
+    original_sha256 = transport._sha256
+
+    def capture_sha256(value):
+        if isinstance(value, str) and '"schema":"nexus.repository_mutation_binding.v1"' in value:
+            captured_binding_payloads.append(value)
+        return original_sha256(value)
+
+    monkeypatch.setattr(transport, "_sha256", capture_sha256)
+    port = transport.CanonicalNexusCoreTransportPort(
+        db_path=str(tmp_path / "core-provenance.sqlite")
+    )
+    port.open_or_reuse_mutation_binding(
+        task_id="canary-current-checkout-provenance",
+        base_sha=expected_head,
+        base_tree=expected_tree,
+        request={
+            "execution_lane": ManagedExecutionLane.DIRECT_CANONICAL.value,
+            "allowed_files": ["fixtures/canary/current.txt"],
+            "verifier_commands": ["git diff --check"],
+            "deletion_policy": {"allow_deletion": False},
+        },
+    )
+
+    assert captured_binding_payloads
+    binding_payload = captured_binding_payloads[-1]
+    assert f'"index_revision":"git-commit:{expected_head}"' in binding_payload
+    assert "git-commit:c4fc320c98ced12bbd1770b0290508b29e98a22a" not in binding_payload

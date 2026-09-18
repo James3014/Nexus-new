@@ -301,16 +301,27 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
         if "contract_hash" in kwargs:
             contract_hash = kwargs["contract_hash"]
 
-        # Binding hash computation using real tracked authority
-        index_path = Path(
-            "/Users/jameschen/workspace/nexus-new/docs/agents/CAPABILITY_DISCOVERY_INDEX.v1.json"
-        )
+        # Bind provenance to the exact Nexus-new checkout executing this adapter.
+        # A historical hard-coded revision would make an otherwise current G7
+        # receipt stale as soon as canonical main advances.
+        source_repo_root = Path(__file__).resolve().parents[2]
+        index_path = source_repo_root / "docs/agents/CAPABILITY_DISCOVERY_INDEX.v1.json"
+        mode_path = source_repo_root / "docs/governance/current_operating_mode.yaml"
+        try:
+            index_rev = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"],
+                cwd=source_repo_root,
+                text=True,
+            ).strip()
+        except (OSError, subprocess.CalledProcessError) as exc:
+            raise RuntimeError(
+                "CANONICAL_NEXUS_SOURCE_IDENTITY_UNAVAILABLE: cannot bind executing checkout"
+            ) from exc
+        if len(index_rev) != 40 or any(ch not in "0123456789abcdef" for ch in index_rev):
+            raise RuntimeError(
+                "CANONICAL_NEXUS_SOURCE_IDENTITY_INVALID: executing checkout HEAD is malformed"
+            )
         index_sha256 = hashlib.sha256(index_path.read_bytes()).hexdigest()
-        index_rev = "c4fc320c98ced12bbd1770b0290508b29e98a22a"
-
-        mode_path = Path(
-            "/Users/jameschen/workspace/nexus-new/docs/governance/current_operating_mode.yaml"
-        )
         authority_hash = _sha256(mode_path.read_bytes())
 
         binding_payload = {
