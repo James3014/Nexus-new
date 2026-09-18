@@ -348,6 +348,23 @@ def test_opencode_args_match_current_cli_without_removed_auto_flag():
     assert "--auto" not in argv
 
 
+def test_grok_args_match_current_headless_cli():
+    from nexus.executors.worker_registry import _grok_args
+
+    argv = _grok_args("test prompt", "grok-4.6")
+
+    assert argv == (
+        "--model",
+        "grok-4.6",
+        "--single",
+        "test prompt",
+        "--output-format",
+        "json",
+        "--no-alt-screen",
+    )
+    assert "--prompt" not in argv
+
+
 def test_every_adapter_exit_0_result_is_execution_completed(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
