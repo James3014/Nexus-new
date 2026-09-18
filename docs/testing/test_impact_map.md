@@ -45,6 +45,7 @@
 | nexus/executors/cli_worker.py | tests/nexus/executors/test_cli_worker.py | active | high | cli_worker_executor_contract |
 | nexus/executors/codex_executor.py | tests/nexus/executors/test_codex_executor.py, tests/nexus/executors/test_worker_contract.py, tests/nexus/executors/test_cli_worker.py, tests/nexus/orchestrator/test_worker_planner_context_input.py | active | high | codex_receipt_attempt_count_and_worker_context_contract |
 | nexus/executors/worker_registry.py | tests/nexus/executors/test_worker_contract.py, tests/services/test_agy_account_pool.py | active | high | worker_registry_contract |
+| nexus/governance/capability_gate.py | tests/engine/test_engine_bootstrap.py, tests/health/test_commander_health_loop.py, tests/services/test_policy_gate.py | active | high | legacy_capability_gate_authority_boundary |
 | nexus/engine/asi_constraints.py | tests/engine/test_asi_constraints.py::test_asi_constraint_extractor_orders_families_and_preserves_evidence_refs, tests/engine/test_asi_constraints.py | active | medium | asi_constraint_ordering_contract |
 | nexus/contracts/s2t_export.py | tests/contracts/test_s2t_contracts.py::test_s2t_agent_lightning_export_emits_preference_pairs, tests/contracts/test_s2t_contracts.py::test_s2t_export_selects_highest_scored_failed_rejected_candidate_stably | active | medium | s2t_export_ordering_contract |
 | nexus/contracts/hybrid_retrieval.py | tests/contracts/test_hybrid_retrieval.py | active | high | hybrid_retrieval_rrf_contract |
