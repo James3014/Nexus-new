@@ -319,6 +319,17 @@ def test_contract_or_authority_change_escalates_to_tier2():
     assert "tests/services/test_policy_gate.py" in plan.pytest_targets
 
 
+def test_legacy_capability_gate_uses_high_risk_mapped_oracles():
+    plan = build_impact_plan(["nexus/governance/capability_gate.py"])
+
+    assert plan.tier == 2
+    assert plan.impact_class == "HIGH_RISK_INTEGRATION"
+    assert plan.unmatched_paths == []
+    assert "tests/engine/test_engine_bootstrap.py" in plan.pytest_targets
+    assert "tests/health/test_commander_health_loop.py" in plan.pytest_targets
+    assert "tests/services/test_policy_gate.py" in plan.pytest_targets
+
+
 def test_ci_workflow_change_selects_ci_machinery_regressions():
     plan = build_impact_plan([".github/workflows/pytest.yml"])
 
