@@ -47,15 +47,25 @@ Required invariant:
 
 No provider adapter change is authorized by this prerequisite.
 
-## Fresh MCP-session gate
+## Authenticated transport / freshness gate
 
-Before physical canaries:
-1. connect a fresh authenticated MCP client to the live DevSpace service;
-2. perform `tools/list`;
-3. prove the returned `agent_start.executionContract` schema includes both `authorizedToolCeiling` and `toolProjectionManifest`;
-4. bind the fresh session/catalog generation and live source/build identity.
+Before physical canaries, bind the actual authorized ChatGPT -> DevSpace transport to the live server generation without handling, extracting, bypassing, or reissuing Owner OAuth credentials.
 
-The stale ChatGPT-native tool schema must not be used as proof that the fresh production tool contract is absent.
+Preferred witness remains a fresh authenticated MCP `tools/list` acknowledgement when the host exposes a safe reconnect primitive.
+
+When the host fixes tool metadata at conversation start and does not expose a safe fresh-session primitive, the following stronger execution-path witness is accepted instead:
+
+1. live `capability_convergence_status` shows the authoritative production role `CONVERGED`, exact live source/build identity, and both required capabilities:
+   - `agent_start.executionContract.authorizedToolCeiling`
+   - `agent_start.executionContract.toolProjectionManifest`;
+2. the already-authorized ChatGPT connector sends a bounded `agent_start` request containing both fields to that exact live server, even if the host-side displayed schema is stale;
+3. DevSpace returns a durable `agentId`;
+4. post-readback of the durable `local_agent_sessions.execution_contract` proves the exact ceiling, manifest schema, task/attempt identity, and selected set survived the public MCP admission path;
+5. provider-boundary behavior reflects that projection (for example, a provider lacking a proven seam fails closed with `PROVIDER_PROTOCOL_ERROR` rather than running the legacy wider surface).
+
+This alternative is an execution/readback freshness witness, not a permission to bypass OAuth. Do not read, export, synthesize, or privately mint Owner credentials merely to manufacture a new client session.
+
+The stale ChatGPT-native tool metadata must not be used as proof that the live production contract is absent when the exact authenticated round-trip and durable readback prove otherwise.
 
 ## Canary contract
 
@@ -113,3 +123,12 @@ If exact provider schema introspection is unavailable, use the strongest determi
 - durable #982 Wave 5 receipt records denominator and results
 
 Wave 5 may set `BENCHMARK_VALIDITY=TRUE` only for transport families/identities with valid physical intervention witnesses. It does not authorize benchmark execution beyond the separately tracked Wave 6 card.
+
+## Evidence-gate amendment — 2026-09-18
+
+Host/tooling observation:
+- ChatGPT's loaded `agent_start` metadata predates the live Wave 4 schema and reports `RECONNECT_REQUIRED` because no safe active-session generation snapshot is exposed to this request context.
+- The host does not expose an authorized generic reconnect/raw-MCP primitive, and automation is not permitted to extract or bypass the Owner OAuth token merely to create one.
+- A bounded authenticated connector probe on live DevSpace accepted metadata-hidden `authorizedToolCeiling` + `toolProjectionManifest`, persisted the exact contract in the durable agent row, and Grok then failed closed at the provider boundary with `PROVIDER_PROTOCOL_ERROR`.
+
+Therefore G3 freshness is bound to the live server capability manifest plus exact authenticated admission/persistence/provider-behavior round trip. This changes only the evidence mechanism; tool authority, selected-set semantics, denominator, canary arms, and provider classifications are unchanged.
