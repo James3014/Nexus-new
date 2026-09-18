@@ -1,5 +1,5 @@
-from typing import Any, Dict, List, Optional
 from enum import Enum
+from typing import Any, Dict, List, Optional
 
 
 class Phase(str, Enum):
@@ -22,6 +22,9 @@ SKILL_GROUPS: Dict[Phase, List[str]] = {
 }
 
 PHASE_TOOLS: Dict[Phase, List[str]] = SKILL_GROUPS
+
+CAPABILITY_GATE_AUTHORITY_BOUNDARY = "LEGACY_COMPATIBILITY_PROJECTION_ONLY"
+CAPABILITY_GATE_ISSUES_EFFECT_AUTHORITY = False
 
 
 class CapabilityGate:
@@ -75,3 +78,13 @@ class CapabilityGate:
     def managed_toolsets(self, phase_str: Optional[str]) -> List[str]:
         """🎯 Composio P0: 獲取 JIT 精簡工具集"""
         return self.get_tools(phase_str)
+
+    @staticmethod
+    def authority_metadata() -> Dict[str, Any]:
+        """Machine-readable compatibility marker; this gate never mints execution authority."""
+        return {
+            "authority_boundary": CAPABILITY_GATE_AUTHORITY_BOUNDARY,
+            "issues_effect_authority": CAPABILITY_GATE_ISSUES_EFFECT_AUTHORITY,
+            "effect_authorization_schema": None,
+            "tool_projection_schema": None,
+        }

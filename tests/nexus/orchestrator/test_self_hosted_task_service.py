@@ -295,6 +295,227 @@ def _request(tmp_path: Path, **overrides):
     return values
 
 
+def test_wave4_effect_authorization_preserves_supplied_attempt_identity(tmp_path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    service._launch_worker = lambda task_id, attempt_id: service._with_task_action(
+        service._read_state(task_id)
+    )
+    request = _request(
+        tmp_path,
+        task_id="wave4-attempt-binding",
+        execution_lane="ISOLATED_TARGET",
+        attempt_id="attempt-wave4-fixed",
+        operation_id="operation-wave4-fixed",
+        repository="James3014/Nexus-new",
+        source_revision="a" * 40,
+        base_revision="a" * 40,
+        workspace_id="workspace-wave4",
+        target_id="target-wave4",
+        effect_authorization_required=True,
+        effect_authorization={"schema": "placeholder"},
+        tool_projection_requests={"codex": {"backend_id": "codex-cli"}},
+    )
+
+    service.submit_task(request)
+    state = service._read_state("wave4-attempt-binding")
+
+    assert state["attempt_id"] == "attempt-wave4-fixed"
+    assert state["attempt_id_hint"] == "attempt-wave4-fixed"
+    assert state["request"]["attempt_id"] == "attempt-wave4-fixed"
+
+
+def test_wave4_effect_authorization_requires_attempt_identity_before_state_creation(tmp_path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    request = _request(
+        tmp_path,
+        task_id="wave4-attempt-missing",
+        execution_lane="ISOLATED_TARGET",
+        effect_authorization_required=True,
+        effect_authorization={"schema": "placeholder"},
+        tool_projection_requests={"codex": {"backend_id": "codex-cli"}},
+    )
+
+    with pytest.raises(RuntimeError, match="EFFECT_AUTHORIZATION_ATTEMPT_ID_REQUIRED"):
+        service.submit_task(request)
+
+    assert service._read_state("wave4-attempt-missing") is None
+
+
+def test_wave4_runtime_projection_reaches_worker_boundary_and_blocks_legacy_adapter(
+    tmp_path, monkeypatch
+):
+    calls: list[str] = []
+
+    class FakeAdapter:
+        def __init__(self, provider: str):
+            self.provider = provider
+
+        def preflight(self):
+            return WorkerPreflight(
+                provider=self.provider,
+                executable=f"/fake/{self.provider}",
+                executable_available=True,
+                authorized=True,
+                implementation_status="IMPLEMENTED",
+                ready=True,
+                reason="ready",
+            )
+
+        def invoke(self, contract, lease, *, prompt, **options):
+            calls.append(self.provider)
+            raise AssertionError("legacy adapter must not receive effect-authorized execution")
+
+    registry = WorkerRegistry({
+        provider: FakeAdapter(provider) for provider in SUPPORTED_WORKER_PROVIDERS
+    })
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        worker_registry=registry,
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    request = _real_request(tmp_path, task_id="wave4-runtime-effect-block")
+    attempt_id = "attempt-wave4-runtime"
+    operation_id = "operation-wave4-runtime"
+    source_revision = request["controller_revision"]
+    authorization_material = {
+        "schema": "nexus.runtime.effect_authorization.v1",
+        "authority_id": "owner-wave4",
+        "authority_ref": "Nexus-new#1007",
+        "operation_id": operation_id,
+        "attempt_id": attempt_id,
+        "repository": "James3014/Nexus-new",
+        "source_revision": source_revision,
+        "base_revision": source_revision,
+        "workspace_id": "workspace-wave4-runtime",
+        "target_id": "wave4-runtime-effect-block",
+        "expires_at": None,
+        "effects": {
+            "filesystem": {"write_paths": ["nexus_canary.txt"]},
+        },
+    }
+    authorization = {
+        **authorization_material,
+        "authorization_hash": hashlib.sha256(
+            json.dumps(
+                authorization_material,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ).encode("utf-8")
+        ).hexdigest(),
+    }
+    request.update({
+        "execution_lane": "ISOLATED_TARGET",
+        "attempt_id": attempt_id,
+        "operation_id": operation_id,
+        "repository": "James3014/Nexus-new",
+        "source_revision": source_revision,
+        "base_revision": source_revision,
+        "workspace_id": "workspace-wave4-runtime",
+        "target_id": "wave4-runtime-effect-block",
+        "effect_authorization_required": True,
+        "effect_authorization": authorization,
+        "tool_projection_requests": {
+            "codex": {
+                "backend_id": "codex-cli",
+                "selected_tools": ["edit"],
+                "selected_effects": {
+                    "filesystem": {"write_paths": ["nexus_canary.txt"]},
+                },
+            },
+        },
+    })
+    contract = service.build_contract(request)
+    target = tmp_path / "target"
+    target.mkdir()
+    state = {
+        "task_id": contract.task_id,
+        "status": "SUBMITTED",
+        "attempt_id": attempt_id,
+        "request": dict(request),
+        "submitted_at": "2026-09-18T00:00:00+00:00",
+        "executions": [],
+        "execution": None,
+        "attempts": [{"attempt_id": attempt_id}],
+    }
+
+    monkeypatch.setattr(service, "_read_state", lambda _task_id: state)
+
+    def mutate_state(_task_id, mutate):
+        mutate(state)
+        return state
+
+    monkeypatch.setattr(service, "_mutate_state", mutate_state)
+
+    class FakeManager:
+        def __init__(self, root_dir):
+            self.root_dir = root_dir
+
+    class FakeController:
+        def __init__(self, worktree_manager):
+            self.worktree_manager = worktree_manager
+
+        def prepare_task(self, _contract):
+            return TargetWorktreeLease(
+                schema="nexus.target_worktree_lease.v1",
+                lease_id="lease-wave4",
+                task_id=contract.task_id,
+                controller_revision=contract.controller_revision,
+                target_base_revision=contract.target_base_revision,
+                target_worktree=str(target),
+                target_branch="nexus/task/wave4-runtime-effect-block",
+                initial_head=source_revision,
+                initial_status_sha256="0" * 64,
+                controller_status_sha256="0" * 64,
+                created_from_exact_revision=True,
+                commit_created=False,
+                merge_performed=False,
+            )
+
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.WorktreeManager",
+        FakeManager,
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.SelfHostedDevelopmentController",
+        FakeController,
+    )
+
+    def update(status, values):
+        state["status"] = status
+        state.update(values)
+
+    with pytest.raises(
+        Exception,
+        match="effect-authorized execution requires a projection-aware backend",
+    ):
+        service._run_default_resumable(
+            contract,
+            request,
+            update,
+            task_id=contract.task_id,
+            attempt_id=attempt_id,
+        )
+
+    assert calls == []
+    assert state["effect_authorization_hash"] == authorization["authorization_hash"]
+    projection = state["tool_projection_manifests"]["codex"]
+    assert projection["authorization_hash"] == authorization["authorization_hash"]
+    assert projection["attempt_id"] == attempt_id
+    assert projection["selected_effects"] == {
+        "filesystem": {"write_paths": ["nexus_canary.txt"]},
+    }
+
+
 def _claim_request(**overrides):
     values = {"task_id": "claim-task", "repository": "James3014/Nexus-new", "issue": 129,
         "attempt_id": "attempt-1", "action_id": "action-1", "worker_id": "worker-a",

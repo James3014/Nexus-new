@@ -5883,7 +5883,20 @@ class SelfHostedTaskService:
         verifier_contract = type("DirectVerifierContract", (), {
             "verifier_commands": tuple(str(command) for command in request.get("verifier_commands") or ())
         })()
-        passed, evidence, failures = CandidateVerifier._run_verifiers(verifier_contract, str(controller))
+        direct_candidate = type(
+            "DirectCandidatePaths",
+            (),
+            {
+                "changed_files": changed,
+                "untracked_files": [],
+                "deleted_files": deleted,
+            },
+        )()
+        passed, evidence, failures = CandidateVerifier._run_verifiers(
+            verifier_contract,
+            str(controller),
+            direct_candidate,
+        )
         verifier_time_ms = max(0, int((time.perf_counter() - verifier_started) * 1000))
         if not passed:
             raise RuntimeError("DIRECT_CANONICAL_VERIFIER_FAILED: " + ",".join(failures))
@@ -6185,6 +6198,11 @@ class SelfHostedTaskService:
             if isinstance(dispatch_binding, Mapping)
             else None
         )
+        effect_authorization_requested = bool(
+            request.get("effect_authorization_required")
+            or "effect_authorization" in request
+            or "tool_projection_requests" in request
+        )
         if action:
             attempt_id = attempt_id_hint
         elif isinstance(dispatch_envelope, Mapping):
@@ -6192,6 +6210,10 @@ class SelfHostedTaskService:
             if not bound_attempt_id or attempt_id_hint != bound_attempt_id:
                 raise RuntimeError("WORKFORCE_DISPATCH_ENVELOPE_IDENTITY_DRIFT")
             attempt_id = bound_attempt_id
+        elif effect_authorization_requested:
+            if not attempt_id_hint:
+                raise RuntimeError("EFFECT_AUTHORIZATION_ATTEMPT_ID_REQUIRED")
+            attempt_id = attempt_id_hint
         else:
             attempt_id = uuid4().hex
         now = _utc_now()

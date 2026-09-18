@@ -519,3 +519,134 @@ def test_c15_worker_prose_is_not_completion_truth(tmp_path: Path):
     assert receipt.terminal_status == "FINAL_BLOCK"
     assert receipt.core_provenance_verified is False
     assert receipt.candidate_commit_sha is None
+
+
+def test_wave4_effect_binding_mismatch_blocks_before_worker(tmp_path: Path):
+    repo = tmp_path / "repo"
+    base_sha = _init_repo(repo)
+    invoked: list[str] = []
+    service = _setup_service(tmp_path, invoked)
+    port = FakeAmbientCorePort()
+    launcher = ManagedLocalAgentLauncher(service=service)
+    task_id = "wave4-effect-mismatch"
+
+    req = ManagedLocalAgentRequest(
+        task_id=task_id,
+        what="exercise effect-bound managed execution",
+        why="prove attempt identity cannot drift",
+        repository_root=str(repo),
+        repository_identity="James3014/example",
+        base_revision=base_sha,
+        worker_provider="codex",
+        target_root=str(tmp_path / "targets"),
+        ambient_core_port=port,
+        core_envelope_required=True,
+        effect_authorization={
+            "operation_id": f"op-{task_id}",
+            "attempt_id": "attempt-wrong",
+            "repository": "James3014/example",
+            "source_revision": base_sha,
+            "base_revision": base_sha,
+            "workspace_id": task_id,
+            "target_id": task_id,
+        },
+        tool_projection_requests={
+            "codex": {
+                "backend_id": "codex-cli",
+                "selected_tools": ["edit"],
+                "selected_effects": {"filesystem": {"write_paths": ["src/"]}},
+            }
+        },
+    )
+
+    receipt = launcher.launch_managed_agent(req)
+
+    assert receipt.terminal_status == "FINAL_BLOCK"
+    assert receipt.worker_invocation_count == 0
+    assert invoked == []
+    assert receipt.failure_reasons == ("EFFECT_AUTHORIZATION_IDENTITY_MISMATCH:attempt_id",)
+
+
+def test_wave4_effect_binding_requires_explicit_repository_identity(tmp_path: Path):
+    repo = tmp_path / "repo"
+    base_sha = _init_repo(repo)
+    invoked: list[str] = []
+    service = _setup_service(tmp_path, invoked)
+    port = FakeAmbientCorePort()
+    launcher = ManagedLocalAgentLauncher(service=service)
+    task_id = "wave4-effect-repository"
+
+    req = ManagedLocalAgentRequest(
+        task_id=task_id,
+        what="exercise effect-bound managed execution",
+        why="prove local path cannot masquerade as repository identity",
+        repository_root=str(repo),
+        base_revision=base_sha,
+        worker_provider="codex",
+        target_root=str(tmp_path / "targets"),
+        ambient_core_port=port,
+        core_envelope_required=True,
+        effect_authorization={
+            "operation_id": f"op-{task_id}",
+            "attempt_id": f"attempt-{task_id}-1",
+            "repository": str(repo),
+            "source_revision": base_sha,
+            "base_revision": base_sha,
+            "workspace_id": task_id,
+            "target_id": task_id,
+        },
+        tool_projection_requests={
+            "codex": {
+                "backend_id": "codex-cli",
+                "selected_tools": ["edit"],
+                "selected_effects": {"filesystem": {"write_paths": ["src/"]}},
+            }
+        },
+    )
+
+    receipt = launcher.launch_managed_agent(req)
+
+    assert receipt.terminal_status == "FINAL_BLOCK"
+    assert receipt.worker_invocation_count == 0
+    assert invoked == []
+    assert receipt.failure_reasons == ("EFFECT_AUTHORIZATION_REPOSITORY_IDENTITY_REQUIRED",)
+
+
+def test_wave4_effect_binding_requires_projection_pair_before_worker(tmp_path: Path):
+    repo = tmp_path / "repo"
+    base_sha = _init_repo(repo)
+    invoked: list[str] = []
+    service = _setup_service(tmp_path, invoked)
+    port = FakeAmbientCorePort()
+    launcher = ManagedLocalAgentLauncher(service=service)
+    task_id = "wave4-effect-pair"
+
+    req = ManagedLocalAgentRequest(
+        task_id=task_id,
+        what="exercise effect-bound managed execution",
+        why="prove incomplete pair is rejected",
+        repository_root=str(repo),
+        repository_identity="James3014/example",
+        base_revision=base_sha,
+        worker_provider="codex",
+        target_root=str(tmp_path / "targets"),
+        ambient_core_port=port,
+        core_envelope_required=True,
+        effect_authorization={
+            "operation_id": f"op-{task_id}",
+            "attempt_id": f"attempt-{task_id}-1",
+            "repository": "James3014/example",
+            "source_revision": base_sha,
+            "base_revision": base_sha,
+            "workspace_id": task_id,
+            "target_id": task_id,
+        },
+        tool_projection_requests={},
+    )
+
+    receipt = launcher.launch_managed_agent(req)
+
+    assert receipt.terminal_status == "FINAL_BLOCK"
+    assert receipt.worker_invocation_count == 0
+    assert invoked == []
+    assert receipt.failure_reasons == ("EFFECT_AUTHORIZATION_PROJECTION_PAIR_REQUIRED",)
