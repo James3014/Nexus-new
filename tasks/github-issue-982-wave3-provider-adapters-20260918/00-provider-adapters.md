@@ -3,7 +3,7 @@
 artifact_authority: current
 task_id: `issue-982-wave3-provider-adapters-20260918`
 owner: James Chen
-status: PREPARED_NOT_CANONICAL
+status: ACTIVE
 contract_kind: TRACKED_TASK_CARD
 AUTO_CHAIN: false
 worker_may_commit: true
@@ -19,7 +19,7 @@ Wire the validated `ToolProjectionManifest.selectedTools` from the durable DevSp
 
 - Nexus-new authority base: `a258be3d0946d37f038a8d58d9d5c836cf2a96d4`
 - DevSpace foundation dependency: PR `James3014/devspace#191`
-- DevSpace implementation base: `PENDING_POST_MERGE_READBACK_OF_PR_191`
+- DevSpace implementation base: `3117cce75da90df1a2523b690e7c0cc5c47045f9`
 - Durable authority owner: `ExecutionContract.authorizedToolCeiling`
 - Derived selection: `ExecutionContract.toolProjectionManifest.selectedTools`
 - Canonical namespace: `devspace.tool_intent.v1`
