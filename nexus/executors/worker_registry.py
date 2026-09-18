@@ -808,7 +808,7 @@ def _cline_args(prompt: str, model: str) -> tuple[str, ...]:
 
 
 def _grok_args(prompt: str, model: str) -> tuple[str, ...]:
-    return ("--model", model, "--prompt", prompt)
+    return ("--model", model, "--single", prompt, "--output-format", "json", "--no-alt-screen")
 
 
 class WorkerRegistry:

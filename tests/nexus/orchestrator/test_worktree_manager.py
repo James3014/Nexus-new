@@ -2135,6 +2135,75 @@ def test_orphan_ownership_without_authoritative_snapshot_fails_closed_even_if_pa
         manager.create_lease(contract_b, task_states={})
 
 
+def test_valid_ownership_record_from_other_target_root_does_not_consume_serial_budget(sh2_repo):
+    contract_a, manager_a, lease_a, target_a = _prepare_candidate(
+        sh2_repo,
+        task_id="task-other-root-a",
+        allowed_files=["src/allowed.txt"],
+    )
+    controller_a = Path(contract_a.controller_repo_root).resolve()
+    record_path = manager_a._ownership_record_path(controller_a, contract_a.task_id)
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+
+    # Remove only the physical Target. The durable ownership record remains in
+    # the shared Git common-dir, exactly like a historical retained record.
+    _git(controller_a, "worktree", "remove", "--force", str(target_a))
+    assert not target_a.exists()
+    assert record_path.exists()
+
+    controller_b = controller_a.parent / "controller-b"
+    _git(
+        controller_a,
+        "worktree",
+        "add",
+        "--detach",
+        str(controller_b),
+        sh2_repo["controller_revision"],
+    )
+    target_root_b = controller_a.parent / "targets-b"
+    target_root_b.mkdir()
+    sh2_repo_b = {
+        **sh2_repo,
+        "controller": controller_b,
+        "target_root": target_root_b,
+    }
+    contract_b = _contract(
+        sh2_repo_b,
+        task_id="task-other-root-b",
+        allowed_files=["outside.txt"],
+    )
+    manager_b = WorktreeManager(root_dir=str(target_root_b), process_checker=lambda _: False)
+    snapshot_a = {
+        "task_id": contract_a.task_id,
+        "status": "CANDIDATE_CAPTURED",
+        "attempt_id": lease_a.attempt_id,
+        "lease_id": lease_a.lease_id,
+        "controller_revision": contract_a.controller_revision,
+        "controller_worktree": str(controller_a),
+        "contract": contract_a.model_dump(mode="json"),
+        "lease": lease_a.__dict__,
+        "expected_attempt_id": lease_a.attempt_id,
+        "expected_lease_id": lease_a.lease_id,
+        "expected_controller_revision": contract_a.controller_revision,
+        "expected_controller_worktree": str(controller_a),
+        "contract_hash": record.get("contract_hash"),
+        "source_identity": record.get("source_identity"),
+    }
+
+    # A fully validated record for another Target root must not consume this
+    # manager's serial budget merely because both controllers share a Git
+    # common-dir.
+    assert manager_b.target_conflict(
+        contract_b,
+        task_states={contract_a.task_id: snapshot_a},
+    ) is False
+    lease_b = manager_b.create_lease(
+        contract_b,
+        task_states={contract_a.task_id: snapshot_a},
+    )
+    assert Path(lease_b.target_worktree).exists()
+
+
 def test_valid_orphan_ownership_with_matching_snapshot_allows_genuinely_disjoint_target(sh2_repo):
     contract_a, manager, lease_a, target_a = _prepare_candidate(
         sh2_repo, task_id="task-orphan-valid", allowed_files=["src/a_scope.txt"]

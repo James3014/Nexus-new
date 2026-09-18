@@ -1504,14 +1504,32 @@ class WorktreeManager:
                 # An orphan ownership record without matching authoritative task state must fail closed.
                 return True
             try:
+                # Ownership records live in the repository common-dir and can
+                # legitimately belong to another controller worktree / Target
+                # root. Validate the record against its own persisted
+                # controller + authoritative task snapshot before trusting its
+                # target path for root scoping.
                 _validate_ownership_record(
                     record,
                     task_state=snapshot,
-                    controller_root=controller_root,
                 )
+                record_contract = record.get("contract")
+                raw_target = (
+                    record_contract.get("target_repo_root")
+                    if isinstance(record_contract, Mapping)
+                    else None
+                )
+                if not isinstance(raw_target, str) or not raw_target.strip():
+                    return True
+                record_target = Path(raw_target).expanduser().resolve()
+                root = self.root_dir.resolve()
+                if record_target == root:
+                    return True
+                if root not in record_target.parents:
+                    continue
                 if mutation_domains_conflict(record, contract):
                     return True
-            except ValueError:
+            except (OSError, ValueError):
                 return True
 
         return False
