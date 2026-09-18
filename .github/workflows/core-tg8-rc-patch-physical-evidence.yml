@@ -1,0 +1,157 @@
+name: Core TG8 RC Patch Physical Evidence
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  rc-patch:
+    runs-on: ubuntu-latest
+    env:
+      RC1_SHA: 9e7ff0767c0d00783235e2cfa08b14865557a165
+      RC2_SHA: a12fa34bd409fc23cc4ed458f36ed03d4d075682
+      LEGACY_ARTIFACT_ID: "9960033003"
+      LEGACY_ARTIFACT_SHA256: 67c68ee594face7097770eb95aa58b9d75afc02a26c33ae68476c9c3a34e9d84
+      SOURCE_DATE_EPOCH: "1700000000"
+    steps:
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: latest
+
+      - name: Acquire accepted historical receipt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/James3014/Nexus-new/actions/artifacts/${LEGACY_ARTIFACT_ID}/zip" \
+            -o /tmp/legacy.zip
+          test "$(sha256sum /tmp/legacy.zip | awk '{print $1}')" = "${LEGACY_ARTIFACT_SHA256}"
+          mkdir -p /tmp/legacy evidence
+          unzip -q /tmp/legacy.zip -d /tmp/legacy
+          cp /tmp/legacy/tg5-receipt.json evidence/accepted-tg5-receipt.json
+          sha256sum evidence/accepted-tg5-receipt.json > evidence/accepted-tg5-receipt.file.sha256
+
+      - name: Acquire exact Core repository and build RC1 and RC2 twice
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/James3014/nexus-core.git core
+          mkdir -p /tmp/rc-wheels/{rc1-a,rc1-b,rc2-a,rc2-b}
+          build_pair() {
+            label="$1"; sha="$2"; expected="$3"
+            git -C core checkout --quiet --detach "$sha"
+            test "$(git -C core rev-parse HEAD)" = "$sha"
+            test -z "$(git -C core status --porcelain)"
+            (cd core && python - "$expected" <<'PY')
+          import pathlib, re, sys
+          text = pathlib.Path('product/protocol/__init__.py').read_text()
+          match = re.search(r'^PUBLIC_PROTOCOL_VERSION = "([^"]+)"$', text, re.M)
+          assert match and match.group(1) == sys.argv[1]
+          PY
+            (cd core && SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}" uv build --wheel --out-dir "/tmp/rc-wheels/${label}-a")
+            rm -rf core/build core/*.egg-info
+            (cd core && SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}" uv build --wheel --out-dir "/tmp/rc-wheels/${label}-b")
+            a=$(find "/tmp/rc-wheels/${label}-a" -maxdepth 1 -name 'nexus_core-*.whl' -print -quit)
+            b=$(find "/tmp/rc-wheels/${label}-b" -maxdepth 1 -name 'nexus_core-*.whl' -print -quit)
+            test "$(sha256sum "$a" | awk '{print $1}')" = "$(sha256sum "$b" | awk '{print $1}')"
+          }
+          build_pair rc1 "${RC1_SHA}" "1.0.0-rc.1"
+          build_pair rc2 "${RC2_SHA}" "1.0.0-rc.2"
+
+      - name: Install RC1 then upgrade to RC2 and rollback
+        run: |
+          set -euo pipefail
+          python -m venv /tmp/rc-patch-venv
+          PIP=/tmp/rc-patch-venv/bin/pip
+          PY=/tmp/rc-patch-venv/bin/python
+          RC1=$(find /tmp/rc-wheels/rc1-a -maxdepth 1 -name 'nexus_core-*.whl' -print -quit)
+          RC2=$(find /tmp/rc-wheels/rc2-a -maxdepth 1 -name 'nexus_core-*.whl' -print -quit)
+          "$PIP" install --quiet "$RC1"
+          "$PY" - "1.0.0-rc.1" evidence/accepted-tg5-receipt.json <<'PY'
+          import json, pathlib, sys
+          from product.evidence import _hash
+          from product.protocol import PUBLIC_PROTOCOL_VERSION
+          from product.runtime.schemas import validate_receipt_verify_request
+          expected, path = sys.argv[1], pathlib.Path(sys.argv[2])
+          receipt = json.loads(path.read_text())
+          assert PUBLIC_PROTOCOL_VERSION == expected
+          assert validate_receipt_verify_request({'receipt': receipt, 'requested_scope': 'ENVELOPE_ONLY', 'original_inputs': None}) == ()
+          assert receipt['receipt_hash'] == _hash({k:v for k,v in receipt.items() if k != 'receipt_hash'})
+          PY
+          /tmp/rc-patch-venv/bin/nexus-certify --help >/dev/null
+          sha256sum -c evidence/accepted-tg5-receipt.file.sha256
+
+          "$PIP" install --quiet --force-reinstall --no-deps "$RC2"
+          "$PY" - "1.0.0-rc.2" evidence/accepted-tg5-receipt.json <<'PY'
+          import json, pathlib, sys
+          from product.evidence import _hash
+          from product.protocol import PUBLIC_PROTOCOL_VERSION
+          from product.runtime.schemas import validate_receipt_verify_request
+          expected, path = sys.argv[1], pathlib.Path(sys.argv[2])
+          receipt = json.loads(path.read_text())
+          assert PUBLIC_PROTOCOL_VERSION == expected
+          assert validate_receipt_verify_request({'receipt': receipt, 'requested_scope': 'ENVELOPE_ONLY', 'original_inputs': None}) == ()
+          assert receipt['receipt_hash'] == _hash({k:v for k,v in receipt.items() if k != 'receipt_hash'})
+          PY
+          /tmp/rc-patch-venv/bin/nexus-certify --help >/dev/null
+          sha256sum -c evidence/accepted-tg5-receipt.file.sha256
+
+          "$PIP" install --quiet --force-reinstall --no-deps "$RC1"
+          "$PY" - <<'PY'
+          from product.protocol import PUBLIC_PROTOCOL_VERSION
+          assert PUBLIC_PROTOCOL_VERSION == '1.0.0-rc.1'
+          PY
+          /tmp/rc-patch-venv/bin/nexus-certify --help >/dev/null
+          sha256sum -c evidence/accepted-tg5-receipt.file.sha256
+
+      - name: Emit RC patch summary
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          def row(label, sha):
+              a = next(Path(f'/tmp/rc-wheels/{label}-a').glob('nexus_core-*.whl'))
+              b = next(Path(f'/tmp/rc-wheels/{label}-b').glob('nexus_core-*.whl'))
+              ah = 'sha256:' + hashlib.sha256(a.read_bytes()).hexdigest()
+              bh = 'sha256:' + hashlib.sha256(b.read_bytes()).hexdigest()
+              assert ah == bh
+              return {'commit': sha, 'wheel': a.name, 'wheel_sha256': ah, 'reproducible_build': True}
+          receipt = Path('evidence/accepted-tg5-receipt.json')
+          payload = {
+              'schema': 'nexus.core.tg8-rc-patch-physical.v1',
+              'rc1': row('rc1', os.environ['RC1_SHA']),
+              'rc2': row('rc2', os.environ['RC2_SHA']),
+              'accepted_historical_receipt_file_sha256': 'sha256:' + hashlib.sha256(receipt.read_bytes()).hexdigest(),
+              'results': {
+                  'rc1_install': 'PASS',
+                  'rc1_to_rc2_upgrade': 'PASS',
+                  'rc2_to_rc1_rollback': 'PASS',
+                  'old_receipt_readable_at_rc1': 'PASS',
+                  'old_receipt_readable_at_rc2': 'PASS',
+                  'old_receipt_bytes_and_hash_preserved': 'PASS',
+              },
+              'claim_ceiling': 'TG8_RC_PATCH_EVIDENCE_ONLY',
+          }
+          Path('evidence/tg8-rc-patch-summary.json').write_text(json.dumps(payload, sort_keys=True, indent=2) + '\n')
+          print(json.dumps(payload, sort_keys=True))
+          PY
+
+      - name: Upload RC patch evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-tg8-rc-patch-${{ env.RC2_SHA }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 14
