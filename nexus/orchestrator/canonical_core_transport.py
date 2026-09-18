@@ -149,16 +149,14 @@ def extract_git_manifest(
             after_oid = dst_oid
             after_mode = dst_mode
 
-        entries.append(
-            {
-                "path": path,
-                "change_type": change_type,
-                "before_oid": before_oid,
-                "after_oid": after_oid,
-                "before_mode": before_mode,
-                "after_mode": after_mode,
-            }
-        )
+        entries.append({
+            "path": path,
+            "change_type": change_type,
+            "before_oid": before_oid,
+            "after_oid": after_oid,
+            "before_mode": before_mode,
+            "after_mode": after_mode,
+        })
     return {
         "source_tree": f"git-tree:{src_tree}",
         "target_tree": f"git-tree:{tgt_tree}",
@@ -467,28 +465,24 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
         force_forbidden_deletion = kwargs.get("force_forbidden_deletion", False)
 
         if force_scope_escape:
-            manifest["entries"].append(
-                {
-                    "path": "unauthorized_scope_escape.txt",
-                    "change_type": "ADD",
-                    "before_oid": None,
-                    "after_oid": "e" * 40,
-                    "before_mode": None,
-                    "after_mode": "100644",
-                }
-            )
+            manifest["entries"].append({
+                "path": "unauthorized_scope_escape.txt",
+                "change_type": "ADD",
+                "before_oid": None,
+                "after_oid": "e" * 40,
+                "before_mode": None,
+                "after_mode": "100644",
+            })
 
         if force_forbidden_deletion:
-            manifest["entries"].append(
-                {
-                    "path": "forbidden_deleted_file.txt",
-                    "change_type": "DELETE",
-                    "before_oid": "d" * 40,
-                    "after_oid": None,
-                    "before_mode": "100644",
-                    "after_mode": None,
-                }
-            )
+            manifest["entries"].append({
+                "path": "forbidden_deleted_file.txt",
+                "change_type": "DELETE",
+                "before_oid": "d" * 40,
+                "after_oid": None,
+                "before_mode": "100644",
+                "after_mode": None,
+            })
 
         manifest_entries = manifest["entries"]
         changed_paths = sorted(list(set(row["path"] for row in manifest_entries)))
@@ -592,16 +586,14 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
                 and not force_fail
             )
             obs_status = "PASS" if is_pass else "FAIL"
-            observations.append(
-                {
-                    "verifier_id": vid,
-                    "artifact_id": f"art-{vid}",
-                    "artifact_hash": _sha256(
-                        json.dumps(_to_serializable(v_res or {"exit_code": 0}), sort_keys=True)
-                    ),
-                    "status": obs_status,
-                }
-            )
+            observations.append({
+                "verifier_id": vid,
+                "artifact_id": f"art-{vid}",
+                "artifact_hash": _sha256(
+                    json.dumps(_to_serializable(v_res or {"exit_code": 0}), sort_keys=True)
+                ),
+                "status": obs_status,
+            })
 
         evidence_payload = {
             "bundle_id": f"eb-{session_id[:12]}",
@@ -818,14 +810,12 @@ def cli_main():
 
         observations = []
         for obs in evidence_data["observations"]:
-            observations.append(
-                {
-                    "verifier_id": obs["verifier_id"],
-                    "artifact_id": obs["artifact_id"],
-                    "artifact_hash": obs["artifact_hash"],
-                    "status": obs["status"],
-                }
-            )
+            observations.append({
+                "verifier_id": obs["verifier_id"],
+                "artifact_id": obs["artifact_id"],
+                "artifact_hash": obs["artifact_hash"],
+                "status": obs["status"],
+            })
 
         evidence_payload = {
             "bundle_id": evidence_data.get("bundle_id") or "eb-1",
