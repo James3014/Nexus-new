@@ -50,6 +50,7 @@ Every downstream layer may preserve or narrow authority, never widen or mint it.
 Production source / dependency:
 - `pyproject.toml`
 - `uv.lock`
+- `requirements/canonical-runtime.txt`
 - `nexus/orchestrator/managed_local_agent.py`
 - `nexus/orchestrator/self_hosted_task_service.py`
 - `nexus/executors/worker_registry.py`
@@ -70,7 +71,7 @@ Tests:
 - the existing worker-registry test file, if fresh discovery identifies one; otherwise a new bounded `tests/nexus/executors/test_worker_effect_projection.py`
 - the existing capability-gate test file, if fresh discovery identifies one; otherwise a new bounded `tests/nexus/governance/test_capability_gate_authority_boundary.py`
 
-Maximum changed files: 19.
+Maximum changed files: 20.
 
 ## Wave 4A required behavior
 
