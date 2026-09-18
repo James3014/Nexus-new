@@ -281,6 +281,50 @@ def test_pr910_dependency_snapshot_transition_is_exact_and_separate() -> None:
     assert trusted_anchor.TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION[0] == 833
 
 
+def test_pr1013_dependency_snapshot_transition_is_exact_and_separate() -> None:
+    assert trusted_anchor.TRUSTED_PR1013_DEPENDENCY_SNAPSHOT_TRANSITION == (
+        1013,
+        (
+            "2c2c1a9d9e2f12736fb3a33efbace9a7b264ca737c00e27ed37696dc5f560c34",
+            "ec48fa0ea3dc4403c84d26dcf73a0f18b88292270c4dc519986b06a92835ce35",
+            "40012ce8452131f446fce0feb8f508f050a8b0dc875837eac1b623007e7388b8",
+            "33543bf4216e10131b08c30951d65bed92ab98bb39e0e9fdde417bdf68a189c0",
+        ),
+    )
+
+
+def test_pr1013_dependency_snapshot_transition_allows_only_exact_binding(monkeypatch) -> None:
+    values = [b"trusted pyproject\n", b"trusted lock\n", b"head pyproject\n", b"head lock\n"]
+    hashes = trusted_anchor.TRUSTED_PR1013_DEPENDENCY_SNAPSHOT_TRANSITION[1]
+    original_sha = trusted_anchor._sha
+    digest_by_value = dict(zip(values, hashes, strict=True))
+    monkeypatch.setattr(
+        trusted_anchor,
+        "_sha",
+        lambda value: digest_by_value.get(value, original_sha(value)),
+    )
+
+    trusted_anchor._validate_trusted_dependency_contract(
+        values[0],
+        values[2],
+        values[1],
+        values[3],
+        pull_request_number=1013,
+        head_product_init_is_regular=True,
+    )
+
+    values[3] += b"tampered"
+    with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+        trusted_anchor._validate_trusted_dependency_contract(
+            values[0],
+            values[2],
+            values[1],
+            values[3],
+            pull_request_number=1013,
+            head_product_init_is_regular=True,
+        )
+
+
 def _pr910_snapshot_fixture(monkeypatch):
     values = [b"trusted pyproject\n", b"trusted lock\n", b"head pyproject\n", b"head lock\n"]
     hashes = trusted_anchor.TRUSTED_PR910_DEPENDENCY_SNAPSHOT_TRANSITION[1]
