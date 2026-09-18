@@ -110,6 +110,26 @@ def test_worker_registry_contract_maps_exact_targets_without_fallback():
     assert details.risk_reasons == ["worker_registry_contract"]
 
 
+def test_legacy_capability_gate_maps_existing_behavioral_oracles_without_fallback():
+    details = select_target_details(
+        ["nexus/governance/capability_gate.py"],
+        load_impact_rules(),
+        index_path=Path("/tmp/missing-capability-gate-impact-index.json"),
+        history_path=Path("/tmp/missing-capability-gate-history.jsonl"),
+    )
+
+    assert details.targets == [
+        "tests/engine/test_engine_bootstrap.py",
+        "tests/health/test_commander_health_loop.py",
+        "tests/services/test_policy_gate.py",
+    ]
+    assert details.unmatched_paths == []
+    assert details.fallback_used is False
+    assert details.risk == "high"
+    assert details.high_risk_escalated is True
+    assert details.risk_reasons == ["legacy_capability_gate_authority_boundary"]
+
+
 def test_unrelated_worker_registry_path_remains_fallback():
     details = select_target_details(
         ["nexus/executors/worker_registry_unknown.py"],
