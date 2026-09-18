@@ -96,6 +96,9 @@ class ManagedLocalAgentRequest:
     shell_pty_mode: bool = False
     timeout_seconds: Optional[float] = None
     idempotency_key: Optional[str] = None
+    repository_identity: Optional[str] = None
+    effect_authorization: Optional[Mapping[str, Any]] = None
+    tool_projection_requests: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -211,6 +214,120 @@ class ManagedLocalAgentLauncher:
                     raw_metadata={"binding_identity": binding_identity.binding_hash},
                 )
 
+        effect_requested = (
+            request.effect_authorization is not None
+            or bool(request.tool_projection_requests)
+        )
+        effect_authorization = request.effect_authorization
+        tool_projection_requests = dict(request.tool_projection_requests)
+        repository_identity = (
+            str(request.repository_identity).strip()
+            if request.repository_identity is not None
+            else ""
+        )
+        if effect_requested:
+            if not repository_identity:
+                return ManagedLocalAgentReceipt(
+                    task_id=request.task_id,
+                    worker_provider=provider,
+                    execution_lane=request.execution_lane,
+                    status="FINAL_BLOCK",
+                    terminal_status="FINAL_BLOCK",
+                    pre_write_machine_enforced_core_bound=True,
+                    path_level_prewrite_containment_proven=False,
+                    post_hoc_physical_verification=False,
+                    core_provenance_verified=False,
+                    core_binding_hash=None,
+                    candidate_state_hash=None,
+                    candidate_commit_sha=None,
+                    candidate_ref=None,
+                    worker_invocation_count=0,
+                    worker_outcome=None,
+                    failure_reasons=(
+                        "EFFECT_AUTHORIZATION_REPOSITORY_IDENTITY_REQUIRED",
+                    ),
+                    raw_metadata={"binding_identity": binding_identity.binding_hash},
+                )
+            if not isinstance(effect_authorization, Mapping) or not tool_projection_requests:
+                return ManagedLocalAgentReceipt(
+                    task_id=request.task_id,
+                    worker_provider=provider,
+                    execution_lane=request.execution_lane,
+                    status="FINAL_BLOCK",
+                    terminal_status="FINAL_BLOCK",
+                    pre_write_machine_enforced_core_bound=True,
+                    path_level_prewrite_containment_proven=False,
+                    post_hoc_physical_verification=False,
+                    core_provenance_verified=False,
+                    core_binding_hash=None,
+                    candidate_state_hash=None,
+                    candidate_commit_sha=None,
+                    candidate_ref=None,
+                    worker_invocation_count=0,
+                    worker_outcome=None,
+                    failure_reasons=("EFFECT_AUTHORIZATION_PROJECTION_PAIR_REQUIRED",),
+                    raw_metadata={"binding_identity": binding_identity.binding_hash},
+                )
+            expected_effect_identity = {
+                "operation_id": binding_identity.operation_id,
+                "attempt_id": binding_identity.attempt_id,
+                "repository": repository_identity,
+                "source_revision": current_head,
+                "base_revision": request.base_revision,
+                "workspace_id": binding_identity.workspace_identity,
+                "target_id": request.task_id,
+            }
+            mismatched = tuple(
+                field_name
+                for field_name, expected_value in expected_effect_identity.items()
+                if effect_authorization.get(field_name) != expected_value
+            )
+            if mismatched:
+                return ManagedLocalAgentReceipt(
+                    task_id=request.task_id,
+                    worker_provider=provider,
+                    execution_lane=request.execution_lane,
+                    status="FINAL_BLOCK",
+                    terminal_status="FINAL_BLOCK",
+                    pre_write_machine_enforced_core_bound=True,
+                    path_level_prewrite_containment_proven=False,
+                    post_hoc_physical_verification=False,
+                    core_provenance_verified=False,
+                    core_binding_hash=None,
+                    candidate_state_hash=None,
+                    candidate_commit_sha=None,
+                    candidate_ref=None,
+                    worker_invocation_count=0,
+                    worker_outcome=None,
+                    failure_reasons=(
+                        "EFFECT_AUTHORIZATION_IDENTITY_MISMATCH:"
+                        + ",".join(mismatched),
+                    ),
+                    raw_metadata={"binding_identity": binding_identity.binding_hash},
+                )
+            if provider not in tool_projection_requests:
+                return ManagedLocalAgentReceipt(
+                    task_id=request.task_id,
+                    worker_provider=provider,
+                    execution_lane=request.execution_lane,
+                    status="FINAL_BLOCK",
+                    terminal_status="FINAL_BLOCK",
+                    pre_write_machine_enforced_core_bound=True,
+                    path_level_prewrite_containment_proven=False,
+                    post_hoc_physical_verification=False,
+                    core_provenance_verified=False,
+                    core_binding_hash=None,
+                    candidate_state_hash=None,
+                    candidate_commit_sha=None,
+                    candidate_ref=None,
+                    worker_invocation_count=0,
+                    worker_outcome=None,
+                    failure_reasons=(
+                        f"TOOL_PROJECTION_REQUEST_MISSING:{provider}",
+                    ),
+                    raw_metadata={"binding_identity": binding_identity.binding_hash},
+                )
+
         # 6. Dispatch through SelfHostedTaskService
         service_request = {
             "task_id": request.task_id,
@@ -231,6 +348,27 @@ class ManagedLocalAgentLauncher:
             "deletion_policy": dict(request.deletion_policy),
             "managed_binding_hash": binding_identity.binding_hash,
         }
+        if effect_requested:
+            assert isinstance(effect_authorization, Mapping)
+            service_request.update({
+                # Repository governance lane and SelfHostedTaskService execution
+                # topology are distinct. Effect-bound work must traverse the
+                # isolated runtime-coordination path rather than the direct
+                # canonical shortcut.
+                "execution_lane": "ISOLATED_TARGET",
+                "effect_authorization_required": True,
+                "effect_authorization": dict(effect_authorization),
+                "tool_projection_requests": {
+                    key: dict(value) for key, value in tool_projection_requests.items()
+                },
+                "operation_id": binding_identity.operation_id,
+                "attempt_id": binding_identity.attempt_id,
+                "repository": repository_identity,
+                "source_revision": current_head,
+                "base_revision": request.base_revision,
+                "workspace_id": binding_identity.workspace_identity,
+                "target_id": request.task_id,
+            })
         if request.idempotency_key:
             service_request["idempotency_key"] = request.idempotency_key
 
