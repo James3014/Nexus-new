@@ -3,10 +3,10 @@
 artifact_authority: current
 task_id: `issue-982-wave4-mcp-schema-closure-20260918`
 owner: James Chen
-status: ACTIVE
+status: COMPLETED
 contract_kind: TRACKED_TASK_CARD
 AUTO_CHAIN: false
-worker_may_commit: true
+worker_may_commit: false
 worker_may_approve: false
 worker_may_integrate: false
 worker_may_push: false
@@ -102,3 +102,55 @@ The repair is complete when the registered `agent_start` schema can carry the ex
 ## Scope amendment — post-merge CI consumer drift
 
 This amendment does not widen production behavior. It authorizes only the two test consumers discovered after the first repair merged. Their purpose is to keep convergence/promotion fixtures synchronized with the canonical capability contract. No additional production source, provider adapter, routing, JIT, or runtime authority is added.
+
+
+## Closure receipt — 2026-09-18
+
+Wave 4 / G2 runtime-bound closure is complete.
+
+Canonical closure evidence:
+- Nexus-new authority main before this closeout: `c4fc320c98ced12bbd1770b0290508b29e98a22a`
+- DevSpace production repair merge: `06d758032ed2f73505cf16073cd5f42abe98f810` via James3014/devspace#193
+- DevSpace consumer-fixture follow-up merge: `bbf265621ab68dcd9676276fc22b67e99c85391a` via James3014/devspace#195
+- #195 exact Candidate checks: 13 terminal checks, no blockers; macOS and Ubuntu Smoke both completed Test, Build, and Doctor successfully
+- live DevSpace source: `06d758032ed2f73505cf16073cd5f42abe98f810`
+- live DevSpace build: `devspace-1.0.7-06d75803`
+- live capability manifest: `004b3d4fe6d5fa62432328fb2404ec295f5327dac90fe82c64e934d6a6073ab8`
+- live authoritative production role: `CONVERGED`
+- live required capabilities include:
+  - `agent_start.executionContract.authorizedToolCeiling`
+  - `agent_start.executionContract.toolProjectionManifest`
+- exact compare `06d75803..bbf26562` changes only:
+  - `src/capability-generation-convergence.test.ts`
+  - `src/git-integration.test.ts`
+  so current main has no production-source delta beyond the live repair
+- durable Issue reconciliation: James3014/Nexus-new#982 comment `5724407365`
+
+Independent/bounded verification for the production repair included:
+- `execution-protocol` 11/11 PASS
+- `local-agent-execution-contract` 93/93 PASS
+- `capability-manifest` 4/4 PASS
+- `deployment-convergence` 18/18 PASS
+- `server.test.ts` 75/75 PASS
+- real MCP schema -> handler -> durable-store round trip PASS
+- typecheck and diff-check PASS
+
+Post-merge consumer-fixture closure included:
+- `capability-generation-convergence` 6/6 PASS
+- `git-integration-ci` 35/35 PASS
+- full cross-platform Smoke matrix PASS
+
+Closure state:
+```text
+EXECUTION_PLAN_WAVE_4_G2_CLOSURE=COMPLETE
+G2_RUNTIME_BOUND_VERIFIED=TRUE
+CURRENT_SESSION_RECONNECT_REQUIRED=TRUE
+G3_11_MODEL_PHYSICAL_CANARY=NOT_STARTED
+G4_BENCHMARK=BLOCKED
+BENCHMARK_VALIDITY=FALSE
+AUTO_CHAIN=false
+```
+
+The current ChatGPT MCP session predates the live server generation and therefore reports `RECONNECT_REQUIRED`. That is a client/session freshness condition, not a missing live capability. G3 must begin only after a fresh DevSpace MCP session/tool-catalog bind.
+
+This Task Card is terminal. It grants no further mutation authority.
