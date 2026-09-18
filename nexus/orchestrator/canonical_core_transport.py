@@ -22,7 +22,13 @@ import sys
 import uuid
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping
+
+from nexus.orchestrator.ambient_core import (
+    PREPARATION_SCHEMA,
+    AmbientCoreControlPort,
+    projection_hash,
+)
 
 # Add nexus-core to sys.path
 CORE_REPO_ROOT = Path("/Users/jameschen/Workspace/nexus-core").resolve()
@@ -30,33 +36,32 @@ if str(CORE_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(CORE_REPO_ROOT))
 
 try:
-    from product.protocol import PUBLIC_PROTOCOL_VERSION
-    from product.protocol.generic_verification import (
+    from product.adapters.generic_verification import verify_generic_changeset
+    from product.protocol.generic_verification import (  # noqa: E402
         GENERIC_VERIFICATION_REQUEST_SCHEMA_ID,
         GENERIC_VERIFICATION_RESPONSE_SCHEMA_ID,
         acceptance_contract_hash,
         change_manifest_hash,
         change_set_hash,
-        verification_plan_hash,
         evidence_bundle_hash,
-        canonical_hash,
+        verification_plan_hash,
     )
-    from product.adapters.generic_verification import verify_generic_changeset
+
+    from product.protocol import PUBLIC_PROTOCOL_VERSION  # noqa: E402
+
     CORE_AVAILABLE = True
     CORE_IMPORT_ERROR = None
 except ImportError as exc:
     CORE_AVAILABLE = False
     CORE_IMPORT_ERROR = str(exc)
     PUBLIC_PROTOCOL_VERSION = "0.1.0-experimental"
-    GENERIC_VERIFICATION_REQUEST_SCHEMA_ID = "nexus.core.generic-verification-request.v1-experimental"
-    GENERIC_VERIFICATION_RESPONSE_SCHEMA_ID = "nexus.core.generic-verification-response.v1-experimental"
+    GENERIC_VERIFICATION_REQUEST_SCHEMA_ID = (
+        "nexus.core.generic-verification-request.v1-experimental"
+    )
+    GENERIC_VERIFICATION_RESPONSE_SCHEMA_ID = (
+        "nexus.core.generic-verification-response.v1-experimental"
+    )
 
-from nexus.orchestrator.ambient_core import (
-    AmbientCoreControlPort,
-    CORE_RESPONSE_SCHEMA,
-    PREPARATION_SCHEMA,
-    projection_hash,
-)
 
 CANONICAL_CORE_REVISION = "fde015797672b0aac5dca7b41c7e5a0b901698d4"
 CANONICAL_CORE_INTERFACE = "product.adapters.generic_verification.verify_generic_changeset"
@@ -95,15 +100,22 @@ def _to_serializable(obj: Any) -> Any:
     return str(obj)
 
 
-def extract_git_manifest(repo_path: Path | str, base_ref: str, target_ref: str = "HEAD") -> dict[str, Any]:
+def extract_git_manifest(
+    repo_path: Path | str, base_ref: str, target_ref: str = "HEAD"
+) -> dict[str, Any]:
     """Derive exact Git change manifest directly from repository trees."""
     repo = Path(repo_path)
-    src_tree = subprocess.check_output(["git", "rev-parse", f"{base_ref}^{{tree}}"], cwd=repo, text=True).strip()
-    tgt_tree = subprocess.check_output(["git", "rev-parse", f"{target_ref}^{{tree}}"], cwd=repo, text=True).strip()
+    src_tree = subprocess.check_output(
+        ["git", "rev-parse", f"{base_ref}^{{tree}}"], cwd=repo, text=True
+    ).strip()
+    tgt_tree = subprocess.check_output(
+        ["git", "rev-parse", f"{target_ref}^{{tree}}"], cwd=repo, text=True
+    ).strip()
 
     raw_diff = subprocess.check_output(
         ["git", "diff-tree", "-r", "--no-commit-id", "--raw", base_ref, target_ref],
-        cwd=repo, text=True
+        cwd=repo,
+        text=True,
     ).strip()
 
     entries = []
@@ -137,14 +149,16 @@ def extract_git_manifest(repo_path: Path | str, base_ref: str, target_ref: str =
             after_oid = dst_oid
             after_mode = dst_mode
 
-        entries.append({
-            "path": path,
-            "change_type": change_type,
-            "before_oid": before_oid,
-            "after_oid": after_oid,
-            "before_mode": before_mode,
-            "after_mode": after_mode,
-        })
+        entries.append(
+            {
+                "path": path,
+                "change_type": change_type,
+                "before_oid": before_oid,
+                "after_oid": after_oid,
+                "before_mode": before_mode,
+                "after_mode": after_mode,
+            }
+        )
     return {
         "source_tree": f"git-tree:{src_tree}",
         "target_tree": f"git-tree:{tgt_tree}",
@@ -213,14 +227,28 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
 
         lane = request.get("execution_lane") or "GOVERNED"
 
-        base_sha = kwargs.get("base_sha") or request.get("controller_revision") or getattr(contract_arg, "controller_revision", None) or "0"*40
-        base_tree = kwargs.get("base_tree") or request.get("target_base_revision") or getattr(contract_arg, "target_base_revision", None) or "0"*40
+        base_sha = (
+            kwargs.get("base_sha")
+            or request.get("controller_revision")
+            or getattr(contract_arg, "controller_revision", None)
+            or "0" * 40
+        )
+        base_tree = (
+            kwargs.get("base_tree")
+            or request.get("target_base_revision")
+            or getattr(contract_arg, "target_base_revision", None)
+            or "0" * 40
+        )
 
         repo_root = request.get("controller_repo_root") or kwargs.get("repo_root")
-        if repo_root and (base_sha == "0"*40 or not base_sha):
+        if repo_root and (base_sha == "0" * 40 or not base_sha):
             try:
-                base_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo_root, text=True).strip()
-                base_tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=repo_root, text=True).strip()
+                base_sha = subprocess.check_output(
+                    ["git", "rev-parse", "HEAD"], cwd=repo_root, text=True
+                ).strip()
+                base_tree = subprocess.check_output(
+                    ["git", "rev-parse", "HEAD^{tree}"], cwd=repo_root, text=True
+                ).strip()
             except Exception:
                 pass
 
@@ -229,17 +257,36 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
         binding_id = f"binding-{uuid.uuid4().hex[:12]}"
 
         # Compute contract hash
-        contract_id = getattr(contract_arg, "contract_id", None) or request.get("contract_id") or "canary-contract"
-        allowed_paths = getattr(contract_arg, "allowed_paths", None) or request.get("allowed_files") or []
-        required_verifier_ids = getattr(contract_arg, "required_verifier_ids", None) or request.get("verifier_commands") or ["git diff --check"]
-        deletion_policy_val = getattr(contract_arg, "deletion_policy", None) or request.get("deletion_policy") or "FORBID"
+        contract_id = (
+            getattr(contract_arg, "contract_id", None)
+            or request.get("contract_id")
+            or "canary-contract"
+        )
+        allowed_paths = (
+            getattr(contract_arg, "allowed_paths", None) or request.get("allowed_files") or []
+        )
+        required_verifier_ids = (
+            getattr(contract_arg, "required_verifier_ids", None)
+            or request.get("verifier_commands")
+            or ["git diff --check"]
+        )
+        deletion_policy_val = (
+            getattr(contract_arg, "deletion_policy", None)
+            or request.get("deletion_policy")
+            or "FORBID"
+        )
         deletion_policy = _normalize_deletion_policy(deletion_policy_val)
 
-        req_hash = _sha256(json.dumps({
-            "contract_id": str(contract_id),
-            "allowed_paths": sorted(list(allowed_paths)),
-            "required_verifier_ids": sorted(list(required_verifier_ids)),
-        }, sort_keys=True))
+        req_hash = _sha256(
+            json.dumps(
+                {
+                    "contract_id": str(contract_id),
+                    "allowed_paths": sorted(list(allowed_paths)),
+                    "required_verifier_ids": sorted(list(required_verifier_ids)),
+                },
+                sort_keys=True,
+            )
+        )
 
         contract_payload = {
             "contract_id": str(contract_id),
@@ -257,11 +304,15 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
             contract_hash = kwargs["contract_hash"]
 
         # Binding hash computation using real tracked authority
-        index_path = Path("/Users/jameschen/workspace/nexus-new/docs/agents/CAPABILITY_DISCOVERY_INDEX.v1.json")
+        index_path = Path(
+            "/Users/jameschen/workspace/nexus-new/docs/agents/CAPABILITY_DISCOVERY_INDEX.v1.json"
+        )
         index_sha256 = hashlib.sha256(index_path.read_bytes()).hexdigest()
         index_rev = "c4fc320c98ced12bbd1770b0290508b29e98a22a"
 
-        mode_path = Path("/Users/jameschen/workspace/nexus-new/docs/governance/current_operating_mode.yaml")
+        mode_path = Path(
+            "/Users/jameschen/workspace/nexus-new/docs/governance/current_operating_mode.yaml"
+        )
         authority_hash = _sha256(mode_path.read_bytes())
 
         binding_payload = {
@@ -296,21 +347,24 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
         # Record session in SQLite
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT OR REPLACE INTO core_mutation_sessions
                 (id, binding_id, binding_hash, operation_id, attempt_id, acceptance_contract_hash, source_revision, source_tree, status)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                session_id,
-                binding_id,
-                binding_hash,
-                operation_id,
-                attempt_id,
-                contract_hash,
-                f"git-commit:{base_sha}",
-                f"git-tree:{base_tree}",
-                "ACTIVE"
-            ))
+            """,
+                (
+                    session_id,
+                    binding_id,
+                    binding_hash,
+                    operation_id,
+                    attempt_id,
+                    contract_hash,
+                    f"git-commit:{base_sha}",
+                    f"git-tree:{base_tree}",
+                    "ACTIVE",
+                ),
+            )
             conn.commit()
 
         return {
@@ -347,8 +401,7 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
         candidate = kwargs.get("candidate")
         request = kwargs.get("request") or {}
         session_id = prep.get("session_id") or f"cms_{uuid.uuid4().hex}"
-        binding_hash = prep.get("binding_hash") or "sha256:" + "0"*64
-        acceptance_contract_hash_val = prep.get("acceptance_contract_hash")
+        binding_hash = prep.get("binding_hash") or "sha256:" + "0" * 64
 
         # Accurately derive candidate_state_hash
         candidate_state_hash = None
@@ -366,14 +419,22 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
         if candidate is not None and hasattr(candidate, "target_worktree"):
             repo_dir = candidate.target_worktree
         if not repo_dir:
-            repo_dir = request.get("target_repo_root") or request.get("controller_repo_root") or kwargs.get("repo_dir")
+            repo_dir = (
+                request.get("target_repo_root")
+                or request.get("controller_repo_root")
+                or kwargs.get("repo_dir")
+            )
 
         base_commit = prep.get("source_revision", "").replace("git-commit:", "")
-        if not base_commit or base_commit == "0"*40:
+        if not base_commit or base_commit == "0" * 40:
             base_commit = "HEAD~1"
 
         target_commit = "HEAD"
-        if candidate is not None and hasattr(candidate, "candidate_commit_sha") and candidate.candidate_commit_sha:
+        if (
+            candidate is not None
+            and hasattr(candidate, "candidate_commit_sha")
+            and candidate.candidate_commit_sha
+        ):
             target_commit = candidate.candidate_commit_sha
 
         # Extract real git change manifest.
@@ -386,16 +447,18 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
             manifest = extract_git_manifest(repo_dir, base_commit, target_commit)
         else:
             manifest = {
-                "source_tree": prep.get("source_tree") or "git-tree:" + "0"*40,
-                "target_tree": "git-tree:" + "0"*40,
-                "entries": [{
-                    "path": "fixtures/canary/file.txt",
-                    "change_type": "ADD",
-                    "before_oid": None,
-                    "after_oid": "1"*40,
-                    "before_mode": None,
-                    "after_mode": "100644",
-                }],
+                "source_tree": prep.get("source_tree") or "git-tree:" + "0" * 40,
+                "target_tree": "git-tree:" + "0" * 40,
+                "entries": [
+                    {
+                        "path": "fixtures/canary/file.txt",
+                        "change_type": "ADD",
+                        "before_oid": None,
+                        "after_oid": "1" * 40,
+                        "before_mode": None,
+                        "after_mode": "100644",
+                    }
+                ],
             }
 
         # Force failure simulation if requested for hostile witness
@@ -404,28 +467,34 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
         force_forbidden_deletion = kwargs.get("force_forbidden_deletion", False)
 
         if force_scope_escape:
-            manifest["entries"].append({
-                "path": "unauthorized_scope_escape.txt",
-                "change_type": "ADD",
-                "before_oid": None,
-                "after_oid": "e"*40,
-                "before_mode": None,
-                "after_mode": "100644",
-            })
+            manifest["entries"].append(
+                {
+                    "path": "unauthorized_scope_escape.txt",
+                    "change_type": "ADD",
+                    "before_oid": None,
+                    "after_oid": "e" * 40,
+                    "before_mode": None,
+                    "after_mode": "100644",
+                }
+            )
 
         if force_forbidden_deletion:
-            manifest["entries"].append({
-                "path": "forbidden_deleted_file.txt",
-                "change_type": "DELETE",
-                "before_oid": "d"*40,
-                "after_oid": None,
-                "before_mode": "100644",
-                "after_mode": None,
-            })
+            manifest["entries"].append(
+                {
+                    "path": "forbidden_deleted_file.txt",
+                    "change_type": "DELETE",
+                    "before_oid": "d" * 40,
+                    "after_oid": None,
+                    "before_mode": "100644",
+                    "after_mode": None,
+                }
+            )
 
         manifest_entries = manifest["entries"]
         changed_paths = sorted(list(set(row["path"] for row in manifest_entries)))
-        deleted_paths = sorted(list(set(row["path"] for row in manifest_entries if row["change_type"] == "DELETE")))
+        deleted_paths = sorted(
+            list(set(row["path"] for row in manifest_entries if row["change_type"] == "DELETE"))
+        )
 
         manifest_hash = change_manifest_hash(manifest)
         if candidate_state_hash is None:
@@ -438,11 +507,16 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
         deletion_policy_val = request.get("deletion_policy") or "FORBID"
         deletion_policy = _normalize_deletion_policy(deletion_policy_val)
 
-        req_hash = _sha256(json.dumps({
-            "contract_id": str(contract_id),
-            "allowed_paths": sorted(list(allowed_paths)),
-            "required_verifier_ids": sorted(list(required_verifier_ids)),
-        }, sort_keys=True))
+        req_hash = _sha256(
+            json.dumps(
+                {
+                    "contract_id": str(contract_id),
+                    "allowed_paths": sorted(list(allowed_paths)),
+                    "required_verifier_ids": sorted(list(required_verifier_ids)),
+                },
+                sort_keys=True,
+            )
+        )
 
         contract_payload = {
             "contract_id": str(contract_id),
@@ -454,8 +528,12 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
         computed_contract_hash = acceptance_contract_hash(contract_payload)
 
         # Build ChangeSet
-        src_rev_ref = f"git-commit:{base_commit}" if len(base_commit) == 40 else manifest["source_tree"]
-        tgt_rev_ref = f"git-commit:{target_commit}" if len(target_commit) == 40 else manifest["target_tree"]
+        src_rev_ref = (
+            f"git-commit:{base_commit}" if len(base_commit) == 40 else manifest["source_tree"]
+        )
+        tgt_rev_ref = (
+            f"git-commit:{target_commit}" if len(target_commit) == 40 else manifest["target_tree"]
+        )
         change_set_payload = {
             "change_set_id": f"cs-{session_id[:12]}",
             "source_revision": src_rev_ref,
@@ -508,14 +586,22 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
                     exit_code = v_res.get("exit_code", 0)
                     status_str = str(v_res.get("status", "PASS")).upper()
 
-            is_pass = (exit_code == 0 and status_str in {"COMPLETED", "PASSED", "PASS", "CLEAN"} and not force_fail)
+            is_pass = (
+                exit_code == 0
+                and status_str in {"COMPLETED", "PASSED", "PASS", "CLEAN"}
+                and not force_fail
+            )
             obs_status = "PASS" if is_pass else "FAIL"
-            observations.append({
-                "verifier_id": vid,
-                "artifact_id": f"art-{vid}",
-                "artifact_hash": _sha256(json.dumps(_to_serializable(v_res or {"exit_code": 0}), sort_keys=True)),
-                "status": obs_status,
-            })
+            observations.append(
+                {
+                    "verifier_id": vid,
+                    "artifact_id": f"art-{vid}",
+                    "artifact_hash": _sha256(
+                        json.dumps(_to_serializable(v_res or {"exit_code": 0}), sort_keys=True)
+                    ),
+                    "status": obs_status,
+                }
+            )
 
         evidence_payload = {
             "bundle_id": f"eb-{session_id[:12]}",
@@ -547,7 +633,10 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
 
         if status_code != 200:
             core_verification_status = "FAILED_VERIFICATION"
-            reason_codes = [f"ADAPTER_ERROR_{status_code}", core_response.get("error", {}).get("code", "UNKNOWN")]
+            reason_codes = [
+                f"ADAPTER_ERROR_{status_code}",
+                core_response.get("error", {}).get("code", "UNKNOWN"),
+            ]
             core_response_payload = {
                 "schema": GENERIC_VERIFICATION_RESPONSE_SCHEMA_ID,
                 "protocol_version": PUBLIC_PROTOCOL_VERSION,
@@ -589,28 +678,31 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
         # Record verification in SQLite
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT OR REPLACE INTO core_mutation_verifications
                 (session_id, binding_hash, candidate_state_hash, core_status, change_set_hash,
                  verification_plan_hash, evidence_bundle_hash, change_manifest_hash, projection_hash,
                  core_reason_codes_json)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                session_id,
-                binding_hash,
-                candidate_state_hash,
-                core_status,
-                hashes.get("change_set_hash", computed_change_set_hash),
-                hashes.get("verification_plan_hash", computed_plan_hash),
-                hashes.get("evidence_bundle_hash", evidence_bundle_hash(evidence_payload)),
-                hashes.get("change_manifest_hash", manifest_hash),
-                proj_hash,
-                json.dumps(reason_codes)
-            ))
-            cursor.execute("UPDATE core_mutation_sessions SET status = ? WHERE id = ?", (
-                "COMPLETED" if core_status == "VERIFIED" else "FAILED",
-                session_id
-            ))
+            """,
+                (
+                    session_id,
+                    binding_hash,
+                    candidate_state_hash,
+                    core_status,
+                    hashes.get("change_set_hash", computed_change_set_hash),
+                    hashes.get("verification_plan_hash", computed_plan_hash),
+                    hashes.get("evidence_bundle_hash", evidence_bundle_hash(evidence_payload)),
+                    hashes.get("change_manifest_hash", manifest_hash),
+                    proj_hash,
+                    json.dumps(reason_codes),
+                ),
+            )
+            cursor.execute(
+                "UPDATE core_mutation_sessions SET status = ? WHERE id = ?",
+                ("COMPLETED" if core_status == "VERIFIED" else "FAILED", session_id),
+            )
             conn.commit()
 
         return projection_payload
@@ -621,7 +713,9 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM core_mutation_sessions WHERE id = ?", (session_id,))
             s_row = cursor.fetchone()
-            cursor.execute("SELECT * FROM core_mutation_verifications WHERE session_id = ?", (session_id,))
+            cursor.execute(
+                "SELECT * FROM core_mutation_verifications WHERE session_id = ?", (session_id,)
+            )
             v_row = cursor.fetchone()
             return {
                 "db_path": str(self.db_path),
@@ -632,7 +726,9 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
 
 def cli_main():
     parser = argparse.ArgumentParser(description="Canonical Core generic verification CLI")
-    parser.add_argument("--verify-json", help="Path to full generic verification request JSON or input payload")
+    parser.add_argument(
+        "--verify-json", help="Path to full generic verification request JSON or input payload"
+    )
     args = parser.parse_args()
 
     if args.verify_json:
@@ -642,11 +738,16 @@ def cli_main():
         # Check if full generic request or partial payload
         if data.get("schema") == GENERIC_VERIFICATION_REQUEST_SCHEMA_ID:
             status_code, resp = verify_generic_changeset(data)
-            print(json.dumps({
-                "status_code": status_code,
-                "core_verification": resp.get("verification", {}),
-                "response": resp,
-            }, indent=2))
+            print(
+                json.dumps(
+                    {
+                        "status_code": status_code,
+                        "core_verification": resp.get("verification", {}),
+                        "response": resp,
+                    },
+                    indent=2,
+                )
+            )
             sys.exit(0 if status_code == 200 else 1)
 
         # Partial payload from DevSpace or external caller: build generic request
@@ -655,29 +756,38 @@ def cli_main():
         evidence_data = data["evidence_bundle"]
 
         repo_dir = data.get("repo_dir") or "/tmp/nexus_canary_fixture_repo/d2_devspace"
-        base_commit = change_set_data.get("source_revision", "").replace("git-commit:", "") or "HEAD~1"
-        target_commit = change_set_data.get("target_revision", "").replace("git-commit:", "") or "HEAD"
+        base_commit = (
+            change_set_data.get("source_revision", "").replace("git-commit:", "") or "HEAD~1"
+        )
+        target_commit = (
+            change_set_data.get("target_revision", "").replace("git-commit:", "") or "HEAD"
+        )
 
         manifest = data.get("change_manifest")
         if not manifest and Path(repo_dir).exists():
             manifest = extract_git_manifest(repo_dir, base_commit, target_commit)
         elif not manifest:
             manifest = {
-                "source_tree": "git-tree:" + "0"*40,
-                "target_tree": "git-tree:" + "0"*40,
-                "entries": [{
-                    "path": p,
-                    "change_type": "ADD",
-                    "before_oid": None,
-                    "after_oid": "1"*40,
-                    "before_mode": None,
-                    "after_mode": "100644",
-                } for p in change_set_data["paths"]],
+                "source_tree": "git-tree:" + "0" * 40,
+                "target_tree": "git-tree:" + "0" * 40,
+                "entries": [
+                    {
+                        "path": p,
+                        "change_type": "ADD",
+                        "before_oid": None,
+                        "after_oid": "1" * 40,
+                        "before_mode": None,
+                        "after_mode": "100644",
+                    }
+                    for p in change_set_data["paths"]
+                ],
             }
 
         diff_hash = change_manifest_hash(manifest)
         paths = sorted(list(set(row["path"] for row in manifest["entries"])))
-        deleted_paths = sorted(list(set(row["path"] for row in manifest["entries"] if row["change_type"] == "DELETE")))
+        deleted_paths = sorted(
+            list(set(row["path"] for row in manifest["entries"] if row["change_type"] == "DELETE"))
+        )
 
         contract_payload = {
             "contract_id": contract_data["contract_id"],
@@ -708,12 +818,14 @@ def cli_main():
 
         observations = []
         for obs in evidence_data["observations"]:
-            observations.append({
-                "verifier_id": obs["verifier_id"],
-                "artifact_id": obs["artifact_id"],
-                "artifact_hash": obs["artifact_hash"],
-                "status": obs["status"],
-            })
+            observations.append(
+                {
+                    "verifier_id": obs["verifier_id"],
+                    "artifact_id": obs["artifact_id"],
+                    "artifact_hash": obs["artifact_hash"],
+                    "status": obs["status"],
+                }
+            )
 
         evidence_payload = {
             "bundle_id": evidence_data.get("bundle_id") or "eb-1",
@@ -736,12 +848,17 @@ def cli_main():
         }
 
         status_code, resp = verify_generic_changeset(full_generic_payload)
-        print(json.dumps({
-            "status_code": status_code,
-            "core_verification": resp.get("verification", {}),
-            "response": resp,
-            "generic_request": full_generic_payload,
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "status_code": status_code,
+                    "core_verification": resp.get("verification", {}),
+                    "response": resp,
+                    "generic_request": full_generic_payload,
+                },
+                indent=2,
+            )
+        )
         sys.exit(0 if status_code == 200 else 1)
 
 
