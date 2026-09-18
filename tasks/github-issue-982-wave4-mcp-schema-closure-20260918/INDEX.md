@@ -1,7 +1,7 @@
 # Issue #982 Wave 4 MCP Schema Closure Repair
 
 artifact_authority: current
-status: ACTIVE
+status: COMPLETE
 owner: James Chen
 AUTO_CHAIN: false
 
@@ -25,3 +25,19 @@ AUTO_CHAIN: false
 4. Full CI/test-matrix evidence must be green after all consumers are synchronized; a focused-test-only green is insufficient for Wave 4 closure.
 5. A merged source fix is not Wave 4 closure until the live DevSpace build is rebound to the merged source and exposes the new capabilities.
 6. G3/G4 remain separate successor gates.
+
+
+## Closure
+
+- Wave 4 / G2 runtime-bound closure: `COMPLETE`
+- production repair live source/build: `06d758032ed2f73505cf16073cd5f42abe98f810` / `devspace-1.0.7-06d75803`
+- live required tool-projection capabilities: present
+- DevSpace current main: `bbf265621ab68dcd9676276fc22b67e99c85391a`
+- delta from live production repair to current main: test-only (`capability-generation-convergence.test.ts`, `git-integration.test.ts`)
+- full #195 macOS + Ubuntu Smoke: PASS
+- durable Issue receipt: #982 comment `5724407365`
+- current session catalog: `RECONNECT_REQUIRED`
+- next gate: G3 physical exposure canary after fresh MCP session bind
+- G3: NOT_STARTED
+- G4: BLOCKED
+- AUTO_CHAIN: false
