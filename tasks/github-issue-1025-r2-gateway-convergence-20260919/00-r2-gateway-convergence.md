@@ -109,7 +109,7 @@ No deletion is authorized.
 
 The new tracked receipt must bind:
 - Issue #1025 and this Task Card as execution authority lineage;
-- desired commit/tree `5c38bfdd... / 21cca6f6...`;
+- desired commit/tree `354a496d... / a70f34af...`;
 - predecessor commit/tree `db57b1e4... / e2f801d7...`;
 - exact manager SHA-256 `3f0c3420...`;
 - current accepted manager lineage `3e1ed6a7...`;
@@ -130,7 +130,7 @@ The canonical #526 host-card identity remains the manager's semantic recovery co
 Before first reload/rebind effect:
 1. this Card/INDEX are Git-tracked and current;
 2. package-environment convergence is exact and read back;
-3. fresh recovery-authority Candidate is exact and merged;
+3. fresh recovery-authority Candidate is exact, current-target-bound, and merged;
 4. current main and authority bytes are re-read;
 5. required authority bytes are materialized byte-exact into the fixed #526 state root;
 6. predecessor artifact passes manager hash/size/mode/owner/self-contained verification;
