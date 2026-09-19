@@ -31,10 +31,10 @@ Issue-body SHA-256 at this Task Card bootstrap:
 ## Frozen source fence
 
 Desired Nexus-new:
-- commit: `5c38bfddb34ded0db841dec32101ba724b1cc4ac`
-- tree: `21cca6f65620ab328b30e97d80f14e108d18df0e`
+- commit: `354a496d315e2d55c23aadb58175f1b6356c330c`
+- tree: `a70f34af9f07553d296572effe69e112172a46fa`
 - source PR #1022 exact head: `49b1f32e3cbc131f272422f9c47817f7d35022f0`
-- source PR head tree: `21cca6f65620ab328b30e97d80f14e108d18df0e`
+- source PR head tree: `a70f34af9f07553d296572effe69e112172a46fa`
 - PR #1022 exact-head required workflows: terminal success
 
 Desired Gateway entrypoint:
@@ -182,3 +182,25 @@ This does not establish R3 hostile effect-authority E2E.
 R2 is terminal only when the desired source generation and exact runtime package generation are both physically loaded and read back through the current Gateway, with the #526 recovery ledger reconciled and no unauthorized side effect.
 
 Then STOP. `AUTO_CHAIN=false`.
+
+
+## 2026-09-19 current-target rebind delta
+
+This bounded recovery delta supersedes only the frozen desired Nexus-new source identity above.
+
+Fresh canonical evidence:
+
+- current Nexus-new main: `354a496d315e2d55c23aadb58175f1b6356c330c`
+- current tree: `a70f34af9f07553d296572effe69e112172a46fa`
+- the valid governed B1 reintegration is present on this exact main;
+- compare `5c38bfddb34ded0db841dec32101ba724b1cc4ac..354a496d315e2d55c23aadb58175f1b6356c330c` changes only this R2 Task Card and its INDEX; no production source file differs;
+- Gateway entrypoint blob remains `f6d0131df01c60b055a8eeec1be2125705c590f3`;
+- the exact Gateway entrypoint bytes remain SHA-256 `8f5fddd5c7761574da8566b5511e9107651a04687a6f656c05d5b435e9a530b1`;
+- current `pyproject.toml` still pins `nexus-runtime@632e1a18d164d7dadf6bb98caa9c4e9d17c436f3`;
+- physical predecessor remains loaded Gateway source `db57b1e44715e83bd1aea1c5f81ff058b2745782`.
+
+Reason for rebind:
+
+The historical `5c38bfddb34ded0db841dec32101ba724b1cc4ac` merge was later treated as invalid-authority incident lineage and was recovered/re-integrated under valid governed authority. Runtime recovery must therefore target the current valid canonical commit, not the historical incident commit, even though the relevant production source bytes are equivalent.
+
+This delta does not authorize any new source behavior, process manager, provider/model choice, G4 work, release, or production-readiness claim. The existing #526 durable Gateway recovery mechanism remains the sole host-effect path.
