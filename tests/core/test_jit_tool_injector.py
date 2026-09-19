@@ -2,7 +2,6 @@ import pytest
 
 from nexus.core.jit_tool_injector import JITToolInjector
 
-
 READ_ONLY = [
     "workspace.read",
     "workspace.search_text",

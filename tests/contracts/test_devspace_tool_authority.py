@@ -2,7 +2,6 @@ from copy import deepcopy
 
 import pytest
 
-from nexus.engine.canonical_task_seam import CanonicalDispatchEnvelope
 from nexus.contracts.devspace_tool_authority import (
     CANONICAL_TOOL_INTENTS,
     TOOL_AUTHORITY_SCHEMA,
@@ -15,6 +14,7 @@ from nexus.contracts.devspace_tool_authority import (
     tool_authority_policy,
     tool_authority_policy_hash,
 )
+from nexus.engine.canonical_task_seam import CanonicalDispatchEnvelope
 
 
 def _envelope(*, decision: str = "a" * 64, plan: str = "b" * 64) -> dict:

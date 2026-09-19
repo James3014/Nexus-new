@@ -38,10 +38,7 @@ def tool_authority_policy() -> dict[str, Any]:
     return {
         "schema": TOOL_AUTHORITY_POLICY_SCHEMA,
         "namespace": TOOL_INTENT_NAMESPACE,
-        "effectCeilings": {
-            name: list(values)
-            for name, values in _EFFECT_TOOL_POLICY.items()
-        },
+        "effectCeilings": {name: list(values) for name, values in _EFFECT_TOOL_POLICY.items()},
     }
 
 
@@ -64,7 +61,13 @@ def _envelope_payload(envelope: Mapping[str, Any] | object) -> Mapping[str, Any]
     else:
         payload = {
             name: getattr(envelope, name, None)
-            for name in ("schema", "task_id", "attempt_id", "planner_decision_hash", "planner_plan_hash")
+            for name in (
+                "schema",
+                "task_id",
+                "attempt_id",
+                "planner_decision_hash",
+                "planner_plan_hash",
+            )
         }
     if payload.get("schema") != CANONICAL_DISPATCH_ENVELOPE_SCHEMA:
         raise ValueError("canonical_dispatch_envelope_schema_invalid")
@@ -77,7 +80,9 @@ def _envelope_payload(envelope: Mapping[str, Any] | object) -> Mapping[str, Any]
     return payload
 
 
-def canonicalize_tool_intents(values: Iterable[str], *, field: str = "tool_intents") -> tuple[str, ...]:
+def canonicalize_tool_intents(
+    values: Iterable[str], *, field: str = "tool_intents"
+) -> tuple[str, ...]:
     if isinstance(values, (str, bytes)):
         raise ValueError(f"{field}_invalid")
     raw = [str(value) for value in values]
