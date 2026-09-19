@@ -34,7 +34,7 @@ Desired Nexus-new:
 - commit: `354a496d315e2d55c23aadb58175f1b6356c330c`
 - tree: `a70f34af9f07553d296572effe69e112172a46fa`
 - source PR #1022 exact head: `49b1f32e3cbc131f272422f9c47817f7d35022f0`
-- source PR head tree: `a70f34af9f07553d296572effe69e112172a46fa`
+- source PR head tree: `21cca6f65620ab328b30e97d80f14e108d18df0e`
 - PR #1022 exact-head required workflows: terminal success
 
 Desired Gateway entrypoint:
