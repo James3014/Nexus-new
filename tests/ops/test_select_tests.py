@@ -130,6 +130,65 @@ def test_legacy_capability_gate_maps_existing_behavioral_oracles_without_fallbac
     assert details.risk_reasons == ["legacy_capability_gate_authority_boundary"]
 
 
+def test_wave4_service_paths_use_exact_oracles_not_full_services_fallback():
+    details = select_target_details(
+        [
+            "nexus/services/external_intelligence_fanout.py",
+            "nexus/services/open_swe_external_intelligence.py",
+        ],
+        load_impact_rules(),
+        index_path=Path("/tmp/missing-wave4-service-impact-index.json"),
+        history_path=Path("/tmp/missing-wave4-service-history.jsonl"),
+    )
+
+    assert details.targets == [
+        "tests/services/test_external_intelligence_fanout.py",
+        "tests/services/test_open_swe_worker_transport.py",
+        "tests/services/test_open_swe_external_intelligence.py",
+        "tests/services/test_policy_gate.py",
+    ]
+    assert "tests/services" not in details.targets
+    assert details.unmatched_paths == []
+    assert details.fallback_used is False
+    assert details.risk == "high"
+    assert details.high_risk_escalated is True
+    assert details.risk_reasons == [
+        "external_intelligence_fanout_contract",
+        "open_swe_external_intelligence_effect_projection_contract",
+    ]
+
+
+def test_wave4_new_orchestrator_and_test_paths_map_without_fallback():
+    changed = [
+        "nexus/orchestrator/code_integrity_verifier.py",
+        "nexus/orchestrator/managed_local_agent.py",
+        "tests/nexus/executors/test_worker_effect_projection.py",
+        "tests/nexus/governance/test_capability_gate_authority_boundary.py",
+        "tests/nexus/orchestrator/test_candidate_verifier.py",
+        "tests/nexus/orchestrator/test_code_integrity_verifier.py",
+        "tests/nexus/orchestrator/test_managed_local_agent.py",
+        "tests/nexus/orchestrator/test_self_hosted_task_service.py",
+        "tests/services/test_open_swe_worker_transport.py",
+    ]
+    details = select_target_details(
+        changed,
+        load_impact_rules(),
+        index_path=Path("/tmp/missing-wave4-orchestrator-impact-index.json"),
+        history_path=Path("/tmp/missing-wave4-orchestrator-history.jsonl"),
+    )
+
+    assert "tests/nexus/orchestrator/test_code_integrity_verifier.py" in details.targets
+    assert "tests/nexus/orchestrator/test_managed_local_agent.py" in details.targets
+    assert "tests/nexus/orchestrator/test_self_hosted_task_service.py" in details.targets
+    assert "tests/nexus/executors/test_worker_effect_projection.py" in details.targets
+    assert "tests/nexus/governance/test_capability_gate_authority_boundary.py" in details.targets
+    assert "tests/services/test_open_swe_worker_transport.py" in details.targets
+    assert details.unmatched_paths == []
+    assert details.fallback_used is False
+    assert details.risk == "high"
+    assert details.high_risk_escalated is True
+
+
 def test_unrelated_worker_registry_path_remains_fallback():
     details = select_target_details(
         ["nexus/executors/worker_registry_unknown.py"],
