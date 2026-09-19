@@ -307,6 +307,9 @@ class OpenCodeRunResult:
     repair_phase_count: int = 0
     worker_identity_sha256: str = ""
     operation_id: str = ""
+    effect_authorization_hash: str = ""
+    tool_projection_hash: str = ""
+    execution_exposure_receipt: dict[str, Any] | None = None
 
 
 def plan_fanout(

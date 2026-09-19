@@ -2,6 +2,7 @@ import hashlib
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -84,6 +85,53 @@ def test_static_contract_rejects_malformed_verifier_before_invocation(tmp_path):
     )
     with pytest.raises(ValueError, match="invalid verifier contract"):
         CandidateVerifier.validate_static_contract(contract, str(tmp_path))
+
+
+def test_static_contract_accepts_internal_code_integrity_verifier(tmp_path):
+    contract = SelfHostedTaskContract(
+        task_id="code-integrity-static",
+        objective="verify bounded candidate integrity",
+        controller_revision="a" * 40,
+        target_base_revision="b" * 40,
+        controller_repo_root=str(tmp_path),
+        target_repo_root=str(tmp_path / "target"),
+        target_worktree_root=str(tmp_path),
+        allowed_files=["src/feature.py"],
+        verifier_commands=["code_integrity_v1"],
+        protected_contracts=[],
+        preferred_provider="codex",
+        maximum_provider_calls=1,
+        mutation_mode=MutationMode.WORKING_TREE_ONLY,
+        human_approval_required=True,
+    )
+
+    CandidateVerifier.validate_static_contract(contract, str(tmp_path))
+
+
+def test_code_integrity_verifier_runs_inside_candidate_gate_without_shell(tmp_path):
+    source = tmp_path / "src" / "feature.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("def unfinished():\n    pass\n", encoding="utf-8")
+    contract = SimpleNamespace(verifier_commands=["code_integrity_v1"])
+    candidate = SimpleNamespace(
+        changed_files=["src/feature.py"],
+        untracked_files=[],
+        deleted_files=[],
+    )
+
+    passed, evidence, failures = CandidateVerifier._run_verifiers(
+        contract,
+        str(tmp_path),
+        candidate,
+    )
+
+    assert passed is False
+    assert failures[0] == "verifier_failed:code_integrity_v1"
+    assert any("OBVIOUS_IMPLEMENTATION_STUB" in item for item in failures)
+    assert evidence[0].command == "code_integrity_v1"
+    assert evidence[0].executable_identity == "internal:code_integrity_v1"
+    assert evidence[0].evidence_sha256 == evidence[0].stdout_sha256
+    assert evidence[0].details[0]["code"] == "OBVIOUS_IMPLEMENTATION_STUB"
 
 
 def test_python_c_verifier_accepts_multiline_code_but_keeps_other_newlines_rejected(tmp_path):

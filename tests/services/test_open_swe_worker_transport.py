@@ -56,6 +56,59 @@ def _artifact_and_workspace(tmp_path: Path):
     return workspace, artifact
 
 
+def _hash_json(value) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+
+
+def _projected_pair(operation_id: str):
+    authorization_material = {
+        "schema": "nexus.runtime.effect_authorization.v1",
+        "authority_id": "owner-wave4",
+        "authority_ref": "Nexus-new#1007",
+        "operation_id": operation_id,
+        "attempt_id": "attempt-wave4-open-swe",
+        "repository": "James3014/Nexus-new",
+        "source_revision": "1" * 40,
+        "base_revision": "1" * 40,
+        "workspace_id": "workspace-wave4",
+        "target_id": "target-wave4",
+        "expires_at": None,
+        "effects": {
+            "filesystem": {"write_paths": ["a.py"]},
+            "process": {"commands": []},
+            "network": {"hosts": []},
+            "git": {"operations": []},
+        },
+    }
+    authorization = {
+        **authorization_material,
+        "authorization_hash": _hash_json(authorization_material),
+    }
+    projection_material = {
+        "schema": "nexus.runtime.tool_projection_manifest.v1",
+        "authorization_hash": authorization["authorization_hash"],
+        "operation_id": operation_id,
+        "attempt_id": authorization["attempt_id"],
+        "provider": "google_genai",
+        "backend_id": "nexus-open-swe-runtime",
+        "selected_tools": [
+            "read_file",
+            "record_diagnosis",
+            "record_worker_result",
+            "write_file",
+        ],
+        "selected_effects": {"filesystem": {"write_paths": ["a.py"]}},
+        "authority_kind": "DERIVED_PROJECTION_ONLY",
+    }
+    projection = {
+        **projection_material,
+        "projection_hash": _hash_json(projection_material),
+    }
+    return authorization, projection
+
+
 def _completed(module, payload, *, response_status="IMPLEMENTATION_COMPLETED"):
     if payload["operation"] == "identity":
         return {
@@ -86,7 +139,7 @@ def _completed(module, payload, *, response_status="IMPLEMENTATION_COMPLETED"):
         sort_keys=True,
         separators=(",", ":"),
     )
-    return {
+    result = {
         "schema": module.PROTOCOL_RESULT_SCHEMA,
         "kind": "worker",
         "operation_id": payload["operation_id"],
@@ -110,6 +163,39 @@ def _completed(module, payload, *, response_status="IMPLEMENTATION_COMPLETED"):
         "repair_phase_count": 1 if response_status == "IMPLEMENTATION_COMPLETED" else 0,
         "worker_identity_sha256": payload["worker_identity_sha256"],
     }
+    if isinstance(payload.get("effect_authorization"), dict):
+        authorization = payload["effect_authorization"]
+        projection = payload["tool_projection_manifest"]
+        phase_surfaces = {
+            "diagnosis": ["read_file", "record_diagnosis"],
+            "repair": ["read_file", "record_worker_result", "write_file"],
+        }
+        receipt_material = {
+            "schema": module.EXPOSURE_RECEIPT_SCHEMA,
+            "operation_id": payload["operation_id"],
+            "attempt_id": authorization["attempt_id"],
+            "provider": payload["provider_id"],
+            "backend_id": projection["backend_id"],
+            "authorization_hash": authorization["authorization_hash"],
+            "projection_hash": projection["projection_hash"],
+            "actual_exposed_tools": [
+                "read_file",
+                "record_diagnosis",
+                "record_worker_result",
+                "write_file",
+            ],
+            "phase_tool_surfaces": phase_surfaces,
+            "authority_kind": "DERIVED_EXPOSURE_EVIDENCE_ONLY",
+        }
+        result.update(
+            effect_authorization_hash=authorization["authorization_hash"],
+            tool_projection_hash=projection["projection_hash"],
+            execution_exposure_receipt={
+                **receipt_material,
+                "exposure_hash": _hash_json(receipt_material),
+            },
+        )
+    return result
 
 
 def test_worker_external_protocol_maps_completed_result(tmp_path, monkeypatch):
@@ -145,6 +231,145 @@ def test_worker_external_protocol_maps_completed_result(tmp_path, monkeypatch):
     assert calls[0]["operation"] == "identity"
     assert calls[1]["operation"] == "worker_run"
     assert calls[1]["worker_identity"] == _worker()
+
+
+def test_wave4_effect_pair_is_forwarded_and_exposure_receipt_is_read_back(tmp_path, monkeypatch):
+    import nexus.services.open_swe_external_intelligence as module
+
+    workspace, artifact = _artifact_and_workspace(tmp_path)
+    calls = []
+
+    def runtime_call(_executable, payload, **_kwargs):
+        calls.append(dict(payload))
+        return _completed(module, payload), "", True, ""
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    transport = module.OpenSWEWorkerTransport(
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+        expected_artifact_sha256="a" * 64,
+        require_worker_binding=True,
+    ).bind_worker(_worker())
+    operation_id = transport.prepare_operation_id(
+        "worker_run",
+        prompt=_prompt(),
+        artifact_path=str(artifact),
+        workspace_path=str(workspace),
+        session_id="",
+    )
+    authorization, projection = _projected_pair(operation_id)
+
+    result = transport.run_new(
+        prompt=_prompt(),
+        artifact_path=str(artifact),
+        workspace_path=str(workspace),
+        operation_id=operation_id,
+        effect_authorization=authorization,
+        tool_projection_manifest=projection,
+    )
+
+    assert result.status == "COMPLETED"
+    assert calls[1]["attempt_id"] == authorization["attempt_id"]
+    assert calls[1]["effect_authorization"] == authorization
+    assert calls[1]["tool_projection_manifest"] == projection
+    assert result.effect_authorization_hash == authorization["authorization_hash"]
+    assert result.tool_projection_hash == projection["projection_hash"]
+    exposure_receipt = result.execution_exposure_receipt
+    assert isinstance(exposure_receipt, dict)
+    assert exposure_receipt["schema"] == module.EXPOSURE_RECEIPT_SCHEMA
+    assert exposure_receipt["projection_hash"] == projection["projection_hash"]
+
+
+def test_wave4_tampered_exposure_receipt_never_returns_success(tmp_path, monkeypatch):
+    import nexus.services.open_swe_external_intelligence as module
+
+    workspace, artifact = _artifact_and_workspace(tmp_path)
+
+    def runtime_call(_executable, payload, **_kwargs):
+        result = _completed(module, payload)
+        if payload["operation"] == "worker_run":
+            result["execution_exposure_receipt"]["actual_exposed_tools"].append("shell")
+        return result, "", True, ""
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    transport = module.OpenSWEWorkerTransport(
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+        expected_artifact_sha256="a" * 64,
+    )
+    operation_id = transport.prepare_operation_id(
+        "worker_run",
+        prompt=_prompt(),
+        artifact_path=str(artifact),
+        workspace_path=str(workspace),
+        session_id="",
+    )
+    authorization, projection = _projected_pair(operation_id)
+
+    result = transport.run_new(
+        prompt=_prompt(),
+        artifact_path=str(artifact),
+        workspace_path=str(workspace),
+        operation_id=operation_id,
+        effect_authorization=authorization,
+        tool_projection_manifest=projection,
+    )
+
+    assert result.status == "OPEN_SWE_OUTCOME_UNKNOWN"
+    assert result.outcome_unknown is True
+    assert result.error == "OPEN_SWE_EXPOSURE_RECEIPT_TOOLS_INVALID"
+
+
+def test_wave4_effect_bound_reconcile_reuses_same_projection_identity(tmp_path, monkeypatch):
+    import nexus.services.open_swe_external_intelligence as module
+
+    workspace, artifact = _artifact_and_workspace(tmp_path)
+    calls = []
+
+    def runtime_call(_executable, payload, **_kwargs):
+        calls.append(dict(payload))
+        return _completed(module, payload), "", True, ""
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    transport = module.OpenSWEWorkerTransport(
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+        expected_artifact_sha256="a" * 64,
+    )
+    operation_id = transport.prepare_operation_id(
+        "worker_run",
+        prompt=_prompt(),
+        artifact_path=str(artifact),
+        workspace_path=str(workspace),
+        session_id="",
+    )
+    authorization, projection = _projected_pair(operation_id)
+
+    first = transport.run_new(
+        prompt=_prompt(),
+        artifact_path=str(artifact),
+        workspace_path=str(workspace),
+        operation_id=operation_id,
+        effect_authorization=authorization,
+        tool_projection_manifest=projection,
+    )
+    reconciled = transport.reconcile_workspace(
+        workspace_path=str(workspace),
+        operation_id=operation_id,
+        effect_authorization=authorization,
+        tool_projection_manifest=projection,
+    )
+
+    assert first.status == reconciled.status == "COMPLETED"
+    assert calls[-1]["operation"] == "worker_reconcile"
+    assert calls[-1]["effect_authorization"] == authorization
+    assert calls[-1]["tool_projection_manifest"] == projection
+    reconciled_receipt = reconciled.execution_exposure_receipt
+    assert isinstance(reconciled_receipt, dict)
+    assert reconciled_receipt["projection_hash"] == projection["projection_hash"]
 
 
 def test_worker_result_must_bind_to_requested_operation_id(tmp_path, monkeypatch):
