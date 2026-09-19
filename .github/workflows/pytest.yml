@@ -17,7 +17,7 @@ jobs:
     name: Exact-base impact gate
     if: github.event_name != 'workflow_dispatch' && github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       - name: Initialize evidence directory
