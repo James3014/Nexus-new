@@ -79,6 +79,7 @@ EXACT_CONFIG_TARGETS: dict[str, tuple[str, ...]] = {
 }
 
 OPTIONAL_BROWSER_EXCLUSION = "tests/core/test_web_dom_mapper.py"
+PYTEST_PER_TEST_TIMEOUT_SECONDS = 120
 EXACT_GIT_EVIDENCE_ONLY = "EXACT_GIT_EVIDENCE_ONLY"
 _UNKNOWN = "IMPACT_UNKNOWN"
 _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -1569,7 +1570,15 @@ def run_pytest_plan(
     pytest_args = list(existing_targets)
     if "tests/core" in existing_targets:
         pytest_args.append(f"--ignore={OPTIONAL_BROWSER_EXCLUSION}")
-    command = [sys.executable, "-m", "pytest", *pytest_args, "-q", f"--junitxml={junit_path}"]
+    command = [
+        sys.executable,
+        "-m",
+        "pytest",
+        *pytest_args,
+        "-q",
+        f"--timeout={PYTEST_PER_TEST_TIMEOUT_SECONDS}",
+        f"--junitxml={junit_path}",
+    ]
     completed = subprocess.run(command, cwd=cwd, text=True, capture_output=True, check=False)
     stdout_path.write_text(completed.stdout + completed.stderr, encoding="utf-8")
     status = (
