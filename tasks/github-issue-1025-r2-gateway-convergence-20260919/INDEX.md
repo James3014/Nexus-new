@@ -25,7 +25,7 @@ Reuse #526 durable Gateway recovery. No new recovery/process authority.
 1. Merge this Task Card/INDEX bootstrap.
 2. Rebind the exact current source under this Card.
 3. Converge only the fixed Gateway interpreter's `nexus-runtime` package generation and verify exact API identity.
-4. Create/merge one fresh #526 recovery authority receipt for desired `5c38bfdd...` over predecessor `db57b1e4...`.
+4. Create/merge one fresh #526 recovery authority receipt for desired `354a496d...` over predecessor `db57b1e4...`.
 5. Run typed zero-effect recovery preflight.
 6. Execute the exact #526 recovery only if every preflight identity remains current.
 7. Reconcile unknown outcome; never blind retry.
