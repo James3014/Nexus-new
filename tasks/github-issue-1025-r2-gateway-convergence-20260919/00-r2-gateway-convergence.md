@@ -31,8 +31,8 @@ Issue-body SHA-256 at this Task Card bootstrap:
 ## Frozen source fence
 
 Desired Nexus-new:
-- commit: `5c38bfddb34ded0db841dec32101ba724b1cc4ac`
-- tree: `21cca6f65620ab328b30e97d80f14e108d18df0e`
+- commit: `c6e2609f9c148e42d96eaf9e1e9cfddb0579ad33`
+- tree: `7fd8be2eb8b20a81d9279aa7bb4400a7fdedeef6`
 - source PR #1022 exact head: `49b1f32e3cbc131f272422f9c47817f7d35022f0`
 - source PR head tree: `21cca6f65620ab328b30e97d80f14e108d18df0e`
 - PR #1022 exact-head required workflows: terminal success
@@ -109,7 +109,7 @@ No deletion is authorized.
 
 The new tracked receipt must bind:
 - Issue #1025 and this Task Card as execution authority lineage;
-- desired commit/tree `5c38bfdd... / 21cca6f6...`;
+- desired commit/tree `c6e2609f... / 7fd8be2e...`;
 - predecessor commit/tree `db57b1e4... / e2f801d7...`;
 - exact manager SHA-256 `3f0c3420...`;
 - current accepted manager lineage `3e1ed6a7...`;
@@ -130,7 +130,7 @@ The canonical #526 host-card identity remains the manager's semantic recovery co
 Before first reload/rebind effect:
 1. this Card/INDEX are Git-tracked and current;
 2. package-environment convergence is exact and read back;
-3. fresh recovery-authority Candidate is exact and merged;
+3. fresh recovery-authority Candidate is exact, current-target-bound, and merged;
 4. current main and authority bytes are re-read;
 5. required authority bytes are materialized byte-exact into the fixed #526 state root;
 6. predecessor artifact passes manager hash/size/mode/owner/self-contained verification;
@@ -182,3 +182,23 @@ This does not establish R3 hostile effect-authority E2E.
 R2 is terminal only when the desired source generation and exact runtime package generation are both physically loaded and read back through the current Gateway, with the #526 recovery ledger reconciled and no unauthorized side effect.
 
 Then STOP. `AUTO_CHAIN=false`.
+
+
+## 2026-09-19 current-target rebind delta
+
+This bounded recovery delta supersedes only the frozen desired Nexus-new source identity above.
+
+Fresh canonical evidence:
+
+- current Nexus-new main: `c6e2609f9c148e42d96eaf9e1e9cfddb0579ad33`
+- current tree: `7fd8be2eb8b20a81d9279aa7bb4400a7fdedeef6`
+- valid governed B1 reintegration is an ancestor of this exact main;
+- drift from B1-valid main `354a496d315e2d55c23aadb58175f1b6356c330c` to this target changes only `nexus/health/executor.py`, `nexus/health/sandbox.py`, and `tests/health/test_sandbox_safety.py`;
+- that drift has no path overlap with the Gateway entrypoint, B1 tool-authority contract, B3 Task Card, or the runtime dependency pin;
+- Gateway entrypoint blob remains `f6d0131df01c60b055a8eeec1be2125705c590f3`;
+- current `pyproject.toml` still pins `nexus-runtime@632e1a18d164d7dadf6bb98caa9c4e9d17c436f3`;
+- B1 contract blob remains `5789cc0ac74e5c08a33fb89c0ef9c0c7e043fed7`;
+- B3 Task Card blob remains `a3187e24964c0f86f60cf3cd1b75a8d959a96cb8`;
+- physical predecessor remains loaded Gateway source `db57b1e44715e83bd1aea1c5f81ff058b2745782`.
+
+The historical `5c38bfddb34ded0db841dec32101ba724b1cc4ac` merge is incident lineage, not the desired runtime target. This rebind does not change production behavior, provider/model selection, G4 scope, release authority, or production claims. #526 remains the sole Gateway host-effect mechanism.
