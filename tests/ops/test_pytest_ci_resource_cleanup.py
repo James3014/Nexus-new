@@ -10,9 +10,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github/workflows/pytest.yml"
 
 
-def _impact_steps() -> list[dict[str, object]]:
+def _impact_job() -> dict[str, object]:
     payload = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    return list(payload["jobs"]["impact-gate"]["steps"])
+    return dict(payload["jobs"]["impact-gate"])
+
+
+def _impact_steps() -> list[dict[str, object]]:
+    return list(_impact_job()["steps"])
 
 
 def _step(name: str) -> dict[str, object]:
@@ -20,6 +24,10 @@ def _step(name: str) -> dict[str, object]:
         if step.get("name") == name:
             return step
     raise AssertionError(f"missing workflow step: {name}")
+
+
+def test_impact_gate_timeout_covers_base_and_head_phases() -> None:
+    assert int(_impact_job()["timeout-minutes"]) >= 60
 
 
 def test_exact_base_resources_are_released_before_exact_head() -> None:
