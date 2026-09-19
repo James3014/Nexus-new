@@ -277,6 +277,20 @@ jobs:
           echo "base run evidence exit: $RUN_STATUS"
           exit 0
 
+      - name: Release exact-base resources before exact head
+        if: always() && steps.base-worktree.outputs.path != ''
+        env:
+          BASE_WORKTREE: ${{ steps.base-worktree.outputs.path }}
+        run: |
+          set -euo pipefail
+          if [ -d "$BASE_WORKTREE" ]; then
+            du -sh "$BASE_WORKTREE" || true
+            git worktree remove --force "$BASE_WORKTREE"
+          fi
+          git worktree prune
+          uv cache clean
+          df -h "$RUNNER_TEMP" "$GITHUB_WORKSPACE"
+
       - name: Run mapped tests on exact head
         run: |
           set +e
@@ -323,7 +337,14 @@ jobs:
 
       - name: Remove exact base worktree
         if: always() && steps.base-worktree.outputs.path != ''
-        run: git worktree remove --force "${{ steps.base-worktree.outputs.path }}"
+        env:
+          BASE_WORKTREE: ${{ steps.base-worktree.outputs.path }}
+        run: |
+          set -euo pipefail
+          if [ -d "$BASE_WORKTREE" ]; then
+            git worktree remove --force "$BASE_WORKTREE"
+          fi
+          git worktree prune
 
       - name: Install gitlink metadata for checkout post-cleanup
         if: always()
