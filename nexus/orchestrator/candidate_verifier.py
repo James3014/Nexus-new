@@ -18,6 +18,7 @@ from nexus.executors.cli_worker import (
     bounded_environment_receipt,
     run_cli_worker,
 )
+from nexus.orchestrator.code_integrity_verifier import run_code_integrity_v1
 from nexus.orchestrator.repository_contract_gate import (
     RepositoryContractFinding,
     RepositoryContractGate,
@@ -48,6 +49,8 @@ class VerifierEvidence:
     process_group_id: Optional[int] = None
     process_group_killed: bool = False
     timed_out: bool = False
+    evidence_sha256: str = ""
+    details: tuple[Mapping[str, object], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -121,6 +124,8 @@ class CandidateVerifier:
             deduplicated = CandidateVerifier._deduplicate_verifier_commands(tuple(str(item) for item in commands))
             request_target = target if Path(target).is_dir() else "."
             for command in deduplicated:
+                if command == "code_integrity_v1":
+                    continue
                 CandidateVerifier._build_verifier_request(command, request_target)
         except (TypeError, ValueError) as exc:
             raise ValueError(f"invalid verifier contract: {exc}") from exc
@@ -252,10 +257,68 @@ class CandidateVerifier:
         return failures
 
     @staticmethod
-    def _run_verifiers(contract: SelfHostedTaskContract, target: str) -> tuple[bool, tuple[VerifierEvidence, ...], list[str]]:
+    def _run_verifiers(
+        contract: SelfHostedTaskContract,
+        target: str,
+        candidate: CandidateDiffReceipt | None = None,
+    ) -> tuple[bool, tuple[VerifierEvidence, ...], list[str]]:
         evidence: list[VerifierEvidence] = []
         failures: list[str] = []
-        for command in CandidateVerifier._deduplicate_verifier_commands(contract.verifier_commands):
+        for command in CandidateVerifier._deduplicate_verifier_commands(
+            tuple(contract.verifier_commands)
+        ):
+            if command == "code_integrity_v1":
+                if candidate is None:
+                    failures.append(
+                        "verifier_invalid:code_integrity_v1:candidate_paths_required"
+                    )
+                    continue
+                started = time.monotonic()
+                result = run_code_integrity_v1(
+                    target,
+                    changed_files=candidate.changed_files,
+                    untracked_files=candidate.untracked_files,
+                    deleted_files=candidate.deleted_files,
+                )
+                detail = tuple(
+                    {
+                        "code": finding.code,
+                        "path": finding.path,
+                        "line": finding.line,
+                        "detail": finding.detail,
+                    }
+                    for finding in result.findings
+                ) + tuple(
+                    {
+                        "code": "TEST_REACHABILITY_WITNESS",
+                        "path": reference,
+                        "line": 0,
+                        "detail": "test imports an existing repository production module",
+                    }
+                    for reference in result.target_references
+                )
+                evidence.append(
+                    VerifierEvidence(
+                        command=command,
+                        status=CliWorkerStatus.COMPLETED.value,
+                        exit_code=0 if result.passed else 1,
+                        stdout_sha256=result.evidence_sha256,
+                        stderr_sha256=hashlib.sha256(b"").hexdigest(),
+                        wall_time_ms=max(0, int((time.monotonic() - started) * 1000)),
+                        executable_identity="internal:code_integrity_v1",
+                        executable_sha256=result.verifier_source_sha256,
+                        cwd=str(Path(target).resolve()),
+                        evidence_sha256=result.evidence_sha256,
+                        details=detail,
+                    )
+                )
+                if not result.passed:
+                    failures.append("verifier_failed:code_integrity_v1")
+                    failures.extend(
+                        f"code_integrity_v1:{finding.code}:{finding.path}:{finding.line}"
+                        for finding in result.findings
+                    )
+                continue
             try:
                 request = CandidateVerifier._build_verifier_request(command, target)
                 result = run_cli_worker(request)
@@ -289,7 +352,7 @@ class CandidateVerifier:
     @staticmethod
     def _deduplicate_verifier_commands(commands: tuple[str, ...]) -> tuple[str, ...]:
         """Merge overlapping pytest manifests while preserving other commands."""
-        ordered: list[tuple[str, object]] = []
+        ordered: list[tuple[str, str | tuple[str, ...]]] = []
         pytest_groups: dict[tuple[str, ...], list[str]] = {}
         for command in commands:
             tokens = shlex.split(command)
@@ -322,10 +385,17 @@ class CandidateVerifier:
         rendered: list[str] = []
         for kind, value in ordered:
             if kind == "plain":
-                rendered.append(str(value))
+                assert isinstance(value, str)
+                rendered.append(value)
             else:
-                prefix = value  # type: ignore[assignment]
-                rendered.append(" ".join(shlex.quote(token) for token in (*prefix, *pytest_groups[prefix])))
+                assert isinstance(value, tuple)
+                prefix = value
+                rendered.append(
+                    " ".join(
+                        shlex.quote(token)
+                        for token in (*prefix, *pytest_groups[prefix])
+                    )
+                )
         return tuple(rendered)
 
     def verify(
@@ -345,6 +415,7 @@ class CandidateVerifier:
         verifier_passed, verifier_evidence, verifier_failures = self._run_verifiers(
             contract,
             lease.target_worktree,
+            candidate,
         )
         post_verifier = self.worktree_manager.capture_candidate(contract, lease)
         verifier_state_failures: list[str] = []
@@ -410,7 +481,9 @@ class CandidateVerifier:
         failures.extend(verifier_state_failures)
         failures.extend(repository_contract.blocking_reasons)
         verified = not failures
-        verifier_manifest = tuple(CandidateVerifier._deduplicate_verifier_commands(contract.verifier_commands))
+        verifier_manifest = CandidateVerifier._deduplicate_verifier_commands(
+            tuple(contract.verifier_commands)
+        )
         return VerifiedCandidateReceipt(
             schema="nexus.verified_candidate_receipt.v1",
             task_id=contract.task_id,

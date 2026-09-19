@@ -874,4 +874,20 @@ class WorkerRegistry:
         preflight = self.preflight(provider)
         if not preflight.ready:
             raise WorkerProviderUnavailable(f"{provider}: {preflight.reason}")
-        return self.adapter(provider).invoke(contract, lease, prompt=prompt, **options)
+
+        adapter = self.adapter(provider)
+        effect_authorization = options.pop("effect_authorization", None)
+        tool_projection_manifest = options.pop("tool_projection_manifest", None)
+        if (effect_authorization is None) != (tool_projection_manifest is None):
+            raise WorkerProviderUnavailable(
+                f"{provider}: effect authorization and tool projection must be supplied together"
+            )
+        if effect_authorization is not None:
+            if not bool(getattr(adapter, "supports_effect_projection", False)):
+                raise WorkerProviderUnavailable(
+                    f"{provider}: effect-authorized execution requires a projection-aware backend"
+                )
+            options["effect_authorization"] = effect_authorization
+            options["tool_projection_manifest"] = tool_projection_manifest
+
+        return adapter.invoke(contract, lease, prompt=prompt, **options)

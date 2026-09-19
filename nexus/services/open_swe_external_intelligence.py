@@ -22,6 +22,7 @@ from nexus.services.external_intelligence_fanout import FanoutError, OpenCodeRun
 
 PROTOCOL_REQUEST_SCHEMA = "nexus.open_swe_runtime.request.v1"
 PROTOCOL_RESULT_SCHEMA = "nexus.open_swe_runtime.result.v1"
+EXPOSURE_RECEIPT_SCHEMA = "nexus.open_swe_runtime.execution_exposure_receipt.v1"
 READ_ONLY_SEMANTIC_TOOLS = frozenset({"glob", "grep", "ls", "read_file", "record_finding"})
 FORBIDDEN_SEMANTIC_TOOLS = frozenset({
     "delete",
@@ -200,18 +201,111 @@ def _normalize_transport_config(
 
 
 def _safe_request_hash(payload: Mapping[str, Any]) -> str:
+    effect_authorization = payload.get("effect_authorization")
+    tool_projection = payload.get("tool_projection_manifest")
     safe = {
         "schema": payload.get("schema"),
         "operation": payload.get("operation"),
         "operation_id": payload.get("operation_id"),
+        "attempt_id": payload.get("attempt_id"),
         "provider_id": payload.get("provider_id"),
         "model_id": payload.get("model_id"),
         "workspace_path": payload.get("workspace_path"),
         "repository_root": payload.get("repository_root"),
         "session_id": payload.get("session_id"),
         "worker_identity_sha256": payload.get("worker_identity_sha256"),
+        "effect_authorization_hash": (
+            effect_authorization.get("authorization_hash")
+            if isinstance(effect_authorization, Mapping)
+            else None
+        ),
+        "tool_projection_hash": (
+            tool_projection.get("projection_hash") if isinstance(tool_projection, Mapping) else None
+        ),
     }
     return _sha256(_canonical_json(safe))
+
+
+def _validate_execution_exposure_receipt(
+    receipt: Any,
+    *,
+    operation_id: str,
+    provider_id: str,
+    effect_authorization: Mapping[str, Any],
+    tool_projection_manifest: Mapping[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(receipt, Mapping):
+        raise OpenSWEExternalIntelligenceError("OPEN_SWE_EXPOSURE_RECEIPT_REQUIRED")
+    expected_fields = {
+        "schema",
+        "operation_id",
+        "attempt_id",
+        "provider",
+        "backend_id",
+        "authorization_hash",
+        "projection_hash",
+        "actual_exposed_tools",
+        "phase_tool_surfaces",
+        "authority_kind",
+        "exposure_hash",
+    }
+    if set(receipt) != expected_fields:
+        raise OpenSWEExternalIntelligenceError("OPEN_SWE_EXPOSURE_RECEIPT_FIELDS_INVALID")
+    if (
+        receipt.get("schema") != EXPOSURE_RECEIPT_SCHEMA
+        or receipt.get("authority_kind") != "DERIVED_EXPOSURE_EVIDENCE_ONLY"
+        or receipt.get("operation_id") != operation_id
+        or receipt.get("attempt_id") != effect_authorization.get("attempt_id")
+        or receipt.get("provider") != provider_id
+        or receipt.get("backend_id") != tool_projection_manifest.get("backend_id")
+        or receipt.get("authorization_hash") != effect_authorization.get("authorization_hash")
+        or receipt.get("projection_hash") != tool_projection_manifest.get("projection_hash")
+    ):
+        raise OpenSWEExternalIntelligenceError("OPEN_SWE_EXPOSURE_RECEIPT_IDENTITY_INVALID")
+
+    selected_tools_raw = tool_projection_manifest.get("selected_tools")
+    actual_tools_raw = receipt.get("actual_exposed_tools")
+    phase_surfaces_raw = receipt.get("phase_tool_surfaces")
+    if (
+        not isinstance(selected_tools_raw, list)
+        or not isinstance(actual_tools_raw, list)
+        or not isinstance(phase_surfaces_raw, Mapping)
+        or any(not isinstance(item, str) or not item for item in selected_tools_raw)
+        or any(not isinstance(item, str) or not item for item in actual_tools_raw)
+    ):
+        raise OpenSWEExternalIntelligenceError("OPEN_SWE_EXPOSURE_RECEIPT_TOOLS_INVALID")
+    selected_tools = set(selected_tools_raw)
+    actual_tools = tuple(sorted(set(actual_tools_raw)))
+    if list(actual_tools) != actual_tools_raw or not set(actual_tools).issubset(selected_tools):
+        raise OpenSWEExternalIntelligenceError("OPEN_SWE_EXPOSURE_RECEIPT_TOOLS_INVALID")
+
+    observed_union: set[str] = set()
+    normalized_phases: dict[str, list[str]] = {}
+    for raw_phase, raw_tools in sorted(phase_surfaces_raw.items()):
+        if (
+            not isinstance(raw_phase, str)
+            or not raw_phase
+            or not isinstance(raw_tools, list)
+            or any(not isinstance(item, str) or not item for item in raw_tools)
+        ):
+            raise OpenSWEExternalIntelligenceError("OPEN_SWE_EXPOSURE_RECEIPT_TOOLS_INVALID")
+        normalized = sorted(set(raw_tools))
+        if normalized != raw_tools or not set(normalized).issubset(selected_tools):
+            raise OpenSWEExternalIntelligenceError("OPEN_SWE_EXPOSURE_RECEIPT_TOOLS_INVALID")
+        normalized_phases[raw_phase] = normalized
+        observed_union.update(normalized)
+    if sorted(observed_union) != list(actual_tools):
+        raise OpenSWEExternalIntelligenceError("OPEN_SWE_EXPOSURE_RECEIPT_TOOLS_INVALID")
+
+    material = dict(receipt)
+    observed_hash = material.pop("exposure_hash")
+    if (
+        not isinstance(observed_hash, str)
+        or _SHA256_RE.fullmatch(observed_hash) is None
+        or _sha256(_canonical_json(material)) != observed_hash
+    ):
+        raise OpenSWEExternalIntelligenceError("OPEN_SWE_EXPOSURE_RECEIPT_HASH_INVALID")
+    return dict(receipt)
 
 
 def _runtime_call(
@@ -560,6 +654,8 @@ class OpenSWEWorkerTransport:
         retry_safe: bool = False,
         error: str = "",
         argv_sha256: str = "",
+        effect_authorization_hash: str = "",
+        tool_projection_hash: str = "",
     ) -> OpenCodeRunResult:
         return OpenCodeRunResult(
             status=status,
@@ -573,6 +669,8 @@ class OpenSWEWorkerTransport:
             retry_safe=retry_safe,
             error=error,
             worker_identity_sha256=self._bound_worker_sha256,
+            effect_authorization_hash=effect_authorization_hash,
+            tool_projection_hash=tool_projection_hash,
         )
 
     def _request(
@@ -584,9 +682,17 @@ class OpenSWEWorkerTransport:
         workspace_path: str,
         session_id: str = "",
         operation_id: str = "",
+        effect_authorization: Mapping[str, Any] | None = None,
+        tool_projection_manifest: Mapping[str, Any] | None = None,
     ) -> OpenCodeRunResult:
         if session_id and _SESSION_RE.fullmatch(session_id) is None:
             raise FanoutError("INVALID_SESSION_ID")
+        effect_requested = effect_authorization is not None or tool_projection_manifest is not None
+        if effect_requested and (
+            not isinstance(effect_authorization, Mapping)
+            or not isinstance(tool_projection_manifest, Mapping)
+        ):
+            raise FanoutError("EFFECT_AUTHORIZATION_PROJECTION_PAIR_REQUIRED")
         if operation == "worker_reconcile" and (
             not isinstance(operation_id, str) or _SHA256_RE.fullmatch(operation_id) is None
         ):
@@ -596,6 +702,8 @@ class OpenSWEWorkerTransport:
             and operation_id != ""
             and (not isinstance(operation_id, str) or _SHA256_RE.fullmatch(operation_id) is None)
         ):
+            raise FanoutError("OPERATION_ID_REQUIRED")
+        if effect_requested and not operation_id:
             raise FanoutError("OPERATION_ID_REQUIRED")
         workspace = Path(workspace_path).expanduser().resolve()
         if operation != "worker_reconcile":
@@ -633,6 +741,27 @@ class OpenSWEWorkerTransport:
                     error="OPERATION_ID_MISMATCH",
                 )
             operation_id = computed_operation_id
+
+        effect_authorization_hash = ""
+        tool_projection_hash = ""
+        attempt_id = ""
+        if effect_requested:
+            assert isinstance(effect_authorization, Mapping)
+            assert isinstance(tool_projection_manifest, Mapping)
+            if effect_authorization.get("operation_id") != operation_id:
+                raise FanoutError("EFFECT_AUTHORIZATION_OPERATION_MISMATCH")
+            attempt_id = str(effect_authorization.get("attempt_id") or "").strip()
+            if not attempt_id:
+                raise FanoutError("EFFECT_AUTHORIZATION_ATTEMPT_ID_REQUIRED")
+            if tool_projection_manifest.get("operation_id") != operation_id:
+                raise FanoutError("TOOL_PROJECTION_OPERATION_MISMATCH")
+            if tool_projection_manifest.get("attempt_id") != attempt_id:
+                raise FanoutError("TOOL_PROJECTION_ATTEMPT_MISMATCH")
+            if tool_projection_manifest.get("provider") != self.provider_id:
+                raise FanoutError("TOOL_PROJECTION_PROVIDER_MISMATCH")
+            effect_authorization_hash = str(effect_authorization.get("authorization_hash") or "")
+            tool_projection_hash = str(tool_projection_manifest.get("projection_hash") or "")
+
         payload = {
             "schema": PROTOCOL_REQUEST_SCHEMA,
             "operation": operation,
@@ -650,6 +779,12 @@ class OpenSWEWorkerTransport:
             "worker_identity": self._bound_worker or {},
             "worker_identity_sha256": self._bound_worker_sha256,
         }
+        if effect_requested:
+            payload.update({
+                "attempt_id": attempt_id,
+                "effect_authorization": dict(effect_authorization),
+                "tool_projection_manifest": dict(tool_projection_manifest),
+            })
         argv_sha256 = _safe_request_hash(payload)
         value, _stderr, process_started, failure = _runtime_call(
             self.executable,
@@ -715,6 +850,57 @@ class OpenSWEWorkerTransport:
                 error="WORKER_IDENTITY_ATTESTATION_MISMATCH",
                 argv_sha256=argv_sha256,
             )
+        exposure_receipt: dict[str, Any] | None = None
+        if effect_requested:
+            returned_authorization_hash = str(value.get("effect_authorization_hash") or "")
+            returned_projection_hash = str(value.get("tool_projection_hash") or "")
+            completed = str(value.get("status") or "") == "COMPLETED"
+            if (
+                (
+                    returned_authorization_hash
+                    and returned_authorization_hash != effect_authorization_hash
+                )
+                or (returned_projection_hash and returned_projection_hash != tool_projection_hash)
+                or (
+                    completed
+                    and (
+                        returned_authorization_hash != effect_authorization_hash
+                        or returned_projection_hash != tool_projection_hash
+                    )
+                )
+            ):
+                return self._local_failure(
+                    "OPEN_SWE_OUTCOME_UNKNOWN",
+                    workspace_path=str(workspace),
+                    process_started=bool(value.get("process_started", process_started)),
+                    outcome_unknown=True,
+                    error="EFFECT_PROJECTION_ATTESTATION_MISMATCH",
+                    argv_sha256=argv_sha256,
+                    effect_authorization_hash=effect_authorization_hash,
+                    tool_projection_hash=tool_projection_hash,
+                )
+            raw_exposure_receipt = value.get("execution_exposure_receipt")
+            if completed or raw_exposure_receipt is not None:
+                try:
+                    exposure_receipt = _validate_execution_exposure_receipt(
+                        raw_exposure_receipt,
+                        operation_id=operation_id,
+                        provider_id=self.provider_id,
+                        effect_authorization=effect_authorization,
+                        tool_projection_manifest=tool_projection_manifest,
+                    )
+                except OpenSWEExternalIntelligenceError as exc:
+                    return self._local_failure(
+                        "OPEN_SWE_OUTCOME_UNKNOWN",
+                        workspace_path=str(workspace),
+                        process_started=bool(value.get("process_started", process_started)),
+                        outcome_unknown=True,
+                        error=str(exc),
+                        argv_sha256=argv_sha256,
+                        effect_authorization_hash=effect_authorization_hash,
+                        tool_projection_hash=tool_projection_hash,
+                    )
+
         evidence_paths_raw = value.get("diagnosis_evidence_paths") or []
         evidence_paths = (
             tuple(str(path) for path in evidence_paths_raw)
@@ -745,6 +931,9 @@ class OpenSWEWorkerTransport:
             repair_phase_count=int(value.get("repair_phase_count") or 0),
             worker_identity_sha256=worker_hash,
             operation_id=operation_id,
+            effect_authorization_hash=effect_authorization_hash,
+            tool_projection_hash=tool_projection_hash,
+            execution_exposure_receipt=exposure_receipt,
         )
 
     def _ensure_runtime_identity(self) -> bool:
@@ -768,7 +957,14 @@ class OpenSWEWorkerTransport:
         return True
 
     def run_new(
-        self, *, prompt: str, artifact_path: str, workspace_path: str, operation_id: str = ""
+        self,
+        *,
+        prompt: str,
+        artifact_path: str,
+        workspace_path: str,
+        operation_id: str = "",
+        effect_authorization: Mapping[str, Any] | None = None,
+        tool_projection_manifest: Mapping[str, Any] | None = None,
     ) -> OpenCodeRunResult:
         return self._request(
             "worker_run",
@@ -776,6 +972,8 @@ class OpenSWEWorkerTransport:
             artifact_path=artifact_path,
             workspace_path=workspace_path,
             operation_id=operation_id,
+            effect_authorization=effect_authorization,
+            tool_projection_manifest=tool_projection_manifest,
         )
 
     def continue_session(
@@ -786,6 +984,8 @@ class OpenSWEWorkerTransport:
         artifact_path: str,
         workspace_path: str,
         operation_id: str = "",
+        effect_authorization: Mapping[str, Any] | None = None,
+        tool_projection_manifest: Mapping[str, Any] | None = None,
     ) -> OpenCodeRunResult:
         return self._request(
             "worker_continue",
@@ -794,13 +994,24 @@ class OpenSWEWorkerTransport:
             artifact_path=artifact_path,
             workspace_path=workspace_path,
             operation_id=operation_id,
+            effect_authorization=effect_authorization,
+            tool_projection_manifest=tool_projection_manifest,
         )
 
     def reconcile_workspace(
-        self, *, workspace_path: str, operation_id: str = ""
+        self,
+        *,
+        workspace_path: str,
+        operation_id: str = "",
+        effect_authorization: Mapping[str, Any] | None = None,
+        tool_projection_manifest: Mapping[str, Any] | None = None,
     ) -> OpenCodeRunResult:
         return self._request(
-            "worker_reconcile", workspace_path=workspace_path, operation_id=operation_id
+            "worker_reconcile",
+            workspace_path=workspace_path,
+            operation_id=operation_id,
+            effect_authorization=effect_authorization,
+            tool_projection_manifest=tool_projection_manifest,
         )
 
 
