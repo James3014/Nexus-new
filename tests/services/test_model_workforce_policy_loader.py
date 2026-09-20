@@ -773,4 +773,3 @@ def test_b3_mimo_campaign_does_not_change_global_fast_route() -> None:
         )
         == "agy_flash_37_medium"
     )
-
