@@ -3120,7 +3120,6 @@ def test_gateway_owner_standing_grant_issue_is_typed_cas_and_idempotent(monkeypa
     issued_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     args = {
         "ownerConfirmation": True,
-        "attemptKey": "issue-1051-merge-a1",
         "repository": "James3014/Nexus-new",
         "coordinatorId": "chatgpt-primary",
         "goalId": "issue-982-wave3-a6",
@@ -3171,7 +3170,6 @@ def test_gateway_owner_standing_grant_issue_is_typed_cas_and_idempotent(monkeypa
 
     successor_args = {
         **args,
-        "attemptKey": "issue-1051-merge-a2",
         "allowedActions": ["GITHUB_MERGE", "REPOSITORY_PUSH"],
         "expectedCurrentReceiptHash": payload["receipt_hash"],
     }
@@ -3207,7 +3205,6 @@ def test_gateway_owner_standing_grant_issue_fails_closed_before_write(monkeypatc
     issued_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     good = {
         "ownerConfirmation": True,
-        "attemptKey": "issue-1051-negative",
         "repository": "James3014/Nexus-new",
         "coordinatorId": "chatgpt-primary",
         "goalId": "issue-982-wave3-a6-negative",
@@ -3263,7 +3260,6 @@ def test_gateway_owner_standing_grant_issue_fails_closed_before_write(monkeypatc
             "name": "nexus_owner_standing_grant_issue",
             "arguments": {
                 **good,
-                "attemptKey": "issue-1051-conflict",
                 "allowedActions": ["REPOSITORY_PUSH"],
             },
         },
