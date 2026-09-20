@@ -1,6 +1,6 @@
 # SPEC-ISSUE-982-WAVE-B-GOVERNED-TOOL-AUTHORITY-001
 
-status: READY_FOR_TASK_CARDS
+status: B3_BLOCKED_PENDING_GATEWAY_REBIND
 issue: James3014/Nexus-new#982
 owner: James Chen
 date: 2026-09-19
@@ -322,13 +322,34 @@ git diff --check
 
 plus any narrower tests added by the Candidate.
 
+## 10A. 2026-09-20 B3 MiMo route contract delta
+
+This section supersedes the historical B3 exact-model witness binding without changing the Wave B tool-authority architecture.
+
+Canonical route lineage:
+
+- Issue `#1032` owns the route/Workforce source delta.
+- PR `#1039` is merged at `d7b2e359b9d4700b33186a2633310b84ab7b502c`.
+- verified campaign: `github-issue-982-wave-b-20260919`
+- requested role: `bounded_candidate_generation`
+- minimum autonomy: `L1`
+- context: `nexus_bounded`
+- mutation intent: `false`
+- worker: `opencode_mimo_free`
+- provider: `opencode`
+- exact model: `opencode/mimo-v2.5-free`
+
+The provider/model is dispatch-time evidence, not durable caller route authority. No caller may substitute another provider/model. If the exact MiMo identity is unavailable, stale, or no longer admitted before the live canary, B3 blocks and must rebind under current Planner/Workforce authority; catalog presence alone is insufficient.
+
+Before any B3 provider effect, the live Nexus Gateway/runtime must be bound to `d7b2e359b9d4700b33186a2633310b84ab7b502c` or a later verified descendant that contains both this accepted B3 contract and the #1032 canonical route.
+
 ## 11. Live Wave B runtime witness
 
 After both source changes are independently accepted, merged, and the current DevSpace runtime is rebound to the accepted DevSpace revision:
 
 1. generate one tracked Nexus grant whose `toolAuthority` is produced from a real canonical Planner/dispatch identity and READ_ONLY policy;
-2. grant/canary authority files must exist at the current canonical Nexus main revision used by DevSpace grant resolution;
-3. use OpenCode `opencode/big-pickle` when current catalog/preflight proves it admitted;
+2. grant/canary authority files must exist at the current canonical Nexus main revision used by DevSpace grant resolution, and the live Nexus Gateway/runtime source must contain merge `d7b2e359b9d4700b33186a2633310b84ab7b502c` or a later verified descendant carrying the #1032 route;
+3. use the canonical #1032 B3 route worker `opencode_mimo_free` / `opencode/mimo-v2.5-free` only when fresh catalog/preflight and Workforce Admission prove the exact dispatch identity eligible;
 4. keep the same authorized ceiling as Wave A:
    - `workspace.read`
    - `workspace.search_text`
