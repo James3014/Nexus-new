@@ -202,3 +202,41 @@ Fresh canonical evidence:
 - physical predecessor remains loaded Gateway source `db57b1e44715e83bd1aea1c5f81ff058b2745782`.
 
 The historical `5c38bfddb34ded0db841dec32101ba724b1cc4ac` merge is incident lineage, not the desired runtime target. This rebind does not change production behavior, provider/model selection, G4 scope, release authority, or production claims. #526 remains the sole Gateway host-effect mechanism.
+
+## 2026-09-20 current transport-manager compatibility rebind delta
+
+This bounded delta supersedes only the frozen recovery-manager generation for the current R2 attempt. It does not widen the desired Gateway source, predecessor, runtime package, process authority, or claim ceiling.
+
+Fresh evidence after the later DevSpace cutover:
+
+- collaboration main at the rebind freeze: `295536811ff563354da31022b09c799e910f2c9e / e9f7c0d7162fc597c05c72afce798c312c69251c`;
+- loaded Gateway predecessor remains `db57b1e44715e83bd1aea1c5f81ff058b2745782 / e2f801d7e7cb6a94383949a8c8dff9dff151fe8d`;
+- desired Gateway remains `c6e2609f9c148e42d96eaf9e1e9cfddb0579ad33 / 7fd8be2eb8b20a81d9279aa7bb4400a7fdedeef6`;
+- fixed interpreter remains converged to `nexus-runtime@632e1a18d164d7dadf6bb98caa9c4e9d17c436f3`;
+- current DevSpace typed recovery bridge accepts manager SHA-256 `6873dde17e08d4020620c2408e414327b176be723f5f23f01bee754b2627502c`;
+- the same bridge accepts Gateway deployment-contract SHA-256 `3cd032639f69349bd44e61dec41551957e9034157febfff83e7fb3c89b5ef798`;
+- the A2 fixed manager `3f0c3420...` is therefore transport-incompatible before effect, and the bridge correctly fails closed;
+- `6873dde1...` is the exact manager from accepted source merge `4306e223f4fc1a092f7a0a21ff4aa5da4455f97e` / Candidate `b0ec2fc4993bb2c2d49d5c66e510e2a13f89a940`;
+- that exact Candidate had terminal-success GitHub exact-head Pyright, Governance, Ruff, Bandit, Secret Audit, and Pytest checks;
+- Owner source-verification payload SHA-256 `df0f8db214e508bb49a1128411f7ecd98d593951e1dfee9aed255a0bdfe082e3` binds the same `b0ec2fc...` commit/tree and successful check set;
+- the historical continuation authority that referenced `6873dde1...` is expired and is evidence only; it is not reused as current effect authority.
+
+Current Owner activation:
+
+- Issue #1025 comment `5747735968`;
+- exact Owner message SHA-256 `ab7212e8e7c5e8cbf7f2c7b13dd28fd7eda2bca0ccd5e1f8310139d407ce4df2`;
+- activation id `BREAK_GLASS_ISSUE1025_R2_MANAGER_REBIND_20260920_A3`.
+
+The A3 recovery receipt must therefore:
+
+1. bind current issuance floor `295536811... / e9f7c0d7...`;
+2. keep desired and predecessor semantic identities unchanged;
+3. bind manager `6873dde1...` and verification lineage `df0f8db2...`;
+4. use a new receipt/request/idempotency fence and bounded freshness;
+5. remain future-tracked external-bootstrap provenance with no standing-grant substitution.
+
+After the A3 Candidate is independently verified and integrated, the host step may materialize only the exact tracked A3 receipt/request plus the exact `6873dde1...` manager bytes from accepted source `4306e223...`. Typed zero-effect recovery preflight must return the expected `BLOCKED` checkpoint with `TARGET_READY` and `ROLLBACK_READY` before any Gateway replacement effect is permitted.
+
+No historical continuation authority is revived. No second process owner, alternate recovery lifecycle, generic host command, #1032/B3 effect, G4, release, or public-production claim is authorized.
+
+`AUTO_CHAIN=false`.
