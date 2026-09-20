@@ -4,7 +4,7 @@ artifact_authority: current
 task_id: `issue-982-wave-b3-governed-opencode-witness-20260919`
 campaign_id: `github-issue-982-wave-b-20260919`
 owner: James Chen
-status: READY_PENDING_GATEWAY_REBIND_AND_FRESH_ADMISSION
+status: BLOCKED_PENDING_B1_B2
 contract_kind: TRACKED_TASK_CARD
 AUTO_CHAIN: false
 worker_may_commit: true
@@ -32,8 +32,8 @@ Before any canary effect:
 2. B2 DevSpace grant/tool cross-validation source is merged on canonical DevSpace main.
 3. live DevSpace source/build is cryptographically/factually rebound to the accepted B2 source.
 4. current authoritative DevSpace role is converged with no unresolved cutover.
-5. current OpenCode catalog/preflight and fresh Workforce Admission establish the exact canonical B3 worker `opencode_mimo_free` / `opencode/mimo-v2.5-free` as eligible.
-6. current Nexus main containing this card, the authority artifact, and the exact tracked grant is bound by DevSpace grant resolution, and the live Nexus Gateway/runtime source contains `d7b2e359b9d4700b33186a2633310b84ab7b502c` or a later verified descendant carrying the merged #1032 route.
+5. current OpenCode catalog/preflight lists `opencode/big-pickle` as usable.
+6. current Nexus main containing this card, the authority artifact, and the exact tracked grant is bound by DevSpace grant resolution.
 7. no unresolved earlier canary effect with the same task/attempt identity exists.
 
 ## Allowed Nexus-new artifact paths
@@ -50,29 +50,12 @@ The grant must be generated from the accepted B1 deterministic builder/policy, n
 
 The authority path for the grant is this Task Card unless a later explicit contract delta names another tracked authority artifact.
 
-## Canonical route binding
-
-The live B3 witness MUST use the merged #1032 canonical route/Workforce path:
-
-- owning route delta: `James3014/Nexus-new#1032`
-- integration merge: `d7b2e359b9d4700b33186a2633310b84ab7b502c`
-- verified campaign: `github-issue-982-wave-b-20260919`
-- requested role: `bounded_candidate_generation`
-- minimum autonomy: `L1`
-- context: `nexus_bounded`
-- mutation intent: `false`
-- worker: `opencode_mimo_free`
-- provider/model: `opencode / opencode/mimo-v2.5-free`
-
-The exact provider/model is dispatch-time evidence and cannot be supplied as a caller override. If fresh catalog, preflight, or Workforce Admission does not support this exact identity, STOP and rebind; do not silently substitute big-pickle or another model.
-
 ## Positive arm contract
 
 Provider/model:
 
 - provider: `opencode`
-- worker: `opencode_mimo_free`
-- model: `opencode/mimo-v2.5-free`
+- model: `opencode/big-pickle`
 - authorityMode: `NEXUS_GOVERNED`
 
 Authorized ceiling:
