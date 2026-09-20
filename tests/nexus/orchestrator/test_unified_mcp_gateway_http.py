@@ -158,7 +158,6 @@ def test_http_owner_standing_grant_issue_is_exposed_idempotent_and_fail_closed(
     issued_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     arguments = {
         "ownerConfirmation": True,
-        "attemptKey": "http-issue-1051-a1",
         "repository": "James3014/Nexus-new",
         "coordinatorId": "chatgpt-http",
         "goalId": "issue-982-wave3-http",
