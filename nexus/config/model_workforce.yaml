@@ -693,6 +693,8 @@ routing:
         fast_bounded_implementation: agy_flash_37_medium
       open-swe-resident-five-repo-canary-20260908:
         bounded_candidate_generation: opencli_chatgpt_balanced_web
+      github-issue-982-wave-b-20260919:
+        bounded_candidate_generation: opencode_mimo_free
     main_engineering: codex_luna
     independent_review: grok_review
     complex_milestone: codex_luna_when_available
