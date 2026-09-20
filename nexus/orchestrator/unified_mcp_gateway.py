@@ -3115,7 +3115,6 @@ class UnifiedMCPGateway:
         """
         allowed_keys = {
             "ownerConfirmation",
-            "attemptKey",
             "repository",
             "coordinatorId",
             "goalId",
@@ -3133,7 +3132,6 @@ class UnifiedMCPGateway:
         if str(arguments.get("repository") or "").strip() != GITHUB_REPOSITORY.repository_id:
             raise GatewayInputError("STANDING_GRANT_REPOSITORY_MISMATCH")
 
-        attempt_key = _text(arguments.get("attemptKey"), "attemptKey", max_length=128)
         coordinator_id = _text(arguments.get("coordinatorId"), "coordinatorId", max_length=128)
         goal_id = _text(arguments.get("goalId"), "goalId", max_length=128)
         coordination_scope_id = _text(
@@ -3198,7 +3196,6 @@ class UnifiedMCPGateway:
             expires_at=expires_at,
         )
         request_identity = {
-            "attemptKey": attempt_key,
             "repository": GITHUB_REPOSITORY.repository_id,
             "coordinatorId": coordinator_id,
             "goalId": goal_id,
@@ -4326,7 +4323,6 @@ class UnifiedMCPGateway:
                     "additionalProperties": False,
                     "required": [
                         "ownerConfirmation",
-                        "attemptKey",
                         "repository",
                         "coordinatorId",
                         "goalId",
@@ -4337,7 +4333,6 @@ class UnifiedMCPGateway:
                     ],
                     "properties": {
                         "ownerConfirmation": {"type": "boolean", "const": True},
-                        "attemptKey": {"type": "string", "maxLength": 128},
                         "repository": {
                             "type": "string",
                             "const": "James3014/Nexus-new",
