@@ -3110,6 +3110,169 @@ def test_assisted_retry_valid_same_task_uses_fresh_attempt_action_and_idempotenc
     assert second["attempt_history"][0]["attempt_id"] == first["attempt_id"]
 
 
+def test_gateway_owner_standing_grant_issue_is_typed_cas_and_idempotent(monkeypatch, tmp_path):
+    import nexus.orchestrator.standing_grant_store as sg_store
+
+    receipt_path = tmp_path / "authority" / "standing-grant.json"
+    monkeypatch.setattr(sg_store, "DEFAULT_RECEIPT_PATH", receipt_path)
+
+    gateway = UnifiedMCPGateway(service=FakeService())
+    issued_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    args = {
+        "ownerConfirmation": True,
+        "attemptKey": "issue-1051-merge-a1",
+        "repository": "James3014/Nexus-new",
+        "coordinatorId": "chatgpt-primary",
+        "goalId": "issue-982-wave3-a6",
+        "coordinationScopeId": "owner-thread-first-wave",
+        "allowedActions": ["GITHUB_MERGE"],
+        "ttlMinutes": 30,
+        "issuedAt": issued_at,
+    }
+
+    first = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 920,
+        "method": "tools/call",
+        "params": {"name": "nexus_owner_standing_grant_issue", "arguments": args},
+    })
+    assert first["result"]["isError"] is False, first
+    payload = first["result"]["structuredContent"]
+    assert payload["status"] == "ISSUED"
+    assert payload["allowed_actions"] == ["GITHUB_MERGE"]
+    assert payload["merge_performed"] is False
+    assert payload["claim_ceiling"] == "STANDING_GRANT_ISSUED_ONLY"
+
+    key = sg_store.StandingGrantKey(
+        RepositoryIdentity(
+            repository_id="James3014/Nexus-new",
+            canonical_remote="https://github.com/James3014/Nexus-new.git",
+        ),
+        "issue-982-wave3-a6",
+        "owner-thread-first-wave",
+    )
+    loaded = sg_store.load_keyed_standing_grant_receipt(key)
+    assert loaded is not None
+    assert loaded.receipt_hash == payload["receipt_hash"]
+    assert [action.value for action in loaded.context.allowed_actions] == ["GITHUB_MERGE"]
+
+    replay = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 921,
+        "method": "tools/call",
+        "params": {"name": "nexus_owner_standing_grant_issue", "arguments": args},
+    })
+    replay_payload = replay["result"]["structuredContent"]
+    assert replay["result"]["isError"] is False
+    assert replay_payload["status"] == "REPLAYED"
+    assert replay_payload["receipt_hash"] == payload["receipt_hash"]
+    assert replay_payload["request_hash"] == payload["request_hash"]
+    assert replay_payload["idempotent_replay"] is True
+
+    successor_args = {
+        **args,
+        "attemptKey": "issue-1051-merge-a2",
+        "allowedActions": ["GITHUB_MERGE", "REPOSITORY_PUSH"],
+        "expectedCurrentReceiptHash": payload["receipt_hash"],
+    }
+    successor = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 922,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_owner_standing_grant_issue",
+            "arguments": successor_args,
+        },
+    })
+    successor_payload = successor["result"]["structuredContent"]
+    assert successor["result"]["isError"] is False
+    assert successor_payload["status"] == "ISSUED"
+    assert successor_payload["supersedes_grant_hash"] == payload["receipt_hash"]
+    rebound = sg_store.load_keyed_standing_grant_receipt(key)
+    assert rebound is not None
+    assert rebound.receipt_hash == successor_payload["receipt_hash"]
+    assert sorted(action.value for action in rebound.context.allowed_actions) == [
+        "GITHUB_MERGE",
+        "REPOSITORY_PUSH",
+    ]
+
+
+def test_gateway_owner_standing_grant_issue_fails_closed_before_write(monkeypatch, tmp_path):
+    import nexus.orchestrator.standing_grant_store as sg_store
+
+    receipt_path = tmp_path / "authority" / "standing-grant.json"
+    monkeypatch.setattr(sg_store, "DEFAULT_RECEIPT_PATH", receipt_path)
+    gateway = UnifiedMCPGateway(service=FakeService())
+
+    issued_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    good = {
+        "ownerConfirmation": True,
+        "attemptKey": "issue-1051-negative",
+        "repository": "James3014/Nexus-new",
+        "coordinatorId": "chatgpt-primary",
+        "goalId": "issue-982-wave3-a6-negative",
+        "coordinationScopeId": "owner-thread-negative",
+        "allowedActions": ["GITHUB_MERGE"],
+        "ttlMinutes": 30,
+        "issuedAt": issued_at,
+    }
+
+    bad_cases = (
+        ({**good, "ownerConfirmation": False}, "OWNER_CONFIRMATION_REQUIRED"),
+        ({**good, "repository": "someone/else"}, "STANDING_GRANT_REPOSITORY_MISMATCH"),
+        ({**good, "allowedActions": ["NOT_A_REAL_ACTION"]}, "STANDING_GRANT_ACTION_INVALID"),
+        ({**good, "allowedActions": ["GITHUB_MERGE", "GITHUB_MERGE"]}, "STANDING_GRANT_ACTION_DUPLICATE"),
+        ({**good, "receiptPath": "/tmp/raw.json"}, "unknown arguments"),
+    )
+    for index, (arguments, expected_error) in enumerate(bad_cases, start=930):
+        response = gateway.handle({
+            "jsonrpc": "2.0",
+            "id": index,
+            "method": "tools/call",
+            "params": {
+                "name": "nexus_owner_standing_grant_issue",
+                "arguments": arguments,
+            },
+        })
+        assert response["result"]["isError"] is True
+        assert expected_error in response["result"]["structuredContent"]["error"]
+
+    key = sg_store.StandingGrantKey(
+        RepositoryIdentity(
+            repository_id="James3014/Nexus-new",
+            canonical_remote="https://github.com/James3014/Nexus-new.git",
+        ),
+        good["goalId"],
+        good["coordinationScopeId"],
+    )
+    assert sg_store.load_keyed_standing_grant_receipt(key) is None
+
+    created = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 940,
+        "method": "tools/call",
+        "params": {"name": "nexus_owner_standing_grant_issue", "arguments": good},
+    })
+    created_hash = created["result"]["structuredContent"]["receipt_hash"]
+
+    conflict = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 941,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_owner_standing_grant_issue",
+            "arguments": {
+                **good,
+                "attemptKey": "issue-1051-conflict",
+                "allowedActions": ["REPOSITORY_PUSH"],
+            },
+        },
+    })
+    assert conflict["result"]["isError"] is True
+    assert "CURRENT_RECEIPT_EXISTS_CAS_REQUIRED" in conflict["result"]["structuredContent"]["error"]
+    assert sg_store.load_keyed_standing_grant_receipt(key).receipt_hash == created_hash
+
+
 def test_gateway_task_card_authority_switch_and_restore_workflow(monkeypatch, tmp_path):
     import nexus.orchestrator.standing_grant_store as sg_store
 
