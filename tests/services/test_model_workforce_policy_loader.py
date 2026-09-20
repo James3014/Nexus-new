@@ -747,6 +747,7 @@ def test_loader_rejects_invalid_combined_route_metadata(tmp_path, mutation, expe
     with pytest.raises(Exception, match=expected):
         _mutated_policy(tmp_path, mutation).load()
 
+
 def test_resolve_route_b3_mimo_campaign_exact_match_only() -> None:
     loader = WorkforcePolicyLoader(POLICY_PATH)
     loader.load()
