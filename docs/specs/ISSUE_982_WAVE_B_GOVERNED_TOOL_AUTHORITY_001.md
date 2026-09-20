@@ -66,6 +66,22 @@ Comment `5723728222` freezes producer ownership:
 
 Wave A comment `5739580640` proves one physical OpenCode intervention under OWNER_DIRECT and leaves Wave B / G4 unstarted.
 
+### Post-Spec B3 worker-identity delta (2026-09-20)
+
+The governed #1032 route/Workforce delta is now integrated on Nexus-new main by PR #1039 / merge `d7b2e359b9d4700b33186a2633310b84ab7b502c`.
+
+For the exact verified campaign `github-issue-982-wave-b-20260919`, the canonical Planner/Workforce path now binds:
+
+- worker: `opencode_mimo_free`
+- provider: `opencode`
+- model: `opencode/mimo-v2.5-free`
+- role: `bounded_candidate_generation`
+- minimum autonomy: `L1`
+- context: `nexus_bounded`
+- mutation intent: `false`
+
+This supersedes only the historical big-pickle-specific B3 witness identity below. It does not change the Wave B tool-authority architecture, does not promote MiMo globally, and does not permit caller provider/model override. Fresh catalog/preflight and Workforce Admission remain mandatory immediately before the live canary; identity drift blocks/rebinds rather than silently substituting another model.
+
 ## 3. Architecture decision
 
 Classification: `MISSING_CANONICAL_WIRING`.
@@ -328,7 +344,7 @@ After both source changes are independently accepted, merged, and the current De
 
 1. generate one tracked Nexus grant whose `toolAuthority` is produced from a real canonical Planner/dispatch identity and READ_ONLY policy;
 2. grant/canary authority files must exist at the current canonical Nexus main revision used by DevSpace grant resolution;
-3. use OpenCode `opencode/big-pickle` when current catalog/preflight proves it admitted;
+3. use the #1032-bound OpenCode worker `opencode_mimo_free` (`provider=opencode`, `model=opencode/mimo-v2.5-free`) only when fresh catalog/preflight and Workforce Admission establish that exact identity as eligible; drift blocks/rebinds and MUST NOT silently substitute another model;
 4. keep the same authorized ceiling as Wave A:
    - `workspace.read`
    - `workspace.search_text`
