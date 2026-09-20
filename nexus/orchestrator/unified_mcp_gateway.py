@@ -29,7 +29,11 @@ from typing import Any, Mapping, Optional
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from nexus.contracts.autonomy_goal import AutonomyActionClass, RepositoryIdentity
+from nexus.contracts.autonomy_goal import (
+    AutonomyActionClass,
+    RepositoryIdentity,
+    StandingGrantContext,
+)
 from nexus.contracts.execution_readiness import (
     COMPLETION_AUTHORITY_KIND,
     HOST_GATEWAY_SERVICE_LABEL,
@@ -92,10 +96,13 @@ from nexus.orchestrator.self_hosted_task_service import (
 )
 from nexus.orchestrator.standing_grant_store import (
     StandingGrantKey,
+    StandingGrantReceipt,
     StandingGrantReceiptError,
     authorize_durable_standing_grant_effect,
+    load_keyed_standing_grant_receipt,
     restore_task_card_authority,
     switch_task_card_authority,
+    write_keyed_standing_grant_receipt,
 )
 from nexus.services.model_capability_lineage import (
     CHANGE_KIND_VALUES,
@@ -3099,6 +3106,170 @@ class UnifiedMCPGateway:
             "owner_authority": owner_authority,
         }
 
+    def _owner_standing_grant_issue(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        """Materialize one explicit Owner-issued keyed standing grant via canonical CAS.
+
+        This public surface is intentionally a thin adapter over the existing
+        standing-grant contract/store. It does not evaluate downstream effects,
+        execute GitHub actions, or create another grant authority.
+        """
+        allowed_keys = {
+            "ownerConfirmation",
+            "repository",
+            "coordinatorId",
+            "goalId",
+            "coordinationScopeId",
+            "allowedActions",
+            "ttlMinutes",
+            "issuedAt",
+            "expectedCurrentReceiptHash",
+        }
+        unknown_keys = set(arguments.keys()) - allowed_keys
+        if unknown_keys:
+            raise GatewayInputError(f"unknown arguments: {', '.join(sorted(unknown_keys))}")
+        if arguments.get("ownerConfirmation") is not True:
+            raise GatewayInputError("OWNER_CONFIRMATION_REQUIRED")
+        if str(arguments.get("repository") or "").strip() != GITHUB_REPOSITORY.repository_id:
+            raise GatewayInputError("STANDING_GRANT_REPOSITORY_MISMATCH")
+
+        coordinator_id = _text(arguments.get("coordinatorId"), "coordinatorId", max_length=128)
+        goal_id = _text(arguments.get("goalId"), "goalId", max_length=128)
+        coordination_scope_id = _text(
+            arguments.get("coordinationScopeId"),
+            "coordinationScopeId",
+            max_length=128,
+        )
+
+        raw_actions = arguments.get("allowedActions")
+        if not isinstance(raw_actions, list) or not raw_actions or len(raw_actions) > 8:
+            raise GatewayInputError("allowedActions must contain between 1 and 8 actions")
+        parsed_actions: list[AutonomyActionClass] = []
+        for raw_action in raw_actions:
+            try:
+                action = AutonomyActionClass(str(raw_action))
+            except ValueError as exc:
+                raise GatewayInputError(f"STANDING_GRANT_ACTION_INVALID:{raw_action}") from exc
+            if action in parsed_actions:
+                raise GatewayInputError("STANDING_GRANT_ACTION_DUPLICATE")
+            parsed_actions.append(action)
+        parsed_actions.sort(key=lambda action: action.value)
+
+        raw_ttl = arguments.get("ttlMinutes")
+        if isinstance(raw_ttl, bool) or not isinstance(raw_ttl, int) or not 1 <= raw_ttl <= 60:
+            raise GatewayInputError("ttlMinutes must be an integer between 1 and 60")
+
+        issued_raw = _text(arguments.get("issuedAt"), "issuedAt", max_length=64)
+        try:
+            issued_at = datetime.fromisoformat(issued_raw.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise GatewayInputError("STANDING_GRANT_ISSUED_AT_INVALID") from exc
+        if issued_at.tzinfo is None:
+            raise GatewayInputError("STANDING_GRANT_ISSUED_AT_TIMEZONE_REQUIRED")
+        issued_at = issued_at.astimezone(timezone.utc)
+        expires_at = issued_at + timedelta(minutes=raw_ttl)
+        now = datetime.now(timezone.utc)
+        if issued_at > now + timedelta(minutes=1):
+            raise GatewayInputError("STANDING_GRANT_ISSUED_AT_FUTURE")
+        if now >= expires_at:
+            raise GatewayInputError("STANDING_GRANT_REQUEST_EXPIRED")
+
+        expected_current = arguments.get("expectedCurrentReceiptHash")
+        if expected_current is not None:
+            expected_current = _text(
+                expected_current,
+                "expectedCurrentReceiptHash",
+                max_length=64,
+            ).lower()
+            if not _SHA64_RE.fullmatch(expected_current):
+                raise GatewayInputError(
+                    "expectedCurrentReceiptHash must be a lowercase 64-hex SHA-256"
+                )
+
+        context = StandingGrantContext.issue(
+            owner_id="James3014",
+            coordinator_id=coordinator_id,
+            repository=GITHUB_REPOSITORY,
+            thread_id=coordination_scope_id,
+            goal_id=goal_id,
+            allowed_actions=tuple(parsed_actions),
+            issued_at=issued_at,
+            expires_at=expires_at,
+        )
+        request_identity = {
+            "repository": GITHUB_REPOSITORY.repository_id,
+            "coordinatorId": coordinator_id,
+            "goalId": goal_id,
+            "coordinationScopeId": coordination_scope_id,
+            "allowedActions": [action.value for action in parsed_actions],
+            "issuedAt": issued_at.isoformat(),
+            "expiresAt": expires_at.isoformat(),
+            "expectedCurrentReceiptHash": expected_current,
+        }
+        request_hash = hashlib.sha256(
+            json.dumps(
+                request_identity,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ).encode("utf-8")
+        ).hexdigest()
+        receipt = StandingGrantReceipt.issue(
+            grant_id=f"owner-{request_hash[:24]}",
+            context=context,
+            supersedes_grant_hash=expected_current,
+        )
+        key = StandingGrantKey(
+            GITHUB_REPOSITORY,
+            goal_id,
+            coordination_scope_id,
+        )
+
+        try:
+            current = load_keyed_standing_grant_receipt(key, now=now)
+            if current is not None and current.receipt_hash == receipt.receipt_hash:
+                status = "REPLAYED"
+            else:
+                if current is None and expected_current is not None:
+                    raise StandingGrantReceiptError("EXPECTED_PREDECESSOR_MISSING")
+                if current is not None and expected_current is None:
+                    raise StandingGrantReceiptError("CURRENT_RECEIPT_EXISTS_CAS_REQUIRED")
+                if (
+                    current is not None
+                    and expected_current is not None
+                    and current.receipt_hash != expected_current
+                ):
+                    raise StandingGrantReceiptError("CAS_MISMATCH")
+                write_keyed_standing_grant_receipt(
+                    receipt,
+                    expected_receipt_hash=expected_current,
+                )
+                rebound = load_keyed_standing_grant_receipt(key, now=now)
+                if rebound is None or rebound.receipt_hash != receipt.receipt_hash:
+                    raise StandingGrantReceiptError("ISSUANCE_READBACK_MISMATCH")
+                status = "ISSUED"
+        except StandingGrantReceiptError as exc:
+            raise GatewayInputError(str(exc)) from exc
+
+        return {
+            "schema": "nexus.owner_standing_grant_issuance.v1",
+            "status": status,
+            "repository": GITHUB_REPOSITORY.repository_id,
+            "grant_id": receipt.grant_id,
+            "receipt_hash": receipt.receipt_hash,
+            "key_digest": key.digest,
+            "goal_id": goal_id,
+            "coordination_scope_id": coordination_scope_id,
+            "coordinator_id": coordinator_id,
+            "allowed_actions": [action.value for action in parsed_actions],
+            "issued_at": issued_at.isoformat(),
+            "expires_at": expires_at.isoformat(),
+            "supersedes_grant_hash": expected_current,
+            "request_hash": request_hash,
+            "idempotent_replay": status == "REPLAYED",
+            "merge_performed": False,
+            "claim_ceiling": "STANDING_GRANT_ISSUED_ONLY",
+        }
+
     def _task_card_authority_switch(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         allowed_keys = {
             "ownerConfirmation",
@@ -4137,6 +4308,54 @@ class UnifiedMCPGateway:
                         "index_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                         "authority_goal_id": {"type": "string", "maxLength": 128},
                         "authority_coordination_scope_id": {"type": "string", "maxLength": 128},
+                    },
+                },
+            },
+            {
+                "name": "nexus_owner_standing_grant_issue",
+                "description": (
+                    "Materialize one explicit Owner-confirmed keyed standing grant "
+                    "through the canonical CAS store. Issues authority only; never "
+                    "executes merge, push, route, approval, release, or production effects."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "ownerConfirmation",
+                        "repository",
+                        "coordinatorId",
+                        "goalId",
+                        "coordinationScopeId",
+                        "allowedActions",
+                        "ttlMinutes",
+                        "issuedAt",
+                    ],
+                    "properties": {
+                        "ownerConfirmation": {"type": "boolean", "const": True},
+                        "repository": {
+                            "type": "string",
+                            "const": "James3014/Nexus-new",
+                        },
+                        "coordinatorId": {"type": "string", "maxLength": 128},
+                        "goalId": {"type": "string", "maxLength": 128},
+                        "coordinationScopeId": {"type": "string", "maxLength": 128},
+                        "allowedActions": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": [action.value for action in AutonomyActionClass],
+                            },
+                            "minItems": 1,
+                            "maxItems": 8,
+                            "uniqueItems": True,
+                        },
+                        "ttlMinutes": {"type": "integer", "minimum": 1, "maximum": 60},
+                        "issuedAt": {"type": "string", "maxLength": 64},
+                        "expectedCurrentReceiptHash": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$",
+                        },
                     },
                 },
             },
@@ -5990,6 +6209,8 @@ class UnifiedMCPGateway:
             return self._task_card_create(arguments)
         if name == "nexus_task_card_commit":
             return self._task_card_commit(arguments)
+        if name == "nexus_owner_standing_grant_issue":
+            return self._owner_standing_grant_issue(arguments)
         if name == "nexus_task_card_authority_switch":
             return self._task_card_authority_switch(arguments)
         if name == "nexus_task_card_authority_restore":
