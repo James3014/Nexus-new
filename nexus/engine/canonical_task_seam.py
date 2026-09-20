@@ -505,8 +505,25 @@ def build_canonical_planner_admission(
         raise ValueError("canonical_task_card_task_mismatch")
 
     task_card_campaign_id = _derive_campaign_id_from_task_card(task_card_identity)
+    campaign_id = task_card_campaign_id
+    verified_campaign_id = ""
+    if campaign_identity is not None:
+        if not isinstance(campaign_identity, VerifiedCampaignIdentity):
+            raise ValueError("canonical_campaign_identity_unverified")
+        if (
+            campaign_identity.task_id != task_card_identity.task_id
+            or campaign_identity.task_card_hash != task_card_identity.task_card_hash
+            or campaign_identity.contract_kind != task_card_identity.contract_kind
+        ):
+            raise ValueError("canonical_campaign_identity_binding_mismatch")
+        if campaign_id and campaign_identity.campaign_id != campaign_id:
+            raise ValueError("canonical_campaign_identity_conflict")
+        campaign_id = campaign_identity.campaign_id
+        verified_campaign_id = campaign_identity.campaign_id
+
     candidate_generation_only = (
         task_card_campaign_id == "open-swe-resident-five-repo-canary-20260908"
+        or verified_campaign_id == "github-issue-982-wave-b-20260919"
     )
     context = CanonicalTaskContext(
         task_id=str(task_id),
@@ -545,19 +562,6 @@ def build_canonical_planner_admission(
         raise ValueError("canonical_workforce_demands_missing")
     policy = WorkforcePolicyLoader()
     snapshot = policy.load()
-    campaign_id = task_card_campaign_id
-    if campaign_identity is not None:
-        if not isinstance(campaign_identity, VerifiedCampaignIdentity):
-            raise ValueError("canonical_campaign_identity_unverified")
-        if (
-            campaign_identity.task_id != task_card_identity.task_id
-            or campaign_identity.task_card_hash != task_card_identity.task_card_hash
-            or campaign_identity.contract_kind != task_card_identity.contract_kind
-        ):
-            raise ValueError("canonical_campaign_identity_binding_mismatch")
-        if campaign_id and campaign_identity.campaign_id != campaign_id:
-            raise ValueError("canonical_campaign_identity_conflict")
-        campaign_id = campaign_identity.campaign_id
     policy_bindings, _ = _resolve_policy_workforce_bindings(
         plan_payload,
         allowed_files=allowed_files,

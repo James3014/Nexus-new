@@ -746,3 +746,30 @@ def _mutated_policy(tmp_path, mutate):
 def test_loader_rejects_invalid_combined_route_metadata(tmp_path, mutation, expected) -> None:
     with pytest.raises(Exception, match=expected):
         _mutated_policy(tmp_path, mutation).load()
+
+
+def test_resolve_route_b3_mimo_campaign_exact_match_only() -> None:
+    loader = WorkforcePolicyLoader(POLICY_PATH)
+    loader.load()
+
+    assert (
+        loader.resolve_route(
+            "bounded_candidate_generation",
+            campaign_id="github-issue-982-wave-b-20260919",
+        )
+        == "opencode_mimo_free"
+    )
+
+
+def test_b3_mimo_campaign_does_not_change_global_fast_route() -> None:
+    loader = WorkforcePolicyLoader(POLICY_PATH)
+    loader.load()
+
+    assert loader.resolve_route("fast_bounded_implementation") == "agy_flash_37_medium"
+    assert (
+        loader.resolve_route(
+            "fast_bounded_implementation",
+            campaign_id="github-issue-982-wave-b-20260919",
+        )
+        == "agy_flash_37_medium"
+    )
