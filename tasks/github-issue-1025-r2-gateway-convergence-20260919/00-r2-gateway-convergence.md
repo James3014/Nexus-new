@@ -240,3 +240,38 @@ After the A3 Candidate is independently verified and integrated, the host step m
 No historical continuation authority is revived. No second process owner, alternate recovery lifecycle, generic host command, #1032/B3 effect, G4, release, or public-production claim is authorized.
 
 `AUTO_CHAIN=false`.
+
+## 2026-09-20 live DevSpace manager evidence correction (A4)
+
+This corrective delta supersedes only the A3 manager-generation inference introduced by PR #1035. It preserves the R2 desired/predecessor/runtime target and the #526 single process/effect owner.
+
+Authoritative runtime evidence:
+
+- live DevSpace source: `903922900665ed7519f98828bac74cd62e72ebd4`;
+- live DevSpace build: `devspace-1.0.7-90392290`;
+- cutover: `closed / normal / reconciliationRequired=false`;
+- exact live `src/durable-operations.ts@90392290...` accepts manager SHA-256 `3f0c34204bef175fcfad7150c5919d96f6b3735813cea5258bdcd51e37d4baeb`;
+- the same live source accepts deployment-contract SHA-256 `3cd032639f69349bd44e61dec41551957e9034157febfff83e7fb3c89b5ef798`;
+- the local checkout that exposed `6873dde1...` was not the live DevSpace source (`03841ac7...`);
+- current Nexus-new main at correction freeze is `482fb4b83d8ac9b5ceb33b0e3f9890634f0da897 / 85a8a14a6a64cecced02f26be96c78f696b6ff47`;
+- current Nexus-new manager bytes are exactly `3f0c3420...`;
+- existing independent acceptance lineage for that manager is `3e1ed6a7c05d2951ab343e4b249425bfdbd0203dcdd4e11b0f7cdbe5342b2bd1`;
+- A3 typed preflight failed before manager execution with `effect_started=false`; no A3 Gateway replacement effect occurred.
+
+Corrective Owner activation: Issue #1025 comment `5747996106`.
+Exact Owner instruction hash remains `ab7212e8e7c5e8cbf7f2c7b13dd28fd7eda2bca0ccd5e1f8310139d407ce4df2`.
+
+A4 must bind:
+
+- issuance floor `482fb4b8... / 85a8a14a...`;
+- manager `3f0c3420...`;
+- independent manager acceptance `3e1ed6a7...`;
+- desired `c6e2609f... / 7fd8be2e...`;
+- predecessor `db57b1e4... / e2f801d...`;
+- fresh receipt/request/fence identities;
+- bounded expiry;
+- future-tracked external-bootstrap provenance.
+
+PR #1035 remains historical evidence of a corrected false inference and grants no future host effect. After A4 integration, only the exact tracked A4 receipt/request and `3f0c3420...` manager may be materialized for typed zero-effect preflight.
+
+`AUTO_CHAIN=false`.
