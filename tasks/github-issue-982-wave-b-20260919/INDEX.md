@@ -2,7 +2,7 @@
 
 campaign_id: `github-issue-982-wave-b-20260919`
 owner: James Chen
-status: READY_PENDING_CONTRACT_TRACKING
+status: B3_CONTRACT_DELTA_TRACKED_PENDING_GATEWAY_REBIND
 AUTO_CHAIN: false
 
 ## Contract
@@ -22,7 +22,8 @@ AUTO_CHAIN: false
    - bounded by the Spec and DevSpace `AGENTS.md`;
    - must extend `nexus.devspace.execution_grant.v1` with backward-compatible tool-authority validation.
 3. `02-governed-opencode-runtime-witness.md`
-   - blocked until B1+B2 source integration and DevSpace live runtime rebind;
+   - B1+B2 and #1032 route source integration are complete;
+   - blocked until the live Nexus Gateway/runtime source contains `d7b2e359b9d4700b33186a2633310b84ab7b502c` or a later verified descendant and fresh MiMo admission passes;
    - creates the tracked canary grant/evidence and runs the positive + widening-negative governed witness.
 
 ## Dependency graph
@@ -50,3 +51,20 @@ B1 and B2 source implementation may proceed in parallel only after this contract
 No card or Owner-inline Wave B authority starts G4 benchmark, Wave C, release, or production promotion.
 
 `AUTO_CHAIN=false`.
+
+## B3 2026-09-20 contract delta
+
+The historical `opencode/big-pickle` B3 witness binding is superseded.
+
+Current exact B3 witness route:
+
+```text
+verified campaign github-issue-982-wave-b-20260919
+  -> bounded_candidate_generation / L1 / nexus_bounded / mutation_intent=false
+  -> opencode_mimo_free
+  -> opencode / opencode/mimo-v2.5-free
+```
+
+Owning source delta: #1032 / PR #1039 / merge `d7b2e359b9d4700b33186a2633310b84ab7b502c`.
+
+No caller provider/model override, global MiMo promotion, OWNER_DIRECT fallback, Wave 4, release, or production claim is authorized.
