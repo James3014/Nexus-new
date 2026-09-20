@@ -32,15 +32,23 @@ def _get_index_hash(repo: Path) -> str:
 
 def test_t1_clean_committed_target(test_repo: Path):
     """T1: Clean committed target (base -> committed candidate) preserves existing behavior."""
-    base_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=test_repo, text=True).strip()
-    base_tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=test_repo, text=True).strip()
+    base_commit = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=test_repo, text=True
+    ).strip()
+    base_tree = subprocess.check_output(
+        ["git", "rev-parse", "HEAD^{tree}"], cwd=test_repo, text=True
+    ).strip()
 
     # Modify and commit
     (test_repo / "tracked_a.txt").write_text("modified a\n", encoding="utf-8")
     subprocess.check_call(["git", "add", "tracked_a.txt"], cwd=test_repo)
     subprocess.check_call(["git", "commit", "-m", "update a"], cwd=test_repo)
-    cand_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=test_repo, text=True).strip()
-    cand_tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=test_repo, text=True).strip()
+    cand_commit = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=test_repo, text=True
+    ).strip()
+    cand_tree = subprocess.check_output(
+        ["git", "rev-parse", "HEAD^{tree}"], cwd=test_repo, text=True
+    ).strip()
 
     manifest = extract_git_manifest(test_repo, base_commit, cand_commit)
     assert manifest["source_tree"] == f"git-tree:{base_tree}"
@@ -55,8 +63,12 @@ def test_t1_clean_committed_target(test_repo: Path):
 
 def test_t2_dirty_tracked_modification(test_repo: Path):
     """T2: Working tree has uncommitted modifications to tracked file."""
-    base_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=test_repo, text=True).strip()
-    base_tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=test_repo, text=True).strip()
+    base_commit = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=test_repo, text=True
+    ).strip()
+    base_tree = subprocess.check_output(
+        ["git", "rev-parse", "HEAD^{tree}"], cwd=test_repo, text=True
+    ).strip()
 
     # Uncommitted modification
     (test_repo / "tracked_a.txt").write_text("uncommitted dirty content\n", encoding="utf-8")
@@ -78,8 +90,12 @@ def test_t2_dirty_tracked_modification(test_repo: Path):
 
 def test_t3_dirty_untracked_file(test_repo: Path):
     """T3: Working tree has a new untracked file."""
-    base_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=test_repo, text=True).strip()
-    base_tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=test_repo, text=True).strip()
+    base_commit = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=test_repo, text=True
+    ).strip()
+    base_tree = subprocess.check_output(
+        ["git", "rev-parse", "HEAD^{tree}"], cwd=test_repo, text=True
+    ).strip()
 
     # New untracked file
     (test_repo / "untracked_new.txt").write_text("brand new file\n", encoding="utf-8")
@@ -103,8 +119,12 @@ def test_t3_dirty_untracked_file(test_repo: Path):
 
 def test_t4_dirty_deletion(test_repo: Path):
     """T4: Tracked file deleted from working tree without commit."""
-    base_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=test_repo, text=True).strip()
-    base_tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=test_repo, text=True).strip()
+    base_commit = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=test_repo, text=True
+    ).strip()
+    base_tree = subprocess.check_output(
+        ["git", "rev-parse", "HEAD^{tree}"], cwd=test_repo, text=True
+    ).strip()
 
     (test_repo / "tracked_b.txt").unlink()
 
@@ -122,7 +142,9 @@ def test_t4_dirty_deletion(test_repo: Path):
 
 def test_t5_t6_t7_caller_non_interference(test_repo: Path):
     """T5/T6/T7: Caller normal index, working tree, and HEAD are strictly preserved."""
-    base_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=test_repo, text=True).strip()
+    base_commit = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=test_repo, text=True
+    ).strip()
     orig_index_hash = _get_index_hash(test_repo)
 
     # Make working tree dirty
@@ -142,7 +164,9 @@ def test_t5_t6_t7_caller_non_interference(test_repo: Path):
     assert (test_repo / "new_untracked.txt").read_text(encoding="utf-8") == "untracked\n"
 
     # T7: HEAD commit is unchanged
-    after_head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=test_repo, text=True).strip()
+    after_head = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=test_repo, text=True
+    ).strip()
     assert after_head == base_commit
 
 
@@ -150,7 +174,9 @@ def test_t8_temp_index_cleanup(test_repo: Path):
     """T8: Temporary index directory is cleanly removed after success."""
     import tempfile
 
-    base_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=test_repo, text=True).strip()
+    base_commit = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=test_repo, text=True
+    ).strip()
     (test_repo / "dirty.txt").write_text("dirty\n", encoding="utf-8")
 
     manifest = extract_git_manifest(test_repo, base_commit, "HEAD")
@@ -163,7 +189,9 @@ def test_t8_temp_index_cleanup(test_repo: Path):
 
 def test_t9_failure_cleanup(test_repo: Path, monkeypatch: pytest.MonkeyPatch):
     """T9: Temporary index directory is cleaned up even if write-tree or diff-tree fails."""
-    base_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=test_repo, text=True).strip()
+    base_commit = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=test_repo, text=True
+    ).strip()
     (test_repo / "dirty.txt").write_text("dirty\n", encoding="utf-8")
 
     # Monkeypatch subprocess.check_call to fail inside the with block
@@ -182,14 +210,20 @@ def test_t9_failure_cleanup(test_repo: Path, monkeypatch: pytest.MonkeyPatch):
 
 def test_t14_dirty_target_oracle(test_repo: Path):
     """T14 Oracle: Prove that without the fix (rev-parse HEAD^{tree}), uncommitted changes are invisible."""
-    base_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=test_repo, text=True).strip()
-    base_tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=test_repo, text=True).strip()
+    base_commit = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=test_repo, text=True
+    ).strip()
+    base_tree = subprocess.check_output(
+        ["git", "rev-parse", "HEAD^{tree}"], cwd=test_repo, text=True
+    ).strip()
 
     # Add uncommitted modification
     (test_repo / "tracked_a.txt").write_text("uncommitted change\n", encoding="utf-8")
 
     # Unfixed naive behavior:
-    naive_tgt_tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=test_repo, text=True).strip()
+    naive_tgt_tree = subprocess.check_output(
+        ["git", "rev-parse", "HEAD^{tree}"], cwd=test_repo, text=True
+    ).strip()
     assert naive_tgt_tree == base_tree  # Naive HEAD tree completely misses the working-tree edit!
 
     # Fixed extract_git_manifest behavior:

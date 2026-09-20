@@ -123,7 +123,9 @@ def extract_git_manifest(
             env = {**os.environ, "GIT_INDEX_FILE": str(index_file)}
             subprocess.check_call(["git", "read-tree", "HEAD"], cwd=repo, env=env)
             subprocess.check_call(["git", "add", "-A", "--", "."], cwd=repo, env=env)
-            tgt_tree = subprocess.check_output(["git", "write-tree"], cwd=repo, env=env, text=True).strip()
+            tgt_tree = subprocess.check_output(
+                ["git", "write-tree"], cwd=repo, env=env, text=True
+            ).strip()
             raw_diff = subprocess.check_output(
                 ["git", "diff-tree", "-r", "--no-commit-id", "--raw", src_tree, tgt_tree],
                 cwd=repo,
