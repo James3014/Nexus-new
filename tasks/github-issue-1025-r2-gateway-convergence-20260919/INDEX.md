@@ -32,6 +32,15 @@ Reuse #526 durable Gateway recovery. No new recovery/process authority.
 8. Physically read back source + package + server/tool identity.
 9. Stop at R2; R3 is not auto-chained.
 
+## 2026-09-20 manager-generation rebind frontier
+
+- current DevSpace typed recovery bridge accepts manager `6873dde17e08d4020620c2408e414327b176be723f5f23f01bee754b2627502c`;
+- A2 authority/fixed manager `3f0c3420...` is rejected before effect;
+- `6873dde1...` has exact-head source verification lineage `df0f8db214e508bb49a1128411f7ecd98d593951e1dfee9aed255a0bdfe082e3`;
+- Owner rebind activation: Issue #1025 comment `5747735968`;
+- desired/predecessor/runtime identities remain unchanged;
+- historical successor-continuation authority remains expired evidence only.
+
 ## Next gate
 
-`R2_CURRENT_TARGET_REBOUND_TO_VALID_CANONICAL_MAIN`
+`R2_A3_MANAGER_REBIND_TRACKED_THEN_ZERO_EFFECT_PREFLIGHT`
