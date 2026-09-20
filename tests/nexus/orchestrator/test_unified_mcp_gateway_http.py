@@ -149,6 +149,82 @@ def test_runtime_identity_function_is_deterministic():
     assert first == second
 
 
+def test_http_owner_standing_grant_issue_is_exposed_idempotent_and_fail_closed(
+    tmp_path, monkeypatch,
+):
+    receipt_path = tmp_path / "standing-grant" / "standing-grant.json"
+    monkeypatch.setattr(sg_store, "DEFAULT_RECEIPT_PATH", receipt_path)
+    server, thread = _server()
+    issued_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    arguments = {
+        "ownerConfirmation": True,
+        "attemptKey": "http-issue-1051-a1",
+        "repository": "James3014/Nexus-new",
+        "coordinatorId": "chatgpt-http",
+        "goalId": "issue-982-wave3-http",
+        "coordinationScopeId": "owner-thread-http",
+        "allowedActions": ["GITHUB_MERGE"],
+        "ttlMinutes": 30,
+        "issuedAt": issued_at,
+    }
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 9050,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_owner_standing_grant_issue",
+            "arguments": arguments,
+        },
+    }
+    try:
+        listed = json.loads(
+            _request(
+                server,
+                {"jsonrpc": "2.0", "id": 9049, "method": "tools/list", "params": {}},
+                token="secret",
+            ).read()
+        )
+        spec = next(
+            tool
+            for tool in listed["result"]["tools"]
+            if tool["name"] == "nexus_owner_standing_grant_issue"
+        )
+        assert spec["inputSchema"]["additionalProperties"] is False
+        assert spec["inputSchema"]["properties"]["ownerConfirmation"]["const"] is True
+
+        first = json.loads(_request(server, payload, token="secret").read())["result"]
+        assert first["isError"] is False
+        first_content = first["structuredContent"]
+        assert first_content["status"] == "ISSUED"
+        assert first_content["allowed_actions"] == ["GITHUB_MERGE"]
+        assert first_content["merge_performed"] is False
+
+        replay = json.loads(_request(server, payload, token="secret").read())["result"]
+        assert replay["isError"] is False
+        replay_content = replay["structuredContent"]
+        assert replay_content["status"] == "REPLAYED"
+        assert replay_content["receipt_hash"] == first_content["receipt_hash"]
+
+        rejected_payload = {
+            **payload,
+            "id": 9051,
+            "params": {
+                **payload["params"],
+                "arguments": {**arguments, "ownerConfirmation": False},
+            },
+        }
+        rejected = json.loads(
+            _request(server, rejected_payload, token="secret").read()
+        )["result"]
+        assert rejected["isError"] is True
+        assert "OWNER_CONFIRMATION_REQUIRED" in rejected["structuredContent"]["error"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+    assert not thread.is_alive()
+
+
 def test_http_external_candidate_adoption_canary_is_pending_physical_idempotent_and_fail_closed(
     tmp_path, monkeypatch,
 ):
