@@ -44,3 +44,15 @@ Reuse #526 durable Gateway recovery. No new recovery/process authority.
 ## Next gate
 
 `R2_A3_MANAGER_REBIND_TRACKED_THEN_ZERO_EFFECT_PREFLIGHT`
+
+## 2026-09-20 A4 live-manager correction frontier
+
+- PR #1035 manager rebind `6873dde1...` is superseded as incorrect live-source evidence.
+- live DevSpace `90392290...` accepts `3f0c3420...`.
+- corrective Owner activation: #1025 comment `5747996106`.
+- A3 effect_started: `false`.
+- desired/predecessor/runtime targets unchanged.
+
+## Corrected next gate
+
+`R2_A4_LIVE_MANAGER_TRACKED_THEN_TYPED_ZERO_EFFECT_PREFLIGHT`
