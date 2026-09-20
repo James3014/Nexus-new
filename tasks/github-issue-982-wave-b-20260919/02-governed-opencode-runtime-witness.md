@@ -4,7 +4,7 @@ artifact_authority: current
 task_id: `issue-982-wave-b3-governed-opencode-witness-20260919`
 campaign_id: `github-issue-982-wave-b-20260919`
 owner: James Chen
-status: BLOCKED_PENDING_B1_B2
+status: READY_PENDING_NEXUS_RUNTIME_REBIND_AND_FRESH_ADMISSION
 contract_kind: TRACKED_TASK_CARD
 AUTO_CHAIN: false
 worker_may_commit: true
@@ -17,6 +17,8 @@ worker_may_push: false
 - path: `docs/specs/ISSUE_982_WAVE_B_GOVERNED_TOOL_AUTHORITY_001.md`
 - contract-branch blob SHA: `a402d709800aad4d4282b6006343d5d4c4ca65aa`
 - Issue: `James3014/Nexus-new#982`
+- B3 route/Workforce source owner: `James3014/Nexus-new#1032`
+- governed route integration: PR #1039 / merge `d7b2e359b9d4700b33186a2633310b84ab7b502c`
 
 ## Objective
 
@@ -32,8 +34,8 @@ Before any canary effect:
 2. B2 DevSpace grant/tool cross-validation source is merged on canonical DevSpace main.
 3. live DevSpace source/build is cryptographically/factually rebound to the accepted B2 source.
 4. current authoritative DevSpace role is converged with no unresolved cutover.
-5. current OpenCode catalog/preflight lists `opencode/big-pickle` as usable.
-6. current Nexus main containing this card, the authority artifact, and the exact tracked grant is bound by DevSpace grant resolution.
+5. current OpenCode catalog/preflight and Workforce Admission establish `opencode_mimo_free` / `opencode` / `opencode/mimo-v2.5-free` as the exact eligible `bounded_candidate_generation / L1` worker identity.
+6. the live Nexus Gateway/runtime is bound to a verified source containing the merged #1032 MiMo route delta, this current B3 contract, the authority artifact, and the exact tracked grant used by DevSpace grant resolution.
 7. no unresolved earlier canary effect with the same task/attempt identity exists.
 
 ## Allowed Nexus-new artifact paths
@@ -54,8 +56,10 @@ The authority path for the grant is this Task Card unless a later explicit contr
 
 Provider/model:
 
+- worker: `opencode_mimo_free`
 - provider: `opencode`
-- model: `opencode/big-pickle`
+- model: `opencode/mimo-v2.5-free`
+- role/autonomy: `bounded_candidate_generation / L1`
 - authorityMode: `NEXUS_GOVERNED`
 
 Authorized ceiling:
@@ -85,6 +89,8 @@ No `workspace.mutate` or `process.execute` intent is authorized.
 Capture and bind:
 
 - canonical Nexus main revision;
+- live Nexus Gateway/runtime source identity proving the merged #1032 MiMo route delta is loaded;
+- exact Workforce worker/provider/model/admission identity for `opencode_mimo_free / opencode / opencode/mimo-v2.5-free`;
 - tracked grant path and raw SHA-256;
 - authority path and raw SHA-256;
 - Planner decision hash / plan hash / tool policy hash from tracked grant tool authority;
@@ -120,6 +126,7 @@ Wave B may be marked complete only when:
 B1_NEXUS_SOURCE_MERGED=TRUE
 B2_DEVSPACE_SOURCE_MERGED=TRUE
 DEVSPACE_RUNTIME_BOUND_TO_B2=TRUE
+NEXUS_GATEWAY_BOUND_TO_1032_ROUTE_SOURCE=TRUE
 NEXUS_GOVERNED_OPENCODE_POSITIVE_WITNESS=TRUE
 GOVERNED_TOOL_AUTHORITY_WIDENING_FAIL_CLOSED=TRUE
 CANARY_REPOSITORY_MUTATION=NONE
