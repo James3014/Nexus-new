@@ -2,7 +2,7 @@
 
 campaign_id: `github-issue-982-wave-b-20260919`
 owner: James Chen
-status: B3_CONTRACT_DELTA_TRACKED_PENDING_GATEWAY_REBIND
+status: WAVE3_GATEWAY_REBIND_AUTHORITY_TRACKED
 AUTO_CHAIN: false
 
 ## Contract
@@ -21,7 +21,11 @@ AUTO_CHAIN: false
    - separate Owner-inline authority from the explicit Wave B request;
    - bounded by the Spec and DevSpace `AGENTS.md`;
    - must extend `nexus.devspace.execution_grant.v1` with backward-compatible tool-authority validation.
-3. `02-governed-opencode-runtime-witness.md`
+3. `03-current-gateway-rebind-20260920.md`
+   - tracks the fresh #526 v2 authority for physical Gateway convergence to `2f2b75dd46ad3b03564c385a954d11565b8377ed`;
+   - preserves the current live Gateway as the exact rollback predecessor;
+   - requires zero-effect preflight and one fenced recovery operation before B3 provider effect.
+4. `02-governed-opencode-runtime-witness.md`
    - B1+B2 and #1032 route source integration are complete;
    - blocked until the live Nexus Gateway/runtime source contains `d7b2e359b9d4700b33186a2633310b84ab7b502c` or a later verified descendant and fresh MiMo admission passes;
    - creates the tracked canary grant/evidence and runs the positive + widening-negative governed witness.
@@ -34,6 +38,12 @@ Spec + tracked cards
        +--> B1 Nexus-new implementation ----+
        |                                     |
        +--> B2 DevSpace implementation ------+--> live DevSpace cutover/rebind
+                                             |
+                                             v
+                         Gateway current-source rebind to 2f2b75dd
+                                             |
+                                             v
+                           fresh MiMo catalog/preflight/admission
                                              |
                                              v
                                   B3 NEXUS_GOVERNED canary
