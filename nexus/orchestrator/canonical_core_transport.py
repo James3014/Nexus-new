@@ -16,9 +16,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import uuid
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
@@ -108,15 +110,36 @@ def extract_git_manifest(
     src_tree = subprocess.check_output(
         ["git", "rev-parse", f"{base_ref}^{{tree}}"], cwd=repo, text=True
     ).strip()
-    tgt_tree = subprocess.check_output(
-        ["git", "rev-parse", f"{target_ref}^{{tree}}"], cwd=repo, text=True
+
+    # If target repo is dirty with untracked/working files, materialize them into
+    # an isolated temporary index without modifying the caller's working tree or index.
+    status_raw = subprocess.check_output(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=repo, text=True
     ).strip()
 
-    raw_diff = subprocess.check_output(
-        ["git", "diff-tree", "-r", "--no-commit-id", "--raw", base_ref, target_ref],
-        cwd=repo,
-        text=True,
-    ).strip()
+    if status_raw and target_ref == "HEAD":
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_file = Path(tmpdir) / "index"
+            env = {**os.environ, "GIT_INDEX_FILE": str(index_file)}
+            subprocess.check_call(["git", "read-tree", "HEAD"], cwd=repo, env=env)
+            subprocess.check_call(["git", "add", "-A", "--", "."], cwd=repo, env=env)
+            tgt_tree = subprocess.check_output(
+                ["git", "write-tree"], cwd=repo, env=env, text=True
+            ).strip()
+            raw_diff = subprocess.check_output(
+                ["git", "diff-tree", "-r", "--no-commit-id", "--raw", src_tree, tgt_tree],
+                cwd=repo,
+                text=True,
+            ).strip()
+    else:
+        tgt_tree = subprocess.check_output(
+            ["git", "rev-parse", f"{target_ref}^{{tree}}"], cwd=repo, text=True
+        ).strip()
+        raw_diff = subprocess.check_output(
+            ["git", "diff-tree", "-r", "--no-commit-id", "--raw", base_ref, target_ref],
+            cwd=repo,
+            text=True,
+        ).strip()
 
     entries = []
     for line in raw_diff.splitlines():
