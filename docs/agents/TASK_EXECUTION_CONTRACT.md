@@ -53,10 +53,10 @@ be mechanically compared as proof that authority is preserved. Any changed,
 missing, malformed, contradictory, unknown, false, or otherwise unprovable
 field returns `GOVERNED_REQUIRED`. This classification does not approve a diff,
 verify a Candidate, grant merge/release/production authority, or replace any
-existing verifier or acceptance gate. It is future-only after independent
-acceptance and integration and cannot be used retroactively to bless or relabel
-historical evidence, PRs, or governed attempts, including the #401 rebind that
-introduces the contract.
+existing verifier or acceptance gate. It is future-only after this contract
+is integrated into `main` and cannot be used retroactively to bless or relabel
+historical evidence, PRs, or governed attempts, including the prior governed
+#401 attempt.
 
 ### Self-hosting stabilization and future default transition
 
