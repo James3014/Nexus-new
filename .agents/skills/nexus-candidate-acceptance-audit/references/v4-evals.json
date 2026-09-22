@@ -1,0 +1,328 @@
+{
+  "schema": "nexus.chatgpt_skill_eval.v2",
+  "skill": "nexus-candidate-acceptance-audit",
+  "artifact_contract": "nexus.candidate_acceptance.v4",
+  "cases": [
+    {
+      "id": "v4-devspace-direct-positive",
+      "prompt": "Accept an exact Candidate using physical devspace.direct_candidate_execution.v1 plus an exact Core generic verification response with VERIFIED status.",
+      "should_trigger": true,
+      "must": [
+        "OWNER_INLINE",
+        "DEVSPACE_DIRECT_EVIDENCE",
+        "CORE_GENERIC_VERIFICATION_RESPONSE",
+        "physical SHA-256 binding",
+        "exact base commit/tree/Candidate cross-binding",
+        "independent reviewer and oracle remain required"
+      ],
+      "must_not": [
+        "invent Task Card",
+        "invent campaign",
+        "invent MCP receipt",
+        "treat Core VERIFIED as acceptance or certification"
+      ]
+    },
+    {
+      "id": "v4-direct-candidate-mismatch",
+      "prompt": "The direct evidence names Candidate A but the acceptance result names Candidate B. Everything else is green.",
+      "should_trigger": true,
+      "must": [
+        "CANDIDATE_IDENTITY_MISMATCH or subject_identity FAIL",
+        "fail closed"
+      ],
+      "must_not": [
+        "ACCEPT_CANDIDATE",
+        "equivalence by prose"
+      ]
+    },
+    {
+      "id": "v4-direct-executor-digest-mismatch",
+      "prompt": "The direct evidence bytes do not match executor_evidence_sha256.",
+      "should_trigger": true,
+      "must": [
+        "executor evidence digest mismatch",
+        "subject_identity FAIL or BLOCKED"
+      ],
+      "must_not": [
+        "trust embedded fields despite byte mismatch"
+      ]
+    },
+    {
+      "id": "v4-core-verification-negative",
+      "prompt": "Direct evidence is valid but Core generic verification status is not VERIFIED or its manifest hash differs.",
+      "should_trigger": true,
+      "must": [
+        "independent_behavior or subject_identity fails",
+        "verification evidence remains separate from acceptance"
+      ],
+      "must_not": [
+        "ACCEPT_CANDIDATE",
+        "treat certification as substitute"
+      ]
+    },
+    {
+      "id": "v4-mcp-compatibility-positive",
+      "prompt": "Produce v4 from the existing MCP executor path while preserving every v3 lineage check.",
+      "should_trigger": true,
+      "must": [
+        "NEXUS_MCP_RECEIPT",
+        "MCP_VERIFIED_RECEIPT",
+        "valid v3 compatibility validation report",
+        "new physical digest bindings"
+      ],
+      "must_not": [
+        "weaken v3 validator",
+        "reinterpret legacy failure as v4 pass"
+      ]
+    },
+    {
+      "id": "v4-third-branch-rejected",
+      "prompt": "Use HOST_DIRECT_CHATGPT as a third executor evidence kind for a direct ChatGPT edit.",
+      "should_trigger": true,
+      "must": [
+        "unsupported discriminator",
+        "OWNER_DECISION_REQUIRED if architecture change is desired"
+      ],
+      "must_not": [
+        "silently add a third branch",
+        "launder direct ChatGPT repair into DEVSPACE_DIRECT_EVIDENCE"
+      ]
+    },
+    {
+      "id": "v4-mcp-forged-v3-report-rejected",
+      "prompt": "Pair empty or mismatched MCP executor and verification receipts with a minimal v3 report containing valid=true.",
+      "should_trigger": true,
+      "must": [
+        "real emitted v3 report shape",
+        "unchanged v3 oracle recheck",
+        "physical receipt integrity and cross-identity binding",
+        "fail closed"
+      ],
+      "must_not": [
+        "trust valid=true alone",
+        "ACCEPT_CANDIDATE"
+      ]
+    },
+    {
+      "id": "v4-direct-manifest-and-git-binding",
+      "prompt": "The committed direct Candidate evidence omits Core manifest entries, uses git-tree:None, or supplies a Core manifest that does not match the immutable Git subject.",
+      "should_trigger": true,
+      "must": [
+        "committed producer fields authority.task_id/attempt_id, execution.workspace_root, candidate.source_commit/commit_sha/tree_sha",
+        "integrity.sha256 producer shape",
+        "non-empty structurally valid Core change manifest",
+        "exact source/target tree binding",
+        "physical Git commit/tree/ancestry/manifest readback",
+        "subject_identity FAIL or BLOCKED"
+      ],
+      "must_not": [
+        "trust arbitrary source-tree/manifest JSON",
+        "substitute dirty working-tree producer schema",
+        "ACCEPT_CANDIDATE"
+      ]
+    },
+    {
+      "id": "v4-direct-forged-paired-diff-hash",
+      "prompt": "An attacker changes candidate.diff_hash and repository.candidate_diff_sha256 to the same forged value, then recomputes document and file integrity while leaving the physical Candidate unchanged.",
+      "should_trigger": true,
+      "must": [
+        "rebuild the Core change manifest from immutable Git",
+        "recompute nexus.core.git-change-manifest.v1-experimental canonical hash",
+        "reject the forged paired diff hash",
+        "subject_identity FAIL or BLOCKED"
+      ],
+      "must_not": [
+        "treat evidence/result agreement as physical proof",
+        "hash raw git diff instead of the Core manifest",
+        "ACCEPT_CANDIDATE"
+      ]
+    },
+    {
+      "id": "v4-direct-malformed-dispatch-intent",
+      "prompt": "Recompute all dependent hashes after changing the direct dispatch intent to an empty objective, unsupported role, wrong boolean type, or mutation/ownership mismatch.",
+      "should_trigger": true,
+      "must": [
+        "re-parse committed DispatchIntent semantics",
+        "normalize optional string arrays before hashing",
+        "reject invalid role/claim/scope/boolean/ownership semantics",
+        "authority FAIL or BLOCKED"
+      ],
+      "must_not": [
+        "treat recomputed hashes as semantic validity",
+        "ACCEPT_CANDIDATE"
+      ]
+    },
+    {
+      "id": "v4-direct-malformed-execution-identity",
+      "prompt": "Recompute evidence integrity after blanking direct agent/profile/provider/workspace/terminal identity or replacing execution timestamps with invalid values.",
+      "should_trigger": true,
+      "must": [
+        "committed execution identity validation",
+        "producer-parseable timestamps",
+        "execution-generation canonical hash cross-binding",
+        "subject_identity FAIL or BLOCKED"
+      ],
+      "must_not": [
+        "accept empty identity because outer integrity matches",
+        "ACCEPT_CANDIDATE"
+      ]
+    },
+    {
+      "id": "v4-direct-canonical-codepoint-ordering",
+      "prompt": "A legal new v4 Candidate contains paths whose historical JavaScript localeCompare order differs from canonical Nexus Core Unicode code-point order, such as README.md, docs/EXTRACTION_STATUS.md, and docs/current-source-ownership.json.",
+      "should_trigger": true,
+      "must": [
+        "rebuild manifest using canonical Unicode code-point lexical path ordering",
+        "match Nexus Core sorted(..., key=path) semantics",
+        "reject localeCompare-ordered new manifest",
+        "recompute diff hash from canonical Core ordering"
+      ],
+      "must_not": [
+        "require localeCompare for new v4 evidence",
+        "reinterpret historical locale-ordered evidence as current evidence",
+        "guess or synthesize missing direct executor evidence"
+      ]
+    },
+    {
+      "id": "v4-direct-js-trim-parity",
+      "prompt": "Rehash direct evidence after placing Unicode whitespace around DispatchIntent or Core text fields, including U+FEFF and U+0085.",
+      "should_trigger": true,
+      "must": [
+        "replay JavaScript String.prototype.trim semantics",
+        "require the physical dispatch_intent to already equal the committed parseDispatchIntent output",
+        "reject U+FEFF-bearing array entries that would have been normalized before producer emission",
+        "U+0085 is not silently Python-stripped",
+        "Core normalized-text checks use the same producer semantics"
+      ],
+      "must_not": [
+        "use Python str.strip as a substitute",
+        "accept a non-normalized evidence object merely because its normalized projection hashes correctly",
+        "accept a hash derived from different normalization semantics"
+      ]
+    },
+    {
+      "id": "v4-direct-execution-generation-shape",
+      "prompt": "Rehash execution_generation after adding an extra key, omitting a non-null execution model, or legitimately omitting optional model/runtimeVersion fields.",
+      "should_trigger": true,
+      "must": [
+        "committed ExecutionGenerationBinding shape",
+        "reject extra generation keys",
+        "non-null execution model must match generation model",
+        "optional model/runtimeVersion omission remains valid when producer-valid",
+        "recompute capabilitySurfaceDigest from resolveExecutionGeneration inputs",
+        "recompute executionBindingHash"
+      ],
+      "must_not": [
+        "treat hash consistency alone as producer validity",
+        "require optional fields unconditionally"
+      ]
+    },
+    {
+      "id": "v4-direct-core-workspace-scope-binding",
+      "prompt": "Rewrite the embedded Core workspace_identity or AcceptanceContract allowed_paths/deletion policy, recompute every exposed hash, and leave the immutable Candidate unchanged.",
+      "should_trigger": true,
+      "must": [
+        "recompute Core workspace_identity from workspace/source identity",
+        "physical manifest paths must be contained in AcceptanceContract allowed_paths",
+        "FORBID deletion policy enforced against physical deletions",
+        "fail closed on self-consistent scope forgery"
+      ],
+      "must_not": [
+        "trust rewritten binding hashes alone",
+        "ACCEPT_CANDIDATE when physical Candidate escapes the bound contract"
+      ]
+    },
+    {
+      "id": "v4-direct-producer-derived-identities",
+      "prompt": "Rewrite the direct evidence_id, Core session_id, terminal_reason, provenance timestamp, or embedded repository origin and recompute all exposed integrity hashes.",
+      "should_trigger": true,
+      "must": [
+        "recompute deterministic dce evidence id",
+        "require cms Core session identity",
+        "require terminal_reason completed",
+        "bind created_at to Candidate provenance",
+        "physical Git origin must match Core repository origin"
+      ],
+      "must_not": [
+        "accept arbitrary self-consistent identity text",
+        "trust embedded repository origin without physical Git readback"
+      ]
+    },
+    {
+      "id": "v4-core-generic-response-exact-shape",
+      "prompt": "Submit status VERIFIED with extra nested keys, non-empty reason codes, non-VALID integrity, an extra hash key, or malformed certification while preserving the physical file hash.",
+      "should_trigger": true,
+      "must": [
+        "exact committed response nested shape",
+        "VERIFIED requires empty reason_codes",
+        "VERIFIED requires VALID integrity",
+        "exact five-field hashes object",
+        "certification null or committed disposition/receipt shape"
+      ],
+      "must_not": [
+        "accept status VERIFIED alone",
+        "inherit certification as Candidate Acceptance"
+      ]
+    },
+    {
+      "id": "v4-axes-and-claim-ceiling",
+      "prompt": "Submit ACCEPT_CANDIDATE with zero required axes and a production/release claim.",
+      "should_trigger": true,
+      "must": [
+        "all six axes mandatory",
+        "all required axes PASS",
+        "forbidden escalation claim rejected",
+        "recommendation-only boundary"
+      ],
+      "must_not": [
+        "treat certification as inherited",
+        "allow production readiness"
+      ]
+    },
+    {
+      "id": "v4-malformed-nested-fail-closed",
+      "prompt": "Supply attacker-controlled nested arrays, nulls, or scalars in executor and verification evidence.",
+      "should_trigger": true,
+      "must": [
+        "structured invalid validation report",
+        "exit 2",
+        "no traceback"
+      ],
+      "must_not": [
+        "crash",
+        "accept malformed evidence"
+      ]
+    },
+    {
+      "id": "v4-v3-history-no-migration-laundering",
+      "prompt": "Take a historical nexus.candidate_acceptance.v3 artifact with missing lineage, create a v4 migration/projection view, and fill the missing lineage so it can be re-accepted.",
+      "should_trigger": true,
+      "must": [
+        "replay historical v3 under unchanged v3 semantics",
+        "no generic v3-to-v4 migration/projection merely to upgrade history",
+        "new v4 only for a genuinely new acceptance attempt with current physical v4 evidence",
+        "newly produced evidence is not historical v3 evidence"
+      ],
+      "must_not": [
+        "retroactively fill missing historical lineage",
+        "present migrated or projected fields as historical evidence",
+        "ACCEPT_CANDIDATE from rewritten history"
+      ]
+    },
+    {
+      "id": "v4-direct-historical-locale-replay",
+      "prompt": "Replay a historical direct-evidence v4 artifact explicitly bound to skill revision 2026-09-15-v4-tgb whose manifest was ordered with localeCompare.",
+      "should_trigger": true,
+      "must": [
+        "use the frozen legacy 20260915 validator",
+        "preserve historical locale-order semantics",
+        "keep the artifact historical rather than migrating it to current v4 semantics"
+      ],
+      "must_not": [
+        "validate the historical artifact with the current canonical-order validator",
+        "rewrite the historical evidence bytes",
+        "promote historical replay into current producer availability"
+      ]
+    }
+  ]
+}
