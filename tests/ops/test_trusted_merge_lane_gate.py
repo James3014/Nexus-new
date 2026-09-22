@@ -12,13 +12,11 @@ from scripts.ops.trusted_merge_lane_gate import (
     LaneBindingError,
     canonical_hash,
     render_binding,
-    render_owner_rebind_comment,
     validate_event,
 )
 
 REPOSITORY = "James3014/Nexus-new"
 PR_NUMBER = 1061
-COMMENT_ID = 9001
 TASK_ID = "issue-1023-lane-rebind"
 ATTEMPT_ID = "attempt-1"
 CARD_PATH = "tasks/campaign/00-card.md"
@@ -33,32 +31,26 @@ def _repo(tmp_path: Path, *, card_lane: str = "GOVERNED", change_card_on_head: b
     repo.mkdir()
     subprocess.run(["git", "-C", str(repo), "init", "-b", "main"], check=True, capture_output=True)
     subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True)
-    subprocess.run(
-        ["git", "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True
-    )
+    subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True)
     card = repo / CARD_PATH
     card.parent.mkdir(parents=True)
     card.write_text(
         "# Task Card\n\n"
-        f"task_id: {chr(96)}{TASK_ID}{chr(96)}\n"
+        f"task_id: {chr(96)}{TASK_ID}{chr(96)}\\n"
         "contract_kind: TRACKED_TASK_CARD\n"
         f"execution_lane: {card_lane}\n",
         encoding="utf-8",
     )
     (repo / "README.md").write_text("base\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
-    subprocess.run(
-        ["git", "-C", str(repo), "commit", "-m", "base"], check=True, capture_output=True
-    )
+    subprocess.run(["git", "-C", str(repo), "commit", "-m", "base"], check=True, capture_output=True)
     base = _git(repo, "rev-parse", "HEAD")
     card_bytes = card.read_bytes()
     if change_card_on_head:
         card.write_text(card.read_text(encoding="utf-8") + "\nchanged: true\n", encoding="utf-8")
     (repo / "README.md").write_text("head\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
-    subprocess.run(
-        ["git", "-C", str(repo), "commit", "-m", "head"], check=True, capture_output=True
-    )
+    subprocess.run(["git", "-C", str(repo), "commit", "-m", "head"], check=True, capture_output=True)
     head = _git(repo, "rev-parse", "HEAD")
     return repo, base, head, card_bytes
 
@@ -99,7 +91,6 @@ def _binding(
             "task_card_path": None,
             "task_card_sha256": None,
             "owner_lane_rebind": None,
-            "owner_lane_rebind_comment_id": None,
         }
     else:
         card_hash = hashlib.sha256(card_bytes).hexdigest()
@@ -114,7 +105,6 @@ def _binding(
             "task_card_path": CARD_PATH,
             "task_card_sha256": card_hash,
             "owner_lane_rebind": None,
-            "owner_lane_rebind_comment_id": None,
         }
         if rebind:
             record = {
@@ -134,23 +124,8 @@ def _binding(
             }
             record["record_hash"] = canonical_hash(record)
             value["owner_lane_rebind"] = record
-            value["owner_lane_rebind_comment_id"] = COMMENT_ID
     value["binding_hash"] = canonical_hash(value)
     return value
-
-
-def _comments(
-    binding, *, author: str = "James3014", association: str = "OWNER", body: str | None = None
-):
-    record = binding["owner_lane_rebind"]
-    return [
-        {
-            "id": binding["owner_lane_rebind_comment_id"],
-            "user": {"login": author},
-            "author_association": association,
-            "body": body if body is not None else render_owner_rebind_comment(record),
-        }
-    ]
 
 
 def test_pre_enforcement_pr_keeps_compatibility(tmp_path: Path):
@@ -199,60 +174,9 @@ def test_exact_governed_to_direct_rebind_passes(tmp_path: Path, lane: str):
     result = validate_event(
         _event(base=base, head=head, body=render_binding(binding)),
         repo_root=repo,
-        comments=_comments(binding),
     )
     assert result["status"] == "PASS"
     assert result["reason"] == "OWNER_GOVERNED_TO_DIRECT_REBIND_VALID"
-
-
-def test_valid_rebind_without_durable_owner_comment_blocks(tmp_path: Path):
-    repo, base, head, card_bytes = _repo(tmp_path, card_lane="GOVERNED")
-    binding = _binding(
-        lane="DIRECT_CANONICAL",
-        head=head,
-        card_bytes=card_bytes,
-        rebind=True,
-    )
-    with pytest.raises(LaneBindingError, match="OWNER_LANE_REBIND_COMMENTS_REQUIRED"):
-        validate_event(
-            _event(base=base, head=head, body=render_binding(binding)),
-            repo_root=repo,
-        )
-
-
-def test_agent_authored_rebind_comment_blocks(tmp_path: Path):
-    repo, base, head, card_bytes = _repo(tmp_path, card_lane="GOVERNED")
-    binding = _binding(
-        lane="DIRECT_CANONICAL",
-        head=head,
-        card_bytes=card_bytes,
-        rebind=True,
-    )
-    with pytest.raises(LaneBindingError, match="OWNER_LANE_REBIND_COMMENT_AUTHOR_INVALID"):
-        validate_event(
-            _event(base=base, head=head, body=render_binding(binding)),
-            repo_root=repo,
-            comments=_comments(binding, author="automation-bot", association="MEMBER"),
-        )
-
-
-def test_owner_comment_with_mismatched_record_blocks(tmp_path: Path):
-    repo, base, head, card_bytes = _repo(tmp_path, card_lane="GOVERNED")
-    binding = _binding(
-        lane="DIRECT_CANONICAL",
-        head=head,
-        card_bytes=card_bytes,
-        rebind=True,
-    )
-    other = dict(binding["owner_lane_rebind"])
-    other["attempt_id"] = "other-attempt"
-    other["record_hash"] = canonical_hash({k: v for k, v in other.items() if k != "record_hash"})
-    with pytest.raises(LaneBindingError, match="OWNER_LANE_REBIND_COMMENT_SUBJECT_MISMATCH"):
-        validate_event(
-            _event(base=base, head=head, body=render_binding(binding)),
-            repo_root=repo,
-            comments=_comments(binding, body=render_owner_rebind_comment(other)),
-        )
 
 
 def test_governed_to_direct_without_rebind_blocks(tmp_path: Path):
@@ -308,9 +232,7 @@ def test_wrong_attempt_or_issue_blocks_exact_rebind(tmp_path: Path):
         rebind=True,
     )
     binding["attempt_id"] = "attempt-2"
-    binding["binding_hash"] = canonical_hash({
-        k: v for k, v in binding.items() if k != "binding_hash"
-    })
+    binding["binding_hash"] = canonical_hash({k: v for k, v in binding.items() if k != "binding_hash"})
     with pytest.raises(LaneBindingError, match="OWNER_LANE_REBIND_SUBJECT_MISMATCH"):
         validate_event(
             _event(base=base, head=head, body=render_binding(binding)),
