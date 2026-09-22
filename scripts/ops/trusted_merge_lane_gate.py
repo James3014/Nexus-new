@@ -21,7 +21,7 @@ END_MARKER = "NEXUS_MERGE_LANE_V1 -->"
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 SHA64 = re.compile(r"^[0-9a-f]{64}$")
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
-TASK_PATH = re.compile(r"^tasks/[A-Za-z0-9._/-]+\\.md$")
+TASK_PATH = re.compile(r"^tasks/[A-Za-z0-9._/-]+\.md$")
 
 
 class LaneBindingError(ValueError):
@@ -84,7 +84,7 @@ def extract_binding(body: Any) -> dict[str, Any]:
     if type(body) is not str:
         raise LaneBindingError("PR_BODY_REQUIRED")
     pattern = re.compile(
-        re.escape(START_MARKER) + r"\\s*(\\{.*?\\})\\s*" + re.escape(END_MARKER),
+        re.escape(START_MARKER) + r"\s*(\{.*?\})\s*" + re.escape(END_MARKER),
         re.DOTALL,
     )
     matches = pattern.findall(body)
@@ -118,9 +118,9 @@ def _task_card_metadata(card: bytes) -> tuple[str | None, str | None, str | None
         text = card.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise LaneBindingError("TASK_CARD_UTF8_INVALID") from exc
-    task = re.search(r"(?m)^task_id:\\s*`?([^\\s`]+)`?\\s*$", text)
-    lane = re.search(r"(?m)^execution_lane:\\s*`?([A-Z_]+)`?\\s*$", text)
-    attempt = re.search(r"(?m)^attempt_id:\\s*`?([^\\s`]+)`?\\s*$", text)
+    task = re.search(r"(?m)^task_id:\s*\x60?([^\s\x60]+)\x60?\s*$", text)
+    lane = re.search(r"(?m)^execution_lane:\s*\x60?([A-Z_]+)\x60?\s*$", text)
+    attempt = re.search(r"(?m)^attempt_id:\s*\x60?([^\s\x60]+)\x60?\s*$", text)
     return (
         task.group(1) if task else None,
         lane.group(1) if lane else None,
