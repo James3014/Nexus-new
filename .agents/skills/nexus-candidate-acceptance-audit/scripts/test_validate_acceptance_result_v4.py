@@ -82,9 +82,12 @@ class CandidateAcceptanceV4OrderingTests(unittest.TestCase):
 
     def test_current_manifest_rejects_legacy_locale_order(self) -> None:
         errors: list[str] = []
+        legacy_manifest = self.manifest(
+            legacy._producer_locale_order(self.paths.copy())
+        )
         self.assertFalse(
             current._validate_manifest(
-                self.manifest(legacy._producer_locale_order(self.paths.copy())),
+                legacy_manifest,
                 "a" * 40,
                 "b" * 40,
                 errors,
@@ -122,14 +125,12 @@ class CandidateAcceptanceV4OrderingTests(unittest.TestCase):
         )
 
     def test_missing_direct_evidence_fails_closed(self) -> None:
-        errors, warnings = current.validate_physical(
-            {"source": {}},
-            SimpleNamespace(
-                executor_evidence=None,
-                verification_evidence=None,
-                v3_validation_report=None,
-            ),
+        args = SimpleNamespace(
+            executor_evidence=None,
+            verification_evidence=None,
+            v3_validation_report=None,
         )
+        errors, warnings = current.validate_physical({"source": {}}, args)
         self.assertEqual(warnings, [])
         self.assertEqual(
             errors,

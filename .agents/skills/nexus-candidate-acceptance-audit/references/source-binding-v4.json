@@ -69,7 +69,10 @@
     "historical_v4_locale_replay_preserved": true,
     "historical_v4_schema_snapshot": "references/acceptance-result-schema-v4-legacy-20260915.md",
     "historical_v4_legacy_validator_sha256": "b9c2efc05e6a9c1424e8d682601db3a43d880f578e4f089baeb70adcfcf164bb",
-    "historical_v4_legacy_schema_sha256": "c930c277f766bdee0cca1a410343865a73d10b0f35eb460efd27eb4aacc1f53c"
+    "historical_v4_legacy_schema_sha256": "c930c277f766bdee0cca1a410343865a73d10b0f35eb460efd27eb4aacc1f53c",
+    "historical_v4_legacy_validator_source_archive": "scripts/archive/validate_acceptance_result_v4_legacy_20260915.source.txt",
+    "historical_v3_validator_source_archive": "scripts/archive/validate_acceptance_result_v3_20260915.source.txt",
+    "runtime_admission_validator_source_archive": "scripts/archive/validate_runtime_admission_20260915.source.txt"
   },
   "validation_status": {
     "previous_synthetic_v4_positive_fixture": "INVALIDATED_BY_IMMUTABLE_PRODUCER_REBIND",
@@ -116,7 +119,9 @@
     "issue1055_current_validator": "IMPLEMENTED_PENDING_REPOSITORY_VALIDATION",
     "issue1055_legacy_v4_replay": "FROZEN_COPY_CREATED_PENDING_HASH_CHECK",
     "issue1055_direct_producer_availability": "EXTERNAL_BLOCKED_ON_DEVSPACE_231; NO_SYNTHETIC_EVIDENCE",
-    "issue1055_ordering_regression": "PASS_6_OF_6"
+    "issue1055_ordering_regression": "PASS_6_OF_6",
+    "issue1055_repo_ruff_strategy": "RUNTIME_WRAPPERS_EXECUTE_ARCHIVED_SOURCE; HISTORICAL SOURCE BYTES PRESERVED OUTSIDE *.py",
+    "issue1055_current_v4_source_archive": "scripts/archive/validate_acceptance_result_v4_current.source.txt"
   },
   "claim_ceiling": "Issue #1055 consumer/validator source candidate only; DevSpace direct-evidence producer availability remains owned by devspace#231; no acceptance, merge, release, deployment or production claim",
   "canonical_editable_source": {
