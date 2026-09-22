@@ -18,6 +18,8 @@ ALL_LANES = DIRECT_LANES | {"GOVERNED"}
 CONTRACT_KINDS = {"OWNER_INLINE", "TRACKED_TASK_CARD"}
 START_MARKER = "<!-- NEXUS_MERGE_LANE_V1"
 END_MARKER = "NEXUS_MERGE_LANE_V1 -->"
+OWNER_REBIND_START_MARKER = "<!-- NEXUS_OWNER_LANE_REBIND_V1"
+OWNER_REBIND_END_MARKER = "NEXUS_OWNER_LANE_REBIND_V1 -->"
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 SHA64 = re.compile(r"^[0-9a-f]{64}$")
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -253,6 +255,7 @@ def validate_event(
     event: Mapping[str, Any],
     *,
     repo_root: Path,
+    comments: Any = None,
     enforcement_start_pr_number: int = ENFORCEMENT_START_PR_NUMBER,
 ) -> dict[str, Any]:
     root = _exact_dict(event, "EVENT")
@@ -290,6 +293,7 @@ def validate_event(
         "task_card_path",
         "task_card_sha256",
         "owner_lane_rebind",
+        "owner_lane_rebind_comment_id",
         "binding_hash",
     }
     if set(binding) != required_binding_fields:
@@ -314,6 +318,7 @@ def validate_event(
             "task_card_path",
             "task_card_sha256",
             "owner_lane_rebind",
+            "owner_lane_rebind_comment_id",
         ):
             if binding[field] is not None:
                 raise LaneBindingError("OWNER_INLINE_TRACKED_FIELDS_FORBIDDEN")
@@ -349,7 +354,10 @@ def validate_event(
     if lane == "GOVERNED":
         if card_lane != "GOVERNED":
             raise LaneBindingError("GOVERNED_BINDING_REQUIRES_GOVERNED_CARD")
-        if binding["owner_lane_rebind"] is not None:
+        if (
+            binding["owner_lane_rebind"] is not None
+            or binding["owner_lane_rebind_comment_id"] is not None
+        ):
             raise LaneBindingError("GOVERNED_BINDING_REBIND_FORBIDDEN")
         return {
             "schema": "nexus.trusted_merge_lane_gate_result.v1",
@@ -362,7 +370,10 @@ def validate_event(
         }
 
     if card_lane == lane:
-        if binding["owner_lane_rebind"] is not None:
+        if (
+            binding["owner_lane_rebind"] is not None
+            or binding["owner_lane_rebind_comment_id"] is not None
+        ):
             raise LaneBindingError("DIRECT_ORIGIN_REBIND_FORBIDDEN")
         return {
             "schema": "nexus.trusted_merge_lane_gate_result.v1",
@@ -414,10 +425,20 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--event-json", required=True)
     parser.add_argument("--repo-root", required=True)
+    parser.add_argument("--comments-json")
     args = parser.parse_args()
     event = json.loads(Path(args.event_json).read_text(encoding="utf-8"))
+    comments = (
+        json.loads(Path(args.comments_json).read_text(encoding="utf-8"))
+        if args.comments_json
+        else None
+    )
     try:
-        result = validate_event(event, repo_root=Path(args.repo_root))
+        result = validate_event(
+            event,
+            repo_root=Path(args.repo_root),
+            comments=comments,
+        )
     except LaneBindingError as exc:
         print(
             json.dumps(
