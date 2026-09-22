@@ -359,6 +359,29 @@ Neither direct lane requires a third-party GitHub `APPROVED` review, an
 `IndependentReviewReceipt`, `independent_acceptance_hash`, a standing-grant
 receipt, `GITHUB_MERGE`, or `github_complete_pull_request`.
 
+A tracked Task Card whose exact bytes still declare `execution_lane: GOVERNED`
+remains the effective merge-lane contract until the Owner explicitly changes it.
+To move that exact in-progress attempt to `DIRECT_CANONICAL` or
+`DIRECT_DELEGATED`, publish one typed `nexus.owner_execution_lane_rebind.v1`
+record in a durable GitHub Issue comment before merge. The record binds the
+repository, Issue, task, attempt, Task Card path and SHA-256, PR number, exact PR
+head SHA, old/new lanes, Owner identity, decision time, confirmation, and its
+canonical record hash. The fetched GitHub comment author must match the expected
+Owner identity, and its `created_at` is the durable carrier time; both decision
+and carrier must predate the merge attempt. This keeps the rebind outside the PR
+whose head it binds and avoids a circular self-hash/writeback dependency.
+
+Before the direct merge sink is used for a previously governed task, the
+coordinator must fetch the current Task Card bytes, current PR head, and durable
+rebind comment, then call `validate_direct_merge_lane()`. Missing, malformed,
+post-hoc, wrong-attempt, changed-card, moved-head, wrong-PR, or lane-mismatched
+records fail closed. Branch names, CI results, agent prose, or a caller-selected
+lane cannot substitute for Owner authority. A valid rebind supersedes the old
+GOVERNED merge-lane requirements only for that exact attempt and head; all normal
+direct verification, scope/deletion, branch-protection, fresh-main, and
+expected-head/CAS gates remain. A task that began in a genuine direct lane does
+not require this rebind.
+
 For `GOVERNED`, the primary coordinator may prepare `MERGE_INTENT` and continue
 under a current standing grant whose exact repository, Goal, coordinator, and
 action binding remains valid. Governed merge additionally requires independent

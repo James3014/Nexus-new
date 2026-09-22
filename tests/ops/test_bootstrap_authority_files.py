@@ -278,6 +278,14 @@ def test_protected_merge_requires_exact_owner_slot_not_standing_grant():
     assert "It grants no delegated-worker merge authority" in agents
     assert "For `DIRECT_CANONICAL`, the primary coordinator may use" in contract
     assert "Neither direct lane requires a third-party GitHub `APPROVED` review" in contract
+    assert "nexus.owner_execution_lane_rebind.v1" in agents
+    assert "nexus.owner_execution_lane_rebind.v1" in contract
+    assert "validate_direct_merge_lane()" in agents
+    assert "validate_direct_merge_lane()" in contract
+    assert "its `created_at` is the durable carrier time" in _norm(contract)
+    assert "A task that began in a genuine direct lane does not require this rebind" in _norm(
+        contract
+    )
     assert "For `GOVERNED`, the primary coordinator may prepare `MERGE_INTENT`" in contract
     assert "Any PR/head/base/main or evidence drift invalidates" in _norm(contract)
     assert "protected-merge semantics follow the already-selected execution lane" in _norm(merge)
