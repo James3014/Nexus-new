@@ -65,7 +65,9 @@ class SemanticAuthorityDelta:
 
 SemanticAuthorityDeltaEnvelope = SemanticAuthorityDelta
 
-_REQUIRED_FIELDS: Final = frozenset(SemanticAuthorityDelta.__dataclass_fields__)
+_ALL_FIELDS: Final = frozenset(SemanticAuthorityDelta.__dataclass_fields__)
+_OPTIONAL_FIELDS: Final = frozenset({"changed_files", "diff_lines"})
+_REQUIRED_FIELDS: Final = _ALL_FIELDS - _OPTIONAL_FIELDS
 
 
 def _typed_envelope(
@@ -76,7 +78,8 @@ def _typed_envelope(
     if not isinstance(value, Mapping):
         return None
     try:
-        if set(value) != _REQUIRED_FIELDS:
+        keys = set(value)
+        if not _REQUIRED_FIELDS.issubset(keys) or not keys.issubset(_ALL_FIELDS):
             return None
         return SemanticAuthorityDelta(**dict(value))
     except Exception:
