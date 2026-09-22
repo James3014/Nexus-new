@@ -193,9 +193,7 @@ def test_non_authoritative_descriptive_correction_is_direct():
         ("descriptive_correction", "additive_append_only"),
     ),
 )
-def test_write_kind_and_evidence_change_must_match(
-    write_kind: str, evidence_change: str
-):
+def test_write_kind_and_evidence_change_must_match(write_kind: str, evidence_change: str):
     assert (
         classify_semantic_authority_delta(
             valid_delta(write_kind=write_kind, evidence_change=evidence_change)
