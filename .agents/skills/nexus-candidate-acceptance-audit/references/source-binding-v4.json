@@ -34,8 +34,15 @@
     "dirty_source_observation_disposition": "NON_AUTHORITATIVE_FOR_TG_B_CONTRACT",
     "lineage_limitation": "final TG-A repair has no valid delegated-executor artifact and must not be laundered into DEVSPACE_DIRECT_EVIDENCE",
     "current_owner": "James3014/devspace#231",
-    "current_main_observed": "9c5ef999bbee93f59dfd8b9229a77679d4cd1bf3",
-    "current_producer_status": "NOT_INTEGRATED; #231 a3 OUTCOME_UNKNOWN; missing exact direct evidence must remain ACCEPTANCE_BLOCKED"
+    "current_producer_status": "NOT_INTEGRATED_AT_ISSUE_1055_CLOSURE_SNAPSHOT; #231 remains open; missing exact direct evidence must remain ACCEPTANCE_BLOCKED",
+    "producer_observation": {
+      "repository": "James3014/devspace",
+      "main": "e9f3f4f694377c93505c2ea76b3fb6af03ab87ef",
+      "issue": 231,
+      "issue_state": "open",
+      "issue_updated_at": "2026-09-21T23:39:00Z",
+      "freshness_rule": "snapshot only; rebind repository main, Issue #231 and physical producer evidence before each new formal direct-evidence acceptance"
+    }
   },
   "nexus_core": {
     "main": "7c3be85fe874656a17d04032c5ff93f12aa707a2",
