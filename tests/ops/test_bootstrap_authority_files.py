@@ -292,6 +292,11 @@ def test_protected_merge_requires_exact_owner_slot_not_standing_grant():
     assert "types: [opened, synchronize, reopened, ready_for_review, edited]" in workflow
     assert "trusted_merge_lane_gate.py" in workflow
     assert "merge-lane-gate.json" in workflow
+    assert "issues: read" in workflow
+    assert "pr-issue-comments.json" in workflow
+    assert "owner_lane_rebind_comment_id" in contract
+    assert "author_association: OWNER" in contract
+    assert "self-attested" in agents
     assert "For `GOVERNED`, the primary coordinator may prepare `MERGE_INTENT`" in contract
     assert "Any PR/head/base/main or evidence drift invalidates" in _norm(contract)
     assert "protected-merge semantics follow the already-selected execution lane" in _norm(merge)
