@@ -938,15 +938,10 @@ def _local_acquisition_run(job_name: str, origin: Path) -> str:
     )
     run = _named_step(job_name, step_name)["run"]
     run = run.replace('"https://github.com/$REPOSITORY.git"', shlex.quote(str(origin)))
-    run = run.replace(
+    return run.replace(
         'python "$trusted_script" runtime-builder --repo-root "$bare_repo" --workflow-sha "$WORKFLOW_SHA" --uv-executable "$(command -v uv)" --output-dir "$runtime_dir"',
         'cp -R "$RUNNER_TEMP/runtime-artifact" "$runtime_dir"',
     )
-    if job_name == "trusted-controller":
-        start = run.index("python - <<'PY'\n", run.index("anchor-event.json"))
-        end = run.index("\nPY\n", start) + len("\nPY\n")
-        run = run[:start] + "printf '[]\\n' > \"$RUNNER_TEMP/pr-issue-comments.json\"\n" + run[end:]
-    return run
 
 
 def _job_block(text: str, job_name: str, next_job_name: str) -> str:
@@ -2119,10 +2114,7 @@ def test_workflow_is_three_job_isolated_anchor():
         "trusted-verifier",
     }
     assert workflow["jobs"]["unprivileged-executor"]["permissions"] == {}
-    assert workflow["jobs"]["trusted-controller"]["permissions"] == {
-        "contents": "read",
-        "issues": "read",
-    }
+    assert workflow["jobs"]["trusted-controller"]["permissions"] == {"contents": "read"}
     assert workflow["jobs"]["trusted-verifier"]["permissions"] == {
         "contents": "read",
         "actions": "read",
