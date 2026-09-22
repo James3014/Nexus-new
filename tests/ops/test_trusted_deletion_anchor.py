@@ -945,11 +945,7 @@ def _local_acquisition_run(job_name: str, origin: Path) -> str:
     if job_name == "trusted-controller":
         start = run.index("python - <<'PY'\n", run.index("anchor-event.json"))
         end = run.index("\nPY\n", start) + len("\nPY\n")
-        run = (
-            run[:start]
-            + "printf '[]\\n' > \"$RUNNER_TEMP/pr-issue-comments.json\"\n"
-            + run[end:]
-        )
+        run = run[:start] + "printf '[]\\n' > \"$RUNNER_TEMP/pr-issue-comments.json\"\n" + run[end:]
     return run
 
 
