@@ -361,48 +361,26 @@ receipt, `GITHUB_MERGE`, or `github_complete_pull_request`.
 
 A tracked Task Card whose exact bytes still declare `execution_lane: GOVERNED`
 remains the effective merge-lane contract until the Owner explicitly changes it.
-Starting with PR #1061, every newly opened protected-merge PR must publish exactly
-one machine-readable `nexus.merge_lane_binding.v1` block in the GitHub PR body.
-The block is outside Git history, so it can bind the exact current PR head without
-a circular self-hash dependency; editing the body retriggers the trusted
-`pull_request_target` verifier on the same head.
+To move that exact in-progress attempt to `DIRECT_CANONICAL` or
+`DIRECT_DELEGATED`, publish one typed `nexus.owner_execution_lane_rebind.v1`
+record in a durable GitHub Issue comment before merge. The record binds the
+repository, Issue, task, attempt, Task Card path and SHA-256, PR number, exact PR
+head SHA, old/new lanes, Owner identity, decision time, confirmation, and its
+canonical record hash. The fetched GitHub comment author must match the expected
+Owner identity, and its `created_at` is the durable carrier time; both decision
+and carrier must predate the merge attempt. This keeps the rebind outside the PR
+whose head it binds and avoids a circular self-hash/writeback dependency.
 
-A genuine `DIRECT_CANONICAL` / `DIRECT_DELEGATED` attempt stays lightweight:
-an `OWNER_INLINE` binding carries no Task Card or rebind, while a tracked Task
-Card that already declares the same direct lane may bind its exact unchanged
-bytes/hash without a rebind. A normal `GOVERNED` attempt binds its exact
-unchanged Task Card and keeps the governed completion path.
-
-To move an exact tracked attempt from `GOVERNED` to a direct lane, the PR
-binding must contain one `nexus.owner_execution_lane_rebind.v1` record and an
-exact `owner_lane_rebind_comment_id`. The record binds repository, Issue, task,
-attempt, exact Task Card path/SHA-256, PR number, exact current PR head SHA,
-`GOVERNED` as the old lane, the requested direct lane, repository Owner
-identity, explicit Owner confirmation, and a canonical record hash. The outer
-binding has its own canonical hash.
-
-The comment ID is not self-attesting metadata. The trusted default-branch
-controller fetches the PR's GitHub issue comments with read-only `issues: read`
-permission. The referenced comment must physically exist on that PR, its
-`user.login` must equal the repository Owner, GitHub must report
-`author_association: OWNER`, and its single
-`NEXUS_OWNER_LANE_REBIND_V1` payload must exactly equal the nested rebind
-record. A bot/member comment, random prose, a forged `owner_confirmation: true`
-field, branch name, or execution-lane argument cannot substitute for that
-durable Owner carrier.
-
-The active repository ruleset already requires
-`Trusted verifier (default branch)`. Its trusted default-branch controller runs
-`scripts/ops/trusted_merge_lane_gate.py` against the exact
-`pull_request_target` event, exact base/head Task Card blobs, and fetched PR
-comments. Missing or duplicate binding, malformed JSON/schema, missing/non-Owner
-or mismatched comment carrier, Task Card mutation, wrong Issue/task/attempt/PR/
-lane, stale/moved head, owner mismatch, or record/binding hash tamper fails that
-required check before the server-bound `git_merge_pull_request` can merge. This
-is a merge precondition only: it does not mint acceptance, standing-grant,
-route, Workforce, merge, release, or production authority. Current merge-time
-Owner confirmation and every normal direct verification/scope/deletion/
-branch-protection/fresh-main/expected-head gate remain required.
+Before the direct merge sink is used for a previously governed task, the
+coordinator must fetch the current Task Card bytes, current PR head, and durable
+rebind comment, then call `validate_direct_merge_lane()`. Missing, malformed,
+post-hoc, wrong-attempt, changed-card, moved-head, wrong-PR, or lane-mismatched
+records fail closed. Branch names, CI results, agent prose, or a caller-selected
+lane cannot substitute for Owner authority. A valid rebind supersedes the old
+GOVERNED merge-lane requirements only for that exact attempt and head; all normal
+direct verification, scope/deletion, branch-protection, fresh-main, and
+expected-head/CAS gates remain. A task that began in a genuine direct lane does
+not require this rebind.
 
 For `GOVERNED`, the primary coordinator may prepare `MERGE_INTENT` and continue
 under a current standing grant whose exact repository, Goal, coordinator, and
