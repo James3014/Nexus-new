@@ -1,0 +1,10 @@
+interface:
+  display_name: Nexus Candidate Acceptance Audit
+  short_description: Verify an exact Candidate before owner approval
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - chatgpt
+  - atlas
+  allow_implicit_invocation: true

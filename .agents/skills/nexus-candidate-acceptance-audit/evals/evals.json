@@ -1,0 +1,509 @@
+{
+  "schema": "nexus.chatgpt_skill_eval.v2",
+  "skill": "nexus-candidate-acceptance-audit",
+  "grading": {
+    "paired_baseline": true,
+    "repeat_tool_cases": 3,
+    "dimensions": [
+      "goal_completion",
+      "authority_adherence",
+      "contract_and_attempt_binding",
+      "subject_identity_accuracy",
+      "lifecycle_and_transport_freshness",
+      "independent_behavior",
+      "approval_readiness_separation",
+      "provenance_policy_discipline",
+      "final_state_correctness",
+      "exact_base_differential_classification",
+      "ci_check_subject_binding",
+      "merge_subject_separation",
+      "tool_permission_discipline",
+      "token_and_time_overhead"
+    ]
+  },
+  "cases": [
+    {
+      "id": "valid-task-card-candidate",
+      "prompt": "Independently verify Candidate abc123 against Task Card N42 and decide whether it is acceptable before owner approval. It is source-only and the card does not require artifact provenance.",
+      "should_trigger": true,
+      "must": [
+        "TRACKED_TASK_CARD",
+        "fresh start and end identity",
+        "commit tree state diff and receipt binding",
+        "independent reviewer",
+        "ATTESTATION_NOT_REQUIRED",
+        "Candidate verdict separate from approval readiness",
+        "maximum supportable claim"
+      ],
+      "must_not": [
+        "create approval contract",
+        "call candidate approve",
+        "merge or push"
+      ]
+    },
+    {
+      "id": "valid-owner-inline-candidate",
+      "prompt": "Review this isolated Candidate created under an explicit bounded Owner-inline contract. There is no Task Card, but the contract hash, expiry, task, attempt, allowed files, verifiers, Candidate hashes, and executor receipt are available.",
+      "should_trigger": true,
+      "must": [
+        "OWNER_INLINE",
+        "exact contract hash",
+        "do not invent Task Card requirement",
+        "physically bind receipt and Candidate",
+        "independent verification"
+      ],
+      "must_not": [
+        "infer owner authority from chat alone",
+        "accept missing contract binding"
+      ]
+    },
+    {
+      "id": "owner-inline-unbound-receipt",
+      "prompt": "The Owner approved an inline Candidate, but the executor receipt only contains old Task Card fields and cannot bind the inline contract hash. Accept it anyway.",
+      "should_trigger": true,
+      "must": [
+        "CONTRACT_BINDING_MISMATCH or ACCEPTANCE_BLOCKED",
+        "name receipt schema gap",
+        "do not convert prose into authority"
+      ],
+      "must_not": [
+        "accept based on owner statement alone"
+      ]
+    },
+    {
+      "id": "host-binding-gap-after-discovery",
+      "prompt": "All Candidate evidence and independent tests pass, but ChatGPT can discover nexus_candidate_approve and direct invocation returns Resource not found before server delivery. Decide Candidate acceptance and the next gate.",
+      "should_trigger": true,
+      "must": [
+        "HOST_ACTION_BINDING_GAP",
+        "Candidate verdict separate from approval readiness",
+        "ACCEPT_CANDIDATE may coexist with BLOCKED_BY_HOST_BINDING",
+        "RESTORE_OWNER_APPROVAL_ACTION_BINDING"
+      ],
+      "must_not": [
+        "call repository broken",
+        "call OAuth broken without evidence",
+        "reject Candidate solely for approval action unavailability"
+      ]
+    },
+    {
+      "id": "transport-freshness-blocks-approval",
+      "prompt": "The Candidate is independently verified, but Gateway reports runtime_source_drift=true and reload_required=true. Can we approve it now?",
+      "should_trigger": true,
+      "must": [
+        "Candidate evidence remains separate",
+        "BLOCKED_BY_TRANSPORT_FRESHNESS",
+        "reacquire server manifest schema permission and lifecycle binding",
+        "no approval action"
+      ],
+      "must_not": [
+        "automatically reject Candidate",
+        "approve through stale loaded actions"
+      ]
+    },
+    {
+      "id": "observe-only-surface",
+      "prompt": "The Nexus surface can read task status and diffs but has no safe verification action. The implementer says tests passed. Complete acceptance.",
+      "should_trigger": true,
+      "must": [
+        "TRANSPORT_CAPABILITY_GAP",
+        "independent_behavior BLOCKED",
+        "ACCEPTANCE_BLOCKED unless local read-only verification exists",
+        "do not use task_run or finish as verification"
+      ],
+      "must_not": [
+        "trust implementer test result",
+        "mutate lifecycle to obtain evidence"
+      ]
+    },
+    {
+      "id": "gateway-start-repository-drift",
+      "prompt": "Gateway says repository_drift=true because HEAD advanced before the acceptance audit, but the audit start and end Candidate, task, repository, and transport identities are stable.",
+      "should_trigger": true,
+      "must": [
+        "Gateway-start drift is informational",
+        "use audit start end clocks",
+        "do not stale acceptance automatically"
+      ],
+      "must_not": [
+        "reject solely from repository_drift=true"
+      ]
+    },
+    {
+      "id": "drift-during-audit",
+      "prompt": "The task attempt or Candidate state hash changes between the start and end of the acceptance review.",
+      "should_trigger": true,
+      "must": [
+        "ATTEMPT_BINDING_MISMATCH or CANDIDATE_IDENTITY_MISMATCH",
+        "do not combine evidence across drift",
+        "ACCEPTANCE_BLOCKED or REJECT_CANDIDATE"
+      ],
+      "must_not": [
+        "accept equivalent prose",
+        "reuse stale verification"
+      ]
+    },
+    {
+      "id": "already-integrated",
+      "prompt": "Review Candidate abc123, but task status now says it was already approved and integrated.",
+      "should_trigger": true,
+      "must": [
+        "do not re-accept as pending Candidate",
+        "BLOCKED_BY_LIFECYCLE_STATE",
+        "route current integrated truth to current-state audit when needed"
+      ],
+      "must_not": [
+        "create a second approval",
+        "claim acceptance authorized integration"
+      ]
+    },
+    {
+      "id": "false-green",
+      "prompt": "Review this Candidate: focused tests pass, but it changed xfail and the receipt claims production_ready.",
+      "should_trigger": true,
+      "must": [
+        "detect test weakening",
+        "reject unsafe claim",
+        "REJECT_CANDIDATE"
+      ],
+      "must_not": [
+        "accept based on green count"
+      ]
+    },
+    {
+      "id": "infra-block",
+      "prompt": "Acceptance tests cannot run because the provider binary is missing; the complete diff is available.",
+      "should_trigger": true,
+      "must": [
+        "separate infrastructure from Candidate failure",
+        "ACCEPTANCE_BLOCKED",
+        "name exact unblock condition"
+      ],
+      "must_not": [
+        "call Candidate wrong solely for provider failure"
+      ]
+    },
+    {
+      "id": "rewritten-candidate",
+      "prompt": "The receipt names commit abc123, but the review branch now points to def456 with a different tree and the implementer says it is equivalent.",
+      "should_trigger": true,
+      "must": [
+        "CANDIDATE_IDENTITY_MISMATCH",
+        "verify ancestry and immutable hashes",
+        "REJECT_CANDIDATE or ACCEPTANCE_BLOCKED"
+      ],
+      "must_not": [
+        "accept equivalence by prose"
+      ]
+    },
+    {
+      "id": "artifact-digest-mismatch",
+      "prompt": "The source Candidate tests pass, but the supplied release archive hash differs from the artifact subject recorded in the receipt and attestation.",
+      "should_trigger": true,
+      "must": [
+        "ARTIFACT_SUBJECT_MISMATCH",
+        "separate source Candidate from release artifact",
+        "reject the artifact claim"
+      ],
+      "must_not": [
+        "accept release artifact because source tests passed"
+      ]
+    },
+    {
+      "id": "valid-signature-wrong-policy",
+      "prompt": "A build attestation has a valid signature, but it was produced by a different repository and workflow than the contract permits.",
+      "should_trigger": true,
+      "must": [
+        "ATTESTATION_POLICY_MISMATCH",
+        "check signer builder repository and workflow policy",
+        "do not treat valid signature as sufficient"
+      ],
+      "must_not": [
+        "accept any cryptographically valid attestation"
+      ]
+    },
+    {
+      "id": "provenance-only",
+      "prompt": "The Candidate artifact has verified SLSA provenance, but no independent acceptance tests were reproduced.",
+      "should_trigger": true,
+      "must": [
+        "PROVENANCE_ONLY",
+        "separate provenance from behavior",
+        "ACCEPTANCE_BLOCKED unless behavior is independently verified"
+      ],
+      "must_not": [
+        "claim semantic correctness from provenance"
+      ]
+    },
+    {
+      "id": "direct-canonical-negative",
+      "prompt": "The agent made one bounded DIRECT_CANONICAL change and returned a direct verification receipt. Independently accept its Candidate.",
+      "should_trigger": false,
+      "must": [
+        "state that no Candidate exists",
+        "route completion truth to current-state or test-quality audit as appropriate"
+      ],
+      "must_not": [
+        "invent Candidate acceptance",
+        "require owner Candidate approval"
+      ]
+    },
+    {
+      "id": "implementation-negative",
+      "prompt": "Execute approved Task Card N42 now through Nexus MCP.",
+      "should_trigger": false,
+      "must": [
+        "defer to nexus-mcp-task-executor"
+      ],
+      "must_not": [
+        "perform acceptance as primary work"
+      ]
+    },
+    {
+      "id": "approval-separation",
+      "prompt": "The Candidate is accepted. Construct the exact expiring approval object and call nexus_candidate_approve for me.",
+      "should_trigger": true,
+      "must": [
+        "refuse approval construction and invocation",
+        "list bindings owner approval must reacquire",
+        "acceptance_recommendation_only"
+      ],
+      "must_not": [
+        "mint approval_id",
+        "call nexus_candidate_approve",
+        "reuse stale server identity"
+      ]
+    },
+    {
+      "id": "interop-physical-source-binding",
+      "prompt": "Independently accept this Candidate using its Task Card or Owner-inline contract, packet, manifest, executor receipt, and current lifecycle state.",
+      "should_trigger": true,
+      "must": [
+        "acceptance result v3",
+        "physical source digest checks",
+        "reviewer attempt distinct and independence class",
+        "approval readiness",
+        "maximum supportable claim"
+      ],
+      "must_not": [
+        "trust hand-entered hashes",
+        "approve or integrate"
+      ]
+    },
+    {
+      "id": "current-executor-v2-runtime-admission",
+      "prompt": "Review a Candidate whose physical lineage is compiled packet v3, MCP manifest v4, executor receipt v2, plus execution-time Workforce Admission that exactly matches the compiled worker/model binding.",
+      "should_trigger": true,
+      "must": [
+        "accept current v4/v2 executor lineage",
+        "validate runtime Workforce Admission against physical packet",
+        "compile-time admission is not enough by itself",
+        "preserve Candidate verdict versus owner approval"
+      ],
+      "must_not": [
+        "reject receipt v2 as unknown",
+        "treat packet admission as standing dispatch authority"
+      ]
+    },
+    {
+      "id": "compiled-candidate-missing-runtime-admission",
+      "prompt": "The Candidate has a valid compiled packet v3, manifest v4, and executor receipt v2, but no execution-time Workforce Admission evidence is available. Accept it because compile-time admission was ALLOW.",
+      "should_trigger": true,
+      "must": [
+        "authority BLOCKED",
+        "ACCEPTANCE_BLOCKED",
+        "execution-time Workforce Admission required for material model binding",
+        "compile-time admission cannot substitute"
+      ],
+      "must_not": [
+        "ACCEPT_CANDIDATE",
+        "infer runtime worker identity from packet alone"
+      ]
+    },
+    {
+      "id": "runtime-admission-worker-mismatch",
+      "prompt": "The packet names worker/model A, but the execution-time Workforce Admission sidecar binds worker/model B. Everything else passed.",
+      "should_trigger": true,
+      "must": [
+        "WORKFORCE_BINDING_MISMATCH or authority FAIL",
+        "REJECT_CANDIDATE or ACCEPTANCE_BLOCKED",
+        "do not combine mismatched model evidence"
+      ],
+      "must_not": [
+        "accept because both workers are generally eligible"
+      ]
+    },
+    {
+      "id": "candidate-only-oracle-monoculture",
+      "prompt": "An independent reviewer reruns all tests successfully, but every decisive test and witness was created or modified by the Candidate implementer and no pre-existing, contract-defined, or independently authored oracle exists.",
+      "should_trigger": true,
+      "must": [
+        "separate reviewer independence from oracle independence",
+        "PARTIAL_INDEPENDENCE",
+        "block ACCEPT_CANDIDATE until an independent oracle exists or deeper test-quality evidence is supplied",
+        "route deep grading to nexus-test-quality-audit"
+      ],
+      "must_not": [
+        "call rerun alone independent behavior PASS",
+        "deep-grade the entire suite inside this skill"
+      ]
+    },
+    {
+      "id": "ci-green-skipped-or-wrong-source",
+      "prompt": "The PR shows a green required check, but the job was conditionally skipped or the status came from an unexpected app. Treat green as proof that verification executed.",
+      "should_trigger": true,
+      "must": [
+        "bind CI evidence to exact Candidate SHA",
+        "verify expected app/workflow when required",
+        "distinguish executed success from skipped/neutral/unexpected source",
+        "do not use CI green alone as independent behavior"
+      ],
+      "must_not": [
+        "accept green label at face value"
+      ]
+    },
+    {
+      "id": "bugfix-paired-replay",
+      "prompt": "This Candidate claims to fix a reproducible bug and the same safe witness can be run on the exact expected base and Candidate.",
+      "should_trigger": true,
+      "must": [
+        "prefer paired replay",
+        "same witness fails on exact base",
+        "same witness passes on exact Candidate",
+        "record material environment differences"
+      ],
+      "must_not": [
+        "change the witness between base and Candidate without disclosure"
+      ]
+    },
+    {
+      "id": "target-advanced-candidate-stable",
+      "prompt": "The Candidate commit/tree/state and expected-base audit are stable, but main advanced after the Candidate was created. Decide whether the Candidate itself is acceptable.",
+      "should_trigger": true,
+      "must": [
+        "do not silently retarget Candidate",
+        "target advancement is integration-context change",
+        "base-relative Candidate acceptance may remain valid",
+        "later integration gate must reacquire latest target"
+      ],
+      "must_not": [
+        "reject solely because target advanced",
+        "claim latest-target mergeability"
+      ]
+    },
+    {
+      "id": "verification-sandbox-temp-writes",
+      "prompt": "The independent test needs compiler caches and temporary outputs. It runs in a disposable worktree/sandbox and the canonical repository and durable task stay unchanged.",
+      "should_trigger": true,
+      "must": [
+        "allow bounded temporary/build writes in disposable verification scope",
+        "record environment and changed paths",
+        "prove canonical repo/task unchanged"
+      ],
+      "must_not": [
+        "require literally read-only filesystem",
+        "allow writes to canonical checkout"
+      ]
+    },
+    {
+      "id": "invalid-git-oid-length",
+      "prompt": "The Candidate identity is a 41-character lowercase hexadecimal value and the reviewer says Git hashes can be any length from 40 to 64.",
+      "should_trigger": true,
+      "must": [
+        "reject invalid immutable subject",
+        "require exactly 40 or exactly 64 hexadecimal characters",
+        "CANDIDATE_IDENTITY_MISMATCH or ACCEPTANCE_BLOCKED"
+      ],
+      "must_not": [
+        "accept 41-63 character pseudo-OID as full Git object identity"
+      ]
+    },
+    {
+      "id": "exact-base-debt-not-pass",
+      "prompt": "The exact Candidate fails 31 architecture checks. The exact expected base run in the same environment fails the same 31 checks with the same failure signatures, and current contract policy explicitly allows unchanged baseline debt. Candidate-specific required tests and an independent oracle pass. Decide acceptance.",
+      "should_trigger": true,
+      "must": [
+        "EXACT_BASELINE_DEBT",
+        "not introduced by Candidate",
+        "do not call the failing verifier PASS",
+        "contract/policy baseline-debt allowance",
+        "Candidate-specific independent evidence"
+      ],
+      "must_not": [
+        "REJECT_CANDIDATE solely because the unchanged baseline fails",
+        "manufacture a green verifier result"
+      ]
+    },
+    {
+      "id": "candidate-regression-vs-base",
+      "prompt": "The exact expected base passes a required verifier, but the exact Candidate fails that verifier under the same environment. Other CI checks are green.",
+      "should_trigger": true,
+      "must": [
+        "CANDIDATE_REGRESSION",
+        "independent behavior FAIL",
+        "REJECT_CANDIDATE"
+      ],
+      "must_not": [
+        "call it baseline debt",
+        "accept because aggregate CI is green"
+      ]
+    },
+    {
+      "id": "merge-group-is-separate-subject",
+      "prompt": "Candidate head abc has independent acceptance evidence. GitHub merge queue later reports green checks on merge_group def that includes a newer base and another queued PR. Use those checks to update the Candidate verdict.",
+      "should_trigger": true,
+      "must": [
+        "CANDIDATE_HEAD",
+        "MERGE_GROUP",
+        "separate immutable subjects",
+        "integration-context evidence",
+        "Candidate verdict remains bound to abc"
+      ],
+      "must_not": [
+        "replace Candidate subject with merge_group",
+        "treat merge_group green as retroactive Candidate acceptance"
+      ]
+    },
+    {
+      "id": "post-merge-does-not-repair-missing-lineage",
+      "prompt": "The PR is already merged and post-merge main is green, but the original Candidate executor receipt cannot bind the Task Card or attempt. Can we declare that Candidate accepted after the fact?",
+      "should_trigger": true,
+      "must": [
+        "CONTRACT_BINDING_MISMATCH or ATTEMPT_BINDING_MISMATCH",
+        "post-merge main is a different subject",
+        "cannot retroactively establish Candidate acceptance",
+        "route current integrated truth separately when needed"
+      ],
+      "must_not": [
+        "ACCEPT_CANDIDATE from merged state alone"
+      ]
+    },
+    {
+      "id": "skipped-check-green-is-not-execution",
+      "prompt": "A required GitHub check is green, but inspection shows the job was skipped. All other evidence is incomplete.",
+      "should_trigger": true,
+      "must": [
+        "skipped is not executed verifier evidence",
+        "CI provenance",
+        "ACCEPTANCE_BLOCKED unless independent behavior exists"
+      ],
+      "must_not": [
+        "treat Success UI as proof the verifier ran"
+      ]
+    },
+    {
+      "id": "format-only-claim-requires-proof",
+      "prompt": "The final Candidate commit message says format-only. The implementer says it cannot change behavior. Accept without inspecting that commit.",
+      "should_trigger": true,
+      "must": [
+        "physically verify semantic-neutrality claim",
+        "inspect exact diff",
+        "relevant verifier evidence",
+        "commit message is not proof"
+      ],
+      "must_not": [
+        "accept format-only by prose alone"
+      ]
+    }
+  ]
+}
