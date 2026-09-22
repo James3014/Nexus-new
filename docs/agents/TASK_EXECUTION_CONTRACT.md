@@ -37,8 +37,9 @@ already `GOVERNED` / `NEXUS_GOVERNED`.
 The corresponding fail-closed classifier returns only `DIRECT_CANONICAL` or
 `GOVERNED_REQUIRED`. A direct result requires explicit current Owner
 authorization; additive/append-only evidence or a non-authoritative descriptive
-correction; exact bound source, task, attempt, receipt, and provenance identity;
-no deletion, historical rewrite, receipt mutation, or authority transition; a
+correction; exact bound source, task, attempt, and provenance identity; no
+governed receipt solely for this direct classification; no deletion, historical
+rewrite, receipt mutation, or authority transition; a
 bounded scope, focused verifier, exact changed-file audit, no-deletion audit,
 and `git diff --check`; and no bundled protected action. It also requires every
 semantic-authority dimension to be explicitly unchanged: autonomy,
