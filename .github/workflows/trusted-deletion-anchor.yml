@@ -15,7 +15,6 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-      issues: read
     steps:
       - name: Acquire fixed trusted runtime builder
         uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
@@ -111,46 +110,12 @@ jobs:
           printf '%s\n' "commit=$WORKFLOW_SHA" "path=$golden_script_path" "blob=$golden_script_blob_id" "sha256=$golden_script_sha256" >> "$trusted_dir/trusted-source.receipt"
           test "$(git -C "$bare_repo" config --get remote.origin.url)" = "https://github.com/$REPOSITORY.git"
           python -c 'import json, os; event=json.loads(os.environ["EVENT_JSON"]); event.update(event_name=os.environ["EVENT_NAME"], workflow_ref=os.environ["WORKFLOW_REF"], workflow_sha=os.environ["WORKFLOW_SHA"], run_id=int(os.environ["RUN_ID"])); json.dump(event, open(os.environ["RUNNER_TEMP"] + "/anchor-event.json", "w"))'
-          python - <<'PY'
-          import json
-          import os
-          import urllib.parse
-          import urllib.request
-
-          event = json.loads(os.environ["EVENT_JSON"])
-          repository = os.environ["REPOSITORY"]
-          number = int(event["pull_request"]["number"])
-          token = os.environ["TRUSTED_TOKEN"]
-          comments = []
-          for page in range(1, 101):
-              query = urllib.parse.urlencode({"per_page": 100, "page": page})
-              request = urllib.request.Request(
-                  f"https://api.github.com/repos/{repository}/issues/{number}/comments?{query}",
-                  headers={
-                      "Accept": "application/vnd.github+json",
-                      "Authorization": f"Bearer {token}",
-                      "X-GitHub-Api-Version": "2022-11-28",
-                  },
-              )
-              with urllib.request.urlopen(request, timeout=30) as response:
-                  batch = json.load(response)
-              if not isinstance(batch, list):
-                  raise SystemExit("PR issue comments response is not a list")
-              comments.extend(batch)
-              if len(batch) < 100:
-                  break
-          else:
-              raise SystemExit("PR issue comments pagination did not converge")
-          with open(os.path.join(os.environ["RUNNER_TEMP"], "pr-issue-comments.json"), "w", encoding="utf-8") as handle:
-              json.dump(comments, handle, ensure_ascii=False, sort_keys=True)
-          PY
           python "$trusted_script" runtime-builder --repo-root "$bare_repo" --workflow-sha "$WORKFLOW_SHA" --uv-executable "$(command -v uv)" --output-dir "$runtime_dir"
           GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: basic $basic_auth" \
             python "$trusted_script" controller --event-json "$RUNNER_TEMP/anchor-event.json" --repo-root "$bare_repo" --output-dir "$RUNNER_TEMP/trusted-anchor" --runtime-dir "$runtime_dir"
           python "$trusted_lane_gate" \
             --event-json "$RUNNER_TEMP/anchor-event.json" \
             --repo-root "$bare_repo" \
-            --comments-json "$RUNNER_TEMP/pr-issue-comments.json" \
             > "$RUNNER_TEMP/trusted-anchor/merge-lane-gate.json"
       - name: Publish fixed external anchor
         id: external-anchor
