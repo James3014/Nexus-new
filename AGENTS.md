@@ -202,10 +202,11 @@ plus `git diff --check`, and report changed files/evidence.
 inside the existing `DIRECT_CANONICAL` boundary, not a fourth execution lane and
 not a substitute for the Owner-selected lane. For a future additive
 provenance/evidence writeback or non-authoritative descriptive correction to stay
-direct, current Owner authorization, bound source/task/attempt/receipt/provenance
+direct, current Owner authorization, bound source/task/attempt/provenance
 identity, append-only evidence semantics, zero deletion/historical rewrite/receipt
 mutation/authority transition, and bounded verification obligations must all be
-explicitly proven. Autonomy, roles/capabilities, Workforce admission,
+explicitly proven. A governed receipt is not required solely for this direct
+classification. Autonomy, roles/capabilities, Workforce admission,
 provider/model/worker authority, default route, semantic authority lineage,
 parser/verifier and independent-review requirements, forbidden/protected-ref
 actions, claim ceilings, `CapabilityPlanner`, lifecycle, Candidate, approval,
