@@ -374,25 +374,35 @@ bytes/hash without a rebind. A normal `GOVERNED` attempt binds its exact
 unchanged Task Card and keeps the governed completion path.
 
 To move an exact tracked attempt from `GOVERNED` to a direct lane, the PR
-binding must contain one `nexus.owner_execution_lane_rebind.v1` record. It binds
-repository, Issue, task, attempt, exact Task Card path/SHA-256, PR number, exact
-current PR head SHA, `GOVERNED` as the old lane, the requested direct lane,
-repository Owner identity, explicit Owner confirmation, and a canonical record
-hash. The outer binding has its own canonical hash. Random prose, branch names,
-or an execution-lane argument cannot substitute for either typed record.
+binding must contain one `nexus.owner_execution_lane_rebind.v1` record and an
+exact `owner_lane_rebind_comment_id`. The record binds repository, Issue, task,
+attempt, exact Task Card path/SHA-256, PR number, exact current PR head SHA,
+`GOVERNED` as the old lane, the requested direct lane, repository Owner
+identity, explicit Owner confirmation, and a canonical record hash. The outer
+binding has its own canonical hash.
+
+The comment ID is not self-attesting metadata. The trusted default-branch
+controller fetches the PR's GitHub issue comments with read-only `issues: read`
+permission. The referenced comment must physically exist on that PR, its
+`user.login` must equal the repository Owner, GitHub must report
+`author_association: OWNER`, and its single
+`NEXUS_OWNER_LANE_REBIND_V1` payload must exactly equal the nested rebind
+record. A bot/member comment, random prose, a forged `owner_confirmation: true`
+field, branch name, or execution-lane argument cannot substitute for that
+durable Owner carrier.
 
 The active repository ruleset already requires
 `Trusted verifier (default branch)`. Its trusted default-branch controller runs
 `scripts/ops/trusted_merge_lane_gate.py` against the exact
-`pull_request_target` event and exact base/head Task Card blobs. Missing or
-duplicate binding, malformed JSON/schema, Task Card mutation, wrong
-Issue/task/attempt/PR/lane, stale/moved head, owner mismatch, or record/binding
-hash tamper fails that required check before the server-bound
-`git_merge_pull_request` can merge. This is a merge precondition only: it does
-not mint acceptance, standing-grant, route, Workforce, merge, release, or
-production authority. Current merge-time Owner confirmation and every normal
-direct verification/scope/deletion/branch-protection/fresh-main/expected-head
-gate remain required.
+`pull_request_target` event, exact base/head Task Card blobs, and fetched PR
+comments. Missing or duplicate binding, malformed JSON/schema, missing/non-Owner
+or mismatched comment carrier, Task Card mutation, wrong Issue/task/attempt/PR/
+lane, stale/moved head, owner mismatch, or record/binding hash tamper fails that
+required check before the server-bound `git_merge_pull_request` can merge. This
+is a merge precondition only: it does not mint acceptance, standing-grant,
+route, Workforce, merge, release, or production authority. Current merge-time
+Owner confirmation and every normal direct verification/scope/deletion/
+branch-protection/fresh-main/expected-head gate remain required.
 
 For `GOVERNED`, the primary coordinator may prepare `MERGE_INTENT` and continue
 under a current standing grant whose exact repository, Goal, coordinator, and
