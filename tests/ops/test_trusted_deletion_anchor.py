@@ -2121,7 +2121,10 @@ def test_workflow_is_three_job_isolated_anchor():
         "trusted-verifier",
     }
     assert workflow["jobs"]["unprivileged-executor"]["permissions"] == {}
-    assert workflow["jobs"]["trusted-controller"]["permissions"] == {\n        "contents": "read",\n        "issues": "read",\n    }
+    assert workflow["jobs"]["trusted-controller"]["permissions"] == {
+        "contents": "read",
+        "issues": "read",
+    }
     assert workflow["jobs"]["trusted-verifier"]["permissions"] == {
         "contents": "read",
         "actions": "read",
