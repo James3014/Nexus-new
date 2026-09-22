@@ -12,11 +12,13 @@ from scripts.ops.trusted_merge_lane_gate import (
     LaneBindingError,
     canonical_hash,
     render_binding,
+    render_owner_rebind_comment,
     validate_event,
 )
 
 REPOSITORY = "James3014/Nexus-new"
 PR_NUMBER = 1061
+COMMENT_ID = 9001
 TASK_ID = "issue-1023-lane-rebind"
 ATTEMPT_ID = "attempt-1"
 CARD_PATH = "tasks/campaign/00-card.md"
@@ -97,6 +99,7 @@ def _binding(
             "task_card_path": None,
             "task_card_sha256": None,
             "owner_lane_rebind": None,
+            "owner_lane_rebind_comment_id": None,
         }
     else:
         card_hash = hashlib.sha256(card_bytes).hexdigest()
@@ -111,6 +114,7 @@ def _binding(
             "task_card_path": CARD_PATH,
             "task_card_sha256": card_hash,
             "owner_lane_rebind": None,
+            "owner_lane_rebind_comment_id": None,
         }
         if rebind:
             record = {
@@ -130,6 +134,7 @@ def _binding(
             }
             record["record_hash"] = canonical_hash(record)
             value["owner_lane_rebind"] = record
+            value["owner_lane_rebind_comment_id"] = COMMENT_ID
     value["binding_hash"] = canonical_hash(value)
     return value
 
@@ -192,6 +197,7 @@ def test_exact_governed_to_direct_rebind_passes(tmp_path: Path, lane: str):
     result = validate_event(
         _event(base=base, head=head, body=render_binding(binding)),
         repo_root=repo,
+        comments=_comments(binding),
     )
     assert result["status"] == "PASS"
     assert result["reason"] == "OWNER_GOVERNED_TO_DIRECT_REBIND_VALID"
