@@ -82,9 +82,7 @@ class CandidateAcceptanceV4OrderingTests(unittest.TestCase):
 
     def test_current_manifest_rejects_legacy_locale_order(self) -> None:
         errors: list[str] = []
-        legacy_manifest = self.manifest(
-            legacy._producer_locale_order(self.paths.copy())
-        )
+        legacy_manifest = self.manifest(legacy._producer_locale_order(self.paths.copy()))
         self.assertFalse(
             current._validate_manifest(
                 legacy_manifest,
@@ -94,10 +92,7 @@ class CandidateAcceptanceV4OrderingTests(unittest.TestCase):
             )
         )
         self.assertTrue(
-            any(
-                "canonical Unicode code-point lexical semantics" in error
-                for error in errors
-            )
+            any("canonical Unicode code-point lexical semantics" in error for error in errors)
         )
 
     def test_core_manifest_hash_uses_canonical_order(self) -> None:

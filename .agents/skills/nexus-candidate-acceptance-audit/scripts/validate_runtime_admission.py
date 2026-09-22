@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Load the frozen runtime-admission validator source."""
+
 from __future__ import annotations
 
 from pathlib import Path

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Load the current v4 Candidate Acceptance validator source."""
+
 from __future__ import annotations
 
 from pathlib import Path
