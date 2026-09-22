@@ -102,6 +102,51 @@ def render_binding(binding: Mapping[str, Any]) -> str:
     return f"{START_MARKER}\n{payload}\n{END_MARKER}"
 
 
+def render_owner_rebind_comment(rebind: Mapping[str, Any]) -> str:
+    payload = json.dumps(dict(rebind), ensure_ascii=False, indent=2, sort_keys=True)
+    return f"{OWNER_REBIND_START_MARKER}\n{payload}\n{OWNER_REBIND_END_MARKER}"
+
+
+def _extract_owner_rebind_comment(body: Any) -> dict[str, Any]:
+    if type(body) is not str:
+        raise LaneBindingError("OWNER_LANE_REBIND_COMMENT_BODY_INVALID")
+    if body.count(OWNER_REBIND_START_MARKER) != 1 or body.count(OWNER_REBIND_END_MARKER) != 1:
+        raise LaneBindingError("OWNER_LANE_REBIND_COMMENT_MARKER_INVALID")
+    start = body.index(OWNER_REBIND_START_MARKER) + len(OWNER_REBIND_START_MARKER)
+    end = body.index(OWNER_REBIND_END_MARKER, start)
+    payload = body[start:end].strip()
+    try:
+        value = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise LaneBindingError("OWNER_LANE_REBIND_COMMENT_JSON_INVALID") from exc
+    return _exact_dict(value, "OWNER_LANE_REBIND_COMMENT")
+
+
+def _validate_owner_rebind_comment(
+    comments: Any,
+    *,
+    comment_id: int,
+    expected_rebind: Mapping[str, Any],
+    owner_id: str,
+) -> None:
+    if type(comments) is not list:
+        raise LaneBindingError("OWNER_LANE_REBIND_COMMENTS_REQUIRED")
+    matches = [
+        comment
+        for comment in comments
+        if type(comment) is dict and comment.get("id") == comment_id
+    ]
+    if len(matches) != 1:
+        raise LaneBindingError("OWNER_LANE_REBIND_COMMENT_NOT_FOUND")
+    comment = matches[0]
+    user = _exact_dict(comment.get("user"), "OWNER_LANE_REBIND_COMMENT_USER")
+    if user.get("login") != owner_id or comment.get("author_association") != "OWNER":
+        raise LaneBindingError("OWNER_LANE_REBIND_COMMENT_AUTHOR_INVALID")
+    actual_rebind = _extract_owner_rebind_comment(comment.get("body"))
+    if actual_rebind != dict(expected_rebind):
+        raise LaneBindingError("OWNER_LANE_REBIND_COMMENT_SUBJECT_MISMATCH")
+
+
 def _git_show(repo_root: Path, revision: str, path: str) -> bytes:
     proc = subprocess.run(
         ["git", "-C", str(repo_root), "show", f"{revision}:{path}"],
@@ -331,7 +376,7 @@ def validate_event(
 
     if card_lane != "GOVERNED":
         raise LaneBindingError("DIRECT_REBIND_REQUIRES_GOVERNED_CARD")
-    _validate_rebind(
+    rebind = _validate_rebind(
         binding["owner_lane_rebind"],
         repository=repository,
         issue_number=issue_number,
@@ -342,6 +387,16 @@ def validate_event(
         pull_request_number=pr_number,
         head_sha=head_sha,
         requested_lane=lane,
+        owner_id=owner_id,
+    )
+    comment_id = _exact_int(
+        binding.get("owner_lane_rebind_comment_id"),
+        "OWNER_LANE_REBIND_COMMENT_ID",
+    )
+    _validate_owner_rebind_comment(
+        comments,
+        comment_id=comment_id,
+        expected_rebind=rebind,
         owner_id=owner_id,
     )
     return {
