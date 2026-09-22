@@ -116,17 +116,22 @@ not defects merely because they are not yet `NEXUS_GOVERNED`.
   direct work uses `OWNER_INLINE` or a Task Card that already declares that
   direct lane and needs no governed acceptance/rebind. A tracked Task Card whose
   exact base/head bytes still declare `GOVERNED` cannot reach the direct sink
-  merely through caller prose or an execution-lane argument: the binding must
-  contain one exact `nexus.owner_execution_lane_rebind.v1` record for the Issue,
-  task, attempt, Task Card path/hash, PR, current PR head, old/new lane, Owner,
-  and explicit Owner confirmation. The default-branch
+  merely through caller prose or an execution-lane argument. Its binding must
+  contain one exact `nexus.owner_execution_lane_rebind.v1` record plus the exact
+  GitHub PR issue-comment ID carrying that same record. The trusted controller
+  fetches comments read-only and requires the carrier comment to be authored by
+  the repository Owner with GitHub `author_association: OWNER`; self-attested
+  agent prose or a forged `owner_confirmation: true` field is insufficient.
+  The rebind binds Issue, task, attempt, Task Card path/hash, PR, current PR head,
+  old/new lane, Owner, and explicit confirmation. The default-branch
   `Trusted verifier (default branch)` executes
-  `scripts/ops/trusted_merge_lane_gate.py` against the exact PR event and exact
-  base/head Task Card bytes. Missing/duplicate/malformed binding, changed card,
-  stale/moved head, wrong Issue/task/attempt/PR/lane, or hash tamper blocks the
-  required check before `git_merge_pull_request`. A valid rebind supersedes only
-  the old lane requirement; normal direct verification and current merge-time
-  Owner confirmation remain required.
+  `scripts/ops/trusted_merge_lane_gate.py` against the exact PR event, exact
+  base/head Task Card bytes, and fetched comments. Missing/duplicate/malformed
+  binding, missing/non-Owner/mismatched durable comment, changed card, stale/moved
+  head, wrong Issue/task/attempt/PR/lane, or hash tamper blocks the required check
+  before `git_merge_pull_request`. A valid rebind supersedes only the old lane
+  requirement; normal direct verification and current merge-time Owner
+  confirmation remain required.
 - Governed protected-merge completion after independent acceptance uses the live
   host action `github_complete_pull_request` when that action is present on the
   bound MCP surface. It runs `run_github_completion_loop()`, consumes
