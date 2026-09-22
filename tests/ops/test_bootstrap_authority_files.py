@@ -470,4 +470,7 @@ def test_semantic_authority_delta_contract_is_fail_closed_future_only_and_lane_p
     assert "Any changed, missing, malformed, contradictory, unknown" in agents
     assert "GOVERNED_REQUIRED" in texts["docs/agents/TASK_EXECUTION_CONTRACT.md"]
     assert "does not approve" in contract.lower()
+    assert "future-only after this contract is integrated into `main`" in contract
+    assert "future-only after independent acceptance" not in contract
+    assert "after this contract is integrated into `main`" in agents
     assert "MERGE_INTENT" in texts["AGENTS.md"]
