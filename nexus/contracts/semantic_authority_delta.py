@@ -120,7 +120,11 @@ def classify_semantic_authority_delta(
         "descriptive_correction",
     }:
         return GOVERNED_REQUIRED
-    if type(item.evidence_change) is not str or item.evidence_change != "additive_append_only":
+    expected_change = {
+        "evidence_provenance_writeback": "additive_append_only",
+        "descriptive_correction": "non_authoritative_correction",
+    }[item.write_kind]
+    if type(item.evidence_change) is not str or item.evidence_change != expected_change:
         return GOVERNED_REQUIRED
     if not isinstance(item.authority_unchanged, Mapping):
         return GOVERNED_REQUIRED
