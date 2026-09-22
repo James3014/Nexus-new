@@ -1,0 +1,8 @@
+extend = "../../../pyproject.toml"
+force-exclude = true
+extend-exclude = [
+  "scripts/validate_acceptance_result.py",
+  "scripts/validate_acceptance_result_v4.py",
+  "scripts/validate_acceptance_result_v4_legacy_20260915.py",
+  "scripts/validate_runtime_admission.py",
+]

@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import importlib.util
+import unittest
 from pathlib import Path
 from types import SimpleNamespace
-import unittest
 
 HERE = Path(__file__).resolve().parent
 
@@ -19,7 +19,10 @@ def load(name: str, filename: str):
 
 
 current = load("candidate_acceptance_v4_current", "validate_acceptance_result_v4.py")
-legacy = load("candidate_acceptance_v4_legacy", "validate_acceptance_result_v4_legacy_20260915.py")
+legacy = load(
+    "candidate_acceptance_v4_legacy",
+    "validate_acceptance_result_v4_legacy_20260915.py",
+)
 
 
 class CandidateAcceptanceV4OrderingTests(unittest.TestCase):
@@ -48,26 +51,51 @@ class CandidateAcceptanceV4OrderingTests(unittest.TestCase):
         }
 
     def test_current_order_matches_core_codepoint_order(self) -> None:
-        self.assertEqual(current._canonical_manifest_path_order(self.paths.copy()), sorted(self.paths))
+        self.assertEqual(
+            current._canonical_manifest_path_order(self.paths.copy()),
+            sorted(self.paths),
+        )
 
     def test_historical_locale_order_remains_replayable_and_distinct(self) -> None:
         old = legacy._producer_locale_order(self.paths.copy())
         self.assertNotEqual(old, sorted(self.paths))
-        self.assertEqual(old, [
-            "docs/current-source-ownership.json",
-            "docs/EXTRACTION_STATUS.md",
-            "README.md",
-        ])
+        self.assertEqual(
+            old,
+            [
+                "docs/current-source-ownership.json",
+                "docs/EXTRACTION_STATUS.md",
+                "README.md",
+            ],
+        )
 
     def test_current_manifest_accepts_canonical_order(self) -> None:
         errors: list[str] = []
-        self.assertTrue(current._validate_manifest(self.manifest(sorted(self.paths)), "a" * 40, "b" * 40, errors))
+        self.assertTrue(
+            current._validate_manifest(
+                self.manifest(sorted(self.paths)),
+                "a" * 40,
+                "b" * 40,
+                errors,
+            )
+        )
         self.assertEqual(errors, [])
 
     def test_current_manifest_rejects_legacy_locale_order(self) -> None:
         errors: list[str] = []
-        self.assertFalse(current._validate_manifest(self.manifest(legacy._producer_locale_order(self.paths.copy())), "a" * 40, "b" * 40, errors))
-        self.assertTrue(any("canonical Unicode code-point lexical semantics" in error for error in errors))
+        self.assertFalse(
+            current._validate_manifest(
+                self.manifest(legacy._producer_locale_order(self.paths.copy())),
+                "a" * 40,
+                "b" * 40,
+                errors,
+            )
+        )
+        self.assertTrue(
+            any(
+                "canonical Unicode code-point lexical semantics" in error
+                for error in errors
+            )
+        )
 
     def test_core_manifest_hash_uses_canonical_order(self) -> None:
         manifest = self.manifest(sorted(self.paths))
@@ -76,17 +104,37 @@ class CandidateAcceptanceV4OrderingTests(unittest.TestCase):
             "nexus.core.git-change-manifest.v1-experimental",
             manifest["source_tree"],
             manifest["target_tree"],
-            [[rows[path]["path"], rows[path]["change_type"], rows[path]["before_oid"], rows[path]["after_oid"], rows[path]["before_mode"], rows[path]["after_mode"]] for path in sorted(self.paths)],
+            [
+                [
+                    rows[path]["path"],
+                    rows[path]["change_type"],
+                    rows[path]["before_oid"],
+                    rows[path]["after_oid"],
+                    rows[path]["before_mode"],
+                    rows[path]["after_mode"],
+                ]
+                for path in sorted(self.paths)
+            ],
         ]
-        self.assertEqual(current.core_manifest_hash(manifest), current.core_value_hash(expected_value))
+        self.assertEqual(
+            current.core_manifest_hash(manifest),
+            current.core_value_hash(expected_value),
+        )
 
     def test_missing_direct_evidence_fails_closed(self) -> None:
         errors, warnings = current.validate_physical(
             {"source": {}},
-            SimpleNamespace(executor_evidence=None, verification_evidence=None, v3_validation_report=None),
+            SimpleNamespace(
+                executor_evidence=None,
+                verification_evidence=None,
+                v3_validation_report=None,
+            ),
         )
         self.assertEqual(warnings, [])
-        self.assertEqual(errors, ["--executor-evidence is required for v4 physical binding"])
+        self.assertEqual(
+            errors,
+            ["--executor-evidence is required for v4 physical binding"],
+        )
 
 
 if __name__ == "__main__":
