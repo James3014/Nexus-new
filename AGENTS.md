@@ -198,6 +198,28 @@ Target, Candidate, approval, or promotion receipt and does not delegate
 implementation. Record the baseline, keep the diff scoped, run relevant checks
 plus `git diff --check`, and report changed files/evidence.
 
+`AUTHORITY_PRESERVING_EVIDENCE_WRITEBACK` is a semantic-authority classification
+inside the existing `DIRECT_CANONICAL` boundary, not a fourth execution lane and
+not a substitute for the Owner-selected lane. For a future additive
+provenance/evidence writeback or non-authoritative descriptive correction to stay
+direct, current Owner authorization, bound source/task/attempt/provenance
+identity, append-only evidence semantics, zero deletion/historical rewrite/receipt
+mutation/authority transition, and bounded verification obligations must all be
+explicitly proven. A governed receipt is not required solely for this direct
+classification. Autonomy, roles/capabilities, Workforce admission,
+provider/model/worker authority, default route, semantic authority lineage,
+parser/verifier and independent-review requirements, forbidden/protected-ref
+actions, claim ceilings, `CapabilityPlanner`, lifecycle, Candidate, approval,
+integration, merge, release, security, migration/schema, production-data,
+production, and public-claim authority must all be explicitly unchanged.
+Filename, protected-path status, line-count, model quality, or a tiny diff never
+establish that result. Any changed, missing, malformed, contradictory, unknown,
+or otherwise unprovable authority dimension fails closed to
+`GOVERNED_REQUIRED`. The classifier never returns `DIRECT_DELEGATED`, does not
+approve a diff or authorize a protected effect, and applies only to future
+classifications after this contract is integrated into `main`; it cannot
+retroactively relabel historical writebacks or the prior governed #401 attempt.
+
 Direct work becomes governed when it crosses an `escalate_to_governed_when`
 boundary in `current_operating_mode.yaml`: route, Workforce, lifecycle,
 authentication/security, migration/schema, production-data, release,

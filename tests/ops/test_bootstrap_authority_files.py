@@ -438,3 +438,39 @@ def test_direct_external_delegation_does_not_inherit_nexus_workforce_admission()
     assert "route, admission, approval, integration, merge, release" in normalized
     assert "non-self-approving" in normalized
     assert "Local output and delegated output are candidates" in normalized
+
+
+def test_semantic_authority_delta_contract_is_fail_closed_future_only_and_lane_preserving():
+    texts = _authority_texts()
+    agents = _norm(texts["AGENTS.md"])
+    contract = _norm(texts["docs/agents/TASK_EXECUTION_CONTRACT.md"])
+
+    for text in (agents, contract):
+        assert "AUTHORITY_PRESERVING_EVIDENCE_WRITEBACK" in text
+        assert "semantic authority" in text.lower()
+        assert "DIRECT_CANONICAL" in text
+        assert "DIRECT_DELEGATED" in text
+        assert "GOVERNED" in text
+        assert "filename" in text.lower()
+        assert "line-count" in text.lower()
+        assert "autonomy" in text.lower()
+        assert "worker/provider/model" in text or "provider/model/worker" in text
+        assert "default route" in text.lower() or "route/default" in text.lower()
+        assert "CapabilityPlanner" in text
+        assert "parser" in text.lower()
+        assert "verifier" in text.lower()
+        assert "claim" in text.lower()
+        assert "security" in text.lower()
+        assert "migration/schema" in text.lower()
+        assert "production-data" in text.lower()
+        assert "future" in text.lower()
+        assert "retroactive" in text.lower()
+
+    assert "not a fourth execution lane" in agents.lower()
+    assert "Any changed, missing, malformed, contradictory, unknown" in agents
+    assert "GOVERNED_REQUIRED" in texts["docs/agents/TASK_EXECUTION_CONTRACT.md"]
+    assert "does not approve" in contract.lower()
+    assert "future-only after this contract is integrated into `main`" in contract
+    assert "future-only after independent acceptance" not in contract
+    assert "after this contract is integrated into `main`" in agents
+    assert "MERGE_INTENT" in texts["AGENTS.md"]
