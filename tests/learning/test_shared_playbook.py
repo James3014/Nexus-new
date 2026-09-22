@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from nexus.learning.shared_playbook import SharedPlaybookError, load_selected_shared_playbook
+from tests.learning.test_shared_playbook_g10_promotion import _create_canonical_acceptance_receipt
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -17,6 +18,7 @@ def _copy_diagnose_skill(tmp_path: Path) -> Path:
     target = tmp_path / ".agents" / "skills" / "diagnose"
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(source, target)
+    _create_canonical_acceptance_receipt(target, set_active_status=False)
     return target
 
 
@@ -27,22 +29,25 @@ def _mutate_manifest(skill_dir: Path, mutate) -> None:
     path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
 
-def test_diagnose_shared_playbook_binds_exact_manifest_and_instructions_hashes() -> None:
-    identity = load_selected_shared_playbook("diagnose", "xray", root=REPO_ROOT, required=True)
+def test_diagnose_shared_playbook_binds_exact_manifest_and_instructions_hashes(
+    tmp_path: Path,
+) -> None:
+    _copy_diagnose_skill(tmp_path)
+    identity = load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
     assert identity is not None
     assert identity.playbook_id == "diagnose"
     assert identity.version == "1.0.0"
-    assert identity.status == "ACTIVE"
+    assert identity.status == "CANDIDATE"
     assert identity.primary is True
     assert identity.trace_authority == "DERIVED_ONLY"
-    assert identity.promotion_record_path == ".agents/skills/diagnose/promotion_record.json"
+    assert identity.promotion_record_path is None
     assert (
         identity.manifest_sha256
-        == hashlib.sha256((REPO_ROOT / identity.manifest_path).read_bytes()).hexdigest()
+        == hashlib.sha256((tmp_path / identity.manifest_path).read_bytes()).hexdigest()
     )
     assert (
         identity.instructions_sha256
-        == hashlib.sha256((REPO_ROOT / identity.instructions_path).read_bytes()).hexdigest()
+        == hashlib.sha256((tmp_path / identity.instructions_path).read_bytes()).hexdigest()
     )
 
 
