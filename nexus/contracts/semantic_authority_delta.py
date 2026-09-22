@@ -46,7 +46,6 @@ class SemanticAuthorityDelta:
     bound_source: bool
     bound_task: bool
     bound_attempt: bool
-    bound_receipt: bool
     bound_provenance: bool
     deletion: bool
     historical_rewrite: bool
@@ -102,7 +101,6 @@ def classify_semantic_authority_delta(
         "bound_source",
         "bound_task",
         "bound_attempt",
-        "bound_receipt",
         "bound_provenance",
         "deletion",
         "historical_rewrite",
@@ -138,7 +136,6 @@ def classify_semantic_authority_delta(
         and item.bound_source
         and item.bound_task
         and item.bound_attempt
-        and item.bound_receipt
         and item.bound_provenance
         and not item.deletion
         and not item.historical_rewrite
