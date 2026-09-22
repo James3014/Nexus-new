@@ -343,6 +343,16 @@ def test_missing_unknown_or_malformed_mapping_is_governed(payload: dict[str, obj
     assert classify_semantic_authority_delta(payload) == GOVERNED_REQUIRED
 
 
+def test_mapping_may_omit_descriptive_file_metadata():
+    item = valid_delta()
+    payload = {
+        key: getattr(item, key)
+        for key in SemanticAuthorityDelta.__dataclass_fields__
+        if key not in {"changed_files", "diff_lines"}
+    }
+    assert classify_semantic_authority_delta(payload) == DIRECT_CANONICAL
+
+
 def test_filename_or_tiny_diff_never_decides_result():
     assert (
         classify_semantic_authority_delta(valid_delta(changed_files=("AGENTS.md",), diff_lines=1))
