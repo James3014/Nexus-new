@@ -823,6 +823,8 @@ def _trusted_origin(
         elif script_object == "symlink":
             script_path.unlink()
             script_path.symlink_to("hostile-target.py")
+    lane_gate_path = source / "scripts/ops/trusted_merge_lane_gate.py"
+    lane_gate_path.write_bytes((ROOT / "scripts/ops/trusted_merge_lane_gate.py").read_bytes())
     golden_script_path = source / "scripts/ops/trusted_golden_verifier.py"
     golden_script_path.write_bytes((ROOT / "scripts/ops/trusted_golden_verifier.py").read_bytes())
     evaluator_path = source / trusted_anchor.GOLDEN_EVALUATOR_PATH
