@@ -134,6 +134,18 @@ def _binding(
     return value
 
 
+def _comments(binding, *, author: str = "James3014", association: str = "OWNER", body: str | None = None):
+    record = binding["owner_lane_rebind"]
+    return [
+        {
+            "id": binding["owner_lane_rebind_comment_id"],
+            "user": {"login": author},
+            "author_association": association,
+            "body": body if body is not None else render_owner_rebind_comment(record),
+        }
+    ]
+
+
 def test_pre_enforcement_pr_keeps_compatibility(tmp_path: Path):
     repo, base, head, _ = _repo(tmp_path)
     result = validate_event(
@@ -183,6 +195,58 @@ def test_exact_governed_to_direct_rebind_passes(tmp_path: Path, lane: str):
     )
     assert result["status"] == "PASS"
     assert result["reason"] == "OWNER_GOVERNED_TO_DIRECT_REBIND_VALID"
+
+
+def test_valid_rebind_without_durable_owner_comment_blocks(tmp_path: Path):
+    repo, base, head, card_bytes = _repo(tmp_path, card_lane="GOVERNED")
+    binding = _binding(
+        lane="DIRECT_CANONICAL",
+        head=head,
+        card_bytes=card_bytes,
+        rebind=True,
+    )
+    with pytest.raises(LaneBindingError, match="OWNER_LANE_REBIND_COMMENTS_REQUIRED"):
+        validate_event(
+            _event(base=base, head=head, body=render_binding(binding)),
+            repo_root=repo,
+        )
+
+
+def test_agent_authored_rebind_comment_blocks(tmp_path: Path):
+    repo, base, head, card_bytes = _repo(tmp_path, card_lane="GOVERNED")
+    binding = _binding(
+        lane="DIRECT_CANONICAL",
+        head=head,
+        card_bytes=card_bytes,
+        rebind=True,
+    )
+    with pytest.raises(LaneBindingError, match="OWNER_LANE_REBIND_COMMENT_AUTHOR_INVALID"):
+        validate_event(
+            _event(base=base, head=head, body=render_binding(binding)),
+            repo_root=repo,
+            comments=_comments(binding, author="automation-bot", association="MEMBER"),
+        )
+
+
+def test_owner_comment_with_mismatched_record_blocks(tmp_path: Path):
+    repo, base, head, card_bytes = _repo(tmp_path, card_lane="GOVERNED")
+    binding = _binding(
+        lane="DIRECT_CANONICAL",
+        head=head,
+        card_bytes=card_bytes,
+        rebind=True,
+    )
+    other = dict(binding["owner_lane_rebind"])
+    other["attempt_id"] = "other-attempt"
+    other["record_hash"] = canonical_hash(
+        {k: v for k, v in other.items() if k != "record_hash"}
+    )
+    with pytest.raises(LaneBindingError, match="OWNER_LANE_REBIND_COMMENT_SUBJECT_MISMATCH"):
+        validate_event(
+            _event(base=base, head=head, body=render_binding(binding)),
+            repo_root=repo,
+            comments=_comments(binding, body=render_owner_rebind_comment(other)),
+        )
 
 
 def test_governed_to_direct_without_rebind_blocks(tmp_path: Path):
