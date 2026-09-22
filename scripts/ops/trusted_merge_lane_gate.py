@@ -83,15 +83,15 @@ def _task_path(value: Any) -> str:
 def extract_binding(body: Any) -> dict[str, Any]:
     if type(body) is not str:
         raise LaneBindingError("PR_BODY_REQUIRED")
-    pattern = re.compile(
-        re.escape(START_MARKER) + r"\s*(\{.*?\})\s*" + re.escape(END_MARKER),
-        re.DOTALL,
-    )
-    matches = pattern.findall(body)
-    if len(matches) != 1:
+    if body.count(START_MARKER) != 1 or body.count(END_MARKER) != 1:
         raise LaneBindingError("EXACTLY_ONE_MERGE_LANE_BINDING_REQUIRED")
+    start = body.index(START_MARKER) + len(START_MARKER)
+    end = body.index(END_MARKER, start)
+    payload = body[start:end].strip()
+    if not payload:
+        raise LaneBindingError("MERGE_LANE_BINDING_JSON_INVALID")
     try:
-        value = json.loads(matches[0])
+        value = json.loads(payload)
     except json.JSONDecodeError as exc:
         raise LaneBindingError("MERGE_LANE_BINDING_JSON_INVALID") from exc
     return _exact_dict(value, "MERGE_LANE_BINDING")
