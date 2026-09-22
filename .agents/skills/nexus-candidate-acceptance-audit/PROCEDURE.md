@@ -280,7 +280,7 @@ Return the human report using `references/acceptance-template.md`, the validated
 
 ## Skill evaluation
 
-Use `evals/evals.json`. Grade contract/attempt binding, current executor lineage, runtime Workforce Admission binding, exact Git identity, lifecycle/transport freshness, exact-base differential classification, verification isolation, oracle independence, paired replay when applicable, CI/check subject binding, merge-subject separation, anti-false-green controls, provenance policy, approval-readiness separation, claim discipline, and refusal to mutate.
+Use `references/evals.json`. Grade contract/attempt binding, current executor lineage, runtime Workforce Admission binding, exact Git identity, lifecycle/transport freshness, exact-base differential classification, verification isolation, oracle independence, paired replay when applicable, CI/check subject binding, merge-subject separation, anti-false-green controls, provenance policy, approval-readiness separation, claim discipline, and refusal to mutate.
 
 ## Cross-Skill handoff
 
