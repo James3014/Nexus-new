@@ -139,7 +139,9 @@ def _binding(
     return value
 
 
-def _comments(binding, *, author: str = "James3014", association: str = "OWNER", body: str | None = None):
+def _comments(
+    binding, *, author: str = "James3014", association: str = "OWNER", body: str | None = None
+):
     record = binding["owner_lane_rebind"]
     return [
         {
@@ -244,9 +246,7 @@ def test_owner_comment_with_mismatched_record_blocks(tmp_path: Path):
     )
     other = dict(binding["owner_lane_rebind"])
     other["attempt_id"] = "other-attempt"
-    other["record_hash"] = canonical_hash(
-        {k: v for k, v in other.items() if k != "record_hash"}
-    )
+    other["record_hash"] = canonical_hash({k: v for k, v in other.items() if k != "record_hash"})
     with pytest.raises(LaneBindingError, match="OWNER_LANE_REBIND_COMMENT_SUBJECT_MISMATCH"):
         validate_event(
             _event(base=base, head=head, body=render_binding(binding)),
@@ -308,9 +308,9 @@ def test_wrong_attempt_or_issue_blocks_exact_rebind(tmp_path: Path):
         rebind=True,
     )
     binding["attempt_id"] = "attempt-2"
-    binding["binding_hash"] = canonical_hash({
-        k: v for k, v in binding.items() if k != "binding_hash"
-    })
+    binding["binding_hash"] = canonical_hash(
+        {k: v for k, v in binding.items() if k != "binding_hash"}
+    )
     with pytest.raises(LaneBindingError, match="OWNER_LANE_REBIND_SUBJECT_MISMATCH"):
         validate_event(
             _event(base=base, head=head, body=render_binding(binding)),

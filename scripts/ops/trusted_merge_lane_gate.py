@@ -134,9 +134,7 @@ def _validate_owner_rebind_comment(
     if type(comments) is not list:
         raise LaneBindingError("OWNER_LANE_REBIND_COMMENTS_REQUIRED")
     matches = [
-        comment
-        for comment in comments
-        if type(comment) is dict and comment.get("id") == comment_id
+        comment for comment in comments if type(comment) is dict and comment.get("id") == comment_id
     ]
     if len(matches) != 1:
         raise LaneBindingError("OWNER_LANE_REBIND_COMMENT_NOT_FOUND")
