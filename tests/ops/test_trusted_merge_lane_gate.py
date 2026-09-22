@@ -308,9 +308,9 @@ def test_wrong_attempt_or_issue_blocks_exact_rebind(tmp_path: Path):
         rebind=True,
     )
     binding["attempt_id"] = "attempt-2"
-    binding["binding_hash"] = canonical_hash(
-        {k: v for k, v in binding.items() if k != "binding_hash"}
-    )
+    binding["binding_hash"] = canonical_hash({
+        k: v for k, v in binding.items() if k != "binding_hash"
+    })
     with pytest.raises(LaneBindingError, match="OWNER_LANE_REBIND_SUBJECT_MISMATCH"):
         validate_event(
             _event(base=base, head=head, body=render_binding(binding)),
