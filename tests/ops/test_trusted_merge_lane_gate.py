@@ -31,26 +31,32 @@ def _repo(tmp_path: Path, *, card_lane: str = "GOVERNED", change_card_on_head: b
     repo.mkdir()
     subprocess.run(["git", "-C", str(repo), "init", "-b", "main"], check=True, capture_output=True)
     subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True)
-    subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True
+    )
     card = repo / CARD_PATH
     card.parent.mkdir(parents=True)
     card.write_text(
         "# Task Card\n\n"
-        f"task_id: {chr(96)}{TASK_ID}{chr(96)}\\n"
+        f"task_id: {chr(96)}{TASK_ID}{chr(96)}\n"
         "contract_kind: TRACKED_TASK_CARD\n"
         f"execution_lane: {card_lane}\n",
         encoding="utf-8",
     )
     (repo / "README.md").write_text("base\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
-    subprocess.run(["git", "-C", str(repo), "commit", "-m", "base"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-m", "base"], check=True, capture_output=True
+    )
     base = _git(repo, "rev-parse", "HEAD")
     card_bytes = card.read_bytes()
     if change_card_on_head:
         card.write_text(card.read_text(encoding="utf-8") + "\nchanged: true\n", encoding="utf-8")
     (repo / "README.md").write_text("head\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
-    subprocess.run(["git", "-C", str(repo), "commit", "-m", "head"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-m", "head"], check=True, capture_output=True
+    )
     head = _git(repo, "rev-parse", "HEAD")
     return repo, base, head, card_bytes
 
@@ -232,7 +238,9 @@ def test_wrong_attempt_or_issue_blocks_exact_rebind(tmp_path: Path):
         rebind=True,
     )
     binding["attempt_id"] = "attempt-2"
-    binding["binding_hash"] = canonical_hash({k: v for k, v in binding.items() if k != "binding_hash"})
+    binding["binding_hash"] = canonical_hash({
+        k: v for k, v in binding.items() if k != "binding_hash"
+    })
     with pytest.raises(LaneBindingError, match="OWNER_LANE_REBIND_SUBJECT_MISMATCH"):
         validate_event(
             _event(base=base, head=head, body=render_binding(binding)),
