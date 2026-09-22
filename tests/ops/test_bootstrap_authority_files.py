@@ -278,6 +278,20 @@ def test_protected_merge_requires_exact_owner_slot_not_standing_grant():
     assert "It grants no delegated-worker merge authority" in agents
     assert "For `DIRECT_CANONICAL`, the primary coordinator may use" in contract
     assert "Neither direct lane requires a third-party GitHub `APPROVED` review" in contract
+    workflow = (ROOT / ".github/workflows/trusted-deletion-anchor.yml").read_text(encoding="utf-8")
+    assert "nexus.merge_lane_binding.v1" in agents
+    assert "nexus.merge_lane_binding.v1" in contract
+    assert "nexus.owner_execution_lane_rebind.v1" in agents
+    assert "nexus.owner_execution_lane_rebind.v1" in contract
+    assert "scripts/ops/trusted_merge_lane_gate.py" in agents
+    assert "scripts/ops/trusted_merge_lane_gate.py" in contract
+    assert "Starting with PR #1061" in agents
+    assert "Starting with PR #1061" in contract
+    assert "Trusted verifier (default branch)" in agents
+    assert "Trusted verifier (default branch)" in contract
+    assert "types: [opened, synchronize, reopened, ready_for_review, edited]" in workflow
+    assert "trusted_merge_lane_gate.py" in workflow
+    assert "merge-lane-gate.json" in workflow
     assert "For `GOVERNED`, the primary coordinator may prepare `MERGE_INTENT`" in contract
     assert "Any PR/head/base/main or evidence drift invalidates" in _norm(contract)
     assert "protected-merge semantics follow the already-selected execution lane" in _norm(merge)

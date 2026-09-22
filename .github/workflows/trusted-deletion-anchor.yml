@@ -2,7 +2,7 @@ name: Trusted deletion-evidence bootstrap anchor
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
 
 permissions: {}
 
@@ -86,6 +86,17 @@ jobs:
           test "$(git hash-object "$trusted_script")" = "$script_blob_id"
           script_sha256="$(sha256sum "$trusted_script" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "$trusted_script" | cut -d' ' -f1)"
           printf '%s\n' "commit=$WORKFLOW_SHA" "path=$script_path" "blob=$script_blob_id" "sha256=$script_sha256" > "$trusted_dir/trusted-source.receipt"
+          lane_gate_path='scripts/ops/trusted_merge_lane_gate.py'
+          lane_gate_entry="$(git -C "$bare_repo" ls-tree "$WORKFLOW_SHA" -- "$lane_gate_path")"
+          lane_gate_blob_id="$(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA:$lane_gate_path")"
+          test "$lane_gate_entry" = "100644 blob $lane_gate_blob_id	$lane_gate_path"
+          test "$(git -C "$bare_repo" cat-file -t "$WORKFLOW_SHA:$lane_gate_path")" = blob
+          trusted_lane_gate="$trusted_dir/trusted_merge_lane_gate.py"
+          git -C "$bare_repo" cat-file blob "$WORKFLOW_SHA:$lane_gate_path" > "$trusted_lane_gate"
+          test "$(stat -c '%a' "$trusted_lane_gate" 2>/dev/null || stat -f '%Lp' "$trusted_lane_gate")" = 644
+          test "$(git hash-object "$trusted_lane_gate")" = "$lane_gate_blob_id"
+          lane_gate_sha256="$(sha256sum "$trusted_lane_gate" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "$trusted_lane_gate" | cut -d' ' -f1)"
+          printf '%s\n' "commit=$WORKFLOW_SHA" "path=$lane_gate_path" "blob=$lane_gate_blob_id" "sha256=$lane_gate_sha256" >> "$trusted_dir/trusted-source.receipt"
           golden_script_path='scripts/ops/trusted_golden_verifier.py'
           golden_script_entry="$(git -C "$bare_repo" ls-tree "$WORKFLOW_SHA" -- "$golden_script_path")"
           golden_script_blob_id="$(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA:$golden_script_path")"
@@ -102,6 +113,10 @@ jobs:
           python "$trusted_script" runtime-builder --repo-root "$bare_repo" --workflow-sha "$WORKFLOW_SHA" --uv-executable "$(command -v uv)" --output-dir "$runtime_dir"
           GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: basic $basic_auth" \
             python "$trusted_script" controller --event-json "$RUNNER_TEMP/anchor-event.json" --repo-root "$bare_repo" --output-dir "$RUNNER_TEMP/trusted-anchor" --runtime-dir "$runtime_dir"
+          python "$trusted_lane_gate" \
+            --event-json "$RUNNER_TEMP/anchor-event.json" \
+            --repo-root "$bare_repo" \
+            > "$RUNNER_TEMP/trusted-anchor/merge-lane-gate.json"
       - name: Publish fixed external anchor
         id: external-anchor
         run: |
@@ -260,6 +275,8 @@ jobs:
           set -euo pipefail
           test -f "$RUNNER_TEMP/trusted-anchor/evidence/raw-evidence.json"
           cp "$RUNNER_TEMP/trusted-anchor/evidence/raw-evidence.json" "$RUNNER_TEMP/trusted-anchor/raw-evidence.json"
+          test -f "$RUNNER_TEMP/trusted-anchor/merge-lane-gate.json"
+          python -c 'import json,os; p=json.load(open(os.environ["RUNNER_TEMP"] + "/trusted-anchor/merge-lane-gate.json", encoding="utf-8")); assert p["status"] == "PASS"; assert p["pull_request_number"] == int(os.environ["EXPECTED_PULL_REQUEST_NUMBER"]); assert p["head_sha"] == os.environ["EXPECTED_HEAD_SHA"]'
           python "$RUNNER_TEMP/trusted-verifier-source/trusted_deletion_anchor.py" verifier --bundle-dir "$RUNNER_TEMP/trusted-anchor" --expected-workflow-ref "$EXPECTED_WORKFLOW_REF" --expected-workflow-sha "$EXPECTED_WORKFLOW_SHA" --expected-run-id "$EXPECTED_RUN_ID" --verify-evidence "$RUNNER_TEMP/trusted-anchor/raw-evidence.json" --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256" --expected-external-anchor-sha256 "$EXPECTED_EXTERNAL_ANCHOR_SHA256" --expected-event-name "$EXPECTED_EVENT_NAME" --expected-repository "$EXPECTED_REPOSITORY" --expected-default-branch "$EXPECTED_DEFAULT_BRANCH" --expected-pull-request-number "$EXPECTED_PULL_REQUEST_NUMBER" --expected-base-sha "$EXPECTED_BASE_SHA" --expected-head-sha "$EXPECTED_HEAD_SHA"
       - name: Verify exact-head Golden corpus with trusted default-branch source
         env:

@@ -359,6 +359,41 @@ Neither direct lane requires a third-party GitHub `APPROVED` review, an
 `IndependentReviewReceipt`, `independent_acceptance_hash`, a standing-grant
 receipt, `GITHUB_MERGE`, or `github_complete_pull_request`.
 
+A tracked Task Card whose exact bytes still declare `execution_lane: GOVERNED`
+remains the effective merge-lane contract until the Owner explicitly changes it.
+Starting with PR #1061, every newly opened protected-merge PR must publish exactly
+one machine-readable `nexus.merge_lane_binding.v1` block in the GitHub PR body.
+The block is outside Git history, so it can bind the exact current PR head without
+a circular self-hash dependency; editing the body retriggers the trusted
+`pull_request_target` verifier on the same head.
+
+A genuine `DIRECT_CANONICAL` / `DIRECT_DELEGATED` attempt stays lightweight:
+an `OWNER_INLINE` binding carries no Task Card or rebind, while a tracked Task
+Card that already declares the same direct lane may bind its exact unchanged
+bytes/hash without a rebind. A normal `GOVERNED` attempt binds its exact
+unchanged Task Card and keeps the governed completion path.
+
+To move an exact tracked attempt from `GOVERNED` to a direct lane, the PR
+binding must contain one `nexus.owner_execution_lane_rebind.v1` record. It binds
+repository, Issue, task, attempt, exact Task Card path/SHA-256, PR number, exact
+current PR head SHA, `GOVERNED` as the old lane, the requested direct lane,
+repository Owner identity, explicit Owner confirmation, and a canonical record
+hash. The outer binding has its own canonical hash. Random prose, branch names,
+or an execution-lane argument cannot substitute for either typed record.
+
+The active repository ruleset already requires
+`Trusted verifier (default branch)`. Its trusted default-branch controller runs
+`scripts/ops/trusted_merge_lane_gate.py` against the exact
+`pull_request_target` event and exact base/head Task Card blobs. Missing or
+duplicate binding, malformed JSON/schema, Task Card mutation, wrong
+Issue/task/attempt/PR/lane, stale/moved head, owner mismatch, or record/binding
+hash tamper fails that required check before the server-bound
+`git_merge_pull_request` can merge. This is a merge precondition only: it does
+not mint acceptance, standing-grant, route, Workforce, merge, release, or
+production authority. Current merge-time Owner confirmation and every normal
+direct verification/scope/deletion/branch-protection/fresh-main/expected-head
+gate remain required.
+
 For `GOVERNED`, the primary coordinator may prepare `MERGE_INTENT` and continue
 under a current standing grant whose exact repository, Goal, coordinator, and
 action binding remains valid. Governed merge additionally requires independent
