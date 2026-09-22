@@ -36,7 +36,7 @@ def _repo(tmp_path: Path, *, card_lane: str = "GOVERNED", change_card_on_head: b
     card.parent.mkdir(parents=True)
     card.write_text(
         "# Task Card\n\n"
-        f"task_id: \`{TASK_ID}\`\n"
+        f"task_id: {chr(96)}{TASK_ID}{chr(96)}\\n"
         "contract_kind: TRACKED_TASK_CARD\n"
         f"execution_lane: {card_lane}\n",
         encoding="utf-8",
