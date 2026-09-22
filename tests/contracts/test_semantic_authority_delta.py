@@ -153,7 +153,6 @@ def valid_delta(**overrides: object) -> SemanticAuthorityDelta:
         "bound_source": True,
         "bound_task": True,
         "bound_attempt": True,
-        "bound_receipt": True,
         "bound_provenance": True,
         "deletion": False,
         "historical_rewrite": False,
@@ -286,10 +285,15 @@ def test_every_authority_dimension_must_be_explicitly_unchanged(dimension: str):
 
 @pytest.mark.parametrize(
     "field",
-    ("bound_source", "bound_task", "bound_attempt", "bound_receipt", "bound_provenance"),
+    ("bound_source", "bound_task", "bound_attempt", "bound_provenance"),
 )
 def test_missing_bound_identity_is_governed(field: str):
     assert classify_semantic_authority_delta(valid_delta(**{field: False})) == GOVERNED_REQUIRED
+
+
+def test_direct_classification_does_not_require_governed_receipt():
+    assert "bound_receipt" not in SemanticAuthorityDelta.__dataclass_fields__
+    assert classify_semantic_authority_delta(valid_delta()) == DIRECT_CANONICAL
 
 
 def test_contradictory_evidence_only_and_authority_change_is_governed():
