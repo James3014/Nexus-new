@@ -26,6 +26,38 @@ must not relabel that explicit choice. The lane governs authorization, not
 correctness: source behavior, tests, and required verifiers decide whether the
 program works.
 
+### Semantic-authority delta for evidence writeback
+
+`AUTHORITY_PRESERVING_EVIDENCE_WRITEBACK` is a semantic predicate used only to
+determine whether a future evidence/provenance writeback may remain within an
+already eligible `DIRECT_CANONICAL` lane. It is not a new execution lane, does
+not select or convert `DIRECT_DELEGATED`, and cannot downgrade an attempt that is
+already `GOVERNED` / `NEXUS_GOVERNED`.
+
+The corresponding fail-closed classifier returns only `DIRECT_CANONICAL` or
+`GOVERNED_REQUIRED`. A direct result requires explicit current Owner
+authorization; additive/append-only evidence or a non-authoritative descriptive
+correction; exact bound source, task, attempt, receipt, and provenance identity;
+no deletion, historical rewrite, receipt mutation, or authority transition; a
+bounded scope, focused verifier, exact changed-file audit, no-deletion audit,
+and `git diff --check`; and no bundled protected action. It also requires every
+semantic-authority dimension to be explicitly unchanged: autonomy,
+roles/capabilities, Workforce admission, provider/model/worker authority,
+default route, semantic authority lineage, parser/verifier, independent review,
+forbidden/protected-ref actions, claim ceilings, `CapabilityPlanner`, lifecycle,
+Candidate, approval, integration, merge, release, security, migration/schema,
+production-data, production, and public-claim authority.
+
+Filename, protected-path status, line-count, model quality, or diff size cannot
+be mechanically compared as proof that authority is preserved. Any changed,
+missing, malformed, contradictory, unknown, false, or otherwise unprovable
+field returns `GOVERNED_REQUIRED`. This classification does not approve a diff,
+verify a Candidate, grant merge/release/production authority, or replace any
+existing verifier or acceptance gate. It is future-only after independent
+acceptance and integration and cannot be used retroactively to bless or relabel
+historical evidence, PRs, or governed attempts, including the #401 rebind that
+introduces the contract.
+
 ### Self-hosting stabilization and future default transition
 
 The current repository operating mode remains `BOOTSTRAP`, which is the
