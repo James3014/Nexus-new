@@ -216,8 +216,8 @@ establish that result. Any changed, missing, malformed, contradictory, unknown,
 or otherwise unprovable authority dimension fails closed to
 `GOVERNED_REQUIRED`. The classifier never returns `DIRECT_DELEGATED`, does not
 approve a diff or authorize a protected effect, and applies only to future
-classifications after its own acceptance/integration; it cannot retroactively
-relabel historical writebacks or this governed #401 rebind.
+classifications after this contract is integrated into `main`; it cannot
+retroactively relabel historical writebacks or the prior governed #401 attempt.
 
 Direct work becomes governed when it crosses an `escalate_to_governed_when`
 boundary in `current_operating_mode.yaml`: route, Workforce, lifecycle,
