@@ -18,17 +18,9 @@ from nexus.orchestrator.task_contract import ApprovalStatus, SelfHostedTaskContr
 NEXUS_SALVAGE_BOT_NAME = "Nexus Salvage Bot"
 NEXUS_SALVAGE_BOT_EMAIL = "nexus-salvage-bot@nexus.local"
 _DIRECT_TERMINAL_STATUSES = frozenset({
-    "FINAL_BLOCK",
-    "RETAINED_FOR_REVIEW",
-    "REJECTED",
-    "SUPERSEDED",
-    "INTEGRATED",
-    "INTEGRATION_FAILED",
-    "CANCELLED",
-    "REHEARSAL_VERIFIED",
-    "DIRECT_COMPLETED",
-    "DIRECT_RECONCILE_REQUIRED",
-    "INTEGRATED_AND_CLEANED",
+    "FINAL_BLOCK", "RETAINED_FOR_REVIEW", "REJECTED", "SUPERSEDED",
+    "INTEGRATED", "INTEGRATION_FAILED", "CANCELLED", "REHEARSAL_VERIFIED",
+    "DIRECT_COMPLETED", "DIRECT_RECONCILE_REQUIRED", "INTEGRATED_AND_CLEANED",
 })
 
 
@@ -118,24 +110,10 @@ def _domain_fingerprint(record_or_contract: Any) -> str:
     contract = _record_contract(record_or_contract)
     paths = _normalized_mutation_paths(contract)
     mode = str(_record_value(contract, "mutation_mode") or "WORKING_TREE_ONLY").upper()
-    task_id = str(
-        _record_value(contract, "task_id") or _record_value(record_or_contract, "task_id") or ""
-    ).strip()
-    controller = str(
-        _record_value(record_or_contract, "controller_worktree")
-        or _record_value(contract, "controller_repo_root")
-        or ""
-    ).strip()
-    controller_revision = str(
-        _record_value(record_or_contract, "controller_revision")
-        or _record_value(contract, "controller_revision")
-        or ""
-    ).strip()
-    target_base_revision = str(
-        _record_value(contract, "target_base_revision")
-        or _record_value(record_or_contract, "target_base_revision")
-        or ""
-    ).strip()
+    task_id = str(_record_value(contract, "task_id") or _record_value(record_or_contract, "task_id") or "").strip()
+    controller = str(_record_value(record_or_contract, "controller_worktree") or _record_value(contract, "controller_repo_root") or "").strip()
+    controller_revision = str(_record_value(record_or_contract, "controller_revision") or _record_value(contract, "controller_revision") or "").strip()
+    target_base_revision = str(_record_value(contract, "target_base_revision") or _record_value(record_or_contract, "target_base_revision") or "").strip()
     payload = {
         "task_id": task_id,
         "controller_repo_root": controller,
@@ -154,9 +132,7 @@ def _domain_fingerprint(record_or_contract: Any) -> str:
 
 
 def _validate_mutation_identity(record: Any) -> None:
-    task_id = str(
-        _record_value(record, "task_id") or _record_value(_record_contract(record), "task_id") or ""
-    ).strip()
+    task_id = str(_record_value(record, "task_id") or _record_value(_record_contract(record), "task_id") or "").strip()
     if not task_id:
         raise ValueError("MUTATION_IDENTITY_INVALID: task id is missing")
     contract = _record_contract(record)
@@ -179,11 +155,7 @@ def _validate_mutation_identity(record: Any) -> None:
         if value is None and key == "lease_id" and isinstance(lease, Mapping):
             value = lease.get(key)
         if value is None and status in {
-            "TARGET_LEASED",
-            "WORKER_RUNNING",
-            "WORKER_COMPLETED",
-            "CANDIDATE_CAPTURED",
-            "VERIFIED",
+            "TARGET_LEASED", "WORKER_RUNNING", "WORKER_COMPLETED", "CANDIDATE_CAPTURED", "VERIFIED",
         }:
             raise ValueError(f"MUTATION_IDENTITY_INVALID: {key} is missing")
         if value is not None and not str(value).strip():
@@ -200,7 +172,9 @@ def _validate_mutation_identity(record: Any) -> None:
             raise ValueError(f"MUTATION_IDENTITY_INVALID: {key} is stale")
 
     contract_hash = str(
-        _record_value(record, "contract_hash") or _record_value(contract, "contract_hash") or ""
+        _record_value(record, "contract_hash")
+        or _record_value(contract, "contract_hash")
+        or ""
     ).strip()
     expected_contract_hash = _record_value(record, "expected_contract_hash")
     if expected_contract_hash is not None and contract_hash != expected_contract_hash:
@@ -212,10 +186,7 @@ def _validate_mutation_identity(record: Any) -> None:
         or ""
     ).strip()
     expected_domain_fingerprint = _record_value(record, "expected_domain_fingerprint")
-    if (
-        expected_domain_fingerprint is not None
-        and domain_fingerprint != str(expected_domain_fingerprint).strip()
-    ):
+    if expected_domain_fingerprint is not None and domain_fingerprint != str(expected_domain_fingerprint).strip():
         raise ValueError("MUTATION_IDENTITY_INVALID: domain_fingerprint is stale")
 
     source_identity = str(
@@ -225,10 +196,7 @@ def _validate_mutation_identity(record: Any) -> None:
         or ""
     ).strip()
     expected_source_identity = _record_value(record, "expected_source_identity")
-    if (
-        expected_source_identity is not None
-        and source_identity != str(expected_source_identity).strip()
-    ):
+    if expected_source_identity is not None and source_identity != str(expected_source_identity).strip():
         raise ValueError("MUTATION_IDENTITY_INVALID: source_identity is stale")
 
     if _record_value(record, "competition_id") is not None:
@@ -261,11 +229,7 @@ def _validate_ownership_record(
     resolved_controller = (
         Path(controller_root).resolve()
         if controller_root is not None
-        else (
-            Path(str(record.get("controller_worktree") or "")).resolve()
-            if record.get("controller_worktree")
-            else None
-        )
+        else (Path(str(record.get("controller_worktree") or "")).resolve() if record.get("controller_worktree") else None)
     )
 
     record_src = str(record.get("source_identity") or "")
@@ -283,65 +247,41 @@ def _validate_ownership_record(
         # Task ID cross-check
         state_task_id = str(
             task_state.get("task_id")
-            or (
-                task_state.get("contract", {}).get("task_id")
-                if isinstance(task_state.get("contract"), Mapping)
-                else ""
-            )
+            or (task_state.get("contract", {}).get("task_id") if isinstance(task_state.get("contract"), Mapping) else "")
             or ""
         ).strip()
         rec_task_id = str(record.get("task_id") or "").strip()
         if state_task_id and rec_task_id and state_task_id != rec_task_id:
-            raise ValueError(
-                "MUTATION_IDENTITY_INVALID: task id mismatch with authoritative service state"
-            )
+            raise ValueError("MUTATION_IDENTITY_INVALID: task id mismatch with authoritative service state")
 
         # Controller worktree cross-check
         rec_ctrl = str(
             record.get("controller_worktree")
-            or (
-                rec_contract.get("controller_repo_root")
-                if isinstance(rec_contract, Mapping)
-                else ""
-            )
+            or (rec_contract.get("controller_repo_root") if isinstance(rec_contract, Mapping) else "")
             or ""
         ).strip()
         state_contract = task_state.get("contract") or {}
         state_ctrl = str(
             task_state.get("controller_worktree")
-            or (
-                state_contract.get("controller_repo_root")
-                if isinstance(state_contract, Mapping)
-                else ""
-            )
+            or (state_contract.get("controller_repo_root") if isinstance(state_contract, Mapping) else "")
             or ""
         ).strip()
         if rec_ctrl and state_ctrl and Path(rec_ctrl).resolve() != Path(state_ctrl).resolve():
-            raise ValueError(
-                "MUTATION_IDENTITY_INVALID: controller worktree mismatch with authoritative service state"
-            )
+            raise ValueError("MUTATION_IDENTITY_INVALID: controller worktree mismatch with authoritative service state")
 
         # Controller revision cross-check
         rec_rev = str(
             record.get("controller_revision")
-            or (
-                rec_contract.get("controller_revision") if isinstance(rec_contract, Mapping) else ""
-            )
+            or (rec_contract.get("controller_revision") if isinstance(rec_contract, Mapping) else "")
             or ""
         ).strip()
         state_rev = str(
             task_state.get("controller_revision")
-            or (
-                state_contract.get("controller_revision")
-                if isinstance(state_contract, Mapping)
-                else ""
-            )
+            or (state_contract.get("controller_revision") if isinstance(state_contract, Mapping) else "")
             or ""
         ).strip()
         if rec_rev and state_rev and rec_rev != state_rev:
-            raise ValueError(
-                "MUTATION_IDENTITY_INVALID: controller revision mismatch with authoritative service state"
-            )
+            raise ValueError("MUTATION_IDENTITY_INVALID: controller revision mismatch with authoritative service state")
 
         # Full canonical contract hash cross-check
         state_contract_hash = str(
@@ -351,31 +291,20 @@ def _validate_ownership_record(
             or ""
         ).strip()
         if state_contract_hash and computed_contract_hash != state_contract_hash:
-            raise ValueError(
-                "MUTATION_IDENTITY_INVALID: contract hash mismatch with authoritative service state"
-            )
+            raise ValueError("MUTATION_IDENTITY_INVALID: contract hash mismatch with authoritative service state")
 
         # Allowed paths / domain fingerprint cross-check
         if (
-            isinstance(state_contract, Mapping)
-            and ("allowed_files" in state_contract or "allowed_paths" in state_contract)
-        ) or (
-            isinstance(task_state, Mapping)
-            and ("allowed_files" in task_state or "allowed_paths" in task_state)
+            (isinstance(state_contract, Mapping) and ("allowed_files" in state_contract or "allowed_paths" in state_contract))
+            or (isinstance(task_state, Mapping) and ("allowed_files" in task_state or "allowed_paths" in task_state))
         ):
             try:
-                state_paths = _normalized_mutation_paths(
-                    state_contract if state_contract else task_state
-                )
+                state_paths = _normalized_mutation_paths(state_contract if state_contract else task_state)
                 record_paths = _normalized_mutation_paths(rec_contract if rec_contract else record)
                 if state_paths != record_paths:
-                    raise ValueError(
-                        "MUTATION_IDENTITY_INVALID: allowed paths mismatch with authoritative service state"
-                    )
+                    raise ValueError("MUTATION_IDENTITY_INVALID: allowed paths mismatch with authoritative service state")
             except ValueError as exc:
-                raise ValueError(
-                    f"MUTATION_IDENTITY_INVALID: mutation domain invalid: {exc}"
-                ) from exc
+                raise ValueError(f"MUTATION_IDENTITY_INVALID: mutation domain invalid: {exc}") from exc
 
         rec_df = str(
             record.get("domain_fingerprint")
@@ -384,34 +313,22 @@ def _validate_ownership_record(
         ).strip()
         state_df = str(
             task_state.get("domain_fingerprint")
-            or (
-                state_contract.get("domain_fingerprint")
-                if isinstance(state_contract, Mapping)
-                else ""
-            )
+            or (state_contract.get("domain_fingerprint") if isinstance(state_contract, Mapping) else "")
             or ""
         ).strip()
         if rec_df and state_df and rec_df != state_df:
-            raise ValueError(
-                "MUTATION_IDENTITY_INVALID: domain fingerprint mismatch with authoritative service state"
-            )
+            raise ValueError("MUTATION_IDENTITY_INVALID: domain fingerprint mismatch with authoritative service state")
 
         # Actual attempt ID cross-check
         state_attempt = str(task_state.get("attempt_id") or "").strip()
         rec_attempt = str(record.get("attempt_id") or "").strip()
         if state_attempt and rec_attempt and rec_attempt != state_attempt:
-            raise ValueError(
-                "MUTATION_IDENTITY_INVALID: attempt id mismatch with authoritative service state"
-            )
+            raise ValueError("MUTATION_IDENTITY_INVALID: attempt id mismatch with authoritative service state")
 
         # Source identity cross-check
-        state_source = str(
-            task_state.get("source_identity") or task_state.get("controller_source") or ""
-        ).strip()
+        state_source = str(task_state.get("source_identity") or task_state.get("controller_source") or "").strip()
         if state_source and record_src and record_src != state_source:
-            raise ValueError(
-                "MUTATION_IDENTITY_INVALID: source identity mismatch with authoritative service state"
-            )
+            raise ValueError("MUTATION_IDENTITY_INVALID: source identity mismatch with authoritative service state")
 
 
 def mutation_domains_conflict(left: Any, right: Any) -> bool:
@@ -424,26 +341,10 @@ def mutation_domains_conflict(left: Any, right: Any) -> bool:
     right_mode = str(_record_value(right_contract, "mutation_mode") or "ISOLATED_TARGET").upper()
     if left_mode == "DIRECT_CANONICAL" or right_mode == "DIRECT_CANONICAL":
         return True
-    left_controller = str(
-        _record_value(left, "controller_worktree")
-        or _record_value(left_contract, "controller_repo_root")
-        or ""
-    )
-    right_controller = str(
-        _record_value(right, "controller_worktree")
-        or _record_value(right_contract, "controller_repo_root")
-        or ""
-    )
-    left_revision = str(
-        _record_value(left, "controller_revision")
-        or _record_value(left_contract, "controller_revision")
-        or ""
-    )
-    right_revision = str(
-        _record_value(right, "controller_revision")
-        or _record_value(right_contract, "controller_revision")
-        or ""
-    )
+    left_controller = str(_record_value(left, "controller_worktree") or _record_value(left_contract, "controller_repo_root") or "")
+    right_controller = str(_record_value(right, "controller_worktree") or _record_value(right_contract, "controller_repo_root") or "")
+    left_revision = str(_record_value(left, "controller_revision") or _record_value(left_contract, "controller_revision") or "")
+    right_revision = str(_record_value(right, "controller_revision") or _record_value(right_contract, "controller_revision") or "")
     if left_controller != right_controller or left_revision != right_revision:
         return True
     left_paths = _normalized_mutation_paths(left)
@@ -602,10 +503,10 @@ def get_canonical_git_hooks_dir(base_path: Optional[Path] = None) -> Path:
     if override:
         hooks_dir = Path(override).expanduser().resolve()
     else:
-        root = base_path.resolve() if base_path else Path.cwd().resolve()
+        root = (base_path.resolve() if base_path else Path.cwd().resolve())
         if "nexus-runtime-targets" in root.parts:
             idx = root.parts.index("nexus-runtime-targets")
-            hooks_root = Path(*root.parts[: idx + 1])
+            hooks_root = Path(*root.parts[:idx + 1])
         elif root == Path("/Users/jameschen/Workspace/nexus"):
             hooks_root = Path("/Users/jameschen/Workspace/nexus-runtime-targets")
         else:
@@ -622,19 +523,13 @@ def get_canonical_git_hooks_dir(base_path: Optional[Path] = None) -> Path:
         try:
             hooks_dir.chmod(0o700)
         except Exception as exc:
-            raise RuntimeError(
-                f"failed to set permissions 0700 on canonical git hooks dir: {exc}"
-            ) from exc
+            raise RuntimeError(f"failed to set permissions 0700 on canonical git hooks dir: {exc}") from exc
         st = hooks_dir.stat()
         mode = st.st_mode & 0o777
     if mode != 0o700:
-        raise RuntimeError(
-            f"canonical git hooks dir permissions must be 0700, got {oct(mode)}: {hooks_dir}"
-        )
+        raise RuntimeError(f"canonical git hooks dir permissions must be 0700, got {oct(mode)}: {hooks_dir}")
     if st.st_uid != current_uid:
-        raise RuntimeError(
-            f"canonical git hooks dir owner {st.st_uid} does not match current process uid {current_uid}: {hooks_dir}"
-        )
+        raise RuntimeError(f"canonical git hooks dir owner {st.st_uid} does not match current process uid {current_uid}: {hooks_dir}")
 
     return hooks_dir
 
@@ -666,11 +561,7 @@ class WorktreeManager:
         git_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
         git_args = list(args)
         if not any("core.hooksPath" in a for a in args):
-            hooks_dir = (
-                get_canonical_git_hooks_dir(Path(cwd) if cwd else self.root_dir)
-                if self._ensure_hooks
-                else Path("/dev/null")
-            )
+            hooks_dir = get_canonical_git_hooks_dir(Path(cwd) if cwd else self.root_dir) if self._ensure_hooks else Path("/dev/null")
             git_args = ["-c", f"core.hooksPath={hooks_dir}", *args]
         result = subprocess.run(
             ["git", *git_args],
@@ -681,7 +572,8 @@ class WorktreeManager:
         )
         if result.returncode != 0:
             raise RuntimeError(
-                f"Git command failed: git {' '.join(args)}\nError: {result.stderr.strip()}"
+                f"Git command failed: git {' '.join(args)}\n"
+                f"Error: {result.stderr.strip()}"
             )
         return result.stdout.strip()
 
@@ -695,11 +587,7 @@ class WorktreeManager:
         git_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
         git_args = list(args)
         if not any("core.hooksPath" in a for a in args):
-            hooks_dir = (
-                get_canonical_git_hooks_dir(Path(cwd) if cwd else self.root_dir)
-                if self._ensure_hooks
-                else Path("/dev/null")
-            )
+            hooks_dir = get_canonical_git_hooks_dir(Path(cwd) if cwd else self.root_dir) if self._ensure_hooks else Path("/dev/null")
             git_args = ["-c", f"core.hooksPath={hooks_dir}", *args]
         result = subprocess.run(
             ["git", *git_args],
@@ -709,7 +597,9 @@ class WorktreeManager:
         )
         if result.returncode != 0:
             stderr = result.stderr.decode("utf-8", errors="replace").strip()
-            raise RuntimeError(f"Git command failed: git {' '.join(args)}\nError: {stderr}")
+            raise RuntimeError(
+                f"Git command failed: git {' '.join(args)}\nError: {stderr}"
+            )
         return result.stdout
 
     def get_worktree_path(self, task_id: str) -> Path:
@@ -730,7 +620,9 @@ class WorktreeManager:
             }
             if str(worktree_path.resolve()) in registered_paths:
                 return str(worktree_path.resolve())
-            raise RuntimeError(f"existing path is not a registered worktree: {worktree_path}")
+            raise RuntimeError(
+                f"existing path is not a registered worktree: {worktree_path}"
+            )
 
         try:
             self._run_git(["rev-parse", "--verify", branch_name])
@@ -794,9 +686,7 @@ class WorktreeManager:
         with self._reservation_lock(controller_root):
             sig = inspect.signature(self._create_lease_locked)
             if "attempt_id" in sig.parameters:
-                return self._create_lease_locked(
-                    contract, task_states=task_states, attempt_id=attempt_id
-                )
+                return self._create_lease_locked(contract, task_states=task_states, attempt_id=attempt_id)
             return self._create_lease_locked(contract, task_states=task_states)
 
     def create_precommitted_lease(
@@ -811,25 +701,15 @@ class WorktreeManager:
         attempt_id: Optional[str] = None,
     ) -> TargetWorktreeLease:
         """Lease an exact-base Target and detach it at an existing Candidate."""
-        if (
-            candidate_commit is not None
-            and candidate_commit_sha is not None
-            and candidate_commit != candidate_commit_sha
-        ):
+        if candidate_commit is not None and candidate_commit_sha is not None and candidate_commit != candidate_commit_sha:
             raise RuntimeError("precommitted candidate commit assertions disagree")
-        if (
-            candidate_tree is not None
-            and candidate_tree_sha is not None
-            and candidate_tree != candidate_tree_sha
-        ):
+        if candidate_tree is not None and candidate_tree_sha is not None and candidate_tree != candidate_tree_sha:
             raise RuntimeError("precommitted candidate tree assertions disagree")
         candidate_commit = candidate_commit or candidate_commit_sha
         candidate_tree = candidate_tree or candidate_tree_sha
         controller_root = Path(contract.controller_repo_root).resolve()
         target_path = Path(contract.target_repo_root).resolve()
-        self._verify_target_boundary(
-            controller_root, target_path, Path(contract.target_worktree_root).resolve()
-        )
+        self._verify_target_boundary(controller_root, target_path, Path(contract.target_worktree_root).resolve())
         _normalized_mutation_paths(contract)
         CollaborationRealmVerifier.verify_submission(contract)
         self._verify_controller(contract)
@@ -853,22 +733,18 @@ class WorktreeManager:
     ) -> TargetWorktreeLease:
         controller_root = Path(contract.controller_repo_root).resolve()
         target_path = Path(contract.target_repo_root).resolve()
-        if not isinstance(candidate_commit, str) or not re.fullmatch(
-            r"[0-9a-f]{40}", candidate_commit
-        ):
+        if not isinstance(candidate_commit, str) or not re.fullmatch(r"[0-9a-f]{40}", candidate_commit):
             raise RuntimeError("precommitted candidate must be an exact commit SHA")
         try:
             resolved_candidate = self._run_git(
-                ["rev-parse", f"{candidate_commit}^{{commit}}"],
-                cwd=controller_root,
+                ["rev-parse", f"{candidate_commit}^{{commit}}"], cwd=controller_root,
             )
         except RuntimeError as exc:
             raise RuntimeError("precommitted candidate is missing or not a commit") from exc
         if resolved_candidate != candidate_commit:
             raise RuntimeError("precommitted candidate must resolve to the exact commit SHA")
         candidate_tree_sha = self._run_git(
-            ["rev-parse", f"{candidate_commit}^{{tree}}"],
-            cwd=controller_root,
+            ["rev-parse", f"{candidate_commit}^{{tree}}"], cwd=controller_root,
         )
         if candidate_tree is not None and candidate_tree_sha != candidate_tree:
             raise RuntimeError("precommitted candidate tree does not match the asserted tree")
@@ -878,9 +754,7 @@ class WorktreeManager:
                 cwd=controller_root,
             )
         except RuntimeError as exc:
-            raise RuntimeError(
-                "precommitted candidate must descend from the exact Target base"
-            ) from exc
+            raise RuntimeError("precommitted candidate must descend from the exact Target base") from exc
         merge_commits = self._run_git(
             ["rev-list", "--merges", f"{contract.target_base_revision}..{candidate_commit}"],
             cwd=controller_root,
@@ -895,9 +769,7 @@ class WorktreeManager:
                 raise RuntimeError("existing precommitted Target is not detached")
             try:
                 record = self._read_target_ownership(
-                    controller_root,
-                    existing_entry,
-                    contract.task_id,
+                    controller_root, existing_entry, contract.task_id,
                 )
             except ValueError as exc:
                 raise RuntimeError("existing detached Target ownership is invalid") from exc
@@ -923,13 +795,9 @@ class WorktreeManager:
                 raise RuntimeError("existing detached Target Candidate does not match")
             if self._status_bytes(target_path):
                 raise RuntimeError("existing precommitted Target must be clean")
-            if (
-                self._run_git(
-                    ["rev-parse", f"refs/heads/nexus/task/{contract.task_id}"],
-                    cwd=controller_root,
-                )
-                != contract.target_base_revision
-            ):
+            if self._run_git(
+                ["rev-parse", f"refs/heads/nexus/task/{contract.task_id}"], cwd=controller_root,
+            ) != contract.target_base_revision:
                 raise RuntimeError("existing precommitted lease moved the task branch")
             return TargetWorktreeLease(**dict(existing_lease))
 
@@ -941,9 +809,7 @@ class WorktreeManager:
         prior_ownership = ownership_path.read_bytes() if ownership_path.exists() else None
 
         lease = self._create_lease_locked(
-            contract,
-            task_states=task_states,
-            attempt_id=attempt_id,
+            contract, task_states=task_states, attempt_id=attempt_id,
         )
         target = Path(lease.target_worktree)
         try:
@@ -956,15 +822,14 @@ class WorktreeManager:
             branch_head = self._run_git(["rev-parse", branch_ref], cwd=controller_root)
             if branch_head != contract.target_base_revision:
                 raise RuntimeError("precommitted lease moved the task branch")
-            adopted = TargetWorktreeLease(**{
-                **lease.__dict__,
-                "target_detached": True,
-            })
+            adopted = TargetWorktreeLease(
+                **{
+                    **lease.__dict__,
+                    "target_detached": True,
+                }
+            )
             self._write_target_ownership(
-                contract,
-                adopted,
-                attempt_id=attempt_id,
-                task_states=task_states,
+                contract, adopted, attempt_id=attempt_id, task_states=task_states,
             )
             return adopted
         except Exception:
@@ -998,14 +863,8 @@ class WorktreeManager:
                 env={**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"},
             ).stdout.strip()
         )
-        common_dir = (
-            (controller_root / raw_common).resolve()
-            if not raw_common.is_absolute()
-            else raw_common.resolve()
-        )
-        return (
-            common_dir / "nexus-target-ownership" / f"{sha256(task_id.encode()).hexdigest()}.json"
-        )
+        common_dir = (controller_root / raw_common).resolve() if not raw_common.is_absolute() else raw_common.resolve()
+        return common_dir / "nexus-target-ownership" / f"{sha256(task_id.encode()).hexdigest()}.json"
 
     def _write_target_ownership(
         self,
@@ -1020,16 +879,10 @@ class WorktreeManager:
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         contract_hash = _contract_digest(contract)
         controller_root_str = str(controller_root)
-        snapshot = (
-            task_states.get(contract.task_id) if isinstance(task_states, Mapping) else {}
-        ) or {}
+        snapshot = (task_states.get(contract.task_id) if isinstance(task_states, Mapping) else {}) or {}
         execution_authority = snapshot.get("execution_authority") or "WORKER_REGISTRY"
-        worker_id = snapshot.get("selected_worker_id") or getattr(
-            contract, "selected_worker_id", None
-        )
-        provider = snapshot.get("selected_provider") or getattr(
-            contract, "preferred_provider", None
-        )
+        worker_id = snapshot.get("selected_worker_id") or getattr(contract, "selected_worker_id", None)
+        provider = snapshot.get("selected_provider") or getattr(contract, "preferred_provider", None)
         lifecycle_revision = snapshot.get("lifecycle_revision")
         src_identity = snapshot.get("source_identity") or _source_identity(
             controller_root_str,
@@ -1040,12 +893,7 @@ class WorktreeManager:
             provider=provider,
             lifecycle_revision=lifecycle_revision,
         )
-        actual_attempt_id = (
-            attempt_id
-            or lease.attempt_id
-            or snapshot.get("attempt_id")
-            or f"attempt-{contract.task_id}"
-        )
+        actual_attempt_id = attempt_id or lease.attempt_id or snapshot.get("attempt_id") or f"attempt-{contract.task_id}"
         if hasattr(contract, "model_dump"):
             contract_payload = contract.model_dump(mode="json", exclude={"contract_hash"})
         elif isinstance(contract, Mapping):
@@ -1092,9 +940,7 @@ class WorktreeManager:
     @staticmethod
     def _ownership_digest(record: Mapping[str, Any]) -> str:
         payload = {key: value for key, value in record.items() if key != "integrity_sha256"}
-        return sha256(
-            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        ).hexdigest()
+        return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
     _validate_ownership_record = staticmethod(_validate_ownership_record)
 
@@ -1130,10 +976,7 @@ class WorktreeManager:
             fd = os.open(path, flags)
             try:
                 fst = os.fstat(fd)
-                if not stat.S_ISREG(fst.st_mode) or (fst.st_dev, fst.st_ino) != (
-                    lst.st_dev,
-                    lst.st_ino,
-                ):
+                if not stat.S_ISREG(fst.st_mode) or (fst.st_dev, fst.st_ino) != (lst.st_dev, lst.st_ino):
                     raise ValueError("ownership record changed while reading")
                 with os.fdopen(fd, "r", encoding="utf-8") as handle:
                     fd = -1
@@ -1159,8 +1002,7 @@ class WorktreeManager:
             or record.get("expected_controller_worktree") != str(controller_root)
             or (branch != expected_branch and not (detached_lease and branch in {"", "detached"}))
             or not isinstance(lease, Mapping)
-            or Path(str(lease.get("target_worktree", ""))).resolve()
-            != Path(str(entry.get("worktree", ""))).resolve()
+            or Path(str(lease.get("target_worktree", ""))).resolve() != Path(str(entry.get("worktree", ""))).resolve()
         ):
             raise ValueError("MUTATION_IDENTITY_INVALID: ownership record is stale")
         return record
@@ -1200,16 +1042,12 @@ class WorktreeManager:
             if (
                 state_lease.get("lease_id") != lease_id
                 or state_lease.get("attempt_id") != attempt_id
-                or Path(str(state_lease.get("target_worktree") or "")).expanduser().resolve()
-                != target_worktree
-                or Path(str(state_contract.get("target_repo_root") or "")).expanduser().resolve()
-                != target_worktree
+                or Path(str(state_lease.get("target_worktree") or "")).expanduser().resolve() != target_worktree
+                or Path(str(state_contract.get("target_repo_root") or "")).expanduser().resolve() != target_worktree
             ):
                 return False
         tombstone_stem = ownership_path.with_suffix("").name
-        for tombstone in sorted(
-            ownership_path.parent.glob(f"{tombstone_stem}.*.released"), reverse=True
-        ):
+        for tombstone in sorted(ownership_path.parent.glob(f"{tombstone_stem}.*.released"), reverse=True):
             try:
                 lst = os.lstat(tombstone)
                 if not stat.S_ISREG(lst.st_mode) or stat.S_ISLNK(lst.st_mode):
@@ -1217,10 +1055,7 @@ class WorktreeManager:
                 fd = os.open(tombstone, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
                 try:
                     fst = os.fstat(fd)
-                    if not stat.S_ISREG(fst.st_mode) or (fst.st_dev, fst.st_ino) != (
-                        lst.st_dev,
-                        lst.st_ino,
-                    ):
+                    if not stat.S_ISREG(fst.st_mode) or (fst.st_dev, fst.st_ino) != (lst.st_dev, lst.st_ino):
                         continue
                     with os.fdopen(fd, "r", encoding="utf-8") as handle:
                         fd = -1
@@ -1228,9 +1063,7 @@ class WorktreeManager:
                 finally:
                     if fd != -1:
                         os.close(fd)
-                _validate_ownership_record(
-                    record, task_state=task_state, controller_root=controller_root
-                )
+                _validate_ownership_record(record, task_state=task_state, controller_root=controller_root)
             except (OSError, ValueError, TypeError, json.JSONDecodeError):
                 continue
             if (
@@ -1238,8 +1071,7 @@ class WorktreeManager:
                 and record.get("attempt_id") == attempt_id
                 and record.get("lease_id") == lease_id
                 and isinstance(record.get("lease"), Mapping)
-                and Path(str(record["lease"].get("target_worktree") or "")).expanduser().resolve()
-                == target_worktree
+                and Path(str(record["lease"].get("target_worktree") or "")).expanduser().resolve() == target_worktree
             ):
                 return True
         return False
@@ -1302,10 +1134,7 @@ class WorktreeManager:
         fd = os.open(path, flags)
         try:
             fst = os.fstat(fd)
-            if not stat.S_ISREG(fst.st_mode) or (fst.st_dev, fst.st_ino) != (
-                lst.st_dev,
-                lst.st_ino,
-            ):
+            if not stat.S_ISREG(fst.st_mode) or (fst.st_dev, fst.st_ino) != (lst.st_dev, lst.st_ino):
                 raise ValueError("ownership record changed while reading")
             with os.fdopen(fd, "r", encoding="utf-8") as handle:
                 fd = -1
@@ -1326,12 +1155,7 @@ class WorktreeManager:
         target_path = Path(lease.target_worktree).resolve()
         record_contract = record.get("contract") or {}
         record_lease = record.get("lease") or {}
-        expected_attempt = (
-            attempt_id
-            or lease.attempt_id
-            or record.get("expected_attempt_id")
-            or record.get("attempt_id")
-        )
+        expected_attempt = attempt_id or lease.attempt_id or record.get("expected_attempt_id") or record.get("attempt_id")
         if (
             record.get("task_id") != contract.task_id
             or record.get("lease_id") != lease.lease_id
@@ -1363,9 +1187,7 @@ class WorktreeManager:
         except FileNotFoundError:
             return
         except OSError as exc:
-            raise RuntimeError(
-                f"ownership record atomic staging failed during CAS deletion: {exc}"
-            ) from exc
+            raise RuntimeError(f"ownership record atomic staging failed during CAS deletion: {exc}") from exc
 
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         fd = -1
@@ -1374,9 +1196,7 @@ class WorktreeManager:
                 lst = os.lstat(staging_path)
             except OSError as exc:
                 self._restore_staged_ownership_record(staging_path, path)
-                raise RuntimeError(
-                    f"ownership record lstat failed during CAS deletion: {exc}"
-                ) from exc
+                raise RuntimeError(f"ownership record lstat failed during CAS deletion: {exc}") from exc
 
             if not stat.S_ISREG(lst.st_mode) or stat.S_ISLNK(lst.st_mode):
                 self._restore_staged_ownership_record(staging_path, path)
@@ -1401,10 +1221,7 @@ class WorktreeManager:
             if record.get("integrity_sha256") != expected_digest:
                 self._restore_staged_ownership_record(staging_path, path)
                 raise RuntimeError("ownership record digest changed before deletion")
-            if (
-                record.get("lease_id") != expected_lease_id
-                or record.get("task_id") != expected_task_id
-            ):
+            if record.get("lease_id") != expected_lease_id or record.get("task_id") != expected_task_id:
                 self._restore_staged_ownership_record(staging_path, path)
                 raise RuntimeError("ownership record lease/task identity changed before deletion")
             if expected_attempt_id is not None and record.get("attempt_id") != expected_attempt_id:
@@ -1446,8 +1263,7 @@ class WorktreeManager:
             attempt_id
             or (
                 task_states.get(contract.task_id, {}).get("attempt_id")
-                if isinstance(task_states, Mapping)
-                and isinstance(task_states.get(contract.task_id), Mapping)
+                if isinstance(task_states, Mapping) and isinstance(task_states.get(contract.task_id), Mapping)
                 else None
             )
             or getattr(contract, "attempt_id", None)
@@ -1463,7 +1279,9 @@ class WorktreeManager:
         if target_path.exists():
             entry = self._worktree_entry(controller_root, target_path)
             if entry is None:
-                raise RuntimeError(f"existing path is not a registered worktree: {target_path}")
+                raise RuntimeError(
+                    f"existing path is not a registered worktree: {target_path}"
+                )
             expected_branch = f"refs/heads/{target_branch}"
             if (
                 entry.get("HEAD") != contract.target_base_revision
@@ -1476,20 +1294,11 @@ class WorktreeManager:
             target_root.mkdir(parents=True, exist_ok=True)
             branch_ref = f"refs/heads/{target_branch}"
             try:
-                branch_head = self._run_git(
-                    ["rev-parse", f"{branch_ref}^{{commit}}"], cwd=controller_root
-                )
+                branch_head = self._run_git(["rev-parse", f"{branch_ref}^{{commit}}"], cwd=controller_root)
             except RuntimeError:
                 branch_head = None
             if branch_head is None:
-                add_args = [
-                    "worktree",
-                    "add",
-                    "-b",
-                    target_branch,
-                    str(target_path),
-                    contract.target_base_revision,
-                ]
+                add_args = ["worktree", "add", "-b", target_branch, str(target_path), contract.target_base_revision]
                 branch_created_this_call = True
             else:
                 if branch_head != contract.target_base_revision:
@@ -1500,12 +1309,7 @@ class WorktreeManager:
                     branch_is_ancestor = False
                     try:
                         self._run_git(
-                            [
-                                "merge-base",
-                                "--is-ancestor",
-                                branch_head,
-                                contract.target_base_revision,
-                            ],
+                            ["merge-base", "--is-ancestor", branch_head, contract.target_base_revision],
                             cwd=controller_root,
                         )
                         branch_is_ancestor = True
@@ -1522,29 +1326,18 @@ class WorktreeManager:
                         ]
                     else:
                         protected = self._run_git(
-                            [
-                                "for-each-ref",
-                                "--format=%(objectname)",
-                                f"refs/nexus-candidates/{contract.task_id}/",
-                            ],
+                            ["for-each-ref", "--format=%(objectname)", f"refs/nexus-candidates/{contract.task_id}/"],
                             cwd=controller_root,
                         ).splitlines()
                         protected.extend(
                             self._run_git(
-                                [
-                                    "for-each-ref",
-                                    "--format=%(objectname)",
-                                    f"refs/nexus-candidate-commits/{contract.task_id}/",
-                                ],
+                                ["for-each-ref", "--format=%(objectname)", f"refs/nexus-candidate-commits/{contract.task_id}/"],
                                 cwd=controller_root,
                             ).splitlines()
                         )
                         try:
                             legacy_candidate = self._run_git(
-                                [
-                                    "rev-parse",
-                                    f"refs/nexus-candidates/{contract.task_id}^{{commit}}",
-                                ],
+                                ["rev-parse", f"refs/nexus-candidates/{contract.task_id}^{{commit}}"],
                                 cwd=controller_root,
                             )
                         except RuntimeError:
@@ -1570,17 +1363,9 @@ class WorktreeManager:
                             if len(salvage_parents) == 2:
                                 protected.append(salvage_parents[1])
                         if branch_head not in protected:
-                            raise RuntimeError(
-                                "existing task branch candidate lacks durable protection"
-                            )
+                            raise RuntimeError("existing task branch candidate lacks durable protection")
                         target_detached = True
-                        add_args = [
-                            "worktree",
-                            "add",
-                            "--detach",
-                            str(target_path),
-                            contract.target_base_revision,
-                        ]
+                        add_args = ["worktree", "add", "--detach", str(target_path), contract.target_base_revision]
                 else:
                     add_args = ["worktree", "add", str(target_path), target_branch]
             self._run_git(add_args, cwd=controller_root)
@@ -1597,9 +1382,7 @@ class WorktreeManager:
             raise RuntimeError("Target worktree must be clean")
         try:
             collaboration_provenance = CollaborationRealmVerifier.verify_target(
-                contract,
-                target_path,
-                initial_head,
+                contract, target_path, initial_head,
             )
         except Exception as verification_error:
             if target_created_this_call:
@@ -1661,9 +1444,7 @@ class WorktreeManager:
         """Return whether an existing active Target overlaps this contract."""
         controller_root, target_path, _ = self._resolved_paths(contract)
         active = self._active_target_worktrees(
-            controller_root,
-            target_path,
-            task_states=task_states,
+            controller_root, target_path, task_states=task_states,
         )
         for entry in active:
             branch = entry.get("branch", "detached" if "detached" in entry else "")
@@ -1679,8 +1460,7 @@ class WorktreeManager:
                     if (
                         isinstance(record_lease, Mapping)
                         and record_lease.get("target_detached") is True
-                        and Path(str(record_lease.get("target_worktree", ""))).resolve()
-                        == target_entry_path
+                        and Path(str(record_lease.get("target_worktree", ""))).resolve() == target_entry_path
                     ):
                         task_id = str(record.get("task_id") or "")
                         break
@@ -1697,10 +1477,7 @@ class WorktreeManager:
             # its mutation domain.
             try:
                 existing = self._read_target_ownership(
-                    controller_root,
-                    entry,
-                    task_id,
-                    task_state=snapshot,
+                    controller_root, entry, task_id, task_state=snapshot,
                 )
             except ValueError:
                 # Any malformed, stale, swapped, or integrity-invalid record
@@ -1717,12 +1494,7 @@ class WorktreeManager:
 
         records = self._all_ownership_records(controller_root)
         active_task_ids = {
-            (
-                entry
-                .get("branch", "")
-                .removeprefix("refs/heads/nexus/task/")
-                .removeprefix("nexus/task/")
-            )
+            (entry.get("branch", "").removeprefix("refs/heads/nexus/task/").removeprefix("nexus/task/"))
             for entry in active
         }
         for record in records:
@@ -1779,16 +1551,13 @@ class WorktreeManager:
             raise RuntimeError("candidate commit does not match Target HEAD")
         legacy_ref = f"refs/nexus-candidates/{contract.task_id}"
         try:
-            self._run_git(
-                ["rev-parse", f"{legacy_ref}^{{commit}}"], cwd=contract.controller_repo_root
-            )
+            self._run_git(["rev-parse", f"{legacy_ref}^{{commit}}"], cwd=contract.controller_repo_root)
             candidate_ref = f"refs/nexus-candidate-commits/{contract.task_id}/{candidate_commit}"
         except RuntimeError:
             candidate_ref = f"refs/nexus-candidates/{contract.task_id}/{candidate_commit}"
         try:
             existing = self._run_git(
-                ["rev-parse", f"{candidate_ref}^{{commit}}"],
-                cwd=contract.controller_repo_root,
+                ["rev-parse", f"{candidate_ref}^{{commit}}"], cwd=contract.controller_repo_root,
             )
         except RuntimeError:
             existing = None
@@ -1810,17 +1579,10 @@ class WorktreeManager:
                     raced = None
                 if raced != candidate_commit:
                     raise RuntimeError("candidate durable ref create-only CAS failed") from exc
-        if (
-            self._run_git(["rev-parse", candidate_ref], cwd=contract.controller_repo_root)
-            != candidate_commit
-        ):
+        if self._run_git(["rev-parse", candidate_ref], cwd=contract.controller_repo_root) != candidate_commit:
             raise RuntimeError("candidate durable ref verification failed")
-        expected_tree = self._run_git(
-            ["rev-parse", f"{candidate_commit}^{{tree}}"], cwd=contract.controller_repo_root
-        )
-        ref_tree = self._run_git(
-            ["rev-parse", f"{candidate_ref}^{{tree}}"], cwd=contract.controller_repo_root
-        )
+        expected_tree = self._run_git(["rev-parse", f"{candidate_commit}^{{tree}}"], cwd=contract.controller_repo_root)
+        ref_tree = self._run_git(["rev-parse", f"{candidate_ref}^{{tree}}"], cwd=contract.controller_repo_root)
         if ref_tree != expected_tree:
             raise RuntimeError("candidate ref tree verification failed")
         return candidate_ref
@@ -1887,7 +1649,9 @@ class WorktreeManager:
 
         salvage_ref = self.salvage_ref_for(contract.task_id, attempt_id)
         try:
-            existing = self._run_git(["rev-parse", f"{salvage_ref}^{{commit}}"], cwd=controller)
+            existing = self._run_git(
+                ["rev-parse", f"{salvage_ref}^{{commit}}"], cwd=controller
+            )
         except RuntimeError:
             existing = None
         if existing is not None:
@@ -1897,13 +1661,9 @@ class WorktreeManager:
         message = f"Nexus Salvage Bot: salvage-only snapshot {contract.task_id}/{attempt_id}"
         self._run_git(
             [
-                "-c",
-                f"user.name={NEXUS_SALVAGE_BOT_NAME}",
-                "-c",
-                f"user.email={NEXUS_SALVAGE_BOT_EMAIL}",
-                "commit",
-                "-m",
-                message,
+                "-c", f"user.name={NEXUS_SALVAGE_BOT_NAME}",
+                "-c", f"user.email={NEXUS_SALVAGE_BOT_EMAIL}",
+                "commit", "-m", message,
             ],
             cwd=target,
         )
@@ -1961,37 +1721,23 @@ class WorktreeManager:
         target = Path(lease.target_worktree).resolve()
         controller = Path(contract.controller_repo_root).resolve()
         if target == controller:
-            return self._cleanup_receipt(
-                contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", "Target is controller", False, False
-            )
+            return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", "Target is controller", False, False)
         if (candidate_commit is not None or candidate_ref is not None) and (
             salvage_commit is not None or salvage_ref is not None
         ):
             return self._cleanup_receipt(
-                contract,
-                lease,
-                "BLOCKED_BY_MISSING_REF",
-                "candidate and salvage durable bindings cannot be combined",
-                False,
-                False,
+                contract, lease, "BLOCKED_BY_MISSING_REF",
+                "candidate and salvage durable bindings cannot be combined", False, False,
             )
 
         try:
-            ownership_path, ownership_record, expected_identity, expected_digest = (
-                self._validate_exact_ownership_for_cleanup(
-                    controller,
-                    contract,
-                    lease,
-                )
+            ownership_path, ownership_record, expected_identity, expected_digest = self._validate_exact_ownership_for_cleanup(
+                controller, contract, lease,
             )
         except ValueError as exc:
             return self._cleanup_receipt(
-                contract,
-                lease,
-                "BLOCKED_BY_UNSAVED_CHANGES",
-                f"ownership record validation failed: {exc}",
-                False,
-                False,
+                contract, lease, "BLOCKED_BY_UNSAVED_CHANGES",
+                f"ownership record validation failed: {exc}", False, False,
             )
 
         durable_commit = candidate_commit or salvage_commit
@@ -2014,71 +1760,33 @@ class WorktreeManager:
                         expected_attempt_id=lease.attempt_id or ownership_record.get("attempt_id"),
                     )
                 except RuntimeError as exc:
-                    return self._cleanup_receipt(
-                        contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", str(exc), False, False
-                    )
+                    return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", str(exc), False, False)
             return self._cleanup_receipt(contract, lease, "ALREADY_REMOVED", None, False, True)
 
         if entry is None:
             if self.process_checker(target):
-                return self._cleanup_receipt(
-                    contract,
-                    lease,
-                    "BLOCKED_BY_PROCESS",
-                    "active process uses Target",
-                    False,
-                    False,
-                )
+                return self._cleanup_receipt(contract, lease, "BLOCKED_BY_PROCESS", "active process uses Target", False, False)
             if not target.is_dir() or target.is_symlink():
-                return self._cleanup_receipt(
-                    contract,
-                    lease,
-                    "BLOCKED_BY_UNSAVED_CHANGES",
-                    "unregistered Target is not an empty directory",
-                    False,
-                    False,
-                )
+                return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", "unregistered Target is not an empty directory", False, False)
             try:
                 is_empty = not any(target.iterdir())
             except OSError as exc:
-                return self._cleanup_receipt(
-                    contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", str(exc), False, False
-                )
+                return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", str(exc), False, False)
             if not is_empty:
-                return self._cleanup_receipt(
-                    contract,
-                    lease,
-                    "BLOCKED_BY_UNSAVED_CHANGES",
-                    "unregistered Target is not an empty directory",
-                    False,
-                    False,
-                )
+                return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", "unregistered Target is not an empty directory", False, False)
             if durable_commit:
                 if not durable_ref:
-                    return self._cleanup_receipt(
-                        contract, lease, "BLOCKED_BY_MISSING_REF", missing_ref_blocker, False, False
-                    )
+                    return self._cleanup_receipt(contract, lease, "BLOCKED_BY_MISSING_REF", missing_ref_blocker, False, False)
                 try:
-                    protected = self._run_git(
-                        ["rev-parse", f"{durable_ref}^{{commit}}"], cwd=controller
-                    )
+                    protected = self._run_git(["rev-parse", f"{durable_ref}^{{commit}}"], cwd=controller)
                 except RuntimeError:
                     protected = ""
                 if protected != durable_commit:
-                    return self._cleanup_receipt(
-                        contract, lease, "BLOCKED_BY_MISSING_REF", missing_ref_blocker, False, False
-                    )
+                    return self._cleanup_receipt(contract, lease, "BLOCKED_BY_MISSING_REF", missing_ref_blocker, False, False)
             if not dry_run:
                 target.rmdir()
                 if target.exists():
-                    return self._cleanup_receipt(
-                        contract,
-                        lease,
-                        "BLOCKED_BY_UNSAVED_CHANGES",
-                        "failed to remove unregistered target directory",
-                        False,
-                        False,
-                    )
+                    return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", "failed to remove unregistered target directory", False, False)
                 if ownership_record is not None:
                     try:
                         self._delete_ownership_record_cas(
@@ -2087,67 +1795,35 @@ class WorktreeManager:
                             expected_digest,
                             lease.lease_id,
                             contract.task_id,
-                            expected_attempt_id=lease.attempt_id
-                            or ownership_record.get("attempt_id"),
+                            expected_attempt_id=lease.attempt_id or ownership_record.get("attempt_id"),
                         )
                     except RuntimeError as exc:
-                        return self._cleanup_receipt(
-                            contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", str(exc), False, False
-                        )
+                        return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", str(exc), False, False)
             return self._cleanup_receipt(contract, lease, "REMOVED", None, not dry_run, True)
 
         if self.process_checker(target):
-            return self._cleanup_receipt(
-                contract, lease, "BLOCKED_BY_PROCESS", "active process uses Target", False, False
-            )
+            return self._cleanup_receipt(contract, lease, "BLOCKED_BY_PROCESS", "active process uses Target", False, False)
         status = self._status_bytes(target)
         if status:
-            return self._cleanup_receipt(
-                contract,
-                lease,
-                "BLOCKED_BY_UNSAVED_CHANGES",
-                "dirty target has no durable snapshot",
-                False,
-                False,
-            )
+            return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", "dirty target has no durable snapshot", False, False)
         head = self._run_git(["rev-parse", "HEAD"], cwd=target)
         if durable_commit:
             if head != durable_commit or not durable_ref:
-                return self._cleanup_receipt(
-                    contract, lease, "BLOCKED_BY_MISSING_REF", missing_ref_blocker, False, False
-                )
+                return self._cleanup_receipt(contract, lease, "BLOCKED_BY_MISSING_REF", missing_ref_blocker, False, False)
             try:
-                protected = self._run_git(
-                    ["rev-parse", f"{durable_ref}^{{commit}}"], cwd=controller
-                )
+                protected = self._run_git(["rev-parse", f"{durable_ref}^{{commit}}"], cwd=controller)
             except RuntimeError:
                 protected = ""
             if protected != durable_commit:
-                return self._cleanup_receipt(
-                    contract, lease, "BLOCKED_BY_MISSING_REF", missing_ref_blocker, False, False
-                )
+                return self._cleanup_receipt(contract, lease, "BLOCKED_BY_MISSING_REF", missing_ref_blocker, False, False)
         elif head != lease.initial_head:
-            return self._cleanup_receipt(
-                contract,
-                lease,
-                "BLOCKED_BY_UNSAVED_CHANGES",
-                "Target HEAD changed without durable snapshot",
-                False,
-                False,
-            )
+            return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", "Target HEAD changed without durable snapshot", False, False)
 
         if not dry_run:
             self._run_git(["worktree", "remove", "--", str(target)], cwd=controller)
             self._run_git(["worktree", "prune"], cwd=controller)
             if self._worktree_entry(controller, target) is not None or target.exists():
-                return self._cleanup_receipt(
-                    contract,
-                    lease,
-                    "BLOCKED_BY_UNSAVED_CHANGES",
-                    "registered worktree removal verification failed",
-                    False,
-                    False,
-                )
+                return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", "registered worktree removal verification failed", False, False)
             if ownership_record is not None:
                 try:
                     self._delete_ownership_record_cas(
@@ -2159,9 +1835,7 @@ class WorktreeManager:
                         expected_attempt_id=lease.attempt_id or ownership_record.get("attempt_id"),
                     )
                 except RuntimeError as exc:
-                    return self._cleanup_receipt(
-                        contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", str(exc), False, False
-                    )
+                    return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", str(exc), False, False)
 
         return self._cleanup_receipt(contract, lease, "REMOVED", None, not dry_run, True)
 
@@ -2226,7 +1900,8 @@ class WorktreeManager:
             )
         except RuntimeError as e:
             raise RuntimeError(
-                f"Safety check 2 failed: cannot resolve task branch '{branch_ref}': {e}"
+                f"Safety check 2 failed: cannot resolve task branch "
+                f"'{branch_ref}': {e}"
             )
 
         already_restored = current_branch_sha == initial_head
@@ -2244,7 +1919,9 @@ class WorktreeManager:
                 ["rev-parse", f"{salvage_ref}^{{commit}}"], cwd=controller
             )
         except RuntimeError as e:
-            raise RuntimeError(f"Safety check 3 failed: salvage ref '{salvage_ref}' not found: {e}")
+            raise RuntimeError(
+                f"Safety check 3 failed: salvage ref '{salvage_ref}' not found: {e}"
+            )
         if current_salvage_sha != salvage_commit:
             raise RuntimeError(
                 f"Safety check 3 failed: salvage ref '{salvage_ref}' points to "
@@ -2258,7 +1935,8 @@ class WorktreeManager:
             )
         except RuntimeError as e:
             raise RuntimeError(
-                f"Safety check 4 failed: cannot inspect parents of {salvage_commit}: {e}"
+                f"Safety check 4 failed: cannot inspect parents of "
+                f"{salvage_commit}: {e}"
             )
         parts = parent_info.split()
         if len(parts) == 1:
@@ -2291,11 +1969,13 @@ class WorktreeManager:
 
         # Check 7: No active candidate/promotion binding
         candidate_refs = self._run_git(
-            ["for-each-ref", "--format=%(refname)", f"refs/nexus-candidates/{task_id}/"],
+            ["for-each-ref", "--format=%(refname)",
+             f"refs/nexus-candidates/{task_id}/"],
             cwd=controller,
         ).splitlines()
         candidate_commit_refs = self._run_git(
-            ["for-each-ref", "--format=%(refname)", f"refs/nexus-candidate-commits/{task_id}/"],
+            ["for-each-ref", "--format=%(refname)",
+             f"refs/nexus-candidate-commits/{task_id}/"],
             cwd=controller,
         ).splitlines()
         try:
@@ -2311,9 +1991,7 @@ class WorktreeManager:
             if candidate_refs:
                 violations.append(f"nexus-candidates/{task_id}/ ({len(candidate_refs)} ref(s))")
             if candidate_commit_refs:
-                violations.append(
-                    f"nexus-candidate-commits/{task_id}/ ({len(candidate_commit_refs)} ref(s))"
-                )
+                violations.append(f"nexus-candidate-commits/{task_id}/ ({len(candidate_commit_refs)} ref(s))")
             if has_legacy:
                 violations.append(f"nexus-candidates/{task_id} (legacy)")
             raise RuntimeError(
@@ -2323,7 +2001,9 @@ class WorktreeManager:
 
         # Idempotent: if branch is already at initial_head, return ALREADY_RESTORED
         if already_restored:
-            verified = self._run_git(["rev-parse", f"{branch_ref}^{{commit}}"], cwd=controller)
+            verified = self._run_git(
+                ["rev-parse", f"{branch_ref}^{{commit}}"], cwd=controller
+            )
             if verified != initial_head:
                 raise RuntimeError(
                     f"Post-ALREADY_RESTORED verification failed: branch "
@@ -2344,7 +2024,9 @@ class WorktreeManager:
             )
 
         # Post-restoration verification
-        verified = self._run_git(["rev-parse", f"{branch_ref}^{{commit}}"], cwd=controller)
+        verified = self._run_git(
+            ["rev-parse", f"{branch_ref}^{{commit}}"], cwd=controller
+        )
         if verified != initial_head:
             raise RuntimeError(
                 f"Post-restoration verification failed: branch '{branch_ref}' "
@@ -2374,9 +2056,7 @@ class WorktreeManager:
             return bool(result.stdout.strip())
         if result.returncode == 1 and not result.stderr.strip():
             return False
-        raise RuntimeError(
-            f"process probe unavailable for {path}: {result.stderr.strip() or result.returncode}"
-        )
+        raise RuntimeError(f"process probe unavailable for {path}: {result.stderr.strip() or result.returncode}")
 
     def capture_candidate(
         self,
@@ -2398,9 +2078,7 @@ class WorktreeManager:
 
         target_head = self._run_git(["rev-parse", "HEAD"], cwd=target_path)
         collaboration_provenance = CollaborationRealmVerifier.verify_target(
-            contract,
-            target_path,
-            target_head,
+            contract, target_path, target_head,
         )
         committed_changed: list[str] = []
         committed_deleted: list[str] = []
@@ -2411,7 +2089,9 @@ class WorktreeManager:
                     cwd=target_path,
                 )
             except RuntimeError as exc:
-                raise RuntimeError("Target HEAD must descend from the leased initial_head") from exc
+                raise RuntimeError(
+                    "Target HEAD must descend from the leased initial_head"
+                ) from exc
             committed_changed, committed_deleted = self._parse_commit_diff(
                 self._run_git(
                     ["diff", "--name-status", lease.initial_head, target_head],
@@ -2422,25 +2102,26 @@ class WorktreeManager:
         working_changed, untracked_files, working_deleted = self._parse_status(target_status)
         changed_files = sorted(set(committed_changed) | set(working_changed))
         deleted_files = sorted(set(committed_deleted) | set(working_deleted))
-        committed_diff = (
-            self._run_git_bytes(
-                ["diff", "--binary", "--no-ext-diff", f"{lease.initial_head}..{target_head}", "--"],
-                cwd=target_path,
-            )
-            if target_head != lease.initial_head
-            else b""
-        )
+        committed_diff = self._run_git_bytes(
+            ["diff", "--binary", "--no-ext-diff", f"{lease.initial_head}..{target_head}", "--"],
+            cwd=target_path,
+        ) if target_head != lease.initial_head else b""
         working_diff = self._run_git_bytes(
             ["diff", "--binary", "--no-ext-diff", "HEAD", "--"],
             cwd=target_path,
         )
         tracked_diff_sha256 = sha256(committed_diff + b"\0" + working_diff).hexdigest()
         untracked_content_hashes = {
-            path: self._hash_untracked_path(target_path / path) for path in untracked_files
+            path: self._hash_untracked_path(target_path / path)
+            for path in untracked_files
         }
-        candidate_paths = sorted(set(changed_files) | set(untracked_files) | set(deleted_files))
+        candidate_paths = sorted(
+            set(changed_files) | set(untracked_files) | set(deleted_files)
+        )
         forbidden_path_violations = sorted(
-            path for path in candidate_paths if self._matches_any(path, contract.forbidden_files)
+            path
+            for path in candidate_paths
+            if self._matches_any(path, contract.forbidden_files)
         )
         out_of_scope_paths = sorted(
             path
@@ -2512,17 +2193,10 @@ class WorktreeManager:
         if expected_collaboration:
             actual = lease.collaboration_provenance or {}
             immutable_fields = (
-                "binding_hash",
-                "repository_id",
-                "canonical_remote",
-                "base_branch",
-                "base_sha",
-                "collaboration_root",
-                "execution_root",
+                "binding_hash", "repository_id", "canonical_remote", "base_branch",
+                "base_sha", "collaboration_root", "execution_root",
             )
-            if any(
-                actual.get(field) != expected_collaboration.get(field) for field in immutable_fields
-            ):
+            if any(actual.get(field) != expected_collaboration.get(field) for field in immutable_fields):
                 raise RuntimeError("contract and collaboration lease identity mismatch")
             if actual.get("sanitized_ancestry_verified") is not True:
                 raise RuntimeError("collaboration lease lacks sanitized ancestry proof")
@@ -2542,7 +2216,10 @@ class WorktreeManager:
         if status:
             raise RuntimeError("Controller must remain clean")
         status_sha256 = sha256(status).hexdigest()
-        if expected_status_sha256 is not None and status_sha256 != expected_status_sha256:
+        if (
+            expected_status_sha256 is not None
+            and status_sha256 != expected_status_sha256
+        ):
             raise RuntimeError("Controller status drift")
         return status_sha256
 
@@ -2860,9 +2537,7 @@ class WorktreeManager:
         path_to_task: dict[str, tuple[str, dict]] = {}
         for tid, st in states.items():
             lease_dict = st.get("lease") or {}
-            target_wt = lease_dict.get("target_worktree") or (st.get("contract") or {}).get(
-                "target_repo_root"
-            )
+            target_wt = lease_dict.get("target_worktree") or (st.get("contract") or {}).get("target_repo_root")
             if target_wt:
                 path_to_task[str(Path(target_wt).resolve())] = (tid, st)
 
@@ -2929,15 +2604,9 @@ class WorktreeManager:
 
             unique_commits_unavailable = False
             try:
-                unique_commits = tuple(
-                    sorted(
-                        set(
-                            self._run_git(
-                                ["rev-list", f"{c_head}..{head}"], cwd=c_root
-                            ).splitlines()
-                        )
-                    )
-                )
+                unique_commits = tuple(sorted(set(self._run_git(
+                    ["rev-list", f"{c_head}..{head}"], cwd=c_root
+                ).splitlines())))
             except Exception:
                 unique_commits = ()
                 unique_commits_unavailable = True
@@ -2948,25 +2617,16 @@ class WorktreeManager:
             branch_ref_valid = False
             if registered_branch_ref:
                 try:
-                    branch_ref_valid = (
-                        self._run_git(
-                            ["rev-parse", f"{registered_branch_ref}^{{commit}}"], cwd=c_root
-                        )
-                        == head
-                    )
+                    branch_ref_valid = self._run_git(
+                        ["rev-parse", f"{registered_branch_ref}^{{commit}}"], cwd=c_root
+                    ) == head
                 except Exception:
                     branch_ref_unavailable = True
-            branch_protected = (
-                branch_ref_valid
-                or protected
-                or branch.startswith((
-                    "refs/nexus-candidates/",
-                    "refs/nexus-candidate-commits/",
-                    "refs/nexus-salvage/",
-                    "nexus-candidates/",
-                    "nexus-candidate-commits/",
-                    "nexus-salvage/",
-                ))
+            branch_protected = branch_ref_valid or protected or branch.startswith(
+                (
+                    "refs/nexus-candidates/", "refs/nexus-candidate-commits/", "refs/nexus-salvage/",
+                    "nexus-candidates/", "nexus-candidate-commits/", "nexus-salvage/",
+                )
             )
 
             task_info = path_to_task.get(wt_str)
@@ -2984,14 +2644,7 @@ class WorktreeManager:
             elif wt_path == legacy_path.resolve() or wt_str == "/Users/jameschen/Workspace/nexus":
                 classification = "KEEP_DIRTY_OR_UNKNOWN"
                 blocker_reason = "legacy_root_protected"
-            elif task_status is not None and task_status not in {
-                "INTEGRATED",
-                "SUPERSEDED",
-                "CANCELLED",
-                "REJECTED",
-                "RETAINED_FOR_REVIEW",
-                "FINAL_BLOCK",
-            }:
+            elif task_status is not None and task_status not in {"INTEGRATED", "SUPERSEDED", "CANCELLED", "REJECTED", "RETAINED_FOR_REVIEW", "FINAL_BLOCK"}:
                 classification = "KEEP_ACTIVE_OR_RETAINED"
                 blocker_reason = "active_task_ownership"
             elif task_status in {"RETAINED_FOR_REVIEW", "FINAL_BLOCK"}:
@@ -3001,11 +2654,7 @@ class WorktreeManager:
                 if is_dirty:
                     classification = "KEEP_DIRTY_OR_UNKNOWN"
                     blocker_reason = "dirty_terminal_target"
-                elif (
-                    reachable
-                    or protected
-                    or head == (task_st.get("lease") or {}).get("initial_head")
-                ):
+                elif reachable or protected or head == (task_st.get("lease") or {}).get("initial_head"):
                     classification = "RELEASABLE_TERMINAL_TARGET"
                 else:
                     classification = "BLOCKED_UNPROTECTED_UNIQUE_COMMIT"
@@ -3024,18 +2673,8 @@ class WorktreeManager:
                 # Preserve the legacy classification names for compatibility,
                 # while making the disposition gate conservative.
                 blocker_reason = "active_process_or_lock"
-            if wt_path != c_root and (
-                process_active
-                or lock_present
-                or process_evidence_unavailable
-                or branch_ref_unavailable
-                or unique_commits_unavailable
-            ):
-                classification = (
-                    "KEEP_ACTIVE_OR_RETAINED"
-                    if (process_active or lock_present)
-                    else "KEEP_DIRTY_OR_UNKNOWN"
-                )
+            if wt_path != c_root and (process_active or lock_present or process_evidence_unavailable or branch_ref_unavailable or unique_commits_unavailable):
+                classification = "KEEP_ACTIVE_OR_RETAINED" if (process_active or lock_present) else "KEEP_DIRTY_OR_UNKNOWN"
             if wt_path == c_root:
                 disposition = "ACTIVE_RETAIN"
             elif current_review or task_status in {"RETAINED_FOR_REVIEW", "FINAL_BLOCK"}:
@@ -3043,9 +2682,7 @@ class WorktreeManager:
             elif process_evidence_unavailable:
                 disposition = "OWNER_DECISION_REQUIRED"
             elif process_active or lock_present or is_dirty:
-                disposition = (
-                    "ACTIVE_RETAIN" if process_active or lock_present else "OWNER_DECISION_REQUIRED"
-                )
+                disposition = "ACTIVE_RETAIN" if process_active or lock_present else "OWNER_DECISION_REQUIRED"
             elif unique_commits_unavailable:
                 disposition = "OWNER_DECISION_REQUIRED"
             elif branch_ref_unavailable:
@@ -3054,12 +2691,7 @@ class WorktreeManager:
                 disposition = "FORENSIC_RETAIN"
             elif unique_commits and not protected:
                 disposition = "BLOCKED_UNPROTECTED_UNIQUE_COMMIT"
-            elif task_status is not None and task_status not in {
-                "INTEGRATED",
-                "SUPERSEDED",
-                "CANCELLED",
-                "REJECTED",
-            }:
+            elif task_status is not None and task_status not in {"INTEGRATED", "SUPERSEDED", "CANCELLED", "REJECTED"}:
                 disposition = "ACTIVE_RETAIN"
             else:
                 disposition = "RELEASABLE_REDUNDANT_CLEAN"
@@ -3093,9 +2725,7 @@ class WorktreeManager:
                     process_active=process_active,
                     process_evidence_unavailable=process_evidence_unavailable,
                     evidence_unavailable=(
-                        process_evidence_unavailable
-                        or branch_ref_unavailable
-                        or unique_commits_unavailable
+                        process_evidence_unavailable or branch_ref_unavailable or unique_commits_unavailable
                     ),
                     lock_present=lock_present,
                     current_review=current_review,
@@ -3103,10 +2733,7 @@ class WorktreeManager:
                 )
             )
 
-        if legacy_exists and not any(
-            w.path == str(legacy_path.resolve()) or w.path == "/Users/jameschen/Workspace/nexus"
-            for w in worktree_entries
-        ):
+        if legacy_exists and not any(w.path == str(legacy_path.resolve()) or w.path == "/Users/jameschen/Workspace/nexus" for w in worktree_entries):
             worktree_entries.append(
                 WorkspaceWorktreeEntry(
                     path=str(legacy_path.resolve()),
@@ -3152,9 +2779,7 @@ class WorktreeManager:
                 for w in sorted(worktree_entries, key=lambda x: x.path)
             ],
         }
-        inv_hash = sha256(
-            json.dumps(inv_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        ).hexdigest()
+        inv_hash = sha256(json.dumps(inv_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
         return WorkspaceInventory(
             schema="nexus.workspace_inventory.v1",
@@ -3219,21 +2844,25 @@ class WorktreeManager:
             status_read_error = False
             if path.exists():
                 try:
-                    changed, untracked, deleted = self._parse_status(self._status_bytes(path))
+                    changed, untracked, deleted = self._parse_status(
+                        self._status_bytes(path)
+                    )
                     changed = sorted(set(changed) | set(untracked) | set(deleted))
                 except Exception:
                     status_read_error = True
             task_id = entry.task_id
             state = states.get(task_id or "") if task_id else None
             status = state.get("status") if state else None
-            active_target = bool(task_id and status not in terminal and status not in exempt)
+            active_target = bool(
+                task_id
+                and status not in terminal
+                and status not in exempt
+            )
             overlap = [
-                path_name
-                for path_name in changed
+                path_name for path_name in changed
                 if any(
                     path_name == boundary
-                    or boundary.endswith("/")
-                    and path_name.startswith(boundary)
+                    or boundary.endswith("/") and path_name.startswith(boundary)
                     for boundary in allowed
                 )
             ]
@@ -3242,9 +2871,7 @@ class WorktreeManager:
                 record_blockers.append("process_evidence_unavailable")
                 blockers.append(f"process_evidence_unavailable:{entry.path}")
             if entry.disposition in {
-                "ACTIVE_RETAIN",
-                "FORENSIC_RETAIN",
-                "OWNER_DECISION_REQUIRED",
+                "ACTIVE_RETAIN", "FORENSIC_RETAIN", "OWNER_DECISION_REQUIRED",
                 "BLOCKED_UNPROTECTED_UNIQUE_COMMIT",
             }:
                 # The controller is intentionally omitted above; every
@@ -3341,20 +2968,17 @@ class WorktreeManager:
                 blocker_codes_set.add(w.blocker_reason)
 
         releasable_paths = sorted(
-            w.path for w in inventory.worktrees if w.disposition == "RELEASABLE_REDUNDANT_CLEAN"
+            w.path for w in inventory.worktrees
+            if w.disposition == "RELEASABLE_REDUNDANT_CLEAN"
         )
         blocked_paths = sorted(
             groups["KEEP_DIRTY_OR_UNKNOWN"]
             + groups["KEEP_ACTIVE_OR_RETAINED"]
             + groups["BLOCKED_UNPROTECTED_UNIQUE_COMMIT"]
             + [
-                w.path
-                for w in inventory.worktrees
-                if w.disposition
-                in {
-                    "ACTIVE_RETAIN",
-                    "FORENSIC_RETAIN",
-                    "OWNER_DECISION_REQUIRED",
+                w.path for w in inventory.worktrees
+                if w.disposition in {
+                    "ACTIVE_RETAIN", "FORENSIC_RETAIN", "OWNER_DECISION_REQUIRED",
                     "BLOCKED_UNPROTECTED_UNIQUE_COMMIT",
                 }
             ]
@@ -3371,9 +2995,7 @@ class WorktreeManager:
             "blocked_paths": blocked_paths,
             "blocker_codes": blocker_codes,
         }
-        plan_hash = sha256(
-            json.dumps(plan_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        ).hexdigest()
+        plan_hash = sha256(json.dumps(plan_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
         return ConvergencePlan(
             schema="nexus.workspace_convergence_plan.v1",
@@ -3464,9 +3086,7 @@ class WorktreeManager:
         active_task_id = None
         for tid, st in states.items():
             lease_dict = st.get("lease") or {}
-            target_wt = lease_dict.get("target_worktree") or (st.get("contract") or {}).get(
-                "target_repo_root"
-            )
+            target_wt = lease_dict.get("target_worktree") or (st.get("contract") or {}).get("target_repo_root")
             if target_wt and Path(target_wt).resolve() == slot_path:
                 if st.get("status") not in {"INTEGRATED", "SUPERSEDED", "CANCELLED", "REJECTED"}:
                     active_task_id = tid
@@ -3578,10 +3198,7 @@ class WorktreeManager:
 
                 reachable = False
                 try:
-                    self._run_git(
-                        ["merge-base", "--is-ancestor", current_head, contract.controller_revision],
-                        cwd=c_root,
-                    )
+                    self._run_git(["merge-base", "--is-ancestor", current_head, contract.controller_revision], cwd=c_root)
                     reachable = True
                 except Exception:
                     reachable = False
