@@ -6,10 +6,10 @@ from pydantic import ValidationError
 from nexus.contracts.gateway_convergence import (
     DesiredDeploymentMode,
     DesiredDeploymentPolicy,
+    EvidenceState,
     GatewayConvergenceObservation,
     RecoveryEffectObservation,
     RecoveryEffectState,
-    EvidenceState,
     UpstreamFreshness,
 )
 
