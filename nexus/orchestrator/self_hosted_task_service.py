@@ -7442,7 +7442,7 @@ class SelfHostedTaskService:
             "forbidden_files": tuple(projection.forbidden_repository_paths),
             "authorized_deletions": (),
             "verifier_commands": tuple(projection.exact_verification_commands),
-            "protected_contracts": (),
+            "protected_contracts": tuple(projection.protected_contracts),
         }
         derived_projection = {
             "allowed_repository_paths": list(projection.allowed_repository_paths),
@@ -7451,7 +7451,7 @@ class SelfHostedTaskService:
             "forbidden_scope": list(projection.forbidden_scope),
             "exact_verification_commands": list(projection.exact_verification_commands),
             "authorized_deletions": [],
-            "protected_contracts": [],
+            "protected_contracts": list(projection.protected_contracts),
             "repository_contract_policy_revision_hash": "",
         }
         for field, expected in derived.items():

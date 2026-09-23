@@ -7021,6 +7021,8 @@ def _external_adoption_fixture(tmp_path, monkeypatch, **overrides):
     import nexus.orchestrator.self_hosted_task_service as service_module
 
     card_allowed_paths = overrides.pop("card_allowed_paths", ("src/one.py", "src/two.py"))
+    card_protected_contracts = tuple(overrides.pop("card_protected_contracts", ()))
+    authority_sensitive_candidate = bool(overrides.pop("authority_sensitive_candidate", False))
     tmp_path.mkdir(parents=True, exist_ok=True)
     controller = tmp_path / "controller"
     controller.mkdir()
@@ -7045,7 +7047,14 @@ def _external_adoption_fixture(tmp_path, monkeypatch, **overrides):
         + "\n"
         "## Forbidden scope\n\n"
         "- `tasks/**`\n\n"
-        "## Exact verification commands\n\n"
+        + (
+            "## Protected contracts\n\n"
+            + "".join(f"- `{marker}`\n" for marker in card_protected_contracts)
+            + "\n"
+            if card_protected_contracts
+            else ""
+        )
+        + "## Exact verification commands\n\n"
         "- `git diff --check`\n",
         encoding="utf-8",
     )
@@ -7061,8 +7070,17 @@ def _external_adoption_fixture(tmp_path, monkeypatch, **overrides):
     (candidate_target / "src" / "two.py").write_text("two = 2\n", encoding="utf-8")
     _git(candidate_target, "add", "src/two.py")
     _git(candidate_target, "commit", "-m", "candidate two")
+    if authority_sensitive_candidate:
+        planner = candidate_target / "nexus" / "core" / "planner.py"
+        planner.parent.mkdir(parents=True)
+        planner.write_text("x = 1\n", encoding="utf-8")
+        _git(candidate_target, "add", "nexus/core/planner.py")
+        _git(candidate_target, "commit", "-m", "candidate authority route")
     candidate = _git(candidate_target, "rev-parse", "HEAD")
     candidate_tree = _git(candidate_target, "rev-parse", "HEAD^{tree}")
+    candidate_changed_paths = _git(
+        controller, "diff", "--name-only", base, candidate
+    ).splitlines()
     diff = subprocess.run(
         ["git", "diff", "--binary", f"{base}..{candidate}"],
         cwd=controller, check=True, stdout=subprocess.PIPE,
@@ -7079,7 +7097,7 @@ def _external_adoption_fixture(tmp_path, monkeypatch, **overrides):
             "base_commit": base,
             "commit": candidate,
             "tree": candidate_tree,
-            "changed_paths": ["src/one.py", "src/two.py"],
+            "changed_paths": candidate_changed_paths,
             "deleted_paths": [],
         },
     }
@@ -7123,7 +7141,7 @@ def _external_adoption_fixture(tmp_path, monkeypatch, **overrides):
         "forbidden_files": (),
         "authorized_deletions": (),
         "verifier_commands": ("git diff --check",),
-        "protected_contracts": (),
+        "protected_contracts": card_protected_contracts,
     }
     values.update(overrides)
     semantic_hash = ExternalCandidateAdoptionRequest.semantic_hash_for(values)
@@ -7176,6 +7194,74 @@ def test_adopt_external_candidate_physically_verifies_exact_chain_and_stops_pend
     assert adopted["push_performed"] is False
     replay = service.adopt_external_candidate(request)
     assert replay["adoption_receipt_hash"] == adopted["adoption_receipt_hash"]
+
+
+def test_adopt_external_candidate_derives_authority_marker_from_tracked_card(
+    tmp_path, monkeypatch,
+):
+    service, request, candidate, _ = _external_adoption_fixture(
+        tmp_path,
+        monkeypatch,
+        card_allowed_paths=("src/one.py", "src/two.py", "nexus/core/planner.py"),
+        card_protected_contracts=("repository-authority-change.v1",),
+        authority_sensitive_candidate=True,
+    )
+
+    adopted = service.adopt_external_candidate(request)
+
+    assert adopted["candidate_commit_sha"] == candidate
+    assert adopted["contract"]["protected_contracts"] == ["repository-authority-change.v1"]
+    assert adopted["derived_contract_projection"]["protected_contracts"] == [
+        "repository-authority-change.v1"
+    ]
+    assert adopted["verified_receipt"]["authority_change_required"] is True
+    assert len(adopted["verified_receipt"]["authority_findings_sha256"]) == 64
+    assert adopted["status"] == "PENDING_HUMAN_APPROVAL"
+
+
+def test_adopt_external_candidate_unmarked_authority_sensitive_candidate_stays_blocked(
+    tmp_path, monkeypatch,
+):
+    service, request, _, _ = _external_adoption_fixture(
+        tmp_path,
+        monkeypatch,
+        card_allowed_paths=("src/one.py", "src/two.py", "nexus/core/planner.py"),
+        authority_sensitive_candidate=True,
+    )
+
+    with pytest.raises(RuntimeError, match="effective_route_authority_change"):
+        service.adopt_external_candidate(request)
+
+
+def test_adopt_external_candidate_rejects_request_marker_missing_from_tracked_card(
+    tmp_path, monkeypatch,
+):
+    service, request, _, _ = _external_adoption_fixture(
+        tmp_path,
+        monkeypatch,
+        protected_contracts=("repository-authority-change.v1",),
+    )
+
+    with pytest.raises(RuntimeError, match="ADOPTION_REQUEST_BINDING_MISMATCH:protected_contracts"):
+        service.adopt_external_candidate(request)
+
+    assert service._read_state(request.task_id) is None
+
+
+def test_adopt_external_candidate_rejects_card_marker_missing_from_request(
+    tmp_path, monkeypatch,
+):
+    service, request, _, _ = _external_adoption_fixture(
+        tmp_path,
+        monkeypatch,
+        card_protected_contracts=("repository-authority-change.v1",),
+        protected_contracts=(),
+    )
+
+    with pytest.raises(RuntimeError, match="ADOPTION_REQUEST_BINDING_MISMATCH:protected_contracts"):
+        service.adopt_external_candidate(request)
+
+    assert service._read_state(request.task_id) is None
 
 
 def test_adopt_external_candidate_allows_unchanged_card_scope_path(tmp_path, monkeypatch):
