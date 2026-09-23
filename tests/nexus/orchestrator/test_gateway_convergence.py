@@ -15,7 +15,6 @@ from nexus.contracts.gateway_convergence import (
 )
 from nexus.orchestrator.gateway_convergence import evaluate_gateway_convergence
 
-
 NOW = datetime(2026, 9, 23, 12, 0, tzinfo=timezone.utc)
 
 
