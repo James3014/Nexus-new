@@ -76,6 +76,7 @@ class HistoricalEpbTaskCardProjection:
     auto_chain: Literal[False] = False
     forbidden_repository_paths: tuple[str, ...] = ()
     forbidden_repository_patterns: tuple[str, ...] = ()
+    protected_contracts: tuple[str, ...] = ()
 
 
 _HISTORICAL_CARD_SECTIONS = (
@@ -154,6 +155,15 @@ def parse_historical_epb_task_card(card_bytes: bytes) -> HistoricalEpbTaskCardPr
             raise _unresolvable_card()
         return tuple(values)
 
+    protected_headings = sum(line == "## Protected contracts" for line in lines)
+    if protected_headings > 1:
+        raise _unresolvable_card()
+    protected_contracts: tuple[str, ...] = ()
+    if protected_headings == 1:
+        protected_contracts = code_bullets(_historical_card_section(lines, "Protected contracts"))
+        if protected_contracts != ("repository-authority-change.v1",):
+            raise _unresolvable_card()
+
     allowed = code_bullets(sections["Allowed repository paths"])
     try:
         for path in allowed:
@@ -197,6 +207,7 @@ def parse_historical_epb_task_card(card_bytes: bytes) -> HistoricalEpbTaskCardPr
         False,
         tuple(forbidden_paths),
         tuple(forbidden_patterns),
+        protected_contracts,
     )
 
 

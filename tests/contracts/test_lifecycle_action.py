@@ -286,6 +286,35 @@ def test_historical_epb_card_parser_extracts_only_frozen_sections():
     )
 
 
+def test_historical_epb_card_parser_projects_exact_authority_change_marker():
+    card = _HISTORICAL_CARD.replace(
+        "## Exact verification commands",
+        "## Protected contracts\n\n- `repository-authority-change.v1`\n\n## Exact verification commands",
+    )
+
+    projection = parse_historical_epb_task_card(card.encode("utf-8"))
+
+    assert projection.protected_contracts == ("repository-authority-change.v1",)
+
+
+@pytest.mark.parametrize(
+    "section",
+    [
+        "## Protected contracts\n\n- `unknown-authority-marker.v1`\n",
+        "## Protected contracts\n\nrepository-authority-change.v1\n",
+        "## Protected contracts\n\n- `repository-authority-change.v1`\n\n## Protected contracts\n\n- `repository-authority-change.v1`\n",
+    ],
+)
+def test_historical_epb_card_parser_rejects_untrusted_or_ambiguous_protected_contracts(section):
+    card = _HISTORICAL_CARD.replace(
+        "## Exact verification commands",
+        section + "\n## Exact verification commands",
+    )
+
+    with pytest.raises(ValueError, match="ADOPTION_CARD_CONTRACT_UNRESOLVABLE"):
+        parse_historical_epb_task_card(card.encode("utf-8"))
+
+
 def test_historical_epb_card_parser_classifies_forbidden_repository_tokens():
     projection = parse_historical_epb_task_card(_HISTORICAL_CARD.encode("utf-8"))
 
