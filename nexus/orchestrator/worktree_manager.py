@@ -659,8 +659,12 @@ class WorktreeManager:
                 common_dir = (controller_root / common_dir).resolve()
             else:
                 common_dir = common_dir.resolve()
-            if not common_dir.is_dir() or common_dir.name != ".git":
-                raise RuntimeError("Git common directory is not a valid .git directory")
+            if (
+                not common_dir.is_dir()
+                or not (common_dir / "HEAD").is_file()
+                or not (common_dir / "objects").is_dir()
+            ):
+                raise RuntimeError("Git common directory is not structurally valid")
         except Exception as exc:
             raise RuntimeError("TARGET_ADMISSION_LOCK_UNRESOLVED") from exc
         lock_path = common_dir / "nexus-target-admission.lock"

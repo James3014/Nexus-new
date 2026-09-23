@@ -980,3 +980,35 @@ def test_valid_orphan_record_with_matching_snapshot_allows_disjoint_concurrency(
     lease_b = manager.create_lease(contract_b, task_states=state_a)
     assert lease_b.task_id == "b"
     assert Path(lease_b.target_worktree).exists()
+
+
+def test_reservation_lock_accepts_bare_common_git_dir_deployment(tmp_path):
+    seed = tmp_path / "seed"
+    bare = tmp_path / "repository.git"
+    deployment = tmp_path / "deployment"
+    target_root = tmp_path / "targets"
+    seed.mkdir()
+    target_root.mkdir()
+    _git(seed, "init", "-b", "main")
+    _git(seed, "config", "user.email", "test@example.test")
+    _git(seed, "config", "user.name", "Test")
+    (seed / "base.txt").write_text("base\n", encoding="utf-8")
+    _git(seed, "add", "base.txt")
+    _git(seed, "commit", "-m", "base")
+    subprocess.run(
+        ["git", "clone", "--bare", str(seed), str(bare)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "--git-dir", str(bare), "worktree", "add", "--detach", str(deployment), "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert _git(deployment, "rev-parse", "--git-common-dir") == str(bare)
+
+    manager = WorktreeManager(root_dir=target_root, process_checker=lambda _: False)
+    with manager._reservation_lock(deployment):
+        assert (bare / "nexus-target-admission.lock").exists()
