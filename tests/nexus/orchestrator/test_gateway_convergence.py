@@ -67,14 +67,12 @@ def _effect(
         "target_tree": target_tree,
     }
     if state == "TERMINAL_SUCCESS":
-        values.update(
-            {
-                "postflight_verified": True,
-                "postflight_loaded_commit": target_commit,
-                "postflight_loaded_tree": target_tree,
-                "postflight_receipt_hash": "e" * 64,
-            }
-        )
+        values.update({
+            "postflight_verified": True,
+            "postflight_loaded_commit": target_commit,
+            "postflight_loaded_tree": target_tree,
+            "postflight_receipt_hash": "e" * 64,
+        })
     return RecoveryEffectObservation(**values)
 
 
