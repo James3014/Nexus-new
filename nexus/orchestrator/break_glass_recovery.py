@@ -772,14 +772,16 @@ def _runtime_dispatched_body(
 
 
 def _runtime_terminal_status(outcome: GatewayReconcileOutcome) -> str:
-    if outcome.effect_started is not True:
-        raise BreakGlassRecoveryError("RUNTIME_RECOVERY_TERMINAL_EFFECT_NOT_STARTED")
     if outcome.result is ResultClass.VERIFIED:
+        if outcome.effect_started is not True:
+            raise BreakGlassRecoveryError("RUNTIME_RECOVERY_TERMINAL_EFFECT_STATE_INVALID")
         return "CONSUMED"
     if outcome.result is ResultClass.ROLLED_BACK:
+        if outcome.effect_started is not True:
+            raise BreakGlassRecoveryError("RUNTIME_RECOVERY_TERMINAL_EFFECT_STATE_INVALID")
         return "ROLLED_BACK"
     if outcome.result is ResultClass.BLOCKED:
-        return "BLOCKED_AFTER_EFFECT"
+        return "BLOCKED_AFTER_EFFECT" if outcome.effect_started else "BLOCKED_BEFORE_EFFECT"
     raise BreakGlassRecoveryError("RUNTIME_RECOVERY_OUTCOME_UNSUPPORTED")
 
 
@@ -805,8 +807,6 @@ def _validate_runtime_outcome_binding(
         or typed.predecessor_manifest_id != runtime.predecessor_manifest_id
     ):
         raise BreakGlassRecoveryError("RUNTIME_RECOVERY_OUTCOME_MISMATCH")
-    if typed.result is ResultClass.BLOCKED and not typed.effect_started:
-        raise BreakGlassRecoveryError("RUNTIME_RECOVERY_BLOCKED_BEFORE_EFFECT")
     _runtime_terminal_status(typed)
     return typed
 
@@ -836,7 +836,7 @@ def _runtime_terminal_body(
         "idempotency_fence": request.idempotency_fence,
         "gateway_outcome_evidence_sha256": typed.evidence_hash,
         "physical_observation_sha256": canonical_sha256(dict(typed.physical_observation)),
-        "effect_started": True,
+        "effect_started": typed.effect_started,
         "authority_terminal": True,
         "post_terminal_replay": "DENY",
         "claim_ceiling": runtime.claim_ceiling,
@@ -906,14 +906,23 @@ def _assert_terminal_structural_fence(
         "gateway_request_id": runtime.gateway_request_id,
         "gateway_request_hash": runtime.gateway_request_hash,
         "idempotency_fence": runtime.idempotency_fence,
-        "effect_started": True,
         "authority_terminal": True,
         "post_terminal_replay": "DENY",
         "claim_ceiling": runtime.claim_ceiling,
     }
     if any(terminal.get(key) != value for key, value in invariant.items()):
         raise BreakGlassRecoveryError("RUNTIME_RECOVERY_TERMINAL_BINDING_INVALID")
-    if terminal.get("status") not in {"CONSUMED", "ROLLED_BACK", "BLOCKED_AFTER_EFFECT"}:
+    status = terminal.get("status")
+    effect_started = terminal.get("effect_started")
+    if type(effect_started) is not bool:
+        raise BreakGlassRecoveryError("RUNTIME_RECOVERY_TERMINAL_EFFECT_STATE_INVALID")
+    if status in {"CONSUMED", "ROLLED_BACK", "BLOCKED_AFTER_EFFECT"}:
+        if effect_started is not True:
+            raise BreakGlassRecoveryError("RUNTIME_RECOVERY_TERMINAL_EFFECT_STATE_INVALID")
+    elif status == "BLOCKED_BEFORE_EFFECT":
+        if effect_started is not False:
+            raise BreakGlassRecoveryError("RUNTIME_RECOVERY_TERMINAL_EFFECT_STATE_INVALID")
+    else:
         raise BreakGlassRecoveryError("RUNTIME_RECOVERY_TERMINAL_STATUS_INVALID")
     if not _is_sha256(terminal.get("gateway_outcome_evidence_sha256")) or not _is_sha256(
         terminal.get("physical_observation_sha256")

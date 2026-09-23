@@ -1230,3 +1230,51 @@ def test_runtime_recovery_self_rehashed_terminal_semantic_tamper_fails_closed(
             gateway_outcome=outcome,
             state_root=tmp_path,
         )
+
+
+def test_runtime_recovery_pre_effect_block_terminalizes_and_denies_replay(tmp_path: Path) -> None:
+    request = gateway_request()
+    runtime = runtime_envelope(request)
+    outcome = gateway_outcome(
+        request,
+        result=ResultClass.BLOCKED,
+        effect_started=False,
+    )
+    calls: list[str] = []
+
+    def executor(actual: GatewayRecoveryRequest) -> GatewayReconcileOutcome:
+        calls.append(actual.request_id)
+        return outcome
+
+    terminal = run_runtime_recovery(
+        runtime,
+        request,
+        executor=executor,
+        state_root=tmp_path,
+    )
+    assert terminal["status"] == "BLOCKED_BEFORE_EFFECT"
+    assert terminal["effect_started"] is False
+    assert terminal["authority_terminal"] is True
+    assert terminal["post_terminal_replay"] == "DENY"
+
+    structural = inspect_runtime_recovery(runtime, state_root=tmp_path)
+    assert structural["status"] == "TERMINAL_RECORDED_REQUIRES_GATEWAY_OUTCOME"
+    verified = inspect_runtime_recovery(
+        runtime,
+        gateway_request=request,
+        gateway_outcome=outcome,
+        state_root=tmp_path,
+    )
+    assert verified["status"] == "BLOCKED_BEFORE_EFFECT"
+    assert verified["verified_against_gateway_outcome"] is True
+
+    with pytest.raises(BreakGlassRecoveryError, match="RUNTIME_RECOVERY_REPLAY_DENIED"):
+        execute_runtime_recovery(
+            runtime,
+            request,
+            clock=_must_not_read_clock,
+            revocation_provider=_must_not_refresh_authority,
+            executor=executor,
+            state_root=tmp_path,
+        )
+    assert calls == [request.request_id]

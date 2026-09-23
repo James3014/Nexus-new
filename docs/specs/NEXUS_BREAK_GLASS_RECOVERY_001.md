@@ -149,7 +149,7 @@ The physical restart/activation, rollback, durable effect ledger, and
 authenticated identity/health postflight remain owned by the existing fixed
 Gateway durable-recovery manager in `scripts/ops/mcp_gateway_durable.py`; this
 consumer SHALL NOT create a second runtime manager. Terminal break-glass state
-MAY be `CONSUMED`, `ROLLED_BACK`, or `BLOCKED_AFTER_EFFECT`, must bind the exact
+MAY be `CONSUMED`, `ROLLED_BACK`, `BLOCKED_BEFORE_EFFECT`, or `BLOCKED_AFTER_EFFECT`, must bind the exact
 Gateway outcome evidence hash and a hash of physical observation, and SHALL NOT
 persist raw host observation or credentials. Host-local transition self-hashes
 prove accidental integrity only: terminal success SHALL NOT be projected from

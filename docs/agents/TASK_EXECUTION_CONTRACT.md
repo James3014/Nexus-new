@@ -150,8 +150,9 @@ later expiry/revocation cannot justify a second effect. Success requires the
 existing manager's authenticated identity/health postflight. Outer transition
 self-hashes do not independently certify terminal semantics: any recorded
 terminal must be re-verified field-for-field against the exact typed Gateway
-outcome before it may project `CONSUMED`, `ROLLED_BACK`, or
-`BLOCKED_AFTER_EFFECT`. Without that readback inspection remains non-success.
+outcome before it may project `CONSUMED`, `ROLLED_BACK`,
+`BLOCKED_BEFORE_EFFECT`, or `BLOCKED_AFTER_EFFECT`. Without that readback
+inspection remains non-success.
 Terminal break-glass state denies replay. Raw host observation and credentials
 are not persisted by the outer authority receipt. Runtime recovery does not
 imply source repair, merge, release, or production/public claim authority.

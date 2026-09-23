@@ -117,8 +117,9 @@ For a qualifying bounded repair:
    final gate blocks the effect. After `DISPATCHED`, any timeout/crash/lost ack
    can only reconcile that same request ID/hash/fence; it must never generate a
    replacement activation. Finalize only from the manager's authenticated
-   identity/health readback as `CONSUMED`, `ROLLED_BACK`, or
-   `BLOCKED_AFTER_EFFECT`. Outer ledger self-hashes are not success authority:
+   identity/health readback as `CONSUMED`, `ROLLED_BACK`,
+   `BLOCKED_BEFORE_EFFECT`, or `BLOCKED_AFTER_EFFECT`. Outer ledger self-hashes
+   are not success authority:
    re-verify the exact terminal record against the typed Gateway outcome before
    treating it as terminal success, then deny replay. `SOURCE_REPAIR`,
    `EMERGENCY_INTEGRATION`, and `RUNTIME_RECOVERY` are separate Owner
