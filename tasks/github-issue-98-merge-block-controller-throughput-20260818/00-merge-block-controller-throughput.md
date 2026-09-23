@@ -5,9 +5,9 @@ campaign_id: github-issue-98-merge-block-controller-throughput-20260818
 source_issue: "#98"
 owner: James Chen
 status: ACTIVE
-baseline_revision: c90cb159476c5824d4c1fc4e341652f60036ddf5
-rebound_from_current_main: c90cb159476c5824d4c1fc4e341652f60036ddf5
-rebind_head_before_edits: b197b904050aa8c0f66009bbe6e651eecfc59bf0
+baseline_revision: d2fe07e673f9da49dda8257ccab3ad16c2f038f1
+rebound_from_current_main: d2fe07e673f9da49dda8257ccab3ad16c2f038f1
+rebind_head_before_edits: d2fe07e673f9da49dda8257ccab3ad16c2f038f1
 historical_baseline_revision: f9899121c6b691fd7a66a391a2055a2c78bd387b
 claim_ceiling: SOURCE_CANDIDATE_ONLY
 commit_required: true
@@ -49,6 +49,17 @@ block before provider invocation.
   This Candidate may execute but must not modify that file.
 - The running Gateway is observation-only and currently reports
   `reload_required=true`; no live mutation or completion claim may consume it.
+
+## Current-main admission-lock repair delta (2026-09-23)
+
+- The Gateway deployment topology uses a linked worktree whose Git common directory is a
+  valid bare repository ending in `repository.git`, not a directory literally named `.git`.
+- Reservation-lock admission must trust Git's resolved common-dir identity plus structural
+  Git markers (`HEAD` and `objects/`), rather than a basename convention.
+- This repair changes only common-dir validation. The lock filename, flock semantics,
+  ownership records, overlap policy, cleanup authority, and target identity remain unchanged.
+- Regression must prove both ordinary linked-worktree `.git` and deployment-style bare
+  `repository.git` topologies share the same fail-closed reservation-lock mechanism.
 
 ## Contract Delta (Ownership Authority Unification)
 
