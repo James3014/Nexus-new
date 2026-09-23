@@ -7229,7 +7229,7 @@ def test_adopt_external_candidate_unmarked_authority_sensitive_candidate_stays_b
         authority_sensitive_candidate=True,
     )
 
-    with pytest.raises(RuntimeError, match="effective_route_authority_change"):
+    with pytest.raises(RuntimeError, match="external Candidate failed lifecycle-native verification"):
         service.adopt_external_candidate(request)
 
 
