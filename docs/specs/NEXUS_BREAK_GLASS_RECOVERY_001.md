@@ -41,7 +41,7 @@ retroactive Task Card, acceptance, merge, runtime, or release authority.
 
 - **ADDED:** canonical `nexus.break_glass_owner_activation.v1` authority payload.
 - **ADDED:** externally materialized GitHub Owner activation, verification, emergency-integration, and terminal/revocation comment envelopes with exact canonical payload hash binding.
-- **ADDED:** durable host-local source-repair evidence chain `PREPARED -> APPLIED -> VERIFIED -> CONSUMED` plus a separate emergency-integration `PREPARED -> CONSUMED` chain.
+- **ADDED:** durable host-local source-repair evidence chain `PREPARED -> APPLIED -> VERIFIED -> CONSUMED` plus separate emergency-integration `PREPARED -> CONSUMED` and runtime-recovery `PREPARED -> DISPATCHED -> TERMINAL` chains.
 - **ADDED:** narrow operator CLI that reads fixed Git/GitHub evidence but performs no repair, merge, push, reload, or release effect itself.
 - **MODIFIED:** bootstrap recovery documentation now requires this canonical authority for governance-plane self-repair.
 - **UNCHANGED:** normal standing grants, Task Cards, CapabilityPlanner, Workforce Admission, Candidate acceptance, protected merge, Gateway reload/rebind, release, and production authority.
@@ -122,6 +122,42 @@ preserving the accepted head as merge lineage. No force push, ref deletion,
 unrelated merge, runtime
 activation, release, or production/public claim is granted.
 
+### REQ-007B — One-shot runtime recovery authority
+
+A runtime effect requires a separately materialized Owner
+`nexus.break_glass_owner_runtime_recovery.v1` comment on canonical break-glass
+Issue #806, additionally bound to implementation Issue #973. The payload SHALL
+bind exactly one `RUNTIME_RECOVERY` attempt to action
+`GATEWAY_DURABLE_RECOVERY`, service `com.nexus.mcp.gateway.direct`, the complete
+canonical `GatewayRecoveryRequest` hash, request ID, idempotency fence, desired
+and predecessor manifest identities/hashes, validity window, and claim ceiling
+`runtime_recovery_only`. The runtime consumer SHALL expose no caller-selected
+service, executable, shell command, filesystem destination, merge, release, or
+production claim.
+
+Before the durable `DISPATCHED` transition, the consumer SHALL re-read Owner
+revocation evidence and only then sample a fresh clock immediately before the
+effect-commit write. A timestamp captured before remote authority readback SHALL
+NOT authorize `DISPATCHED`. Expired, newly revoked, replayed, mismatched, or
+widened requests fail closed without calling the runtime effect. `DISPATCHED` is
+the one-shot effect-commit boundary: once it is durable, timeout, crash, lost
+acknowledgement, later expiry, or later revocation SHALL reconcile only the same
+request ID/hash/fence rather than infer that the effect never started or create
+a replacement effect.
+
+The physical restart/activation, rollback, durable effect ledger, and
+authenticated identity/health postflight remain owned by the existing fixed
+Gateway durable-recovery manager in `scripts/ops/mcp_gateway_durable.py`; this
+consumer SHALL NOT create a second runtime manager. Terminal break-glass state
+MAY be `CONSUMED`, `ROLLED_BACK`, or `BLOCKED_AFTER_EFFECT`, must bind the exact
+Gateway outcome evidence hash and a hash of physical observation, and SHALL NOT
+persist raw host observation or credentials. Host-local transition self-hashes
+prove accidental integrity only: terminal success SHALL NOT be projected from
+the outer ledger alone. A terminal record is success evidence only after exact
+semantic re-verification against the trusted `GatewayReconcileOutcome`; without
+that readback inspection is explicitly non-success. Any terminal state denies
+replay.
+
 ### REQ-008 — Crash/retry/replay safety
 
 Each source or integration attempt SHALL use stable recovery/effect identity and
@@ -169,6 +205,7 @@ break-glass authority is terminal and replay is denied.
 | AC-005 | REQ-006/007 | APPLIED and VERIFIED bind one immutable repair subject; VERIFIED is rooted in an Owner GitHub verification comment whose exact-head checks are all successful. | Caller-only verifier/hash, verifier==implementer, check-head substitution, and commit substitution fail. |
 | AC-006 | REQ-008 | Exact PREPARED retry is idempotent; source and integration attempts reconcile through durable terminal records. | Phase skip, conflicting APPLIED retry, transition tamper, symlink state, and blind post-merge retry fail. |
 | AC-007 | REQ-007A/009 | A separate Owner integration grant rebinds the freshly observed current main and exact PR/head/checks; only an existing exact-head/CAS merge sink may consume it. Source-repair base may remain older immutable provenance. Source CONSUMED requires a fresh Owner GitHub canary comment bound to the physical normal-governance evidence plus a global Owner terminal/revocation comment. | Source authority cannot merge; stale integration base is rejected by the merge sink; integration grant cannot widen effect; caller-local canary JSON/hashes cannot consume source authority; local and fresh-session global post-consume replay fail. |
+| AC-007B | REQ-007B/008 | Exact Owner runtime grant can commit one fixed Gateway durable-recovery request; revocation is re-read and expiry is evaluated from a fresh post-readback clock immediately before DISPATCHED; existing manager readback returns VERIFIED or ROLLED_BACK and exact terminal semantics re-verify against that typed outcome. | Wrong action/service/request/hash/fence/manifests, expiry/revocation before DISPATCH, replay, widened effect, stale-clock acceptance, self-rehashed PREPARED/DISPATCHED/TERMINAL semantic tamper, and lost-ack replacement attempts fail closed; outer terminal self-hash alone never certifies success and lost ack reconciles the same request only. |
 | AC-008 | REQ-010 | Integrated revision passes focused/regression evidence and a fresh Owner-bound normal-governance canary, then terminal/replay-denial evidence is recorded. | Green source tests alone, merged PR without physical canary evidence, or caller-authored canary JSON cannot close #806. |
 | AC-009 | REQ-003/007A/009 | Controlled self-hosting E2E starts with normal governance unavailable, exercises real break-glass source/integration contracts, restores the normal-path canary, consumes emergency authority, and proves replay denial. | Harness that never begins in a failed-governance state or never exercises replay denial is not sufficient. |
 
@@ -198,6 +235,7 @@ qualifying failure evidence
   -> VERIFIED
   -> separately authorized integration if needed
   -> separately authorized runtime recovery if needed
+     -> PREPARED -> DISPATCHED -> same-request reconcile -> TERMINAL
   -> fresh normal-Governance canary
   -> CONSUMED / authority terminal proof
   -> replay denied

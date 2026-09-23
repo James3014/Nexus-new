@@ -106,10 +106,24 @@ For a qualifying bounded repair:
    behavior, not process liveness alone.
 11. Advance source recovery evidence through `PREPARED -> APPLIED -> VERIFIED`;
    if emergency integration is required, advance its distinct durable attempt
-   through `PREPARED -> CONSUMED` only after authoritative PR/main readback.
-   `SOURCE_REPAIR`, `EMERGENCY_INTEGRATION`, and `RUNTIME_RECOVERY` are separate
-   Owner authorities. A source-repair activation cannot be reused for merge or
-   runtime effects.
+   through `PREPARED -> CONSUMED` only after authoritative PR/main readback. If
+   runtime recovery is separately required, obtain a new Owner runtime grant
+   bound to Issue #806 + implementation Issue #973 and one exact canonical
+   `GatewayRecoveryRequest`. The runtime consumer records `PREPARED`, then
+   atomically records `DISPATCHED` before delegating to the existing fixed
+   durable Gateway recovery manager. Immediately before `DISPATCHED`, re-read
+   Owner revocation evidence and sample a fresh clock after that readback; do not
+   reuse a caller timestamp captured earlier. Expiry or Owner revocation at that
+   final gate blocks the effect. After `DISPATCHED`, any timeout/crash/lost ack
+   can only reconcile that same request ID/hash/fence; it must never generate a
+   replacement activation. Finalize only from the manager's authenticated
+   identity/health readback as `CONSUMED`, `ROLLED_BACK`, or
+   `BLOCKED_AFTER_EFFECT`. Outer ledger self-hashes are not success authority:
+   re-verify the exact terminal record against the typed Gateway outcome before
+   treating it as terminal success, then deny replay. `SOURCE_REPAIR`,
+   `EMERGENCY_INTEGRATION`, and `RUNTIME_RECOVERY` are separate Owner
+   authorities. A source-repair activation cannot be reused for merge or runtime
+   effects.
 12. After the normal governance canary succeeds, publish a canonical Owner
    canary comment bound to the physical source/runtime identity, action binding,
    normal authority readback, bounded governance operation, and verifier receipt.
