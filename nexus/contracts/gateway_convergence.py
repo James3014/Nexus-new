@@ -111,14 +111,12 @@ class DesiredDeploymentPolicy(BaseModel):
 
     @property
     def generation_id(self) -> str:
-        return canonical_hash(
-            {
-                "schema": self.schema_name,
-                "mode": self.mode.value,
-                "desired_commit": self.desired_commit,
-                "desired_tree": self.desired_tree,
-            }
-        )
+        return canonical_hash({
+            "schema": self.schema_name,
+            "mode": self.mode.value,
+            "desired_commit": self.desired_commit,
+            "desired_tree": self.desired_tree,
+        })
 
 
 class GatewayConvergenceObservation(BaseModel):
