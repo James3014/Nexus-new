@@ -4,6 +4,7 @@ artifact_authority: current
 task_id: `ISSUE-1064-GATEWAY-CONTINUOUS-CONVERGENCE`
 owner: James Chen
 status: ACTIVE
+execution_lane: `GOVERNED`
 commit_required: true
 candidate_required: true
 worker_may_commit: true
