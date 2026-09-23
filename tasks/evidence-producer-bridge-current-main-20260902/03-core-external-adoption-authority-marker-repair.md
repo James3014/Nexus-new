@@ -1,6 +1,9 @@
 # TASK-EPB-004-R1 — External Candidate Authority-Marker Re-entry Repair
 
 task_id: `TASK-EPB-004-R1`
+attempt_id: `TASK-EPB-004-R1-ATTEMPT-1`
+execution_lane: `GOVERNED`
+issue_number: `973`
 
 - Campaign: `CAMPAIGN-EVIDENCE-PRODUCER-BRIDGE-01`
 - Mission: `CORE-EVIDENCE-TRUST-CANONICALIZATION-20260902`
