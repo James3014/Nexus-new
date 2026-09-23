@@ -42,6 +42,10 @@ from nexus.contracts.execution_readiness import (
     ExecutionReadinessRequest,
     ExecutionReadinessStatus,
 )
+from nexus.contracts.gateway_convergence import (
+    ConvergenceAction,
+    GatewayConvergenceRequest,
+)
 from nexus.contracts.lifecycle_action import (
     ContractKind,
     ExternalCandidateAdoptionRequest,
@@ -77,6 +81,7 @@ from nexus.orchestrator.execution_readiness import (
     evaluate_execution_readiness,
     evaluate_source_binding,
 )
+from nexus.orchestrator.gateway_convergence import evaluate_gateway_convergence
 from nexus.orchestrator.learning_policy_control import (
     apply_learning_policy_effect,
 )
@@ -4002,6 +4007,55 @@ class UnifiedMCPGateway:
                 },
             },
             {
+                "name": "nexus_gateway_convergence",
+                "description": (
+                    "Classify one policy-driven desired-vs-loaded Gateway convergence generation. "
+                    "Decision-only: never reloads, restarts, grants recovery authority, or retries "
+                    "an ambiguous effect; issue #526 remains the sole replacement-effect owner."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["policy", "readiness_state", "quiescence_state"],
+                    "properties": {
+                        "policy": {
+                            "type": "object",
+                            "required": ["mode", "desired_commit", "desired_tree"],
+                            "properties": {
+                                "mode": {
+                                    "type": "string",
+                                    "enum": ["PINNED", "TRACK_ACCEPTED_MAIN"],
+                                },
+                                "desired_commit": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{40}$",
+                                },
+                                "desired_tree": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{40}$",
+                                },
+                            },
+                            "additionalProperties": False,
+                        },
+                        "readiness_state": {
+                            "type": "string",
+                            "enum": ["SAFE", "BLOCKED", "UNKNOWN"],
+                        },
+                        "quiescence_state": {
+                            "type": "string",
+                            "enum": ["SAFE", "BLOCKED", "UNKNOWN"],
+                        },
+                        "active_effect": {
+                            "type": ["object", "null"],
+                        },
+                        "not_before": {
+                            "type": ["string", "null"],
+                            "format": "date-time",
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+            },
+            {
                 "name": "nexus_execution_readiness",
                 "description": (
                     "Evaluate the pre-execution readiness convergence gate: exactly one typed "
@@ -4783,6 +4837,73 @@ class UnifiedMCPGateway:
             "canonical_repo_root": str(CANONICAL_SOURCE_ROOT),
             "lifecycle": lifecycle,
         }
+
+    def _gateway_convergence(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        """Classify one #1064 convergence generation without performing effects."""
+
+        policy = arguments.get("policy")
+        if not isinstance(policy, Mapping):
+            raise GatewayInputError("policy must be an object")
+        readiness_state = _text(
+            arguments.get("readiness_state"),
+            "readiness_state",
+            max_length=32,
+        ).upper()
+        quiescence_state = _text(
+            arguments.get("quiescence_state"),
+            "quiescence_state",
+            max_length=32,
+        ).upper()
+        if readiness_state not in {"SAFE", "BLOCKED", "UNKNOWN"}:
+            raise GatewayInputError("readiness_state must be SAFE, BLOCKED, or UNKNOWN")
+        if quiescence_state not in {"SAFE", "BLOCKED", "UNKNOWN"}:
+            raise GatewayInputError("quiescence_state must be SAFE, BLOCKED, or UNKNOWN")
+
+        status = self._gateway_status()
+        try:
+            loaded_tree = _git("rev-parse", "HEAD^{tree}").strip()
+        except RuntimeError as exc:
+            raise GatewayInputError("loaded Gateway tree is unavailable") from exc
+
+        request_payload: dict[str, Any] = {
+            "policy": dict(policy),
+            "observation": {
+                "loaded_commit": status.get("repo_head_current"),
+                "loaded_tree": loaded_tree,
+                "upstream_freshness": status.get("upstream_freshness"),
+                "observed_upstream_main_head": status.get("observed_upstream_main_head"),
+                "readiness_state": readiness_state,
+                "quiescence_state": quiescence_state,
+                "server_instance_id": status.get("server_instance_id"),
+            },
+            "active_effect": arguments.get("active_effect"),
+            "not_before": arguments.get("not_before"),
+        }
+        try:
+            request = GatewayConvergenceRequest.model_validate(request_payload)
+            result = evaluate_gateway_convergence(request)
+        except ValueError as exc:
+            raise GatewayInputError(str(exc)) from exc
+
+        next_action = {
+            ConvergenceAction.NOOP: "none",
+            ConvergenceAction.BLOCKED: "reobserve_or_rebind",
+            ConvergenceAction.REQUEST_RECOVERY: "prepare_issue_526_recovery",
+            ConvergenceAction.START_PREPARED_RECOVERY: "issue_526_gateway_recover",
+            ConvergenceAction.COALESCE_PRE_EFFECT_TARGET: "prepare_latest_issue_526_recovery",
+            ConvergenceAction.RECONCILE_RECOVERY: "operation_reconcile",
+        }[result.action]
+        payload = result.model_dump(mode="json")
+        payload.update(
+            {
+                "canonical_next_action": next_action,
+                "decision_only": True,
+                "host_effect_performed": False,
+                "observed_gateway_instance_id": status.get("server_instance_id"),
+                "observed_upstream_freshness": status.get("upstream_freshness"),
+            }
+        )
+        return payload
 
     def _gateway_execution_readiness(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         """Evaluate the #807 pre-execution readiness convergence gate.
@@ -6142,6 +6263,8 @@ class UnifiedMCPGateway:
     def _call_tool(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         if name == "nexus_gateway_status":
             return self._gateway_status()
+        if name == "nexus_gateway_convergence":
+            return self._gateway_convergence(arguments)
         if name == EXECUTION_READINESS_TOOL_NAME:
             return self._gateway_execution_readiness(arguments)
         if name == "nexus_project_entry":
