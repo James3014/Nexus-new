@@ -14,7 +14,8 @@
 |---:|---|---|---|
 | 0 | `TASK-EPB-002-R1` | `INTEGRATED_SOURCE_VERIFIED` | Evidence Trust foundation integrated |
 | 1 | `TASK-EPB-003-R1` | `ACTIVE` | core merge `1c4f9384a67c61f80d1f11215e9c1ab225b21809` |
+| 2 | `TASK-EPB-004-R1` | `ACTIVE` | #973 R4 exposed authority-marker re-entry gap |
 
-Current frontier: `TASK-EPB-003-R1`.
+Current frontier: `TASK-EPB-004-R1`.
 
 `AUTO_CHAIN=false`
