@@ -383,6 +383,7 @@ current action surface cannot obtain the exact requalification evidence, report 
 transport/evidence capability gap rather than treating Candidate recreation as a
 safe fallback.
 
+
 A tracked Task Card whose exact bytes still declare `execution_lane: GOVERNED`
 remains the effective merge-lane contract until the Owner explicitly changes it.
 Starting with PR #1061, every newly opened protected-merge PR must publish exactly
@@ -475,6 +476,27 @@ Candidate, PR, and Issue identities must agree; the Candidate head must be
 contained by the merge commit, and the merge commit must be contained by the
 resolved default branch. Missing, stale, malformed, wrongly attributed, or
 revision-mismatched evidence fails closed and cannot unlock downstream work.
+
+The fresh binding also supplies the exact material acceptance-criterion set and
+the witness kinds required to prove each criterion. The completion snapshot must
+map every such criterion to current evidence identities and classify it as
+`SATISFIED_CURRENT`, `UNSATISFIED_CURRENT`, or `EVIDENCE_UNAVAILABLE`.
+Criterion evidence must be part of the bound required-evidence set and must
+itself be bound to the exact current-main HEAD and tree. A criterion may be
+`SATISFIED_CURRENT` only when its current evidence covers every witness kind
+required by the fresh binding. A broad behavioral invariant therefore cannot be
+closed by a single narrow happy-path witness when its binding requires negative,
+falsifier, or mechanical-enforcement coverage.
+
+`original_contract_satisfied` is a compatibility projection of the
+criterion-level result, not an independent semantic authority. It must equal the
+value derived from all bound material criteria. Missing criterion coverage or
+`EVIDENCE_UNAVAILABLE` fails closed as `BLOCKED_EVIDENCE`; a currently
+falsified material criterion keeps the original Issue nonterminal (or enters a
+bounded `CONTRACT_DELTA` when that is independently required). Historical
+terminal evidence is preserved as history, but fresh contradictory evidence is
+reconciled against the original Issue before a distinct follow-up may escape the
+same contract.
 
 The reconciliation selects exactly one disposition:
 
