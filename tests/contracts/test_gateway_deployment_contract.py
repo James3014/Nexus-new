@@ -2189,9 +2189,10 @@ def test_r1_materialization_request_is_typed_and_hash_bound():
         "recovery_authority_id": receipt.receipt_id,
         "recovery_authority_hash": receipt.receipt_hash,
     }
-    request = GatewayRecoveryMaterializationRequest.model_validate(
-        {**values, "request_hash": canonical_hash(values)}
-    )
+    request = GatewayRecoveryMaterializationRequest.model_validate({
+        **values,
+        "request_hash": canonical_hash(values),
+    })
     assert validate_recovery_materialization_request(request) == request
 
     mutated = request.model_dump()
@@ -2204,12 +2205,10 @@ def test_r1_materialization_request_is_typed_and_hash_bound():
     wrong_operation = {**values, "operation": "gateway-recover"}
     with pytest.raises(ContractError, match="operation/effect"):
         validate_recovery_materialization_request(
-            GatewayRecoveryMaterializationRequest.model_validate(
-                {
-                    **wrong_operation,
-                    "request_hash": canonical_hash(wrong_operation),
-                }
-            )
+            GatewayRecoveryMaterializationRequest.model_validate({
+                **wrong_operation,
+                "request_hash": canonical_hash(wrong_operation),
+            })
         )
 
 
@@ -2237,27 +2236,27 @@ def test_r1_materialization_receipt_requires_zero_effect_and_binds_hashes():
         "schema": "nexus.gateway.durable_recovery_materialization_receipt.v1",
     }
     receipt = validate_recovery_materialization_receipt(
-        RecoveryAuthorityMaterializationReceipt(
-            **{**values, "receipt_hash": canonical_hash(values)}
-        )
+        RecoveryAuthorityMaterializationReceipt(**{
+            **values,
+            "receipt_hash": canonical_hash(values),
+        })
     )
     assert receipt.effect_started is False
 
     started = {**values, "effect_started": True}
     with pytest.raises(ContractError, match="never start an effect"):
         validate_recovery_materialization_receipt(
-            RecoveryAuthorityMaterializationReceipt(
-                **{**started, "receipt_hash": canonical_hash(started)}
-            )
+            RecoveryAuthorityMaterializationReceipt(**{
+                **started,
+                "receipt_hash": canonical_hash(started),
+            })
         )
 
-    tampered = RecoveryAuthorityMaterializationReceipt(
-        **{
-            **values,
-            "fresh_main": "0" * 40,
-            "receipt_hash": canonical_hash(values),
-        }
-    )
+    tampered = RecoveryAuthorityMaterializationReceipt(**{
+        **values,
+        "fresh_main": "0" * 40,
+        "receipt_hash": canonical_hash(values),
+    })
     with pytest.raises(ContractError, match="hash mismatch"):
         validate_recovery_materialization_receipt(tampered)
 

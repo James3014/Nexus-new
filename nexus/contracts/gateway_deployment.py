@@ -1454,8 +1454,12 @@ def validate_recovery_request(request: GatewayRecoveryRequest) -> GatewayRecover
 
 
 GATEWAY_RECOVERY_MATERIALIZATION_OPERATION = "gateway-recovery-materialize"
-GATEWAY_RECOVERY_MATERIALIZATION_SCHEMA = "nexus.gateway.durable_recovery_materialization_request.v1"
-GATEWAY_RECOVERY_MATERIALIZATION_RECEIPT_SCHEMA = "nexus.gateway.durable_recovery_materialization_receipt.v1"
+GATEWAY_RECOVERY_MATERIALIZATION_SCHEMA = (
+    "nexus.gateway.durable_recovery_materialization_request.v1"
+)
+GATEWAY_RECOVERY_MATERIALIZATION_RECEIPT_SCHEMA = (
+    "nexus.gateway.durable_recovery_materialization_receipt.v1"
+)
 
 
 def derive_gateway_recovery_request(
@@ -1587,15 +1591,10 @@ def validate_recovery_materialization_receipt(
             _hash(value, name, 40)
         else:
             _id(value, name)
-    if (
-        type(receipt.predecessor_artifact_size) is not int
-        or receipt.predecessor_artifact_size <= 0
-    ):
+    if type(receipt.predecessor_artifact_size) is not int or receipt.predecessor_artifact_size <= 0:
         raise ContractError("R1 materialization predecessor artifact size invalid")
     expected = canonical_hash({
-        key: value
-        for key, value in receipt.model_dump().items()
-        if key != "receipt_hash"
+        key: value for key, value in receipt.model_dump().items() if key != "receipt_hash"
     })
     if receipt.receipt_hash != expected:
         raise ContractError("R1 materialization receipt hash mismatch")
