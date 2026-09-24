@@ -2226,6 +2226,7 @@ def test_r1_materialization_receipt_requires_zero_effect_and_binds_hashes():
         "effect_class": EffectClass.GATEWAY_RECOVERY_MATERIALIZATION,
         "recovery_authority_id": "receipt-1",
         "recovery_authority_hash": "a" * 64,
+        "materialization_request_hash": "1" * 64,
         "fresh_main": "b" * 40,
         "fresh_main_tree": "c" * 40,
         "materialized_authority_sha256": "d" * 64,

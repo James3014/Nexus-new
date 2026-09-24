@@ -325,6 +325,7 @@ GATEWAY_PREDECESSOR_ARTIFACT_ROOT = GATEWAY_STATE_ROOT / "predecessor-artifacts"
 GATEWAY_REPOSITORY = GATEWAY_STATE_ROOT / "repository.git"
 _R1_PERSISTENT_FSCK_TIMEOUT_SECONDS = 120
 GATEWAY_RECOVERY_AUTHORITY_STORE = GATEWAY_STATE_ROOT / "recovery-authority.json"
+GATEWAY_RECOVERY_MATERIALIZATION_ROOT = GATEWAY_STATE_ROOT / "recovery-materializations"
 RECOVERY_AUTHORITY_SOURCE_PATH = RECOVERY_RECEIPT_PATH
 RECOVERY_CONTINUATION_AUTHORITY_SOURCE_PATH = (
     "tasks/github-issue-526-g20-r1-source-contract-delta-20260903/"
@@ -1841,6 +1842,81 @@ def _r1_materialize_predecessor_artifact(receipt: RecoveryAuthorityReceipt) -> P
     return artifact
 
 
+def _r1_materialization_receipt_path(
+    request: GatewayRecoveryMaterializationRequest,
+) -> Path:
+    return GATEWAY_RECOVERY_MATERIALIZATION_ROOT / f"{request.request_hash}.json"
+
+
+def _r1_load_materialization_receipt(
+    request: GatewayRecoveryMaterializationRequest,
+) -> RecoveryAuthorityMaterializationReceipt | None:
+    path = _r1_materialization_receipt_path(request)
+    if not path.exists() and not path.is_symlink():
+        return None
+    checked = _safe_store_path(path)
+    try:
+        payload = json.loads(checked.read_text(encoding="utf-8"), object_pairs_hook=_unique_pairs)
+        receipt = RecoveryAuthorityMaterializationReceipt.model_validate(payload)
+        validate_recovery_materialization_receipt(receipt)
+    except (OSError, UnicodeError, ValueError, ContractError) as exc:
+        raise _gateway_error("R1 materialization receipt invalid", exc) from exc
+    if (
+        receipt.materialization_request_hash != request.request_hash
+        or receipt.request_id != request.request_id
+        or receipt.idempotency_fence != request.idempotency_fence
+        or receipt.recovery_authority_id != request.recovery_authority_id
+        or receipt.recovery_authority_hash != request.recovery_authority_hash
+    ):
+        raise _gateway_error("R1 materialization receipt/request conflict")
+    return receipt
+
+
+def _r1_reconcile_materialization_receipt(
+    request: GatewayRecoveryMaterializationRequest,
+    receipt: RecoveryAuthorityMaterializationReceipt,
+) -> dict[str, Any]:
+    tracked_receipt, tracked_bytes = _r1_tracked_recovery_receipt(receipt.fresh_main)
+    if (
+        tracked_receipt.receipt_id != receipt.recovery_authority_id
+        or tracked_receipt.receipt_hash != receipt.recovery_authority_hash
+    ):
+        raise _gateway_error("R1 durable materialization authority drift")
+    canonical_request = derive_gateway_recovery_request(tracked_receipt)
+    validate_recovery_request(canonical_request)
+    if (
+        canonical_request.request_id != request.request_id
+        or canonical_request.idempotency_fence != request.idempotency_fence
+    ):
+        raise _gateway_error("R1 durable materialization request/fence drift")
+    request_bytes = json.dumps(
+        canonical_request.model_dump(), sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    if hashlib.sha256(tracked_bytes).hexdigest() != receipt.materialized_authority_sha256:
+        raise _gateway_error("R1 durable materialization authority bytes drift")
+    if hashlib.sha256(request_bytes).hexdigest() != receipt.materialized_request_sha256:
+        raise _gateway_error("R1 durable materialization request bytes drift")
+    materialized_authority = _r1_materialize_value_store(
+        GATEWAY_RECOVERY_AUTHORITY_STORE, tracked_bytes
+    )
+    materialized_request = _r1_materialize_value_store(
+        GATEWAY_REQUEST_STORE, request_bytes
+    )
+    _r1_materialize_predecessor_artifact(tracked_receipt)
+    checked_authority = _safe_store_path(GATEWAY_RECOVERY_AUTHORITY_STORE)
+    checked_request = _safe_store_path(GATEWAY_REQUEST_STORE)
+    if (
+        checked_authority.read_bytes() != tracked_bytes
+        or checked_request.read_bytes() != request_bytes
+        or hashlib.sha256(materialized_authority).hexdigest()
+        != receipt.materialized_authority_sha256
+        or hashlib.sha256(materialized_request).hexdigest()
+        != receipt.materialized_request_sha256
+    ):
+        raise _gateway_error("R1 materialization post-write identity mismatch")
+    return receipt.model_dump()
+
+
 def gateway_recovery_materialize(
     request: GatewayRecoveryMaterializationRequest | Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -1850,6 +1926,10 @@ def gateway_recovery_materialize(
     except ContractError as exc:
         raise _gateway_error("R1 materialization request rejected", exc) from exc
     with InterProcessLock(GATEWAY_LOCK):
+        durable = _r1_load_materialization_receipt(typed)
+        if durable is not None:
+            return _r1_reconcile_materialization_receipt(typed, durable)
+
         fresh_main, fresh_tree = _r1_refresh_fixed_authority_mirror()
         tracked_receipt, tracked_bytes = _r1_tracked_recovery_receipt(fresh_main)
         if (
@@ -1864,23 +1944,9 @@ def gateway_recovery_materialize(
             or canonical_request.idempotency_fence != typed.idempotency_fence
         ):
             raise _gateway_error("R1 materialization request/fence identity mismatch")
-        materialized_authority = _r1_materialize_value_store(
-            GATEWAY_RECOVERY_AUTHORITY_STORE, tracked_bytes
-        )
         request_bytes = json.dumps(
             canonical_request.model_dump(), sort_keys=True, separators=(",", ":")
         ).encode("utf-8")
-        materialized_request = _r1_materialize_value_store(
-            GATEWAY_REQUEST_STORE, request_bytes
-        )
-        _r1_materialize_predecessor_artifact(tracked_receipt)
-        checked_authority = _safe_store_path(GATEWAY_RECOVERY_AUTHORITY_STORE)
-        checked_request = _safe_store_path(GATEWAY_REQUEST_STORE)
-        if (
-            checked_authority.read_bytes() != tracked_bytes
-            or checked_request.read_bytes() != request_bytes
-        ):
-            raise _gateway_error("R1 materialization post-write identity mismatch")
         receipt_values = {
             "request_id": typed.request_id,
             "idempotency_fence": typed.idempotency_fence,
@@ -1888,10 +1954,11 @@ def gateway_recovery_materialize(
             "effect_class": EffectClass.GATEWAY_RECOVERY_MATERIALIZATION,
             "recovery_authority_id": typed.recovery_authority_id,
             "recovery_authority_hash": typed.recovery_authority_hash,
+            "materialization_request_hash": typed.request_hash,
             "fresh_main": fresh_main,
             "fresh_main_tree": fresh_tree,
-            "materialized_authority_sha256": hashlib.sha256(materialized_authority).hexdigest(),
-            "materialized_request_sha256": hashlib.sha256(materialized_request).hexdigest(),
+            "materialized_authority_sha256": hashlib.sha256(tracked_bytes).hexdigest(),
+            "materialized_request_sha256": hashlib.sha256(request_bytes).hexdigest(),
             "predecessor_artifact_sha256": tracked_receipt.predecessor_artifact_sha256,
             "predecessor_artifact_size": tracked_receipt.predecessor_artifact_size,
             "effect_started": False,
@@ -1900,7 +1967,17 @@ def gateway_recovery_materialize(
         receipt_values["receipt_hash"] = canonical_hash(receipt_values)
         receipt = RecoveryAuthorityMaterializationReceipt(**receipt_values)
         validate_recovery_materialization_receipt(receipt)
-        return receipt.model_dump()
+
+        # Persist manager-owned continuity before touching the materialized stores.
+        # A caller disconnect after this point can be reconciled by any transport
+        # using only the exact request plus fixed manager state.
+        receipt_bytes = json.dumps(
+            receipt.model_dump(), sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        _r1_materialize_value_store(
+            _r1_materialization_receipt_path(typed), receipt_bytes
+        )
+        return _r1_reconcile_materialization_receipt(typed, receipt)
 
 
 def gateway_recover(
