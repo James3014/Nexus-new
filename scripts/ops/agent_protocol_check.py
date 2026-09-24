@@ -269,9 +269,8 @@ def evaluate_completion_snapshot(
     for item in expected_criteria_raw:
         criterion_id = item.get("id")
         witness_kinds = item.get("required_witness_kinds")
-        if (
-            not isinstance(criterion_id, str)
-            or not _COMPLETION_CRITERION_ID_RE.fullmatch(criterion_id)
+        if not isinstance(criterion_id, str) or not _COMPLETION_CRITERION_ID_RE.fullmatch(
+            criterion_id
         ):
             failures.append("expected_acceptance_criterion_id_invalid")
             continue
@@ -282,15 +281,12 @@ def evaluate_completion_snapshot(
             not isinstance(witness_kinds, list)
             or not witness_kinds
             or not all(
-                isinstance(kind, str)
-                and _COMPLETION_WITNESS_KIND_RE.fullmatch(kind)
+                isinstance(kind, str) and _COMPLETION_WITNESS_KIND_RE.fullmatch(kind)
                 for kind in witness_kinds
             )
             or len(witness_kinds) != len(set(witness_kinds))
         ):
-            failures.append(
-                f"expected_acceptance_criterion_witness_kinds_invalid:{criterion_id}"
-            )
+            failures.append(f"expected_acceptance_criterion_witness_kinds_invalid:{criterion_id}")
             continue
         expected_criteria[criterion_id] = tuple(witness_kinds)
 
@@ -305,9 +301,8 @@ def evaluate_completion_snapshot(
         criteria_raw = []
     for item in criteria_raw:
         criterion_id = item.get("id")
-        if (
-            not isinstance(criterion_id, str)
-            or not _COMPLETION_CRITERION_ID_RE.fullmatch(criterion_id)
+        if not isinstance(criterion_id, str) or not _COMPLETION_CRITERION_ID_RE.fullmatch(
+            criterion_id
         ):
             failures.append("acceptance_criterion_id_invalid")
             continue
@@ -334,8 +329,7 @@ def evaluate_completion_snapshot(
 
         criterion_evidence_ids = criterion.get("evidence_ids")
         if not isinstance(criterion_evidence_ids, list) or not all(
-            isinstance(evidence_id, str) and evidence_id
-            for evidence_id in criterion_evidence_ids
+            isinstance(evidence_id, str) and evidence_id for evidence_id in criterion_evidence_ids
         ):
             failures.append(f"acceptance_criterion_evidence_ids_invalid:{criterion_id}")
             criterion_evidence_ids = []
@@ -347,31 +341,22 @@ def evaluate_completion_snapshot(
         covered_witness_kinds: set[str] = set()
         for evidence_id in criterion_evidence_ids:
             if evidence_id not in required_evidence:
-                failures.append(
-                    f"criterion_evidence_not_required:{criterion_id}:{evidence_id}"
-                )
+                failures.append(f"criterion_evidence_not_required:{criterion_id}:{evidence_id}")
             item = evidence_by_id.get(evidence_id)
             if item is None:
-                failures.append(
-                    f"criterion_evidence_missing:{criterion_id}:{evidence_id}"
-                )
+                failures.append(f"criterion_evidence_missing:{criterion_id}:{evidence_id}")
                 continue
             if (
                 item.get("status") != "PASS"
                 or item.get("bound_sha") != actual_head
                 or item.get("bound_tree_sha") != actual_tree
             ):
-                failures.append(
-                    f"criterion_evidence_not_current:{criterion_id}:{evidence_id}"
-                )
+                failures.append(f"criterion_evidence_not_current:{criterion_id}:{evidence_id}")
             witness_kind = item.get("witness_kind")
-            if (
-                not isinstance(witness_kind, str)
-                or not _COMPLETION_WITNESS_KIND_RE.fullmatch(witness_kind)
+            if not isinstance(witness_kind, str) or not _COMPLETION_WITNESS_KIND_RE.fullmatch(
+                witness_kind
             ):
-                failures.append(
-                    f"criterion_witness_kind_invalid:{criterion_id}:{evidence_id}"
-                )
+                failures.append(f"criterion_witness_kind_invalid:{criterion_id}:{evidence_id}")
                 continue
             covered_witness_kinds.add(witness_kind)
 
@@ -380,25 +365,16 @@ def evaluate_completion_snapshot(
         elif status == "SATISFIED_CURRENT":
             for witness_kind in required_witness_kinds:
                 if witness_kind not in covered_witness_kinds:
-                    failures.append(
-                        f"criterion_witness_kind_missing:{criterion_id}:{witness_kind}"
-                    )
+                    failures.append(f"criterion_witness_kind_missing:{criterion_id}:{witness_kind}")
 
     criterion_semantics_determinate = (
         bool(expected_criteria)
         and sorted(criteria) == sorted(expected_criteria)
         and len(criterion_statuses) == len(expected_criteria)
-        and all(
-            status != "EVIDENCE_UNAVAILABLE"
-            for status in criterion_statuses.values()
-        )
+        and all(status != "EVIDENCE_UNAVAILABLE" for status in criterion_statuses.values())
     )
-    derived_original_satisfied = (
-        criterion_semantics_determinate
-        and all(
-            status == "SATISFIED_CURRENT"
-            for status in criterion_statuses.values()
-        )
+    derived_original_satisfied = criterion_semantics_determinate and all(
+        status == "SATISFIED_CURRENT" for status in criterion_statuses.values()
     )
 
     prerequisite_open_failures: list[str] = []
@@ -460,10 +436,7 @@ def evaluate_completion_snapshot(
     )
     if not all(type(flag) is bool for flag in semantic_flags):
         failures.append("completion_semantic_flags_invalid")
-    elif (
-        criterion_semantics_determinate
-        and original_satisfied is not derived_original_satisfied
-    ):
+    elif criterion_semantics_determinate and original_satisfied is not derived_original_satisfied:
         failures.append("original_contract_satisfied_mismatch")
     if contract_delta and distinct_follow_up:
         failures.append("completion_signals_contradictory")
