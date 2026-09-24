@@ -15,7 +15,9 @@ permissions:
 jobs:
   impact-gate:
     name: Exact-base impact gate
-    if: github.event_name != 'workflow_dispatch' && github.event_name != 'schedule'
+    # Post-repair hostile-test branch intentionally suppresses the real gate so
+    # a same-name untrusted job can be observed against the protected context.
+    if: github.event_name != 'workflow_dispatch' && github.event_name != 'schedule' && github.head_ref != 'codex/issue-116-post-repair-negative-witness'
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -371,6 +373,35 @@ jobs:
           path: ${{ runner.temp }}/nexus-ci-impact/
           if-no-files-found: error
           retention-days: 7
+
+  same-name-substitution-1:
+    name: Exact-base impact gate
+    # Evidence-only Issue #116 post-repair Phase 2: deliberately do not run Golden.
+    if: github.event_name == 'pull_request' && github.head_ref == 'codex/issue-116-post-repair-negative-witness'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Emit untrusted same-name success
+        run: |
+          set -euo pipefail
+          echo "UNTRUSTED_SAME_NAME_SUBSTITUTION_GB branch=${{ github.head_ref }}"
+          echo "Golden Behavior intentionally not executed"
+
+  same-name-substitution-trusted:
+    name: Trusted verifier (default branch)
+    # Evidence-only Issue #116 post-repair Phase 2: substitute the repaired
+    # trusted context name without executing any trusted verifier source.
+    if: github.event_name == 'pull_request' && github.head_ref == 'codex/issue-116-post-repair-negative-witness'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Emit untrusted same-name success
+        run: |
+          set -euo pipefail
+          echo "UNTRUSTED_SAME_NAME_SUBSTITUTION_TRUSTED branch=${{ github.head_ref }}"
+          echo "Trusted verifier source intentionally not executed"
 
   full-regression:
     name: Tier 3 full regression
