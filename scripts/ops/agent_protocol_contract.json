@@ -11,9 +11,7 @@
     "G12 Fast Start advisory-cache gate"
   ],
   "boundaries": {
-    "allowed_paths": [
-      "."
-    ],
+    "allowed_paths": ["."],
     "forbidden_paths": [
       ".obsidian/",
       "benchmarks/",
