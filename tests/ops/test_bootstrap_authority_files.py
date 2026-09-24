@@ -504,3 +504,17 @@ def test_first_issue_bound_action_requires_project_entry_before_governed_effects
     assert "Do not jump directly to `nexus_task_card_create`" in normalized
     assert "Switching repository or Issue invalidates the prior Project Entry binding" in normalized
     assert "Direct lanes remain governed by their existing lane rules" in normalized
+
+
+def test_project_entry_ready_still_requires_bound_governed_bootstrap_action():
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    normalized = _norm(agents)
+
+    assert "Project Entry `READY_TO_EXECUTE` result is pre-execution evidence" in normalized
+    assert "Before the first `GOVERNED` effect" in normalized
+    assert "`nexus_owner_standing_grant_issue` must be present" in normalized
+    assert "before `nexus_task_card_create` is attempted" in normalized
+    assert "classify a host/action-surface binding gap" in normalized
+    assert "STOP before the effect" in normalized
+    assert "`OWNER_AUTHORITY_REQUIRED:RECEIPT_MISSING` retries" in normalized
+    assert "Surface convergence is a transport precondition and grants no authority" in normalized
