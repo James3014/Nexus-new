@@ -495,7 +495,9 @@ def test_first_issue_bound_action_requires_project_entry_before_governed_effects
     normalized = _norm(agents)
 
     assert "Project-entry invariant (#842)" in agents
-    assert "MUST call `nexus_project_entry` before any Nexus-governed effectful action" in normalized
+    assert (
+        "MUST call `nexus_project_entry` before any Nexus-governed effectful action" in normalized
+    )
     assert "`continue ... #N`, `處理 #N`, `幫我修 #N`" in agents
     assert "If Project Entry is not `READY_TO_EXECUTE`" in normalized
     assert "STOP the governed effect path" in normalized
