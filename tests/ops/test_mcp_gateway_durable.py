@@ -623,6 +623,12 @@ def _r1m_clear_materialized_stores(fixture, monkeypatch):
         "GATEWAY_RECOVERY_AUTHORITY_STORE",
         fixture["state"] / "recovery-authority.json",
     )
+    monkeypatch.setattr(
+        g,
+        "GATEWAY_RECOVERY_MATERIALIZATION_ROOT",
+        fixture["state"] / "recovery-materializations",
+    )
+    shutil.rmtree(g.GATEWAY_RECOVERY_MATERIALIZATION_ROOT, ignore_errors=True)
     for path in (
         g.GATEWAY_RECOVERY_AUTHORITY_STORE,
         g.GATEWAY_REQUEST_STORE,
@@ -660,6 +666,15 @@ def test_r1b1_materialize_creates_fixed_stores_and_starts_no_effect(tmp_path, mo
     )
     assert outcome["recovery_authority_id"] == fixture["receipt"].receipt_id
     assert outcome["recovery_authority_hash"] == fixture["receipt"].receipt_hash
+    assert outcome["materialization_request_hash"] == _r1m_materialization_request(
+        fixture["receipt"]
+    )["request_hash"]
+    durable_receipt = (
+        g.GATEWAY_RECOVERY_MATERIALIZATION_ROOT
+        / f"{outcome['materialization_request_hash']}.json"
+    )
+    assert durable_receipt.is_file()
+    assert json.loads(durable_receipt.read_text()) == outcome
     assert outcome["fresh_main"] == fresh_main
     assert outcome["fresh_main_tree"] == fresh_tree
     authority_bytes = g.GATEWAY_RECOVERY_AUTHORITY_STORE.read_bytes()
@@ -710,8 +725,15 @@ def test_r1b1_materialize_is_idempotent_and_rejects_post_materialization_drift(
     _r1m_clear_materialized_stores(fixture, monkeypatch)
     request = _r1m_materialization_request(fixture["receipt"])
     first = g.gateway_recovery_materialize(request)
+    g.GATEWAY_REQUEST_STORE.unlink()
+    monkeypatch.setattr(
+        g,
+        "_r1_refresh_fixed_authority_mirror",
+        lambda: (_ for _ in ()).throw(AssertionError("durable replay must not refresh main")),
+    )
     second = g.gateway_recovery_materialize(request)
     assert second == first
+    assert g.GATEWAY_REQUEST_STORE.is_file()
     fixture["state"].joinpath("recovery-authority.json").write_bytes(
         b"forged-authority-store"
     )
