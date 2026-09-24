@@ -247,6 +247,14 @@ def _completion_snapshot(history: dict[str, str | Path]) -> dict:
                 "status": "PASS",
                 "bound_sha": main,
                 "bound_tree_sha": str(history["tree"]),
+                "witness_kind": "POSITIVE_CONTROL",
+            }
+        ],
+        "acceptance_criteria": [
+            {
+                "id": "AC-BASELINE",
+                "status": "SATISFIED_CURRENT",
+                "evidence_ids": ["post-merge-verifier"],
             }
         ],
         "hard_prerequisites": [],
@@ -259,7 +267,7 @@ def _completion_snapshot(history: dict[str, str | Path]) -> dict:
 
 
 def _completion_bindings(snapshot: dict) -> dict:
-    return {
+    bindings = {
         "repository": snapshot["repository"],
         "issue_number": snapshot["issue"]["number"],
         "issue_contract_revision": snapshot["issue"]["contract_revision"],
@@ -273,7 +281,19 @@ def _completion_bindings(snapshot: dict) -> dict:
         "current_main_tree_sha": snapshot["current_main"]["tree_sha"],
         "required_evidence_ids": list(snapshot["required_evidence_ids"]),
         "required_predecessors": list(snapshot["hard_prerequisites"]),
+        "required_acceptance_criteria": list(
+            snapshot.get(
+                "required_acceptance_criteria",
+                [
+                    {
+                        "id": "AC-BASELINE",
+                        "required_witness_kinds": ["POSITIVE_CONTROL"],
+                    }
+                ],
+            )
+        ),
     }
+    return bindings
 
 
 def _evaluate(snapshot: dict, history: dict[str, str | Path], *, expected: dict | None = None):
@@ -296,6 +316,101 @@ def test_completion_snapshot_binds_issue_candidate_merge_and_current_main(tmp_pa
         "downstream_ready": True,
         "failures": [],
     }
+
+
+def test_completion_snapshot_rejects_semantic_false_green_without_required_witness_coverage(
+    tmp_path,
+):
+    history = _completion_repo(tmp_path)
+    snapshot = _completion_snapshot(history)
+    snapshot["evidence"][0]["witness_kind"] = "POSITIVE_CONTROL"
+    snapshot["acceptance_criteria"] = [
+        {
+            "id": "AC-FIRST-PROJECT-ACTION",
+            "status": "SATISFIED_CURRENT",
+            "evidence_ids": ["post-merge-verifier"],
+        }
+    ]
+    snapshot["required_acceptance_criteria"] = [
+        {
+            "id": "AC-FIRST-PROJECT-ACTION",
+            "required_witness_kinds": ["POSITIVE_CONTROL", "NEGATIVE_CONTROL"],
+        }
+    ]
+
+    result = _evaluate(snapshot, history)
+
+    assert result["disposition"] == "BLOCKED_EVIDENCE"
+    assert (
+        "criterion_witness_kind_missing:AC-FIRST-PROJECT-ACTION:NEGATIVE_CONTROL"
+        in result["failures"]
+    )
+
+
+def test_completion_snapshot_requires_fresh_acceptance_criterion_binding(tmp_path):
+    history = _completion_repo(tmp_path)
+    snapshot = _completion_snapshot(history)
+    expected = _completion_snapshot(history)
+    expected["required_acceptance_criteria"] = []
+
+    result = _evaluate(snapshot, history, expected=expected)
+
+    assert result["disposition"] == "BLOCKED_EVIDENCE"
+    assert "expected_acceptance_criteria_invalid" in result["failures"]
+
+
+def test_completion_snapshot_keeps_open_for_current_falsified_criterion(tmp_path):
+    history = _completion_repo(tmp_path)
+    snapshot = _completion_snapshot(history)
+    snapshot["original_contract_satisfied"] = False
+    snapshot["acceptance_criteria"][0]["status"] = "UNSATISFIED_CURRENT"
+    snapshot["evidence"][0]["witness_kind"] = "FALSIFIER"
+
+    result = _evaluate(snapshot, history)
+
+    assert result["disposition"] == "KEEP_OPEN"
+    assert result["terminal"] is False
+    assert result["downstream_ready"] is False
+    assert result["failures"] == []
+
+
+def test_completion_snapshot_blocks_unavailable_criterion_evidence(tmp_path):
+    history = _completion_repo(tmp_path)
+    snapshot = _completion_snapshot(history)
+    snapshot["original_contract_satisfied"] = False
+    snapshot["acceptance_criteria"][0] = {
+        "id": "AC-BASELINE",
+        "status": "EVIDENCE_UNAVAILABLE",
+        "evidence_ids": [],
+    }
+
+    result = _evaluate(snapshot, history)
+
+    assert result["disposition"] == "BLOCKED_EVIDENCE"
+    assert "criterion_evidence_unavailable:AC-BASELINE" in result["failures"]
+
+
+def test_completion_snapshot_rejects_stale_criterion_witness(tmp_path):
+    history = _completion_repo(tmp_path)
+    snapshot = _completion_snapshot(history)
+    snapshot["evidence"][0]["bound_sha"] = "a" * 40
+
+    result = _evaluate(snapshot, history)
+
+    assert result["disposition"] == "BLOCKED_EVIDENCE"
+    assert "criterion_evidence_not_current:AC-BASELINE:post-merge-verifier" in result["failures"]
+
+
+def test_completion_snapshot_rejects_bare_original_satisfied_assertion(tmp_path):
+    history = _completion_repo(tmp_path)
+    snapshot = _completion_snapshot(history)
+    snapshot["acceptance_criteria"][0]["status"] = "UNSATISFIED_CURRENT"
+    snapshot["evidence"][0]["witness_kind"] = "FALSIFIER"
+
+    result = _evaluate(snapshot, history)
+
+    assert result["disposition"] == "BLOCKED_EVIDENCE"
+    assert "original_contract_satisfied_mismatch" in result["failures"]
 
 
 def test_completion_snapshot_stale_main_fails_closed(tmp_path):
@@ -352,6 +467,8 @@ def test_completion_snapshot_does_not_unlock_downstream_for_open_predecessor(tmp
     history = _completion_repo(tmp_path)
     snapshot = _completion_snapshot(history)
     snapshot["original_contract_satisfied"] = False
+    snapshot["acceptance_criteria"][0]["status"] = "UNSATISFIED_CURRENT"
+    snapshot["evidence"][0]["witness_kind"] = "FALSIFIER"
     snapshot["requested_downstream_ready"] = True
     snapshot["hard_prerequisites"] = [
         {
