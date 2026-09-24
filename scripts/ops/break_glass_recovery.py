@@ -4,8 +4,9 @@
 The CLI does not execute a repair. It re-reads the exact Owner activation comment
 from the fixed public GitHub API endpoint, validates its immutable identity/body/
 payload hashes, reads fixed Git identity/diff evidence, and advances the one-shot
-durable recovery record. It exposes no arbitrary command, merge, push, reload,
-release, or standing-grant action.
+durable recovery record. It exposes no arbitrary command, merge, push, release, or standing-grant
+action. The optional runtime-recovery subcommand can invoke only the repository's
+existing fixed durable Gateway recovery seam after a separate exact Owner grant.
 """
 
 from __future__ import annotations
@@ -30,22 +31,30 @@ from nexus.contracts.break_glass_recovery import (  # noqa: E402
     OwnerActivationEnvelope,
     OwnerCanaryEnvelope,
     OwnerIntegrationEnvelope,
+    OwnerRuntimeRecoveryEnvelope,
+    OwnerRuntimeRevocationEnvelope,
     OwnerTerminalEnvelope,
     OwnerVerificationEnvelope,
     integration_readback_from_github,
     owner_canary_from_github_comment,
     owner_envelope_from_github_comment,
     owner_integration_from_github_comment,
+    owner_runtime_recovery_from_github_comment,
+    owner_runtime_revocations_from_github_comments,
     owner_terminals_from_github_comments,
     owner_verification_from_github_comment,
 )
+from nexus.contracts.gateway_deployment import GatewayRecoveryRequest  # noqa: E402
 from nexus.orchestrator.break_glass_recovery import (  # noqa: E402
     BreakGlassRecoveryError,
     assert_source_not_globally_terminal,
     consume_source_repair_authority,
+    execute_runtime_recovery,
     inspect_attempt,
     inspect_emergency_integration,
+    inspect_runtime_recovery,
     prepare_emergency_integration,
+    prepare_runtime_recovery,
     prepare_source_repair,
     record_emergency_integration_consumed,
     record_source_repair_applied,
@@ -137,6 +146,27 @@ def _fetch_verification(comment_id: int) -> OwnerVerificationEnvelope:
 
 def _fetch_integration(comment_id: int) -> OwnerIntegrationEnvelope:
     return owner_integration_from_github_comment(_fetch_comment(comment_id))
+
+
+def _fetch_runtime(comment_id: int) -> OwnerRuntimeRecoveryEnvelope:
+    return owner_runtime_recovery_from_github_comment(_fetch_comment(comment_id))
+
+
+def _fetch_runtime_revocations() -> tuple[OwnerRuntimeRevocationEnvelope, ...]:
+    return owner_runtime_revocations_from_github_comments(_fetch_issue_comments())
+
+
+def _gateway_request_json(value: str) -> GatewayRecoveryRequest:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise BreakGlassRecoveryError("RUNTIME_GATEWAY_REQUEST_JSON_INVALID") from exc
+    if not isinstance(parsed, dict):
+        raise BreakGlassRecoveryError("RUNTIME_GATEWAY_REQUEST_JSON_INVALID")
+    try:
+        return GatewayRecoveryRequest.model_validate(parsed)
+    except (TypeError, ValueError) as exc:
+        raise BreakGlassRecoveryError("RUNTIME_GATEWAY_REQUEST_JSON_INVALID") from exc
 
 
 def _fetch_canary(comment_id: int) -> OwnerCanaryEnvelope:
@@ -332,6 +362,52 @@ def _inspect_integration(args: argparse.Namespace) -> int:
     return 0
 
 
+def _prepare_runtime(args: argparse.Namespace) -> int:
+    runtime = _fetch_runtime(args.runtime_comment_id)
+    request = _gateway_request_json(args.gateway_request_json)
+    revocations = _fetch_runtime_revocations()
+    result = prepare_runtime_recovery(
+        runtime,
+        request,
+        now=_now(),
+        revocations=revocations,
+    )
+    _print(result)
+    return 0
+
+
+def _recover_runtime(args: argparse.Namespace) -> int:
+    runtime = _fetch_runtime(args.runtime_comment_id)
+    request = _gateway_request_json(args.gateway_request_json)
+    # The physical effect stays owned by the existing durable Gateway manager.
+    # This command contributes only the separate one-shot break-glass authority
+    # consumer; it exposes no caller-selected service, path, shell, or action.
+    from scripts.ops.mcp_gateway_durable import _gateway_recover_live
+
+    result = execute_runtime_recovery(
+        runtime,
+        request,
+        clock=_now,
+        revocation_provider=_fetch_runtime_revocations,
+        executor=_gateway_recover_live,
+    )
+    _print(result)
+    return 0
+
+
+def _inspect_runtime(args: argparse.Namespace) -> int:
+    runtime = _fetch_runtime(args.runtime_comment_id)
+    result = inspect_runtime_recovery(runtime)
+    result["revoked"] = any(
+        item.payload.recovery_id == runtime.payload.recovery_id
+        and item.payload.runtime_attempt_id == runtime.payload.runtime_attempt_id
+        and item.payload.runtime_recovery_payload_sha256 == runtime.payload_sha256
+        for item in _fetch_runtime_revocations()
+    )
+    _print(result)
+    return 0
+
+
 def _inspect(args: argparse.Namespace) -> int:
     envelope = _fetch_envelope(args.comment_id)
     _print(inspect_attempt(envelope.payload))
@@ -392,6 +468,20 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_integration = commands.add_parser("inspect-integration")
     inspect_integration.add_argument("--integration-comment-id", type=int, required=True)
     inspect_integration.set_defaults(handler=_inspect_integration)
+
+    prepare_runtime = commands.add_parser("prepare-runtime")
+    prepare_runtime.add_argument("--runtime-comment-id", type=int, required=True)
+    prepare_runtime.add_argument("--gateway-request-json", required=True)
+    prepare_runtime.set_defaults(handler=_prepare_runtime)
+
+    recover_runtime = commands.add_parser("recover-runtime")
+    recover_runtime.add_argument("--runtime-comment-id", type=int, required=True)
+    recover_runtime.add_argument("--gateway-request-json", required=True)
+    recover_runtime.set_defaults(handler=_recover_runtime)
+
+    inspect_runtime = commands.add_parser("inspect-runtime")
+    inspect_runtime.add_argument("--runtime-comment-id", type=int, required=True)
+    inspect_runtime.set_defaults(handler=_inspect_runtime)
 
     return parser
 

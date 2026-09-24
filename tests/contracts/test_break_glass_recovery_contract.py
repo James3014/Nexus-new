@@ -12,6 +12,7 @@ from nexus.contracts.break_glass_recovery import (
     BreakGlassEffectClass,
     BreakGlassOwnerCanaryPayload,
     BreakGlassOwnerIntegrationPayload,
+    BreakGlassOwnerRuntimeRecoveryPayload,
     BreakGlassOwnerTerminalPayload,
     BreakGlassOwnerVerificationPayload,
     OwnerActivationEnvelope,
@@ -20,6 +21,9 @@ from nexus.contracts.break_glass_recovery import (
     owner_canary_from_github_comment,
     owner_envelope_from_github_comment,
     owner_integration_from_github_comment,
+    owner_runtime_recovery_from_github_comment,
+    owner_runtime_revocation_from_github_comment,
+    owner_runtime_revocations_from_github_comments,
     owner_terminal_from_github_comment,
     owner_terminals_from_github_comments,
     owner_verification_from_github_comment,
@@ -514,3 +518,123 @@ def test_relative_path_escape_is_rejected() -> None:
     data["allowed_paths"] = ["../outside"]
     with pytest.raises(ValidationError, match="PATH_INVALID"):
         BreakGlassActivationPayload.model_validate(data)
+
+
+def runtime_payload_dict() -> dict[str, object]:
+    return {
+        "schema": "nexus.break_glass_owner_runtime_recovery.v1",
+        "repository": "James3014/Nexus-new",
+        "issue": 806,
+        "owner_login": "James3014",
+        "runtime_recovery_issue": 973,
+        "recovery_id": "BG-973-20260906",
+        "runtime_attempt_id": "BG-973-R1",
+        "effect_class": "RUNTIME_RECOVERY",
+        "action": "GATEWAY_DURABLE_RECOVERY",
+        "service_identity": "com.nexus.mcp.gateway.direct",
+        "gateway_request_id": "BG-973-GW-REQ-1",
+        "gateway_request_hash": "1" * 64,
+        "idempotency_fence": "BG-973-FENCE-1",
+        "desired_manifest_id": "desired-973",
+        "desired_manifest_sha256": "2" * 64,
+        "predecessor_manifest_id": "predecessor-973",
+        "predecessor_manifest_sha256": "3" * 64,
+        "issued_at": "2026-09-06T07:30:00+08:00",
+        "expires_at": "2026-09-06T08:30:00+08:00",
+        "claim_ceiling": "runtime_recovery_only",
+    }
+
+
+def runtime_comment(payload: dict[str, object] | None = None) -> dict[str, object]:
+    value = payload or runtime_payload_dict()
+    payload_hash = canonical_sha256(value)
+    body = (
+        "## Runtime recovery authority\n\n"
+        f"Canonical runtime recovery payload SHA-256: `{payload_hash}`\n\n"
+        "```json\n"
+        + json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        + "\n```\n"
+    )
+    return {
+        "id": 6000000973,
+        "html_url": "https://github.com/James3014/Nexus-new/issues/806#issuecomment-6000000973",
+        "issue_url": "https://api.github.com/repos/James3014/Nexus-new/issues/806",
+        "user": {"login": "James3014"},
+        "body": body,
+    }
+
+
+def runtime_revocation_comment(payload_hash: str) -> dict[str, object]:
+    value = {
+        "schema": "nexus.break_glass_owner_runtime_revocation.v1",
+        "repository": "James3014/Nexus-new",
+        "issue": 806,
+        "owner_login": "James3014",
+        "runtime_recovery_issue": 973,
+        "recovery_id": "BG-973-20260906",
+        "runtime_attempt_id": "BG-973-R1",
+        "runtime_recovery_payload_sha256": payload_hash,
+        "reason": "owner-revoked-before-effect",
+        "issued_at": "2026-09-06T07:45:00+08:00",
+    }
+    revocation_hash = canonical_sha256(value)
+    body = (
+        "## Runtime recovery revocation\n\n"
+        f"Canonical runtime revocation payload SHA-256: `{revocation_hash}`\n\n"
+        "```json\n"
+        + json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        + "\n```\n"
+    )
+    return {
+        "id": 6000000974,
+        "html_url": "https://github.com/James3014/Nexus-new/issues/806#issuecomment-6000000974",
+        "issue_url": "https://api.github.com/repos/James3014/Nexus-new/issues/806",
+        "user": {"login": "James3014"},
+        "body": body,
+    }
+
+
+def test_runtime_recovery_owner_comment_binds_fixed_effect_service_and_issue() -> None:
+    envelope = owner_runtime_recovery_from_github_comment(runtime_comment())
+    assert envelope.payload.effect_class == "RUNTIME_RECOVERY"
+    assert envelope.payload.action == "GATEWAY_DURABLE_RECOVERY"
+    assert envelope.payload.service_identity == "com.nexus.mcp.gateway.direct"
+    assert envelope.payload.runtime_recovery_issue == 973
+    assert envelope.payload.claim_ceiling == "runtime_recovery_only"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("effect_class", "SOURCE_REPAIR"),
+        ("action", "ARBITRARY_COMMAND"),
+        ("service_identity", "com.example.other"),
+        ("runtime_recovery_issue", 974),
+        ("claim_ceiling", "production_success"),
+    ],
+)
+def test_runtime_recovery_widening_is_rejected(field: str, value: object) -> None:
+    payload = runtime_payload_dict()
+    payload[field] = value
+    with pytest.raises(ValidationError):
+        BreakGlassOwnerRuntimeRecoveryPayload.model_validate(payload)
+
+
+def test_runtime_revocation_comment_is_exactly_bound_and_discoverable() -> None:
+    runtime = owner_runtime_recovery_from_github_comment(runtime_comment())
+    comment = runtime_revocation_comment(runtime.payload_sha256)
+    revocation = owner_runtime_revocation_from_github_comment(comment)
+    assert revocation.payload.runtime_recovery_payload_sha256 == runtime.payload_sha256
+    assert owner_runtime_revocations_from_github_comments((comment,)) == (revocation,)
+
+
+def test_runtime_recovery_comment_forged_owner_and_payload_tamper_fail_closed() -> None:
+    forged = runtime_comment()
+    forged["user"] = {"login": "worker-model"}
+    with pytest.raises(BreakGlassContractError, match="GITHUB_COMMENT_OWNER_MISMATCH"):
+        owner_runtime_recovery_from_github_comment(forged)
+
+    tampered = runtime_comment()
+    tampered["body"] = str(tampered["body"]).replace("desired-973", "desired-other")
+    with pytest.raises(BreakGlassContractError, match="GITHUB_COMMENT_PAYLOAD_HASH_MISMATCH"):
+        owner_runtime_recovery_from_github_comment(tampered)

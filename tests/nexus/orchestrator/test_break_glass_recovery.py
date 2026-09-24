@@ -13,19 +13,31 @@ from nexus.contracts.break_glass_recovery import (
     OwnerActivationEnvelope,
     OwnerCanaryEnvelope,
     OwnerIntegrationEnvelope,
+    OwnerRuntimeRecoveryEnvelope,
+    OwnerRuntimeRevocationEnvelope,
     OwnerTerminalEnvelope,
     OwnerVerificationEnvelope,
     canonical_json_bytes,
     canonical_sha256,
+)
+from nexus.contracts.gateway_deployment import (
+    EffectClass,
+    GatewayReconcileOutcome,
+    GatewayRecoveryRequest,
+    ResultClass,
+    canonical_hash,
 )
 from nexus.orchestrator.break_glass_recovery import (
     BreakGlassRecoveryError,
     assert_emergency_integration_not_consumed,
     assert_source_not_globally_terminal,
     consume_source_repair_authority,
+    execute_runtime_recovery,
     inspect_attempt,
     inspect_emergency_integration,
+    inspect_runtime_recovery,
     prepare_emergency_integration,
+    prepare_runtime_recovery,
     prepare_source_repair,
     record_emergency_integration_consumed,
     record_source_repair_applied,
@@ -93,6 +105,141 @@ def envelope() -> OwnerActivationEnvelope:
         "payload_sha256": payload_hash,
         "payload": payload,
     })
+
+
+def gateway_request() -> GatewayRecoveryRequest:
+    values = {
+        "request_id": "BG-973-GW-REQ-1",
+        "idempotency_fence": "BG-973-FENCE-1",
+        "operation": "gateway-recover",
+        "effect_class": EffectClass.GATEWAY_DURABLE_RECOVERY,
+        "recovery_authority_id": "gateway-recovery-authority-1",
+        "recovery_authority_hash": "a" * 64,
+        "desired_manifest_id": "desired-973",
+        "desired_manifest_hash": "b" * 64,
+        "predecessor_manifest_id": "predecessor-973",
+        "predecessor_manifest_hash": "c" * 64,
+    }
+    return GatewayRecoveryRequest(**values, request_hash=canonical_hash(values))
+
+
+def runtime_envelope(
+    request: GatewayRecoveryRequest | None = None,
+    *,
+    expires_at: str = "2026-09-06T23:00:00+08:00",
+    runtime_attempt_id: str = "BG-973-R1",
+) -> OwnerRuntimeRecoveryEnvelope:
+    request = request or gateway_request()
+    payload = {
+        "schema": "nexus.break_glass_owner_runtime_recovery.v1",
+        "repository": "James3014/Nexus-new",
+        "issue": 806,
+        "owner_login": "James3014",
+        "runtime_recovery_issue": 973,
+        "recovery_id": "BG-973-20260906",
+        "runtime_attempt_id": runtime_attempt_id,
+        "effect_class": "RUNTIME_RECOVERY",
+        "action": "GATEWAY_DURABLE_RECOVERY",
+        "service_identity": "com.nexus.mcp.gateway.direct",
+        "gateway_request_id": request.request_id,
+        "gateway_request_hash": request.request_hash,
+        "idempotency_fence": request.idempotency_fence,
+        "desired_manifest_id": request.desired_manifest_id,
+        "desired_manifest_sha256": request.desired_manifest_hash,
+        "predecessor_manifest_id": request.predecessor_manifest_id,
+        "predecessor_manifest_sha256": request.predecessor_manifest_hash,
+        "issued_at": "2026-09-06T07:30:00+08:00",
+        "expires_at": expires_at,
+        "claim_ceiling": "runtime_recovery_only",
+    }
+    payload_hash = canonical_sha256(payload)
+    return OwnerRuntimeRecoveryEnvelope.model_validate({
+        "repository": "James3014/Nexus-new",
+        "issue": 806,
+        "comment_id": 6000000973,
+        "comment_url": "https://github.com/James3014/Nexus-new/issues/806#issuecomment-6000000973",
+        "author_login": "James3014",
+        "comment_body_sha256": "e" * 64,
+        "payload_sha256": payload_hash,
+        "payload": payload,
+    })
+
+
+def runtime_revocation(runtime: OwnerRuntimeRecoveryEnvelope) -> OwnerRuntimeRevocationEnvelope:
+    payload = {
+        "schema": "nexus.break_glass_owner_runtime_revocation.v1",
+        "repository": "James3014/Nexus-new",
+        "issue": 806,
+        "owner_login": "James3014",
+        "runtime_recovery_issue": 973,
+        "recovery_id": runtime.payload.recovery_id,
+        "runtime_attempt_id": runtime.payload.runtime_attempt_id,
+        "runtime_recovery_payload_sha256": runtime.payload_sha256,
+        "reason": "owner-revoked-before-effect",
+        "issued_at": "2026-09-06T07:45:00+08:00",
+    }
+    payload_hash = canonical_sha256(payload)
+    return OwnerRuntimeRevocationEnvelope.model_validate({
+        "repository": "James3014/Nexus-new",
+        "issue": 806,
+        "comment_id": 6000000974,
+        "comment_url": "https://github.com/James3014/Nexus-new/issues/806#issuecomment-6000000974",
+        "author_login": "James3014",
+        "comment_body_sha256": "f" * 64,
+        "payload_sha256": payload_hash,
+        "payload": payload,
+    })
+
+
+def gateway_outcome(
+    request: GatewayRecoveryRequest,
+    *,
+    result: ResultClass = ResultClass.VERIFIED,
+    effect_started: bool = True,
+) -> GatewayReconcileOutcome:
+    values = {
+        "request_id": request.request_id,
+        "request_hash": request.request_hash,
+        "idempotency_fence": request.idempotency_fence,
+        "desired_manifest_id": request.desired_manifest_id,
+        "predecessor_manifest_id": request.predecessor_manifest_id,
+        "physical_observation": {
+            "service_identity": "com.nexus.mcp.gateway.direct",
+            "postflight": "IDENTITY_AND_HEALTH_VERIFIED",
+        },
+        "effect_started": effect_started,
+        "result": result,
+    }
+    return GatewayReconcileOutcome(**values, evidence_hash=canonical_hash(values))
+
+
+def run_runtime_recovery(
+    runtime: OwnerRuntimeRecoveryEnvelope,
+    request: GatewayRecoveryRequest,
+    *,
+    executor,
+    state_root: Path,
+    clock_values: tuple[datetime, ...] = (NOW, NOW),
+    revocation_snapshots: tuple[tuple[OwnerRuntimeRevocationEnvelope, ...], ...] = ((), ()),
+):
+    clocks = iter(clock_values)
+    snapshots = iter(revocation_snapshots)
+    return execute_runtime_recovery(
+        runtime,
+        request,
+        clock=lambda: next(clocks),
+        revocation_provider=lambda: next(snapshots),
+        executor=executor,
+        state_root=state_root,
+    )
+
+
+def _must_not_refresh_authority() -> tuple[OwnerRuntimeRevocationEnvelope, ...]:
+    raise AssertionError("post-DISPATCH reconciliation must not re-open authority freshness")
+
+
+def _must_not_read_clock() -> datetime:
+    raise AssertionError("post-DISPATCH reconciliation must not re-open expiry")
 
 
 def applied(
@@ -753,3 +900,381 @@ def test_symlink_state_file_is_rejected(tmp_path: Path) -> None:
     (attempt_dir / "01-prepared.json").symlink_to(target)
     with pytest.raises(BreakGlassRecoveryError, match="STATE_FILE_UNSAFE"):
         inspect_attempt(env.payload, state_root=tmp_path)
+
+
+def test_runtime_recovery_exact_authority_consumes_once_and_redacts_physical_details(
+    tmp_path: Path,
+) -> None:
+    request = gateway_request()
+    runtime = runtime_envelope(request)
+    calls: list[str] = []
+
+    def executor(actual: GatewayRecoveryRequest) -> GatewayReconcileOutcome:
+        calls.append(actual.request_id)
+        return gateway_outcome(actual)
+
+    terminal = run_runtime_recovery(runtime, request, executor=executor, state_root=tmp_path)
+    assert terminal["status"] == "CONSUMED"
+    assert terminal["authority_terminal"] is True
+    assert terminal["post_terminal_replay"] == "DENY"
+    assert "physical_observation" not in terminal
+    expected_outcome = gateway_outcome(request)
+    assert terminal["physical_observation_sha256"] == canonical_sha256(
+        dict(expected_outcome.physical_observation)
+    )
+    assert calls == [request.request_id]
+
+    structural = inspect_runtime_recovery(runtime, state_root=tmp_path)
+    assert structural["status"] == "TERMINAL_RECORDED_REQUIRES_GATEWAY_OUTCOME"
+    verified = inspect_runtime_recovery(
+        runtime,
+        gateway_request=request,
+        gateway_outcome=expected_outcome,
+        state_root=tmp_path,
+    )
+    assert verified["status"] == "CONSUMED"
+    assert verified["verified_against_gateway_outcome"] is True
+
+    with pytest.raises(BreakGlassRecoveryError, match="RUNTIME_RECOVERY_REPLAY_DENIED"):
+        execute_runtime_recovery(
+            runtime,
+            request,
+            clock=_must_not_read_clock,
+            revocation_provider=_must_not_refresh_authority,
+            executor=executor,
+            state_root=tmp_path,
+        )
+    assert calls == [request.request_id]
+
+
+def test_runtime_recovery_rejects_expired_revoked_and_mismatched_before_effect(
+    tmp_path: Path,
+) -> None:
+    request = gateway_request()
+    calls: list[str] = []
+
+    def executor(actual: GatewayRecoveryRequest) -> GatewayReconcileOutcome:
+        calls.append(actual.request_id)
+        return gateway_outcome(actual)
+
+    expired = runtime_envelope(request, expires_at="2026-09-06T07:31:00+08:00")
+    with pytest.raises(Exception, match="RUNTIME_RECOVERY_EXPIRED"):
+        run_runtime_recovery(
+            expired,
+            request,
+            executor=executor,
+            state_root=tmp_path / "expired",
+        )
+
+    runtime = runtime_envelope(request)
+    revocation = runtime_revocation(runtime)
+    with pytest.raises(BreakGlassRecoveryError, match="RUNTIME_RECOVERY_REVOKED"):
+        run_runtime_recovery(
+            runtime,
+            request,
+            executor=executor,
+            revocation_snapshots=((revocation,),),
+            state_root=tmp_path / "revoked",
+        )
+
+    values = {
+        key: value
+        for key, value in request.model_dump().items()
+        if key not in {"schema", "request_hash"}
+    }
+    values["request_id"] = "BG-973-GW-REQ-OTHER"
+    values["effect_class"] = EffectClass.GATEWAY_DURABLE_RECOVERY
+    other = GatewayRecoveryRequest(**values, request_hash=canonical_hash(values))
+    with pytest.raises(BreakGlassRecoveryError, match="RUNTIME_GATEWAY_REQUEST_MISMATCH"):
+        run_runtime_recovery(
+            runtime,
+            other,
+            executor=executor,
+            state_root=tmp_path / "mismatch",
+        )
+    assert calls == []
+
+
+def test_runtime_recovery_fresh_commit_clock_catches_expiry_after_initial_readback(
+    tmp_path: Path,
+) -> None:
+    request = gateway_request()
+    runtime = runtime_envelope(request, expires_at="2026-09-06T08:05:00+08:00")
+    calls: list[str] = []
+
+    def executor(actual: GatewayRecoveryRequest) -> GatewayReconcileOutcome:
+        calls.append(actual.request_id)
+        return gateway_outcome(actual)
+
+    with pytest.raises(Exception, match="RUNTIME_RECOVERY_EXPIRED"):
+        run_runtime_recovery(
+            runtime,
+            request,
+            executor=executor,
+            clock_values=(NOW, datetime(2026, 9, 6, 0, 6, tzinfo=timezone.utc)),
+            revocation_snapshots=((), ()),
+            state_root=tmp_path,
+        )
+    assert calls == []
+    assert not (
+        tmp_path
+        / runtime.payload.recovery_id
+        / runtime.payload.runtime_attempt_id
+        / "02-runtime-dispatched.json"
+    ).exists()
+
+
+def test_runtime_recovery_rereads_revocation_immediately_before_dispatch(
+    tmp_path: Path,
+) -> None:
+    request = gateway_request()
+    runtime = runtime_envelope(request)
+    revocation = runtime_revocation(runtime)
+    calls: list[str] = []
+
+    def executor(actual: GatewayRecoveryRequest) -> GatewayReconcileOutcome:
+        calls.append(actual.request_id)
+        return gateway_outcome(actual)
+
+    with pytest.raises(BreakGlassRecoveryError, match="RUNTIME_RECOVERY_REVOKED"):
+        run_runtime_recovery(
+            runtime,
+            request,
+            executor=executor,
+            revocation_snapshots=((), (revocation,)),
+            state_root=tmp_path,
+        )
+    assert calls == []
+    assert not (
+        tmp_path
+        / runtime.payload.recovery_id
+        / runtime.payload.runtime_attempt_id
+        / "02-runtime-dispatched.json"
+    ).exists()
+
+
+def test_runtime_recovery_lost_ack_reconciles_same_request_after_expiry_and_revocation(
+    tmp_path: Path,
+) -> None:
+    request = gateway_request()
+    runtime = runtime_envelope(request, expires_at="2026-09-06T08:05:00+08:00")
+    durable_manager_result: GatewayReconcileOutcome | None = None
+    physical_activations = 0
+    calls = 0
+
+    def executor(actual: GatewayRecoveryRequest) -> GatewayReconcileOutcome:
+        nonlocal durable_manager_result, physical_activations, calls
+        calls += 1
+        if durable_manager_result is None:
+            physical_activations += 1
+            durable_manager_result = gateway_outcome(actual)
+            raise TimeoutError("ack lost after durable manager effect")
+        return durable_manager_result
+
+    with pytest.raises(
+        BreakGlassRecoveryError,
+        match="RUNTIME_RECOVERY_OUTCOME_UNKNOWN_RECONCILE_SAME_REQUEST",
+    ):
+        run_runtime_recovery(runtime, request, executor=executor, state_root=tmp_path)
+    assert inspect_runtime_recovery(runtime, state_root=tmp_path)["status"] == (
+        "DISPATCHED_RECONCILE_ONLY"
+    )
+    assert physical_activations == 1
+
+    terminal = execute_runtime_recovery(
+        runtime,
+        request,
+        clock=_must_not_read_clock,
+        revocation_provider=_must_not_refresh_authority,
+        executor=executor,
+        state_root=tmp_path,
+    )
+    assert terminal["status"] == "CONSUMED"
+    assert calls == 2
+    assert physical_activations == 1
+
+
+def test_runtime_recovery_records_rollback_as_terminal_and_denies_replay(tmp_path: Path) -> None:
+    request = gateway_request()
+    runtime = runtime_envelope(request)
+    outcome = gateway_outcome(request, result=ResultClass.ROLLED_BACK)
+    terminal = run_runtime_recovery(
+        runtime,
+        request,
+        executor=lambda actual: outcome,
+        state_root=tmp_path,
+    )
+    assert terminal["status"] == "ROLLED_BACK"
+    assert terminal["effect_started"] is True
+    verified = inspect_runtime_recovery(
+        runtime,
+        gateway_request=request,
+        gateway_outcome=outcome,
+        state_root=tmp_path,
+    )
+    assert verified["status"] == "ROLLED_BACK"
+    with pytest.raises(BreakGlassRecoveryError, match="RUNTIME_RECOVERY_REPLAY_DENIED"):
+        prepare_runtime_recovery(runtime, request, now=NOW, state_root=tmp_path)
+
+
+def test_runtime_recovery_self_rehashed_prepared_tamper_is_rejected(tmp_path: Path) -> None:
+    request = gateway_request()
+    runtime = runtime_envelope(request)
+    prepare_runtime_recovery(runtime, request, now=NOW, state_root=tmp_path)
+    prepared_path = (
+        tmp_path
+        / runtime.payload.recovery_id
+        / runtime.payload.runtime_attempt_id
+        / "01-runtime-prepared.json"
+    )
+    prepared = json.loads(prepared_path.read_text(encoding="utf-8"))
+    prepared["service_identity"] = "com.example.forged"
+    body = {key: value for key, value in prepared.items() if key != "transition_hash"}
+    prepared["transition_hash"] = canonical_sha256(body)
+    prepared_path.write_text(
+        json.dumps(prepared, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(BreakGlassRecoveryError, match="RUNTIME_RECOVERY_PREPARED_TAMPERED"):
+        inspect_runtime_recovery(runtime, state_root=tmp_path)
+
+
+def test_runtime_recovery_self_rehashed_dispatch_tamper_is_rejected(tmp_path: Path) -> None:
+    request = gateway_request()
+    runtime = runtime_envelope(request)
+
+    def lost_ack(actual: GatewayRecoveryRequest) -> GatewayReconcileOutcome:
+        _ = gateway_outcome(actual)
+        raise TimeoutError("ack lost after dispatch")
+
+    with pytest.raises(
+        BreakGlassRecoveryError,
+        match="RUNTIME_RECOVERY_OUTCOME_UNKNOWN_RECONCILE_SAME_REQUEST",
+    ):
+        run_runtime_recovery(
+            runtime,
+            request,
+            executor=lost_ack,
+            state_root=tmp_path,
+        )
+
+    dispatched_path = (
+        tmp_path
+        / runtime.payload.recovery_id
+        / runtime.payload.runtime_attempt_id
+        / "02-runtime-dispatched.json"
+    )
+    dispatched = json.loads(dispatched_path.read_text(encoding="utf-8"))
+    dispatched["gateway_request_hash"] = "0" * 64
+    body = {key: value for key, value in dispatched.items() if key != "transition_hash"}
+    dispatched["transition_hash"] = canonical_sha256(body)
+    dispatched_path.write_text(
+        json.dumps(dispatched, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(BreakGlassRecoveryError, match="RUNTIME_RECOVERY_DISPATCH_TAMPERED"):
+        inspect_runtime_recovery(runtime, state_root=tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("status", "ROLLED_BACK"),
+        ("phase", "DISPATCHED"),
+        ("effect_started", False),
+        ("gateway_outcome_evidence_sha256", "0" * 64),
+        ("physical_observation_sha256", "1" * 64),
+        ("gateway_request_hash", "2" * 64),
+        ("claim_ceiling", "production_success"),
+    ],
+)
+def test_runtime_recovery_self_rehashed_terminal_semantic_tamper_fails_closed(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    request = gateway_request()
+    runtime = runtime_envelope(request)
+    outcome = gateway_outcome(request)
+    run_runtime_recovery(
+        runtime,
+        request,
+        executor=lambda actual: outcome,
+        state_root=tmp_path,
+    )
+    terminal_path = (
+        tmp_path
+        / runtime.payload.recovery_id
+        / runtime.payload.runtime_attempt_id
+        / "03-runtime-terminal.json"
+    )
+    terminal = json.loads(terminal_path.read_text(encoding="utf-8"))
+    terminal[field] = value
+    body = {key: item for key, item in terminal.items() if key != "transition_hash"}
+    terminal["transition_hash"] = canonical_sha256(body)
+    terminal_path.write_text(
+        json.dumps(terminal, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+
+    if field in {"status", "gateway_outcome_evidence_sha256", "physical_observation_sha256"}:
+        structural = inspect_runtime_recovery(runtime, state_root=tmp_path)
+        assert structural["status"] == "TERMINAL_RECORDED_REQUIRES_GATEWAY_OUTCOME"
+    else:
+        with pytest.raises(BreakGlassRecoveryError, match="RUNTIME_RECOVERY_TERMINAL"):
+            inspect_runtime_recovery(runtime, state_root=tmp_path)
+
+    with pytest.raises(BreakGlassRecoveryError, match="RUNTIME_RECOVERY_TERMINAL"):
+        inspect_runtime_recovery(
+            runtime,
+            gateway_request=request,
+            gateway_outcome=outcome,
+            state_root=tmp_path,
+        )
+
+
+def test_runtime_recovery_pre_effect_block_terminalizes_and_denies_replay(tmp_path: Path) -> None:
+    request = gateway_request()
+    runtime = runtime_envelope(request)
+    outcome = gateway_outcome(
+        request,
+        result=ResultClass.BLOCKED,
+        effect_started=False,
+    )
+    calls: list[str] = []
+
+    def executor(actual: GatewayRecoveryRequest) -> GatewayReconcileOutcome:
+        calls.append(actual.request_id)
+        return outcome
+
+    terminal = run_runtime_recovery(
+        runtime,
+        request,
+        executor=executor,
+        state_root=tmp_path,
+    )
+    assert terminal["status"] == "BLOCKED_BEFORE_EFFECT"
+    assert terminal["effect_started"] is False
+    assert terminal["authority_terminal"] is True
+    assert terminal["post_terminal_replay"] == "DENY"
+
+    structural = inspect_runtime_recovery(runtime, state_root=tmp_path)
+    assert structural["status"] == "TERMINAL_RECORDED_REQUIRES_GATEWAY_OUTCOME"
+    verified = inspect_runtime_recovery(
+        runtime,
+        gateway_request=request,
+        gateway_outcome=outcome,
+        state_root=tmp_path,
+    )
+    assert verified["status"] == "BLOCKED_BEFORE_EFFECT"
+    assert verified["verified_against_gateway_outcome"] is True
+
+    with pytest.raises(BreakGlassRecoveryError, match="RUNTIME_RECOVERY_REPLAY_DENIED"):
+        execute_runtime_recovery(
+            runtime,
+            request,
+            clock=_must_not_read_clock,
+            revocation_provider=_must_not_refresh_authority,
+            executor=executor,
+            state_root=tmp_path,
+        )
+    assert calls == [request.request_id]

@@ -13,22 +13,32 @@ import pwd
 import stat
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from nexus.contracts.break_glass_recovery import (
     BreakGlassActivationPayload,
     BreakGlassAppliedEvidence,
     BreakGlassGovernanceCanaryEvidence,
     BreakGlassOwnerIntegrationPayload,
+    BreakGlassOwnerRuntimeRecoveryPayload,
     BreakGlassPhase,
     BreakGlassVerificationEvidence,
     OwnerActivationEnvelope,
     OwnerCanaryEnvelope,
     OwnerIntegrationEnvelope,
+    OwnerRuntimeRecoveryEnvelope,
+    OwnerRuntimeRevocationEnvelope,
     OwnerTerminalEnvelope,
     OwnerVerificationEnvelope,
     canonical_json_bytes,
     canonical_sha256,
+)
+from nexus.contracts.gateway_deployment import (
+    GatewayReconcileOutcome,
+    GatewayRecoveryRequest,
+    ResultClass,
+    validate_reconcile_outcome,
+    validate_recovery_request,
 )
 
 _HOME = Path(pwd.getpwuid(os.getuid()).pw_dir)
@@ -43,6 +53,9 @@ _PHASE_FILE = {
 _PHASE_ORDER = tuple(_PHASE_FILE)
 _INTEGRATION_PREPARED_FILE = "01-integration-prepared.json"
 _INTEGRATION_CONSUMED_FILE = "02-integration-consumed.json"
+_RUNTIME_PREPARED_FILE = "01-runtime-prepared.json"
+_RUNTIME_DISPATCHED_FILE = "02-runtime-dispatched.json"
+_RUNTIME_TERMINAL_FILE = "03-runtime-terminal.json"
 
 
 class BreakGlassRecoveryError(Exception):
@@ -649,6 +662,475 @@ def assert_emergency_integration_not_consumed(
         raise BreakGlassRecoveryError("INTEGRATION_REPLAY_DENIED")
 
 
+def _runtime_attempt_dir(
+    runtime: BreakGlassOwnerRuntimeRecoveryPayload, *, state_root: Path | None = None
+) -> Path:
+    root = state_root or DEFAULT_BREAK_GLASS_ROOT
+    return root / runtime.recovery_id / runtime.runtime_attempt_id
+
+
+def _runtime_envelope_hash(envelope: OwnerRuntimeRecoveryEnvelope) -> str:
+    return canonical_sha256(envelope.model_dump(mode="json"))
+
+
+def _validate_runtime_request_binding(
+    runtime: BreakGlassOwnerRuntimeRecoveryPayload,
+    gateway_request: GatewayRecoveryRequest | Mapping[str, Any],
+) -> GatewayRecoveryRequest:
+    try:
+        request = GatewayRecoveryRequest.model_validate(gateway_request)
+        validate_recovery_request(request)
+    except Exception as exc:
+        raise BreakGlassRecoveryError("RUNTIME_GATEWAY_REQUEST_INVALID") from exc
+    expected = {
+        "gateway_request_id": request.request_id,
+        "gateway_request_hash": request.request_hash,
+        "idempotency_fence": request.idempotency_fence,
+        "desired_manifest_id": request.desired_manifest_id,
+        "desired_manifest_sha256": request.desired_manifest_hash,
+        "predecessor_manifest_id": request.predecessor_manifest_id,
+        "predecessor_manifest_sha256": request.predecessor_manifest_hash,
+    }
+    observed = {key: getattr(runtime, key) for key in expected}
+    if observed != expected:
+        raise BreakGlassRecoveryError("RUNTIME_GATEWAY_REQUEST_MISMATCH")
+    return request
+
+
+def _assert_runtime_not_revoked(
+    envelope: OwnerRuntimeRecoveryEnvelope,
+    revocations: tuple[OwnerRuntimeRevocationEnvelope, ...],
+) -> None:
+    runtime = envelope.payload
+    for revocation in revocations:
+        payload = revocation.payload
+        if (
+            payload.recovery_id == runtime.recovery_id
+            and payload.runtime_attempt_id == runtime.runtime_attempt_id
+            and payload.runtime_recovery_payload_sha256 == envelope.payload_sha256
+        ):
+            raise BreakGlassRecoveryError("RUNTIME_RECOVERY_REVOKED")
+
+
+def _runtime_prepared_body(envelope: OwnerRuntimeRecoveryEnvelope) -> dict[str, Any]:
+    runtime = envelope.payload
+    return {
+        "schema": "nexus.break_glass_runtime_transition.v1",
+        "repository": runtime.repository,
+        "issue": runtime.issue,
+        "recovery_id": runtime.recovery_id,
+        "runtime_attempt_id": runtime.runtime_attempt_id,
+        "effect_class": runtime.effect_class,
+        "phase": "PREPARED",
+        "runtime_comment_id": envelope.comment_id,
+        "runtime_envelope_sha256": _runtime_envelope_hash(envelope),
+        "runtime_payload_sha256": envelope.payload_sha256,
+        "gateway_request_id": runtime.gateway_request_id,
+        "gateway_request_hash": runtime.gateway_request_hash,
+        "idempotency_fence": runtime.idempotency_fence,
+        "desired_manifest_id": runtime.desired_manifest_id,
+        "desired_manifest_sha256": runtime.desired_manifest_sha256,
+        "predecessor_manifest_id": runtime.predecessor_manifest_id,
+        "predecessor_manifest_sha256": runtime.predecessor_manifest_sha256,
+        "action": runtime.action,
+        "service_identity": runtime.service_identity,
+        "claim_ceiling": runtime.claim_ceiling,
+        "forbidden_effects": [
+            "SOURCE_REPAIR",
+            "EMERGENCY_INTEGRATION",
+            "ARBITRARY_COMMAND",
+            "ARBITRARY_PATH",
+            "GITHUB_MERGE",
+            "RELEASE",
+            "PRODUCTION_PUBLIC_CLAIM",
+        ],
+    }
+
+
+def _runtime_dispatched_body(
+    envelope: OwnerRuntimeRecoveryEnvelope, *, predecessor_hash: str
+) -> dict[str, Any]:
+    runtime = envelope.payload
+    return {
+        "schema": "nexus.break_glass_runtime_transition.v1",
+        "repository": runtime.repository,
+        "issue": runtime.issue,
+        "recovery_id": runtime.recovery_id,
+        "runtime_attempt_id": runtime.runtime_attempt_id,
+        "effect_class": runtime.effect_class,
+        "phase": "DISPATCHED",
+        "predecessor_hash": predecessor_hash,
+        "runtime_envelope_sha256": _runtime_envelope_hash(envelope),
+        "runtime_payload_sha256": envelope.payload_sha256,
+        "gateway_request_id": runtime.gateway_request_id,
+        "gateway_request_hash": runtime.gateway_request_hash,
+        "idempotency_fence": runtime.idempotency_fence,
+        "action": runtime.action,
+        "service_identity": runtime.service_identity,
+        "reconcile_policy": "SAME_REQUEST_ONLY",
+    }
+
+
+def _runtime_terminal_status(outcome: GatewayReconcileOutcome) -> str:
+    if outcome.result is ResultClass.VERIFIED:
+        if outcome.effect_started is not True:
+            raise BreakGlassRecoveryError("RUNTIME_RECOVERY_TERMINAL_EFFECT_STATE_INVALID")
+        return "CONSUMED"
+    if outcome.result is ResultClass.ROLLED_BACK:
+        if outcome.effect_started is not True:
+            raise BreakGlassRecoveryError("RUNTIME_RECOVERY_TERMINAL_EFFECT_STATE_INVALID")
+        return "ROLLED_BACK"
+    if outcome.result is ResultClass.BLOCKED:
+        return "BLOCKED_AFTER_EFFECT" if outcome.effect_started else "BLOCKED_BEFORE_EFFECT"
+    raise BreakGlassRecoveryError("RUNTIME_RECOVERY_OUTCOME_UNSUPPORTED")
+
+
+def _validate_runtime_outcome_binding(
+    runtime: BreakGlassOwnerRuntimeRecoveryPayload,
+    request: GatewayRecoveryRequest,
+    outcome: GatewayReconcileOutcome,
+) -> GatewayReconcileOutcome:
+    try:
+        typed = validate_reconcile_outcome(outcome)
+    except Exception as exc:
+        raise BreakGlassRecoveryError("RUNTIME_RECOVERY_OUTCOME_INVALID") from exc
+    if (
+        typed.request_id != request.request_id
+        or typed.request_hash != request.request_hash
+        or typed.idempotency_fence != request.idempotency_fence
+        or typed.desired_manifest_id != request.desired_manifest_id
+        or typed.predecessor_manifest_id != request.predecessor_manifest_id
+        or typed.request_id != runtime.gateway_request_id
+        or typed.request_hash != runtime.gateway_request_hash
+        or typed.idempotency_fence != runtime.idempotency_fence
+        or typed.desired_manifest_id != runtime.desired_manifest_id
+        or typed.predecessor_manifest_id != runtime.predecessor_manifest_id
+    ):
+        raise BreakGlassRecoveryError("RUNTIME_RECOVERY_OUTCOME_MISMATCH")
+    _runtime_terminal_status(typed)
+    return typed
+
+
+def _runtime_terminal_body(
+    envelope: OwnerRuntimeRecoveryEnvelope,
+    request: GatewayRecoveryRequest,
+    outcome: GatewayReconcileOutcome,
+    *,
+    predecessor_hash: str,
+) -> dict[str, Any]:
+    runtime = envelope.payload
+    typed = _validate_runtime_outcome_binding(runtime, request, outcome)
+    return {
+        "schema": "nexus.break_glass_runtime_transition.v1",
+        "repository": runtime.repository,
+        "issue": runtime.issue,
+        "recovery_id": runtime.recovery_id,
+        "runtime_attempt_id": runtime.runtime_attempt_id,
+        "effect_class": runtime.effect_class,
+        "phase": "TERMINAL",
+        "status": _runtime_terminal_status(typed),
+        "predecessor_hash": predecessor_hash,
+        "runtime_payload_sha256": envelope.payload_sha256,
+        "gateway_request_id": request.request_id,
+        "gateway_request_hash": request.request_hash,
+        "idempotency_fence": request.idempotency_fence,
+        "gateway_outcome_evidence_sha256": typed.evidence_hash,
+        "physical_observation_sha256": canonical_sha256(dict(typed.physical_observation)),
+        "effect_started": typed.effect_started,
+        "authority_terminal": True,
+        "post_terminal_replay": "DENY",
+        "claim_ceiling": runtime.claim_ceiling,
+    }
+
+
+def _assert_exact_runtime_transition(
+    record: Mapping[str, Any], expected_body: Mapping[str, Any], *, reason: str
+) -> None:
+    expected = {
+        **dict(expected_body),
+        "transition_hash": canonical_sha256(dict(expected_body)),
+    }
+    if dict(record) != expected:
+        raise BreakGlassRecoveryError(reason)
+
+
+def _is_sha256(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(char in "0123456789abcdef" for char in value)
+    )
+
+
+def _assert_terminal_structural_fence(
+    envelope: OwnerRuntimeRecoveryEnvelope,
+    terminal: Mapping[str, Any],
+    *,
+    predecessor_hash: str,
+) -> None:
+    runtime = envelope.payload
+    required = {
+        "schema",
+        "repository",
+        "issue",
+        "recovery_id",
+        "runtime_attempt_id",
+        "effect_class",
+        "phase",
+        "status",
+        "predecessor_hash",
+        "runtime_payload_sha256",
+        "gateway_request_id",
+        "gateway_request_hash",
+        "idempotency_fence",
+        "gateway_outcome_evidence_sha256",
+        "physical_observation_sha256",
+        "effect_started",
+        "authority_terminal",
+        "post_terminal_replay",
+        "claim_ceiling",
+        "transition_hash",
+    }
+    if set(terminal) != required:
+        raise BreakGlassRecoveryError("RUNTIME_RECOVERY_TERMINAL_SCHEMA_INVALID")
+    invariant = {
+        "schema": "nexus.break_glass_runtime_transition.v1",
+        "repository": runtime.repository,
+        "issue": runtime.issue,
+        "recovery_id": runtime.recovery_id,
+        "runtime_attempt_id": runtime.runtime_attempt_id,
+        "effect_class": runtime.effect_class,
+        "phase": "TERMINAL",
+        "predecessor_hash": predecessor_hash,
+        "runtime_payload_sha256": envelope.payload_sha256,
+        "gateway_request_id": runtime.gateway_request_id,
+        "gateway_request_hash": runtime.gateway_request_hash,
+        "idempotency_fence": runtime.idempotency_fence,
+        "authority_terminal": True,
+        "post_terminal_replay": "DENY",
+        "claim_ceiling": runtime.claim_ceiling,
+    }
+    if any(terminal.get(key) != value for key, value in invariant.items()):
+        raise BreakGlassRecoveryError("RUNTIME_RECOVERY_TERMINAL_BINDING_INVALID")
+    status = terminal.get("status")
+    effect_started = terminal.get("effect_started")
+    if type(effect_started) is not bool:
+        raise BreakGlassRecoveryError("RUNTIME_RECOVERY_TERMINAL_EFFECT_STATE_INVALID")
+    if status in {"CONSUMED", "ROLLED_BACK", "BLOCKED_AFTER_EFFECT"}:
+        if effect_started is not True:
+            raise BreakGlassRecoveryError("RUNTIME_RECOVERY_TERMINAL_EFFECT_STATE_INVALID")
+    elif status == "BLOCKED_BEFORE_EFFECT":
+        if effect_started is not False:
+            raise BreakGlassRecoveryError("RUNTIME_RECOVERY_TERMINAL_EFFECT_STATE_INVALID")
+    else:
+        raise BreakGlassRecoveryError("RUNTIME_RECOVERY_TERMINAL_STATUS_INVALID")
+    if not _is_sha256(terminal.get("gateway_outcome_evidence_sha256")) or not _is_sha256(
+        terminal.get("physical_observation_sha256")
+    ):
+        raise BreakGlassRecoveryError("RUNTIME_RECOVERY_TERMINAL_EVIDENCE_INVALID")
+
+
+def prepare_runtime_recovery(
+    envelope: OwnerRuntimeRecoveryEnvelope,
+    gateway_request: GatewayRecoveryRequest | Mapping[str, Any],
+    *,
+    now: datetime,
+    revocations: tuple[OwnerRuntimeRevocationEnvelope, ...] = (),
+    state_root: Path | None = None,
+) -> dict[str, Any]:
+    runtime = envelope.payload
+    runtime.assert_current(now=now)
+    _assert_runtime_not_revoked(envelope, revocations)
+    _validate_runtime_request_binding(runtime, gateway_request)
+    attempt_dir = _runtime_attempt_dir(runtime, state_root=state_root)
+    _ensure_safe_dir(attempt_dir, create=True)
+    terminal_path = attempt_dir / _RUNTIME_TERMINAL_FILE
+    if terminal_path.exists() or terminal_path.is_symlink():
+        raise BreakGlassRecoveryError("RUNTIME_RECOVERY_REPLAY_DENIED")
+    prepared_path = attempt_dir / _RUNTIME_PREPARED_FILE
+    return _atomic_create(prepared_path, _runtime_prepared_body(envelope))
+
+
+def inspect_runtime_recovery(
+    envelope: OwnerRuntimeRecoveryEnvelope,
+    *,
+    gateway_request: GatewayRecoveryRequest | Mapping[str, Any] | None = None,
+    gateway_outcome: GatewayReconcileOutcome | None = None,
+    state_root: Path | None = None,
+) -> dict[str, Any]:
+    runtime = envelope.payload
+    attempt_dir = _runtime_attempt_dir(runtime, state_root=state_root)
+    if not attempt_dir.exists():
+        return {
+            "schema": "nexus.break_glass_runtime_inspection.v1",
+            "status": "MISSING",
+            "recovery_id": runtime.recovery_id,
+            "runtime_attempt_id": runtime.runtime_attempt_id,
+        }
+    _ensure_safe_dir(attempt_dir, create=False)
+    prepared = _load_json_file(attempt_dir / _RUNTIME_PREPARED_FILE)
+    _assert_exact_runtime_transition(
+        prepared,
+        _runtime_prepared_body(envelope),
+        reason="RUNTIME_RECOVERY_PREPARED_TAMPERED",
+    )
+
+    dispatched_path = attempt_dir / _RUNTIME_DISPATCHED_FILE
+    terminal_path = attempt_dir / _RUNTIME_TERMINAL_FILE
+    if terminal_path.exists() or terminal_path.is_symlink():
+        if not (dispatched_path.exists() or dispatched_path.is_symlink()):
+            raise BreakGlassRecoveryError("RUNTIME_RECOVERY_CHAIN_INVALID")
+        dispatched = _load_json_file(dispatched_path)
+        _assert_exact_runtime_transition(
+            dispatched,
+            _runtime_dispatched_body(envelope, predecessor_hash=str(prepared["transition_hash"])),
+            reason="RUNTIME_RECOVERY_DISPATCH_TAMPERED",
+        )
+        terminal = _load_json_file(terminal_path)
+        _assert_terminal_structural_fence(
+            envelope,
+            terminal,
+            predecessor_hash=str(dispatched["transition_hash"]),
+        )
+        if gateway_request is None and gateway_outcome is None:
+            # Self-hash plus same-UID file ownership cannot prove the trusted
+            # Gateway manager's result. Never project a durable outer terminal
+            # into success without re-binding the exact manager outcome.
+            return {
+                "schema": "nexus.break_glass_runtime_inspection.v1",
+                "status": "TERMINAL_RECORDED_REQUIRES_GATEWAY_OUTCOME",
+                "recovery_id": runtime.recovery_id,
+                "runtime_attempt_id": runtime.runtime_attempt_id,
+                "terminal_transition_hash": terminal["transition_hash"],
+            }
+        if gateway_request is None or gateway_outcome is None:
+            raise BreakGlassRecoveryError("RUNTIME_RECOVERY_GATEWAY_OUTCOME_BINDING_REQUIRED")
+        request = _validate_runtime_request_binding(runtime, gateway_request)
+        expected_terminal = _runtime_terminal_body(
+            envelope,
+            request,
+            gateway_outcome,
+            predecessor_hash=str(dispatched["transition_hash"]),
+        )
+        _assert_exact_runtime_transition(
+            terminal,
+            expected_terminal,
+            reason="RUNTIME_RECOVERY_TERMINAL_OUTCOME_MISMATCH",
+        )
+        return {
+            "schema": "nexus.break_glass_runtime_inspection.v1",
+            "status": expected_terminal["status"],
+            "verified_against_gateway_outcome": True,
+            "recovery_id": runtime.recovery_id,
+            "runtime_attempt_id": runtime.runtime_attempt_id,
+            "terminal_transition_hash": terminal["transition_hash"],
+            "gateway_outcome_evidence_sha256": gateway_outcome.evidence_hash,
+        }
+
+    if dispatched_path.exists() or dispatched_path.is_symlink():
+        dispatched = _load_json_file(dispatched_path)
+        _assert_exact_runtime_transition(
+            dispatched,
+            _runtime_dispatched_body(envelope, predecessor_hash=str(prepared["transition_hash"])),
+            reason="RUNTIME_RECOVERY_DISPATCH_TAMPERED",
+        )
+        return {
+            "schema": "nexus.break_glass_runtime_inspection.v1",
+            "status": "DISPATCHED_RECONCILE_ONLY",
+            "recovery_id": runtime.recovery_id,
+            "runtime_attempt_id": runtime.runtime_attempt_id,
+            "latest_transition_hash": dispatched["transition_hash"],
+        }
+    return {
+        "schema": "nexus.break_glass_runtime_inspection.v1",
+        "status": "PREPARED",
+        "recovery_id": runtime.recovery_id,
+        "runtime_attempt_id": runtime.runtime_attempt_id,
+        "latest_transition_hash": prepared["transition_hash"],
+    }
+
+
+def execute_runtime_recovery(
+    envelope: OwnerRuntimeRecoveryEnvelope,
+    gateway_request: GatewayRecoveryRequest | Mapping[str, Any],
+    *,
+    clock: Callable[[], datetime],
+    revocation_provider: Callable[[], tuple[OwnerRuntimeRevocationEnvelope, ...]],
+    executor: Callable[[GatewayRecoveryRequest], GatewayReconcileOutcome],
+    state_root: Path | None = None,
+) -> dict[str, Any]:
+    runtime = envelope.payload
+    request = _validate_runtime_request_binding(runtime, gateway_request)
+    attempt_dir = _runtime_attempt_dir(runtime, state_root=state_root)
+    terminal_path = attempt_dir / _RUNTIME_TERMINAL_FILE
+    if terminal_path.exists() or terminal_path.is_symlink():
+        raise BreakGlassRecoveryError("RUNTIME_RECOVERY_REPLAY_DENIED")
+
+    prepared_path = attempt_dir / _RUNTIME_PREPARED_FILE
+    dispatched_path = attempt_dir / _RUNTIME_DISPATCHED_FILE
+    if dispatched_path.exists() or dispatched_path.is_symlink():
+        # After DISPATCHED, authority freshness cannot prove that no effect
+        # started. Reconcile only the exact already-bound request.
+        _ensure_safe_dir(attempt_dir, create=False)
+        prepared = _load_json_file(prepared_path)
+        _assert_exact_runtime_transition(
+            prepared,
+            _runtime_prepared_body(envelope),
+            reason="RUNTIME_RECOVERY_PREPARED_TAMPERED",
+        )
+        dispatched = _load_json_file(dispatched_path)
+        _assert_exact_runtime_transition(
+            dispatched,
+            _runtime_dispatched_body(envelope, predecessor_hash=str(prepared["transition_hash"])),
+            reason="RUNTIME_RECOVERY_DISPATCH_TAMPERED",
+        )
+    else:
+        initial_revocations = revocation_provider()
+        initial_now = clock()
+        prepared = prepare_runtime_recovery(
+            envelope,
+            request,
+            now=initial_now,
+            revocations=initial_revocations,
+            state_root=state_root,
+        )
+
+        # Re-read revocation evidence first, then sample a fresh clock as close
+        # as possible to the durable effect-commit transition. The caller may
+        # not reuse a timestamp captured before remote authority readback.
+        commit_revocations = revocation_provider()
+        commit_now = clock()
+        runtime.assert_current(now=commit_now)
+        _assert_runtime_not_revoked(envelope, commit_revocations)
+        dispatched = _atomic_create(
+            dispatched_path,
+            _runtime_dispatched_body(envelope, predecessor_hash=str(prepared["transition_hash"])),
+        )
+
+    try:
+        outcome = _validate_runtime_outcome_binding(runtime, request, executor(request))
+    except BreakGlassRecoveryError:
+        raise
+    except Exception as exc:
+        raise BreakGlassRecoveryError(
+            "RUNTIME_RECOVERY_OUTCOME_UNKNOWN_RECONCILE_SAME_REQUEST"
+        ) from exc
+
+    terminal_body = _runtime_terminal_body(
+        envelope,
+        request,
+        outcome,
+        predecessor_hash=str(dispatched["transition_hash"]),
+    )
+    terminal = _atomic_create(terminal_path, terminal_body)
+    _assert_exact_runtime_transition(
+        terminal,
+        terminal_body,
+        reason="RUNTIME_RECOVERY_TERMINAL_OUTCOME_MISMATCH",
+    )
+    return terminal
+
+
 def re_full_sha40(value: str) -> bool:
     return len(value) == 40 and all(char in "0123456789abcdef" for char in value)
 
@@ -691,4 +1173,7 @@ __all__ = [
     "record_emergency_integration_consumed",
     "inspect_emergency_integration",
     "assert_emergency_integration_not_consumed",
+    "prepare_runtime_recovery",
+    "execute_runtime_recovery",
+    "inspect_runtime_recovery",
 ]

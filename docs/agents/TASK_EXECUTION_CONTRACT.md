@@ -133,6 +133,30 @@ bounded exact-head/CAS sink such as `git_merge_pull_request`; its
 source. Force push, ref deletion, unrelated merge, runtime activation, release,
 and production/public claims remain forbidden.
 
+A separately issued `RUNTIME_RECOVERY` grant is narrower still. Its canonical
+authority remains an Owner GitHub comment on break-glass Issue #806 while also
+binding implementation Issue #973, exactly one `GatewayRecoveryRequest`
+hash/ID/idempotency fence, desired/predecessor manifest identities, action
+`GATEWAY_DURABLE_RECOVERY`, fixed service
+`com.nexus.mcp.gateway.direct`, expiry, and `runtime_recovery_only` claim
+ceiling. The break-glass consumer may only commit that one request to the
+existing durable Gateway recovery manager; it is not another runtime manager.
+Before durable `DISPATCHED`, the consumer re-reads Owner revocation evidence
+and then samples a fresh clock immediately before the effect-commit write; a
+caller timestamp captured before that readback is insufficient. Expired, newly
+revoked, mismatched, or widened authority blocks without an effect. After
+`DISPATCHED`, unknown outcome permits only reconciliation of the same request;
+later expiry/revocation cannot justify a second effect. Success requires the
+existing manager's authenticated identity/health postflight. Outer transition
+self-hashes do not independently certify terminal semantics: any recorded
+terminal must be re-verified field-for-field against the exact typed Gateway
+outcome before it may project `CONSUMED`, `ROLLED_BACK`,
+`BLOCKED_BEFORE_EFFECT`, or `BLOCKED_AFTER_EFFECT`. Without that readback
+inspection remains non-success.
+Terminal break-glass state denies replay. Raw host observation and credentials
+are not persisted by the outer authority receipt. Runtime recovery does not
+imply source repair, merge, release, or production/public claim authority.
+
 `NEXUS_GOVERNANCE_DEFAULT_READY` may be declared only by the Owner after a fresh
 readiness review. At minimum, that review should bind evidence that:
 

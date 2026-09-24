@@ -479,6 +479,120 @@ class BreakGlassOwnerIntegrationPayload(_FrozenModel):
             raise BreakGlassContractError("INTEGRATION_EXPIRED")
 
 
+class BreakGlassOwnerRuntimeRecoveryPayload(_FrozenModel):
+    schema: Literal["nexus.break_glass_owner_runtime_recovery.v1"] = (
+        "nexus.break_glass_owner_runtime_recovery.v1"
+    )
+    repository: Literal[_ALLOWED_REPOSITORY]
+    issue: Literal[_ALLOWED_ISSUE]
+    owner_login: Literal[_ALLOWED_OWNER]
+    runtime_recovery_issue: Literal[973]
+    recovery_id: StrictStr
+    runtime_attempt_id: StrictStr
+    effect_class: Literal["RUNTIME_RECOVERY"]
+    action: Literal["GATEWAY_DURABLE_RECOVERY"]
+    service_identity: Literal["com.nexus.mcp.gateway.direct"]
+    gateway_request_id: StrictStr
+    gateway_request_hash: StrictStr
+    idempotency_fence: StrictStr
+    desired_manifest_id: StrictStr
+    desired_manifest_sha256: StrictStr
+    predecessor_manifest_id: StrictStr
+    predecessor_manifest_sha256: StrictStr
+    issued_at: datetime
+    expires_at: datetime
+    claim_ceiling: Literal["runtime_recovery_only"]
+
+    @field_validator(
+        "recovery_id",
+        "runtime_attempt_id",
+        "gateway_request_id",
+        "idempotency_fence",
+        "desired_manifest_id",
+        "predecessor_manifest_id",
+    )
+    @classmethod
+    def validate_id(cls, value: str) -> str:
+        if not _SAFE_ID.fullmatch(value) or value != value.strip():
+            raise ValueError("RECOVERY_IDENTITY_INVALID")
+        return value
+
+    @field_validator(
+        "gateway_request_hash",
+        "desired_manifest_sha256",
+        "predecessor_manifest_sha256",
+    )
+    @classmethod
+    def validate_sha256(cls, value: str) -> str:
+        if not _SHA64.fullmatch(value):
+            raise ValueError("SHA256_INVALID")
+        return value
+
+    @model_validator(mode="after")
+    def validate_semantics(self) -> "BreakGlassOwnerRuntimeRecoveryPayload":
+        if _utc(self.expires_at) <= _utc(self.issued_at):
+            raise ValueError("RUNTIME_RECOVERY_WINDOW_INVALID")
+        return self
+
+    @property
+    def payload_sha256(self) -> str:
+        return canonical_sha256(self.model_dump(mode="json"))
+
+    def assert_current(self, *, now: datetime) -> None:
+        instant = _utc(now)
+        if instant < _utc(self.issued_at):
+            raise BreakGlassContractError("RUNTIME_RECOVERY_NOT_YET_VALID")
+        if instant >= _utc(self.expires_at):
+            raise BreakGlassContractError("RUNTIME_RECOVERY_EXPIRED")
+
+
+class BreakGlassOwnerRuntimeRevocationPayload(_FrozenModel):
+    schema: Literal["nexus.break_glass_owner_runtime_revocation.v1"] = (
+        "nexus.break_glass_owner_runtime_revocation.v1"
+    )
+    repository: Literal[_ALLOWED_REPOSITORY]
+    issue: Literal[_ALLOWED_ISSUE]
+    owner_login: Literal[_ALLOWED_OWNER]
+    runtime_recovery_issue: Literal[973]
+    recovery_id: StrictStr
+    runtime_attempt_id: StrictStr
+    runtime_recovery_payload_sha256: StrictStr
+    reason: StrictStr
+    issued_at: datetime
+
+    @field_validator("recovery_id", "runtime_attempt_id")
+    @classmethod
+    def validate_id(cls, value: str) -> str:
+        if not _SAFE_ID.fullmatch(value) or value != value.strip():
+            raise ValueError("RECOVERY_IDENTITY_INVALID")
+        return value
+
+    @field_validator("runtime_recovery_payload_sha256")
+    @classmethod
+    def validate_sha256(cls, value: str) -> str:
+        if not _SHA64.fullmatch(value):
+            raise ValueError("SHA256_INVALID")
+        return value
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, value: str) -> str:
+        if not value.strip() or value != value.strip():
+            raise ValueError("REVOCATION_REASON_INVALID")
+        return value
+
+    @field_validator("issued_at")
+    @classmethod
+    def validate_issued_at(cls, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            raise ValueError("TIMEZONE_REQUIRED")
+        return value
+
+    @property
+    def payload_sha256(self) -> str:
+        return canonical_sha256(self.model_dump(mode="json"))
+
+
 class BreakGlassOwnerCanaryPayload(_FrozenModel):
     schema: Literal["nexus.break_glass_owner_canary.v1"] = "nexus.break_glass_owner_canary.v1"
     repository: Literal[_ALLOWED_REPOSITORY]
@@ -614,6 +728,44 @@ class OwnerIntegrationEnvelope(_OwnerEvidenceEnvelope):
         return self
 
 
+class OwnerRuntimeRecoveryEnvelope(_OwnerEvidenceEnvelope):
+    schema: Literal["nexus.break_glass_owner_runtime_recovery_envelope.v1"] = (
+        "nexus.break_glass_owner_runtime_recovery_envelope.v1"
+    )
+    payload: BreakGlassOwnerRuntimeRecoveryPayload
+
+    @model_validator(mode="after")
+    def validate_envelope(self) -> "OwnerRuntimeRecoveryEnvelope":
+        if self.payload.owner_login != self.author_login:
+            raise ValueError("OWNER_IDENTITY_MISMATCH")
+        if self.payload.repository != self.repository or self.payload.issue != self.issue:
+            raise ValueError("OWNER_PROVENANCE_SCOPE_MISMATCH")
+        if self.payload.payload_sha256 != self.payload_sha256:
+            raise ValueError("PAYLOAD_HASH_MISMATCH")
+        if not self.comment_url.endswith(str(self.comment_id)):
+            raise ValueError("COMMENT_ID_URL_MISMATCH")
+        return self
+
+
+class OwnerRuntimeRevocationEnvelope(_OwnerEvidenceEnvelope):
+    schema: Literal["nexus.break_glass_owner_runtime_revocation_envelope.v1"] = (
+        "nexus.break_glass_owner_runtime_revocation_envelope.v1"
+    )
+    payload: BreakGlassOwnerRuntimeRevocationPayload
+
+    @model_validator(mode="after")
+    def validate_envelope(self) -> "OwnerRuntimeRevocationEnvelope":
+        if self.payload.owner_login != self.author_login:
+            raise ValueError("OWNER_IDENTITY_MISMATCH")
+        if self.payload.repository != self.repository or self.payload.issue != self.issue:
+            raise ValueError("OWNER_PROVENANCE_SCOPE_MISMATCH")
+        if self.payload.payload_sha256 != self.payload_sha256:
+            raise ValueError("PAYLOAD_HASH_MISMATCH")
+        if not self.comment_url.endswith(str(self.comment_id)):
+            raise ValueError("COMMENT_ID_URL_MISMATCH")
+        return self
+
+
 class OwnerCanaryEnvelope(_OwnerEvidenceEnvelope):
     schema: Literal["nexus.break_glass_owner_canary_envelope.v1"] = (
         "nexus.break_glass_owner_canary_envelope.v1"
@@ -728,15 +880,21 @@ def _owner_evidence_from_github_comment(
     marker: str,
     payload_model: type[BreakGlassOwnerVerificationPayload]
     | type[BreakGlassOwnerIntegrationPayload]
+    | type[BreakGlassOwnerRuntimeRecoveryPayload]
+    | type[BreakGlassOwnerRuntimeRevocationPayload]
     | type[BreakGlassOwnerCanaryPayload]
     | type[BreakGlassOwnerTerminalPayload],
     envelope_model: type[OwnerVerificationEnvelope]
     | type[OwnerIntegrationEnvelope]
+    | type[OwnerRuntimeRecoveryEnvelope]
+    | type[OwnerRuntimeRevocationEnvelope]
     | type[OwnerCanaryEnvelope]
     | type[OwnerTerminalEnvelope],
 ) -> (
     OwnerVerificationEnvelope
     | OwnerIntegrationEnvelope
+    | OwnerRuntimeRecoveryEnvelope
+    | OwnerRuntimeRevocationEnvelope
     | OwnerCanaryEnvelope
     | OwnerTerminalEnvelope
 ):
@@ -804,6 +962,51 @@ def owner_integration_from_github_comment(
     if not isinstance(envelope, OwnerIntegrationEnvelope):
         raise BreakGlassContractError("INTEGRATION_ENVELOPE_INVALID")
     return envelope
+
+
+def owner_runtime_recovery_from_github_comment(
+    comment: Mapping[str, Any],
+) -> OwnerRuntimeRecoveryEnvelope:
+    envelope = _owner_evidence_from_github_comment(
+        comment,
+        marker="Canonical runtime recovery payload SHA-256",
+        payload_model=BreakGlassOwnerRuntimeRecoveryPayload,
+        envelope_model=OwnerRuntimeRecoveryEnvelope,
+    )
+    if not isinstance(envelope, OwnerRuntimeRecoveryEnvelope):
+        raise BreakGlassContractError("RUNTIME_RECOVERY_ENVELOPE_INVALID")
+    return envelope
+
+
+def owner_runtime_revocation_from_github_comment(
+    comment: Mapping[str, Any],
+) -> OwnerRuntimeRevocationEnvelope:
+    envelope = _owner_evidence_from_github_comment(
+        comment,
+        marker="Canonical runtime revocation payload SHA-256",
+        payload_model=BreakGlassOwnerRuntimeRevocationPayload,
+        envelope_model=OwnerRuntimeRevocationEnvelope,
+    )
+    if not isinstance(envelope, OwnerRuntimeRevocationEnvelope):
+        raise BreakGlassContractError("RUNTIME_REVOCATION_ENVELOPE_INVALID")
+    return envelope
+
+
+def owner_runtime_revocations_from_github_comments(
+    comments: tuple[Mapping[str, Any], ...],
+) -> tuple[OwnerRuntimeRevocationEnvelope, ...]:
+    revocations: list[OwnerRuntimeRevocationEnvelope] = []
+    marker = "Canonical runtime revocation payload SHA-256:"
+    schema = "nexus.break_glass_owner_runtime_revocation.v1"
+    for comment in comments:
+        user = comment.get("user")
+        body = comment.get("body")
+        if not isinstance(user, Mapping) or user.get("login") != _ALLOWED_OWNER:
+            continue
+        if not isinstance(body, str) or marker not in body or schema not in body:
+            continue
+        revocations.append(owner_runtime_revocation_from_github_comment(comment))
+    return tuple(revocations)
 
 
 def owner_canary_from_github_comment(
