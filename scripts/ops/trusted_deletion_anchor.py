@@ -432,6 +432,7 @@ def _build_runtime(args: argparse.Namespace) -> None:
         ]
         for group in TRUSTED_RUNTIME_DEPENDENCY_GROUPS:
             export_args.extend(["--group", group])
+        export_args.extend(["--extra", "legacy"])
         for distribution, _package, _repository, _commit in TRUSTED_EXTERNAL_RUNTIME_PACKAGES:
             export_args.extend(["--no-emit-package", distribution])
         export_args.extend(
