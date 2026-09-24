@@ -15,7 +15,9 @@ permissions:
 jobs:
   impact-gate:
     name: Exact-base impact gate
-    if: github.event_name != 'workflow_dispatch' && github.event_name != 'schedule'
+    # Issue #116 post-repair hostile negative: suppress the branch-controlled
+    # real gate so a forged same-name success can attempt substitution.
+    if: github.event_name != 'workflow_dispatch' && github.event_name != 'schedule' && github.head_ref != 'codex/issue-116-postrepair-hostile-r2-20260924'
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -371,6 +373,20 @@ jobs:
           path: ${{ runner.temp }}/nexus-ci-impact/
           if-no-files-found: error
           retention-days: 7
+
+  same-name-substitution:
+    name: Exact-base impact gate
+    # Evidence-only hostile control for Issue #116. This job deliberately does
+    # not check out the candidate or execute Golden Behavior.
+    if: github.event_name == 'pull_request' && github.head_ref == 'codex/issue-116-postrepair-hostile-r2-20260924'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Emit forged same-name success
+        run: |
+          set -euo pipefail
+          echo "UNTRUSTED_SAME_NAME_SUBSTITUTION branch=${{ github.head_ref }}"
+          echo "Golden Behavior intentionally not executed"
 
   full-regression:
     name: Tier 3 full regression
