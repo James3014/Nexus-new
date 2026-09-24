@@ -359,6 +359,31 @@ Neither direct lane requires a third-party GitHub `APPROVED` review, an
 `IndependentReviewReceipt`, `independent_acceptance_hash`, a standing-grant
 receipt, `GITHUB_MERGE`, or `github_complete_pull_request`.
 
+A stale exact base invalidates the current **merge attempt**, not automatically
+its Candidate or PR. On `main` movement, the coordinator must first apply the
+existing #441 main-movement requalification semantics using exact old/new main
+SHA/tree, immutable Candidate head/tree/diff/path identity, and exact changed-main
+paths. This decision happens before any rebase, update-branch, branch/PR recreation,
+Candidate re-acceptance, or full-verifier replay caused solely by base movement.
+
+- `REUSE_UNAFFECTED`: preserve the same Candidate/PR/head and prior unaffected
+  evidence; refresh current-base observations and rerun only checks whose required
+  exact subject actually changed.
+- `RECHECK_AFFECTED`: rerun only the affected evidence dimensions plus physically
+  required GitHub checks on their exact current subject.
+- semantic overlap, Candidate identity drift, authority/governance drift,
+  conflict, platform-mandated new integration subject, or `IMPACT_UNKNOWN` may
+  require a new integration head/rebase/reverification; plain base inequality may not.
+
+For GOVERNED completion, `github_complete_pull_request` is the existing bounded
+consumer of this repeated-drift logic when the action is exposed. DIRECT remains
+lightweight and ends at `git_merge_pull_request`, but it must not skip the
+main-movement decision and substitute mechanical PR reconstruction. If the
+current action surface cannot obtain the exact requalification evidence, report a
+transport/evidence capability gap rather than treating Candidate recreation as a
+safe fallback.
+
+
 A tracked Task Card whose exact bytes still declare `execution_lane: GOVERNED`
 remains the effective merge-lane contract until the Owner explicitly changes it.
 Starting with PR #1061, every newly opened protected-merge PR must publish exactly
