@@ -518,3 +518,28 @@ def test_project_entry_ready_still_requires_bound_governed_bootstrap_action():
     assert "STOP before the effect" in normalized
     assert "`OWNER_AUTHORITY_REQUIRED:RECEIPT_MISSING` retries" in normalized
     assert "Surface convergence is a transport precondition and grants no authority" in normalized
+
+
+def test_main_movement_invalidates_merge_attempt_not_candidate_by_default():
+    texts = _authority_texts()
+    agents = _norm(texts["AGENTS.md"])
+    contract = _norm(texts["docs/agents/TASK_EXECUTION_CONTRACT.md"])
+
+    for text in (agents, contract):
+        assert "merge attempt" in text
+        assert "Candidate" in text
+        assert "#441" in text
+        assert "REUSE_UNAFFECTED" in text
+        assert "RECHECK_AFFECTED" in text
+        assert "IMPACT_UNKNOWN" in text
+        assert "exact changed-main paths" in text
+        assert "base" in text.lower()
+        assert "current main" in text.lower() or "current `main`" in text
+
+    assert "does **not** by itself invalidate the Candidate" in texts["AGENTS.md"]
+    assert "Do not create a new PR generation merely to refresh the base SHA" in agents
+    assert "`base != current main` alone is never sufficient evidence" in agents
+    assert "plain base inequality may not" in contract
+    assert "mechanical PR reconstruction" in contract
+    assert "transport/evidence capability gap" in agents
+    assert "transport/evidence capability gap" in contract

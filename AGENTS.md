@@ -138,6 +138,32 @@ not defects merely because they are not yet `NEXUS_GOVERNED`.
   expected-head/CAS action `git_merge_pull_request`, not the governed completion
   loop. In `DIRECT_DELEGATED`, the coordinator distinct from the worker inspects
   the physical diff and reruns the verifier; no third reviewer is required.
+- **Main-movement decision invariant:** exact-base movement invalidates the current
+  merge attempt by default; it does **not** by itself invalidate the Candidate,
+  PR, source head/tree/diff, or previously verified semantic evidence. Before
+  rebasing, recreating a branch/PR, force-updating a PR head, re-accepting a
+  Candidate, or rerunning the full verifier/CI set solely because `main` moved,
+  the coordinator MUST apply the existing #441 main-movement requalification
+  semantics to the exact old/new main SHA+tree, unchanged Candidate head/tree/
+  diff/path identity, and exact changed-main paths.
+- If every relevant dimension is `REUSE_UNAFFECTED` / irrelevant movement, keep
+  the same Candidate, PR, and PR head; refresh current `main`/base evidence and
+  rerun only checks whose exact required subject changed. Do not create a new PR
+  generation merely to refresh the base SHA.
+- `RECHECK_AFFECTED` means rerun only the named affected semantic/test/transport
+  dimensions plus any GitHub-required check that truthfully binds to a new exact
+  integration subject. A required check may never be copied to a different head.
+- A new integration head, rebase/update-branch, Candidate re-verification, or new
+  PR generation is allowed only when the requalification proves semantic overlap,
+  Candidate identity change, authority/governance drift, an exact-subject platform
+  requirement, or `IMPACT_UNKNOWN`/conflict that cannot safely reuse the prior
+  subject. `base != current main` alone is never sufficient evidence.
+- For `GOVERNED`, `github_complete_pull_request` already owns the bounded repeated
+  main-drift loop when exposed. For DIRECT, `git_merge_pull_request` remains the
+  final physical CAS sink only after the coordinator has completed the decision
+  above. If the bound action surface cannot obtain the required requalification
+  evidence, stop with a transport/evidence capability gap instead of mechanically
+  rebuilding the PR.
 - Starting with PR #1061, every new protected-merge PR carries exactly one
   machine-readable `nexus.merge_lane_binding.v1` block in the PR body. Genuine
   direct work uses `OWNER_INLINE` or a Task Card that already declares that
