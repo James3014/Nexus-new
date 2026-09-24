@@ -46,6 +46,13 @@ TERMINAL_COMPLETION_DISPOSITIONS = {
     "DONE_NO_FOLLOW_UP",
     "FOLLOW_UP_REQUIRED",
 }
+COMPLETION_CRITERION_STATUSES = {
+    "SATISFIED_CURRENT",
+    "UNSATISFIED_CURRENT",
+    "EVIDENCE_UNAVAILABLE",
+}
+_COMPLETION_CRITERION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_COMPLETION_WITNESS_KIND_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 
 
 def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -250,6 +257,150 @@ def evaluate_completion_snapshot(
     if not post_merge_evidence:
         failures.append("post_merge_current_main_evidence_missing")
 
+    expected_criteria_raw = expected_bindings.get("required_acceptance_criteria")
+    expected_criteria: dict[str, tuple[str, ...]] = {}
+    if (
+        not isinstance(expected_criteria_raw, list)
+        or not expected_criteria_raw
+        or not all(isinstance(item, Mapping) for item in expected_criteria_raw)
+    ):
+        failures.append("expected_acceptance_criteria_invalid")
+        expected_criteria_raw = []
+    for item in expected_criteria_raw:
+        criterion_id = item.get("id")
+        witness_kinds = item.get("required_witness_kinds")
+        if (
+            not isinstance(criterion_id, str)
+            or not _COMPLETION_CRITERION_ID_RE.fullmatch(criterion_id)
+        ):
+            failures.append("expected_acceptance_criterion_id_invalid")
+            continue
+        if criterion_id in expected_criteria:
+            failures.append(f"duplicate_expected_acceptance_criterion:{criterion_id}")
+            continue
+        if (
+            not isinstance(witness_kinds, list)
+            or not witness_kinds
+            or not all(
+                isinstance(kind, str)
+                and _COMPLETION_WITNESS_KIND_RE.fullmatch(kind)
+                for kind in witness_kinds
+            )
+            or len(witness_kinds) != len(set(witness_kinds))
+        ):
+            failures.append(
+                f"expected_acceptance_criterion_witness_kinds_invalid:{criterion_id}"
+            )
+            continue
+        expected_criteria[criterion_id] = tuple(witness_kinds)
+
+    criteria_raw = snapshot.get("acceptance_criteria")
+    criteria: dict[str, Mapping[str, Any]] = {}
+    if (
+        not isinstance(criteria_raw, list)
+        or not criteria_raw
+        or not all(isinstance(item, Mapping) for item in criteria_raw)
+    ):
+        failures.append("acceptance_criteria_invalid")
+        criteria_raw = []
+    for item in criteria_raw:
+        criterion_id = item.get("id")
+        if (
+            not isinstance(criterion_id, str)
+            or not _COMPLETION_CRITERION_ID_RE.fullmatch(criterion_id)
+        ):
+            failures.append("acceptance_criterion_id_invalid")
+            continue
+        if criterion_id in criteria:
+            failures.append(f"duplicate_acceptance_criterion:{criterion_id}")
+            continue
+        criteria[criterion_id] = item
+
+    if sorted(criteria) != sorted(expected_criteria):
+        failures.append("acceptance_criterion_set_mismatch")
+
+    criterion_statuses: dict[str, str] = {}
+    for criterion_id, required_witness_kinds in expected_criteria.items():
+        criterion = criteria.get(criterion_id)
+        if criterion is None:
+            failures.append(f"acceptance_criterion_missing:{criterion_id}")
+            continue
+
+        status = criterion.get("status")
+        if status not in COMPLETION_CRITERION_STATUSES:
+            failures.append(f"acceptance_criterion_status_invalid:{criterion_id}")
+            continue
+        criterion_statuses[criterion_id] = str(status)
+
+        criterion_evidence_ids = criterion.get("evidence_ids")
+        if not isinstance(criterion_evidence_ids, list) or not all(
+            isinstance(evidence_id, str) and evidence_id
+            for evidence_id in criterion_evidence_ids
+        ):
+            failures.append(f"acceptance_criterion_evidence_ids_invalid:{criterion_id}")
+            criterion_evidence_ids = []
+        if len(criterion_evidence_ids) != len(set(criterion_evidence_ids)):
+            failures.append(f"acceptance_criterion_evidence_ids_duplicate:{criterion_id}")
+        if status != "EVIDENCE_UNAVAILABLE" and not criterion_evidence_ids:
+            failures.append(f"acceptance_criterion_evidence_missing:{criterion_id}")
+
+        covered_witness_kinds: set[str] = set()
+        for evidence_id in criterion_evidence_ids:
+            if evidence_id not in required_evidence:
+                failures.append(
+                    f"criterion_evidence_not_required:{criterion_id}:{evidence_id}"
+                )
+            item = evidence_by_id.get(evidence_id)
+            if item is None:
+                failures.append(
+                    f"criterion_evidence_missing:{criterion_id}:{evidence_id}"
+                )
+                continue
+            if (
+                item.get("status") != "PASS"
+                or item.get("bound_sha") != actual_head
+                or item.get("bound_tree_sha") != actual_tree
+            ):
+                failures.append(
+                    f"criterion_evidence_not_current:{criterion_id}:{evidence_id}"
+                )
+            witness_kind = item.get("witness_kind")
+            if (
+                not isinstance(witness_kind, str)
+                or not _COMPLETION_WITNESS_KIND_RE.fullmatch(witness_kind)
+            ):
+                failures.append(
+                    f"criterion_witness_kind_invalid:{criterion_id}:{evidence_id}"
+                )
+                continue
+            covered_witness_kinds.add(witness_kind)
+
+        if status == "EVIDENCE_UNAVAILABLE":
+            failures.append(f"criterion_evidence_unavailable:{criterion_id}")
+        elif status == "SATISFIED_CURRENT":
+            for witness_kind in required_witness_kinds:
+                if witness_kind not in covered_witness_kinds:
+                    failures.append(
+                        f"criterion_witness_kind_missing:{criterion_id}:{witness_kind}"
+                    )
+
+    criterion_semantics_determinate = (
+        bool(expected_criteria)
+        and sorted(criteria) == sorted(expected_criteria)
+        and len(criterion_statuses) == len(expected_criteria)
+        and all(
+            status != "EVIDENCE_UNAVAILABLE"
+            for status in criterion_statuses.values()
+        )
+    )
+    derived_original_satisfied = (
+        criterion_semantics_determinate
+        and all(
+            status == "SATISFIED_CURRENT"
+            for status in criterion_statuses.values()
+        )
+    )
+
     prerequisite_open_failures: list[str] = []
     prerequisite_identity_failures: list[str] = []
     prerequisites = snapshot.get("hard_prerequisites", [])
@@ -309,6 +460,11 @@ def evaluate_completion_snapshot(
     )
     if not all(type(flag) is bool for flag in semantic_flags):
         failures.append("completion_semantic_flags_invalid")
+    elif (
+        criterion_semantics_determinate
+        and original_satisfied is not derived_original_satisfied
+    ):
+        failures.append("original_contract_satisfied_mismatch")
     if contract_delta and distinct_follow_up:
         failures.append("completion_signals_contradictory")
     if distinct_follow_up and original_satisfied is False:
