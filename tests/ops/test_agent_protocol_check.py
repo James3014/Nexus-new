@@ -359,6 +359,27 @@ def test_completion_snapshot_requires_fresh_acceptance_criterion_binding(tmp_pat
     assert "expected_acceptance_criteria_invalid" in result["failures"]
 
 
+def test_completion_snapshot_rejects_omitted_material_acceptance_criterion(tmp_path):
+    history = _completion_repo(tmp_path)
+    snapshot = _completion_snapshot(history)
+    snapshot["required_acceptance_criteria"] = [
+        {
+            "id": "AC-BASELINE",
+            "required_witness_kinds": ["POSITIVE_CONTROL"],
+        },
+        {
+            "id": "AC-NEGATIVE-CONTROL",
+            "required_witness_kinds": ["NEGATIVE_CONTROL"],
+        },
+    ]
+
+    result = _evaluate(snapshot, history)
+
+    assert result["disposition"] == "BLOCKED_EVIDENCE"
+    assert "acceptance_criterion_set_mismatch" in result["failures"]
+    assert "acceptance_criterion_missing:AC-NEGATIVE-CONTROL" in result["failures"]
+
+
 def test_completion_snapshot_keeps_open_for_current_falsified_criterion(tmp_path):
     history = _completion_repo(tmp_path)
     snapshot = _completion_snapshot(history)
