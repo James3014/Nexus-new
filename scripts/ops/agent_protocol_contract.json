@@ -45,7 +45,19 @@
       "explicit_default_main_ref_head_and_tree",
       "post_merge_current_main_evidence",
       "required_evidence_set",
-      "required_predecessor_set"
-    ]
+      "required_predecessor_set",
+      "required_acceptance_criterion_witness_coverage"
+    ],
+    "criterion_statuses": [
+      "SATISFIED_CURRENT",
+      "UNSATISFIED_CURRENT",
+      "EVIDENCE_UNAVAILABLE"
+    ],
+    "criterion_witness_binding": {
+      "expected_source": "fresh_completion_bindings",
+      "snapshot_field": "acceptance_criteria",
+      "required_expected_field": "required_acceptance_criteria",
+      "terminal_rule": "every_material_criterion_satisfied_with_required_current_witness_kinds"
+    }
   }
 }
