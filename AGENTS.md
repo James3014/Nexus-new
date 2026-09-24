@@ -76,6 +76,22 @@ not defects merely because they are not yet `NEXUS_GOVERNED`.
 - The collaboration repository is `James3014/Nexus-new`; default and
   collaboration branch is `main`.
 - G12 Fast Start advisory-cache gate: before any GitHub Issue implementation source/test body reads, primary Codex/coordinator must consult #549 as `ADVISORY_CACHE_ONLY`. `BLOCKED`, `HOST_REBIND_REQUIRED`, `NEEDS_DECISION`, and `EVIDENCE_BLOCKED` require fresh metadata-only rebind and must not read diff, patch, or implementation bodies; if still non-ready, stop. `READY_CANDIDATE` is not authority; fresh Issue/dependencies/main/host and normal gates remain required. Missing, stale, malformed, hash-invalid, wrong-authority, or contradictory cache fails closed to normal authoritative discovery. Fast Start consumers are read-only for #549/product Issues; see `docs/agents/TASK_EXECUTION_CONTRACT.md`.
+- **Project-entry invariant (#842):** on the first explicit Nexus/project-bound
+  action for a repository + Issue, the primary coordinator MUST call
+  `nexus_project_entry` before any Nexus-governed effectful action. This applies
+  regardless of phrasing (`continue ... #N`, `處理 #N`, `幫我修 #N`, or an
+  equivalent issue-bound follow-up); keyword choice is not an authorization
+  signal. The Project Entry result is pre-execution evidence only.
+- If Project Entry is not `READY_TO_EXECUTE`, surface its single canonical
+  blocker and next action and STOP the governed effect path. Do not jump directly
+  to `nexus_task_card_create`, worker/Candidate mutation, alternate shell/CLI
+  transport, carrier pairing, copied authority material, or handwritten
+  standing-grant diagnosis. Recovery/rebind remains owned by the blocker’s
+  existing canonical owner (#806 break-glass or #526 Gateway rebind as applicable).
+- Switching repository or Issue invalidates the prior Project Entry binding for
+  governed effects and requires a fresh `nexus_project_entry` call. Direct lanes
+  remain governed by their existing lane rules; this invariant must not fabricate
+  a Task Card merely because an Issue was opened.
 - A Ready GitHub Issue is a worker-neutral bounded collaboration contract; it
   does not select local lifecycle. Draft, triage, and unready Issues grant no
   mutation. An eligible governed worker implements on an issue-specific branch
