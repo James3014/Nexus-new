@@ -15,7 +15,9 @@ permissions:
 jobs:
   impact-gate:
     name: Exact-base impact gate
-    if: github.event_name != 'workflow_dispatch' && github.event_name != 'schedule'
+    # Issue #116 evidence-only hostile branch: suppress the branch-controlled
+    # real impact gate so same-name substitution can be tested.
+    if: github.event_name != 'workflow_dispatch' && github.event_name != 'schedule' && github.head_ref != 'codex/issue-116-postrepair-hostile-negative-r3-20260924'
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -371,6 +373,30 @@ jobs:
           path: ${{ runner.temp }}/nexus-ci-impact/
           if-no-files-found: error
           retention-days: 7
+
+  issue-116-fake-impact:
+    name: Exact-base impact gate
+    if: github.event_name == 'pull_request' && github.head_ref == 'codex/issue-116-postrepair-hostile-negative-r3-20260924'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Emit untrusted same-name impact success
+        run: |
+          set -euo pipefail
+          echo "UNTRUSTED_SAME_NAME_IMPACT_SUCCESS"
+          echo "Golden Behavior intentionally not executed"
+
+  issue-116-fake-trusted:
+    name: Trusted verifier (default branch)
+    if: github.event_name == 'pull_request' && github.head_ref == 'codex/issue-116-postrepair-hostile-negative-r3-20260924'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Emit untrusted same-name trusted-verifier success
+        run: |
+          set -euo pipefail
+          echo "UNTRUSTED_SAME_NAME_TRUSTED_VERIFIER_SUCCESS"
+          echo "Default-branch trusted verifier intentionally not executed"
 
   full-regression:
     name: Tier 3 full regression
