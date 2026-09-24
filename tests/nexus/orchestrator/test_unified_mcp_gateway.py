@@ -4374,3 +4374,135 @@ def test_project_entry_invalid_issue_number_is_public_input_error(issue):
     gateway = UnifiedMCPGateway(service=FakeService())
     response = gateway.handle({"jsonrpc": "2.0", "id": 8422, "method": "tools/call", "params": {"name": "nexus_project_entry", "arguments": {"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": issue}}})
     assert response["result"]["isError"] is True
+
+
+def test_gateway_convergence_tool_is_decision_only_and_reuses_status_observation(monkeypatch):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    def fake_git(*args):
+        if args == ("rev-parse", "HEAD"):
+            return "a" * 40 + "\n"
+        if args == ("rev-parse", "HEAD^{tree}"):
+            return "b" * 40 + "\n"
+        raise AssertionError(f"unexpected git call: {args}")
+
+    monkeypatch.setattr(gateway_module, "_git", fake_git)
+    gateway = UnifiedMCPGateway(
+        service=FakeService(),
+        upstream_observer=lambda: (
+            "c" * 40,
+            "2026-09-23T12:00:00+00:00",
+            None,
+        ),
+        upstream_cache_ttl_seconds=0,
+    )
+
+    response = gateway.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1064,
+            "method": "tools/call",
+            "params": {
+                "name": "nexus_gateway_convergence",
+                "arguments": {
+                    "policy": {
+                        "mode": "TRACK_ACCEPTED_MAIN",
+                        "desired_commit": "c" * 40,
+                        "desired_tree": "d" * 40,
+                    },
+                    "readiness_state": "SAFE",
+                    "quiescence_state": "SAFE",
+                },
+            },
+        }
+    )
+    payload = response["result"]["structuredContent"]
+    assert response["result"].get("isError") is not True
+    assert payload["action"] == "REQUEST_RECOVERY"
+    assert payload["canonical_next_action"] == "prepare_issue_526_recovery"
+    assert payload["effect_owner"] == "ISSUE_526_GATEWAY_RECOVERY"
+    assert payload["effect_authorized"] is False
+    assert payload["host_effect_performed"] is False
+    assert payload["observed_upstream_freshness"] == "STALE"
+
+    pinned = gateway.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1065,
+            "method": "tools/call",
+            "params": {
+                "name": "nexus_gateway_convergence",
+                "arguments": {
+                    "policy": {
+                        "mode": "PINNED",
+                        "desired_commit": "a" * 40,
+                        "desired_tree": "b" * 40,
+                    },
+                    "readiness_state": "SAFE",
+                    "quiescence_state": "SAFE",
+                },
+            },
+        }
+    )
+    pinned_payload = pinned["result"]["structuredContent"]
+    assert pinned_payload["action"] == "NOOP"
+    assert pinned_payload["reason"] == "PINNED_ALREADY_LOADED"
+    assert pinned_payload["canonical_next_action"] == "none"
+
+
+def test_gateway_convergence_tool_surfaces_same_effect_reconciliation(monkeypatch):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    monkeypatch.setattr(
+        gateway_module,
+        "_git",
+        lambda *args: (
+            "a" * 40 + "\n"
+            if args == ("rev-parse", "HEAD")
+            else "b" * 40 + "\n"
+        ),
+    )
+    gateway = UnifiedMCPGateway(
+        service=FakeService(),
+        upstream_observer=lambda: (
+            "c" * 40,
+            "2026-09-23T12:00:00+00:00",
+            None,
+        ),
+        upstream_cache_ttl_seconds=0,
+    )
+    response = gateway.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1066,
+            "method": "tools/call",
+            "params": {
+                "name": "nexus_gateway_convergence",
+                "arguments": {
+                    "policy": {
+                        "mode": "TRACK_ACCEPTED_MAIN",
+                        "desired_commit": "c" * 40,
+                        "desired_tree": "d" * 40,
+                    },
+                    "readiness_state": "SAFE",
+                    "quiescence_state": "SAFE",
+                    "active_effect": {
+                        "state": "OUTCOME_UNKNOWN",
+                        "operation_id": "op-original",
+                        "request_id": "request-original",
+                        "idempotency_fence": "fence-original",
+                        "target_commit": "1" * 40,
+                        "target_tree": "2" * 40,
+                    },
+                },
+            },
+        }
+    )
+    payload = response["result"]["structuredContent"]
+    assert payload["action"] == "RECONCILE_RECOVERY"
+    assert payload["canonical_next_action"] == "operation_reconcile"
+    assert payload["operation_id"] == "op-original"
+    assert payload["request_id"] == "request-original"
+    assert payload["idempotency_fence"] == "fence-original"
+    assert payload["retry_authorized"] is False
+    assert payload["host_effect_performed"] is False
