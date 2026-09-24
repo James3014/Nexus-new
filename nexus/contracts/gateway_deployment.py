@@ -1545,6 +1545,7 @@ class RecoveryAuthorityMaterializationReceipt(StrictRecord):
     effect_class: EffectClass
     recovery_authority_id: str
     recovery_authority_hash: str
+    materialization_request_hash: str
     fresh_main: str
     fresh_main_tree: str
     materialized_authority_sha256: str
@@ -1581,6 +1582,7 @@ def validate_recovery_materialization_receipt(
         (receipt.fresh_main, "fresh main", 40),
         (receipt.fresh_main_tree, "fresh main tree", 40),
         (receipt.recovery_authority_hash, "authority hash", 64),
+        (receipt.materialization_request_hash, "materialization request hash", 64),
         (receipt.materialized_authority_sha256, "materialized authority hash", 64),
         (receipt.materialized_request_sha256, "materialized request hash", 64),
         (receipt.predecessor_artifact_sha256, "predecessor artifact hash", 64),
