@@ -398,10 +398,7 @@ def test_completion_snapshot_rejects_stale_criterion_witness(tmp_path):
     result = _evaluate(snapshot, history)
 
     assert result["disposition"] == "BLOCKED_EVIDENCE"
-    assert (
-        "criterion_evidence_not_current:AC-BASELINE:post-merge-verifier"
-        in result["failures"]
-    )
+    assert "criterion_evidence_not_current:AC-BASELINE:post-merge-verifier" in result["failures"]
 
 
 def test_completion_snapshot_rejects_bare_original_satisfied_assertion(tmp_path):
