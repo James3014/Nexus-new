@@ -593,6 +593,201 @@ def test_r1b1_real_git_bundle_bare_store_and_two_detached_worktrees(tmp_path, mo
         assert g._r1_verify_worktree(worktree, manifest) == worktree
 
 
+def _r1m_materialization_request(
+    receipt,
+    *,
+    request_id=None,
+    idempotency_fence=None,
+    authority_id=None,
+    authority_hash=None,
+):
+    from nexus.contracts.gateway_deployment import canonical_hash
+
+    values = {
+        "request_id": request_id or receipt.request_id,
+        "idempotency_fence": idempotency_fence or receipt.idempotency_fence,
+        "operation": g.GATEWAY_RECOVERY_MATERIALIZATION_OPERATION,
+        "effect_class": g.EffectClass.GATEWAY_RECOVERY_MATERIALIZATION.value,
+        "recovery_authority_id": authority_id or receipt.receipt_id,
+        "recovery_authority_hash": authority_hash or receipt.receipt_hash,
+    }
+    return {**values, "request_hash": canonical_hash(values)}
+
+
+def _r1m_clear_materialized_stores(fixture, monkeypatch):
+    monkeypatch.setattr(
+        g, "GATEWAY_REQUEST_STORE", fixture["state"] / "request.json"
+    )
+    monkeypatch.setattr(
+        g,
+        "GATEWAY_RECOVERY_AUTHORITY_STORE",
+        fixture["state"] / "recovery-authority.json",
+    )
+    for path in (
+        g.GATEWAY_RECOVERY_AUTHORITY_STORE,
+        g.GATEWAY_REQUEST_STORE,
+        fixture["predecessor_artifact"],
+    ):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def test_r1b1_materialize_creates_fixed_stores_and_starts_no_effect(tmp_path, monkeypatch):
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    _r1m_clear_materialized_stores(fixture, monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        g, "_launchctl_observation", lambda *args, **kwargs: calls.append((args, kwargs))
+    )
+    fresh_main = subprocess.check_output(
+        ["git", "-C", str(fixture["mirror"]), "rev-parse", "HEAD"], text=True
+    ).strip()
+    fresh_tree = subprocess.check_output(
+        ["git", "-C", str(fixture["mirror"]), "rev-parse", f"{fresh_main}^{{tree}}"],
+        text=True,
+    ).strip()
+    outcome = g.gateway_recovery_materialize(
+        _r1m_materialization_request(fixture["receipt"])
+    )
+    assert outcome["effect_started"] is False
+    assert calls == []
+    assert outcome["operation"] == g.GATEWAY_RECOVERY_MATERIALIZATION_OPERATION
+    assert (
+        outcome["effect_class"]
+        == g.EffectClass.GATEWAY_RECOVERY_MATERIALIZATION.value
+    )
+    assert outcome["recovery_authority_id"] == fixture["receipt"].receipt_id
+    assert outcome["recovery_authority_hash"] == fixture["receipt"].receipt_hash
+    assert outcome["fresh_main"] == fresh_main
+    assert outcome["fresh_main_tree"] == fresh_tree
+    authority_bytes = g.GATEWAY_RECOVERY_AUTHORITY_STORE.read_bytes()
+    request_bytes = g.GATEWAY_REQUEST_STORE.read_bytes()
+    assert outcome["materialized_authority_sha256"] == hashlib.sha256(
+        authority_bytes
+    ).hexdigest()
+    assert outcome["materialized_request_sha256"] == hashlib.sha256(
+        request_bytes
+    ).hexdigest()
+    tracked = subprocess.check_output(
+        [
+            "git",
+            "-C",
+            str(fixture["mirror"]),
+            "show",
+            f"{fresh_main}:{g.RECOVERY_AUTHORITY_SOURCE_PATH}",
+        ],
+    )
+    assert authority_bytes == tracked
+    stored_request = json.loads(request_bytes.decode("utf-8"))
+    expected_request = json.loads(
+        json.dumps(
+            fixture["request"].model_dump(),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
+    assert stored_request == expected_request
+    artifact = fixture["predecessor_artifact"].parent / (
+        f"{fixture['receipt'].predecessor_artifact_sha256}.bundle"
+    )
+    assert artifact.is_file()
+    assert artifact.stat().st_size == fixture["receipt"].predecessor_artifact_size
+    assert hashlib.sha256(artifact.read_bytes()).hexdigest() == (
+        fixture["receipt"].predecessor_artifact_sha256
+    )
+    assert outcome["predecessor_artifact_sha256"] == (
+        fixture["receipt"].predecessor_artifact_sha256
+    )
+    assert g._load_recovery_authority(fixture["request"]) == fixture["receipt"]
+
+
+def test_r1b1_materialize_is_idempotent_and_rejects_post_materialization_drift(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    _r1m_clear_materialized_stores(fixture, monkeypatch)
+    request = _r1m_materialization_request(fixture["receipt"])
+    first = g.gateway_recovery_materialize(request)
+    second = g.gateway_recovery_materialize(request)
+    assert second == first
+    fixture["state"].joinpath("recovery-authority.json").write_bytes(
+        b"forged-authority-store"
+    )
+    with pytest.raises(g.GatewayContractError, match="store drift"):
+        g.gateway_recovery_materialize(request)
+
+
+def test_r1b1_materialize_rejects_identity_and_fence_mismatch(tmp_path, monkeypatch):
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    _r1m_clear_materialized_stores(fixture, monkeypatch)
+    receipt = fixture["receipt"]
+    with pytest.raises(g.GatewayContractError, match="authority identity mismatch"):
+        g.gateway_recovery_materialize(
+            _r1m_materialization_request(receipt, authority_hash="d" * 64)
+        )
+    with pytest.raises(g.GatewayContractError, match="request/fence identity mismatch"):
+        g.gateway_recovery_materialize(
+            _r1m_materialization_request(receipt, request_id="request-999")
+        )
+    with pytest.raises(g.GatewayContractError, match="request rejected"):
+        g.gateway_recovery_materialize(
+            {
+                **_r1m_materialization_request(receipt),
+                "operation": "gateway-recover",
+            }
+        )
+
+
+def test_r1b1_materialize_refreshes_stale_mirror_before_reading(tmp_path, monkeypatch):
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    _r1m_clear_materialized_stores(fixture, monkeypatch)
+    receipt_sha = subprocess.check_output(
+        ["git", "-C", str(fixture["mirror"]), "rev-parse", "HEAD"], text=True
+    ).strip()
+    base = subprocess.check_output(
+        ["git", "-C", str(fixture["mirror"]), "rev-parse", "HEAD~3"], text=True
+    ).strip()
+    subprocess.run(
+        ["git", "-C", str(fixture["mirror"]), "checkout", "--detach", "-q", base],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(fixture["mirror"]),
+            "update-ref",
+            "refs/heads/main",
+            receipt_sha,
+        ],
+        check=True,
+    )
+    assert subprocess.check_output(
+        ["git", "-C", str(fixture["mirror"]), "rev-parse", "HEAD"], text=True
+    ).strip() == base
+    outcome = g.gateway_recovery_materialize(
+        _r1m_materialization_request(fixture["receipt"])
+    )
+    assert outcome["fresh_main"] == receipt_sha
+    assert subprocess.check_output(
+        ["git", "-C", str(fixture["mirror"]), "rev-parse", "HEAD"], text=True
+    ).strip() == receipt_sha
+    assert g._load_recovery_authority(fixture["request"]) == fixture["receipt"]
+
+
+def test_r1b1_materialize_has_no_caller_selectable_surface():
+    import inspect
+
+    parameters = inspect.signature(g.gateway_recovery_materialize).parameters
+    assert tuple(parameters) == ("request",)
+    assert "state_root" not in parameters
+    assert "desired_source" not in parameters
+    assert "predecessor_source" not in parameters
+    assert "authority_source" not in parameters
+
+
 def test_r1b1_local_typed_receipt_mismatch_fails_before_bundle(tmp_path, monkeypatch):
     from nexus.contracts.gateway_deployment import canonical_hash
 

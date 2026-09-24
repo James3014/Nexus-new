@@ -2174,6 +2174,109 @@ def test_r1b2_recovery_transition_exact_edges_and_no_uncertain_reentry():
             transition(previous, current)
 
 
+def test_r1_materialization_request_is_typed_and_hash_bound():
+    from nexus.contracts.gateway_deployment import (
+        GatewayRecoveryMaterializationRequest,
+        validate_recovery_materialization_request,
+    )
+
+    receipt = _r1_authority_fixture()
+    values = {
+        "request_id": receipt.request_id,
+        "idempotency_fence": receipt.idempotency_fence,
+        "operation": "gateway-recovery-materialize",
+        "effect_class": EffectClass.GATEWAY_RECOVERY_MATERIALIZATION.value,
+        "recovery_authority_id": receipt.receipt_id,
+        "recovery_authority_hash": receipt.receipt_hash,
+    }
+    request = GatewayRecoveryMaterializationRequest.model_validate({
+        **values,
+        "request_hash": canonical_hash(values),
+    })
+    assert validate_recovery_materialization_request(request) == request
+
+    mutated = request.model_dump()
+    mutated["recovery_authority_id"] = "receipt-2"
+    with pytest.raises(ContractError, match="hash mismatch"):
+        validate_recovery_materialization_request(
+            GatewayRecoveryMaterializationRequest.model_validate(mutated)
+        )
+
+    wrong_operation = {**values, "operation": "gateway-recover"}
+    with pytest.raises(ContractError, match="operation/effect"):
+        validate_recovery_materialization_request(
+            GatewayRecoveryMaterializationRequest.model_validate({
+                **wrong_operation,
+                "request_hash": canonical_hash(wrong_operation),
+            })
+        )
+
+
+def test_r1_materialization_receipt_requires_zero_effect_and_binds_hashes():
+    from nexus.contracts.gateway_deployment import (
+        EffectClass,
+        RecoveryAuthorityMaterializationReceipt,
+        validate_recovery_materialization_receipt,
+    )
+
+    values = {
+        "request_id": "request-1",
+        "idempotency_fence": "fence-1",
+        "operation": "gateway-recovery-materialize",
+        "effect_class": EffectClass.GATEWAY_RECOVERY_MATERIALIZATION,
+        "recovery_authority_id": "receipt-1",
+        "recovery_authority_hash": "a" * 64,
+        "fresh_main": "b" * 40,
+        "fresh_main_tree": "c" * 40,
+        "materialized_authority_sha256": "d" * 64,
+        "materialized_request_sha256": "e" * 64,
+        "predecessor_artifact_sha256": "f" * 64,
+        "predecessor_artifact_size": 1024,
+        "effect_started": False,
+        "schema": "nexus.gateway.durable_recovery_materialization_receipt.v1",
+    }
+    receipt = validate_recovery_materialization_receipt(
+        RecoveryAuthorityMaterializationReceipt(**{
+            **values,
+            "receipt_hash": canonical_hash(values),
+        })
+    )
+    assert receipt.effect_started is False
+
+    started = {**values, "effect_started": True}
+    with pytest.raises(ContractError, match="never start an effect"):
+        validate_recovery_materialization_receipt(
+            RecoveryAuthorityMaterializationReceipt(**{
+                **started,
+                "receipt_hash": canonical_hash(started),
+            })
+        )
+
+    tampered = RecoveryAuthorityMaterializationReceipt(**{
+        **values,
+        "fresh_main": "0" * 40,
+        "receipt_hash": canonical_hash(values),
+    })
+    with pytest.raises(ContractError, match="hash mismatch"):
+        validate_recovery_materialization_receipt(tampered)
+
+
+def test_r1_derive_gateway_recovery_request_matches_authorized_request():
+    from nexus.contracts.gateway_deployment import (
+        derive_gateway_recovery_request,
+        validate_recovery_request,
+    )
+
+    receipt = _r1_authority_fixture()
+    derived = derive_gateway_recovery_request(receipt)
+    assert derived == _r1_request_fixture(receipt)
+    assert validate_recovery_request(derived) == derived
+    assert derived.recovery_authority_id == receipt.receipt_id
+    assert derived.recovery_authority_hash == receipt.receipt_hash
+    assert derived.desired_manifest_id == receipt.desired_manifest_id
+    assert derived.predecessor_manifest_hash == receipt.predecessor_manifest_sha256
+
+
 def test_r1b2_already_desired_plan_ack_and_physical_identity_are_strict():
     from nexus.contracts.gateway_deployment import (
         RecoveryEffectAck,
