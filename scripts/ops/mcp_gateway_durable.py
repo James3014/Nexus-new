@@ -32,6 +32,9 @@ from nexus.contracts.gateway_deployment import (
     DESIRED_PROFILE,
     GATEWAY_ACTION,
     GATEWAY_TASK_ID,
+    GATEWAY_RECOVERY_MATERIALIZATION_OPERATION,
+    GATEWAY_RECOVERY_MATERIALIZATION_RECEIPT_SCHEMA,
+    GATEWAY_RECOVERY_MATERIALIZATION_SCHEMA,
     HOST_CARD_SHA256,
     INTERPRETER,
     RECOVERY_RECEIPT_PATH,
@@ -46,10 +49,12 @@ from nexus.contracts.gateway_deployment import (
     EffectClass,
     GatewayDeploymentRequest,
     GatewayReconcileOutcome,
+    GatewayRecoveryMaterializationRequest,
     GatewayRecoveryRequest,
     HostEffectAuthorityBundle,
     HostEffectAuthorityReceipt,
     PostflightIdentity,
+    RecoveryAuthorityMaterializationReceipt,
     RecoveryAuthorityReceipt,
     RecoveryContinuationAuthorityReceipt,
     RecoveryEffectAck,
@@ -63,6 +68,7 @@ from nexus.contracts.gateway_deployment import (
     _gateway_wrapper_command,
     canonical_hash,
     derive_deployment_manifest,
+    derive_gateway_recovery_request,
     select_host_effect_authority_receipt,
     validate_authority_freshness,
     validate_deployment_manifest,
@@ -77,6 +83,8 @@ from nexus.contracts.gateway_deployment import (
     validate_recovery_effect_ack,
     validate_recovery_effect_plan,
     validate_recovery_ledger_record,
+    validate_recovery_materialization_receipt,
+    validate_recovery_materialization_request,
     validate_recovery_physical_identity,
     validate_recovery_request,
     validate_recovery_source_set,
@@ -1712,6 +1720,188 @@ def _resolve_manifest_reference(
         raise _gateway_error("R1 request manifest reference mismatch")
     _resolve_manifest_source(manifest)
     return manifest
+
+
+def _r1_refresh_fixed_authority_mirror() -> tuple[str, str]:
+    """Refresh the fixed, manager-owned authority mirror to fresh GitHub main."""
+    root = Path(HOST_AUTHORITY_SOURCE_ROOT)
+    if root.is_symlink() or not root.is_dir() or (root / ".git").is_symlink():
+        raise _gateway_error("R1 authority mirror unavailable")
+    info = os.lstat(root)
+    if info.st_uid != HOST_AUTHORITY_UID or stat.S_IMODE(info.st_mode) not in {0o700, 0o755}:
+        raise _gateway_error("R1 authority mirror ownership/mode invalid")
+    root_text = str(root)
+    if _r1_run("git", "-C", root_text, "rev-parse", "--show-toplevel") != str(root.resolve()):
+        raise _gateway_error("R1 authority mirror root mismatch")
+    if _r1_run("git", "-C", root_text, "remote", "get-url", "origin") != HOST_AUTHORITY_REMOTE:
+        raise _gateway_error("R1 authority mirror origin mismatch")
+    if _r1_run("git", "-C", root_text, "status", "--porcelain"):
+        raise _gateway_error("R1 authority mirror dirty")
+    _r1_run("git", "-C", root_text, "fetch", HOST_AUTHORITY_REMOTE, HOST_AUTHORITY_REF)
+    fetched = str(_r1_run("git", "-C", root_text, "rev-parse", "FETCH_HEAD^{commit}"))
+    if not re.fullmatch(r"[0-9a-f]{40}", fetched):
+        raise _gateway_error("R1 freshness fetch observation malformed")
+    _r1_run("git", "-C", root_text, "checkout", "--detach", "--force", fetched)
+    fresh_main, fresh_tree = _r1_mirror_fresh_main()
+    if fresh_main != fetched:
+        raise _gateway_error("R1 authority mirror drift after refresh")
+    return fresh_main, fresh_tree
+
+
+def _r1_tracked_recovery_receipt(fresh_main: str) -> tuple[RecoveryAuthorityReceipt, bytes]:
+    root = str(HOST_AUTHORITY_SOURCE_ROOT)
+    tracked = bytes(
+        _r1_run(
+            "git", "-C", root, "show",
+            f"{fresh_main}:{RECOVERY_AUTHORITY_SOURCE_PATH}",
+            bytes_output=True,
+        )
+    )
+    if not tracked or len(tracked) > MAX_GATEWAY_STORE_BYTES:
+        raise _gateway_error("R1 tracked recovery receipt size invalid")
+    try:
+        payload = json.loads(tracked.decode("utf-8"), object_pairs_hook=_unique_pairs)
+        receipt = RecoveryAuthorityReceipt.model_validate(payload)
+        validate_recovery_authority(receipt)
+    except (UnicodeError, ValueError, ContractError) as exc:
+        raise _gateway_error("R1 tracked recovery receipt malformed", exc) from exc
+    if receipt.receipt_hash != canonical_hash({
+        key: value for key, value in receipt.model_dump().items() if key != "receipt_hash"
+    }):
+        raise _gateway_error("R1 tracked recovery receipt hash mismatch")
+    return receipt, tracked
+
+
+def _r1_materialize_value_store(path: Path, data: bytes) -> bytes:
+    if not data or len(data) > MAX_GATEWAY_STORE_BYTES:
+        raise _gateway_error("R1 materialization payload size invalid")
+    path = _safe_store_path(path, leaf_mode=0o600, create=True)
+    try:
+        existing = path.read_bytes()
+    except OSError:
+        existing = None
+    if existing is not None:
+        if existing != data:
+            raise _gateway_error("R1 materialization store drift; refusing to overwrite")
+        return existing
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    try:
+        os.chmod(tmp, 0o600)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+    written = path.read_bytes()
+    if written != data:
+        raise _gateway_error("R1 materialization write identity mismatch")
+    return written
+
+
+def _r1_materialize_predecessor_artifact(receipt: RecoveryAuthorityReceipt) -> Path:
+    artifact = _r1_predecessor_artifact_path(receipt)
+    try:
+        info = os.lstat(artifact)
+    except OSError:
+        info = None
+    if info is not None:
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+            raise _gateway_error("R1 predecessor artifact identity invalid")
+        _r1_verify_predecessor_artifact(receipt)
+        return artifact
+    root = str(HOST_AUTHORITY_SOURCE_ROOT)
+    if not re.fullmatch(
+        r"[0-9a-f]{40}",
+        _r1_run(
+            "git", "-C", root, "for-each-ref", "--format=%(objectname)",
+            "--count=1", _R1_PREDECESSOR_ARTIFACT_REF,
+        ),
+    ):
+        raise _gateway_error("R1 mirror predecessor artifact ref unavailable")
+    bundles = _r1_safe_directory(GATEWAY_SOURCE_BUNDLES_ROOT)
+    scratch = Path(tempfile.mkdtemp(prefix=".predecessor-materialize.", dir=bundles))
+    try:
+        os.chmod(scratch, 0o700)
+        candidate = scratch / "candidate.bundle"
+        _r1_run(
+            "git", "-C", root, "bundle", "create", str(candidate),
+            _R1_PREDECESSOR_ARTIFACT_REF,
+        )
+        os.chmod(candidate, 0o600)
+        candidate_bytes = candidate.read_bytes()
+        if hashlib.sha256(candidate_bytes).hexdigest() != receipt.predecessor_artifact_sha256:
+            raise _gateway_error("R1 predecessor artifact regeneration hash mismatch")
+        _r1_safe_directory(GATEWAY_PREDECESSOR_ARTIFACT_ROOT)
+        os.replace(candidate, artifact)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+    _r1_verify_predecessor_artifact(receipt)
+    return artifact
+
+
+def gateway_recovery_materialize(
+    request: GatewayRecoveryMaterializationRequest | Mapping[str, Any],
+) -> dict[str, Any]:
+    try:
+        typed = GatewayRecoveryMaterializationRequest.model_validate(request)
+        validate_recovery_materialization_request(typed)
+    except ContractError as exc:
+        raise _gateway_error("R1 materialization request rejected", exc) from exc
+    with InterProcessLock(GATEWAY_LOCK):
+        fresh_main, fresh_tree = _r1_refresh_fixed_authority_mirror()
+        tracked_receipt, tracked_bytes = _r1_tracked_recovery_receipt(fresh_main)
+        if (
+            tracked_receipt.receipt_id != typed.recovery_authority_id
+            or tracked_receipt.receipt_hash != typed.recovery_authority_hash
+        ):
+            raise _gateway_error("R1 materialization authority identity mismatch")
+        canonical_request = derive_gateway_recovery_request(tracked_receipt)
+        validate_recovery_request(canonical_request)
+        if (
+            canonical_request.request_id != typed.request_id
+            or canonical_request.idempotency_fence != typed.idempotency_fence
+        ):
+            raise _gateway_error("R1 materialization request/fence identity mismatch")
+        materialized_authority = _r1_materialize_value_store(
+            GATEWAY_RECOVERY_AUTHORITY_STORE, tracked_bytes
+        )
+        request_bytes = json.dumps(
+            canonical_request.model_dump(), sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        materialized_request = _r1_materialize_value_store(
+            GATEWAY_REQUEST_STORE, request_bytes
+        )
+        _r1_materialize_predecessor_artifact(tracked_receipt)
+        checked_authority = _safe_store_path(GATEWAY_RECOVERY_AUTHORITY_STORE)
+        checked_request = _safe_store_path(GATEWAY_REQUEST_STORE)
+        if (
+            checked_authority.read_bytes() != tracked_bytes
+            or checked_request.read_bytes() != request_bytes
+        ):
+            raise _gateway_error("R1 materialization post-write identity mismatch")
+        receipt_values = {
+            "request_id": typed.request_id,
+            "idempotency_fence": typed.idempotency_fence,
+            "operation": GATEWAY_RECOVERY_MATERIALIZATION_OPERATION,
+            "effect_class": EffectClass.GATEWAY_RECOVERY_MATERIALIZATION,
+            "recovery_authority_id": typed.recovery_authority_id,
+            "recovery_authority_hash": typed.recovery_authority_hash,
+            "fresh_main": fresh_main,
+            "fresh_main_tree": fresh_tree,
+            "materialized_authority_sha256": hashlib.sha256(materialized_authority).hexdigest(),
+            "materialized_request_sha256": hashlib.sha256(materialized_request).hexdigest(),
+            "predecessor_artifact_sha256": tracked_receipt.predecessor_artifact_sha256,
+            "predecessor_artifact_size": tracked_receipt.predecessor_artifact_size,
+            "effect_started": False,
+            "schema": GATEWAY_RECOVERY_MATERIALIZATION_RECEIPT_SCHEMA,
+        }
+        receipt_values["receipt_hash"] = canonical_hash(receipt_values)
+        receipt = RecoveryAuthorityMaterializationReceipt(**receipt_values)
+        validate_recovery_materialization_receipt(receipt)
+        return receipt.model_dump()
 
 
 def gateway_recover(

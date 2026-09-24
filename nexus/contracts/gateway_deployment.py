@@ -158,6 +158,7 @@ class EffectClass(StrEnum):
     GATEWAY_ROLLBACK = "GATEWAY_ROLLBACK"
     STATUS = "STATUS"
     GATEWAY_DURABLE_RECOVERY = "GATEWAY_DURABLE_RECOVERY"
+    GATEWAY_RECOVERY_MATERIALIZATION = "GATEWAY_RECOVERY_MATERIALIZATION"
 
 
 class ResultClass(StrEnum):
@@ -1450,6 +1451,155 @@ def validate_recovery_request(request: GatewayRecoveryRequest) -> GatewayRecover
     if request.request_hash != expected:
         raise ContractError("R1 recovery request hash mismatch")
     return request
+
+
+GATEWAY_RECOVERY_MATERIALIZATION_OPERATION = "gateway-recovery-materialize"
+GATEWAY_RECOVERY_MATERIALIZATION_SCHEMA = "nexus.gateway.durable_recovery_materialization_request.v1"
+GATEWAY_RECOVERY_MATERIALIZATION_RECEIPT_SCHEMA = "nexus.gateway.durable_recovery_materialization_receipt.v1"
+
+
+def derive_gateway_recovery_request(
+    receipt: RecoveryAuthorityReceipt,
+) -> GatewayRecoveryRequest:
+    """Project the canonical recovery request from a validated authority receipt.
+
+    The tracked receipt is the single immutable authority source. Projecting the
+    recovery request purely from it guarantees materialized probe/preflight/recover
+    can never observe divergent request/manifest/hash bindings across refresh.
+    """
+    if not isinstance(receipt, RecoveryAuthorityReceipt):
+        raise ContractError("recovery receipt must be typed")
+    values = {
+        "request_id": receipt.request_id,
+        "idempotency_fence": receipt.idempotency_fence,
+        "operation": receipt.operation,
+        "effect_class": receipt.effect_class,
+        "recovery_authority_id": receipt.receipt_id,
+        "recovery_authority_hash": receipt.receipt_hash,
+        "desired_manifest_id": receipt.desired_manifest_id,
+        "desired_manifest_hash": receipt.desired_manifest_sha256,
+        "predecessor_manifest_id": receipt.predecessor_manifest_id,
+        "predecessor_manifest_hash": receipt.predecessor_manifest_sha256,
+    }
+    return GatewayRecoveryRequest(**values, request_hash=canonical_hash(values))
+
+
+@dataclass(frozen=True)
+class GatewayRecoveryMaterializationRequest(StrictRecord):
+    """R-1129 request: the exact recovery authority receipt and request fence to materialize."""
+
+    request_id: str
+    idempotency_fence: str
+    operation: str
+    effect_class: EffectClass
+    recovery_authority_id: str
+    recovery_authority_hash: str
+    request_hash: str = ""
+    schema: str = GATEWAY_RECOVERY_MATERIALIZATION_SCHEMA
+
+    _converters: ClassVar[Mapping[str, Any]] = {"effect_class": EffectClass}
+
+
+def validate_recovery_materialization_request(
+    request: GatewayRecoveryMaterializationRequest,
+) -> GatewayRecoveryMaterializationRequest:
+    if (
+        not isinstance(request, GatewayRecoveryMaterializationRequest)
+        or request.schema
+        != GatewayRecoveryMaterializationRequest.__dataclass_fields__["schema"].default
+    ):
+        raise ContractError("R1 materialization schema mismatch")
+    if (
+        request.operation != GATEWAY_RECOVERY_MATERIALIZATION_OPERATION
+        or request.effect_class is not EffectClass.GATEWAY_RECOVERY_MATERIALIZATION
+    ):
+        raise ContractError("R1 materialization operation/effect mismatch")
+    for value, name in (
+        (request.request_id, "request id"),
+        (request.idempotency_fence, "fence"),
+        (request.recovery_authority_id, "authority id"),
+    ):
+        _id(value, name)
+    _hash(request.recovery_authority_hash, "authority hash")
+    expected = canonical_hash({
+        key: value
+        for key, value in request.model_dump().items()
+        if key not in {"request_hash", "schema"}
+    })
+    if request.request_hash != expected:
+        raise ContractError("R1 materialization request hash mismatch")
+    return request
+
+
+@dataclass(frozen=True)
+class RecoveryAuthorityMaterializationReceipt(StrictRecord):
+    """Typed, deterministic outcome of one materialization attempt (start no effect)."""
+
+    request_id: str
+    idempotency_fence: str
+    operation: str
+    effect_class: EffectClass
+    recovery_authority_id: str
+    recovery_authority_hash: str
+    fresh_main: str
+    fresh_main_tree: str
+    materialized_authority_sha256: str
+    materialized_request_sha256: str
+    predecessor_artifact_sha256: str
+    predecessor_artifact_size: int
+    effect_started: bool
+    schema: str = GATEWAY_RECOVERY_MATERIALIZATION_RECEIPT_SCHEMA
+    receipt_hash: str = ""
+
+    _converters: ClassVar[Mapping[str, Any]] = {"effect_class": EffectClass}
+
+
+def validate_recovery_materialization_receipt(
+    receipt: RecoveryAuthorityMaterializationReceipt,
+) -> RecoveryAuthorityMaterializationReceipt:
+    if (
+        not isinstance(receipt, RecoveryAuthorityMaterializationReceipt)
+        or receipt.schema
+        != RecoveryAuthorityMaterializationReceipt.__dataclass_fields__["schema"].default
+    ):
+        raise ContractError("R1 materialization receipt schema mismatch")
+    if (
+        receipt.operation != GATEWAY_RECOVERY_MATERIALIZATION_OPERATION
+        or receipt.effect_class is not EffectClass.GATEWAY_RECOVERY_MATERIALIZATION
+    ):
+        raise ContractError("R1 materialization receipt operation/effect mismatch")
+    if receipt.effect_started is not False:
+        raise ContractError("R1 materialization must never start an effect")
+    for value, name, length in (
+        (receipt.request_id, "request id", 128),
+        (receipt.idempotency_fence, "fence", 128),
+        (receipt.recovery_authority_id, "authority id", 128),
+        (receipt.fresh_main, "fresh main", 40),
+        (receipt.fresh_main_tree, "fresh main tree", 40),
+        (receipt.recovery_authority_hash, "authority hash", 64),
+        (receipt.materialized_authority_sha256, "materialized authority hash", 64),
+        (receipt.materialized_request_sha256, "materialized request hash", 64),
+        (receipt.predecessor_artifact_sha256, "predecessor artifact hash", 64),
+    ):
+        if length == 64:
+            _hash(value, name)
+        elif length == 40:
+            _hash(value, name, 40)
+        else:
+            _id(value, name)
+    if (
+        type(receipt.predecessor_artifact_size) is not int
+        or receipt.predecessor_artifact_size <= 0
+    ):
+        raise ContractError("R1 materialization predecessor artifact size invalid")
+    expected = canonical_hash({
+        key: value
+        for key, value in receipt.model_dump().items()
+        if key != "receipt_hash"
+    })
+    if receipt.receipt_hash != expected:
+        raise ContractError("R1 materialization receipt hash mismatch")
+    return receipt
 
 
 def validate_profile(
