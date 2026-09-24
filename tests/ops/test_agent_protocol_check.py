@@ -259,7 +259,7 @@ def _completion_snapshot(history: dict[str, str | Path]) -> dict:
 
 
 def _completion_bindings(snapshot: dict) -> dict:
-    return {
+    bindings = {
         "repository": snapshot["repository"],
         "issue_number": snapshot["issue"]["number"],
         "issue_contract_revision": snapshot["issue"]["contract_revision"],
@@ -274,6 +274,11 @@ def _completion_bindings(snapshot: dict) -> dict:
         "required_evidence_ids": list(snapshot["required_evidence_ids"]),
         "required_predecessors": list(snapshot["hard_prerequisites"]),
     }
+    if "required_acceptance_criteria" in snapshot:
+        bindings["required_acceptance_criteria"] = list(
+            snapshot["required_acceptance_criteria"]
+        )
+    return bindings
 
 
 def _evaluate(snapshot: dict, history: dict[str, str | Path], *, expected: dict | None = None):
@@ -296,6 +301,36 @@ def test_completion_snapshot_binds_issue_candidate_merge_and_current_main(tmp_pa
         "downstream_ready": True,
         "failures": [],
     }
+
+
+def test_completion_snapshot_rejects_semantic_false_green_without_required_witness_coverage(
+    tmp_path,
+):
+    history = _completion_repo(tmp_path)
+    snapshot = _completion_snapshot(history)
+    snapshot["evidence"][0]["witness_kind"] = "POSITIVE_CONTROL"
+    snapshot["acceptance_criteria"] = [
+        {
+            "id": "AC-FIRST-PROJECT-ACTION",
+            "status": "SATISFIED_CURRENT",
+            "evidence_ids": ["post-merge-verifier"],
+        }
+    ]
+    expected = _completion_snapshot(history)
+    expected["required_acceptance_criteria"] = [
+        {
+            "id": "AC-FIRST-PROJECT-ACTION",
+            "required_witness_kinds": ["POSITIVE_CONTROL", "NEGATIVE_CONTROL"],
+        }
+    ]
+
+    result = _evaluate(snapshot, history, expected=expected)
+
+    assert result["disposition"] == "BLOCKED_EVIDENCE"
+    assert (
+        "criterion_witness_kind_missing:AC-FIRST-PROJECT-ACTION:NEGATIVE_CONTROL"
+        in result["failures"]
+    )
 
 
 def test_completion_snapshot_stale_main_fails_closed(tmp_path):
