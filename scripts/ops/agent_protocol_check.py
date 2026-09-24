@@ -51,6 +51,21 @@ COMPLETION_CRITERION_STATUSES = {
     "UNSATISFIED_CURRENT",
     "EVIDENCE_UNAVAILABLE",
 }
+PRIOR_CLOSURE_FALSIFIER_STATUSES = {
+    "SEALED_CURRENT",
+    "STILL_REPRODUCIBLE",
+    "EVIDENCE_UNAVAILABLE",
+}
+PRIOR_CLOSURE_PROOF_MECHANISMS = {
+    "MECHANICAL_ENFORCEMENT",
+    "MECHANICAL_INVARIANT",
+    "HOSTILE_REGRESSION",
+    "CONTRACT_DELTA",
+}
+ESCALATION_CLASSIFICATIONS = {
+    "REOPENED_SAME_CONTRACT",
+    "REPEATED_FALSE_CLOSURE",
+}
 _COMPLETION_CRITERION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _COMPLETION_WITNESS_KIND_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 
@@ -367,14 +382,213 @@ def evaluate_completion_snapshot(
                 if witness_kind not in covered_witness_kinds:
                     failures.append(f"criterion_witness_kind_missing:{criterion_id}:{witness_kind}")
 
+    falsifier_open_failures: list[str] = []
+    expected_history = expected_bindings.get("prior_closure_history")
+    snapshot_history = snapshot.get("prior_closure_history")
+    issue_reopened_flag = bool(issue.get("reopened_same_contract")) or bool(
+        expected_bindings.get("issue_reopened_same_contract")
+    )
+
+    if issue_reopened_flag and expected_history is None:
+        failures.append("prior_closure_history_required")
+
+    snapshot_falsifiers: dict[str, Mapping[str, Any]] = {}
+    expected_falsifiers: dict[str, tuple[str, ...]] = {}
+
+    if expected_history is None and snapshot_history is not None:
+        failures.append("unexpected_prior_closure_history")
+    elif expected_history is not None and snapshot_history is None:
+        failures.append("prior_closure_history_missing")
+    elif expected_history is not None and snapshot_history is not None:
+        if not isinstance(expected_history, Mapping):
+            failures.append("expected_prior_closure_history_invalid")
+            expected_history = {}
+        if not isinstance(snapshot_history, Mapping):
+            failures.append("prior_closure_history_invalid")
+            snapshot_history = {}
+
+        for key, mismatch_code in (
+            ("prior_terminal_identity", "prior_terminal_identity_mismatch"),
+            ("prior_reopen_identity", "prior_reopen_identity_mismatch"),
+            ("reopen_reason", "prior_reopen_reason_mismatch"),
+            ("escalation_classification", "escalation_classification_mismatch"),
+            ("recurrence_count", "recurrence_count_mismatch"),
+        ):
+            exp_val = expected_history.get(key)
+            if exp_val is None or (isinstance(exp_val, str) and not exp_val):
+                failures.append(f"expected_{key}_missing")
+            elif snapshot_history.get(key) != exp_val:
+                failures.append(mismatch_code)
+
+        exp_reopen_reason = expected_history.get("reopen_reason")
+        if exp_reopen_reason and exp_reopen_reason != "SAME_CONTRACT_INCOMPLETENESS":
+            failures.append("expected_reopen_reason_unsupported")
+
+        exp_classification = expected_history.get("escalation_classification")
+        if exp_classification not in ESCALATION_CLASSIFICATIONS:
+            failures.append("expected_escalation_classification_invalid")
+
+        exp_count = expected_history.get("recurrence_count")
+        if not isinstance(exp_count, int) or isinstance(exp_count, bool) or exp_count < 1:
+            failures.append("expected_recurrence_count_invalid")
+        else:
+            if exp_count == 1 and exp_classification != "REOPENED_SAME_CONTRACT":
+                failures.append("escalation_classification_count_mismatch")
+            elif exp_count > 1 and exp_classification != "REPEATED_FALSE_CLOSURE":
+                failures.append("escalation_classification_count_mismatch")
+
+        if exp_classification == "REPEATED_FALSE_CLOSURE":
+            if snapshot_history.get("architecture_review_confirmed") is not True:
+                failures.append("architecture_review_not_confirmed")
+
+        expected_falsifiers_raw = expected_history.get(
+            "required_previous_falsifiers"
+        ) or expected_history.get("previous_closure_falsifiers")
+        if (
+            not isinstance(expected_falsifiers_raw, list)
+            or not expected_falsifiers_raw
+            or not all(isinstance(item, Mapping) for item in expected_falsifiers_raw)
+        ):
+            failures.append("expected_previous_closure_falsifiers_invalid")
+            expected_falsifiers_raw = []
+        for item in expected_falsifiers_raw:
+            falsifier_id = item.get("id")
+            witness_kinds = item.get("required_recurrence_witness_kinds") or item.get(
+                "required_witness_kinds"
+            )
+            if not isinstance(falsifier_id, str) or not _COMPLETION_CRITERION_ID_RE.fullmatch(
+                falsifier_id
+            ):
+                failures.append("expected_previous_closure_falsifier_id_invalid")
+                continue
+            if falsifier_id in expected_falsifiers:
+                failures.append(f"duplicate_expected_previous_closure_falsifier:{falsifier_id}")
+                continue
+            if (
+                not isinstance(witness_kinds, list)
+                or not witness_kinds
+                or not all(
+                    isinstance(kind, str) and _COMPLETION_WITNESS_KIND_RE.fullmatch(kind)
+                    for kind in witness_kinds
+                )
+                or len(witness_kinds) != len(set(witness_kinds))
+            ):
+                failures.append(
+                    f"expected_previous_closure_falsifier_witness_kinds_invalid:{falsifier_id}"
+                )
+                continue
+            expected_falsifiers[falsifier_id] = tuple(witness_kinds)
+
+        snapshot_falsifiers_raw = snapshot_history.get(
+            "previous_closure_falsifiers"
+        ) or snapshot_history.get("falsifiers")
+        if (
+            not isinstance(snapshot_falsifiers_raw, list)
+            or not snapshot_falsifiers_raw
+            or not all(isinstance(item, Mapping) for item in snapshot_falsifiers_raw)
+        ):
+            failures.append("previous_closure_falsifiers_invalid")
+            snapshot_falsifiers_raw = []
+        for item in snapshot_falsifiers_raw:
+            falsifier_id = item.get("id")
+            if not isinstance(falsifier_id, str) or not _COMPLETION_CRITERION_ID_RE.fullmatch(
+                falsifier_id
+            ):
+                failures.append("previous_closure_falsifier_id_invalid")
+                continue
+            if falsifier_id in snapshot_falsifiers:
+                failures.append(f"duplicate_previous_closure_falsifier:{falsifier_id}")
+                continue
+            snapshot_falsifiers[falsifier_id] = item
+
+        if sorted(snapshot_falsifiers) != sorted(expected_falsifiers):
+            failures.append("previous_closure_falsifier_set_mismatch")
+
+        for falsifier_id, required_witness_kinds in expected_falsifiers.items():
+            falsifier = snapshot_falsifiers.get(falsifier_id)
+            if falsifier is None:
+                failures.append(f"previous_closure_falsifier_missing:{falsifier_id}")
+                continue
+
+            status = falsifier.get("status")
+            if status not in PRIOR_CLOSURE_FALSIFIER_STATUSES:
+                failures.append(f"previous_closure_falsifier_status_invalid:{falsifier_id}")
+                continue
+
+            if status == "EVIDENCE_UNAVAILABLE":
+                failures.append(f"previous_closure_falsifier_evidence_unavailable:{falsifier_id}")
+                continue
+            elif status == "STILL_REPRODUCIBLE":
+                falsifier_open_failures.append(
+                    f"previous_closure_falsifier_still_reproducible:{falsifier_id}"
+                )
+                continue
+
+            proof_mechanism = falsifier.get("proof_mechanism")
+            if proof_mechanism not in PRIOR_CLOSURE_PROOF_MECHANISMS:
+                failures.append(
+                    f"previous_closure_falsifier_proof_mechanism_invalid:{falsifier_id}"
+                )
+
+            evidence_ids = falsifier.get("evidence_ids")
+            if not isinstance(evidence_ids, list) or not all(
+                isinstance(eid, str) and eid for eid in evidence_ids
+            ):
+                failures.append(f"previous_closure_falsifier_evidence_ids_invalid:{falsifier_id}")
+                evidence_ids = []
+            if len(evidence_ids) != len(set(evidence_ids)):
+                failures.append(f"previous_closure_falsifier_evidence_ids_duplicate:{falsifier_id}")
+            if not evidence_ids:
+                failures.append(f"previous_closure_falsifier_evidence_missing:{falsifier_id}")
+
+            covered_witness_kinds: set[str] = set()
+            for evidence_id in evidence_ids:
+                if evidence_id not in required_evidence:
+                    failures.append(f"falsifier_evidence_not_required:{falsifier_id}:{evidence_id}")
+                item = evidence_by_id.get(evidence_id)
+                if item is None:
+                    failures.append(f"falsifier_evidence_missing:{falsifier_id}:{evidence_id}")
+                    continue
+                if (
+                    item.get("status") != "PASS"
+                    or item.get("bound_sha") != actual_head
+                    or item.get("bound_tree_sha") != actual_tree
+                ):
+                    failures.append(f"falsifier_evidence_not_current:{falsifier_id}:{evidence_id}")
+                witness_kind = item.get("witness_kind")
+                if not isinstance(witness_kind, str) or not _COMPLETION_WITNESS_KIND_RE.fullmatch(
+                    witness_kind
+                ):
+                    failures.append(f"falsifier_witness_kind_invalid:{falsifier_id}:{evidence_id}")
+                    continue
+                covered_witness_kinds.add(witness_kind)
+
+            for witness_kind in required_witness_kinds:
+                if witness_kind not in covered_witness_kinds:
+                    failures.append(f"falsifier_witness_kind_missing:{falsifier_id}:{witness_kind}")
+
+    falsifier_semantics_determinate = expected_history is None or (
+        isinstance(snapshot_history, Mapping)
+        and sorted(snapshot_falsifiers) == sorted(expected_falsifiers)
+        and all(f.get("status") != "EVIDENCE_UNAVAILABLE" for f in snapshot_falsifiers.values())
+    )
+    all_falsifiers_sealed = expected_history is None or (
+        falsifier_semantics_determinate
+        and not falsifier_open_failures
+        and all(f.get("status") == "SEALED_CURRENT" for f in snapshot_falsifiers.values())
+    )
+
     criterion_semantics_determinate = (
         bool(expected_criteria)
         and sorted(criteria) == sorted(expected_criteria)
         and len(criterion_statuses) == len(expected_criteria)
         and all(status != "EVIDENCE_UNAVAILABLE" for status in criterion_statuses.values())
+        and falsifier_semantics_determinate
     )
-    derived_original_satisfied = criterion_semantics_determinate and all(
-        status == "SATISFIED_CURRENT" for status in criterion_statuses.values()
+    derived_original_satisfied = (
+        criterion_semantics_determinate
+        and all(status == "SATISFIED_CURRENT" for status in criterion_statuses.values())
+        and all_falsifiers_sealed
     )
 
     prerequisite_open_failures: list[str] = []
@@ -448,7 +662,7 @@ def evaluate_completion_snapshot(
         disposition = "BLOCKED_EVIDENCE"
     elif contract_delta:
         disposition = "CONTRACT_DELTA"
-    elif not original_satisfied or prerequisite_open_failures:
+    elif not original_satisfied or prerequisite_open_failures or falsifier_open_failures:
         disposition = "KEEP_OPEN"
     elif distinct_follow_up:
         disposition = "FOLLOW_UP_REQUIRED" if owner_checked else "BLOCKED_EVIDENCE"
@@ -458,6 +672,7 @@ def evaluate_completion_snapshot(
         disposition = "DONE_NO_FOLLOW_UP"
 
     failures.extend(prerequisite_open_failures)
+    failures.extend(falsifier_open_failures)
     terminal = disposition in TERMINAL_COMPLETION_DISPOSITIONS
     downstream_ready = requested_downstream is True and terminal and not failures
     return {
@@ -468,7 +683,7 @@ def evaluate_completion_snapshot(
     }
 
 
-def _validate_boundaries(boundaries: Dict, source: str) -> Dict:
+def _validate_boundaries(boundaries: object, source: str) -> Dict:
     if not isinstance(boundaries, dict):
         raise ContractError(f"{source}: boundaries must be an object")
     for key in ("allowed_paths", "forbidden_paths"):

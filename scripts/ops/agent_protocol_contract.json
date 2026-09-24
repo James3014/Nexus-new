@@ -46,7 +46,8 @@
       "post_merge_current_main_evidence",
       "required_evidence_set",
       "required_predecessor_set",
-      "required_acceptance_criterion_witness_coverage"
+      "required_acceptance_criterion_witness_coverage",
+      "prior_false_closure_falsifier_recurrence_coverage"
     ],
     "criterion_statuses": [
       "SATISFIED_CURRENT",
@@ -58,6 +59,30 @@
       "snapshot_field": "acceptance_criteria",
       "required_expected_field": "required_acceptance_criteria",
       "terminal_rule": "every_material_criterion_satisfied_with_required_current_witness_kinds"
+    },
+    "prior_closure_history_binding": {
+      "expected_source": "fresh_completion_bindings",
+      "snapshot_field": "prior_closure_history",
+      "required_expected_field": "prior_closure_history",
+      "reopen_reasons": [
+        "SAME_CONTRACT_INCOMPLETENESS"
+      ],
+      "escalation_classifications": [
+        "REOPENED_SAME_CONTRACT",
+        "REPEATED_FALSE_CLOSURE"
+      ],
+      "falsifier_statuses": [
+        "SEALED_CURRENT",
+        "STILL_REPRODUCIBLE",
+        "EVIDENCE_UNAVAILABLE"
+      ],
+      "proof_mechanisms": [
+        "MECHANICAL_ENFORCEMENT",
+        "MECHANICAL_INVARIANT",
+        "HOSTILE_REGRESSION",
+        "CONTRACT_DELTA"
+      ],
+      "terminal_rule": "every_material_previous_falsifier_sealed_with_required_current_witness_kinds"
     }
   }
 }

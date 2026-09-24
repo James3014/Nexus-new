@@ -463,15 +463,34 @@ required by the fresh binding. A broad behavioral invariant therefore cannot be
 closed by a single narrow happy-path witness when its binding requires negative,
 falsifier, or mechanical-enforcement coverage.
 
+When an Issue has a prior terminal disposition followed by reopening for
+`SAME_CONTRACT_INCOMPLETENESS`, fresh completion bindings must bind the exact
+closure history: `prior_terminal_identity`, `prior_reopen_identity`,
+`reopen_reason` (`SAME_CONTRACT_INCOMPLETENESS`), `escalation_classification`
+(`REOPENED_SAME_CONTRACT` or `REPEATED_FALSE_CLOSURE`), `recurrence_count`, and
+every material previous-closure falsifier with its required recurrence witness
+kinds. The completion snapshot must map every required previous-closure
+falsifier to fresh current evidence proving the falsifier is now prevented by a
+mechanical enforcement invariant, reproduced as a passing hostile regression,
+or legitimately updated by an Owner contract delta. A historical terminal
+marker alone never satisfies this requirement. Missing previous-falsifier
+evidence or `EVIDENCE_UNAVAILABLE` fails closed as `BLOCKED_EVIDENCE`; a
+still-reproducible prior falsifier classifies `KEEP_OPEN`. A caller cannot omit
+known prior-falsifier bindings to obtain `DONE_NO_FOLLOW_UP`. If an Issue has
+been false-closed repeatedly (`REPEATED_FALSE_CLOSURE`), architecture and
+criterion-coverage review confirmation is required before another terminal
+closure is permitted.
+
 `original_contract_satisfied` is a compatibility projection of the
-criterion-level result, not an independent semantic authority. It must equal the
-value derived from all bound material criteria. Missing criterion coverage or
-`EVIDENCE_UNAVAILABLE` fails closed as `BLOCKED_EVIDENCE`; a currently
-falsified material criterion keeps the original Issue nonterminal (or enters a
-bounded `CONTRACT_DELTA` when that is independently required). Historical
-terminal evidence is preserved as history, but fresh contradictory evidence is
-reconciled against the original Issue before a distinct follow-up may escape the
-same contract.
+criterion-level and prior-falsifier results, not an independent semantic
+authority. It must equal the value derived from all bound material criteria and
+sealed previous falsifiers. Missing criterion coverage, missing recurrence
+witnesses, or `EVIDENCE_UNAVAILABLE` fails closed as `BLOCKED_EVIDENCE`; a
+currently falsified material criterion or reproducible prior falsifier keeps the
+original Issue nonterminal (or enters a bounded `CONTRACT_DELTA` when that is
+independently required). Historical terminal evidence is preserved as history,
+but fresh contradictory evidence is reconciled against the original Issue
+before a distinct follow-up may escape the same contract.
 
 The reconciliation selects exactly one disposition:
 
