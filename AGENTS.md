@@ -88,6 +88,17 @@ not defects merely because they are not yet `NEXUS_GOVERNED`.
   transport, carrier pairing, copied authority material, or handwritten
   standing-grant diagnosis. Recovery/rebind remains owned by the blocker’s
   existing canonical owner (#806 break-glass or #526 Gateway rebind as applicable).
+- A Project Entry `READY_TO_EXECUTE` result is pre-execution evidence, not proof
+  that the next governed authority/effect action exists on the caller's bound MCP
+  surface. Before the first `GOVERNED` effect, prove the exact next required
+  public action is present on that bound surface. For Task Card bootstrap without
+  a current valid standing grant, `nexus_owner_standing_grant_issue` must be
+  present before `nexus_task_card_create` is attempted.
+- If a required next action is absent, classify a host/action-surface binding gap
+  and STOP before the effect. Do not convert the missing action into repeated
+  `OWNER_AUTHORITY_REQUIRED:RECEIPT_MISSING` retries, CLI probing, carrier pairing,
+  copied authority material, or broad manual debugging. Surface convergence is a
+  transport precondition and grants no authority by itself.
 - Switching repository or Issue invalidates the prior Project Entry binding for
   governed effects and requires a fresh `nexus_project_entry` call. Direct lanes
   remain governed by their existing lane rules; this invariant must not fabricate
