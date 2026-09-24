@@ -488,3 +488,17 @@ def test_semantic_authority_delta_contract_is_fail_closed_future_only_and_lane_p
     assert "future-only after independent acceptance" not in contract
     assert "after this contract is integrated into `main`" in agents
     assert "MERGE_INTENT" in texts["AGENTS.md"]
+
+
+def test_first_issue_bound_action_requires_project_entry_before_governed_effects():
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    normalized = _norm(agents)
+
+    assert "Project-entry invariant (#842)" in agents
+    assert "MUST call `nexus_project_entry` before any Nexus-governed effectful action" in normalized
+    assert "`continue ... #N`, `處理 #N`, `幫我修 #N`" in agents
+    assert "If Project Entry is not `READY_TO_EXECUTE`" in normalized
+    assert "STOP the governed effect path" in normalized
+    assert "Do not jump directly to `nexus_task_card_create`" in normalized
+    assert "Switching repository or Issue invalidates the prior Project Entry binding" in normalized
+    assert "Direct lanes remain governed by their existing lane rules" in normalized
