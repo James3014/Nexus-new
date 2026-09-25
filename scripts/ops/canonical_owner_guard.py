@@ -107,8 +107,10 @@ def _check_forwarding_module(
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             value = node.value
             if (
-                any(isinstance(target, ast.Name) and target.id == "CANONICAL_IMPLEMENTATION_MODULE"
-                    for target in targets)
+                any(
+                    isinstance(target, ast.Name) and target.id == "CANONICAL_IMPLEMENTATION_MODULE"
+                    for target in targets
+                )
                 and isinstance(value, ast.Constant)
                 and isinstance(value.value, str)
             ):
@@ -153,7 +155,9 @@ def _check_forbidden_tree_imports(repo_root: Path, forbidden_stems: tuple[str, .
                 if node.module:
                     root_name = node.module.split(".")[0]
                     if root_name in forbidden_stems:
-                        issues.append(f"FORBIDDEN_IMPORT_FROM: {py_file} imports from '{node.module}'")
+                        issues.append(
+                            f"FORBIDDEN_IMPORT_FROM: {py_file} imports from '{node.module}'"
+                        )
     return issues
 
 
@@ -206,7 +210,9 @@ def audit_repository_ownership(
     if changed_files is not None:
         # product/ and runtimes/open_swe/ are frozen legacy snapshots
         frozen_prefixes = ("product/", "runtimes/open_swe/")
-        frozen_issues = _check_frozen_paths_for_modifications(repo_root, frozen_prefixes, changed_files)
+        frozen_issues = _check_frozen_paths_for_modifications(
+            repo_root, frozen_prefixes, changed_files
+        )
         all_issues.extend(frozen_issues)
 
     status = "PASS" if not all_issues else "FAIL"

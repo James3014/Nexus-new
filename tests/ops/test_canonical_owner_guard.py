@@ -104,9 +104,7 @@ def test_frozen_paths_checks_for_modifications():
         "nexus/engine/capability_planner.py",
         "runtimes/open_swe/nexus_open_swe_runtime/extra.py",
     ]
-    issues = _check_frozen_paths_for_modifications(
-        Path("."), frozen_prefixes, changed_files
-    )
+    issues = _check_frozen_paths_for_modifications(Path("."), frozen_prefixes, changed_files)
     assert len(issues) == 2
     assert any("product/new_feature.py" in issue for issue in issues)
     assert any("runtimes/open_swe/nexus_open_swe_runtime/extra.py" in issue for issue in issues)
@@ -125,7 +123,9 @@ def test_audit_fails_on_hostile_fixture(tmp_path: Path):
         encoding="utf-8",
     )
     # And valid others
-    (learning_dir / "learning_closure_effectiveness.py").write_text("from nexus_learning import x\n")
+    (learning_dir / "learning_closure_effectiveness.py").write_text(
+        "from nexus_learning import x\n"
+    )
     (learning_dir / "learning_episode_projection.py").write_text("from nexus_learning import x\n")
     contracts_dir = nexus_dir / "contracts"
     contracts_dir.mkdir()
