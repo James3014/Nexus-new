@@ -1396,9 +1396,12 @@ def test_g20_predecessor_artifact_wrong_size_fails_before_promotion(
     fixture = _r1b1_fixture(tmp_path, monkeypatch)
     artifact = fixture["predecessor_artifact"]
     artifact.write_bytes(artifact.read_bytes() + b"tamper")
+    # Appending bytes corrupts the git bundle format; git bundle verify (run
+    # against an empty object database) will reject it before any git objects
+    # are inspected, so the error propagates as a failed subprocess.
     with pytest.raises(
         g.GatewayContractError,
-        match="R1 predecessor artifact identity invalid",
+        match="R1 fixed subprocess rejected",
     ):
         g._r1_verify_predecessor_artifact(fixture["receipt"])
     assert not g.GATEWAY_DEPLOYMENTS_ROOT.exists()
@@ -1411,12 +1414,15 @@ def test_g20_predecessor_artifact_same_size_wrong_sha_fails_before_promotion(
     artifact = fixture["predecessor_artifact"]
     payload = artifact.read_bytes()
     artifact.write_bytes(bytes([payload[0] ^ 1]) + payload[1:])
+    # Flipping a byte in the bundle corrupts git pack data; git bundle verify
+    # or git fsck --full --strict will detect the corruption.  The byte-level
+    # sha256 check has been replaced by git-semantic verification (commit,
+    # tree, fsck, entrypoint), so the error is now a subprocess rejection.
     with pytest.raises(
         g.GatewayContractError,
-        match="R1 predecessor artifact hash mismatch",
+        match="R1 fixed subprocess rejected",
     ):
         g._r1_verify_predecessor_artifact(fixture["receipt"])
-    assert artifact.stat().st_size == fixture["receipt"].predecessor_artifact_size
     assert not g.GATEWAY_DEPLOYMENTS_ROOT.exists()
 
 
