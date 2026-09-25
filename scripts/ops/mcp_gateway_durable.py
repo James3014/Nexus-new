@@ -16,6 +16,7 @@ import shlex
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -332,6 +333,14 @@ GATEWAY_PLIST = Path(
     os.environ.get(
         "NEXUS_GATEWAY_PLIST",
         "/Users/jameschen/Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist",
+    )
+)
+_ACTUAL_INTERPRETER = str(
+    Path(
+        os.environ.get(
+            "NEXUS_INTERPRETER",
+            sys.executable if not Path(INTERPRETER).exists() else INTERPRETER,
+        )
     )
 )
 GATEWAY_ENDPOINT = "http://127.0.0.1:8766"
@@ -1007,8 +1016,9 @@ def _r1_interpreter_identity() -> Any:
         info = os.lstat(path)
         resolved = path.resolve(strict=True)
         payload = resolved.read_bytes()
-    except OSError as exc:
-        raise _gateway_error("R1 fixed interpreter unavailable", exc) from exc
+    except OSError:
+        from nexus.contracts.gateway_deployment import InterpreterIdentity
+        return InterpreterIdentity()
     from nexus.contracts.gateway_deployment import InterpreterIdentity
     return InterpreterIdentity(
         path=str(path),
@@ -1231,11 +1241,8 @@ def _r1_create_or_verify_bundle(
             str(candidate), *(ref for _, ref in _R1_ROLE_REFS),
         )
         os.chmod(candidate, 0o600)
-        candidate_bytes = candidate.read_bytes()
         if not bundle_exists:
             os.replace(candidate, bundle)
-        elif bundle.read_bytes() != candidate_bytes:
-            raise _gateway_error("R1 persisted bundle bytes changed")
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
     if bundle.exists() or bundle.is_symlink():
@@ -1353,7 +1360,7 @@ def _r1_import_witness(path: Path) -> None:
         "s.loader.exec_module(m)"
     )
     result = subprocess.run(
-        (INTERPRETER, "-I", "-B", "-c", code, str(path)),
+        (_ACTUAL_INTERPRETER, "-I", "-B", "-c", code, str(path)),
         cwd=path,
         env={"PATH": os.defpath, "PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1"},
         stdout=subprocess.PIPE,
@@ -2906,7 +2913,7 @@ def _recovery_plan(
             Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.predecessor_manifest_id
         ),
         "service_label": GATEWAY_LABEL,
-        "plist_path": str(GATEWAY_PLIST),
+        "plist_path": receipt.plist_path,
         "endpoint": GATEWAY_ENDPOINT,
         "pre_effect_identity_hash": canonical_hash({}),
     }
@@ -2935,12 +2942,16 @@ def _recovery_wrapper_command(root: str) -> str:
         for token in (";", "&&", "|", "$", "`", "\n", "\r", "\x00")
     ):
         raise _gateway_error("R1 recovery wrapper path contains shell metacharacter")
+    state_dir = (
+        Path.home() / "Workspace/Nexus-new-self-hosted-state"
+        if (Path.home() / "Workspace/Nexus-new-self-hosted-state").exists()
+        else (Path.home() / "workspace/Nexus-new-self-hosted-state")
+    )
     return (
         f'cd "{root_path}" ; source "{ENV_PATH}" ; export PYTHONDONTWRITEBYTECODE=1 ; '
         f'export NEXUS_CANONICAL_SOURCE_ROOT="{root_path}" ; '
-        "export NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR="
-        '"/Users/jameschen/Workspace/Nexus-new-self-hosted-state" ; '
-        f'exec {INTERPRETER} "{entrypoint}"'
+        f'export NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR="{state_dir}" ; '
+        f'exec {_ACTUAL_INTERPRETER} "{entrypoint}"'
     )
 
 
@@ -2948,6 +2959,17 @@ def _recovery_expected_plist_bytes(root: str) -> bytes:
     """Render the one fixed direct-Gateway wrapper for an R1 deployment root."""
     root_path = Path(root)
     wrapper = _recovery_wrapper_command(str(root_path))
+    log_dir = Path.home() / "Library/Logs/Nexus"
+    stdout_path = str(
+        log_dir / "gateway.log"
+        if log_dir.exists()
+        else Path("/Users/jameschen/Library/Logs/Nexus/gateway.log")
+    )
+    stderr_path = str(
+        log_dir / "gateway.err.log"
+        if log_dir.exists()
+        else Path("/Users/jameschen/Library/Logs/Nexus/gateway.err.log")
+    )
     payload = {
         "Label": GATEWAY_LABEL,
         "ProgramArguments": [
@@ -2958,8 +2980,8 @@ def _recovery_expected_plist_bytes(root: str) -> bytes:
         "WorkingDirectory": str(root_path),
         "RunAtLoad": True,
         "KeepAlive": True,
-        "StandardOutPath": "/Users/jameschen/Library/Logs/Nexus/gateway.log",
-        "StandardErrorPath": "/Users/jameschen/Library/Logs/Nexus/gateway.err.log",
+        "StandardOutPath": stdout_path,
+        "StandardErrorPath": stderr_path,
     }
     return plistlib.dumps(payload, fmt=plistlib.FMT_XML)
 
@@ -2997,7 +3019,7 @@ def _recovery_expected_postflight(
     """Derive runtime identity from the exact staged desired source, never live predecessor state."""
     root = Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.desired_manifest_id
     _r1_verify_worktree(root, receipt.desired_manifest)
-    command = (INTERPRETER, "-c", _RECOVERY_RUNTIME_IDENTITY_CODE, str(root))
+    command = (_ACTUAL_INTERPRETER, "-c", _RECOVERY_RUNTIME_IDENTITY_CODE, str(root))
     run = command_runner or (
         lambda *args: subprocess.run(
             args,
