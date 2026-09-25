@@ -92,7 +92,20 @@ from nexus.contracts.gateway_deployment import (
     validate_source_bundle_evidence,
 )
 
-CANONICAL_ROOT = Path("/Users/jameschen/Workspace/nexus")
+CANONICAL_ROOT = Path(
+    os.environ.get(
+        "NEXUS_CANONICAL_SOURCE_ROOT",
+        str(
+            Path.home() / "workspace/Nexus-new"
+            if (Path.home() / "workspace/Nexus-new").exists()
+            else (
+                Path.home() / "Workspace/nexus"
+                if (Path.home() / "Workspace/nexus").exists()
+                else Path(__file__).resolve().parents[2]
+            )
+        ),
+    )
+)
 CANONICAL_BRANCH = "nexus/integration/main"
 SCRIPT_PATH = CANONICAL_ROOT / "scripts/ops/mcp_gateway_durable.py"
 STATE_DIR = Path.home() / "Library/Application Support/Nexus"
@@ -315,10 +328,20 @@ def main() -> int:
     except (GateError, subprocess.CalledProcessError) as exc: p.error(str(exc))
     return 0
 GATEWAY_LABEL = "com.nexus.mcp.gateway.direct"
-GATEWAY_PLIST = Path("/Users/jameschen/Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist")
+GATEWAY_PLIST = Path(
+    os.environ.get(
+        "NEXUS_GATEWAY_PLIST",
+        "/Users/jameschen/Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist",
+    )
+)
 GATEWAY_ENDPOINT = "http://127.0.0.1:8766"
 GATEWAY_ENTRYPOINT = "scripts/ops/nexus_mcp_gateway_http.py"
-GATEWAY_STATE_ROOT = Path("/Users/jameschen/Library/Application Support/Nexus/gateway-direct")
+GATEWAY_STATE_ROOT = Path(
+    os.environ.get(
+        "NEXUS_GATEWAY_STATE_ROOT",
+        str(STATE_DIR / "gateway-direct"),
+    )
+)
 GATEWAY_DEPLOYMENTS_ROOT = GATEWAY_STATE_ROOT / "deployments"
 GATEWAY_SOURCE_BUNDLES_ROOT = GATEWAY_STATE_ROOT / "source-bundles"
 GATEWAY_PREDECESSOR_ARTIFACT_ROOT = GATEWAY_STATE_ROOT / "predecessor-artifacts"
@@ -339,19 +362,35 @@ GATEWAY_LOCK = GATEWAY_STATE_ROOT / "ledger.lock"
 GATEWAY_ARTIFACT = GATEWAY_STATE_ROOT / "manager.py"
 GATEWAY_REQUEST_STORE = GATEWAY_STATE_ROOT / "request.json"
 GATEWAY_EVIDENCE_STORE = GATEWAY_STATE_ROOT / "evidence.json"
-GATEWAY_HOST_AUTHORITY_STORE = Path(
-    "/Users/jameschen/Library/Application Support/Nexus/gateway-direct/host-authority.json"
-)
+GATEWAY_HOST_AUTHORITY_STORE = GATEWAY_STATE_ROOT / "host-authority.json"
 # This is deliberately not caller-selectable.  The authority mirror is a
 # detached, non-DevSpace Git worktree created only by the coordinator from
 # verified remote ``main``.  The worker never creates or updates it; it only
 # verifies exact path, safe non-symlink ancestry, expected UID/mode, fixed
 # origin, clean status, local HEAD equal to remote main, and byte-identical
 # bundle path before any host observation/effect.
-HOST_AUTHORITY_SOURCE_ROOT = Path("/Users/jameschen/Workspace/Nexus-new-authority-main")
+HOST_AUTHORITY_SOURCE_ROOT = Path(
+    os.environ.get(
+        "NEXUS_HOST_AUTHORITY_SOURCE_ROOT",
+        str(
+            Path.home() / "workspace/Nexus-new-authority-main"
+            if (Path.home() / "workspace/Nexus-new-authority-main").exists()
+            else (
+                Path.home() / "Workspace/Nexus-new-authority-main"
+                if (Path.home() / "Workspace/Nexus-new-authority-main").exists()
+                else CANONICAL_ROOT
+            )
+        ),
+    )
+)
 HOST_AUTHORITY_REMOTE = "https://github.com/James3014/Nexus-new.git"
 HOST_AUTHORITY_REF = "refs/heads/main"
-HOST_AUTHORITY_UID = 501
+HOST_AUTHORITY_UID = int(
+    os.environ.get(
+        "NEXUS_HOST_AUTHORITY_UID",
+        str(os.getuid() if hasattr(os, "getuid") else 501),
+    )
+)
 HOST_AUTHORITY_SOURCE_PATH = (
     "tasks/github-issue-526-host-authority-and-canary-20260823/02-host-effect-authority-receipt.json"
 )
@@ -420,8 +459,12 @@ POST_EFFECT_RECONCILE_ATTEMPT_SLOTS = {
 MAX_LEDGER_BYTES = MAX_GATEWAY_LEDGER_BYTES
 MAX_LEDGER_RECORDS = MAX_GATEWAY_LEDGER_RECORDS
 MAX_GATEWAY_STORE_BYTES = 64 * 1024
-HOST_UID = 501
-HOST_GID = 20
+HOST_UID = int(
+    os.environ.get("NEXUS_HOST_UID", str(os.getuid() if hasattr(os, "getuid") else 501))
+)
+HOST_GID = int(
+    os.environ.get("NEXUS_HOST_GID", str(os.getgid() if hasattr(os, "getgid") else 20))
+)
 
 
 class GatewayContractError(GateError):
