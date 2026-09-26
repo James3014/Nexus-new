@@ -49,9 +49,7 @@ def test_enforced_label_without_physical_producer_proof_fails_closed():
         },
     )
     assert ok is False
-    assert reason == (
-        "UNENFORCED_TOOL_EXPOSURE:PHYSICAL_TOOL_EXPOSURE_PRODUCER_UNVERIFIED"
-    )
+    assert reason == ("UNENFORCED_TOOL_EXPOSURE:PHYSICAL_TOOL_EXPOSURE_PRODUCER_UNVERIFIED")
 
 
 def test_request_only_not_enforced_fails_closed():

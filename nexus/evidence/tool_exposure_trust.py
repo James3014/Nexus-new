@@ -90,9 +90,7 @@ def bind_tool_exposure_observation(
     is_enforced = mode in PHYSICALLY_ENFORCED_MODES
     obs_status = "FAIL"
     reason = (
-        "PHYSICAL_TOOL_EXPOSURE_PRODUCER_UNVERIFIED"
-        if is_enforced
-        else f"UNENFORCED_MODE:{mode}"
+        "PHYSICAL_TOOL_EXPOSURE_PRODUCER_UNVERIFIED" if is_enforced else f"UNENFORCED_MODE:{mode}"
     )
 
     return {
