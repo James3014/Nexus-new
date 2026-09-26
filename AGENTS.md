@@ -50,14 +50,17 @@ scope, safety, verification, and governed-escalation boundaries. Governed work
 and representative `NEXUS_GOVERNED` pilots remain valid, but are not mandatory
 for every bounded Nexus change solely because G10 completed.
 
-Nexus execution lanes and DevSpace authority modes remain distinct concepts.
-A direct Nexus lane may use DevSpace `OWNER_DIRECT` as execution transport;
-a governed external execution may use `NEXUS_GOVERNED` when canonical Nexus
-authority is bound. Once one attempt has entered governed / `NEXUS_GOVERNED`
-authority, missing, stale, expired, unavailable, or transport-failed authority
-must never silently downgrade that attempt to direct / `OWNER_DIRECT`. It must
-block, rebind, reconcile, or start a separately Owner-authorized recovery/direct
-attempt with a new authority identity.
+Nexus execution lanes and execution transports are distinct concepts.
+`DIRECT_CANONICAL`, `DIRECT_DELEGATED`, and `GOVERNED` define authority and
+verification requirements; a host tool or external control plane does not choose
+or widen that authority. Owner-approved transports may include direct host tools
+such as Desktop Commander or bounded external worker planes such as DevSpace,
+but transport identity is not Nexus route, approval, completion, merge, release,
+or production authority. An attempt already admitted as governed must never
+silently downgrade to a direct attempt merely because its authority or transport
+is missing, stale, expired, unavailable, or failed. It must block, rebind,
+reconcile, or start a separately Owner-authorized recovery/direct attempt with a
+new authority identity.
 
 `NEXUS_GOVERNANCE_DEFAULT_READY` is an Owner-only transition decision. It is not
 inferred from G10, tests, an agent, a Task Card, CI, or runtime state. Before the
@@ -68,9 +71,11 @@ admission, and execution contracts; common work no longer requiring routine
 direct bypass; and a proven direct recovery path for restoring the governance
 plane. After that declaration, a separate policy change may make governed
 execution the default and narrow direct authority. Until then, narrowly typed
-DevSpace `OWNER_DIRECT` bootstrap capabilities such as `workspace_clone` and
-`dependency_sync` are compatible with the current stabilization policy and are
-not defects merely because they are not yet `NEXUS_GOVERNED`.
+Owner-approved bootstrap or environment capabilities remain compatible with the
+current stabilization policy when they preserve the active lane and its scope,
+verification, and claim ceilings. Historical DevSpace `OWNER_DIRECT` helpers
+such as `workspace_clone` and `dependency_sync` are examples of such transport
+capabilities, not required Nexus authority primitives.
 
 ## Repository collaboration authority (GitHub)
 
@@ -300,9 +305,15 @@ escalate an otherwise eligible `DIRECT_DELEGATED` task.
 
 ### DIRECT_DELEGATED
 
-Owner -> primary coordinator -> approved non-Nexus control plane (such as
-DevSpace) -> exactly one bounded external worker -> independent coordinator
-verification -> optional exact Owner-confirmed protected PR merge -> STOP.
+Owner -> primary coordinator -> approved non-Nexus control plane -> exactly
+one bounded external worker -> independent coordinator verification -> optional
+exact Owner-confirmed protected PR merge -> STOP.
+
+The external control plane is intentionally transport-neutral. DevSpace may be
+used when selected, but it is not required by the lane. A direct host tool such
+as Desktop Commander is not itself a delegated worker plane; when the primary
+coordinator uses such a tool directly, the work remains `DIRECT_CANONICAL`
+unless a separate bounded worker is actually delegated.
 
 No Nexus Task Card, Nexus lifecycle, CapabilityPlanner routing, Nexus Workforce
 Admission, or Candidate lifecycle is required solely for this lane. The worker
