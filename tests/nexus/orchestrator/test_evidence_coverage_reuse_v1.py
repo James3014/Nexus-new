@@ -1,11 +1,55 @@
 """Evidence coverage/reuse v1: producer declaration + transport (task_0002)."""
+
 from __future__ import annotations
-import copy, json, sys
+
+import copy
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
+
 import pytest
+
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
+
 EXACT_CONTROLLER_SHA = "a" * 40
 EXACT_TARGET_SHA = "b" * 40
+_PYTHON = sys.executable
+
+# Pre-candidate Core revision (accepted base tree), used as the physical
+# "old consumer" witness. The local checkout is configurable so the witness
+# is not bound to one developer machine layout.
+CORE_REPO_ROOT = Path(os.environ.get("NEXUS_CORE_REPO_ROOT", "/Users/james/workspace/nexus-core"))
+OLD_CORE_COMMIT = "7c3be85fe874656a17d04032c5ff93f12aa707a2"
+
+
+def _pre_candidate_core_worktree():
+    """Materialize the exact pre-candidate Core revision in a disposable worktree."""
+    if not (CORE_REPO_ROOT / "product").is_dir():
+        pytest.skip("nexus-core checkout unavailable")
+    target = tempfile.mkdtemp(prefix="pre-candidate-core-")
+    added = subprocess.run(
+        ["git", "-C", str(CORE_REPO_ROOT), "worktree", "add", target, OLD_CORE_COMMIT, "--detach"],
+        capture_output=True,
+        text=True,
+    )
+    if added.returncode != 0:
+        shutil.rmtree(target, ignore_errors=True)
+        pytest.skip("pre-candidate Core revision unavailable")
+    return Path(target)
+
+
+def _remove_worktree(path):
+    subprocess.run(
+        ["git", "-C", str(CORE_REPO_ROOT), "worktree", "remove", "--force", str(path)],
+        capture_output=True,
+        text=True,
+    )
+    shutil.rmtree(path, ignore_errors=True)
+
 def _base_contract_kwargs(tmp_path, **overrides):
     values = {
         "task_id": "evcov-contract",
@@ -166,7 +210,10 @@ def test_wrong_core_revision_marked_fail_closed():
     assert status["expected_revision"] != status["observed_commit"]
 
 def test_missing_observed_core_identity_marked_unavailable():
-    from nexus.orchestrator.canonical_core_transport import core_provenance_status, read_observed_core_identity
+    from nexus.orchestrator.canonical_core_transport import (
+        core_provenance_status,
+        read_observed_core_identity,
+    )
     status = core_provenance_status({"available": False, "reason": "CORE_IDENTITY_UNREADABLE", "expected_revision": "f" * 40, "observed_commit": None, "observed_tree": None})
     assert status["status"] == "CORE_IDENTITY_UNAVAILABLE"
     assert status["fail_closed"] is True
@@ -200,7 +247,6 @@ def _req(tmp_path, cid):
 
 def test_verify_candidate_projection_carries_provenance_and_universe(tmp_path, monkeypatch):
     import nexus.orchestrator.canonical_core_transport as transport
-    import hashlib as _hl
     def _sh(b):
         import hashlib as _h2
         return "sha256:" + _h2.sha256(b).hexdigest()
@@ -225,7 +271,6 @@ def test_verify_candidate_projection_carries_provenance_and_universe(tmp_path, m
 
 def test_verify_candidate_legacy_request_has_no_universe(tmp_path, monkeypatch):
     import nexus.orchestrator.canonical_core_transport as transport
-    import hashlib as _hl
     def _sh(b):
         import hashlib as _h2
         return "sha256:" + _h2.sha256(b).hexdigest()
@@ -262,20 +307,27 @@ def test_new_producer_old_consumer_requires_core_first(tmp_path):
     assert _stub_old_consumer_rejects_unknown_keys(legacy_wire) == "ACCEPTED"
 
 def test_new_producer_old_consumer_physical_core_rejects_universe():
-    import subprocess
-    code = (
-        "from product.adapters.generic_verification import _validate_contract;"
-        "import json;"
-        "uni={\"contract_id\":\"c\",\"requirements_hash\":\"sha256:\"+\"f\"*64,\"required_verifier_ids\":[\"v\"],\"allowed_paths\":[\"a.py\"],\"deletion_policy\":\"FORBID\","
-        "\"expected_subjects\":[{\"logical_subject_id\":\"s\",\"evidence_kind\":\"k\",\"requirement_mode\":\"REQUIRED\",\"applicability\":\"APPLICABLE\"}],\"universe_generation\":1};"
-        "leg={\"contract_id\":\"c\",\"requirements_hash\":\"sha256:\"+\"f\"*64,\"required_verifier_ids\":[\"v\"],\"allowed_paths\":[\"a.py\"],\"deletion_policy\":\"FORBID\"};"
-        "print(json.dumps([_validate_contract(uni), _validate_contract(leg)]))"
-    )
-    out = subprocess.check_output(["/Users/james/workspace/Nexus-new/.venv/bin/python", "-c", code], cwd="/Users/james/workspace/nexus-core", text=True)
-    assert json.loads(out) == ["acceptance_contract", None]
+    pre_candidate_core = _pre_candidate_core_worktree()
+    try:
+        code = (
+            "from product.adapters.generic_verification import _validate_contract;"
+            "import json;"
+            "uni={\"contract_id\":\"c\",\"requirements_hash\":\"sha256:\"+\"f\"*64,\"required_verifier_ids\":[\"v\"],\"allowed_paths\":[\"a.py\"],\"deletion_policy\":\"FORBID\","
+            "\"expected_subjects\":[{\"logical_subject_id\":\"s\",\"evidence_kind\":\"k\",\"requirement_mode\":\"REQUIRED\",\"applicability\":\"APPLICABLE\"}],\"universe_generation\":1};"
+            "leg={\"contract_id\":\"c\",\"requirements_hash\":\"sha256:\"+\"f\"*64,\"required_verifier_ids\":[\"v\"],\"allowed_paths\":[\"a.py\"],\"deletion_policy\":\"FORBID\"};"
+            "print(json.dumps([_validate_contract(uni), _validate_contract(leg)]))"
+        )
+        out = subprocess.check_output(
+            [_PYTHON, "-c", code], cwd=str(pre_candidate_core), text=True
+        )
+        assert json.loads(out) == ["acceptance_contract", None]
+    finally:
+        _remove_worktree(pre_candidate_core)
+
 
 def test_old_producer_new_consumer_accepts_legacy():
-    import subprocess
+    if not (CORE_REPO_ROOT / "product").is_dir():
+        pytest.skip("nexus-core checkout unavailable")
     code = (
         "from product.adapters.generic_verification import _validate_contract;"
         "import json;"
@@ -284,5 +336,6 @@ def test_old_producer_new_consumer_accepts_legacy():
         "\"expected_subjects\":[{\"logical_subject_id\":\"s\",\"evidence_kind\":\"k\",\"requirement_mode\":\"REQUIRED\",\"applicability\":\"APPLICABLE\"}],\"universe_generation\":1};"
         "print(json.dumps([_validate_contract(leg), _validate_contract(uni)]))"
     )
-    out = subprocess.check_output(["/Users/james/workspace/Nexus-new/.venv/bin/python", "-c", code], cwd="/Users/james/workspace/nexus-core-evidence-reuse", text=True)
+    out = subprocess.check_output([_PYTHON, "-c", code], cwd=str(CORE_REPO_ROOT), text=True)
     assert json.loads(out) == [None, None]
+

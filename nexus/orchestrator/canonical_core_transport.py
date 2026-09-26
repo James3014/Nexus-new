@@ -27,13 +27,13 @@ from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-_EXACT_GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-
 from nexus.orchestrator.ambient_core import (
     PREPARATION_SCHEMA,
     AmbientCoreControlPort,
     projection_hash,
 )
+
+_EXACT_GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 # The Core worktree actually imported by this transport process. The legacy
 # hardcoded CORE_REPO_ROOT pointed at a developer machine path that does not
@@ -55,9 +55,8 @@ try:
         verification_plan_hash,
     )
 
-    from product.protocol import PUBLIC_PROTOCOL_VERSION  # noqa: E402
-
     import product as _IMPORTED_CORE_PACKAGE  # noqa: E402
+    from product.protocol import PUBLIC_PROTOCOL_VERSION  # noqa: E402
 
     CORE_AVAILABLE = True
     CORE_IMPORT_ERROR = None

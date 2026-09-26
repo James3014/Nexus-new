@@ -4808,9 +4808,18 @@ class SelfHostedTaskService:
         ):
             raise RuntimeError("external adoption replay candidate identity mismatch")
         contract_payload = state.get("contract")
-        if not isinstance(contract_payload, Mapping) or state.get("contract_hash") != canonical({
+        # Mirror SelfHostedTaskContract.contract_hash byte-for-byte: the
+        # persisted dump carries an explicit expected_evidence null for
+        # legacy contracts, while the hash rule drops a null universe so
+        # legacy hashes stay byte-identical. Any add/drop/mutate of a
+        # non-null universe still changes these bytes versus the stored
+        # hash and fails closed below.
+        contract_canonical = {
             key: value for key, value in contract_payload.items() if key != "contract_hash"
-        }):
+        } if isinstance(contract_payload, Mapping) else None
+        if contract_canonical is not None and contract_canonical.get("expected_evidence") is None:
+            contract_canonical.pop("expected_evidence", None)
+        if contract_canonical is None or state.get("contract_hash") != canonical(contract_canonical):
             raise RuntimeError("external adoption replay contract binding mismatch")
         expected_receipt = {
             "schema": "nexus.external_candidate_adoption_receipt.v1", "task_id": request.task_id,

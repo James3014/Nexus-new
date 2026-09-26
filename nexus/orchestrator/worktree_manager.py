@@ -46,6 +46,12 @@ def _contract_digest(contract: Any) -> str:
         }
     else:
         return ""
+    # Mirror SelfHostedTaskContract.contract_hash byte-for-byte: a null
+    # expected_evidence universe is dropped so legacy digests stay
+    # byte-identical to before the field existed. A declared (non-null)
+    # universe stays bound into the digest.
+    if payload.get("expected_evidence") is None:
+        payload.pop("expected_evidence", None)
     canonical = json.dumps(
         payload,
         sort_keys=True,
