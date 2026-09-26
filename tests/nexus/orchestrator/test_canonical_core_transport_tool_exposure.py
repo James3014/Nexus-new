@@ -1,10 +1,71 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import tempfile
 from pathlib import Path
+from typing import Any
 
+import pytest
+
+import nexus.orchestrator.canonical_core_transport as core_transport
 from nexus.contracts.tool_exposure_receipt import build_tool_exposure_receipt
 from nexus.orchestrator.canonical_core_transport import CanonicalNexusCoreTransportPort
+
+
+def _portable_hash(value: Any) -> str:
+    payload = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        default=str,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+@pytest.fixture(autouse=True)
+def portable_core_boundary(monkeypatch: pytest.MonkeyPatch):
+    """Exercise transport wiring without depending on a host-local nexus-core checkout."""
+
+    monkeypatch.setattr(core_transport, "CORE_AVAILABLE", True)
+    for name in (
+        "acceptance_contract_hash",
+        "change_manifest_hash",
+        "change_set_hash",
+        "evidence_bundle_hash",
+        "verification_plan_hash",
+    ):
+        monkeypatch.setattr(core_transport, name, _portable_hash, raising=False)
+
+    def fake_verify_generic_changeset(request: dict[str, Any]):
+        observations = request["evidence_bundle"]["observations"]
+        verified = all(obs["status"] == "PASS" for obs in observations)
+        response = {
+            "schema": core_transport.GENERIC_VERIFICATION_RESPONSE_SCHEMA_ID,
+            "protocol_version": core_transport.PUBLIC_PROTOCOL_VERSION,
+            "verification": {
+                "status": "VERIFIED" if verified else "FAILED_VERIFICATION",
+                "reason_codes": [] if verified else ["EVIDENCE_FAILED"],
+                "integrity": "VALID" if verified else "INVALID",
+            },
+            "hashes": {
+                "acceptance_contract_hash": _portable_hash(request["acceptance_contract"]),
+                "change_set_hash": _portable_hash(request["change_set"]),
+                "verification_plan_hash": _portable_hash(request["verification_plan"]),
+                "evidence_bundle_hash": _portable_hash(request["evidence_bundle"]),
+                "change_manifest_hash": _portable_hash(request["change_manifest"]),
+            },
+            "certification": None,
+        }
+        return 200, response
+
+    monkeypatch.setattr(
+        core_transport,
+        "verify_generic_changeset",
+        fake_verify_generic_changeset,
+        raising=False,
+    )
 
 
 def _create_receipt(
