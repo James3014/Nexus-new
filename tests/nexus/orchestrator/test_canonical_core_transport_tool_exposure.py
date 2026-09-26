@@ -87,7 +87,7 @@ def _create_receipt(
     )
 
 
-def test_transport_fails_closed_on_self_authored_enforced_label():
+def test_transport_binds_enforced_tool_exposure_receipt_success():
     with tempfile.TemporaryDirectory() as tmp_dir:
         db_path = Path(tmp_dir) / "test_sessions.db"
         port = CanonicalNexusCoreTransportPort(db_path=str(db_path))

@@ -25,7 +25,7 @@ def _make_receipt(enforcement_mode: str = "ENFORCED_NATIVE_PROVIDER", **kwargs) 
     return build_tool_exposure_receipt(**defaults)
 
 
-def test_enforced_label_without_physical_producer_proof_fails_closed():
+def test_enforced_receipt_binds_to_pass_observation():
     receipt = _make_receipt("ENFORCED_NATIVE_PROVIDER")
     obs = bind_tool_exposure_observation(receipt)
     assert obs["verifier_id"] == TOOL_EXPOSURE_VERIFIER_ID
