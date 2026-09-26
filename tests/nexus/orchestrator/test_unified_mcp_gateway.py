@@ -4270,6 +4270,27 @@ def test_github_issue_observer_fails_closed_when_cli_cannot_be_resolved(monkeypa
     }
 
 
+def test_github_observer_runtime_identity_binds_resolved_path_and_hash(
+    tmp_path, monkeypatch
+):
+    import nexus.orchestrator.unified_mcp_gateway as module
+
+    github_cli = tmp_path / "gh"
+    github_cli.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    github_cli.chmod(0o755)
+    monkeypatch.setenv("NEXUS_GITHUB_CLI", str(github_cli))
+
+    identity = module.github_observer_runtime_identity()
+
+    assert identity == {
+        "schema": "nexus.github_observer_dependency.v1",
+        "ready": True,
+        "executable_path": str(github_cli.resolve()),
+        "executable_sha256": hashlib.sha256(github_cli.read_bytes()).hexdigest(),
+        "failure_code": None,
+    }
+
+
 def _configured_github_observer(monkeypatch, tmp_path, run_result):
     import nexus.orchestrator.unified_mcp_gateway as module
 

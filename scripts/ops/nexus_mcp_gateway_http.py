@@ -32,6 +32,7 @@ from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
     TASK_CONTRACT_REVISION,
     TOOL_MANIFEST_REVISION,
     UnifiedMCPGateway,
+    github_observer_runtime_identity,
 )
 
 TOKEN_ENV = "NEXUS_MCP_GATEWAY_TOKEN"
@@ -69,8 +70,9 @@ def _git_head() -> str:
 
 def runtime_identity(gateway: UnifiedMCPGateway | None = None) -> dict[str, Any]:
     current_head = _git_head()
+    github_observer = github_observer_runtime_identity()
     return {
-        "status": "ok",
+        "status": "ok" if github_observer["ready"] is True else "degraded",
         "server": GATEWAY_NAME,
         "public_app_name": PUBLIC_APP_NAME,
         "namespace_policy": "stable_public_name_with_manifest_revision",
@@ -94,6 +96,7 @@ def runtime_identity(gateway: UnifiedMCPGateway | None = None) -> dict[str, Any]
         "pending_actions": None if gateway is None else gateway._gateway_status().get("pending_actions"),
         "tool_manifest_revision": TOOL_MANIFEST_REVISION,
         "tool_count": len(UnifiedMCPGateway.tool_specs()),
+        "github_observer": github_observer,
     }
 
 

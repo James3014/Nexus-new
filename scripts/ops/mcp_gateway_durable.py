@@ -177,6 +177,97 @@ def read_secret_env(path: Path | None = None) -> dict[str, str]:
     if not values.get("NEXUS_MCP_GATEWAY_TOKEN"): raise GateError("gateway token missing")
     return values
 
+def _github_observer_dependency(
+    values: Mapping[str, str] | None = None,
+    *,
+    required: bool = True,
+) -> dict[str, Any]:
+    """Bind the non-secret Project Entry observer executable identity."""
+    env_values = read_secret_env() if values is None else values
+    configured = str(env_values.get("NEXUS_GITHUB_CLI", "")).strip()
+
+    def unavailable(
+        message: str, *, cause: BaseException | None = None
+    ) -> dict[str, Any]:
+        if required:
+            if cause is None:
+                raise GateError(message)
+            raise GateError(message) from cause
+        return {
+            "schema": "nexus.github_observer_dependency.v1",
+            "ready": False,
+            "executable_path": None,
+            "executable_sha256": None,
+            "failure_code": "GITHUB_OBSERVER_EXECUTABLE_UNAVAILABLE",
+        }
+
+    if not configured:
+        return unavailable("NEXUS_GITHUB_CLI is required for Gateway deployment")
+    candidate = Path(configured)
+    if not candidate.is_absolute():
+        return unavailable("NEXUS_GITHUB_CLI must be an absolute path")
+    try:
+        resolved = candidate.resolve(strict=True)
+    except OSError as exc:
+        return unavailable("GitHub observer executable unavailable", cause=exc)
+    if not resolved.is_file() or not os.access(resolved, os.X_OK):
+        return unavailable("GitHub observer path is not executable")
+    try:
+        digest = hashlib.sha256(resolved.read_bytes()).hexdigest()
+    except OSError as exc:
+        return unavailable("GitHub observer executable unreadable", cause=exc)
+    return {
+        "schema": "nexus.github_observer_dependency.v1",
+        "ready": True,
+        "executable_path": str(resolved),
+        "executable_sha256": digest,
+        "failure_code": None,
+    }
+
+
+def _observer_dependency_from_surface(surface: Mapping[str, Any]) -> Mapping[str, Any]:
+    value = surface.get("github_observer")
+    if value is None:
+        value = surface.get("githubObserver")
+    if not isinstance(value, Mapping):
+        raise _gateway_error("GitHub observer runtime identity missing")
+    required = {
+        "schema",
+        "ready",
+        "executable_path",
+        "executable_sha256",
+        "failure_code",
+    }
+    if set(value) != required:
+        raise _gateway_error("GitHub observer runtime identity malformed")
+    path = value.get("executable_path")
+    digest = value.get("executable_sha256")
+    if (
+        value.get("schema") != "nexus.github_observer_dependency.v1"
+        or value.get("ready") is not True
+        or not isinstance(path, str)
+        or not Path(path).is_absolute()
+        or not isinstance(digest, str)
+        or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+        or value.get("failure_code") is not None
+    ):
+        raise _gateway_error("GitHub observer runtime identity invalid")
+    return value
+
+
+def _require_observer_surface_identity(
+    surface: Mapping[str, Any],
+    expected: Mapping[str, Any],
+) -> None:
+    observed = _observer_dependency_from_surface(surface)
+    if observed.get("schema") != "nexus.github_observer_dependency.v1":
+        raise _gateway_error("GitHub observer runtime schema mismatch")
+    if observed.get("ready") is not True:
+        raise _gateway_error("GitHub observer runtime dependency unavailable")
+    if dict(observed) != dict(expected):
+        raise _gateway_error("GitHub observer runtime identity mismatch")
+
+
 def _plist(kind: str, head: str, devspace_hash: str | None, devspace_root: Path = DEVSPACE_ROOT, node_path: Path = NODE_PATH) -> dict:
     args = ["/usr/bin/python3", str(SCRIPT_PATH), f"serve-{kind}", "--env-file", str(ENV_PATH), "--launch-floor-head", head]
     if kind == "devspace": args += ["--devspace-hash", devspace_hash or "", "--devspace-root", str(devspace_root), "--node-path", str(node_path)]
@@ -188,7 +279,9 @@ def _plist(kind: str, head: str, devspace_hash: str | None, devspace_root: Path 
 
 def render(root: Path = CANONICAL_ROOT, launch_floor_head: str | None = None, devspace_hash: str | None = None, devspace_root: Path | None = None, node_path: Path | None = None) -> dict[str, bytes]:
     devspace_root = devspace_root or DEVSPACE_ROOT; node_path = node_path or NODE_PATH
-    head = verify_gateway(root, launch_floor_head); read_secret_env()
+    head = verify_gateway(root, launch_floor_head)
+    env_values = read_secret_env()
+    _github_observer_dependency(env_values)
     if not devspace_hash or len(devspace_hash) != 64 or any(c not in "0123456789abcdefABCDEF" for c in devspace_hash): raise GateError("explicit DevSpace artifact hash required")
     identity = devspace_root / "generated/build-identity.json"; cli = devspace_root / "dist/cli.js"
     if (not devspace_root.is_absolute() or not devspace_root.exists() or not node_path.is_absolute() or
@@ -267,9 +360,14 @@ def manage(action: str, *, root: Path = CANONICAL_ROOT, launch_floor_head: str |
 def serve(kind: str, *, root: Path = CANONICAL_ROOT, launch_floor_head: str | None = None,
           devspace_hash: str | None = None, devspace_root: Path = DEVSPACE_ROOT,
           node_path: Path = NODE_PATH, execve=os.execve) -> None:
-    verify_gateway(root, launch_floor_head); env_file = read_secret_env()
-    env = os.environ.copy(); env.update(env_file); env["NEXUS_CANONICAL_SOURCE_ROOT"] = str(CANONICAL_ROOT)
+    verify_gateway(root, launch_floor_head)
+    env_file = read_secret_env()
+    env = os.environ.copy()
+    env.update(env_file)
+    env["NEXUS_CANONICAL_SOURCE_ROOT"] = str(CANONICAL_ROOT)
     if kind == "gateway":
+        observer = _github_observer_dependency(env_file)
+        env["NEXUS_GITHUB_CLI"] = str(observer["executable_path"])
         argv = [str(CANONICAL_ROOT / ".venv/bin/python"), str(CANONICAL_ROOT / "scripts/ops/nexus_mcp_gateway_http.py")]
     else:
         if not devspace_hash: raise GateError("explicit DevSpace artifact hash required")
@@ -847,6 +945,9 @@ class _RecoveryAdapters:
     ]
     clock: Callable[[], str]
     crash_hook: Callable[[str], None]
+    pre_effect_identity: Callable[
+        [RecoveryEffectPlan], Mapping[str, Any]
+    ] | None = None
 
 
 def _r1_run(*command: str, bytes_output: bool = False, timeout: int = 60) -> str | bytes:
@@ -3151,10 +3252,30 @@ def _block_post_effect_recovery_for_capacity_unlocked(
     return blocked
 
 
+def _bound_recovery_observer(
+    records: list[RecoveryLedgerRecord],
+) -> dict[str, Any]:
+    witnesses = [
+        record.pre_effect_identity.get("github_observer")
+        for record in records
+        if record.state is DeploymentState.EFFECT_STARTED
+        and isinstance(record.pre_effect_identity, Mapping)
+        and record.pre_effect_identity.get("github_observer") is not None
+    ]
+    if len(witnesses) != 1 or not isinstance(witnesses[0], Mapping):
+        raise GatewayContractError(
+            "recovery GitHub observer pre-effect binding missing"
+        )
+    witness = dict(witnesses[0])
+    _observer_dependency_from_surface({"github_observer": witness})
+    return witness
+
+
 def _validate_recovery_postflight(
     postflight: Mapping[str, Any],
     identity: RecoveryPhysicalIdentity,
     receipt: RecoveryAuthorityReceipt,
+    expected_observer: Mapping[str, Any],
 ) -> None:
     if not isinstance(postflight, Mapping) or postflight.get("authenticated") is not True:
         raise GatewayContractError("recovery postflight is not authenticated")
@@ -3164,6 +3285,7 @@ def _validate_recovery_postflight(
     if not all(isinstance(item, Mapping) for item in (health, initialize, tools)):
         raise GatewayContractError("recovery postflight response missing")
     expected = _recovery_expected_postflight(receipt)
+    _observer_dependency_from_surface({"github_observer": expected_observer})
     desired_root = str(Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.desired_manifest_id)
     if (
         identity.deployment_id != receipt.desired_manifest_id
@@ -3183,6 +3305,12 @@ def _validate_recovery_postflight(
     for surface, label in ((health, "health"), (initialize, "initialize")):
         if any(surface.get(key) != value for key, value in canonical_identity.items()):
             raise GatewayContractError(f"recovery {label} identity mismatch")
+        try:
+            _require_observer_surface_identity(surface, expected_observer)
+        except GatewayContractError as exc:
+            raise GatewayContractError(
+                f"recovery {label} GitHub observer identity mismatch"
+            ) from exc
         if (
             surface.get("tool_manifest_sha256") != expected["tool_manifest_sha256"]
             or surface.get("schema_sha256") != expected["schema_sha256"]
@@ -3400,6 +3528,7 @@ def _recovery_live_postflight(
     applied: bool,
     opener: Any = urllib.request.urlopen,
     token_loader: Callable[[], str] | None = None,
+    observer_dependency: Mapping[str, Any] | None = None,
 ) -> Mapping[str, Any]:
     token = _recovery_token(token_loader)
     health = _recovery_health(token=token, opener=opener)
@@ -3423,6 +3552,17 @@ def _recovery_live_postflight(
     tools = tools_result.get("tools")
     if not isinstance(server_info, Mapping):
         raise _gateway_error("R1 Gateway initialize identity missing")
+    health_observer = _observer_dependency_from_surface(health)
+    initialize_observer = _observer_dependency_from_surface(server_info)
+    if dict(health_observer) != dict(initialize_observer):
+        raise _gateway_error("R1 health/initialize GitHub observer disagreement")
+    expected_observer = (
+        dict(health_observer)
+        if observer_dependency is None
+        else observer_dependency
+    )
+    _require_observer_surface_identity(health, expected_observer)
+    _require_observer_surface_identity(server_info, expected_observer)
     if (
         not isinstance(tools, list)
         or not tools
@@ -3487,6 +3627,7 @@ def _recovery_live_postflight(
         "schema_sha256": schema_hash,
         "permission_sha256": health_identity["permission_sha256"],
         "lifecycle": health_identity["lifecycle"],
+        "github_observer": expected_observer,
     }
     return {
         "authenticated": True,
@@ -3500,6 +3641,7 @@ def _recovery_live_postflight(
         },
         "previous_server_instance": previous_server_instance,
         "applied": applied,
+        "github_observer": dict(expected_observer),
     }
 
 
@@ -3515,6 +3657,7 @@ def _production_recovery_adapters(
     state: dict[str, Any] = {
         "previous_server_instance": None,
         "applied": False,
+        "github_observer": None,
     }
     run = runner or (
         lambda *args: subprocess.run(
@@ -3536,7 +3679,25 @@ def _production_recovery_adapters(
             sleeper=sleeper,
         )
 
+    def pre_effect_identity(
+        _plan: RecoveryEffectPlan,
+    ) -> Mapping[str, Any]:
+        observer = _github_observer_dependency()
+        state["github_observer"] = observer
+        return {"github_observer": observer}
+
     def effect(plan: RecoveryEffectPlan) -> RecoveryEffectAck:
+        # R1 is the production deployment path.  The durable EFFECT_STARTED
+        # row already bound the observer identity; re-read once immediately
+        # before host effects and reject any drift.
+        current_observer = _github_observer_dependency()
+        expected_observer = state.get("github_observer")
+        if expected_observer is None:
+            state["github_observer"] = current_observer
+        elif dict(current_observer) != dict(expected_observer):
+            raise _gateway_error(
+                "R1 GitHub observer dependency drift before effect"
+            )
         desired_bytes = _recovery_expected_plist_bytes(plan.desired_root)
         predecessor_bytes = _recovery_expected_plist_bytes(plan.predecessor_root)
         try:
@@ -3611,6 +3772,7 @@ def _production_recovery_adapters(
             applied=bool(state["applied"]),
             opener=opener,
             token_loader=token_loader,
+            observer_dependency=state["github_observer"],
         )
 
     return _RecoveryAdapters(
@@ -3619,6 +3781,7 @@ def _production_recovery_adapters(
         postflight=postflight,
         clock=lambda: datetime.now(timezone.utc).isoformat(),
         crash_hook=lambda _point: None,
+        pre_effect_identity=pre_effect_identity,
     )
 
 
@@ -3723,8 +3886,14 @@ def _validate_terminal_recovery_replay(
     if terminal.result is ResultClass.VERIFIED:
         if classification != "desired":
             raise GatewayContractError("VERIFIED recovery physical identity drift")
+        expected_observer = _bound_recovery_observer(records)
         postflight = adapters.postflight(plan, identity)
-        _validate_recovery_postflight(postflight, identity, receipt)
+        _validate_recovery_postflight(
+            postflight,
+            identity,
+            receipt,
+            expected_observer,
+        )
     elif terminal.result is ResultClass.ROLLED_BACK:
         if classification != "predecessor":
             raise GatewayContractError("ROLLED_BACK recovery physical identity drift")
@@ -3921,6 +4090,41 @@ def _gateway_recover_with_adapters(
                     observed_identity={"outcome": blocked.model_dump()},
                 )
                 return blocked
+            try:
+                dependency_identity = (
+                    dict(adapters.pre_effect_identity(plan))
+                    if adapters.pre_effect_identity is not None
+                    else {"github_observer": _github_observer_dependency()}
+                )
+                observer_witness = dependency_identity.get("github_observer")
+                if not isinstance(observer_witness, Mapping):
+                    raise GatewayContractError(
+                        "recovery GitHub observer pre-effect binding missing"
+                    )
+                _observer_dependency_from_surface(
+                    {"github_observer": observer_witness}
+                )
+            except (GateError, GatewayContractError):
+                blocked = _recovery_outcome(
+                    typed,
+                    receipt,
+                    result=ResultClass.BLOCKED,
+                    effect_started=False,
+                    observation={
+                        "state": "BLOCKED",
+                        "reason": "GitHub observer dependency unavailable",
+                    },
+                )
+                _append_recovery_state_unlocked(
+                    ledger,
+                    rows,
+                    typed,
+                    receipt,
+                    evidence,
+                    DeploymentState.BLOCKED,
+                    observed_identity={"outcome": blocked.model_dump()},
+                )
+                return blocked
             owner_start = _current_recovery_process_start()
             _record_recovery_owner(os.getpid(), owner_start)
             _append_recovery_state_unlocked(
@@ -3934,6 +4138,7 @@ def _gateway_recover_with_adapters(
                     "plan_hash": plan.plan_hash,
                     "effect_owner_pid": os.getpid(),
                     "effect_owner_start": owner_start,
+                    **dependency_identity,
                 },
             )
             state = DeploymentState.EFFECT_STARTED
@@ -4166,8 +4371,21 @@ def _gateway_recover_with_adapters(
             state = DeploymentState.IDENTITY_VERIFIED
             adapters.crash_hook("after_identity_verified")
     try:
+        with InterProcessLock(
+            ledger.lock_path, timeout=RECOVERY_LEDGER_LOCK_TIMEOUT_SECONDS
+        ):
+            current_rows = ledger._scan_unlocked()
+            current_records = _recovery_typed_rows(
+                current_rows, typed.request_id
+            )
+            expected_observer = _bound_recovery_observer(current_records)
         postflight = adapters.postflight(plan, identity)
-        _validate_recovery_postflight(postflight, identity, receipt)
+        _validate_recovery_postflight(
+            postflight,
+            identity,
+            receipt,
+            expected_observer,
+        )
     except Exception as exc:
         with InterProcessLock(
             ledger.lock_path, timeout=RECOVERY_LEDGER_LOCK_TIMEOUT_SECONDS
@@ -4701,7 +4919,8 @@ def _normalize_gateway_identity_surfaces(
     profile: Any,
     git: Mapping[str, Any],
     server_info: Mapping[str, Any] | None = None,
-) -> dict[str, str]:
+    expected_observer: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     """Normalize physical health/initialize fields against fixed local Git."""
     normalized: dict[str, str] = {}
     for key, aliases in _GATEWAY_PROTOCOL_ALIASES.items():
@@ -4729,13 +4948,36 @@ def _normalize_gateway_identity_surfaces(
         if _canonical_alias(health, "tree", ("git_tree",)) != local_tree:
             raise _gateway_error("health/local Git tree disagreement")
     normalized.update(root=root, head=head, tree=str(local_tree))
+    if expected_observer is not None:
+        _require_observer_surface_identity(health, expected_observer)
+        if server_info is not None:
+            _require_observer_surface_identity(server_info, expected_observer)
+            if dict(_observer_dependency_from_surface(health)) != dict(
+                _observer_dependency_from_surface(server_info)
+            ):
+                raise _gateway_error(
+                    "health/initialize GitHub observer disagreement"
+                )
+        normalized["github_observer"] = dict(expected_observer)
+    elif "github_observer" in health or "githubObserver" in health:
+        observed_observer = _observer_dependency_from_surface(health)
+        if server_info is not None and (
+            "github_observer" in server_info or "githubObserver" in server_info
+        ):
+            initialize_observer = _observer_dependency_from_surface(server_info)
+            if dict(observed_observer) != dict(initialize_observer):
+                raise _gateway_error(
+                    "health/initialize GitHub observer disagreement"
+                )
+        normalized["github_observer"] = dict(observed_observer)
     return normalized
 
 
 def postflight_gateway(expected: Mapping[str, Any], *, token: str, endpoint: str = GATEWAY_ENDPOINT,
                        opener: Any = urllib.request.urlopen, retries: int = 3,
                        timeout: float = 2.0, sleeper: Callable[[float], None] = time.sleep,
-                       git_command_runner: Callable[..., Any] | None = None) -> PostflightIdentity:
+                       git_command_runner: Callable[..., Any] | None = None,
+                       observer_dependency: Mapping[str, Any] | None = None) -> PostflightIdentity:
     """Bounded authenticated health/initialize/tools-list identity proof."""
     if not token or retries < 1 or retries > 5:
         raise _gateway_error("postflight retry/token contract invalid")
@@ -4773,6 +5015,7 @@ def postflight_gateway(expected: Mapping[str, Any], *, token: str, endpoint: str
                 profile=profile,
                 git=git_identity,
                 server_info=server_info,
+                expected_observer=observer_dependency,
             )
             declared_manifest = merged["tool_manifest_sha256"]
             declared_schema = merged["schema_sha256"]
@@ -4942,6 +5185,9 @@ def gateway_reload(request: GatewayDeploymentRequest, *, observed: Mapping[str, 
         raise _gateway_error("Gateway source authority freshness rejected", exc) from exc
     if request.operation not in {"reload", "gateway-reload"}:
         raise _gateway_error("gateway_reload requires reload operation")
+    # Bind the required observer executable before any Gateway effect or ledger
+    # STARTED state.  PATH discovery is intentionally not accepted here.
+    bound_observer = _github_observer_dependency()
     plist_path = Path(plist_path or GATEWAY_PLIST)
     if plist_path != Path(GATEWAY_PLIST):
         raise _gateway_error("Gateway plist destination substitution")
@@ -4997,8 +5243,14 @@ def gateway_reload(request: GatewayDeploymentRequest, *, observed: Mapping[str, 
                 raise _gateway_error("Gateway bootstrap failed")
             expected = request.postflight.model_dump()
             expected["previous_server_instance"] = request.current_identity.server_instance
-            postflight_result = postflight_gateway(expected, token=token, endpoint=GATEWAY_ENDPOINT,
-                                                   opener=opener, sleeper=sleeper)
+            postflight_result = postflight_gateway(
+                expected,
+                token=token,
+                endpoint=GATEWAY_ENDPOINT,
+                opener=opener,
+                sleeper=sleeper,
+                observer_dependency=bound_observer,
+            )
             validate_postflight_identity(postflight_result, request.desired)
             previous = request.current_identity.server_instance
             if previous and postflight_result.server_instance == previous:
@@ -5037,7 +5289,14 @@ def gateway_status(
     if request.operation not in {"status", "gateway-status"} or request.effect_class is not EffectClass.STATUS:
         raise _gateway_error("Gateway status requires STATUS operation")
     observed = _launchctl_observation(runner=runner)
-    return {"state": "SERVICE_OBSERVED", "operation": "status", "service": GATEWAY_LABEL, **observed}
+    observer = _github_observer_dependency(required=False)
+    return {
+        "state": "SERVICE_OBSERVED",
+        "operation": "status",
+        "service": GATEWAY_LABEL,
+        "github_observer": observer,
+        **observed,
+    }
 
 
 def _validate_gateway_action_pair(
