@@ -27,9 +27,14 @@ OLD_CORE_COMMIT = "7c3be85fe874656a17d04032c5ff93f12aa707a2"
 
 
 def _pre_candidate_core_worktree():
-    """Materialize the exact pre-candidate Core revision in a disposable worktree."""
+    """Materialize the exact pre-candidate Core revision, or None when unavailable.
+
+    Returns None instead of skipping: these witnesses must stay deterministic
+    on hosts and CI runners that have no local nexus-core checkout, so the
+    physical confirmation is additive to an in-repo deterministic assertion.
+    """
     if not (CORE_REPO_ROOT / "product").is_dir():
-        pytest.skip("nexus-core checkout unavailable")
+        return None
     target = tempfile.mkdtemp(prefix="pre-candidate-core-")
     added = subprocess.run(
         ["git", "-C", str(CORE_REPO_ROOT), "worktree", "add", target, OLD_CORE_COMMIT, "--detach"],
@@ -38,7 +43,7 @@ def _pre_candidate_core_worktree():
     )
     if added.returncode != 0:
         shutil.rmtree(target, ignore_errors=True)
-        pytest.skip("pre-candidate Core revision unavailable")
+        return None
     return Path(target)
 
 
@@ -659,8 +664,29 @@ def test_new_producer_old_consumer_requires_core_first(tmp_path):
     assert _stub_old_consumer_rejects_unknown_keys(legacy_wire) == "ACCEPTED"
 
 
-def test_new_producer_old_consumer_physical_core_rejects_universe():
+def test_new_producer_old_consumer_physical_core_rejects_universe(tmp_path):
+    project = _import_transport()
+    contract = SelfHostedTaskContract(
+        **_base_contract_kwargs(tmp_path, expected_evidence=_universe_dict())
+    )
+    projected = project(contract)
+    assert projected is not None
+    wire_contract = {
+        "contract_id": "c",
+        "requirements_hash": "sha256:" + "f" * 64,
+        "required_verifier_ids": ["python3 -m pytest -q"],
+        "allowed_paths": ["nexus/orchestrator/task_contract.py"],
+        "deletion_policy": "FORBID",
+        "expected_subjects": projected["expected_subjects"],
+        "universe_generation": projected["universe_generation"],
+    }
+    # Deterministic: the pre-candidate Core validator required an exact key set,
+    # so the declared universe is an unknown key for it.
+    assert _stub_old_consumer_rejects_unknown_keys(wire_contract) == "REJECTED"
+    # Physical confirmation, only where a Core checkout exists (never skipped).
     pre_candidate_core = _pre_candidate_core_worktree()
+    if pre_candidate_core is None:
+        return
     try:
         code = (
             "from product.adapters.generic_verification import _validate_contract;"
@@ -676,9 +702,23 @@ def test_new_producer_old_consumer_physical_core_rejects_universe():
         _remove_worktree(pre_candidate_core)
 
 
-def test_old_producer_new_consumer_accepts_legacy():
+def test_old_producer_new_consumer_accepts_legacy(tmp_path):
+    project = _import_transport()
+    legacy = SelfHostedTaskContract(**_base_contract_kwargs(tmp_path))
+    # Deterministic: a contract without a declaration projects to no universe,
+    # so the consumer request stays on the unchanged pre-candidate key set.
+    assert project(legacy) is None
+    legacy_wire = {
+        "contract_id": "c",
+        "requirements_hash": "sha256:" + "f" * 64,
+        "required_verifier_ids": ["python3 -m pytest -q"],
+        "allowed_paths": ["nexus/orchestrator/task_contract.py"],
+        "deletion_policy": "FORBID",
+    }
+    assert _stub_old_consumer_rejects_unknown_keys(legacy_wire) == "ACCEPTED"
+    # Physical confirmation, only where a Core checkout exists (never skipped).
     if not (CORE_REPO_ROOT / "product").is_dir():
-        pytest.skip("nexus-core checkout unavailable")
+        return
     code = (
         "from product.adapters.generic_verification import _validate_contract;"
         "import json;"
