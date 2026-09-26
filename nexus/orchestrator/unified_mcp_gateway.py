@@ -553,12 +553,44 @@ def _git(*args: str, timeout: float = 3.0) -> str:
     return result.stdout
 
 
+_GITHUB_CLI_ENV = "NEXUS_GITHUB_CLI"
+
+
+def _resolve_github_cli() -> tuple[str | None, str | None]:
+    """Resolve the GitHub CLI to one executable absolute path before use."""
+    configured = os.environ.get(_GITHUB_CLI_ENV, "").strip()
+    if configured:
+        candidate = Path(configured)
+        if not candidate.is_absolute():
+            return None, f"{_GITHUB_CLI_ENV} must be an absolute path"
+    else:
+        discovered = shutil.which("gh")
+        if not discovered:
+            return None, "GitHub CLI executable could not be resolved"
+        candidate = Path(discovered)
+
+    try:
+        resolved = candidate.resolve(strict=True)
+    except OSError as exc:
+        return None, f"GitHub CLI executable could not be resolved: {exc}"
+    if not resolved.is_file() or not os.access(resolved, os.X_OK):
+        return None, "GitHub CLI resolved path is not an executable file"
+    return str(resolved), None
+
+
 def observe_github_issue(repository: str, issue_number: int) -> dict[str, Any]:
     """Fresh, bounded GitHub observation; never writes or infers missing state."""
+    github_cli, resolution_error = _resolve_github_cli()
+    if github_cli is None:
+        return {
+            "ok": False,
+            "blocker": "GITHUB_OBSERVER_EXECUTABLE_UNAVAILABLE",
+            "detail": resolution_error or "GitHub CLI executable unavailable",
+        }
     try:
         result = subprocess.run(
             [
-                "gh", "issue", "view", str(issue_number), "--repo", repository,
+                github_cli, "issue", "view", str(issue_number), "--repo", repository,
                 "--json", "number,state,updatedAt,url",
             ],
             cwd=CANONICAL_SOURCE_ROOT,
@@ -567,30 +599,52 @@ def observe_github_issue(repository: str, issue_number: int) -> dict[str, Any]:
             timeout=5,
             check=False,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except subprocess.TimeoutExpired as exc:
         return {
             "ok": False,
-            "blocker": "GITHUB_ISSUE_OBSERVER_UNAVAILABLE",
+            "blocker": "GITHUB_OBSERVER_TIMEOUT",
+            "detail": str(exc),
+        }
+    except OSError as exc:
+        return {
+            "ok": False,
+            "blocker": "GITHUB_OBSERVER_EXECUTABLE_UNAVAILABLE",
             "detail": str(exc),
         }
     if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        lowered = detail.lower()
+        auth_failure = any(
+            marker in lowered
+            for marker in (
+                "auth login",
+                "authentication",
+                "not logged into",
+                "gh_token",
+                "github_token",
+            )
+        )
         return {
             "ok": False,
-            "blocker": "GITHUB_ISSUE_OBSERVER_UNAVAILABLE",
-            "detail": result.stderr.strip(),
+            "blocker": (
+                "GITHUB_OBSERVER_AUTH_UNAVAILABLE"
+                if auth_failure
+                else "GITHUB_OBSERVER_REQUEST_FAILED"
+            ),
+            "detail": detail,
         }
     try:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         return {
             "ok": False,
-            "blocker": "GITHUB_ISSUE_OBSERVER_UNAVAILABLE",
+            "blocker": "GITHUB_OBSERVER_MALFORMED_RESPONSE",
             "detail": str(exc),
         }
     if not isinstance(payload, Mapping) or str(payload.get("number")) != str(issue_number):
         return {
             "ok": False,
-            "blocker": "GITHUB_ISSUE_OBSERVER_UNAVAILABLE",
+            "blocker": "GITHUB_OBSERVER_MALFORMED_RESPONSE",
             "detail": "issue identity mismatch",
         }
     return {
@@ -5041,10 +5095,27 @@ class UnifiedMCPGateway:
         canonical_remote = GITHUB_REPOSITORY.canonical_remote
         observation = self._github_issue_observer(repository, raw_issue)
         if not isinstance(observation, Mapping) or observation.get("ok") is not True:
-            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_GITHUB_OBSERVER_FAILED", "fresh Issue observation unavailable")
+            cause_code = (
+                str(observation.get("blocker"))
+                if isinstance(observation, Mapping) and observation.get("blocker")
+                else "GITHUB_OBSERVER_REQUEST_FAILED"
+            )
+            return self._project_entry_blocker(
+                repository,
+                raw_issue,
+                "PROJECT_ENTRY_GITHUB_OBSERVER_FAILED",
+                "fresh Issue observation unavailable",
+                cause_code=cause_code,
+            )
         issue = observation.get("issue")
         if not isinstance(issue, Mapping) or str(issue.get("number")) != str(raw_issue) or not issue.get("state"):
-            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_GITHUB_OBSERVER_FAILED", "fresh Issue identity/state unavailable")
+            return self._project_entry_blocker(
+                repository,
+                raw_issue,
+                "PROJECT_ENTRY_GITHUB_OBSERVER_FAILED",
+                "fresh Issue identity/state unavailable",
+                cause_code="GITHUB_OBSERVER_MALFORMED_RESPONSE",
+            )
         if str(issue.get("state")).upper() != "OPEN":
             return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_ISSUE_NOT_OPEN", "Issue is not open")
         try:
@@ -5112,11 +5183,22 @@ class UnifiedMCPGateway:
         return hashlib.sha256(json.dumps(stable, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
 
     @staticmethod
-    def _project_entry_blocker(repository: str, issue: int, code: str, detail: str, *, task_id: str | None = None) -> dict[str, Any]:
+    def _project_entry_blocker(
+        repository: str,
+        issue: int,
+        code: str,
+        detail: str,
+        *,
+        task_id: str | None = None,
+        cause_code: str | None = None,
+    ) -> dict[str, Any]:
         safe_detail = f"diagnostic_class={code}; diagnostic_sha256={hashlib.sha256(str(detail).encode()).hexdigest()}"
+        blocker = {"code": code, "detail": safe_detail}
+        if cause_code:
+            blocker["cause_code"] = cause_code
         result = {"schema": "nexus.project_entry.v1", "status": "BLOCKED", "repository": repository,
                   "issue_number": issue, "task_resolution": {"status": "NOT_RESOLVED"},
-                  "blocker": {"code": code, "detail": safe_detail},
+                  "blocker": blocker,
                   "claim_ceiling": "PROJECT_ENTRY_OBSERVE_ONLY_NO_DOWNSTREAM_EFFECTS",
                   "claim_ceiling_excludes": ["execution", "verification", "acceptance", "merge", "release", "production"]}
         if task_id:
