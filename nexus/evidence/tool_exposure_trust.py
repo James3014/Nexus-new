@@ -79,7 +79,8 @@ def bind_tool_exposure_observation(
         return {
             "verifier_id": TOOL_EXPOSURE_VERIFIER_ID,
             "artifact_id": f"tool-exposure-{receipt.get('operation_id', 'unknown')}-{receipt.get('attempt_id', 'unknown')}",
-            "artifact_hash": "sha256:" + str(receipt.get("exposure_hash") or "0" * 64).removeprefix("sha256:"),
+            "artifact_hash": "sha256:"
+            + str(receipt.get("exposure_hash") or "0" * 64).removeprefix("sha256:"),
             "status": "FAIL",
             "reason": str(exc),
         }

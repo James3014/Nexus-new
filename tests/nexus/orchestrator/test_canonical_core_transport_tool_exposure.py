@@ -7,7 +7,11 @@ from nexus.contracts.tool_exposure_receipt import build_tool_exposure_receipt
 from nexus.orchestrator.canonical_core_transport import CanonicalNexusCoreTransportPort
 
 
-def _create_receipt(enforcement_mode: str = "ENFORCED_NATIVE_PROVIDER", op_id: str = "op-test-1", att_id: str = "att-1") -> dict:
+def _create_receipt(
+    enforcement_mode: str = "ENFORCED_NATIVE_PROVIDER",
+    op_id: str = "op-test-1",
+    att_id: str = "att-1",
+) -> dict:
     return build_tool_exposure_receipt(
         operation_id=op_id,
         attempt_id=att_id,

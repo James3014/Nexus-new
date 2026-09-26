@@ -16,7 +16,11 @@ from nexus.contracts.tool_exposure_receipt import (
 def _sample_receipt(
     *,
     enforcement_mode: str = "ENFORCED_MANAGED_BRIDGE",
-    candidate_tools: tuple[str, ...] = ("workspace.read", "workspace.search_text", "workspace.list"),
+    candidate_tools: tuple[str, ...] = (
+        "workspace.read",
+        "workspace.search_text",
+        "workspace.list",
+    ),
     selected_tools: tuple[str, ...] = ("workspace.read", "workspace.search_text"),
     actual_exposed_tools: tuple[str, ...] = ("workspace.read",),
 ) -> dict:
@@ -61,7 +65,9 @@ def test_selected_tools_exceed_candidate_fails_closed():
 
 
 def test_actual_exposed_tools_exceed_selected_fails_closed():
-    with pytest.raises(ToolExposureWidenedError, match="ACTUAL_EXPOSED_TOOLS_EXCEED_SELECTED_TOOLS"):
+    with pytest.raises(
+        ToolExposureWidenedError, match="ACTUAL_EXPOSED_TOOLS_EXCEED_SELECTED_TOOLS"
+    ):
         _sample_receipt(
             candidate_tools=("workspace.read", "workspace.mutate"),
             selected_tools=("workspace.read",),

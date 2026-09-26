@@ -195,7 +195,11 @@ def validate_tool_exposure_receipt(
     selected = receipt.get("selected_tools")
     actual = receipt.get("actual_exposed_tools")
 
-    if not isinstance(candidates, list) or not isinstance(selected, list) or not isinstance(actual, list):
+    if (
+        not isinstance(candidates, list)
+        or not isinstance(selected, list)
+        or not isinstance(actual, list)
+    ):
         raise ToolExposureError("TOOL_EXPOSURE_LISTS_INVALID")
 
     if not set(selected).issubset(set(candidates)):
