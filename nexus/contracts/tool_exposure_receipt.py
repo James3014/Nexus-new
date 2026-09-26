@@ -7,42 +7,36 @@ from typing import Any, Mapping, Sequence
 
 TOOL_EXPOSURE_RECEIPT_SCHEMA = "nexus.tool_exposure_receipt.v1"
 
-ENFORCEMENT_MODES = frozenset(
-    {
-        "ENFORCED_NATIVE_PROVIDER",
-        "ENFORCED_MANAGED_BRIDGE",
-        "REQUEST_ONLY_NOT_ENFORCED",
-        "NOT_OBSERVED",
-        "NO_EXTERNAL_TOOL_SURFACE",
-        "UNKNOWN",
-    }
-)
+ENFORCEMENT_MODES = frozenset({
+    "ENFORCED_NATIVE_PROVIDER",
+    "ENFORCED_MANAGED_BRIDGE",
+    "REQUEST_ONLY_NOT_ENFORCED",
+    "NOT_OBSERVED",
+    "NO_EXTERNAL_TOOL_SURFACE",
+    "UNKNOWN",
+})
 
-PHYSICALLY_ENFORCED_MODES = frozenset(
-    {
-        "ENFORCED_NATIVE_PROVIDER",
-        "ENFORCED_MANAGED_BRIDGE",
-    }
-)
+PHYSICALLY_ENFORCED_MODES = frozenset({
+    "ENFORCED_NATIVE_PROVIDER",
+    "ENFORCED_MANAGED_BRIDGE",
+})
 
-_EXPECTED_FIELDS = frozenset(
-    {
-        "schema",
-        "operation_id",
-        "attempt_id",
-        "provider",
-        "backend_id",
-        "planner_decision_hash",
-        "projection_hash",
-        "enforcement_mode",
-        "candidate_tools",
-        "selected_tools",
-        "actual_exposed_tools",
-        "actual_exposed_tool_count",
-        "authority_kind",
-        "exposure_hash",
-    }
-)
+_EXPECTED_FIELDS = frozenset({
+    "schema",
+    "operation_id",
+    "attempt_id",
+    "provider",
+    "backend_id",
+    "planner_decision_hash",
+    "projection_hash",
+    "enforcement_mode",
+    "candidate_tools",
+    "selected_tools",
+    "actual_exposed_tools",
+    "actual_exposed_tool_count",
+    "authority_kind",
+    "exposure_hash",
+})
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
