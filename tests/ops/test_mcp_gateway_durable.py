@@ -76,6 +76,16 @@ def _r1b2_portable_lstat(path, *, dir_fd=None):
 
 @pytest.fixture(autouse=True)
 def _isolated_host_authority_store(monkeypatch, tmp_path):
+    fake_github_cli = tmp_path / "gh"
+    fake_github_cli.write_text("#!/bin/sh\nexit 0\n")
+    fake_github_cli.chmod(0o755)
+    env_path = tmp_path / "mcp-gateway.env"
+    env_path.write_text(
+        "export NEXUS_MCP_GATEWAY_TOKEN='SECRET'\n"
+        f"export NEXUS_GITHUB_CLI='{fake_github_cli}'\n"
+    )
+    env_path.chmod(0o600)
+    monkeypatch.setattr(g, "ENV_PATH", env_path)
     monkeypatch.setattr(g, "HOST_UID", os.getuid())
     monkeypatch.setattr(g, "HOST_AUTHORITY_UID", os.getuid())
     path = tmp_path / "gateway-direct" / "host-authority.json"
@@ -129,7 +139,15 @@ def _isolated_host_authority_store(monkeypatch, tmp_path):
 def setup(monkeypatch, tmp_path, head="abc123", dirty="", branch="nexus/integration/main"):
     monkeypatch.setattr(g, "CANONICAL_ROOT", tmp_path)
     monkeypatch.setattr(g, "ENV_PATH", tmp_path.parent / f"{tmp_path.name}-state.env")
-    g.ENV_PATH.write_text("export NEXUS_MCP_GATEWAY_TOKEN='SECRET'\nexport NEXUS_GATEWAY_HOST=127.0.0.1\n"); os.chmod(g.ENV_PATH, 0o600)
+    fake_github_cli = tmp_path / "gh"
+    fake_github_cli.write_text("#!/bin/sh\nexit 0\n")
+    fake_github_cli.chmod(0o755)
+    g.ENV_PATH.write_text(
+        "export NEXUS_MCP_GATEWAY_TOKEN='SECRET'\n"
+        "export NEXUS_GATEWAY_HOST=127.0.0.1\n"
+        f"export NEXUS_GITHUB_CLI='{fake_github_cli}'\n"
+    )
+    os.chmod(g.ENV_PATH, 0o600)
     vals = {"branch": branch, "status": dirty, "head": head}
     monkeypatch.setattr(g, "_git", lambda _r, *a: vals["head"] if a[0] == "rev-parse" else vals[a[0]])
     monkeypatch.setattr(g, "_is_ancestor", lambda _r, _a, _d: True)
@@ -2339,12 +2357,15 @@ def test_gateway_reload_writes_only_fixed_service_and_requires_postflight(monkey
     values = {**request.__dict__, "postflight": post}
     values["request_hash"] = __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash({k: v for k, v in values.items() if k not in {"request_hash", "schema"}})
     request = request.__class__(**values)
+    observer = g._github_observer_dependency()
     identity = {"server_instance_id": "new", "repo_root": request.desired.git.root, "git_head": request.desired.git.head,
                 "permission_policy_hash": "b" * 64, "lifecycle_revision": GATEWAY_LIFECYCLE_REVISION,
-                "tool_manifest_revision": manifest, "full_tool_schema_hash": schema}
+                "tool_manifest_revision": manifest, "full_tool_schema_hash": schema,
+                "github_observer": observer}
     server_info = {"serverInstanceId": "new", "permissionPolicyHash": "b" * 64,
                    "lifecycleRevision": GATEWAY_LIFECYCLE_REVISION,
-                   "toolManifestRevision": manifest, "fullToolSchemaHash": schema}
+                   "toolManifestRevision": manifest, "fullToolSchemaHash": schema,
+                   "githubObserver": observer}
     class Response:
         def __init__(self, value): self.value = value
         def __enter__(self): return self
@@ -2566,11 +2587,13 @@ def test_postflight_requires_authenticated_identity_and_recomputes_manifest(monk
     manifest = hashlib.sha256(json.dumps(("ping",), separators=(",", ":"), ensure_ascii=True).encode()).hexdigest()
     schema = hashlib.sha256(json.dumps(tools, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
     from nexus.contracts.gateway_deployment import DESIRED_PROFILE
+    observer = g._github_observer_dependency()
     identity = {
         "server_instance_id": "new-instance", "repo_root": DESIRED_PROFILE.git.root, "git_head": DESIRED_PROFILE.git.head,
         "permission_policy_hash": "a" * 64,
         "lifecycle_revision": GATEWAY_LIFECYCLE_REVISION,
         "tool_manifest_revision": manifest, "full_tool_schema_hash": schema,
+        "github_observer": observer,
     }
 
     class Response:
@@ -2596,6 +2619,7 @@ def test_postflight_requires_authenticated_identity_and_recomputes_manifest(monk
                 "serverInstanceId": "new-instance", "toolManifestRevision": manifest,
                 "fullToolSchemaHash": schema, "permissionPolicyHash": "a" * 64,
                 "lifecycleRevision": GATEWAY_LIFECYCLE_REVISION,
+                "githubObserver": observer,
             }}})
         return Response({"result": {"tools": tools}})
 
@@ -2884,6 +2908,7 @@ def test_collect_dispatch_unloaded_rollback_skips_health_and_launch_effects(monk
 
 
 def _actual_gateway_surfaces(profile, tools):
+    observer = g._github_observer_dependency()
     manifest = hashlib.sha256(
         json.dumps(tuple(sorted(item["name"] for item in tools)), separators=(",", ":"), ensure_ascii=True).encode()
     ).hexdigest()
@@ -2898,6 +2923,7 @@ def _actual_gateway_surfaces(profile, tools):
         "full_tool_schema_hash": schema,
         "permission_policy_hash": "a" * 64,
         "lifecycle_revision": GATEWAY_LIFECYCLE_REVISION,
+        "github_observer": observer,
     }
     server_info = {
         "serverInstanceId": "physical-instance",
@@ -2905,6 +2931,7 @@ def _actual_gateway_surfaces(profile, tools):
         "fullToolSchemaHash": schema,
         "permissionPolicyHash": "a" * 64,
         "lifecycleRevision": GATEWAY_LIFECYCLE_REVISION,
+        "githubObserver": observer,
     }
     return health, server_info, manifest, schema
 
@@ -2934,6 +2961,31 @@ def _surface_opener(health, server_info, tools):
         return Response({"result": {"tools": tools}})
 
     return opener
+
+
+def test_http_health_degrades_when_github_observer_dependency_is_unavailable(
+    monkeypatch,
+):
+    from scripts.ops import nexus_mcp_gateway_http as http_gateway
+
+    unavailable = {
+        "schema": "nexus.github_observer_dependency.v1",
+        "ready": False,
+        "executable_path": None,
+        "executable_sha256": None,
+        "failure_code": "GITHUB_OBSERVER_EXECUTABLE_UNAVAILABLE",
+    }
+    monkeypatch.setattr(
+        http_gateway,
+        "github_observer_runtime_identity",
+        lambda: unavailable,
+    )
+    monkeypatch.setattr(http_gateway, "_git_head", lambda: "a" * 40)
+
+    identity = http_gateway.runtime_identity()
+
+    assert identity["status"] == "degraded"
+    assert identity["github_observer"] == unavailable
 
 
 def test_actual_gateway_surfaces_prove_fixed_contract_identity_without_fake_health_fields():
@@ -3739,6 +3791,30 @@ def test_r1_live_production_wrapper_and_plist_are_fixed_and_secret_free(
         g._recovery_expected_plist_bytes("/tmp/caller-selected")
 
 
+def test_r1_live_production_effect_blocks_before_launchctl_without_bound_github_cli(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    plan = g._recovery_plan(fixture["request"], fixture["receipt"])
+    g.ENV_PATH.write_text("export NEXUS_MCP_GATEWAY_TOKEN='SECRET'\n")
+    g.ENV_PATH.chmod(0o600)
+    calls = []
+
+    adapters = g._production_recovery_adapters(
+        fixture["receipt"],
+        runner=lambda *args: calls.append(args)
+        or subprocess.CompletedProcess(args, 0, "", ""),
+        opener=_production_health_opener(),
+        token_loader=lambda: "SECRET",
+        sleeper=lambda _: None,
+    )
+
+    with pytest.raises(g.GateError, match="NEXUS_GITHUB_CLI is required"):
+        adapters.effect(plan)
+
+    assert calls == []
+
+
 def test_r1_live_production_effect_uses_only_fixed_gateway_launchctl_surface(
     tmp_path, monkeypatch
 ):
@@ -3892,6 +3968,7 @@ def test_r1_live_production_postflight_requires_changed_server_instance(
         "tool_count": len(tools),
     }
     monkeypatch.setattr(g, "_recovery_expected_postflight", lambda _receipt: expected)
+    observer = g._github_observer_dependency()
     health = {
         "server_instance_id": physical.server_instance,
         "repo_root": physical.root,
@@ -3901,6 +3978,7 @@ def test_r1_live_production_postflight_requires_changed_server_instance(
         "full_tool_schema_hash": schema,
         "permission_policy_hash": expected["permission_sha256"],
         "lifecycle_revision": expected["lifecycle"],
+        "github_observer": observer,
     }
     server_info = {
         "serverInstanceId": physical.server_instance,
@@ -3908,6 +3986,7 @@ def test_r1_live_production_postflight_requires_changed_server_instance(
         "fullToolSchemaHash": schema,
         "permissionPolicyHash": expected["permission_sha256"],
         "lifecycleRevision": expected["lifecycle"],
+        "githubObserver": observer,
     }
     postflight = g._recovery_live_postflight(
         plan,
@@ -3922,7 +4001,10 @@ def test_r1_live_production_postflight_requires_changed_server_instance(
         g.GatewayContractError, match="server instance did not change"
     ):
         g._validate_recovery_postflight(
-            postflight, physical, fixture["receipt"]
+            postflight,
+            physical,
+            fixture["receipt"],
+            observer,
         )
 
 
@@ -3979,6 +4061,7 @@ def _r1b2_postflight(fixture, physical, **changes):
         "schema_sha256": expected["schema_sha256"],
         "permission_sha256": expected["permission_sha256"],
         "lifecycle": expected["lifecycle"],
+        "github_observer": g._github_observer_dependency(),
     }
     values = {
         "authenticated": True,
@@ -3992,6 +4075,7 @@ def _r1b2_postflight(fixture, physical, **changes):
         },
         "previous_server_instance": None,
         "applied": False,
+        "github_observer": g._github_observer_dependency(),
         **changes,
     }
     return values
@@ -4911,6 +4995,46 @@ def test_r1b2_verified_terminal_replay_revalidates_all_artifacts(
         )
 
 
+def test_r1b2_verified_terminal_replay_uses_durable_observer_binding(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    terminal = g._gateway_recover_with_adapters(
+        fixture["request"],
+        adapters=_r1b2_adapters(fixture, ledger),
+        ledger=ledger,
+    )
+    assert terminal.result == "VERIFIED"
+
+    records = ledger.recovery_rows(
+        fixture["request"].request_id,
+        request=fixture["request"],
+        receipt=fixture["receipt"],
+        source_bundle_evidence=None,
+    )
+    bound_observer = g._bound_recovery_observer(records)
+    physical = _r1b2_physical_identity(fixture, "desired")
+    postflight = _r1b2_postflight(fixture, physical)
+    assert postflight["health"]["github_observer"] == bound_observer
+
+    g.ENV_PATH.write_text("export NEXUS_MCP_GATEWAY_TOKEN='SECRET'\n")
+    g.ENV_PATH.chmod(0o600)
+
+    replay = g._RecoveryAdapters(
+        observe=lambda _plan: physical,
+        effect=lambda _plan: pytest.fail("terminal replay cannot invoke effect"),
+        postflight=lambda _plan, _identity: postflight,
+        clock=lambda: "2026-08-25T00:00:00Z",
+        crash_hook=lambda _point: None,
+    )
+    assert g._gateway_recover_with_adapters(
+        fixture["request"], adapters=replay, ledger=ledger
+    ) == terminal
+
+
 def test_r1b2_rolled_back_terminal_revalidates_predecessor(tmp_path, monkeypatch):
     fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
     ledger = g.GatewayLedger(
@@ -5001,6 +5125,7 @@ def _r1b2_runtime_payload(fixture):
             fixture["state"] / "recovery-authority.json"
         ),
         "GATEWAY_LOCK": str(fixture["lock_path"]),
+        "ENV_PATH": str(g.ENV_PATH),
     }
 
 
@@ -5016,6 +5141,7 @@ def _r1b2_apply_runtime_payload(payload):
         "GATEWAY_DEPLOYMENTS_ROOT",
         "GATEWAY_RECOVERY_AUTHORITY_STORE",
         "GATEWAY_LOCK",
+        "ENV_PATH",
     }
     for name, value in payload.items():
         setattr(g, name, Path(value) if name in path_names else value)

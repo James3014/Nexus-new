@@ -578,6 +578,36 @@ def _resolve_github_cli() -> tuple[str | None, str | None]:
     return str(resolved), None
 
 
+def github_observer_runtime_identity() -> dict[str, Any]:
+    """Expose the non-secret executable identity required by Project Entry."""
+    executable, _error = _resolve_github_cli()
+    if executable is None:
+        return {
+            "schema": "nexus.github_observer_dependency.v1",
+            "ready": False,
+            "executable_path": None,
+            "executable_sha256": None,
+            "failure_code": "GITHUB_OBSERVER_EXECUTABLE_UNAVAILABLE",
+        }
+    try:
+        digest = hashlib.sha256(Path(executable).read_bytes()).hexdigest()
+    except OSError:
+        return {
+            "schema": "nexus.github_observer_dependency.v1",
+            "ready": False,
+            "executable_path": executable,
+            "executable_sha256": None,
+            "failure_code": "GITHUB_OBSERVER_EXECUTABLE_UNAVAILABLE",
+        }
+    return {
+        "schema": "nexus.github_observer_dependency.v1",
+        "ready": True,
+        "executable_path": executable,
+        "executable_sha256": digest,
+        "failure_code": None,
+    }
+
+
 def observe_github_issue(repository: str, issue_number: int) -> dict[str, Any]:
     """Fresh, bounded GitHub observation; never writes or infers missing state."""
     github_cli, resolution_error = _resolve_github_cli()
@@ -4889,6 +4919,7 @@ class UnifiedMCPGateway:
             "route_authority": "CapabilityPlanner",
             "execution_lanes": ["DIRECT_CANONICAL", "ASSISTED_CANONICAL", "ISOLATED_TARGET"],
             "canonical_repo_root": str(CANONICAL_SOURCE_ROOT),
+            "github_observer": github_observer_runtime_identity(),
             "lifecycle": lifecycle,
         }
 
@@ -6474,6 +6505,7 @@ class UnifiedMCPGateway:
                         "lifecycleRevision": LIFECYCLE_REVISION,
                         "serverInstanceId": SERVER_INSTANCE_ID,
                         "serverStartedAt": SERVER_STARTED_AT,
+                        "githubObserver": github_observer_runtime_identity(),
                     },
                 },
             }
