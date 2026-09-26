@@ -90,6 +90,27 @@ def test_repository_secret_hygiene_paths_map_without_fallback():
     ]
 
 
+def test_issue653_retired_sampler_path_maps_without_fallback():
+    details = select_target_details(
+        ["nexus/search/sampler.py"],
+        load_impact_rules(),
+        index_path=Path("/tmp/missing-issue653-impact-index.json"),
+        history_path=Path("/tmp/missing-issue653-history.jsonl"),
+    )
+
+    assert details.targets == [
+        "tests/unit/committee/search/test_diversity.py",
+        "tests/architecture/test_boundaries_v2.py",
+        "tests/architecture/test_boundaries_v3.py",
+        "tests/services/test_policy_gate.py",
+    ]
+    assert details.unmatched_paths == []
+    assert details.fallback_used is False
+    assert details.risk == "high"
+    assert details.high_risk_escalated is True
+    assert details.risk_reasons == ["issue653_proven_orphan_retirement_contract"]
+
+
 def test_worker_registry_contract_maps_exact_targets_without_fallback():
     details = select_target_details(
         ["nexus/executors/worker_registry.py"],
