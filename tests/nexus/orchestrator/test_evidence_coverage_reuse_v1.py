@@ -346,14 +346,12 @@ def test_transport_output_mutation_does_not_mutate_contract(tmp_path):
     )
     before = copy.deepcopy(contract.model_dump(mode="json")["expected_evidence"])
     projected = project(contract)
-    projected["expected_subjects"].append(
-        {
-            "logical_subject_id": "evil",
-            "evidence_kind": "x",
-            "requirement_mode": "REQUIRED",
-            "applicability": "APPLICABLE",
-        }
-    )
+    projected["expected_subjects"].append({
+        "logical_subject_id": "evil",
+        "evidence_kind": "x",
+        "requirement_mode": "REQUIRED",
+        "applicability": "APPLICABLE",
+    })
     projected["expected_subjects"][0]["evidence_kind"] = "MUTATED"
     assert contract.model_dump(mode="json")["expected_evidence"] == before
 
@@ -368,15 +366,13 @@ def test_transport_does_not_author_universe():
 def test_wrong_core_revision_marked_fail_closed():
     from nexus.orchestrator.canonical_core_transport import core_provenance_status
 
-    status = core_provenance_status(
-        {
-            "available": True,
-            "source_root": "/tmp/fake-core",
-            "expected_revision": "f" * 40,
-            "observed_commit": "a" * 40,
-            "observed_tree": "b" * 40,
-        }
-    )
+    status = core_provenance_status({
+        "available": True,
+        "source_root": "/tmp/fake-core",
+        "expected_revision": "f" * 40,
+        "observed_commit": "a" * 40,
+        "observed_tree": "b" * 40,
+    })
     assert status["fail_closed"] is True
     assert status["status"] == "CORE_REVISION_MISMATCH"
     assert status["observed_commit"] == "a" * 40
@@ -389,15 +385,13 @@ def test_missing_observed_core_identity_marked_unavailable():
         read_observed_core_identity,
     )
 
-    status = core_provenance_status(
-        {
-            "available": False,
-            "reason": "CORE_IDENTITY_UNREADABLE",
-            "expected_revision": "f" * 40,
-            "observed_commit": None,
-            "observed_tree": None,
-        }
-    )
+    status = core_provenance_status({
+        "available": False,
+        "reason": "CORE_IDENTITY_UNREADABLE",
+        "expected_revision": "f" * 40,
+        "observed_commit": None,
+        "observed_tree": None,
+    })
     assert status["status"] == "CORE_IDENTITY_UNAVAILABLE"
     assert status["fail_closed"] is True
     assert status["observed_commit"] is None
