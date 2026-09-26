@@ -6,37 +6,77 @@ import re
 from typing import Any, Mapping, Sequence
 
 TOOL_EXPOSURE_RECEIPT_SCHEMA = "nexus.tool_exposure_receipt.v1"
+STABLE_TOOL_IDENTITY_SCHEMA = "nexus.stable_tool_identity.v1"
+RUNTIME_TOOL_GENERATION_SCHEMA = "nexus.runtime_tool_generation.v1"
 
-ENFORCEMENT_MODES = frozenset({
-    "ENFORCED_NATIVE_PROVIDER",
-    "ENFORCED_MANAGED_BRIDGE",
-    "REQUEST_ONLY_NOT_ENFORCED",
-    "NOT_OBSERVED",
-    "NO_EXTERNAL_TOOL_SURFACE",
-    "UNKNOWN",
-})
+ENFORCEMENT_MODES = frozenset(
+    {
+        "ENFORCED_NATIVE_PROVIDER",
+        "ENFORCED_MANAGED_BRIDGE",
+        "REQUEST_ONLY_NOT_ENFORCED",
+        "NOT_OBSERVED",
+        "NO_EXTERNAL_TOOL_SURFACE",
+        "UNKNOWN",
+    }
+)
 
-PHYSICALLY_ENFORCED_MODES = frozenset({
-    "ENFORCED_NATIVE_PROVIDER",
-    "ENFORCED_MANAGED_BRIDGE",
-})
+PHYSICALLY_ENFORCED_MODES = frozenset(
+    {
+        "ENFORCED_NATIVE_PROVIDER",
+        "ENFORCED_MANAGED_BRIDGE",
+    }
+)
 
-_EXPECTED_FIELDS = frozenset({
-    "schema",
-    "operation_id",
-    "attempt_id",
-    "provider",
-    "backend_id",
-    "planner_decision_hash",
-    "projection_hash",
-    "enforcement_mode",
-    "candidate_tools",
-    "selected_tools",
-    "actual_exposed_tools",
-    "actual_exposed_tool_count",
-    "authority_kind",
-    "exposure_hash",
-})
+_CORE_FIELDS = frozenset(
+    {
+        "schema",
+        "operation_id",
+        "attempt_id",
+        "provider",
+        "backend_id",
+        "planner_decision_hash",
+        "projection_hash",
+        "enforcement_mode",
+        "candidate_tools",
+        "selected_tools",
+        "actual_exposed_tools",
+        "actual_exposed_tool_count",
+        "authority_kind",
+        "exposure_hash",
+    }
+)
+
+_OPTIONAL_FIELDS = frozenset(
+    {
+        "remote_tool_identities",
+        "runtime_tool_generations",
+    }
+)
+
+_ALL_FIELDS = _CORE_FIELDS | _OPTIONAL_FIELDS
+_EXPECTED_FIELDS = _ALL_FIELDS
+
+_STABLE_TOOL_IDENTITY_FIELDS = frozenset(
+    {
+        "schema",
+        "server_origin",
+        "tool_name",
+        "input_schema_hash",
+        "description_hash",
+        "stable_tool_id",
+    }
+)
+
+_RUNTIME_TOOL_GENERATION_FIELDS = frozenset(
+    {
+        "schema",
+        "server_origin",
+        "server_instance_id",
+        "catalog_generation",
+        "generation_hash",
+        "observed_at",
+    }
+)
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -74,6 +114,245 @@ def _require_text(value: Any, field: str) -> str:
     return value.strip()
 
 
+def compute_tool_input_schema_hash(schema: Mapping[str, Any] | str | None) -> str:
+    """Compute sha256 hex digest for an input schema."""
+    if schema is None:
+        return _sha256({})
+    if isinstance(schema, str):
+        schema_str = schema.strip()
+        if len(schema_str) == 64 and _SHA256_RE.fullmatch(schema_str):
+            return schema_str
+        try:
+            parsed = json.loads(schema_str)
+            return _sha256(parsed)
+        except Exception:
+            return _sha256({"raw": schema_str})
+    return _sha256(schema)
+
+
+def compute_tool_description_hash(description: str | None) -> str:
+    """Compute sha256 hex digest for a tool description."""
+    desc = (description or "").strip()
+    if len(desc) == 64 and _SHA256_RE.fullmatch(desc):
+        return desc
+    return hashlib.sha256(desc.encode("utf-8")).hexdigest()
+
+
+def compute_stable_tool_id(
+    *,
+    server_origin: str,
+    tool_name: str,
+    input_schema_hash: str,
+    description_hash: str,
+) -> str:
+    """Compute durable stable tool authority identity hash."""
+    payload = {
+        "description_hash": _require_hex64(description_hash, "description_hash"),
+        "input_schema_hash": _require_hex64(input_schema_hash, "input_schema_hash"),
+        "server_origin": _require_text(server_origin, "server_origin"),
+        "tool_name": _require_text(tool_name, "tool_name"),
+    }
+    return _sha256(payload)
+
+
+def build_stable_tool_identity(
+    *,
+    server_origin: str,
+    tool_name: str,
+    input_schema: Mapping[str, Any] | str | None = None,
+    input_schema_hash: str | None = None,
+    description: str | None = None,
+    description_hash: str | None = None,
+) -> dict[str, Any]:
+    """Construct a Stable Tool Authority Identity.
+
+    Durable approved capability identity: (server/origin + tool + input schema hash + description hash).
+    Server instance ID is NOT baked into this stable identity.
+    """
+    origin = _require_text(server_origin, "server_origin")
+    name = _require_text(tool_name, "tool_name")
+
+    if input_schema_hash is not None:
+        s_hash = _require_hex64(input_schema_hash, "input_schema_hash")
+    else:
+        s_hash = compute_tool_input_schema_hash(input_schema)
+
+    if description_hash is not None:
+        d_hash = _require_hex64(description_hash, "description_hash")
+    else:
+        d_hash = compute_tool_description_hash(description)
+
+    stable_id = compute_stable_tool_id(
+        server_origin=origin,
+        tool_name=name,
+        input_schema_hash=s_hash,
+        description_hash=d_hash,
+    )
+    return {
+        "schema": STABLE_TOOL_IDENTITY_SCHEMA,
+        "server_origin": origin,
+        "tool_name": name,
+        "input_schema_hash": s_hash,
+        "description_hash": d_hash,
+        "stable_tool_id": stable_id,
+    }
+
+
+def validate_stable_tool_identity(
+    identity: Mapping[str, Any],
+    *,
+    expected_server_origin: str | None = None,
+    expected_tool_name: str | None = None,
+    expected_input_schema_hash: str | None = None,
+    expected_description_hash: str | None = None,
+    expected_stable_tool_id: str | None = None,
+) -> dict[str, Any]:
+    """Validate a Stable Tool Authority Identity fail-closed."""
+    if not isinstance(identity, Mapping):
+        raise ToolExposureError("STABLE_TOOL_IDENTITY_NOT_MAPPING")
+
+    if set(identity) != _STABLE_TOOL_IDENTITY_FIELDS:
+        raise ToolExposureError("STABLE_TOOL_IDENTITY_FIELDS_INVALID")
+
+    if identity.get("schema") != STABLE_TOOL_IDENTITY_SCHEMA:
+        raise ToolExposureError("STABLE_TOOL_IDENTITY_SCHEMA_INVALID")
+
+    origin = _require_text(identity.get("server_origin"), "server_origin")
+    name = _require_text(identity.get("tool_name"), "tool_name")
+    s_hash = _require_hex64(identity.get("input_schema_hash"), "input_schema_hash")
+    d_hash = _require_hex64(identity.get("description_hash"), "description_hash")
+    claimed_id = _require_hex64(identity.get("stable_tool_id"), "stable_tool_id")
+
+    computed_id = compute_stable_tool_id(
+        server_origin=origin,
+        tool_name=name,
+        input_schema_hash=s_hash,
+        description_hash=d_hash,
+    )
+    if claimed_id != computed_id:
+        raise ToolExposureError("STABLE_TOOL_ID_MISMATCH")
+
+    if expected_server_origin is not None and origin != expected_server_origin:
+        raise ToolExposureIdentityError(
+            f"REMOTE_TOOL_SERVER_ORIGIN_MISMATCH: expected {expected_server_origin}, got {origin}"
+        )
+    if expected_tool_name is not None and name != expected_tool_name:
+        raise ToolExposureIdentityError(
+            f"REMOTE_TOOL_NAME_MISMATCH: expected {expected_tool_name}, got {name}"
+        )
+    if expected_input_schema_hash is not None and s_hash != expected_input_schema_hash:
+        raise ToolExposureIdentityError(
+            f"REMOTE_TOOL_INPUT_SCHEMA_MISMATCH: expected {expected_input_schema_hash}, got {s_hash}"
+        )
+    if expected_description_hash is not None and d_hash != expected_description_hash:
+        raise ToolExposureIdentityError(
+            f"REMOTE_TOOL_DESCRIPTION_MISMATCH: expected {expected_description_hash}, got {d_hash}"
+        )
+    if expected_stable_tool_id is not None and claimed_id != expected_stable_tool_id:
+        raise ToolExposureIdentityError(
+            f"REMOTE_STABLE_TOOL_ID_MISMATCH: expected {expected_stable_tool_id}, got {claimed_id}"
+        )
+
+    return dict(identity)
+
+
+def compute_runtime_generation_hash(
+    *,
+    server_origin: str,
+    server_instance_id: str,
+    catalog_generation: int | str,
+) -> str:
+    """Compute ephemeral runtime tool generation evidence hash."""
+    payload = {
+        "catalog_generation": catalog_generation,
+        "server_instance_id": _require_text(server_instance_id, "server_instance_id"),
+        "server_origin": _require_text(server_origin, "server_origin"),
+    }
+    return _sha256(payload)
+
+
+def build_runtime_tool_generation(
+    *,
+    server_origin: str,
+    server_instance_id: str,
+    catalog_generation: int | str,
+    observed_at: str | None = None,
+) -> dict[str, Any]:
+    """Construct ephemeral physical generation evidence."""
+    origin = _require_text(server_origin, "server_origin")
+    instance_id = _require_text(server_instance_id, "server_instance_id")
+    if not isinstance(catalog_generation, (int, str)) or str(catalog_generation).strip() == "":
+        raise ToolExposureError("catalog_generation_invalid")
+    gen = (
+        catalog_generation
+        if isinstance(catalog_generation, int)
+        else str(catalog_generation).strip()
+    )
+    obs_at = str(observed_at or "1970-01-01T00:00:00Z").strip()
+    gen_hash = compute_runtime_generation_hash(
+        server_origin=origin,
+        server_instance_id=instance_id,
+        catalog_generation=gen,
+    )
+    return {
+        "schema": RUNTIME_TOOL_GENERATION_SCHEMA,
+        "server_origin": origin,
+        "server_instance_id": instance_id,
+        "catalog_generation": gen,
+        "generation_hash": gen_hash,
+        "observed_at": obs_at,
+    }
+
+
+def validate_runtime_tool_generation(
+    generation: Mapping[str, Any],
+    *,
+    expected_server_origin: str | None = None,
+    expected_server_instance_id: str | None = None,
+    expected_catalog_generation: int | str | None = None,
+) -> dict[str, Any]:
+    """Validate ephemeral runtime tool generation evidence fail-closed."""
+    if not isinstance(generation, Mapping):
+        raise ToolExposureError("RUNTIME_TOOL_GENERATION_NOT_MAPPING")
+
+    if set(generation) != _RUNTIME_TOOL_GENERATION_FIELDS:
+        raise ToolExposureError("RUNTIME_TOOL_GENERATION_FIELDS_INVALID")
+
+    if generation.get("schema") != RUNTIME_TOOL_GENERATION_SCHEMA:
+        raise ToolExposureError("RUNTIME_TOOL_GENERATION_SCHEMA_INVALID")
+
+    origin = _require_text(generation.get("server_origin"), "server_origin")
+    instance_id = _require_text(generation.get("server_instance_id"), "server_instance_id")
+    cat_gen = generation.get("catalog_generation")
+    if not isinstance(cat_gen, (int, str)) or str(cat_gen).strip() == "":
+        raise ToolExposureError("catalog_generation_invalid")
+    gen = cat_gen if isinstance(cat_gen, int) else str(cat_gen).strip()
+    claimed_hash = _require_hex64(generation.get("generation_hash"), "generation_hash")
+
+    computed_hash = compute_runtime_generation_hash(
+        server_origin=origin,
+        server_instance_id=instance_id,
+        catalog_generation=gen,
+    )
+    if claimed_hash != computed_hash:
+        raise ToolExposureError("RUNTIME_GENERATION_HASH_MISMATCH")
+
+    if expected_server_origin is not None and origin != expected_server_origin:
+        raise ToolExposureIdentityError(
+            f"RUNTIME_GENERATION_SERVER_ORIGIN_MISMATCH: expected {expected_server_origin}, got {origin}"
+        )
+    if expected_server_instance_id is not None and instance_id != expected_server_instance_id:
+        raise ToolExposureIdentityError(
+            f"RUNTIME_GENERATION_SERVER_INSTANCE_MISMATCH: expected {expected_server_instance_id}, got {instance_id}"
+        )
+    if expected_catalog_generation is not None and gen != expected_catalog_generation:
+        raise ToolExposureIdentityError(
+            f"RUNTIME_GENERATION_CATALOG_GENERATION_MISMATCH: expected {expected_catalog_generation}, got {gen}"
+        )
+
+    return dict(generation)
+
+
 def build_tool_exposure_receipt(
     *,
     operation_id: str,
@@ -86,15 +365,16 @@ def build_tool_exposure_receipt(
     candidate_tools: Sequence[str],
     selected_tools: Sequence[str],
     actual_exposed_tools: Sequence[str],
+    remote_tool_identities: Sequence[Mapping[str, Any]] | None = None,
+    runtime_tool_generations: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Construct a canonical derived physical-exposure evidence record.
 
-    This helper does not grant authority or prove that a physical producer
-    actually exposed the supplied surface; that provenance must come from the
-    bound provider/runtime path. Invariants:
+    Invariants:
     1. selected_tools <= candidate_tools
     2. actual_exposed_tools <= selected_tools
     3. enforcement_mode in ENFORCEMENT_MODES
+    4. remote_tool_identities and runtime_tool_generations are validated and deterministically ordered
     """
     op_id = _require_text(operation_id, "operation_id")
     att_id = _require_text(attempt_id, "attempt_id")
@@ -116,6 +396,22 @@ def build_tool_exposure_receipt(
     if not set(actual).issubset(set(selected)):
         raise ToolExposureWidenedError("ACTUAL_EXPOSED_TOOLS_EXCEED_SELECTED_TOOLS")
 
+    validated_remote = [
+        validate_stable_tool_identity(ident) for ident in (remote_tool_identities or ())
+    ]
+    validated_remote.sort(key=lambda x: (x["server_origin"], x["tool_name"], x["stable_tool_id"]))
+
+    validated_gens = [
+        validate_runtime_tool_generation(gen) for gen in (runtime_tool_generations or ())
+    ]
+    validated_gens.sort(
+        key=lambda x: (
+            x["server_origin"],
+            str(x["catalog_generation"]),
+            x["server_instance_id"],
+        )
+    )
+
     material = {
         "schema": TOOL_EXPOSURE_RECEIPT_SCHEMA,
         "operation_id": op_id,
@@ -130,6 +426,8 @@ def build_tool_exposure_receipt(
         "actual_exposed_tools": list(actual),
         "actual_exposed_tool_count": len(actual),
         "authority_kind": "DERIVED_EXPOSURE_EVIDENCE_ONLY",
+        "remote_tool_identities": validated_remote,
+        "runtime_tool_generations": validated_gens,
     }
     exposure_hash = _sha256(material)
     return {**material, "exposure_hash": exposure_hash}
@@ -144,15 +442,20 @@ def validate_tool_exposure_receipt(
     expected_projection_hash: str | None = None,
     expected_provider: str | None = None,
     expected_backend_id: str | None = None,
+    expected_remote_tool_identities: Sequence[Mapping[str, Any]] | None = None,
+    expected_runtime_tool_generations: Sequence[Mapping[str, Any]] | None = None,
+    require_remote_tool_identity: bool = False,
 ) -> dict[str, Any]:
     """Validate a tool exposure receipt fail-closed.
 
-    Rejects missing fields, hash mismatches, identity drift, and tool widening.
+    Rejects missing fields, hash mismatches, identity drift, tool widening,
+    and unapproved remote tool identity / runtime generation drift.
     """
     if not isinstance(receipt, Mapping):
         raise ToolExposureError("TOOL_EXPOSURE_RECEIPT_NOT_MAPPING")
 
-    if set(receipt) != _EXPECTED_FIELDS:
+    receipt_keys = set(receipt)
+    if not (receipt_keys == _CORE_FIELDS or receipt_keys == _ALL_FIELDS):
         raise ToolExposureError("TOOL_EXPOSURE_RECEIPT_FIELDS_INVALID")
 
     if receipt.get("schema") != TOOL_EXPOSURE_RECEIPT_SCHEMA:
@@ -212,5 +515,78 @@ def validate_tool_exposure_receipt(
 
     if _sha256(material) != claimed_hash:
         raise ToolExposureError("TOOL_EXPOSURE_HASH_MISMATCH")
+
+    # Validate remote tool identities
+    raw_remotes = receipt.get("remote_tool_identities") or []
+    if not isinstance(raw_remotes, (list, tuple)):
+        raise ToolExposureError("REMOTE_TOOL_IDENTITIES_INVALID")
+    validated_remotes = [validate_stable_tool_identity(r) for r in raw_remotes]
+
+    if require_remote_tool_identity and not validated_remotes:
+        raise ToolExposureIdentityError("MISSING_REMOTE_TOOL_IDENTITY_EVIDENCE")
+
+    if expected_remote_tool_identities is not None:
+        if not validated_remotes:
+            raise ToolExposureIdentityError("MISSING_REMOTE_TOOL_IDENTITY_EVIDENCE")
+        for exp in expected_remote_tool_identities:
+            exp_origin = exp.get("server_origin")
+            exp_name = exp.get("tool_name")
+            exp_schema_hash = exp.get("input_schema_hash")
+            exp_desc_hash = exp.get("description_hash")
+            exp_stable_id = exp.get("stable_tool_id")
+
+            match = next(
+                (
+                    r
+                    for r in validated_remotes
+                    if r.get("server_origin") == exp_origin and r.get("tool_name") == exp_name
+                ),
+                None,
+            )
+            if match is None:
+                raise ToolExposureIdentityError(
+                    f"REMOTE_TOOL_IDENTITY_NOT_FOUND: {exp_origin}/{exp_name}"
+                )
+
+            if exp_schema_hash and match.get("input_schema_hash") != exp_schema_hash:
+                raise ToolExposureIdentityError(
+                    f"REMOTE_TOOL_INPUT_SCHEMA_MISMATCH: expected {exp_schema_hash}, got {match.get('input_schema_hash')}"
+                )
+            if exp_desc_hash and match.get("description_hash") != exp_desc_hash:
+                raise ToolExposureIdentityError(
+                    f"REMOTE_TOOL_DESCRIPTION_MISMATCH: expected {exp_desc_hash}, got {match.get('description_hash')}"
+                )
+            if exp_stable_id and match.get("stable_tool_id") != exp_stable_id:
+                raise ToolExposureIdentityError(
+                    f"REMOTE_STABLE_TOOL_ID_MISMATCH: expected {exp_stable_id}, got {match.get('stable_tool_id')}"
+                )
+
+    # Validate runtime tool generations
+    raw_gens = receipt.get("runtime_tool_generations") or []
+    if not isinstance(raw_gens, (list, tuple)):
+        raise ToolExposureError("RUNTIME_TOOL_GENERATIONS_INVALID")
+    validated_gens = [validate_runtime_tool_generation(g) for g in raw_gens]
+
+    if expected_runtime_tool_generations is not None:
+        for exp_g in expected_runtime_tool_generations:
+            exp_orig = exp_g.get("server_origin")
+            exp_inst = exp_g.get("server_instance_id")
+            exp_cat = exp_g.get("catalog_generation")
+
+            match_g = next(
+                (g for g in validated_gens if g.get("server_origin") == exp_orig),
+                None,
+            )
+            if match_g is None:
+                raise ToolExposureIdentityError(f"RUNTIME_GENERATION_NOT_FOUND: {exp_orig}")
+
+            if exp_inst and match_g.get("server_instance_id") != exp_inst:
+                raise ToolExposureIdentityError(
+                    f"RUNTIME_GENERATION_SERVER_INSTANCE_MISMATCH: expected {exp_inst}, got {match_g.get('server_instance_id')}"
+                )
+            if exp_cat is not None and match_g.get("catalog_generation") != exp_cat:
+                raise ToolExposureIdentityError(
+                    f"RUNTIME_GENERATION_CATALOG_GENERATION_MISMATCH: expected {exp_cat}, got {match_g.get('catalog_generation')}"
+                )
 
     return dict(receipt)

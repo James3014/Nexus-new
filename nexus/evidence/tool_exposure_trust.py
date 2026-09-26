@@ -1,9 +1,12 @@
-"""Tool Exposure Core Evidence Trust & Completion Claim Binding (#1138).
+"""Tool Exposure Core Evidence Trust & Completion Claim Binding (#1138, #1144).
 
 Consumes physical tool-exposure receipts produced under #982 and validates
 that Core EvidenceBundle observations fail closed whenever a completion claim
 requires physical tool-exposure evidence but the receipt is missing, stale,
 substituted, unobserved, or merely requested.
+
+Binds approved remote MCP tool authority identity through physical invocation
+and Core completion (#1144).
 """
 
 from __future__ import annotations
@@ -36,6 +39,8 @@ def bind_tool_exposure_observation(
     - If enforcement_mode is NOT in PHYSICALLY_ENFORCED_MODES, returns status="FAIL".
     - An ENFORCED_* label alone is not physical producer proof. Until #982
       supplies a canonical provider/runtime provenance path, it also fails closed.
+    - If remote tool identity is expected or required, validates stable tool authority
+      identity and runtime generation evidence fail-closed (#1144).
     """
     if receipt is None:
         return {
@@ -65,6 +70,11 @@ def bind_tool_exposure_observation(
                 "status": "FAIL",
                 "reason": f"TOOL_EXPOSURE_BINDING_INCOMPLETE:{','.join(missing)}",
             }
+
+        requires_remote = bool(
+            expected_binding.get("requires_remote_tool_identity")
+            or expected_binding.get("expected_remote_tool_identities")
+        )
         expected_kwargs = {
             "expected_operation_id": expected_binding.get("operation_id"),
             "expected_attempt_id": expected_binding.get("attempt_id"),
@@ -72,6 +82,13 @@ def bind_tool_exposure_observation(
             "expected_projection_hash": expected_binding.get("projection_hash"),
             "expected_provider": expected_binding.get("provider"),
             "expected_backend_id": expected_binding.get("backend_id"),
+            "expected_remote_tool_identities": expected_binding.get(
+                "expected_remote_tool_identities"
+            ),
+            "expected_runtime_tool_generations": expected_binding.get(
+                "expected_runtime_tool_generations"
+            ),
+            "require_remote_tool_identity": requires_remote,
         }
 
     try:
@@ -108,6 +125,13 @@ def bind_tool_exposure_observation(
         "projection_hash": validated["projection_hash"],
         "actual_exposed_tools": validated["actual_exposed_tools"],
         "actual_exposed_tool_count": validated["actual_exposed_tool_count"],
+        "remote_tool_identities": validated.get("remote_tool_identities", []),
+        "runtime_tool_generations": validated.get("runtime_tool_generations", []),
+        "stable_tool_ids": [
+            ident["stable_tool_id"]
+            for ident in validated.get("remote_tool_identities", [])
+            if isinstance(ident, Mapping) and "stable_tool_id" in ident
+        ],
     }
 
 
@@ -117,7 +141,11 @@ def verify_completion_claim_exposure(
     requires_physical_tool_exposure: bool,
     expected_binding: Mapping[str, Any] | None = None,
 ) -> tuple[bool, str]:
-    """Verify completion evidence without trusting a naked PASS assertion."""
+    """Verify completion evidence without trusting a naked PASS assertion.
+
+    Binds approved remote MCP tool authority identity through physical invocation
+    and Core completion (#1144).
+    """
     if not requires_physical_tool_exposure:
         return True, "EXPOSURE_EVIDENCE_NOT_REQUIRED"
 
@@ -163,5 +191,69 @@ def verify_completion_claim_exposure(
             expected_hash = "sha256:" + expected_hash
         if exposure_obs.get("artifact_hash") != expected_hash:
             return False, "STALE_OR_SUBSTITUTED_TOOL_EXPOSURE_RECEIPT:exposure_hash"
+
+    # Enforce remote tool identity binding when required (#1144)
+    requires_remote = bool(
+        expected_binding.get("requires_remote_tool_identity")
+        or expected_binding.get("expected_remote_tool_identities")
+    )
+    if requires_remote:
+        remote_identities = exposure_obs.get("remote_tool_identities") or []
+        if not remote_identities:
+            return False, "MISSING_REMOTE_TOOL_IDENTITY_EVIDENCE"
+
+        expected_remotes = expected_binding.get("expected_remote_tool_identities")
+        if expected_remotes:
+            for exp in expected_remotes:
+                exp_origin = exp.get("server_origin")
+                exp_name = exp.get("tool_name")
+                exp_stable_id = exp.get("stable_tool_id")
+
+                match = next(
+                    (
+                        r
+                        for r in remote_identities
+                        if r.get("server_origin") == exp_origin and r.get("tool_name") == exp_name
+                    ),
+                    None,
+                )
+                if match is None:
+                    return (
+                        False,
+                        f"STALE_OR_SUBSTITUTED_TOOL_EXPOSURE_RECEIPT:remote_tool_origin_mismatch:{exp_origin}/{exp_name}",
+                    )
+                if exp_stable_id and match.get("stable_tool_id") != exp_stable_id:
+                    return (
+                        False,
+                        f"STALE_OR_SUBSTITUTED_TOOL_EXPOSURE_RECEIPT:remote_tool_identity_drift:{exp_name}",
+                    )
+
+        expected_gens = expected_binding.get("expected_runtime_tool_generations")
+        if expected_gens:
+            runtime_gens = exposure_obs.get("runtime_tool_generations") or []
+            for exp_g in expected_gens:
+                exp_orig = exp_g.get("server_origin")
+                exp_inst = exp_g.get("server_instance_id")
+                exp_cat = exp_g.get("catalog_generation")
+
+                match_g = next(
+                    (g for g in runtime_gens if g.get("server_origin") == exp_orig),
+                    None,
+                )
+                if match_g is None:
+                    return (
+                        False,
+                        f"STALE_OR_SUBSTITUTED_TOOL_EXPOSURE_RECEIPT:runtime_generation_missing:{exp_orig}",
+                    )
+                if exp_inst and match_g.get("server_instance_id") != exp_inst:
+                    return (
+                        False,
+                        f"STALE_OR_SUBSTITUTED_TOOL_EXPOSURE_RECEIPT:runtime_generation_instance_drift:{exp_orig}",
+                    )
+                if exp_cat is not None and match_g.get("catalog_generation") != exp_cat:
+                    return (
+                        False,
+                        f"STALE_OR_SUBSTITUTED_TOOL_EXPOSURE_RECEIPT:runtime_generation_drift:{exp_orig}",
+                    )
 
     return True, "TOOL_EXPOSURE_VERIFIED"

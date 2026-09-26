@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from nexus.contracts.tool_exposure_receipt import build_tool_exposure_receipt
+from nexus.contracts.tool_exposure_receipt import (
+    build_stable_tool_identity,
+    build_tool_exposure_receipt,
+)
 from nexus.evidence.tool_exposure_trust import (
     TOOL_EXPOSURE_VERIFIER_ID,
     bind_tool_exposure_observation,
@@ -176,3 +179,219 @@ def test_unrequired_exposure_passes_without_evidence():
     )
     assert ok is True
     assert reason == "EXPOSURE_EVIDENCE_NOT_REQUIRED"
+
+
+def test_hostile_control_9_receipt_server_a_cannot_satisfy_server_b_completion():
+    tool_a = build_stable_tool_identity(
+        server_origin="mcp://server-a",
+        tool_name="database_query",
+        input_schema={"sql": "string"},
+        description="Query server A database",
+    )
+    tool_b = build_stable_tool_identity(
+        server_origin="mcp://server-b",
+        tool_name="database_query",
+        input_schema={"sql": "string"},
+        description="Query server B database",
+    )
+    obs = {
+        "verifier_id": TOOL_EXPOSURE_VERIFIER_ID,
+        "artifact_id": "tool-exposure-op-wave1-att-1",
+        "artifact_hash": "sha256:" + "a" * 64,
+        "status": "PASS",
+        "operation_id": "op-wave1",
+        "attempt_id": "att-1",
+        "provider": "opencode",
+        "backend_id": "devspace",
+        "planner_decision_hash": "1" * 64,
+        "projection_hash": "2" * 64,
+        "remote_tool_identities": [tool_a],
+        "stable_tool_ids": [tool_a["stable_tool_id"]],
+    }
+    evidence_bundle = {"observations": [obs]}
+
+    # Claim checking for tool_b must reject receipt that only contains tool_a (Control 9)
+    ok, reason = verify_completion_claim_exposure(
+        evidence_bundle,
+        requires_physical_tool_exposure=True,
+        expected_binding={
+            "operation_id": "op-wave1",
+            "attempt_id": "att-1",
+            "provider": "opencode",
+            "backend_id": "devspace",
+            "planner_decision_hash": "1" * 64,
+            "projection_hash": "2" * 64,
+            "exposure_hash": "a" * 64,
+            "expected_remote_tool_identities": [tool_b],
+        },
+    )
+    assert ok is False
+    assert "remote_tool_origin_mismatch" in reason
+
+
+def test_hostile_control_10_missing_required_remote_tool_identity_evidence_fails_closed():
+    obs = {
+        "verifier_id": TOOL_EXPOSURE_VERIFIER_ID,
+        "artifact_id": "tool-exposure-op-wave1-att-1",
+        "artifact_hash": "sha256:" + "a" * 64,
+        "status": "PASS",
+        "operation_id": "op-wave1",
+        "attempt_id": "att-1",
+        "provider": "opencode",
+        "backend_id": "devspace",
+        "planner_decision_hash": "1" * 64,
+        "projection_hash": "2" * 64,
+        "remote_tool_identities": [],
+    }
+    evidence_bundle = {"observations": [obs]}
+
+    ok, reason = verify_completion_claim_exposure(
+        evidence_bundle,
+        requires_physical_tool_exposure=True,
+        expected_binding={
+            "operation_id": "op-wave1",
+            "attempt_id": "att-1",
+            "provider": "opencode",
+            "backend_id": "devspace",
+            "planner_decision_hash": "1" * 64,
+            "projection_hash": "2" * 64,
+            "exposure_hash": "a" * 64,
+            "requires_remote_tool_identity": True,
+        },
+    )
+    assert ok is False
+    assert reason == "MISSING_REMOTE_TOOL_IDENTITY_EVIDENCE"
+
+
+def test_hostile_control_11_local_native_paths_do_not_fabricate_fake_remote_server_identities():
+    obs = {
+        "verifier_id": TOOL_EXPOSURE_VERIFIER_ID,
+        "artifact_id": "tool-exposure-op-wave1-att-1",
+        "artifact_hash": "sha256:" + "a" * 64,
+        "status": "PASS",
+        "operation_id": "op-wave1",
+        "attempt_id": "att-1",
+        "provider": "opencode",
+        "backend_id": "devspace",
+        "planner_decision_hash": "1" * 64,
+        "projection_hash": "2" * 64,
+        "actual_exposed_tools": ["workspace.read"],
+        "remote_tool_identities": [],
+    }
+    evidence_bundle = {"observations": [obs]}
+
+    ok, reason = verify_completion_claim_exposure(
+        evidence_bundle,
+        requires_physical_tool_exposure=True,
+        expected_binding={
+            "operation_id": "op-wave1",
+            "attempt_id": "att-1",
+            "provider": "opencode",
+            "backend_id": "devspace",
+            "planner_decision_hash": "1" * 64,
+            "projection_hash": "2" * 64,
+            "exposure_hash": "a" * 64,
+            # No remote requirement -> local-native tools pass cleanly
+        },
+    )
+    assert ok is True
+    assert reason == "TOOL_EXPOSURE_VERIFIED"
+
+
+def test_hostile_control_1_schema_drift_fails_observation():
+    approved_tool = build_stable_tool_identity(
+        server_origin="mcp://server-a",
+        tool_name="read",
+        input_schema={"path": "string"},
+        description="Read file",
+    )
+    drifted_tool = build_stable_tool_identity(
+        server_origin="mcp://server-a",
+        tool_name="read",
+        input_schema={"path": "string", "encoding": "string"},
+        description="Read file",
+    )
+    receipt = _make_receipt(
+        "ENFORCED_MANAGED_BRIDGE",
+        remote_tool_identities=[drifted_tool],
+    )
+    obs = bind_tool_exposure_observation(
+        receipt,
+        expected_binding={
+            "operation_id": "op-wave1",
+            "attempt_id": "att-1",
+            "provider": "opencode",
+            "backend_id": "devspace",
+            "planner_decision_hash": "1" * 64,
+            "projection_hash": "2" * 64,
+            "expected_remote_tool_identities": [approved_tool],
+        },
+    )
+    assert obs["status"] == "FAIL"
+    assert "REMOTE_TOOL_INPUT_SCHEMA_MISMATCH" in obs["reason"]
+
+
+def test_hostile_control_2_description_drift_fails_observation():
+    approved_tool = build_stable_tool_identity(
+        server_origin="mcp://server-a",
+        tool_name="read",
+        input_schema={"path": "string"},
+        description="Approved safe description",
+    )
+    drifted_tool = build_stable_tool_identity(
+        server_origin="mcp://server-a",
+        tool_name="read",
+        input_schema={"path": "string"},
+        description="Poisoned prompt description",
+    )
+    receipt = _make_receipt(
+        "ENFORCED_MANAGED_BRIDGE",
+        remote_tool_identities=[drifted_tool],
+    )
+    obs = bind_tool_exposure_observation(
+        receipt,
+        expected_binding={
+            "operation_id": "op-wave1",
+            "attempt_id": "att-1",
+            "provider": "opencode",
+            "backend_id": "devspace",
+            "planner_decision_hash": "1" * 64,
+            "projection_hash": "2" * 64,
+            "expected_remote_tool_identities": [approved_tool],
+        },
+    )
+    assert obs["status"] == "FAIL"
+    assert "REMOTE_TOOL_DESCRIPTION_MISMATCH" in obs["reason"]
+
+
+def test_hostile_control_4_server_substitution_fails_observation():
+    approved_tool = build_stable_tool_identity(
+        server_origin="mcp://server-trusted",
+        tool_name="read",
+        input_schema={"path": "string"},
+        description="Read file",
+    )
+    substituted_tool = build_stable_tool_identity(
+        server_origin="mcp://server-malicious",
+        tool_name="read",
+        input_schema={"path": "string"},
+        description="Read file",
+    )
+    receipt = _make_receipt(
+        "ENFORCED_MANAGED_BRIDGE",
+        remote_tool_identities=[substituted_tool],
+    )
+    obs = bind_tool_exposure_observation(
+        receipt,
+        expected_binding={
+            "operation_id": "op-wave1",
+            "attempt_id": "att-1",
+            "provider": "opencode",
+            "backend_id": "devspace",
+            "planner_decision_hash": "1" * 64,
+            "projection_hash": "2" * 64,
+            "expected_remote_tool_identities": [approved_tool],
+        },
+    )
+    assert obs["status"] == "FAIL"
+    assert "REMOTE_TOOL_IDENTITY_NOT_FOUND" in obs["reason"]
