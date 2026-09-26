@@ -34,7 +34,8 @@ def bind_tool_exposure_observation(
     - If receipt is None, returns status="FAIL" with MISSING_RECEIPT.
     - If validation fails or identity drifts, returns status="FAIL".
     - If enforcement_mode is NOT in PHYSICALLY_ENFORCED_MODES, returns status="FAIL".
-    - Only a verified receipt with ENFORCED_* produces status="PASS".
+    - An ENFORCED_* label alone is not physical producer proof. Until #982
+      supplies a canonical provider/runtime provenance path, it also fails closed.
     """
     if receipt is None:
         return {
@@ -87,8 +88,12 @@ def bind_tool_exposure_observation(
 
     mode = validated.get("enforcement_mode")
     is_enforced = mode in PHYSICALLY_ENFORCED_MODES
-    obs_status = "PASS" if is_enforced else "FAIL"
-    reason = "VERIFIED_PHYSICALLY_ENFORCED" if is_enforced else f"UNENFORCED_MODE:{mode}"
+    obs_status = "FAIL"
+    reason = (
+        "PHYSICAL_TOOL_EXPOSURE_PRODUCER_UNVERIFIED"
+        if is_enforced
+        else f"UNENFORCED_MODE:{mode}"
+    )
 
     return {
         "verifier_id": TOOL_EXPOSURE_VERIFIER_ID,
