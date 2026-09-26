@@ -42,6 +42,7 @@ from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
     GatewayInputError,
     UnifiedMCPGateway,
     _compile_agy_command,
+    observe_github_issue,
 )
 from nexus.services.model_workforce_policy import WorkforcePolicyLoader  # noqa: E402
 from nexus.services.runtime_workforce_admission import (  # noqa: E402
@@ -4216,6 +4217,148 @@ def test_project_entry_binding_hash_is_deterministic_and_bound():
     assert first == UnifiedMCPGateway._project_entry_binding_hash(dict(base))
     changed = dict(base, source_tree="c" * 40)
     assert first != UnifiedMCPGateway._project_entry_binding_hash(changed)
+
+
+def test_github_issue_observer_uses_configured_absolute_cli_under_minimal_path(
+    tmp_path, monkeypatch
+):
+    fake_gh = tmp_path / "gh"
+    fake_gh.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' "
+        "'{\"number\":982,\"state\":\"OPEN\","
+        "\"updatedAt\":\"2026-09-26T00:00:00Z\","
+        "\"url\":\"https://github.com/James3014/Nexus-new/issues/982\"}'\n",
+        encoding="utf-8",
+    )
+    fake_gh.chmod(0o755)
+    monkeypatch.setenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+    monkeypatch.setenv("NEXUS_GITHUB_CLI", str(fake_gh))
+
+    result = observe_github_issue("James3014/Nexus-new", 982)
+
+    assert result["ok"] is True
+    assert result["issue"]["number"] == 982
+    assert result["issue"]["state"] == "OPEN"
+
+
+def test_github_issue_observer_rejects_relative_configured_cli(monkeypatch):
+    monkeypatch.setenv("NEXUS_GITHUB_CLI", "gh")
+
+    result = observe_github_issue("James3014/Nexus-new", 982)
+
+    assert result == {
+        "ok": False,
+        "blocker": "GITHUB_OBSERVER_EXECUTABLE_UNAVAILABLE",
+        "detail": "NEXUS_GITHUB_CLI must be an absolute path",
+    }
+
+
+def test_github_issue_observer_fails_closed_when_cli_cannot_be_resolved(monkeypatch):
+    import nexus.orchestrator.unified_mcp_gateway as module
+
+    monkeypatch.delenv("NEXUS_GITHUB_CLI", raising=False)
+    monkeypatch.setenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+    monkeypatch.setattr(module.shutil, "which", lambda *_: None)
+
+    result = observe_github_issue("James3014/Nexus-new", 982)
+
+    assert result == {
+        "ok": False,
+        "blocker": "GITHUB_OBSERVER_EXECUTABLE_UNAVAILABLE",
+        "detail": "GitHub CLI executable could not be resolved",
+    }
+
+
+def _configured_github_observer(monkeypatch, tmp_path, run_result):
+    import nexus.orchestrator.unified_mcp_gateway as module
+
+    github_cli = tmp_path / "gh"
+    github_cli.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    github_cli.chmod(0o755)
+    monkeypatch.setenv("NEXUS_GITHUB_CLI", str(github_cli))
+
+    def fake_run(command, **kwargs):
+        if isinstance(run_result, BaseException):
+            raise run_result
+        return run_result(command)
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    return module
+
+
+def test_github_issue_observer_timeout_is_typed(tmp_path, monkeypatch):
+    module = _configured_github_observer(
+        monkeypatch,
+        tmp_path,
+        subprocess.TimeoutExpired(cmd=["gh"], timeout=5),
+    )
+
+    result = module.observe_github_issue("James3014/Nexus-new", 982)
+
+    assert result["ok"] is False
+    assert result["blocker"] == "GITHUB_OBSERVER_TIMEOUT"
+
+
+@pytest.mark.parametrize(
+    ("stderr", "expected"),
+    [
+        (
+            "To get started with GitHub CLI, please run: gh auth login",
+            "GITHUB_OBSERVER_AUTH_UNAVAILABLE",
+        ),
+        ("GraphQL: issue lookup failed", "GITHUB_OBSERVER_REQUEST_FAILED"),
+    ],
+)
+def test_github_issue_observer_nonzero_exit_is_typed(
+    tmp_path, monkeypatch, stderr, expected
+):
+    module = _configured_github_observer(
+        monkeypatch,
+        tmp_path,
+        lambda command: subprocess.CompletedProcess(command, 1, "", stderr),
+    )
+
+    result = module.observe_github_issue("James3014/Nexus-new", 982)
+
+    assert result["ok"] is False
+    assert result["blocker"] == expected
+
+
+def test_github_issue_observer_malformed_json_is_typed(tmp_path, monkeypatch):
+    module = _configured_github_observer(
+        monkeypatch,
+        tmp_path,
+        lambda command: subprocess.CompletedProcess(command, 0, "{not-json", ""),
+    )
+
+    result = module.observe_github_issue("James3014/Nexus-new", 982)
+
+    assert result["ok"] is False
+    assert result["blocker"] == "GITHUB_OBSERVER_MALFORMED_RESPONSE"
+
+
+def test_project_entry_preserves_typed_github_observer_cause(monkeypatch):
+    gateway = _project_entry_gateway(
+        monkeypatch,
+        lambda *_: {
+            "ok": False,
+            "blocker": "GITHUB_OBSERVER_AUTH_UNAVAILABLE",
+            "detail": "not authenticated",
+        },
+    )
+
+    result = gateway._project_entry(
+        {
+            "repository_owner": "James3014",
+            "repository_name": "Nexus-new",
+            "issue_number": 982,
+        }
+    )
+
+    assert result["status"] == "BLOCKED"
+    assert result["blocker"]["code"] == "PROJECT_ENTRY_GITHUB_OBSERVER_FAILED"
+    assert result["blocker"]["cause_code"] == "GITHUB_OBSERVER_AUTH_UNAVAILABLE"
 
 
 def _project_entry_gateway(monkeypatch, observer, *, service=None, readiness=None):
