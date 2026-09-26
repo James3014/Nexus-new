@@ -596,6 +596,38 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
                 if cmd:
                     evidence_by_id[cmd] = ev
 
+        # Wire tool_exposure_receipt if required by plan or supplied in kwargs (#1138)
+        if "tool_exposure" in required_verifier_ids or "tool_exposure_receipt" in kwargs:
+            from nexus.evidence.tool_exposure_trust import (
+                TOOL_EXPOSURE_VERIFIER_ID,
+                bind_tool_exposure_observation,
+            )
+            raw_receipt = kwargs.get("tool_exposure_receipt")
+            tool_projection = kwargs.get("tool_projection_manifest")
+            if not isinstance(tool_projection, Mapping):
+                tool_projection = {}
+            expected_binding = {
+                "operation_id": prep.get("operation_id"),
+                "attempt_id": prep.get("attempt_id") or kwargs.get("attempt_id"),
+                "planner_decision_hash": (
+                    tool_projection.get("planner_decision_hash")
+                    or kwargs.get("planner_decision_hash")
+                ),
+                "projection_hash": (
+                    tool_projection.get("projection_hash") or kwargs.get("projection_hash")
+                ),
+                "provider": tool_projection.get("provider") or kwargs.get("provider"),
+                "backend_id": tool_projection.get("backend_id") or kwargs.get("backend_id"),
+            }
+            exposure_obs = bind_tool_exposure_observation(raw_receipt, expected_binding=expected_binding)
+            evidence_by_id[TOOL_EXPOSURE_VERIFIER_ID] = {
+                "exit_code": 0 if exposure_obs["status"] == "PASS" else 1,
+                "status": exposure_obs["status"],
+                "artifact_id": exposure_obs["artifact_id"],
+                "artifact_hash": exposure_obs["artifact_hash"],
+                "reason": exposure_obs.get("reason"),
+            }
+
         observations = []
         for vid in sorted(list(required_verifier_ids)):
             v_res = evidence_by_id.get(vid)
@@ -620,14 +652,27 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
                 and not force_fail
             )
             obs_status = "PASS" if is_pass else "FAIL"
-            observations.append({
-                "verifier_id": vid,
-                "artifact_id": f"art-{vid}",
-                "artifact_hash": _sha256(
-                    json.dumps(_to_serializable(v_res or {"exit_code": 0}), sort_keys=True)
-                ),
-                "status": obs_status,
-            })
+
+            if vid == "tool_exposure" and isinstance(v_res, Mapping) and "artifact_hash" in v_res:
+                art_id = v_res.get("artifact_id", f"art-{vid}")
+                art_hash = v_res["artifact_hash"]
+                if not art_hash.startswith("sha256:"):
+                    art_hash = "sha256:" + art_hash
+                observations.append({
+                    "verifier_id": vid,
+                    "artifact_id": art_id,
+                    "artifact_hash": art_hash,
+                    "status": obs_status,
+                })
+            else:
+                observations.append({
+                    "verifier_id": vid,
+                    "artifact_id": f"art-{vid}",
+                    "artifact_hash": _sha256(
+                        json.dumps(_to_serializable(v_res or {"exit_code": 0}), sort_keys=True)
+                    ),
+                    "status": obs_status,
+                })
 
         evidence_payload = {
             "bundle_id": f"eb-{session_id[:12]}",
