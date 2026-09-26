@@ -98,6 +98,10 @@ class ManagedLocalAgentRequest:
     idempotency_key: Optional[str] = None
     repository_identity: Optional[str] = None
     effect_authorization: Optional[Mapping[str, Any]] = None
+    # Optional producer-declared expected-evidence universe (§55-57 projection
+    # point). Carried verbatim into the service request; transport MUST NOT
+    # author it. None = legacy (no-universe) request.
+    expected_evidence: Optional[Mapping[str, Any]] = None
     tool_projection_requests: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
 
@@ -342,6 +346,10 @@ class ManagedLocalAgentLauncher:
             "deletion_policy": dict(request.deletion_policy),
             "managed_binding_hash": binding_identity.binding_hash,
         }
+        if request.expected_evidence is not None:
+            # Projection point (§55-57): carry the producer declaration
+            # verbatim into the service request. No semantic mutation here.
+            service_request["expected_evidence"] = dict(request.expected_evidence)
         if effect_requested:
             assert isinstance(effect_authorization, Mapping)
             service_request.update({

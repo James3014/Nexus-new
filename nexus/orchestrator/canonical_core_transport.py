@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -32,7 +33,12 @@ from nexus.orchestrator.ambient_core import (
     projection_hash,
 )
 
-# Add nexus-core to sys.path
+_EXACT_GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+# The Core worktree actually imported by this transport process. The legacy
+# hardcoded CORE_REPO_ROOT pointed at a developer machine path that does not
+# exist here; keep it as the configured expectation (never as executed truth)
+# and derive the ACTUAL executed identity from the imported product module.
 CORE_REPO_ROOT = Path("/Users/jameschen/Workspace/nexus-core").resolve()
 if str(CORE_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(CORE_REPO_ROOT))
@@ -49,6 +55,7 @@ try:
         verification_plan_hash,
     )
 
+    import product as _IMPORTED_CORE_PACKAGE  # noqa: E402
     from product.protocol import PUBLIC_PROTOCOL_VERSION  # noqa: E402
 
     CORE_AVAILABLE = True
@@ -64,9 +71,207 @@ except ImportError as exc:
         "nexus.core.generic-verification-response.v1-experimental"
     )
 
+    def _unavailable_hash(_value: Any) -> str:  # type: ignore[misc]
+        raise RuntimeError("CANONICAL_NEXUS_CORE_UNAVAILABLE: Cannot perform verification")
+
+    acceptance_contract_hash = _unavailable_hash  # type: ignore[no-redef]
+    change_manifest_hash = _unavailable_hash  # type: ignore[no-redef]
+    change_set_hash = _unavailable_hash  # type: ignore[no-redef]
+    evidence_bundle_hash = _unavailable_hash  # type: ignore[no-redef]
+    verification_plan_hash = _unavailable_hash  # type: ignore[no-redef]
+
+    def verify_generic_changeset(_payload: Any) -> tuple[int, dict[str, Any]]:  # type: ignore[misc]
+        raise RuntimeError("CANONICAL_NEXUS_CORE_UNAVAILABLE: Cannot perform verification")
+
+    _IMPORTED_CORE_PACKAGE = None  # type: ignore[assignment]
+
 
 CANONICAL_CORE_REVISION = "fde015797672b0aac5dca7b41c7e5a0b901698d4"
 CANONICAL_CORE_INTERFACE = "product.adapters.generic_verification.verify_generic_changeset"
+
+
+def _resolve_core_source_root() -> Path | None:
+    """Core source root actually imported (never the configured expectation)."""
+    package = globals().get("_IMPORTED_CORE_PACKAGE")
+    module_file = getattr(package, "__file__", None) if package is not None else None
+    if not module_file:
+        return None
+    try:
+        root = Path(str(module_file)).resolve().parent.parent
+    except Exception:
+        return None
+    return root if (root / "product").is_dir() else None
+
+
+def read_observed_core_identity(core_root: Path | None = None) -> dict[str, Any]:
+    """Bind ACTUAL executed Core commit+tree (INT-8 provenance).
+
+    Unreadable identity returns available=False explicitly — callers fail
+    closed, never substituting expected == observed.
+    """
+    root = core_root if core_root is not None else _resolve_core_source_root()
+    base: dict[str, Any] = {
+        "available": False,
+        "expected_revision": CANONICAL_CORE_REVISION,
+        "observed_commit": None,
+        "observed_tree": None,
+    }
+    if root is None:
+        return {**base, "reason": "CORE_SOURCE_UNAVAILABLE"}
+    try:
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(root),
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        tree = subprocess.check_output(
+            ["git", "rev-parse", "HEAD^{tree}"],
+            cwd=str(root),
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except Exception:
+        return {**base, "reason": "CORE_IDENTITY_UNREADABLE", "source_root": str(root)}
+    if not _EXACT_GIT_SHA_RE.fullmatch(commit) or not _EXACT_GIT_SHA_RE.fullmatch(tree):
+        return {**base, "reason": "CORE_IDENTITY_MALFORMED", "source_root": str(root)}
+    return {
+        "available": True,
+        "source_root": str(root),
+        "expected_revision": CANONICAL_CORE_REVISION,
+        "observed_commit": commit,
+        "observed_tree": tree,
+        "revision_match": commit == CANONICAL_CORE_REVISION,
+    }
+
+
+def core_provenance_status(observed: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Fail-closed Core provenance status for a transport call.
+
+    CORE_UNAVAILABLE / CORE_IDENTITY_UNAVAILABLE / CORE_REVISION_MISMATCH are
+    fail-closed; only CORE_REVISION_PINNED proceeds (binds actual Y, never X).
+
+    An explicitly provided observed identity is always evaluated on its own
+    terms (pure evaluation, used by tests and by verify_candidate which
+    already bound the live identity). The CORE_AVAILABLE import gate applies
+    only when no observed identity is supplied and the live import is needed.
+    """
+    if observed is not None:
+        identity = dict(observed)
+        if not identity.get("available"):
+            return {
+                "status": "CORE_IDENTITY_UNAVAILABLE",
+                "fail_closed": True,
+                "reason": identity.get("reason", "CORE_IDENTITY_UNREADABLE"),
+                "expected_revision": CANONICAL_CORE_REVISION,
+                "observed_commit": None,
+                "observed_tree": None,
+                "source_root": identity.get("source_root"),
+            }
+        if identity.get("observed_commit") != CANONICAL_CORE_REVISION:
+            return {
+                "status": "CORE_REVISION_MISMATCH",
+                "fail_closed": True,
+                "reason": "INT-8: executed Core differs from configured expectation",
+                "expected_revision": CANONICAL_CORE_REVISION,
+                "observed_commit": identity.get("observed_commit"),
+                "observed_tree": identity.get("observed_tree"),
+                "source_root": identity.get("source_root"),
+            }
+        return {
+            "status": "CORE_REVISION_PINNED",
+            "fail_closed": False,
+            "expected_revision": CANONICAL_CORE_REVISION,
+            "observed_commit": identity.get("observed_commit"),
+            "observed_tree": identity.get("observed_tree"),
+            "source_root": identity.get("source_root"),
+        }
+    if not CORE_AVAILABLE:
+        return {
+            "status": "CORE_UNAVAILABLE",
+            "fail_closed": True,
+            "reason": CORE_IMPORT_ERROR,
+            "expected_revision": CANONICAL_CORE_REVISION,
+            "observed_commit": None,
+            "observed_tree": None,
+        }
+    identity = dict(observed) if isinstance(observed, Mapping) else read_observed_core_identity()
+    if not identity.get("available"):
+        return {
+            "status": "CORE_IDENTITY_UNAVAILABLE",
+            "fail_closed": True,
+            "reason": identity.get("reason", "CORE_IDENTITY_UNREADABLE"),
+            "expected_revision": CANONICAL_CORE_REVISION,
+            "observed_commit": None,
+            "observed_tree": None,
+            "source_root": identity.get("source_root"),
+        }
+    if identity.get("observed_commit") != CANONICAL_CORE_REVISION:
+        return {
+            "status": "CORE_REVISION_MISMATCH",
+            "fail_closed": True,
+            "reason": "INT-8: executed Core differs from configured expectation",
+            "expected_revision": CANONICAL_CORE_REVISION,
+            "observed_commit": identity.get("observed_commit"),
+            "observed_tree": identity.get("observed_tree"),
+            "source_root": identity.get("source_root"),
+        }
+    return {
+        "status": "CORE_REVISION_PINNED",
+        "fail_closed": False,
+        "expected_revision": CANONICAL_CORE_REVISION,
+        "observed_commit": identity.get("observed_commit"),
+        "observed_tree": identity.get("observed_tree"),
+        "source_root": identity.get("source_root"),
+    }
+
+
+def project_expected_evidence_universe(contract: Any) -> dict[str, Any] | None:
+    """Project the producer-declared universe (sorted, no drops, no rewrites).
+
+    Legacy contracts (no expected_evidence) project to None — a no-universe
+    legacy Core request. Transport MUST NOT author the universe: absence
+    always yields None, never a synthesized universe.
+    """
+    universe = getattr(contract, "expected_evidence", None)
+    if universe is None:
+        return None
+    if isinstance(universe, Mapping):
+        generation = universe.get("universe_generation")
+        raw_subjects = universe.get("subjects") or []
+        subjects = [
+            {
+                "logical_subject_id": s.get("logical_subject_id"),
+                "evidence_kind": s.get("evidence_kind"),
+                "requirement_mode": getattr(
+                    s.get("requirement_mode"), "value", s.get("requirement_mode")
+                ),
+                "applicability": getattr(s.get("applicability"), "value", s.get("applicability")),
+            }
+            for s in raw_subjects
+        ]
+    else:
+        generation = getattr(universe, "universe_generation", None)
+        raw_subjects = getattr(universe, "subjects", None) or []
+        subjects = [
+            {
+                "logical_subject_id": getattr(s, "logical_subject_id", None),
+                "evidence_kind": getattr(s, "evidence_kind", None),
+                "requirement_mode": getattr(
+                    getattr(s, "requirement_mode", None),
+                    "value",
+                    getattr(s, "requirement_mode", None),
+                ),
+                "applicability": getattr(
+                    getattr(s, "applicability", None), "value", getattr(s, "applicability", None)
+                ),
+            }
+            for s in raw_subjects
+        ]
+    ordered = sorted(subjects, key=lambda s: str(s.get("logical_subject_id") or ""))
+    # Deep-copy so later mutation of transport output cannot alias the contract.
+    frozen = json.loads(json.dumps(ordered, sort_keys=True, ensure_ascii=False))
+    return {"expected_subjects": frozen, "universe_generation": generation}
 
 
 def _sha256(data: bytes | str) -> str:
@@ -528,12 +733,24 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
         if candidate_state_hash is None:
             candidate_state_hash = manifest_hash[7:]
 
-        # Build AcceptanceContract
+        # Build AcceptanceContract — project the producer-declared universe
+        # WITHOUT semantic mutation (sorted, no drops, no rewrites). Legacy
+        # contracts (no expected_evidence) project to a no-universe request.
         contract_id = request.get("contract_id") or "canary-contract"
         allowed_paths = request.get("allowed_files") or changed_paths
         required_verifier_ids = request.get("verifier_commands") or ["git diff --check"]
         deletion_policy_val = request.get("deletion_policy") or "FORBID"
         deletion_policy = _normalize_deletion_policy(deletion_policy_val)
+        contract_arg = kwargs.get("contract")
+        universe_projection = (
+            project_expected_evidence_universe(contract_arg)
+            if contract_arg is not None
+            else project_expected_evidence_universe(request)
+        )
+        # Fail closed on observed Core source identity: bind ACTUAL executed
+        # commit+tree; unreadable -> marked unavailable; mismatch -> flagged.
+        # INT-8: never report the configured expectation as executed truth.
+        core_source = read_observed_core_identity()
 
         req_hash = _sha256(
             json.dumps(
@@ -553,6 +770,12 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
             "allowed_paths": sorted(list(allowed_paths)),
             "deletion_policy": deletion_policy,
         }
+        if universe_projection is not None:
+            # Verbatim projection of the producer declaration — sorted, no
+            # drops, no rewrites. Core (evidence-reuse branch) accepts these
+            # optional acceptance_contract fields.
+            contract_payload["expected_subjects"] = universe_projection["expected_subjects"]
+            contract_payload["universe_generation"] = universe_projection["universe_generation"]
         computed_contract_hash = acceptance_contract_hash(contract_payload)
 
         # Build ChangeSet
@@ -745,6 +968,16 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
             "core_response": core_response_payload,
             "raw_core_request": generic_request,
             "raw_core_response": core_response_payload,
+            "expected_evidence_projection": universe_projection,
+            "core_source_identity": core_source,
+            "core_provenance": core_provenance_status({
+                "available": core_source.get("available", False),
+                "reason": core_source.get("reason"),
+                "source_root": core_source.get("source_root"),
+                "expected_revision": CANONICAL_CORE_REVISION,
+                "observed_commit": core_source.get("observed_commit"),
+                "observed_tree": core_source.get("observed_tree"),
+            }),
         }
 
         proj_hash = projection_hash(projection_payload)
