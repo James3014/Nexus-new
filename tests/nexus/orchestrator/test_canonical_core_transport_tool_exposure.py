@@ -115,9 +115,10 @@ def test_transport_binds_enforced_tool_exposure_receipt_success():
 
         observations = projection["raw_core_request"]["evidence_bundle"]["observations"]
         tool_obs = next(obs for obs in observations if obs["verifier_id"] == "tool_exposure")
-        assert tool_obs["status"] == "PASS"
+        assert tool_obs["status"] == "FAIL"
         assert tool_obs["artifact_hash"].startswith("sha256:")
         assert receipt["exposure_hash"] in tool_obs["artifact_hash"]
+        assert projection["raw_core_response"]["verification"]["status"] != "VERIFIED"
 
 
 def test_transport_fails_closed_on_unenforced_mode():
