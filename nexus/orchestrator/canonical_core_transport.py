@@ -82,6 +82,7 @@ except ImportError as exc:
 
     def verify_generic_changeset(_payload: Any) -> tuple[int, dict[str, Any]]:  # type: ignore[misc]
         raise RuntimeError("CANONICAL_NEXUS_CORE_UNAVAILABLE: Cannot perform verification")
+
     _IMPORTED_CORE_PACKAGE = None  # type: ignore[assignment]
 
 
@@ -119,12 +120,16 @@ def read_observed_core_identity(core_root: Path | None = None) -> dict[str, Any]
         return {**base, "reason": "CORE_SOURCE_UNAVAILABLE"}
     try:
         commit = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=str(root),
-            text=True, stderr=subprocess.DEVNULL,
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(root),
+            text=True,
+            stderr=subprocess.DEVNULL,
         ).strip()
         tree = subprocess.check_output(
-            ["git", "rev-parse", "HEAD^{tree}"], cwd=str(root),
-            text=True, stderr=subprocess.DEVNULL,
+            ["git", "rev-parse", "HEAD^{tree}"],
+            cwd=str(root),
+            text=True,
+            stderr=subprocess.DEVNULL,
         ).strip()
     except Exception:
         return {**base, "reason": "CORE_IDENTITY_UNREADABLE", "source_root": str(root)}
@@ -155,15 +160,18 @@ def core_provenance_status(observed: Mapping[str, Any] | None = None) -> dict[st
         identity = dict(observed)
         if not identity.get("available"):
             return {
-                "status": "CORE_IDENTITY_UNAVAILABLE", "fail_closed": True,
+                "status": "CORE_IDENTITY_UNAVAILABLE",
+                "fail_closed": True,
                 "reason": identity.get("reason", "CORE_IDENTITY_UNREADABLE"),
                 "expected_revision": CANONICAL_CORE_REVISION,
-                "observed_commit": None, "observed_tree": None,
+                "observed_commit": None,
+                "observed_tree": None,
                 "source_root": identity.get("source_root"),
             }
         if identity.get("observed_commit") != CANONICAL_CORE_REVISION:
             return {
-                "status": "CORE_REVISION_MISMATCH", "fail_closed": True,
+                "status": "CORE_REVISION_MISMATCH",
+                "fail_closed": True,
                 "reason": "INT-8: executed Core differs from configured expectation",
                 "expected_revision": CANONICAL_CORE_REVISION,
                 "observed_commit": identity.get("observed_commit"),
@@ -171,7 +179,8 @@ def core_provenance_status(observed: Mapping[str, Any] | None = None) -> dict[st
                 "source_root": identity.get("source_root"),
             }
         return {
-            "status": "CORE_REVISION_PINNED", "fail_closed": False,
+            "status": "CORE_REVISION_PINNED",
+            "fail_closed": False,
             "expected_revision": CANONICAL_CORE_REVISION,
             "observed_commit": identity.get("observed_commit"),
             "observed_tree": identity.get("observed_tree"),
@@ -179,23 +188,28 @@ def core_provenance_status(observed: Mapping[str, Any] | None = None) -> dict[st
         }
     if not CORE_AVAILABLE:
         return {
-            "status": "CORE_UNAVAILABLE", "fail_closed": True,
+            "status": "CORE_UNAVAILABLE",
+            "fail_closed": True,
             "reason": CORE_IMPORT_ERROR,
             "expected_revision": CANONICAL_CORE_REVISION,
-            "observed_commit": None, "observed_tree": None,
+            "observed_commit": None,
+            "observed_tree": None,
         }
     identity = dict(observed) if isinstance(observed, Mapping) else read_observed_core_identity()
     if not identity.get("available"):
         return {
-            "status": "CORE_IDENTITY_UNAVAILABLE", "fail_closed": True,
+            "status": "CORE_IDENTITY_UNAVAILABLE",
+            "fail_closed": True,
             "reason": identity.get("reason", "CORE_IDENTITY_UNREADABLE"),
             "expected_revision": CANONICAL_CORE_REVISION,
-            "observed_commit": None, "observed_tree": None,
+            "observed_commit": None,
+            "observed_tree": None,
             "source_root": identity.get("source_root"),
         }
     if identity.get("observed_commit") != CANONICAL_CORE_REVISION:
         return {
-            "status": "CORE_REVISION_MISMATCH", "fail_closed": True,
+            "status": "CORE_REVISION_MISMATCH",
+            "fail_closed": True,
             "reason": "INT-8: executed Core differs from configured expectation",
             "expected_revision": CANONICAL_CORE_REVISION,
             "observed_commit": identity.get("observed_commit"),
@@ -203,7 +217,8 @@ def core_provenance_status(observed: Mapping[str, Any] | None = None) -> dict[st
             "source_root": identity.get("source_root"),
         }
     return {
-        "status": "CORE_REVISION_PINNED", "fail_closed": False,
+        "status": "CORE_REVISION_PINNED",
+        "fail_closed": False,
         "expected_revision": CANONICAL_CORE_REVISION,
         "observed_commit": identity.get("observed_commit"),
         "observed_tree": identity.get("observed_tree"),
@@ -228,7 +243,9 @@ def project_expected_evidence_universe(contract: Any) -> dict[str, Any] | None:
             {
                 "logical_subject_id": s.get("logical_subject_id"),
                 "evidence_kind": s.get("evidence_kind"),
-                "requirement_mode": getattr(s.get("requirement_mode"), "value", s.get("requirement_mode")),
+                "requirement_mode": getattr(
+                    s.get("requirement_mode"), "value", s.get("requirement_mode")
+                ),
                 "applicability": getattr(s.get("applicability"), "value", s.get("applicability")),
             }
             for s in raw_subjects
@@ -240,8 +257,14 @@ def project_expected_evidence_universe(contract: Any) -> dict[str, Any] | None:
             {
                 "logical_subject_id": getattr(s, "logical_subject_id", None),
                 "evidence_kind": getattr(s, "evidence_kind", None),
-                "requirement_mode": getattr(getattr(s, "requirement_mode", None), "value", getattr(s, "requirement_mode", None)),
-                "applicability": getattr(getattr(s, "applicability", None), "value", getattr(s, "applicability", None)),
+                "requirement_mode": getattr(
+                    getattr(s, "requirement_mode", None),
+                    "value",
+                    getattr(s, "requirement_mode", None),
+                ),
+                "applicability": getattr(
+                    getattr(s, "applicability", None), "value", getattr(s, "applicability", None)
+                ),
             }
             for s in raw_subjects
         ]
@@ -354,14 +377,16 @@ def extract_git_manifest(
             after_oid = dst_oid
             after_mode = dst_mode
 
-        entries.append({
-            "path": path,
-            "change_type": change_type,
-            "before_oid": before_oid,
-            "after_oid": after_oid,
-            "before_mode": before_mode,
-            "after_mode": after_mode,
-        })
+        entries.append(
+            {
+                "path": path,
+                "change_type": change_type,
+                "before_oid": before_oid,
+                "after_oid": after_oid,
+                "before_mode": before_mode,
+                "after_mode": after_mode,
+            }
+        )
     return {
         "source_tree": f"git-tree:{src_tree}",
         "target_tree": f"git-tree:{tgt_tree}",
@@ -681,24 +706,28 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
         force_forbidden_deletion = kwargs.get("force_forbidden_deletion", False)
 
         if force_scope_escape:
-            manifest["entries"].append({
-                "path": "unauthorized_scope_escape.txt",
-                "change_type": "ADD",
-                "before_oid": None,
-                "after_oid": "e" * 40,
-                "before_mode": None,
-                "after_mode": "100644",
-            })
+            manifest["entries"].append(
+                {
+                    "path": "unauthorized_scope_escape.txt",
+                    "change_type": "ADD",
+                    "before_oid": None,
+                    "after_oid": "e" * 40,
+                    "before_mode": None,
+                    "after_mode": "100644",
+                }
+            )
 
         if force_forbidden_deletion:
-            manifest["entries"].append({
-                "path": "forbidden_deleted_file.txt",
-                "change_type": "DELETE",
-                "before_oid": "d" * 40,
-                "after_oid": None,
-                "before_mode": "100644",
-                "after_mode": None,
-            })
+            manifest["entries"].append(
+                {
+                    "path": "forbidden_deleted_file.txt",
+                    "change_type": "DELETE",
+                    "before_oid": "d" * 40,
+                    "after_oid": None,
+                    "before_mode": "100644",
+                    "after_mode": None,
+                }
+            )
 
         manifest_entries = manifest["entries"]
         changed_paths = sorted(list(set(row["path"] for row in manifest_entries)))
@@ -861,21 +890,25 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
                 art_hash = v_res["artifact_hash"]
                 if not art_hash.startswith("sha256:"):
                     art_hash = "sha256:" + art_hash
-                observations.append({
-                    "verifier_id": vid,
-                    "artifact_id": art_id,
-                    "artifact_hash": art_hash,
-                    "status": obs_status,
-                })
+                observations.append(
+                    {
+                        "verifier_id": vid,
+                        "artifact_id": art_id,
+                        "artifact_hash": art_hash,
+                        "status": obs_status,
+                    }
+                )
             else:
-                observations.append({
-                    "verifier_id": vid,
-                    "artifact_id": f"art-{vid}",
-                    "artifact_hash": _sha256(
-                        json.dumps(_to_serializable(v_res or {"exit_code": 0}), sort_keys=True)
-                    ),
-                    "status": obs_status,
-                })
+                observations.append(
+                    {
+                        "verifier_id": vid,
+                        "artifact_id": f"art-{vid}",
+                        "artifact_hash": _sha256(
+                            json.dumps(_to_serializable(v_res or {"exit_code": 0}), sort_keys=True)
+                        ),
+                        "status": obs_status,
+                    }
+                )
 
         evidence_payload = {
             "bundle_id": f"eb-{session_id[:12]}",
@@ -1104,12 +1137,14 @@ def cli_main():
 
         observations = []
         for obs in evidence_data["observations"]:
-            observations.append({
-                "verifier_id": obs["verifier_id"],
-                "artifact_id": obs["artifact_id"],
-                "artifact_hash": obs["artifact_hash"],
-                "status": obs["status"],
-            })
+            observations.append(
+                {
+                    "verifier_id": obs["verifier_id"],
+                    "artifact_id": obs["artifact_id"],
+                    "artifact_hash": obs["artifact_hash"],
+                    "status": obs["status"],
+                }
+            )
 
         evidence_payload = {
             "bundle_id": evidence_data.get("bundle_id") or "eb-1",
