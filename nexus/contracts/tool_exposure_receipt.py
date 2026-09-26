@@ -566,12 +566,15 @@ def validate_tool_exposure_receipt(
     if expected_remote_tool_identities is not None:
         if not validated_remotes:
             raise ToolExposureIdentityError("MISSING_REMOTE_TOOL_IDENTITY_EVIDENCE")
-        for exp in expected_remote_tool_identities:
-            exp_origin = exp.get("server_origin")
-            exp_name = exp.get("tool_name")
-            exp_schema_hash = exp.get("input_schema_hash")
-            exp_desc_hash = exp.get("description_hash")
-            exp_stable_id = exp.get("stable_tool_id")
+        validated_expected_remotes = [
+            validate_stable_tool_identity(exp) for exp in expected_remote_tool_identities
+        ]
+        for exp in validated_expected_remotes:
+            exp_origin = exp["server_origin"]
+            exp_name = exp["tool_name"]
+            exp_schema_hash = exp["input_schema_hash"]
+            exp_desc_hash = exp["description_hash"]
+            exp_stable_id = exp["stable_tool_id"]
 
             match = next(
                 (
@@ -586,15 +589,15 @@ def validate_tool_exposure_receipt(
                     f"REMOTE_TOOL_IDENTITY_NOT_FOUND: {exp_origin}/{exp_name}"
                 )
 
-            if exp_schema_hash and match.get("input_schema_hash") != exp_schema_hash:
+            if match.get("input_schema_hash") != exp_schema_hash:
                 raise ToolExposureIdentityError(
                     f"REMOTE_TOOL_INPUT_SCHEMA_MISMATCH: expected {exp_schema_hash}, got {match.get('input_schema_hash')}"
                 )
-            if exp_desc_hash and match.get("description_hash") != exp_desc_hash:
+            if match.get("description_hash") != exp_desc_hash:
                 raise ToolExposureIdentityError(
                     f"REMOTE_TOOL_DESCRIPTION_MISMATCH: expected {exp_desc_hash}, got {match.get('description_hash')}"
                 )
-            if exp_stable_id and match.get("stable_tool_id") != exp_stable_id:
+            if match.get("stable_tool_id") != exp_stable_id:
                 raise ToolExposureIdentityError(
                     f"REMOTE_STABLE_TOOL_ID_MISMATCH: expected {exp_stable_id}, got {match.get('stable_tool_id')}"
                 )
@@ -606,13 +609,16 @@ def validate_tool_exposure_receipt(
     validated_gens = [validate_runtime_tool_generation(g) for g in raw_gens]
 
     if expected_runtime_tool_generations is not None:
-        for exp_g in expected_runtime_tool_generations:
-            exp_orig = exp_g.get("server_origin")
-            exp_inst = exp_g.get("server_instance_id")
-            exp_source = exp_g.get("source_commit")
-            exp_build = exp_g.get("build_id")
-            exp_manifest = exp_g.get("capability_manifest_sha256")
-            exp_cat = exp_g.get("catalog_generation")
+        validated_expected_gens = [
+            validate_runtime_tool_generation(g) for g in expected_runtime_tool_generations
+        ]
+        for exp_g in validated_expected_gens:
+            exp_orig = exp_g["server_origin"]
+            exp_inst = exp_g["server_instance_id"]
+            exp_source = exp_g["source_commit"]
+            exp_build = exp_g["build_id"]
+            exp_manifest = exp_g["capability_manifest_sha256"]
+            exp_cat = exp_g["catalog_generation"]
 
             match_g = next(
                 (g for g in validated_gens if g.get("server_origin") == exp_orig),
@@ -621,24 +627,24 @@ def validate_tool_exposure_receipt(
             if match_g is None:
                 raise ToolExposureIdentityError(f"RUNTIME_GENERATION_NOT_FOUND: {exp_orig}")
 
-            if exp_inst and match_g.get("server_instance_id") != exp_inst:
+            if match_g.get("server_instance_id") != exp_inst:
                 raise ToolExposureIdentityError(
                     f"RUNTIME_GENERATION_SERVER_INSTANCE_MISMATCH: expected {exp_inst}, got {match_g.get('server_instance_id')}"
                 )
-            if exp_source and match_g.get("source_commit") != exp_source:
+            if match_g.get("source_commit") != exp_source:
                 raise ToolExposureIdentityError(
                     f"RUNTIME_GENERATION_SOURCE_COMMIT_MISMATCH: expected {exp_source}, got {match_g.get('source_commit')}"
                 )
-            if exp_build and match_g.get("build_id") != exp_build:
+            if match_g.get("build_id") != exp_build:
                 raise ToolExposureIdentityError(
                     f"RUNTIME_GENERATION_BUILD_ID_MISMATCH: expected {exp_build}, got {match_g.get('build_id')}"
                 )
-            if exp_manifest and match_g.get("capability_manifest_sha256") != exp_manifest:
+            if match_g.get("capability_manifest_sha256") != exp_manifest:
                 raise ToolExposureIdentityError(
                     "RUNTIME_GENERATION_CAPABILITY_MANIFEST_MISMATCH: "
                     f"expected {exp_manifest}, got {match_g.get('capability_manifest_sha256')}"
                 )
-            if exp_cat is not None and match_g.get("catalog_generation") != exp_cat:
+            if match_g.get("catalog_generation") != exp_cat:
                 raise ToolExposureIdentityError(
                     f"RUNTIME_GENERATION_CATALOG_GENERATION_MISMATCH: expected {exp_cat}, got {match_g.get('catalog_generation')}"
                 )

@@ -229,3 +229,62 @@ def test_receipt_with_remote_tool_identities_tampered_fails_closed():
     tampered["remote_tool_identities"] = [{**ident, "tool_name": "tampered_tool"}]
     with pytest.raises(ToolExposureError, match="TOOL_EXPOSURE_HASH_MISMATCH"):
         validate_tool_exposure_receipt(tampered)
+
+def test_partial_expected_remote_identity_fails_closed():
+    identity = build_stable_tool_identity(
+        server_origin="mcp://server-a",
+        tool_name="db_query",
+        input_schema={"sql": "string", "danger": "bool"},
+        description="Unapproved dangerous semantics",
+    )
+    receipt = build_tool_exposure_receipt(
+        operation_id="op-partial-remote",
+        attempt_id="att-1",
+        provider="opencode",
+        backend_id="devspace",
+        planner_decision_hash="a" * 64,
+        projection_hash="b" * 64,
+        enforcement_mode="ENFORCED_MANAGED_BRIDGE",
+        candidate_tools=["db_query"],
+        selected_tools=["db_query"],
+        actual_exposed_tools=["db_query"],
+        remote_tool_identities=[identity],
+    )
+    with pytest.raises(ToolExposureError, match="STABLE_TOOL_IDENTITY_FIELDS_INVALID"):
+        validate_tool_exposure_receipt(
+            receipt,
+            expected_remote_tool_identities=[
+                {"server_origin": "mcp://server-a", "tool_name": "db_query"}
+            ],
+            require_remote_tool_identity=True,
+        )
+
+
+def test_partial_expected_runtime_generation_fails_closed():
+    generation = build_runtime_tool_generation(
+        server_origin="mcp://server-a",
+        server_instance_id="server-instance-1",
+        source_commit="c" * 40,
+        build_id="build-1",
+        capability_manifest_sha256="d" * 64,
+        catalog_generation="catalog-1",
+    )
+    receipt = build_tool_exposure_receipt(
+        operation_id="op-partial-generation",
+        attempt_id="att-1",
+        provider="opencode",
+        backend_id="devspace",
+        planner_decision_hash="a" * 64,
+        projection_hash="b" * 64,
+        enforcement_mode="ENFORCED_MANAGED_BRIDGE",
+        candidate_tools=["db_query"],
+        selected_tools=["db_query"],
+        actual_exposed_tools=["db_query"],
+        runtime_tool_generations=[generation],
+    )
+    with pytest.raises(ToolExposureError, match="RUNTIME_TOOL_GENERATION_FIELDS_INVALID"):
+        validate_tool_exposure_receipt(
+            receipt,
+            expected_runtime_tool_generations=[{"server_origin": "mcp://server-a"}],
+        )
+

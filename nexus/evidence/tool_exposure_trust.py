@@ -16,6 +16,8 @@ from typing import Any, Mapping
 from nexus.contracts.tool_exposure_receipt import (
     PHYSICALLY_ENFORCED_MODES,
     ToolExposureError,
+    validate_runtime_tool_generation,
+    validate_stable_tool_identity,
     validate_tool_exposure_receipt,
 )
 
@@ -74,6 +76,7 @@ def bind_tool_exposure_observation(
         requires_remote = bool(
             expected_binding.get("requires_remote_tool_identity")
             or expected_binding.get("expected_remote_tool_identities")
+            or expected_binding.get("expected_runtime_tool_generations")
         )
         expected_kwargs = {
             "expected_operation_id": expected_binding.get("operation_id"),
@@ -196,23 +199,36 @@ def verify_completion_claim_exposure(
     requires_remote = bool(
         expected_binding.get("requires_remote_tool_identity")
         or expected_binding.get("expected_remote_tool_identities")
+        or expected_binding.get("expected_runtime_tool_generations")
     )
     if requires_remote:
         remote_identities = exposure_obs.get("remote_tool_identities") or []
         if not remote_identities:
             return False, "MISSING_REMOTE_TOOL_IDENTITY_EVIDENCE"
+        try:
+            validated_remote_identities = [
+                validate_stable_tool_identity(identity) for identity in remote_identities
+            ]
+        except ToolExposureError as exc:
+            return False, f"INVALID_REMOTE_TOOL_IDENTITY_EVIDENCE:{exc}"
 
         expected_remotes = expected_binding.get("expected_remote_tool_identities")
         if expected_remotes:
-            for exp in expected_remotes:
-                exp_origin = exp.get("server_origin")
-                exp_name = exp.get("tool_name")
-                exp_stable_id = exp.get("stable_tool_id")
+            try:
+                validated_expected_remotes = [
+                    validate_stable_tool_identity(identity) for identity in expected_remotes
+                ]
+            except ToolExposureError as exc:
+                return False, f"INVALID_EXPECTED_REMOTE_TOOL_IDENTITY:{exc}"
 
+            for exp in validated_expected_remotes:
+                exp_origin = exp["server_origin"]
+                exp_name = exp["tool_name"]
+                exp_stable_id = exp["stable_tool_id"]
                 match = next(
                     (
                         r
-                        for r in remote_identities
+                        for r in validated_remote_identities
                         if r.get("server_origin") == exp_origin and r.get("tool_name") == exp_name
                     ),
                     None,
@@ -222,7 +238,7 @@ def verify_completion_claim_exposure(
                         False,
                         f"STALE_OR_SUBSTITUTED_TOOL_EXPOSURE_RECEIPT:remote_tool_origin_mismatch:{exp_origin}/{exp_name}",
                     )
-                if exp_stable_id and match.get("stable_tool_id") != exp_stable_id:
+                if match.get("stable_tool_id") != exp_stable_id:
                     return (
                         False,
                         f"STALE_OR_SUBSTITUTED_TOOL_EXPOSURE_RECEIPT:remote_tool_identity_drift:{exp_name}",
@@ -231,13 +247,24 @@ def verify_completion_claim_exposure(
         expected_gens = expected_binding.get("expected_runtime_tool_generations")
         if expected_gens:
             runtime_gens = exposure_obs.get("runtime_tool_generations") or []
-            for exp_g in expected_gens:
-                exp_orig = exp_g.get("server_origin")
-                exp_inst = exp_g.get("server_instance_id")
-                exp_cat = exp_g.get("catalog_generation")
+            try:
+                validated_runtime_gens = [
+                    validate_runtime_tool_generation(generation) for generation in runtime_gens
+                ]
+            except ToolExposureError as exc:
+                return False, f"INVALID_RUNTIME_TOOL_GENERATION_EVIDENCE:{exc}"
+            try:
+                validated_expected_gens = [
+                    validate_runtime_tool_generation(generation) for generation in expected_gens
+                ]
+            except ToolExposureError as exc:
+                return False, f"INVALID_EXPECTED_RUNTIME_TOOL_GENERATION:{exc}"
 
+            for exp_g in validated_expected_gens:
+                exp_orig = exp_g["server_origin"]
+                exp_generation_hash = exp_g["generation_hash"]
                 match_g = next(
-                    (g for g in runtime_gens if g.get("server_origin") == exp_orig),
+                    (g for g in validated_runtime_gens if g.get("server_origin") == exp_orig),
                     None,
                 )
                 if match_g is None:
@@ -245,12 +272,7 @@ def verify_completion_claim_exposure(
                         False,
                         f"STALE_OR_SUBSTITUTED_TOOL_EXPOSURE_RECEIPT:runtime_generation_missing:{exp_orig}",
                     )
-                if exp_inst and match_g.get("server_instance_id") != exp_inst:
-                    return (
-                        False,
-                        f"STALE_OR_SUBSTITUTED_TOOL_EXPOSURE_RECEIPT:runtime_generation_instance_drift:{exp_orig}",
-                    )
-                if exp_cat is not None and match_g.get("catalog_generation") != exp_cat:
+                if match_g.get("generation_hash") != exp_generation_hash:
                     return (
                         False,
                         f"STALE_OR_SUBSTITUTED_TOOL_EXPOSURE_RECEIPT:runtime_generation_drift:{exp_orig}",

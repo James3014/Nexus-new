@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from nexus.contracts.tool_exposure_receipt import (
+    build_runtime_tool_generation,
     build_stable_tool_identity,
     build_tool_exposure_receipt,
 )
@@ -395,3 +396,95 @@ def test_hostile_control_4_server_substitution_fails_observation():
     )
     assert obs["status"] == "FAIL"
     assert "REMOTE_TOOL_IDENTITY_NOT_FOUND" in obs["reason"]
+
+def test_completion_rejects_partial_expected_remote_identity():
+    identity = build_stable_tool_identity(
+        server_origin="mcp://server-a",
+        tool_name="database_query",
+        input_schema={"sql": "string", "danger": "bool"},
+        description="Unapproved dangerous semantics",
+    )
+    evidence_bundle = {
+        "observations": [{
+            "verifier_id": TOOL_EXPOSURE_VERIFIER_ID,
+            "artifact_id": "tool-exposure-op-wave1-att-1",
+            "artifact_hash": "sha256:" + "a" * 64,
+            "status": "PASS",
+            "operation_id": "op-wave1",
+            "attempt_id": "att-1",
+            "provider": "opencode",
+            "backend_id": "devspace",
+            "planner_decision_hash": "1" * 64,
+            "projection_hash": "2" * 64,
+            "remote_tool_identities": [identity],
+        }]
+    }
+    ok, reason = verify_completion_claim_exposure(
+        evidence_bundle,
+        requires_physical_tool_exposure=True,
+        expected_binding={
+            "operation_id": "op-wave1",
+            "attempt_id": "att-1",
+            "provider": "opencode",
+            "backend_id": "devspace",
+            "planner_decision_hash": "1" * 64,
+            "projection_hash": "2" * 64,
+            "expected_remote_tool_identities": [
+                {"server_origin": "mcp://server-a", "tool_name": "database_query"}
+            ],
+        },
+    )
+    assert ok is False
+    assert reason == "INVALID_EXPECTED_REMOTE_TOOL_IDENTITY:STABLE_TOOL_IDENTITY_FIELDS_INVALID"
+
+
+def test_runtime_generation_expectation_alone_is_enforced():
+    identity = build_stable_tool_identity(
+        server_origin="mcp://server-a",
+        tool_name="database_query",
+        input_schema={"sql": "string"},
+        description="Query server A database",
+    )
+    generation = build_runtime_tool_generation(
+        server_origin="mcp://server-a",
+        server_instance_id="server-instance-1",
+        source_commit="c" * 40,
+        build_id="build-1",
+        capability_manifest_sha256="d" * 64,
+        catalog_generation="catalog-1",
+    )
+    evidence_bundle = {
+        "observations": [{
+            "verifier_id": TOOL_EXPOSURE_VERIFIER_ID,
+            "artifact_id": "tool-exposure-op-wave1-att-1",
+            "artifact_hash": "sha256:" + "a" * 64,
+            "status": "PASS",
+            "operation_id": "op-wave1",
+            "attempt_id": "att-1",
+            "provider": "opencode",
+            "backend_id": "devspace",
+            "planner_decision_hash": "1" * 64,
+            "projection_hash": "2" * 64,
+            "remote_tool_identities": [identity],
+            "runtime_tool_generations": [],
+        }]
+    }
+    ok, reason = verify_completion_claim_exposure(
+        evidence_bundle,
+        requires_physical_tool_exposure=True,
+        expected_binding={
+            "operation_id": "op-wave1",
+            "attempt_id": "att-1",
+            "provider": "opencode",
+            "backend_id": "devspace",
+            "planner_decision_hash": "1" * 64,
+            "projection_hash": "2" * 64,
+            "expected_runtime_tool_generations": [generation],
+        },
+    )
+    assert ok is False
+    assert reason == (
+        "STALE_OR_SUBSTITUTED_TOOL_EXPOSURE_RECEIPT:"
+        "runtime_generation_missing:mcp://server-a"
+    )
+
