@@ -9,74 +9,65 @@ TOOL_EXPOSURE_RECEIPT_SCHEMA = "nexus.tool_exposure_receipt.v1"
 STABLE_TOOL_IDENTITY_SCHEMA = "nexus.stable_tool_identity.v1"
 RUNTIME_TOOL_GENERATION_SCHEMA = "nexus.runtime_tool_generation.v1"
 
-ENFORCEMENT_MODES = frozenset(
-    {
-        "ENFORCED_NATIVE_PROVIDER",
-        "ENFORCED_MANAGED_BRIDGE",
-        "REQUEST_ONLY_NOT_ENFORCED",
-        "NOT_OBSERVED",
-        "NO_EXTERNAL_TOOL_SURFACE",
-        "UNKNOWN",
-    }
-)
+ENFORCEMENT_MODES = frozenset({
+    "ENFORCED_NATIVE_PROVIDER",
+    "ENFORCED_MANAGED_BRIDGE",
+    "REQUEST_ONLY_NOT_ENFORCED",
+    "NOT_OBSERVED",
+    "NO_EXTERNAL_TOOL_SURFACE",
+    "UNKNOWN",
+})
 
-PHYSICALLY_ENFORCED_MODES = frozenset(
-    {
-        "ENFORCED_NATIVE_PROVIDER",
-        "ENFORCED_MANAGED_BRIDGE",
-    }
-)
+PHYSICALLY_ENFORCED_MODES = frozenset({
+    "ENFORCED_NATIVE_PROVIDER",
+    "ENFORCED_MANAGED_BRIDGE",
+})
 
-_CORE_FIELDS = frozenset(
-    {
-        "schema",
-        "operation_id",
-        "attempt_id",
-        "provider",
-        "backend_id",
-        "planner_decision_hash",
-        "projection_hash",
-        "enforcement_mode",
-        "candidate_tools",
-        "selected_tools",
-        "actual_exposed_tools",
-        "actual_exposed_tool_count",
-        "authority_kind",
-        "exposure_hash",
-    }
-)
+_CORE_FIELDS = frozenset({
+    "schema",
+    "operation_id",
+    "attempt_id",
+    "provider",
+    "backend_id",
+    "planner_decision_hash",
+    "projection_hash",
+    "enforcement_mode",
+    "candidate_tools",
+    "selected_tools",
+    "actual_exposed_tools",
+    "actual_exposed_tool_count",
+    "authority_kind",
+    "exposure_hash",
+})
 
-_OPTIONAL_FIELDS = frozenset(
-    {
-        "remote_tool_identities",
-        "runtime_tool_generations",
-    }
-)
+_OPTIONAL_FIELDS = frozenset({
+    "remote_tool_identities",
+    "runtime_tool_generations",
+})
 
 _ALL_FIELDS = _CORE_FIELDS | _OPTIONAL_FIELDS
 _EXPECTED_FIELDS = _ALL_FIELDS
 
-_STABLE_TOOL_IDENTITY_FIELDS = frozenset(
-    {
-        "schema",
-        "server_origin",
-        "tool_name",
-        "input_schema_hash",
-        "description_hash",
-        "stable_tool_id",
-    }
-)
+_STABLE_TOOL_IDENTITY_FIELDS = frozenset({
+    "schema",
+    "server_origin",
+    "tool_name",
+    "input_schema_hash",
+    "description_hash",
+    "stable_tool_id",
+})
 
-_RUNTIME_TOOL_GENERATION_FIELDS = frozenset(
-    {
-        "schema",
-        "server_origin",
-        "server_instance_id",
-        "catalog_generation",
-        "generation_hash",
-        "observed_at",
-    }
-)
+_RUNTIME_TOOL_GENERATION_FIELDS = frozenset({
+    "schema",
+    "server_origin",
+    "server_instance_id",
+    "source_commit",
+    "build_id",
+    "capability_manifest_sha256",
+    "catalog_generation",
+    "generation_hash",
+    "observed_at",
+})
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -260,13 +251,21 @@ def compute_runtime_generation_hash(
     *,
     server_origin: str,
     server_instance_id: str,
+    source_commit: str,
+    build_id: str,
+    capability_manifest_sha256: str,
     catalog_generation: int | str,
 ) -> str:
     """Compute ephemeral runtime tool generation evidence hash."""
     payload = {
+        "build_id": _require_text(build_id, "build_id"),
+        "capability_manifest_sha256": _require_hex64(
+            capability_manifest_sha256, "capability_manifest_sha256"
+        ),
         "catalog_generation": catalog_generation,
         "server_instance_id": _require_text(server_instance_id, "server_instance_id"),
         "server_origin": _require_text(server_origin, "server_origin"),
+        "source_commit": _require_text(source_commit, "source_commit"),
     }
     return _sha256(payload)
 
@@ -275,12 +274,18 @@ def build_runtime_tool_generation(
     *,
     server_origin: str,
     server_instance_id: str,
+    source_commit: str,
+    build_id: str,
+    capability_manifest_sha256: str,
     catalog_generation: int | str,
     observed_at: str | None = None,
 ) -> dict[str, Any]:
-    """Construct ephemeral physical generation evidence."""
+    """Construct physical runtime-generation evidence for a remote tool server."""
     origin = _require_text(server_origin, "server_origin")
     instance_id = _require_text(server_instance_id, "server_instance_id")
+    source = _require_text(source_commit, "source_commit")
+    build = _require_text(build_id, "build_id")
+    manifest = _require_hex64(capability_manifest_sha256, "capability_manifest_sha256")
     if not isinstance(catalog_generation, (int, str)) or str(catalog_generation).strip() == "":
         raise ToolExposureError("catalog_generation_invalid")
     gen = (
@@ -292,12 +297,18 @@ def build_runtime_tool_generation(
     gen_hash = compute_runtime_generation_hash(
         server_origin=origin,
         server_instance_id=instance_id,
+        source_commit=source,
+        build_id=build,
+        capability_manifest_sha256=manifest,
         catalog_generation=gen,
     )
     return {
         "schema": RUNTIME_TOOL_GENERATION_SCHEMA,
         "server_origin": origin,
         "server_instance_id": instance_id,
+        "source_commit": source,
+        "build_id": build,
+        "capability_manifest_sha256": manifest,
         "catalog_generation": gen,
         "generation_hash": gen_hash,
         "observed_at": obs_at,
@@ -309,6 +320,9 @@ def validate_runtime_tool_generation(
     *,
     expected_server_origin: str | None = None,
     expected_server_instance_id: str | None = None,
+    expected_source_commit: str | None = None,
+    expected_build_id: str | None = None,
+    expected_capability_manifest_sha256: str | None = None,
     expected_catalog_generation: int | str | None = None,
 ) -> dict[str, Any]:
     """Validate ephemeral runtime tool generation evidence fail-closed."""
@@ -323,6 +337,11 @@ def validate_runtime_tool_generation(
 
     origin = _require_text(generation.get("server_origin"), "server_origin")
     instance_id = _require_text(generation.get("server_instance_id"), "server_instance_id")
+    source = _require_text(generation.get("source_commit"), "source_commit")
+    build = _require_text(generation.get("build_id"), "build_id")
+    manifest = _require_hex64(
+        generation.get("capability_manifest_sha256"), "capability_manifest_sha256"
+    )
     cat_gen = generation.get("catalog_generation")
     if not isinstance(cat_gen, (int, str)) or str(cat_gen).strip() == "":
         raise ToolExposureError("catalog_generation_invalid")
@@ -332,6 +351,9 @@ def validate_runtime_tool_generation(
     computed_hash = compute_runtime_generation_hash(
         server_origin=origin,
         server_instance_id=instance_id,
+        source_commit=source,
+        build_id=build,
+        capability_manifest_sha256=manifest,
         catalog_generation=gen,
     )
     if claimed_hash != computed_hash:
@@ -344,6 +366,22 @@ def validate_runtime_tool_generation(
     if expected_server_instance_id is not None and instance_id != expected_server_instance_id:
         raise ToolExposureIdentityError(
             f"RUNTIME_GENERATION_SERVER_INSTANCE_MISMATCH: expected {expected_server_instance_id}, got {instance_id}"
+        )
+    if expected_source_commit is not None and source != expected_source_commit:
+        raise ToolExposureIdentityError(
+            f"RUNTIME_GENERATION_SOURCE_COMMIT_MISMATCH: expected {expected_source_commit}, got {source}"
+        )
+    if expected_build_id is not None and build != expected_build_id:
+        raise ToolExposureIdentityError(
+            f"RUNTIME_GENERATION_BUILD_ID_MISMATCH: expected {expected_build_id}, got {build}"
+        )
+    if (
+        expected_capability_manifest_sha256 is not None
+        and manifest != expected_capability_manifest_sha256
+    ):
+        raise ToolExposureIdentityError(
+            "RUNTIME_GENERATION_CAPABILITY_MANIFEST_MISMATCH: "
+            f"expected {expected_capability_manifest_sha256}, got {manifest}"
         )
     if expected_catalog_generation is not None and gen != expected_catalog_generation:
         raise ToolExposureIdentityError(
@@ -571,6 +609,9 @@ def validate_tool_exposure_receipt(
         for exp_g in expected_runtime_tool_generations:
             exp_orig = exp_g.get("server_origin")
             exp_inst = exp_g.get("server_instance_id")
+            exp_source = exp_g.get("source_commit")
+            exp_build = exp_g.get("build_id")
+            exp_manifest = exp_g.get("capability_manifest_sha256")
             exp_cat = exp_g.get("catalog_generation")
 
             match_g = next(
@@ -583,6 +624,19 @@ def validate_tool_exposure_receipt(
             if exp_inst and match_g.get("server_instance_id") != exp_inst:
                 raise ToolExposureIdentityError(
                     f"RUNTIME_GENERATION_SERVER_INSTANCE_MISMATCH: expected {exp_inst}, got {match_g.get('server_instance_id')}"
+                )
+            if exp_source and match_g.get("source_commit") != exp_source:
+                raise ToolExposureIdentityError(
+                    f"RUNTIME_GENERATION_SOURCE_COMMIT_MISMATCH: expected {exp_source}, got {match_g.get('source_commit')}"
+                )
+            if exp_build and match_g.get("build_id") != exp_build:
+                raise ToolExposureIdentityError(
+                    f"RUNTIME_GENERATION_BUILD_ID_MISMATCH: expected {exp_build}, got {match_g.get('build_id')}"
+                )
+            if exp_manifest and match_g.get("capability_manifest_sha256") != exp_manifest:
+                raise ToolExposureIdentityError(
+                    "RUNTIME_GENERATION_CAPABILITY_MANIFEST_MISMATCH: "
+                    f"expected {exp_manifest}, got {match_g.get('capability_manifest_sha256')}"
                 )
             if exp_cat is not None and match_g.get("catalog_generation") != exp_cat:
                 raise ToolExposureIdentityError(

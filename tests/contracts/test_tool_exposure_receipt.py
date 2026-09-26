@@ -162,11 +162,17 @@ def test_runtime_tool_generation_evidence_creation_and_validation():
     gen = build_runtime_tool_generation(
         server_origin="mcp://file-server",
         server_instance_id="inst-1",
+        source_commit="a" * 40,
+        build_id="devspace-build-1",
+        capability_manifest_sha256="b" * 64,
         catalog_generation=1,
     )
     assert gen["schema"] == RUNTIME_TOOL_GENERATION_SCHEMA
     assert gen["server_origin"] == "mcp://file-server"
     assert gen["server_instance_id"] == "inst-1"
+    assert gen["source_commit"] == "a" * 40
+    assert gen["build_id"] == "devspace-build-1"
+    assert gen["capability_manifest_sha256"] == "b" * 64
     assert gen["catalog_generation"] == 1
     assert len(gen["generation_hash"]) == 64
 
@@ -177,6 +183,9 @@ def test_runtime_tool_generation_evidence_creation_and_validation():
         ToolExposureIdentityError, match="RUNTIME_GENERATION_SERVER_INSTANCE_MISMATCH"
     ):
         validate_runtime_tool_generation(gen, expected_server_instance_id="inst-2")
+
+    with pytest.raises(ToolExposureIdentityError, match="RUNTIME_GENERATION_BUILD_ID_MISMATCH"):
+        validate_runtime_tool_generation(gen, expected_build_id="devspace-build-2")
 
 
 def test_receipt_with_remote_tool_identities_tampered_fails_closed():
@@ -189,6 +198,9 @@ def test_receipt_with_remote_tool_identities_tampered_fails_closed():
     gen = build_runtime_tool_generation(
         server_origin="mcp://file-server",
         server_instance_id="inst-1",
+        source_commit="a" * 40,
+        build_id="devspace-build-1",
+        capability_manifest_sha256="b" * 64,
         catalog_generation=1,
     )
     receipt = build_tool_exposure_receipt(

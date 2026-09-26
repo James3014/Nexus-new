@@ -25,16 +25,8 @@ import tempfile
 import uuid
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 
-from nexus.contracts.tool_exposure_receipt import (
-    ToolExposureError,
-    ToolExposureIdentityError,
-    build_runtime_tool_generation,
-    build_stable_tool_identity,
-    compute_tool_description_hash,
-    compute_tool_input_schema_hash,
-)
 from nexus.orchestrator.ambient_core import (
     PREPARATION_SCHEMA,
     AmbientCoreControlPort,
@@ -385,151 +377,18 @@ def extract_git_manifest(
             after_oid = dst_oid
             after_mode = dst_mode
 
-        entries.append(
-            {
-                "path": path,
-                "change_type": change_type,
-                "before_oid": before_oid,
-                "after_oid": after_oid,
-                "before_mode": before_mode,
-                "after_mode": after_mode,
-            }
-        )
+        entries.append({
+            "path": path,
+            "change_type": change_type,
+            "before_oid": before_oid,
+            "after_oid": after_oid,
+            "before_mode": before_mode,
+            "after_mode": after_mode,
+        })
     return {
         "source_tree": f"git-tree:{src_tree}",
         "target_tree": f"git-tree:{tgt_tree}",
         "entries": entries,
-    }
-
-
-def revalidate_remote_tool_authority(
-    *,
-    approved_tool: Mapping[str, Any],
-    live_spec: Mapping[str, Any],
-    catalog_candidates: Sequence[Mapping[str, Any]] | None = None,
-    expected_catalog_generation: int | str | None = None,
-    max_catalog_drift: int | None = 0,
-) -> dict[str, Any]:
-    """Revalidate live remote tool specification and runtime generation against approved identity before invocation (#1144).
-
-    Enforces 8 pre-invocation/transport hostile controls:
-    1. same name + changed input schema -> pre-invocation reject (Control 1)
-    2. same name/schema + changed description -> reject / rebind required (Control 2)
-    3. same bare name from another server -> no ambiguous consequential resolution (Control 3)
-    4. unapproved server/origin substitution -> reject (Control 4)
-    5. stale T0 discovery followed by changed T1 catalog/spec -> reject (Control 5)
-    6. same approved build/spec after benign server restart -> bounded revalidation succeeds with new runtime-generation evidence (Control 6)
-    7. different build/spec restart -> fail until rebind (Control 7)
-    8. delayed invocation after generation drift -> freshness gate catches it (Control 8)
-    """
-    if not isinstance(approved_tool, Mapping):
-        raise ToolExposureError("APPROVED_TOOL_NOT_MAPPING")
-    if not isinstance(live_spec, Mapping):
-        raise ToolExposureError("LIVE_SPEC_NOT_MAPPING")
-
-    # Ambiguity check across candidate catalogs (Control 3)
-    if catalog_candidates:
-        tool_name = approved_tool.get("tool_name")
-        matching_origins = {
-            c.get("server_origin")
-            for c in catalog_candidates
-            if c.get("tool_name") == tool_name and c.get("server_origin")
-        }
-        if len(matching_origins) > 1 and not approved_tool.get("server_origin"):
-            raise ToolExposureError(
-                f"AMBIGUOUS_TOOL_RESOLUTION: bare tool name '{tool_name}' offered by multiple servers: {sorted(matching_origins)}"
-            )
-
-    approved_origin = approved_tool.get("server_origin")
-    live_origin = live_spec.get("server_origin")
-    if not approved_origin or not live_origin or approved_origin != live_origin:
-        raise ToolExposureIdentityError(
-            f"UNAPPROVED_SERVER_ORIGIN: expected {approved_origin}, got {live_origin}"
-        )
-
-    approved_name = approved_tool.get("tool_name")
-    live_name = live_spec.get("tool_name")
-    if not approved_name or not live_name or approved_name != live_name:
-        raise ToolExposureIdentityError(
-            f"REMOTE_TOOL_NAME_MISMATCH: expected {approved_name}, got {live_name}"
-        )
-
-    # Input schema comparison (Control 1)
-    approved_schema_hash = approved_tool.get("input_schema_hash")
-    if not approved_schema_hash and "input_schema" in approved_tool:
-        approved_schema_hash = compute_tool_input_schema_hash(approved_tool["input_schema"])
-
-    live_schema_hash = live_spec.get("input_schema_hash")
-    if not live_schema_hash and "input_schema" in live_spec:
-        live_schema_hash = compute_tool_input_schema_hash(live_spec["input_schema"])
-
-    if approved_schema_hash and live_schema_hash and approved_schema_hash != live_schema_hash:
-        raise ToolExposureIdentityError(
-            f"REMOTE_TOOL_INPUT_SCHEMA_MISMATCH: approved {approved_schema_hash}, live {live_schema_hash}"
-        )
-
-    # Description comparison (Control 2)
-    approved_desc_hash = approved_tool.get("description_hash")
-    if not approved_desc_hash and "description" in approved_tool:
-        approved_desc_hash = compute_tool_description_hash(approved_tool["description"])
-
-    live_desc_hash = live_spec.get("description_hash")
-    if not live_desc_hash and "description" in live_spec:
-        live_desc_hash = compute_tool_description_hash(live_spec["description"])
-
-    if approved_desc_hash and live_desc_hash and approved_desc_hash != live_desc_hash:
-        raise ToolExposureIdentityError(
-            f"REMOTE_TOOL_DESCRIPTION_MISMATCH: approved {approved_desc_hash}, live {live_desc_hash} (rebind required)"
-        )
-
-    # Stable Tool Identity check (Control 7)
-    live_stable_identity = build_stable_tool_identity(
-        server_origin=live_origin,
-        tool_name=live_name,
-        input_schema_hash=live_schema_hash,
-        description_hash=live_desc_hash,
-    )
-    approved_stable_id = approved_tool.get("stable_tool_id")
-    if approved_stable_id and live_stable_identity["stable_tool_id"] != approved_stable_id:
-        raise ToolExposureIdentityError(
-            f"REMOTE_STABLE_TOOL_ID_MISMATCH: expected {approved_stable_id}, got {live_stable_identity['stable_tool_id']}"
-        )
-
-    # Catalog generation drift check (Controls 5, 8)
-    live_gen = live_spec.get("catalog_generation")
-    if expected_catalog_generation is not None:
-        if isinstance(live_gen, int) and isinstance(expected_catalog_generation, int):
-            drift = live_gen - expected_catalog_generation
-            allowed_drift = max_catalog_drift if max_catalog_drift is not None else 0
-            if drift > allowed_drift:
-                raise ToolExposureError(
-                    f"CATALOG_GENERATION_DRIFT: expected {expected_catalog_generation}, live {live_gen}"
-                )
-            if drift < 0:
-                raise ToolExposureError(
-                    f"STALE_CATALOG_DISCOVERY: expected {expected_catalog_generation}, live {live_gen}"
-                )
-        elif str(live_gen) != str(expected_catalog_generation):
-            raise ToolExposureError(
-                f"CATALOG_GENERATION_DRIFT: expected {expected_catalog_generation}, live {live_gen}"
-            )
-
-    # Server instance evidence (Control 6)
-    server_instance_id = live_spec.get("server_instance_id")
-    if not server_instance_id:
-        raise ToolExposureError("MISSING_SERVER_INSTANCE_ID")
-
-    runtime_gen = build_runtime_tool_generation(
-        server_origin=live_origin,
-        server_instance_id=server_instance_id,
-        catalog_generation=live_gen if live_gen is not None else 1,
-        observed_at=live_spec.get("observed_at"),
-    )
-
-    return {
-        "status": "APPROVED",
-        "stable_tool_identity": live_stable_identity,
-        "runtime_tool_generation": runtime_gen,
     }
 
 
@@ -766,52 +625,6 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
             if not row:
                 raise RuntimeError(f"CANONICAL_CORE_SESSION_NOT_FOUND: {session_id}")
 
-    def revalidate_remote_tool_invocation(
-        self,
-        *,
-        approved_tool: Mapping[str, Any],
-        live_spec: Mapping[str, Any],
-        catalog_candidates: Sequence[Mapping[str, Any]] | None = None,
-        expected_catalog_generation: int | str | None = None,
-        max_catalog_drift: int | None = 0,
-    ) -> dict[str, Any]:
-        """Revalidate live remote tool authority before physical invocation (#1144)."""
-        return revalidate_remote_tool_authority(
-            approved_tool=approved_tool,
-            live_spec=live_spec,
-            catalog_candidates=catalog_candidates,
-            expected_catalog_generation=expected_catalog_generation,
-            max_catalog_drift=max_catalog_drift,
-        )
-
-    def dispatch_remote_tool(
-        self,
-        *,
-        approved_tool: Mapping[str, Any],
-        live_spec: Mapping[str, Any],
-        invoker: Any = None,
-        invoker_kwargs: Mapping[str, Any] | None = None,
-        catalog_candidates: Sequence[Mapping[str, Any]] | None = None,
-        expected_catalog_generation: int | str | None = None,
-        max_catalog_drift: int | None = 0,
-    ) -> dict[str, Any]:
-        """Revalidate and dispatch remote tool invocation (#1144)."""
-        revalidation = self.revalidate_remote_tool_invocation(
-            approved_tool=approved_tool,
-            live_spec=live_spec,
-            catalog_candidates=catalog_candidates,
-            expected_catalog_generation=expected_catalog_generation,
-            max_catalog_drift=max_catalog_drift,
-        )
-        invoker_result = None
-        if invoker is not None:
-            kwargs = invoker_kwargs or {}
-            invoker_result = invoker(**kwargs)
-        return {
-            **revalidation,
-            "result": invoker_result,
-        }
-
     def verify_candidate(self, **kwargs: Any) -> Mapping[str, Any]:
         """
         Pure transport: passes candidate evidence directly to canonical
@@ -891,28 +704,24 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
         force_forbidden_deletion = kwargs.get("force_forbidden_deletion", False)
 
         if force_scope_escape:
-            manifest["entries"].append(
-                {
-                    "path": "unauthorized_scope_escape.txt",
-                    "change_type": "ADD",
-                    "before_oid": None,
-                    "after_oid": "e" * 40,
-                    "before_mode": None,
-                    "after_mode": "100644",
-                }
-            )
+            manifest["entries"].append({
+                "path": "unauthorized_scope_escape.txt",
+                "change_type": "ADD",
+                "before_oid": None,
+                "after_oid": "e" * 40,
+                "before_mode": None,
+                "after_mode": "100644",
+            })
 
         if force_forbidden_deletion:
-            manifest["entries"].append(
-                {
-                    "path": "forbidden_deleted_file.txt",
-                    "change_type": "DELETE",
-                    "before_oid": "d" * 40,
-                    "after_oid": None,
-                    "before_mode": "100644",
-                    "after_mode": None,
-                }
-            )
+            manifest["entries"].append({
+                "path": "forbidden_deleted_file.txt",
+                "change_type": "DELETE",
+                "before_oid": "d" * 40,
+                "after_oid": None,
+                "before_mode": "100644",
+                "after_mode": None,
+            })
 
         manifest_entries = manifest["entries"]
         changed_paths = sorted(list(set(row["path"] for row in manifest_entries)))
@@ -1087,26 +896,24 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
                 art_hash = v_res["artifact_hash"]
                 if not art_hash.startswith("sha256:"):
                     art_hash = "sha256:" + art_hash
-                obs_entry = {
+                observation = {
                     "verifier_id": vid,
                     "artifact_id": art_id,
                     "artifact_hash": art_hash,
                     "status": obs_status,
                 }
-                if "reason" in v_res:
-                    obs_entry["reason"] = v_res["reason"]
-                observations.append(obs_entry)
+                if v_res.get("reason") is not None:
+                    observation["reason"] = v_res["reason"]
+                observations.append(observation)
             else:
-                observations.append(
-                    {
-                        "verifier_id": vid,
-                        "artifact_id": f"art-{vid}",
-                        "artifact_hash": _sha256(
-                            json.dumps(_to_serializable(v_res or {"exit_code": 0}), sort_keys=True)
-                        ),
-                        "status": obs_status,
-                    }
-                )
+                observations.append({
+                    "verifier_id": vid,
+                    "artifact_id": f"art-{vid}",
+                    "artifact_hash": _sha256(
+                        json.dumps(_to_serializable(v_res or {"exit_code": 0}), sort_keys=True)
+                    ),
+                    "status": obs_status,
+                })
 
         evidence_payload = {
             "bundle_id": f"eb-{session_id[:12]}",
@@ -1333,14 +1140,12 @@ def cli_main():
 
         observations = []
         for obs in evidence_data["observations"]:
-            observations.append(
-                {
-                    "verifier_id": obs["verifier_id"],
-                    "artifact_id": obs["artifact_id"],
-                    "artifact_hash": obs["artifact_hash"],
-                    "status": obs["status"],
-                }
-            )
+            observations.append({
+                "verifier_id": obs["verifier_id"],
+                "artifact_id": obs["artifact_id"],
+                "artifact_hash": obs["artifact_hash"],
+                "status": obs["status"],
+            })
 
         evidence_payload = {
             "bundle_id": evidence_data.get("bundle_id") or "eb-1",
