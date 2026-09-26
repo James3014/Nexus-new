@@ -3220,6 +3220,22 @@ class SelfHostedTaskService:
         ]
         verifier_commands = [str(item) for item in request.get("verifier_commands", [])]
         protected_contracts = [str(item) for item in request.get("protected_contracts", [])]
+        raw_expected_evidence = request.get("expected_evidence")
+        expected_evidence = None
+        if raw_expected_evidence is not None:
+            # Projection point (§55-57): adopt the producer declaration
+            # verbatim into the contract. Validation (incl. §21-22 coupling)
+            # runs in the contract model; transport/service MUST NOT author it.
+            from nexus.orchestrator.task_contract import ExpectedEvidenceUniverse
+
+            if isinstance(raw_expected_evidence, Mapping):
+                expected_evidence = ExpectedEvidenceUniverse.model_validate(raw_expected_evidence)
+            else:
+                expected_evidence = ExpectedEvidenceUniverse.model_validate(
+                    raw_expected_evidence.model_dump(mode="json")
+                    if hasattr(raw_expected_evidence, "model_dump")
+                    else dict(raw_expected_evidence)
+                )
         if (
             request.get("worker_candidate_ingress")
             and str(request.get("contract_kind") or "") == ContractKind.OWNER_INLINE.value
@@ -3305,6 +3321,7 @@ class SelfHostedTaskService:
             mutation_mode=MutationMode.WORKING_TREE_ONLY,
             human_approval_required=True,
             collaboration_realm=collaboration_realm,
+            expected_evidence=expected_evidence,
         )
 
     @staticmethod
