@@ -6,6 +6,7 @@
 | product/adapters/github.py | tests/product/test_github_adapter.py | active | high | product_github_adapter_contract |
 | product/benchmark/__init__.py | tests/product/test_false_completion_benchmark.py | active | high | product_benchmark_contract |
 | nexus/contracts/changeset_certification.py | tests/contracts/test_changeset_certification.py, tests/product/test_changeset_certification_adapter.py | active | high | changeset_certification_contract |
+| nexus/evidence/tool_exposure_trust.py | tests/evidence/test_tool_exposure_trust.py, tests/nexus/orchestrator/test_canonical_core_transport_tool_exposure.py | active | high | tool_exposure_core_evidence_trust_contract |
 | tasks/github-issue-526-host-authority-and-canary-20260823/02-host-effect-authority-receipt.json | tests/contracts/test_gateway_deployment_contract.py, tests/ops/test_mcp_gateway_durable.py | active | high | gateway_host_authority_bundle_contract |
 | tasks/github-issue-526-host-authority-and-canary-20260823/10-durable-recovery-authority-receipt.json | tests/contracts/test_gateway_deployment_contract.py, tests/ops/test_mcp_gateway_durable.py | active | high | issue526_r1_recovery_authority_receipt_contract |
 | tasks/github-issue-526-host-authority-and-canary-20260823/10-r1-source-acceptance-evidence.json | tests/contracts/test_gateway_deployment_contract.py, tests/ops/test_mcp_gateway_durable.py | active | high | issue526_r1_source_acceptance_evidence_contract |

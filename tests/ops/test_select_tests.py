@@ -507,6 +507,27 @@ def test_default_impact_map_covers_product_paths_and_changeset_contract(tmp_path
     assert changeset_details.high_risk_escalated is True
 
 
+def test_tool_exposure_trust_maps_exact_evidence_and_transport_tests_without_fallback(tmp_path):
+    rules = load_impact_rules()
+    details = select_target_details(
+        ["nexus/evidence/tool_exposure_trust.py"],
+        rules,
+        index_path=tmp_path / "missing_impact_index.json",
+        stats_path=tmp_path / "missing_impact_stats.json",
+        history_path=tmp_path / "missing_test_history.jsonl",
+    )
+
+    assert details.targets == [
+        "tests/evidence/test_tool_exposure_trust.py",
+        "tests/nexus/orchestrator/test_canonical_core_transport_tool_exposure.py",
+        "tests/services/test_policy_gate.py",
+    ]
+    assert details.unmatched_paths == []
+    assert details.fallback_used is False
+    assert details.risk == "high"
+    assert details.high_risk_escalated is True
+
+
 def test_model_workforce_policy_uses_exact_contract_targets_without_fallback(tmp_path):
     rules = load_impact_rules()
     workforce_rule = next(
