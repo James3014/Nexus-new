@@ -842,6 +842,18 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
                 ),
                 "provider": tool_projection.get("provider") or kwargs.get("provider"),
                 "backend_id": tool_projection.get("backend_id") or kwargs.get("backend_id"),
+                "expected_remote_tool_identities": (
+                    kwargs.get("expected_remote_tool_identities")
+                    or tool_projection.get("expected_remote_tool_identities")
+                ),
+                "expected_runtime_tool_generations": (
+                    kwargs.get("expected_runtime_tool_generations")
+                    or tool_projection.get("expected_runtime_tool_generations")
+                ),
+                "requires_remote_tool_identity": (
+                    kwargs.get("requires_remote_tool_identity")
+                    or tool_projection.get("requires_remote_tool_identity", False)
+                ),
             }
             exposure_obs = bind_tool_exposure_observation(
                 raw_receipt, expected_binding=expected_binding
@@ -884,12 +896,15 @@ class CanonicalNexusCoreTransportPort(AmbientCoreControlPort):
                 art_hash = v_res["artifact_hash"]
                 if not art_hash.startswith("sha256:"):
                     art_hash = "sha256:" + art_hash
-                observations.append({
+                observation = {
                     "verifier_id": vid,
                     "artifact_id": art_id,
                     "artifact_hash": art_hash,
                     "status": obs_status,
-                })
+                }
+                if v_res.get("reason") is not None:
+                    observation["reason"] = v_res["reason"]
+                observations.append(observation)
             else:
                 observations.append({
                     "verifier_id": vid,
