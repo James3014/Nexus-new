@@ -397,6 +397,7 @@ def test_hostile_control_4_server_substitution_fails_observation():
     assert obs["status"] == "FAIL"
     assert "REMOTE_TOOL_IDENTITY_NOT_FOUND" in obs["reason"]
 
+
 def test_completion_rejects_partial_expected_remote_identity():
     identity = build_stable_tool_identity(
         server_origin="mcp://server-a",
@@ -405,19 +406,21 @@ def test_completion_rejects_partial_expected_remote_identity():
         description="Unapproved dangerous semantics",
     )
     evidence_bundle = {
-        "observations": [{
-            "verifier_id": TOOL_EXPOSURE_VERIFIER_ID,
-            "artifact_id": "tool-exposure-op-wave1-att-1",
-            "artifact_hash": "sha256:" + "a" * 64,
-            "status": "PASS",
-            "operation_id": "op-wave1",
-            "attempt_id": "att-1",
-            "provider": "opencode",
-            "backend_id": "devspace",
-            "planner_decision_hash": "1" * 64,
-            "projection_hash": "2" * 64,
-            "remote_tool_identities": [identity],
-        }]
+        "observations": [
+            {
+                "verifier_id": TOOL_EXPOSURE_VERIFIER_ID,
+                "artifact_id": "tool-exposure-op-wave1-att-1",
+                "artifact_hash": "sha256:" + "a" * 64,
+                "status": "PASS",
+                "operation_id": "op-wave1",
+                "attempt_id": "att-1",
+                "provider": "opencode",
+                "backend_id": "devspace",
+                "planner_decision_hash": "1" * 64,
+                "projection_hash": "2" * 64,
+                "remote_tool_identities": [identity],
+            }
+        ]
     }
     ok, reason = verify_completion_claim_exposure(
         evidence_bundle,
@@ -454,20 +457,22 @@ def test_runtime_generation_expectation_alone_is_enforced():
         catalog_generation="catalog-1",
     )
     evidence_bundle = {
-        "observations": [{
-            "verifier_id": TOOL_EXPOSURE_VERIFIER_ID,
-            "artifact_id": "tool-exposure-op-wave1-att-1",
-            "artifact_hash": "sha256:" + "a" * 64,
-            "status": "PASS",
-            "operation_id": "op-wave1",
-            "attempt_id": "att-1",
-            "provider": "opencode",
-            "backend_id": "devspace",
-            "planner_decision_hash": "1" * 64,
-            "projection_hash": "2" * 64,
-            "remote_tool_identities": [identity],
-            "runtime_tool_generations": [],
-        }]
+        "observations": [
+            {
+                "verifier_id": TOOL_EXPOSURE_VERIFIER_ID,
+                "artifact_id": "tool-exposure-op-wave1-att-1",
+                "artifact_hash": "sha256:" + "a" * 64,
+                "status": "PASS",
+                "operation_id": "op-wave1",
+                "attempt_id": "att-1",
+                "provider": "opencode",
+                "backend_id": "devspace",
+                "planner_decision_hash": "1" * 64,
+                "projection_hash": "2" * 64,
+                "remote_tool_identities": [identity],
+                "runtime_tool_generations": [],
+            }
+        ]
     }
     ok, reason = verify_completion_claim_exposure(
         evidence_bundle,
@@ -484,7 +489,5 @@ def test_runtime_generation_expectation_alone_is_enforced():
     )
     assert ok is False
     assert reason == (
-        "STALE_OR_SUBSTITUTED_TOOL_EXPOSURE_RECEIPT:"
-        "runtime_generation_missing:mcp://server-a"
+        "STALE_OR_SUBSTITUTED_TOOL_EXPOSURE_RECEIPT:runtime_generation_missing:mcp://server-a"
     )
-

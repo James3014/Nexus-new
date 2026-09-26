@@ -230,6 +230,7 @@ def test_receipt_with_remote_tool_identities_tampered_fails_closed():
     with pytest.raises(ToolExposureError, match="TOOL_EXPOSURE_HASH_MISMATCH"):
         validate_tool_exposure_receipt(tampered)
 
+
 def test_partial_expected_remote_identity_fails_closed():
     identity = build_stable_tool_identity(
         server_origin="mcp://server-a",
@@ -287,4 +288,3 @@ def test_partial_expected_runtime_generation_fails_closed():
             receipt,
             expected_runtime_tool_generations=[{"server_origin": "mcp://server-a"}],
         )
-
