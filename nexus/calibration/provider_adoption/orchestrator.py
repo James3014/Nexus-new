@@ -34,12 +34,16 @@ from nexus.calibration.provider_adoption.capability import (
     create_initial_capability_matrix,
 )
 from nexus.calibration.provider_adoption.cohort import (
+    SUPPORTED_LEAKAGE_POLICY_REVISIONS,
     EvaluationResult,
     EvidenceLevel,
     FrozenCohort,
     QualityVerdict,
+    audit_cohort_leakage,
+    validate_contract_cohort_binding,
 )
 from nexus.calibration.provider_adoption.contracts import (
+    BaselineIdentity,
     ExperimentContract,
     validate_experiment_contract,
 )
@@ -63,6 +67,86 @@ from nexus.calibration.provider_adoption.state_machine import (
 )
 
 EXPERIMENT_RECEIPT_SCHEMA = "nexus.provider_experiment.execution_receipt.v1"
+BASELINE_EVALUATION_SCHEMA = "nexus.provider_experiment.baseline_evaluation.v1"
+COMPARATIVE_METRICS_SCHEMA = "nexus.provider_experiment.comparative_metrics.v1"
+
+BASELINE_STATUS_NOT_REQUESTED = "NOT_REQUESTED"
+BASELINE_STATUS_NOT_EVALUATED = "NOT_EVALUATED"
+BASELINE_STATUS_UNAVAILABLE = "UNAVAILABLE"
+BASELINE_STATUS_IDENTITY_MISMATCH = "IDENTITY_MISMATCH"
+BASELINE_STATUS_STOPPED_BY_CONDITION = "STOPPED_BY_CONDITION"
+BASELINE_STATUS_EVALUATED = "EVALUATED"
+
+COMPARISON_STATUS_AVAILABLE = "AVAILABLE"
+COMPARISON_STATUS_NOT_AVAILABLE = "NOT_AVAILABLE"
+
+
+@dataclass(frozen=True)
+class ComparativeMetrics:
+    status: str
+    reason: str = ""
+    accuracy_delta: float | None = None
+    error_rate_delta: float | None = None
+    p50_latency_delta_ms: int | None = None
+    p95_latency_delta_ms: int | None = None
+    throughput_delta_rps: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "reason": self.reason,
+            "accuracy_delta": self.accuracy_delta,
+            "error_rate_delta": self.error_rate_delta,
+            "p50_latency_delta_ms": self.p50_latency_delta_ms,
+            "p95_latency_delta_ms": self.p95_latency_delta_ms,
+            "throughput_delta_rps": self.throughput_delta_rps,
+        }
+
+
+@dataclass(frozen=True)
+class BaselineEvaluation:
+    schema: str
+    status: str
+    reason: str
+    requested: bool
+    expected_identity: BaselineIdentity | None
+    physical_identity: PhysicalIdentity | None
+    baseline_identity_digest: str | None
+    baseline_run_id: str | None
+    cohort_id: str
+    cohort_revision: int
+    cohort_sha256: str
+    ground_truth_revision: int
+    ground_truth_sha256: str
+    cohort_evaluations: tuple[EvaluationResult, ...]
+    operational_metrics: OperationalMetrics | None
+    comparison: ComparativeMetrics
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": self.schema,
+            "status": self.status,
+            "reason": self.reason,
+            "requested": self.requested,
+            "expected_identity": self.expected_identity.to_dict()
+            if self.expected_identity
+            else None,
+            "physical_identity": self.physical_identity.to_dict()
+            if self.physical_identity
+            else None,
+            "baseline_identity_digest": self.baseline_identity_digest,
+            "baseline_run_id": self.baseline_run_id,
+            "cohort_id": self.cohort_id,
+            "cohort_revision": self.cohort_revision,
+            "cohort_sha256": self.cohort_sha256,
+            "ground_truth_revision": self.ground_truth_revision,
+            "ground_truth_sha256": self.ground_truth_sha256,
+            "cohort_evaluations": [e.to_dict() for e in self.cohort_evaluations],
+            "operational_metrics": self.operational_metrics.to_dict()
+            if self.operational_metrics
+            else None,
+            "comparison": self.comparison.to_dict(),
+        }
 
 
 @dataclass(frozen=True)
@@ -79,8 +163,10 @@ class ExperimentExecutionReceipt:
     operational_metrics: OperationalMetrics
     failure_matrix: FailureMatrix
     recommendation: AdmissionRecommendation
+    leakage_audit_status: str = "NOT_EVALUATED"
     stop_reason: str = ""
     receipt_hash: str = ""
+    baseline_evaluation: BaselineEvaluation | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -96,8 +182,12 @@ class ExperimentExecutionReceipt:
             "operational_metrics": self.operational_metrics.to_dict(),
             "failure_matrix": self.failure_matrix.to_dict(),
             "recommendation": self.recommendation.to_dict(),
+            "leakage_audit_status": self.leakage_audit_status,
             "stop_reason": self.stop_reason,
             "receipt_hash": self.receipt_hash,
+            "baseline_evaluation": self.baseline_evaluation.to_dict()
+            if self.baseline_evaluation
+            else None,
         }
 
     def compute_hash(self) -> str:
@@ -106,11 +196,334 @@ class ExperimentExecutionReceipt:
         return canonical_json_hash(data)
 
 
+def _grade_case_execution(
+    *,
+    out_text: str,
+    schema_valid: bool,
+    failure_class: str | None,
+    ground_truth: str,
+    acceptable_variants: tuple[str, ...],
+    forbidden_outputs: tuple[str, ...],
+) -> tuple[QualityVerdict, str | None, bool]:
+    """Grade case execution against ground truth, acceptable variants, and forbidden outputs.
+
+    Returns: (verdict, effective_failure_class, is_failure)
+    """
+    if failure_class:
+        return QualityVerdict.FAIL, failure_class, True
+    if not schema_valid:
+        return QualityVerdict.FAIL, FailureClass.SCHEMA_VIOLATION.value, True
+
+    norm_out = out_text.strip().lower()
+    norm_gt = ground_truth.strip().lower()
+    norm_variants = [v.strip().lower() for v in acceptable_variants]
+    norm_forbidden = [f.strip().lower() for f in forbidden_outputs]
+
+    if norm_out in norm_forbidden:
+        return QualityVerdict.FAIL, FailureClass.INVALID_RESPONSE.value, True
+    if norm_out == norm_gt or norm_out in norm_variants:
+        return QualityVerdict.PASS, None, False
+    return QualityVerdict.FAIL, FailureClass.INVALID_RESPONSE.value, True
+
+
+def _evaluate_baseline(
+    *,
+    contract: ExperimentContract,
+    cohort: FrozenCohort,
+    baseline_adapter: CandidateAdapter | None,
+    candidate_cohort_reached: bool,
+    lifecycle_halt_reason: str,
+    candidate_operational_metrics: OperationalMetrics | None,
+    candidate_evaluated: bool,
+    evaluator_identity: str,
+    evidence_level: EvidenceLevel,
+) -> BaselineEvaluation:
+    """Evaluate baseline model adapter under settled calibration semantics."""
+    # 1. Baseline is optional: contract.baseline is None => NOT_REQUESTED
+    if contract.baseline is None:
+        return BaselineEvaluation(
+            schema=BASELINE_EVALUATION_SCHEMA,
+            status=BASELINE_STATUS_NOT_REQUESTED,
+            reason="Baseline evaluation not requested in contract.",
+            requested=False,
+            expected_identity=None,
+            physical_identity=None,
+            baseline_identity_digest=None,
+            baseline_run_id=None,
+            cohort_id=cohort.cohort_id,
+            cohort_revision=cohort.cohort_revision,
+            cohort_sha256=cohort.cohort_sha256,
+            ground_truth_revision=cohort.ground_truth_revision,
+            ground_truth_sha256=cohort.ground_truth_sha256,
+            cohort_evaluations=(),
+            operational_metrics=None,
+            comparison=ComparativeMetrics(
+                status=COMPARISON_STATUS_NOT_AVAILABLE,
+                reason="Baseline not requested.",
+            ),
+        )
+
+    expected = contract.baseline
+
+    # 2. Baseline requested but no adapter supplied => NOT_EVALUATED
+    if baseline_adapter is None:
+        return BaselineEvaluation(
+            schema=BASELINE_EVALUATION_SCHEMA,
+            status=BASELINE_STATUS_NOT_EVALUATED,
+            reason="Baseline requested in contract but no baseline_adapter provided.",
+            requested=True,
+            expected_identity=expected,
+            physical_identity=None,
+            baseline_identity_digest=None,
+            baseline_run_id=None,
+            cohort_id=cohort.cohort_id,
+            cohort_revision=cohort.cohort_revision,
+            cohort_sha256=cohort.cohort_sha256,
+            ground_truth_revision=cohort.ground_truth_revision,
+            ground_truth_sha256=cohort.ground_truth_sha256,
+            cohort_evaluations=(),
+            operational_metrics=None,
+            comparison=ComparativeMetrics(
+                status=COMPARISON_STATUS_NOT_AVAILABLE,
+                reason="Baseline adapter not provided.",
+            ),
+        )
+
+    # 3. Inspect exact baseline physical identity
+    baseline_physical_id = baseline_adapter.inspect_identity()
+    if (
+        baseline_physical_id.provider_id != expected.provider_id
+        or baseline_physical_id.model_id != expected.model_id
+        or baseline_physical_id.transport != expected.transport
+    ):
+        return BaselineEvaluation(
+            schema=BASELINE_EVALUATION_SCHEMA,
+            status=BASELINE_STATUS_IDENTITY_MISMATCH,
+            reason=(
+                f"Baseline physical identity mismatch: expected provider='{expected.provider_id}', "
+                f"model='{expected.model_id}', transport='{expected.transport}'; "
+                f"observed provider='{baseline_physical_id.provider_id}', "
+                f"model='{baseline_physical_id.model_id}', transport='{baseline_physical_id.transport}'."
+            ),
+            requested=True,
+            expected_identity=expected,
+            physical_identity=baseline_physical_id,
+            baseline_identity_digest=baseline_physical_id.identity_digest,
+            baseline_run_id=None,
+            cohort_id=cohort.cohort_id,
+            cohort_revision=cohort.cohort_revision,
+            cohort_sha256=cohort.cohort_sha256,
+            ground_truth_revision=cohort.ground_truth_revision,
+            ground_truth_sha256=cohort.ground_truth_sha256,
+            cohort_evaluations=(),
+            operational_metrics=None,
+            comparison=ComparativeMetrics(
+                status=COMPARISON_STATUS_NOT_AVAILABLE,
+                reason="Baseline physical identity mismatch.",
+            ),
+        )
+
+    # 4. Check if baseline adapter environment is blocked
+    is_base_blocked, base_blocker_reason = baseline_adapter.is_environment_blocked()
+    if is_base_blocked:
+        return BaselineEvaluation(
+            schema=BASELINE_EVALUATION_SCHEMA,
+            status=BASELINE_STATUS_UNAVAILABLE,
+            reason=f"Baseline environment blocked: {base_blocker_reason}",
+            requested=True,
+            expected_identity=expected,
+            physical_identity=baseline_physical_id,
+            baseline_identity_digest=baseline_physical_id.identity_digest,
+            baseline_run_id=None,
+            cohort_id=cohort.cohort_id,
+            cohort_revision=cohort.cohort_revision,
+            cohort_sha256=cohort.cohort_sha256,
+            ground_truth_revision=cohort.ground_truth_revision,
+            ground_truth_sha256=cohort.ground_truth_sha256,
+            cohort_evaluations=(),
+            operational_metrics=None,
+            comparison=ComparativeMetrics(
+                status=COMPARISON_STATUS_NOT_AVAILABLE,
+                reason=f"Baseline environment blocked: {base_blocker_reason}",
+            ),
+        )
+
+    # 5. If candidate cohort evaluation was not reached, baseline cannot run cohort
+    if not candidate_cohort_reached:
+        return BaselineEvaluation(
+            schema=BASELINE_EVALUATION_SCHEMA,
+            status=BASELINE_STATUS_NOT_EVALUATED,
+            reason=f"Cohort execution not reached due to candidate lifecycle halt: {lifecycle_halt_reason}",
+            requested=True,
+            expected_identity=expected,
+            physical_identity=baseline_physical_id,
+            baseline_identity_digest=baseline_physical_id.identity_digest,
+            baseline_run_id=None,
+            cohort_id=cohort.cohort_id,
+            cohort_revision=cohort.cohort_revision,
+            cohort_sha256=cohort.cohort_sha256,
+            ground_truth_revision=cohort.ground_truth_revision,
+            ground_truth_sha256=cohort.ground_truth_sha256,
+            cohort_evaluations=(),
+            operational_metrics=None,
+            comparison=ComparativeMetrics(
+                status=COMPARISON_STATUS_NOT_AVAILABLE,
+                reason="Candidate cohort execution not reached.",
+            ),
+        )
+
+    # 6. Execute SAME exact cohort cases with same grading semantics under stable baseline_run_id
+    baseline_run_id = str(uuid.uuid4())
+    base_evaluations: list[EvaluationResult] = []
+    base_consecutive_failures = 0
+    base_total_failures = 0
+    base_total_executed = 0
+    base_t0 = time.monotonic()
+    base_stopped = False
+    base_stop_reason = ""
+
+    # Isolated state machine for stop condition evaluation only; does NOT mutate candidate sm
+    base_sm = LifecycleStateMachine(experiment_id=contract.experiment_id)
+
+    for case in cohort.cases:
+        t_start = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        out_text, schema_valid, failure_class, lat_ms = baseline_adapter.execute_case(case)
+        t_end = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+        verdict, effective_fc, is_fail = _grade_case_execution(
+            out_text=out_text,
+            schema_valid=schema_valid,
+            failure_class=failure_class,
+            ground_truth=case.ground_truth,
+            acceptable_variants=case.acceptable_variants,
+            forbidden_outputs=case.forbidden_outputs,
+        )
+
+        if is_fail:
+            base_consecutive_failures += 1
+            base_total_failures += 1
+        else:
+            base_consecutive_failures = 0
+
+        base_total_executed += 1
+
+        base_evaluations.append(
+            EvaluationResult(
+                schema="nexus.provider_experiment.evaluation_result.v1",
+                experiment_id=contract.experiment_id,
+                run_id=baseline_run_id,
+                case_id=case.case_id,
+                candidate_identity_digest=baseline_physical_id.identity_digest,
+                input_digest=canonical_json_hash(case.input_prompt),
+                output_text=out_text,
+                output_digest=canonical_json_hash(out_text),
+                schema_valid=schema_valid,
+                quality_result=verdict,
+                failure_class=effective_fc,
+                latency_ms=lat_ms,
+                retry_count=0,
+                started_at=t_start,
+                completed_at=t_end,
+                evaluator_identity=evaluator_identity,
+                evidence_level=evidence_level,
+            )
+        )
+
+        should_stop, s_reason = base_sm.check_stop_conditions(
+            contract.stop_conditions,
+            consecutive_failures=base_consecutive_failures,
+            total_failures=base_total_failures,
+            total_executed=base_total_executed,
+            timed_out=(effective_fc == FailureClass.PROVIDER_TIMEOUT.value),
+        )
+        if should_stop:
+            base_stopped = True
+            base_stop_reason = s_reason
+            break
+
+    # 7. Aggregate operational metrics
+    base_t_duration = max(0.001, time.monotonic() - base_t0)
+    base_offline_bool = (
+        True
+        if baseline_physical_id.offline_availability == "VERIFIED_OFFLINE"
+        else (False if baseline_physical_id.offline_availability == "ONLINE_REQUIRED" else None)
+    )
+    base_metrics = aggregate_operational_metrics(
+        base_evaluations,
+        total_duration_sec=base_t_duration,
+        offline_verified=base_offline_bool,
+        network_dependency_observed=baseline_physical_id.network_dependency,
+    )
+
+    # 8. Determine final status and comparison
+    if base_stopped:
+        base_status = BASELINE_STATUS_STOPPED_BY_CONDITION
+        base_reason = base_stop_reason
+        comparison = ComparativeMetrics(
+            status=COMPARISON_STATUS_NOT_AVAILABLE,
+            reason=f"Baseline evaluation stopped early by stop condition: {base_stop_reason}",
+        )
+    else:
+        base_status = BASELINE_STATUS_EVALUATED
+        base_reason = "Baseline cohort evaluation completed successfully."
+
+        if candidate_operational_metrics is not None and candidate_evaluated:
+            accuracy_delta = round(
+                candidate_operational_metrics.accuracy - base_metrics.accuracy, 4
+            )
+            error_rate_delta = round(
+                candidate_operational_metrics.error_rate - base_metrics.error_rate, 4
+            )
+            p50_latency_delta_ms = (
+                candidate_operational_metrics.p50_latency_ms - base_metrics.p50_latency_ms
+            )
+            p95_latency_delta_ms = (
+                candidate_operational_metrics.p95_latency_ms - base_metrics.p95_latency_ms
+            )
+            throughput_delta_rps = round(
+                candidate_operational_metrics.throughput_rps - base_metrics.throughput_rps, 4
+            )
+            comparison = ComparativeMetrics(
+                status=COMPARISON_STATUS_AVAILABLE,
+                reason="Candidate and baseline cohorts fully evaluated under identical conditions.",
+                accuracy_delta=accuracy_delta,
+                error_rate_delta=error_rate_delta,
+                p50_latency_delta_ms=p50_latency_delta_ms,
+                p95_latency_delta_ms=p95_latency_delta_ms,
+                throughput_delta_rps=throughput_delta_rps,
+            )
+        else:
+            comparison = ComparativeMetrics(
+                status=COMPARISON_STATUS_NOT_AVAILABLE,
+                reason="Candidate cohort was not fully evaluated.",
+            )
+
+    return BaselineEvaluation(
+        schema=BASELINE_EVALUATION_SCHEMA,
+        status=base_status,
+        reason=base_reason,
+        requested=True,
+        expected_identity=expected,
+        physical_identity=baseline_physical_id,
+        baseline_identity_digest=baseline_physical_id.identity_digest,
+        baseline_run_id=baseline_run_id,
+        cohort_id=cohort.cohort_id,
+        cohort_revision=cohort.cohort_revision,
+        cohort_sha256=cohort.cohort_sha256,
+        ground_truth_revision=cohort.ground_truth_revision,
+        ground_truth_sha256=cohort.ground_truth_sha256,
+        cohort_evaluations=tuple(base_evaluations),
+        operational_metrics=base_metrics,
+        comparison=comparison,
+    )
+
+
 def run_provider_adoption_experiment(
     *,
     contract: ExperimentContract,
     cohort: FrozenCohort,
     adapter: CandidateAdapter,
+    baseline_adapter: CandidateAdapter | None = None,
     evidence_level: EvidenceLevel = EvidenceLevel.SIMULATED,
     evaluator_identity: str = "nexus_provider_adoption_evaluator_v1",
 ) -> ExperimentExecutionReceipt:
@@ -121,6 +534,7 @@ def run_provider_adoption_experiment(
 
     # G0: Contract Validation
     validate_experiment_contract(contract)
+    validate_contract_cohort_binding(contract, cohort)
     sm.transition_to(LifecycleState.CONTRACT_FROZEN, "Contract validated and frozen.")
 
     # Check adapter environment blockers
@@ -192,8 +606,19 @@ def run_provider_adoption_experiment(
             latency_p95_ms=0,
             pass_thresholds=contract.pass_thresholds,
             metrics_config=contract.metrics_config,
-            environment_blocked=True,
+            blocker_category="ENVIRONMENT",
             blocker_reason=blocker_reason,
+        )
+        base_eval = _evaluate_baseline(
+            contract=contract,
+            cohort=cohort,
+            baseline_adapter=baseline_adapter,
+            candidate_cohort_reached=False,
+            lifecycle_halt_reason=f"Candidate environment blocked: {blocker_reason}",
+            candidate_operational_metrics=None,
+            candidate_evaluated=False,
+            evaluator_identity=evaluator_identity,
+            evidence_level=evidence_level,
         )
         receipt = ExperimentExecutionReceipt(
             schema=EXPERIMENT_RECEIPT_SCHEMA,
@@ -208,7 +633,9 @@ def run_provider_adoption_experiment(
             operational_metrics=empty_metrics,
             failure_matrix=failure_matrix,
             recommendation=recommendation,
+            leakage_audit_status="NOT_EVALUATED",
             stop_reason=sm.stop_reason,
+            baseline_evaluation=base_eval,
         )
         h = receipt.compute_hash()
         return ExperimentExecutionReceipt(**{**receipt.__dict__, "receipt_hash": h})
@@ -254,8 +681,21 @@ def run_provider_adoption_experiment(
             error_rate=1.0,
             offline_verified=False,
             latency_p95_ms=0,
-            environment_blocked=True,
-            blocker_reason="GROUND_TRUTH_NOT_READY",
+            pass_thresholds=contract.pass_thresholds,
+            metrics_config=contract.metrics_config,
+            blocker_category="DATA/COHORT",
+            blocker_reason="GROUND_TRUTH_NOT_READY: Benchmark cohort ground truth is incomplete or unverified.",
+        )
+        base_eval = _evaluate_baseline(
+            contract=contract,
+            cohort=cohort,
+            baseline_adapter=baseline_adapter,
+            candidate_cohort_reached=False,
+            lifecycle_halt_reason="GROUND_TRUTH_NOT_READY: Benchmark cohort ground truth is incomplete or unverified.",
+            candidate_operational_metrics=None,
+            candidate_evaluated=False,
+            evaluator_identity=evaluator_identity,
+            evidence_level=evidence_level,
         )
         receipt = ExperimentExecutionReceipt(
             schema=EXPERIMENT_RECEIPT_SCHEMA,
@@ -270,10 +710,129 @@ def run_provider_adoption_experiment(
             operational_metrics=empty_metrics,
             failure_matrix=failure_matrix,
             recommendation=recommendation,
+            leakage_audit_status="NOT_EVALUATED",
             stop_reason=sm.stop_reason,
+            baseline_evaluation=base_eval,
         )
         h = receipt.compute_hash()
         return ExperimentExecutionReceipt(**{**receipt.__dict__, "receipt_hash": h})
+
+    # Invariant 6.5 / Leakage Defense: Audit cohort for leakage before executing cases
+    if contract.dataset.leakage_policy_revision not in SUPPORTED_LEAKAGE_POLICY_REVISIONS:
+        policy_msg = (
+            f"UNSUPPORTED_LEAKAGE_POLICY_REVISION: Revision "
+            f"{contract.dataset.leakage_policy_revision} is not supported "
+            f"(supported: {list(SUPPORTED_LEAKAGE_POLICY_REVISIONS)})."
+        )
+        sm.transition_to(LifecycleState.FAILED, policy_msg)
+        empty_metrics = aggregate_operational_metrics([])
+        failure_matrix = build_failure_matrix()
+        recommendation = build_admission_recommendation(
+            experiment_id=contract.experiment_id,
+            candidate_provider_id=contract.candidate.provider_id,
+            candidate_model_id=contract.candidate.model_id,
+            claim_ceiling=contract.claim_ceiling,
+            accuracy=0.0,
+            format_compliance=0.0,
+            error_rate=1.0,
+            offline_verified=False,
+            latency_p95_ms=0,
+            pass_thresholds=contract.pass_thresholds,
+            metrics_config=contract.metrics_config,
+            blocker_category="DATA/COHORT",
+            blocker_reason=policy_msg,
+            capability_matrix=cap_matrix,
+            allowed_capabilities=contract.allowed_capabilities,
+        )
+        base_eval = _evaluate_baseline(
+            contract=contract,
+            cohort=cohort,
+            baseline_adapter=baseline_adapter,
+            candidate_cohort_reached=False,
+            lifecycle_halt_reason=policy_msg,
+            candidate_operational_metrics=None,
+            candidate_evaluated=False,
+            evaluator_identity=evaluator_identity,
+            evidence_level=evidence_level,
+        )
+        receipt = ExperimentExecutionReceipt(
+            schema=EXPERIMENT_RECEIPT_SCHEMA,
+            experiment_id=contract.experiment_id,
+            run_id=run_id,
+            contract_hash=contract.contract_hash,
+            final_state=sm.current_state,
+            state_history=tuple((s.value, r) for s, r in sm.history),
+            physical_identity=physical_id,
+            capability_matrix=cap_matrix,
+            cohort_evaluations=(),
+            operational_metrics=empty_metrics,
+            failure_matrix=failure_matrix,
+            recommendation=recommendation,
+            leakage_audit_status="FAILED",
+            stop_reason=sm.stop_reason,
+            baseline_evaluation=base_eval,
+        )
+        h = receipt.compute_hash()
+        return ExperimentExecutionReceipt(**{**receipt.__dict__, "receipt_hash": h})
+
+    is_clean, leak_issues = audit_cohort_leakage(
+        cohort,
+        policy_revision=contract.dataset.leakage_policy_revision,
+    )
+    if not is_clean:
+        leak_msg = f"COHORT_LEAKAGE_DETECTED: {'; '.join(leak_issues)}"
+        sm.transition_to(LifecycleState.FAILED, leak_msg)
+        empty_metrics = aggregate_operational_metrics([])
+        failure_matrix = build_failure_matrix()
+        recommendation = build_admission_recommendation(
+            experiment_id=contract.experiment_id,
+            candidate_provider_id=contract.candidate.provider_id,
+            candidate_model_id=contract.candidate.model_id,
+            claim_ceiling=contract.claim_ceiling,
+            accuracy=0.0,
+            format_compliance=0.0,
+            error_rate=1.0,
+            offline_verified=False,
+            latency_p95_ms=0,
+            pass_thresholds=contract.pass_thresholds,
+            metrics_config=contract.metrics_config,
+            blocker_category="DATA/COHORT",
+            blocker_reason=leak_msg,
+            capability_matrix=cap_matrix,
+            allowed_capabilities=contract.allowed_capabilities,
+        )
+        base_eval = _evaluate_baseline(
+            contract=contract,
+            cohort=cohort,
+            baseline_adapter=baseline_adapter,
+            candidate_cohort_reached=False,
+            lifecycle_halt_reason=leak_msg,
+            candidate_operational_metrics=None,
+            candidate_evaluated=False,
+            evaluator_identity=evaluator_identity,
+            evidence_level=evidence_level,
+        )
+        receipt = ExperimentExecutionReceipt(
+            schema=EXPERIMENT_RECEIPT_SCHEMA,
+            experiment_id=contract.experiment_id,
+            run_id=run_id,
+            contract_hash=contract.contract_hash,
+            final_state=sm.current_state,
+            state_history=tuple((s.value, r) for s, r in sm.history),
+            physical_identity=physical_id,
+            capability_matrix=cap_matrix,
+            cohort_evaluations=(),
+            operational_metrics=empty_metrics,
+            failure_matrix=failure_matrix,
+            recommendation=recommendation,
+            leakage_audit_status="FAILED",
+            stop_reason=sm.stop_reason,
+            baseline_evaluation=base_eval,
+        )
+        h = receipt.compute_hash()
+        return ExperimentExecutionReceipt(**{**receipt.__dict__, "receipt_hash": h})
+
+    leakage_audit_status = "PASSED"
 
     # G3: Cohort Evaluation with active Stop Condition enforcement (Invariant 6.4)
     evaluations: list[EvaluationResult] = []
@@ -288,28 +847,20 @@ def run_provider_adoption_experiment(
         out_text, schema_valid, failure_class, lat_ms = adapter.execute_case(case)
         t_case_end = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-        # Grade quality
-        if failure_class:
-            verdict = QualityVerdict.FAIL
-            consecutive_failures += 1
-            total_failures += 1
-        elif not schema_valid:
-            verdict = QualityVerdict.FAIL
-            failure_class = FailureClass.SCHEMA_VIOLATION.value
+        verdict, effective_fc, is_fail = _grade_case_execution(
+            out_text=out_text,
+            schema_valid=schema_valid,
+            failure_class=failure_class,
+            ground_truth=case.ground_truth,
+            acceptable_variants=case.acceptable_variants,
+            forbidden_outputs=case.forbidden_outputs,
+        )
+
+        if is_fail:
             consecutive_failures += 1
             total_failures += 1
         else:
-            norm_out = out_text.strip().lower()
-            norm_gt = case.ground_truth.strip().lower()
-            norm_variants = [v.strip().lower() for v in case.acceptable_variants]
-            if norm_out == norm_gt or norm_out in norm_variants:
-                verdict = QualityVerdict.PASS
-                consecutive_failures = 0
-            else:
-                verdict = QualityVerdict.FAIL
-                failure_class = FailureClass.INVALID_RESPONSE.value
-                consecutive_failures += 1
-                total_failures += 1
+            consecutive_failures = 0
 
         total_executed += 1
 
@@ -325,7 +876,7 @@ def run_provider_adoption_experiment(
                 output_digest=canonical_json_hash(out_text),
                 schema_valid=schema_valid,
                 quality_result=verdict,
-                failure_class=failure_class,
+                failure_class=effective_fc,
                 latency_ms=lat_ms,
                 retry_count=0,
                 started_at=t_case_start,
@@ -341,7 +892,7 @@ def run_provider_adoption_experiment(
             consecutive_failures=consecutive_failures,
             total_failures=total_failures,
             total_executed=total_executed,
-            timed_out=(failure_class == FailureClass.PROVIDER_TIMEOUT.value),
+            timed_out=(effective_fc == FailureClass.PROVIDER_TIMEOUT.value),
         )
         if should_stop:
             sm.transition_to(LifecycleState.STOPPED_BY_CONDITION, stop_reason)
@@ -367,14 +918,29 @@ def run_provider_adoption_experiment(
     if not stopped:
         sm.transition_to(LifecycleState.OPERATIONAL_EVALUATED, "Operational metrics aggregated.")
 
-    # G5: Failure Evaluation (Contract vs Observation)
-    observations: dict[str, Any] = {}
-    for fc in FailureClass:
-        obs = adapter.inject_fault(fc)
-        observations[fc.value] = obs
+    # Baseline Calibration Evaluation (Settled Semantics)
+    base_eval = _evaluate_baseline(
+        contract=contract,
+        cohort=cohort,
+        baseline_adapter=baseline_adapter,
+        candidate_cohort_reached=True,
+        lifecycle_halt_reason="",
+        candidate_operational_metrics=operational_metrics,
+        candidate_evaluated=(not stopped),
+        evaluator_identity=evaluator_identity,
+        evidence_level=evidence_level,
+    )
 
-    failure_matrix = build_failure_matrix(observations=observations)
-    if not stopped:
+    # G5: Failure Evaluation (Contract vs Observation)
+    if stopped:
+        failure_matrix = build_failure_matrix()
+    else:
+        observations: dict[str, Any] = {}
+        for fc in FailureClass:
+            obs = adapter.inject_fault(fc)
+            observations[fc.value] = obs
+
+        failure_matrix = build_failure_matrix(observations=observations)
         sm.transition_to(LifecycleState.FAILURE_EVALUATED, "Failure behavior matrix compiled.")
 
     # G6: Admission Recommendation (Advisory Only)
@@ -390,10 +956,13 @@ def run_provider_adoption_experiment(
         latency_p95_ms=operational_metrics.p95_latency_ms,
         semantic_correctness=operational_metrics.semantic_correctness_rate,
         latency_p50_ms=operational_metrics.p50_latency_ms,
+        throughput_rps=operational_metrics.throughput_rps,
         pass_thresholds=contract.pass_thresholds,
         metrics_config=contract.metrics_config,
-        environment_blocked=stopped,
+        blocker_category="EVALUATION_STOP" if stopped else None,
         blocker_reason=sm.stop_reason if stopped else "",
+        capability_matrix=cap_matrix,
+        allowed_capabilities=contract.allowed_capabilities,
     )
     if not stopped:
         sm.transition_to(LifecycleState.RECOMMENDATION_READY, "Advisory recommendation ready.")
@@ -411,7 +980,9 @@ def run_provider_adoption_experiment(
         operational_metrics=operational_metrics,
         failure_matrix=failure_matrix,
         recommendation=recommendation,
+        leakage_audit_status=leakage_audit_status,
         stop_reason=sm.stop_reason,
+        baseline_evaluation=base_eval,
     )
     h = receipt.compute_hash()
     return ExperimentExecutionReceipt(**{**receipt.__dict__, "receipt_hash": h})

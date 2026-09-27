@@ -240,12 +240,39 @@ def validate_contract_authority(boundary: AuthorityBoundary) -> None:
         )
 
 
+def validate_contract_capabilities(
+    allowed_capabilities: tuple[str, ...],
+    forbidden_capabilities: tuple[str, ...],
+) -> None:
+    """Validate consistency of allowed and forbidden capabilities.
+
+    Vocabulary Note:
+    - Allowed capabilities typically specify capability probe IDs (e.g. CAP-001 through CAP-011
+      defined in capability.py) to be evaluated during G2 probing.
+    - Forbidden capabilities specify capabilities or side-effect classes forbidden to the
+      candidate (e.g. CAP-008, or effect names such as "file_mutation", "process_execution").
+    - Overlap between allowed_capabilities and forbidden_capabilities represents an inconsistent
+      or contradictory contract and fails closed.
+    - This consistency check does NOT invent a generic runtime permission authority; runtime
+      authority boundaries remain strictly governed by AuthorityBoundary.
+    """
+    allowed_set = set(allowed_capabilities)
+    forbidden_set = set(forbidden_capabilities)
+    overlap = allowed_set & forbidden_set
+    if overlap:
+        raise ValueError(
+            f"CAPABILITY_CONSISTENCY_ERROR: Overlap detected between allowed_capabilities "
+            f"and forbidden_capabilities: {sorted(overlap)}."
+        )
+
+
 def validate_experiment_contract(contract: ExperimentContract) -> None:
     if contract.schema != EXPERIMENT_CONTRACT_SCHEMA:
         raise ValueError(
             f"Invalid schema: expected {EXPERIMENT_CONTRACT_SCHEMA}, got {contract.schema}"
         )
     validate_contract_authority(contract.authority_boundary)
+    validate_contract_capabilities(contract.allowed_capabilities, contract.forbidden_capabilities)
     expected_hash = contract.compute_content_hash()
     if contract.contract_hash != expected_hash:
         raise ValueError(
@@ -278,6 +305,7 @@ def build_experiment_contract(
     created_at: str,
 ) -> ExperimentContract:
     validate_contract_authority(authority_boundary)
+    validate_contract_capabilities(allowed_capabilities, forbidden_capabilities)
     raw_dict = {
         "schema": EXPERIMENT_CONTRACT_SCHEMA,
         "experiment_id": experiment_id,

@@ -241,6 +241,9 @@ def main() -> int:
     print(f"Recommended State: {receipt.recommendation.recommended_state}")
     print(f"Recommended Autonomy: {receipt.recommendation.recommended_autonomy}")
     print(f"Clamped by Ceiling: {receipt.recommendation.clamped_by_ceiling}")
+    if receipt.baseline_evaluation:
+        print(f"Baseline Status: {receipt.baseline_evaluation.status}")
+        print(f"Baseline Comparison: {receipt.baseline_evaluation.comparison.status}")
 
     return 0
 

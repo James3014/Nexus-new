@@ -84,3 +84,35 @@ def test_contract_authority_escalation_rejection():
     # Attempting to grant network permission MUST fail closed
     with pytest.raises(ValueError, match="FORBIDDEN_AUTHORITY_ESCALATION.*network_permission"):
         _make_valid_contract(authority_boundary=AuthorityBoundary(network_permission=True))
+
+
+def test_contract_capabilities_overlap_rejected():
+    """Verify D6: overlap between allowed_capabilities and forbidden_capabilities fails closed."""
+    from nexus.calibration.provider_adoption.contracts import validate_contract_capabilities
+
+    # 1. Direct validator check with CAP-* ID overlap
+    with pytest.raises(ValueError, match="CAPABILITY_CONSISTENCY_ERROR.*CAP-001"):
+        validate_contract_capabilities(
+            allowed_capabilities=("CAP-001", "CAP-002"),
+            forbidden_capabilities=("CAP-001", "file_mutation"),
+        )
+
+    # 2. Direct validator check with effect name overlap
+    with pytest.raises(ValueError, match="CAPABILITY_CONSISTENCY_ERROR.*tool_calling"):
+        validate_contract_capabilities(
+            allowed_capabilities=("CAP-001", "tool_calling"),
+            forbidden_capabilities=("tool_calling", "process_execution"),
+        )
+
+    # 3. Contract builder check with CAP-* ID overlap
+    with pytest.raises(ValueError, match="CAPABILITY_CONSISTENCY_ERROR.*CAP-002"):
+        _make_valid_contract(
+            allowed_capabilities=("CAP-001", "CAP-002"),
+            forbidden_capabilities=("CAP-002", "process_execution"),
+        )
+
+    # 4. Valid disjoint sets succeed
+    validate_contract_capabilities(
+        allowed_capabilities=("CAP-001", "CAP-002"),
+        forbidden_capabilities=("CAP-008", "file_mutation", "process_execution"),
+    )

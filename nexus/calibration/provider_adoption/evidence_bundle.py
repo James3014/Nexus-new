@@ -58,6 +58,70 @@ def generate_13_question_report(bundle: EvidenceBundle) -> str:
     m = r.operational_metrics
     rec = r.recommendation
 
+    if r.leakage_audit_status == "PASSED":
+        leakage_prevention_desc = (
+            "Ground truth is strictly segregated from prompts and audited clean."
+        )
+    elif r.leakage_audit_status == "FAILED":
+        leakage_prevention_desc = "Prompt leakage detected during audit; case execution halted."
+    else:
+        leakage_prevention_desc = "Cohort audit was not evaluated due to prior lifecycle blocker."
+
+    be = getattr(r, "baseline_evaluation", None)
+    if be is not None and be.requested:
+        expected_base_str = (
+            f"`{be.expected_identity.provider_id}/{be.expected_identity.model_id}` ({be.expected_identity.transport})"
+            if be.expected_identity
+            else "None"
+        )
+        observed_base_str = (
+            f"`{be.physical_identity.identity_digest}`" if be.physical_identity else "None"
+        )
+        base_lines = [
+            "- **Baseline Calibration & Comparative Evidence:**",
+            "  - **Baseline Requested:** YES",
+            f"  - **Baseline Status:** `{be.status}` ({be.reason})",
+            f"  - **Expected Baseline Identity:** {expected_base_str}",
+            f"  - **Observed Physical Identity:** {observed_base_str}",
+            f"  - **Baseline Cases Evaluated:** {len(be.cohort_evaluations)}",
+        ]
+        if be.operational_metrics:
+            bm = be.operational_metrics
+            base_lines.append(
+                f"  - **Baseline Metrics:** {bm.total_cases} cases (Accuracy: {bm.accuracy * 100:.1f}%, Error Rate: {bm.error_rate * 100:.1f}%, Latency p50: {bm.p50_latency_ms} ms, Latency p95: {bm.p95_latency_ms} ms, Throughput: {bm.throughput_rps:.2f} rps)"
+            )
+        cmp = be.comparison
+        base_lines.append(
+            f"  - **Comparison Status:** `{cmp.status}` ({cmp.reason or 'Factual metric deltas available.'})"
+        )
+        if cmp.status == "AVAILABLE":
+            acc_d = f"{cmp.accuracy_delta * 100:+.1f}%" if cmp.accuracy_delta is not None else "N/A"
+            err_d = (
+                f"{cmp.error_rate_delta * 100:+.1f}%" if cmp.error_rate_delta is not None else "N/A"
+            )
+            p50_d = (
+                f"{cmp.p50_latency_delta_ms:+d} ms"
+                if cmp.p50_latency_delta_ms is not None
+                else "N/A"
+            )
+            p95_d = (
+                f"{cmp.p95_latency_delta_ms:+d} ms"
+                if cmp.p95_latency_delta_ms is not None
+                else "N/A"
+            )
+            tps_d = (
+                f"{cmp.throughput_delta_rps:+.2f} rps"
+                if cmp.throughput_delta_rps is not None
+                else "N/A"
+            )
+            base_lines.append(
+                f"  - **Metric Deltas (Candidate - Baseline):** Accuracy: {acc_d}, Error Rate: {err_d}, Latency p50: {p50_d}, Latency p95: {p95_d}, Throughput: {tps_d}"
+            )
+        base_report_block = "\n" + "\n".join(base_lines)
+    else:
+        base_reason = be.reason if be else "Baseline evaluation not requested in contract."
+        base_report_block = f"\n- **Baseline Evaluation:** `NOT_REQUESTED` ({base_reason})"
+
     return f"""# Provider Adoption Experiment Report: {c.experiment_id}
 
 **Bundle Hash:** `{bundle.bundle_hash}`
@@ -99,7 +163,9 @@ def generate_13_question_report(bundle: EvidenceBundle) -> str:
 - **Cohort ID:** `{c.dataset.cohort_id}` (Revision {c.dataset.cohort_revision})
 - **Cohort Type:** `{c.dataset.cohort_type}`
 - **Cohort Hash:** `{c.dataset.cohort_sha256}`
-- **Leakage Prevention:** Ground truth is strictly segregated from prompts and audited.
+- **Leakage Policy Revision:** `{c.dataset.leakage_policy_revision}`
+- **Leakage Audit Status:** `{r.leakage_audit_status}`
+- **Leakage Prevention:** {leakage_prevention_desc}
 
 ### Q7: Were ground truth datasets validated and provenance-tracked?
 - **Ground Truth Revision:** `{c.dataset.ground_truth_revision}`
@@ -110,7 +176,7 @@ def generate_13_question_report(bundle: EvidenceBundle) -> str:
 - **Total Cases:** {m.total_cases} (Accuracy: {m.accuracy * 100:.1f}%, Error Rate: {m.error_rate * 100:.1f}%)
 - **Latency p50:** {m.p50_latency_ms} ms
 - **Latency p95:** {m.p95_latency_ms} ms
-- **Throughput:** {m.throughput_rps:.2f} rps
+- **Throughput:** {m.throughput_rps:.2f} rps{base_report_block}
 
 ### Q9: Was offline availability physically verified or marked unknown?
 - **Offline Status:** `{m.offline_status}`
@@ -133,6 +199,7 @@ def generate_13_question_report(bundle: EvidenceBundle) -> str:
 - **Authority Disclaimer:** {rec.authority_disclaimer}
 
 ### Q13: What are the exact remaining blockers and next gate?
+- **Blocker Category:** `{rec.blocker_category or "None"}`
 - **Stop Reason:** `{r.stop_reason or "None"}`
 - **Next Gate:** `INDEPENDENT_REVIEW_OF_NEXUS_NEW_PROVIDER_ADOPTION_CANDIDATE`
 """

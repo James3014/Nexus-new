@@ -15,8 +15,13 @@ Strict Invariants:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Sequence
 
+from nexus.calibration.provider_adoption.capability import (
+    CapabilityMatrix,
+    CapabilityProbeResult,
+    CapabilityStatus,
+)
 from nexus.calibration.provider_adoption.contracts import (
     MetricsConfig,
     PassThresholds,
@@ -30,6 +35,13 @@ AUTHORITY_DISCLAIMER = (
     "Workforce Admission authority. It grants no permissions, changes no routing tables, "
     "and does not constitute production admission."
 )
+
+ROLE_CAPABILITY_REQUIREMENTS: dict[str, str] = {
+    "classification": "CAP-004",
+    "extraction": "CAP-005",
+    "simple_extraction": "CAP-005",
+    "read_only_schema_candidate": "CAP-002",
+}
 
 
 @dataclass(frozen=True)
@@ -47,6 +59,7 @@ class AdmissionRecommendation:
     reasons: tuple[str, ...]
     required_controls: tuple[str, ...]
     authority_disclaimer: str = AUTHORITY_DISCLAIMER
+    blocker_category: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -63,6 +76,7 @@ class AdmissionRecommendation:
             "reasons": list(self.reasons),
             "required_controls": list(self.required_controls),
             "authority_disclaimer": self.authority_disclaimer,
+            "blocker_category": self.blocker_category,
         }
 
 
@@ -79,10 +93,14 @@ def build_admission_recommendation(
     latency_p95_ms: int,
     semantic_correctness: float = 1.0,
     latency_p50_ms: int = 0,
+    throughput_rps: float | None = None,
     pass_thresholds: PassThresholds | None = None,
     metrics_config: MetricsConfig | None = None,
     environment_blocked: bool = False,
     blocker_reason: str = "",
+    blocker_category: str | None = None,
+    capability_matrix: CapabilityMatrix | dict[str, CapabilityProbeResult] | None = None,
+    allowed_capabilities: Sequence[str] | None = None,
 ) -> AdmissionRecommendation:
     """Build advisory recommendation clamped by ceiling and governed by contract thresholds."""
     reasons: list[str] = []
@@ -93,7 +111,25 @@ def build_admission_recommendation(
         "DETERMINISTIC_VERIFIER_REQUIRED",
     ]
 
-    if environment_blocked:
+    effective_category = blocker_category
+    if effective_category is None and environment_blocked:
+        effective_category = "ENVIRONMENT"
+
+    if effective_category is not None:
+        normalized_cat = (
+            "DATA/COHORT"
+            if effective_category in ("DATA/COHORT", "DATA_COHORT")
+            else effective_category
+        )
+        if normalized_cat == "ENVIRONMENT":
+            cat_reason = f"Candidate blocked by environment: {blocker_reason}"
+        elif normalized_cat == "DATA/COHORT":
+            cat_reason = f"Candidate blocked by dataset/cohort: {blocker_reason}"
+        elif normalized_cat == "EVALUATION_STOP":
+            cat_reason = f"Candidate stopped by evaluation condition: {blocker_reason}"
+        else:
+            cat_reason = f"Candidate blocked by {normalized_cat}: {blocker_reason}"
+
         return AdmissionRecommendation(
             schema=RECOMMENDATION_SCHEMA,
             experiment_id=experiment_id,
@@ -105,8 +141,9 @@ def build_admission_recommendation(
             recommended_roles=(),
             claim_ceiling=claim_ceiling,
             clamped_by_ceiling=False,
-            reasons=(f"Candidate blocked by environment: {blocker_reason}",),
+            reasons=(cat_reason,),
             required_controls=tuple(controls),
+            blocker_category=normalized_cat,
         )
 
     # 1. Enforce contract pass thresholds and operational metrics limits
@@ -137,6 +174,10 @@ def build_admission_recommendation(
         if latency_p95_ms > metrics_config.latency_p95_max_ms:
             failed_thresholds.append(
                 f"P95 latency ({latency_p95_ms} ms) exceeded contract limit ({metrics_config.latency_p95_max_ms} ms)."
+            )
+        if throughput_rps is not None and throughput_rps < metrics_config.min_throughput_rps:
+            failed_thresholds.append(
+                f"Throughput ({throughput_rps:.2f} rps) failed contract minimum threshold ({metrics_config.min_throughput_rps:.2f} rps)."
             )
 
     if failed_thresholds:
@@ -179,6 +220,48 @@ def build_admission_recommendation(
             preliminary_state = "REGISTERED_BLOCKED"
             preliminary_roles = ()
             reasons.append("Quality below acceptable threshold; recommended state is BLOCKED.")
+
+    # 3. Enforce capability evidence constraints (Invariant D12: quality != capability)
+    probes: dict[str, CapabilityProbeResult] | None = None
+    if isinstance(capability_matrix, CapabilityMatrix):
+        probes = capability_matrix.probes
+    elif isinstance(capability_matrix, dict):
+        probes = capability_matrix
+
+    if allowed_capabilities is not None or probes is not None:
+        unsupported_caps: list[str] = []
+        if allowed_capabilities is not None:
+            for cap_id in allowed_capabilities:
+                probe = probes.get(cap_id) if probes is not None else None
+                if probe is None or probe.status != CapabilityStatus.SUPPORTED:
+                    unsupported_caps.append(cap_id)
+
+        if unsupported_caps:
+            sorted_unsupported = sorted(unsupported_caps)
+            reasons.append(
+                f"Required allowed capabilities not supported or not evaluated: {', '.join(sorted_unsupported)}."
+            )
+            if preliminary_state != "REGISTERED_BLOCKED":
+                if parse_autonomy_rank(preliminary_autonomy) > parse_autonomy_rank("L0.25"):
+                    preliminary_autonomy = "L0.25"
+                    preliminary_state = "EXPERIMENT_ONLY"
+                    reasons.append(
+                        "Preliminary autonomy capped at L0.25 / EXPERIMENT_ONLY due to unsupported or not-evaluated required capabilities."
+                    )
+
+        # Filter recommended roles: do not recommend a role unless its capability is SUPPORTED
+        if probes is not None:
+            filtered_roles: list[str] = []
+            for role in preliminary_roles:
+                req_cap = ROLE_CAPABILITY_REQUIREMENTS.get(role)
+                if req_cap is not None:
+                    probe = probes.get(req_cap)
+                    if probe is not None and probe.status == CapabilityStatus.SUPPORTED:
+                        filtered_roles.append(role)
+                else:
+                    # Roles without capability requirement (e.g. bounded_experiment, explicit_experiment_only)
+                    filtered_roles.append(role)
+            preliminary_roles = tuple(filtered_roles)
 
     # Clamp by contract claim ceiling
     ceiling_rank = parse_autonomy_rank(claim_ceiling)
