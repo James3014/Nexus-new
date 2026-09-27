@@ -245,26 +245,33 @@ def inspect_physical_host_identity(
 
 
 def evaluate_identity_drift(baseline: PhysicalIdentity, current: PhysicalIdentity) -> str:
-    """Evaluate whether candidate identity has drifted from baseline.
+    """Evaluate whether candidate execution identity has drifted from baseline.
 
     Outcomes:
-    - CURRENT: identical key characteristics
-    - STALE: OS version, kernel, or adapter generation has drifted
-    - REQUALIFICATION_REQUIRED: provider, model, runtime binary, or runtime version changed
+    - CURRENT: no material execution-identity drift
+    - STALE: transport/source/host/environment/adapter identity changed
+    - REQUALIFICATION_REQUIRED: provider/model/model-generation/runtime identity changed
     """
     if (
         baseline.provider_id != current.provider_id
         or baseline.model_id != current.model_id
+        or baseline.model_generation != current.model_generation
         or baseline.runtime_version != current.runtime_version
         or baseline.runtime_executable_sha256 != current.runtime_executable_sha256
     ):
         return "REQUALIFICATION_REQUIRED"
 
     if (
-        baseline.os_version != current.os_version
+        baseline.transport != current.transport
+        or baseline.runtime_executable != current.runtime_executable
+        or baseline.host_identity != current.host_identity
+        or baseline.hardware_identity != current.hardware_identity
+        or baseline.os_version != current.os_version
         or baseline.kernel_version != current.kernel_version
         or baseline.adapter_generation != current.adapter_generation
         or baseline.architecture != current.architecture
+        or baseline.source_commit_identity != current.source_commit_identity
+        or baseline.memory_gb != current.memory_gb
     ):
         return "STALE"
 

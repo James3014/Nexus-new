@@ -112,7 +112,7 @@ class AppleFMCandidateAdapter(CandidateAdapter):
             transport="apple_fm_cli",
             runtime_executable=self.binary_path,
             runtime_version=runtime_ver,
-            adapter_generation="v1",
+            adapter_generation="v2",
             model_generation="apple-fm-local-v1",
             timestamp=timestamp,
             offline_verified=None,

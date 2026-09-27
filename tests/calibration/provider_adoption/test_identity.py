@@ -1,5 +1,7 @@
 """Unit tests for G1 Physical Identity module in Provider Adoption Framework."""
 
+from dataclasses import replace
+
 from nexus.calibration.provider_adoption.identity import (
     PHYSICAL_IDENTITY_SCHEMA,
     UNKNOWN,
@@ -143,3 +145,22 @@ def test_identity_drift_evaluation():
         timestamp="2026-09-27T00:00:00Z",
     )
     assert evaluate_identity_drift(base, curr_adapter_drift) == "STALE"
+
+    # Transport/source drift changes execution identity and must not look CURRENT.
+    assert evaluate_identity_drift(base, replace(base, transport="other_cli")) == "STALE"
+    assert (
+        evaluate_identity_drift(
+            base,
+            replace(base, source_commit_identity="f" * 40),
+        )
+        == "STALE"
+    )
+
+    # Model generation is semantic identity and requires full requalification.
+    assert (
+        evaluate_identity_drift(
+            base,
+            replace(base, model_generation="model-gen-2"),
+        )
+        == "REQUALIFICATION_REQUIRED"
+    )

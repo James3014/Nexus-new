@@ -5,11 +5,12 @@ Defines criteria under which existing admission/qualification evidence becomes
 STALE or requires full REQUALIFICATION.
 
 Invariants:
-- A change in model weights, provider ID, runtime binary hash, or major runtime version
-  requires REQUALIFICATION_REQUIRED.
-- A change in host OS version, kernel release, or minor adapter generation
-  marks existing evidence as STALE.
-- Untracked drift or unknown changes fail closed to REQUALIFICATION_REQUIRED.
+- A change in provider/model/model-generation/runtime identity requires
+  REQUALIFICATION_REQUIRED.
+- A change in transport, bound source, host/hardware, OS/kernel/architecture,
+  memory, runtime path, or adapter generation marks existing evidence as STALE.
+- Tool-projection drift requires REQUALIFICATION_REQUIRED.
+- Observation timestamp and offline/network observations are not execution identity.
 """
 
 from __future__ import annotations
@@ -76,92 +77,143 @@ def evaluate_requalification(
 ) -> RequalificationEvaluation:
     dimensions: list[DriftDimension] = []
 
-    # 1. Provider ID
-    if baseline_identity.provider_id != current_identity.provider_id:
+    def add_dimension(
+        name: str,
+        baseline_value: object,
+        current_value: object,
+        verdict: RequalificationVerdict,
+        reason: str,
+    ) -> None:
+        if baseline_value == current_value:
+            return
         dimensions.append(
             DriftDimension(
-                "provider_id",
-                baseline_identity.provider_id,
-                current_identity.provider_id,
-                RequalificationVerdict.REQUALIFICATION_REQUIRED,
-                "Provider ID mismatch requires full requalification.",
+                name,
+                str(baseline_value),
+                str(current_value),
+                verdict,
+                reason,
             )
         )
 
-    # 2. Model ID
-    if baseline_identity.model_id != current_identity.model_id:
-        dimensions.append(
-            DriftDimension(
-                "model_id",
-                baseline_identity.model_id,
-                current_identity.model_id,
-                RequalificationVerdict.REQUALIFICATION_REQUIRED,
-                "Model ID mismatch requires full requalification.",
-            )
-        )
-
-    # 3. Runtime Executable Hash
+    # Semantic/runtime identity drift invalidates inherited qualification.
+    add_dimension(
+        "provider_id",
+        baseline_identity.provider_id,
+        current_identity.provider_id,
+        RequalificationVerdict.REQUALIFICATION_REQUIRED,
+        "Provider ID mismatch requires full requalification.",
+    )
+    add_dimension(
+        "model_id",
+        baseline_identity.model_id,
+        current_identity.model_id,
+        RequalificationVerdict.REQUALIFICATION_REQUIRED,
+        "Model ID mismatch requires full requalification.",
+    )
+    add_dimension(
+        "model_generation",
+        baseline_identity.model_generation,
+        current_identity.model_generation,
+        RequalificationVerdict.REQUALIFICATION_REQUIRED,
+        "Model generation changed; semantic evidence cannot be inherited automatically.",
+    )
     if (
         baseline_identity.runtime_executable_sha256 != "UNKNOWN"
         and current_identity.runtime_executable_sha256 != "UNKNOWN"
-        and baseline_identity.runtime_executable_sha256
-        != current_identity.runtime_executable_sha256
     ):
-        dimensions.append(
-            DriftDimension(
-                "runtime_executable_sha256",
-                baseline_identity.runtime_executable_sha256,
-                current_identity.runtime_executable_sha256,
-                RequalificationVerdict.REQUALIFICATION_REQUIRED,
-                "Runtime executable binary hash changed.",
-            )
+        add_dimension(
+            "runtime_executable_sha256",
+            baseline_identity.runtime_executable_sha256,
+            current_identity.runtime_executable_sha256,
+            RequalificationVerdict.REQUALIFICATION_REQUIRED,
+            "Runtime executable binary hash changed.",
         )
-
-    # 4. Runtime Version
     if (
         baseline_identity.runtime_version != "UNKNOWN"
         and current_identity.runtime_version != "UNKNOWN"
-        and baseline_identity.runtime_version != current_identity.runtime_version
     ):
-        dimensions.append(
-            DriftDimension(
-                "runtime_version",
-                baseline_identity.runtime_version,
-                current_identity.runtime_version,
-                RequalificationVerdict.REQUALIFICATION_REQUIRED,
-                "Runtime version changed.",
-            )
+        add_dimension(
+            "runtime_version",
+            baseline_identity.runtime_version,
+            current_identity.runtime_version,
+            RequalificationVerdict.REQUALIFICATION_REQUIRED,
+            "Runtime version changed.",
         )
 
-    # 5. OS Version
-    if (
-        baseline_identity.os_version != "UNKNOWN"
-        and current_identity.os_version != "UNKNOWN"
-        and baseline_identity.os_version != current_identity.os_version
-    ):
-        dimensions.append(
-            DriftDimension(
-                "os_version",
-                baseline_identity.os_version,
-                current_identity.os_version,
-                RequalificationVerdict.STALE,
-                "Operating system version changed; prior evidence is STALE.",
-            )
+    # Execution-environment/source drift requires review/targeted requalification,
+    # but does not by itself prove a semantic model change.
+    stale_dimensions = (
+        (
+            "transport",
+            baseline_identity.transport,
+            current_identity.transport,
+            "Transport changed.",
+        ),
+        (
+            "runtime_executable",
+            baseline_identity.runtime_executable,
+            current_identity.runtime_executable,
+            "Runtime executable path changed.",
+        ),
+        (
+            "host_identity",
+            baseline_identity.host_identity,
+            current_identity.host_identity,
+            "Physical host identity changed.",
+        ),
+        (
+            "hardware_identity",
+            baseline_identity.hardware_identity,
+            current_identity.hardware_identity,
+            "Hardware identity changed.",
+        ),
+        (
+            "os_version",
+            baseline_identity.os_version,
+            current_identity.os_version,
+            "Operating system version changed.",
+        ),
+        (
+            "kernel_version",
+            baseline_identity.kernel_version,
+            current_identity.kernel_version,
+            "Kernel version changed.",
+        ),
+        (
+            "architecture",
+            baseline_identity.architecture,
+            current_identity.architecture,
+            "Hardware architecture changed.",
+        ),
+        (
+            "adapter_generation",
+            baseline_identity.adapter_generation,
+            current_identity.adapter_generation,
+            "Adapter generation changed.",
+        ),
+        (
+            "source_commit_identity",
+            baseline_identity.source_commit_identity,
+            current_identity.source_commit_identity,
+            "Bound source revision changed.",
+        ),
+        (
+            "memory_gb",
+            baseline_identity.memory_gb,
+            current_identity.memory_gb,
+            "Observed memory capacity changed.",
+        ),
+    )
+    for name, baseline_value, current_value, reason in stale_dimensions:
+        add_dimension(
+            name,
+            baseline_value,
+            current_value,
+            RequalificationVerdict.STALE,
+            f"{reason} Prior evidence requires targeted review before reuse.",
         )
 
-    # 6. Adapter Generation
-    if baseline_identity.adapter_generation != current_identity.adapter_generation:
-        dimensions.append(
-            DriftDimension(
-                "adapter_generation",
-                baseline_identity.adapter_generation,
-                current_identity.adapter_generation,
-                RequalificationVerdict.STALE,
-                "Adapter generation updated; prior evidence is STALE.",
-            )
-        )
-
-    # 7. Tool Projection
     if tool_projection_drift:
         dimensions.append(
             DriftDimension(
