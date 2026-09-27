@@ -14,11 +14,18 @@ def test_provider_adoption_calibration_maps_exact_oracles_without_fallback():
         history_path=Path("/tmp/missing-provider-adoption-history.jsonl"),
     )
 
-    assert details.targets == [
-        "tests/calibration/provider_adoption",
-        "tests/bench/test_model_calibration_plan.py",
-        "tests/services/test_policy_gate.py",
+    provider_targets = [
+        target
+        for target in details.targets
+        if target.startswith("tests/calibration/provider_adoption/test_")
     ]
+    expected_provider_targets = sorted(
+        str(path) for path in Path("tests/calibration/provider_adoption").glob("test_*.py")
+    )
+    assert sorted(provider_targets) == expected_provider_targets
+    assert "tests/calibration/provider_adoption" not in details.targets
+    assert "tests/bench/test_model_calibration_plan.py" in details.targets
+    assert "tests/services/test_policy_gate.py" in details.targets
     assert details.unmatched_paths == []
     assert details.fallback_used is False
     assert details.risk == "high"
