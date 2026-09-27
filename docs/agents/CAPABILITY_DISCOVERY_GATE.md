@@ -63,8 +63,8 @@ Semantic PR review or advisory publication work should additionally discover `se
 
 Capability ids already used by v1 discovery receipts remain stable even when their descriptive wording is refined. In particular, `nexus_core_domain_runtime` and `nexus_runtime_activation` are retained as navigation ids for compatibility; their current descriptions in the index define the real ownership boundary. Do not infer that Core owns general runtime orchestration or that `nexus-runtime` owns arbitrary host deployment merely from those historical id names.
 
-## DevSpace enforcement
+## DevSpace compatibility enforcement
 
-DevSpace is the mechanical admission boundary for delegated local workers. Its MCP `agent_start` surface must fail closed for a write-capable worker when no valid discovery receipt is supplied. The receipt must be bound to the current canonical `James3014/Nexus-new` main revision and exact tracked bytes of `docs/agents/CAPABILITY_DISCOVERY_INDEX.v1.json`.
+When DevSpace is explicitly selected as the external delegated-worker transport, it is the mechanical admission boundary for that DevSpace worker path. Its MCP `agent_start` surface must fail closed for a write-capable worker when no valid discovery receipt is supplied. The receipt must be bound to the current canonical `James3014/Nexus-new` main revision and exact tracked bytes of `docs/agents/CAPABILITY_DISCOVERY_INDEX.v1.json`.
 
-DevSpace verifies only receipt/index identity and structural reuse constraints. It does not select the capability, decide correctness, or gain Nexus routing authority. The verified receipt is injected into the delegated worker prompt so the worker inherits the donor/reuse context rather than rediscovering the system from scratch.
+This is transport-specific compatibility enforcement, not a repository-wide requirement to use DevSpace or Dev MCP. DevSpace verifies only receipt/index identity and structural reuse constraints. It does not select the capability, decide correctness, or gain Nexus routing authority. The verified receipt is injected into a DevSpace-delegated worker prompt so that worker inherits the donor/reuse context rather than rediscovering the system from scratch.

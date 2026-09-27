@@ -1,7 +1,7 @@
 ---
 schema: devspace-agent/v1
 name: opencode-hy3-high-implement
-description: Bounded OpenCode Hy3 Free implementation worker using the calibrated high variant.
+description: COMPATIBILITY_ONLY - bounded OpenCode Hy3 Free implementation worker retained for explicit DevSpace transport selection.
 provider: opencode
 model: opencode/hy3-free
 thinking: high
