@@ -25,6 +25,20 @@ from nexus.calibration.provider_adoption.canonical_json import canonical_json_ha
 PHYSICAL_IDENTITY_SCHEMA = "nexus.provider_experiment.physical_identity.v1"
 UNKNOWN = "UNKNOWN"
 
+# Observation metadata and capability observations are deliberately excluded from
+# execution identity. Re-observing the same host/runtime at a later timestamp, or
+# later proving offline/network behavior, must not mint a new execution identity.
+_IDENTITY_NON_IDENTITY_FIELDS = frozenset({
+    "identity_digest",
+    "timestamp",
+    "offline_availability",
+    "network_dependency",
+})
+
+
+def _identity_digest_payload(data: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in data.items() if k not in _IDENTITY_NON_IDENTITY_FIELDS}
+
 
 @dataclass(frozen=True)
 class PhysicalIdentity:
@@ -76,9 +90,7 @@ class PhysicalIdentity:
         }
 
     def compute_digest(self) -> str:
-        data = self.to_dict()
-        data.pop("identity_digest", None)
-        return canonical_json_hash(data)
+        return canonical_json_hash(_identity_digest_payload(self.to_dict()))
 
 
 def compute_file_sha256(path: str) -> str:
@@ -205,7 +217,7 @@ def inspect_physical_host_identity(
         "timestamp": timestamp,
         "memory_gb": observed_memory_gb,
     }
-    digest = canonical_json_hash(raw)
+    digest = canonical_json_hash(_identity_digest_payload(raw))
 
     return PhysicalIdentity(
         schema=PHYSICAL_IDENTITY_SCHEMA,
@@ -233,26 +245,33 @@ def inspect_physical_host_identity(
 
 
 def evaluate_identity_drift(baseline: PhysicalIdentity, current: PhysicalIdentity) -> str:
-    """Evaluate whether candidate identity has drifted from baseline.
+    """Evaluate whether candidate execution identity has drifted from baseline.
 
     Outcomes:
-    - CURRENT: identical key characteristics
-    - STALE: OS version, kernel, or adapter generation has drifted
-    - REQUALIFICATION_REQUIRED: provider, model, runtime binary, or runtime version changed
+    - CURRENT: no material execution-identity drift
+    - STALE: transport/source/host/environment/adapter identity changed
+    - REQUALIFICATION_REQUIRED: provider/model/model-generation/runtime identity changed
     """
     if (
         baseline.provider_id != current.provider_id
         or baseline.model_id != current.model_id
+        or baseline.model_generation != current.model_generation
         or baseline.runtime_version != current.runtime_version
         or baseline.runtime_executable_sha256 != current.runtime_executable_sha256
     ):
         return "REQUALIFICATION_REQUIRED"
 
     if (
-        baseline.os_version != current.os_version
+        baseline.transport != current.transport
+        or baseline.runtime_executable != current.runtime_executable
+        or baseline.host_identity != current.host_identity
+        or baseline.hardware_identity != current.hardware_identity
+        or baseline.os_version != current.os_version
         or baseline.kernel_version != current.kernel_version
         or baseline.adapter_generation != current.adapter_generation
         or baseline.architecture != current.architecture
+        or baseline.source_commit_identity != current.source_commit_identity
+        or baseline.memory_gb != current.memory_gb
     ):
         return "STALE"
 

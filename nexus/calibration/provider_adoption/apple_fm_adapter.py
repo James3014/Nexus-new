@@ -15,13 +15,18 @@ Strict Invariants:
 from __future__ import annotations
 
 import datetime
+import json
 import os
 import platform
 import subprocess
+import tempfile
 
 from nexus.calibration.provider_adoption.adapter import CandidateAdapter
 from nexus.calibration.provider_adoption.capability import (
     CAP_001_PLAIN_TEXT,
+    CAP_002_STRUCTURED_JSON,
+    CAP_004_CLASSIFICATION,
+    CAP_005_EXTRACTION,
     CapabilityProbeResult,
     CapabilityStatus,
     evaluate_capability_probe,
@@ -107,12 +112,152 @@ class AppleFMCandidateAdapter(CandidateAdapter):
             transport="apple_fm_cli",
             runtime_executable=self.binary_path,
             runtime_version=runtime_ver,
-            adapter_generation="v1",
+            adapter_generation="v2",
             model_generation="apple-fm-local-v1",
             timestamp=timestamp,
             offline_verified=None,
             network_dependency_observed="UNKNOWN",
         )
+
+    def _run_text_capability_probe(
+        self,
+        *,
+        capability_id: str,
+        prompt: str,
+        expected_output: str,
+    ) -> CapabilityProbeResult:
+        try:
+            t0 = datetime.datetime.now()
+            res = subprocess.run(
+                [self.binary_path, "respond", "--no-stream", "--greedy", prompt],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            dt_ms = int((datetime.datetime.now() - t0).total_seconds() * 1000)
+
+            def semantic_validator(output_text: str) -> tuple[bool, str]:
+                actual = output_text.strip()
+                if actual == expected_output:
+                    return True, "exact_expected_output"
+                return False, f"expected exact output {expected_output!r}, got {actual!r}"
+
+            return evaluate_capability_probe(
+                capability_id,
+                executed=True,
+                exit_code=res.returncode,
+                output_text=res.stdout.strip(),
+                latency_ms=dt_ms,
+                semantic_validator=semantic_validator,
+                error_message=res.stderr.strip(),
+            )
+        except subprocess.TimeoutExpired:
+            return evaluate_capability_probe(
+                capability_id,
+                executed=True,
+                exit_code=1,
+                output_text="",
+                latency_ms=30000,
+                error_message="provider_timeout",
+            )
+        except Exception as exc:
+            return evaluate_capability_probe(
+                capability_id,
+                executed=True,
+                exit_code=1,
+                output_text="",
+                latency_ms=0,
+                error_message=str(exc),
+            )
+
+    def _run_structured_json_probe(self, capability_id: str) -> CapabilityProbeResult:
+        schema_cmd = [
+            self.binary_path,
+            "schema",
+            "object",
+            "--name",
+            "NexusStructuredProbe",
+            "--int",
+            "code",
+            "--int",
+            "count",
+        ]
+        try:
+            schema_res = subprocess.run(
+                schema_cmd,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if schema_res.returncode != 0 or not schema_res.stdout.strip():
+                return evaluate_capability_probe(
+                    capability_id,
+                    executed=True,
+                    exit_code=schema_res.returncode,
+                    output_text="",
+                    latency_ms=0,
+                    error_message=schema_res.stderr.strip() or "schema_generation_failed",
+                )
+
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=True) as schema_file:
+                schema_file.write(schema_res.stdout)
+                schema_file.flush()
+                t0 = datetime.datetime.now()
+                res = subprocess.run(
+                    [
+                        self.binary_path,
+                        "respond",
+                        "--no-stream",
+                        "--greedy",
+                        "--schema",
+                        schema_file.name,
+                        "Extract the numeric code and count. Message: HTTP 429 occurred after 4 attempts.",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                dt_ms = int((datetime.datetime.now() - t0).total_seconds() * 1000)
+
+            def semantic_validator(output_text: str) -> tuple[bool, str]:
+                try:
+                    payload = json.loads(output_text)
+                except json.JSONDecodeError as exc:
+                    return False, f"invalid_json:{exc.msg}"
+                expected = {"code": 429, "count": 4}
+                if set(payload) != set(expected):
+                    return False, f"unexpected_keys:{sorted(payload)}"
+                if payload != expected:
+                    return False, f"unexpected_values:{payload}"
+                return True, "exact_structured_output"
+
+            return evaluate_capability_probe(
+                capability_id,
+                executed=True,
+                exit_code=res.returncode,
+                output_text=res.stdout.strip(),
+                latency_ms=dt_ms,
+                semantic_validator=semantic_validator,
+                error_message=res.stderr.strip(),
+            )
+        except subprocess.TimeoutExpired:
+            return evaluate_capability_probe(
+                capability_id,
+                executed=True,
+                exit_code=1,
+                output_text="",
+                latency_ms=30000,
+                error_message="provider_timeout",
+            )
+        except Exception as exc:
+            return evaluate_capability_probe(
+                capability_id,
+                executed=True,
+                exit_code=1,
+                output_text="",
+                latency_ms=0,
+                error_message=str(exc),
+            )
 
     def probe_capability(self, capability_id: str) -> CapabilityProbeResult:
         blocked, reason = self.is_environment_blocked()
@@ -126,35 +271,32 @@ class AppleFMCandidateAdapter(CandidateAdapter):
                 error_message=reason,
             )
 
-        # If not blocked, physical probe can be executed
-        # Example for CAP-001:
         if capability_id == CAP_001_PLAIN_TEXT:
-            try:
-                t0 = datetime.datetime.now()
-                res = subprocess.run(
-                    [self.binary_path, "respond", "Hello"],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                )
-                dt_ms = int((datetime.datetime.now() - t0).total_seconds() * 1000)
-                return evaluate_capability_probe(
-                    capability_id,
-                    executed=True,
-                    exit_code=res.returncode,
-                    output_text=res.stdout.strip(),
-                    latency_ms=dt_ms,
-                    error_message=res.stderr.strip(),
-                )
-            except Exception as exc:
-                return evaluate_capability_probe(
-                    capability_id,
-                    executed=True,
-                    exit_code=1,
-                    output_text="",
-                    latency_ms=0,
-                    error_message=str(exc),
-                )
+            return self._run_text_capability_probe(
+                capability_id=capability_id,
+                prompt="Reply with exactly OK and no other text.",
+                expected_output="OK",
+            )
+        if capability_id == CAP_002_STRUCTURED_JSON:
+            return self._run_structured_json_probe(capability_id)
+        if capability_id == CAP_004_CLASSIFICATION:
+            return self._run_text_capability_probe(
+                capability_id=capability_id,
+                prompt=(
+                    "Classify the sentiment of this text: 'The build passed cleanly without errors.' "
+                    "Options: POSITIVE, NEGATIVE, NEUTRAL. Return only the label."
+                ),
+                expected_output="POSITIVE",
+            )
+        if capability_id == CAP_005_EXTRACTION:
+            return self._run_text_capability_probe(
+                capability_id=capability_id,
+                prompt=(
+                    "Return only the integer error code. "
+                    "Message: Process exited with code 137 (OOM killed)"
+                ),
+                expected_output="137",
+            )
 
         return CapabilityProbeResult(
             capability_id=capability_id,

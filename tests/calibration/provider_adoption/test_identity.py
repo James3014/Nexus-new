@@ -1,5 +1,7 @@
 """Unit tests for G1 Physical Identity module in Provider Adoption Framework."""
 
+from dataclasses import replace
+
 from nexus.calibration.provider_adoption.identity import (
     PHYSICAL_IDENTITY_SCHEMA,
     UNKNOWN,
@@ -23,6 +25,53 @@ def test_physical_identity_inspection_and_digest():
     assert ident.identity_digest != ""
     assert len(ident.identity_digest) == 64
     assert ident.compute_digest() == ident.identity_digest
+
+
+def test_identity_digest_ignores_observation_timestamp():
+    first = inspect_physical_host_identity(
+        provider_id="provider-a",
+        model_id="model-1",
+        transport="cli",
+        runtime_executable="/bin/echo",
+        runtime_version="1.0.0",
+        timestamp="2026-09-27T00:00:00Z",
+    )
+    later = inspect_physical_host_identity(
+        provider_id="provider-a",
+        model_id="model-1",
+        transport="cli",
+        runtime_executable="/bin/echo",
+        runtime_version="1.0.0",
+        timestamp="2026-09-27T01:00:00Z",
+    )
+    assert first.timestamp != later.timestamp
+    assert first.identity_digest == later.identity_digest
+
+
+def test_identity_digest_ignores_later_offline_network_observation():
+    unknown = inspect_physical_host_identity(
+        provider_id="provider-a",
+        model_id="model-1",
+        transport="cli",
+        runtime_executable="/bin/echo",
+        runtime_version="1.0.0",
+        timestamp="2026-09-27T00:00:00Z",
+        offline_verified=None,
+        network_dependency_observed="UNKNOWN",
+    )
+    verified = inspect_physical_host_identity(
+        provider_id="provider-a",
+        model_id="model-1",
+        transport="cli",
+        runtime_executable="/bin/echo",
+        runtime_version="1.0.0",
+        timestamp="2026-09-27T01:00:00Z",
+        offline_verified=True,
+        network_dependency_observed="NONE",
+    )
+    assert unknown.identity_digest == verified.identity_digest
+    assert unknown.offline_availability != verified.offline_availability
+    assert unknown.network_dependency != verified.network_dependency
 
 
 def test_offline_status_honest_preservation_fix_6_1():
@@ -96,3 +145,22 @@ def test_identity_drift_evaluation():
         timestamp="2026-09-27T00:00:00Z",
     )
     assert evaluate_identity_drift(base, curr_adapter_drift) == "STALE"
+
+    # Transport/source drift changes execution identity and must not look CURRENT.
+    assert evaluate_identity_drift(base, replace(base, transport="other_cli")) == "STALE"
+    assert (
+        evaluate_identity_drift(
+            base,
+            replace(base, source_commit_identity="f" * 40),
+        )
+        == "STALE"
+    )
+
+    # Model generation is semantic identity and requires full requalification.
+    assert (
+        evaluate_identity_drift(
+            base,
+            replace(base, model_generation="model-gen-2"),
+        )
+        == "REQUALIFICATION_REQUIRED"
+    )

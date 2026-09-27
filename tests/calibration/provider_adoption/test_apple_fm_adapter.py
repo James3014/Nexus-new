@@ -1,7 +1,5 @@
 """Unit tests for Apple FM Candidate Adapter in Provider Adoption Framework."""
 
-import os
-import platform
 import subprocess
 from unittest.mock import patch
 
@@ -10,25 +8,49 @@ from nexus.calibration.provider_adoption.apple_fm_adapter import (
 )
 from nexus.calibration.provider_adoption.capability import (
     CAP_001_PLAIN_TEXT,
+    CAP_002_STRUCTURED_JSON,
+    CAP_004_CLASSIFICATION,
+    CAP_005_EXTRACTION,
     CapabilityStatus,
 )
 
 
+def test_apple_fm_license_agreed_allows_environment():
+    adapter = AppleFMCandidateAdapter("/usr/bin/fm")
+    mock_res = subprocess.CompletedProcess(
+        args=["/usr/bin/fm", "license", "--status"],
+        returncode=0,
+        stdout="Agreed.",
+        stderr="",
+    )
+    with patch("platform.system", return_value="Darwin"):
+        with patch("os.path.isfile", return_value=True):
+            with patch("subprocess.run", return_value=mock_res):
+                blocked, reason = adapter.is_environment_blocked()
+                assert blocked is False
+                assert reason == ""
+
+
 def test_apple_fm_license_not_agreed_blocks_environment():
-    """Verify that when 'fm license --status' exits with code 69, status is BLOCKED."""
-    adapter = AppleFMCandidateAdapter()
+    """Preserve the original exact-base test identity with deterministic mocked evidence."""
+    adapter = AppleFMCandidateAdapter("/usr/bin/fm")
+    mock_res = subprocess.CompletedProcess(
+        args=["/usr/bin/fm", "license", "--status"],
+        returncode=69,
+        stdout="",
+        stderr="Not agreed. Run 'sudo fm license' to review and agree.",
+    )
+    with patch("platform.system", return_value="Darwin"):
+        with patch("os.path.isfile", return_value=True):
+            with patch("subprocess.run", return_value=mock_res):
+                blocked, reason = adapter.is_environment_blocked()
+                assert blocked is True
+                assert "APPLE_FM_LICENSE_NOT_AGREED" in reason
 
-    # If running on macOS with /usr/bin/fm present, test actual status
-    if platform.system() == "Darwin" and os.path.isfile("/usr/bin/fm"):
-        blocked, reason = adapter.is_environment_blocked()
-        # On this host, fm license is not agreed to
-        assert blocked is True
-        assert "APPLE_FM_LICENSE_NOT_AGREED" in reason
-
-        probe = adapter.probe_capability(CAP_001_PLAIN_TEXT)
-        assert probe.status == CapabilityStatus.BLOCKED
-        assert probe.exit_code == 69
-        assert "APPLE_FM_LICENSE_NOT_AGREED" in probe.error_message
+                probe = adapter.probe_capability(CAP_001_PLAIN_TEXT)
+                assert probe.status == CapabilityStatus.BLOCKED
+                assert probe.exit_code == 69
+                assert "APPLE_FM_LICENSE_NOT_AGREED" in probe.error_message
 
 
 def test_apple_fm_offline_honesty_invariant_6_1():
@@ -71,9 +93,15 @@ def test_apple_fm_uses_respond_command_contract():
         stderr="",
     )
     mock_respond_ok = subprocess.CompletedProcess(
-        args=["/usr/bin/fm", "respond", "Hello"],
+        args=[
+            "/usr/bin/fm",
+            "respond",
+            "--no-stream",
+            "--greedy",
+            "Reply with exactly OK and no other text.",
+        ],
         returncode=0,
-        stdout="Hello there!",
+        stdout="OK",
         stderr="",
     )
 
@@ -95,6 +123,82 @@ def test_apple_fm_uses_respond_command_contract():
                 for c in calls:
                     assert "prompt" not in c, f"Contract violation: 'prompt' found in CLI call: {c}"
                 assert any(c[:2] == ["/usr/bin/fm", "respond"] for c in calls)
+                assert any("--no-stream" in c and "--greedy" in c for c in calls if "respond" in c)
+
+
+def test_apple_fm_structured_json_probe_requires_exact_schema_values():
+    adapter = AppleFMCandidateAdapter("/usr/bin/fm")
+    mock_license_ok = subprocess.CompletedProcess(
+        args=["/usr/bin/fm", "license", "--status"],
+        returncode=0,
+        stdout="Agreed.",
+        stderr="",
+    )
+    mock_schema_ok = subprocess.CompletedProcess(
+        args=["/usr/bin/fm", "schema", "object"],
+        returncode=0,
+        stdout=(
+            '{"type":"object","properties":{"code":{"type":"integer"},'
+            '"count":{"type":"integer"}},"required":["code","count"],'
+            '"additionalProperties":false,"title":"NexusStructuredProbe",'
+            '"x-order":["code","count"]}'
+        ),
+        stderr="",
+    )
+    mock_respond_ok = subprocess.CompletedProcess(
+        args=["/usr/bin/fm", "respond"],
+        returncode=0,
+        stdout='{"code": 429, "count": 4}',
+        stderr="",
+    )
+
+    def mock_subprocess_run(cmd, *args, **kwargs):
+        if "license" in cmd:
+            return mock_license_ok
+        if "schema" in cmd and "object" in cmd:
+            return mock_schema_ok
+        return mock_respond_ok
+
+    with patch("platform.system", return_value="Darwin"):
+        with patch("os.path.isfile", return_value=True):
+            with patch("subprocess.run", side_effect=mock_subprocess_run):
+                probe = adapter.probe_capability(CAP_002_STRUCTURED_JSON)
+
+    assert probe.status == CapabilityStatus.SUPPORTED
+    assert probe.raw_output == '{"code": 429, "count": 4}'
+
+
+def test_apple_fm_classification_and_extraction_probes_require_exact_semantics():
+    adapter = AppleFMCandidateAdapter("/usr/bin/fm")
+    mock_license_ok = subprocess.CompletedProcess(
+        args=["/usr/bin/fm", "license", "--status"],
+        returncode=0,
+        stdout="Agreed.",
+        stderr="",
+    )
+
+    def mock_subprocess_run(cmd, *args, **kwargs):
+        if "license" in cmd:
+            return mock_license_ok
+        prompt = cmd[-1]
+        if "sentiment" in prompt:
+            output = "POSITIVE"
+        elif "error code" in prompt:
+            output = "137"
+        else:
+            output = "unexpected"
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=output, stderr="")
+
+    with patch("platform.system", return_value="Darwin"):
+        with patch("os.path.isfile", return_value=True):
+            with patch("subprocess.run", side_effect=mock_subprocess_run):
+                cls_probe = adapter.probe_capability(CAP_004_CLASSIFICATION)
+                ext_probe = adapter.probe_capability(CAP_005_EXTRACTION)
+
+    assert cls_probe.status == CapabilityStatus.SUPPORTED
+    assert cls_probe.raw_output == "POSITIVE"
+    assert ext_probe.status == CapabilityStatus.SUPPORTED
+    assert ext_probe.raw_output == "137"
 
 
 def test_apple_fm_execute_case_uses_respond_command_contract():
