@@ -130,16 +130,27 @@ class ExternalAccountPool:
             raise ValueError(f"duplicate account internal_id: {account.internal_id}")
         self._accounts[account.internal_id] = account
 
-    def acquire(self, consumer_id: str) -> AccountLease:
-        """Acquire a lease from the least-loaded available account."""
+    def acquire(
+        self,
+        consumer_id: str,
+        preferred_account_id: Optional[str] = None,
+    ) -> AccountLease:
+        """Acquire a lease from the least-loaded available account, or a specific preferred account."""
 
-        available = [account for account in self._accounts.values() if account.is_available]
-        if not available:
-            raise ExternalAccountPoolExhaustedError(
-                f"EXTERNAL_ACCOUNT_POOL_EXHAUSTED:{self.provider}"
-            )
+        if preferred_account_id is not None:
+            account = self._accounts.get(preferred_account_id)
+            if account is None or not account.is_available:
+                raise ExternalAccountPoolExhaustedError(
+                    f"EXTERNAL_ACCOUNT_POOL_EXHAUSTED:{self.provider}"
+                )
+        else:
+            available = [account for account in self._accounts.values() if account.is_available]
+            if not available:
+                raise ExternalAccountPoolExhaustedError(
+                    f"EXTERNAL_ACCOUNT_POOL_EXHAUSTED:{self.provider}"
+                )
+            account = min(available, key=lambda candidate: candidate.load)
 
-        account = min(available, key=lambda candidate: candidate.load)
         lease_id = f"lease_{uuid.uuid4().hex}"
         lease = AccountLease(
             lease_id=lease_id,
