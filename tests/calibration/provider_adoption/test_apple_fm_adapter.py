@@ -31,6 +31,28 @@ def test_apple_fm_license_agreed_allows_environment():
                 assert reason == ""
 
 
+def test_apple_fm_license_not_agreed_blocks_environment():
+    """Preserve the original exact-base test identity with deterministic mocked evidence."""
+    adapter = AppleFMCandidateAdapter("/usr/bin/fm")
+    mock_res = subprocess.CompletedProcess(
+        args=["/usr/bin/fm", "license", "--status"],
+        returncode=69,
+        stdout="",
+        stderr="Not agreed. Run 'sudo fm license' to review and agree.",
+    )
+    with patch("platform.system", return_value="Darwin"):
+        with patch("os.path.isfile", return_value=True):
+            with patch("subprocess.run", return_value=mock_res):
+                blocked, reason = adapter.is_environment_blocked()
+                assert blocked is True
+                assert "APPLE_FM_LICENSE_NOT_AGREED" in reason
+
+                probe = adapter.probe_capability(CAP_001_PLAIN_TEXT)
+                assert probe.status == CapabilityStatus.BLOCKED
+                assert probe.exit_code == 69
+                assert "APPLE_FM_LICENSE_NOT_AGREED" in probe.error_message
+
+
 def test_apple_fm_offline_honesty_invariant_6_1():
     """Verify that Apple FM physical identity does not fake VERIFIED_OFFLINE."""
     adapter = AppleFMCandidateAdapter()
