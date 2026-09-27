@@ -137,3 +137,16 @@ def test_apple_fm_execute_case_uses_respond_command_contract():
                 for c in calls:
                     assert "prompt" not in c, f"Contract violation: 'prompt' found in CLI call: {c}"
                 assert ["/usr/bin/fm", "respond", "Classify this prompt"] in calls
+
+
+def test_apple_fm_declares_physical_ceiling_without_running_license_or_benchmark():
+    """Verify AppleFMAdapter declares PHYSICAL ceiling without running CLI, license checks, or benchmarks."""
+    from nexus.calibration.provider_adoption.adapter import get_adapter_evidence_ceiling
+    from nexus.calibration.provider_adoption.cohort import EvidenceLevel
+
+    with patch("subprocess.run") as mock_run:
+        adapter = AppleFMCandidateAdapter("/usr/bin/fm")
+        assert adapter.max_evidence_level == EvidenceLevel.PHYSICAL
+        assert get_adapter_evidence_ceiling(adapter) == EvidenceLevel.PHYSICAL
+        # Subprocess must NOT have been called merely by inspecting the evidence ceiling
+        mock_run.assert_not_called()

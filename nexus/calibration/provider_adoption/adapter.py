@@ -11,7 +11,10 @@ from nexus.calibration.provider_adoption.capability import (
     CapabilityProbeResult,
     CapabilityStatus,
 )
-from nexus.calibration.provider_adoption.cohort import CohortCase
+from nexus.calibration.provider_adoption.cohort import (
+    CohortCase,
+    EvidenceLevel,
+)
 from nexus.calibration.provider_adoption.failure import (
     FailureClass,
     FailureObservationItem,
@@ -22,8 +25,32 @@ from nexus.calibration.provider_adoption.identity import (
 )
 
 
+def get_adapter_evidence_ceiling(adapter: CandidateAdapter | None) -> EvidenceLevel:
+    """Extract maximum supportable evidence level ceiling from an adapter.
+
+    Conservative fail-closed default: SIMULATED (never defaults to PHYSICAL).
+    """
+    if adapter is None:
+        return EvidenceLevel.SIMULATED
+    raw = getattr(adapter, "max_evidence_level", None)
+    if raw is None:
+        raw = getattr(adapter, "get_max_evidence_level", None)
+    if callable(raw):
+        raw = raw()
+    if isinstance(raw, str):
+        try:
+            return EvidenceLevel(raw)
+        except ValueError:
+            return EvidenceLevel.SIMULATED
+    if isinstance(raw, EvidenceLevel):
+        return raw
+    return EvidenceLevel.SIMULATED
+
+
 class CandidateAdapter:
     """Universal interface for candidate model adapters."""
+
+    max_evidence_level: EvidenceLevel = EvidenceLevel.SIMULATED
 
     def is_environment_blocked(self) -> tuple[bool, str]:
         """Check if environment prevents execution."""
@@ -52,6 +79,8 @@ class CandidateAdapter:
 class SimulatedCandidateAdapter(CandidateAdapter):
     """Deterministic simulated adapter for testing the experiment lifecycle."""
 
+    max_evidence_level: EvidenceLevel = EvidenceLevel.SIMULATED
+
     def __init__(
         self,
         *,
@@ -67,6 +96,7 @@ class SimulatedCandidateAdapter(CandidateAdapter):
         offline_verified: bool | None = None,
         exercised_faults: dict[FailureClass, bool] | None = None,
         default_latency_ms: int = 15,
+        max_evidence_level: EvidenceLevel | None = None,
     ) -> None:
         self.provider_id = provider_id
         self.model_id = model_id
@@ -80,6 +110,16 @@ class SimulatedCandidateAdapter(CandidateAdapter):
         self.offline_verified = offline_verified
         self.exercised_faults = exercised_faults or {}
         self.default_latency_ms = default_latency_ms
+        if max_evidence_level is not None:
+            if (
+                max_evidence_level == EvidenceLevel.PHYSICAL
+                and type(self) is SimulatedCandidateAdapter
+            ):
+                raise ValueError(
+                    "SimulatedCandidateAdapter maximum supportable evidence level is SIMULATED. "
+                    "Simulated evidence must never claim PHYSICAL ceiling."
+                )
+            self.max_evidence_level = max_evidence_level
 
     def is_environment_blocked(self) -> tuple[bool, str]:
         return self.environment_blocked, self.environment_blocker_reason

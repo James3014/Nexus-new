@@ -24,7 +24,10 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from nexus.calibration.provider_adoption.adapter import CandidateAdapter
+from nexus.calibration.provider_adoption.adapter import (
+    CandidateAdapter,
+    get_adapter_evidence_ceiling,
+)
 from nexus.calibration.provider_adoption.canonical_json import canonical_json_hash
 from nexus.calibration.provider_adoption.capability import (
     ALL_CAPABILITY_IDS,
@@ -40,6 +43,7 @@ from nexus.calibration.provider_adoption.cohort import (
     FrozenCohort,
     QualityVerdict,
     audit_cohort_leakage,
+    resolve_effective_evidence_level,
     validate_contract_cohort_binding,
 )
 from nexus.calibration.provider_adoption.contracts import (
@@ -289,7 +293,31 @@ def _evaluate_baseline(
             ),
         )
 
-    # 3. Inspect exact baseline physical identity
+    # 3. If candidate cohort evaluation was not reached, do not touch baseline transport.
+    if not candidate_cohort_reached:
+        return BaselineEvaluation(
+            schema=BASELINE_EVALUATION_SCHEMA,
+            status=BASELINE_STATUS_NOT_EVALUATED,
+            reason=f"Cohort execution not reached due to candidate lifecycle halt: {lifecycle_halt_reason}",
+            requested=True,
+            expected_identity=expected,
+            physical_identity=None,
+            baseline_identity_digest=None,
+            baseline_run_id=None,
+            cohort_id=cohort.cohort_id,
+            cohort_revision=cohort.cohort_revision,
+            cohort_sha256=cohort.cohort_sha256,
+            ground_truth_revision=cohort.ground_truth_revision,
+            ground_truth_sha256=cohort.ground_truth_sha256,
+            cohort_evaluations=(),
+            operational_metrics=None,
+            comparison=ComparativeMetrics(
+                status=COMPARISON_STATUS_NOT_AVAILABLE,
+                reason="Candidate cohort execution not reached.",
+            ),
+        )
+
+    # 4. Inspect exact baseline physical identity
     baseline_physical_id = baseline_adapter.inspect_identity()
     if (
         baseline_physical_id.provider_id != expected.provider_id
@@ -348,31 +376,9 @@ def _evaluate_baseline(
             ),
         )
 
-    # 5. If candidate cohort evaluation was not reached, baseline cannot run cohort
-    if not candidate_cohort_reached:
-        return BaselineEvaluation(
-            schema=BASELINE_EVALUATION_SCHEMA,
-            status=BASELINE_STATUS_NOT_EVALUATED,
-            reason=f"Cohort execution not reached due to candidate lifecycle halt: {lifecycle_halt_reason}",
-            requested=True,
-            expected_identity=expected,
-            physical_identity=baseline_physical_id,
-            baseline_identity_digest=baseline_physical_id.identity_digest,
-            baseline_run_id=None,
-            cohort_id=cohort.cohort_id,
-            cohort_revision=cohort.cohort_revision,
-            cohort_sha256=cohort.cohort_sha256,
-            ground_truth_revision=cohort.ground_truth_revision,
-            ground_truth_sha256=cohort.ground_truth_sha256,
-            cohort_evaluations=(),
-            operational_metrics=None,
-            comparison=ComparativeMetrics(
-                status=COMPARISON_STATUS_NOT_AVAILABLE,
-                reason="Candidate cohort execution not reached.",
-            ),
-        )
-
-    # 6. Execute SAME exact cohort cases with same grading semantics under stable baseline_run_id
+    # 5. Execute SAME exact cohort cases with same grading semantics under stable baseline_run_id
+    baseline_ceiling = get_adapter_evidence_ceiling(baseline_adapter)
+    baseline_effective_level = resolve_effective_evidence_level(evidence_level, baseline_ceiling)
     baseline_run_id = str(uuid.uuid4())
     base_evaluations: list[EvaluationResult] = []
     base_consecutive_failures = 0
@@ -425,7 +431,7 @@ def _evaluate_baseline(
                 started_at=t_start,
                 completed_at=t_end,
                 evaluator_identity=evaluator_identity,
-                evidence_level=evidence_level,
+                evidence_level=baseline_effective_level,
             )
         )
 
@@ -835,6 +841,8 @@ def run_provider_adoption_experiment(
     leakage_audit_status = "PASSED"
 
     # G3: Cohort Evaluation with active Stop Condition enforcement (Invariant 6.4)
+    candidate_ceiling = get_adapter_evidence_ceiling(adapter)
+    candidate_effective_level = resolve_effective_evidence_level(evidence_level, candidate_ceiling)
     evaluations: list[EvaluationResult] = []
     consecutive_failures = 0
     total_failures = 0
@@ -882,7 +890,7 @@ def run_provider_adoption_experiment(
                 started_at=t_case_start,
                 completed_at=t_case_end,
                 evaluator_identity=evaluator_identity,
-                evidence_level=evidence_level,
+                evidence_level=candidate_effective_level,
             )
         )
 
@@ -923,8 +931,8 @@ def run_provider_adoption_experiment(
         contract=contract,
         cohort=cohort,
         baseline_adapter=baseline_adapter,
-        candidate_cohort_reached=True,
-        lifecycle_halt_reason="",
+        candidate_cohort_reached=(not stopped),
+        lifecycle_halt_reason=sm.stop_reason if stopped else "",
         candidate_operational_metrics=operational_metrics,
         candidate_evaluated=(not stopped),
         evaluator_identity=evaluator_identity,

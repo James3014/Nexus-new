@@ -17,6 +17,7 @@ from nexus.calibration.provider_adoption.adapter import (
 from nexus.calibration.provider_adoption.cohort import (
     CohortCase,
     CohortType,
+    EvidenceLevel,
     QualityVerdict,
     create_frozen_cohort,
 )
@@ -1727,8 +1728,8 @@ def test_baseline_result_never_changes_candidate_g6_recommendation_or_authority(
     assert states1 == states2 == states3
 
 
-def test_candidate_stop_condition_renders_comparison_not_available_even_if_baseline_evaluates():
-    """Verify that if candidate stops early, comparison is NOT_AVAILABLE."""
+def test_candidate_stop_condition_skips_baseline_execution():
+    """Verify that terminal candidate stop prevents any subsequent baseline execution."""
     contract_tmpl, cohort = _make_test_contract(
         experiment_id="EXP-CAND-STOP",
         max_consecutive_failures=2,
@@ -1752,7 +1753,17 @@ def test_candidate_stop_condition_renders_comparison_not_available_even_if_basel
     )
 
     adapter = SimulatedCandidateAdapter(fail_case_ids={"C1", "C2"})  # candidate stops on C2
-    baseline_adapter = SimulatedCandidateAdapter(
+
+    class CountingBaselineAdapter(SimulatedCandidateAdapter):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.execute_count = 0
+
+        def execute_case(self, case):
+            self.execute_count += 1
+            return super().execute_case(case)
+
+    baseline_adapter = CountingBaselineAdapter(
         provider_id="sim-base", model_id="sim-base-v1", transport="in_memory"
     )
 
@@ -1766,10 +1777,11 @@ def test_candidate_stop_condition_renders_comparison_not_available_even_if_basel
     assert receipt.final_state == LifecycleState.STOPPED_BY_CONDITION
     assert len(receipt.cohort_evaluations) == 2
     be = receipt.baseline_evaluation
-    assert be.status == BASELINE_STATUS_EVALUATED
-    assert len(be.cohort_evaluations) == 5
+    assert be.status == BASELINE_STATUS_NOT_EVALUATED
+    assert len(be.cohort_evaluations) == 0
+    assert baseline_adapter.execute_count == 0
     assert be.comparison.status == COMPARISON_STATUS_NOT_AVAILABLE
-    assert "Candidate cohort was not fully evaluated" in be.comparison.reason
+    assert "Candidate cohort execution not reached" in be.comparison.reason
 
 
 def test_candidate_environment_blocked_leaves_baseline_not_evaluated():
@@ -1797,7 +1809,14 @@ def test_candidate_environment_blocked_leaves_baseline_not_evaluated():
         environment_blocked=True,
         environment_blocker_reason="APPLE_FM_LICENSE_NOT_AGREED",
     )
-    baseline_adapter = SimulatedCandidateAdapter(
+
+    class BaselineMustNotBeTouched(SimulatedCandidateAdapter):
+        def inspect_identity(self):
+            raise AssertionError(
+                "baseline identity probe must not run before candidate reaches cohort"
+            )
+
+    baseline_adapter = BaselineMustNotBeTouched(
         provider_id="sim-base", model_id="sim-base-v1", transport="in_memory"
     )
 
@@ -1813,3 +1832,414 @@ def test_candidate_environment_blocked_leaves_baseline_not_evaluated():
     assert be.status == BASELINE_STATUS_NOT_EVALUATED
     assert len(be.cohort_evaluations) == 0
     assert be.comparison.status == COMPARISON_STATUS_NOT_AVAILABLE
+
+
+class PhysicalCapableFakeAdapter(SimulatedCandidateAdapter):
+    """Fake adapter declaring PHYSICAL support ceiling for negative control tests."""
+
+    max_evidence_level = EvidenceLevel.PHYSICAL
+
+
+def test_evidence_ceiling_simulated_adapter_with_requested_physical_clamps_to_simulated():
+    """Negative Control 1: SimulatedCandidateAdapter + requested PHYSICAL => SIMULATED, never PHYSICAL."""
+    contract, cohort = _make_test_contract("EXP-CEIL-01")
+    adapter = SimulatedCandidateAdapter()
+
+    receipt = run_provider_adoption_experiment(
+        contract=contract,
+        cohort=cohort,
+        adapter=adapter,
+        evidence_level=EvidenceLevel.PHYSICAL,
+    )
+
+    assert receipt.final_state == LifecycleState.RECOMMENDATION_READY
+    assert len(receipt.cohort_evaluations) == 5
+    for ev in receipt.cohort_evaluations:
+        assert ev.evidence_level == EvidenceLevel.SIMULATED
+        assert ev.evidence_level != EvidenceLevel.PHYSICAL
+
+
+def test_evidence_ceiling_simulated_adapter_with_requested_fixture_clamps_to_fixture():
+    """Negative Control 2: SimulatedCandidateAdapter + requested FIXTURE => FIXTURE."""
+    contract, cohort = _make_test_contract("EXP-CEIL-02")
+    adapter = SimulatedCandidateAdapter()
+
+    receipt = run_provider_adoption_experiment(
+        contract=contract,
+        cohort=cohort,
+        adapter=adapter,
+        evidence_level=EvidenceLevel.FIXTURE,
+    )
+
+    assert receipt.final_state == LifecycleState.RECOMMENDATION_READY
+    assert len(receipt.cohort_evaluations) == 5
+    for ev in receipt.cohort_evaluations:
+        assert ev.evidence_level == EvidenceLevel.FIXTURE
+
+
+def test_evidence_ceiling_physical_capable_adapter_with_requested_simulated_underclaims():
+    """Negative Control 3: Physical-capable adapter + requested SIMULATED => caller underclaim yields SIMULATED."""
+    contract, cohort = _make_test_contract("EXP-CEIL-03")
+    adapter = PhysicalCapableFakeAdapter()
+
+    receipt = run_provider_adoption_experiment(
+        contract=contract,
+        cohort=cohort,
+        adapter=adapter,
+        evidence_level=EvidenceLevel.SIMULATED,
+    )
+
+    assert receipt.final_state == LifecycleState.RECOMMENDATION_READY
+    assert len(receipt.cohort_evaluations) == 5
+    for ev in receipt.cohort_evaluations:
+        assert ev.evidence_level == EvidenceLevel.SIMULATED
+
+
+def test_evidence_ceiling_physical_capable_adapter_with_requested_physical_is_physical():
+    """Negative Control 4: Physical-capable adapter + requested PHYSICAL => PHYSICAL."""
+    contract, cohort = _make_test_contract("EXP-CEIL-04")
+    adapter = PhysicalCapableFakeAdapter()
+
+    receipt = run_provider_adoption_experiment(
+        contract=contract,
+        cohort=cohort,
+        adapter=adapter,
+        evidence_level=EvidenceLevel.PHYSICAL,
+    )
+
+    assert receipt.final_state == LifecycleState.RECOMMENDATION_READY
+    assert len(receipt.cohort_evaluations) == 5
+    for ev in receipt.cohort_evaluations:
+        assert ev.evidence_level == EvidenceLevel.PHYSICAL
+
+
+def test_evidence_ceiling_candidate_physical_baseline_simulated_independent_resolution():
+    """Negative Control 5: Candidate physical + baseline simulated + requested PHYSICAL
+    => candidate PHYSICAL, baseline SIMULATED.
+    """
+    contract_tmpl, cohort = _make_test_contract("EXP-CEIL-05")
+    contract = build_experiment_contract(
+        experiment_id="EXP-CEIL-05",
+        experiment_revision=1,
+        candidate=contract_tmpl.candidate,
+        baseline=BaselineIdentity("sim-base", "sim-base-v1", "in_memory"),
+        job_to_be_done=contract_tmpl.job_to_be_done,
+        allowed_capabilities=contract_tmpl.allowed_capabilities,
+        forbidden_capabilities=contract_tmpl.forbidden_capabilities,
+        dataset=contract_tmpl.dataset,
+        metrics_config=contract_tmpl.metrics_config,
+        pass_thresholds=contract_tmpl.pass_thresholds,
+        stop_conditions=contract_tmpl.stop_conditions,
+        environment_constraints=contract_tmpl.environment_constraints,
+        authority_boundary=contract_tmpl.authority_boundary,
+        claim_ceiling=contract_tmpl.claim_ceiling,
+        created_at="2026-09-27T00:00:00Z",
+    )
+
+    candidate_adapter = PhysicalCapableFakeAdapter()
+    baseline_adapter = SimulatedCandidateAdapter(
+        provider_id="sim-base", model_id="sim-base-v1", transport="in_memory"
+    )
+
+    receipt = run_provider_adoption_experiment(
+        contract=contract,
+        cohort=cohort,
+        adapter=candidate_adapter,
+        baseline_adapter=baseline_adapter,
+        evidence_level=EvidenceLevel.PHYSICAL,
+    )
+
+    assert receipt.final_state == LifecycleState.RECOMMENDATION_READY
+    # Candidate evaluations are PHYSICAL
+    assert len(receipt.cohort_evaluations) == 5
+    for ev in receipt.cohort_evaluations:
+        assert ev.evidence_level == EvidenceLevel.PHYSICAL
+
+    # Baseline evaluations MUST remain SIMULATED despite caller requesting PHYSICAL
+    be = receipt.baseline_evaluation
+    assert be.status == BASELINE_STATUS_EVALUATED
+    assert len(be.cohort_evaluations) == 5
+    for ev in be.cohort_evaluations:
+        assert ev.evidence_level == EvidenceLevel.SIMULATED
+        assert ev.evidence_level != EvidenceLevel.PHYSICAL
+
+
+def test_evidence_ceiling_baseline_physical_candidate_simulated_independent_resolution():
+    """Negative Control 6: Baseline physical + candidate simulated + requested PHYSICAL
+    => candidate SIMULATED, baseline PHYSICAL when baseline executes.
+    """
+    contract_tmpl, cohort = _make_test_contract("EXP-CEIL-06")
+    contract = build_experiment_contract(
+        experiment_id="EXP-CEIL-06",
+        experiment_revision=1,
+        candidate=contract_tmpl.candidate,
+        baseline=BaselineIdentity("phys-base", "phys-base-v1", "in_memory"),
+        job_to_be_done=contract_tmpl.job_to_be_done,
+        allowed_capabilities=contract_tmpl.allowed_capabilities,
+        forbidden_capabilities=contract_tmpl.forbidden_capabilities,
+        dataset=contract_tmpl.dataset,
+        metrics_config=contract_tmpl.metrics_config,
+        pass_thresholds=contract_tmpl.pass_thresholds,
+        stop_conditions=contract_tmpl.stop_conditions,
+        environment_constraints=contract_tmpl.environment_constraints,
+        authority_boundary=contract_tmpl.authority_boundary,
+        claim_ceiling=contract_tmpl.claim_ceiling,
+        created_at="2026-09-27T00:00:00Z",
+    )
+
+    candidate_adapter = SimulatedCandidateAdapter()
+    baseline_adapter = PhysicalCapableFakeAdapter(
+        provider_id="phys-base", model_id="phys-base-v1", transport="in_memory"
+    )
+
+    receipt = run_provider_adoption_experiment(
+        contract=contract,
+        cohort=cohort,
+        adapter=candidate_adapter,
+        baseline_adapter=baseline_adapter,
+        evidence_level=EvidenceLevel.PHYSICAL,
+    )
+
+    assert receipt.final_state == LifecycleState.RECOMMENDATION_READY
+    # Candidate evaluations clamped to SIMULATED
+    assert len(receipt.cohort_evaluations) == 5
+    for ev in receipt.cohort_evaluations:
+        assert ev.evidence_level == EvidenceLevel.SIMULATED
+        assert ev.evidence_level != EvidenceLevel.PHYSICAL
+
+    # Baseline evaluations are PHYSICAL
+    be = receipt.baseline_evaluation
+    assert be.status == BASELINE_STATUS_EVALUATED
+    assert len(be.cohort_evaluations) == 5
+    for ev in be.cohort_evaluations:
+        assert ev.evidence_level == EvidenceLevel.PHYSICAL
+
+
+def test_evidence_ceiling_environment_data_stop_paths_do_not_fabricate_evaluations():
+    """Negative Control 7: Blocked environment, unready ground truth, or stopped runs
+    must never fabricate case evaluations or physical evidence.
+    """
+    contract_tmpl, cohort = _make_test_contract("EXP-CEIL-07")
+    contract = build_experiment_contract(
+        experiment_id="EXP-CEIL-07",
+        experiment_revision=1,
+        candidate=contract_tmpl.candidate,
+        baseline=BaselineIdentity("sim-base", "sim-base-v1", "in_memory"),
+        job_to_be_done=contract_tmpl.job_to_be_done,
+        allowed_capabilities=contract_tmpl.allowed_capabilities,
+        forbidden_capabilities=contract_tmpl.forbidden_capabilities,
+        dataset=contract_tmpl.dataset,
+        metrics_config=contract_tmpl.metrics_config,
+        pass_thresholds=contract_tmpl.pass_thresholds,
+        stop_conditions=contract_tmpl.stop_conditions,
+        environment_constraints=contract_tmpl.environment_constraints,
+        authority_boundary=contract_tmpl.authority_boundary,
+        claim_ceiling=contract_tmpl.claim_ceiling,
+        created_at="2026-09-27T00:00:00Z",
+    )
+
+    # 1. Environment blocked
+    blocked_adapter = PhysicalCapableFakeAdapter(
+        environment_blocked=True, environment_blocker_reason="BLOCKED_BY_TEST"
+    )
+    receipt_env = run_provider_adoption_experiment(
+        contract=contract,
+        cohort=cohort,
+        adapter=blocked_adapter,
+        baseline_adapter=PhysicalCapableFakeAdapter(
+            provider_id="sim-base", model_id="sim-base-v1", transport="in_memory"
+        ),
+        evidence_level=EvidenceLevel.PHYSICAL,
+    )
+    assert receipt_env.final_state == LifecycleState.BLOCKED_BY_ENVIRONMENT
+    assert len(receipt_env.cohort_evaluations) == 0
+    assert len(receipt_env.baseline_evaluation.cohort_evaluations) == 0
+
+    # 2. Terminal candidate stop condition
+    stop_adapter = SimulatedCandidateAdapter(fail_case_ids={"C1", "C2"})
+    contract_stop = build_experiment_contract(
+        experiment_id="EXP-CEIL-07-STOP",
+        experiment_revision=1,
+        candidate=contract_tmpl.candidate,
+        baseline=BaselineIdentity("sim-base", "sim-base-v1", "in_memory"),
+        job_to_be_done=contract_tmpl.job_to_be_done,
+        allowed_capabilities=contract_tmpl.allowed_capabilities,
+        forbidden_capabilities=contract_tmpl.forbidden_capabilities,
+        dataset=contract_tmpl.dataset,
+        metrics_config=contract_tmpl.metrics_config,
+        pass_thresholds=contract_tmpl.pass_thresholds,
+        stop_conditions=StopConditions(2, 0.2, True, 5),
+        environment_constraints=contract_tmpl.environment_constraints,
+        authority_boundary=contract_tmpl.authority_boundary,
+        claim_ceiling=contract_tmpl.claim_ceiling,
+        created_at="2026-09-27T00:00:00Z",
+    )
+    receipt_stop = run_provider_adoption_experiment(
+        contract=contract_stop,
+        cohort=cohort,
+        adapter=stop_adapter,
+        baseline_adapter=PhysicalCapableFakeAdapter(
+            provider_id="sim-base", model_id="sim-base-v1", transport="in_memory"
+        ),
+        evidence_level=EvidenceLevel.PHYSICAL,
+    )
+    assert receipt_stop.final_state == LifecycleState.STOPPED_BY_CONDITION
+    # Candidate ran 2 cases; their level was clamped to SIMULATED, not PHYSICAL
+    assert len(receipt_stop.cohort_evaluations) == 2
+    for ev in receipt_stop.cohort_evaluations:
+        assert ev.evidence_level == EvidenceLevel.SIMULATED
+    # Baseline was not run
+    assert len(receipt_stop.baseline_evaluation.cohort_evaluations) == 0
+
+
+def test_evidence_ceiling_default_call_backwards_compatible_as_simulated():
+    """Negative Control 8: Default calls without explicit evidence_level remain SIMULATED."""
+    contract, cohort = _make_test_contract("EXP-CEIL-08")
+    adapter = SimulatedCandidateAdapter()
+
+    # Call with default evidence_level (no explicit parameter)
+    receipt = run_provider_adoption_experiment(
+        contract=contract,
+        cohort=cohort,
+        adapter=adapter,
+    )
+
+    assert receipt.final_state == LifecycleState.RECOMMENDATION_READY
+    assert len(receipt.cohort_evaluations) == 5
+    for ev in receipt.cohort_evaluations:
+        assert ev.evidence_level == EvidenceLevel.SIMULATED
+
+
+def test_evidence_ceiling_custom_adapter_defaults_conservatively_to_simulated():
+    """Negative Control 9 / Settled Semantics 2, 14: Custom adapter that does not override
+    ceiling defaults safely to SIMULATED, never PHYSICAL.
+    """
+    from nexus.calibration.provider_adoption.adapter import CandidateAdapter
+
+    class BareCustomAdapter(CandidateAdapter):
+        def is_environment_blocked(self):
+            return False, ""
+
+        def inspect_identity(self):
+            from nexus.calibration.provider_adoption.identity import inspect_physical_host_identity
+
+            return inspect_physical_host_identity(
+                provider_id="custom",
+                model_id="custom-v1",
+                transport="custom_pipe",
+                runtime_executable="custom_bin",
+                runtime_version="1.0.0",
+                adapter_generation="v1",
+                model_generation="custom-gen-1",
+                timestamp="2026-09-27T00:00:00Z",
+                offline_verified=True,
+                network_dependency_observed="NONE",
+            )
+
+        def probe_capability(self, capability_id):
+            from nexus.calibration.provider_adoption.capability import (
+                CapabilityProbeResult,
+                CapabilityStatus,
+            )
+
+            return CapabilityProbeResult(
+                capability_id=capability_id,
+                status=CapabilityStatus.SUPPORTED,
+                physical_evidence="ok",
+                exit_code=0,
+                latency_ms=10,
+            )
+
+        def execute_case(self, case):
+            return case.ground_truth, True, None, 10
+
+        def inject_fault(self, failure_class):
+            from nexus.calibration.provider_adoption.failure import FailureObservationItem
+
+            return FailureObservationItem(
+                failure_class=failure_class,
+                exercised=False,
+                observed_fail_closed=None,
+                observed_retry_behavior="NOT_EVALUATED",
+                evidence_notes="",
+            )
+
+    custom_adapter = BareCustomAdapter()
+    assert custom_adapter.max_evidence_level == EvidenceLevel.SIMULATED
+
+    contract, cohort = _make_test_contract("EXP-CEIL-09")
+    receipt = run_provider_adoption_experiment(
+        contract=contract,
+        cohort=cohort,
+        adapter=custom_adapter,
+        evidence_level=EvidenceLevel.PHYSICAL,
+    )
+    assert len(receipt.cohort_evaluations) == 5
+    for ev in receipt.cohort_evaluations:
+        # Bare custom adapter ceiling is SIMULATED, cannot escalate to PHYSICAL
+        assert ev.evidence_level == EvidenceLevel.SIMULATED
+        assert ev.evidence_level != EvidenceLevel.PHYSICAL
+
+
+def test_evidence_ceiling_simulated_adapter_rejects_physical_ceiling_instantiation():
+    """SimulatedCandidateAdapter cannot claim PHYSICAL ceiling at instantiation."""
+    import pytest
+
+    with pytest.raises(
+        ValueError,
+        match="SimulatedCandidateAdapter maximum supportable evidence level is SIMULATED",
+    ):
+        SimulatedCandidateAdapter(max_evidence_level=EvidenceLevel.PHYSICAL)
+
+
+def test_resolve_effective_evidence_level_all_matrix_combinations():
+    """Unit test for resolve_effective_evidence_level across all permutations."""
+    from nexus.calibration.provider_adoption.cohort import resolve_effective_evidence_level
+
+    # Requested PHYSICAL
+    assert (
+        resolve_effective_evidence_level(EvidenceLevel.PHYSICAL, EvidenceLevel.PHYSICAL)
+        == EvidenceLevel.PHYSICAL
+    )
+    assert (
+        resolve_effective_evidence_level(EvidenceLevel.PHYSICAL, EvidenceLevel.SIMULATED)
+        == EvidenceLevel.SIMULATED
+    )
+    assert (
+        resolve_effective_evidence_level(EvidenceLevel.PHYSICAL, EvidenceLevel.FIXTURE)
+        == EvidenceLevel.FIXTURE
+    )
+
+    # Requested SIMULATED
+    assert (
+        resolve_effective_evidence_level(EvidenceLevel.SIMULATED, EvidenceLevel.PHYSICAL)
+        == EvidenceLevel.SIMULATED
+    )
+    assert (
+        resolve_effective_evidence_level(EvidenceLevel.SIMULATED, EvidenceLevel.SIMULATED)
+        == EvidenceLevel.SIMULATED
+    )
+    assert (
+        resolve_effective_evidence_level(EvidenceLevel.SIMULATED, EvidenceLevel.FIXTURE)
+        == EvidenceLevel.FIXTURE
+    )
+
+    # Requested FIXTURE
+    assert (
+        resolve_effective_evidence_level(EvidenceLevel.FIXTURE, EvidenceLevel.PHYSICAL)
+        == EvidenceLevel.FIXTURE
+    )
+    assert (
+        resolve_effective_evidence_level(EvidenceLevel.FIXTURE, EvidenceLevel.SIMULATED)
+        == EvidenceLevel.FIXTURE
+    )
+    assert (
+        resolve_effective_evidence_level(EvidenceLevel.FIXTURE, EvidenceLevel.FIXTURE)
+        == EvidenceLevel.FIXTURE
+    )
+
+    # String input support & fallback
+    assert resolve_effective_evidence_level("PHYSICAL", "SIMULATED") == EvidenceLevel.SIMULATED
+    assert (
+        resolve_effective_evidence_level("UNKNOWN_STRING", "SIMULATED") == EvidenceLevel.SIMULATED
+    )

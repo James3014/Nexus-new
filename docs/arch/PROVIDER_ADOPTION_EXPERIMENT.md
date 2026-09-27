@@ -95,6 +95,7 @@ DRAFT → G0 CONTRACT_FROZEN → G1 IDENTITY_INSPECTED → G2 CAPABILITY_PROBED
 - **Ground Truth Readiness:** If ground truth is incomplete or unverified, evaluation halts with `GROUND_TRUTH_NOT_READY`.
 - **Single Run Identity:** Generates a single stable `run_id` for the entire run. All case receipts bind to this exact `run_id`.
 - **Active Stop Condition Monitoring:** Evaluates consecutive failures, error rate, and safety timeouts after every case. If a threshold is crossed, halts immediately with `STOPPED_BY_CONDITION`.
+- **Evidence Level Ceiling Enforcement:** Mock or simulated evidence must never masquerade as physical evidence. Case evaluations are clamped to the adapter's declared maximum supportable evidence level ceiling (`min(requested, adapter_ceiling)` under ordering `FIXTURE < SIMULATED < PHYSICAL`).
 
 ### G4 — Operational Metrics
 - Schema: `nexus.provider_experiment.operational_metrics.v1`.
@@ -110,7 +111,7 @@ DRAFT → G0 CONTRACT_FROZEN → G1 IDENTITY_INSPECTED → G2 CAPABILITY_PROBED
 - **Physical Identity Verification:** Before any cohort case execution, the baseline adapter's physical identity (`provider_id`, `model_id`, `transport`) is inspected. Any discrepancy with `contract.baseline` yields `IDENTITY_MISMATCH` with zero case execution and comparison `NOT_AVAILABLE`.
 - **Environment Blockers:** If the baseline adapter reports environment blocked, status is marked `UNAVAILABLE` with the exact blocker reason. No fake measurement is made.
 - **Cohort Parity:** If physical identity matches and environment is clear, baseline executes the SAME exact `FrozenCohort` cases with identical prompt digests and identical grading semantics (`ground_truth`, `acceptable_variants`, `forbidden_outputs`, `schema_valid`).
-- **Independent Execution Identity:** Baseline case evaluations are recorded under a distinct, stable `baseline_run_id` and bound to the baseline's physical identity digest.
+- **Independent Execution Identity & Evidence Ceiling:** Baseline case evaluations are recorded under a distinct, stable `baseline_run_id`, bound to the baseline's physical identity digest, and resolved independently to its own adapter evidence ceiling (e.g. a simulated baseline remains `SIMULATED` even during a `PHYSICAL` candidate run).
 - **Stop Conditions:** Baseline enforces stop conditions during cohort evaluation. Early stop sets status to `STOPPED_BY_CONDITION` and disables comparison (`NOT_AVAILABLE`).
 - **Comparative Evidence:** Factual metric deltas (accuracy, error rate, p50/p95 latency, throughput) are computed only when `baseline_status == EVALUATED` and candidate cohort was fully evaluated. If baseline was not evaluated or stopped early, comparison status is explicitly `NOT_AVAILABLE`.
 - **Zero Candidate Authority Alteration:** Baseline evaluation is purely descriptive calibration evidence. It does not run G5 fault injection, does not mutate candidate lifecycle state, and never promotes, demotes, or alters candidate G6 admission recommendation.
@@ -136,7 +137,7 @@ DRAFT → G0 CONTRACT_FROZEN → G1 IDENTITY_INSPECTED → G2 CAPABILITY_PROBED
 
 ## 3. False-Green Defenses and Verifier Invariants
 
-The framework enforces seven mandatory false-green defenses:
+The framework enforces eight mandatory false-green defenses:
 1. **Offline Status Invariant (6.1):** `apple-fm` or local models never automatically receive `VERIFIED_OFFLINE` without physical offline network tests.
 2. **Capability Probe Invariant (6.2):** Absence of blockers does not imply `SUPPORTED`. Every supported capability must have physical execution proof.
 3. **Failure Observation Invariant (6.3):** Pre-declared expected behavior cannot be claimed as candidate evidence. `all_fail_closed_observed` is `None` unless physically exercised.
@@ -144,6 +145,7 @@ The framework enforces seven mandatory false-green defenses:
 5. **Cohort Provenance Invariant (6.5):** Synthetic test fixtures cannot claim historical receipt status. Unready promotion ground truth yields `GROUND_TRUTH_NOT_READY`.
 6. **Single Run Identity Invariant (6.6):** All case evaluations share a single immutable `run_id`.
 7. **Baseline Calibration Parity Invariant (6.7):** Baseline evaluation must execute the exact same frozen cohort cases and grading rules as candidate, bind a separate stable `baseline_run_id`, never alter candidate G6 authority, and fail closed to `NOT_AVAILABLE` comparison whenever baseline or candidate execution is incomplete, mismatched, or blocked.
+8. **Evidence Level Ceiling Invariant (6.8):** Mock, fixture, or simulated evidence must never masquerade as `PHYSICAL` evidence. Each adapter declares its maximum supportable evidence level ceiling (`CandidateAdapter` default `SIMULATED`, `AppleFMCandidateAdapter` `PHYSICAL`). Caller requested evidence level can only narrow (underclaim), never escalate above the adapter ceiling (`min(requested, ceiling)` with `FIXTURE < SIMULATED < PHYSICAL`). Candidate and baseline evidence levels resolve independently.
 
 ---
 

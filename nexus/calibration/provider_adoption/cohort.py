@@ -43,6 +43,43 @@ class EvidenceLevel(str, Enum):
     PHYSICAL = "PHYSICAL"
 
 
+EVIDENCE_LEVEL_RANK: dict[EvidenceLevel, int] = {
+    EvidenceLevel.FIXTURE: 1,
+    EvidenceLevel.SIMULATED: 2,
+    EvidenceLevel.PHYSICAL: 3,
+}
+
+
+def resolve_effective_evidence_level(
+    requested: EvidenceLevel | str,
+    ceiling: EvidenceLevel | str,
+) -> EvidenceLevel:
+    """Resolve effective evidence level as min(requested, ceiling).
+
+    Caller intent can only narrow evidence strength (underclaim), never escalate it.
+    Evidence level ordering: FIXTURE (1) < SIMULATED (2) < PHYSICAL (3).
+    Unknown/unrecognized levels fail conservative to SIMULATED.
+    """
+    req_enum = requested if isinstance(requested, EvidenceLevel) else None
+    if req_enum is None:
+        try:
+            req_enum = EvidenceLevel(str(requested))
+        except ValueError:
+            req_enum = EvidenceLevel.SIMULATED
+
+    ceil_enum = ceiling if isinstance(ceiling, EvidenceLevel) else None
+    if ceil_enum is None:
+        try:
+            ceil_enum = EvidenceLevel(str(ceiling))
+        except ValueError:
+            ceil_enum = EvidenceLevel.SIMULATED
+
+    req_rank = EVIDENCE_LEVEL_RANK.get(req_enum, 2)
+    ceil_rank = EVIDENCE_LEVEL_RANK.get(ceil_enum, 2)
+
+    return req_enum if req_rank <= ceil_rank else ceil_enum
+
+
 @dataclass(frozen=True)
 class CohortCase:
     case_id: str

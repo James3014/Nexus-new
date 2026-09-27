@@ -26,7 +26,7 @@ from nexus.calibration.provider_adoption.capability import (
     CapabilityStatus,
     evaluate_capability_probe,
 )
-from nexus.calibration.provider_adoption.cohort import CohortCase
+from nexus.calibration.provider_adoption.cohort import CohortCase, EvidenceLevel
 from nexus.calibration.provider_adoption.failure import (
     FailureClass,
     FailureObservationItem,
@@ -41,6 +41,8 @@ APPLE_FM_BINARY = "/usr/bin/fm"
 
 class AppleFMCandidateAdapter(CandidateAdapter):
     """Adapter for Apple Foundation Models CLI on macOS."""
+
+    max_evidence_level: EvidenceLevel = EvidenceLevel.PHYSICAL
 
     def __init__(self, binary_path: str = APPLE_FM_BINARY) -> None:
         self.binary_path = binary_path

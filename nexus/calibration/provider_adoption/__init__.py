@@ -13,6 +13,7 @@ G6: Advisory Admission Recommendation
 from nexus.calibration.provider_adoption.adapter import (
     CandidateAdapter,
     SimulatedCandidateAdapter,
+    get_adapter_evidence_ceiling,
 )
 from nexus.calibration.provider_adoption.apple_fm_adapter import (
     AppleFMCandidateAdapter,
@@ -29,6 +30,7 @@ from nexus.calibration.provider_adoption.capability import (
     evaluate_capability_probe,
 )
 from nexus.calibration.provider_adoption.cohort import (
+    EVIDENCE_LEVEL_RANK,
     CohortCase,
     CohortType,
     EvaluationResult,
@@ -37,6 +39,7 @@ from nexus.calibration.provider_adoption.cohort import (
     QualityVerdict,
     audit_cohort_leakage,
     create_frozen_cohort,
+    resolve_effective_evidence_level,
 )
 from nexus.calibration.provider_adoption.contracts import (
     AuthorityBoundary,
@@ -132,6 +135,7 @@ __all__ = [
     "ComparativeMetrics",
     "DatasetRef",
     "DriftDimension",
+    "EVIDENCE_LEVEL_RANK",
     "EnvironmentConstraints",
     "EvaluationResult",
     "EvidenceBundle",
@@ -167,8 +171,10 @@ __all__ = [
     "evaluate_identity_drift",
     "evaluate_requalification",
     "generate_13_question_report",
+    "get_adapter_evidence_ceiling",
     "get_default_failure_contracts",
     "inspect_physical_host_identity",
+    "resolve_effective_evidence_level",
     "run_provider_adoption_experiment",
     "validate_experiment_contract",
     "verify_contract_immutability",
