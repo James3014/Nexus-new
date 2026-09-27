@@ -196,26 +196,22 @@ def compute_cohort_hashes(cases: Sequence[CohortCase]) -> tuple[str, str]:
     return canonical_json_hash(cohort_inputs), canonical_json_hash(gt_inputs)
 
 
-_CLASSIFICATION_TASK_CLASSES: frozenset[str] = frozenset(
-    {
-        "classification",
-        "multiple_choice",
-        "multiple-choice",
-        "categorization",
-        "single_choice",
-        "single-choice",
-        "choice",
-    }
-)
+_CLASSIFICATION_TASK_CLASSES: frozenset[str] = frozenset({
+    "classification",
+    "multiple_choice",
+    "multiple-choice",
+    "categorization",
+    "single_choice",
+    "single-choice",
+    "choice",
+})
 
-_EXTRACTION_TASK_CLASSES: frozenset[str] = frozenset(
-    {
-        "extraction",
-        "simple_extraction",
-        "simple-extraction",
-        "extract",
-    }
-)
+_EXTRACTION_TASK_CLASSES: frozenset[str] = frozenset({
+    "extraction",
+    "simple_extraction",
+    "simple-extraction",
+    "extract",
+})
 
 SUPPORTED_LEAKAGE_POLICY_REVISIONS: tuple[int, ...] = (1,)
 
