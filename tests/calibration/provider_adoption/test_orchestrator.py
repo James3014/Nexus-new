@@ -12,8 +12,11 @@ Verifies:
 from typing import Any
 
 from nexus.calibration.provider_adoption.adapter import (
+    CandidateAdapter,
     SimulatedCandidateAdapter,
+    get_adapter_evidence_ceiling,
 )
+from nexus.calibration.provider_adoption.capability import CapabilityProbeResult
 from nexus.calibration.provider_adoption.cohort import (
     CohortCase,
     CohortType,
@@ -36,7 +39,10 @@ from nexus.calibration.provider_adoption.evidence_bundle import (
     build_evidence_bundle,
     generate_13_question_report,
 )
-from nexus.calibration.provider_adoption.failure import FailureClass
+from nexus.calibration.provider_adoption.failure import (
+    FailureClass,
+    FailureObservationItem,
+)
 from nexus.calibration.provider_adoption.identity import PhysicalIdentity
 from nexus.calibration.provider_adoption.orchestrator import (
     BASELINE_STATUS_EVALUATED,
@@ -1834,10 +1840,31 @@ def test_candidate_environment_blocked_leaves_baseline_not_evaluated():
     assert be.comparison.status == COMPARISON_STATUS_NOT_AVAILABLE
 
 
-class PhysicalCapableFakeAdapter(SimulatedCandidateAdapter):
+class PhysicalCapableFakeAdapter(CandidateAdapter):
     """Fake adapter declaring PHYSICAL support ceiling for negative control tests."""
 
-    max_evidence_level = EvidenceLevel.PHYSICAL
+    max_evidence_level: EvidenceLevel = EvidenceLevel.PHYSICAL
+
+    def __init__(self, **kwargs: Any) -> None:
+        self._inner = SimulatedCandidateAdapter(**kwargs)
+
+    def is_environment_blocked(self) -> tuple[bool, str]:
+        return self._inner.is_environment_blocked()
+
+    def inspect_identity(self) -> PhysicalIdentity:
+        return self._inner.inspect_identity()
+
+    def probe_capability(self, capability_id: str) -> CapabilityProbeResult:
+        return self._inner.probe_capability(capability_id)
+
+    def execute_case(self, case: CohortCase) -> tuple[str, bool, str | None, int]:
+        return self._inner.execute_case(case)
+
+    def inject_fault(self, failure_class: FailureClass) -> FailureObservationItem:
+        return self._inner.inject_fault(failure_class)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
 
 
 def test_evidence_ceiling_simulated_adapter_with_requested_physical_clamps_to_simulated():
@@ -2243,3 +2270,410 @@ def test_resolve_effective_evidence_level_all_matrix_combinations():
     assert (
         resolve_effective_evidence_level("UNKNOWN_STRING", "SIMULATED") == EvidenceLevel.SIMULATED
     )
+
+
+# ============================================================================
+# D13: Baseline Exception Containment & Candidate Receipt Invariance Tests
+# ============================================================================
+
+
+def test_baseline_identity_crash_contained_candidate_receipt_survives():
+    """D13: Baseline inspect_identity exception is contained; candidate receipt survives intact."""
+    contract_tmpl, cohort = _make_test_contract("EXP-D13-BASE-ID-CRASH")
+    contract = build_experiment_contract(
+        experiment_id="EXP-D13-BASE-ID-CRASH",
+        experiment_revision=1,
+        candidate=contract_tmpl.candidate,
+        baseline=BaselineIdentity("sim-base", "sim-base-v1", "in_memory"),
+        job_to_be_done=contract_tmpl.job_to_be_done,
+        allowed_capabilities=contract_tmpl.allowed_capabilities,
+        forbidden_capabilities=contract_tmpl.forbidden_capabilities,
+        dataset=contract_tmpl.dataset,
+        metrics_config=contract_tmpl.metrics_config,
+        pass_thresholds=contract_tmpl.pass_thresholds,
+        stop_conditions=contract_tmpl.stop_conditions,
+        environment_constraints=contract_tmpl.environment_constraints,
+        authority_boundary=contract_tmpl.authority_boundary,
+        claim_ceiling=contract_tmpl.claim_ceiling,
+        created_at="2026-09-27T00:00:00Z",
+    )
+
+    class CrashingIdentityBaselineAdapter(SimulatedCandidateAdapter):
+        def inspect_identity(self):
+            raise RuntimeError("BASELINE_IDENTITY_CRASH")
+
+    candidate_adapter = SimulatedCandidateAdapter()
+    baseline_adapter = CrashingIdentityBaselineAdapter(
+        provider_id="sim-base",
+        model_id="sim-base-v1",
+        transport="in_memory",
+    )
+
+    receipt = run_provider_adoption_experiment(
+        contract=contract,
+        cohort=cohort,
+        adapter=candidate_adapter,
+        baseline_adapter=baseline_adapter,
+    )
+
+    # 1. Candidate execution survived completely intact
+    assert receipt.final_state == LifecycleState.RECOMMENDATION_READY
+    assert len(receipt.cohort_evaluations) == 5
+    assert receipt.operational_metrics.accuracy == 1.0
+
+    # 2. Baseline evaluation status UNAVAILABLE, physical_identity None, zero cases, comparison NOT_AVAILABLE
+    be = receipt.baseline_evaluation
+    assert be is not None
+    assert be.status == BASELINE_STATUS_UNAVAILABLE
+    assert "BASELINE_IDENTITY_CRASH" in be.reason
+    assert be.physical_identity is None
+    assert be.baseline_identity_digest is None
+    assert be.baseline_run_id is None
+    assert len(be.cohort_evaluations) == 0
+    assert be.operational_metrics is None
+    assert be.comparison.status == COMPARISON_STATUS_NOT_AVAILABLE
+    assert "BASELINE_IDENTITY_CRASH" in be.comparison.reason
+
+    # 3. Control equivalence: candidate recommendation, state history, roles, authority disclaimer unchanged
+    control_receipt = run_provider_adoption_experiment(
+        contract=contract_tmpl,
+        cohort=cohort,
+        adapter=SimulatedCandidateAdapter(),
+        baseline_adapter=None,
+    )
+    assert receipt.recommendation.verdict == control_receipt.recommendation.verdict
+    assert (
+        receipt.recommendation.recommended_autonomy
+        == control_receipt.recommendation.recommended_autonomy
+    )
+    assert (
+        receipt.recommendation.recommended_state == control_receipt.recommendation.recommended_state
+    )
+    assert (
+        receipt.recommendation.recommended_roles == control_receipt.recommendation.recommended_roles
+    )
+    assert (
+        receipt.recommendation.clamped_by_ceiling
+        == control_receipt.recommendation.clamped_by_ceiling
+    )
+    assert (
+        receipt.recommendation.authority_disclaimer
+        == control_receipt.recommendation.authority_disclaimer
+    )
+    states_crash = [s for s, _ in receipt.state_history]
+    states_ctrl = [s for s, _ in control_receipt.state_history]
+    assert states_crash == states_ctrl
+
+
+def test_baseline_environment_check_crash_contained_candidate_receipt_survives():
+    """D13: Baseline is_environment_blocked exception after identity preserves physical identity; candidate receipt survives."""
+    contract_tmpl, cohort = _make_test_contract("EXP-D13-BASE-ENV-CRASH")
+    contract = build_experiment_contract(
+        experiment_id="EXP-D13-BASE-ENV-CRASH",
+        experiment_revision=1,
+        candidate=contract_tmpl.candidate,
+        baseline=BaselineIdentity("sim-base", "sim-base-v1", "in_memory"),
+        job_to_be_done=contract_tmpl.job_to_be_done,
+        allowed_capabilities=contract_tmpl.allowed_capabilities,
+        forbidden_capabilities=contract_tmpl.forbidden_capabilities,
+        dataset=contract_tmpl.dataset,
+        metrics_config=contract_tmpl.metrics_config,
+        pass_thresholds=contract_tmpl.pass_thresholds,
+        stop_conditions=contract_tmpl.stop_conditions,
+        environment_constraints=contract_tmpl.environment_constraints,
+        authority_boundary=contract_tmpl.authority_boundary,
+        claim_ceiling=contract_tmpl.claim_ceiling,
+        created_at="2026-09-27T00:00:00Z",
+    )
+
+    class CrashingEnvBaselineAdapter(SimulatedCandidateAdapter):
+        def is_environment_blocked(self):
+            raise RuntimeError("BASELINE_ENV_CHECK_CRASH")
+
+    candidate_adapter = SimulatedCandidateAdapter()
+    baseline_adapter = CrashingEnvBaselineAdapter(
+        provider_id="sim-base",
+        model_id="sim-base-v1",
+        transport="in_memory",
+    )
+
+    receipt = run_provider_adoption_experiment(
+        contract=contract,
+        cohort=cohort,
+        adapter=candidate_adapter,
+        baseline_adapter=baseline_adapter,
+    )
+
+    # 1. Candidate execution survived intact
+    assert receipt.final_state == LifecycleState.RECOMMENDATION_READY
+    assert len(receipt.cohort_evaluations) == 5
+
+    # 2. Baseline status UNAVAILABLE, observed physical identity preserved, zero cases, comparison NOT_AVAILABLE
+    be = receipt.baseline_evaluation
+    assert be is not None
+    assert be.status == BASELINE_STATUS_UNAVAILABLE
+    assert "BASELINE_ENV_CHECK_CRASH" in be.reason
+    assert be.physical_identity is not None
+    assert be.physical_identity.provider_id == "sim-base"
+    assert be.baseline_identity_digest == be.physical_identity.identity_digest
+    assert be.baseline_run_id is None
+    assert len(be.cohort_evaluations) == 0
+    assert be.operational_metrics is None
+    assert be.comparison.status == COMPARISON_STATUS_NOT_AVAILABLE
+
+    # 3. Control equivalence
+    control_receipt = run_provider_adoption_experiment(
+        contract=contract_tmpl,
+        cohort=cohort,
+        adapter=SimulatedCandidateAdapter(),
+        baseline_adapter=None,
+    )
+    assert receipt.recommendation.verdict == control_receipt.recommendation.verdict
+    assert (
+        receipt.recommendation.recommended_autonomy
+        == control_receipt.recommendation.recommended_autonomy
+    )
+    assert (
+        receipt.recommendation.recommended_state == control_receipt.recommendation.recommended_state
+    )
+    assert (
+        receipt.recommendation.recommended_roles == control_receipt.recommendation.recommended_roles
+    )
+    assert (
+        receipt.recommendation.clamped_by_ceiling
+        == control_receipt.recommendation.clamped_by_ceiling
+    )
+    assert (
+        receipt.recommendation.authority_disclaimer
+        == control_receipt.recommendation.authority_disclaimer
+    )
+
+
+def test_baseline_case_crash_after_successful_cases_preserves_partial_truthful_evidence():
+    """D13: Baseline execute_case crash after successful cases preserves partial evaluations; status UNAVAILABLE, comparison NOT_AVAILABLE."""
+    contract_tmpl, cohort = _make_test_contract("EXP-D13-BASE-CASE-CRASH")
+    contract = build_experiment_contract(
+        experiment_id="EXP-D13-BASE-CASE-CRASH",
+        experiment_revision=1,
+        candidate=contract_tmpl.candidate,
+        baseline=BaselineIdentity("sim-base", "sim-base-v1", "in_memory"),
+        job_to_be_done=contract_tmpl.job_to_be_done,
+        allowed_capabilities=contract_tmpl.allowed_capabilities,
+        forbidden_capabilities=contract_tmpl.forbidden_capabilities,
+        dataset=contract_tmpl.dataset,
+        metrics_config=contract_tmpl.metrics_config,
+        pass_thresholds=contract_tmpl.pass_thresholds,
+        stop_conditions=contract_tmpl.stop_conditions,
+        environment_constraints=contract_tmpl.environment_constraints,
+        authority_boundary=contract_tmpl.authority_boundary,
+        claim_ceiling=contract_tmpl.claim_ceiling,
+        created_at="2026-09-27T00:00:00Z",
+    )
+
+    class CrashingCaseBaselineAdapter(SimulatedCandidateAdapter):
+        def execute_case(self, case):
+            if case.case_id == "C3":
+                raise RuntimeError("BASELINE_CASE_CRASH")
+            return super().execute_case(case)
+
+    candidate_adapter = SimulatedCandidateAdapter()
+    baseline_adapter = CrashingCaseBaselineAdapter(
+        provider_id="sim-base",
+        model_id="sim-base-v1",
+        transport="in_memory",
+    )
+
+    receipt = run_provider_adoption_experiment(
+        contract=contract,
+        cohort=cohort,
+        adapter=candidate_adapter,
+        baseline_adapter=baseline_adapter,
+    )
+
+    # 1. Candidate completed all 5 cases cleanly
+    assert receipt.final_state == LifecycleState.RECOMMENDATION_READY
+    assert len(receipt.cohort_evaluations) == 5
+
+    # 2. Baseline is NOT EVALUATED (it crashed mid-cohort)
+    be = receipt.baseline_evaluation
+    assert be is not None
+    assert be.status == BASELINE_STATUS_UNAVAILABLE
+    assert be.status != BASELINE_STATUS_EVALUATED
+    assert "BASELINE_CASE_CRASH" in be.reason
+    assert "C3" in be.reason
+    assert be.comparison.status == COMPARISON_STATUS_NOT_AVAILABLE
+
+    # 3. Truthful partial evidence preserved for completed cases C1 and C2, zero fabricated for C3
+    assert len(be.cohort_evaluations) == 2
+    assert [e.case_id for e in be.cohort_evaluations] == ["C1", "C2"]
+    assert be.baseline_run_id is not None
+    assert be.cohort_evaluations[0].run_id == be.baseline_run_id
+    assert be.operational_metrics is not None
+    assert be.operational_metrics.total_cases == 2
+
+    # 4. Control equivalence
+    control_receipt = run_provider_adoption_experiment(
+        contract=contract_tmpl,
+        cohort=cohort,
+        adapter=SimulatedCandidateAdapter(),
+        baseline_adapter=None,
+    )
+    assert receipt.recommendation.verdict == control_receipt.recommendation.verdict
+    assert (
+        receipt.recommendation.recommended_autonomy
+        == control_receipt.recommendation.recommended_autonomy
+    )
+    assert (
+        receipt.recommendation.recommended_state == control_receipt.recommendation.recommended_state
+    )
+    assert (
+        receipt.recommendation.recommended_roles == control_receipt.recommendation.recommended_roles
+    )
+    assert (
+        receipt.recommendation.clamped_by_ceiling
+        == control_receipt.recommendation.clamped_by_ceiling
+    )
+    assert (
+        receipt.recommendation.authority_disclaimer
+        == control_receipt.recommendation.authority_disclaimer
+    )
+
+
+def test_baseline_case_crash_on_first_case_contained():
+    """D13: Baseline execute_case crash on very first case yields zero evaluations and UNAVAILABLE status."""
+    contract_tmpl, cohort = _make_test_contract("EXP-D13-FIRST-CRASH")
+    contract = build_experiment_contract(
+        experiment_id="EXP-D13-FIRST-CRASH",
+        experiment_revision=1,
+        candidate=contract_tmpl.candidate,
+        baseline=BaselineIdentity("sim-base", "sim-base-v1", "in_memory"),
+        job_to_be_done=contract_tmpl.job_to_be_done,
+        allowed_capabilities=contract_tmpl.allowed_capabilities,
+        forbidden_capabilities=contract_tmpl.forbidden_capabilities,
+        dataset=contract_tmpl.dataset,
+        metrics_config=contract_tmpl.metrics_config,
+        pass_thresholds=contract_tmpl.pass_thresholds,
+        stop_conditions=contract_tmpl.stop_conditions,
+        environment_constraints=contract_tmpl.environment_constraints,
+        authority_boundary=contract_tmpl.authority_boundary,
+        claim_ceiling=contract_tmpl.claim_ceiling,
+        created_at="2026-09-27T00:00:00Z",
+    )
+
+    class FirstCaseCrashBaselineAdapter(SimulatedCandidateAdapter):
+        def execute_case(self, case):
+            raise RuntimeError("FIRST_CASE_CRASH")
+
+    candidate_adapter = SimulatedCandidateAdapter()
+    baseline_adapter = FirstCaseCrashBaselineAdapter(
+        provider_id="sim-base",
+        model_id="sim-base-v1",
+        transport="in_memory",
+    )
+
+    receipt = run_provider_adoption_experiment(
+        contract=contract,
+        cohort=cohort,
+        adapter=candidate_adapter,
+        baseline_adapter=baseline_adapter,
+    )
+
+    assert receipt.final_state == LifecycleState.RECOMMENDATION_READY
+    assert len(receipt.cohort_evaluations) == 5
+
+    be = receipt.baseline_evaluation
+    assert be.status == BASELINE_STATUS_UNAVAILABLE
+    assert "FIRST_CASE_CRASH" in be.reason
+    assert be.comparison.status == COMPARISON_STATUS_NOT_AVAILABLE
+    assert len(be.cohort_evaluations) == 0
+    assert be.operational_metrics is None
+    assert be.baseline_run_id is None
+
+
+# ============================================================================
+# D14: Evidence Ceiling Clamping on Simulated Inheritance Tests
+# ============================================================================
+
+
+class LyingSimulatedSubclass(SimulatedCandidateAdapter):
+    """Subclass attempting to escalate evidence ceiling to PHYSICAL."""
+
+    max_evidence_level = EvidenceLevel.PHYSICAL
+
+
+def test_evidence_ceiling_simulated_subclass_declaring_physical_clamped_to_simulated():
+    """D14: SimulatedCandidateAdapter subclass declaring PHYSICAL ceiling is hard-capped to SIMULATED."""
+    lying_adapter = LyingSimulatedSubclass()
+    # Central ceiling resolver clamps subclass to SIMULATED
+    assert get_adapter_evidence_ceiling(lying_adapter) == EvidenceLevel.SIMULATED
+
+    # When executed through orchestrator with requested PHYSICAL, evidence remains SIMULATED
+    contract, cohort = _make_test_contract("EXP-D14-LYING-SUBCLASS")
+    receipt = run_provider_adoption_experiment(
+        contract=contract,
+        cohort=cohort,
+        adapter=lying_adapter,
+        evidence_level=EvidenceLevel.PHYSICAL,
+    )
+    assert receipt.final_state == LifecycleState.RECOMMENDATION_READY
+    assert len(receipt.cohort_evaluations) == 5
+    for ev in receipt.cohort_evaluations:
+        assert ev.evidence_level == EvidenceLevel.SIMULATED
+        assert ev.evidence_level != EvidenceLevel.PHYSICAL
+
+
+def test_evidence_ceiling_simulated_instance_attr_physical_clamped_to_simulated():
+    """D14: SimulatedCandidateAdapter instance with instance-level PHYSICAL attribute is hard-capped to SIMULATED."""
+    adapter = SimulatedCandidateAdapter()
+    adapter.max_evidence_level = EvidenceLevel.PHYSICAL
+    assert get_adapter_evidence_ceiling(adapter) == EvidenceLevel.SIMULATED
+
+    contract, cohort = _make_test_contract("EXP-D14-INSTANCE-ATTR")
+    receipt = run_provider_adoption_experiment(
+        contract=contract,
+        cohort=cohort,
+        adapter=adapter,
+        evidence_level=EvidenceLevel.PHYSICAL,
+    )
+    assert receipt.final_state == LifecycleState.RECOMMENDATION_READY
+    assert len(receipt.cohort_evaluations) == 5
+    for ev in receipt.cohort_evaluations:
+        assert ev.evidence_level == EvidenceLevel.SIMULATED
+        assert ev.evidence_level != EvidenceLevel.PHYSICAL
+
+
+def test_evidence_ceiling_simulated_subclass_init_rejects_physical():
+    """D14: SimulatedCandidateAdapter subclass passing PHYSICAL in __init__ is rejected with ValueError."""
+    import pytest
+
+    class SubclassAdapter(SimulatedCandidateAdapter):
+        pass
+
+    with pytest.raises(
+        ValueError,
+        match="SimulatedCandidateAdapter maximum supportable evidence level is SIMULATED",
+    ):
+        SubclassAdapter(max_evidence_level=EvidenceLevel.PHYSICAL)
+
+
+def test_evidence_ceiling_direct_candidate_adapter_physical_fake_produces_physical():
+    """D14: Direct CandidateAdapter physical fake can still produce PHYSICAL when requested PHYSICAL.
+
+    Proves the guard specifically targets SimulatedCandidateAdapter rather than globally disabling PHYSICAL.
+    """
+    adapter = PhysicalCapableFakeAdapter()
+    assert isinstance(adapter, CandidateAdapter)
+    assert not isinstance(adapter, SimulatedCandidateAdapter)
+    assert get_adapter_evidence_ceiling(adapter) == EvidenceLevel.PHYSICAL
+
+    contract, cohort = _make_test_contract("EXP-D14-DIRECT-PHYSICAL-FAKE")
+    receipt = run_provider_adoption_experiment(
+        contract=contract,
+        cohort=cohort,
+        adapter=adapter,
+        evidence_level=EvidenceLevel.PHYSICAL,
+    )
+    assert receipt.final_state == LifecycleState.RECOMMENDATION_READY
+    assert len(receipt.cohort_evaluations) == 5
+    for ev in receipt.cohort_evaluations:
+        assert ev.evidence_level == EvidenceLevel.PHYSICAL

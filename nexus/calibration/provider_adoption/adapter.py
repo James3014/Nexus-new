@@ -29,6 +29,7 @@ def get_adapter_evidence_ceiling(adapter: CandidateAdapter | None) -> EvidenceLe
     """Extract maximum supportable evidence level ceiling from an adapter.
 
     Conservative fail-closed default: SIMULATED (never defaults to PHYSICAL).
+    Hard-caps all SimulatedCandidateAdapter instances and subclasses to SIMULATED.
     """
     if adapter is None:
         return EvidenceLevel.SIMULATED
@@ -36,15 +37,29 @@ def get_adapter_evidence_ceiling(adapter: CandidateAdapter | None) -> EvidenceLe
     if raw is None:
         raw = getattr(adapter, "get_max_evidence_level", None)
     if callable(raw):
-        raw = raw()
+        try:
+            raw = raw()
+        except Exception:
+            raw = EvidenceLevel.SIMULATED
+
+    level: EvidenceLevel
     if isinstance(raw, str):
         try:
-            return EvidenceLevel(raw)
+            level = EvidenceLevel(raw)
         except ValueError:
-            return EvidenceLevel.SIMULATED
-    if isinstance(raw, EvidenceLevel):
-        return raw
-    return EvidenceLevel.SIMULATED
+            level = EvidenceLevel.SIMULATED
+    elif isinstance(raw, EvidenceLevel):
+        level = raw
+    else:
+        level = EvidenceLevel.SIMULATED
+
+    # Invariant: ALL SimulatedCandidateAdapter instances and subclasses
+    # use simulated execution semantics and MUST NEVER support evidence above SIMULATED.
+    if isinstance(adapter, SimulatedCandidateAdapter):
+        if level == EvidenceLevel.PHYSICAL:
+            level = EvidenceLevel.SIMULATED
+
+    return level
 
 
 class CandidateAdapter:
@@ -111,9 +126,8 @@ class SimulatedCandidateAdapter(CandidateAdapter):
         self.exercised_faults = exercised_faults or {}
         self.default_latency_ms = default_latency_ms
         if max_evidence_level is not None:
-            if (
-                max_evidence_level == EvidenceLevel.PHYSICAL
-                and type(self) is SimulatedCandidateAdapter
+            if max_evidence_level == EvidenceLevel.PHYSICAL and isinstance(
+                self, SimulatedCandidateAdapter
             ):
                 raise ValueError(
                     "SimulatedCandidateAdapter maximum supportable evidence level is SIMULATED. "

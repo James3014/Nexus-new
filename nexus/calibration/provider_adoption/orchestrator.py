@@ -242,7 +242,32 @@ def _evaluate_baseline(
     evaluator_identity: str,
     evidence_level: EvidenceLevel,
 ) -> BaselineEvaluation:
-    """Evaluate baseline model adapter under settled calibration semantics."""
+    """Evaluate optional baseline evidence without hiding framework defects."""
+    return _evaluate_baseline_impl(
+        contract=contract,
+        cohort=cohort,
+        baseline_adapter=baseline_adapter,
+        candidate_cohort_reached=candidate_cohort_reached,
+        lifecycle_halt_reason=lifecycle_halt_reason,
+        candidate_operational_metrics=candidate_operational_metrics,
+        candidate_evaluated=candidate_evaluated,
+        evaluator_identity=evaluator_identity,
+        evidence_level=evidence_level,
+    )
+
+
+def _evaluate_baseline_impl(
+    *,
+    contract: ExperimentContract,
+    cohort: FrozenCohort,
+    baseline_adapter: CandidateAdapter | None,
+    candidate_cohort_reached: bool,
+    lifecycle_halt_reason: str,
+    candidate_operational_metrics: OperationalMetrics | None,
+    candidate_evaluated: bool,
+    evaluator_identity: str,
+    evidence_level: EvidenceLevel,
+) -> BaselineEvaluation:
     # 1. Baseline is optional: contract.baseline is None => NOT_REQUESTED
     if contract.baseline is None:
         return BaselineEvaluation(
@@ -318,7 +343,33 @@ def _evaluate_baseline(
         )
 
     # 4. Inspect exact baseline physical identity
-    baseline_physical_id = baseline_adapter.inspect_identity()
+    try:
+        baseline_physical_id = baseline_adapter.inspect_identity()
+    except Exception as exc:
+        err_msg = str(exc).strip().replace("\n", " ")[:120]
+        reason = f"Baseline identity probe raised exception: {type(exc).__name__}: {err_msg}"
+        return BaselineEvaluation(
+            schema=BASELINE_EVALUATION_SCHEMA,
+            status=BASELINE_STATUS_UNAVAILABLE,
+            reason=reason,
+            requested=True,
+            expected_identity=expected,
+            physical_identity=None,
+            baseline_identity_digest=None,
+            baseline_run_id=None,
+            cohort_id=cohort.cohort_id,
+            cohort_revision=cohort.cohort_revision,
+            cohort_sha256=cohort.cohort_sha256,
+            ground_truth_revision=cohort.ground_truth_revision,
+            ground_truth_sha256=cohort.ground_truth_sha256,
+            cohort_evaluations=(),
+            operational_metrics=None,
+            comparison=ComparativeMetrics(
+                status=COMPARISON_STATUS_NOT_AVAILABLE,
+                reason=reason,
+            ),
+        )
+
     if (
         baseline_physical_id.provider_id != expected.provider_id
         or baseline_physical_id.model_id != expected.model_id
@@ -351,8 +402,34 @@ def _evaluate_baseline(
             ),
         )
 
-    # 4. Check if baseline adapter environment is blocked
-    is_base_blocked, base_blocker_reason = baseline_adapter.is_environment_blocked()
+    # 5. Check if baseline adapter environment is blocked
+    try:
+        is_base_blocked, base_blocker_reason = baseline_adapter.is_environment_blocked()
+    except Exception as exc:
+        err_msg = str(exc).strip().replace("\n", " ")[:120]
+        reason = f"Baseline environment check raised exception: {type(exc).__name__}: {err_msg}"
+        return BaselineEvaluation(
+            schema=BASELINE_EVALUATION_SCHEMA,
+            status=BASELINE_STATUS_UNAVAILABLE,
+            reason=reason,
+            requested=True,
+            expected_identity=expected,
+            physical_identity=baseline_physical_id,
+            baseline_identity_digest=baseline_physical_id.identity_digest,
+            baseline_run_id=None,
+            cohort_id=cohort.cohort_id,
+            cohort_revision=cohort.cohort_revision,
+            cohort_sha256=cohort.cohort_sha256,
+            ground_truth_revision=cohort.ground_truth_revision,
+            ground_truth_sha256=cohort.ground_truth_sha256,
+            cohort_evaluations=(),
+            operational_metrics=None,
+            comparison=ComparativeMetrics(
+                status=COMPARISON_STATUS_NOT_AVAILABLE,
+                reason=reason,
+            ),
+        )
+
     if is_base_blocked:
         return BaselineEvaluation(
             schema=BASELINE_EVALUATION_SCHEMA,
@@ -376,7 +453,7 @@ def _evaluate_baseline(
             ),
         )
 
-    # 5. Execute SAME exact cohort cases with same grading semantics under stable baseline_run_id
+    # 6. Execute SAME exact cohort cases with same grading semantics under stable baseline_run_id
     baseline_ceiling = get_adapter_evidence_ceiling(baseline_adapter)
     baseline_effective_level = resolve_effective_evidence_level(evidence_level, baseline_ceiling)
     baseline_run_id = str(uuid.uuid4())
@@ -387,13 +464,24 @@ def _evaluate_baseline(
     base_t0 = time.monotonic()
     base_stopped = False
     base_stop_reason = ""
+    base_crashed = False
+    base_crash_reason = ""
 
     # Isolated state machine for stop condition evaluation only; does NOT mutate candidate sm
     base_sm = LifecycleStateMachine(experiment_id=contract.experiment_id)
 
     for case in cohort.cases:
         t_start = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        out_text, schema_valid, failure_class, lat_ms = baseline_adapter.execute_case(case)
+        try:
+            out_text, schema_valid, failure_class, lat_ms = baseline_adapter.execute_case(case)
+        except Exception as exc:
+            base_crashed = True
+            err_msg = str(exc).strip().replace("\n", " ")[:120]
+            base_crash_reason = (
+                f"Baseline case execution failed on case '{case.case_id}': "
+                f"{type(exc).__name__}: {err_msg}"
+            )
+            break
         t_end = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
         verdict, effective_fc, is_fail = _grade_case_execution(
@@ -454,15 +542,26 @@ def _evaluate_baseline(
         if baseline_physical_id.offline_availability == "VERIFIED_OFFLINE"
         else (False if baseline_physical_id.offline_availability == "ONLINE_REQUIRED" else None)
     )
-    base_metrics = aggregate_operational_metrics(
-        base_evaluations,
-        total_duration_sec=base_t_duration,
-        offline_verified=base_offline_bool,
-        network_dependency_observed=baseline_physical_id.network_dependency,
+    base_metrics = (
+        aggregate_operational_metrics(
+            base_evaluations,
+            total_duration_sec=base_t_duration,
+            offline_verified=base_offline_bool,
+            network_dependency_observed=baseline_physical_id.network_dependency,
+        )
+        if base_evaluations
+        else None
     )
 
     # 8. Determine final status and comparison
-    if base_stopped:
+    if base_crashed:
+        base_status = BASELINE_STATUS_UNAVAILABLE
+        base_reason = base_crash_reason
+        comparison = ComparativeMetrics(
+            status=COMPARISON_STATUS_NOT_AVAILABLE,
+            reason=base_crash_reason,
+        )
+    elif base_stopped:
         base_status = BASELINE_STATUS_STOPPED_BY_CONDITION
         base_reason = base_stop_reason
         comparison = ComparativeMetrics(
@@ -473,7 +572,11 @@ def _evaluate_baseline(
         base_status = BASELINE_STATUS_EVALUATED
         base_reason = "Baseline cohort evaluation completed successfully."
 
-        if candidate_operational_metrics is not None and candidate_evaluated:
+        if (
+            candidate_operational_metrics is not None
+            and candidate_evaluated
+            and base_metrics is not None
+        ):
             accuracy_delta = round(
                 candidate_operational_metrics.accuracy - base_metrics.accuracy, 4
             )
@@ -512,7 +615,7 @@ def _evaluate_baseline(
         expected_identity=expected,
         physical_identity=baseline_physical_id,
         baseline_identity_digest=baseline_physical_id.identity_digest,
-        baseline_run_id=baseline_run_id,
+        baseline_run_id=baseline_run_id if base_evaluations else None,
         cohort_id=cohort.cohort_id,
         cohort_revision=cohort.cohort_revision,
         cohort_sha256=cohort.cohort_sha256,
