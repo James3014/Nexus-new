@@ -25,6 +25,20 @@ from nexus.calibration.provider_adoption.canonical_json import canonical_json_ha
 PHYSICAL_IDENTITY_SCHEMA = "nexus.provider_experiment.physical_identity.v1"
 UNKNOWN = "UNKNOWN"
 
+# Observation metadata and capability observations are deliberately excluded from
+# execution identity. Re-observing the same host/runtime at a later timestamp, or
+# later proving offline/network behavior, must not mint a new execution identity.
+_IDENTITY_NON_IDENTITY_FIELDS = frozenset({
+    "identity_digest",
+    "timestamp",
+    "offline_availability",
+    "network_dependency",
+})
+
+
+def _identity_digest_payload(data: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in data.items() if k not in _IDENTITY_NON_IDENTITY_FIELDS}
+
 
 @dataclass(frozen=True)
 class PhysicalIdentity:
@@ -76,9 +90,7 @@ class PhysicalIdentity:
         }
 
     def compute_digest(self) -> str:
-        data = self.to_dict()
-        data.pop("identity_digest", None)
-        return canonical_json_hash(data)
+        return canonical_json_hash(_identity_digest_payload(self.to_dict()))
 
 
 def compute_file_sha256(path: str) -> str:
@@ -205,7 +217,7 @@ def inspect_physical_host_identity(
         "timestamp": timestamp,
         "memory_gb": observed_memory_gb,
     }
-    digest = canonical_json_hash(raw)
+    digest = canonical_json_hash(_identity_digest_payload(raw))
 
     return PhysicalIdentity(
         schema=PHYSICAL_IDENTITY_SCHEMA,

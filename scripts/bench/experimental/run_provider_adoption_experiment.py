@@ -42,6 +42,7 @@ from nexus.calibration.provider_adoption.capability import (
 from nexus.calibration.provider_adoption.cohort import (
     CohortCase,
     CohortType,
+    EvidenceLevel,
     FrozenCohort,
     create_frozen_cohort,
 )
@@ -213,10 +214,14 @@ def main() -> int:
     print(
         f"Executing experiment {contract.experiment_id} for candidate {contract.candidate.provider_id}..."
     )
+    requested_evidence_level = (
+        EvidenceLevel.PHYSICAL if args.candidate == "apple-fm" else EvidenceLevel.SIMULATED
+    )
     receipt = run_provider_adoption_experiment(
         contract=contract,
         cohort=cohort,
         adapter=adapter,
+        evidence_level=requested_evidence_level,
     )
 
     bundle = build_evidence_bundle(contract, receipt)

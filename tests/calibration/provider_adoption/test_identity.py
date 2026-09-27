@@ -25,6 +25,53 @@ def test_physical_identity_inspection_and_digest():
     assert ident.compute_digest() == ident.identity_digest
 
 
+def test_identity_digest_ignores_observation_timestamp():
+    first = inspect_physical_host_identity(
+        provider_id="provider-a",
+        model_id="model-1",
+        transport="cli",
+        runtime_executable="/bin/echo",
+        runtime_version="1.0.0",
+        timestamp="2026-09-27T00:00:00Z",
+    )
+    later = inspect_physical_host_identity(
+        provider_id="provider-a",
+        model_id="model-1",
+        transport="cli",
+        runtime_executable="/bin/echo",
+        runtime_version="1.0.0",
+        timestamp="2026-09-27T01:00:00Z",
+    )
+    assert first.timestamp != later.timestamp
+    assert first.identity_digest == later.identity_digest
+
+
+def test_identity_digest_ignores_later_offline_network_observation():
+    unknown = inspect_physical_host_identity(
+        provider_id="provider-a",
+        model_id="model-1",
+        transport="cli",
+        runtime_executable="/bin/echo",
+        runtime_version="1.0.0",
+        timestamp="2026-09-27T00:00:00Z",
+        offline_verified=None,
+        network_dependency_observed="UNKNOWN",
+    )
+    verified = inspect_physical_host_identity(
+        provider_id="provider-a",
+        model_id="model-1",
+        transport="cli",
+        runtime_executable="/bin/echo",
+        runtime_version="1.0.0",
+        timestamp="2026-09-27T01:00:00Z",
+        offline_verified=True,
+        network_dependency_observed="NONE",
+    )
+    assert unknown.identity_digest == verified.identity_digest
+    assert unknown.offline_availability != verified.offline_availability
+    assert unknown.network_dependency != verified.network_dependency
+
+
 def test_offline_status_honest_preservation_fix_6_1():
     """Verify Invariant 6.1: offline_availability defaults to UNKNOWN, never guessed."""
     ident = inspect_physical_host_identity(
