@@ -136,7 +136,7 @@ def test_unprobed_capabilities_serialize_as_not_evaluated_no_draft():
             max_error_rate=0.5,
             safety_abort_on_timeout=True,
         ),
-        environment_constraints=EnvironmentConstraints("Darwin", "arm64", 8),
+        environment_constraints=EnvironmentConstraints("", "", 0),
         authority_boundary=AuthorityBoundary(),
         claim_ceiling="L1",
         created_at="2026-09-27T00:00:00Z",

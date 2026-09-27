@@ -97,7 +97,7 @@ def _make_test_contract(
         metrics_config=MetricsConfig(500, 2000, 0.05, 1.0),
         pass_thresholds=PassThresholds(0.8, 0.9, 0.85),
         stop_conditions=StopConditions(max_consecutive_failures, 0.2, True, 5),
-        environment_constraints=EnvironmentConstraints("Darwin", "arm64", 8),
+        environment_constraints=EnvironmentConstraints("", "", 0),
         authority_boundary=AuthorityBoundary(),
         claim_ceiling=claim_ceiling,
         created_at="2026-09-27T00:00:00Z",
@@ -326,9 +326,9 @@ def test_orchestrator_environment_constraints_require_offline_unverified():
     contract_tmpl, cohort = _make_test_contract("EXP-ENV-OFFLINE")
     # Require offline, but simulated adapter physical identity defaults to UNKNOWN
     offline_env = EnvironmentConstraints(
-        required_os="Darwin",
-        required_arch="arm64",
-        min_memory_gb=8,
+        required_os="",
+        required_arch="",
+        min_memory_gb=0,
         require_offline=True,
     )
     contract = build_experiment_contract(
@@ -367,9 +367,9 @@ def test_orchestrator_allow_network_false_cannot_silently_become_verified_offlin
     """Verify negative control: allow_network=False cannot silently become verified network independence."""
     contract_tmpl, cohort = _make_test_contract("EXP-ENV-NETWORK-HONESTY")
     no_net_env = EnvironmentConstraints(
-        required_os="Darwin",
-        required_arch="arm64",
-        min_memory_gb=8,
+        required_os="",
+        required_arch="",
+        min_memory_gb=0,
         allow_network=False,
         require_offline=False,
     )
@@ -413,9 +413,9 @@ def test_orchestrator_allow_network_false_blocks_online_required_candidate():
     """Verify negative control: allow_network=False blocks candidate with ONLINE_REQUIRED dependency."""
     contract_tmpl, cohort = _make_test_contract("EXP-ENV-ONLINE-BLOCKED")
     no_net_env = EnvironmentConstraints(
-        required_os="Darwin",
-        required_arch="arm64",
-        min_memory_gb=8,
+        required_os="",
+        required_arch="",
+        min_memory_gb=0,
         allow_network=False,
     )
     contract = build_experiment_contract(
@@ -461,8 +461,8 @@ def test_orchestrator_environment_constraints_min_memory_violation():
     contract_tmpl, cohort = _make_test_contract("EXP-ENV-MEM")
     # Require absurdly large memory
     mem_env = EnvironmentConstraints(
-        required_os="Darwin",
-        required_arch="arm64",
+        required_os="",
+        required_arch="",
         min_memory_gb=2048,
     )
     contract = build_experiment_contract(
@@ -653,7 +653,7 @@ def test_orchestrator_cohort_leakage_detection_halts_execution():
         metrics_config=MetricsConfig(500, 2000, 0.05, 1.0),
         pass_thresholds=PassThresholds(0.8, 0.9, 0.85),
         stop_conditions=StopConditions(3, 0.2, True, 5),
-        environment_constraints=EnvironmentConstraints("Darwin", "arm64", 8),
+        environment_constraints=EnvironmentConstraints("", "", 0),
         authority_boundary=AuthorityBoundary(),
         claim_ceiling="L1",
         created_at="2026-09-27T00:00:00Z",
@@ -859,7 +859,7 @@ def test_orchestrator_cli_equivalent_cohort_reaches_execution_without_leakage_er
         metrics_config=MetricsConfig(500, 2000, 0.05, 1.0),
         pass_thresholds=PassThresholds(0.8, 0.9, 0.85),
         stop_conditions=StopConditions(3, 0.2, True, 5),
-        environment_constraints=EnvironmentConstraints("Darwin", "arm64", 8),
+        environment_constraints=EnvironmentConstraints("", "", 0),
         authority_boundary=AuthorityBoundary(),
         claim_ceiling="L1",
         created_at="2026-09-27T00:00:00Z",
@@ -917,7 +917,7 @@ def test_orchestrator_extraction_source_containing_token_is_clean_under_v1():
         metrics_config=MetricsConfig(500, 2000, 0.05, 1.0),
         pass_thresholds=PassThresholds(0.8, 0.9, 0.85),
         stop_conditions=StopConditions(3, 0.2, True, 5),
-        environment_constraints=EnvironmentConstraints("Darwin", "arm64", 8),
+        environment_constraints=EnvironmentConstraints("", "", 0),
         authority_boundary=AuthorityBoundary(),
         claim_ceiling="L1",
         created_at="2026-09-27T00:00:00Z",
@@ -1029,7 +1029,7 @@ def test_orchestrator_forbidden_outputs_fail_grading():
         metrics_config=MetricsConfig(500, 2000, 0.05, 1.0),
         pass_thresholds=PassThresholds(0.8, 0.9, 0.85),
         stop_conditions=StopConditions(3, 0.2, True, 5),
-        environment_constraints=EnvironmentConstraints("Darwin", "arm64", 8),
+        environment_constraints=EnvironmentConstraints("", "", 0),
         authority_boundary=AuthorityBoundary(),
         claim_ceiling="L1",
         created_at="2026-09-27T00:00:00Z",
@@ -1091,7 +1091,7 @@ def test_orchestrator_forbidden_output_fails_even_if_in_acceptable_variants():
         metrics_config=MetricsConfig(500, 2000, 0.05, 1.0),
         pass_thresholds=PassThresholds(0.8, 0.9, 0.85),
         stop_conditions=StopConditions(3, 0.2, True, 5),
-        environment_constraints=EnvironmentConstraints("Darwin", "arm64", 8),
+        environment_constraints=EnvironmentConstraints("", "", 0),
         authority_boundary=AuthorityBoundary(),
         claim_ceiling="L1",
         created_at="2026-09-27T00:00:00Z",
@@ -1147,7 +1147,7 @@ def test_orchestrator_forbidden_output_exact_normalized_match_not_substring():
         metrics_config=MetricsConfig(500, 2000, 0.05, 1.0),
         pass_thresholds=PassThresholds(0.8, 0.9, 0.85),
         stop_conditions=StopConditions(3, 0.2, True, 5),
-        environment_constraints=EnvironmentConstraints("Darwin", "arm64", 8),
+        environment_constraints=EnvironmentConstraints("", "", 0),
         authority_boundary=AuthorityBoundary(),
         claim_ceiling="L1",
         created_at="2026-09-27T00:00:00Z",
@@ -1621,7 +1621,7 @@ def test_baseline_forbidden_outputs_semantics_identical():
         metrics_config=MetricsConfig(500, 2000, 0.5, 1.0),
         pass_thresholds=PassThresholds(0.5, 0.5, 0.5),
         stop_conditions=StopConditions(5, 0.5, True, 10),
-        environment_constraints=EnvironmentConstraints("Darwin", "arm64", 8),
+        environment_constraints=EnvironmentConstraints("", "", 0),
         authority_boundary=AuthorityBoundary(),
         claim_ceiling="L1",
         created_at="2026-09-27T00:00:00Z",
