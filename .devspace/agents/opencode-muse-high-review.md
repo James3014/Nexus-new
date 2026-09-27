@@ -1,7 +1,7 @@
 ---
 schema: devspace-agent/v1
 name: opencode-muse-high-review
-description: Read-only OpenCode Muse Spark 1.2 Contributor Free reviewer using the calibrated high variant.
+description: COMPATIBILITY_ONLY - read-only OpenCode Muse reviewer retained for explicit DevSpace transport selection.
 provider: opencode
 model: opencode/muse-spark-1.2-contributor-free
 thinking: high

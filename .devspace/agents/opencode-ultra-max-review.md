@@ -1,7 +1,7 @@
 ---
 schema: devspace-agent/v1
 name: opencode-ultra-max-review
-description: Read-only OpenCode Nemotron 3 Ultra Free reviewer using the calibrated max variant.
+description: COMPATIBILITY_ONLY - read-only OpenCode Nemotron reviewer retained for explicit DevSpace transport selection.
 provider: opencode
 model: opencode/nemotron-3-ultra-free
 thinking: max

@@ -1,7 +1,7 @@
 ---
 schema: devspace-agent/v1
 name: opencode-ultra-max-implement
-description: Bounded OpenCode Nemotron 3 Ultra Free implementation worker using the calibrated max variant.
+description: COMPATIBILITY_ONLY - bounded OpenCode Nemotron implementation worker retained for explicit DevSpace transport selection.
 provider: opencode
 model: opencode/nemotron-3-ultra-free
 thinking: max
