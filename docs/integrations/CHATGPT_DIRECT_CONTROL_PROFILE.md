@@ -1,6 +1,6 @@
 ---
 artifact_authority: derived_operational_profile
-status: wave1_candidate
+status: wave4_candidate
 owner: James Chen
 issue: 1154
 not_authority_source: true
@@ -8,10 +8,10 @@ not_authority_source: true
 
 # ChatGPT Direct Control Profile
 
-This profile records the current direct-control composition for Wave 1. It does
-not create a Router, Planner, verifier, lifecycle, approval source, or execution
-lane. Repository authority remains in `AGENTS.md` and the applicable execution
-contract.
+This profile records the current direct-control composition through Wave 4
+reconciliation. It does not create a Router, Planner, verifier, lifecycle,
+approval source, or execution lane. Repository authority remains in `AGENTS.md`
+and the applicable execution contract.
 
 ## Controller
 
@@ -32,8 +32,10 @@ approval, completion, merge, release, deployment, or production authority.
 
 Wave 1 observed two online macOS devices running Desktop Commander `0.2.51`.
 Their exact device ids are runtime identities and must be rebound before each
-host-bound pilot. Filesystem access was tightened from empty/full-filesystem
-access to `/Users/jameschen` and `/Workspace` on both devices.
+host-bound pilot. Current file roots are host-specific: the M5 Pro host is
+bounded to `/Users/james` and `/Workspace`; the second Mac remains bounded to
+`/Users/jameschen` and `/Workspace`. These file roots are containment evidence,
+not an OS-level shell sandbox claim.
 
 Desktop Commander has not been proven equivalent to DevSpace governed execution,
 durable operation replay, exact restart reconciliation, or effect receipts. Do
@@ -73,18 +75,25 @@ upstream interface.
 - Nexus Core verification may be used when applicable; it does not become merge,
   release, deployment, or production authority.
 
-## Wave 2 entry gates
+## Validated direct-control state
 
-Wave 2 may start only after:
+By the Wave 3 canary in Nexus-new #1154, the composition has been exercised on
+one real bounded repository task through peer analysis, isolated physical
+mutation, Git/test verification, push, and a green PR Candidate without Dev MCP.
+That proof does not establish DevSpace-governed equivalence, external CoS
+controller support, merge authority, release authority, or production readiness.
 
-1. both Desktop Commander device/runtime identities are rebound;
-2. filesystem containment remains bounded;
-3. the exact CoS runtime/tool surface is available to Main ChatGPT;
-4. CoS workers remain non-mutating;
-5. no step requires Dev MCP solely to reach either independent pilot.
+## Legacy compatibility boundary
 
-Wave 2 runs two independent canaries in parallel:
-- Desktop Commander direct host/repository execution;
-- CoS three-worker parallel, targeted-continuation, and sleep/wake/reuse.
+The repository-local `.devspace/agents/*.md` profiles are retained as
+`COMPATIBILITY_ONLY` for explicit DevSpace transport selection. A bounded caller
+audit found no current non-historical repository references to those profile
+names. They are not a direct-control dependency and must not be used to infer
+that `DIRECT_CANONICAL` or `DIRECT_DELEGATED` requires DevSpace.
+
+Historical DevSpace ChatSwarm/OpenCLI/macOS-worker-pool Issues are reconciled by
+the Wave 4 Issue writeback rather than rewritten as if they were never valid.
+Residual future work such as supported external CoS control or cross-client
+worker-family migration remains a separate optional frontier.
 
 `AUTO_CHAIN=false`.

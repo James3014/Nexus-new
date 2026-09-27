@@ -1,7 +1,7 @@
 ---
 schema: devspace-agent/v1
 name: opencode-muse-high-implement
-description: Bounded OpenCode Muse Spark 1.2 Contributor Free implementation worker using the calibrated high variant.
+description: COMPATIBILITY_ONLY - bounded OpenCode Muse implementation worker retained for explicit DevSpace transport selection.
 provider: opencode
 model: opencode/muse-spark-1.2-contributor-free
 thinking: high

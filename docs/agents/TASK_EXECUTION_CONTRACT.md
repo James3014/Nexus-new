@@ -75,10 +75,11 @@ transport-neutral. A host execution tool, MCP server, external worker plane, or
 provider adapter is execution plumbing and does not choose the Nexus lane or
 widen its authority. DevSpace `OWNER_DIRECT` / `NEXUS_GOVERNED` remain
 historical/supported transport-specific modes where DevSpace is selected, not
-required Nexus authority primitives. An attempt already admitted as governed
-must never fall back to a direct attempt merely because authority is missing,
-stale, expired, unreachable, or a transport fails. The same attempt must fail
-closed to block, rebind, or reconciliation; any direct recovery is a separately
+required Nexus authority primitives. An attempt already admitted as governed or
+`NEXUS_GOVERNED` must never fall back
+to a direct / `OWNER_DIRECT` attempt merely because authority is missing, stale,
+expired, unreachable, or a transport fails. The same attempt must fail closed to
+block, rebind, or reconciliation; any direct recovery is a separately
 Owner-authorized attempt with a distinct authority identity.
 
 ### Governance-plane break-glass recovery

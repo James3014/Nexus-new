@@ -56,11 +56,10 @@ verification requirements; a host tool or external control plane does not choose
 or widen that authority. Owner-approved transports may include direct host tools
 such as Desktop Commander or bounded external worker planes such as DevSpace,
 but transport identity is not Nexus route, approval, completion, merge, release,
-or production authority. An attempt already admitted as governed must never
-silently downgrade to a direct attempt merely because its authority or transport
-is missing, stale, expired, unavailable, or failed. It must block, rebind,
-reconcile, or start a separately Owner-authorized recovery/direct attempt with a
-new authority identity.
+or production authority. Once one attempt has entered governed authority, missing, stale, expired,
+unavailable, or failed authority or transport must never silently downgrade that attempt
+to direct authority. It must block, rebind, reconcile, or start a separately
+Owner-authorized recovery/direct attempt with a new authority identity.
 
 `NEXUS_GOVERNANCE_DEFAULT_READY` is an Owner-only transition decision. It is not
 inferred from G10, tests, an agent, a Task Card, CI, or runtime state. Before the
