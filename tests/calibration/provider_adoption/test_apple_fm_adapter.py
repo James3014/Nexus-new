@@ -8,6 +8,7 @@ from nexus.calibration.provider_adoption.apple_fm_adapter import (
 )
 from nexus.calibration.provider_adoption.capability import (
     CAP_001_PLAIN_TEXT,
+    CAP_002_STRUCTURED_JSON,
     CAP_004_CLASSIFICATION,
     CAP_005_EXTRACTION,
     CapabilityStatus,
@@ -101,6 +102,48 @@ def test_apple_fm_uses_respond_command_contract():
                     assert "prompt" not in c, f"Contract violation: 'prompt' found in CLI call: {c}"
                 assert any(c[:2] == ["/usr/bin/fm", "respond"] for c in calls)
                 assert any("--no-stream" in c and "--greedy" in c for c in calls if "respond" in c)
+
+
+def test_apple_fm_structured_json_probe_requires_exact_schema_values():
+    adapter = AppleFMCandidateAdapter("/usr/bin/fm")
+    mock_license_ok = subprocess.CompletedProcess(
+        args=["/usr/bin/fm", "license", "--status"],
+        returncode=0,
+        stdout="Agreed.",
+        stderr="",
+    )
+    mock_schema_ok = subprocess.CompletedProcess(
+        args=["/usr/bin/fm", "schema", "object"],
+        returncode=0,
+        stdout=(
+            '{"type":"object","properties":{"code":{"type":"integer"},'
+            '"count":{"type":"integer"}},"required":["code","count"],'
+            '"additionalProperties":false,"title":"NexusStructuredProbe",'
+            '"x-order":["code","count"]}'
+        ),
+        stderr="",
+    )
+    mock_respond_ok = subprocess.CompletedProcess(
+        args=["/usr/bin/fm", "respond"],
+        returncode=0,
+        stdout='{"code": 429, "count": 4}',
+        stderr="",
+    )
+
+    def mock_subprocess_run(cmd, *args, **kwargs):
+        if "license" in cmd:
+            return mock_license_ok
+        if "schema" in cmd and "object" in cmd:
+            return mock_schema_ok
+        return mock_respond_ok
+
+    with patch("platform.system", return_value="Darwin"):
+        with patch("os.path.isfile", return_value=True):
+            with patch("subprocess.run", side_effect=mock_subprocess_run):
+                probe = adapter.probe_capability(CAP_002_STRUCTURED_JSON)
+
+    assert probe.status == CapabilityStatus.SUPPORTED
+    assert probe.raw_output == '{"code": 429, "count": 4}'
 
 
 def test_apple_fm_classification_and_extraction_probes_require_exact_semantics():

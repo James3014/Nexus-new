@@ -15,13 +15,16 @@ Strict Invariants:
 from __future__ import annotations
 
 import datetime
+import json
 import os
 import platform
 import subprocess
+import tempfile
 
 from nexus.calibration.provider_adoption.adapter import CandidateAdapter
 from nexus.calibration.provider_adoption.capability import (
     CAP_001_PLAIN_TEXT,
+    CAP_002_STRUCTURED_JSON,
     CAP_004_CLASSIFICATION,
     CAP_005_EXTRACTION,
     CapabilityProbeResult,
@@ -167,6 +170,95 @@ class AppleFMCandidateAdapter(CandidateAdapter):
                 error_message=str(exc),
             )
 
+    def _run_structured_json_probe(self, capability_id: str) -> CapabilityProbeResult:
+        schema_cmd = [
+            self.binary_path,
+            "schema",
+            "object",
+            "--name",
+            "NexusStructuredProbe",
+            "--int",
+            "code",
+            "--int",
+            "count",
+        ]
+        try:
+            schema_res = subprocess.run(
+                schema_cmd,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if schema_res.returncode != 0 or not schema_res.stdout.strip():
+                return evaluate_capability_probe(
+                    capability_id,
+                    executed=True,
+                    exit_code=schema_res.returncode,
+                    output_text="",
+                    latency_ms=0,
+                    error_message=schema_res.stderr.strip() or "schema_generation_failed",
+                )
+
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=True) as schema_file:
+                schema_file.write(schema_res.stdout)
+                schema_file.flush()
+                t0 = datetime.datetime.now()
+                res = subprocess.run(
+                    [
+                        self.binary_path,
+                        "respond",
+                        "--no-stream",
+                        "--greedy",
+                        "--schema",
+                        schema_file.name,
+                        "Extract the numeric code and count. Message: HTTP 429 occurred after 4 attempts.",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                dt_ms = int((datetime.datetime.now() - t0).total_seconds() * 1000)
+
+            def semantic_validator(output_text: str) -> tuple[bool, str]:
+                try:
+                    payload = json.loads(output_text)
+                except json.JSONDecodeError as exc:
+                    return False, f"invalid_json:{exc.msg}"
+                expected = {"code": 429, "count": 4}
+                if set(payload) != set(expected):
+                    return False, f"unexpected_keys:{sorted(payload)}"
+                if payload != expected:
+                    return False, f"unexpected_values:{payload}"
+                return True, "exact_structured_output"
+
+            return evaluate_capability_probe(
+                capability_id,
+                executed=True,
+                exit_code=res.returncode,
+                output_text=res.stdout.strip(),
+                latency_ms=dt_ms,
+                semantic_validator=semantic_validator,
+                error_message=res.stderr.strip(),
+            )
+        except subprocess.TimeoutExpired:
+            return evaluate_capability_probe(
+                capability_id,
+                executed=True,
+                exit_code=1,
+                output_text="",
+                latency_ms=30000,
+                error_message="provider_timeout",
+            )
+        except Exception as exc:
+            return evaluate_capability_probe(
+                capability_id,
+                executed=True,
+                exit_code=1,
+                output_text="",
+                latency_ms=0,
+                error_message=str(exc),
+            )
+
     def probe_capability(self, capability_id: str) -> CapabilityProbeResult:
         blocked, reason = self.is_environment_blocked()
         if blocked:
@@ -185,6 +277,8 @@ class AppleFMCandidateAdapter(CandidateAdapter):
                 prompt="Reply with exactly OK and no other text.",
                 expected_output="OK",
             )
+        if capability_id == CAP_002_STRUCTURED_JSON:
+            return self._run_structured_json_probe(capability_id)
         if capability_id == CAP_004_CLASSIFICATION:
             return self._run_text_capability_probe(
                 capability_id=capability_id,
