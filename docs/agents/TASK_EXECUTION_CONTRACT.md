@@ -63,17 +63,20 @@ historical evidence, PRs, or governed attempts, including the prior governed
 
 The current repository operating mode remains `BOOTSTRAP`, which is the
 self-hosting stabilization phase for execution-lane selection. G10 proves that a
-canonical Nexus grant can drive a live `NEXUS_GOVERNED` DevSpace execution; it
-is not an automatic repository-wide switch to governed-by-default work.
-Eligible bounded Nexus development may therefore continue through
-`DIRECT_CANONICAL` or `DIRECT_DELEGATED` while this operating mode remains in
-force, subject to every existing direct-lane scope, verification, escalation,
-and authority boundary in this contract.
+canonical Nexus grant can drive one live governed external execution path; it is
+not an automatic repository-wide switch to governed-by-default work. Eligible
+bounded Nexus development may therefore continue through `DIRECT_CANONICAL` or
+`DIRECT_DELEGATED` while this operating mode remains in force, subject to every
+existing direct-lane scope, verification, escalation, and authority boundary in
+this contract.
 
-Nexus execution lanes (`DIRECT_CANONICAL`, `DIRECT_DELEGATED`, `GOVERNED`) and
-DevSpace authority modes (`OWNER_DIRECT`, `NEXUS_GOVERNED`) are related but not
-identical. DevSpace is execution plumbing and does not choose the Nexus lane.
-An attempt already admitted as governed / `NEXUS_GOVERNED` must never fall back
+Nexus execution lanes (`DIRECT_CANONICAL`, `DIRECT_DELEGATED`, `GOVERNED`) are
+transport-neutral. A host execution tool, MCP server, external worker plane, or
+provider adapter is execution plumbing and does not choose the Nexus lane or
+widen its authority. DevSpace `OWNER_DIRECT` / `NEXUS_GOVERNED` remain
+historical/supported transport-specific modes where DevSpace is selected, not
+required Nexus authority primitives. An attempt already admitted as governed or
+`NEXUS_GOVERNED` must never fall back
 to a direct / `OWNER_DIRECT` attempt merely because authority is missing, stale,
 expired, unreachable, or a transport fails. The same attempt must fail closed to
 block, rebind, or reconciliation; any direct recovery is a separately
@@ -147,10 +150,11 @@ readiness review. At minimum, that review should bind evidence that:
 G10, CI, tests, Task Cards, agents, or runtime state cannot self-declare this
 milestone. After the Owner declares it, a separate policy revision may make
 governed execution the default and narrow direct authority. Until then,
-narrowly typed DevSpace `OWNER_DIRECT` bootstrap/environment capabilities such
-as `workspace_clone` and `dependency_sync` remain valid stabilization tools and
-are not considered governance defects solely because they are not yet
-`NEXUS_GOVERNED`.
+narrowly typed Owner-approved bootstrap/environment capabilities remain valid
+stabilization tools when they preserve the active lane and its scope,
+verification, and claim ceilings. Historical DevSpace `OWNER_DIRECT` helpers
+such as `workspace_clone` and `dependency_sync` remain examples only; they are
+not required Nexus authority primitives.
 
 Direct work becomes governed before mutation when it changes CapabilityPlanner
 route/capability authority, Workforce admission/worker authority, Nexus
@@ -176,10 +180,15 @@ itself such a condition.
 
 `DIRECT_DELEGATED` means:
 
-Owner -> primary coordinator -> approved non-Nexus control plane such as
-DevSpace -> exactly one bounded external implementation worker -> independent
-primary-coordinator verification -> optional exact Owner-confirmed protected PR
-merge -> STOP.
+Owner -> primary coordinator -> approved non-Nexus control plane -> exactly
+one bounded external implementation worker -> independent primary-coordinator
+verification -> optional exact Owner-confirmed protected PR merge -> STOP.
+
+The control plane is transport-neutral. DevSpace is one possible worker plane,
+not a requirement of `DIRECT_DELEGATED`. A direct host tool such as Desktop
+Commander does not by itself create delegation; when the primary coordinator
+uses it directly, the work remains `DIRECT_CANONICAL` unless a separate bounded
+worker is actually delegated.
 
 It is not Nexus runtime, Task Card, Nexus lifecycle, CapabilityPlanner routing,
 Nexus Workforce Admission, or Candidate lifecycle authority. An explicit current
@@ -207,9 +216,9 @@ Eligibility requires, at minimum:
   replacement worker.
 
 Isolation: use the canonical checkout only when unrelated dirty state is
-demonstrably non-overlapping; otherwise an approved DevSpace-managed isolated
-worktree may be used. That is transport/workspace isolation only and is never a
-Nexus Target or Candidate.
+demonstrably non-overlapping; otherwise use an Owner-approved isolated worktree
+or equivalent bounded workspace supplied by the selected control plane. That is
+transport/workspace isolation only and is never a Nexus Target or Candidate.
 
 Fail closed with `DIRECT_DELEGATED_BLOCKED` -- without silently creating a Task
 Card or switching to Nexus -- when the work materially requires:

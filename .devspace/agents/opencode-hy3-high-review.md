@@ -1,7 +1,7 @@
 ---
 schema: devspace-agent/v1
 name: opencode-hy3-high-review
-description: Read-only OpenCode Hy3 Free reviewer using the calibrated high variant.
+description: COMPATIBILITY_ONLY - read-only OpenCode Hy3 Free reviewer retained for explicit DevSpace transport selection.
 provider: opencode
 model: opencode/hy3-free
 thinking: high
