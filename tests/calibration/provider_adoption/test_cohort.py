@@ -21,6 +21,29 @@ from nexus.calibration.provider_adoption.contracts import (
 )
 
 
+def test_apple_fm_v3_fixture_cohort_is_frozen_and_leakage_clean():
+    from scripts.bench.experimental.run_provider_adoption_experiment import (
+        build_apple_fm_fixture_cohort,
+    )
+
+    cohort = build_apple_fm_fixture_cohort()
+    assert cohort.cohort_id == "COHORT-APPLE-FM-DETERMINISTIC-V3"
+    assert cohort.cohort_revision == 5
+    assert cohort.ground_truth_revision == 5
+    assert (
+        cohort.cohort_sha256 == "cbaee34f6618411f67575f1e17a62603227f895dd62cc81f74ed6185e72479e7"
+    )
+    assert (
+        cohort.ground_truth_sha256
+        == "e94c5f57205ee8782b0f52eda8ebeeebe8d3f43651106b57c293be0670e539d8"
+    )
+    assert len(cohort.cases) == 8
+    assert {case.task_class for case in cohort.cases} == {"classification", "extraction"}
+    is_clean, issues = audit_cohort_leakage(cohort, policy_revision=1)
+    assert is_clean is True
+    assert issues == []
+
+
 def test_cohort_separate_input_and_ground_truth_hashes():
     cases = [
         CohortCase("C1", "classification", "Classify this error", "TIMEOUT"),

@@ -99,6 +99,95 @@ def build_default_fixture_cohort() -> FrozenCohort:
     )
 
 
+def build_apple_fm_fixture_cohort() -> FrozenCohort:
+    """Frozen deterministic Apple FM cohort validated by the physical V3 pilot."""
+    cases = [
+        CohortCase(
+            case_id="V2-001",
+            task_class="classification",
+            input_prompt=(
+                "Classify the sentiment of this text: 'The build passed cleanly without errors.' "
+                "Options: POSITIVE, NEGATIVE, NEUTRAL. Return only the label."
+            ),
+            ground_truth="POSITIVE",
+        ),
+        CohortCase(
+            case_id="V2-002",
+            task_class="classification",
+            input_prompt=(
+                "Classify the sentiment of this text: 'The deployment failed and was rolled back.' "
+                "Options: POSITIVE, NEGATIVE, NEUTRAL. Return only the label."
+            ),
+            ground_truth="NEGATIVE",
+        ),
+        CohortCase(
+            case_id="V2-003",
+            task_class="classification",
+            input_prompt=(
+                "Classify this provider event. Options: AUTH_ERROR, RATE_LIMIT, PROVIDER_TIMEOUT, "
+                "MODEL_NOT_FOUND, TRANSPORT_FAILURE, UNKNOWN. Event: provider request exceeded "
+                "the 30 second deadline and returned no response. Return only the label."
+            ),
+            ground_truth="PROVIDER_TIMEOUT",
+        ),
+        CohortCase(
+            case_id="V2-004",
+            task_class="classification",
+            input_prompt=(
+                "Classify this provider event. Options: AUTH_ERROR, RATE_LIMIT, PROVIDER_TIMEOUT, "
+                "MODEL_NOT_FOUND, TRANSPORT_FAILURE, UNKNOWN. Event: provider rejected requests "
+                "with HTTP 429 because quota was temporarily exceeded. Return only the label."
+            ),
+            ground_truth="RATE_LIMIT",
+        ),
+        CohortCase(
+            case_id="V2-005",
+            task_class="classification",
+            input_prompt=(
+                "Classify this provider event. Options: AUTH_ERROR, RATE_LIMIT, PROVIDER_TIMEOUT, "
+                "MODEL_NOT_FOUND, TRANSPORT_FAILURE, UNKNOWN. Event: the requested model "
+                "identifier does not exist on this provider. Return only the label."
+            ),
+            ground_truth="MODEL_NOT_FOUND",
+        ),
+        CohortCase(
+            case_id="V2-006",
+            task_class="extraction",
+            input_prompt=(
+                "Return only the integer error code. "
+                "Message: Process exited with code 137 (OOM killed)"
+            ),
+            ground_truth="137",
+        ),
+        CohortCase(
+            case_id="V2-007",
+            task_class="extraction",
+            input_prompt=(
+                "Return only the HTTP status code as an integer. "
+                "Message: Request failed with HTTP 429 Too Many Requests."
+            ),
+            ground_truth="429",
+        ),
+        CohortCase(
+            case_id="V2-008",
+            task_class="extraction",
+            input_prompt=(
+                "Return only the retry count as an integer. "
+                "Message: Payment API failed after 4 retries due to provider throttling."
+            ),
+            ground_truth="4",
+        ),
+    ]
+    return create_frozen_cohort(
+        cohort_id="COHORT-APPLE-FM-DETERMINISTIC-V3",
+        cohort_revision=5,
+        cohort_type=CohortType.FIXTURE_COHORT,
+        cases=cases,
+        ground_truth_revision=5,
+        ground_truth_ready=True,
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run Provider Adoption Experiment")
     parser.add_argument(
@@ -122,9 +211,9 @@ def main() -> int:
     args = parser.parse_args()
 
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    cohort = build_default_fixture_cohort()
 
     if args.candidate == "apple-fm":
+        cohort = build_apple_fm_fixture_cohort()
         candidate_identity = CandidateIdentity(
             provider_id="apple-fm",
             model_id="apple-foundation-model-v1",
@@ -132,8 +221,18 @@ def main() -> int:
             runtime="/usr/bin/fm",
         )
         adapter: CandidateAdapter = AppleFMCandidateAdapter()
+        experiment_id = "EXP-APPLE-FM-PILOT-V3"
+        experiment_revision = 5
+        job_to_be_done = "Read-only deterministic classification, literal extraction, and structured JSON qualification."
+        allowed_capabilities = (
+            CAP_001_PLAIN_TEXT,
+            CAP_002_STRUCTURED_JSON,
+            CAP_004_CLASSIFICATION,
+            CAP_005_EXTRACTION,
+        )
         claim_ceiling = "L0.5"
     else:
+        cohort = build_default_fixture_cohort()
         candidate_identity = CandidateIdentity(
             provider_id="simulated",
             model_id="sim-v1",
@@ -141,6 +240,18 @@ def main() -> int:
             runtime="simulated_runtime",
         )
         adapter = SimulatedCandidateAdapter()
+        experiment_id = "EXP-SIMULATED-PILOT-V1"
+        experiment_revision = 1
+        job_to_be_done = (
+            "Read-only extraction, classification, and summarization candidate qualification."
+        )
+        allowed_capabilities = (
+            CAP_001_PLAIN_TEXT,
+            CAP_002_STRUCTURED_JSON,
+            CAP_004_CLASSIFICATION,
+            CAP_005_EXTRACTION,
+            CAP_006_SUMMARIZATION,
+        )
         claim_ceiling = "L1"
 
     dataset_ref = DatasetRef(
@@ -155,18 +266,12 @@ def main() -> int:
     )
 
     contract = build_experiment_contract(
-        experiment_id=f"EXP-{args.candidate.upper()}-PILOT-V1",
-        experiment_revision=1,
+        experiment_id=experiment_id,
+        experiment_revision=experiment_revision,
         candidate=candidate_identity,
         baseline=None,
-        job_to_be_done="Read-only extraction, classification, and summarization candidate qualification.",
-        allowed_capabilities=(
-            CAP_001_PLAIN_TEXT,
-            CAP_002_STRUCTURED_JSON,
-            CAP_004_CLASSIFICATION,
-            CAP_005_EXTRACTION,
-            CAP_006_SUMMARIZATION,
-        ),
+        job_to_be_done=job_to_be_done,
+        allowed_capabilities=allowed_capabilities,
         forbidden_capabilities=(
             "file_mutation",
             "process_execution",
