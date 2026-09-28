@@ -9,6 +9,7 @@ import pytest
 from nexus.services.external_worker_runtime import (
     AccountBinding,
     ClineExecutionAdapter,
+    CodexExecutionAdapter,
     ExternalWorkerRuntimeError,
     NoopAccountAdapter,
     OpenCodeExecutionAdapter,
@@ -375,3 +376,162 @@ def test_opencode_quota_failure_is_classified_without_retry_permission(
     assert result.status == "FAILED"
     assert result.failure_kind == "QUOTA_EXHAUSTED"
     assert result.retry_permitted is False
+
+
+def _codex_request(
+    tmp_path: Path,
+    *,
+    model: str = "gpt-6-luna",
+    mode: str = "plan",
+    auto_approve: bool = False,
+    thinking: str = "medium",
+) -> WorkerRequest:
+    return WorkerRequest(
+        provider="codex",
+        model=model,
+        prompt="test prompt",
+        cwd=str(tmp_path),
+        mode=mode,
+        auto_approve=auto_approve,
+        timeout_seconds=60,
+        require_free=False,
+        thinking=thinking,
+    )
+
+
+def test_codex_default_model_requires_explicit_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("NEXUS_CODEX_MODEL", raising=False)
+    with pytest.raises(ExternalWorkerRuntimeError, match="CODEX_MODEL_REQUIRED"):
+        CodexExecutionAdapter().default_model()
+
+    monkeypatch.setenv("NEXUS_CODEX_MODEL", "gpt-6-luna")
+    assert CodexExecutionAdapter().default_model() == "gpt-6-luna"
+
+
+def test_codex_plan_compile_is_ephemeral_read_only_and_explicit_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = tmp_path / "codex"
+    fake.write_text("#!/bin/sh\necho codex-cli 0.158.0\n", encoding="utf-8")
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("NEXUS_CODEX_BIN", str(fake))
+
+    command = CodexExecutionAdapter().compile(
+        _codex_request(tmp_path),
+        binding=AccountBinding(provider="codex"),
+    )
+
+    argv = list(command.argv)
+    assert argv[1:3] == ["-a", "never"]
+    assert "exec" in argv
+    assert "--json" in argv
+    assert "--ephemeral" in argv
+    assert "--ignore-user-config" in argv
+    assert argv[argv.index("-C") + 1] == str(tmp_path)
+    assert argv[argv.index("-s") + 1] == "read-only"
+    assert argv[argv.index("-m") + 1] == "gpt-6-luna"
+    assert 'model_reasoning_effort="medium"' in argv
+    assert command.cli_version == "codex-cli 0.158.0"
+
+
+def test_codex_act_requires_explicit_auto_approve(tmp_path: Path) -> None:
+    with pytest.raises(ExternalWorkerRuntimeError, match="CODEX_ACT_REQUIRES_AUTO_APPROVE"):
+        CodexExecutionAdapter().compile(
+            _codex_request(tmp_path, mode="act", auto_approve=False),
+            binding=AccountBinding(provider="codex"),
+        )
+
+
+def test_codex_act_uses_workspace_write_without_dangerous_bypass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = tmp_path / "codex"
+    fake.write_text("#!/bin/sh\necho codex-cli 0.158.0\n", encoding="utf-8")
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("NEXUS_CODEX_BIN", str(fake))
+
+    command = CodexExecutionAdapter().compile(
+        _codex_request(tmp_path, mode="act", auto_approve=True),
+        binding=AccountBinding(provider="codex"),
+    )
+
+    argv = list(command.argv)
+    assert argv[argv.index("-s") + 1] == "workspace-write"
+    assert "--dangerously-bypass-approvals-and-sandbox" not in argv
+
+
+def test_codex_success_uses_terminal_jsonl_and_thread_identity(tmp_path: Path) -> None:
+    request = _codex_request(tmp_path)
+    stdout = "\n".join([
+        json.dumps({"type": "thread.started", "thread_id": "thread-fixture"}),
+        json.dumps({"type": "turn.started"}),
+        json.dumps({
+            "type": "item.completed",
+            "item": {"id": "item_0", "type": "agent_message", "text": "ok"},
+        }),
+        json.dumps({
+            "type": "turn.completed",
+            "usage": {
+                "input_tokens": 10,
+                "cached_input_tokens": 0,
+                "output_tokens": 2,
+            },
+        }),
+    ])
+
+    outcome = CodexExecutionAdapter().interpret(
+        request,
+        exit_code=0,
+        stdout_text=stdout,
+        stderr_text="",
+    )
+
+    assert outcome.status == "COMPLETED"
+    assert outcome.observed_provider == "codex"
+    assert outcome.observed_model == "gpt-6-luna"
+    assert outcome.provider_session_id == "thread-fixture"
+    assert outcome.finish_reason == "completed"
+    assert outcome.retry_permitted is False
+
+
+def test_codex_tool_events_are_counted(tmp_path: Path) -> None:
+    request = _codex_request(tmp_path)
+    stdout = "\n".join([
+        json.dumps({"type": "thread.started", "thread_id": "thread-fixture"}),
+        json.dumps({"type": "turn.started"}),
+        json.dumps({
+            "type": "item.completed",
+            "item": {
+                "id": "item_cmd",
+                "type": "command_execution",
+                "command": "cat fixture.txt",
+            },
+        }),
+        json.dumps({
+            "type": "item.completed",
+            "item": {"id": "item_msg", "type": "agent_message", "text": "ok"},
+        }),
+        json.dumps({"type": "turn.completed", "usage": {}}),
+    ])
+    outcome = CodexExecutionAdapter().interpret(
+        request,
+        exit_code=0,
+        stdout_text=stdout,
+        stderr_text="",
+    )
+    assert outcome.status == "COMPLETED"
+    assert outcome.tool_event_count == 1
+
+
+def test_codex_quota_failure_is_classified_but_not_auto_retryable(tmp_path: Path) -> None:
+    outcome = CodexExecutionAdapter().interpret(
+        _codex_request(tmp_path),
+        exit_code=1,
+        stdout_text="",
+        stderr_text="usage limit reached",
+    )
+    assert outcome.status == "FAILED"
+    assert outcome.failure_kind == "QUOTA_EXHAUSTED"
+    assert outcome.retry_permitted is False

@@ -449,7 +449,8 @@ def main(argv: list[str] | None = None) -> int:
     if not prompt.strip():
         raise SystemExit("EMPTY_PROMPT")
 
-    require_free = bool(args.require_free or not args.allow_paid_model)
+    free_only_by_default = provider in {"cline", "opencode"}
+    require_free = bool(args.require_free or (free_only_by_default and not args.allow_paid_model))
 
     if args.operation_run:
         return _run_operation(
