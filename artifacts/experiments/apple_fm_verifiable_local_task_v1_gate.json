@@ -1,0 +1,12 @@
+{
+  "schema": "nexus.experiment.apple_fm_verifiable_local_task_gate.v1",
+  "status": "SKIPPED_BY_PREREQUISITE_GATE",
+  "prerequisite_experiment": "APPLE_FM_EVIDENCE_FILTER_AB_V1",
+  "prerequisite_verdict": "REJECT_EVIDENCE_FILTER",
+  "reason": "The prerequisite safety experiment failed both critical-evidence-recall and downstream-quality gates. Starting a successor local-completion experiment would widen local-model responsibility after the required safety gate failed.",
+  "successor_experiment_started": false,
+  "routing_changed": false,
+  "capability_planner_changed": false,
+  "workforce_admission_changed": false,
+  "next_gate": "STOP_APPLE_FM_MAINLINE_OR_DEFINE_NEW_INDEPENDENTLY_VERIFIABLE_SEMANTIC_TASK_FAMILY"
+}
