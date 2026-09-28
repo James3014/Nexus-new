@@ -1,0 +1,627 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import uuid
+from importlib import import_module
+from pathlib import Path
+from typing import Any, Optional
+
+SNAPSHOT = Path(
+    os.getenv(
+        "NEXUS_AGY_SNAPSHOT",
+        str(Path.home() / ".local/share/nexus-agy-direct/Nexus-new"),
+    )
+)
+MANAGER = Path(
+    os.getenv(
+        "NEXUS_AGY_MANAGER",
+        str(Path.home() / ".nexus/agy-account-pool/bin/agy-cli-manager"),
+    )
+)
+MANAGER_ROOT = Path(
+    os.getenv(
+        "NEXUS_AGY_MANAGER_ROOT",
+        str(Path.home() / ".nexus/agy-account-pool/runtime"),
+    )
+)
+ALLOCATOR_LOCK_PATH = Path(
+    os.getenv(
+        "NEXUS_AGY_ALLOCATOR_LOCK_PATH",
+        str(Path.home() / ".nexus/agy-account-pool/allocator.lock"),
+    )
+)
+LEASES_DIR = Path(
+    os.getenv(
+        "NEXUS_AGY_LEASES_DIR",
+        str(Path.home() / ".nexus/agy-account-pool/leases"),
+    )
+)
+
+if not SNAPSHOT.is_dir():
+    raise SystemExit("NEXUS_AGY_SNAPSHOT_MISSING")
+sys.path.insert(0, str(SNAPSHOT))
+
+_agy_account_pool = import_module("nexus.services.agy_account_pool")
+AGY_ACCOUNT_PREFERENCE_TIERS_VERSION = _agy_account_pool.AGY_ACCOUNT_PREFERENCE_TIERS_VERSION
+AgyAccountPoolManager = _agy_account_pool.AgyAccountPoolManager
+AgyAccountPoolBusyError = _agy_account_pool.AgyAccountPoolBusyError
+AgyAccountPoolExhaustedError = _agy_account_pool.AgyAccountPoolExhaustedError
+CrossProcessLeaseCoordinator = _agy_account_pool.CrossProcessLeaseCoordinator
+AccountLeaseClaim = _agy_account_pool.AccountLeaseClaim
+
+_external_account_pool = import_module("nexus.services.external_account_pool")
+AccountFailureKind = _external_account_pool.AccountFailureKind
+is_rotation_eligible = _external_account_pool.is_rotation_eligible
+
+QUOTA_SNAPSHOT_PATH = Path(
+    os.getenv(
+        "NEXUS_AGY_QUOTA_SNAPSHOT",
+        str(Path.home() / ".nexus/agy-account-pool/quota-snapshot.json"),
+    )
+)
+
+
+def _model_family(model: str | None) -> str:
+    value = (model or "").strip().lower()
+    if value.startswith("gemini-"):
+        return "gemini"
+    if value.startswith("claude-") or value.startswith("gpt-"):
+        return "claude_gpt"
+    return "unknown"
+
+
+def _parse_reset_at(value: object) -> float | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    from datetime import datetime
+
+    try:
+        dt = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt.timestamp()
+
+
+def _usable_quota_window(
+    groups: dict,
+    group_name: str,
+    now_ts: float | None = None,
+) -> tuple[bool, str]:
+    """Return usability plus the quota window that justified it.
+
+    Prefer explicit 5h evidence. Only when the provider omits the 5h field
+    entirely may a positive/reset weekly window act as a conservative fallback.
+    An explicit disabled/unknown 5h window remains fail-closed.
+    """
+    group = groups.get(group_name) if isinstance(groups, dict) else None
+    if not isinstance(group, dict):
+        return False, "missing"
+
+    current = time.time() if now_ts is None else now_ts
+    if "5h" in group:
+        window = group.get("5h")
+        if not isinstance(window, dict) or window.get("status") != "known":
+            return False, "5h"
+        remaining = window.get("remaining_pct")
+        if isinstance(remaining, (int, float)) and float(remaining) > 0.0:
+            return True, "5h"
+        reset_ts = _parse_reset_at(window.get("reset_at"))
+        return (reset_ts is not None and reset_ts <= current), "5h"
+
+    window = group.get("weekly")
+    if not isinstance(window, dict) or window.get("status") != "known":
+        return False, "weekly"
+    remaining = window.get("remaining_pct")
+    if isinstance(remaining, (int, float)) and float(remaining) > 0.0:
+        return True, "weekly"
+    reset_ts = _parse_reset_at(window.get("reset_at"))
+    return (reset_ts is not None and reset_ts <= current), "weekly"
+
+
+def _load_quota_snapshot(path: Path = QUOTA_SNAPSHOT_PATH) -> dict:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _dynamic_preference_tiers(model: str | None, snapshot: dict) -> tuple[list[str], list[str]]:
+    family = _model_family(model)
+    rows = snapshot.get("accounts") if isinstance(snapshot, dict) else None
+    if not isinstance(rows, list):
+        return [], []
+
+    preferred: list[str] = []
+    reserve: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict) or row.get("ok") is not True:
+            continue
+        name = row.get("account")
+        groups = row.get("groups")
+        if not isinstance(name, str) or not isinstance(groups, dict):
+            continue
+        gemini, _gemini_window = _usable_quota_window(groups, "Gemini Models")
+        claude_gpt, _claude_gpt_window = _usable_quota_window(
+            groups,
+            "Claude and GPT models",
+        )
+
+        if family == "gemini":
+            if not gemini:
+                continue
+            (reserve if claude_gpt else preferred).append(name)
+        elif family == "claude_gpt":
+            if not claude_gpt:
+                continue
+            (reserve if gemini else preferred).append(name)
+        else:
+            if gemini == claude_gpt:
+                if gemini:
+                    reserve.append(name)
+                continue
+            preferred.append(name)
+
+    return sorted(set(preferred)), sorted(set(reserve) - set(preferred))
+
+
+def _apply_dynamic_preference(model: str | None) -> tuple[list[str], list[str]]:
+    if AGY_ACCOUNT_PREFERENCE_TIERS_VERSION != 1:
+        raise RuntimeError("AGY_ACCOUNT_PREFERENCE_TIERS_VERSION_MISMATCH")
+    preferred, reserve = _dynamic_preference_tiers(model, _load_quota_snapshot())
+    os.environ["NEXUS_AGY_PREFERRED_ACCOUNTS"] = ",".join(preferred)
+    os.environ["NEXUS_AGY_RESERVE_ACCOUNTS"] = ",".join(reserve)
+    return preferred, reserve
+
+
+def classify_failure(
+    returncode: int | None, stdout: str, stderr: str, timed_out: bool
+) -> AccountFailureKind:
+    if timed_out:
+        return AccountFailureKind.TIMEOUT
+    text = (stdout + "\n" + stderr).lower()
+    if any(
+        k in text
+        for k in (
+            "quota",
+            "resource_exhausted",
+            "exceeded your current quota",
+            "insufficient_quota",
+        )
+    ):
+        return AccountFailureKind.QUOTA_EXHAUSTED
+    if any(k in text for k in ("429", "rate limit", "ratelimit")):
+        return AccountFailureKind.RATE_LIMITED
+    if any(
+        k in text
+        for k in (
+            "unauthorized",
+            "authenticated",
+            "authentication",
+            "invalid api key",
+            "invalid_api_key",
+            "401",
+            "token expired",
+            "invalid token",
+            "login required",
+        )
+    ):
+        if "expired" in text:
+            return AccountFailureKind.TOKEN_EXPIRED
+        return AccountFailureKind.AUTH_OR_SESSION_INVALID
+    if "refresh failed" in text or "token refresh" in text:
+        return AccountFailureKind.TOKEN_REFRESH_FAILED
+    if "403" in text or "forbidden" in text:
+        return AccountFailureKind.PERMISSION_OR_SCOPE_ERROR
+    if any(k in text for k in ("unavailable", "503", "service unavailable")):
+        return AccountFailureKind.ACCOUNT_UNAVAILABLE
+    if "disabled" in text:
+        return AccountFailureKind.ACCOUNT_DISABLED
+    if returncode == 2:
+        return AccountFailureKind.SYNTAX_OR_IMPLEMENTATION_ERROR
+    return AccountFailureKind.UNKNOWN
+
+
+def run_agy(
+    *,
+    env: dict[str, str],
+    prompt: str,
+    cwd: str,
+    mode: str,
+    model: str | None,
+    effort: str | None,
+    timeout: int,
+):
+    agy = shutil.which("agy")
+    if not agy:
+        raise RuntimeError("AGY_BINARY_NOT_FOUND")
+    argv = [
+        agy,
+        "--new-project",
+        "--add-dir",
+        cwd,
+        "--mode",
+        mode,
+        "--output-format",
+        "text",
+        "--print-timeout",
+        f"{timeout}s",
+    ]
+    if model:
+        argv += ["--model", model]
+    if effort:
+        argv += ["--effort", effort]
+    argv += ["--print", prompt]
+    started = time.monotonic()
+    try:
+        p = subprocess.run(
+            argv,
+            cwd=cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout + 10,
+        )
+        stderr_lower = (p.stderr or "").lower()
+        agy_print_timed_out = (
+            "[agy] print timeout after" in stderr_lower and "turn in progress" in stderr_lower
+        )
+        return (
+            p.returncode,
+            p.stdout,
+            p.stderr,
+            agy_print_timed_out,
+            int((time.monotonic() - started) * 1000),
+        )
+    except subprocess.TimeoutExpired as exc:
+        out = exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        err = exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        return None, out, err, True, int((time.monotonic() - started) * 1000)
+
+
+def emit_meta(data: dict) -> None:
+    sys.stderr.write("NEXUS_AGY_DISPATCH " + json.dumps(data, sort_keys=True) + "\n")
+
+
+TEMP_COMMAND_DENY = [
+    "command(git push)",
+    "command(git reset --hard)",
+    "command(git clean)",
+    "command(gh)",
+    "command(curl)",
+    "command(wget)",
+    "command(ssh)",
+    "command(scp)",
+    "command(rsync)",
+]
+
+_UNSAFE_PERMISSION_RULES = {
+    "command(*)",
+    "read_file(*)",
+    "write_file(*)",
+    "read_file(/)",
+    "write_file(/)",
+}
+
+
+def install_temp_permissions(
+    env: dict[str, str],
+    *,
+    allow_rules: list[str],
+    deny_rules: list[str] | None = None,
+    allow_unsafe_legacy: bool = False,
+):
+    home = str(env.get("HOME") or "").strip()
+    if not home:
+        raise RuntimeError("LEASE_HOME_MISSING")
+    settings = Path(home) / ".gemini" / "antigravity-cli" / "settings.json"
+    original = settings.read_bytes() if settings.exists() else None
+    try:
+        data = json.loads(original.decode("utf-8")) if original else {}
+    except Exception as exc:
+        raise RuntimeError(f"LEASE_SETTINGS_INVALID:{exc}") from exc
+    perms = data.setdefault("permissions", {})
+    allow = list(perms.get("allow") or [])
+    deny = list(perms.get("deny") or [])
+    for rule in allow_rules:
+        if not allow_unsafe_legacy and rule in _UNSAFE_PERMISSION_RULES:
+            raise RuntimeError(f"UNSAFE_PERMISSION_RULE:{rule}")
+        if rule not in allow:
+            allow.append(rule)
+    for rule in deny_rules or []:
+        if rule not in deny:
+            deny.append(rule)
+    perms["allow"] = allow
+    perms["deny"] = deny
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return settings, original
+
+
+def restore_temp_permissions(token) -> None:
+    if token is None:
+        return
+    settings, original = token
+    if original is None:
+        try:
+            settings.unlink()
+        except FileNotFoundError:
+            pass
+    else:
+        settings.write_bytes(original)
+
+
+def dispatch_run(
+    *,
+    prompt: str,
+    cwd: str,
+    mode: str = "accept-edits",
+    model: str | None = None,
+    effort: str | None = None,
+    timeout: int = 900,
+    max_calls: int = 3,
+    pool_wait_timeout: float = 15.0,
+    allow: list[str] | None = None,
+    deny: list[str] | None = None,
+    temp_command_permissions: bool = False,
+    coordinator: CrossProcessLeaseCoordinator | None = None,
+    run_agy_fn: Any = None,
+) -> int:
+    if coordinator is None:
+        if not MANAGER.is_file() or not MANAGER_ROOT.is_dir():
+            raise SystemExit("AGY_ACCOUNT_POOL_RUNTIME_MISSING")
+
+        pool = AgyAccountPoolManager(
+            manager_path=str(MANAGER),
+            manager_root=str(MANAGER_ROOT),
+            use_real_manager=True,
+        )
+        coordinator = CrossProcessLeaseCoordinator(
+            manager=pool,
+            allocator_lock_path=ALLOCATOR_LOCK_PATH,
+            leases_dir=LEASES_DIR,
+        )
+
+    runner = run_agy_fn if run_agy_fn is not None else run_agy
+    preferred_accounts, reserve_accounts = _apply_dynamic_preference(model)
+    consumer_id = "desktop-" + uuid.uuid4().hex
+    exclude_hashes: set[str] = set()
+
+    claim: Optional[AccountLeaseClaim] = None
+    try:
+        claim = coordinator.acquire_claim(
+            consumer_id=consumer_id,
+            exclude_hashes=exclude_hashes,
+            wait_timeout=pool_wait_timeout,
+        )
+    except AgyAccountPoolBusyError:
+        emit_meta({
+            "status": "pool_busy",
+            "attempts": 0,
+            "rotations": 0,
+            "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
+            "wall_ms": 0,
+        })
+        return 75
+    except AgyAccountPoolExhaustedError:
+        emit_meta({
+            "status": "pool_exhausted",
+            "attempts": 0,
+            "rotations": 0,
+            "failure_kind": "ACCOUNT_UNAVAILABLE",
+            "wall_ms": 0,
+        })
+        return 75
+
+    attempts = 0
+    rotations = 0
+    last_kind = None
+    total_wall_ms = 0
+
+    try:
+        while attempts < max(1, max_calls):
+            attempts += 1
+            env = dict(claim.lease.execution_env)
+            permission_token = None
+            try:
+                allow_rules = list(allow or [])
+                deny_rules: list[str] = list(deny or [])
+                allow_unsafe_legacy = False
+                if temp_command_permissions:
+                    allow_rules.append("command(*)")
+                    deny_rules.extend(TEMP_COMMAND_DENY)
+                    allow_unsafe_legacy = True
+                if allow_rules or deny_rules:
+                    permission_token = install_temp_permissions(
+                        env,
+                        allow_rules=allow_rules,
+                        deny_rules=deny_rules,
+                        allow_unsafe_legacy=allow_unsafe_legacy,
+                    )
+                code, out, err, timed_out, wall_ms = runner(
+                    env=env,
+                    prompt=prompt,
+                    cwd=cwd,
+                    mode=mode,
+                    model=model,
+                    effort=effort,
+                    timeout=max(1, timeout),
+                )
+            finally:
+                restore_temp_permissions(permission_token)
+            total_wall_ms += wall_ms
+
+            if code == 0 and not timed_out:
+                sys.stdout.write(out)
+                if err:
+                    sys.stderr.write(err)
+                emit_meta({
+                    "status": "completed",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "account_alias_hash": claim.account_alias_hash,
+                    "lease_id_hash": claim.lease_id_hash,
+                    "parallel_slot": True,
+                    "wall_ms": total_wall_ms,
+                })
+                return 0
+
+            kind = classify_failure(code, out, err, timed_out)
+            last_kind = kind.value
+
+            if not is_rotation_eligible(kind):
+                if out:
+                    sys.stdout.write(out)
+                if err:
+                    sys.stderr.write(err)
+                emit_meta({
+                    "status": "failed",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": last_kind,
+                    "account_alias_hash": claim.account_alias_hash,
+                    "lease_id_hash": claim.lease_id_hash,
+                    "parallel_slot": True,
+                    "wall_ms": total_wall_ms,
+                })
+                return code if isinstance(code, int) and code != 0 else 1
+
+            if attempts >= max_calls:
+                # Rotation eligible, but retry budget exhausted (including --max-calls 1):
+                # Retire/quarantine the failed account, but do not acquire a replacement.
+                try:
+                    coordinator.retire_failed_claim(claim, kind)
+                except Exception:
+                    pass
+                if out:
+                    sys.stdout.write(out)
+                if err:
+                    sys.stderr.write(err)
+                emit_meta({
+                    "status": "failed",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": last_kind,
+                    "account_alias_hash": claim.account_alias_hash,
+                    "lease_id_hash": claim.lease_id_hash,
+                    "parallel_slot": True,
+                    "wall_ms": total_wall_ms,
+                })
+                return code if isinstance(code, int) and code != 0 else 1
+
+            # Rotation eligible: rotate claim
+            try:
+                claim = coordinator.rotate_claim(
+                    current_claim=claim,
+                    failure_kind=kind,
+                    exclude_hashes=exclude_hashes,
+                    wait_timeout=pool_wait_timeout,
+                )
+                rotations += 1
+            except AgyAccountPoolBusyError:
+                emit_meta({
+                    "status": "pool_busy",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
+                    "wall_ms": total_wall_ms,
+                })
+                return 75
+            except AgyAccountPoolExhaustedError:
+                emit_meta({
+                    "status": "pool_exhausted",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": last_kind,
+                    "wall_ms": total_wall_ms,
+                })
+                return 75
+            except Exception:
+                emit_meta({
+                    "status": "failed",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": last_kind,
+                    "wall_ms": total_wall_ms,
+                })
+                return 75
+    finally:
+        if claim is not None:
+            try:
+                claim.release()
+            except Exception:
+                pass
+
+    emit_meta({"status": "failed", "failure_kind": last_kind or "UNKNOWN"})
+    return 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(
+        description="Quota-aware direct Agy dispatcher using the existing Nexus account pool."
+    )
+    ap.add_argument("prompt", nargs="?")
+    ap.add_argument("--prompt", dest="prompt_flag", help="Prompt text")
+    ap.add_argument("--prompt-file")
+    ap.add_argument("--cwd", default=os.getcwd())
+    ap.add_argument("--mode", choices=("plan", "accept-edits"), default="accept-edits")
+    ap.add_argument("--model")
+    ap.add_argument("--effort", choices=("low", "medium", "high"))
+    ap.add_argument("--temp-command-permissions", action="store_true")
+    ap.add_argument(
+        "--allow",
+        action="append",
+        default=[],
+        help="Temporary exact Agy permission rule; repeatable",
+    )
+    ap.add_argument(
+        "--deny", action="append", default=[], help="Temporary exact Agy deny rule; repeatable"
+    )
+    ap.add_argument("--timeout", type=int, default=900)
+    ap.add_argument("--max-calls", type=int, default=3)
+    ap.add_argument(
+        "--pool-wait-timeout",
+        type=float,
+        default=float(os.getenv("NEXUS_AGY_POOL_WAIT_TIMEOUT", "15.0")),
+        help="Timeout in seconds to wait for an available account slot when the pool is busy",
+    )
+    args = ap.parse_args(argv)
+
+    prompt_text = args.prompt_flag if args.prompt_flag is not None else args.prompt
+    if args.prompt_file:
+        prompt = Path(args.prompt_file).read_text(encoding="utf-8")
+    elif prompt_text is not None:
+        prompt = prompt_text
+    else:
+        prompt = sys.stdin.read()
+    if not prompt.strip():
+        raise SystemExit("EMPTY_PROMPT")
+
+    cwd = str(Path(args.cwd).expanduser().resolve())
+    if not Path(cwd).is_dir():
+        raise SystemExit("INVALID_CWD")
+
+    return dispatch_run(
+        prompt=prompt,
+        cwd=cwd,
+        mode=args.mode,
+        model=args.model,
+        effort=args.effort,
+        timeout=args.timeout,
+        max_calls=args.max_calls,
+        pool_wait_timeout=args.pool_wait_timeout,
+        allow=args.allow,
+        deny=args.deny,
+        temp_command_permissions=args.temp_command_permissions,
+    )
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
