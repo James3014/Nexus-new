@@ -591,6 +591,23 @@ class TestAccountConcurrencyModel(unittest.TestCase):
         self.assertEqual(claude_claim.account_alias_hash, acc1.alias_hash)
         claude_claim.release()
 
+    def test_unscoped_rate_limit_remains_account_global(self):
+        acc = AgyAccount(alias="global_rate_limit", home_dir=f"{self.test_dir}/home_rate")
+        mgr = self._create_manager([acc])
+        coord = self._create_coordinator(mgr)
+        claim = coord.acquire_claim("worker-rate", model_family="gemini")
+
+        coord.retire_failed_claim(
+            claim,
+            AccountFailureKind.RATE_LIMITED,
+            model_family="gemini",
+            unavailable_until=time.time() + 60,
+        )
+
+        self.assertTrue(claim.released)
+        self.assertTrue(coord.is_quarantined(acc.alias_hash))
+        self.assertFalse(coord.is_family_unavailable(acc.alias_hash, "gemini"))
+
     def test_expired_model_family_block_is_pruned(self):
         acc = AgyAccount(alias="expiring_family", home_dir=f"{self.test_dir}/home_expire")
         mgr = self._create_manager([acc])
