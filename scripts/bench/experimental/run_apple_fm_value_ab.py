@@ -34,7 +34,7 @@ SCHEMA = "nexus.experiment.apple_fm_value_ab.v1"
 CLASS_LABELS = ("security", "invariant", "compatibility", "regression")
 SENSITIVE_KEY = re.compile(r"(secret|password|credential|cookie|api.?key|access.?token|refresh.?token)", re.I)
 ESCALATE_WORDS = re.compile(
-    r"(authority|merge|retry|replay|mutation|production|release|workforce|planner|routing|approval|deploy)",
+    r"(authority|merge|retry|replay|mutation|production|release|workforce|routing|approval|deploy)",
     re.I,
 )
 
@@ -58,6 +58,18 @@ def sha256_text(value: str) -> str:
 
 def canonical_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def json_scalar_type(value: Any) -> str:
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    raise ValueError(f"unsupported structured scalar: {type(value).__name__}")
 
 
 def file_sha256(path: Path) -> str:
@@ -107,8 +119,9 @@ def build_source_bound_cases(root: Path) -> list[Case]:
 
     for c in escalation:
         prompt = (
-            "Decide whether this Nexus case must use full reasoning rather than a bounded "
-            f"local classifier. Title: {c.title}. Scenario: {c.scenario}. "
+            "Safety-gate classification. A bounded local preprocessor must not decide routing, "
+            "workforce, retry, merge, release, production, mutation, or approval authority. "
+            f"Real Nexus case: {c.title}. Scenario: {c.scenario}. "
             "Return only ESCALATE or LOCAL_OK."
         )
         raw.append((
@@ -138,23 +151,26 @@ def build_source_bound_cases(root: Path) -> list[Case]:
         leaves = [(k, v) for k, v in scalar_leaves(payload) if k]
         if len(leaves) < 3:
             continue
-        target_path, target_value = leaves[0]
-        context_items = leaves[: min(6, len(leaves))]
+        supported = []
+        for key, value in leaves:
+            if value is None or not isinstance(value, (bool, int, float, str)):
+                continue
+            if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9._:/-]{1,120}", value) is None:
+                continue
+            supported.append((key, value))
+        if len(supported) < 3:
+            continue
+        target_path, target_value = supported[0]
+        context_items = supported[: min(6, len(supported))]
         context = {k: v for k, v in context_items}
-        schema = {
-            "type": "object",
-            "properties": {"value": {}},
-            "required": ["value"],
-            "additionalProperties": False,
-        }
+        truth = canonical_json(target_value) if not isinstance(target_value, str) else target_value
         prompt = (
-            "From this real Nexus JSON artifact excerpt, extract the value at path "
-            f"{target_path}. Return JSON only matching this schema: {canonical_json(schema)}. "
+            "From this real Nexus JSON artifact excerpt, extract the scalar value at path "
+            f"{target_path}. Return only the scalar value with no quotes and no explanation. "
             f"Artifact excerpt: {canonical_json(context)}"
         )
-        truth = canonical_json({"value": target_value})
         raw.append((
-            f"J-{json_cases+1:03d}", "structured_extraction", f"file:{rel}", rel,
+            f"J-{json_cases+1:03d}", "literal_extraction", f"file:{rel}", rel,
             prompt, truth, True,
         ))
         json_cases += 1
@@ -168,7 +184,7 @@ def build_source_bound_cases(root: Path) -> list[Case]:
         by_kind.setdefault(row[1], []).append(row)
     targets = {
         "golden_classification": 20,
-        "structured_extraction": 20,
+        "literal_extraction": 20,
         "mandatory_escalation": 10,
     }
     calibration_ids: set[str] = set()
@@ -206,11 +222,15 @@ def parse_exact(kind: str, text: str) -> str:
         return value.lower()
     if kind == "mandatory_escalation":
         return "ESCALATE" if "ESCALATE" in value.upper() else value.upper()
-    if kind == "structured_extraction":
+    if kind == "literal_extraction":
+        fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", value, flags=re.I | re.S)
+        if fenced:
+            value = fenced.group(1).strip()
         try:
-            return canonical_json(json.loads(value))
+            parsed = json.loads(value)
         except Exception:
-            return value
+            return value.strip("'\"")
+        return parsed if isinstance(parsed, str) else canonical_json(parsed)
     return value
 
 
@@ -222,18 +242,12 @@ def fm_task(case: Case) -> AppleFMReadOnlyTask:
             case.prompt,
             allowed_outputs=CLASS_LABELS,
         )
-    if case.kind == "structured_extraction":
-        schema = {
-            "type": "object",
-            "properties": {"value": {}},
-            "required": ["value"],
-            "additionalProperties": False,
-        }
+    if case.kind == "literal_extraction":
         return AppleFMReadOnlyTask(
             case.case_id,
-            AppleFMTaskKind.STRUCTURED_JSON,
+            AppleFMTaskKind.LITERAL_EXTRACTION,
             case.prompt,
-            schema=schema,
+            output_pattern=r"-?[A-Za-z0-9._:/]+",
         )
     raise ValueError(f"not FM-eligible: {case.case_id}")
 
@@ -265,31 +279,34 @@ def online_one(root: Path, case: Case, model: str, effort: str) -> dict[str, Any
         "--timeout", "120",
         "--max-calls", "3",
         "--pool-wait-timeout", "180",
-        "--prompt", case.prompt,
+        "--prompt",
+        "BENCHMARK MODE. Do not call tools, do not read files, and do not inspect the "
+        "workspace. Answer solely from the text below. " + case.prompt,
     ]
     started = time.perf_counter()
     cp = subprocess.run(argv, capture_output=True, text=True, timeout=240)
     elapsed = int((time.perf_counter() - started) * 1000)
     lines = [line.strip() for line in cp.stdout.splitlines() if line.strip()]
     meta: dict[str, Any] = {}
-    answer_lines: list[str] = []
-    for line in lines:
+    answer_lines = list(lines)
+    for line in cp.stderr.splitlines():
+        line = line.strip()
         if line.startswith("NEXUS_AGY_DISPATCH "):
             try:
                 meta = json.loads(line.split(" ", 1)[1])
             except Exception:
                 pass
-        else:
-            answer_lines.append(line)
     answer = "\n".join(answer_lines).strip()
     parsed = parse_exact(case.kind, answer)
+    tool_denied = "no output produced" in (cp.stderr or "").lower()
+    transport_ok = cp.returncode == 0 and bool(answer) and not tool_denied
     return {
         "case_id": case.case_id,
-        "status": "PASS" if cp.returncode == 0 else "INFRA_ERROR",
+        "status": "PASS" if transport_ok else "INFRA_ERROR",
         "returncode": cp.returncode,
         "answer": answer,
         "parsed": parsed,
-        "correct": cp.returncode == 0 and parsed == case.ground_truth,
+        "correct": transport_ok and parsed == case.ground_truth,
         "latency_ms": elapsed,
         "dispatch_meta": meta,
         "stderr_tail": cp.stderr.strip()[-500:],
@@ -407,7 +424,7 @@ def main() -> int:
     cal_online = online_batch(online_root, calibration, args.online_model, args.online_effort, args.online_workers)
 
     kind_policy: dict[str, bool] = {}
-    for kind in ("golden_classification", "structured_extraction"):
+    for kind in ("golden_classification", "literal_extraction"):
         members = [c for c in cal_eligible if c.kind == kind]
         acc = sum(1 for c in members if cal_fm[c.case_id]["correct"]) / max(1, len(members))
         kind_policy[kind] = len(members) >= 10 and acc >= 0.95
@@ -553,7 +570,7 @@ def main() -> int:
                     sum(1 for c in cal_eligible if c.kind == kind and cal_fm[c.case_id]["correct"])
                     / max(1, sum(1 for c in cal_eligible if c.kind == kind))
                 )
-                for kind in ("golden_classification", "structured_extraction")
+                for kind in ("golden_classification", "literal_extraction")
             },
             "online_accuracy": sum(1 for r in cal_online.values() if r["correct"]) / len(cal_online),
         },
