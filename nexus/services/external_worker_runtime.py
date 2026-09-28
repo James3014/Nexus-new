@@ -348,10 +348,182 @@ class ClineExecutionAdapter:
         )
 
 
+class OpenCodeExecutionAdapter:
+    provider = "opencode"
+
+    def default_model(self) -> str:
+        return os.getenv(
+            "NEXUS_OPENCODE_FREE_MODEL",
+            "opencode/mimo-v2.6-flash-free",
+        ).strip()
+
+    @staticmethod
+    def _model_parts(model: str) -> tuple[str, str]:
+        provider_id, sep, model_id = model.partition("/")
+        if not sep or not provider_id or not model_id:
+            raise ExternalWorkerRuntimeError("OPENCODE_MODEL_INVALID")
+        return provider_id, model_id
+
+    def compile(
+        self,
+        request: WorkerRequest,
+        *,
+        binding: AccountBinding,
+    ) -> WorkerCommand:
+        if binding.provider != self.provider:
+            raise ExternalWorkerRuntimeError("ACCOUNT_BINDING_PROVIDER_MISMATCH")
+        if request.provider != self.provider:
+            raise ExternalWorkerRuntimeError("WORKER_REQUEST_PROVIDER_MISMATCH")
+        if request.mode not in {"plan", "act"}:
+            raise ExternalWorkerRuntimeError("OPENCODE_MODE_INVALID")
+
+        provider_id, model_id = self._model_parts(request.model)
+        if provider_id != "opencode":
+            raise ExternalWorkerRuntimeError("OPENCODE_PROVIDER_MODEL_REQUIRED")
+        if request.require_free and not model_id.endswith("-free"):
+            raise ExternalWorkerRuntimeError("OPENCODE_FREE_MODEL_REQUIRED")
+
+        executable = _resolve_executable("NEXUS_OPENCODE_BIN", "opencode")
+        argv = [
+            executable,
+            "run",
+            "--pure",
+            "--dir",
+            request.cwd,
+            "--agent",
+            "plan" if request.mode == "plan" else "build",
+            "--model",
+            request.model,
+            "--format",
+            "json",
+        ]
+        if request.auto_approve:
+            argv.append("--auto")
+        if request.thinking and request.thinking != "none":
+            argv += ["--variant", request.thinking]
+        argv.append(request.prompt)
+
+        env = dict(os.environ)
+        env.update(dict(binding.execution_env))
+        return WorkerCommand(
+            argv=tuple(argv),
+            env=env,
+            cli_version=_cli_version(executable),
+        )
+
+    def interpret(
+        self,
+        request: WorkerRequest,
+        *,
+        exit_code: int,
+        stdout_text: str,
+        stderr_text: str,
+    ) -> WorkerOutcome:
+        events = _jsonl_events(stdout_text)
+        errors = [event for event in events if event.get("type") == "error"]
+        tool_event_count = sum(1 for event in events if event.get("type") == "tool_use")
+        finishes = [
+            event
+            for event in events
+            if event.get("type") == "step_finish" and isinstance(event.get("part"), dict)
+        ]
+
+        session_ids = [
+            str(event["sessionID"])
+            for event in events
+            if isinstance(event.get("sessionID"), str) and event.get("sessionID")
+        ]
+        provider_session_id = session_ids[-1] if session_ids else None
+
+        costs: list[float] = []
+        for event in finishes:
+            part = event.get("part")
+            if not isinstance(part, dict):
+                continue
+            cost = part.get("cost")
+            if isinstance(cost, (int, float)):
+                costs.append(float(cost))
+        total_cost = sum(costs) if costs else None
+
+        final_part = finishes[-1].get("part") if finishes else {}
+        finish_reason = (
+            str(final_part.get("reason"))
+            if isinstance(final_part, dict) and final_part.get("reason") is not None
+            else None
+        )
+        provider_id, model_id = self._model_parts(request.model)
+        observed_provider = provider_id if finishes else None
+        observed_model = request.model if finishes else None
+
+        terminal_success = (
+            exit_code == 0
+            and not errors
+            and bool(finishes)
+            and finish_reason not in {"error", "abort", "cancelled"}
+        )
+        free_attested = (
+            provider_id == "opencode" and model_id.endswith("-free") and total_cost == 0.0
+        )
+
+        if terminal_success:
+            if request.require_free and not free_attested:
+                return WorkerOutcome(
+                    status="FAILED",
+                    failure_kind="FREE_MODEL_ATTESTATION_FAILED",
+                    observed_provider=observed_provider,
+                    observed_model=observed_model,
+                    finish_reason=finish_reason,
+                    total_cost=total_cost,
+                    provider_session_id=provider_session_id,
+                    tool_event_count=tool_event_count,
+                    retry_permitted=False,
+                    details={"attestation": "explicit-model-arg+terminal-cost"},
+                )
+            return WorkerOutcome(
+                status="COMPLETED",
+                failure_kind=None,
+                observed_provider=observed_provider,
+                observed_model=observed_model,
+                finish_reason=finish_reason,
+                total_cost=total_cost,
+                provider_session_id=provider_session_id,
+                tool_event_count=tool_event_count,
+                retry_permitted=False,
+                details={"attestation": "explicit-model-arg+terminal-cost"},
+            )
+
+        failure_text = (stderr_text + "\n" + stdout_text).lower()
+        if "quota" in failure_text or "rate limit" in failure_text:
+            failure_kind = AccountFailureKind.QUOTA_EXHAUSTED.value
+        elif (
+            "auth" in failure_text or "unauthorized" in failure_text or "forbidden" in failure_text
+        ):
+            failure_kind = AccountFailureKind.AUTH_OR_SESSION_INVALID.value
+        elif "timeout" in failure_text:
+            failure_kind = AccountFailureKind.TIMEOUT.value
+        else:
+            failure_kind = AccountFailureKind.UNKNOWN.value
+
+        return WorkerOutcome(
+            status="FAILED",
+            failure_kind=failure_kind,
+            observed_provider=observed_provider,
+            observed_model=observed_model,
+            finish_reason=finish_reason,
+            total_cost=total_cost,
+            provider_session_id=provider_session_id,
+            tool_event_count=tool_event_count,
+            retry_permitted=False,
+            details={"exit_code": exit_code, "event_error_count": len(errors)},
+        )
+
+
 def get_execution_adapter(provider: str) -> ExecutionAdapter:
     key = str(provider).strip().lower()
     if key == "cline":
         return ClineExecutionAdapter()
+    if key == "opencode":
+        return OpenCodeExecutionAdapter()
     raise ExternalWorkerRuntimeError(f"EXTERNAL_WORKER_PROVIDER_UNSUPPORTED:{key}")
 
 
@@ -367,4 +539,6 @@ def get_account_adapter(provider: str) -> AccountAdapter:
     key = str(provider).strip().lower()
     if key == "cline":
         return NoopAccountAdapter("cline")
+    if key == "opencode":
+        return NoopAccountAdapter("opencode")
     raise ExternalWorkerRuntimeError(f"EXTERNAL_ACCOUNT_ADAPTER_UNSUPPORTED:{key}")
