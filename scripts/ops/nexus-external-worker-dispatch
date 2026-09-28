@@ -280,6 +280,7 @@ def _run_operation(
         account_alias_hash=binding.account_alias_hash,
         lease_id_hash=binding.lease_id_hash,
         cli_version=command.cli_version,
+        auth_mode=command.auth_mode,
         command_sha256=_command_hash(command.argv),
     )
 
@@ -387,6 +388,11 @@ def _run_operation(
         cwd=cwd,
         observed_provider=outcome.observed_provider,
         observed_model=outcome.observed_model,
+        model_attestation=(
+            outcome.details.get("attestation")
+            if isinstance(outcome.details.get("attestation"), str)
+            else None
+        ),
         finish_reason=outcome.finish_reason,
         total_cost=outcome.total_cost,
         provider_session_id=outcome.provider_session_id,
@@ -400,6 +406,21 @@ def _run_operation(
 
 def _print_operation(record: dict[str, Any]) -> None:
     print(json.dumps(public_operation_view(record), indent=2, sort_keys=True))
+
+
+def _resolve_require_free(
+    provider: str,
+    *,
+    require_free: bool,
+    allow_paid_model: bool,
+) -> bool:
+    if require_free and allow_paid_model:
+        raise ExternalWorkerRuntimeError("MODEL_COST_POLICY_CONFLICT")
+    if require_free:
+        return True
+    if allow_paid_model:
+        return False
+    return provider in {"cline", "opencode"}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -449,7 +470,11 @@ def main(argv: list[str] | None = None) -> int:
     if not prompt.strip():
         raise SystemExit("EMPTY_PROMPT")
 
-    require_free = bool(args.require_free or not args.allow_paid_model)
+    require_free = _resolve_require_free(
+        provider,
+        require_free=args.require_free,
+        allow_paid_model=args.allow_paid_model,
+    )
 
     if args.operation_run:
         return _run_operation(
