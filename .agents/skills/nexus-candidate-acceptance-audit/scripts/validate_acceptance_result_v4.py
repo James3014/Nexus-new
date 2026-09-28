@@ -81,9 +81,7 @@ def _v5_task_card_from_git(
     task_match = re.search(r"(?m)^task_id:\s*\`([^\`]+)\`\s*$", text)
     if task_match is None:
         raise OSError("Task Card task_id is missing")
-    section = re.search(
-        r"(?ms)^## Allowed files\s*\n(?P<body>.*?)(?=^## |\Z)", text
-    )
+    section = re.search(r"(?ms)^## Allowed files\s*\n(?P<body>.*?)(?=^## |\Z)", text)
     if section is None:
         raise OSError("Task Card Allowed files section is missing")
     allowed = re.findall(r"(?m)^-\s*\`([^\`]+)\`\s*$", section.group("body"))
@@ -236,7 +234,13 @@ def _v5_validate_direct_evidence(
         errors.append("v5 result source/repository must be objects")
         return
     if not isinstance(evidence, dict) or evidence.get("schema") != V5_DIRECT_SCHEMA:
-        record(data, errors, warnings, "transport-neutral executor evidence schema mismatch", "authority")
+        record(
+            data,
+            errors,
+            warnings,
+            "transport-neutral executor evidence schema mismatch",
+            "authority",
+        )
         return
     top_keys = {
         "schema",
@@ -249,23 +253,51 @@ def _v5_validate_direct_evidence(
         "integrity",
     }
     if set(evidence) != top_keys:
-        record(data, errors, warnings, "transport-neutral executor evidence top-level shape mismatch", "authority")
+        record(
+            data,
+            errors,
+            warnings,
+            "transport-neutral executor evidence top-level shape mismatch",
+            "authority",
+        )
     if not nonempty(evidence.get("evidence_id")):
-        record(data, errors, warnings, "transport-neutral evidence_id is required", "subject_identity")
+        record(
+            data, errors, warnings, "transport-neutral evidence_id is required", "subject_identity"
+        )
     if not _v5_date(evidence.get("created_at")):
-        record(data, errors, warnings, "transport-neutral created_at is invalid", "subject_identity")
+        record(
+            data, errors, warnings, "transport-neutral created_at is invalid", "subject_identity"
+        )
     evidence_integrity = evidence.get("integrity")
     if not isinstance(evidence_integrity, dict) or set(evidence_integrity) != {"sha256"}:
-        record(data, errors, warnings, "transport-neutral evidence integrity shape mismatch", "subject_identity")
+        record(
+            data,
+            errors,
+            warnings,
+            "transport-neutral evidence integrity shape mismatch",
+            "subject_identity",
+        )
     elif evidence_integrity.get("sha256") != canonical_sha256(evidence):
-        record(data, errors, warnings, "transport-neutral evidence integrity mismatch", "subject_identity")
+        record(
+            data,
+            errors,
+            warnings,
+            "transport-neutral evidence integrity mismatch",
+            "subject_identity",
+        )
 
     authority = evidence.get("authority")
     execution = evidence.get("execution")
     candidate = evidence.get("candidate")
     claim = evidence.get("claim")
     if not all(isinstance(item, dict) for item in (authority, execution, candidate, claim)):
-        record(data, errors, warnings, "transport-neutral nested evidence groups must be objects", "authority")
+        record(
+            data,
+            errors,
+            warnings,
+            "transport-neutral nested evidence groups must be objects",
+            "authority",
+        )
         return
 
     authority_keys = {
@@ -358,37 +390,93 @@ def _v5_validate_direct_evidence(
     if authority.get("deletion_policy") not in {"ALLOW", "FORBID"}:
         record(data, errors, warnings, "transport-neutral deletion_policy is invalid", "authority")
     if authority.get("claim_ceiling") != "CANDIDATE_READY":
-        record(data, errors, warnings, "transport-neutral authority claim ceiling is invalid", "claim_discipline")
+        record(
+            data,
+            errors,
+            warnings,
+            "transport-neutral authority claim ceiling is invalid",
+            "claim_discipline",
+        )
 
     for key in ("executor_id", "executor_kind", "transport", "workspace_root"):
         if not nonempty(execution.get(key)):
-            record(data, errors, warnings, f"transport-neutral execution {key} is required", "subject_identity")
+            record(
+                data,
+                errors,
+                warnings,
+                f"transport-neutral execution {key} is required",
+                "subject_identity",
+            )
     for key in ("started_at", "completed_at"):
         if not _v5_date(execution.get(key)):
-            record(data, errors, warnings, f"transport-neutral execution {key} is invalid", "subject_identity")
+            record(
+                data,
+                errors,
+                warnings,
+                f"transport-neutral execution {key} is invalid",
+                "subject_identity",
+            )
     if execution.get("state") != "completed" or execution.get("terminal_reason") != "completed":
-        record(data, errors, warnings, "transport-neutral execution is not terminal completed", "authority")
+        record(
+            data,
+            errors,
+            warnings,
+            "transport-neutral execution is not terminal completed",
+            "authority",
+        )
 
     for key in ("source_commit", "commit_sha", "tree_sha"):
         if not isinstance(candidate.get(key), str) or not GIT_OID.fullmatch(candidate.get(key, "")):
-            record(data, errors, warnings, f"transport-neutral Candidate {key} is malformed", "subject_identity")
+            record(
+                data,
+                errors,
+                warnings,
+                f"transport-neutral Candidate {key} is malformed",
+                "subject_identity",
+            )
     if not nonempty(candidate.get("repository_origin")):
-        record(data, errors, warnings, "transport-neutral repository_origin is required", "subject_identity")
+        record(
+            data,
+            errors,
+            warnings,
+            "transport-neutral repository_origin is required",
+            "subject_identity",
+        )
     for key in ("changed_paths", "deleted_paths"):
         paths = candidate.get(key)
         if not isinstance(paths, list) or not all(
             isinstance(path, str) and GIT_PATH.fullmatch(path) for path in paths
         ):
-            record(data, errors, warnings, f"transport-neutral Candidate {key} is malformed", "subject_identity")
+            record(
+                data,
+                errors,
+                warnings,
+                f"transport-neutral Candidate {key} is malformed",
+                "subject_identity",
+            )
     if not isinstance(candidate.get("diff_hash"), str) or not CORE_HASH.fullmatch(
         candidate.get("diff_hash", "")
     ):
-        record(data, errors, warnings, "transport-neutral Candidate diff_hash is malformed", "subject_identity")
+        record(
+            data,
+            errors,
+            warnings,
+            "transport-neutral Candidate diff_hash is malformed",
+            "subject_identity",
+        )
 
     if claim.get("status") != "CANDIDATE_READY_PENDING_ACCEPTANCE":
-        record(data, errors, warnings, "transport-neutral claim status must remain pending acceptance", "claim_discipline")
+        record(
+            data,
+            errors,
+            warnings,
+            "transport-neutral claim status must remain pending acceptance",
+            "claim_discipline",
+        )
     if claim.get("claim_ceiling") != "CANDIDATE_READY":
-        record(data, errors, warnings, "transport-neutral claim ceiling mismatch", "claim_discipline")
+        record(
+            data, errors, warnings, "transport-neutral claim ceiling mismatch", "claim_discipline"
+        )
     for key in (
         "verified",
         "certified",
@@ -400,7 +488,13 @@ def _v5_validate_direct_evidence(
         "public_claim_allowed",
     ):
         if claim.get(key) is not False:
-            record(data, errors, warnings, f"transport-neutral evidence illegally asserts {key}", "claim_discipline")
+            record(
+                data,
+                errors,
+                warnings,
+                f"transport-neutral evidence illegally asserts {key}",
+                "claim_discipline",
+            )
 
     checks = {
         "task_id": (source.get("task_id"), authority.get("task_id")),
@@ -415,9 +509,18 @@ def _v5_validate_direct_evidence(
             authority.get("task_card_sha256"),
         ),
         "root": (repository.get("root"), execution.get("workspace_root")),
-        "executor_observed_head": (repository.get("executor_observed_head"), candidate.get("source_commit")),
-        "expected_base_commit": (repository.get("expected_base_commit"), candidate.get("source_commit")),
-        "candidate_commit_sha": (repository.get("candidate_commit_sha"), candidate.get("commit_sha")),
+        "executor_observed_head": (
+            repository.get("executor_observed_head"),
+            candidate.get("source_commit"),
+        ),
+        "expected_base_commit": (
+            repository.get("expected_base_commit"),
+            candidate.get("source_commit"),
+        ),
+        "candidate_commit_sha": (
+            repository.get("candidate_commit_sha"),
+            candidate.get("commit_sha"),
+        ),
         "candidate_tree_sha": (repository.get("candidate_tree_sha"), candidate.get("tree_sha")),
         "candidate_diff_sha256": (
             repository.get("candidate_diff_sha256"),
@@ -447,11 +550,13 @@ def _v5_validate_direct_evidence(
         candidate.get("diff_hash"),
     )
     if all(isinstance(item, str) for item in evidence_id_parts):
-        expected_evidence_id = "tnde_" + hashlib.sha256(
-            ":".join(evidence_id_parts).encode("utf-8")
-        ).hexdigest()[:32]
+        expected_evidence_id = (
+            "tnde_" + hashlib.sha256(":".join(evidence_id_parts).encode("utf-8")).hexdigest()[:32]
+        )
         if evidence.get("evidence_id") != expected_evidence_id:
-            record(data, errors, warnings, "transport-neutral evidence_id mismatch", "subject_identity")
+            record(
+                data, errors, warnings, "transport-neutral evidence_id mismatch", "subject_identity"
+            )
 
     root = execution.get("workspace_root")
     source_commit = candidate.get("source_commit")
@@ -474,7 +579,9 @@ def _v5_validate_direct_evidence(
         actual_origin = _git(root, "remote", "get-url", "origin")
         if Path(actual_root).resolve() != Path(root).resolve():
             raise OSError("workspace_root is not the physical Git toplevel")
-        if _v5_normalize_remote(actual_origin) != _v5_normalize_remote(candidate["repository_origin"]):
+        if _v5_normalize_remote(actual_origin) != _v5_normalize_remote(
+            candidate["repository_origin"]
+        ):
             raise OSError("physical Git origin does not match executor evidence")
         card_sha, card_task, card_paths, card_deletion = _v5_task_card_from_git(
             root,
@@ -526,7 +633,13 @@ def _v5_validate_direct_evidence(
             raise OSError("physical Candidate contains forbidden deletions")
         warnings.append(f"v5 physical Git subject verified at {actual_root}")
     except (OSError, subprocess.SubprocessError, UnicodeError) as exc:
-        record(data, errors, warnings, f"v5 physical Git cross-binding failed: {exc}", "subject_identity")
+        record(
+            data,
+            errors,
+            warnings,
+            f"v5 physical Git cross-binding failed: {exc}",
+            "subject_identity",
+        )
 
 
 def _v5_validate_review_evidence(
@@ -542,7 +655,13 @@ def _v5_validate_review_evidence(
         errors.append("v5 result source/repository/review must be objects")
         return
     if not isinstance(evidence, dict) or evidence.get("schema") != V5_REVIEW_SCHEMA:
-        record(data, errors, warnings, "independent review evidence schema mismatch", "independent_behavior")
+        record(
+            data,
+            errors,
+            warnings,
+            "independent review evidence schema mismatch",
+            "independent_behavior",
+        )
         return
     top_keys = {
         "schema",
@@ -557,17 +676,53 @@ def _v5_validate_review_evidence(
         "integrity",
     }
     if set(evidence) != top_keys:
-        record(data, errors, warnings, "independent review evidence top-level shape mismatch", "independent_behavior")
+        record(
+            data,
+            errors,
+            warnings,
+            "independent review evidence top-level shape mismatch",
+            "independent_behavior",
+        )
     if not nonempty(evidence.get("review_id")) or not nonempty(evidence.get("reviewer_id")):
-        record(data, errors, warnings, "independent review identity is required", "independent_behavior")
+        record(
+            data,
+            errors,
+            warnings,
+            "independent review identity is required",
+            "independent_behavior",
+        )
     if not _v5_date(evidence.get("created_at")):
-        record(data, errors, warnings, "independent review created_at is invalid", "independent_behavior")
+        record(
+            data,
+            errors,
+            warnings,
+            "independent review created_at is invalid",
+            "independent_behavior",
+        )
     if evidence.get("reviewer_attempt_id") != source.get("reviewer_attempt_id"):
-        record(data, errors, warnings, "independent review attempt does not bind result", "independent_behavior")
+        record(
+            data,
+            errors,
+            warnings,
+            "independent review attempt does not bind result",
+            "independent_behavior",
+        )
     if evidence.get("reviewer_attempt_id") == source.get("implementer_attempt_id"):
-        record(data, errors, warnings, "implementer and reviewer attempts must differ", "independent_behavior")
+        record(
+            data,
+            errors,
+            warnings,
+            "implementer and reviewer attempts must differ",
+            "independent_behavior",
+        )
     if evidence.get("independence_class") != "INDEPENDENT_REVIEWER":
-        record(data, errors, warnings, "review evidence is not independently classified", "independent_behavior")
+        record(
+            data,
+            errors,
+            warnings,
+            "review evidence is not independently classified",
+            "independent_behavior",
+        )
     if review_result.get("independence_class") != evidence.get("independence_class"):
         record(data, errors, warnings, "review independence class mismatch", "independent_behavior")
 
@@ -580,7 +735,13 @@ def _v5_validate_review_evidence(
         "candidate_tree_sha",
     }
     if not isinstance(bound_repo, dict) or set(bound_repo) != repo_keys:
-        record(data, errors, warnings, "independent review repository shape mismatch", "subject_identity")
+        record(
+            data,
+            errors,
+            warnings,
+            "independent review repository shape mismatch",
+            "subject_identity",
+        )
         bound_repo = {}
     checks = {
         "root": (repository.get("root"), bound_repo.get("root")),
@@ -599,7 +760,9 @@ def _v5_validate_review_evidence(
     }
     for name, (left, right) in checks.items():
         if left != right:
-            record(data, errors, warnings, f"independent review {name} mismatch", "subject_identity")
+            record(
+                data, errors, warnings, f"independent review {name} mismatch", "subject_identity"
+            )
     if nonempty(bound_repo.get("root")) and nonempty(bound_repo.get("origin")):
         try:
             review_root = bound_repo["root"]
@@ -622,7 +785,15 @@ def _v5_validate_review_evidence(
             if _git(review_root, "rev-parse", f"{review_candidate}^{{commit}}") != review_candidate:
                 raise OSError("review Candidate is not the supplied immutable commit")
             ancestry = subprocess.run(
-                ["git", "-C", review_root, "merge-base", "--is-ancestor", review_base, review_candidate],
+                [
+                    "git",
+                    "-C",
+                    review_root,
+                    "merge-base",
+                    "--is-ancestor",
+                    review_base,
+                    review_candidate,
+                ],
                 capture_output=True,
                 timeout=10,
             )
@@ -631,7 +802,13 @@ def _v5_validate_review_evidence(
             if _git(review_root, "rev-parse", f"{review_candidate}^{{tree}}") != review_tree:
                 raise OSError("review Candidate tree does not match physical Git")
         except (OSError, subprocess.SubprocessError, UnicodeError) as exc:
-            record(data, errors, warnings, f"independent review Git binding failed: {exc}", "subject_identity")
+            record(
+                data,
+                errors,
+                warnings,
+                f"independent review Git binding failed: {exc}",
+                "subject_identity",
+            )
 
     commands = evidence.get("commands")
     command_keys = {
@@ -648,24 +825,59 @@ def _v5_validate_review_evidence(
     if commands_valid:
         for index, command in enumerate(commands):
             if not isinstance(command, dict) or set(command) != command_keys:
-                record(data, errors, warnings, f"independent review command {index} shape mismatch", "independent_behavior")
+                record(
+                    data,
+                    errors,
+                    warnings,
+                    f"independent review command {index} shape mismatch",
+                    "independent_behavior",
+                )
                 commands_valid = False
                 continue
             if command.get("result_class") not in COMMAND_RESULTS:
-                record(data, errors, warnings, f"independent review command {index} result invalid", "independent_behavior")
+                record(
+                    data,
+                    errors,
+                    warnings,
+                    f"independent review command {index} result invalid",
+                    "independent_behavior",
+                )
                 commands_valid = False
             if command.get("result_class") == "PASS" and command.get("exit_code") != 0:
-                record(data, errors, warnings, f"independent review command {index} PASS requires exit 0", "independent_behavior")
+                record(
+                    data,
+                    errors,
+                    warnings,
+                    f"independent review command {index} PASS requires exit 0",
+                    "independent_behavior",
+                )
                 commands_valid = False
     else:
-        record(data, errors, warnings, "independent review commands are required", "independent_behavior")
+        record(
+            data,
+            errors,
+            warnings,
+            "independent review commands are required",
+            "independent_behavior",
+        )
     if commands_valid and not any(
-        isinstance(command, dict) and command.get("result_class") == "PASS"
-        for command in commands
+        isinstance(command, dict) and command.get("result_class") == "PASS" for command in commands
     ):
-        record(data, errors, warnings, "independent review requires at least one PASS command", "independent_behavior")
+        record(
+            data,
+            errors,
+            warnings,
+            "independent review requires at least one PASS command",
+            "independent_behavior",
+        )
     if commands != review_result.get("commands"):
-        record(data, errors, warnings, "independent review commands do not match acceptance result", "independent_behavior")
+        record(
+            data,
+            errors,
+            warnings,
+            "independent review commands do not match acceptance result",
+            "independent_behavior",
+        )
 
     claim = evidence.get("claim")
     claim_keys = {
@@ -679,10 +891,18 @@ def _v5_validate_review_evidence(
         "public_claim_allowed",
     }
     if not isinstance(claim, dict) or set(claim) != claim_keys:
-        record(data, errors, warnings, "independent review claim shape mismatch", "claim_discipline")
+        record(
+            data, errors, warnings, "independent review claim shape mismatch", "claim_discipline"
+        )
     else:
         if claim.get("claim_ceiling") != "INDEPENDENT_BEHAVIOR_EVIDENCE_ONLY":
-            record(data, errors, warnings, "independent review claim ceiling mismatch", "claim_discipline")
+            record(
+                data,
+                errors,
+                warnings,
+                "independent review claim ceiling mismatch",
+                "claim_discipline",
+            )
         for key in (
             "certified",
             "accepted",
@@ -693,17 +913,27 @@ def _v5_validate_review_evidence(
             "public_claim_allowed",
         ):
             if claim.get(key) is not False:
-                record(data, errors, warnings, f"independent review illegally asserts {key}", "claim_discipline")
+                record(
+                    data,
+                    errors,
+                    warnings,
+                    f"independent review illegally asserts {key}",
+                    "claim_discipline",
+                )
     integrity = evidence.get("integrity")
     if not isinstance(integrity, dict) or set(integrity) != {"sha256"}:
-        record(data, errors, warnings, "independent review integrity shape mismatch", "subject_identity")
+        record(
+            data,
+            errors,
+            warnings,
+            "independent review integrity shape mismatch",
+            "subject_identity",
+        )
     elif integrity.get("sha256") != canonical_sha256(evidence):
         record(data, errors, warnings, "independent review integrity mismatch", "subject_identity")
 
 
-def validate_physical_v5(
-    data: dict[str, object], args: object
-) -> tuple[list[str], list[str]]:
+def validate_physical_v5(data: dict[str, object], args: object) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
     source = data.get("source") if isinstance(data.get("source"), dict) else {}
@@ -719,7 +949,9 @@ def validate_physical_v5(
         if file_sha256(executor_path) != source.get("executor_evidence_sha256"):
             record(data, errors, warnings, "executor evidence digest mismatch", "subject_identity")
         if file_sha256(verification_path) != source.get("verification_evidence_sha256"):
-            record(data, errors, warnings, "verification evidence digest mismatch", "subject_identity")
+            record(
+                data, errors, warnings, "verification evidence digest mismatch", "subject_identity"
+            )
         executor = read_json(executor_path)
         verification = read_json(verification_path)
         if source.get("executor_evidence_kind") != V5_DIRECT_KIND:
@@ -727,7 +959,9 @@ def validate_physical_v5(
         else:
             _v5_validate_direct_evidence(data, executor, errors, warnings)
         if source.get("verification_evidence_kind") != V5_REVIEW_KIND:
-            record(data, errors, warnings, "unsupported v5 verification evidence branch", "authority")
+            record(
+                data, errors, warnings, "unsupported v5 verification evidence branch", "authority"
+            )
         else:
             _v5_validate_review_evidence(data, verification, errors, warnings)
     except (
@@ -749,15 +983,14 @@ def validate_physical_v5(
         )
     return errors, warnings
 
+
 def validate(data: object) -> dict[str, object]:
     if isinstance(data, dict) and data.get("schema") == V5_SCHEMA:
         return validate_v5(data)
     return _v4_validate(data)
 
 
-def validate_physical(
-    data: dict[str, object], args: object
-) -> tuple[list[str], list[str]]:
+def validate_physical(data: dict[str, object], args: object) -> tuple[list[str], list[str]]:
     if data.get("schema") == V5_SCHEMA:
         return validate_physical_v5(data, args)
     return _v4_validate_physical(data, args)
@@ -776,9 +1009,7 @@ def main() -> int:
         }
     else:
         validation_schema = (
-            V5_VALIDATION_SCHEMA
-            if data.get("schema") == V5_SCHEMA
-            else _V4_VALIDATION_SCHEMA
+            V5_VALIDATION_SCHEMA if data.get("schema") == V5_SCHEMA else _V4_VALIDATION_SCHEMA
         )
         try:
             report = validate(data)
@@ -791,9 +1022,7 @@ def main() -> int:
             report = {
                 "schema": validation_schema,
                 "valid": False,
-                "errors": [
-                    f"malformed nested input: {type(exc).__name__}: {exc}"
-                ],
+                "errors": [f"malformed nested input: {type(exc).__name__}: {exc}"],
                 "warnings": [],
             }
     if args.report:

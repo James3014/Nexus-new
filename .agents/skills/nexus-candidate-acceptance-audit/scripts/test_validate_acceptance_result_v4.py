@@ -138,7 +138,6 @@ class CandidateAcceptanceV4OrderingTests(unittest.TestCase):
         )
 
 
-
 class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
@@ -241,9 +240,7 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
         manifest = current._physical_manifest(str(repo), base, candidate_sha)
         changed_paths = [row["path"] for row in manifest["entries"]]
         deleted_paths = [
-            row["path"]
-            for row in manifest["entries"]
-            if row["change_type"] == "DELETE"
+            row["path"] for row in manifest["entries"] if row["change_type"] == "DELETE"
         ]
         diff_hash = current.core_manifest_hash(manifest)
         task_id = "goal-standalone-golden-path"
@@ -258,9 +255,12 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
         implementer_attempt = "impl-codex-001"
         reviewer_attempt = "review-chatgpt-001"
         created = "2026-09-29T00:00:00+00:00"
-        evidence_id = "tnde_" + hashlib.sha256(
-            f"{task_id}:{implementer_attempt}:{candidate_sha}:{diff_hash}".encode()
-        ).hexdigest()[:32]
+        evidence_id = (
+            "tnde_"
+            + hashlib.sha256(
+                f"{task_id}:{implementer_attempt}:{candidate_sha}:{diff_hash}".encode()
+            ).hexdigest()[:32]
+        )
 
         executor: dict[str, object] = {
             "schema": current.V5_DIRECT_SCHEMA,
@@ -422,9 +422,7 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
                     "verdict": "PASS",
                     "reason": f"{name} independently bound",
                     "evidence_refs": [
-                        "review-evidence"
-                        if name == "independent_behavior"
-                        else "executor-evidence"
+                        "review-evidence" if name == "independent_behavior" else "executor-evidence"
                     ],
                 }
                 for name in current.AXES
@@ -533,9 +531,7 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
         self._refresh_integrity(result)
         report = current.validate(result)
         self.assertFalse(report["valid"])
-        self.assertTrue(
-            any("executor_evidence_kind: invalid" in item for item in report["errors"])
-        )
+        self.assertTrue(any("executor_evidence_kind: invalid" in item for item in report["errors"]))
 
     def test_v5_rejects_devspace_relabeling(self) -> None:
         bundle = self._build_bundle()
@@ -565,9 +561,7 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
         bundle["result"]["source"]["contract_hash"] = "0" * 64
         self._rewrite_bound(bundle, executor=True)
         errors, _ = self._physical(bundle)
-        self.assertTrue(
-            any("Task Card SHA-256 does not match" in item for item in errors)
-        )
+        self.assertTrue(any("Task Card SHA-256 does not match" in item for item in errors))
 
     def test_v5_result_subject_mismatches_fail(self) -> None:
         cases = {
@@ -588,32 +582,24 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
     def test_v5_task_card_must_authorize_worker_commit(self) -> None:
         bundle = self._build_bundle(worker_may_commit=False)
         errors, _ = self._physical(bundle)
-        self.assertTrue(
-            any("Task Card worker_may_commit must be true" in item for item in errors)
-        )
+        self.assertTrue(any("Task Card worker_may_commit must be true" in item for item in errors))
 
     def test_v5_task_card_must_be_governed(self) -> None:
         bundle = self._build_bundle(execution_lane="DIRECT_CANONICAL")
         errors, _ = self._physical(bundle)
-        self.assertTrue(
-            any("Task Card execution_lane must be GOVERNED" in item for item in errors)
-        )
+        self.assertTrue(any("Task Card execution_lane must be GOVERNED" in item for item in errors))
 
     def test_v5_task_card_rejects_duplicate_controls(self) -> None:
         bundle = self._build_bundle(duplicate_status="CLOSED")
         errors, _ = self._physical(bundle)
-        self.assertTrue(
-            any("Task Card status must appear exactly once" in item for item in errors)
-        )
+        self.assertTrue(any("Task Card status must appear exactly once" in item for item in errors))
 
     def test_v5_task_card_binds_scope(self) -> None:
         bundle = self._build_bundle()
         bundle["executor"]["authority"]["allowed_paths"] = ["b.txt"]
         self._rewrite_bound(bundle, executor=True)
         errors, _ = self._physical(bundle)
-        self.assertTrue(
-            any("Task Card allowed paths do not match" in item for item in errors)
-        )
+        self.assertTrue(any("Task Card allowed paths do not match" in item for item in errors))
 
     def test_v5_out_of_scope_path_fails(self) -> None:
         bundle = self._build_bundle(extra_path=True)
@@ -624,7 +610,6 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
         bundle = self._build_bundle(delete=True)
         errors, _ = self._physical(bundle)
         self.assertTrue(any("forbidden deletions" in item for item in errors))
-
 
     def test_v5_tampered_direct_evidence_integrity_fails(self) -> None:
         bundle = self._build_bundle()
@@ -652,9 +637,7 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
         self._refresh_integrity(bundle["result"])
         report = current.validate(bundle["result"])
         self.assertFalse(report["valid"])
-        self.assertTrue(
-            any("must differ from implementer" in item for item in report["errors"])
-        )
+        self.assertTrue(any("must differ from implementer" in item for item in report["errors"]))
 
     def test_v5_rejects_owner_inline_authority(self) -> None:
         bundle = self._build_bundle()
@@ -663,9 +646,7 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
         self._rewrite_bound(bundle, executor=True)
         report = current.validate(bundle["result"])
         self.assertFalse(report["valid"])
-        self.assertTrue(
-            any("requires TRACKED_TASK_CARD" in item for item in report["errors"])
-        )
+        self.assertTrue(any("requires TRACKED_TASK_CARD" in item for item in report["errors"]))
 
     def test_v5_claim_escalation_fails(self) -> None:
         bundle = self._build_bundle()
