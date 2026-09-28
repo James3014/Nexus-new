@@ -2166,7 +2166,10 @@ def test_task_card_create_is_owner_confirmed_non_overwriting_and_hashed(monkeypa
     assert len(payload["index_hash"]) == 64
     assert payload["git_blob_sha"] == "f" * 40
     assert (tmp_path / "tasks/chatgpt-bootstrap/INDEX.md").exists()
-    assert (tmp_path / "tasks/chatgpt-bootstrap/00-first-card.md").exists()
+    card_path = tmp_path / "tasks/chatgpt-bootstrap/00-first-card.md"
+    assert card_path.exists()
+    card_text = card_path.read_text(encoding="utf-8")
+    assert card_text.count("execution_lane: GOVERNED") == 1
     second = gateway.handle({"jsonrpc": "2.0", "id": 705, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": arguments}})
     assert second["result"]["isError"] is True
     assert "TASK_CARD_CREATE_WOULD_OVERWRITE" in second["result"]["structuredContent"]["error"]
