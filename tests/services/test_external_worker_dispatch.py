@@ -149,3 +149,66 @@ def test_runtime_revision_prefers_actual_snapshot_generation(
     monkeypatch.setattr(dispatch, "SNAPSHOT", current / "snapshot")
 
     assert dispatch._runtime_revision() == "b" * 40
+
+
+def _fake_opencode(path: Path) -> None:
+    body = """#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo 1.18.32
+  exit 0
+fi
+# Regression guard: RDC/generic runner must close stdin. If stdin remains open
+# like an interactive pipe, OpenCode waits before dispatch and this test fails.
+if read unexpected; then
+  echo "unexpected stdin: $unexpected" >&2
+  exit 9
+fi
+cat <<'EOF'
+{"type":"step_start","sessionID":"ses_fake","part":{"type":"step-start"}}
+{"type":"text","sessionID":"ses_fake","part":{"type":"text","text":"ok"}}
+{"type":"step_finish","sessionID":"ses_fake","part":{"type":"step-finish","reason":"stop","cost":0}}
+EOF
+exit 0
+"""
+    path.write_text(body, encoding="utf-8")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
+def test_background_opencode_receives_stdin_eof_and_completes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = tmp_path / "opencode"
+    _fake_opencode(fake)
+    monkeypatch.setenv("NEXUS_OPENCODE_BIN", str(fake))
+
+    root = tmp_path / "ops"
+    record = dispatch._spawn_background(
+        provider="opencode",
+        model="opencode/mimo-v2.6-flash-free",
+        prompt="hello",
+        cwd=str(tmp_path),
+        mode="plan",
+        auto_approve=False,
+        timeout_seconds=10,
+        require_free=True,
+        thinking="none",
+        operation_root=root,
+    )
+    operation_id = record["operation_id"]
+
+    deadline = time.time() + 5
+    journal = dispatch._journal("opencode", root)
+    while time.time() < deadline:
+        current = journal.read(operation_id)
+        if current["status"] in {"COMPLETED", "FAILED", "OUTCOME_UNKNOWN"}:
+            break
+        time.sleep(0.05)
+
+    current = journal.read(operation_id)
+    assert current["status"] == "COMPLETED"
+    assert current["observed_provider"] == "opencode"
+    assert current["observed_model"] == "opencode/mimo-v2.6-flash-free"
+    assert current["total_cost"] == 0.0
+    assert current["provider_session_id"] == "ses_fake"
+    assert current["reconciliation"]["retry_permitted"] is False
+    assert not journal.prompt_path(operation_id).exists()
