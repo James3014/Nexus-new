@@ -1,0 +1,123 @@
+{
+  "accepted_source": {
+    "final_manager_sha256": "6e4fa4af4ba50eeb956c7b2ed2579c06dbc392576bf5893f4e93505f6120a6ef",
+    "merge_sha": "7aa687bd3a1f36f43c99d585fffcc1ffe1140431",
+    "parents": [
+      "bdf12413fdb951ae5d7081101a78cc90adb2faed",
+      "a301a341e9284743dac55cddaeb251139d5c9f95"
+    ],
+    "tree_sha": "6939f9970d380ce656b38c1118985a3a84107810"
+  },
+  "claim_ceiling": "CLM_CANDIDATE_EVIDENCE_COLLECTOR_SOURCE_ACCEPTANCE_ONLY",
+  "evidence_class": "INDEPENDENT_SOURCE_ACCEPTANCE_ONLY",
+  "issue_number": 526,
+  "issued_at": "2026-09-28T05:17:13Z",
+  "owner_activation": {
+    "activation_id": "OWNER_ISSUE526_CLM_CANDIDATE_EVIDENCE_RUNTIME_20260928_V1",
+    "message_sha256": "6e39490bd2791486a6c85ab2b9b170b30d74634e2e368ca46e0d2c56e3fab1c6",
+    "source_thread": "issue526-comment-5863910613"
+  },
+  "receipt_hash": "27293f4aefcb3f7c323622e0dd00bcdc5d408fe31c0ff32c81472b102c1db928",
+  "receipt_id": "clm-candidate-evidence-source-acceptance-7aa687bd3a1f",
+  "receipt_version": 1,
+  "repository": "James3014/Nexus-new",
+  "required_checks": [
+    {
+      "check_run_id": 108779216629,
+      "conclusion": "success",
+      "head_sha": "a301a341e9284743dac55cddaeb251139d5c9f95",
+      "name": "Exact-base impact gate",
+      "run_id": 36375104161,
+      "status": "completed"
+    },
+    {
+      "check_run_id": 108779216417,
+      "conclusion": "success",
+      "head_sha": "a301a341e9284743dac55cddaeb251139d5c9f95",
+      "name": "Full published Git history secret audit",
+      "run_id": 36375104160,
+      "status": "completed"
+    },
+    {
+      "check_run_id": 108779533688,
+      "conclusion": "success",
+      "head_sha": "a301a341e9284743dac55cddaeb251139d5c9f95",
+      "name": "Trusted verifier (default branch)",
+      "run_id": 36375102308,
+      "status": "completed"
+    }
+  ],
+  "review": {
+    "coordinator_id": "chatgpt-primary-controller",
+    "notes": [
+      "full source Candidate accepted at 98a479afd3f34daf50483b067081b156de923cd0",
+      "delta-only acceptance PASS for 98a479afd3f34daf50483b067081b156de923cd0..a301a341e9284743dac55cddaeb251139d5c9f95"
+    ],
+    "reviewer_id": "chatgpt-independent-acceptance",
+    "verdict": "ACCEPT"
+  },
+  "schema": "nexus.gateway.r1_source_acceptance.v1",
+  "source_lineage": {
+    "pull_requests": [
+      {
+        "base_sha": "bdf12413fdb951ae5d7081101a78cc90adb2faed",
+        "head_sha": "a301a341e9284743dac55cddaeb251139d5c9f95",
+        "merge_sha": "7aa687bd3a1f36f43c99d585fffcc1ffe1140431",
+        "merge_tree_sha": "6939f9970d380ce656b38c1118985a3a84107810",
+        "merged_at": "2026-09-28T05:13:42Z",
+        "number": 1164
+      }
+    ],
+    "scope": {
+      "deleted_files": [],
+      "files": [
+        "docs/testing/test_impact_map.md",
+        "nexus/committee/controller.py",
+        "nexus/contracts/s2t_trace.py",
+        "nexus/engine/battle_swarm.py",
+        "nexus/engine/repair_attempt_service.py",
+        "nexus/research/clm_system_one/__init__.py",
+        "nexus/research/clm_system_one/candidate_evidence_collector.py",
+        "nexus/services/local_heal/local_model_executor.py",
+        "tests/ops/test_select_tests.py",
+        "tests/research/test_candidate_evidence_battle_swarm_integration.py",
+        "tests/research/test_candidate_evidence_collector.py",
+        "tests/research/test_candidate_evidence_committee_integration.py",
+        "tests/research/test_candidate_evidence_s2t_integration.py",
+        "tests/unit/local_heal/test_local_model_executor.py"
+      ],
+      "sha256": "ab512f21076067e184faa9a849b286c24b4bdfea9b75ca68bf74b7c1c5cdd893"
+    },
+    "scope_base_sha": "bdf12413fdb951ae5d7081101a78cc90adb2faed"
+  },
+  "task_id": "CLM-CANDIDATE-EVIDENCE-RUNTIME-ACTIVATION",
+  "verifier_results": [
+    {
+      "failed": 0,
+      "id": "candidate-evidence-integrations",
+      "kind": "pytest",
+      "passed": 39,
+      "status": "PASS"
+    },
+    {
+      "failed": 0,
+      "id": "local-model-executor",
+      "kind": "pytest",
+      "passed": 187,
+      "skipped": 1,
+      "status": "PASS"
+    },
+    {
+      "failed": 0,
+      "id": "test-selector",
+      "kind": "pytest",
+      "passed": 36,
+      "status": "PASS"
+    },
+    {
+      "id": "diff-check",
+      "kind": "command",
+      "status": "PASS"
+    }
+  ]
+}
