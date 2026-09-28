@@ -157,3 +157,184 @@ def test_cline_quota_failure_is_classified_but_not_auto_retryable(tmp_path: Path
     assert result.status == "FAILED"
     assert result.failure_kind == "QUOTA_EXHAUSTED"
     assert result.retry_permitted is False
+
+
+def _opencode_request(
+    tmp_path: Path,
+    *,
+    model: str = "opencode/mimo-v2.6-flash-free",
+    mode: str = "plan",
+    auto_approve: bool = False,
+) -> WorkerRequest:
+    return WorkerRequest(
+        provider="opencode",
+        model=model,
+        prompt="opencode prompt",
+        cwd=str(tmp_path),
+        mode=mode,
+        auto_approve=auto_approve,
+        timeout_seconds=60,
+        require_free=True,
+        thinking="none",
+    )
+
+
+def test_opencode_compile_uses_server_client_and_prompt_stdin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nexus.services.external_worker_runtime import OpenCodeExecutionAdapter
+
+    fake = tmp_path / "opencode"
+    fake.write_text("#!/bin/sh\necho 1.18.32\n", encoding="utf-8")
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("NEXUS_OPENCODE_BIN", str(fake))
+    monkeypatch.setenv("GITHUB_TOKEN", "owner-token")
+    monkeypatch.setenv("GH_TOKEN", "owner-gh-token")
+
+    command = OpenCodeExecutionAdapter().compile(
+        _opencode_request(tmp_path),
+        binding=AccountBinding(provider="opencode"),
+    )
+    argv = list(command.argv)
+    assert argv[0].endswith("nexus-opencode-server-client")
+    assert "--model" in argv
+    assert argv[argv.index("--model") + 1] == "opencode/mimo-v2.6-flash-free"
+    assert "--require-free" in argv
+    assert command.stdin_text == "opencode prompt"
+    assert "opencode prompt" not in argv
+    assert command.cli_version == "1.18.32"
+    assert "GITHUB_TOKEN" not in command.env
+    assert "GH_TOKEN" not in command.env
+
+
+def test_opencode_act_requires_explicit_auto_approve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nexus.services.external_worker_runtime import OpenCodeExecutionAdapter
+
+    fake = tmp_path / "opencode"
+    fake.write_text("#!/bin/sh\necho 1.18.32\n", encoding="utf-8")
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("NEXUS_OPENCODE_BIN", str(fake))
+
+    with pytest.raises(ExternalWorkerRuntimeError, match="OPENCODE_ACT_REQUIRES_AUTO_APPROVE"):
+        OpenCodeExecutionAdapter().compile(
+            _opencode_request(tmp_path, mode="act", auto_approve=False),
+            binding=AccountBinding(provider="opencode"),
+        )
+
+
+def test_opencode_success_requires_exact_provider_model_and_zero_cost(tmp_path: Path) -> None:
+    from nexus.services.external_worker_runtime import OpenCodeExecutionAdapter
+
+    request = _opencode_request(tmp_path)
+    stdout = json.dumps({
+        "type": "opencode_result",
+        "provider": "opencode",
+        "model": "mimo-v2.6-flash-free",
+        "cost": 0,
+        "finish": "stop",
+        "session_id": "ses_1",
+        "tool_event_count": 2,
+        "server_version": "1.18.32",
+    })
+    result = OpenCodeExecutionAdapter().interpret(
+        request,
+        exit_code=0,
+        stdout_text=stdout,
+        stderr_text="",
+    )
+    assert result.status == "COMPLETED"
+    assert result.observed_provider == "opencode"
+    assert result.observed_model == "mimo-v2.6-flash-free"
+    assert result.total_cost == 0.0
+    assert result.provider_session_id == "ses_1"
+    assert result.tool_event_count == 2
+    assert result.retry_permitted is False
+
+
+def test_opencode_timeout_result_is_outcome_unknown(tmp_path: Path) -> None:
+    from nexus.services.external_worker_runtime import OpenCodeExecutionAdapter
+
+    request = _opencode_request(tmp_path)
+    stdout = json.dumps({
+        "type": "opencode_error",
+        "failure_kind": "TIMEOUT",
+        "outcome_unknown": True,
+        "retry_permitted": False,
+        "error": "OPENCODE_HTTP_TIMEOUT",
+    })
+    result = OpenCodeExecutionAdapter().interpret(
+        request,
+        exit_code=124,
+        stdout_text=stdout,
+        stderr_text="",
+    )
+    assert result.status == "OUTCOME_UNKNOWN"
+    assert result.failure_kind == "TIMEOUT"
+    assert result.retry_permitted is False
+
+
+def test_opencode_auto_free_accepts_attested_actual_free_model(tmp_path: Path) -> None:
+    from nexus.services.external_worker_runtime import OpenCodeExecutionAdapter
+
+    request = WorkerRequest(
+        provider="opencode",
+        model="opencode/auto-free",
+        prompt="auto",
+        cwd=str(tmp_path),
+        mode="plan",
+        auto_approve=False,
+        timeout_seconds=60,
+        require_free=True,
+        thinking="none",
+    )
+    stdout = json.dumps({
+        "type": "opencode_result",
+        "provider": "opencode",
+        "model": "mimo-v2.5-free",
+        "cost": 0,
+        "finish": "stop",
+        "session_id": "ses_auto",
+        "tool_event_count": 0,
+    })
+    result = OpenCodeExecutionAdapter().interpret(
+        request,
+        exit_code=0,
+        stdout_text=stdout,
+        stderr_text="",
+    )
+    assert result.status == "COMPLETED"
+    assert result.observed_model == "mimo-v2.5-free"
+    assert result.total_cost == 0.0
+
+
+def test_opencode_auto_free_rejects_paid_or_nonfree_observation(tmp_path: Path) -> None:
+    from nexus.services.external_worker_runtime import OpenCodeExecutionAdapter
+
+    request = WorkerRequest(
+        provider="opencode",
+        model="opencode/auto-free",
+        prompt="auto",
+        cwd=str(tmp_path),
+        mode="plan",
+        auto_approve=False,
+        timeout_seconds=60,
+        require_free=True,
+        thinking="none",
+    )
+    stdout = json.dumps({
+        "type": "opencode_result",
+        "provider": "opencode",
+        "model": "paid-model",
+        "cost": 0,
+        "finish": "stop",
+    })
+    result = OpenCodeExecutionAdapter().interpret(
+        request,
+        exit_code=0,
+        stdout_text=stdout,
+        stderr_text="",
+    )
+    assert result.status == "FAILED"
+    assert result.failure_kind == "PROVIDER_ATTESTATION_MISMATCH"

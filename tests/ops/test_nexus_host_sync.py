@@ -91,6 +91,14 @@ def _make_source_repo(tmp_path: Path) -> Path:
             ROOT / "nexus/services/external_worker_runtime.py",
             "nexus/services/external_worker_runtime.py",
         ),
+        (
+            ROOT / "nexus/services/opencode_server_client.py",
+            "nexus/services/opencode_server_client.py",
+        ),
+        (
+            ROOT / "scripts/ops/nexus-opencode-server-client",
+            "scripts/ops/nexus-opencode-server-client",
+        ),
     ]:
         dest = repo / relative
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -516,6 +524,10 @@ def test_sync_repairs_incomplete_bootstrap_generation_via_verified_legacy_fallba
         not in {
             "scripts/ops/nexus-external-worker-dispatch",
             "scripts/ops/install_nexus_external_worker_dispatch.sh",
+            "scripts/ops/nexus-opencode-server-client",
+            "nexus/services/direct_operation_journal.py",
+            "nexus/services/external_worker_runtime.py",
+            "nexus/services/opencode_server_client.py",
         }
     ]
     legacy_manifest["components"].pop("external_worker_dispatch", None)
