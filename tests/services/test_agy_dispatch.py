@@ -442,13 +442,12 @@ def test_background_spawn_returns_durable_operation_identity(tmp_path: Path, mon
 def test_parse_agy_attestation_binds_resolved_model_and_conversation(tmp_path: Path) -> None:
     log = tmp_path / "agy.log"
     log.write_text(
-        "\n".join(
-            [
-                'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
-                "I0000 model_resolver.go:93] Resolving model gemini-3.8-flash-low",
-                "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
-            ]
-        ) + "\n",
+        "\n".join([
+            'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
+            "I0000 model_resolver.go:93] Resolving model gemini-3.8-flash-low",
+            "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
+        ])
+        + "\n",
         encoding="utf-8",
     )
     assert dispatch._parse_agy_attestation(log, requested_model="gemini-3.8-flash") == {
@@ -461,12 +460,11 @@ def test_parse_agy_attestation_binds_resolved_model_and_conversation(tmp_path: P
 def test_parse_agy_attestation_fails_closed_without_matching_witnesses(tmp_path: Path) -> None:
     log = tmp_path / "agy.log"
     log.write_text(
-        "\n".join(
-            [
-                'I0000 model_resolver.go:116] model alias "gemini-other" resolved to "gemini-other-low"',
-                "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
-            ]
-        ) + "\n",
+        "\n".join([
+            'I0000 model_resolver.go:116] model alias "gemini-other" resolved to "gemini-other-low"',
+            "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
+        ])
+        + "\n",
         encoding="utf-8",
     )
     assert dispatch._parse_agy_attestation(log, requested_model="gemini-3.8-flash") == {
@@ -479,14 +477,13 @@ def test_parse_agy_attestation_fails_closed_without_matching_witnesses(tmp_path:
 def test_parse_agy_attestation_uses_last_matching_attempt(tmp_path: Path) -> None:
     log = tmp_path / "agy.log"
     log.write_text(
-        "\n".join(
-            [
-                'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
-                "I0000 server.go:1239] Created conversation 11111111-1111-1111-1111-111111111111",
-                'I0001 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low-v2"',
-                "I0001 server.go:1239] Created conversation 22222222-2222-2222-2222-222222222222",
-            ]
-        ) + "\n",
+        "\n".join([
+            'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
+            "I0000 server.go:1239] Created conversation 11111111-1111-1111-1111-111111111111",
+            'I0001 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low-v2"',
+            "I0001 server.go:1239] Created conversation 22222222-2222-2222-2222-222222222222",
+        ])
+        + "\n",
         encoding="utf-8",
     )
     result = dispatch._parse_agy_attestation(log, requested_model="gemini-3.8-flash")
@@ -514,12 +511,11 @@ def test_background_terminal_receipt_persists_agy_attestation(tmp_path: Path, mo
     def fake_dispatch_run(**kwargs):
         log = Path(os.environ["NEXUS_AGY_ATTESTATION_LOG"])
         log.write_text(
-            "\n".join(
-                [
-                    'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
-                    "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
-                ]
-            ) + "\n",
+            "\n".join([
+                'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
+                "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
+            ])
+            + "\n",
             encoding="utf-8",
         )
         kwargs["operation_hook"]({
