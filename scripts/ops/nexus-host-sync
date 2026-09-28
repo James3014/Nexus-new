@@ -188,14 +188,20 @@ def _parse_manifest(data: bytes) -> dict[str, Any]:
         "scripts/ops/nexus-agy-quota",
         "scripts/ops/install_nexus_agy_dispatch.sh",
         "scripts/ops/install_nexus_agy_quota.sh",
-        "scripts/ops/nexus-external-worker-dispatch",
-        "scripts/ops/install_nexus_external_worker_dispatch.sh",
         "nexus/services/agy_account_pool.py",
         "nexus/services/external_account_pool.py",
-        "nexus/services/direct_operation_journal.py",
-        "nexus/services/external_worker_runtime.py",
         "nexus/services/agy_operation_journal.py",
     }
+    components = manifest.get("components", {})
+    if isinstance(components, dict) and isinstance(
+        components.get("external_worker_dispatch"), dict
+    ):
+        required.update({
+            "scripts/ops/nexus-external-worker-dispatch",
+            "scripts/ops/install_nexus_external_worker_dispatch.sh",
+            "nexus/services/direct_operation_journal.py",
+            "nexus/services/external_worker_runtime.py",
+        })
     if not required.issubset(seen):
         raise HostSyncError("HOST_MANIFEST_REQUIRED_RUNTIME_PATH_MISSING")
     return manifest
@@ -420,6 +426,11 @@ def _read_generation(release: Path) -> dict[str, Any]:
     return data
 
 
+def _manifest_has_component(manifest: dict[str, Any], name: str) -> bool:
+    components = manifest.get("components", {})
+    return isinstance(components, dict) and isinstance(components.get(name), dict)
+
+
 def _verify_release_for_activation(
     release: Path,
     *,
@@ -444,11 +455,12 @@ def _verify_release_for_activation(
         raise HostSyncError(f"RELEASE_QUOTA_MISSING:{quota}")
     if _sha256(quota) != generation.get("quota_sha256"):
         raise HostSyncError("RELEASE_QUOTA_HASH_MISMATCH")
-    external_dispatch = release / "bin" / "nexus-external-worker-dispatch"
-    if not external_dispatch.is_file():
-        raise HostSyncError(f"RELEASE_EXTERNAL_DISPATCH_MISSING:{external_dispatch}")
-    if _sha256(external_dispatch) != generation.get("external_dispatcher_sha256"):
-        raise HostSyncError("RELEASE_EXTERNAL_DISPATCH_HASH_MISMATCH")
+    if _manifest_has_component(manifest, "external_worker_dispatch"):
+        external_dispatch = release / "bin" / "nexus-external-worker-dispatch"
+        if not external_dispatch.is_file():
+            raise HostSyncError(f"RELEASE_EXTERNAL_DISPATCH_MISSING:{external_dispatch}")
+        if _sha256(external_dispatch) != generation.get("external_dispatcher_sha256"):
+            raise HostSyncError("RELEASE_EXTERNAL_DISPATCH_HASH_MISMATCH")
 
     manager = _verify_manager(manifest, manager_python)
     if manager["status"] != "VERIFIED":
@@ -469,8 +481,30 @@ def _materialize_release(
     releases.mkdir(parents=True, exist_ok=True)
     release = releases / bundle_sha
     if release.exists():
-        _verify_release_for_activation(release, manager_python=manager_python)
-        return release
+        try:
+            _verify_release_for_activation(release, manager_python=manager_python)
+            return release
+        except HostSyncError as exc:
+            repairable = _manifest_has_component(manifest, "external_worker_dispatch") and str(
+                exc
+            ).startswith("RELEASE_EXTERNAL_DISPATCH_")
+            if not repairable:
+                raise
+
+            current = runtime_root / "current"
+            previous = runtime_root / "previous"
+            if current.is_symlink() and current.resolve(strict=False) == release:
+                if not previous.is_symlink():
+                    raise HostSyncError("INCOMPLETE_RELEASE_HAS_NO_VERIFIED_FALLBACK") from exc
+                fallback = previous.resolve(strict=False)
+                _verify_release_for_activation(fallback, manager_python=manager_python)
+                _atomic_symlink(fallback, current)
+            elif previous.is_symlink() and previous.resolve(strict=False) == release:
+                raise HostSyncError("INCOMPLETE_RELEASE_REFERENCED_AS_PREVIOUS") from exc
+
+            quarantine = releases / f".invalid-{bundle_sha[:12]}-{os.getpid()}"
+            shutil.rmtree(quarantine, ignore_errors=True)
+            os.replace(release, quarantine)
 
     tmp = releases / f".tmp-{bundle_sha[:12]}-{os.getpid()}"
     shutil.rmtree(tmp, ignore_errors=True)
@@ -488,19 +522,27 @@ def _materialize_release(
         external_dispatch_target = bin_dir / "nexus-external-worker-dispatch"
         _install_dispatch(snapshot, dispatch_target)
         _install_quota(snapshot, quota_target)
-        _install_external_worker_dispatch(snapshot, external_dispatch_target)
+        if _manifest_has_component(manifest, "external_worker_dispatch"):
+            _install_external_worker_dispatch(snapshot, external_dispatch_target)
 
         source_dispatch = snapshot / "scripts" / "ops" / "nexus-agy-dispatch"
         source_quota = snapshot / "scripts" / "ops" / "nexus-agy-quota"
-        source_external_dispatch = snapshot / "scripts" / "ops" / "nexus-external-worker-dispatch"
         installed_sha = _sha256(dispatch_target)
         quota_sha = _sha256(quota_target)
-        external_dispatch_sha = _sha256(external_dispatch_target)
+        external_dispatch_sha = None
+        if _manifest_has_component(manifest, "external_worker_dispatch"):
+            source_external_dispatch = (
+                snapshot / "scripts" / "ops" / "nexus-external-worker-dispatch"
+            )
+            external_dispatch_sha = _sha256(external_dispatch_target)
         if _sha256(source_dispatch) != installed_sha:
             raise HostSyncError("DISPATCH_INSTALL_HASH_MISMATCH")
         if _sha256(source_quota) != quota_sha:
             raise HostSyncError("QUOTA_INSTALL_HASH_MISMATCH")
-        if _sha256(source_external_dispatch) != external_dispatch_sha:
+        if (
+            external_dispatch_sha is not None
+            and _sha256(source_external_dispatch) != external_dispatch_sha
+        ):
             raise HostSyncError("EXTERNAL_DISPATCH_INSTALL_HASH_MISMATCH")
 
         generation = {
@@ -510,10 +552,11 @@ def _materialize_release(
             "manifest_sha256": _sha256(snapshot / MANIFEST_PATH),
             "dispatcher_sha256": installed_sha,
             "quota_sha256": quota_sha,
-            "external_dispatcher_sha256": external_dispatch_sha,
             "agy_account_manager": manager["observed"],
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
+        if external_dispatch_sha is not None:
+            generation["external_dispatcher_sha256"] = external_dispatch_sha
         (tmp / "host-generation.json").write_text(
             json.dumps(generation, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
@@ -567,10 +610,14 @@ def _activate(
     _atomic_symlink(current / "bin" / "nexus-agy-dispatch", dispatch_target)
     _atomic_symlink(current / "bin" / "nexus-agy-quota", quota_target)
     _atomic_symlink(current / "snapshot" / "scripts" / "ops" / "nexus-host-sync", sync_target)
-    _atomic_symlink(
-        current / "bin" / "nexus-external-worker-dispatch",
-        external_dispatch_target,
-    )
+    external_bin = release / "bin" / "nexus-external-worker-dispatch"
+    if external_bin.is_file():
+        _atomic_symlink(
+            current / "bin" / "nexus-external-worker-dispatch",
+            external_dispatch_target,
+        )
+    elif external_dispatch_target.is_symlink():
+        external_dispatch_target.unlink()
 
 
 def _same_target(link: Path, expected: Path) -> bool:
@@ -663,21 +710,22 @@ def _status(
         "entrypoint": str(sync_target),
     }
 
-    external_dispatch = release / "bin" / "nexus-external-worker-dispatch"
-    actual_external_dispatch_sha = (
-        _sha256(external_dispatch) if external_dispatch.is_file() else None
-    )
-    external_dispatch_ok = actual_external_dispatch_sha == generation.get(
-        "external_dispatcher_sha256"
-    ) and _same_target(
-        external_dispatch_target,
-        current / "bin" / "nexus-external-worker-dispatch",
-    )
-    payload["components"]["external_worker_dispatch"] = {
-        "status": "VERIFIED" if external_dispatch_ok else "DRIFT",
-        "sha256": actual_external_dispatch_sha,
-        "entrypoint": str(external_dispatch_target),
-    }
+    if _manifest_has_component(manifest, "external_worker_dispatch"):
+        external_dispatch = release / "bin" / "nexus-external-worker-dispatch"
+        actual_external_dispatch_sha = (
+            _sha256(external_dispatch) if external_dispatch.is_file() else None
+        )
+        external_dispatch_ok = actual_external_dispatch_sha == generation.get(
+            "external_dispatcher_sha256"
+        ) and _same_target(
+            external_dispatch_target,
+            current / "bin" / "nexus-external-worker-dispatch",
+        )
+        payload["components"]["external_worker_dispatch"] = {
+            "status": "VERIFIED" if external_dispatch_ok else "DRIFT",
+            "sha256": actual_external_dispatch_sha,
+            "entrypoint": str(external_dispatch_target),
+        }
 
     manifest_ok = _sha256(manifest_path) == generation.get("manifest_sha256")
     bundle_ok = actual_bundle == generation.get("bundle_sha256")

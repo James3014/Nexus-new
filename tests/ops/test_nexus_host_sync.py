@@ -499,3 +499,116 @@ def test_bootstrap_installer_deploys_exact_host_sync_bytes(tmp_path: Path) -> No
     assert mode & stat.S_IXUSR
     assert mode & stat.S_IXGRP
     assert mode & stat.S_IXOTH
+
+
+def test_sync_repairs_incomplete_bootstrap_generation_via_verified_legacy_fallback(
+    tmp_path: Path,
+) -> None:
+    source_repo = _make_source_repo(tmp_path)
+    manifest_path = source_repo / "scripts/ops/nexus-host-runtime-manifest.json"
+    current_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    legacy_manifest = json.loads(json.dumps(current_manifest))
+    legacy_manifest["runtime_files"] = [
+        entry
+        for entry in legacy_manifest["runtime_files"]
+        if entry["path"]
+        not in {
+            "scripts/ops/nexus-external-worker-dispatch",
+            "scripts/ops/install_nexus_external_worker_dispatch.sh",
+        }
+    ]
+    legacy_manifest["components"].pop("external_worker_dispatch", None)
+    manifest_path.write_text(json.dumps(legacy_manifest, indent=2) + "\n", encoding="utf-8")
+    _git(source_repo, "add", "scripts/ops/nexus-host-runtime-manifest.json")
+    _git(source_repo, "commit", "-m", "legacy generation")
+    legacy_revision = _git(source_repo, "rev-parse", "HEAD")
+
+    runtime_root = tmp_path / "runtime"
+    manager_python = tmp_path / "manager-python"
+    dispatch_target = tmp_path / "bin" / "nexus-agy-dispatch"
+    sync_target = tmp_path / "bin" / "nexus-host-sync"
+    external_target = tmp_path / "bin" / "nexus-external-worker-dispatch"
+    _write_fake_manager(manager_python)
+
+    legacy = _invoke(
+        source_repo,
+        runtime_root,
+        manager_python,
+        dispatch_target,
+        sync_target,
+        "sync",
+        revision=legacy_revision,
+    )
+    assert legacy.returncode == 0, legacy.stderr + legacy.stdout
+    legacy_payload = json.loads(legacy.stdout)
+    legacy_bundle = legacy_payload["installed_bundle_sha256"]
+    assert legacy_payload["state"] == "ALIGNED"
+    assert "external_worker_dispatch" not in legacy_payload["components"]
+    assert not external_target.exists()
+    assert not external_target.is_symlink()
+
+    manifest_path.write_text(json.dumps(current_manifest, indent=2) + "\n", encoding="utf-8")
+    _git(source_repo, "add", "scripts/ops/nexus-host-runtime-manifest.json")
+    _git(source_repo, "commit", "-m", "external worker generation")
+    new_revision = _git(source_repo, "rev-parse", "HEAD")
+
+    fresh = _invoke(
+        source_repo,
+        runtime_root,
+        manager_python,
+        dispatch_target,
+        sync_target,
+        "sync",
+        revision=new_revision,
+    )
+    assert fresh.returncode == 0, fresh.stderr + fresh.stdout
+    fresh_payload = json.loads(fresh.stdout)
+    new_bundle = fresh_payload["installed_bundle_sha256"]
+    assert new_bundle != legacy_bundle
+
+    broken_release = runtime_root / "releases" / new_bundle
+    (broken_release / "bin" / "nexus-external-worker-dispatch").unlink()
+    generation_path = broken_release / "host-generation.json"
+    generation = json.loads(generation_path.read_text(encoding="utf-8"))
+    generation.pop("external_dispatcher_sha256", None)
+    generation_path.write_text(json.dumps(generation, indent=2, sort_keys=True) + "\n")
+    if external_target.is_symlink():
+        external_target.unlink()
+
+    repaired = _invoke(
+        source_repo,
+        runtime_root,
+        manager_python,
+        dispatch_target,
+        sync_target,
+        "sync",
+        revision=new_revision,
+    )
+    assert repaired.returncode == 0, repaired.stderr + repaired.stdout
+    repaired_payload = json.loads(repaired.stdout)
+    assert repaired_payload["state"] == "ALIGNED"
+    assert repaired_payload["installed_bundle_sha256"] == new_bundle
+    assert repaired_payload["components"]["external_worker_dispatch"]["status"] == "VERIFIED"
+    assert external_target.is_symlink()
+    assert (runtime_root / "current").resolve().name == new_bundle
+    assert (runtime_root / "previous").resolve().name == legacy_bundle
+    assert not any(
+        child.name.startswith(".invalid-") for child in (runtime_root / "releases").iterdir()
+    )
+
+    rollback = _invoke(
+        source_repo,
+        runtime_root,
+        manager_python,
+        dispatch_target,
+        sync_target,
+        "rollback",
+    )
+    assert rollback.returncode == 0, rollback.stderr + rollback.stdout
+    rollback_payload = json.loads(rollback.stdout)
+    assert rollback_payload["state"] == "INSTALLED"
+    assert rollback_payload["installed_bundle_sha256"] == legacy_bundle
+    assert "external_worker_dispatch" not in rollback_payload["components"]
+    assert not external_target.exists()
+    assert not external_target.is_symlink()
