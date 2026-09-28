@@ -67,7 +67,7 @@ def test_explicit_five_hour_takes_precedence_over_weekly() -> None:
     )
 
 
-def test_dynamic_availability_state_prioritizes_5h_and_filters_fallback() -> None:
+def test_weekly_only_dual_family_account_enters_reserve() -> None:
     now = 2_000_000_000.0
     snapshot = {
         "checked_at": _iso(now),
