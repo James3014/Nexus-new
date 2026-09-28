@@ -421,7 +421,6 @@ def main() -> int:
 
     cal_eligible = [c for c in calibration if c.eligible_candidate]
     cal_fm, cal_fm_receipt = fm_batch(cal_eligible, 2)
-    cal_online = online_batch(online_root, calibration, args.online_model, args.online_effort, args.online_workers)
 
     kind_policy: dict[str, bool] = {}
     for kind in ("golden_classification", "literal_extraction"):
@@ -432,35 +431,30 @@ def main() -> int:
 
     rows_by_arm: dict[str, list[dict[str, Any]]] = {"A0": [], "A2": [], "A4": []}
     fm_receipts: dict[str, list[dict[str, Any]]] = {"A2": [], "A4": []}
-    # Ten source-stable blocks; rotate arm order to reduce time/load drift.
+    # Physical A0 is measured once per holdout case. A2/A4 reuse the exact same
+    # A0 witness only when they would escalate the unchanged original prompt.
     blocks = [holdout[i:i+10] for i in range(0, len(holdout), 10)]
-    arm_orders = (("A0", "A2", "A4"), ("A2", "A4", "A0"), ("A4", "A0", "A2"))
 
-    for bi, block in enumerate(blocks):
-        for arm in arm_orders[bi % len(arm_orders)]:
-            if arm == "A0":
-                online = online_batch(online_root, block, args.online_model, args.online_effort, args.online_workers)
-                for c in block:
-                    o = online[c.case_id]
-                    rows_by_arm[arm].append({
-                        "case_id": c.case_id, "kind": c.kind, "online_called": True,
-                        "accepted_local": False, "fm_correct": None,
-                        "final_correct": bool(o["correct"]),
-                        "end_to_end_latency_ms": o["latency_ms"],
-                        "online": o,
-                    })
-                continue
+    for block in blocks:
+        online = online_batch(online_root, block, args.online_model, args.online_effort, args.online_workers)
+        for c in block:
+            o = online[c.case_id]
+            rows_by_arm["A0"].append({
+                "case_id": c.case_id, "kind": c.kind, "online_called": True,
+                "physical_online_called": True, "accepted_local": False, "fm_correct": None,
+                "final_correct": bool(o["correct"]),
+                "end_to_end_latency_ms": o["latency_ms"],
+                "online_witness_mode": "PHYSICAL_A0",
+                "online": o,
+            })
 
-            concurrency = 2 if arm == "A2" else 4
-            local_candidates = [c for c in block if c.eligible_candidate and kind_policy.get(c.kind, False)]
+        for arm, concurrency in (("A2", 2), ("A4", 4)):
+            local_candidates = [
+                c for c in block
+                if c.eligible_candidate and kind_policy.get(c.kind, False)
+            ]
             fm, receipt = fm_batch(local_candidates, concurrency)
             fm_receipts[arm].append(receipt)
-            escalate = [
-                c for c in block
-                if not (c.eligible_candidate and kind_policy.get(c.kind, False))
-                or not fm[c.case_id]["contract_valid"]
-            ]
-            online = online_batch(online_root, escalate, args.online_model, args.online_effort, args.online_workers)
             for c in block:
                 local_attempt = fm.get(c.case_id)
                 accepted_local = bool(local_attempt and local_attempt["contract_valid"])
@@ -468,18 +462,24 @@ def main() -> int:
                     final_correct = bool(local_attempt["correct"])
                     latency = int(local_attempt["latency_ms"])
                     online_result = None
+                    witness_mode = "LOCAL_PHYSICAL"
                 else:
+                    # Same model, same effort, same original prompt: reuse the paired A0
+                    # physical witness instead of spending a duplicate online call.
                     online_result = online[c.case_id]
                     final_correct = bool(online_result["correct"])
                     fm_latency = int(local_attempt["latency_ms"]) if local_attempt else 0
                     latency = fm_latency + int(online_result["latency_ms"])
+                    witness_mode = "COUNTERFACTUAL_REPLAY_FROM_A0_PHYSICAL"
                 rows_by_arm[arm].append({
                     "case_id": c.case_id, "kind": c.kind,
                     "online_called": not accepted_local,
+                    "physical_online_called": False,
                     "accepted_local": accepted_local,
                     "fm_correct": None if local_attempt is None else bool(local_attempt["correct"]),
                     "final_correct": final_correct,
                     "end_to_end_latency_ms": latency,
+                    "online_witness_mode": witness_mode,
                     "fm": local_attempt,
                     "online": online_result,
                 })
@@ -561,6 +561,8 @@ def main() -> int:
             "parallelism": args.online_workers,
             "cwd": str(online_root),
             "token_usage": "UNKNOWN_NOT_EXPOSED_BY_WRAPPER",
+            "holdout_physical_online_calls": len(holdout),
+            "counterfactual_escalation_replay": True,
         },
         "calibration": {
             "kind_policy": kind_policy,
@@ -572,10 +574,11 @@ def main() -> int:
                 )
                 for kind in ("golden_classification", "literal_extraction")
             },
-            "online_accuracy": sum(1 for r in cal_online.values() if r["correct"]) / len(cal_online),
+            "online_accuracy": "NOT_RUN_GROUND_TRUTH_IS_DETERMINISTIC",
         },
         "holdout": {
             "summaries": summaries,
+            "latency_evidence_mode": "A0_PHYSICAL_PLUS_PAIRED_FM_PHYSICAL_COUNTERFACTUAL_ESCALATION",
             "comparisons_vs_A0": comparisons,
             "oracle_safe_local_fraction_of_all_holdout": oracle_safe / len(holdout),
             "oracle_safe_local_fraction_of_eligible_holdout": (
