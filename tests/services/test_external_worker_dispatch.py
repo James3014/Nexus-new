@@ -212,3 +212,64 @@ def test_background_opencode_receives_stdin_eof_and_completes(
     assert current["provider_session_id"] == "ses_fake"
     assert current["reconciliation"]["retry_permitted"] is False
     assert not journal.prompt_path(operation_id).exists()
+
+
+def _fake_codex(path: Path) -> None:
+    body = """#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo 'codex-cli 0.158.0'
+  exit 0
+fi
+cat <<'EOF'
+{"type":"thread.started","thread_id":"thread-fake"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"cat fixture.txt","status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_0","type":"command_execution","command":"cat fixture.txt","aggregated_output":"ok\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"ok"}}
+{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":2,"reasoning_output_tokens":0}}
+EOF
+exit 0
+"""
+    path.write_text(body, encoding="utf-8")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
+def test_background_codex_operation_reaches_terminal_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = tmp_path / "codex"
+    _fake_codex(fake)
+    monkeypatch.setenv("NEXUS_CODEX_BIN", str(fake))
+
+    root = tmp_path / "ops"
+    record = dispatch._spawn_background(
+        provider="codex",
+        model="gpt-6-luna",
+        prompt="hello",
+        cwd=str(tmp_path),
+        mode="plan",
+        auto_approve=False,
+        timeout_seconds=10,
+        require_free=False,
+        thinking="low",
+        operation_root=root,
+    )
+    operation_id = record["operation_id"]
+
+    deadline = time.time() + 5
+    journal = dispatch._journal("codex", root)
+    while time.time() < deadline:
+        current = journal.read(operation_id)
+        if current["status"] in {"COMPLETED", "FAILED", "OUTCOME_UNKNOWN"}:
+            break
+        time.sleep(0.05)
+
+    current = journal.read(operation_id)
+    assert current["status"] == "COMPLETED"
+    assert current["observed_provider"] == "codex"
+    assert current["observed_model"] == "gpt-6-luna"
+    assert current["total_cost"] is None
+    assert current["provider_session_id"] == "thread-fake"
+    assert current["tool_event_count"] == 1
+    assert current["reconciliation"]["retry_permitted"] is False
+    assert not journal.prompt_path(operation_id).exists()
