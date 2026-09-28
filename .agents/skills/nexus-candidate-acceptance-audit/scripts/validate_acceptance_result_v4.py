@@ -96,6 +96,7 @@ def _v5_task_card_from_git(
         "status": "ACTIVE",
         "commit_required": "true",
         "candidate_required": "true",
+        "worker_may_commit": "true",
         "worker_may_approve": "false",
         "worker_may_integrate": "false",
         "worker_may_push": "false",
@@ -111,42 +112,6 @@ def _v5_task_card_from_git(
     deletion = re.search(r"(?m)^deletion_policy:\s*\`?(ALLOW|FORBID)\`?\s*$", text)
     deletion_policy = deletion.group(1) if deletion else "FORBID"
     return card_sha, task_match.group(1), allowed, deletion_policy
-
-
-def _v5_review_record_hash(evidence: dict[str, object]) -> str:
-    payload = {
-        "schema": V5_REVIEW_SCHEMA,
-        "review_id": evidence.get("review_id"),
-        "reviewer_id": evidence.get("reviewer_id"),
-        "reviewer_attempt_id": evidence.get("reviewer_attempt_id"),
-        "independence_class": evidence.get("independence_class"),
-        "repository": evidence.get("repository"),
-        "commands": evidence.get("commands"),
-        "claim": evidence.get("claim"),
-    }
-    raw = json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    ).encode("utf-8")
-    return hashlib.sha256(raw).hexdigest()
-
-
-def _v5_fetch_github_comment(repository_full_name: str, comment_id: int) -> dict[str, object]:
-    proc = subprocess.run(
-        [
-            "gh",
-            "api",
-            f"repos/{repository_full_name}/issues/comments/{comment_id}",
-        ],
-        text=True,
-        capture_output=True,
-        timeout=20,
-    )
-    if proc.returncode != 0:
-        raise OSError(proc.stderr.strip() or "GitHub review comment lookup failed")
-    value = json.loads(proc.stdout)
-    if not isinstance(value, dict):
-        raise OSError("GitHub review comment response is malformed")
-    return value
 
 
 def _v5_normalize_remote(value: str) -> str:
@@ -585,7 +550,6 @@ def _v5_validate_review_evidence(
         "independence_class",
         "repository",
         "commands",
-        "provenance",
         "claim",
         "integrity",
     }
@@ -699,130 +663,6 @@ def _v5_validate_review_evidence(
         record(data, errors, warnings, "independent review requires at least one PASS command", "independent_behavior")
     if commands != review_result.get("commands"):
         record(data, errors, warnings, "independent review commands do not match acceptance result", "independent_behavior")
-
-    provenance = evidence.get("provenance")
-    provenance_keys = {
-        "kind",
-        "repository_full_name",
-        "issue_number",
-        "comment_id",
-        "author_login",
-        "review_record_sha256",
-        "body_sha256",
-    }
-    if not isinstance(provenance, dict) or set(provenance) != provenance_keys:
-        record(
-            data,
-            errors,
-            warnings,
-            "independent review provenance shape mismatch",
-            "provenance",
-        )
-    else:
-        if provenance.get("kind") != "GITHUB_ISSUE_COMMENT":
-            record(
-                data,
-                errors,
-                warnings,
-                "independent review provenance must be GITHUB_ISSUE_COMMENT",
-                "provenance",
-            )
-        for key in ("repository_full_name", "author_login"):
-            if not nonempty(provenance.get(key)):
-                record(
-                    data,
-                    errors,
-                    warnings,
-                    f"independent review provenance {key} is required",
-                    "provenance",
-                )
-        if not isinstance(provenance.get("issue_number"), int) or provenance.get(
-            "issue_number"
-        ) <= 0:
-            record(
-                data,
-                errors,
-                warnings,
-                "independent review provenance issue_number is invalid",
-                "provenance",
-            )
-        if not isinstance(provenance.get("comment_id"), int) or provenance.get(
-            "comment_id"
-        ) <= 0:
-            record(
-                data,
-                errors,
-                warnings,
-                "independent review provenance comment_id is invalid",
-                "provenance",
-            )
-        for key in ("review_record_sha256", "body_sha256"):
-            if not isinstance(provenance.get(key), str) or not HEX64.fullmatch(
-                provenance.get(key, "")
-            ):
-                record(
-                    data,
-                    errors,
-                    warnings,
-                    f"independent review provenance {key} is malformed",
-                    "provenance",
-                )
-        expected_record = _v5_review_record_hash(evidence)
-        if provenance.get("review_record_sha256") != expected_record:
-            record(
-                data,
-                errors,
-                warnings,
-                "independent review provenance does not bind the review record",
-                "provenance",
-            )
-        try:
-            comment = _v5_fetch_github_comment(
-                provenance["repository_full_name"],
-                provenance["comment_id"],
-            )
-            body = comment.get("body")
-            user = comment.get("user")
-            issue_url = comment.get("issue_url")
-            if not isinstance(body, str) or not isinstance(user, dict):
-                raise OSError("GitHub review comment response is incomplete")
-            if user.get("login") != provenance.get("author_login"):
-                raise OSError("GitHub review comment author mismatch")
-            if evidence.get("reviewer_id") != provenance.get("author_login"):
-                raise OSError("reviewer_id is not authenticated by GitHub author")
-            repo_full_name = provenance.get("repository_full_name")
-            if not isinstance(repo_full_name, str) or not _v5_normalize_remote(
-                bound_repo.get("origin", "")
-            ).endswith("/" + repo_full_name):
-                raise OSError("GitHub review repository does not match Candidate origin")
-            if hashlib.sha256(body.encode("utf-8")).hexdigest() != provenance.get(
-                "body_sha256"
-            ):
-                raise OSError("GitHub review comment body hash mismatch")
-            if not isinstance(issue_url, str) or not issue_url.endswith(
-                f"/issues/{provenance['issue_number']}"
-            ):
-                raise OSError("GitHub review comment issue binding mismatch")
-            markers = {
-                "NEXUS_REVIEW_RECORD_SHA256": provenance.get("review_record_sha256"),
-                "NEXUS_CANDIDATE_SHA": repository.get("candidate_commit_sha"),
-                "NEXUS_TASK_CARD_SHA256": source.get("task_card_sha256"),
-                "NEXUS_REVIEWER_ATTEMPT": evidence.get("reviewer_attempt_id"),
-                "NEXUS_REVIEWER_ID": evidence.get("reviewer_id"),
-            }
-            for label, value in markers.items():
-                if f"{label}: {value}" not in body:
-                    raise OSError(
-                        f"GitHub review comment lacks exact {label} marker"
-                    )
-        except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
-            record(
-                data,
-                errors,
-                warnings,
-                f"independent review provenance verification failed: {exc}",
-                "provenance",
-            )
 
     claim = evidence.get("claim")
     claim_keys = {

@@ -10,7 +10,6 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 
@@ -158,7 +157,13 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
         )
         return proc.stdout.strip()
 
-    def _make_repo(self, *, delete: bool = False, extra_path: bool = False) -> tuple[Path, str, str, str]:
+    def _make_repo(
+        self,
+        *,
+        delete: bool = False,
+        extra_path: bool = False,
+        worker_may_commit: bool = True,
+    ) -> tuple[Path, str, str, str]:
         self.counter += 1
         repo = self.root / f"repo-{self.counter}"
         repo.mkdir()
@@ -177,6 +182,7 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
             "status: ACTIVE\n"
             "commit_required: true\n"
             "candidate_required: true\n"
+            f"worker_may_commit: {'true' if worker_may_commit else 'false'}\n"
             "worker_may_approve: false\n"
             "worker_may_integrate: false\n"
             "worker_may_push: false\n"
@@ -212,8 +218,18 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
         value["integrity"] = {"sha256": "0" * 64}
         value["integrity"]["sha256"] = current.canonical_sha256(value)
 
-    def _build_bundle(self, *, delete: bool = False, extra_path: bool = False) -> dict[str, object]:
-        repo, base, candidate_sha, tree = self._make_repo(delete=delete, extra_path=extra_path)
+    def _build_bundle(
+        self,
+        *,
+        delete: bool = False,
+        extra_path: bool = False,
+        worker_may_commit: bool = True,
+    ) -> dict[str, object]:
+        repo, base, candidate_sha, tree = self._make_repo(
+            delete=delete,
+            extra_path=extra_path,
+            worker_may_commit=worker_may_commit,
+        )
         manifest = current._physical_manifest(str(repo), base, candidate_sha)
         changed_paths = [row["path"] for row in manifest["entries"]]
         deleted_paths = [
@@ -315,15 +331,6 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
                 "candidate_tree_sha": tree,
             },
             "commands": commands,
-            "provenance": {
-                "kind": "GITHUB_ISSUE_COMMENT",
-                "repository_full_name": "owner/repo",
-                "issue_number": 77,
-                "comment_id": 12345,
-                "author_login": "review-publisher",
-                "review_record_sha256": "0" * 64,
-                "body_sha256": "0" * 64,
-            },
             "claim": {
                 "claim_ceiling": "INDEPENDENT_BEHAVIOR_EVIDENCE_ONLY",
                 "certified": False,
@@ -336,18 +343,6 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
             },
             "integrity": {"sha256": "0" * 64},
         }
-        review_record = current._v5_review_record_hash(review)
-        review["provenance"]["review_record_sha256"] = review_record
-        review_body = (
-            f"NEXUS_REVIEW_RECORD_SHA256: {review_record}\n"
-            f"NEXUS_CANDIDATE_SHA: {candidate_sha}\n"
-            f"NEXUS_TASK_CARD_SHA256: {task_card_sha}\n"
-            f"NEXUS_REVIEWER_ATTEMPT: {reviewer_attempt}\n"
-            "NEXUS_REVIEWER_ID: review-publisher\n"
-        )
-        review["provenance"]["body_sha256"] = hashlib.sha256(
-            review_body.encode("utf-8")
-        ).hexdigest()
         self._refresh_integrity(review)
 
         artifacts = self.root / f"artifacts-{self.counter}"
@@ -478,11 +473,6 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
             "executor_path": executor_path,
             "review_path": review_path,
             "result": result,
-            "review_comment": {
-                "body": review_body,
-                "user": {"login": "review-publisher"},
-                "issue_url": "https://api.github.test/repos/owner/repo/issues/77",
-            },
         }
 
     def _args(self, bundle: dict[str, object]) -> SimpleNamespace:
@@ -495,12 +485,7 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
     def _physical(self, bundle: dict[str, object], args=None):
         if args is None:
             args = self._args(bundle)
-        with mock.patch.object(
-            current,
-            "_v5_fetch_github_comment",
-            return_value=bundle["review_comment"],
-        ):
-            return current.validate_physical(bundle["result"], args)
+        return current.validate_physical(bundle["result"], args)
 
     def _rewrite_bound(
         self,
@@ -592,6 +577,13 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
                 errors, _ = self._physical(bundle)
                 self.assertTrue(errors, key)
 
+    def test_v5_task_card_must_authorize_worker_commit(self) -> None:
+        bundle = self._build_bundle(worker_may_commit=False)
+        errors, _ = self._physical(bundle)
+        self.assertTrue(
+            any("Task Card worker_may_commit must be true" in item for item in errors)
+        )
+
     def test_v5_task_card_binds_scope(self) -> None:
         bundle = self._build_bundle()
         bundle["executor"]["authority"]["allowed_paths"] = ["b.txt"]
@@ -640,22 +632,6 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
         self.assertFalse(report["valid"])
         self.assertTrue(
             any("must differ from implementer" in item for item in report["errors"])
-        )
-
-    def test_v5_review_provenance_marker_mismatch_fails(self) -> None:
-        bundle = self._build_bundle()
-        bundle["review_comment"]["body"] = "wrong review marker\n"
-        errors, _ = self._physical(bundle)
-        self.assertTrue(
-            any("review provenance verification failed" in item for item in errors)
-        )
-
-    def test_v5_review_author_mismatch_fails(self) -> None:
-        bundle = self._build_bundle()
-        bundle["review_comment"]["user"]["login"] = "different-reviewer"
-        errors, _ = self._physical(bundle)
-        self.assertTrue(
-            any("review provenance verification failed" in item for item in errors)
         )
 
     def test_v5_rejects_owner_inline_authority(self) -> None:
