@@ -505,6 +505,113 @@ class TestAccountConcurrencyModel(unittest.TestCase):
                 if "quarantine" in p.name:
                     self.assertEqual(data["reason"], AccountFailureKind.QUOTA_EXHAUSTED.value)
 
+    def test_model_family_candidate_tiers_precede_unknown_and_blocked(self):
+        accounts = [
+            AgyAccount(alias="preferred", home_dir=f"{self.test_dir}/home_pref"),
+            AgyAccount(alias="reserve", home_dir=f"{self.test_dir}/home_res"),
+            AgyAccount(alias="fallback", home_dir=f"{self.test_dir}/home_fb"),
+            AgyAccount(alias="unknown", home_dir=f"{self.test_dir}/home_unknown"),
+            AgyAccount(alias="blocked", home_dir=f"{self.test_dir}/home_blocked"),
+        ]
+        mgr = self._create_manager(accounts)
+        coord = self._create_coordinator(mgr)
+        keys = {
+            "NEXUS_AGY_PREFERRED_ACCOUNTS": "preferred",
+            "NEXUS_AGY_RESERVE_ACCOUNTS": "reserve",
+            "NEXUS_AGY_FALLBACK_ACCOUNTS": "fallback",
+            "NEXUS_AGY_BLOCKED_ACCOUNTS": "blocked",
+        }
+        old = {key: os.environ.get(key) for key in keys}
+        claims = []
+        try:
+            os.environ.update(keys)
+            for index in range(4):
+                claims.append(
+                    coord.acquire_claim(
+                        f"worker-tier-{index}",
+                        model_family="gemini",
+                    )
+                )
+            by_hash = {account.alias_hash: account.alias for account in accounts}
+            selected = [by_hash[claim.account_alias_hash] for claim in claims]
+            self.assertEqual(
+                selected,
+                ["preferred", "reserve", "fallback", "unknown"],
+            )
+            self.assertNotIn("blocked", selected)
+        finally:
+            for claim in reversed(claims):
+                claim.release()
+            for key, value in old.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    def test_model_family_quota_retirement_blocks_only_failed_family(self):
+        """Quota exhaustion must not disable a dual-purpose account for another family."""
+        alias = "dual_family_account"
+        acc1 = AgyAccount(alias=alias, home_dir=f"{self.test_dir}/home_family")
+        acc2 = AgyAccount(alias=alias, home_dir=f"{self.test_dir}/home_family")
+        mgr1 = self._create_manager([acc1])
+        mgr2 = self._create_manager([acc2])
+        coord1 = self._create_coordinator(mgr1)
+        coord2 = self._create_coordinator(mgr2)
+
+        claim = coord1.acquire_claim("worker-gemini", model_family="gemini")
+
+        def account_global_mark_bad_must_not_run(*args, **kwargs):
+            raise AssertionError("family-scoped quota failure must not mark account globally bad")
+
+        mgr1.mark_account_bad = account_global_mark_bad_must_not_run
+        coord1.retire_failed_claim(
+            claim,
+            AccountFailureKind.QUOTA_EXHAUSTED,
+            model_family="gemini",
+            unavailable_until=time.time() + 60,
+        )
+
+        self.assertTrue(claim.released)
+        self.assertFalse(coord1.is_quarantined(acc1.alias_hash))
+        self.assertTrue(coord1.is_family_unavailable(acc1.alias_hash, "gemini"))
+        self.assertFalse(coord1.is_family_unavailable(acc1.alias_hash, "claude_gpt"))
+
+        with self.assertRaises(AgyAccountPoolExhaustedError):
+            coord2.acquire_claim(
+                "worker-gemini-2",
+                wait_timeout=0.05,
+                model_family="gemini",
+            )
+
+        claude_claim = coord2.acquire_claim(
+            "worker-claude",
+            wait_timeout=0.1,
+            model_family="claude_gpt",
+        )
+        self.assertEqual(claude_claim.account_alias_hash, acc1.alias_hash)
+        claude_claim.release()
+
+    def test_expired_model_family_block_is_pruned(self):
+        acc = AgyAccount(alias="expiring_family", home_dir=f"{self.test_dir}/home_expire")
+        mgr = self._create_manager([acc])
+        coord = self._create_coordinator(mgr)
+
+        path = coord.mark_family_unavailable(
+            acc.alias_hash,
+            model_family="gemini",
+            reason=AccountFailureKind.RATE_LIMITED.value,
+            unavailable_until=time.time() + 1,
+        )
+        self.assertTrue(path.exists())
+        self.assertTrue(coord.is_family_unavailable(acc.alias_hash, "gemini"))
+
+        blocked = coord.get_family_unavailable_hashes(
+            "gemini",
+            now_ts=time.time() + 2,
+        )
+        self.assertNotIn(acc.alias_hash, blocked)
+        self.assertFalse(path.exists())
+
     def test_n_final_attempt_rotation_eligible_retires_without_replacement(self):
         """N. Final-attempt rotation-eligible failure path (max_calls exhausted / max_calls=1 semantics) retires failed account but does not acquire a replacement."""
         if not dispatch_module:
@@ -607,12 +714,12 @@ class TestAccountConcurrencyModel(unittest.TestCase):
         perms_restored_before_retire: list[bool] = []
         orig_retire = coord.retire_failed_claim
 
-        def spy_retire(claim, failure_kind):
+        def spy_retire(claim, failure_kind, **kwargs):
             actual_home = str(claim.lease.execution_env["HOME"])
             settings_path = Path(actual_home) / ".gemini" / "antigravity-cli" / "settings.json"
             perms_restored_before_retire.append(not settings_path.exists())
             retired_hashes.append(claim.account_alias_hash)
-            return orig_retire(claim, failure_kind)
+            return orig_retire(claim, failure_kind, **kwargs)
 
         coord.retire_failed_claim = spy_retire
         calls: list[str] = []

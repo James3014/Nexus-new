@@ -24,7 +24,7 @@ from nexus.services.external_account_pool import (
 # GitHub credential keys are stripped from every worker execution environment
 # so a delegated worker never inherits a broad Owner GitHub credential that
 # could be interpreted as external-publication authority.
-AGY_ACCOUNT_PREFERENCE_TIERS_VERSION = 1
+AGY_ACCOUNT_PREFERENCE_TIERS_VERSION = 2
 
 GITHUB_CREDENTIAL_KEYS = (
     "GH_TOKEN",
@@ -40,6 +40,14 @@ SENSITIVE_API_KEYS = (
     "GOOGLE_API_KEY",
     "GOOGLE_GENAI_API_KEY",
 ) + GITHUB_CREDENTIAL_KEYS
+
+
+SUPPORTED_AGY_MODEL_FAMILIES = frozenset({"gemini", "claude_gpt"})
+MODEL_FAMILY_SCOPED_FAILURES = frozenset({
+    AccountFailureKind.QUOTA_EXHAUSTED,
+    AccountFailureKind.RATE_LIMITED,
+})
+DEFAULT_FAMILY_UNAVAILABLE_TTL_SECONDS = 300.0
 
 
 class AgyAccountPoolError(RuntimeError):
@@ -783,6 +791,104 @@ class CrossProcessLeaseCoordinator:
         self.poll_interval = poll_interval
         self.default_wait_timeout = default_wait_timeout
 
+    def _family_unavailable_path(self, account_alias_hash: str, model_family: str) -> Path:
+        if model_family not in SUPPORTED_AGY_MODEL_FAMILIES:
+            raise ValueError(f"Unsupported Agy model family: {model_family}")
+        return self.leases_dir / (f"{account_alias_hash}.family-unavailable.{model_family}.json")
+
+    def mark_family_unavailable(
+        self,
+        account_alias_hash: str,
+        *,
+        model_family: str,
+        reason: str,
+        unavailable_until: float | None = None,
+        claim: Optional[AccountLeaseClaim] = None,
+    ) -> Path:
+        """Durably block one account only for one model family across processes."""
+        import time
+
+        self.leases_dir.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        until = (
+            float(unavailable_until)
+            if unavailable_until is not None and float(unavailable_until) > now
+            else now + DEFAULT_FAMILY_UNAVAILABLE_TTL_SECONDS
+        )
+        path = self._family_unavailable_path(account_alias_hash, model_family)
+        payload = {
+            "account_alias_hash": account_alias_hash,
+            "model_family": model_family,
+            "reason": reason,
+            "unavailable_at": now,
+            "unavailable_until": until,
+            "lease_id_hash": claim.lease_id_hash if claim else "none",
+            "consumer_id": claim.lease.consumer_id if claim else "unknown",
+            "pid": os.getpid(),
+        }
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+        try:
+            tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            os.replace(tmp, path)
+        finally:
+            if tmp.exists():
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+        return path
+
+    def get_family_unavailable_hashes(
+        self,
+        model_family: str | None,
+        *,
+        now_ts: float | None = None,
+    ) -> set[str]:
+        """Return active family-scoped blocks, pruning expired markers."""
+        import time
+
+        if model_family not in SUPPORTED_AGY_MODEL_FAMILIES:
+            return set()
+        if not self.leases_dir.exists():
+            return set()
+
+        current = time.time() if now_ts is None else float(now_ts)
+        suffix = f".family-unavailable.{model_family}.json"
+        blocked: set[str] = set()
+        for path in self.leases_dir.glob(f"*{suffix}"):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                until = float(payload.get("unavailable_until"))
+                alias_hash = str(payload.get("account_alias_hash") or "")
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                # A malformed durable block fails closed for the encoded account hash.
+                alias_hash = path.name[: -len(suffix)]
+                if alias_hash:
+                    blocked.add(alias_hash)
+                continue
+
+            if until <= current:
+                try:
+                    path.unlink()
+                except OSError:
+                    blocked.add(alias_hash or path.name[: -len(suffix)])
+                continue
+            if alias_hash:
+                blocked.add(alias_hash)
+        return blocked
+
+    def is_family_unavailable(
+        self,
+        account_alias_hash: str,
+        model_family: str | None,
+        *,
+        now_ts: float | None = None,
+    ) -> bool:
+        return account_alias_hash in self.get_family_unavailable_hashes(
+            model_family,
+            now_ts=now_ts,
+        )
+
     def quarantine_account(
         self,
         account_alias_hash: str,
@@ -870,16 +976,15 @@ class CrossProcessLeaseCoordinator:
         self,
         claim: AccountLeaseClaim,
         failure_kind: AccountFailureKind,
+        *,
+        model_family: str | None = None,
+        unavailable_until: float | None = None,
     ) -> None:
-        """Retire a failed rotation-eligible account.
+        """Retire a failed claim at the narrowest durable availability scope.
 
-        Required invariant:
-        FAILED ROTATION-ELIGIBLE ACCOUNT MUST BECOME DURABLY UNAVAILABLE BEFORE
-        ITS PER-ACCOUNT LOCK IS RELEASED.
-        If provider manager mark-bad persistence fails, fail closed; do not release
-        the account as apparently healthy and continue as if rotation succeeded.
-        A host-local durable quarantine keyed only by account_alias_hash blocks
-        cross-process acquire even if manager persistence fails.
+        Quota/rate failures with a known model family are isolated to
+        account x model_family. Authentication/session/account failures remain
+        account-global and keep the provider manager's normal cooldown semantics.
         """
         if not is_rotation_eligible(failure_kind):
             return
@@ -887,9 +992,26 @@ class CrossProcessLeaseCoordinator:
         if claim.released:
             return
 
-        # Persist provider-manager bad/cooldown state while the per-account lock is
-        # still held. A successful real-manager write is the preferred durable sink
-        # because it preserves the manager's normal cooldown/recovery lifecycle.
+        if (
+            failure_kind in MODEL_FAMILY_SCOPED_FAILURES
+            and model_family in SUPPORTED_AGY_MODEL_FAMILIES
+        ):
+            try:
+                self.mark_family_unavailable(
+                    claim.account_alias_hash,
+                    model_family=model_family,
+                    reason=failure_kind.value,
+                    unavailable_until=unavailable_until,
+                    claim=claim,
+                )
+            except Exception as exc:
+                raise AgyAccountPoolManagerError(
+                    "AGY_FAMILY_RETIREMENT_UNSAFE: family availability state was not persisted"
+                ) from exc
+            claim.release()
+            return
+
+        # Account-global failures keep the provider-manager bad/cooldown state.
         manager_persisted = False
         manager_error: Exception | None = None
         try:
@@ -897,10 +1019,6 @@ class CrossProcessLeaseCoordinator:
         except Exception as exc:
             manager_error = exc
 
-        # In-memory managers and real-manager persistence failures need a host-local
-        # durable quarantine so another process cannot immediately reacquire the
-        # failed account. Do not create a permanent quarantine when manager cooldown
-        # persistence already succeeded.
         quarantine_persisted = False
         quarantine_error: Exception | None = None
         if not manager_persisted:
@@ -920,7 +1038,6 @@ class CrossProcessLeaseCoordinator:
                 "AGY_ACCOUNT_RETIREMENT_UNSAFE: no durable manager or local quarantine state"
             ) from detail
 
-        # At least one durable sink is now established; release the account lock.
         claim.release()
 
     def acquire_claim(
@@ -928,6 +1045,8 @@ class CrossProcessLeaseCoordinator:
         consumer_id: str,
         exclude_hashes: Optional[set[str]] = None,
         wait_timeout: Optional[float] = None,
+        *,
+        model_family: str | None = None,
     ) -> AccountLeaseClaim:
         import fcntl
         import time
@@ -951,6 +1070,12 @@ class CrossProcessLeaseCoordinator:
                     pool = self.manager._ensure_pool()
 
                     quarantined_hashes = self.get_quarantined_hashes()
+                    family_unavailable_hashes = self.get_family_unavailable_hashes(model_family)
+                    blocked_accounts = {
+                        name.strip()
+                        for name in os.getenv("NEXUS_AGY_BLOCKED_ACCOUNTS", "").split(",")
+                        if name.strip()
+                    }
 
                     available_accounts = [
                         acc
@@ -958,6 +1083,8 @@ class CrossProcessLeaseCoordinator:
                         if acc.is_available
                         and acc.alias_hash not in excluded
                         and acc.alias_hash not in quarantined_hashes
+                        and acc.alias_hash not in family_unavailable_hashes
+                        and acc.internal_id not in blocked_accounts
                     ]
 
                     if available_accounts:
@@ -972,6 +1099,15 @@ class CrossProcessLeaseCoordinator:
                             for name in os.getenv("NEXUS_AGY_RESERVE_ACCOUNTS", "").split(",")
                             if name.strip()
                         } - preferred_accounts
+                        fallback_accounts = (
+                            {
+                                name.strip()
+                                for name in os.getenv("NEXUS_AGY_FALLBACK_ACCOUNTS", "").split(",")
+                                if name.strip()
+                            }
+                            - preferred_accounts
+                            - reserve_accounts
+                        )
 
                         def _candidate_sort_key(
                             account: InternalAccountRecord,
@@ -980,8 +1116,10 @@ class CrossProcessLeaseCoordinator:
                                 tier = 0
                             elif account.internal_id in reserve_accounts:
                                 tier = 1
-                            else:
+                            elif account.internal_id in fallback_accounts:
                                 tier = 2
+                            else:
+                                tier = 3
                             # Spread independent dispatches inside each capability tier without
                             # a second shared scheduler state. Per-account flock remains the
                             # authoritative cross-process exclusivity boundary.
@@ -1069,20 +1207,29 @@ class CrossProcessLeaseCoordinator:
         failure_kind: AccountFailureKind,
         exclude_hashes: set[str],
         wait_timeout: Optional[float] = None,
+        *,
+        model_family: str | None = None,
+        unavailable_until: float | None = None,
     ) -> AccountLeaseClaim:
         old_hash = current_claim.account_alias_hash
         old_lease = current_claim.lease
         consumer_id = old_lease.consumer_id
 
-        # 1. Safely retire failed claim: quarantine + manager mark-bad before releasing per-account lock
-        self.retire_failed_claim(current_claim, failure_kind)
+        # 1. Safely retire the failed claim at account or model-family scope.
+        self.retire_failed_claim(
+            current_claim,
+            failure_kind,
+            model_family=model_family,
+            unavailable_until=unavailable_until,
+        )
         exclude_hashes.add(old_hash)
 
-        # 2. Briefly acquire allocator lock and claim another healthy account
+        # 2. Briefly acquire allocator lock and claim another healthy account.
         return self.acquire_claim(
             consumer_id=consumer_id,
             exclude_hashes=exclude_hashes,
             wait_timeout=wait_timeout,
+            model_family=model_family,
         )
 
 
