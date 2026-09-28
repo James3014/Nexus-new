@@ -66,24 +66,36 @@ def test_weekly_only_dual_family_account_enters_reserve() -> None:
     snapshot = {
         "accounts": [
             {
-                "account": "gemini-only",
-                "ok": True,
-                "groups": {
-                    "Gemini Models": {"weekly": _window(70.0)},
-                    "Claude and GPT models": {
-                        "weekly": _window(
-                            0.0,
-                            reset_at="2999-01-01T00:00:00Z",
-                        )
-                    },
-                },
-            },
-            {
-                "account": "google-10",
+                "account": "weekly-only",
                 "ok": True,
                 "groups": {
                     "Gemini Models": {"weekly": _window(86.0)},
                     "Claude and GPT models": {"weekly": _window(100.0)},
+                },
+            },
+            {
+                "account": "gemini-5h",
+                "ok": True,
+                "groups": {
+                    "Gemini Models": {
+                        "5h": _window(80.0),
+                        "weekly": _window(70.0),
+                    },
+                    "Claude and GPT models": {"weekly": _window(100.0)},
+                },
+            },
+            {
+                "account": "dual-5h",
+                "ok": True,
+                "groups": {
+                    "Gemini Models": {
+                        "5h": _window(90.0),
+                        "weekly": _window(60.0),
+                    },
+                    "Claude and GPT models": {
+                        "5h": _window(75.0),
+                        "weekly": _window(65.0),
+                    },
                 },
             },
             {
@@ -98,12 +110,6 @@ def test_weekly_only_dual_family_account_enters_reserve() -> None:
                         },
                         "weekly": _window(90.0),
                     },
-                    "Claude and GPT models": {
-                        "weekly": _window(
-                            0.0,
-                            reset_at="2999-01-01T00:00:00Z",
-                        )
-                    },
                 },
             },
         ]
@@ -114,8 +120,10 @@ def test_weekly_only_dual_family_account_enters_reserve() -> None:
         snapshot,
     )
 
-    assert preferred == ["gemini-only"]
-    assert reserve == ["google-10"]
+    assert preferred == ["gemini-5h"]
+    assert reserve == ["dual-5h"]
+    assert "weekly-only" not in preferred + reserve
+    assert "disabled-5h" not in preferred + reserve
 
 
 def test_installer_deploys_exact_canonical_bytes(tmp_path: Path) -> None:

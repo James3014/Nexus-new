@@ -173,23 +173,28 @@ def _dynamic_preference_tiers(model: str | None, snapshot: dict) -> tuple[list[s
         groups = row.get("groups")
         if not isinstance(name, str) or not isinstance(groups, dict):
             continue
-        gemini, _gemini_window = _usable_quota_window(groups, "Gemini Models")
-        claude_gpt, _claude_gpt_window = _usable_quota_window(
+        gemini, gemini_window = _usable_quota_window(groups, "Gemini Models")
+        claude_gpt, claude_gpt_window = _usable_quota_window(
             groups,
             "Claude and GPT models",
         )
+        gemini_five_hour = gemini and gemini_window == "5h"
+        claude_gpt_five_hour = claude_gpt and claude_gpt_window == "5h"
 
+        # Preference tiers are intentionally 5h-only. Weekly-only accounts stay
+        # in the coordinator's default fallback tier, so they remain usable
+        # without displacing scarce short-window capacity.
         if family == "gemini":
-            if not gemini:
+            if not gemini_five_hour:
                 continue
-            (reserve if claude_gpt else preferred).append(name)
+            (reserve if claude_gpt_five_hour else preferred).append(name)
         elif family == "claude_gpt":
-            if not claude_gpt:
+            if not claude_gpt_five_hour:
                 continue
-            (reserve if gemini else preferred).append(name)
+            (reserve if gemini_five_hour else preferred).append(name)
         else:
-            if gemini == claude_gpt:
-                if gemini:
+            if gemini_five_hour == claude_gpt_five_hour:
+                if gemini_five_hour:
                     reserve.append(name)
                 continue
             preferred.append(name)
