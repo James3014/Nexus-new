@@ -110,7 +110,8 @@ A v5 attempt must already be GOVERNED and must bind a physical
 validator reads those bytes directly from Git and requires:
 
 - the same `task_id`;
-- `artifact_authority: current` and `status: ACTIVE`;
+- exactly one value for every required authority control;
+- `artifact_authority: current`, `status: ACTIVE`, and `execution_lane: GOVERNED`;
 - `commit_required: true`, `candidate_required: true`, and
   `worker_may_commit: true`;
 - `worker_may_approve: false`, `worker_may_integrate: false`, and

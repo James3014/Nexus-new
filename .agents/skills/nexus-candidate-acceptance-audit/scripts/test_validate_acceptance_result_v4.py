@@ -163,6 +163,8 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
         delete: bool = False,
         extra_path: bool = False,
         worker_may_commit: bool = True,
+        execution_lane: str = "GOVERNED",
+        duplicate_status: str | None = None,
     ) -> tuple[Path, str, str, str]:
         self.counter += 1
         repo = self.root / f"repo-{self.counter}"
@@ -180,7 +182,9 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
             "task_id: `goal-standalone-golden-path`\n"
             "owner: Test Owner\n"
             "status: ACTIVE\n"
-            "commit_required: true\n"
+            f"execution_lane: {execution_lane}\n"
+            + (f"status: {duplicate_status}\n" if duplicate_status else "")
+            + "commit_required: true\n"
             "candidate_required: true\n"
             f"worker_may_commit: {'true' if worker_may_commit else 'false'}\n"
             "worker_may_approve: false\n"
@@ -224,11 +228,15 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
         delete: bool = False,
         extra_path: bool = False,
         worker_may_commit: bool = True,
+        execution_lane: str = "GOVERNED",
+        duplicate_status: str | None = None,
     ) -> dict[str, object]:
         repo, base, candidate_sha, tree = self._make_repo(
             delete=delete,
             extra_path=extra_path,
             worker_may_commit=worker_may_commit,
+            execution_lane=execution_lane,
+            duplicate_status=duplicate_status,
         )
         manifest = current._physical_manifest(str(repo), base, candidate_sha)
         changed_paths = [row["path"] for row in manifest["entries"]]
@@ -582,6 +590,20 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
         errors, _ = self._physical(bundle)
         self.assertTrue(
             any("Task Card worker_may_commit must be true" in item for item in errors)
+        )
+
+    def test_v5_task_card_must_be_governed(self) -> None:
+        bundle = self._build_bundle(execution_lane="DIRECT_CANONICAL")
+        errors, _ = self._physical(bundle)
+        self.assertTrue(
+            any("Task Card execution_lane must be GOVERNED" in item for item in errors)
+        )
+
+    def test_v5_task_card_rejects_duplicate_controls(self) -> None:
+        bundle = self._build_bundle(duplicate_status="CLOSED")
+        errors, _ = self._physical(bundle)
+        self.assertTrue(
+            any("Task Card status must appear exactly once" in item for item in errors)
         )
 
     def test_v5_task_card_binds_scope(self) -> None:

@@ -94,6 +94,7 @@ def _v5_task_card_from_git(
     required_controls = {
         "artifact_authority": "current",
         "status": "ACTIVE",
+        "execution_lane": "GOVERNED",
         "commit_required": "true",
         "candidate_required": "true",
         "worker_may_commit": "true",
@@ -103,11 +104,13 @@ def _v5_task_card_from_git(
         "AUTO_CHAIN": "false",
     }
     for key, expected in required_controls.items():
-        control = re.search(
+        controls = re.findall(
             rf"(?m)^{re.escape(key)}:\s*\`?([^\s\`]+)\`?\s*$",
             text,
         )
-        if control is None or control.group(1) != expected:
+        if len(controls) != 1:
+            raise OSError(f"Task Card {key} must appear exactly once")
+        if controls[0] != expected:
             raise OSError(f"Task Card {key} must be {expected}")
     deletion = re.search(r"(?m)^deletion_policy:\s*\`?(ALLOW|FORBID)\`?\s*$", text)
     deletion_policy = deletion.group(1) if deletion else "FORBID"
