@@ -17,6 +17,8 @@ DISPATCH = ROOT / "scripts" / "ops" / "nexus-agy-dispatch"
 DISPATCH_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_agy_dispatch.sh"
 QUOTA = ROOT / "scripts" / "ops" / "nexus-agy-quota"
 QUOTA_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_agy_quota.sh"
+EXTERNAL_DISPATCH = ROOT / "scripts" / "ops" / "nexus-external-worker-dispatch"
+EXTERNAL_DISPATCH_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_external_worker_dispatch.sh"
 MANAGER_SHA = "4c0e326fc72ea98f9d6d80957055a4e8a2d7387f681dea903f2a072942d2e31c"
 LAUNCHD_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_host_sync_launchd.sh"
 BOOTSTRAP_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_host_sync.sh"
@@ -67,6 +69,11 @@ def _make_source_repo(tmp_path: Path) -> Path:
         (DISPATCH_INSTALLER, "scripts/ops/install_nexus_agy_dispatch.sh"),
         (QUOTA, "scripts/ops/nexus-agy-quota"),
         (QUOTA_INSTALLER, "scripts/ops/install_nexus_agy_quota.sh"),
+        (EXTERNAL_DISPATCH, "scripts/ops/nexus-external-worker-dispatch"),
+        (
+            EXTERNAL_DISPATCH_INSTALLER,
+            "scripts/ops/install_nexus_external_worker_dispatch.sh",
+        ),
         (ROOT / "nexus/services/agy_account_pool.py", "nexus/services/agy_account_pool.py"),
         (
             ROOT / "nexus/services/external_account_pool.py",
@@ -75,6 +82,14 @@ def _make_source_repo(tmp_path: Path) -> Path:
         (
             ROOT / "nexus/services/agy_operation_journal.py",
             "nexus/services/agy_operation_journal.py",
+        ),
+        (
+            ROOT / "nexus/services/direct_operation_journal.py",
+            "nexus/services/direct_operation_journal.py",
+        ),
+        (
+            ROOT / "nexus/services/external_worker_runtime.py",
+            "nexus/services/external_worker_runtime.py",
         ),
     ]:
         dest = repo / relative
@@ -99,6 +114,7 @@ def _invoke(
     desired_bundle: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     quota_target = dispatch_target.parent / "nexus-agy-quota"
+    external_dispatch_target = dispatch_target.parent / "nexus-external-worker-dispatch"
     argv = [
         sys.executable,
         str(HOST_SYNC),
@@ -110,6 +126,8 @@ def _invoke(
         str(quota_target),
         "--sync-target",
         str(sync_target),
+        "--external-dispatch-target",
+        str(external_dispatch_target),
         "--manager-python",
         str(manager_python),
         command,
@@ -155,9 +173,11 @@ def test_sync_materializes_exact_generation_and_entrypoints(tmp_path: Path) -> N
     assert payload["desired_bundle_sha256"] == bundle
     assert payload["components"]["agy_dispatch"]["status"] == "VERIFIED"
     assert payload["components"]["agy_quota"]["status"] == "VERIFIED"
+    assert payload["components"]["external_worker_dispatch"]["status"] == "VERIFIED"
     assert payload["components"]["agy_account_manager"]["status"] == "VERIFIED"
     assert dispatch_target.is_symlink()
     assert (dispatch_target.parent / "nexus-agy-quota").is_symlink()
+    assert (dispatch_target.parent / "nexus-external-worker-dispatch").is_symlink()
     assert sync_target.is_symlink()
 
     receipt = json.loads((runtime_root / "releases" / bundle / "host-generation.json").read_text())
