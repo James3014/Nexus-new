@@ -89,6 +89,7 @@ class WorkerCommand:
     argv: tuple[str, ...]
     env: Mapping[str, str]
     cli_version: str | None
+    auth_mode: str | None = None
 
 
 @dataclass(frozen=True)
@@ -152,6 +153,19 @@ def _cli_version(executable: str) -> str | None:
     return value[0].strip() if value else None
 
 
+def _cli_supports_flag(executable: str, flag: str) -> bool:
+    proc = subprocess.run(
+        [executable, "--help"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return False
+    return flag in (proc.stdout + "\n" + proc.stderr)
+
+
 def _jsonl_events(text: str) -> list[dict[str, object]]:
     events: list[dict[str, object]] = []
     for line in text.splitlines():
@@ -162,6 +176,54 @@ def _jsonl_events(text: str) -> list[dict[str, object]]:
         if isinstance(value, dict):
             events.append(value)
     return events
+
+
+def _codex_login_mode(executable: str) -> str | None:
+    proc = subprocess.run(
+        [executable, "login", "status"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    status = (proc.stdout + "\n" + proc.stderr).strip()
+    if proc.returncode == 0 and "Logged in using ChatGPT" in status:
+        return "chatgpt"
+    if proc.returncode == 0 and "API" in status and "key" in status.lower():
+        return "api_key"
+    return None
+
+
+def _codex_model_slugs(executable: str) -> set[str]:
+    proc = subprocess.run(
+        [executable, "debug", "models"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return set()
+    try:
+        payload = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return set()
+    if isinstance(payload, dict):
+        items = payload.get("models", payload.get("data", []))
+    elif isinstance(payload, list):
+        items = payload
+    else:
+        items = []
+    if not isinstance(items, list):
+        return set()
+    slugs: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        slug = item.get("slug") or item.get("id")
+        if isinstance(slug, str) and slug:
+            slugs.add(slug)
+    return slugs
 
 
 class ClineExecutionAdapter:
@@ -348,6 +410,179 @@ class ClineExecutionAdapter:
         )
 
 
+class CodexExecutionAdapter:
+    provider = "codex"
+
+    def default_model(self) -> str:
+        configured = os.getenv("NEXUS_CODEX_MODEL", "").strip()
+        executable = _resolve_executable("NEXUS_CODEX_BIN", "codex")
+        available = _codex_model_slugs(executable)
+        if configured:
+            if configured not in available:
+                raise ExternalWorkerRuntimeError("CODEX_MODEL_UNAVAILABLE")
+            return configured
+        for candidate in (
+            "gpt-6-astra",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+        ):
+            if candidate in available:
+                return candidate
+        raise ExternalWorkerRuntimeError("CODEX_NO_SUPPORTED_MODEL_AVAILABLE")
+
+    def compile(
+        self,
+        request: WorkerRequest,
+        *,
+        binding: AccountBinding,
+    ) -> WorkerCommand:
+        if binding.provider != self.provider:
+            raise ExternalWorkerRuntimeError("ACCOUNT_BINDING_PROVIDER_MISMATCH")
+        if request.provider != self.provider:
+            raise ExternalWorkerRuntimeError("WORKER_REQUEST_PROVIDER_MISMATCH")
+        if request.mode not in {"plan", "act"}:
+            raise ExternalWorkerRuntimeError("CODEX_MODE_INVALID")
+        if request.require_free:
+            raise ExternalWorkerRuntimeError("CODEX_FREE_MODEL_CONTRACT_UNSUPPORTED")
+        if request.mode == "act" and not request.auto_approve:
+            raise ExternalWorkerRuntimeError("CODEX_ACT_REQUIRES_AUTO_APPROVE")
+
+        executable = _resolve_executable("NEXUS_CODEX_BIN", "codex")
+        auth_mode = _codex_login_mode(executable)
+        if auth_mode != "chatgpt":
+            raise ExternalWorkerRuntimeError("CODEX_CHATGPT_AUTH_REQUIRED")
+        if request.model not in _codex_model_slugs(executable):
+            raise ExternalWorkerRuntimeError("CODEX_MODEL_UNAVAILABLE")
+
+        sandbox = "read-only" if request.mode == "plan" else "workspace-write"
+        argv = [executable]
+        if _cli_supports_flag(executable, "--no-daemon"):
+            argv.append("--no-daemon")
+        argv += [
+            "-a",
+            "never",
+            "exec",
+            "--json",
+            "--ephemeral",
+            "--ignore-user-config",
+            "-m",
+            request.model,
+            "-s",
+            sandbox,
+            "-C",
+            request.cwd,
+            "--skip-git-repo-check",
+        ]
+        if request.thinking and request.thinking != "none":
+            argv += ["-c", f'model_reasoning_effort="{request.thinking}"']
+        argv.append(request.prompt)
+
+        env = dict(os.environ)
+        env.update(dict(binding.execution_env))
+        for key in (
+            "OPENAI_API_KEY",
+            "OPENAI_API_KEY_FILE",
+            "OPENAI_BASE_URL",
+            "OPENAI_ORG_ID",
+            "OPENAI_ORGANIZATION",
+            "OPENAI_PROJECT",
+            "CODEX_ACCESS_TOKEN",
+        ):
+            env.pop(key, None)
+
+        return WorkerCommand(
+            argv=tuple(argv),
+            env=env,
+            cli_version=_cli_version(executable),
+            auth_mode=auth_mode,
+        )
+
+    def interpret(
+        self,
+        request: WorkerRequest,
+        *,
+        exit_code: int,
+        stdout_text: str,
+        stderr_text: str,
+    ) -> WorkerOutcome:
+        events = _jsonl_events(stdout_text)
+        thread_ids = [
+            str(event["thread_id"])
+            for event in events
+            if event.get("type") == "thread.started"
+            and isinstance(event.get("thread_id"), str)
+            and event.get("thread_id")
+        ]
+        turns_completed = [event for event in events if event.get("type") == "turn.completed"]
+        agent_messages: list[str] = []
+        tool_event_count = 0
+        for event in events:
+            if event.get("type") not in {"item.started", "item.completed"}:
+                continue
+            item = event.get("item")
+            if not isinstance(item, dict):
+                continue
+            item_type = str(item.get("type") or "")
+            if event.get("type") == "item.completed" and item_type == "agent_message":
+                text = item.get("text")
+                if isinstance(text, str):
+                    agent_messages.append(text)
+            if event.get("type") == "item.completed" and item_type in {
+                "command_execution",
+                "mcp_tool_call",
+                "file_change",
+                "web_search",
+            }:
+                tool_event_count += 1
+
+        terminal_success = (
+            exit_code == 0 and bool(thread_ids) and bool(turns_completed) and bool(agent_messages)
+        )
+        if terminal_success:
+            return WorkerOutcome(
+                status="COMPLETED",
+                failure_kind=None,
+                observed_provider="openai-chatgpt",
+                observed_model=None,
+                finish_reason="completed",
+                total_cost=None,
+                provider_session_id=thread_ids[-1],
+                tool_event_count=tool_event_count,
+                retry_permitted=False,
+                details={
+                    "attestation": "catalog-listed+explicit-model-arg+chatgpt-login+turn-completed"
+                },
+            )
+
+        failure_text = (stderr_text + "\n" + stdout_text).lower()
+        if "usage limit" in failure_text or "quota" in failure_text or "rate limit" in failure_text:
+            failure_kind = AccountFailureKind.QUOTA_EXHAUSTED.value
+        elif "auth" in failure_text or "login" in failure_text or "unauthorized" in failure_text:
+            failure_kind = AccountFailureKind.AUTH_OR_SESSION_INVALID.value
+        elif "timeout" in failure_text or "timed out" in failure_text:
+            failure_kind = AccountFailureKind.TIMEOUT.value
+        else:
+            failure_kind = AccountFailureKind.UNKNOWN.value
+
+        return WorkerOutcome(
+            status="FAILED",
+            failure_kind=failure_kind,
+            observed_provider="openai-chatgpt" if thread_ids else None,
+            observed_model=None,
+            finish_reason=None,
+            total_cost=None,
+            provider_session_id=thread_ids[-1] if thread_ids else None,
+            tool_event_count=tool_event_count,
+            retry_permitted=False,
+            details={
+                "exit_code": exit_code,
+                "turn_completed": bool(turns_completed),
+                "agent_message_count": len(agent_messages),
+            },
+        )
+
+
 class OpenCodeExecutionAdapter:
     provider = "opencode"
 
@@ -524,6 +759,8 @@ def get_execution_adapter(provider: str) -> ExecutionAdapter:
         return ClineExecutionAdapter()
     if key == "opencode":
         return OpenCodeExecutionAdapter()
+    if key == "codex":
+        return CodexExecutionAdapter()
     raise ExternalWorkerRuntimeError(f"EXTERNAL_WORKER_PROVIDER_UNSUPPORTED:{key}")
 
 
@@ -541,4 +778,6 @@ def get_account_adapter(provider: str) -> AccountAdapter:
         return NoopAccountAdapter("cline")
     if key == "opencode":
         return NoopAccountAdapter("opencode")
+    if key == "codex":
+        return NoopAccountAdapter("codex")
     raise ExternalWorkerRuntimeError(f"EXTERNAL_ACCOUNT_ADAPTER_UNSUPPORTED:{key}")

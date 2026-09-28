@@ -212,3 +212,11 @@ def test_background_opencode_receives_stdin_eof_and_completes(
     assert current["provider_session_id"] == "ses_fake"
     assert current["reconciliation"]["retry_permitted"] is False
     assert not journal.prompt_path(operation_id).exists()
+
+
+def test_default_cost_policy_requires_free_only_for_free_catalog_providers() -> None:
+    assert dispatch._resolve_require_free("cline", require_free=False, allow_paid_model=False)
+    assert dispatch._resolve_require_free("opencode", require_free=False, allow_paid_model=False)
+    assert not dispatch._resolve_require_free("codex", require_free=False, allow_paid_model=False)
+    with pytest.raises(dispatch.ExternalWorkerRuntimeError, match="MODEL_COST_POLICY_CONFLICT"):
+        dispatch._resolve_require_free("codex", require_free=True, allow_paid_model=True)
