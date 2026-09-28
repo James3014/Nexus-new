@@ -8,11 +8,19 @@
       "mode": "0755"
     },
     {
+      "path": "scripts/ops/nexus-agy-quota",
+      "mode": "0755"
+    },
+    {
       "path": "scripts/ops/nexus-host-sync",
       "mode": "0755"
     },
     {
       "path": "scripts/ops/install_nexus_agy_dispatch.sh",
+      "mode": "0755"
+    },
+    {
+      "path": "scripts/ops/install_nexus_agy_quota.sh",
       "mode": "0755"
     },
     {
@@ -36,6 +44,10 @@
     "agy_dispatch": {
       "source_path": "scripts/ops/nexus-agy-dispatch",
       "installer_path": "scripts/ops/install_nexus_agy_dispatch.sh"
+    },
+    "agy_quota": {
+      "source_path": "scripts/ops/nexus-agy-quota",
+      "installer_path": "scripts/ops/install_nexus_agy_quota.sh"
     },
     "agy_account_manager": {
       "package": "agy-cli-manager",
