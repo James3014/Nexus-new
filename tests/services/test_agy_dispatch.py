@@ -437,3 +437,153 @@ def test_background_spawn_returns_durable_operation_identity(tmp_path: Path, mon
     assert "--operation-run" in captured["argv"]
     prompt_path = root / "operations" / record["operation_id"] / ".prompt"
     assert stat.S_IMODE(prompt_path.stat().st_mode) == 0o600
+
+
+def test_parse_agy_attestation_binds_resolved_model_and_conversation(tmp_path: Path) -> None:
+    log = tmp_path / "agy.log"
+    log.write_text(
+        "\n".join([
+            'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
+            "I0000 model_resolver.go:93] Resolving model gemini-3.8-flash-low",
+            "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
+        ])
+        + "\n",
+        encoding="utf-8",
+    )
+    assert dispatch._parse_agy_attestation(log, requested_model="gemini-3.8-flash") == {
+        "observed_provider": "agy",
+        "observed_model": "gemini-3.8-flash-low",
+        "provider_session_id": "f67d38d4-f220-4bc0-a216-cef594235952",
+    }
+
+
+def test_parse_agy_attestation_fails_closed_without_matching_witnesses(tmp_path: Path) -> None:
+    log = tmp_path / "agy.log"
+    log.write_text(
+        "\n".join([
+            'I0000 model_resolver.go:116] model alias "gemini-other" resolved to "gemini-other-low"',
+            "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
+        ])
+        + "\n",
+        encoding="utf-8",
+    )
+    assert dispatch._parse_agy_attestation(log, requested_model="gemini-3.8-flash") == {
+        "observed_provider": None,
+        "observed_model": None,
+        "provider_session_id": None,
+    }
+
+
+def test_parse_agy_attestation_uses_last_matching_attempt(tmp_path: Path) -> None:
+    log = tmp_path / "agy.log"
+    log.write_text(
+        "\n".join([
+            'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
+            "I0000 server.go:1239] Created conversation 11111111-1111-1111-1111-111111111111",
+            'I0001 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low-v2"',
+            "I0001 server.go:1239] Created conversation 22222222-2222-2222-2222-222222222222",
+        ])
+        + "\n",
+        encoding="utf-8",
+    )
+    result = dispatch._parse_agy_attestation(log, requested_model="gemini-3.8-flash")
+    assert result["observed_model"] == "gemini-3.8-flash-low-v2"
+    assert result["provider_session_id"] == "22222222-2222-2222-2222-222222222222"
+
+
+def test_background_terminal_receipt_persists_agy_attestation(tmp_path: Path, monkeypatch) -> None:
+    root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-3.8-flash",
+        effort="low",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "attestation probe")
+
+    def fake_dispatch_run(**kwargs):
+        log = Path(os.environ["NEXUS_AGY_ATTESTATION_LOG"])
+        log.write_text(
+            "\n".join([
+                'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
+                "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
+            ])
+            + "\n",
+            encoding="utf-8",
+        )
+        kwargs["operation_hook"]({
+            "phase": "EXECUTING",
+            "attempts": 1,
+            "rotations": 0,
+            "account_alias_hash": "acct",
+            "lease_id_hash": "lease",
+        })
+        return 0
+
+    monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
+    code = dispatch._run_background_operation(
+        operation_id=operation_id,
+        prompt_file=str(prompt_path),
+        cwd=str(tmp_path),
+        mode="plan",
+        model="gemini-3.8-flash",
+        effort="low",
+        timeout=30,
+        max_calls=1,
+        pool_wait_timeout=1.0,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=root,
+        heartbeat_interval=0.01,
+    )
+    record = journal.read(operation_id)
+    assert code == 0
+    assert record["status"] == "COMPLETED"
+    assert record["observed_provider"] == "agy"
+    assert record["observed_model"] == "gemini-3.8-flash-low"
+    assert record["provider_session_id"] == "f67d38d4-f220-4bc0-a216-cef594235952"
+    assert "NEXUS_AGY_ATTESTATION_LOG" not in os.environ
+
+
+def test_run_agy_passes_operation_local_attestation_log(tmp_path: Path, monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class Result:
+        returncode = 0
+        stdout = "ok"
+        stderr = ""
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        captured["kwargs"] = kwargs
+        return Result()
+
+    log = tmp_path / "operation" / "agy.log"
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(log))
+    monkeypatch.setattr(dispatch.shutil, "which", lambda name: "/tmp/fake-agy")
+    monkeypatch.setattr(dispatch.subprocess, "run", fake_run)
+    code, out, err, timed_out, _ = dispatch.run_agy(
+        env={"HOME": str(tmp_path)},
+        prompt="identity probe",
+        cwd=str(tmp_path),
+        mode="plan",
+        model="gemini-3.8-flash",
+        effort="low",
+        timeout=30,
+    )
+    assert code == 0
+    assert out == "ok"
+    assert err == ""
+    assert timed_out is False
+    argv = captured["argv"]
+    assert "--log-file" in argv
+    assert argv[argv.index("--log-file") + 1] == str(log)
+    assert log.parent.is_dir()
