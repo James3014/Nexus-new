@@ -474,7 +474,6 @@ class CodexExecutionAdapter:
             and bool(agent_messages)
             and not failed_turns
             and not top_errors
-            and not item_errors
         )
         if terminal_success:
             return WorkerOutcome(

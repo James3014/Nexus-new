@@ -549,3 +549,49 @@ def test_codex_model_rejection_is_terminal_model_error(tmp_path: Path) -> None:
     assert result.failure_kind == "MODEL_OR_TASK_ERROR"
     assert result.observed_model is None
     assert result.retry_permitted is False
+
+
+def test_codex_nonfatal_item_warning_does_not_override_completed_turn(
+    tmp_path: Path,
+) -> None:
+    request = _codex_request(tmp_path)
+    stdout = "\n".join([
+        json.dumps({
+            "type": "thread.started",
+            "thread_id": "thread-warning",
+        }),
+        json.dumps({"type": "turn.started"}),
+        json.dumps({
+            "type": "item.completed",
+            "item": {
+                "id": "item_warn",
+                "type": "error",
+                "message": "Skill descriptions were shortened to fit the skills context budget.",
+            },
+        }),
+        json.dumps({
+            "type": "item.completed",
+            "item": {
+                "id": "item_0",
+                "type": "agent_message",
+                "text": "ok",
+            },
+        }),
+        json.dumps({
+            "type": "turn.completed",
+            "usage": {
+                "input_tokens": 100,
+                "cached_input_tokens": 0,
+                "output_tokens": 5,
+            },
+        }),
+    ])
+    result = CodexExecutionAdapter().interpret(
+        request,
+        exit_code=0,
+        stdout_text=stdout,
+        stderr_text="",
+    )
+    assert result.status == "COMPLETED"
+    assert result.provider_session_id == "thread-warning"
+    assert result.retry_permitted is False
