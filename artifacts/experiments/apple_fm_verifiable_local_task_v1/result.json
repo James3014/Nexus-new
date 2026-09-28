@@ -1,0 +1,844 @@
+{
+  "schema": "nexus.experiment.apple_fm_verifiable_local_task.v1",
+  "status": "COMPLETE",
+  "claim_ceiling": "EXPERIMENT_ONLY_NO_ROUTING_AUTHORITY",
+  "source_commit": "4a9569c20d0d167aaf2796ae3256e12cf2bcfc22",
+  "source_tree": "8b85bcd5a7b78471790d2ae27f2d44c77b6addc0",
+  "source_result_path": "/Users/james/.local/share/nexus-agy-direct/worktrees/apple-fm-value-ab-v1/artifacts/experiments/apple_fm_value_ab_v2/result.json",
+  "source_result_sha256": "fa852e37ac78ef5848f69b53f081daa29357d72f2a84fd7b69750858c611512b",
+  "cohort_sha256": "063ff493a3f90c99fbd79ae7209fd1398326fa370d2815f27abe51f0b8fb0151",
+  "cohort_count": 50,
+  "classes": {
+    "SUCCESS": 25,
+    "TIMEOUT": 25,
+    "UNKNOWN": 0
+  },
+  "network_denial_verified": true,
+  "deterministic": {
+    "source_contract": "nexus/services/external_worker_runtime.py failure-text classification + structured completion receipt",
+    "accuracy": 1.0,
+    "mean_latency_us": 0.173297496,
+    "rows": [
+      {
+        "case_id": "TRIAGE-001",
+        "label": "SUCCESS",
+        "correct": true,
+        "latency_us_per_call": 0.12499160000000001
+      },
+      {
+        "case_id": "TRIAGE-002",
+        "label": "SUCCESS",
+        "correct": true,
+        "latency_us_per_call": 0.1211125
+      },
+      {
+        "case_id": "TRIAGE-003",
+        "label": "SUCCESS",
+        "correct": true,
+        "latency_us_per_call": 0.1276125
+      },
+      {
+        "case_id": "TRIAGE-004",
+        "label": "SUCCESS",
+        "correct": true,
+        "latency_us_per_call": 0.1305875
+      },
+      {
+        "case_id": "TRIAGE-005",
+        "label": "SUCCESS",
+        "correct": true,
+        "latency_us_per_call": 0.1237042
+      },
+      {
+        "case_id": "TRIAGE-006",
+        "label": "SUCCESS",
+        "correct": true,
+        "latency_us_per_call": 0.126825
+      },
+      {
+        "case_id": "TRIAGE-007",
+        "label": "SUCCESS",
+        "correct": true,
+        "latency_us_per_call": 0.12234579999999999
+      },
+      {
+        "case_id": "TRIAGE-008",
+        "label": "SUCCESS",
+        "correct": true,
+        "latency_us_per_call": 0.1219667
+      },
+      {
+        "case_id": "TRIAGE-009",
+        "label": "SUCCESS",
+        "correct": true,
+        "latency_us_per_call": 0.1214167
+      },
+      {
+        "case_id": "TRIAGE-010",
+        "label": "SUCCESS",
+        "correct": true,
+        "latency_us_per_call": 0.1180708
+      },
+      {
+        "case_id": "TRIAGE-011",
+        "label": "SUCCESS",
+        "correct": true,
+        "latency_us_per_call": 0.119825
+      },
+      {
+        "case_id": "TRIAGE-012",
+        "label": "SUCCESS",
+        "correct": true,
+        "latency_us_per_call": 0.11833750000000001
+      },
+      {
+        "case_id": "TRIAGE-013",
+        "label": "SUCCESS",
+        "correct": true,
+        "latency_us_per_call": 0.1179875
+      },
+      {
+        "case_id": "TRIAGE-014",
+        "label": "SUCCESS",
+        "correct": true,
+        "latency_us_per_call": 0.11830410000000001
+      },
+      {
+        "case_id": "TRIAGE-015",
+        "label": "SUCCESS",
+        "correct": true,
+        "latency_us_per_call": 0.1182375
+      },
+      {
+        "case_id": "TRIAGE-016",
+        "label": "SUCCESS",
+        "correct": true,
+        "latency_us_per_call": 0.1197333
+      },
+      {
+        "case_id": "TRIAGE-017",
+        "label": "SUCCESS",
+        "correct": true,
+        "latency_us_per_call": 0.11880410000000001
+      },
+      {
+        "case_id": "TRIAGE-018",
+        "label": "SUCCESS",
+        "correct": true,
+        "latency_us_per_call": 0.11721670000000001
+      },
+      {
+        "case_id": "TRIAGE-019",
+        "label": "SUCCESS",
+        "correct": true,
+        "latency_us_per_call": 0.1170583
+      },
+      {
+        "case_id": "TRIAGE-020",
+        "label": "SUCCESS",
+        "correct": true,
+        "latency_us_per_call": 0.1185792
+      },
+      {
+        "case_id": "TRIAGE-021",
+        "label": "SUCCESS",
+        "correct": true,
+        "latency_us_per_call": 0.1178875
+      },
+      {
+        "case_id": "TRIAGE-022",
+        "label": "TIMEOUT",
+        "correct": true,
+        "latency_us_per_call": 0.2093167
+      },
+      {
+        "case_id": "TRIAGE-023",
+        "label": "TIMEOUT",
+        "correct": true,
+        "latency_us_per_call": 0.2073
+      },
+      {
+        "case_id": "TRIAGE-024",
+        "label": "SUCCESS",
+        "correct": true,
+        "latency_us_per_call": 0.118675
+      },
+      {
+        "case_id": "TRIAGE-025",
+        "label": "SUCCESS",
+        "correct": true,
+        "latency_us_per_call": 0.1194458
+      },
+      {
+        "case_id": "TRIAGE-026",
+        "label": "TIMEOUT",
+        "correct": true,
+        "latency_us_per_call": 0.2094042
+      },
+      {
+        "case_id": "TRIAGE-027",
+        "label": "SUCCESS",
+        "correct": true,
+        "latency_us_per_call": 0.1182292
+      },
+      {
+        "case_id": "TRIAGE-028",
+        "label": "SUCCESS",
+        "correct": true,
+        "latency_us_per_call": 0.11858750000000001
+      },
+      {
+        "case_id": "TRIAGE-029",
+        "label": "TIMEOUT",
+        "correct": true,
+        "latency_us_per_call": 0.2150833
+      },
+      {
+        "case_id": "TRIAGE-030",
+        "label": "TIMEOUT",
+        "correct": true,
+        "latency_us_per_call": 0.2142417
+      },
+      {
+        "case_id": "TRIAGE-031",
+        "label": "TIMEOUT",
+        "correct": true,
+        "latency_us_per_call": 0.21020830000000001
+      },
+      {
+        "case_id": "TRIAGE-032",
+        "label": "TIMEOUT",
+        "correct": true,
+        "latency_us_per_call": 0.2082125
+      },
+      {
+        "case_id": "TRIAGE-033",
+        "label": "TIMEOUT",
+        "correct": true,
+        "latency_us_per_call": 0.2075625
+      },
+      {
+        "case_id": "TRIAGE-034",
+        "label": "TIMEOUT",
+        "correct": true,
+        "latency_us_per_call": 0.2065
+      },
+      {
+        "case_id": "TRIAGE-035",
+        "label": "TIMEOUT",
+        "correct": true,
+        "latency_us_per_call": 0.2056375
+      },
+      {
+        "case_id": "TRIAGE-036",
+        "label": "TIMEOUT",
+        "correct": true,
+        "latency_us_per_call": 0.2056625
+      },
+      {
+        "case_id": "TRIAGE-037",
+        "label": "TIMEOUT",
+        "correct": true,
+        "latency_us_per_call": 0.21099590000000001
+      },
+      {
+        "case_id": "TRIAGE-038",
+        "label": "TIMEOUT",
+        "correct": true,
+        "latency_us_per_call": 0.2062167
+      },
+      {
+        "case_id": "TRIAGE-039",
+        "label": "TIMEOUT",
+        "correct": true,
+        "latency_us_per_call": 0.2065291
+      },
+      {
+        "case_id": "TRIAGE-040",
+        "label": "TIMEOUT",
+        "correct": true,
+        "latency_us_per_call": 0.6137792
+      },
+      {
+        "case_id": "TRIAGE-041",
+        "label": "TIMEOUT",
+        "correct": true,
+        "latency_us_per_call": 0.20673750000000002
+      },
+      {
+        "case_id": "TRIAGE-042",
+        "label": "TIMEOUT",
+        "correct": true,
+        "latency_us_per_call": 0.2095291
+      },
+      {
+        "case_id": "TRIAGE-043",
+        "label": "TIMEOUT",
+        "correct": true,
+        "latency_us_per_call": 0.2080875
+      },
+      {
+        "case_id": "TRIAGE-044",
+        "label": "TIMEOUT",
+        "correct": true,
+        "latency_us_per_call": 0.2083083
+      },
+      {
+        "case_id": "TRIAGE-045",
+        "label": "TIMEOUT",
+        "correct": true,
+        "latency_us_per_call": 0.2067208
+      },
+      {
+        "case_id": "TRIAGE-046",
+        "label": "TIMEOUT",
+        "correct": true,
+        "latency_us_per_call": 0.23014169999999998
+      },
+      {
+        "case_id": "TRIAGE-047",
+        "label": "TIMEOUT",
+        "correct": true,
+        "latency_us_per_call": 0.220475
+      },
+      {
+        "case_id": "TRIAGE-048",
+        "label": "TIMEOUT",
+        "correct": true,
+        "latency_us_per_call": 0.2115333
+      },
+      {
+        "case_id": "TRIAGE-049",
+        "label": "TIMEOUT",
+        "correct": true,
+        "latency_us_per_call": 0.205625
+      },
+      {
+        "case_id": "TRIAGE-050",
+        "label": "TIMEOUT",
+        "correct": true,
+        "latency_us_per_call": 0.205525
+      }
+    ]
+  },
+  "apple_fm": {
+    "binary": "/usr/bin/fm",
+    "binary_sha256": "f429257df40311ba075484be92c273ab4e882e5694f970c621a4d606b3a956d0",
+    "workers": 2,
+    "accuracy": 1.0,
+    "valid_rate": 1.0,
+    "wall_ms": 12053,
+    "mean_latency_ms": 477.9,
+    "p50_latency_ms": 440,
+    "p95_latency_ms": 513,
+    "rows": [
+      {
+        "label": "SUCCESS",
+        "raw": "SUCCESS",
+        "valid": true,
+        "latency_ms": 1188,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-001",
+        "correct": true
+      },
+      {
+        "label": "SUCCESS",
+        "raw": "SUCCESS",
+        "valid": true,
+        "latency_ms": 1329,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-002",
+        "correct": true
+      },
+      {
+        "label": "SUCCESS",
+        "raw": "SUCCESS",
+        "valid": true,
+        "latency_ms": 440,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-003",
+        "correct": true
+      },
+      {
+        "label": "SUCCESS",
+        "raw": "SUCCESS",
+        "valid": true,
+        "latency_ms": 506,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-004",
+        "correct": true
+      },
+      {
+        "label": "SUCCESS",
+        "raw": "SUCCESS",
+        "valid": true,
+        "latency_ms": 427,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-005",
+        "correct": true
+      },
+      {
+        "label": "SUCCESS",
+        "raw": "SUCCESS",
+        "valid": true,
+        "latency_ms": 401,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-006",
+        "correct": true
+      },
+      {
+        "label": "SUCCESS",
+        "raw": "SUCCESS",
+        "valid": true,
+        "latency_ms": 384,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-007",
+        "correct": true
+      },
+      {
+        "label": "SUCCESS",
+        "raw": "SUCCESS",
+        "valid": true,
+        "latency_ms": 421,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-008",
+        "correct": true
+      },
+      {
+        "label": "SUCCESS",
+        "raw": "SUCCESS",
+        "valid": true,
+        "latency_ms": 412,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-009",
+        "correct": true
+      },
+      {
+        "label": "SUCCESS",
+        "raw": "SUCCESS",
+        "valid": true,
+        "latency_ms": 408,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-010",
+        "correct": true
+      },
+      {
+        "label": "SUCCESS",
+        "raw": "SUCCESS",
+        "valid": true,
+        "latency_ms": 405,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-011",
+        "correct": true
+      },
+      {
+        "label": "SUCCESS",
+        "raw": "SUCCESS",
+        "valid": true,
+        "latency_ms": 409,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-012",
+        "correct": true
+      },
+      {
+        "label": "SUCCESS",
+        "raw": "SUCCESS",
+        "valid": true,
+        "latency_ms": 417,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-013",
+        "correct": true
+      },
+      {
+        "label": "SUCCESS",
+        "raw": "SUCCESS",
+        "valid": true,
+        "latency_ms": 414,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-014",
+        "correct": true
+      },
+      {
+        "label": "SUCCESS",
+        "raw": "SUCCESS",
+        "valid": true,
+        "latency_ms": 423,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-015",
+        "correct": true
+      },
+      {
+        "label": "SUCCESS",
+        "raw": "SUCCESS",
+        "valid": true,
+        "latency_ms": 434,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-016",
+        "correct": true
+      },
+      {
+        "label": "SUCCESS",
+        "raw": "SUCCESS",
+        "valid": true,
+        "latency_ms": 420,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-017",
+        "correct": true
+      },
+      {
+        "label": "SUCCESS",
+        "raw": "SUCCESS",
+        "valid": true,
+        "latency_ms": 416,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-018",
+        "correct": true
+      },
+      {
+        "label": "SUCCESS",
+        "raw": "SUCCESS",
+        "valid": true,
+        "latency_ms": 437,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-019",
+        "correct": true
+      },
+      {
+        "label": "SUCCESS",
+        "raw": "SUCCESS",
+        "valid": true,
+        "latency_ms": 445,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-020",
+        "correct": true
+      },
+      {
+        "label": "SUCCESS",
+        "raw": "SUCCESS",
+        "valid": true,
+        "latency_ms": 417,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-021",
+        "correct": true
+      },
+      {
+        "label": "TIMEOUT",
+        "raw": "TIMEOUT",
+        "valid": true,
+        "latency_ms": 471,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-022",
+        "correct": true
+      },
+      {
+        "label": "TIMEOUT",
+        "raw": "TIMEOUT",
+        "valid": true,
+        "latency_ms": 501,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-023",
+        "correct": true
+      },
+      {
+        "label": "SUCCESS",
+        "raw": "SUCCESS",
+        "valid": true,
+        "latency_ms": 426,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-024",
+        "correct": true
+      },
+      {
+        "label": "SUCCESS",
+        "raw": "SUCCESS",
+        "valid": true,
+        "latency_ms": 408,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-025",
+        "correct": true
+      },
+      {
+        "label": "TIMEOUT",
+        "raw": "TIMEOUT",
+        "valid": true,
+        "latency_ms": 456,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-026",
+        "correct": true
+      },
+      {
+        "label": "SUCCESS",
+        "raw": "SUCCESS",
+        "valid": true,
+        "latency_ms": 476,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-027",
+        "correct": true
+      },
+      {
+        "label": "SUCCESS",
+        "raw": "SUCCESS",
+        "valid": true,
+        "latency_ms": 422,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-028",
+        "correct": true
+      },
+      {
+        "label": "TIMEOUT",
+        "raw": "TIMEOUT",
+        "valid": true,
+        "latency_ms": 471,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-029",
+        "correct": true
+      },
+      {
+        "label": "TIMEOUT",
+        "raw": "TIMEOUT",
+        "valid": true,
+        "latency_ms": 513,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-030",
+        "correct": true
+      },
+      {
+        "label": "TIMEOUT",
+        "raw": "TIMEOUT",
+        "valid": true,
+        "latency_ms": 477,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-031",
+        "correct": true
+      },
+      {
+        "label": "TIMEOUT",
+        "raw": "TIMEOUT",
+        "valid": true,
+        "latency_ms": 475,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-032",
+        "correct": true
+      },
+      {
+        "label": "TIMEOUT",
+        "raw": "TIMEOUT",
+        "valid": true,
+        "latency_ms": 472,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-033",
+        "correct": true
+      },
+      {
+        "label": "TIMEOUT",
+        "raw": "TIMEOUT",
+        "valid": true,
+        "latency_ms": 425,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-034",
+        "correct": true
+      },
+      {
+        "label": "TIMEOUT",
+        "raw": "TIMEOUT",
+        "valid": true,
+        "latency_ms": 474,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-035",
+        "correct": true
+      },
+      {
+        "label": "TIMEOUT",
+        "raw": "TIMEOUT",
+        "valid": true,
+        "latency_ms": 479,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-036",
+        "correct": true
+      },
+      {
+        "label": "TIMEOUT",
+        "raw": "TIMEOUT",
+        "valid": true,
+        "latency_ms": 471,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-037",
+        "correct": true
+      },
+      {
+        "label": "TIMEOUT",
+        "raw": "TIMEOUT",
+        "valid": true,
+        "latency_ms": 498,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-038",
+        "correct": true
+      },
+      {
+        "label": "TIMEOUT",
+        "raw": "TIMEOUT",
+        "valid": true,
+        "latency_ms": 464,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-039",
+        "correct": true
+      },
+      {
+        "label": "TIMEOUT",
+        "raw": "TIMEOUT",
+        "valid": true,
+        "latency_ms": 471,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-040",
+        "correct": true
+      },
+      {
+        "label": "TIMEOUT",
+        "raw": "TIMEOUT",
+        "valid": true,
+        "latency_ms": 465,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-041",
+        "correct": true
+      },
+      {
+        "label": "TIMEOUT",
+        "raw": "TIMEOUT",
+        "valid": true,
+        "latency_ms": 488,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-042",
+        "correct": true
+      },
+      {
+        "label": "TIMEOUT",
+        "raw": "TIMEOUT",
+        "valid": true,
+        "latency_ms": 453,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-043",
+        "correct": true
+      },
+      {
+        "label": "TIMEOUT",
+        "raw": "TIMEOUT",
+        "valid": true,
+        "latency_ms": 423,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-044",
+        "correct": true
+      },
+      {
+        "label": "TIMEOUT",
+        "raw": "TIMEOUT",
+        "valid": true,
+        "latency_ms": 453,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-045",
+        "correct": true
+      },
+      {
+        "label": "TIMEOUT",
+        "raw": "TIMEOUT",
+        "valid": true,
+        "latency_ms": 437,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-046",
+        "correct": true
+      },
+      {
+        "label": "TIMEOUT",
+        "raw": "TIMEOUT",
+        "valid": true,
+        "latency_ms": 465,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-047",
+        "correct": true
+      },
+      {
+        "label": "TIMEOUT",
+        "raw": "TIMEOUT",
+        "valid": true,
+        "latency_ms": 476,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-048",
+        "correct": true
+      },
+      {
+        "label": "TIMEOUT",
+        "raw": "TIMEOUT",
+        "valid": true,
+        "latency_ms": 439,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-049",
+        "correct": true
+      },
+      {
+        "label": "TIMEOUT",
+        "raw": "TIMEOUT",
+        "valid": true,
+        "latency_ms": 393,
+        "returncode": 0,
+        "error": null,
+        "case_id": "TRIAGE-050",
+        "correct": true
+      }
+    ]
+  },
+  "gates": {
+    "deterministic_accuracy_100pct": true,
+    "fm_accuracy_ge_95pct": true,
+    "fm_false_classifications_zero": true,
+    "deterministic_faster_than_fm": true
+  },
+  "verdict": "DETERMINISTIC_DOMINATES"
+}
