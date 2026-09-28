@@ -142,3 +142,23 @@ def test_installer_deploys_exact_canonical_bytes(tmp_path: Path) -> None:
     assert mode & stat.S_IXUSR
     assert mode & stat.S_IXGRP
     assert mode & stat.S_IXOTH
+
+
+def test_default_snapshot_prefers_host_runtime_generation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    current = tmp_path / ".local/share/nexus-host-runtime/current/snapshot"
+    current.mkdir(parents=True)
+
+    assert dispatch._default_snapshot() == current
+
+
+def test_default_snapshot_falls_back_to_legacy_before_host_sync(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    assert dispatch._default_snapshot() == (
+        tmp_path / ".local/share/nexus-agy-direct/Nexus-new"
+    )
