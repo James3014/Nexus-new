@@ -65,11 +65,15 @@ def build_cases()->list[Case]:
 
 def deterministic_classify(text:str)->str:
     low=text.lower()
-    # Mirrors the canonical structured outcome / failure-text semantics:
-    # successful wrapper receipt first, then timeout, else unknown.
+    # Same-input deterministic baseline. The source experiment invoked Agy with
+    # --timeout 120, and Nexus tests bind a 2m print-timeout to TIMEOUT.
     if '"status": "completed"' in low or '"status":"completed"' in low:
         return 'SUCCESS'
     if 'timeout' in low:
+        return 'TIMEOUT'
+    match=re.search(r'"wall_ms"\s*:\s*(\d+)', text)
+    failed=('"status": "failed"' in low or '"status":"failed"' in low)
+    if failed and match and int(match.group(1)) >= 120000:
         return 'TIMEOUT'
     return 'UNKNOWN'
 
