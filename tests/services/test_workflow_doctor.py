@@ -135,9 +135,9 @@ def test_content_equivalent_last_sync_is_current_main_aligned() -> None:
     disposition, gate = doctor._derive_next_gate(
         source=_base_source(),
         runtime=runtime,
-        task={"status": "OBSERVED", "state": "open", "issue_number": 1188},
+        task={"status": "NOT_REQUESTED", "issue_number": None},
         operation=_no_operation(),
-        pr={"status": "NOT_REQUESTED"},
+        pr={"status": "NOT_REQUESTED", "pr_number": None},
         required_gates=[],
         leases=_no_leases(),
     )
@@ -145,7 +145,63 @@ def test_content_equivalent_last_sync_is_current_main_aligned() -> None:
     assert alignment["status"] == "ALIGNED"
     assert alignment["basis"] == "CONTENT_EQUIVALENT_LAST_SYNC"
     assert disposition == "SAFE"
-    assert gate["code"] == "CONTINUE_BOUNDED_ISSUE_WORK"
+    assert gate["code"] == "NO_PENDING_GATE"
+
+
+def test_open_pr_gates_take_precedence_over_unrelated_runtime_drift() -> None:
+    runtime = _base_runtime()
+    runtime["installed_revision"] = "c" * 40
+
+    disposition, gate = doctor._derive_next_gate(
+        source=_base_source(),
+        runtime=runtime,
+        task={"status": "OBSERVED", "state": "open", "issue_number": 1188},
+        operation=_no_operation(),
+        pr={
+            "pr_number": 1191,
+            "status": "OBSERVED",
+            "state": "open",
+            "draft": False,
+            "mergeable": True,
+            "gate_policy_state": "OBSERVED",
+            "check_observation_error": None,
+            "base_sha": "a" * 40,
+            "head_sha": "b" * 40,
+        },
+        required_gates=[
+            {
+                "name": "Exact-base impact gate",
+                "status": "completed",
+                "conclusion": "success",
+            }
+        ],
+        leases=_no_leases(),
+    )
+
+    assert disposition == "SAFE"
+    assert gate["code"] == "EXACT_HEAD_MERGE_GATE"
+
+
+def test_closed_pr_exposes_runtime_sync_as_closeout_gate() -> None:
+    runtime = _base_runtime()
+    runtime["installed_revision"] = "c" * 40
+
+    disposition, gate = doctor._derive_next_gate(
+        source=_base_source(),
+        runtime=runtime,
+        task={"status": "OBSERVED", "state": "open", "issue_number": 1188},
+        operation=_no_operation(),
+        pr={
+            "pr_number": 1191,
+            "status": "OBSERVED",
+            "state": "closed",
+        },
+        required_gates=[],
+        leases=_no_leases(),
+    )
+
+    assert disposition == "RECONCILE"
+    assert gate["code"] == "SYNC_RUNTIME_TO_CURRENT_MAIN"
 
 
 def test_outcome_unknown_operation_requires_reconcile() -> None:

@@ -646,6 +646,96 @@ def _derive_next_gate(
             "error": source.get("github_observation_error"),
         }
 
+    pr_status = pr.get("status")
+    pr_open = pr_status == "OBSERVED" and pr.get("state") == "open"
+
+    if pr.get("pr_number") is not None and pr_status == "UNKNOWN":
+        return "BLOCKED", {
+            "code": "PR_EVIDENCE_UNAVAILABLE",
+            "reason": pr.get("error") or "Pull-request evidence is unavailable.",
+        }
+
+    if pr_open:
+        if pr.get("gate_policy_state") == "UNKNOWN":
+            return "BLOCKED", {
+                "code": "VERIFY_REQUIRED_GATE_POLICY",
+                "reason": "Required-check policy is unknown; merge readiness cannot be inferred.",
+                "error": pr.get("gate_policy_error"),
+            }
+        if pr.get("check_observation_error"):
+            return "BLOCKED", {
+                "code": "VERIFY_PR_CHECK_EVIDENCE",
+                "reason": "Exact-head check evidence could not be observed.",
+                "error": pr.get("check_observation_error"),
+            }
+
+        failed = [
+            row
+            for row in required_gates
+            if row.get("conclusion") not in {None, "success", "neutral", "skipped"}
+        ]
+        if failed:
+            return "BLOCKED", {
+                "code": "FIX_REQUIRED_GATE",
+                "reason": "At least one authoritative required gate failed.",
+                "checks": [row.get("name") for row in failed],
+            }
+        waiting = [
+            row
+            for row in required_gates
+            if row.get("status") != "completed" or row.get("conclusion") is None
+        ]
+        if waiting:
+            return "WAIT", {
+                "code": "WAIT_REQUIRED_GATES",
+                "reason": "Authoritative required gates are not terminal-success yet.",
+                "checks": [row.get("name") for row in waiting],
+            }
+        if pr.get("draft"):
+            return "BLOCKED", {
+                "code": "PR_DRAFT",
+                "reason": "Pull request is still draft.",
+            }
+        if pr.get("mergeable") is False:
+            return "BLOCKED", {
+                "code": "RESOLVE_PR_MERGEABILITY",
+                "reason": "GitHub reports the pull request is not mergeable.",
+            }
+        if (
+            source.get("github_main")
+            and pr.get("base_sha")
+            and source["github_main"] != pr["base_sha"]
+        ):
+            return "RECONCILE", {
+                "code": "REQUALIFY_MAIN_MOVEMENT",
+                "reason": "PR base differs from current main; apply main-movement requalification before merge.",
+                "pr_base": pr.get("base_sha"),
+                "github_main": source.get("github_main"),
+            }
+        return "SAFE", {
+            "code": "EXACT_HEAD_MERGE_GATE",
+            "reason": "PR required gates are successful; merge still requires current Owner confirmation and expected-head/CAS.",
+            "pr_number": pr.get("pr_number"),
+            "head_sha": pr.get("head_sha"),
+        }
+
+    issue_open = task.get("status") == "OBSERVED" and task.get("state") == "open"
+    if task.get("issue_number") is not None and task.get("status") == "UNKNOWN":
+        return "BLOCKED", {
+            "code": "ISSUE_EVIDENCE_UNAVAILABLE",
+            "reason": task.get("error") or "Issue evidence is unavailable.",
+        }
+
+    # Issue-only source work may proceed while an unrelated host runtime is older.
+    # If a PR was requested and is now terminal, runtime alignment becomes the next
+    # physical closeout gate before returning to remaining Issue work.
+    if issue_open and pr.get("pr_number") is None:
+        return "SAFE", {
+            "code": "CONTINUE_BOUNDED_ISSUE_WORK",
+            "reason": "Issue is open and no stronger source-work blocker was observed.",
+            "issue_number": task.get("issue_number"),
+        }
+
     if runtime.get("status") == "OBSERVED":
         components = runtime.get("components")
         drifted = (
@@ -675,80 +765,19 @@ def _derive_next_gate(
                 "installed_bundle_sha256": runtime.get("installed_bundle_sha256"),
             }
 
-    if pr.get("status") == "OBSERVED" and pr.get("state") == "open":
-        if pr.get("gate_policy_state") == "UNKNOWN":
-            return "BLOCKED", {
-                "code": "VERIFY_REQUIRED_GATE_POLICY",
-                "reason": "Required-check policy is unknown; merge readiness cannot be inferred.",
-                "error": pr.get("gate_policy_error"),
-            }
-        if pr.get("check_observation_error"):
-            return "BLOCKED", {
-                "code": "VERIFY_PR_CHECK_EVIDENCE",
-                "reason": "Exact-head check evidence could not be observed.",
-                "error": pr.get("check_observation_error"),
-            }
-
-    failed = [
-        row
-        for row in required_gates
-        if row.get("conclusion") not in {None, "success", "neutral", "skipped"}
-    ]
-    if failed:
-        return "BLOCKED", {
-            "code": "FIX_REQUIRED_GATE",
-            "reason": "At least one authoritative required gate failed.",
-            "checks": [row.get("name") for row in failed],
-        }
-    waiting = [
-        row
-        for row in required_gates
-        if row.get("status") != "completed" or row.get("conclusion") is None
-    ]
-    if waiting:
-        return "WAIT", {
-            "code": "WAIT_REQUIRED_GATES",
-            "reason": "Authoritative required gates are not terminal-success yet.",
-            "checks": [row.get("name") for row in waiting],
-        }
-
-    if pr.get("status") == "OBSERVED":
-        if pr.get("state") != "open":
-            return "SAFE", {
-                "code": "PR_TERMINAL",
-                "reason": "Observed pull request is no longer open.",
-            }
-        if pr.get("draft"):
-            return "BLOCKED", {"code": "PR_DRAFT", "reason": "Pull request is still draft."}
-        if pr.get("mergeable") is False:
-            return "BLOCKED", {
-                "code": "RESOLVE_PR_MERGEABILITY",
-                "reason": "GitHub reports the pull request is not mergeable.",
-            }
-        if (
-            source.get("github_main")
-            and pr.get("base_sha")
-            and source["github_main"] != pr["base_sha"]
-        ):
-            return "RECONCILE", {
-                "code": "REQUALIFY_MAIN_MOVEMENT",
-                "reason": "PR base differs from current main; apply main-movement requalification before merge.",
-                "pr_base": pr.get("base_sha"),
-                "github_main": source.get("github_main"),
-            }
+    if pr_status == "OBSERVED" and pr.get("state") != "open":
         return "SAFE", {
-            "code": "EXACT_HEAD_MERGE_GATE",
-            "reason": "PR required gates are successful; merge still requires current Owner confirmation and expected-head/CAS.",
-            "pr_number": pr.get("pr_number"),
-            "head_sha": pr.get("head_sha"),
+            "code": "PR_TERMINAL",
+            "reason": "Observed pull request is no longer open and runtime alignment is not blocking.",
         }
 
-    if task.get("status") == "OBSERVED" and task.get("state") == "open":
+    if issue_open:
         return "SAFE", {
             "code": "CONTINUE_BOUNDED_ISSUE_WORK",
             "reason": "Issue is open and no stronger blocker was observed.",
             "issue_number": task.get("issue_number"),
         }
+
     return "SAFE", {
         "code": "NO_PENDING_GATE",
         "reason": "No non-terminal workflow blocker was observed.",
