@@ -599,7 +599,7 @@ class TestAccountConcurrencyModel(unittest.TestCase):
         path = coord.mark_family_unavailable(
             acc.alias_hash,
             model_family="gemini",
-            reason=AccountFailureKind.RATE_LIMITED.value,
+            reason=AccountFailureKind.QUOTA_EXHAUSTED.value,
             unavailable_until=time.time() + 1,
         )
         self.assertTrue(path.exists())

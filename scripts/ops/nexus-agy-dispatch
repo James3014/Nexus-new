@@ -95,7 +95,6 @@ QUOTA_SNAPSHOT_PATH = Path(
 
 DEFAULT_QUOTA_MAX_AGE_SECONDS = 900.0
 DEFAULT_QUOTA_FAMILY_BLOCK_SECONDS = 300.0
-DEFAULT_RATE_LIMIT_FAMILY_BLOCK_SECONDS = 120.0
 
 
 def _model_family(model: str | None) -> str:
@@ -341,9 +340,6 @@ def _family_failure_unavailable_until(
     now_ts: float | None = None,
 ) -> float:
     current = time.time() if now_ts is None else float(now_ts)
-    if failure_kind == AccountFailureKind.RATE_LIMITED:
-        return current + DEFAULT_RATE_LIMIT_FAMILY_BLOCK_SECONDS
-
     if not _snapshot_is_fresh(snapshot, now_ts=current):
         return current + DEFAULT_QUOTA_FAMILY_BLOCK_SECONDS
 
@@ -727,14 +723,7 @@ def dispatch_run(
                 return code if isinstance(code, int) and code != 0 else 1
 
             family_unavailable_until = None
-            if (
-                kind
-                in {
-                    AccountFailureKind.QUOTA_EXHAUSTED,
-                    AccountFailureKind.RATE_LIMITED,
-                }
-                and scoped_model_family is not None
-            ):
+            if kind == AccountFailureKind.QUOTA_EXHAUSTED and scoped_model_family is not None:
                 family_unavailable_until = _family_failure_unavailable_until(
                     snapshot=quota_snapshot,
                     account_name=claim.internal_id,

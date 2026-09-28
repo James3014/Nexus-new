@@ -45,7 +45,6 @@ SENSITIVE_API_KEYS = (
 SUPPORTED_AGY_MODEL_FAMILIES = frozenset({"gemini", "claude_gpt"})
 MODEL_FAMILY_SCOPED_FAILURES = frozenset({
     AccountFailureKind.QUOTA_EXHAUSTED,
-    AccountFailureKind.RATE_LIMITED,
 })
 DEFAULT_FAMILY_UNAVAILABLE_TTL_SECONDS = 300.0
 
@@ -982,8 +981,8 @@ class CrossProcessLeaseCoordinator:
     ) -> None:
         """Retire a failed claim at the narrowest durable availability scope.
 
-        Quota/rate failures with a known model family are isolated to
-        account x model_family. Authentication/session/account failures remain
+        Quota exhaustion with a known model family is isolated to
+        account x model_family. Rate limits and authentication/session/account failures remain
         account-global and keep the provider manager's normal cooldown semantics.
         """
         if not is_rotation_eligible(failure_kind):
