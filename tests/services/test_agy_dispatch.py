@@ -172,6 +172,45 @@ def test_stale_quota_snapshot_cannot_block_or_prioritize_accounts() -> None:
     }
 
 
+def test_partial_refresh_does_not_make_old_account_rows_fresh() -> None:
+    now = 2_000_000_000.0
+    snapshot = {
+        "checked_at": _iso(now),
+        "accounts": [
+            {
+                "account": "fresh-row",
+                "checked_at": _iso(now),
+                "ok": True,
+                "groups": {
+                    "Gemini Models": {"weekly": _window(90.0)},
+                },
+            },
+            {
+                "account": "old-row",
+                "checked_at": _iso(now - 3600),
+                "ok": True,
+                "groups": {
+                    "Gemini Models": {
+                        "5h": _window(100.0, reset_at=_iso(now + 3600)),
+                    },
+                },
+            },
+        ],
+    }
+
+    state = dispatch._dynamic_availability_state(
+        "gemini-3.8-flash-medium",
+        snapshot,
+        now_ts=now,
+        max_age_seconds=900,
+    )
+
+    assert state["fallback"] == ["fresh-row"]
+    assert state["unknown"] == ["old-row"]
+    assert state["preferred"] == []
+    assert state["blocked"] == []
+
+
 def test_family_failure_uses_matching_quota_reset_when_available() -> None:
     now = 2_000_000_000.0
     reset = now + 1800
@@ -199,6 +238,35 @@ def test_family_failure_uses_matching_quota_reset_when_available() -> None:
     )
 
     assert unavailable_until == reset
+
+
+def test_stale_account_row_uses_bounded_family_failure_ttl() -> None:
+    now = 2_000_000_000.0
+    snapshot = {
+        "checked_at": _iso(now),
+        "accounts": [
+            {
+                "account": "dual-5h",
+                "checked_at": _iso(now - 3600),
+                "ok": True,
+                "groups": {
+                    "Gemini Models": {
+                        "5h": _window(10.0, reset_at=_iso(now + 86400)),
+                    }
+                },
+            }
+        ],
+    }
+
+    unavailable_until = dispatch._family_failure_unavailable_until(
+        snapshot=snapshot,
+        account_name="dual-5h",
+        model_family="gemini",
+        failure_kind=dispatch.AccountFailureKind.QUOTA_EXHAUSTED,
+        now_ts=now,
+    )
+
+    assert unavailable_until == now + dispatch.DEFAULT_QUOTA_FAMILY_BLOCK_SECONDS
 
 
 def test_stale_snapshot_uses_bounded_family_failure_ttl() -> None:

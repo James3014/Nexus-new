@@ -129,6 +129,19 @@ def _quota_max_age_seconds() -> float:
     return max(0.0, value)
 
 
+def _timestamp_is_fresh(
+    checked_at: object,
+    *,
+    now_ts: float,
+    max_age_seconds: float,
+) -> bool:
+    checked_ts = _parse_reset_at(checked_at)
+    if checked_ts is None:
+        return False
+    age = float(now_ts) - checked_ts
+    return -60.0 <= age <= max(0.0, float(max_age_seconds))
+
+
 def _snapshot_is_fresh(
     snapshot: dict,
     *,
@@ -136,13 +149,30 @@ def _snapshot_is_fresh(
     max_age_seconds: float | None = None,
 ) -> bool:
     checked_at = snapshot.get("checked_at") if isinstance(snapshot, dict) else None
-    checked_ts = _parse_reset_at(checked_at)
-    if checked_ts is None:
-        return False
     current = time.time() if now_ts is None else float(now_ts)
     max_age = _quota_max_age_seconds() if max_age_seconds is None else max_age_seconds
-    age = current - checked_ts
-    return -60.0 <= age <= max(0.0, float(max_age))
+    return _timestamp_is_fresh(
+        checked_at,
+        now_ts=current,
+        max_age_seconds=max_age,
+    )
+
+
+def _row_is_fresh(
+    row: dict,
+    snapshot: dict,
+    *,
+    now_ts: float,
+    max_age_seconds: float,
+) -> bool:
+    checked_at = row.get("checked_at")
+    if checked_at is None:
+        checked_at = snapshot.get("checked_at")
+    return _timestamp_is_fresh(
+        checked_at,
+        now_ts=now_ts,
+        max_age_seconds=max_age_seconds,
+    )
 
 
 def _quota_window_state(
@@ -243,10 +273,12 @@ def _dynamic_availability_state(
     }
     if family not in {"gemini", "claude_gpt"}:
         return result
+    current = time.time() if now_ts is None else float(now_ts)
+    max_age = _quota_max_age_seconds() if max_age_seconds is None else max_age_seconds
     if not _snapshot_is_fresh(
         snapshot,
-        now_ts=now_ts,
-        max_age_seconds=max_age_seconds,
+        now_ts=current,
+        max_age_seconds=max_age,
     ):
         return result
 
@@ -268,6 +300,14 @@ def _dynamic_availability_state(
             continue
         name = row.get("account")
         if not isinstance(name, str):
+            continue
+        if not _row_is_fresh(
+            row,
+            snapshot,
+            now_ts=current,
+            max_age_seconds=max_age,
+        ):
+            unknown.append(name)
             continue
         if row.get("ok") is not True:
             unknown.append(name)
@@ -349,6 +389,13 @@ def _family_failure_unavailable_until(
         for row in rows:
             if not isinstance(row, dict) or row.get("account") != account_name:
                 continue
+            if not _row_is_fresh(
+                row,
+                snapshot,
+                now_ts=current,
+                max_age_seconds=_quota_max_age_seconds(),
+            ):
+                break
             groups = row.get("groups")
             group = groups.get(target_group) if isinstance(groups, dict) else None
             if not isinstance(group, dict):
