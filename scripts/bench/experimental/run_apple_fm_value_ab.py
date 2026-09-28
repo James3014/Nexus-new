@@ -247,7 +247,7 @@ def fm_task(case: Case) -> AppleFMReadOnlyTask:
             case.case_id,
             AppleFMTaskKind.LITERAL_EXTRACTION,
             case.prompt,
-            output_pattern=r"-?[A-Za-z0-9._:/]+",
+            output_pattern=r"-?[A-Za-z0-9._:/-]+",
         )
     raise ValueError(f"not FM-eligible: {case.case_id}")
 
