@@ -13,10 +13,17 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any, Optional
 
+def _default_snapshot() -> Path:
+    host_runtime = Path.home() / ".local/share/nexus-host-runtime/current/snapshot"
+    if host_runtime.is_dir():
+        return host_runtime
+    return Path.home() / ".local/share/nexus-agy-direct/Nexus-new"
+
+
 SNAPSHOT = Path(
     os.getenv(
         "NEXUS_AGY_SNAPSHOT",
-        str(Path.home() / ".local/share/nexus-agy-direct/Nexus-new"),
+        str(_default_snapshot()),
     )
 )
 MANAGER = Path(

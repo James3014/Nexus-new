@@ -1,0 +1,857 @@
+#!/usr/bin/env python3
+"""Synchronize immutable Nexus host runtime bytes across Mac execution hosts.
+
+Git/GitHub remains the software source. A host generation is content-addressed
+from the bounded runtime file set in nexus-host-runtime-manifest.json, so
+unrelated Nexus-new main movement does not cause host churn.
+
+Mutable account, OAuth/Keychain, lease, process, session, log, and worktree
+state is intentionally excluded from this synchronizer.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+STATUS_SCHEMA = "nexus.host_sync_status.v1"
+GENERATION_SCHEMA = "nexus.host_generation.v1"
+MANIFEST_SCHEMA = "nexus.host_runtime_manifest.v1"
+REMOTE_DEFAULT = "https://github.com/James3014/Nexus-new.git"
+MANIFEST_PATH = "scripts/ops/nexus-host-runtime-manifest.json"
+REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+class HostSyncError(RuntimeError):
+    pass
+
+
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _sha256(path: Path) -> str:
+    return _sha256_bytes(path.read_bytes())
+
+
+def _run(
+    argv: list[str],
+    *,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    proc = subprocess.run(
+        argv,
+        cwd=str(cwd) if cwd else None,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        raise HostSyncError(f"COMMAND_FAILED:{argv[0]}:{detail}")
+    return proc
+
+
+def _atomic_symlink(target: Path, link: Path) -> None:
+    link.parent.mkdir(parents=True, exist_ok=True)
+    tmp = link.with_name(f".{link.name}.tmp.{os.getpid()}")
+    try:
+        tmp.unlink()
+    except FileNotFoundError:
+        pass
+    os.symlink(str(target), str(tmp))
+    os.replace(tmp, link)
+
+
+def _source_repo_ready(source_repo: Path) -> bool:
+    if not source_repo.exists():
+        return False
+    proc = subprocess.run(
+        ["git", "-C", str(source_repo), "rev-parse", "--git-dir"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return proc.returncode == 0
+
+
+def _ensure_source_repo(
+    source_repo: Path,
+    *,
+    remote_url: str,
+    fetch: bool,
+    remote_ref: str,
+) -> None:
+    if not _source_repo_ready(source_repo):
+        if source_repo.exists() and any(source_repo.iterdir()):
+            raise HostSyncError(f"SOURCE_REPO_INVALID:{source_repo}")
+        source_repo.parent.mkdir(parents=True, exist_ok=True)
+        _run(["git", "clone", "--bare", "--filter=blob:none", remote_url, str(source_repo)])
+    if fetch:
+        if (
+            not remote_ref
+            or remote_ref.startswith("/")
+            or ".." in remote_ref
+            or not re.fullmatch(r"[A-Za-z0-9._/-]+", remote_ref)
+        ):
+            raise HostSyncError("REMOTE_REF_INVALID")
+        _run(
+            [
+                "git",
+                "-C",
+                str(source_repo),
+                "fetch",
+                "--prune",
+                "origin",
+                f"refs/heads/{remote_ref}:refs/remotes/origin/{remote_ref}",
+            ]
+        )
+
+
+def _require_revision(source_repo: Path, revision: str) -> str:
+    if not REVISION_RE.fullmatch(revision):
+        raise HostSyncError("EXACT_40_CHAR_REVISION_REQUIRED")
+    proc = subprocess.run(
+        ["git", "-C", str(source_repo), "cat-file", "-e", f"{revision}^{{commit}}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise HostSyncError(f"REVISION_NOT_AVAILABLE:{revision}")
+    return revision
+
+
+def _resolve_remote_ref(source_repo: Path, remote_ref: str) -> str:
+    value = _run(
+        ["git", "-C", str(source_repo), "rev-parse", f"refs/remotes/origin/{remote_ref}"]
+    ).stdout.strip()
+    return _require_revision(source_repo, value)
+
+
+def _git_blob(source_repo: Path, revision: str, relative_path: str) -> bytes:
+    proc = subprocess.run(
+        ["git", "-C", str(source_repo), "show", f"{revision}:{relative_path}"],
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        detail = proc.stderr.decode("utf-8", errors="replace").strip()
+        raise HostSyncError(f"REVISION_PATH_MISSING:{relative_path}:{detail}")
+    return proc.stdout
+
+
+def _parse_manifest(data: bytes) -> dict[str, Any]:
+    try:
+        manifest = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HostSyncError(f"HOST_MANIFEST_INVALID_JSON:{exc}") from exc
+    if manifest.get("schema") != MANIFEST_SCHEMA:
+        raise HostSyncError("HOST_MANIFEST_SCHEMA_MISMATCH")
+    runtime_files = manifest.get("runtime_files")
+    if not isinstance(runtime_files, list) or not runtime_files:
+        raise HostSyncError("HOST_MANIFEST_RUNTIME_FILES_MISSING")
+    seen: set[str] = set()
+    for entry in runtime_files:
+        if not isinstance(entry, dict):
+            raise HostSyncError("HOST_MANIFEST_RUNTIME_FILE_INVALID")
+        path = entry.get("path")
+        mode = entry.get("mode")
+        if (
+            not isinstance(path, str)
+            or not path
+            or path.startswith("/")
+            or ".." in Path(path).parts
+            or path in seen
+        ):
+            raise HostSyncError("HOST_MANIFEST_RUNTIME_PATH_INVALID")
+        if mode not in {"0644", "0755"}:
+            raise HostSyncError(f"HOST_MANIFEST_MODE_INVALID:{path}")
+        seen.add(path)
+    required = {
+        MANIFEST_PATH,
+        "scripts/ops/nexus-host-sync",
+        "scripts/ops/nexus-agy-dispatch",
+        "scripts/ops/install_nexus_agy_dispatch.sh",
+        "nexus/services/agy_account_pool.py",
+        "nexus/services/external_account_pool.py",
+    }
+    if not required.issubset(seen):
+        raise HostSyncError("HOST_MANIFEST_REQUIRED_RUNTIME_PATH_MISSING")
+    return manifest
+
+
+def _runtime_entries(manifest: dict[str, Any]) -> list[dict[str, str]]:
+    return sorted(manifest["runtime_files"], key=lambda item: item["path"])
+
+
+def _bundle_digest_from_blobs(blobs: dict[str, bytes]) -> str:
+    h = hashlib.sha256()
+    for path in sorted(blobs):
+        h.update(path.encode("utf-8"))
+        h.update(b"\0")
+        h.update(hashlib.sha256(blobs[path]).digest())
+        h.update(b"\n")
+    return h.hexdigest()
+
+
+def _desired_identity(source_repo: Path, revision: str) -> tuple[dict[str, Any], str, dict[str, bytes]]:
+    manifest_bytes = _git_blob(source_repo, revision, MANIFEST_PATH)
+    manifest = _parse_manifest(manifest_bytes)
+    blobs: dict[str, bytes] = {}
+    for entry in _runtime_entries(manifest):
+        path = entry["path"]
+        blobs[path] = manifest_bytes if path == MANIFEST_PATH else _git_blob(source_repo, revision, path)
+    return manifest, _bundle_digest_from_blobs(blobs), blobs
+
+
+_MANAGER_PROBE = r"""
+import importlib.metadata as m
+import json
+import pathlib
+dist = m.distribution("agy-cli-manager")
+direct = {}
+try:
+    p = pathlib.Path(dist.locate_file(f"agy_cli_manager-{dist.version}.dist-info/direct_url.json"))
+    if p.exists():
+        direct = json.loads(p.read_text())
+except Exception:
+    direct = {}
+archive = direct.get("archive_info") or {}
+hashes = archive.get("hashes") or {}
+value = hashes.get("sha256")
+if not value:
+    raw = archive.get("hash")
+    if isinstance(raw, str) and raw.startswith("sha256="):
+        value = raw.split("=", 1)[1]
+print(json.dumps({"version": dist.version, "archive_sha256": value}))
+"""
+
+
+def _manager_identity(manager_python: Path) -> dict[str, Any]:
+    if not manager_python.is_file():
+        return {
+            "status": "MISSING",
+            "python": str(manager_python),
+            "version": None,
+            "archive_sha256": None,
+        }
+    proc = subprocess.run(
+        [str(manager_python), "-c", _MANAGER_PROBE],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return {
+            "status": "UNREADABLE",
+            "python": str(manager_python),
+            "version": None,
+            "archive_sha256": None,
+            "error": (proc.stderr or proc.stdout or "").strip(),
+        }
+    try:
+        payload = json.loads(proc.stdout.strip())
+    except json.JSONDecodeError:
+        return {
+            "status": "UNREADABLE",
+            "python": str(manager_python),
+            "version": None,
+            "archive_sha256": None,
+            "error": "NON_JSON_MANAGER_PROBE",
+        }
+    return {
+        "status": "OBSERVED",
+        "python": str(manager_python),
+        "version": payload.get("version"),
+        "archive_sha256": payload.get("archive_sha256"),
+    }
+
+
+def _verify_manager(manifest: dict[str, Any], manager_python: Path) -> dict[str, Any]:
+    expected = manifest.get("components", {}).get("agy_account_manager", {})
+    observed = _manager_identity(manager_python)
+    ok = (
+        observed.get("status") == "OBSERVED"
+        and observed.get("version") == expected.get("version")
+        and observed.get("archive_sha256") == expected.get("archive_sha256")
+    )
+    return {
+        "status": "VERIFIED" if ok else "DRIFT",
+        "expected": {
+            "package": expected.get("package"),
+            "version": expected.get("version"),
+            "archive_sha256": expected.get("archive_sha256"),
+        },
+        "observed": observed,
+    }
+
+
+def _snapshot_manifest(snapshot: Path) -> tuple[dict[str, Any], Path]:
+    manifest_path = snapshot / MANIFEST_PATH
+    if not manifest_path.is_file():
+        raise HostSyncError(f"HOST_MANIFEST_MISSING:{manifest_path}")
+    return _parse_manifest(manifest_path.read_bytes()), manifest_path
+
+
+def _bundle_digest_from_snapshot(snapshot: Path, manifest: dict[str, Any]) -> str:
+    blobs: dict[str, bytes] = {}
+    for entry in _runtime_entries(manifest):
+        path = snapshot / entry["path"]
+        if not path.is_file():
+            raise HostSyncError(f"SNAPSHOT_REQUIRED_PATH_MISSING:{path}")
+        blobs[entry["path"]] = path.read_bytes()
+    return _bundle_digest_from_blobs(blobs)
+
+
+def _materialize_snapshot(
+    tmp: Path,
+    manifest: dict[str, Any],
+    blobs: dict[str, bytes],
+) -> Path:
+    snapshot = tmp / "snapshot"
+    for entry in _runtime_entries(manifest):
+        relative = entry["path"]
+        target = snapshot / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(blobs[relative])
+        target.chmod(int(entry["mode"], 8))
+    return snapshot
+
+
+def _install_dispatch(snapshot: Path, target: Path) -> None:
+    installer = snapshot / "scripts" / "ops" / "install_nexus_agy_dispatch.sh"
+    env = os.environ.copy()
+    env.update(
+        {
+            "NEXUS_AGY_REPO_ROOT": str(snapshot),
+            "NEXUS_AGY_SNAPSHOT": str(snapshot),
+            "NEXUS_AGY_DISPATCH_TARGET": str(target),
+        }
+    )
+    _run(["bash", str(installer)], cwd=snapshot, env=env)
+
+
+def _read_generation(release: Path) -> dict[str, Any]:
+    path = release / "host-generation.json"
+    if not path.is_file():
+        raise HostSyncError(f"GENERATION_RECEIPT_MISSING:{path}")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise HostSyncError(f"GENERATION_RECEIPT_INVALID:{exc}") from exc
+    if data.get("schema") != GENERATION_SCHEMA:
+        raise HostSyncError("GENERATION_RECEIPT_SCHEMA_MISMATCH")
+    return data
+
+
+def _verify_release_for_activation(
+    release: Path,
+    *,
+    manager_python: Path,
+) -> dict[str, Any]:
+    generation = _read_generation(release)
+    snapshot = release / "snapshot"
+    manifest, manifest_path = _snapshot_manifest(snapshot)
+    bundle_sha = _bundle_digest_from_snapshot(snapshot, manifest)
+    if bundle_sha != generation.get("bundle_sha256"):
+        raise HostSyncError("RELEASE_BUNDLE_HASH_MISMATCH")
+    if _sha256(manifest_path) != generation.get("manifest_sha256"):
+        raise HostSyncError("RELEASE_MANIFEST_HASH_MISMATCH")
+
+    dispatch = release / "bin" / "nexus-agy-dispatch"
+    if not dispatch.is_file():
+        raise HostSyncError(f"RELEASE_DISPATCH_MISSING:{dispatch}")
+    if _sha256(dispatch) != generation.get("dispatcher_sha256"):
+        raise HostSyncError("RELEASE_DISPATCH_HASH_MISMATCH")
+
+    manager = _verify_manager(manifest, manager_python)
+    if manager["status"] != "VERIFIED":
+        raise HostSyncError("AGY_ACCOUNT_MANAGER_DRIFT")
+    return generation
+
+
+def _materialize_release(
+    *,
+    revision: str,
+    bundle_sha: str,
+    manifest: dict[str, Any],
+    blobs: dict[str, bytes],
+    runtime_root: Path,
+    manager_python: Path,
+) -> Path:
+    releases = runtime_root / "releases"
+    releases.mkdir(parents=True, exist_ok=True)
+    release = releases / bundle_sha
+    if release.exists():
+        _verify_release_for_activation(release, manager_python=manager_python)
+        return release
+
+    tmp = releases / f".tmp-{bundle_sha[:12]}-{os.getpid()}"
+    shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir(parents=True)
+    try:
+        snapshot = _materialize_snapshot(tmp, manifest, blobs)
+        manager = _verify_manager(manifest, manager_python)
+        if manager["status"] != "VERIFIED":
+            raise HostSyncError("AGY_ACCOUNT_MANAGER_DRIFT")
+
+        bin_dir = tmp / "bin"
+        bin_dir.mkdir()
+        dispatch_target = bin_dir / "nexus-agy-dispatch"
+        _install_dispatch(snapshot, dispatch_target)
+
+        source_dispatch = snapshot / "scripts" / "ops" / "nexus-agy-dispatch"
+        installed_sha = _sha256(dispatch_target)
+        if _sha256(source_dispatch) != installed_sha:
+            raise HostSyncError("DISPATCH_INSTALL_HASH_MISMATCH")
+
+        generation = {
+            "schema": GENERATION_SCHEMA,
+            "source_revision": revision,
+            "bundle_sha256": bundle_sha,
+            "manifest_sha256": _sha256(snapshot / MANIFEST_PATH),
+            "dispatcher_sha256": installed_sha,
+            "agy_account_manager": manager["observed"],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        (tmp / "host-generation.json").write_text(
+            json.dumps(generation, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(tmp, release)
+    except Exception:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    return release
+
+
+def _backup_entrypoint(path: Path, runtime_root: Path) -> None:
+    if not path.exists() and not path.is_symlink():
+        return
+    if path.is_symlink():
+        return
+    backups = runtime_root / "backups"
+    backups.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup = backups / f"{path.name}.pre-host-sync.{stamp}"
+    if backup.exists():
+        raise HostSyncError(f"BACKUP_ALREADY_EXISTS:{backup}")
+    shutil.move(str(path), str(backup))
+
+
+def _activate(
+    release: Path,
+    *,
+    runtime_root: Path,
+    dispatch_target: Path,
+    sync_target: Path,
+) -> None:
+    current = runtime_root / "current"
+    previous = runtime_root / "previous"
+    old: Path | None = None
+    if current.is_symlink():
+        old = current.resolve(strict=False)
+    elif current.exists():
+        raise HostSyncError(f"CURRENT_NOT_SYMLINK:{current}")
+
+    if old is not None and old != release:
+        _atomic_symlink(old, previous)
+    _atomic_symlink(release, current)
+
+    _backup_entrypoint(dispatch_target, runtime_root)
+    _backup_entrypoint(sync_target, runtime_root)
+    _atomic_symlink(current / "bin" / "nexus-agy-dispatch", dispatch_target)
+    _atomic_symlink(current / "snapshot" / "scripts" / "ops" / "nexus-host-sync", sync_target)
+
+
+def _same_target(link: Path, expected: Path) -> bool:
+    if not link.is_symlink():
+        return False
+    return link.resolve(strict=False) == expected.resolve(strict=False)
+
+
+def _status(
+    *,
+    runtime_root: Path,
+    dispatch_target: Path,
+    sync_target: Path,
+    manager_python: Path,
+    desired_revision: str | None,
+    desired_bundle_sha: str | None,
+) -> dict[str, Any]:
+    current = runtime_root / "current"
+    payload: dict[str, Any] = {
+        "schema": STATUS_SCHEMA,
+        "host": socket.gethostname(),
+        "desired_revision": desired_revision,
+        "desired_bundle_sha256": desired_bundle_sha,
+        "installed_revision": None,
+        "installed_bundle_sha256": None,
+        "state": "UNINITIALIZED",
+        "components": {},
+        "last_sync": None,
+    }
+    observation = runtime_root / "last-sync.json"
+    if observation.is_file():
+        try:
+            payload["last_sync"] = json.loads(observation.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            payload["last_sync"] = {"state": "UNREADABLE"}
+    if not current.is_symlink():
+        if current.exists():
+            payload["state"] = "INVALID"
+            payload["error"] = "CURRENT_NOT_SYMLINK"
+        return payload
+
+    release = current.resolve(strict=False)
+    try:
+        generation = _read_generation(release)
+        snapshot = release / "snapshot"
+        manifest, manifest_path = _snapshot_manifest(snapshot)
+        actual_bundle = _bundle_digest_from_snapshot(snapshot, manifest)
+    except HostSyncError as exc:
+        payload["state"] = "INVALID"
+        payload["error"] = str(exc)
+        return payload
+
+    payload["installed_revision"] = generation.get("source_revision")
+    payload["installed_bundle_sha256"] = generation.get("bundle_sha256")
+    payload["current_release"] = str(release)
+    payload["source_revision_match"] = (
+        desired_revision is None or generation.get("source_revision") == desired_revision
+    )
+
+    dispatch = release / "bin" / "nexus-agy-dispatch"
+    actual_dispatch_sha = _sha256(dispatch) if dispatch.is_file() else None
+    dispatch_ok = (
+        actual_dispatch_sha == generation.get("dispatcher_sha256")
+        and _same_target(dispatch_target, current / "bin" / "nexus-agy-dispatch")
+    )
+    payload["components"]["agy_dispatch"] = {
+        "status": "VERIFIED" if dispatch_ok else "DRIFT",
+        "sha256": actual_dispatch_sha,
+        "entrypoint": str(dispatch_target),
+    }
+
+    sync_ok = _same_target(
+        sync_target,
+        current / "snapshot" / "scripts" / "ops" / "nexus-host-sync",
+    )
+    payload["components"]["host_sync"] = {
+        "status": "VERIFIED" if sync_ok else "DRIFT",
+        "entrypoint": str(sync_target),
+    }
+
+    manifest_ok = _sha256(manifest_path) == generation.get("manifest_sha256")
+    bundle_ok = actual_bundle == generation.get("bundle_sha256")
+    payload["components"]["manifest"] = {
+        "status": "VERIFIED" if manifest_ok and bundle_ok else "DRIFT",
+        "sha256": _sha256(manifest_path),
+        "bundle_sha256": actual_bundle,
+    }
+
+    manager = _verify_manager(manifest, manager_python)
+    payload["components"]["agy_account_manager"] = manager
+
+    component_ok = all(
+        item.get("status") == "VERIFIED" for item in payload["components"].values()
+    )
+    if not component_ok:
+        payload["state"] = "DEPENDENCY_DRIFT"
+    elif desired_bundle_sha is not None and actual_bundle != desired_bundle_sha:
+        payload["state"] = "STALE"
+    else:
+        payload["state"] = "ALIGNED" if desired_bundle_sha is not None else "INSTALLED"
+    return payload
+
+
+def _emit(payload: dict[str, Any]) -> None:
+    print(json.dumps(payload, indent=2, sort_keys=True))
+
+
+def _write_sync_observation(
+    runtime_root: Path,
+    *,
+    desired_revision: str,
+    desired_bundle_sha: str,
+    status: dict[str, Any],
+) -> None:
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema": "nexus.host_sync_observation.v1",
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "desired_revision": desired_revision,
+        "desired_bundle_sha256": desired_bundle_sha,
+        "installed_revision": status.get("installed_revision"),
+        "installed_bundle_sha256": status.get("installed_bundle_sha256"),
+        "state": status.get("state"),
+    }
+    target = runtime_root / "last-sync.json"
+    tmp = runtime_root / f".last-sync.tmp.{os.getpid()}"
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(tmp, target)
+
+
+def _swap_rollback(runtime_root: Path, *, manager_python: Path) -> Path:
+    current = runtime_root / "current"
+    previous = runtime_root / "previous"
+    if not current.is_symlink() or not previous.is_symlink():
+        raise HostSyncError("ROLLBACK_GENERATION_UNAVAILABLE")
+    current_target = current.resolve(strict=False)
+    previous_target = previous.resolve(strict=False)
+    _verify_release_for_activation(previous_target, manager_python=manager_python)
+    _atomic_symlink(previous_target, current)
+    _atomic_symlink(current_target, previous)
+    return previous_target
+
+
+def _prune_releases(runtime_root: Path) -> None:
+    releases = runtime_root / "releases"
+    if not releases.is_dir():
+        return
+    keep: set[Path] = set()
+    for name in ("current", "previous"):
+        link = runtime_root / name
+        if link.is_symlink():
+            keep.add(link.resolve(strict=False))
+    for child in releases.iterdir():
+        if child.name.startswith(".tmp-"):
+            shutil.rmtree(child, ignore_errors=True)
+        elif child.is_dir() and child not in keep:
+            shutil.rmtree(child, ignore_errors=True)
+
+
+def _common_paths(args: argparse.Namespace) -> tuple[Path, Path, Path, Path]:
+    runtime_root = Path(args.runtime_root).expanduser().resolve()
+    dispatch_target = Path(os.path.abspath(os.path.expanduser(args.dispatch_target)))
+    sync_target = Path(os.path.abspath(os.path.expanduser(args.sync_target)))
+    # Keep the venv entrypoint path itself. Resolving a venv bin/python symlink
+    # to the system interpreter would discard the venv package identity.
+    manager_python = Path(os.path.abspath(os.path.expanduser(args.manager_python)))
+    return runtime_root, dispatch_target, sync_target, manager_python
+
+
+def _resolve_desired(
+    *,
+    source_repo: Path,
+    revision: str | None,
+    track_ref: str | None,
+    remote_url: str,
+    fetch: bool,
+) -> tuple[str, dict[str, Any], str, dict[str, bytes]]:
+    ref = track_ref or "main"
+    _ensure_source_repo(
+        source_repo,
+        remote_url=remote_url,
+        fetch=fetch,
+        remote_ref=ref,
+    )
+    resolved = _require_revision(source_repo, revision) if revision else _resolve_remote_ref(source_repo, ref)
+    manifest, bundle_sha, blobs = _desired_identity(source_repo, resolved)
+    return resolved, manifest, bundle_sha, blobs
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--runtime-root",
+        default=os.getenv(
+            "NEXUS_HOST_RUNTIME_ROOT",
+            str(Path.home() / ".local/share/nexus-host-runtime"),
+        ),
+    )
+    parser.add_argument(
+        "--dispatch-target",
+        default=os.getenv(
+            "NEXUS_AGY_DISPATCH_TARGET",
+            str(Path.home() / ".local/bin/nexus-agy-dispatch"),
+        ),
+    )
+    parser.add_argument(
+        "--sync-target",
+        default=os.getenv(
+            "NEXUS_HOST_SYNC_TARGET",
+            str(Path.home() / ".local/bin/nexus-host-sync"),
+        ),
+    )
+    parser.add_argument(
+        "--manager-python",
+        default=os.getenv(
+            "NEXUS_AGY_MANAGER_PYTHON",
+            str(Path.home() / ".nexus/agy-account-pool/manager-venv-py313/bin/python"),
+        ),
+    )
+
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    status = sub.add_parser("status")
+    status.add_argument("--desired-bundle-sha256")
+
+    verify = sub.add_parser("verify")
+    verify.add_argument("--desired-bundle-sha256", required=True)
+
+    for name in ("desired", "sync"):
+        cmd = sub.add_parser(name)
+        group = cmd.add_mutually_exclusive_group()
+        group.add_argument("--revision")
+        group.add_argument("--track-ref", default=None)
+        cmd.add_argument(
+            "--source-repo",
+            default=os.getenv(
+                "NEXUS_HOST_SOURCE_REPO",
+                str(Path.home() / ".cache/nexus-host-sync/Nexus-new.git"),
+            ),
+        )
+        cmd.add_argument("--remote-url", default=REMOTE_DEFAULT)
+        cmd.add_argument("--no-fetch", action="store_true")
+
+    sub.add_parser("rollback")
+
+    args = parser.parse_args(argv)
+    runtime_root, dispatch_target, sync_target, manager_python = _common_paths(args)
+
+    try:
+        if args.command == "status":
+            payload = _status(
+                runtime_root=runtime_root,
+                dispatch_target=dispatch_target,
+                sync_target=sync_target,
+                manager_python=manager_python,
+                desired_revision=None,
+                desired_bundle_sha=args.desired_bundle_sha256,
+            )
+            _emit(payload)
+            return 0 if payload["state"] in {"ALIGNED", "INSTALLED"} else 2
+
+        if args.command == "verify":
+            payload = _status(
+                runtime_root=runtime_root,
+                dispatch_target=dispatch_target,
+                sync_target=sync_target,
+                manager_python=manager_python,
+                desired_revision=None,
+                desired_bundle_sha=args.desired_bundle_sha256,
+            )
+            _emit(payload)
+            return 0 if payload["state"] == "ALIGNED" else 2
+
+        if args.command in {"desired", "sync"}:
+            source_repo = Path(args.source_repo).expanduser().resolve()
+            revision, manifest, bundle_sha, blobs = _resolve_desired(
+                source_repo=source_repo,
+                revision=args.revision,
+                track_ref=args.track_ref,
+                remote_url=args.remote_url,
+                fetch=not args.no_fetch,
+            )
+            if args.command == "desired":
+                _emit(
+                    {
+                        "schema": STATUS_SCHEMA,
+                        "host": socket.gethostname(),
+                        "state": "DESIRED_RESOLVED",
+                        "desired_revision": revision,
+                        "desired_bundle_sha256": bundle_sha,
+                        "track_ref": args.track_ref or "main",
+                    }
+                )
+                return 0
+
+            current_status = _status(
+                runtime_root=runtime_root,
+                dispatch_target=dispatch_target,
+                sync_target=sync_target,
+                manager_python=manager_python,
+                desired_revision=revision,
+                desired_bundle_sha=bundle_sha,
+            )
+            if current_status["state"] == "ALIGNED":
+                _write_sync_observation(
+                    runtime_root,
+                    desired_revision=revision,
+                    desired_bundle_sha=bundle_sha,
+                    status=current_status,
+                )
+                _emit(current_status)
+                return 0
+
+            release = _materialize_release(
+                revision=revision,
+                bundle_sha=bundle_sha,
+                manifest=manifest,
+                blobs=blobs,
+                runtime_root=runtime_root,
+                manager_python=manager_python,
+            )
+            _verify_release_for_activation(release, manager_python=manager_python)
+            _activate(
+                release,
+                runtime_root=runtime_root,
+                dispatch_target=dispatch_target,
+                sync_target=sync_target,
+            )
+            _prune_releases(runtime_root)
+            payload = _status(
+                runtime_root=runtime_root,
+                dispatch_target=dispatch_target,
+                sync_target=sync_target,
+                manager_python=manager_python,
+                desired_revision=revision,
+                desired_bundle_sha=bundle_sha,
+            )
+            _write_sync_observation(
+                runtime_root,
+                desired_revision=revision,
+                desired_bundle_sha=bundle_sha,
+                status=payload,
+            )
+            _emit(payload)
+            return 0 if payload["state"] == "ALIGNED" else 2
+
+        if args.command == "rollback":
+            release = _swap_rollback(runtime_root, manager_python=manager_python)
+            _activate(
+                release,
+                runtime_root=runtime_root,
+                dispatch_target=dispatch_target,
+                sync_target=sync_target,
+            )
+            _prune_releases(runtime_root)
+            payload = _status(
+                runtime_root=runtime_root,
+                dispatch_target=dispatch_target,
+                sync_target=sync_target,
+                manager_python=manager_python,
+                desired_revision=None,
+                desired_bundle_sha=None,
+            )
+            _emit(payload)
+            return 0 if payload["state"] == "INSTALLED" else 2
+
+    except HostSyncError as exc:
+        _emit(
+            {
+                "schema": STATUS_SCHEMA,
+                "host": socket.gethostname(),
+                "state": "ERROR",
+                "error": str(exc),
+            }
+        )
+        return 2
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

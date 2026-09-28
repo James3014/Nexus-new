@@ -1,0 +1,24 @@
+{
+  "schema": "nexus.host_runtime_manifest.v1",
+  "track_ref": "main",
+  "sync_interval_seconds": 900,
+  "runtime_files": [
+    {"path": "scripts/ops/nexus-agy-dispatch", "mode": "0755"},
+    {"path": "scripts/ops/nexus-host-sync", "mode": "0755"},
+    {"path": "scripts/ops/install_nexus_agy_dispatch.sh", "mode": "0755"},
+    {"path": "scripts/ops/nexus-host-runtime-manifest.json", "mode": "0644"},
+    {"path": "nexus/services/agy_account_pool.py", "mode": "0644"},
+    {"path": "nexus/services/external_account_pool.py", "mode": "0644"}
+  ],
+  "components": {
+    "agy_dispatch": {
+      "source_path": "scripts/ops/nexus-agy-dispatch",
+      "installer_path": "scripts/ops/install_nexus_agy_dispatch.sh"
+    },
+    "agy_account_manager": {
+      "package": "agy-cli-manager",
+      "version": "0.2.1",
+      "archive_sha256": "4c0e326fc72ea98f9d6d80957055a4e8a2d7387f681dea903f2a072942d2e31c"
+    }
+  }
+}
