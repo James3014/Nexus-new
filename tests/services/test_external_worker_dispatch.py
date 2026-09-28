@@ -212,3 +212,121 @@ def test_background_opencode_receives_stdin_eof_and_completes(
     assert current["provider_session_id"] == "ses_fake"
     assert current["reconciliation"]["retry_permitted"] is False
     assert not journal.prompt_path(operation_id).exists()
+
+
+def _fake_codex(path: Path) -> None:
+    body = """#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo 'codex-cli 0.157.1'
+  exit 0
+fi
+if read unexpected; then
+  echo "unexpected stdin: $unexpected" >&2
+  exit 9
+fi
+cat <<'EOF'
+{"type":"thread.started","thread_id":"thread-fake"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"ok"}}
+{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":20,"output_tokens":5}}
+EOF
+exit 0
+"""
+    path.write_text(body, encoding="utf-8")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
+def test_background_codex_receives_stdin_eof_and_completes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = tmp_path / "codex"
+    _fake_codex(fake)
+    monkeypatch.setenv("NEXUS_CODEX_BIN", str(fake))
+
+    root = tmp_path / "ops"
+    record = dispatch._spawn_background(
+        provider="codex",
+        model="gpt-5.6-sol",
+        prompt="hello",
+        cwd=str(tmp_path),
+        mode="plan",
+        auto_approve=False,
+        timeout_seconds=10,
+        require_free=False,
+        thinking="none",
+        operation_root=root,
+    )
+    operation_id = record["operation_id"]
+
+    deadline = time.time() + 5
+    journal = dispatch._journal("codex", root)
+    while time.time() < deadline:
+        current = journal.read(operation_id)
+        if current["status"] in {"COMPLETED", "FAILED", "OUTCOME_UNKNOWN"}:
+            break
+        time.sleep(0.05)
+
+    current = journal.read(operation_id)
+    assert current["status"] == "COMPLETED"
+    assert current["provider"] == "codex"
+    assert current["model"] == "gpt-5.6-sol"
+    assert current["observed_provider"] is None
+    assert current["observed_model"] is None
+    assert current["provider_session_id"] == "thread-fake"
+    assert current["reconciliation"]["retry_permitted"] is False
+    assert not journal.prompt_path(operation_id).exists()
+
+
+def test_codex_does_not_default_to_free_policy() -> None:
+    assert (
+        dispatch._resolve_require_free(
+            "codex",
+            require_free=False,
+            allow_paid_model=False,
+        )
+        is False
+    )
+    assert (
+        dispatch._resolve_require_free(
+            "cline",
+            require_free=False,
+            allow_paid_model=False,
+        )
+        is True
+    )
+    with pytest.raises(dispatch.ExternalWorkerRuntimeError, match="FREE_MODEL_POLICY_CONFLICT"):
+        dispatch._resolve_require_free(
+            "codex",
+            require_free=True,
+            allow_paid_model=True,
+        )
+
+
+def test_runtime_revision_uses_git_snapshot_before_unrelated_host_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot = tmp_path / "source"
+    snapshot.mkdir()
+    import subprocess as _subprocess
+
+    _subprocess.run(["git", "init", "-q", str(snapshot)], check=True)
+    _subprocess.run(
+        ["git", "-C", str(snapshot), "config", "user.email", "test@example.invalid"],
+        check=True,
+    )
+    _subprocess.run(
+        ["git", "-C", str(snapshot), "config", "user.name", "Test"],
+        check=True,
+    )
+    (snapshot / "fixture").write_text("x\n", encoding="utf-8")
+    _subprocess.run(["git", "-C", str(snapshot), "add", "."], check=True)
+    _subprocess.run(["git", "-C", str(snapshot), "commit", "-qm", "fixture"], check=True)
+    head = _subprocess.run(
+        ["git", "-C", str(snapshot), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    monkeypatch.setattr(dispatch, "SNAPSHOT", snapshot)
+
+    assert dispatch._runtime_revision() == head

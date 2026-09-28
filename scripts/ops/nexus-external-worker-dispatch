@@ -86,23 +86,33 @@ def _provider_from_operation_id(operation_id: str) -> str:
 
 
 def _runtime_revision() -> str | None:
-    candidates = [
-        SNAPSHOT.parent / "host-generation.json",
-        Path.home() / ".local/share/nexus-host-runtime/current/host-generation.json",
-    ]
-    seen: set[Path] = set()
-    for receipt in candidates:
-        if receipt in seen:
-            continue
-        seen.add(receipt)
-        try:
-            data = json.loads(receipt.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
+    snapshot_receipt = SNAPSHOT.parent / "host-generation.json"
+    try:
+        data = json.loads(snapshot_receipt.read_text(encoding="utf-8"))
         value = data.get("source_revision")
         if isinstance(value, str) and value:
             return value
-    return None
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    git = subprocess.run(
+        ["git", "-C", str(SNAPSHOT), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if git.returncode == 0:
+        value = git.stdout.strip()
+        if len(value) == 40 and all(ch in "0123456789abcdef" for ch in value):
+            return value
+
+    current_receipt = Path.home() / ".local/share/nexus-host-runtime/current/host-generation.json"
+    try:
+        data = json.loads(current_receipt.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    value = data.get("source_revision")
+    return value if isinstance(value, str) and value else None
 
 
 def _write_private_prompt(path: Path, prompt: str) -> None:
@@ -402,6 +412,18 @@ def _print_operation(record: dict[str, Any]) -> None:
     print(json.dumps(public_operation_view(record), indent=2, sort_keys=True))
 
 
+def _resolve_require_free(
+    provider: str,
+    *,
+    require_free: bool,
+    allow_paid_model: bool,
+) -> bool:
+    if require_free and allow_paid_model:
+        raise ExternalWorkerRuntimeError("FREE_MODEL_POLICY_CONFLICT")
+    default_free_provider = provider in {"cline", "opencode"}
+    return bool(require_free or (default_free_provider and not allow_paid_model))
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("prompt", nargs="?")
@@ -449,7 +471,11 @@ def main(argv: list[str] | None = None) -> int:
     if not prompt.strip():
         raise SystemExit("EMPTY_PROMPT")
 
-    require_free = bool(args.require_free or not args.allow_paid_model)
+    require_free = _resolve_require_free(
+        provider,
+        require_free=args.require_free,
+        allow_paid_model=args.allow_paid_model,
+    )
 
     if args.operation_run:
         return _run_operation(
