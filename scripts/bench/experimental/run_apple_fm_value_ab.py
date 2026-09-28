@@ -382,10 +382,12 @@ def main() -> int:
     ap.add_argument("--online-model", default="gemini-3.8-flash")
     ap.add_argument("--online-effort", default="low", choices=("low", "medium", "high"))
     ap.add_argument("--online-workers", type=int, default=4)
+    ap.add_argument("--online-cwd", type=Path)
     ap.add_argument("--build-only", action="store_true")
     args = ap.parse_args()
 
     root = Path(__file__).resolve().parents[3]
+    online_root = (args.online_cwd or root).resolve()
     cases = build_source_bound_cases(root)
     cohort_sha = write_cohort(args.cohort, cases)
     if args.build_only:
@@ -402,7 +404,7 @@ def main() -> int:
 
     cal_eligible = [c for c in calibration if c.eligible_candidate]
     cal_fm, cal_fm_receipt = fm_batch(cal_eligible, 2)
-    cal_online = online_batch(root, calibration, args.online_model, args.online_effort, args.online_workers)
+    cal_online = online_batch(online_root, calibration, args.online_model, args.online_effort, args.online_workers)
 
     kind_policy: dict[str, bool] = {}
     for kind in ("golden_classification", "structured_extraction"):
@@ -420,7 +422,7 @@ def main() -> int:
     for bi, block in enumerate(blocks):
         for arm in arm_orders[bi % len(arm_orders)]:
             if arm == "A0":
-                online = online_batch(root, block, args.online_model, args.online_effort, args.online_workers)
+                online = online_batch(online_root, block, args.online_model, args.online_effort, args.online_workers)
                 for c in block:
                     o = online[c.case_id]
                     rows_by_arm[arm].append({
@@ -441,7 +443,7 @@ def main() -> int:
                 if not (c.eligible_candidate and kind_policy.get(c.kind, False))
                 or not fm[c.case_id]["contract_valid"]
             ]
-            online = online_batch(root, escalate, args.online_model, args.online_effort, args.online_workers)
+            online = online_batch(online_root, escalate, args.online_model, args.online_effort, args.online_workers)
             for c in block:
                 local_attempt = fm.get(c.case_id)
                 accepted_local = bool(local_attempt and local_attempt["contract_valid"])
@@ -540,6 +542,7 @@ def main() -> int:
             "model": args.online_model,
             "effort": args.online_effort,
             "parallelism": args.online_workers,
+            "cwd": str(online_root),
             "token_usage": "UNKNOWN_NOT_EXPOSED_BY_WRAPPER",
         },
         "calibration": {
