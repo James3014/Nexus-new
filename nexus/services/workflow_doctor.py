@@ -413,6 +413,52 @@ def _collect_quota_snapshot(home: Path) -> dict[str, Any]:
     }
 
 
+def _runtime_main_alignment(
+    runtime: dict[str, Any],
+    github_main: str | None,
+) -> dict[str, Any]:
+    if runtime.get("status") != "OBSERVED" or not github_main:
+        return {
+            "status": "UNKNOWN",
+            "basis": None,
+            "current_main": github_main,
+        }
+
+    installed_revision = runtime.get("installed_revision")
+    if installed_revision == github_main:
+        return {
+            "status": "ALIGNED",
+            "basis": "EXACT_REVISION",
+            "current_main": github_main,
+        }
+
+    installed_bundle = runtime.get("installed_bundle_sha256")
+    last_sync = runtime.get("last_sync")
+    if (
+        isinstance(last_sync, dict)
+        and last_sync.get("state") == "ALIGNED"
+        and last_sync.get("desired_revision") == github_main
+        and installed_bundle
+        and last_sync.get("desired_bundle_sha256") == installed_bundle
+        and last_sync.get("installed_bundle_sha256") == installed_bundle
+    ):
+        return {
+            "status": "ALIGNED",
+            "basis": "CONTENT_EQUIVALENT_LAST_SYNC",
+            "current_main": github_main,
+            "installed_revision": installed_revision,
+            "installed_bundle_sha256": installed_bundle,
+        }
+
+    return {
+        "status": "DRIFT",
+        "basis": "NO_CURRENT_MAIN_BINDING",
+        "current_main": github_main,
+        "installed_revision": installed_revision,
+        "installed_bundle_sha256": installed_bundle,
+    }
+
+
 def _operation_path(home: Path, operation_id: str) -> Path | None:
     if operation_id.startswith("agyop_"):
         return (
@@ -619,13 +665,14 @@ def _derive_next_gate(
                 "reason": "Host runtime status reports drift or invalid state.",
                 "components": drifted,
             }
-        github_main, installed = source.get("github_main"), runtime.get("installed_revision")
-        if github_main and installed and github_main != installed:
+        alignment = _runtime_main_alignment(runtime, source.get("github_main"))
+        if alignment.get("status") == "DRIFT":
             return "RECONCILE", {
                 "code": "SYNC_RUNTIME_TO_CURRENT_MAIN",
-                "reason": "Installed host runtime is not bound to current GitHub main.",
-                "github_main": github_main,
-                "installed_revision": installed,
+                "reason": "Host runtime has no exact or content-equivalent binding to current GitHub main.",
+                "github_main": source.get("github_main"),
+                "installed_revision": runtime.get("installed_revision"),
+                "installed_bundle_sha256": runtime.get("installed_bundle_sha256"),
             }
 
     if pr.get("status") == "OBSERVED" and pr.get("state") == "open":
@@ -726,6 +773,10 @@ def collect_workflow_doctor(
         repository, pr_number, repo_root=repo_root, runner=runner
     )
     runtime = _collect_runtime(home=home, runner=runner)
+    runtime["current_main_alignment"] = _runtime_main_alignment(
+        runtime,
+        source.get("github_main"),
+    )
     quota = _collect_quota_snapshot(home)
     operation = _collect_operations(
         home,

@@ -120,6 +120,34 @@ def test_runtime_main_drift_requires_reconcile() -> None:
     assert gate["code"] == "SYNC_RUNTIME_TO_CURRENT_MAIN"
 
 
+def test_content_equivalent_last_sync_is_current_main_aligned() -> None:
+    runtime = _base_runtime()
+    runtime["installed_revision"] = "c" * 40
+    runtime["installed_bundle_sha256"] = "bundle"
+    runtime["last_sync"] = {
+        "state": "ALIGNED",
+        "desired_revision": "a" * 40,
+        "desired_bundle_sha256": "bundle",
+        "installed_bundle_sha256": "bundle",
+    }
+
+    alignment = doctor._runtime_main_alignment(runtime, "a" * 40)
+    disposition, gate = doctor._derive_next_gate(
+        source=_base_source(),
+        runtime=runtime,
+        task={"status": "OBSERVED", "state": "open", "issue_number": 1188},
+        operation=_no_operation(),
+        pr={"status": "NOT_REQUESTED"},
+        required_gates=[],
+        leases=_no_leases(),
+    )
+
+    assert alignment["status"] == "ALIGNED"
+    assert alignment["basis"] == "CONTENT_EQUIVALENT_LAST_SYNC"
+    assert disposition == "SAFE"
+    assert gate["code"] == "CONTINUE_BOUNDED_ISSUE_WORK"
+
+
 def test_outcome_unknown_operation_requires_reconcile() -> None:
     operation = _no_operation()
     operation["requested_id"] = "agyop_" + "1" * 32
