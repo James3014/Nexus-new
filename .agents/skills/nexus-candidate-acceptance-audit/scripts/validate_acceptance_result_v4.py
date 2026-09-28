@@ -63,21 +63,90 @@ def _v5_date(value: object) -> bool:
     return parsed.tzinfo is not None
 
 
-def _v5_authority_contract_hash(authority: dict[str, object]) -> str:
+def _v5_task_card_from_git(
+    root: str, base_commit: str, path: str
+) -> tuple[str, str, list[str], str]:
+    if not GIT_PATH.fullmatch(path):
+        raise OSError("Task Card path is not repository-relative")
+    raw = subprocess.run(
+        ["git", "-C", root, "show", f"{base_commit}:{path}"],
+        capture_output=True,
+        timeout=10,
+    )
+    if raw.returncode != 0:
+        raise OSError("Task Card is not present in the authorized base")
+    card_bytes = raw.stdout
+    text = card_bytes.decode("utf-8")
+    card_sha = hashlib.sha256(card_bytes).hexdigest()
+    task_match = re.search(r"(?m)^task_id:\s*\`([^\`]+)\`\s*$", text)
+    if task_match is None:
+        raise OSError("Task Card task_id is missing")
+    section = re.search(
+        r"(?ms)^## Allowed files\s*\n(?P<body>.*?)(?=^## |\Z)", text
+    )
+    if section is None:
+        raise OSError("Task Card Allowed files section is missing")
+    allowed = re.findall(r"(?m)^-\s*\`([^\`]+)\`\s*$", section.group("body"))
+    if not allowed or len(set(allowed)) != len(allowed):
+        raise OSError("Task Card allowed files are missing or duplicated")
+    if not all(GIT_PATH.fullmatch(path) for path in allowed):
+        raise OSError("Task Card contains invalid allowed path")
+    required_controls = {
+        "artifact_authority": "current",
+        "status": "ACTIVE",
+        "commit_required": "true",
+        "candidate_required": "true",
+        "worker_may_approve": "false",
+        "worker_may_integrate": "false",
+        "worker_may_push": "false",
+        "AUTO_CHAIN": "false",
+    }
+    for key, expected in required_controls.items():
+        control = re.search(
+            rf"(?m)^{re.escape(key)}:\s*\`?([^\s\`]+)\`?\s*$",
+            text,
+        )
+        if control is None or control.group(1) != expected:
+            raise OSError(f"Task Card {key} must be {expected}")
+    deletion = re.search(r"(?m)^deletion_policy:\s*\`?(ALLOW|FORBID)\`?\s*$", text)
+    deletion_policy = deletion.group(1) if deletion else "FORBID"
+    return card_sha, task_match.group(1), allowed, deletion_policy
+
+
+def _v5_review_record_hash(evidence: dict[str, object]) -> str:
     payload = {
-        "schema": "nexus.owner_inline_direct_authority.v1",
-        "owner_id": authority.get("owner_id"),
-        "authority_ref": authority.get("authority_ref"),
-        "task_id": authority.get("task_id"),
-        "attempt_id": authority.get("attempt_id"),
-        "allowed_paths": authority.get("allowed_paths"),
-        "deletion_policy": authority.get("deletion_policy"),
-        "claim_ceiling": authority.get("claim_ceiling"),
+        "schema": V5_REVIEW_SCHEMA,
+        "review_id": evidence.get("review_id"),
+        "reviewer_id": evidence.get("reviewer_id"),
+        "reviewer_attempt_id": evidence.get("reviewer_attempt_id"),
+        "independence_class": evidence.get("independence_class"),
+        "repository": evidence.get("repository"),
+        "commands": evidence.get("commands"),
+        "claim": evidence.get("claim"),
     }
     raw = json.dumps(
         payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
     ).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
+
+
+def _v5_fetch_github_comment(repository_full_name: str, comment_id: int) -> dict[str, object]:
+    proc = subprocess.run(
+        [
+            "gh",
+            "api",
+            f"repos/{repository_full_name}/issues/comments/{comment_id}",
+        ],
+        text=True,
+        capture_output=True,
+        timeout=20,
+    )
+    if proc.returncode != 0:
+        raise OSError(proc.stderr.strip() or "GitHub review comment lookup failed")
+    value = json.loads(proc.stdout)
+    if not isinstance(value, dict):
+        raise OSError("GitHub review comment response is malformed")
+    return value
 
 
 def _v5_normalize_remote(value: str) -> str:
@@ -100,6 +169,12 @@ def _v5_result_projection(data: dict[str, object]) -> dict[str, object]:
     projected["schema"] = "nexus.candidate_acceptance.v4"
     source = projected.get("source")
     if isinstance(source, dict):
+        # This projection exists only to reuse v4 envelope checks. It deliberately
+        # removes v5 authority lineage and must never be emitted as evidence.
+        source["contract_kind"] = "OWNER_INLINE"
+        source["campaign_id"] = None
+        source["task_card_path"] = None
+        source["task_card_sha256"] = None
         source["executor_evidence_kind"] = "DEVSPACE_DIRECT_EVIDENCE"
         source["verification_evidence_kind"] = "CORE_GENERIC_VERIFICATION_RESPONSE"
     integrity = projected.get("integrity")
@@ -139,18 +214,26 @@ def validate_v5(data: object) -> dict[str, object]:
             "$.source.verification_evidence_kind: v5 direct work requires "
             "INDEPENDENT_REVIEW_EVIDENCE"
         )
-    if source.get("contract_kind") != "OWNER_INLINE":
-        errors.append("$.source.contract_kind: v5 direct evidence requires OWNER_INLINE")
-    if source.get("campaign_id") is not None:
-        errors.append("$.source.campaign_id: v5 direct evidence requires null")
-    for key in (
-        "task_card_path",
-        "task_card_sha256",
-        "compiled_packet_sha256",
-        "execution_manifest_sha256",
-    ):
+    if source.get("contract_kind") != "TRACKED_TASK_CARD":
+        errors.append(
+            "$.source.contract_kind: v5 governed transport-neutral evidence "
+            "requires TRACKED_TASK_CARD"
+        )
+    if not nonempty(source.get("campaign_id")):
+        errors.append("$.source.campaign_id: required for v5 governed work")
+    if not nonempty(source.get("task_card_path")):
+        errors.append("$.source.task_card_path: required for v5 governed work")
+    task_card_sha = source.get("task_card_sha256")
+    if not isinstance(task_card_sha, str) or not HEX64.fullmatch(task_card_sha):
+        errors.append("$.source.task_card_sha256: lowercase SHA-256 required")
+    if source.get("contract_hash") != task_card_sha:
+        errors.append(
+            "$.source.contract_hash: v5 governed work binds contract_hash to "
+            "the immutable Task Card SHA-256"
+        )
+    for key in ("compiled_packet_sha256", "execution_manifest_sha256"):
         if source.get(key) is not None:
-            errors.append(f"$.source.{key}: v5 direct evidence forbids synthetic lineage")
+            errors.append(f"$.source.{key}: v5 direct execution forbids synthetic MCP lineage")
 
     repository = data.get("repository")
     if isinstance(repository, dict):
@@ -221,9 +304,8 @@ def _v5_validate_direct_evidence(
         "contract_kind",
         "task_id",
         "attempt_id",
-        "contract_hash",
-        "owner_id",
-        "authority_ref",
+        "task_card_path",
+        "task_card_sha256",
         "allowed_paths",
         "deletion_policy",
         "claim_ceiling",
@@ -269,21 +351,31 @@ def _v5_validate_direct_evidence(
         if set(value) != keys:
             record(data, errors, warnings, f"transport-neutral {label} shape mismatch", "authority")
 
-    if authority.get("contract_kind") != "OWNER_INLINE":
-        record(data, errors, warnings, "transport-neutral direct work requires OWNER_INLINE authority", "authority")
-    for key in ("task_id", "attempt_id", "owner_id", "authority_ref"):
-        if not nonempty(authority.get(key)):
-            record(data, errors, warnings, f"transport-neutral authority {key} is required", "authority")
-    if not isinstance(authority.get("contract_hash"), str) or not HEX64.fullmatch(
-        authority.get("contract_hash", "")
-    ):
-        record(data, errors, warnings, "transport-neutral contract_hash is malformed", "authority")
-    elif authority.get("contract_hash") != _v5_authority_contract_hash(authority):
+    if authority.get("contract_kind") != "TRACKED_TASK_CARD":
         record(
             data,
             errors,
             warnings,
-            "transport-neutral contract_hash does not bind Owner-inline authority",
+            "transport-neutral governed work requires TRACKED_TASK_CARD authority",
+            "authority",
+        )
+    for key in ("task_id", "attempt_id", "task_card_path"):
+        if not nonempty(authority.get(key)):
+            record(
+                data,
+                errors,
+                warnings,
+                f"transport-neutral authority {key} is required",
+                "authority",
+            )
+    if not isinstance(authority.get("task_card_sha256"), str) or not HEX64.fullmatch(
+        authority.get("task_card_sha256", "")
+    ):
+        record(
+            data,
+            errors,
+            warnings,
+            "transport-neutral task_card_sha256 is malformed",
             "authority",
         )
     allowed_paths = authority.get("allowed_paths")
@@ -345,7 +437,15 @@ def _v5_validate_direct_evidence(
     checks = {
         "task_id": (source.get("task_id"), authority.get("task_id")),
         "attempt_id": (source.get("implementer_attempt_id"), authority.get("attempt_id")),
-        "contract_hash": (source.get("contract_hash"), authority.get("contract_hash")),
+        "task_card_path": (source.get("task_card_path"), authority.get("task_card_path")),
+        "task_card_sha256": (
+            source.get("task_card_sha256"),
+            authority.get("task_card_sha256"),
+        ),
+        "contract_hash": (
+            source.get("contract_hash"),
+            authority.get("task_card_sha256"),
+        ),
         "root": (repository.get("root"), execution.get("workspace_root")),
         "executor_observed_head": (repository.get("executor_observed_head"), candidate.get("source_commit")),
         "expected_base_commit": (repository.get("expected_base_commit"), candidate.get("source_commit")),
@@ -358,7 +458,18 @@ def _v5_validate_direct_evidence(
     }
     for name, (left, right) in checks.items():
         if left != right:
-            axis = "authority" if name in {"task_id", "attempt_id", "contract_hash"} else "subject_identity"
+            axis = (
+                "authority"
+                if name
+                in {
+                    "task_id",
+                    "attempt_id",
+                    "task_card_path",
+                    "task_card_sha256",
+                    "contract_hash",
+                }
+                else "subject_identity"
+            )
             record(data, errors, warnings, f"transport-neutral {name} mismatch", axis)
 
     evidence_id_parts = (
@@ -397,6 +508,19 @@ def _v5_validate_direct_evidence(
             raise OSError("workspace_root is not the physical Git toplevel")
         if _v5_normalize_remote(actual_origin) != _v5_normalize_remote(candidate["repository_origin"]):
             raise OSError("physical Git origin does not match executor evidence")
+        card_sha, card_task, card_paths, card_deletion = _v5_task_card_from_git(
+            root,
+            source_commit,
+            authority["task_card_path"],
+        )
+        if card_sha != authority.get("task_card_sha256"):
+            raise OSError("Task Card SHA-256 does not match the authorized base")
+        if card_task != authority.get("task_id"):
+            raise OSError("Task Card task_id does not match executor evidence")
+        if card_paths != authority.get("allowed_paths"):
+            raise OSError("Task Card allowed paths do not match executor evidence")
+        if card_deletion != authority.get("deletion_policy"):
+            raise OSError("Task Card deletion policy does not match executor evidence")
         if _git(root, "rev-parse", f"{source_commit}^{{commit}}") != source_commit:
             raise OSError("source commit is not the supplied immutable Git object")
         if _git(root, "rev-parse", f"{candidate_commit}^{{commit}}") != candidate_commit:
@@ -461,6 +585,7 @@ def _v5_validate_review_evidence(
         "independence_class",
         "repository",
         "commands",
+        "provenance",
         "claim",
         "integrity",
     }
@@ -574,6 +699,130 @@ def _v5_validate_review_evidence(
         record(data, errors, warnings, "independent review requires at least one PASS command", "independent_behavior")
     if commands != review_result.get("commands"):
         record(data, errors, warnings, "independent review commands do not match acceptance result", "independent_behavior")
+
+    provenance = evidence.get("provenance")
+    provenance_keys = {
+        "kind",
+        "repository_full_name",
+        "issue_number",
+        "comment_id",
+        "author_login",
+        "review_record_sha256",
+        "body_sha256",
+    }
+    if not isinstance(provenance, dict) or set(provenance) != provenance_keys:
+        record(
+            data,
+            errors,
+            warnings,
+            "independent review provenance shape mismatch",
+            "provenance",
+        )
+    else:
+        if provenance.get("kind") != "GITHUB_ISSUE_COMMENT":
+            record(
+                data,
+                errors,
+                warnings,
+                "independent review provenance must be GITHUB_ISSUE_COMMENT",
+                "provenance",
+            )
+        for key in ("repository_full_name", "author_login"):
+            if not nonempty(provenance.get(key)):
+                record(
+                    data,
+                    errors,
+                    warnings,
+                    f"independent review provenance {key} is required",
+                    "provenance",
+                )
+        if not isinstance(provenance.get("issue_number"), int) or provenance.get(
+            "issue_number"
+        ) <= 0:
+            record(
+                data,
+                errors,
+                warnings,
+                "independent review provenance issue_number is invalid",
+                "provenance",
+            )
+        if not isinstance(provenance.get("comment_id"), int) or provenance.get(
+            "comment_id"
+        ) <= 0:
+            record(
+                data,
+                errors,
+                warnings,
+                "independent review provenance comment_id is invalid",
+                "provenance",
+            )
+        for key in ("review_record_sha256", "body_sha256"):
+            if not isinstance(provenance.get(key), str) or not HEX64.fullmatch(
+                provenance.get(key, "")
+            ):
+                record(
+                    data,
+                    errors,
+                    warnings,
+                    f"independent review provenance {key} is malformed",
+                    "provenance",
+                )
+        expected_record = _v5_review_record_hash(evidence)
+        if provenance.get("review_record_sha256") != expected_record:
+            record(
+                data,
+                errors,
+                warnings,
+                "independent review provenance does not bind the review record",
+                "provenance",
+            )
+        try:
+            comment = _v5_fetch_github_comment(
+                provenance["repository_full_name"],
+                provenance["comment_id"],
+            )
+            body = comment.get("body")
+            user = comment.get("user")
+            issue_url = comment.get("issue_url")
+            if not isinstance(body, str) or not isinstance(user, dict):
+                raise OSError("GitHub review comment response is incomplete")
+            if user.get("login") != provenance.get("author_login"):
+                raise OSError("GitHub review comment author mismatch")
+            if evidence.get("reviewer_id") != provenance.get("author_login"):
+                raise OSError("reviewer_id is not authenticated by GitHub author")
+            repo_full_name = provenance.get("repository_full_name")
+            if not isinstance(repo_full_name, str) or not _v5_normalize_remote(
+                bound_repo.get("origin", "")
+            ).endswith("/" + repo_full_name):
+                raise OSError("GitHub review repository does not match Candidate origin")
+            if hashlib.sha256(body.encode("utf-8")).hexdigest() != provenance.get(
+                "body_sha256"
+            ):
+                raise OSError("GitHub review comment body hash mismatch")
+            if not isinstance(issue_url, str) or not issue_url.endswith(
+                f"/issues/{provenance['issue_number']}"
+            ):
+                raise OSError("GitHub review comment issue binding mismatch")
+            markers = {
+                "NEXUS_REVIEW_RECORD_SHA256": provenance.get("review_record_sha256"),
+                "NEXUS_CANDIDATE_SHA": repository.get("candidate_commit_sha"),
+                "NEXUS_TASK_CARD_SHA256": source.get("task_card_sha256"),
+                "NEXUS_REVIEWER_ATTEMPT": evidence.get("reviewer_attempt_id"),
+                "NEXUS_REVIEWER_ID": evidence.get("reviewer_id"),
+            }
+            for label, value in markers.items():
+                if f"{label}: {value}" not in body:
+                    raise OSError(
+                        f"GitHub review comment lacks exact {label} marker"
+                    )
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
+            record(
+                data,
+                errors,
+                warnings,
+                f"independent review provenance verification failed: {exc}",
+                "provenance",
+            )
 
     claim = evidence.get("claim")
     claim_keys = {

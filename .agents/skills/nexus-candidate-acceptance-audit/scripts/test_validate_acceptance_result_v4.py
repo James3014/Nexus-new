@@ -10,6 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 
@@ -157,7 +158,7 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
         )
         return proc.stdout.strip()
 
-    def _make_repo(self, *, delete: bool = False) -> tuple[Path, str, str, str]:
+    def _make_repo(self, *, delete: bool = False, extra_path: bool = False) -> tuple[Path, str, str, str]:
         self.counter += 1
         repo = self.root / f"repo-{self.counter}"
         repo.mkdir()
@@ -166,13 +167,35 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
         self._git(repo, "config", "user.email", "acceptance@example.test")
         self._git(repo, "remote", "add", "origin", "https://example.test/owner/repo.git")
         (repo / "a.txt").write_text("one\n", encoding="utf-8")
-        self._git(repo, "add", "a.txt")
+        card = repo / "tasks" / "test-campaign" / "00-task.md"
+        card.parent.mkdir(parents=True)
+        card.write_text(
+            "# Task Card: goal-standalone-golden-path\n\n"
+            "artifact_authority: current\n"
+            "task_id: `goal-standalone-golden-path`\n"
+            "owner: Test Owner\n"
+            "status: ACTIVE\n"
+            "commit_required: true\n"
+            "candidate_required: true\n"
+            "worker_may_approve: false\n"
+            "worker_may_integrate: false\n"
+            "worker_may_push: false\n"
+            "AUTO_CHAIN: false\n\n"
+            "## Allowed files\n\n"
+            "- `a.txt`\n\n"
+            "## Verification commands\n\n"
+            "```bash\npython -m pytest -q\n```\n",
+            encoding="utf-8",
+        )
+        self._git(repo, "add", "a.txt", str(card.relative_to(repo)))
         self._git(repo, "commit", "-qm", "base")
         base = self._git(repo, "rev-parse", "HEAD")
         if delete:
             (repo / "a.txt").unlink()
         else:
             (repo / "a.txt").write_text("two\n", encoding="utf-8")
+        if extra_path:
+            (repo / "b.txt").write_text("out-of-scope\n", encoding="utf-8")
         self._git(repo, "add", "-A")
         self._git(repo, "commit", "-qm", "candidate")
         candidate = self._git(repo, "rev-parse", "HEAD")
@@ -189,8 +212,8 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
         value["integrity"] = {"sha256": "0" * 64}
         value["integrity"]["sha256"] = current.canonical_sha256(value)
 
-    def _build_bundle(self, *, delete: bool = False) -> dict[str, object]:
-        repo, base, candidate_sha, tree = self._make_repo(delete=delete)
+    def _build_bundle(self, *, delete: bool = False, extra_path: bool = False) -> dict[str, object]:
+        repo, base, candidate_sha, tree = self._make_repo(delete=delete, extra_path=extra_path)
         manifest = current._physical_manifest(str(repo), base, candidate_sha)
         changed_paths = [row["path"] for row in manifest["entries"]]
         deleted_paths = [
@@ -199,8 +222,15 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
             if row["change_type"] == "DELETE"
         ]
         diff_hash = current.core_manifest_hash(manifest)
-        contract_hash = "0" * 64
         task_id = "goal-standalone-golden-path"
+        task_card_path = "tasks/test-campaign/00-task.md"
+        task_card_bytes = subprocess.run(
+            ["git", "-C", str(repo), "show", f"{base}:{task_card_path}"],
+            capture_output=True,
+            check=True,
+        ).stdout
+        task_card_sha = hashlib.sha256(task_card_bytes).hexdigest()
+        contract_hash = task_card_sha
         implementer_attempt = "impl-codex-001"
         reviewer_attempt = "review-chatgpt-001"
         created = "2026-09-29T00:00:00+00:00"
@@ -213,12 +243,11 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
             "evidence_id": evidence_id,
             "created_at": created,
             "authority": {
-                "contract_kind": "OWNER_INLINE",
+                "contract_kind": "TRACKED_TASK_CARD",
                 "task_id": task_id,
                 "attempt_id": implementer_attempt,
-                "contract_hash": contract_hash,
-                "owner_id": "owner",
-                "authority_ref": "owner-request:standalone-golden-path",
+                "task_card_path": task_card_path,
+                "task_card_sha256": task_card_sha,
                 "allowed_paths": ["a.txt"],
                 "deletion_policy": "FORBID",
                 "claim_ceiling": "CANDIDATE_READY",
@@ -257,10 +286,6 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
             },
             "integrity": {"sha256": "0" * 64},
         }
-        executor["authority"]["contract_hash"] = current._v5_authority_contract_hash(
-            executor["authority"]
-        )
-        contract_hash = executor["authority"]["contract_hash"]
         self._refresh_integrity(executor)
 
         commands = [
@@ -279,7 +304,7 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
             "schema": current.V5_REVIEW_SCHEMA,
             "review_id": "review-001",
             "created_at": "2026-09-29T00:01:00+00:00",
-            "reviewer_id": "chatgpt-primary",
+            "reviewer_id": "review-publisher",
             "reviewer_attempt_id": reviewer_attempt,
             "independence_class": "INDEPENDENT_REVIEWER",
             "repository": {
@@ -290,6 +315,15 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
                 "candidate_tree_sha": tree,
             },
             "commands": commands,
+            "provenance": {
+                "kind": "GITHUB_ISSUE_COMMENT",
+                "repository_full_name": "owner/repo",
+                "issue_number": 77,
+                "comment_id": 12345,
+                "author_login": "review-publisher",
+                "review_record_sha256": "0" * 64,
+                "body_sha256": "0" * 64,
+            },
             "claim": {
                 "claim_ceiling": "INDEPENDENT_BEHAVIOR_EVIDENCE_ONLY",
                 "certified": False,
@@ -302,6 +336,18 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
             },
             "integrity": {"sha256": "0" * 64},
         }
+        review_record = current._v5_review_record_hash(review)
+        review["provenance"]["review_record_sha256"] = review_record
+        review_body = (
+            f"NEXUS_REVIEW_RECORD_SHA256: {review_record}\n"
+            f"NEXUS_CANDIDATE_SHA: {candidate_sha}\n"
+            f"NEXUS_TASK_CARD_SHA256: {task_card_sha}\n"
+            f"NEXUS_REVIEWER_ATTEMPT: {reviewer_attempt}\n"
+            "NEXUS_REVIEWER_ID: review-publisher\n"
+        )
+        review["provenance"]["body_sha256"] = hashlib.sha256(
+            review_body.encode("utf-8")
+        ).hexdigest()
         self._refresh_integrity(review)
 
         artifacts = self.root / f"artifacts-{self.counter}"
@@ -317,12 +363,12 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
             "created_at": "2026-09-29T00:02:00+00:00",
             "verdict": "ACCEPT_CANDIDATE",
             "source": {
-                "contract_kind": "OWNER_INLINE",
-                "campaign_id": None,
+                "contract_kind": "TRACKED_TASK_CARD",
+                "campaign_id": "test-campaign",
                 "task_id": task_id,
                 "contract_hash": contract_hash,
-                "task_card_path": None,
-                "task_card_sha256": None,
+                "task_card_path": task_card_path,
+                "task_card_sha256": task_card_sha,
                 "compiled_packet_sha256": None,
                 "execution_manifest_sha256": None,
                 "implementer_attempt_id": implementer_attempt,
@@ -432,6 +478,11 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
             "executor_path": executor_path,
             "review_path": review_path,
             "result": result,
+            "review_comment": {
+                "body": review_body,
+                "user": {"login": "review-publisher"},
+                "issue_url": "https://api.github.test/repos/owner/repo/issues/77",
+            },
         }
 
     def _args(self, bundle: dict[str, object]) -> SimpleNamespace:
@@ -440,6 +491,16 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
             verification_evidence=bundle["review_path"],
             v3_validation_report=None,
         )
+
+    def _physical(self, bundle: dict[str, object], args=None):
+        if args is None:
+            args = self._args(bundle)
+        with mock.patch.object(
+            current,
+            "_v5_fetch_github_comment",
+            return_value=bundle["review_comment"],
+        ):
+            return current.validate_physical(bundle["result"], args)
 
     def _rewrite_bound(
         self,
@@ -468,7 +529,7 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
         bundle = self._build_bundle()
         report = current.validate(bundle["result"])
         self.assertTrue(report["valid"], report["errors"])
-        errors, warnings = current.validate_physical(bundle["result"], self._args(bundle))
+        errors, warnings = self._physical(bundle)
         self.assertEqual(errors, [])
         self.assertTrue(any("v5 physical Git subject verified" in item for item in warnings))
 
@@ -498,18 +559,22 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
         bundle = self._build_bundle()
         args = self._args(bundle)
         args.executor_evidence = None
-        errors, _ = current.validate_physical(bundle["result"], args)
+        errors, _ = self._physical(bundle, args)
         self.assertEqual(
             errors,
             ["--executor-evidence is required for v5 physical binding"],
         )
 
-    def test_v5_missing_owner_authorization_fails(self) -> None:
+    def test_v5_task_card_authority_hash_is_independent(self) -> None:
         bundle = self._build_bundle()
-        bundle["executor"]["authority"]["owner_id"] = ""
+        bundle["executor"]["authority"]["task_card_sha256"] = "0" * 64
+        bundle["result"]["source"]["task_card_sha256"] = "0" * 64
+        bundle["result"]["source"]["contract_hash"] = "0" * 64
         self._rewrite_bound(bundle, executor=True)
-        errors, _ = current.validate_physical(bundle["result"], self._args(bundle))
-        self.assertTrue(any("owner_id is required" in item for item in errors))
+        errors, _ = self._physical(bundle)
+        self.assertTrue(
+            any("Task Card SHA-256 does not match" in item for item in errors)
+        )
 
     def test_v5_result_subject_mismatches_fail(self) -> None:
         cases = {
@@ -524,36 +589,26 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
                 bundle = self._build_bundle()
                 bundle["result"]["repository"][key] = value
                 self._refresh_integrity(bundle["result"])
-                errors, _ = current.validate_physical(
-                    bundle["result"], self._args(bundle)
-                )
+                errors, _ = self._physical(bundle)
                 self.assertTrue(errors, key)
 
-    def test_v5_owner_inline_contract_hash_binds_scope(self) -> None:
+    def test_v5_task_card_binds_scope(self) -> None:
         bundle = self._build_bundle()
         bundle["executor"]["authority"]["allowed_paths"] = ["b.txt"]
         self._rewrite_bound(bundle, executor=True)
-        errors, _ = current.validate_physical(bundle["result"], self._args(bundle))
+        errors, _ = self._physical(bundle)
         self.assertTrue(
-            any("contract_hash does not bind Owner-inline authority" in item for item in errors)
+            any("Task Card allowed paths do not match" in item for item in errors)
         )
 
     def test_v5_out_of_scope_path_fails(self) -> None:
-        bundle = self._build_bundle()
-        bundle["executor"]["authority"]["allowed_paths"] = ["b.txt"]
-        bundle["executor"]["authority"]["contract_hash"] = (
-            current._v5_authority_contract_hash(bundle["executor"]["authority"])
-        )
-        bundle["result"]["source"]["contract_hash"] = bundle["executor"]["authority"][
-            "contract_hash"
-        ]
-        self._rewrite_bound(bundle, executor=True)
-        errors, _ = current.validate_physical(bundle["result"], self._args(bundle))
+        bundle = self._build_bundle(extra_path=True)
+        errors, _ = self._physical(bundle)
         self.assertTrue(any("escapes allowed_paths" in item for item in errors))
 
     def test_v5_forbidden_deletion_fails(self) -> None:
         bundle = self._build_bundle(delete=True)
-        errors, _ = current.validate_physical(bundle["result"], self._args(bundle))
+        errors, _ = self._physical(bundle)
         self.assertTrue(any("forbidden deletions" in item for item in errors))
 
 
@@ -565,14 +620,14 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
             bundle["executor_path"]
         )
         self._refresh_integrity(bundle["result"])
-        errors, _ = current.validate_physical(bundle["result"], self._args(bundle))
+        errors, _ = self._physical(bundle)
         self.assertTrue(any("integrity mismatch" in item for item in errors))
 
     def test_v5_review_bound_to_wrong_candidate_fails(self) -> None:
         bundle = self._build_bundle()
         bundle["review"]["repository"]["candidate_commit_sha"] = bundle["base"]
         self._rewrite_bound(bundle, review=True)
-        errors, _ = current.validate_physical(bundle["result"], self._args(bundle))
+        errors, _ = self._physical(bundle)
         self.assertTrue(any("candidate_commit_sha mismatch" in item for item in errors))
 
     def test_v5_same_implementer_and_reviewer_attempt_fails(self) -> None:
@@ -587,11 +642,38 @@ class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
             any("must differ from implementer" in item for item in report["errors"])
         )
 
+    def test_v5_review_provenance_marker_mismatch_fails(self) -> None:
+        bundle = self._build_bundle()
+        bundle["review_comment"]["body"] = "wrong review marker\n"
+        errors, _ = self._physical(bundle)
+        self.assertTrue(
+            any("review provenance verification failed" in item for item in errors)
+        )
+
+    def test_v5_review_author_mismatch_fails(self) -> None:
+        bundle = self._build_bundle()
+        bundle["review_comment"]["user"]["login"] = "different-reviewer"
+        errors, _ = self._physical(bundle)
+        self.assertTrue(
+            any("review provenance verification failed" in item for item in errors)
+        )
+
+    def test_v5_rejects_owner_inline_authority(self) -> None:
+        bundle = self._build_bundle()
+        bundle["result"]["source"]["contract_kind"] = "OWNER_INLINE"
+        bundle["executor"]["authority"]["contract_kind"] = "OWNER_INLINE"
+        self._rewrite_bound(bundle, executor=True)
+        report = current.validate(bundle["result"])
+        self.assertFalse(report["valid"])
+        self.assertTrue(
+            any("requires TRACKED_TASK_CARD" in item for item in report["errors"])
+        )
+
     def test_v5_claim_escalation_fails(self) -> None:
         bundle = self._build_bundle()
         bundle["executor"]["claim"]["approved"] = True
         self._rewrite_bound(bundle, executor=True)
-        errors, _ = current.validate_physical(bundle["result"], self._args(bundle))
+        errors, _ = self._physical(bundle)
         self.assertTrue(any("illegally asserts approved" in item for item in errors))
 
 
