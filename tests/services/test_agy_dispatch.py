@@ -121,11 +121,13 @@ def test_weekly_only_dual_family_account_enters_reserve() -> None:
 def test_installer_deploys_exact_canonical_bytes(tmp_path: Path) -> None:
     target = tmp_path / "nexus-agy-dispatch"
     env = os.environ.copy()
-    env.update({
-        "NEXUS_AGY_REPO_ROOT": str(ROOT),
-        "NEXUS_AGY_SNAPSHOT": str(ROOT),
-        "NEXUS_AGY_DISPATCH_TARGET": str(target),
-    })
+    env.update(
+        {
+            "NEXUS_AGY_REPO_ROOT": str(ROOT),
+            "NEXUS_AGY_SNAPSHOT": str(ROOT),
+            "NEXUS_AGY_DISPATCH_TARGET": str(target),
+        }
+    )
 
     proc = subprocess.run(
         ["bash", str(INSTALLER_PATH)],
@@ -144,9 +146,7 @@ def test_installer_deploys_exact_canonical_bytes(tmp_path: Path) -> None:
     assert mode & stat.S_IXOTH
 
 
-def test_default_snapshot_prefers_host_runtime_generation(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_default_snapshot_prefers_host_runtime_generation(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     current = tmp_path / ".local/share/nexus-host-runtime/current/snapshot"
     current.mkdir(parents=True)
@@ -159,6 +159,4 @@ def test_default_snapshot_falls_back_to_legacy_before_host_sync(
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
 
-    assert dispatch._default_snapshot() == (
-        tmp_path / ".local/share/nexus-agy-direct/Nexus-new"
-    )
+    assert dispatch._default_snapshot() == (tmp_path / ".local/share/nexus-agy-direct/Nexus-new")

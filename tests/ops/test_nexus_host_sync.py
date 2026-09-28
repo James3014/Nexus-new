@@ -138,9 +138,7 @@ def test_sync_materializes_exact_generation_and_entrypoints(tmp_path: Path) -> N
     assert dispatch_target.is_symlink()
     assert sync_target.is_symlink()
 
-    receipt = json.loads(
-        (runtime_root / "releases" / bundle / "host-generation.json").read_text()
-    )
+    receipt = json.loads((runtime_root / "releases" / bundle / "host-generation.json").read_text())
     assert receipt["source_revision"] == revision
     assert receipt["bundle_sha256"] == bundle
     assert receipt["schema"] == "nexus.host_generation.v1"
