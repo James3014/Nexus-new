@@ -30,6 +30,15 @@ def _tasks(count: int) -> tuple[list[AppleFMReadOnlyTask], dict[str, str]]:
             "Event: HTTP 429 Too Many Requests was returned because quota was exhausted. "
             "Return only the label.",
             "RATE_LIMIT",
+            (
+                "AUTH_ERROR",
+                "RATE_LIMIT",
+                "PROVIDER_TIMEOUT",
+                "MODEL_NOT_FOUND",
+                "TRANSPORT_FAILURE",
+                "UNKNOWN",
+            ),
+            None,
         ),
         (
             AppleFMTaskKind.CLASSIFICATION,
@@ -38,26 +47,47 @@ def _tasks(count: int) -> tuple[list[AppleFMReadOnlyTask], dict[str, str]]:
             "Event: no provider response arrived before the 30 second deadline. "
             "Return only the label.",
             "PROVIDER_TIMEOUT",
+            (
+                "AUTH_ERROR",
+                "RATE_LIMIT",
+                "PROVIDER_TIMEOUT",
+                "MODEL_NOT_FOUND",
+                "TRANSPORT_FAILURE",
+                "UNKNOWN",
+            ),
+            None,
         ),
         (
             AppleFMTaskKind.LITERAL_EXTRACTION,
             "Return only the integer HTTP status code. "
             "Event: the provider returned HTTP 503 Service Unavailable.",
             "503",
+            (),
+            r"\d{3}",
         ),
         (
             AppleFMTaskKind.LITERAL_EXTRACTION,
             "Return only the integer retry count. "
             "Event: the request failed after exactly 3 retries.",
             "3",
+            (),
+            r"\d+",
         ),
     )
     tasks: list[AppleFMReadOnlyTask] = []
     expected: dict[str, str] = {}
     for index in range(count):
-        kind, prompt, truth = templates[index % len(templates)]
+        kind, prompt, truth, allowed_outputs, output_pattern = templates[index % len(templates)]
         task_id = f"P-{index + 1:03d}"
-        tasks.append(AppleFMReadOnlyTask(task_id, kind, prompt))
+        tasks.append(
+            AppleFMReadOnlyTask(
+                task_id,
+                kind,
+                prompt,
+                allowed_outputs=allowed_outputs,
+                output_pattern=output_pattern,
+            )
+        )
         expected[task_id] = truth
     return tasks, expected
 

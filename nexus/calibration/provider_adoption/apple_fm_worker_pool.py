@@ -11,6 +11,7 @@ import concurrent.futures
 import json
 import math
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -52,6 +53,8 @@ class AppleFMReadOnlyTask:
     kind: AppleFMTaskKind
     prompt: str
     schema: dict[str, Any] | None = None
+    allowed_outputs: tuple[str, ...] = ()
+    output_pattern: str | None = None
     risk_tags: tuple[str, ...] = ()
 
     def validate(self) -> None:
@@ -71,6 +74,20 @@ class AppleFMReadOnlyTask:
             raise ValueError(
                 f"{self.task_id}: risk tags are not eligible for Apple FM pool: {blocked}"
             )
+        if self.kind == AppleFMTaskKind.CLASSIFICATION:
+            if not self.allowed_outputs:
+                raise ValueError(f"{self.task_id}: classification requires allowed_outputs")
+            if self.output_pattern is not None or self.schema is not None:
+                raise ValueError(f"{self.task_id}: classification accepts allowed_outputs only")
+        if self.kind == AppleFMTaskKind.LITERAL_EXTRACTION:
+            if self.output_pattern is None:
+                raise ValueError(f"{self.task_id}: literal_extraction requires output_pattern")
+            if self.allowed_outputs or self.schema is not None:
+                raise ValueError(f"{self.task_id}: literal_extraction accepts output_pattern only")
+            try:
+                re.compile(self.output_pattern)
+            except re.error as exc:
+                raise ValueError(f"{self.task_id}: invalid output_pattern: {exc}") from exc
         if self.kind == AppleFMTaskKind.STRUCTURED_JSON and self.schema is None:
             raise ValueError(f"{self.task_id}: structured_json requires a schema")
         if self.kind == AppleFMTaskKind.STRUCTURED_JSON:
@@ -79,8 +96,9 @@ class AppleFMReadOnlyTask:
                 Draft202012Validator.check_schema(self.schema)
             except SchemaError as exc:
                 raise ValueError(f"{self.task_id}: invalid JSON schema: {exc.message}") from exc
-        if self.kind != AppleFMTaskKind.STRUCTURED_JSON and self.schema is not None:
-            raise ValueError(f"{self.task_id}: schema is only valid for structured_json")
+        if self.kind == AppleFMTaskKind.STRUCTURED_JSON:
+            if self.allowed_outputs or self.output_pattern is not None:
+                raise ValueError(f"{self.task_id}: structured_json accepts schema only")
 
 
 @dataclass(frozen=True)
@@ -89,7 +107,8 @@ class AppleFMTaskResult:
     ok: bool
     output_text: str
     latency_ms: int
-    schema_valid: bool
+    output_contract_valid: bool
+    semantic_correctness_status: str
     error_code: str | None
     needs_escalation: bool
 
@@ -99,7 +118,8 @@ class AppleFMTaskResult:
             "ok": self.ok,
             "output_text": self.output_text,
             "latency_ms": self.latency_ms,
-            "schema_valid": self.schema_valid,
+            "output_contract_valid": self.output_contract_valid,
+            "semantic_correctness_status": self.semantic_correctness_status,
             "error_code": self.error_code,
             "needs_escalation": self.needs_escalation,
         }
@@ -111,8 +131,8 @@ class AppleFMWorkerPoolReceipt:
     requested_concurrency: int
     effective_concurrency: int
     total_tasks: int
-    successful_tasks: int
-    failed_tasks: int
+    contract_valid_tasks: int
+    contract_invalid_tasks: int
     wall_time_ms: int
     throughput_rps: float
     p50_latency_ms: int
@@ -128,8 +148,8 @@ class AppleFMWorkerPoolReceipt:
             "requested_concurrency": self.requested_concurrency,
             "effective_concurrency": self.effective_concurrency,
             "total_tasks": self.total_tasks,
-            "successful_tasks": self.successful_tasks,
-            "failed_tasks": self.failed_tasks,
+            "contract_valid_tasks": self.contract_valid_tasks,
+            "contract_invalid_tasks": self.contract_invalid_tasks,
             "wall_time_ms": self.wall_time_ms,
             "throughput_rps": self.throughput_rps,
             "p50_latency_ms": self.p50_latency_ms,
@@ -229,7 +249,8 @@ class AppleFMReadOnlyWorkerPool:
                     ok=False,
                     output_text=output,
                     latency_ms=latency_ms,
-                    schema_valid=False,
+                    output_contract_valid=False,
+                    semantic_correctness_status="NOT_EVALUATED",
                     error_code=f"FM_EXIT_{completed.returncode}",
                     needs_escalation=True,
                 )
@@ -239,34 +260,45 @@ class AppleFMReadOnlyWorkerPool:
                     ok=False,
                     output_text="",
                     latency_ms=latency_ms,
-                    schema_valid=False,
+                    output_contract_valid=False,
+                    semantic_correctness_status="NOT_EVALUATED",
                     error_code="EMPTY_OUTPUT",
                     needs_escalation=True,
                 )
 
-            schema_valid = True
+            output_contract_valid = True
             error_code: str | None = None
-            if task.kind == AppleFMTaskKind.STRUCTURED_JSON:
+            if task.kind == AppleFMTaskKind.CLASSIFICATION:
+                if output not in task.allowed_outputs:
+                    output_contract_valid = False
+                    error_code = "OUTPUT_NOT_IN_ALLOWED_SET"
+            elif task.kind == AppleFMTaskKind.LITERAL_EXTRACTION:
+                assert task.output_pattern is not None
+                if re.fullmatch(task.output_pattern, output) is None:
+                    output_contract_valid = False
+                    error_code = "OUTPUT_PATTERN_MISMATCH"
+            elif task.kind == AppleFMTaskKind.STRUCTURED_JSON:
                 assert task.schema is not None
                 try:
                     payload = json.loads(output)
                 except json.JSONDecodeError:
-                    schema_valid = False
+                    output_contract_valid = False
                     error_code = "INVALID_JSON"
                 else:
                     try:
                         Draft202012Validator(task.schema).validate(payload)
                     except ValidationError:
-                        schema_valid = False
+                        output_contract_valid = False
                         error_code = "SCHEMA_VIOLATION"
             return AppleFMTaskResult(
                 task_id=task.task_id,
-                ok=schema_valid,
+                ok=output_contract_valid,
                 output_text=output,
                 latency_ms=latency_ms,
-                schema_valid=schema_valid,
+                output_contract_valid=output_contract_valid,
+                semantic_correctness_status="NOT_EVALUATED",
                 error_code=error_code,
-                needs_escalation=not schema_valid,
+                needs_escalation=not output_contract_valid,
             )
         except subprocess.TimeoutExpired:
             return AppleFMTaskResult(
@@ -274,7 +306,8 @@ class AppleFMReadOnlyWorkerPool:
                 ok=False,
                 output_text="",
                 latency_ms=int(self.timeout_s * 1000),
-                schema_valid=False,
+                output_contract_valid=False,
+                semantic_correctness_status="NOT_EVALUATED",
                 error_code="PROVIDER_TIMEOUT",
                 needs_escalation=True,
             )
@@ -284,7 +317,8 @@ class AppleFMReadOnlyWorkerPool:
                 ok=False,
                 output_text="",
                 latency_ms=int((time.perf_counter() - started) * 1000),
-                schema_valid=False,
+                output_contract_valid=False,
+                semantic_correctness_status="NOT_EVALUATED",
                 error_code=f"INTERNAL_ERROR:{type(exc).__name__}",
                 needs_escalation=True,
             )
@@ -339,8 +373,8 @@ class AppleFMReadOnlyWorkerPool:
             requested_concurrency=requested,
             effective_concurrency=requested,
             total_tasks=len(results),
-            successful_tasks=successful,
-            failed_tasks=len(results) - successful,
+            contract_valid_tasks=successful,
+            contract_invalid_tasks=len(results) - successful,
             wall_time_ms=wall_time_ms,
             throughput_rps=round(len(results) / max(wall_time_ms / 1000.0, 0.001), 3),
             p50_latency_ms=self._percentile(latencies, 0.50),

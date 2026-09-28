@@ -22,6 +22,24 @@ def _completed(stdout: str, returncode: int = 0):
     return subprocess.CompletedProcess(args=["fm"], returncode=returncode, stdout=stdout, stderr="")
 
 
+def _classification(task_id: str, prompt: str, *labels: str):
+    return AppleFMReadOnlyTask(
+        task_id,
+        AppleFMTaskKind.CLASSIFICATION,
+        prompt,
+        allowed_outputs=labels or ("OK",),
+    )
+
+
+def _extraction(task_id: str, prompt: str, pattern: str = r"\d+"):
+    return AppleFMReadOnlyTask(
+        task_id,
+        AppleFMTaskKind.LITERAL_EXTRACTION,
+        prompt,
+        output_pattern=pattern,
+    )
+
+
 def test_pool_defaults_to_two_and_caps_at_four():
     pool = AppleFMReadOnlyWorkerPool(environment_preflight=_ok_preflight)
     assert pool.default_concurrency == 2
@@ -80,7 +98,7 @@ def test_batch_rejects_duplicate_ids_and_out_of_range_concurrency():
         environment_preflight=_ok_preflight,
         require_network_denial=False,
     )
-    task = AppleFMReadOnlyTask("same", AppleFMTaskKind.CLASSIFICATION, "Return OK")
+    task = _classification("same", "Return OK", "OK")
     with pytest.raises(ValueError, match="duplicate task_id"):
         pool.run_batch([task, task])
     with pytest.raises(ValueError, match="between 1 and 4"):
@@ -104,18 +122,54 @@ def test_pool_runs_tasks_concurrently_preserves_input_order_and_no_fallback():
         require_network_denial=False,
     )
     tasks = [
-        AppleFMReadOnlyTask("A", AppleFMTaskKind.CLASSIFICATION, "slow"),
-        AppleFMReadOnlyTask("B", AppleFMTaskKind.CLASSIFICATION, "fast"),
-        AppleFMReadOnlyTask("C", AppleFMTaskKind.CLASSIFICATION, "fail"),
+        _classification("A", "slow", "SLOW"),
+        _classification("B", "fast", "FAST"),
+        _classification("C", "fail", "EXPECTED"),
     ]
     receipt = pool.run_batch(tasks, concurrency=2)
     assert [result.task_id for result in receipt.results] == ["A", "B", "C"]
     assert [result.output_text for result in receipt.results] == ["SLOW", "FAST", ""]
-    assert receipt.successful_tasks == 2
-    assert receipt.failed_tasks == 1
+    assert receipt.contract_valid_tasks == 2
+    assert receipt.contract_invalid_tasks == 1
     assert receipt.results[2].needs_escalation is True
     assert receipt.automatic_fallback == "DISABLED"
     assert receipt.claim_ceiling == "EXPERIMENT_ONLY"
+
+
+def test_nonempty_wrong_classification_label_fails_output_contract():
+    calls = 0
+
+    def runner(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return _completed("MADE_UP_LABEL")
+
+    pool = AppleFMReadOnlyWorkerPool(
+        command_runner=runner,
+        environment_preflight=_ok_preflight,
+        require_network_denial=False,
+    )
+    result = pool.run_batch([
+        _classification("WRONG", "classify", "RATE_LIMIT", "AUTH_ERROR")
+    ]).results[0]
+    assert result.ok is False
+    assert result.output_contract_valid is False
+    assert result.semantic_correctness_status == "NOT_EVALUATED"
+    assert result.error_code == "OUTPUT_NOT_IN_ALLOWED_SET"
+    assert result.needs_escalation is True
+    assert calls == 1
+
+
+def test_literal_extraction_shape_mismatch_fails_output_contract():
+    pool = AppleFMReadOnlyWorkerPool(
+        command_runner=lambda *a, **k: _completed("status 503"),
+        environment_preflight=_ok_preflight,
+        require_network_denial=False,
+    )
+    result = pool.run_batch([_extraction("E1", "extract", r"\d{3}")]).results[0]
+    assert result.ok is False
+    assert result.error_code == "OUTPUT_PATTERN_MISMATCH"
+    assert result.needs_escalation is True
 
 
 def test_structured_json_requires_schema_and_parses_output():
@@ -143,7 +197,7 @@ def test_structured_json_requires_schema_and_parses_output():
     )
     receipt = pool.run_batch([task], concurrency=1)
     assert receipt.results[0].ok is True
-    assert receipt.results[0].schema_valid is True
+    assert receipt.results[0].output_contract_valid is True
 
     with pytest.raises(ValueError, match="requires a schema"):
         AppleFMReadOnlyWorkerPool(
@@ -176,7 +230,7 @@ def test_structured_json_schema_violation_fails_closed():
         AppleFMReadOnlyTask("SV1", AppleFMTaskKind.STRUCTURED_JSON, "Extract", schema=schema)
     ]).results[0]
     assert result.ok is False
-    assert result.schema_valid is False
+    assert result.output_contract_valid is False
     assert result.error_code == "SCHEMA_VIOLATION"
     assert result.needs_escalation is True
     assert calls == 1
@@ -243,7 +297,7 @@ def test_invalid_json_and_timeout_fail_closed_without_retry():
         timeout_s=1,
     )
     timeout_result = timeout_pool.run_batch([
-        AppleFMReadOnlyTask("T", AppleFMTaskKind.CLASSIFICATION, "classify")
+        _classification("T", "classify", "RATE_LIMIT")
     ]).results[0]
     assert timeout_result.error_code == "PROVIDER_TIMEOUT"
     assert timeout_result.needs_escalation is True
@@ -264,7 +318,7 @@ def test_network_denial_is_injected_into_physical_command():
         require_network_denial=True,
     )
     receipt = pool.run_batch(
-        [AppleFMReadOnlyTask("N1", AppleFMTaskKind.CLASSIFICATION, "classify")],
+        [_classification("N1", "classify", "RATE_LIMIT")],
         concurrency=1,
     )
     assert receipt.results[0].ok is True
