@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import copy
+import hashlib
 import importlib.util
+import json
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -131,6 +136,463 @@ class CandidateAcceptanceV4OrderingTests(unittest.TestCase):
             errors,
             ["--executor-evidence is required for v4 physical binding"],
         )
+
+
+
+class CandidateAcceptanceV5TransportNeutralTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.root = Path(self.tempdir.name)
+        self.counter = 0
+
+    def tearDown(self) -> None:
+        self.tempdir.cleanup()
+
+    def _git(self, repo: Path, *args: str) -> str:
+        proc = subprocess.run(
+            ["git", "-C", str(repo), *args],
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        return proc.stdout.strip()
+
+    def _make_repo(self, *, delete: bool = False) -> tuple[Path, str, str, str]:
+        self.counter += 1
+        repo = self.root / f"repo-{self.counter}"
+        repo.mkdir()
+        self._git(repo, "init", "-q")
+        self._git(repo, "config", "user.name", "Acceptance Test")
+        self._git(repo, "config", "user.email", "acceptance@example.test")
+        self._git(repo, "remote", "add", "origin", "https://example.test/owner/repo.git")
+        (repo / "a.txt").write_text("one\n", encoding="utf-8")
+        self._git(repo, "add", "a.txt")
+        self._git(repo, "commit", "-qm", "base")
+        base = self._git(repo, "rev-parse", "HEAD")
+        if delete:
+            (repo / "a.txt").unlink()
+        else:
+            (repo / "a.txt").write_text("two\n", encoding="utf-8")
+        self._git(repo, "add", "-A")
+        self._git(repo, "commit", "-qm", "candidate")
+        candidate = self._git(repo, "rev-parse", "HEAD")
+        tree = self._git(repo, "rev-parse", "HEAD^{tree}")
+        return repo, base, candidate, tree
+
+    def _write_json(self, path: Path, value: dict[str, object]) -> None:
+        path.write_text(
+            json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+
+    def _refresh_integrity(self, value: dict[str, object]) -> None:
+        value["integrity"] = {"sha256": "0" * 64}
+        value["integrity"]["sha256"] = current.canonical_sha256(value)
+
+    def _build_bundle(self, *, delete: bool = False) -> dict[str, object]:
+        repo, base, candidate_sha, tree = self._make_repo(delete=delete)
+        manifest = current._physical_manifest(str(repo), base, candidate_sha)
+        changed_paths = [row["path"] for row in manifest["entries"]]
+        deleted_paths = [
+            row["path"]
+            for row in manifest["entries"]
+            if row["change_type"] == "DELETE"
+        ]
+        diff_hash = current.core_manifest_hash(manifest)
+        contract_hash = "0" * 64
+        task_id = "goal-standalone-golden-path"
+        implementer_attempt = "impl-codex-001"
+        reviewer_attempt = "review-chatgpt-001"
+        created = "2026-09-29T00:00:00+00:00"
+        evidence_id = "tnde_" + hashlib.sha256(
+            f"{task_id}:{implementer_attempt}:{candidate_sha}:{diff_hash}".encode()
+        ).hexdigest()[:32]
+
+        executor: dict[str, object] = {
+            "schema": current.V5_DIRECT_SCHEMA,
+            "evidence_id": evidence_id,
+            "created_at": created,
+            "authority": {
+                "contract_kind": "OWNER_INLINE",
+                "task_id": task_id,
+                "attempt_id": implementer_attempt,
+                "contract_hash": contract_hash,
+                "owner_id": "owner",
+                "authority_ref": "owner-request:standalone-golden-path",
+                "allowed_paths": ["a.txt"],
+                "deletion_policy": "FORBID",
+                "claim_ceiling": "CANDIDATE_READY",
+            },
+            "execution": {
+                "executor_id": "codex-session-001",
+                "executor_kind": "coding-agent",
+                "transport": "remote-desktop-commander",
+                "workspace_root": str(repo),
+                "started_at": "2026-09-28T23:50:00+00:00",
+                "completed_at": created,
+                "state": "completed",
+                "terminal_reason": "completed",
+            },
+            "candidate": {
+                "repository_origin": "https://example.test/owner/repo.git",
+                "source_commit": base,
+                "commit_sha": candidate_sha,
+                "tree_sha": tree,
+                "changed_paths": changed_paths,
+                "deleted_paths": deleted_paths,
+                "change_manifest": manifest,
+                "diff_hash": diff_hash,
+            },
+            "claim": {
+                "status": "CANDIDATE_READY_PENDING_ACCEPTANCE",
+                "claim_ceiling": "CANDIDATE_READY",
+                "verified": False,
+                "certified": False,
+                "accepted": False,
+                "approved": False,
+                "merged": False,
+                "released": False,
+                "deployed": False,
+                "public_claim_allowed": False,
+            },
+            "integrity": {"sha256": "0" * 64},
+        }
+        executor["authority"]["contract_hash"] = current._v5_authority_contract_hash(
+            executor["authority"]
+        )
+        contract_hash = executor["authority"]["contract_hash"]
+        self._refresh_integrity(executor)
+
+        commands = [
+            {
+                "id": "focused-tests",
+                "cwd": str(repo),
+                "argv": ["python", "-m", "pytest", "-q"],
+                "result_class": "PASS",
+                "exit_code": 0,
+                "duration_ms": 25,
+                "changed_paths": [],
+                "evidence_ref": "review-log:focused-tests",
+            }
+        ]
+        review: dict[str, object] = {
+            "schema": current.V5_REVIEW_SCHEMA,
+            "review_id": "review-001",
+            "created_at": "2026-09-29T00:01:00+00:00",
+            "reviewer_id": "chatgpt-primary",
+            "reviewer_attempt_id": reviewer_attempt,
+            "independence_class": "INDEPENDENT_REVIEWER",
+            "repository": {
+                "root": str(repo),
+                "origin": "https://example.test/owner/repo.git",
+                "expected_base_commit": base,
+                "candidate_commit_sha": candidate_sha,
+                "candidate_tree_sha": tree,
+            },
+            "commands": commands,
+            "claim": {
+                "claim_ceiling": "INDEPENDENT_BEHAVIOR_EVIDENCE_ONLY",
+                "certified": False,
+                "accepted": False,
+                "approved": False,
+                "merged": False,
+                "released": False,
+                "deployed": False,
+                "public_claim_allowed": False,
+            },
+            "integrity": {"sha256": "0" * 64},
+        }
+        self._refresh_integrity(review)
+
+        artifacts = self.root / f"artifacts-{self.counter}"
+        artifacts.mkdir()
+        executor_path = artifacts / "executor.json"
+        review_path = artifacts / "review.json"
+        self._write_json(executor_path, executor)
+        self._write_json(review_path, review)
+
+        result: dict[str, object] = {
+            "schema": current.V5_SCHEMA,
+            "acceptance_id": "acceptance-v5-001",
+            "created_at": "2026-09-29T00:02:00+00:00",
+            "verdict": "ACCEPT_CANDIDATE",
+            "source": {
+                "contract_kind": "OWNER_INLINE",
+                "campaign_id": None,
+                "task_id": task_id,
+                "contract_hash": contract_hash,
+                "task_card_path": None,
+                "task_card_sha256": None,
+                "compiled_packet_sha256": None,
+                "execution_manifest_sha256": None,
+                "implementer_attempt_id": implementer_attempt,
+                "reviewer_attempt_id": reviewer_attempt,
+                "executor_evidence_kind": current.V5_DIRECT_KIND,
+                "executor_evidence_sha256": current.file_sha256(executor_path),
+                "verification_evidence_kind": current.V5_REVIEW_KIND,
+                "verification_evidence_sha256": current.file_sha256(review_path),
+            },
+            "repository": {
+                "root": str(repo),
+                "branch": "candidate",
+                "executor_observed_head": base,
+                "audit_start_head": candidate_sha,
+                "audit_end_head": candidate_sha,
+                "expected_base_commit": base,
+                "candidate_commit_sha": candidate_sha,
+                "candidate_tree_sha": tree,
+                "candidate_state_hash": None,
+                "candidate_diff_sha256": diff_hash.removeprefix("sha256:"),
+                "verified_receipt_hash": None,
+                "dirty_state": "clean",
+                "candidate_integrated": False,
+                "repository_drift_during_audit": False,
+            },
+            "transport": {
+                "mode": "LOCAL_READ_ONLY",
+                "server_instance_id": None,
+                "canonical_root": None,
+                "action_contract_hash": None,
+                "tool_manifest_hash": None,
+                "full_tool_schema_hash": None,
+                "permission_policy_hash": None,
+                "lifecycle_revision": None,
+                "host_binding_status": "AVAILABLE",
+                "verification_surface": "FULL_VERIFY",
+                "reload_required": False,
+                "action_review_required": False,
+                "permission_review_required": False,
+                "runtime_source_drift": False,
+                "transport_stable": True,
+                "start_evidence_ref": "executor-evidence",
+                "end_evidence_ref": "review-evidence",
+            },
+            "axes": {
+                name: {
+                    "required": True,
+                    "verdict": "PASS",
+                    "reason": f"{name} independently bound",
+                    "evidence_refs": [
+                        "review-evidence"
+                        if name == "independent_behavior"
+                        else "executor-evidence"
+                    ],
+                }
+                for name in current.AXES
+            },
+            "review": {
+                "reviewer_distinct": True,
+                "independence_class": "INDEPENDENT_REVIEWER",
+                "commands": commands,
+                "anti_false_green": "physical Git and independent command evidence rebound",
+                "transport_failures": [],
+            },
+            "approval_readiness": {
+                "status": "NOT_EVALUATED",
+                "task_pending_acceptance": None,
+                "exact_binding_match": None,
+                "approval_action_available": None,
+                "approval_contract_created": False,
+                "candidate_already_approved": False,
+                "candidate_already_integrated": False,
+                "required_binding_fields": [
+                    "contract_kind",
+                    "contract_hash",
+                    "task_id",
+                    "attempt_id",
+                    "candidate_commit_sha",
+                    "candidate_tree_sha",
+                ],
+                "blockers": [],
+                "evidence_refs": [],
+            },
+            "approval_boundary": {
+                "acceptance_recommendation_only": True,
+                "candidate_approved": False,
+                "approval_contract_created": False,
+                "integrated": False,
+                "public_claim_allowed": False,
+                "owner_action_required": True,
+            },
+            "maximum_supportable_claim": (
+                "Frozen Candidate evidence supports bounded acceptance recommendation"
+            ),
+            "next_gate": "OWNER_REVIEW_ACCEPTANCE_RESULT",
+            "blockers": [],
+            "integrity": {"sha256": "0" * 64},
+        }
+        self._refresh_integrity(result)
+        return {
+            "repo": repo,
+            "base": base,
+            "candidate_sha": candidate_sha,
+            "tree": tree,
+            "executor": executor,
+            "review": review,
+            "executor_path": executor_path,
+            "review_path": review_path,
+            "result": result,
+        }
+
+    def _args(self, bundle: dict[str, object]) -> SimpleNamespace:
+        return SimpleNamespace(
+            executor_evidence=bundle["executor_path"],
+            verification_evidence=bundle["review_path"],
+            v3_validation_report=None,
+        )
+
+    def _rewrite_bound(
+        self,
+        bundle: dict[str, object],
+        *,
+        executor: bool = False,
+        review: bool = False,
+    ) -> None:
+        result = bundle["result"]
+        self.assertIsInstance(result, dict)
+        if executor:
+            self._refresh_integrity(bundle["executor"])
+            self._write_json(bundle["executor_path"], bundle["executor"])
+            result["source"]["executor_evidence_sha256"] = current.file_sha256(
+                bundle["executor_path"]
+            )
+        if review:
+            self._refresh_integrity(bundle["review"])
+            self._write_json(bundle["review_path"], bundle["review"])
+            result["source"]["verification_evidence_sha256"] = current.file_sha256(
+                bundle["review_path"]
+            )
+        self._refresh_integrity(result)
+
+    def test_v5_transport_neutral_direct_fixture_passes_physical_binding(self) -> None:
+        bundle = self._build_bundle()
+        report = current.validate(bundle["result"])
+        self.assertTrue(report["valid"], report["errors"])
+        errors, warnings = current.validate_physical(bundle["result"], self._args(bundle))
+        self.assertEqual(errors, [])
+        self.assertTrue(any("v5 physical Git subject verified" in item for item in warnings))
+
+    def test_v4_still_rejects_transport_neutral_executor_kind(self) -> None:
+        bundle = self._build_bundle()
+        result = copy.deepcopy(bundle["result"])
+        result["schema"] = "nexus.candidate_acceptance.v4"
+        self._refresh_integrity(result)
+        report = current.validate(result)
+        self.assertFalse(report["valid"])
+        self.assertTrue(
+            any("executor_evidence_kind: invalid" in item for item in report["errors"])
+        )
+
+    def test_v5_rejects_devspace_relabeling(self) -> None:
+        bundle = self._build_bundle()
+        result = bundle["result"]
+        result["source"]["executor_evidence_kind"] = "DEVSPACE_DIRECT_EVIDENCE"
+        self._refresh_integrity(result)
+        report = current.validate(result)
+        self.assertFalse(report["valid"])
+        self.assertTrue(
+            any("TRANSPORT_NEUTRAL_DIRECT_EVIDENCE" in item for item in report["errors"])
+        )
+
+    def test_v5_missing_executor_evidence_blocks(self) -> None:
+        bundle = self._build_bundle()
+        args = self._args(bundle)
+        args.executor_evidence = None
+        errors, _ = current.validate_physical(bundle["result"], args)
+        self.assertEqual(
+            errors,
+            ["--executor-evidence is required for v5 physical binding"],
+        )
+
+    def test_v5_missing_owner_authorization_fails(self) -> None:
+        bundle = self._build_bundle()
+        bundle["executor"]["authority"]["owner_id"] = ""
+        self._rewrite_bound(bundle, executor=True)
+        errors, _ = current.validate_physical(bundle["result"], self._args(bundle))
+        self.assertTrue(any("owner_id is required" in item for item in errors))
+
+    def test_v5_result_subject_mismatches_fail(self) -> None:
+        cases = {
+            "root": "/tmp/not-the-bound-repository",
+            "expected_base_commit": "f" * 40,
+            "candidate_commit_sha": "e" * 40,
+            "candidate_tree_sha": "d" * 40,
+            "candidate_diff_sha256": "c" * 64,
+        }
+        for key, value in cases.items():
+            with self.subTest(key=key):
+                bundle = self._build_bundle()
+                bundle["result"]["repository"][key] = value
+                self._refresh_integrity(bundle["result"])
+                errors, _ = current.validate_physical(
+                    bundle["result"], self._args(bundle)
+                )
+                self.assertTrue(errors, key)
+
+    def test_v5_owner_inline_contract_hash_binds_scope(self) -> None:
+        bundle = self._build_bundle()
+        bundle["executor"]["authority"]["allowed_paths"] = ["b.txt"]
+        self._rewrite_bound(bundle, executor=True)
+        errors, _ = current.validate_physical(bundle["result"], self._args(bundle))
+        self.assertTrue(
+            any("contract_hash does not bind Owner-inline authority" in item for item in errors)
+        )
+
+    def test_v5_out_of_scope_path_fails(self) -> None:
+        bundle = self._build_bundle()
+        bundle["executor"]["authority"]["allowed_paths"] = ["b.txt"]
+        bundle["executor"]["authority"]["contract_hash"] = (
+            current._v5_authority_contract_hash(bundle["executor"]["authority"])
+        )
+        bundle["result"]["source"]["contract_hash"] = bundle["executor"]["authority"][
+            "contract_hash"
+        ]
+        self._rewrite_bound(bundle, executor=True)
+        errors, _ = current.validate_physical(bundle["result"], self._args(bundle))
+        self.assertTrue(any("escapes allowed_paths" in item for item in errors))
+
+    def test_v5_forbidden_deletion_fails(self) -> None:
+        bundle = self._build_bundle(delete=True)
+        errors, _ = current.validate_physical(bundle["result"], self._args(bundle))
+        self.assertTrue(any("forbidden deletions" in item for item in errors))
+
+
+    def test_v5_tampered_direct_evidence_integrity_fails(self) -> None:
+        bundle = self._build_bundle()
+        bundle["executor"]["execution"]["executor_id"] = "tampered-session"
+        self._write_json(bundle["executor_path"], bundle["executor"])
+        bundle["result"]["source"]["executor_evidence_sha256"] = current.file_sha256(
+            bundle["executor_path"]
+        )
+        self._refresh_integrity(bundle["result"])
+        errors, _ = current.validate_physical(bundle["result"], self._args(bundle))
+        self.assertTrue(any("integrity mismatch" in item for item in errors))
+
+    def test_v5_review_bound_to_wrong_candidate_fails(self) -> None:
+        bundle = self._build_bundle()
+        bundle["review"]["repository"]["candidate_commit_sha"] = bundle["base"]
+        self._rewrite_bound(bundle, review=True)
+        errors, _ = current.validate_physical(bundle["result"], self._args(bundle))
+        self.assertTrue(any("candidate_commit_sha mismatch" in item for item in errors))
+
+    def test_v5_same_implementer_and_reviewer_attempt_fails(self) -> None:
+        bundle = self._build_bundle()
+        bundle["result"]["source"]["reviewer_attempt_id"] = bundle["result"]["source"][
+            "implementer_attempt_id"
+        ]
+        self._refresh_integrity(bundle["result"])
+        report = current.validate(bundle["result"])
+        self.assertFalse(report["valid"])
+        self.assertTrue(
+            any("must differ from implementer" in item for item in report["errors"])
+        )
+
+    def test_v5_claim_escalation_fails(self) -> None:
+        bundle = self._build_bundle()
+        bundle["executor"]["claim"]["approved"] = True
+        self._rewrite_bound(bundle, executor=True)
+        errors, _ = current.validate_physical(bundle["result"], self._args(bundle))
+        self.assertTrue(any("illegally asserts approved" in item for item in errors))
 
 
 if __name__ == "__main__":

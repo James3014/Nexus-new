@@ -86,3 +86,173 @@ python -B scripts/validate_acceptance_result_v4.py acceptance-result-v4.json \
 ```
 
 For `NEXUS_MCP_RECEIPT`, also supply `--v3-validation-report` from the unchanged v3 compatibility validation. A structurally valid v4 document without its required physical evidence is not acceptance evidence.
+
+
+## v5 successor / compatibility contract
+
+nexus.candidate_acceptance.v5 is the successor schema for bounded Owner-authorized
+direct execution that is not truthfully represented by either Nexus MCP or
+DevSpace-specific executor lineage.
+
+This section does **not** change nexus.candidate_acceptance.v4.
+Every v4 input continues through the saved current v4 validator, and historical
+2026-09-15-v4-tgb material continues through its frozen legacy validator.
+The current implementation shares the existing
+scripts/validate_acceptance_result_v4.py file only because the governed
+execution surface used for #1176 cannot create a new target file. The wrapper
+dispatches on result.schema; sharing a path is not sharing schema semantics.
+
+For v5 transport-neutral direct work:
+
+- source.executor_evidence_kind = TRANSPORT_NEUTRAL_DIRECT_EVIDENCE
+- executor schema = nexus.transport_neutral_direct_execution.v1
+- source.verification_evidence_kind = INDEPENDENT_REVIEW_EVIDENCE
+- review schema = nexus.independent_candidate_review_evidence.v1
+- source.contract_kind = OWNER_INLINE
+- campaign, Task Card, compiled-packet and MCP-manifest lineage remain null
+- candidate_state_hash and verified_receipt_hash remain null when that
+  direct producer does not physically expose those subjects.
+
+The discriminator selects validation logic only. Codex, RDC, DevSpace,
+a human, or any future executor is an observed execution identity, not an
+authority source or route selector.
+
+### Transport-neutral direct executor evidence
+
+nexus.transport_neutral_direct_execution.v1 has exact top-level groups:
+
+    schema
+    evidence_id
+    created_at
+    authority
+    execution
+    candidate
+    claim
+    integrity
+
+authority binds:
+
+    contract_kind = OWNER_INLINE
+    task_id
+    attempt_id
+    contract_hash
+    owner_id
+    authority_ref
+    allowed_paths[]
+    deletion_policy = ALLOW | FORBID
+    claim_ceiling = CANDIDATE_READY
+
+contract_hash is not caller-chosen metadata. The validator recomputes it as the
+SHA-256 of canonical compact JSON for nexus.owner_inline_direct_authority.v1,
+binding owner_id, authority_ref, task_id, attempt_id, allowed_paths,
+deletion_policy, and claim_ceiling. Synchronizing a forged hash with a widened
+scope therefore does not satisfy the authority check.
+
+execution records only execution observations:
+
+    executor_id
+    executor_kind
+    transport
+    workspace_root
+    started_at
+    completed_at
+    state = completed
+    terminal_reason = completed
+
+None of these execution fields grants authority.
+
+candidate binds the physical Git subject:
+
+    repository_origin
+    source_commit
+    commit_sha
+    tree_sha
+    changed_paths[]
+    deleted_paths[]
+    change_manifest
+    diff_hash
+
+The validator resolves the exact Git objects, requires ancestry from the bound
+base, rebuilds the manifest from Git, compares the physical origin, recomputes
+the Core manifest hash, and enforces allowed_paths and deletion_policy.
+A self-consistent executor JSON document cannot replace those physical checks.
+
+claim remains pending Candidate evidence only:
+
+    status = CANDIDATE_READY_PENDING_ACCEPTANCE
+    claim_ceiling = CANDIDATE_READY
+    verified = false
+    certified = false
+    accepted = false
+    approved = false
+    merged = false
+    released = false
+    deployed = false
+    public_claim_allowed = false
+
+integrity.sha256 is the canonical SHA-256 of the exact evidence object with
+that field replaced by 64 zeroes.
+
+### Independent review evidence
+
+nexus.independent_candidate_review_evidence.v1 binds an independent reviewer
+attempt to the exact repository, base, Candidate commit/tree, and command
+results. At least one command must have result_class=PASS with exit code 0
+when the acceptance result claims independent-behavior PASS.
+
+The review artifact has an evidence-only ceiling:
+
+    claim_ceiling = INDEPENDENT_BEHAVIOR_EVIDENCE_ONLY
+    certified = false
+    accepted = false
+    approved = false
+    merged = false
+    released = false
+    deployed = false
+    public_claim_allowed = false
+
+The review artifact is input evidence. It never becomes Candidate Acceptance,
+Owner approval, merge, release, deployment, routing, Workforce, certification,
+or public-claim authority.
+
+### v5 result and compatibility projection
+
+The v5 result preserves the v4 result envelope and six independent evidence
+axes. The validator may create an in-memory v4 compatibility projection solely
+to reuse unchanged result-envelope checks. That projection:
+
+- is never emitted as evidence;
+- never creates DevSpace lineage;
+- never rewrites a historical artifact;
+- never changes the actual v5 integrity hash; and
+- cannot be used as acceptance, approval, or merge provenance.
+
+The actual v5 result and both physical evidence files are independently
+SHA-256-bound. A v5 transport-neutral artifact relabeled as
+DEVSPACE_DIRECT_EVIDENCE fails rather than inheriting the DevSpace branch.
+
+### DIRECT and GOVERNED remain separate
+
+v5 does not change repository execution-lane policy.
+
+Eligible DIRECT_CANONICAL and DIRECT_DELEGATED work remains subject to its
+current direct verification and Owner merge gates and does not acquire a new
+mandatory formal Candidate-Acceptance hash merely because v5 exists.
+
+GOVERNED work still requires independent Candidate Acceptance and
+machine-verifiable provenance where the current repository contract requires
+them. v5 only makes that acceptance contract capable of consuming truthful
+transport-neutral direct execution evidence; it does not downgrade a governed
+attempt or widen a direct attempt.
+
+### Current invocation path
+
+For both current v4 and v5, invoke the schema-dispatch wrapper:
+
+    python -B scripts/validate_acceptance_result_v4.py acceptance-result.json \
+      --executor-evidence executor-evidence.json \
+      --verification-evidence verification-evidence.json \
+      --report acceptance.validation.json
+
+The result schema determines whether the saved v4 implementation or the v5
+transport-neutral branch is used.
