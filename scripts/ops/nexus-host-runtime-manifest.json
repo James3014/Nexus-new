@@ -4,8 +4,10 @@
   "sync_interval_seconds": 900,
   "runtime_files": [
     {"path": "scripts/ops/nexus-agy-dispatch", "mode": "0755"},
+    {"path": "scripts/ops/nexus-agy-quota", "mode": "0755"},
     {"path": "scripts/ops/nexus-host-sync", "mode": "0755"},
     {"path": "scripts/ops/install_nexus_agy_dispatch.sh", "mode": "0755"},
+    {"path": "scripts/ops/install_nexus_agy_quota.sh", "mode": "0755"},
     {"path": "scripts/ops/nexus-host-runtime-manifest.json", "mode": "0644"},
     {"path": "nexus/services/agy_account_pool.py", "mode": "0644"},
     {"path": "nexus/services/external_account_pool.py", "mode": "0644"}
@@ -14,6 +16,10 @@
     "agy_dispatch": {
       "source_path": "scripts/ops/nexus-agy-dispatch",
       "installer_path": "scripts/ops/install_nexus_agy_dispatch.sh"
+    },
+    "agy_quota": {
+      "source_path": "scripts/ops/nexus-agy-quota",
+      "installer_path": "scripts/ops/install_nexus_agy_quota.sh"
     },
     "agy_account_manager": {
       "package": "agy-cli-manager",

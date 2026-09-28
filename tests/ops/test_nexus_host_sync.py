@@ -15,6 +15,8 @@ HOST_SYNC = ROOT / "scripts" / "ops" / "nexus-host-sync"
 MANIFEST = ROOT / "scripts" / "ops" / "nexus-host-runtime-manifest.json"
 DISPATCH = ROOT / "scripts" / "ops" / "nexus-agy-dispatch"
 DISPATCH_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_agy_dispatch.sh"
+QUOTA = ROOT / "scripts" / "ops" / "nexus-agy-quota"
+QUOTA_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_agy_quota.sh"
 MANAGER_SHA = "4c0e326fc72ea98f9d6d80957055a4e8a2d7387f681dea903f2a072942d2e31c"
 LAUNCHD_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_host_sync_launchd.sh"
 BOOTSTRAP_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_host_sync.sh"
@@ -36,8 +38,17 @@ def _git(repo: Path, *args: str) -> str:
     return proc.stdout.strip()
 
 
-def _write_fake_manager(path: Path, *, version: str = "0.2.1") -> None:
-    payload = json.dumps({"version": version, "archive_sha256": MANAGER_SHA})
+def _write_fake_manager(
+    path: Path,
+    *,
+    version: str = "0.2.1",
+    module_integrity: str = "VERIFIED",
+) -> None:
+    payload = json.dumps({
+        "version": version,
+        "archive_sha256": MANAGER_SHA,
+        "module_integrity": module_integrity,
+    })
     path.write_text(f"#!/bin/sh\nprintf '%s\\n' '{payload}'\n", encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
@@ -54,6 +65,8 @@ def _make_source_repo(tmp_path: Path) -> Path:
         (MANIFEST, "scripts/ops/nexus-host-runtime-manifest.json"),
         (DISPATCH, "scripts/ops/nexus-agy-dispatch"),
         (DISPATCH_INSTALLER, "scripts/ops/install_nexus_agy_dispatch.sh"),
+        (QUOTA, "scripts/ops/nexus-agy-quota"),
+        (QUOTA_INSTALLER, "scripts/ops/install_nexus_agy_quota.sh"),
         (ROOT / "nexus/services/agy_account_pool.py", "nexus/services/agy_account_pool.py"),
         (
             ROOT / "nexus/services/external_account_pool.py",
@@ -81,6 +94,7 @@ def _invoke(
     revision: str | None = None,
     desired_bundle: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    quota_target = dispatch_target.parent / "nexus-agy-quota"
     argv = [
         sys.executable,
         str(HOST_SYNC),
@@ -88,6 +102,8 @@ def _invoke(
         str(runtime_root),
         "--dispatch-target",
         str(dispatch_target),
+        "--quota-target",
+        str(quota_target),
         "--sync-target",
         str(sync_target),
         "--manager-python",
@@ -134,8 +150,10 @@ def test_sync_materializes_exact_generation_and_entrypoints(tmp_path: Path) -> N
     assert payload["installed_revision"] == revision
     assert payload["desired_bundle_sha256"] == bundle
     assert payload["components"]["agy_dispatch"]["status"] == "VERIFIED"
+    assert payload["components"]["agy_quota"]["status"] == "VERIFIED"
     assert payload["components"]["agy_account_manager"]["status"] == "VERIFIED"
     assert dispatch_target.is_symlink()
+    assert (dispatch_target.parent / "nexus-agy-quota").is_symlink()
     assert sync_target.is_symlink()
 
     receipt = json.loads((runtime_root / "releases" / bundle / "host-generation.json").read_text())
@@ -235,6 +253,32 @@ def test_manager_dependency_drift_blocks_activation(tmp_path: Path) -> None:
     dispatch_target = tmp_path / "bin" / "nexus-agy-dispatch"
     sync_target = tmp_path / "bin" / "nexus-host-sync"
     _write_fake_manager(manager_python, version="0.1.0")
+
+    proc = _invoke(
+        source_repo,
+        runtime_root,
+        manager_python,
+        dispatch_target,
+        sync_target,
+        "sync",
+        revision=revision,
+    )
+
+    assert proc.returncode == 2
+    payload = json.loads(proc.stdout)
+    assert payload["state"] == "ERROR"
+    assert payload["error"] == "AGY_ACCOUNT_MANAGER_DRIFT"
+    assert not (runtime_root / "current").exists()
+
+
+def test_manager_module_integrity_drift_blocks_activation(tmp_path: Path) -> None:
+    source_repo = _make_source_repo(tmp_path)
+    revision = _git(source_repo, "rev-parse", "HEAD")
+    runtime_root = tmp_path / "runtime"
+    manager_python = tmp_path / "manager-python"
+    dispatch_target = tmp_path / "bin" / "nexus-agy-dispatch"
+    sync_target = tmp_path / "bin" / "nexus-host-sync"
+    _write_fake_manager(manager_python, module_integrity="DRIFT")
 
     proc = _invoke(
         source_repo,

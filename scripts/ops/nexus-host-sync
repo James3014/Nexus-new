@@ -183,7 +183,9 @@ def _parse_manifest(data: bytes) -> dict[str, Any]:
         MANIFEST_PATH,
         "scripts/ops/nexus-host-sync",
         "scripts/ops/nexus-agy-dispatch",
+        "scripts/ops/nexus-agy-quota",
         "scripts/ops/install_nexus_agy_dispatch.sh",
+        "scripts/ops/install_nexus_agy_quota.sh",
         "nexus/services/agy_account_pool.py",
         "nexus/services/external_account_pool.py",
     }
@@ -217,6 +219,8 @@ def _desired_identity(source_repo: Path, revision: str) -> tuple[dict[str, Any],
 
 
 _MANAGER_PROBE = r"""
+import base64
+import hashlib
 import importlib.metadata as m
 import json
 import pathlib
@@ -235,7 +239,30 @@ if not value:
     raw = archive.get("hash")
     if isinstance(raw, str) and raw.startswith("sha256="):
         value = raw.split("=", 1)[1]
-print(json.dumps({"version": dist.version, "archive_sha256": value}))
+record_hash = None
+actual_hash = None
+for entry in dist.files or ():
+    if str(entry) != "agy_cli_manager/manager.py":
+        continue
+    if entry.hash is not None and entry.hash.mode == "sha256":
+        record_hash = entry.hash.value
+    manager_path = pathlib.Path(dist.locate_file(entry))
+    if manager_path.is_file():
+        digest = hashlib.sha256(manager_path.read_bytes()).digest()
+        actual_hash = base64.urlsafe_b64encode(digest).decode().rstrip("=")
+    break
+module_integrity = (
+    "VERIFIED"
+    if record_hash and actual_hash and record_hash == actual_hash
+    else "DRIFT"
+)
+print(json.dumps({
+    "version": dist.version,
+    "archive_sha256": value,
+    "manager_record_sha256_b64": record_hash,
+    "manager_actual_sha256_b64": actual_hash,
+    "module_integrity": module_integrity,
+}))
 """
 
 
@@ -246,6 +273,7 @@ def _manager_identity(manager_python: Path) -> dict[str, Any]:
             "python": str(manager_python),
             "version": None,
             "archive_sha256": None,
+            "module_integrity": None,
         }
     proc = subprocess.run(
         [str(manager_python), "-c", _MANAGER_PROBE],
@@ -259,6 +287,7 @@ def _manager_identity(manager_python: Path) -> dict[str, Any]:
             "python": str(manager_python),
             "version": None,
             "archive_sha256": None,
+            "module_integrity": None,
             "error": (proc.stderr or proc.stdout or "").strip(),
         }
     try:
@@ -269,6 +298,7 @@ def _manager_identity(manager_python: Path) -> dict[str, Any]:
             "python": str(manager_python),
             "version": None,
             "archive_sha256": None,
+            "module_integrity": None,
             "error": "NON_JSON_MANAGER_PROBE",
         }
     return {
@@ -276,6 +306,9 @@ def _manager_identity(manager_python: Path) -> dict[str, Any]:
         "python": str(manager_python),
         "version": payload.get("version"),
         "archive_sha256": payload.get("archive_sha256"),
+        "module_integrity": payload.get("module_integrity"),
+        "manager_record_sha256_b64": payload.get("manager_record_sha256_b64"),
+        "manager_actual_sha256_b64": payload.get("manager_actual_sha256_b64"),
     }
 
 
@@ -286,6 +319,7 @@ def _verify_manager(manifest: dict[str, Any], manager_python: Path) -> dict[str,
         observed.get("status") == "OBSERVED"
         and observed.get("version") == expected.get("version")
         and observed.get("archive_sha256") == expected.get("archive_sha256")
+        and observed.get("module_integrity") == "VERIFIED"
     )
     return {
         "status": "VERIFIED" if ok else "DRIFT",
@@ -343,6 +377,18 @@ def _install_dispatch(snapshot: Path, target: Path) -> None:
     _run(["bash", str(installer)], cwd=snapshot, env=env)
 
 
+def _install_quota(snapshot: Path, target: Path) -> None:
+    installer = snapshot / "scripts" / "ops" / "install_nexus_agy_quota.sh"
+    env = os.environ.copy()
+    env.update(
+        {
+            "NEXUS_AGY_REPO_ROOT": str(snapshot),
+            "NEXUS_AGY_QUOTA_TARGET": str(target),
+        }
+    )
+    _run(["bash", str(installer)], cwd=snapshot, env=env)
+
+
 def _read_generation(release: Path) -> dict[str, Any]:
     path = release / "host-generation.json"
     if not path.is_file():
@@ -375,6 +421,11 @@ def _verify_release_for_activation(
         raise HostSyncError(f"RELEASE_DISPATCH_MISSING:{dispatch}")
     if _sha256(dispatch) != generation.get("dispatcher_sha256"):
         raise HostSyncError("RELEASE_DISPATCH_HASH_MISMATCH")
+    quota = release / "bin" / "nexus-agy-quota"
+    if not quota.is_file():
+        raise HostSyncError(f"RELEASE_QUOTA_MISSING:{quota}")
+    if _sha256(quota) != generation.get("quota_sha256"):
+        raise HostSyncError("RELEASE_QUOTA_HASH_MISMATCH")
 
     manager = _verify_manager(manifest, manager_python)
     if manager["status"] != "VERIFIED":
@@ -410,12 +461,18 @@ def _materialize_release(
         bin_dir = tmp / "bin"
         bin_dir.mkdir()
         dispatch_target = bin_dir / "nexus-agy-dispatch"
+        quota_target = bin_dir / "nexus-agy-quota"
         _install_dispatch(snapshot, dispatch_target)
+        _install_quota(snapshot, quota_target)
 
         source_dispatch = snapshot / "scripts" / "ops" / "nexus-agy-dispatch"
+        source_quota = snapshot / "scripts" / "ops" / "nexus-agy-quota"
         installed_sha = _sha256(dispatch_target)
+        quota_sha = _sha256(quota_target)
         if _sha256(source_dispatch) != installed_sha:
             raise HostSyncError("DISPATCH_INSTALL_HASH_MISMATCH")
+        if _sha256(source_quota) != quota_sha:
+            raise HostSyncError("QUOTA_INSTALL_HASH_MISMATCH")
 
         generation = {
             "schema": GENERATION_SCHEMA,
@@ -423,6 +480,7 @@ def _materialize_release(
             "bundle_sha256": bundle_sha,
             "manifest_sha256": _sha256(snapshot / MANIFEST_PATH),
             "dispatcher_sha256": installed_sha,
+            "quota_sha256": quota_sha,
             "agy_account_manager": manager["observed"],
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -456,6 +514,7 @@ def _activate(
     *,
     runtime_root: Path,
     dispatch_target: Path,
+    quota_target: Path,
     sync_target: Path,
 ) -> None:
     current = runtime_root / "current"
@@ -471,8 +530,10 @@ def _activate(
     _atomic_symlink(release, current)
 
     _backup_entrypoint(dispatch_target, runtime_root)
+    _backup_entrypoint(quota_target, runtime_root)
     _backup_entrypoint(sync_target, runtime_root)
     _atomic_symlink(current / "bin" / "nexus-agy-dispatch", dispatch_target)
+    _atomic_symlink(current / "bin" / "nexus-agy-quota", quota_target)
     _atomic_symlink(current / "snapshot" / "scripts" / "ops" / "nexus-host-sync", sync_target)
 
 
@@ -486,6 +547,7 @@ def _status(
     *,
     runtime_root: Path,
     dispatch_target: Path,
+    quota_target: Path,
     sync_target: Path,
     manager_python: Path,
     desired_revision: str | None,
@@ -543,6 +605,18 @@ def _status(
         "status": "VERIFIED" if dispatch_ok else "DRIFT",
         "sha256": actual_dispatch_sha,
         "entrypoint": str(dispatch_target),
+    }
+
+    quota = release / "bin" / "nexus-agy-quota"
+    actual_quota_sha = _sha256(quota) if quota.is_file() else None
+    quota_ok = (
+        actual_quota_sha == generation.get("quota_sha256")
+        and _same_target(quota_target, current / "bin" / "nexus-agy-quota")
+    )
+    payload["components"]["agy_quota"] = {
+        "status": "VERIFIED" if quota_ok else "DRIFT",
+        "sha256": actual_quota_sha,
+        "entrypoint": str(quota_target),
     }
 
     sync_ok = _same_target(
@@ -633,14 +707,15 @@ def _prune_releases(runtime_root: Path) -> None:
             shutil.rmtree(child, ignore_errors=True)
 
 
-def _common_paths(args: argparse.Namespace) -> tuple[Path, Path, Path, Path]:
+def _common_paths(args: argparse.Namespace) -> tuple[Path, Path, Path, Path, Path]:
     runtime_root = Path(args.runtime_root).expanduser().resolve()
     dispatch_target = Path(os.path.abspath(os.path.expanduser(args.dispatch_target)))
+    quota_target = Path(os.path.abspath(os.path.expanduser(args.quota_target)))
     sync_target = Path(os.path.abspath(os.path.expanduser(args.sync_target)))
     # Keep the venv entrypoint path itself. Resolving a venv bin/python symlink
     # to the system interpreter would discard the venv package identity.
     manager_python = Path(os.path.abspath(os.path.expanduser(args.manager_python)))
-    return runtime_root, dispatch_target, sync_target, manager_python
+    return runtime_root, dispatch_target, quota_target, sync_target, manager_python
 
 
 def _resolve_desired(
@@ -677,6 +752,13 @@ def main(argv: list[str] | None = None) -> int:
         default=os.getenv(
             "NEXUS_AGY_DISPATCH_TARGET",
             str(Path.home() / ".local/bin/nexus-agy-dispatch"),
+        ),
+    )
+    parser.add_argument(
+        "--quota-target",
+        default=os.getenv(
+            "NEXUS_AGY_QUOTA_TARGET",
+            str(Path.home() / ".local/bin/nexus-agy-quota"),
         ),
     )
     parser.add_argument(
@@ -720,13 +802,14 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("rollback")
 
     args = parser.parse_args(argv)
-    runtime_root, dispatch_target, sync_target, manager_python = _common_paths(args)
+    runtime_root, dispatch_target, quota_target, sync_target, manager_python = _common_paths(args)
 
     try:
         if args.command == "status":
             payload = _status(
                 runtime_root=runtime_root,
                 dispatch_target=dispatch_target,
+                quota_target=quota_target,
                 sync_target=sync_target,
                 manager_python=manager_python,
                 desired_revision=None,
@@ -739,6 +822,7 @@ def main(argv: list[str] | None = None) -> int:
             payload = _status(
                 runtime_root=runtime_root,
                 dispatch_target=dispatch_target,
+                quota_target=quota_target,
                 sync_target=sync_target,
                 manager_python=manager_python,
                 desired_revision=None,
@@ -772,6 +856,7 @@ def main(argv: list[str] | None = None) -> int:
             current_status = _status(
                 runtime_root=runtime_root,
                 dispatch_target=dispatch_target,
+                quota_target=quota_target,
                 sync_target=sync_target,
                 manager_python=manager_python,
                 desired_revision=revision,
@@ -800,12 +885,14 @@ def main(argv: list[str] | None = None) -> int:
                 release,
                 runtime_root=runtime_root,
                 dispatch_target=dispatch_target,
+                quota_target=quota_target,
                 sync_target=sync_target,
             )
             _prune_releases(runtime_root)
             payload = _status(
                 runtime_root=runtime_root,
                 dispatch_target=dispatch_target,
+                quota_target=quota_target,
                 sync_target=sync_target,
                 manager_python=manager_python,
                 desired_revision=revision,
@@ -826,12 +913,14 @@ def main(argv: list[str] | None = None) -> int:
                 release,
                 runtime_root=runtime_root,
                 dispatch_target=dispatch_target,
+                quota_target=quota_target,
                 sync_target=sync_target,
             )
             _prune_releases(runtime_root)
             payload = _status(
                 runtime_root=runtime_root,
                 dispatch_target=dispatch_target,
+                quota_target=quota_target,
                 sync_target=sync_target,
                 manager_python=manager_python,
                 desired_revision=None,
