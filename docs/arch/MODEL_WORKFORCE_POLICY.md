@@ -322,3 +322,92 @@ The Owner-approved MiMo cumulative calibration / governance writeback amendment 
 ## 12. Pending v2 collaboration proposal
 
 `NEXUS_MULTI_MODEL_COLLABORATION_STANDARD_v2.0_20260728` remains `PROPOSED_FOR_OWNER_APPROVAL`. Its proposed changes—including Ling at read-only L0—are recorded as review inputs, not active authority. This policy and `nexus/config/model_workforce.yaml` remain current until James explicitly approves a replacement or amendment.
+
+## 13. Dated Owner-approved local coding worker / 64GB hardware evidence — 2026-09-28
+
+This amendment records the bounded conclusion from
+`LOCAL_AGENT_STACK_FALSIFICATION_V1`. Raw execution evidence remains in the
+Hardware Lab; this policy records only the current interpretation. It does not
+admit a new worker, change routing, or grant merge/release/production authority.
+
+### Exact experiment boundary
+
+- Source repository baseline: `James3014/Nexus-new`; fresh six-task cohort:
+  Issues `#498`, `#493`, `#468`, `#434`, `#435`, and `#436`.
+- Harness: `mini-swe-agent 2.4.6`, isolated no-remote execution-start
+  snapshots, deterministic task-specific verifiers, 600-second task cap, and a
+  common 32K context ceiling for the local comparisons.
+- Generic local control:
+  `Qwen3.6-35B-A3B` local artifact + mini-swe-agent.
+- Specialized 32GB-class arm:
+  `mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit` at revision
+  `6e302ea604ad9ab206367e2c501d1571023e7b6d`.
+- Specialized 64GB-headroom arm:
+  `mlx-community/Qwen3-Coder-30B-A3B-Instruct-8bit` at revision
+  `7c6ee1bbb5ee3051c4b3bc6553f24bdc2d01393a`.
+- Online reference: exact `gpt-5.6-luna` arm on the same sealed task set and
+  deterministic verifier boundary.
+
+### Fresh first-pass result
+
+| Arm | Accepted candidates | Scope-valid | Protocol-valid | Focused verifier pass |
+|---|---:|---:|---:|---:|
+| Generic 35B + mini-swe-agent | 0/6 | 1/6 | 6/6 | 0/6 |
+| Qwen3-Coder 30B-A3B 4-bit | 0/6 | 2/6 | 5/6 | 0/6 |
+| Qwen3-Coder 30B-A3B 8-bit | 0/6 | 1/6 | 4/6 | 0/6 |
+| GPT-5.6 Luna reference | 4/6 | 6/6 | reference transport | 4/6 |
+
+The generic 35B result falsifies the bounded hypothesis that changing only to
+the pinned mini-swe-agent scaffold would make the previously unsuccessful local
+35B lineage a useful Nexus coding worker. The specialized Qwen3-Coder 30B
+4-bit arm also produced no accepted candidate. The 8-bit arm likewise produced
+no accepted candidate, so higher precision / larger memory headroom produced
+zero accepted-candidate uplift over 4-bit on this cohort.
+
+The 8-bit configuration materially consumed the 64GB host headroom during the
+run, but that resource use did not convert into a verifier-approved result.
+Several 4-bit and 8-bit trials reached the 600-second cap; both specialized arms
+also showed scope/protocol defects. The online reference completed 4/6 accepted
+candidates, demonstrating that the cohort was not uniformly unsolvable under the
+same task/verifier boundary.
+
+### Invalidated evidence retained, not scored
+
+Two earlier execution defects were detected and excluded rather than converted
+into model failures:
+
+1. an initial online-reference baseline stripped legitimate pre-outcome Git
+   history required by repository tests; those results were invalidated and the
+   baseline was rebuilt with only history reachable from the exact
+   execution-start revision;
+2. an initial generic-35B run overlapped another resident local model server and
+   became memory-contaminated; the full arm was invalidated and rerun after
+   resource isolation.
+
+These invalidated attempts do not contribute to the 0/6 or 4/6 results above.
+
+### Decision and claim ceiling
+
+Decision:
+`LOCAL_CODING_WORKER_64GB_VALUE_NOT_DEMONSTRATED`.
+
+For the tested Nexus workload, a 64GB-class local coding-worker configuration
+did not demonstrate accepted-candidate value over the corresponding 4-bit
+configuration and did not meet the pre-registered online-substitution signal.
+Nexus therefore does **not** use local coding-worker workload as a reason to
+retain or purchase 64GB hardware at this evidence point.
+
+This is a bounded negative result. It does **not** claim that all local
+inference is low-value, that all 30B-class models are incapable, or that future
+open-weight model generations cannot become useful. The tested local
+configurations remain `BENCHMARK_OR_EXPERIMENT_ONLY`; they receive no new
+Workforce entry, role, autonomy ceiling, default route, or runtime admission.
+Accordingly, `nexus/config/model_workforce.yaml` is intentionally unchanged.
+
+Re-open this research line only when a materially new open-weight model,
+runtime, or agent scaffold has credible reproducible SWE-level evidence that is
+not already represented by the tested configurations, and the new capability or
+memory requirement can plausibly change the hardware decision. Re-opening
+requires a new fresh cohort and a new pre-registered gate; do not continue by
+serially swapping adjacent 30B-class models after this result.
+
