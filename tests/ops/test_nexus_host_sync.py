@@ -345,17 +345,15 @@ def test_launchd_installer_writes_periodic_reconcile_job_without_loading(
     plist = home / "Library" / "LaunchAgents" / "com.nexus.host-sync.plist"
     state_dir = home / ".local" / "state" / "nexus-host-sync"
     env = dict(os.environ)
-    env.update(
-        {
-            "HOME": str(home),
-            "NEXUS_HOST_REPO_ROOT": str(ROOT),
-            "NEXUS_HOST_SYNC_BIN": str(home / ".local/bin/nexus-host-sync"),
-            "NEXUS_HOST_SOURCE_REPO": str(home / ".cache/nexus-host-sync/Nexus-new.git"),
-            "NEXUS_HOST_SYNC_PLIST": str(plist),
-            "NEXUS_HOST_SYNC_STATE_DIR": str(state_dir),
-            "NEXUS_HOST_SYNC_LAUNCHD_LOAD": "0",
-        }
-    )
+    env.update({
+        "HOME": str(home),
+        "NEXUS_HOST_REPO_ROOT": str(ROOT),
+        "NEXUS_HOST_SYNC_BIN": str(home / ".local/bin/nexus-host-sync"),
+        "NEXUS_HOST_SOURCE_REPO": str(home / ".cache/nexus-host-sync/Nexus-new.git"),
+        "NEXUS_HOST_SYNC_PLIST": str(plist),
+        "NEXUS_HOST_SYNC_STATE_DIR": str(state_dir),
+        "NEXUS_HOST_SYNC_LAUNCHD_LOAD": "0",
+    })
 
     proc = subprocess.run(
         ["bash", str(LAUNCHD_INSTALLER)],
@@ -413,12 +411,10 @@ def test_manager_venv_symlink_identity_is_preserved(tmp_path: Path) -> None:
 def test_bootstrap_installer_deploys_exact_host_sync_bytes(tmp_path: Path) -> None:
     target = tmp_path / "bin" / "nexus-host-sync"
     env = dict(os.environ)
-    env.update(
-        {
-            "NEXUS_HOST_REPO_ROOT": str(ROOT),
-            "NEXUS_HOST_SYNC_TARGET": str(target),
-        }
-    )
+    env.update({
+        "NEXUS_HOST_REPO_ROOT": str(ROOT),
+        "NEXUS_HOST_SYNC_TARGET": str(target),
+    })
 
     proc = subprocess.run(
         ["bash", str(BOOTSTRAP_INSTALLER)],
