@@ -106,17 +106,15 @@ def _ensure_source_repo(
             or not re.fullmatch(r"[A-Za-z0-9._/-]+", remote_ref)
         ):
             raise HostSyncError("REMOTE_REF_INVALID")
-        _run(
-            [
-                "git",
-                "-C",
-                str(source_repo),
-                "fetch",
-                "--prune",
-                "origin",
-                f"refs/heads/{remote_ref}:refs/remotes/origin/{remote_ref}",
-            ]
-        )
+        _run([
+            "git",
+            "-C",
+            str(source_repo),
+            "fetch",
+            "--prune",
+            "origin",
+            f"refs/heads/{remote_ref}:refs/remotes/origin/{remote_ref}",
+        ])
 
 
 def _require_revision(source_repo: Path, revision: str) -> str:
@@ -134,9 +132,13 @@ def _require_revision(source_repo: Path, revision: str) -> str:
 
 
 def _resolve_remote_ref(source_repo: Path, remote_ref: str) -> str:
-    value = _run(
-        ["git", "-C", str(source_repo), "rev-parse", f"refs/remotes/origin/{remote_ref}"]
-    ).stdout.strip()
+    value = _run([
+        "git",
+        "-C",
+        str(source_repo),
+        "rev-parse",
+        f"refs/remotes/origin/{remote_ref}",
+    ]).stdout.strip()
     return _require_revision(source_repo, value)
 
 
@@ -208,13 +210,17 @@ def _bundle_digest_from_blobs(blobs: dict[str, bytes]) -> str:
     return h.hexdigest()
 
 
-def _desired_identity(source_repo: Path, revision: str) -> tuple[dict[str, Any], str, dict[str, bytes]]:
+def _desired_identity(
+    source_repo: Path, revision: str
+) -> tuple[dict[str, Any], str, dict[str, bytes]]:
     manifest_bytes = _git_blob(source_repo, revision, MANIFEST_PATH)
     manifest = _parse_manifest(manifest_bytes)
     blobs: dict[str, bytes] = {}
     for entry in _runtime_entries(manifest):
         path = entry["path"]
-        blobs[path] = manifest_bytes if path == MANIFEST_PATH else _git_blob(source_repo, revision, path)
+        blobs[path] = (
+            manifest_bytes if path == MANIFEST_PATH else _git_blob(source_repo, revision, path)
+        )
     return manifest, _bundle_digest_from_blobs(blobs), blobs
 
 
@@ -367,25 +373,21 @@ def _materialize_snapshot(
 def _install_dispatch(snapshot: Path, target: Path) -> None:
     installer = snapshot / "scripts" / "ops" / "install_nexus_agy_dispatch.sh"
     env = os.environ.copy()
-    env.update(
-        {
-            "NEXUS_AGY_REPO_ROOT": str(snapshot),
-            "NEXUS_AGY_SNAPSHOT": str(snapshot),
-            "NEXUS_AGY_DISPATCH_TARGET": str(target),
-        }
-    )
+    env.update({
+        "NEXUS_AGY_REPO_ROOT": str(snapshot),
+        "NEXUS_AGY_SNAPSHOT": str(snapshot),
+        "NEXUS_AGY_DISPATCH_TARGET": str(target),
+    })
     _run(["bash", str(installer)], cwd=snapshot, env=env)
 
 
 def _install_quota(snapshot: Path, target: Path) -> None:
     installer = snapshot / "scripts" / "ops" / "install_nexus_agy_quota.sh"
     env = os.environ.copy()
-    env.update(
-        {
-            "NEXUS_AGY_REPO_ROOT": str(snapshot),
-            "NEXUS_AGY_QUOTA_TARGET": str(target),
-        }
-    )
+    env.update({
+        "NEXUS_AGY_REPO_ROOT": str(snapshot),
+        "NEXUS_AGY_QUOTA_TARGET": str(target),
+    })
     _run(["bash", str(installer)], cwd=snapshot, env=env)
 
 
@@ -597,9 +599,8 @@ def _status(
 
     dispatch = release / "bin" / "nexus-agy-dispatch"
     actual_dispatch_sha = _sha256(dispatch) if dispatch.is_file() else None
-    dispatch_ok = (
-        actual_dispatch_sha == generation.get("dispatcher_sha256")
-        and _same_target(dispatch_target, current / "bin" / "nexus-agy-dispatch")
+    dispatch_ok = actual_dispatch_sha == generation.get("dispatcher_sha256") and _same_target(
+        dispatch_target, current / "bin" / "nexus-agy-dispatch"
     )
     payload["components"]["agy_dispatch"] = {
         "status": "VERIFIED" if dispatch_ok else "DRIFT",
@@ -609,9 +610,8 @@ def _status(
 
     quota = release / "bin" / "nexus-agy-quota"
     actual_quota_sha = _sha256(quota) if quota.is_file() else None
-    quota_ok = (
-        actual_quota_sha == generation.get("quota_sha256")
-        and _same_target(quota_target, current / "bin" / "nexus-agy-quota")
+    quota_ok = actual_quota_sha == generation.get("quota_sha256") and _same_target(
+        quota_target, current / "bin" / "nexus-agy-quota"
     )
     payload["components"]["agy_quota"] = {
         "status": "VERIFIED" if quota_ok else "DRIFT",
@@ -639,9 +639,7 @@ def _status(
     manager = _verify_manager(manifest, manager_python)
     payload["components"]["agy_account_manager"] = manager
 
-    component_ok = all(
-        item.get("status") == "VERIFIED" for item in payload["components"].values()
-    )
+    component_ok = all(item.get("status") == "VERIFIED" for item in payload["components"].values())
     if not component_ok:
         payload["state"] = "DEPENDENCY_DRIFT"
     elif desired_bundle_sha is not None and actual_bundle != desired_bundle_sha:
@@ -733,7 +731,11 @@ def _resolve_desired(
         fetch=fetch,
         remote_ref=ref,
     )
-    resolved = _require_revision(source_repo, revision) if revision else _resolve_remote_ref(source_repo, ref)
+    resolved = (
+        _require_revision(source_repo, revision)
+        if revision
+        else _resolve_remote_ref(source_repo, ref)
+    )
     manifest, bundle_sha, blobs = _desired_identity(source_repo, resolved)
     return resolved, manifest, bundle_sha, blobs
 
@@ -841,16 +843,14 @@ def main(argv: list[str] | None = None) -> int:
                 fetch=not args.no_fetch,
             )
             if args.command == "desired":
-                _emit(
-                    {
-                        "schema": STATUS_SCHEMA,
-                        "host": socket.gethostname(),
-                        "state": "DESIRED_RESOLVED",
-                        "desired_revision": revision,
-                        "desired_bundle_sha256": bundle_sha,
-                        "track_ref": args.track_ref or "main",
-                    }
-                )
+                _emit({
+                    "schema": STATUS_SCHEMA,
+                    "host": socket.gethostname(),
+                    "state": "DESIRED_RESOLVED",
+                    "desired_revision": revision,
+                    "desired_bundle_sha256": bundle_sha,
+                    "track_ref": args.track_ref or "main",
+                })
                 return 0
 
             current_status = _status(
@@ -930,14 +930,12 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if payload["state"] == "INSTALLED" else 2
 
     except HostSyncError as exc:
-        _emit(
-            {
-                "schema": STATUS_SCHEMA,
-                "host": socket.gethostname(),
-                "state": "ERROR",
-                "error": str(exc),
-            }
-        )
+        _emit({
+            "schema": STATUS_SCHEMA,
+            "host": socket.gethostname(),
+            "state": "ERROR",
+            "error": str(exc),
+        })
         return 2
     return 2
 

@@ -9,7 +9,6 @@ import subprocess
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 QUOTA_PATH = ROOT / "scripts" / "ops" / "nexus-agy-quota"
 INSTALLER_PATH = ROOT / "scripts" / "ops" / "install_nexus_agy_quota.sh"
@@ -37,14 +36,12 @@ def test_partial_refresh_preserves_current_inventory_and_drops_removed_accounts(
 ) -> None:
     snapshot = tmp_path / "quota.json"
     snapshot.write_text(
-        json.dumps(
-            {
-                "accounts": [
-                    {"account": "keep", "ok": True, "groups": {}},
-                    {"account": "removed", "ok": True, "groups": {}},
-                ]
-            }
-        ),
+        json.dumps({
+            "accounts": [
+                {"account": "keep", "ok": True, "groups": {}},
+                {"account": "removed", "ok": True, "groups": {}},
+            ]
+        }),
         encoding="utf-8",
     )
 
