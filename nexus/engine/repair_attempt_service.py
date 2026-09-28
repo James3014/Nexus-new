@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import subprocess
 from pathlib import Path
@@ -68,6 +69,18 @@ class RepairAttemptService:
                 workers = int(reflex_loop.config.get("battle_workers", 4) or 4)
             battle_swarm.default_workers = workers
             logger.info("⚔️ [BattleSwarm] Triggering Layer 4 Parallel Repair with %d workers...", workers)
+            try:
+                source_revision_proc = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=str(self.project_root),
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                source_revision = source_revision_proc.stdout.strip()
+            except (OSError, subprocess.SubprocessError):
+                source_revision = ""
 
             def swarm_worker(_strategy, wt_path, _tid, _desc, _ctx):
                 if target_env is not None:
@@ -82,7 +95,51 @@ class RepairAttemptService:
                     pregate_root = wt_path
                 wt_passed, wt_gates = self.run_cli_pregate_fn(project_root=pregate_root, commands=verify_cmds)
                 score = (sum(1 for g in wt_gates if g["passed"]) / max(len(wt_gates), 1)) * 10.0
-                return {"passed": wt_passed, "score": score}
+                candidate_payload = ""
+                if source_revision:
+                    try:
+                        diff_proc = subprocess.run(
+                            ["git", "diff", "--binary", source_revision],
+                            cwd=str(wt_path),
+                            check=False,
+                            capture_output=True,
+                            text=True,
+                            timeout=10,
+                        )
+                        candidate_payload = diff_proc.stdout or ""
+                    except (OSError, subprocess.SubprocessError):
+                        candidate_payload = ""
+                gate_evidence = []
+                for gate in wt_gates:
+                    gate_evidence.append(
+                        {
+                            "cmd_sha256": hashlib.sha256(
+                                str(gate.get("cmd") or "").encode("utf-8")
+                            ).hexdigest(),
+                            "exit_code": gate.get("exit_code"),
+                            "passed": bool(gate.get("passed", False)),
+                            "stdout_sha256": hashlib.sha256(
+                                str(gate.get("stdout_tail") or "").encode("utf-8")
+                            ).hexdigest(),
+                            "stderr_sha256": hashlib.sha256(
+                                str(gate.get("stderr_tail") or "").encode("utf-8")
+                            ).hexdigest(),
+                            "reason": str(gate.get("reason") or ""),
+                        }
+                    )
+                return {
+                    "passed": wt_passed,
+                    "score": score,
+                    "verifier_status": "pass" if wt_passed else "fail",
+                    "gate_results": gate_evidence,
+                    "candidate_payload": candidate_payload,
+                    "candidate_payload_sha256": (
+                        hashlib.sha256(candidate_payload.encode("utf-8")).hexdigest()
+                        if candidate_payload
+                        else ""
+                    ),
+                    "candidate_state_hash": "",
+                }
 
             battle_result = battle_swarm.trigger_battle(
                 task_id=task_id,
@@ -90,6 +147,90 @@ class RepairAttemptService:
                 context=state.metadata,
                 execute_fn=swarm_worker,
             )
+            try:
+                from nexus.research.clm_system_one.candidate_evidence_collector import (
+                    collect_candidate_group,
+                )
+
+                winner_strategy = str(
+                    (battle_result.get("winner") or {}).get("strategy") or ""
+                )
+                collection_candidates = []
+                for item in battle_result.get("all_results", []) or []:
+                    strategy_name = str(item.get("strategy") or "")
+                    candidate_payload = str(item.get("candidate_payload") or "")
+                    collection_candidates.append(
+                        {
+                            "candidate_id": f"{task_id}#battle-{strategy_name}",
+                            "candidate_model": strategy_name,
+                            "candidate_source": "battle_swarm",
+                            "candidate_payload": candidate_payload,
+                            "candidate_payload_sha256": str(
+                                item.get("candidate_payload_sha256") or ""
+                            ),
+                            "candidate_state_hash": str(
+                                item.get("candidate_state_hash") or ""
+                            ),
+                            "verifier_status": str(
+                                item.get("verifier_status") or ""
+                            ),
+                            "label_quality": (
+                                "MECHANICAL_GATE"
+                                if candidate_payload
+                                else "TRACE_ONLY"
+                            ),
+                            "verifier_evidence": {
+                                "verifier_kind": "cli_pregate",
+                                "gate_results": list(
+                                    item.get("gate_results", []) or []
+                                ),
+                            },
+                            "failure_reason_codes": (
+                                []
+                                if item.get("passed")
+                                else ["cli_pregate_failed"]
+                            ),
+                            "selected": strategy_name == winner_strategy,
+                        }
+                    )
+                collection = collect_candidate_group(
+                    repo_root=self.project_root,
+                    task_id=task_id,
+                    attempt_id=f"battle-attempt-{attempt}",
+                    collector_source="battle_swarm",
+                    source_revision=source_revision,
+                    contract_identity={
+                        "task_desc": task_desc,
+                        "attempt": attempt,
+                    },
+                    verifier_identity={
+                        "kind": "cli_pregate",
+                        "commands": list(verify_cmds),
+                    },
+                    candidates=collection_candidates,
+                    winner_id=(
+                        f"{task_id}#battle-{winner_strategy}"
+                        if winner_strategy
+                        else ""
+                    ),
+                )
+                state.metadata["candidate_evidence_collection_status"] = (
+                    collection.status
+                )
+                state.metadata["candidate_evidence_collection_group_sha256"] = (
+                    collection.group_sha256
+                )
+                state.metadata["candidate_evidence_collection_rows"] = (
+                    collection.collected_count
+                )
+                state.metadata["candidate_evidence_collection_eligible_rows"] = (
+                    collection.eligible_count
+                )
+            except Exception as collection_exc:
+                state.metadata["candidate_evidence_collection_status"] = "ERROR"
+                state.metadata["candidate_evidence_collection_error_type"] = type(
+                    collection_exc
+                ).__name__
             try:
                 if battle_result.get("status") == "winner_found":
                     winner = battle_result["winner"]

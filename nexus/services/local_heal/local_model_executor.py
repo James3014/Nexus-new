@@ -2024,6 +2024,109 @@ class LocalModelExecutor:
                 patch_lifecycle_state=raw_meta["patch_lifecycle_state"],
             )
             raw_meta.update(vfe)
+            # Research-only sidecar for the primary local committee.  Only the
+            # selected candidate has isolated verifier truth in this topology;
+            # unselected candidates are preserved as UNKNOWN rather than being
+            # mislabeled as failures.
+            try:
+                from nexus.research.clm_system_one.candidate_evidence_collector import (
+                    collect_candidate_group,
+                )
+
+                _lc_contract_identity = {
+                    "problem_statement": request.problem_statement,
+                    "target_file": request.target_file,
+                    "selected_capabilities": list(request.selected_capabilities),
+                    "locked_search_sha256": hashlib.sha256(
+                        str(locked_search or "").encode("utf-8")
+                    ).hexdigest(),
+                }
+                _lc_collection_candidates = []
+                for _lc_candidate in candidates:
+                    if getattr(_lc_candidate, "role", "") == "judge":
+                        continue
+                    _lc_selected = (
+                        _lc_candidate.candidate_id == decision.selected_candidate_id
+                    )
+                    _lc_payload = (
+                        selected_patch
+                        if _lc_selected
+                        else str(getattr(_lc_candidate, "candidate_patch", "") or "")
+                    )
+                    _lc_collection_candidates.append(
+                        {
+                            "candidate_id": _lc_candidate.candidate_id,
+                            "candidate_model": _lc_candidate.model,
+                            "candidate_source": "local_committee_only",
+                            "candidate_payload": _lc_payload,
+                            "candidate_payload_sha256": "",
+                            "candidate_state_hash": "",
+                            "verifier_status": (
+                                isolated_verifier_status if _lc_selected else "not_run"
+                            ),
+                            "label_quality": (
+                                "ISOLATED_VERIFIER" if _lc_selected else "TRACE_ONLY"
+                            ),
+                            "verifier_evidence": (
+                                {
+                                    "verifier_kind": "isolated_verifier",
+                                    "verifier_invoked": candidate_isolation_attempted,
+                                    "verifier_status": isolated_verifier_status,
+                                    "exit_code": isolated_verifier_exit_code,
+                                    "stdout_sha256": hashlib.sha256(
+                                        isolated_verifier_stdout_tail.encode("utf-8")
+                                    ).hexdigest(),
+                                    "stderr_sha256": hashlib.sha256(
+                                        isolated_verifier_stderr_tail.encode("utf-8")
+                                    ).hexdigest(),
+                                    "verifier_error": isolated_verifier_error,
+                                    "apply_status": isolated_apply_status,
+                                }
+                                if _lc_selected
+                                else {}
+                            ),
+                            "failure_reason_codes": (
+                                [str(raw_meta.get("verifier_failure_kind") or "")]
+                                if _lc_selected
+                                and str(raw_meta.get("verifier_failure_kind") or "")
+                                else []
+                            ),
+                            "selected": _lc_selected,
+                        }
+                    )
+                _lc_collection = collect_candidate_group(
+                    repo_root=request.repo_root,
+                    task_id=request.task_id,
+                    attempt_id=attempt_id_val,
+                    collector_source="local_committee_only",
+                    source_revision=str(
+                        request.route_context.get("source_revision")
+                        or request.route_context.get("workspace_revision")
+                        or ""
+                    ),
+                    contract_identity=_lc_contract_identity,
+                    verifier_identity={
+                        "kind": "isolated_verifier",
+                        "command": list(verifier_command),
+                    },
+                    candidates=_lc_collection_candidates,
+                    winner_id=decision.selected_candidate_id,
+                )
+                raw_meta["candidate_evidence_collection_status"] = _lc_collection.status
+                raw_meta[
+                    "candidate_evidence_collection_group_sha256"
+                ] = _lc_collection.group_sha256
+                raw_meta[
+                    "candidate_evidence_collection_rows"
+                ] = _lc_collection.collected_count
+                raw_meta[
+                    "candidate_evidence_collection_eligible_rows"
+                ] = _lc_collection.eligible_count
+            except Exception as _lc_collection_exc:
+                raw_meta["candidate_evidence_collection_status"] = "ERROR"
+                raw_meta["candidate_evidence_collection_error_type"] = type(
+                    _lc_collection_exc
+                ).__name__
             # C15-3E: Verifier receipt presence fields
             raw_meta["verifier_stdout_tail_present"] = bool(isolated_verifier_stdout_tail)
             raw_meta["verifier_stderr_tail_present"] = bool(isolated_verifier_stderr_tail)
@@ -2690,6 +2793,11 @@ class LocalModelExecutor:
                     _dr_committee_winner = None
                     _dr_committee_candidate_count = 0
                     _dr_committee_candidates_list = []
+                    _dr_candidate_payloads: dict[str, str] = {}
+                    _dr_candidate_verifier_evidence: dict[str, dict[str, Any]] = {}
+                    _dr_collection_attempt_id = (
+                        f"attempt-{len(profile_attempts)}" if profile_attempts else "attempt-1"
+                    )
                     import sys as _dbg
                     import json as _json
                     print(f"[C15-5C] candidate_models={_dr_candidate_models} len={len(_dr_candidate_models)}", file=_dbg.stderr)
@@ -2762,6 +2870,10 @@ class LocalModelExecutor:
                                     pass
 
                             _cp_patch = str(getattr(_cp_result, "pre_verification_final_patch", "") or getattr(_cp_result, "final_patch", "") or "")
+                            # Candidate hash below uses rstrip("\n"); persist the
+                            # exact same normalized bytes so the content-addressed
+                            # sidecar binds to the runtime's existing hash.
+                            _dr_candidate_payloads[_cand_id] = _cp_patch.rstrip("\n")
 
                             import hashlib as _hashlib
                             _cp_patch_hash = _hashlib.sha256(_cp_patch.rstrip("\n").encode()).hexdigest() if _cp_patch.strip() else ""
@@ -2802,6 +2914,7 @@ class LocalModelExecutor:
                             _conversion_candidate_hash = ""
                             _target_file_correct = True
                             _preimage_match_status = "not_applicable"
+                            _cp_verify = None
                             if _last_patch_decision:
                                 _conversion_status = _last_patch_decision.get("conversion_status", "none")
                                 _conversion_source_hash_before = _last_patch_decision.get("conversion_source_hash_before", "")
@@ -2855,6 +2968,24 @@ class LocalModelExecutor:
                                     if _cp_verify.verifier_status != "pass":
                                         _rejection_reason = "verifier_failed"
 
+                            _dr_candidate_verifier_evidence[_cand_id] = {
+                                "verifier_kind": "isolated_verifier",
+                                "verifier_invoked": _cp_verify is not None,
+                                "verifier_status": _verifier_result,
+                                "exit_code": getattr(_cp_verify, "exit_code", None),
+                                "stdout_sha256": _hashlib.sha256(
+                                    str(getattr(_cp_verify, "stdout_tail", "") or "").encode("utf-8")
+                                ).hexdigest(),
+                                "stderr_sha256": _hashlib.sha256(
+                                    str(getattr(_cp_verify, "stderr_tail", "") or "").encode("utf-8")
+                                ).hexdigest(),
+                                "verifier_error": str(
+                                    getattr(_cp_verify, "verifier_error", "") or ""
+                                ),
+                                "apply_status": _apply_status,
+                                "rejection_reason": _rejection_reason,
+                            }
+
                             _cand_data = {
                                 "candidate_id": _cand_id,
                                 "model": _dr_cand_resolved,
@@ -2896,6 +3027,7 @@ class LocalModelExecutor:
                     # 若有多個 verifier-pass 候選，交給既有 AutoreasonService 做信心排名，
                     # 選出最高分候選，而非直接選第一個。
                     _dr_autoreason_winner_model = ""
+                    _dr_autoreason_winner_candidate_id = ""
                     _dr_autoreason_invoked = False
                     _passing_cands = [
                         c for c in _dr_committee_candidates_list
@@ -2922,6 +3054,7 @@ class LocalModelExecutor:
                             _ar_winner_id = _ar_result.get("winner")
                             _dr_autoreason_invoked = True
                             if _ar_winner_id:
+                                _dr_autoreason_winner_candidate_id = str(_ar_winner_id)
                                 _winner_cand = next((c for c in _dr_committee_candidates_list if c["candidate_id"] == _ar_winner_id), None)
                                 _winner_model = _winner_cand["model"] if _winner_cand else _ar_winner_id
                                 _dr_autoreason_winner_model = _winner_model
@@ -2933,10 +3066,117 @@ class LocalModelExecutor:
                                     _dr_committee_winner,  # fallback 保持原值
                                 )
                             raw_meta["delegated_retry_autoreason_winner"] = _dr_autoreason_winner_model
+                            raw_meta["delegated_retry_autoreason_winner_candidate_id"] = (
+                                _dr_autoreason_winner_candidate_id
+                            )
                             raw_meta["delegated_retry_autoreason_borda"] = str(_ar_result.get("borda_scores", {}))
                         except Exception as _ar_err:
                             raw_meta["delegated_retry_autoreason_error"] = str(_ar_err)
                     raw_meta["delegated_retry_autoreason_invoked"] = _dr_autoreason_invoked
+
+                    # Research-only sidecar: persist every committee candidate and
+                    # its already-computed isolated verifier outcome.  The
+                    # collector does not run a verifier, select a winner, or
+                    # participate in delivery; collection failures are telemetry
+                    # only and must not change the runtime outcome.
+                    try:
+                        from nexus.research.clm_system_one.candidate_evidence_collector import (
+                            collect_candidate_group,
+                        )
+
+                        # Bind evidence to the candidate the runtime will
+                        # actually deliver below, not to Autoreason's advisory
+                        # selected flag.  Existing runtime semantics can retain
+                        # their own behavior without contaminating the corpus.
+                        _dr_delivered_candidate_id = str(
+                            (_dr_committee_winner or {}).get("candidate_id") or ""
+                        )
+                        _dr_autoreason_delivery_mismatch = bool(
+                            _dr_autoreason_winner_candidate_id
+                            and _dr_delivered_candidate_id
+                            and _dr_autoreason_winner_candidate_id
+                            != _dr_delivered_candidate_id
+                        )
+                        _dr_verifier_command = tuple(
+                            request.route_context.get("verifier_command", []) or []
+                        )
+                        _dr_contract_identity = {
+                            "problem_statement": request.problem_statement,
+                            "target_file": request.target_file,
+                            "selected_capabilities": list(request.selected_capabilities),
+                            "locked_search_sha256": _hashlib.sha256(
+                                str(route_ctx.get("locked_search") or "").encode("utf-8")
+                            ).hexdigest(),
+                        }
+                        _dr_collection_candidates = []
+                        for _cand in _dr_committee_candidates_list:
+                            _cid = str(_cand.get("candidate_id") or "")
+                            _dr_collection_candidates.append(
+                                {
+                                    "candidate_id": _cid,
+                                    "candidate_model": str(_cand.get("model") or ""),
+                                    "candidate_source": "delegated_retry_committee",
+                                    "candidate_payload": _dr_candidate_payloads.get(_cid, ""),
+                                    "candidate_payload_sha256": str(
+                                        _cand.get("candidate_hash") or ""
+                                    ),
+                                    "candidate_state_hash": "",
+                                    "verifier_status": str(
+                                        _cand.get("verifier_result") or ""
+                                    ),
+                                    "label_quality": "ISOLATED_VERIFIER",
+                                    "verifier_evidence": _dr_candidate_verifier_evidence.get(
+                                        _cid, {}
+                                    ),
+                                    "failure_reason_codes": [
+                                        str(_cand.get("rejection_reason") or "")
+                                    ]
+                                    if str(_cand.get("rejection_reason") or "")
+                                    else [],
+                                    "selected": _cid == _dr_delivered_candidate_id,
+                                }
+                            )
+                        _dr_collection = collect_candidate_group(
+                            repo_root=request.repo_root,
+                            task_id=request.task_id,
+                            attempt_id=_dr_collection_attempt_id,
+                            collector_source="localheal_delegated_retry_committee",
+                            source_revision=str(
+                                request.route_context.get("source_revision")
+                                or request.route_context.get("workspace_revision")
+                                or ""
+                            ),
+                            contract_identity=_dr_contract_identity,
+                            verifier_identity={
+                                "kind": "isolated_verifier",
+                                "command": list(_dr_verifier_command),
+                            },
+                            candidates=_dr_collection_candidates,
+                            winner_id=_dr_delivered_candidate_id,
+                        )
+                        raw_meta["candidate_evidence_collection_status"] = (
+                            _dr_collection.status
+                        )
+                        raw_meta["candidate_evidence_collection_group_sha256"] = (
+                            _dr_collection.group_sha256
+                        )
+                        raw_meta["candidate_evidence_collection_rows"] = (
+                            _dr_collection.collected_count
+                        )
+                        raw_meta["candidate_evidence_collection_eligible_rows"] = (
+                            _dr_collection.eligible_count
+                        )
+                        raw_meta["candidate_evidence_delivered_winner_id"] = (
+                            _dr_delivered_candidate_id
+                        )
+                        raw_meta[
+                            "candidate_evidence_autoreason_delivery_mismatch"
+                        ] = _dr_autoreason_delivery_mismatch
+                    except Exception as _collection_exc:
+                        raw_meta["candidate_evidence_collection_status"] = "ERROR"
+                        raw_meta["candidate_evidence_collection_error_type"] = type(
+                            _collection_exc
+                        ).__name__
 
                     _dr_judge_model = _dr_signal.get("judge_model") or ""
                     raw_meta["delegated_retry_proposer_count_expected"] = len(_dr_candidate_models)

@@ -65,6 +65,26 @@ def test_issue153_event_feedback_rows_map_without_fallback():
     ]
 
 
+def test_committee_controller_maps_candidate_evidence_oracles_without_fallback():
+    details = select_target_details(
+        ["nexus/committee/controller.py"],
+        load_impact_rules(),
+        index_path=Path("/tmp/missing-committee-impact-index.json"),
+        history_path=Path("/tmp/missing-committee-history.jsonl"),
+    )
+
+    assert details.targets == [
+        "tests/unit/committee/test_data_flow_v267.py",
+        "tests/research/test_candidate_evidence_committee_integration.py",
+        "tests/services/test_policy_gate.py",
+    ]
+    assert details.unmatched_paths == []
+    assert details.fallback_used is False
+    assert details.risk == "high"
+    assert details.high_risk_escalated is True
+    assert details.risk_reasons == ["candidate_evidence_committee_sidecar_contract"]
+
+
 def test_repository_secret_hygiene_paths_map_without_fallback():
     details = select_target_details(
         [".gitignore", "tests/ops/test_repository_secret_hygiene.py"],

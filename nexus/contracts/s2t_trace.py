@@ -7,7 +7,6 @@ from typing import Any
 
 from nexus.contracts.s2t_policy import S2TCandidate
 
-
 S2T_TRACE_SCHEMA_VERSION = "s2t.v1"
 S2T_EPISODE_SCHEMA_VERSION = "s2t_episode.v1"
 
@@ -157,6 +156,81 @@ class S2TTraceWriter:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(event.to_dict(), ensure_ascii=False, sort_keys=True) + "\n")
+        # Mirror S2T candidate sets into the common research evidence store
+        # only when this is a repository-local .nexus trace.  S2T candidate
+        # verifier labels are not necessarily independent per-candidate
+        # executable truth, so they remain TRACE_ONLY and are not promoted to
+        # the training-eligible corpus by default.
+        try:
+            resolved = self.path.expanduser().resolve()
+            nexus_parent = next(
+                (parent for parent in resolved.parents if parent.name == ".nexus"),
+                None,
+            )
+            if nexus_parent is None:
+                return
+            repo_root = nexus_parent.parent
+            from nexus.research.clm_system_one.candidate_evidence_collector import (
+                collect_candidate_group,
+            )
+
+            candidates = []
+            for candidate in event.candidates:
+                payload = json.dumps(
+                    {
+                        "source": candidate.source,
+                        "content_ref": candidate.content_ref,
+                        "claimed_outcome": candidate.claimed_outcome,
+                        "static_score": candidate.static_score,
+                        "selector_score": candidate.selector_score,
+                        "risk_flags": list(candidate.risk_flags),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                candidates.append({
+                    "candidate_id": candidate.candidate_id,
+                    "candidate_model": event.model,
+                    "candidate_source": f"s2t:{candidate.source}",
+                    "candidate_payload": payload,
+                    "candidate_payload_sha256": "",
+                    "candidate_state_hash": "",
+                    "verifier_status": candidate.verifier_result,
+                    "label_quality": "TRACE_ONLY",
+                    "verifier_evidence": {
+                        "event_verifier_name": event.verifier_name,
+                        "event_verifier_result": event.verifier_result,
+                        "event_verifier_evidence_ref": event.verifier_evidence_ref,
+                        "candidate_evidence_refs": list(candidate.evidence_refs),
+                    },
+                    "failure_reason_codes": list(candidate.risk_flags),
+                    "selected": candidate.candidate_id == event.selected_candidate_id,
+                })
+            collect_candidate_group(
+                repo_root=repo_root,
+                task_id=event.task_id,
+                attempt_id=event.run_id,
+                collector_source="s2t_trace",
+                source_revision="",
+                contract_identity={
+                    "phase": event.phase,
+                    "risk_tier": event.risk_tier,
+                    "mode": event.mode,
+                    "candidate_set_id": event.candidate_set_id,
+                    "route_decision_ref": event.route_decision_ref,
+                },
+                verifier_identity={
+                    "kind": "s2t_trace",
+                    "verifier_name": event.verifier_name,
+                },
+                candidates=candidates,
+                winner_id=event.selected_candidate_id,
+            )
+        except Exception:
+            # Trace writing is authoritative for this surface; the research
+            # sidecar is best-effort and must never alter the S2T runtime.
+            return
 
 
 def redact_s2t_event(event: S2TTraceEvent) -> dict[str, Any]:

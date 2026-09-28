@@ -86,6 +86,16 @@ class BattleSwarm:
                         "strategy": strategy["name"],
                         "score": res.get("score", 0.0),
                         "passed": res.get("passed", False),
+                        "verifier_status": res.get(
+                            "verifier_status",
+                            "pass" if res.get("passed", False) else "fail",
+                        ),
+                        "gate_results": res.get("gate_results", []),
+                        "candidate_payload": res.get("candidate_payload", ""),
+                        "candidate_payload_sha256": res.get(
+                            "candidate_payload_sha256", ""
+                        ),
+                        "candidate_state_hash": res.get("candidate_state_hash", ""),
                         "params": strategy["params"],
                         "language": res.get("language", "unknown"),
                         "file_patterns": res.get("file_patterns", []),
