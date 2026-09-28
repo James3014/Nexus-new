@@ -561,3 +561,32 @@ def test_codex_act_compile_uses_workspace_write_after_explicit_gate(
     assert argv[argv.index("-s") + 1] == "workspace-write"
     assert argv[argv.index("-a") + 1] == "never"
     assert argv[argv.index("-c") + 1] == 'model_reasoning_effort="high"'
+
+
+def test_codex_workspace_credit_exhaustion_is_classified_as_quota(
+    tmp_path: Path,
+) -> None:
+    request = _codex_request(tmp_path)
+    stdout = "\n".join([
+        json.dumps({"type": "thread.started", "thread_id": "thread-credit"}),
+        json.dumps({"type": "turn.started"}),
+        json.dumps({
+            "type": "error",
+            "message": "Your workspace is out of credits. Ask your workspace owner to refill in order to continue.",
+        }),
+        json.dumps({
+            "type": "turn.failed",
+            "error": {
+                "message": "Your workspace is out of credits. Ask your workspace owner to refill in order to continue."
+            },
+        }),
+    ])
+    result = CodexExecutionAdapter().interpret(
+        request,
+        exit_code=1,
+        stdout_text=stdout,
+        stderr_text="",
+    )
+    assert result.status == "FAILED"
+    assert result.failure_kind == "QUOTA_EXHAUSTED"
+    assert result.retry_permitted is False

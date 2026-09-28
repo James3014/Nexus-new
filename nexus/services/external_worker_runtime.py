@@ -480,7 +480,12 @@ class CodexExecutionAdapter:
             )
 
         failure_text = (stderr_text + "\n" + stdout_text).lower()
-        if "quota" in failure_text or "rate limit" in failure_text:
+        if (
+            "quota" in failure_text
+            or "rate limit" in failure_text
+            or "out of credits" in failure_text
+            or "credits exhausted" in failure_text
+        ):
             failure_kind = AccountFailureKind.QUOTA_EXHAUSTED.value
         elif (
             "auth" in failure_text
