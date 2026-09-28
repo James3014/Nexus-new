@@ -93,6 +93,10 @@ QUOTA_SNAPSHOT_PATH = Path(
 )
 
 
+DEFAULT_QUOTA_MAX_AGE_SECONDS = 900.0
+DEFAULT_QUOTA_FAMILY_BLOCK_SECONDS = 300.0
+
+
 def _model_family(model: str | None) -> str:
     value = (model or "").strip().lower()
     if value.startswith("gemini-"):
@@ -114,40 +118,132 @@ def _parse_reset_at(value: object) -> float | None:
     return dt.timestamp()
 
 
+def _quota_max_age_seconds() -> float:
+    raw = os.getenv("NEXUS_AGY_QUOTA_MAX_AGE_SECONDS")
+    if raw is None:
+        return DEFAULT_QUOTA_MAX_AGE_SECONDS
+    try:
+        value = float(raw)
+    except ValueError:
+        return DEFAULT_QUOTA_MAX_AGE_SECONDS
+    return max(0.0, value)
+
+
+def _timestamp_is_fresh(
+    checked_at: object,
+    *,
+    now_ts: float,
+    max_age_seconds: float,
+) -> bool:
+    checked_ts = _parse_reset_at(checked_at)
+    if checked_ts is None:
+        return False
+    age = float(now_ts) - checked_ts
+    return -60.0 <= age <= max(0.0, float(max_age_seconds))
+
+
+def _snapshot_is_fresh(
+    snapshot: dict,
+    *,
+    now_ts: float | None = None,
+    max_age_seconds: float | None = None,
+) -> bool:
+    checked_at = snapshot.get("checked_at") if isinstance(snapshot, dict) else None
+    current = time.time() if now_ts is None else float(now_ts)
+    max_age = _quota_max_age_seconds() if max_age_seconds is None else max_age_seconds
+    return _timestamp_is_fresh(
+        checked_at,
+        now_ts=current,
+        max_age_seconds=max_age,
+    )
+
+
+def _row_is_fresh(
+    row: dict,
+    snapshot: dict,
+    *,
+    now_ts: float,
+    max_age_seconds: float,
+) -> bool:
+    checked_at = row.get("checked_at")
+    if checked_at is None:
+        checked_at = snapshot.get("checked_at")
+    return _timestamp_is_fresh(
+        checked_at,
+        now_ts=now_ts,
+        max_age_seconds=max_age_seconds,
+    )
+
+
+def _quota_window_state(
+    window: object,
+    *,
+    now_ts: float,
+) -> tuple[str, float | None]:
+    if not isinstance(window, dict):
+        return "unknown", None
+    status = window.get("status")
+    reset_ts = _parse_reset_at(window.get("reset_at"))
+    if status == "disabled":
+        return "blocked", reset_ts
+    if status != "known":
+        return "unknown", reset_ts
+    remaining = window.get("remaining_pct")
+    if isinstance(remaining, (int, float)) and float(remaining) > 0.0:
+        return "available", reset_ts
+    if reset_ts is not None and reset_ts <= now_ts:
+        return "available", reset_ts
+    if isinstance(remaining, (int, float)) and float(remaining) <= 0.0:
+        return "blocked", reset_ts
+    return "unknown", reset_ts
+
+
+def _family_quota_state(
+    groups: dict,
+    group_name: str,
+    *,
+    now_ts: float | None = None,
+) -> tuple[str, float | None]:
+    current = time.time() if now_ts is None else float(now_ts)
+    group = groups.get(group_name) if isinstance(groups, dict) else None
+    if not isinstance(group, dict):
+        return "unknown", None
+
+    if "5h" in group:
+        state, reset_ts = _quota_window_state(group.get("5h"), now_ts=current)
+        if state == "available":
+            return "five_hour", reset_ts
+        if state == "blocked":
+            return "blocked", reset_ts
+        return "unknown", reset_ts
+
+    state, reset_ts = _quota_window_state(group.get("weekly"), now_ts=current)
+    if state == "available":
+        return "weekly", reset_ts
+    if state == "blocked":
+        return "blocked", reset_ts
+    return "unknown", reset_ts
+
+
 def _usable_quota_window(
     groups: dict,
     group_name: str,
     now_ts: float | None = None,
 ) -> tuple[bool, str]:
-    """Return usability plus the quota window that justified it.
-
-    Prefer explicit 5h evidence. Only when the provider omits the 5h field
-    entirely may a positive/reset weekly window act as a conservative fallback.
-    An explicit disabled/unknown 5h window remains fail-closed.
-    """
-    group = groups.get(group_name) if isinstance(groups, dict) else None
-    if not isinstance(group, dict):
-        return False, "missing"
-
-    current = time.time() if now_ts is None else now_ts
-    if "5h" in group:
-        window = group.get("5h")
-        if not isinstance(window, dict) or window.get("status") != "known":
-            return False, "5h"
-        remaining = window.get("remaining_pct")
-        if isinstance(remaining, (int, float)) and float(remaining) > 0.0:
-            return True, "5h"
-        reset_ts = _parse_reset_at(window.get("reset_at"))
-        return (reset_ts is not None and reset_ts <= current), "5h"
-
-    window = group.get("weekly")
-    if not isinstance(window, dict) or window.get("status") != "known":
-        return False, "weekly"
-    remaining = window.get("remaining_pct")
-    if isinstance(remaining, (int, float)) and float(remaining) > 0.0:
+    state, _reset_ts = _family_quota_state(
+        groups,
+        group_name,
+        now_ts=now_ts,
+    )
+    if state == "five_hour":
+        return True, "5h"
+    if state == "weekly":
         return True, "weekly"
-    reset_ts = _parse_reset_at(window.get("reset_at"))
-    return (reset_ts is not None and reset_ts <= current), "weekly"
+    if isinstance(groups, dict):
+        group = groups.get(group_name)
+        if isinstance(group, dict) and "5h" in group:
+            return False, "5h"
+    return False, "weekly" if state == "blocked" else "missing"
 
 
 def _load_quota_snapshot(path: Path = QUOTA_SNAPSHOT_PATH) -> dict:
@@ -158,57 +254,161 @@ def _load_quota_snapshot(path: Path = QUOTA_SNAPSHOT_PATH) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def _dynamic_preference_tiers(model: str | None, snapshot: dict) -> tuple[list[str], list[str]]:
+def _dynamic_availability_state(
+    model: str | None,
+    snapshot: dict,
+    *,
+    now_ts: float | None = None,
+    max_age_seconds: float | None = None,
+) -> dict[str, object]:
     family = _model_family(model)
+    result: dict[str, object] = {
+        "family": family,
+        "snapshot_fresh": False,
+        "preferred": [],
+        "reserve": [],
+        "fallback": [],
+        "blocked": [],
+        "unknown": [],
+    }
+    if family not in {"gemini", "claude_gpt"}:
+        return result
+    current = time.time() if now_ts is None else float(now_ts)
+    max_age = _quota_max_age_seconds() if max_age_seconds is None else max_age_seconds
+    if not _snapshot_is_fresh(
+        snapshot,
+        now_ts=current,
+        max_age_seconds=max_age,
+    ):
+        return result
+
     rows = snapshot.get("accounts") if isinstance(snapshot, dict) else None
     if not isinstance(rows, list):
-        return [], []
+        return result
 
+    result["snapshot_fresh"] = True
     preferred: list[str] = []
     reserve: list[str] = []
+    fallback: list[str] = []
+    blocked: list[str] = []
+    unknown: list[str] = []
+    target_group = "Gemini Models" if family == "gemini" else "Claude and GPT models"
+    other_group = "Claude and GPT models" if family == "gemini" else "Gemini Models"
+
     for row in rows:
-        if not isinstance(row, dict) or row.get("ok") is not True:
+        if not isinstance(row, dict):
             continue
         name = row.get("account")
-        groups = row.get("groups")
-        if not isinstance(name, str) or not isinstance(groups, dict):
+        if not isinstance(name, str):
             continue
-        gemini, gemini_window = _usable_quota_window(groups, "Gemini Models")
-        claude_gpt, claude_gpt_window = _usable_quota_window(
+        if not _row_is_fresh(
+            row,
+            snapshot,
+            now_ts=current,
+            max_age_seconds=max_age,
+        ):
+            unknown.append(name)
+            continue
+        if row.get("ok") is not True:
+            unknown.append(name)
+            continue
+        groups = row.get("groups")
+        if not isinstance(groups, dict):
+            unknown.append(name)
+            continue
+
+        target_state, _target_reset = _family_quota_state(
             groups,
-            "Claude and GPT models",
+            target_group,
+            now_ts=now_ts,
         )
-        gemini_five_hour = gemini and gemini_window == "5h"
-        claude_gpt_five_hour = claude_gpt and claude_gpt_window == "5h"
-
-        # Preference tiers are intentionally 5h-only. Weekly-only accounts stay
-        # in the coordinator's default fallback tier, so they remain usable
-        # without displacing scarce short-window capacity.
-        if family == "gemini":
-            if not gemini_five_hour:
-                continue
-            (reserve if claude_gpt_five_hour else preferred).append(name)
-        elif family == "claude_gpt":
-            if not claude_gpt_five_hour:
-                continue
-            (reserve if gemini_five_hour else preferred).append(name)
+        other_state, _other_reset = _family_quota_state(
+            groups,
+            other_group,
+            now_ts=now_ts,
+        )
+        if target_state == "five_hour":
+            if other_state == "five_hour":
+                reserve.append(name)
+            else:
+                preferred.append(name)
+        elif target_state == "weekly":
+            fallback.append(name)
+        elif target_state == "blocked":
+            blocked.append(name)
         else:
-            if gemini_five_hour == claude_gpt_five_hour:
-                if gemini_five_hour:
-                    reserve.append(name)
-                continue
-            preferred.append(name)
+            unknown.append(name)
 
-    return sorted(set(preferred)), sorted(set(reserve) - set(preferred))
+    result.update({
+        "preferred": sorted(set(preferred)),
+        "reserve": sorted(set(reserve) - set(preferred)),
+        "fallback": sorted(set(fallback) - set(preferred) - set(reserve)),
+        "blocked": sorted(set(blocked)),
+        "unknown": sorted(set(unknown)),
+    })
+    return result
+
+
+def _dynamic_preference_tiers(model: str | None, snapshot: dict) -> tuple[list[str], list[str]]:
+    state = _dynamic_availability_state(model, snapshot)
+    return list(state["preferred"]), list(state["reserve"])
+
+
+def _apply_dynamic_availability(model: str | None) -> tuple[dict, dict[str, object]]:
+    if AGY_ACCOUNT_PREFERENCE_TIERS_VERSION != 2:
+        raise RuntimeError("AGY_ACCOUNT_PREFERENCE_TIERS_VERSION_MISMATCH")
+    snapshot = _load_quota_snapshot()
+    state = _dynamic_availability_state(model, snapshot)
+    os.environ["NEXUS_AGY_PREFERRED_ACCOUNTS"] = ",".join(state["preferred"])
+    os.environ["NEXUS_AGY_RESERVE_ACCOUNTS"] = ",".join(state["reserve"])
+    os.environ["NEXUS_AGY_FALLBACK_ACCOUNTS"] = ",".join(state["fallback"])
+    os.environ["NEXUS_AGY_BLOCKED_ACCOUNTS"] = ",".join(state["blocked"])
+    return snapshot, state
 
 
 def _apply_dynamic_preference(model: str | None) -> tuple[list[str], list[str]]:
-    if AGY_ACCOUNT_PREFERENCE_TIERS_VERSION != 1:
-        raise RuntimeError("AGY_ACCOUNT_PREFERENCE_TIERS_VERSION_MISMATCH")
-    preferred, reserve = _dynamic_preference_tiers(model, _load_quota_snapshot())
-    os.environ["NEXUS_AGY_PREFERRED_ACCOUNTS"] = ",".join(preferred)
-    os.environ["NEXUS_AGY_RESERVE_ACCOUNTS"] = ",".join(reserve)
-    return preferred, reserve
+    _snapshot, state = _apply_dynamic_availability(model)
+    return list(state["preferred"]), list(state["reserve"])
+
+
+def _family_failure_unavailable_until(
+    *,
+    snapshot: dict,
+    account_name: str,
+    model_family: str,
+    failure_kind: AccountFailureKind,
+    now_ts: float | None = None,
+) -> float:
+    current = time.time() if now_ts is None else float(now_ts)
+    if not _snapshot_is_fresh(snapshot, now_ts=current):
+        return current + DEFAULT_QUOTA_FAMILY_BLOCK_SECONDS
+
+    target_group = "Gemini Models" if model_family == "gemini" else "Claude and GPT models"
+    rows = snapshot.get("accounts") if isinstance(snapshot, dict) else None
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict) or row.get("account") != account_name:
+                continue
+            if not _row_is_fresh(
+                row,
+                snapshot,
+                now_ts=current,
+                max_age_seconds=_quota_max_age_seconds(),
+            ):
+                break
+            groups = row.get("groups")
+            group = groups.get(target_group) if isinstance(groups, dict) else None
+            if not isinstance(group, dict):
+                break
+            for window_name in ("5h", "weekly"):
+                window = group.get(window_name)
+                if not isinstance(window, dict):
+                    continue
+                reset_ts = _parse_reset_at(window.get("reset_at"))
+                if reset_ts is not None and reset_ts > current:
+                    return reset_ts
+            break
+    return current + DEFAULT_QUOTA_FAMILY_BLOCK_SECONDS
 
 
 def classify_failure(
@@ -436,7 +636,9 @@ def dispatch_run(
         )
 
     runner = run_agy_fn if run_agy_fn is not None else run_agy
-    preferred_accounts, reserve_accounts = _apply_dynamic_preference(model)
+    quota_snapshot, availability_state = _apply_dynamic_availability(model)
+    model_family = str(availability_state["family"])
+    scoped_model_family = model_family if model_family in {"gemini", "claude_gpt"} else None
     consumer_id = "desktop-" + uuid.uuid4().hex
     exclude_hashes: set[str] = set()
 
@@ -446,6 +648,7 @@ def dispatch_run(
             consumer_id=consumer_id,
             exclude_hashes=exclude_hashes,
             wait_timeout=pool_wait_timeout,
+            model_family=scoped_model_family,
         )
     except AgyAccountPoolBusyError:
         emit_meta({
@@ -566,11 +769,25 @@ def dispatch_run(
                 })
                 return code if isinstance(code, int) and code != 0 else 1
 
+            family_unavailable_until = None
+            if kind == AccountFailureKind.QUOTA_EXHAUSTED and scoped_model_family is not None:
+                family_unavailable_until = _family_failure_unavailable_until(
+                    snapshot=quota_snapshot,
+                    account_name=claim.internal_id,
+                    model_family=scoped_model_family,
+                    failure_kind=kind,
+                )
+
             if attempts >= max_calls:
                 # Rotation eligible, but retry budget exhausted (including --max-calls 1):
-                # Retire/quarantine the failed account, but do not acquire a replacement.
+                # Retire the failed availability scope, but do not acquire a replacement.
                 try:
-                    coordinator.retire_failed_claim(claim, kind)
+                    coordinator.retire_failed_claim(
+                        claim,
+                        kind,
+                        model_family=scoped_model_family,
+                        unavailable_until=family_unavailable_until,
+                    )
                 except Exception:
                     pass
                 if out:
@@ -596,6 +813,8 @@ def dispatch_run(
                     failure_kind=kind,
                     exclude_hashes=exclude_hashes,
                     wait_timeout=pool_wait_timeout,
+                    model_family=scoped_model_family,
+                    unavailable_until=family_unavailable_until,
                 )
                 rotations += 1
                 _operation_hook(

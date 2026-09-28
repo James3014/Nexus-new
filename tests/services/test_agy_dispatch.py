@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import stat
 import subprocess
+from datetime import datetime, timezone
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
@@ -22,6 +23,10 @@ def _window(remaining: float, *, reset_at: str | None = None) -> dict:
         "remaining_pct": remaining,
         "reset_at": reset_at,
     }
+
+
+def _iso(ts: float) -> str:
+    return datetime.fromtimestamp(ts, timezone.utc).isoformat()
 
 
 def test_weekly_only_quota_is_usable_fallback() -> None:
@@ -63,7 +68,9 @@ def test_explicit_five_hour_takes_precedence_over_weekly() -> None:
 
 
 def test_weekly_only_dual_family_account_enters_reserve() -> None:
+    now = 2_000_000_000.0
     snapshot = {
+        "checked_at": _iso(now),
         "accounts": [
             {
                 "account": "weekly-only",
@@ -78,7 +85,7 @@ def test_weekly_only_dual_family_account_enters_reserve() -> None:
                 "ok": True,
                 "groups": {
                     "Gemini Models": {
-                        "5h": _window(80.0),
+                        "5h": _window(80.0, reset_at=_iso(now + 3600)),
                         "weekly": _window(70.0),
                     },
                     "Claude and GPT models": {"weekly": _window(100.0)},
@@ -89,41 +96,205 @@ def test_weekly_only_dual_family_account_enters_reserve() -> None:
                 "ok": True,
                 "groups": {
                     "Gemini Models": {
-                        "5h": _window(90.0),
+                        "5h": _window(90.0, reset_at=_iso(now + 3600)),
                         "weekly": _window(60.0),
                     },
                     "Claude and GPT models": {
-                        "5h": _window(75.0),
+                        "5h": _window(75.0, reset_at=_iso(now + 3600)),
                         "weekly": _window(65.0),
                     },
                 },
             },
             {
-                "account": "disabled-5h",
+                "account": "blocked",
                 "ok": True,
                 "groups": {
                     "Gemini Models": {
-                        "5h": {
-                            "status": "disabled",
-                            "remaining_pct": None,
-                            "reset_at": None,
-                        },
-                        "weekly": _window(90.0),
+                        "weekly": _window(0.0, reset_at=_iso(now + 86400)),
+                    }
+                },
+            },
+            {
+                "account": "unknown",
+                "ok": False,
+                "error": "timeout",
+            },
+        ],
+    }
+
+    state = dispatch._dynamic_availability_state(
+        "gemini-3.8-flash-medium",
+        snapshot,
+        now_ts=now,
+        max_age_seconds=900,
+    )
+
+    assert state["snapshot_fresh"] is True
+    assert state["preferred"] == ["gemini-5h"]
+    assert state["reserve"] == ["dual-5h"]
+    assert state["fallback"] == ["weekly-only"]
+    assert state["blocked"] == ["blocked"]
+    assert state["unknown"] == ["unknown"]
+
+
+def test_stale_quota_snapshot_cannot_block_or_prioritize_accounts() -> None:
+    now = 2_000_000_000.0
+    snapshot = {
+        "checked_at": _iso(now - 901),
+        "accounts": [
+            {
+                "account": "apparently-blocked",
+                "ok": True,
+                "groups": {
+                    "Gemini Models": {
+                        "weekly": _window(0.0, reset_at=_iso(now + 86400)),
+                    }
+                },
+            }
+        ],
+    }
+
+    state = dispatch._dynamic_availability_state(
+        "gemini-3.8-flash-medium",
+        snapshot,
+        now_ts=now,
+        max_age_seconds=900,
+    )
+
+    assert state == {
+        "family": "gemini",
+        "snapshot_fresh": False,
+        "preferred": [],
+        "reserve": [],
+        "fallback": [],
+        "blocked": [],
+        "unknown": [],
+    }
+
+
+def test_partial_refresh_does_not_make_old_account_rows_fresh() -> None:
+    now = 2_000_000_000.0
+    snapshot = {
+        "checked_at": _iso(now),
+        "accounts": [
+            {
+                "account": "fresh-row",
+                "checked_at": _iso(now),
+                "ok": True,
+                "groups": {
+                    "Gemini Models": {"weekly": _window(90.0)},
+                },
+            },
+            {
+                "account": "old-row",
+                "checked_at": _iso(now - 3600),
+                "ok": True,
+                "groups": {
+                    "Gemini Models": {
+                        "5h": _window(100.0, reset_at=_iso(now + 3600)),
                     },
                 },
             },
-        ]
+        ],
     }
 
-    preferred, reserve = dispatch._dynamic_preference_tiers(
+    state = dispatch._dynamic_availability_state(
         "gemini-3.8-flash-medium",
         snapshot,
+        now_ts=now,
+        max_age_seconds=900,
     )
 
-    assert preferred == ["gemini-5h"]
-    assert reserve == ["dual-5h"]
-    assert "weekly-only" not in preferred + reserve
-    assert "disabled-5h" not in preferred + reserve
+    assert state["fallback"] == ["fresh-row"]
+    assert state["unknown"] == ["old-row"]
+    assert state["preferred"] == []
+    assert state["blocked"] == []
+
+
+def test_family_failure_uses_matching_quota_reset_when_available() -> None:
+    now = 2_000_000_000.0
+    reset = now + 1800
+    snapshot = {
+        "checked_at": _iso(now),
+        "accounts": [
+            {
+                "account": "dual-5h",
+                "ok": True,
+                "groups": {
+                    "Gemini Models": {
+                        "5h": _window(10.0, reset_at=_iso(reset)),
+                    }
+                },
+            }
+        ],
+    }
+
+    unavailable_until = dispatch._family_failure_unavailable_until(
+        snapshot=snapshot,
+        account_name="dual-5h",
+        model_family="gemini",
+        failure_kind=dispatch.AccountFailureKind.QUOTA_EXHAUSTED,
+        now_ts=now,
+    )
+
+    assert unavailable_until == reset
+
+
+def test_stale_account_row_uses_bounded_family_failure_ttl() -> None:
+    now = 2_000_000_000.0
+    snapshot = {
+        "checked_at": _iso(now),
+        "accounts": [
+            {
+                "account": "dual-5h",
+                "checked_at": _iso(now - 3600),
+                "ok": True,
+                "groups": {
+                    "Gemini Models": {
+                        "5h": _window(10.0, reset_at=_iso(now + 86400)),
+                    }
+                },
+            }
+        ],
+    }
+
+    unavailable_until = dispatch._family_failure_unavailable_until(
+        snapshot=snapshot,
+        account_name="dual-5h",
+        model_family="gemini",
+        failure_kind=dispatch.AccountFailureKind.QUOTA_EXHAUSTED,
+        now_ts=now,
+    )
+
+    assert unavailable_until == now + dispatch.DEFAULT_QUOTA_FAMILY_BLOCK_SECONDS
+
+
+def test_stale_snapshot_uses_bounded_family_failure_ttl() -> None:
+    now = 2_000_000_000.0
+    snapshot = {
+        "checked_at": _iso(now - 3600),
+        "accounts": [
+            {
+                "account": "dual-5h",
+                "ok": True,
+                "groups": {
+                    "Gemini Models": {
+                        "5h": _window(10.0, reset_at=_iso(now + 86400)),
+                    }
+                },
+            }
+        ],
+    }
+
+    unavailable_until = dispatch._family_failure_unavailable_until(
+        snapshot=snapshot,
+        account_name="dual-5h",
+        model_family="gemini",
+        failure_kind=dispatch.AccountFailureKind.QUOTA_EXHAUSTED,
+        now_ts=now,
+    )
+
+    assert unavailable_until == now + dispatch.DEFAULT_QUOTA_FAMILY_BLOCK_SECONDS
 
 
 def test_installer_deploys_exact_canonical_bytes(tmp_path: Path) -> None:
