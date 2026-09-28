@@ -72,6 +72,10 @@ def _make_source_repo(tmp_path: Path) -> Path:
             ROOT / "nexus/services/external_account_pool.py",
             "nexus/services/external_account_pool.py",
         ),
+        (
+            ROOT / "nexus/services/agy_operation_journal.py",
+            "nexus/services/agy_operation_journal.py",
+        ),
     ]:
         dest = repo / relative
         dest.parent.mkdir(parents=True, exist_ok=True)

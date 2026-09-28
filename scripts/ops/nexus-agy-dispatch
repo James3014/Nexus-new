@@ -2,16 +2,19 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from importlib import import_module
 from pathlib import Path
 from typing import Any, Optional
+
 
 def _default_snapshot() -> Path:
     host_runtime = Path.home() / ".local/share/nexus-host-runtime/current/snapshot"
@@ -66,6 +69,21 @@ AccountLeaseClaim = _agy_account_pool.AccountLeaseClaim
 _external_account_pool = import_module("nexus.services.external_account_pool")
 AccountFailureKind = _external_account_pool.AccountFailureKind
 is_rotation_eligible = _external_account_pool.is_rotation_eligible
+
+
+_agy_operation_journal = import_module("nexus.services.agy_operation_journal")
+AgyOperationJournal = _agy_operation_journal.AgyOperationJournal
+AgyOperationJournalError = _agy_operation_journal.AgyOperationJournalError
+public_operation_view = _agy_operation_journal.public_operation_view
+new_operation_id = _agy_operation_journal.new_operation_id
+new_attempt_id = _agy_operation_journal.new_attempt_id
+
+OPERATION_ROOT = Path(
+    os.getenv(
+        "NEXUS_AGY_OPERATION_ROOT",
+        str(Path.home() / ".local/state/nexus-agy-operations"),
+    )
+)
 
 QUOTA_SNAPSHOT_PATH = Path(
     os.getenv(
@@ -297,6 +315,21 @@ def emit_meta(data: dict) -> None:
     sys.stderr.write("NEXUS_AGY_DISPATCH " + json.dumps(data, sort_keys=True) + "\n")
 
 
+def _runtime_revision() -> str | None:
+    receipt = Path.home() / ".local/share/nexus-host-runtime/current/host-generation.json"
+    try:
+        data = json.loads(receipt.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    value = data.get("source_revision")
+    return value if isinstance(value, str) and value else None
+
+
+def _operation_hook(callback: Any, **payload: Any) -> None:
+    if callback is not None:
+        callback(payload)
+
+
 TEMP_COMMAND_DENY = [
     "command(git push)",
     "command(git reset --hard)",
@@ -380,6 +413,7 @@ def dispatch_run(
     temp_command_permissions: bool = False,
     coordinator: CrossProcessLeaseCoordinator | None = None,
     run_agy_fn: Any = None,
+    operation_hook: Any = None,
 ) -> int:
     if coordinator is None:
         if not MANAGER.is_file() or not MANAGER_ROOT.is_dir():
@@ -432,9 +466,26 @@ def dispatch_run(
     last_kind = None
     total_wall_ms = 0
 
+    _operation_hook(
+        operation_hook,
+        phase="ACCOUNT_LEASED",
+        account_alias_hash=claim.account_alias_hash,
+        lease_id_hash=claim.lease_id_hash,
+        attempts=attempts,
+        rotations=rotations,
+    )
+
     try:
         while attempts < max(1, max_calls):
             attempts += 1
+            _operation_hook(
+                operation_hook,
+                phase="EXECUTING",
+                attempts=attempts,
+                rotations=rotations,
+                account_alias_hash=claim.account_alias_hash,
+                lease_id_hash=claim.lease_id_hash,
+            )
             env = dict(claim.lease.execution_env)
             permission_token = None
             try:
@@ -482,6 +533,16 @@ def dispatch_run(
 
             kind = classify_failure(code, out, err, timed_out)
             last_kind = kind.value
+            _operation_hook(
+                operation_hook,
+                phase="CLASSIFYING_FAILURE",
+                attempts=attempts,
+                rotations=rotations,
+                failure_kind=last_kind,
+                timed_out=bool(timed_out),
+                account_alias_hash=claim.account_alias_hash,
+                lease_id_hash=claim.lease_id_hash,
+            )
 
             if not is_rotation_eligible(kind):
                 if out:
@@ -532,6 +593,14 @@ def dispatch_run(
                     wait_timeout=pool_wait_timeout,
                 )
                 rotations += 1
+                _operation_hook(
+                    operation_hook,
+                    phase="ACCOUNT_ROTATED",
+                    attempts=attempts,
+                    rotations=rotations,
+                    account_alias_hash=claim.account_alias_hash,
+                    lease_id_hash=claim.lease_id_hash,
+                )
             except AgyAccountPoolBusyError:
                 emit_meta({
                     "status": "pool_busy",
@@ -570,6 +639,239 @@ def dispatch_run(
     return 1
 
 
+def _write_private_prompt(path: Path, prompt: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(prompt)
+        fh.flush()
+        os.fsync(fh.fileno())
+
+
+def _spawn_background_operation(
+    *,
+    prompt: str,
+    cwd: str,
+    mode: str,
+    model: str | None,
+    effort: str | None,
+    timeout: int,
+    max_calls: int,
+    pool_wait_timeout: float,
+    allow: list[str],
+    deny: list[str],
+    temp_command_permissions: bool,
+    operation_root: Path,
+) -> dict[str, Any]:
+    journal = AgyOperationJournal(operation_root)
+    operation_id = new_operation_id()
+    attempt_id = new_attempt_id()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=attempt_id,
+        cwd=cwd,
+        provider="agy",
+        model=model,
+        effort=effort,
+        prompt_sha256=hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+        runtime_revision=_runtime_revision(),
+    )
+    prompt_path = journal.prompt_path(operation_id)
+    _write_private_prompt(prompt_path, prompt)
+
+    argv = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--operation-run",
+        operation_id,
+        "--operation-root",
+        str(operation_root),
+        "--prompt-file",
+        str(prompt_path),
+        "--cwd",
+        cwd,
+        "--mode",
+        mode,
+        "--timeout",
+        str(timeout),
+        "--max-calls",
+        str(max_calls),
+        "--pool-wait-timeout",
+        str(pool_wait_timeout),
+    ]
+    if model:
+        argv += ["--model", model]
+    if effort:
+        argv += ["--effort", effort]
+    if temp_command_permissions:
+        argv.append("--temp-command-permissions")
+    for rule in allow:
+        argv += ["--allow", rule]
+    for rule in deny:
+        argv += ["--deny", rule]
+
+    stdout_path = journal.stdout_path(operation_id)
+    stderr_path = journal.stderr_path(operation_id)
+    stdout_path.parent.mkdir(parents=True, exist_ok=True)
+    with (
+        stdout_path.open("ab", buffering=0) as out_fh,
+        stderr_path.open("ab", buffering=0) as err_fh,
+    ):
+        proc = subprocess.Popen(
+            argv,
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,
+            stdout=out_fh,
+            stderr=err_fh,
+            start_new_session=True,
+            close_fds=True,
+        )
+    return journal.bind_pid(operation_id, proc.pid)
+
+
+def _run_background_operation(
+    *,
+    operation_id: str,
+    prompt_file: str,
+    cwd: str,
+    mode: str,
+    model: str | None,
+    effort: str | None,
+    timeout: int,
+    max_calls: int,
+    pool_wait_timeout: float,
+    allow: list[str],
+    deny: list[str],
+    temp_command_permissions: bool,
+    operation_root: Path,
+    heartbeat_interval: float = 15.0,
+) -> int:
+    journal = AgyOperationJournal(operation_root)
+    prompt_path = Path(prompt_file)
+    try:
+        prompt = prompt_path.read_text(encoding="utf-8")
+    finally:
+        try:
+            prompt_path.unlink()
+        except FileNotFoundError:
+            pass
+
+    journal.mark_started(operation_id, pid=os.getpid())
+    stop = threading.Event()
+    state: dict[str, Any] = {
+        "phase": "STARTING",
+        "attempts": 0,
+        "rotations": 0,
+        "account_alias_hash": None,
+        "lease_id_hash": None,
+        "failure_kind": None,
+        "timed_out": False,
+    }
+    state_lock = threading.Lock()
+
+    def _heartbeat_snapshot(snapshot: dict[str, Any]) -> None:
+        journal.heartbeat(
+            operation_id,
+            phase=str(snapshot.get("phase") or "RUNNING"),
+            attempts=int(snapshot.get("attempts") or 0),
+            rotations=int(snapshot.get("rotations") or 0),
+            account_alias_hash=snapshot.get("account_alias_hash"),
+            lease_id_hash=snapshot.get("lease_id_hash"),
+            failure_kind=snapshot.get("failure_kind"),
+        )
+
+    def on_event(event: dict[str, Any]) -> None:
+        with state_lock:
+            state.update(event)
+            snapshot = dict(state)
+        _heartbeat_snapshot(snapshot)
+
+    def heartbeat_loop() -> None:
+        while not stop.wait(max(1.0, heartbeat_interval)):
+            with state_lock:
+                snapshot = dict(state)
+            try:
+                _heartbeat_snapshot(snapshot)
+            except Exception:
+                pass
+
+    heartbeat_thread = threading.Thread(
+        target=heartbeat_loop,
+        name=f"agy-heartbeat-{operation_id}",
+        daemon=True,
+    )
+    heartbeat_thread.start()
+
+    exit_code: int | None = None
+    try:
+        exit_code = dispatch_run(
+            prompt=prompt,
+            cwd=cwd,
+            mode=mode,
+            model=model,
+            effort=effort,
+            timeout=timeout,
+            max_calls=max_calls,
+            pool_wait_timeout=pool_wait_timeout,
+            allow=allow,
+            deny=deny,
+            temp_command_permissions=temp_command_permissions,
+            operation_hook=on_event,
+        )
+        with state_lock:
+            snapshot = dict(state)
+        failure_kind = snapshot.get("failure_kind")
+        timed_out = bool(snapshot.get("timed_out")) or failure_kind == "TIMEOUT"
+        if timed_out:
+            terminal_status = "OUTCOME_UNKNOWN"
+            reconciliation = {
+                "at": _agy_operation_journal.utc_now(),
+                "result": "PROVIDER_TURN_MAY_STILL_BE_RUNNING",
+                "retry_permitted": False,
+            }
+        elif exit_code == 0:
+            terminal_status = "COMPLETED"
+            reconciliation = None
+        else:
+            terminal_status = "FAILED"
+            reconciliation = None
+
+        journal.mark_terminal(
+            operation_id,
+            status=terminal_status,
+            exit_code=exit_code,
+            failure_kind=failure_kind,
+            cwd=cwd,
+            attempts=int(snapshot.get("attempts") or 0),
+            rotations=int(snapshot.get("rotations") or 0),
+            account_alias_hash=snapshot.get("account_alias_hash"),
+            lease_id_hash=snapshot.get("lease_id_hash"),
+            reconciliation=reconciliation,
+        )
+        return int(exit_code or 0)
+    except BaseException as exc:
+        journal.mark_terminal(
+            operation_id,
+            status="OUTCOME_UNKNOWN",
+            exit_code=exit_code,
+            failure_kind=f"WRAPPER_EXCEPTION:{type(exc).__name__}",
+            cwd=cwd,
+            reconciliation={
+                "at": _agy_operation_journal.utc_now(),
+                "result": "WRAPPER_EXCEPTION_WITH_UNKNOWN_PROVIDER_EFFECT",
+                "retry_permitted": False,
+            },
+        )
+        raise
+    finally:
+        stop.set()
+        heartbeat_thread.join(timeout=2.0)
+
+
+def _print_operation(record: dict[str, Any]) -> None:
+    print(json.dumps(public_operation_view(record), indent=2, sort_keys=True))
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="Quota-aware direct Agy dispatcher using the existing Nexus account pool."
@@ -599,7 +901,31 @@ def main(argv: list[str] | None = None) -> int:
         default=float(os.getenv("NEXUS_AGY_POOL_WAIT_TIMEOUT", "15.0")),
         help="Timeout in seconds to wait for an available account slot when the pool is busy",
     )
+    ap.add_argument(
+        "--background",
+        action="store_true",
+        help="Start a durable background operation and return its operation_id immediately",
+    )
+    ap.add_argument("--status", metavar="OPERATION_ID")
+    ap.add_argument("--reconcile", metavar="OPERATION_ID")
+    ap.add_argument("--operation-root", default=str(OPERATION_ROOT), help=argparse.SUPPRESS)
+    ap.add_argument("--operation-run", metavar="OPERATION_ID", help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
+
+    operation_root = Path(args.operation_root).expanduser()
+    journal = AgyOperationJournal(operation_root)
+
+    if args.status:
+        _print_operation(journal.read(args.status))
+        return 0
+
+    if args.reconcile:
+        _print_operation(journal.reconcile(args.reconcile))
+        return 0
+
+    cwd = str(Path(args.cwd).expanduser().resolve())
+    if not Path(cwd).is_dir():
+        raise SystemExit("INVALID_CWD")
 
     prompt_text = args.prompt_flag if args.prompt_flag is not None else args.prompt
     if args.prompt_file:
@@ -611,9 +937,40 @@ def main(argv: list[str] | None = None) -> int:
     if not prompt.strip():
         raise SystemExit("EMPTY_PROMPT")
 
-    cwd = str(Path(args.cwd).expanduser().resolve())
-    if not Path(cwd).is_dir():
-        raise SystemExit("INVALID_CWD")
+    if args.operation_run:
+        return _run_background_operation(
+            operation_id=args.operation_run,
+            prompt_file=args.prompt_file,
+            cwd=cwd,
+            mode=args.mode,
+            model=args.model,
+            effort=args.effort,
+            timeout=args.timeout,
+            max_calls=args.max_calls,
+            pool_wait_timeout=args.pool_wait_timeout,
+            allow=args.allow,
+            deny=args.deny,
+            temp_command_permissions=args.temp_command_permissions,
+            operation_root=operation_root,
+        )
+
+    if args.background:
+        record = _spawn_background_operation(
+            prompt=prompt,
+            cwd=cwd,
+            mode=args.mode,
+            model=args.model,
+            effort=args.effort,
+            timeout=args.timeout,
+            max_calls=args.max_calls,
+            pool_wait_timeout=args.pool_wait_timeout,
+            allow=args.allow,
+            deny=args.deny,
+            temp_command_permissions=args.temp_command_permissions,
+            operation_root=operation_root,
+        )
+        _print_operation(record)
+        return 0
 
     return dispatch_run(
         prompt=prompt,
