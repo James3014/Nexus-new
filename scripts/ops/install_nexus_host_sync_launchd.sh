@@ -48,10 +48,25 @@ payload = {
 with open(out, "wb") as fh:
     plistlib.dump(payload, fh, sort_keys=True)
 PY
-plutil -lint "$TMP" >/dev/null
+python3 - "$TMP" <<'PY_VALIDATE'
+import plistlib
+import sys
+
+with open(sys.argv[1], "rb") as fh:
+    payload = plistlib.load(fh)
+
+if payload.get("Label") != "com.nexus.host-sync":
+    raise SystemExit("NEXUS_HOST_SYNC_PLIST_LABEL_MISMATCH")
+if not isinstance(payload.get("ProgramArguments"), list):
+    raise SystemExit("NEXUS_HOST_SYNC_PLIST_PROGRAM_ARGUMENTS_INVALID")
+PY_VALIDATE
 mv "$TMP" "$PLIST"
 
 if [[ "$LOAD" == "1" ]]; then
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    echo "NEXUS_HOST_SYNC_LAUNCHD_REQUIRES_DARWIN" >&2
+    exit 1
+  fi
   DOMAIN="gui/$(id -u)"
   launchctl bootout "$DOMAIN" "$PLIST" >/dev/null 2>&1 || true
   launchctl bootstrap "$DOMAIN" "$PLIST"
