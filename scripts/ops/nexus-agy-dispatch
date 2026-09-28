@@ -464,7 +464,9 @@ _AGY_ALIAS_RESOLUTION_RE = re.compile(
     r'model alias "(?P<alias>[^"\n]+)" resolved to "(?P<resolved>[^"\n]+)"'
 )
 _AGY_RESOLVING_MODEL_RE = re.compile(r"Resolving model (?P<resolved>[^\s]+)")
-_AGY_CONVERSATION_RE = re.compile(r"Created conversation (?P<conversation>[0-9a-fA-F-]{36})")
+_AGY_CONVERSATION_RE = re.compile(
+    r"Created conversation (?P<conversation>[0-9a-fA-F-]{36})"
+)
 
 
 def _parse_agy_attestation(
@@ -492,7 +494,9 @@ def _parse_agy_attestation(
             if resolved == requested_model:
                 resolved_models.append(resolved)
 
-    conversations = [match.group("conversation") for match in _AGY_CONVERSATION_RE.finditer(text)]
+    conversations = [
+        match.group("conversation") for match in _AGY_CONVERSATION_RE.finditer(text)
+    ]
     if not resolved_models or not conversations:
         return {
             "observed_provider": None,
@@ -703,26 +707,22 @@ def dispatch_run(
             model_family=scoped_model_family,
         )
     except AgyAccountPoolBusyError:
-        emit_meta(
-            {
-                "status": "pool_busy",
-                "attempts": 0,
-                "rotations": 0,
-                "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
-                "wall_ms": 0,
-            }
-        )
+        emit_meta({
+            "status": "pool_busy",
+            "attempts": 0,
+            "rotations": 0,
+            "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
+            "wall_ms": 0,
+        })
         return 75
     except AgyAccountPoolExhaustedError:
-        emit_meta(
-            {
-                "status": "pool_exhausted",
-                "attempts": 0,
-                "rotations": 0,
-                "failure_kind": "ACCOUNT_UNAVAILABLE",
-                "wall_ms": 0,
-            }
-        )
+        emit_meta({
+            "status": "pool_exhausted",
+            "attempts": 0,
+            "rotations": 0,
+            "failure_kind": "ACCOUNT_UNAVAILABLE",
+            "wall_ms": 0,
+        })
         return 75
 
     attempts = 0
@@ -784,17 +784,15 @@ def dispatch_run(
                 sys.stdout.write(out)
                 if err:
                     sys.stderr.write(err)
-                emit_meta(
-                    {
-                        "status": "completed",
-                        "attempts": attempts,
-                        "rotations": rotations,
-                        "account_alias_hash": claim.account_alias_hash,
-                        "lease_id_hash": claim.lease_id_hash,
-                        "parallel_slot": True,
-                        "wall_ms": total_wall_ms,
-                    }
-                )
+                emit_meta({
+                    "status": "completed",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "account_alias_hash": claim.account_alias_hash,
+                    "lease_id_hash": claim.lease_id_hash,
+                    "parallel_slot": True,
+                    "wall_ms": total_wall_ms,
+                })
                 return 0
 
             kind = classify_failure(code, out, err, timed_out)
@@ -815,18 +813,16 @@ def dispatch_run(
                     sys.stdout.write(out)
                 if err:
                     sys.stderr.write(err)
-                emit_meta(
-                    {
-                        "status": "failed",
-                        "attempts": attempts,
-                        "rotations": rotations,
-                        "failure_kind": last_kind,
-                        "account_alias_hash": claim.account_alias_hash,
-                        "lease_id_hash": claim.lease_id_hash,
-                        "parallel_slot": True,
-                        "wall_ms": total_wall_ms,
-                    }
-                )
+                emit_meta({
+                    "status": "failed",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": last_kind,
+                    "account_alias_hash": claim.account_alias_hash,
+                    "lease_id_hash": claim.lease_id_hash,
+                    "parallel_slot": True,
+                    "wall_ms": total_wall_ms,
+                })
                 return code if isinstance(code, int) and code != 0 else 1
 
             family_unavailable_until = None
@@ -854,18 +850,16 @@ def dispatch_run(
                     sys.stdout.write(out)
                 if err:
                     sys.stderr.write(err)
-                emit_meta(
-                    {
-                        "status": "failed",
-                        "attempts": attempts,
-                        "rotations": rotations,
-                        "failure_kind": last_kind,
-                        "account_alias_hash": claim.account_alias_hash,
-                        "lease_id_hash": claim.lease_id_hash,
-                        "parallel_slot": True,
-                        "wall_ms": total_wall_ms,
-                    }
-                )
+                emit_meta({
+                    "status": "failed",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": last_kind,
+                    "account_alias_hash": claim.account_alias_hash,
+                    "lease_id_hash": claim.lease_id_hash,
+                    "parallel_slot": True,
+                    "wall_ms": total_wall_ms,
+                })
                 return code if isinstance(code, int) and code != 0 else 1
 
             # Rotation eligible: rotate claim
@@ -888,37 +882,31 @@ def dispatch_run(
                     lease_id_hash=claim.lease_id_hash,
                 )
             except AgyAccountPoolBusyError:
-                emit_meta(
-                    {
-                        "status": "pool_busy",
-                        "attempts": attempts,
-                        "rotations": rotations,
-                        "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
-                        "wall_ms": total_wall_ms,
-                    }
-                )
+                emit_meta({
+                    "status": "pool_busy",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
+                    "wall_ms": total_wall_ms,
+                })
                 return 75
             except AgyAccountPoolExhaustedError:
-                emit_meta(
-                    {
-                        "status": "pool_exhausted",
-                        "attempts": attempts,
-                        "rotations": rotations,
-                        "failure_kind": last_kind,
-                        "wall_ms": total_wall_ms,
-                    }
-                )
+                emit_meta({
+                    "status": "pool_exhausted",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": last_kind,
+                    "wall_ms": total_wall_ms,
+                })
                 return 75
             except Exception:
-                emit_meta(
-                    {
-                        "status": "failed",
-                        "attempts": attempts,
-                        "rotations": rotations,
-                        "failure_kind": last_kind,
-                        "wall_ms": total_wall_ms,
-                    }
-                )
+                emit_meta({
+                    "status": "failed",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": last_kind,
+                    "wall_ms": total_wall_ms,
+                })
                 return 75
     finally:
         if claim is not None:
