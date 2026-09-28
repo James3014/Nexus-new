@@ -62,7 +62,7 @@ def test_explicit_five_hour_takes_precedence_over_weekly() -> None:
     )
 
 
-def test_dynamic_preference_tiers_prioritize_only_five_hour_capacity() -> None:
+def test_weekly_only_dual_family_account_enters_reserve() -> None:
     snapshot = {
         "accounts": [
             {
