@@ -65,10 +65,10 @@ AgyAccountPoolBusyError = _agy_account_pool.AgyAccountPoolBusyError
 AgyAccountPoolExhaustedError = _agy_account_pool.AgyAccountPoolExhaustedError
 CrossProcessLeaseCoordinator = _agy_account_pool.CrossProcessLeaseCoordinator
 AccountLeaseClaim = _agy_account_pool.AccountLeaseClaim
+is_agy_rotation_eligible = _agy_account_pool.is_agy_rotation_eligible
 
 _external_account_pool = import_module("nexus.services.external_account_pool")
 AccountFailureKind = _external_account_pool.AccountFailureKind
-is_rotation_eligible = _external_account_pool.is_rotation_eligible
 
 
 _agy_operation_journal = import_module("nexus.services.agy_operation_journal")
@@ -752,7 +752,7 @@ def dispatch_run(
                 lease_id_hash=claim.lease_id_hash,
             )
 
-            if not is_rotation_eligible(kind):
+            if not is_agy_rotation_eligible(kind):
                 if out:
                     sys.stdout.write(out)
                 if err:

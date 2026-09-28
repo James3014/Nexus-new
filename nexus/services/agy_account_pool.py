@@ -65,6 +65,11 @@ class AgyAccountPoolManagerError(AgyAccountPoolError):
     """Raised when the account pool manager CLI fails or returns invalid data."""
 
 
+def is_agy_rotation_eligible(failure_kind: AccountFailureKind) -> bool:
+    """Agy provider timeouts cool down the current account before another attempt."""
+    return failure_kind == AccountFailureKind.TIMEOUT or is_rotation_eligible(failure_kind)
+
+
 @dataclass
 class AccountLeaseClaim:
     """Exclusive cross-process lease claim on one account.
@@ -985,7 +990,7 @@ class CrossProcessLeaseCoordinator:
         account x model_family. Rate limits and authentication/session/account failures remain
         account-global and keep the provider manager's normal cooldown semantics.
         """
-        if not is_rotation_eligible(failure_kind):
+        if not is_agy_rotation_eligible(failure_kind):
             return
 
         if claim.released:

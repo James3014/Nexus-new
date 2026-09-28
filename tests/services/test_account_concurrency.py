@@ -681,28 +681,28 @@ class TestAccountConcurrencyModel(unittest.TestCase):
         mgr = self._create_manager([acc1, acc2])
         coord = self._create_coordinator(mgr)
 
-        # 1. Direct coordinator test: retire_failed_claim with non-rotation failure is a no-op
+        # A semantic/implementation failure remains ineligible for Agy rotation.
         claim = coord.acquire_claim("worker-o")
         self.assertFalse(is_rotation_eligible(AccountFailureKind.TIMEOUT))
-        coord.retire_failed_claim(claim, AccountFailureKind.TIMEOUT)
+        coord.retire_failed_claim(claim, AccountFailureKind.SYNTAX_OR_IMPLEMENTATION_ERROR)
         self.assertFalse(coord.is_quarantined(acc1.alias_hash))
         claim.release()
 
         # 2. Dispatch run test with non-rotation failure
         calls: list[dict[str, str]] = []
 
-        def mock_run_agy_timeout(*, env, prompt, cwd, mode, model, effort, timeout):
+        def mock_run_agy_error(*, env, prompt, cwd, mode, model, effort, timeout):
             calls.append(dict(env))
-            return None, "", "Task timed out after 900s", True, 900000
+            return 2, "", "invalid command", False, 50
 
         code = dispatch_module.dispatch_run(
-            prompt="test prompt timeout",
+            prompt="test prompt invalid command",
             cwd=self.test_dir,
             max_calls=3,
             coordinator=coord,
-            run_agy_fn=mock_run_agy_timeout,
+            run_agy_fn=mock_run_agy_error,
         )
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertEqual(len(calls), 1, "Non-rotation failure must not retry or switch accounts")
 
         # Neither account is quarantined
@@ -883,11 +883,107 @@ class TestAccountConcurrencyModel(unittest.TestCase):
             coordinator=coord,
             run_agy_fn=cli_timeout_runner,
         )
-        self.assertEqual(dispatch_rc, 1)
+        self.assertEqual(dispatch_rc, 75)
+        self.assertTrue(coord.is_quarantined(acc.alias_hash))
+        with self.assertRaises(AgyAccountPoolExhaustedError):
+            coord.acquire_claim("worker-after-timeout", wait_timeout=0.1)
+
+    def test_t_timeout_retires_exact_claim_before_release_and_retries_other_account(self):
+        acc1 = AgyAccount(alias="timeout_a", home_dir=f"{self.test_dir}/timeout_a")
+        acc2 = AgyAccount(alias="timeout_b", home_dir=f"{self.test_dir}/timeout_b")
+        mgr = self._create_manager([acc1, acc2])
+        coord = self._create_coordinator(mgr)
+        events = []
+        original_mark = mgr.mark_account_bad
+
+        def mark_bad(lease, kind):
+            events.append(("mark", lease.account_alias_hash, kind))
+            return original_mark(lease, kind)
+
+        mgr.mark_account_bad = mark_bad
+        original_release = mgr.release
+
+        def release(lease):
+            events.append(("release", lease.account_alias_hash, None))
+            original_release(lease)
+
+        mgr.release = release
+        homes = []
+
+        def runner(*, env, **kwargs):
+            homes.append(env["HOME"])
+            return (
+                (0, "", "print timeout after 2m", True, 120000)
+                if len(homes) == 1
+                else (0, "ok", "", False, 1)
+            )
+
+        self.assertEqual(
+            dispatch_module.dispatch_run(
+                prompt="timeout probe",
+                cwd=self.test_dir,
+                max_calls=2,
+                coordinator=coord,
+                run_agy_fn=runner,
+            ),
+            0,
+        )
+        self.assertEqual(set(homes), {acc1.home_dir, acc2.home_dir})
+        self.assertNotEqual(homes[0], homes[1])
+        selected = next(acc for acc in (acc1, acc2) if acc.home_dir == homes[0])
+        other = acc2 if selected is acc1 else acc1
+        self.assertEqual(events[0], ("mark", selected.alias_hash, AccountFailureKind.TIMEOUT))
+        self.assertEqual(events[1], ("release", selected.alias_hash, None))
+        self.assertTrue(coord.is_quarantined(selected.alias_hash))
+        self.assertFalse(coord.is_quarantined(other.alias_hash))
+
+    def test_u_timeout_max_calls_one_retires_without_replacement(self):
+        accounts = [
+            AgyAccount(alias=f"timeout_{i}", home_dir=f"{self.test_dir}/timeout_{i}")
+            for i in range(2)
+        ]
+        coord = self._create_coordinator(self._create_manager(accounts))
+        acquired = []
+        original_acquire = coord.acquire_claim
+
+        def acquire(*args, **kwargs):
+            claim = original_acquire(*args, **kwargs)
+            acquired.append(claim.account_alias_hash)
+            return claim
+
+        coord.acquire_claim = acquire
+        self.assertEqual(
+            dispatch_module.dispatch_run(
+                prompt="timeout probe",
+                cwd=self.test_dir,
+                max_calls=1,
+                coordinator=coord,
+                run_agy_fn=lambda **kwargs: (0, "", "print timeout", True, 120000),
+            ),
+            1,
+        )
+        self.assertEqual(len(acquired), 1)
+        self.assertIn(acquired[0], {acc.alias_hash for acc in accounts})
+        self.assertTrue(coord.is_quarantined(acquired[0]))
+        other_hash = next(acc.alias_hash for acc in accounts if acc.alias_hash != acquired[0])
+        self.assertFalse(coord.is_quarantined(other_hash))
+
+    def test_v_timeout_manager_cooldown_does_not_leave_permanent_quarantine(self):
+        acc = AgyAccount(alias="timeout_cooldown", home_dir=f"{self.test_dir}/timeout_cooldown")
+        mgr = self._create_manager([acc])
+        coord = self._create_coordinator(mgr)
+        claim = coord.acquire_claim("worker-timeout")
+
+        def durable_mark_bad(lease, kind):
+            self.assertEqual(kind, AccountFailureKind.TIMEOUT)
+            self.assertEqual(lease.account_alias_hash, claim.account_alias_hash)
+            self.assertFalse(claim.released)
+            return True
+
+        mgr.mark_account_bad = durable_mark_bad
+        coord.retire_failed_claim(claim, AccountFailureKind.TIMEOUT)
+        self.assertTrue(claim.released)
         self.assertFalse(coord.is_quarantined(acc.alias_hash))
-        claim = coord.acquire_claim("worker-after-timeout", wait_timeout=0.1)
-        self.assertEqual(claim.account_alias_hash, acc.alias_hash)
-        claim.release()
 
 
 if __name__ == "__main__":
