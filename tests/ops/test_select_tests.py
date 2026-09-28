@@ -691,6 +691,42 @@ def test_issue526_r1_evidence_rows_map_exact_targets_without_shadowing_adjacent(
     assert "tests/ops/test_mcp_gateway_durable.py" not in adjacent.targets
 
 
+def test_clm_candidate_evidence_runtime_recovery_artifacts_map_exact_gateway_oracles(
+    tmp_path,
+):
+    paths = [
+        (
+            "tasks/github-issue-526-g20-r1-source-contract-delta-20260903/"
+            "02-r1-complete-deployment-recovery-authority-receipt.json"
+        ),
+        "tasks/clm-candidate-evidence-runtime-20260928/01-source-acceptance-evidence.json",
+        "tasks/clm-candidate-evidence-runtime-20260928/02-derived-recovery-request.json",
+    ]
+    details = select_target_details(
+        paths,
+        load_impact_rules(),
+        index_path=tmp_path / "missing-index.json",
+        stats_path=tmp_path / "missing-stats.json",
+        history_path=tmp_path / "missing-history.jsonl",
+    )
+
+    assert details.targets == [
+        "tests/contracts/test_gateway_deployment_contract.py",
+        "tests/ops/test_mcp_gateway_durable.py",
+        "tests/services/test_policy_gate.py",
+    ]
+    assert details.unmatched_paths == []
+    assert details.fallback_used is False
+    assert details.risk == "high"
+    assert details.high_risk_escalated is True
+    assert details.risk_reasons == [
+        "issue526_clm_runtime_recovery_authority_contract",
+        "clm_candidate_evidence_source_acceptance_contract",
+        "clm_candidate_evidence_recovery_request_contract",
+    ]
+    assert details.sources == ["impact_map", "high_risk"]
+
+
 def test_select_targets_uses_fallback_when_no_paths_match():
     targets, reasons = select_targets(
         ["nexus/app/flow.py"],
