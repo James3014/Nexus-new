@@ -3,12 +3,34 @@
   "track_ref": "main",
   "sync_interval_seconds": 900,
   "runtime_files": [
-    {"path": "scripts/ops/nexus-agy-dispatch", "mode": "0755"},
-    {"path": "scripts/ops/nexus-host-sync", "mode": "0755"},
-    {"path": "scripts/ops/install_nexus_agy_dispatch.sh", "mode": "0755"},
-    {"path": "scripts/ops/nexus-host-runtime-manifest.json", "mode": "0644"},
-    {"path": "nexus/services/agy_account_pool.py", "mode": "0644"},
-    {"path": "nexus/services/external_account_pool.py", "mode": "0644"}
+    {
+      "path": "scripts/ops/nexus-agy-dispatch",
+      "mode": "0755"
+    },
+    {
+      "path": "scripts/ops/nexus-host-sync",
+      "mode": "0755"
+    },
+    {
+      "path": "scripts/ops/install_nexus_agy_dispatch.sh",
+      "mode": "0755"
+    },
+    {
+      "path": "scripts/ops/nexus-host-runtime-manifest.json",
+      "mode": "0644"
+    },
+    {
+      "path": "nexus/services/agy_account_pool.py",
+      "mode": "0644"
+    },
+    {
+      "path": "nexus/services/external_account_pool.py",
+      "mode": "0644"
+    },
+    {
+      "path": "nexus/services/agy_operation_journal.py",
+      "mode": "0644"
+    }
   ],
   "components": {
     "agy_dispatch": {
