@@ -9,6 +9,7 @@ import pytest
 from nexus.services.external_worker_runtime import (
     AccountBinding,
     ClineExecutionAdapter,
+    CodexExecutionAdapter,
     ExternalWorkerRuntimeError,
     NoopAccountAdapter,
     OpenCodeExecutionAdapter,
@@ -374,4 +375,223 @@ def test_opencode_quota_failure_is_classified_without_retry_permission(
     )
     assert result.status == "FAILED"
     assert result.failure_kind == "QUOTA_EXHAUSTED"
+    assert result.retry_permitted is False
+
+
+def _codex_request(
+    tmp_path: Path,
+    *,
+    model: str = "gpt-5.6-sol",
+    mode: str = "plan",
+    auto_approve: bool = False,
+    thinking: str = "none",
+) -> WorkerRequest:
+    return WorkerRequest(
+        provider="codex",
+        model=model,
+        prompt="test prompt",
+        cwd=str(tmp_path),
+        mode=mode,
+        auto_approve=auto_approve,
+        timeout_seconds=60,
+        require_free=False,
+        thinking=thinking,
+    )
+
+
+def test_codex_default_model_requires_explicit_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("NEXUS_CODEX_MODEL", raising=False)
+    with pytest.raises(ExternalWorkerRuntimeError, match="CODEX_MODEL_REQUIRED"):
+        CodexExecutionAdapter().default_model()
+
+
+def test_codex_compile_is_noninteractive_native_and_read_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = tmp_path / "codex"
+    fake.write_text("#!/bin/sh\necho codex-cli 0.157.1\n", encoding="utf-8")
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("NEXUS_CODEX_BIN", str(fake))
+    monkeypatch.setenv("OPENAI_API_KEY", "must-not-propagate")
+    monkeypatch.setenv("GITHUB_TOKEN", "must-not-propagate")
+    monkeypatch.setenv("GH_TOKEN", "must-not-propagate")
+
+    command = CodexExecutionAdapter().compile(
+        _codex_request(tmp_path),
+        binding=AccountBinding(provider="codex"),
+    )
+
+    argv = list(command.argv)
+    assert argv[argv.index("--ask-for-approval") + 1] == "never"
+    assert argv[argv.index("--sandbox") + 1] == "read-only"
+    assert argv[argv.index("--model") + 1] == "gpt-5.6-sol"
+    assert argv[argv.index("--cd") + 1] == str(tmp_path)
+    assert "--json" in argv
+    assert "--ephemeral" in argv
+    assert "--ignore-user-config" in argv
+    assert "--ignore-rules" in argv
+    assert "--skip-git-repo-check" in argv
+    assert command.cli_version == "codex-cli 0.157.1"
+    assert "OPENAI_API_KEY" not in command.env
+    assert "GITHUB_TOKEN" not in command.env
+    assert "GH_TOKEN" not in command.env
+
+
+def test_codex_act_requires_explicit_auto_approve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = tmp_path / "codex"
+    fake.write_text("#!/bin/sh\necho codex-cli 0.157.1\n", encoding="utf-8")
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("NEXUS_CODEX_BIN", str(fake))
+
+    with pytest.raises(ExternalWorkerRuntimeError, match="CODEX_ACT_REQUIRES_AUTO_APPROVE"):
+        CodexExecutionAdapter().compile(
+            _codex_request(tmp_path, mode="act", auto_approve=False),
+            binding=AccountBinding(provider="codex"),
+        )
+
+    command = CodexExecutionAdapter().compile(
+        _codex_request(
+            tmp_path,
+            mode="act",
+            auto_approve=True,
+            thinking="high",
+        ),
+        binding=AccountBinding(provider="codex"),
+    )
+    argv = list(command.argv)
+    assert argv[argv.index("--sandbox") + 1] == "workspace-write"
+    assert 'model_reasoning_effort="high"' in argv
+
+
+def test_codex_rejects_free_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = tmp_path / "codex"
+    fake.write_text("#!/bin/sh\necho codex-cli 0.157.1\n", encoding="utf-8")
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("NEXUS_CODEX_BIN", str(fake))
+    request = _codex_request(tmp_path)
+    request = WorkerRequest(**{
+        **request.__dict__,
+        "require_free": True,
+    })
+    with pytest.raises(ExternalWorkerRuntimeError, match="CODEX_FREE_MODEL_UNSUPPORTED"):
+        CodexExecutionAdapter().compile(
+            request,
+            binding=AccountBinding(provider="codex"),
+        )
+
+
+def test_codex_success_preserves_unknown_model_attestation(tmp_path: Path) -> None:
+    request = _codex_request(tmp_path)
+    stdout = "\n".join([
+        json.dumps({
+            "type": "thread.started",
+            "thread_id": "thread-fixture",
+        }),
+        json.dumps({"type": "turn.started"}),
+        json.dumps({
+            "type": "item.completed",
+            "item": {
+                "id": "item_0",
+                "type": "agent_message",
+                "text": "ok",
+            },
+        }),
+        json.dumps({
+            "type": "turn.completed",
+            "usage": {
+                "input_tokens": 100,
+                "cached_input_tokens": 20,
+                "output_tokens": 5,
+            },
+        }),
+    ])
+    result = CodexExecutionAdapter().interpret(
+        request,
+        exit_code=0,
+        stdout_text=stdout,
+        stderr_text="",
+    )
+    assert result.status == "COMPLETED"
+    assert result.observed_provider is None
+    assert result.observed_model is None
+    assert result.provider_session_id == "thread-fixture"
+    assert result.finish_reason == "completed"
+    assert result.retry_permitted is False
+
+
+def test_codex_model_rejection_is_terminal_model_error(tmp_path: Path) -> None:
+    request = _codex_request(tmp_path, model="gpt-impossible")
+    stdout = "\n".join([
+        json.dumps({
+            "type": "thread.started",
+            "thread_id": "thread-fixture",
+        }),
+        json.dumps({
+            "type": "error",
+            "message": "The model is not supported when using Codex with a ChatGPT account.",
+        }),
+        json.dumps({
+            "type": "turn.failed",
+            "error": {"message": "model not supported"},
+        }),
+    ])
+    result = CodexExecutionAdapter().interpret(
+        request,
+        exit_code=1,
+        stdout_text=stdout,
+        stderr_text="",
+    )
+    assert result.status == "FAILED"
+    assert result.failure_kind == "MODEL_OR_TASK_ERROR"
+    assert result.observed_model is None
+    assert result.retry_permitted is False
+
+
+def test_codex_nonfatal_item_warning_does_not_override_completed_turn(
+    tmp_path: Path,
+) -> None:
+    request = _codex_request(tmp_path)
+    stdout = "\n".join([
+        json.dumps({
+            "type": "thread.started",
+            "thread_id": "thread-warning",
+        }),
+        json.dumps({"type": "turn.started"}),
+        json.dumps({
+            "type": "item.completed",
+            "item": {
+                "id": "item_warn",
+                "type": "error",
+                "message": "Skill descriptions were shortened to fit the skills context budget.",
+            },
+        }),
+        json.dumps({
+            "type": "item.completed",
+            "item": {
+                "id": "item_0",
+                "type": "agent_message",
+                "text": "ok",
+            },
+        }),
+        json.dumps({
+            "type": "turn.completed",
+            "usage": {
+                "input_tokens": 100,
+                "cached_input_tokens": 0,
+                "output_tokens": 5,
+            },
+        }),
+    ])
+    result = CodexExecutionAdapter().interpret(
+        request,
+        exit_code=0,
+        stdout_text=stdout,
+        stderr_text="",
+    )
+    assert result.status == "COMPLETED"
+    assert result.provider_session_id == "thread-warning"
     assert result.retry_permitted is False

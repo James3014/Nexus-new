@@ -164,6 +164,22 @@ def _jsonl_events(text: str) -> list[dict[str, object]]:
     return events
 
 
+def _worker_env(
+    binding: AccountBinding,
+    *,
+    strip_openai_api_key: bool = False,
+) -> dict[str, str]:
+    """Build a delegated-worker environment without Owner GitHub credentials."""
+
+    env = dict(os.environ)
+    for key in ("GITHUB_TOKEN", "GH_TOKEN"):
+        env.pop(key, None)
+    if strip_openai_api_key:
+        env.pop("OPENAI_API_KEY", None)
+    env.update(dict(binding.execution_env))
+    return env
+
+
 class ClineExecutionAdapter:
     provider = "cline"
 
@@ -209,8 +225,7 @@ class ClineExecutionAdapter:
             argv.append("--plan")
         argv.append(request.prompt)
 
-        env = dict(os.environ)
-        env.update(dict(binding.execution_env))
+        env = _worker_env(binding)
         return WorkerCommand(
             argv=tuple(argv),
             env=env,
@@ -348,6 +363,170 @@ class ClineExecutionAdapter:
         )
 
 
+class CodexExecutionAdapter:
+    provider = "codex"
+
+    def default_model(self) -> str:
+        model = os.getenv("NEXUS_CODEX_MODEL", "").strip()
+        if not model:
+            raise ExternalWorkerRuntimeError("CODEX_MODEL_REQUIRED")
+        return model
+
+    def compile(
+        self,
+        request: WorkerRequest,
+        *,
+        binding: AccountBinding,
+    ) -> WorkerCommand:
+        if binding.provider != self.provider:
+            raise ExternalWorkerRuntimeError("ACCOUNT_BINDING_PROVIDER_MISMATCH")
+        if request.provider != self.provider:
+            raise ExternalWorkerRuntimeError("WORKER_REQUEST_PROVIDER_MISMATCH")
+        if request.mode not in {"plan", "act"}:
+            raise ExternalWorkerRuntimeError("CODEX_MODE_INVALID")
+        if request.require_free:
+            raise ExternalWorkerRuntimeError("CODEX_FREE_MODEL_UNSUPPORTED")
+        if not request.model.strip():
+            raise ExternalWorkerRuntimeError("CODEX_MODEL_REQUIRED")
+        if request.mode == "act" and not request.auto_approve:
+            raise ExternalWorkerRuntimeError("CODEX_ACT_REQUIRES_AUTO_APPROVE")
+        if request.thinking not in {"none", "low", "medium", "high", "xhigh"}:
+            raise ExternalWorkerRuntimeError("CODEX_THINKING_INVALID")
+
+        executable = _resolve_executable("NEXUS_CODEX_BIN", "codex")
+        argv = [
+            executable,
+            "--ask-for-approval",
+            "never",
+            "exec",
+            "--json",
+            "--ephemeral",
+            "--ignore-user-config",
+            "--ignore-rules",
+            "--skip-git-repo-check",
+            "--sandbox",
+            "read-only" if request.mode == "plan" else "workspace-write",
+            "--model",
+            request.model,
+            "--cd",
+            request.cwd,
+            "--color",
+            "never",
+        ]
+        if request.thinking != "none":
+            argv += [
+                "--config",
+                f'model_reasoning_effort="{request.thinking}"',
+            ]
+        argv.append(request.prompt)
+
+        return WorkerCommand(
+            argv=tuple(argv),
+            env=_worker_env(binding, strip_openai_api_key=True),
+            cli_version=_cli_version(executable),
+        )
+
+    def interpret(
+        self,
+        request: WorkerRequest,
+        *,
+        exit_code: int,
+        stdout_text: str,
+        stderr_text: str,
+    ) -> WorkerOutcome:
+        events = _jsonl_events(stdout_text)
+        threads = [
+            event
+            for event in events
+            if event.get("type") == "thread.started" and isinstance(event.get("thread_id"), str)
+        ]
+        completed_turns = [event for event in events if event.get("type") == "turn.completed"]
+        failed_turns = [event for event in events if event.get("type") == "turn.failed"]
+        top_errors = [event for event in events if event.get("type") == "error"]
+        item_errors = [
+            event
+            for event in events
+            if event.get("type") == "item.completed"
+            and isinstance(event.get("item"), dict)
+            and event["item"].get("type") == "error"
+        ]
+
+        provider_session_id = str(threads[-1]["thread_id"]) if threads else None
+        agent_messages = [
+            event
+            for event in events
+            if event.get("type") == "item.completed"
+            and isinstance(event.get("item"), dict)
+            and event["item"].get("type") == "agent_message"
+        ]
+        non_message_items = [
+            event
+            for event in events
+            if event.get("type") == "item.completed"
+            and isinstance(event.get("item"), dict)
+            and event["item"].get("type") not in {"agent_message", "error", "reasoning"}
+        ]
+        tool_event_count = len(non_message_items)
+
+        terminal_success = (
+            exit_code == 0
+            and bool(completed_turns)
+            and bool(agent_messages)
+            and not failed_turns
+            and not top_errors
+        )
+        if terminal_success:
+            return WorkerOutcome(
+                status="COMPLETED",
+                failure_kind=None,
+                observed_provider=None,
+                observed_model=None,
+                finish_reason="completed",
+                total_cost=None,
+                provider_session_id=provider_session_id,
+                tool_event_count=tool_event_count,
+                retry_permitted=False,
+                details={
+                    "attestation": "explicit-model-arg+codex-terminal-success",
+                    "requested_model": request.model,
+                },
+            )
+
+        failure_text = (stderr_text + "\n" + stdout_text).lower()
+        if "quota" in failure_text or "rate limit" in failure_text:
+            failure_kind = AccountFailureKind.QUOTA_EXHAUSTED.value
+        elif (
+            "logged in" in failure_text or "auth" in failure_text or "unauthorized" in failure_text
+        ):
+            failure_kind = AccountFailureKind.AUTH_OR_SESSION_INVALID.value
+        elif "not supported" in failure_text or "model metadata" in failure_text:
+            failure_kind = AccountFailureKind.MODEL_OR_TASK_ERROR.value
+        elif "timeout" in failure_text:
+            failure_kind = AccountFailureKind.TIMEOUT.value
+        elif "permission" in failure_text or "sandbox" in failure_text:
+            failure_kind = AccountFailureKind.PERMISSION_OR_SCOPE_ERROR.value
+        else:
+            failure_kind = AccountFailureKind.UNKNOWN.value
+
+        return WorkerOutcome(
+            status="FAILED",
+            failure_kind=failure_kind,
+            observed_provider=None,
+            observed_model=None,
+            finish_reason="failed" if failed_turns else None,
+            total_cost=None,
+            provider_session_id=provider_session_id,
+            tool_event_count=tool_event_count,
+            retry_permitted=False,
+            details={
+                "exit_code": exit_code,
+                "requested_model": request.model,
+                "top_error_count": len(top_errors),
+                "item_error_count": len(item_errors),
+            },
+        )
+
+
 class OpenCodeExecutionAdapter:
     provider = "opencode"
 
@@ -403,8 +582,7 @@ class OpenCodeExecutionAdapter:
             argv += ["--variant", request.thinking]
         argv.append(request.prompt)
 
-        env = dict(os.environ)
-        env.update(dict(binding.execution_env))
+        env = _worker_env(binding)
         return WorkerCommand(
             argv=tuple(argv),
             env=env,
@@ -524,6 +702,8 @@ def get_execution_adapter(provider: str) -> ExecutionAdapter:
         return ClineExecutionAdapter()
     if key == "opencode":
         return OpenCodeExecutionAdapter()
+    if key == "codex":
+        return CodexExecutionAdapter()
     raise ExternalWorkerRuntimeError(f"EXTERNAL_WORKER_PROVIDER_UNSUPPORTED:{key}")
 
 
@@ -541,4 +721,6 @@ def get_account_adapter(provider: str) -> AccountAdapter:
         return NoopAccountAdapter("cline")
     if key == "opencode":
         return NoopAccountAdapter("opencode")
+    if key == "codex":
+        return NoopAccountAdapter("codex")
     raise ExternalWorkerRuntimeError(f"EXTERNAL_ACCOUNT_ADAPTER_UNSUPPORTED:{key}")
