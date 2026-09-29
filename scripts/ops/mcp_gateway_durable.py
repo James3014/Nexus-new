@@ -36,7 +36,6 @@ from nexus.contracts.gateway_deployment import (
     GATEWAY_RECOVERY_MATERIALIZATION_RECEIPT_SCHEMA,
     GATEWAY_TASK_ID,
     HOST_CARD_SHA256,
-    INTERPRETER,
     RECOVERY_RECEIPT_PATH,
     REPOSITORY,
     SOURCE_BASE_MERGE,
@@ -82,6 +81,7 @@ from nexus.contracts.gateway_deployment import (
     validate_recovery_continuation_authority,
     validate_recovery_effect_ack,
     validate_recovery_effect_plan,
+    validate_recovery_interpreter_identity,
     validate_recovery_ledger_record,
     validate_recovery_materialization_receipt,
     validate_recovery_materialization_request,
@@ -433,14 +433,11 @@ GATEWAY_PLIST = Path(
         "/Users/jameschen/Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist",
     )
 )
-_ACTUAL_INTERPRETER = str(
-    Path(
-        os.environ.get(
-            "NEXUS_INTERPRETER",
-            sys.executable if not Path(INTERPRETER).exists() else INTERPRETER,
-        )
-    )
-)
+# R1 binds the interpreter that is physically running the fixed manager.
+# It must never fall back to a historical host path or accept a caller-selected
+# interpreter environment override.  The pure contract validates the observed
+# identity against the two fixed known host identities.
+_ACTUAL_INTERPRETER = str(Path(sys.executable))
 GATEWAY_ENDPOINT = "http://127.0.0.1:8766"
 GATEWAY_ENTRYPOINT = "scripts/ops/nexus_mcp_gateway_http.py"
 GATEWAY_STATE_ROOT = Path(
@@ -1112,16 +1109,15 @@ def _r1_verify_inert_gitlinks(worktree: Path, commit: str) -> None:
 
 
 def _r1_interpreter_identity() -> Any:
-    path = Path(INTERPRETER)
+    path = Path(_ACTUAL_INTERPRETER)
     try:
         info = os.lstat(path)
         resolved = path.resolve(strict=True)
         payload = resolved.read_bytes()
-    except OSError:
-        from nexus.contracts.gateway_deployment import InterpreterIdentity
-        return InterpreterIdentity()
+    except OSError as exc:
+        raise _gateway_error("R1 manager interpreter observation failed", exc) from exc
     from nexus.contracts.gateway_deployment import InterpreterIdentity
-    return InterpreterIdentity(
+    identity = InterpreterIdentity(
         path=str(path),
         resolved_path=str(resolved),
         sha256=hashlib.sha256(payload).hexdigest(),
@@ -1129,6 +1125,10 @@ def _r1_interpreter_identity() -> Any:
         gid=info.st_gid,
         mode=stat.filemode(info.st_mode),
     )
+    try:
+        return validate_recovery_interpreter_identity(identity)
+    except ContractError as exc:
+        raise _gateway_error("R1 manager interpreter identity rejected", exc) from exc
 
 
 def _r1_derive_source_set(
@@ -3800,6 +3800,10 @@ def _gateway_recover_live(
     # manager enters successor_mode and is rejected unless this exact V6 ledger
     # already contains EFFECT_STARTED plus a valid continuation authority.
     receipt = _load_recovery_authority(typed)
+    if str(GATEWAY_PLIST) != receipt.plist_path:
+        raise _gateway_error("R1 manager plist binding mismatch")
+    if _r1_interpreter_identity() != receipt.source_set.interpreter:
+        raise _gateway_error("R1 manager interpreter binding mismatch")
     return _gateway_recover_with_adapters(
         typed,
         adapters=_production_recovery_adapters(receipt),
