@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import stat
 import time
@@ -149,3 +150,98 @@ def test_runtime_revision_prefers_actual_snapshot_generation(
     monkeypatch.setattr(dispatch, "SNAPSHOT", current / "snapshot")
 
     assert dispatch._runtime_revision() == "b" * 40
+
+
+def test_opencode_run_operation_writes_prompt_to_stdin_and_completes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class FakeAdapter:
+        provider = "opencode"
+
+        def compile(self, request, *, binding):
+            script = tmp_path / "fake-server-helper"
+            script.write_text(
+                "#!/bin/sh\n"
+                "prompt=$(cat)\n"
+                'test "$prompt" = "hello" || exit 9\n'
+                "cat <<'EOF'\n"
+                '{"type":"opencode_result",'
+                '"provider":"opencode",'
+                '"model":"mimo-v2.6-flash-free",'
+                '"cost":0,'
+                '"finish":"stop",'
+                '"session_id":"ses_fake",'
+                '"tool_event_count":0}\n'
+                "EOF\n",
+                encoding="utf-8",
+            )
+            script.chmod(script.stat().st_mode | stat.S_IXUSR)
+            return dispatch._runtime_module.WorkerCommand(
+                argv=(str(script),),
+                env=dict(os.environ),
+                cli_version="1.18.32",
+                stdin_text=request.prompt,
+            )
+
+        def interpret(self, request, *, exit_code, stdout_text, stderr_text):
+            event = json.loads(stdout_text.strip())
+            return dispatch._runtime_module.WorkerOutcome(
+                status="COMPLETED",
+                failure_kind=None,
+                observed_provider=event["provider"],
+                observed_model=event["model"],
+                finish_reason=event["finish"],
+                total_cost=float(event["cost"]),
+                provider_session_id=event["session_id"],
+                tool_event_count=int(event["tool_event_count"]),
+                retry_permitted=False,
+            )
+
+    monkeypatch.setattr(dispatch, "get_execution_adapter", lambda provider: FakeAdapter())
+
+    root = tmp_path / "ops"
+    journal = dispatch._journal("opencode", root)
+    operation_id = journal.new_operation_id()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="opencode",
+        model="opencode/mimo-v2.6-flash-free",
+        effort="none",
+        prompt_sha256="0" * 64,
+        runtime_revision=None,
+        initial_fields={
+            "mode": "plan",
+            "auto_approve": False,
+            "require_free": True,
+        },
+    )
+    prompt_path = journal.prompt_path(operation_id)
+    dispatch._write_private_prompt(prompt_path, "hello")
+
+    code = dispatch._run_operation(
+        operation_id=operation_id,
+        provider="opencode",
+        model="opencode/mimo-v2.6-flash-free",
+        prompt_file=str(prompt_path),
+        cwd=str(tmp_path),
+        mode="plan",
+        auto_approve=False,
+        timeout_seconds=10,
+        require_free=True,
+        thinking="none",
+        operation_root=root,
+        heartbeat_interval=0.05,
+        outer_grace_seconds=0.2,
+    )
+
+    current = journal.read(operation_id)
+    assert code == 0
+    assert current["status"] == "COMPLETED"
+    assert current["observed_provider"] == "opencode"
+    assert current["observed_model"] == "mimo-v2.6-flash-free"
+    assert current["total_cost"] == 0.0
+    assert current["provider_session_id"] == "ses_fake"
+    assert current["reconciliation"]["retry_permitted"] is False
+    assert not prompt_path.exists()

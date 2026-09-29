@@ -56,6 +56,18 @@
       "mode": "0644"
     },
     {
+      "path": "scripts/ops/nexus-workflow-doctor",
+      "mode": "0755"
+    },
+    {
+      "path": "scripts/ops/install_nexus_workflow_doctor.sh",
+      "mode": "0755"
+    },
+    {
+      "path": "nexus/services/workflow_doctor.py",
+      "mode": "0644"
+    },
+    {
       "path": "scripts/ops/nexus-opencode-server-client",
       "mode": "0755"
     },
@@ -81,6 +93,10 @@
     "external_worker_dispatch": {
       "source_path": "scripts/ops/nexus-external-worker-dispatch",
       "installer_path": "scripts/ops/install_nexus_external_worker_dispatch.sh"
+    },
+    "workflow_doctor": {
+      "source_path": "scripts/ops/nexus-workflow-doctor",
+      "installer_path": "scripts/ops/install_nexus_workflow_doctor.sh"
     }
   }
 }

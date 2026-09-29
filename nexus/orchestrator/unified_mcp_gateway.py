@@ -2987,8 +2987,9 @@ class UnifiedMCPGateway:
             raise GatewayInputError("TASK_CARD_CREATE_WOULD_OVERWRITE")
         card = "\n".join([
             f"# Task Card: {task_id}", "", "artifact_authority: current", f"task_id: `{task_id}`",
-            "owner: James Chen", "status: ACTIVE", "commit_required: true", "candidate_required: true",
-            "worker_may_commit: true", "worker_may_approve: false", "worker_may_integrate: false",
+            "owner: James Chen", "status: ACTIVE", "execution_lane: GOVERNED",
+            "commit_required: true", "candidate_required: true", "worker_may_commit: true",
+            "worker_may_approve: false", "worker_may_integrate: false",
             "worker_may_push: false", "AUTO_CHAIN: false", "", "## Objective", "", objective, "",
             "## Allowed files", "", *[f"- `{path}`" for path in allowed], "", "## Verification commands", "",
             "```bash", *verifiers, "```", "", "## Exit criteria", "", "Owner review of the exact scoped commit.",

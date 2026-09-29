@@ -14,6 +14,7 @@ import os
 import secrets
 import shutil
 import signal
+import socket
 import subprocess
 import time
 import urllib.error
@@ -149,10 +150,7 @@ class OpenCodeServerClient:
         if query:
             url += "?" + urllib.parse.urlencode(query)
         body = None if payload is None else json.dumps(payload).encode("utf-8")
-        headers = {
-            "authorization": self._auth_header(),
-            "accept": "application/json",
-        }
+        headers = {"accept": "application/json"}
         if body is not None:
             headers["content-type"] = "application/json"
         req = urllib.request.Request(url, data=body, headers=headers, method=method)
@@ -162,7 +160,7 @@ class OpenCodeServerClient:
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")[:2000]
             raise OpenCodeServerError(f"OPENCODE_HTTP_{exc.code}:{detail}") from exc
-        except TimeoutError as exc:
+        except (TimeoutError, socket.timeout) as exc:
             raise OpenCodeRequestTimeout("OPENCODE_HTTP_TIMEOUT") from exc
         except urllib.error.URLError as exc:
             if isinstance(getattr(exc, "reason", None), TimeoutError):
@@ -249,8 +247,6 @@ class OpenCodeServerClient:
             "OPENCODE_DISABLE_PROJECT_CONFIG": "true",
             "OPENCODE_DISABLE_PRUNE": "true",
             "OPENCODE_DISABLE_AUTOUPDATE": "true",
-            "OPENCODE_SERVER_USERNAME": self.username,
-            "OPENCODE_SERVER_PASSWORD": self._password(),
         })
         return env
 
@@ -391,7 +387,13 @@ class OpenCodeServerClient:
             {"permission": "read", "pattern": "*.env.*", "action": "deny"},
         ]
         if mode == "plan":
-            return common + [{"permission": "edit", "pattern": "*", "action": "deny"}]
+            return [
+                {"permission": "*", "pattern": "*", "action": "deny"},
+                {"permission": "read", "pattern": "*", "action": "allow"},
+                {"permission": "list", "pattern": "*", "action": "allow"},
+                {"permission": "glob", "pattern": "*", "action": "allow"},
+                {"permission": "grep", "pattern": "*", "action": "allow"},
+            ] + common
         if mode != "act":
             raise OpenCodeServerError("OPENCODE_MODE_INVALID")
         if not auto_approve:
@@ -452,15 +454,43 @@ class OpenCodeServerClient:
 
         if not isinstance(response, dict):
             raise OpenCodeServerError("OPENCODE_MESSAGE_RESPONSE_INVALID")
-        info = response.get("info")
-        if not isinstance(info, dict):
+        response_info = response.get("info")
+        if not isinstance(response_info, dict):
             raise OpenCodeServerError("OPENCODE_MESSAGE_INFO_MISSING")
-        messages = self._request(
-            "GET",
-            f"/session/{session_id}/message",
-            query={"directory": directory},
-            timeout=10,
-        )
+
+        # OpenCode can return from POST /message before the terminal finish
+        # field is visible on the response object. Poll the canonical session
+        # message list briefly and attest against the final assistant message.
+        deadline = time.monotonic() + min(max(2.0, timeout_seconds / 4), 10.0)
+        messages: Any = None
+        final_info = response_info
+        final_parts = response.get("parts", [])
+        while True:
+            messages = self._request(
+                "GET",
+                f"/session/{session_id}/message",
+                query={"directory": directory},
+                timeout=10,
+            )
+            assistant_messages: list[dict[str, Any]] = []
+            if isinstance(messages, list):
+                assistant_messages = [
+                    message
+                    for message in messages
+                    if isinstance(message, dict)
+                    and isinstance(message.get("info"), dict)
+                    and message["info"].get("role") == "assistant"
+                ]
+            if assistant_messages:
+                latest = assistant_messages[-1]
+                latest_info = latest.get("info")
+                if isinstance(latest_info, dict):
+                    final_info = {**response_info, **latest_info}
+                    final_parts = latest.get("parts", [])
+            if final_info.get("finish") is not None or time.monotonic() >= deadline:
+                break
+            time.sleep(0.1)
+
         tool_event_count = 0
         if isinstance(messages, list):
             for message in messages:
@@ -472,16 +502,16 @@ class OpenCodeServerClient:
 
         text = "".join(
             str(part.get("text", ""))
-            for part in response.get("parts", [])
+            for part in final_parts
             if isinstance(part, dict) and part.get("type") == "text"
         )
         return OpenCodeResult(
-            provider=str(info.get("providerID") or ""),
-            model=str(info.get("modelID") or ""),
-            cost=float(info.get("cost") or 0.0),
-            finish=str(info["finish"]) if info.get("finish") is not None else None,
+            provider=str(final_info.get("providerID") or ""),
+            model=str(final_info.get("modelID") or ""),
+            cost=float(final_info.get("cost") or 0.0),
+            finish=(str(final_info["finish"]) if final_info.get("finish") is not None else None),
             session_id=session_id,
-            message_id=str(info["id"]) if info.get("id") else None,
+            message_id=str(final_info["id"]) if final_info.get("id") else None,
             tool_event_count=tool_event_count,
             text=text,
             server_version=str(health.get("version")) if health.get("version") else None,

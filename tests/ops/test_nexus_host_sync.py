@@ -17,6 +17,8 @@ DISPATCH = ROOT / "scripts" / "ops" / "nexus-agy-dispatch"
 DISPATCH_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_agy_dispatch.sh"
 QUOTA = ROOT / "scripts" / "ops" / "nexus-agy-quota"
 QUOTA_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_agy_quota.sh"
+WORKFLOW_DOCTOR = ROOT / "scripts" / "ops" / "nexus-workflow-doctor"
+WORKFLOW_DOCTOR_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_workflow_doctor.sh"
 EXTERNAL_DISPATCH = ROOT / "scripts" / "ops" / "nexus-external-worker-dispatch"
 EXTERNAL_DISPATCH_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_external_worker_dispatch.sh"
 MANAGER_SHA = "4c0e326fc72ea98f9d6d80957055a4e8a2d7387f681dea903f2a072942d2e31c"
@@ -69,6 +71,11 @@ def _make_source_repo(tmp_path: Path) -> Path:
         (DISPATCH_INSTALLER, "scripts/ops/install_nexus_agy_dispatch.sh"),
         (QUOTA, "scripts/ops/nexus-agy-quota"),
         (QUOTA_INSTALLER, "scripts/ops/install_nexus_agy_quota.sh"),
+        (WORKFLOW_DOCTOR, "scripts/ops/nexus-workflow-doctor"),
+        (
+            WORKFLOW_DOCTOR_INSTALLER,
+            "scripts/ops/install_nexus_workflow_doctor.sh",
+        ),
         (EXTERNAL_DISPATCH, "scripts/ops/nexus-external-worker-dispatch"),
         (
             EXTERNAL_DISPATCH_INSTALLER,
@@ -86,6 +93,10 @@ def _make_source_repo(tmp_path: Path) -> Path:
         (
             ROOT / "nexus/services/direct_operation_journal.py",
             "nexus/services/direct_operation_journal.py",
+        ),
+        (
+            ROOT / "nexus/services/workflow_doctor.py",
+            "nexus/services/workflow_doctor.py",
         ),
         (
             ROOT / "nexus/services/external_worker_runtime.py",
@@ -122,6 +133,7 @@ def _invoke(
     desired_bundle: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     quota_target = dispatch_target.parent / "nexus-agy-quota"
+    workflow_doctor_target = dispatch_target.parent / "nexus-workflow-doctor"
     external_dispatch_target = dispatch_target.parent / "nexus-external-worker-dispatch"
     argv = [
         sys.executable,
@@ -132,6 +144,8 @@ def _invoke(
         str(dispatch_target),
         "--quota-target",
         str(quota_target),
+        "--workflow-doctor-target",
+        str(workflow_doctor_target),
         "--sync-target",
         str(sync_target),
         "--external-dispatch-target",
@@ -181,10 +195,12 @@ def test_sync_materializes_exact_generation_and_entrypoints(tmp_path: Path) -> N
     assert payload["desired_bundle_sha256"] == bundle
     assert payload["components"]["agy_dispatch"]["status"] == "VERIFIED"
     assert payload["components"]["agy_quota"]["status"] == "VERIFIED"
+    assert payload["components"]["workflow_doctor"]["status"] == "VERIFIED"
     assert payload["components"]["external_worker_dispatch"]["status"] == "VERIFIED"
     assert payload["components"]["agy_account_manager"]["status"] == "VERIFIED"
     assert dispatch_target.is_symlink()
     assert (dispatch_target.parent / "nexus-agy-quota").is_symlink()
+    assert (dispatch_target.parent / "nexus-workflow-doctor").is_symlink()
     assert (dispatch_target.parent / "nexus-external-worker-dispatch").is_symlink()
     assert sync_target.is_symlink()
 
@@ -528,9 +544,13 @@ def test_sync_repairs_incomplete_bootstrap_generation_via_verified_legacy_fallba
             "nexus/services/direct_operation_journal.py",
             "nexus/services/external_worker_runtime.py",
             "nexus/services/opencode_server_client.py",
+            "scripts/ops/nexus-workflow-doctor",
+            "scripts/ops/install_nexus_workflow_doctor.sh",
+            "nexus/services/workflow_doctor.py",
         }
     ]
     legacy_manifest["components"].pop("external_worker_dispatch", None)
+    legacy_manifest["components"].pop("workflow_doctor", None)
     manifest_path.write_text(json.dumps(legacy_manifest, indent=2) + "\n", encoding="utf-8")
     _git(source_repo, "add", "scripts/ops/nexus-host-runtime-manifest.json")
     _git(source_repo, "commit", "-m", "legacy generation")

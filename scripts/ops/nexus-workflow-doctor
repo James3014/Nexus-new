@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+"""Canonical host entrypoint for the read-only Nexus workflow doctor."""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+
+def _snapshot() -> Path:
+    configured = os.getenv("NEXUS_WORKFLOW_DOCTOR_SNAPSHOT", "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    current = Path.home() / ".local/share/nexus-host-runtime/current/snapshot"
+    if current.is_dir():
+        return current
+    return Path(__file__).resolve().parents[2]
+
+
+SNAPSHOT = _snapshot()
+if not SNAPSHOT.is_dir():
+    raise SystemExit("NEXUS_WORKFLOW_DOCTOR_SNAPSHOT_MISSING")
+sys.path.insert(0, str(SNAPSHOT))
+
+from nexus.services.workflow_doctor import main  # noqa: E402,I001
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

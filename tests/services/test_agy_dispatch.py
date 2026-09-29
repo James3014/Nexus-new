@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import stat
 import subprocess
+from datetime import datetime, timezone
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
@@ -22,6 +23,10 @@ def _window(remaining: float, *, reset_at: str | None = None) -> dict:
         "remaining_pct": remaining,
         "reset_at": reset_at,
     }
+
+
+def _iso(ts: float) -> str:
+    return datetime.fromtimestamp(ts, timezone.utc).isoformat()
 
 
 def test_weekly_only_quota_is_usable_fallback() -> None:
@@ -63,7 +68,9 @@ def test_explicit_five_hour_takes_precedence_over_weekly() -> None:
 
 
 def test_weekly_only_dual_family_account_enters_reserve() -> None:
+    now = 2_000_000_000.0
     snapshot = {
+        "checked_at": _iso(now),
         "accounts": [
             {
                 "account": "weekly-only",
@@ -78,7 +85,7 @@ def test_weekly_only_dual_family_account_enters_reserve() -> None:
                 "ok": True,
                 "groups": {
                     "Gemini Models": {
-                        "5h": _window(80.0),
+                        "5h": _window(80.0, reset_at=_iso(now + 3600)),
                         "weekly": _window(70.0),
                     },
                     "Claude and GPT models": {"weekly": _window(100.0)},
@@ -89,41 +96,205 @@ def test_weekly_only_dual_family_account_enters_reserve() -> None:
                 "ok": True,
                 "groups": {
                     "Gemini Models": {
-                        "5h": _window(90.0),
+                        "5h": _window(90.0, reset_at=_iso(now + 3600)),
                         "weekly": _window(60.0),
                     },
                     "Claude and GPT models": {
-                        "5h": _window(75.0),
+                        "5h": _window(75.0, reset_at=_iso(now + 3600)),
                         "weekly": _window(65.0),
                     },
                 },
             },
             {
-                "account": "disabled-5h",
+                "account": "blocked",
                 "ok": True,
                 "groups": {
                     "Gemini Models": {
-                        "5h": {
-                            "status": "disabled",
-                            "remaining_pct": None,
-                            "reset_at": None,
-                        },
-                        "weekly": _window(90.0),
+                        "weekly": _window(0.0, reset_at=_iso(now + 86400)),
+                    }
+                },
+            },
+            {
+                "account": "unknown",
+                "ok": False,
+                "error": "timeout",
+            },
+        ],
+    }
+
+    state = dispatch._dynamic_availability_state(
+        "gemini-3.8-flash-medium",
+        snapshot,
+        now_ts=now,
+        max_age_seconds=900,
+    )
+
+    assert state["snapshot_fresh"] is True
+    assert state["preferred"] == ["gemini-5h"]
+    assert state["reserve"] == ["dual-5h"]
+    assert state["fallback"] == ["weekly-only"]
+    assert state["blocked"] == ["blocked"]
+    assert state["unknown"] == ["unknown"]
+
+
+def test_stale_quota_snapshot_cannot_block_or_prioritize_accounts() -> None:
+    now = 2_000_000_000.0
+    snapshot = {
+        "checked_at": _iso(now - 901),
+        "accounts": [
+            {
+                "account": "apparently-blocked",
+                "ok": True,
+                "groups": {
+                    "Gemini Models": {
+                        "weekly": _window(0.0, reset_at=_iso(now + 86400)),
+                    }
+                },
+            }
+        ],
+    }
+
+    state = dispatch._dynamic_availability_state(
+        "gemini-3.8-flash-medium",
+        snapshot,
+        now_ts=now,
+        max_age_seconds=900,
+    )
+
+    assert state == {
+        "family": "gemini",
+        "snapshot_fresh": False,
+        "preferred": [],
+        "reserve": [],
+        "fallback": [],
+        "blocked": [],
+        "unknown": [],
+    }
+
+
+def test_partial_refresh_does_not_make_old_account_rows_fresh() -> None:
+    now = 2_000_000_000.0
+    snapshot = {
+        "checked_at": _iso(now),
+        "accounts": [
+            {
+                "account": "fresh-row",
+                "checked_at": _iso(now),
+                "ok": True,
+                "groups": {
+                    "Gemini Models": {"weekly": _window(90.0)},
+                },
+            },
+            {
+                "account": "old-row",
+                "checked_at": _iso(now - 3600),
+                "ok": True,
+                "groups": {
+                    "Gemini Models": {
+                        "5h": _window(100.0, reset_at=_iso(now + 3600)),
                     },
                 },
             },
-        ]
+        ],
     }
 
-    preferred, reserve = dispatch._dynamic_preference_tiers(
+    state = dispatch._dynamic_availability_state(
         "gemini-3.8-flash-medium",
         snapshot,
+        now_ts=now,
+        max_age_seconds=900,
     )
 
-    assert preferred == ["gemini-5h"]
-    assert reserve == ["dual-5h"]
-    assert "weekly-only" not in preferred + reserve
-    assert "disabled-5h" not in preferred + reserve
+    assert state["fallback"] == ["fresh-row"]
+    assert state["unknown"] == ["old-row"]
+    assert state["preferred"] == []
+    assert state["blocked"] == []
+
+
+def test_family_failure_uses_matching_quota_reset_when_available() -> None:
+    now = 2_000_000_000.0
+    reset = now + 1800
+    snapshot = {
+        "checked_at": _iso(now),
+        "accounts": [
+            {
+                "account": "dual-5h",
+                "ok": True,
+                "groups": {
+                    "Gemini Models": {
+                        "5h": _window(10.0, reset_at=_iso(reset)),
+                    }
+                },
+            }
+        ],
+    }
+
+    unavailable_until = dispatch._family_failure_unavailable_until(
+        snapshot=snapshot,
+        account_name="dual-5h",
+        model_family="gemini",
+        failure_kind=dispatch.AccountFailureKind.QUOTA_EXHAUSTED,
+        now_ts=now,
+    )
+
+    assert unavailable_until == reset
+
+
+def test_stale_account_row_uses_bounded_family_failure_ttl() -> None:
+    now = 2_000_000_000.0
+    snapshot = {
+        "checked_at": _iso(now),
+        "accounts": [
+            {
+                "account": "dual-5h",
+                "checked_at": _iso(now - 3600),
+                "ok": True,
+                "groups": {
+                    "Gemini Models": {
+                        "5h": _window(10.0, reset_at=_iso(now + 86400)),
+                    }
+                },
+            }
+        ],
+    }
+
+    unavailable_until = dispatch._family_failure_unavailable_until(
+        snapshot=snapshot,
+        account_name="dual-5h",
+        model_family="gemini",
+        failure_kind=dispatch.AccountFailureKind.QUOTA_EXHAUSTED,
+        now_ts=now,
+    )
+
+    assert unavailable_until == now + dispatch.DEFAULT_QUOTA_FAMILY_BLOCK_SECONDS
+
+
+def test_stale_snapshot_uses_bounded_family_failure_ttl() -> None:
+    now = 2_000_000_000.0
+    snapshot = {
+        "checked_at": _iso(now - 3600),
+        "accounts": [
+            {
+                "account": "dual-5h",
+                "ok": True,
+                "groups": {
+                    "Gemini Models": {
+                        "5h": _window(10.0, reset_at=_iso(now + 86400)),
+                    }
+                },
+            }
+        ],
+    }
+
+    unavailable_until = dispatch._family_failure_unavailable_until(
+        snapshot=snapshot,
+        account_name="dual-5h",
+        model_family="gemini",
+        failure_kind=dispatch.AccountFailureKind.QUOTA_EXHAUSTED,
+        now_ts=now,
+    )
+
+    assert unavailable_until == now + dispatch.DEFAULT_QUOTA_FAMILY_BLOCK_SECONDS
 
 
 def test_installer_deploys_exact_canonical_bytes(tmp_path: Path) -> None:
@@ -266,3 +437,153 @@ def test_background_spawn_returns_durable_operation_identity(tmp_path: Path, mon
     assert "--operation-run" in captured["argv"]
     prompt_path = root / "operations" / record["operation_id"] / ".prompt"
     assert stat.S_IMODE(prompt_path.stat().st_mode) == 0o600
+
+
+def test_parse_agy_attestation_binds_resolved_model_and_conversation(tmp_path: Path) -> None:
+    log = tmp_path / "agy.log"
+    log.write_text(
+        "\n".join([
+            'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
+            "I0000 model_resolver.go:93] Resolving model gemini-3.8-flash-low",
+            "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
+        ])
+        + "\n",
+        encoding="utf-8",
+    )
+    assert dispatch._parse_agy_attestation(log, requested_model="gemini-3.8-flash") == {
+        "observed_provider": "agy",
+        "observed_model": "gemini-3.8-flash-low",
+        "provider_session_id": "f67d38d4-f220-4bc0-a216-cef594235952",
+    }
+
+
+def test_parse_agy_attestation_fails_closed_without_matching_witnesses(tmp_path: Path) -> None:
+    log = tmp_path / "agy.log"
+    log.write_text(
+        "\n".join([
+            'I0000 model_resolver.go:116] model alias "gemini-other" resolved to "gemini-other-low"',
+            "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
+        ])
+        + "\n",
+        encoding="utf-8",
+    )
+    assert dispatch._parse_agy_attestation(log, requested_model="gemini-3.8-flash") == {
+        "observed_provider": None,
+        "observed_model": None,
+        "provider_session_id": None,
+    }
+
+
+def test_parse_agy_attestation_uses_last_matching_attempt(tmp_path: Path) -> None:
+    log = tmp_path / "agy.log"
+    log.write_text(
+        "\n".join([
+            'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
+            "I0000 server.go:1239] Created conversation 11111111-1111-1111-1111-111111111111",
+            'I0001 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low-v2"',
+            "I0001 server.go:1239] Created conversation 22222222-2222-2222-2222-222222222222",
+        ])
+        + "\n",
+        encoding="utf-8",
+    )
+    result = dispatch._parse_agy_attestation(log, requested_model="gemini-3.8-flash")
+    assert result["observed_model"] == "gemini-3.8-flash-low-v2"
+    assert result["provider_session_id"] == "22222222-2222-2222-2222-222222222222"
+
+
+def test_background_terminal_receipt_persists_agy_attestation(tmp_path: Path, monkeypatch) -> None:
+    root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-3.8-flash",
+        effort="low",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "attestation probe")
+
+    def fake_dispatch_run(**kwargs):
+        log = Path(os.environ["NEXUS_AGY_ATTESTATION_LOG"])
+        log.write_text(
+            "\n".join([
+                'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
+                "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
+            ])
+            + "\n",
+            encoding="utf-8",
+        )
+        kwargs["operation_hook"]({
+            "phase": "EXECUTING",
+            "attempts": 1,
+            "rotations": 0,
+            "account_alias_hash": "acct",
+            "lease_id_hash": "lease",
+        })
+        return 0
+
+    monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
+    code = dispatch._run_background_operation(
+        operation_id=operation_id,
+        prompt_file=str(prompt_path),
+        cwd=str(tmp_path),
+        mode="plan",
+        model="gemini-3.8-flash",
+        effort="low",
+        timeout=30,
+        max_calls=1,
+        pool_wait_timeout=1.0,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=root,
+        heartbeat_interval=0.01,
+    )
+    record = journal.read(operation_id)
+    assert code == 0
+    assert record["status"] == "COMPLETED"
+    assert record["observed_provider"] == "agy"
+    assert record["observed_model"] == "gemini-3.8-flash-low"
+    assert record["provider_session_id"] == "f67d38d4-f220-4bc0-a216-cef594235952"
+    assert "NEXUS_AGY_ATTESTATION_LOG" not in os.environ
+
+
+def test_run_agy_passes_operation_local_attestation_log(tmp_path: Path, monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class Result:
+        returncode = 0
+        stdout = "ok"
+        stderr = ""
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        captured["kwargs"] = kwargs
+        return Result()
+
+    log = tmp_path / "operation" / "agy.log"
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(log))
+    monkeypatch.setattr(dispatch.shutil, "which", lambda name: "/tmp/fake-agy")
+    monkeypatch.setattr(dispatch.subprocess, "run", fake_run)
+    code, out, err, timed_out, _ = dispatch.run_agy(
+        env={"HOME": str(tmp_path)},
+        prompt="identity probe",
+        cwd=str(tmp_path),
+        mode="plan",
+        model="gemini-3.8-flash",
+        effort="low",
+        timeout=30,
+    )
+    assert code == 0
+    assert out == "ok"
+    assert err == ""
+    assert timed_out is False
+    argv = captured["argv"]
+    assert "--log-file" in argv
+    assert argv[argv.index("--log-file") + 1] == str(log)
+    assert log.parent.is_dir()

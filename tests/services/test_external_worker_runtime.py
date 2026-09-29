@@ -11,6 +11,7 @@ from nexus.services.external_worker_runtime import (
     ClineExecutionAdapter,
     ExternalWorkerRuntimeError,
     NoopAccountAdapter,
+    OpenCodeExecutionAdapter,
     WorkerRequest,
 )
 
@@ -182,8 +183,6 @@ def _opencode_request(
 def test_opencode_compile_uses_server_client_and_prompt_stdin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from nexus.services.external_worker_runtime import OpenCodeExecutionAdapter
-
     fake = tmp_path / "opencode"
     fake.write_text("#!/bin/sh\necho 1.18.32\n", encoding="utf-8")
     fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
@@ -210,8 +209,6 @@ def test_opencode_compile_uses_server_client_and_prompt_stdin(
 def test_opencode_act_requires_explicit_auto_approve(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from nexus.services.external_worker_runtime import OpenCodeExecutionAdapter
-
     fake = tmp_path / "opencode"
     fake.write_text("#!/bin/sh\necho 1.18.32\n", encoding="utf-8")
     fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
@@ -225,8 +222,6 @@ def test_opencode_act_requires_explicit_auto_approve(
 
 
 def test_opencode_success_requires_exact_provider_model_and_zero_cost(tmp_path: Path) -> None:
-    from nexus.services.external_worker_runtime import OpenCodeExecutionAdapter
-
     request = _opencode_request(tmp_path)
     stdout = json.dumps({
         "type": "opencode_result",
@@ -254,8 +249,6 @@ def test_opencode_success_requires_exact_provider_model_and_zero_cost(tmp_path: 
 
 
 def test_opencode_timeout_result_is_outcome_unknown(tmp_path: Path) -> None:
-    from nexus.services.external_worker_runtime import OpenCodeExecutionAdapter
-
     request = _opencode_request(tmp_path)
     stdout = json.dumps({
         "type": "opencode_error",
@@ -276,8 +269,6 @@ def test_opencode_timeout_result_is_outcome_unknown(tmp_path: Path) -> None:
 
 
 def test_opencode_auto_free_accepts_attested_actual_free_model(tmp_path: Path) -> None:
-    from nexus.services.external_worker_runtime import OpenCodeExecutionAdapter
-
     request = WorkerRequest(
         provider="opencode",
         model="opencode/auto-free",
@@ -310,8 +301,6 @@ def test_opencode_auto_free_accepts_attested_actual_free_model(tmp_path: Path) -
 
 
 def test_opencode_auto_free_rejects_paid_or_nonfree_observation(tmp_path: Path) -> None:
-    from nexus.services.external_worker_runtime import OpenCodeExecutionAdapter
-
     request = WorkerRequest(
         provider="opencode",
         model="opencode/auto-free",

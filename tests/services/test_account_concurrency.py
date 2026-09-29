@@ -505,6 +505,130 @@ class TestAccountConcurrencyModel(unittest.TestCase):
                 if "quarantine" in p.name:
                     self.assertEqual(data["reason"], AccountFailureKind.QUOTA_EXHAUSTED.value)
 
+    def test_model_family_candidate_tiers_precede_unknown_and_blocked(self):
+        accounts = [
+            AgyAccount(alias="preferred", home_dir=f"{self.test_dir}/home_pref"),
+            AgyAccount(alias="reserve", home_dir=f"{self.test_dir}/home_res"),
+            AgyAccount(alias="fallback", home_dir=f"{self.test_dir}/home_fb"),
+            AgyAccount(alias="unknown", home_dir=f"{self.test_dir}/home_unknown"),
+            AgyAccount(alias="blocked", home_dir=f"{self.test_dir}/home_blocked"),
+        ]
+        mgr = self._create_manager(accounts)
+        coord = self._create_coordinator(mgr)
+        keys = {
+            "NEXUS_AGY_PREFERRED_ACCOUNTS": "preferred",
+            "NEXUS_AGY_RESERVE_ACCOUNTS": "reserve",
+            "NEXUS_AGY_FALLBACK_ACCOUNTS": "fallback",
+            "NEXUS_AGY_BLOCKED_ACCOUNTS": "blocked",
+        }
+        old = {key: os.environ.get(key) for key in keys}
+        claims = []
+        try:
+            os.environ.update(keys)
+            for index in range(4):
+                claims.append(
+                    coord.acquire_claim(
+                        f"worker-tier-{index}",
+                        model_family="gemini",
+                    )
+                )
+            by_hash = {account.alias_hash: account.alias for account in accounts}
+            selected = [by_hash[claim.account_alias_hash] for claim in claims]
+            self.assertEqual(
+                selected,
+                ["preferred", "reserve", "fallback", "unknown"],
+            )
+            self.assertNotIn("blocked", selected)
+        finally:
+            for claim in reversed(claims):
+                claim.release()
+            for key, value in old.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    def test_model_family_quota_retirement_blocks_only_failed_family(self):
+        """Quota exhaustion must not disable a dual-purpose account for another family."""
+        alias = "dual_family_account"
+        acc1 = AgyAccount(alias=alias, home_dir=f"{self.test_dir}/home_family")
+        acc2 = AgyAccount(alias=alias, home_dir=f"{self.test_dir}/home_family")
+        mgr1 = self._create_manager([acc1])
+        mgr2 = self._create_manager([acc2])
+        coord1 = self._create_coordinator(mgr1)
+        coord2 = self._create_coordinator(mgr2)
+
+        claim = coord1.acquire_claim("worker-gemini", model_family="gemini")
+
+        def account_global_mark_bad_must_not_run(*args, **kwargs):
+            raise AssertionError("family-scoped quota failure must not mark account globally bad")
+
+        mgr1.mark_account_bad = account_global_mark_bad_must_not_run
+        coord1.retire_failed_claim(
+            claim,
+            AccountFailureKind.QUOTA_EXHAUSTED,
+            model_family="gemini",
+            unavailable_until=time.time() + 60,
+        )
+
+        self.assertTrue(claim.released)
+        self.assertFalse(coord1.is_quarantined(acc1.alias_hash))
+        self.assertTrue(coord1.is_family_unavailable(acc1.alias_hash, "gemini"))
+        self.assertFalse(coord1.is_family_unavailable(acc1.alias_hash, "claude_gpt"))
+
+        with self.assertRaises(AgyAccountPoolExhaustedError):
+            coord2.acquire_claim(
+                "worker-gemini-2",
+                wait_timeout=0.05,
+                model_family="gemini",
+            )
+
+        claude_claim = coord2.acquire_claim(
+            "worker-claude",
+            wait_timeout=0.1,
+            model_family="claude_gpt",
+        )
+        self.assertEqual(claude_claim.account_alias_hash, acc1.alias_hash)
+        claude_claim.release()
+
+    def test_unscoped_rate_limit_remains_account_global(self):
+        acc = AgyAccount(alias="global_rate_limit", home_dir=f"{self.test_dir}/home_rate")
+        mgr = self._create_manager([acc])
+        coord = self._create_coordinator(mgr)
+        claim = coord.acquire_claim("worker-rate", model_family="gemini")
+
+        coord.retire_failed_claim(
+            claim,
+            AccountFailureKind.RATE_LIMITED,
+            model_family="gemini",
+            unavailable_until=time.time() + 60,
+        )
+
+        self.assertTrue(claim.released)
+        self.assertTrue(coord.is_quarantined(acc.alias_hash))
+        self.assertFalse(coord.is_family_unavailable(acc.alias_hash, "gemini"))
+
+    def test_expired_model_family_block_is_pruned(self):
+        acc = AgyAccount(alias="expiring_family", home_dir=f"{self.test_dir}/home_expire")
+        mgr = self._create_manager([acc])
+        coord = self._create_coordinator(mgr)
+
+        path = coord.mark_family_unavailable(
+            acc.alias_hash,
+            model_family="gemini",
+            reason=AccountFailureKind.QUOTA_EXHAUSTED.value,
+            unavailable_until=time.time() + 1,
+        )
+        self.assertTrue(path.exists())
+        self.assertTrue(coord.is_family_unavailable(acc.alias_hash, "gemini"))
+
+        blocked = coord.get_family_unavailable_hashes(
+            "gemini",
+            now_ts=time.time() + 2,
+        )
+        self.assertNotIn(acc.alias_hash, blocked)
+        self.assertFalse(path.exists())
+
     def test_n_final_attempt_rotation_eligible_retires_without_replacement(self):
         """N. Final-attempt rotation-eligible failure path (max_calls exhausted / max_calls=1 semantics) retires failed account but does not acquire a replacement."""
         if not dispatch_module:
@@ -557,28 +681,28 @@ class TestAccountConcurrencyModel(unittest.TestCase):
         mgr = self._create_manager([acc1, acc2])
         coord = self._create_coordinator(mgr)
 
-        # 1. Direct coordinator test: retire_failed_claim with non-rotation failure is a no-op
+        # A semantic/implementation failure remains ineligible for Agy rotation.
         claim = coord.acquire_claim("worker-o")
         self.assertFalse(is_rotation_eligible(AccountFailureKind.TIMEOUT))
-        coord.retire_failed_claim(claim, AccountFailureKind.TIMEOUT)
+        coord.retire_failed_claim(claim, AccountFailureKind.SYNTAX_OR_IMPLEMENTATION_ERROR)
         self.assertFalse(coord.is_quarantined(acc1.alias_hash))
         claim.release()
 
         # 2. Dispatch run test with non-rotation failure
         calls: list[dict[str, str]] = []
 
-        def mock_run_agy_timeout(*, env, prompt, cwd, mode, model, effort, timeout):
+        def mock_run_agy_error(*, env, prompt, cwd, mode, model, effort, timeout):
             calls.append(dict(env))
-            return None, "", "Task timed out after 900s", True, 900000
+            return 2, "", "invalid command", False, 50
 
         code = dispatch_module.dispatch_run(
-            prompt="test prompt timeout",
+            prompt="test prompt invalid command",
             cwd=self.test_dir,
             max_calls=3,
             coordinator=coord,
-            run_agy_fn=mock_run_agy_timeout,
+            run_agy_fn=mock_run_agy_error,
         )
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertEqual(len(calls), 1, "Non-rotation failure must not retry or switch accounts")
 
         # Neither account is quarantined
@@ -607,12 +731,12 @@ class TestAccountConcurrencyModel(unittest.TestCase):
         perms_restored_before_retire: list[bool] = []
         orig_retire = coord.retire_failed_claim
 
-        def spy_retire(claim, failure_kind):
+        def spy_retire(claim, failure_kind, **kwargs):
             actual_home = str(claim.lease.execution_env["HOME"])
             settings_path = Path(actual_home) / ".gemini" / "antigravity-cli" / "settings.json"
             perms_restored_before_retire.append(not settings_path.exists())
             retired_hashes.append(claim.account_alias_hash)
-            return orig_retire(claim, failure_kind)
+            return orig_retire(claim, failure_kind, **kwargs)
 
         coord.retire_failed_claim = spy_retire
         calls: list[str] = []
@@ -759,11 +883,107 @@ class TestAccountConcurrencyModel(unittest.TestCase):
             coordinator=coord,
             run_agy_fn=cli_timeout_runner,
         )
-        self.assertEqual(dispatch_rc, 1)
+        self.assertEqual(dispatch_rc, 75)
+        self.assertTrue(coord.is_quarantined(acc.alias_hash))
+        with self.assertRaises(AgyAccountPoolExhaustedError):
+            coord.acquire_claim("worker-after-timeout", wait_timeout=0.1)
+
+    def test_t_timeout_retires_exact_claim_before_release_and_retries_other_account(self):
+        acc1 = AgyAccount(alias="timeout_a", home_dir=f"{self.test_dir}/timeout_a")
+        acc2 = AgyAccount(alias="timeout_b", home_dir=f"{self.test_dir}/timeout_b")
+        mgr = self._create_manager([acc1, acc2])
+        coord = self._create_coordinator(mgr)
+        events = []
+        original_mark = mgr.mark_account_bad
+
+        def mark_bad(lease, kind):
+            events.append(("mark", lease.account_alias_hash, kind))
+            return original_mark(lease, kind)
+
+        mgr.mark_account_bad = mark_bad
+        original_release = mgr.release
+
+        def release(lease):
+            events.append(("release", lease.account_alias_hash, None))
+            original_release(lease)
+
+        mgr.release = release
+        homes = []
+
+        def runner(*, env, **kwargs):
+            homes.append(env["HOME"])
+            return (
+                (0, "", "print timeout after 2m", True, 120000)
+                if len(homes) == 1
+                else (0, "ok", "", False, 1)
+            )
+
+        self.assertEqual(
+            dispatch_module.dispatch_run(
+                prompt="timeout probe",
+                cwd=self.test_dir,
+                max_calls=2,
+                coordinator=coord,
+                run_agy_fn=runner,
+            ),
+            0,
+        )
+        self.assertEqual(set(homes), {acc1.home_dir, acc2.home_dir})
+        self.assertNotEqual(homes[0], homes[1])
+        selected = next(acc for acc in (acc1, acc2) if acc.home_dir == homes[0])
+        other = acc2 if selected is acc1 else acc1
+        self.assertEqual(events[0], ("mark", selected.alias_hash, AccountFailureKind.TIMEOUT))
+        self.assertEqual(events[1], ("release", selected.alias_hash, None))
+        self.assertTrue(coord.is_quarantined(selected.alias_hash))
+        self.assertFalse(coord.is_quarantined(other.alias_hash))
+
+    def test_u_timeout_max_calls_one_retires_without_replacement(self):
+        accounts = [
+            AgyAccount(alias=f"timeout_{i}", home_dir=f"{self.test_dir}/timeout_{i}")
+            for i in range(2)
+        ]
+        coord = self._create_coordinator(self._create_manager(accounts))
+        acquired = []
+        original_acquire = coord.acquire_claim
+
+        def acquire(*args, **kwargs):
+            claim = original_acquire(*args, **kwargs)
+            acquired.append(claim.account_alias_hash)
+            return claim
+
+        coord.acquire_claim = acquire
+        self.assertEqual(
+            dispatch_module.dispatch_run(
+                prompt="timeout probe",
+                cwd=self.test_dir,
+                max_calls=1,
+                coordinator=coord,
+                run_agy_fn=lambda **kwargs: (0, "", "print timeout", True, 120000),
+            ),
+            1,
+        )
+        self.assertEqual(len(acquired), 1)
+        self.assertIn(acquired[0], {acc.alias_hash for acc in accounts})
+        self.assertTrue(coord.is_quarantined(acquired[0]))
+        other_hash = next(acc.alias_hash for acc in accounts if acc.alias_hash != acquired[0])
+        self.assertFalse(coord.is_quarantined(other_hash))
+
+    def test_v_timeout_manager_cooldown_does_not_leave_permanent_quarantine(self):
+        acc = AgyAccount(alias="timeout_cooldown", home_dir=f"{self.test_dir}/timeout_cooldown")
+        mgr = self._create_manager([acc])
+        coord = self._create_coordinator(mgr)
+        claim = coord.acquire_claim("worker-timeout")
+
+        def durable_mark_bad(lease, kind):
+            self.assertEqual(kind, AccountFailureKind.TIMEOUT)
+            self.assertEqual(lease.account_alias_hash, claim.account_alias_hash)
+            self.assertFalse(claim.released)
+            return True
+
+        mgr.mark_account_bad = durable_mark_bad
+        coord.retire_failed_claim(claim, AccountFailureKind.TIMEOUT)
+        self.assertTrue(claim.released)
         self.assertFalse(coord.is_quarantined(acc.alias_hash))
-        claim = coord.acquire_claim("worker-after-timeout", wait_timeout=0.1)
-        self.assertEqual(claim.account_alias_hash, acc.alias_hash)
-        claim.release()
 
 
 if __name__ == "__main__":

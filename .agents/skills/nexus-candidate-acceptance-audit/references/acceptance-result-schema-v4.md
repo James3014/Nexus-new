@@ -86,3 +86,183 @@ python -B scripts/validate_acceptance_result_v4.py acceptance-result-v4.json \
 ```
 
 For `NEXUS_MCP_RECEIPT`, also supply `--v3-validation-report` from the unchanged v3 compatibility validation. A structurally valid v4 document without its required physical evidence is not acceptance evidence.
+
+
+## v5 successor / compatibility contract
+
+`nexus.candidate_acceptance.v5` exists for **GOVERNED** Candidate Acceptance
+when execution was performed through a transport-neutral direct path that cannot
+truthfully be represented as Nexus MCP or DevSpace lineage.
+
+This section does **not** redefine `nexus.candidate_acceptance.v4`. Every v4
+input continues through the saved current v4 implementation, and historical
+v3/v4 replay remains on its existing validators. The v5 implementation shares
+`scripts/validate_acceptance_result_v4.py` only because the governed execution
+surface used for #1176 could not create a new validator target file. Schema
+dispatch preserves the version boundary.
+
+### Authority source
+
+v5 does not allow executor or transport metadata to mint authority.
+
+A v5 attempt must already be GOVERNED and must bind a physical
+`TRACKED_TASK_CARD` that is present in the exact authorized base commit. The
+validator reads those bytes directly from Git and requires:
+
+- the same `task_id`;
+- exactly one value for every required authority control;
+- `artifact_authority: current`, `status: ACTIVE`, and `execution_lane: GOVERNED`;
+- `commit_required: true`, `candidate_required: true`, and
+  `worker_may_commit: true`;
+- `worker_may_approve: false`, `worker_may_integrate: false`, and
+  `worker_may_push: false`;
+- `AUTO_CHAIN: false`;
+- a non-empty exact Allowed files list; and
+- the bound deletion policy, defaulting to `FORBID` only when the Task Card
+  omits an explicit deletion policy.
+
+The Task Card SHA-256, task ID, allowed paths, and deletion policy must
+cross-bind the acceptance result and executor evidence. Rewriting executor JSON
+cannot widen the Task Card.
+
+For v5:
+
+- `source.contract_kind = TRACKED_TASK_CARD`
+- `source.campaign_id` is non-empty
+- `source.task_card_path` is non-empty
+- `source.task_card_sha256` is the physical Task Card SHA-256
+- `source.contract_hash = source.task_card_sha256`
+- `source.executor_evidence_kind = TRANSPORT_NEUTRAL_DIRECT_EVIDENCE`
+- executor schema = `nexus.transport_neutral_direct_execution.v1`
+- `source.verification_evidence_kind = INDEPENDENT_REVIEW_EVIDENCE`
+- review schema = `nexus.independent_candidate_review_evidence.v1`
+- compiled-packet and MCP-manifest compatibility fields remain null
+- `candidate_state_hash` and `verified_receipt_hash` remain null when the
+  transport-neutral producer does not physically expose those subjects.
+
+### Transport-neutral executor evidence
+
+`nexus.transport_neutral_direct_execution.v1` binds:
+
+    schema
+    evidence_id
+    created_at
+    authority
+    execution
+    candidate
+    claim
+    integrity
+
+The `authority` group contains only the already-existing Task Card binding:
+
+    contract_kind = TRACKED_TASK_CARD
+    task_id
+    attempt_id
+    task_card_path
+    task_card_sha256
+    allowed_paths[]
+    deletion_policy = ALLOW | FORBID
+    claim_ceiling = CANDIDATE_READY
+
+The `execution` group is observational only:
+
+    executor_id
+    executor_kind
+    transport
+    workspace_root
+    started_at
+    completed_at
+    state = completed
+    terminal_reason = completed
+
+Codex, RDC, another CLI, or a human operator can appear here without becoming a
+Nexus authority selector.
+
+The `candidate` group binds the physical Git subject:
+
+    repository_origin
+    source_commit
+    commit_sha
+    tree_sha
+    changed_paths[]
+    deleted_paths[]
+    change_manifest
+    diff_hash
+
+The validator re-reads Git origin, exact objects, ancestry, tree and diff,
+rebuilds the manifest, recomputes the manifest hash, and enforces the Task Card
+scope/deletion policy. Self-consistent JSON cannot replace those checks.
+
+The executor claim ceiling is only:
+
+    status = CANDIDATE_READY_PENDING_ACCEPTANCE
+    claim_ceiling = CANDIDATE_READY
+    verified = false
+    certified = false
+    accepted = false
+    approved = false
+    merged = false
+    released = false
+    deployed = false
+    public_claim_allowed = false
+
+### Independent review evidence
+
+`nexus.independent_candidate_review_evidence.v1` is a separately
+SHA-256-bound artifact produced/consumed by the independent Candidate Acceptance
+audit. It binds:
+
+- reviewer identity and reviewer attempt;
+- `INDEPENDENT_REVIEWER` classification;
+- exact repository/base/Candidate/tree;
+- exact review command records; and
+- an evidence-only claim ceiling.
+
+At least one command must be a PASS with exit code 0 when independent behavior
+is marked PASS. The review artifact must match the acceptance result's review
+commands and exact Candidate.
+
+Important claim boundary: this artifact records the acceptance auditor's review
+evidence; its own JSON integrity does **not** cryptographically authenticate a
+human/model identity and does not create reviewer authority. Reviewer
+separation remains the same role/procedure boundary already used by v4:
+implementer and reviewer attempts must differ, the acceptance auditor must be
+independent, and self-approval is forbidden. Generic CI status, a GitHub
+comment, or a caller-written `INDEPENDENT_REVIEWER` label is not silently
+upgraded into a stronger semantic oracle.
+
+The review artifact never grants certification, Owner approval, merge, release,
+deployment, routing, Workforce, or public-claim authority.
+
+### v5 compatibility projection
+
+The v5 validator may create an in-memory v4 projection solely to reuse the
+unchanged v4 result-envelope checks. That projection substitutes v4
+discriminators only in memory, is never emitted as evidence, never creates real
+DevSpace lineage, and never changes the actual v5 integrity hash.
+
+### DIRECT and GOVERNED remain separate
+
+v5 does not change execution-lane policy. Eligible `DIRECT_CANONICAL` and
+`DIRECT_DELEGATED` work keeps its existing direct verification and Owner merge
+gates and does not acquire a mandatory formal Candidate-Acceptance step merely
+because Codex or RDC was used.
+
+`GOVERNED` work still requires independent Candidate Acceptance wherever the
+repository contract requires it. v5 only closes the executor-provenance gap so
+that a truthful transport-neutral direct executor can participate without being
+relabeled as DevSpace.
+
+### Current invocation path
+
+For current v4 and v5, use the schema-dispatch wrapper:
+
+```bash
+python -B scripts/validate_acceptance_result_v4.py acceptance-result.json \
+  --executor-evidence executor-evidence.json \
+  --verification-evidence verification-evidence.json \
+  --report acceptance.validation.json
+```
+
+The result schema selects the preserved v4 implementation or the v5
+transport-neutral branch.

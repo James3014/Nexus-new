@@ -204,6 +204,13 @@ def _parse_manifest(data: bytes) -> dict[str, Any]:
             "nexus/services/opencode_server_client.py",
             "scripts/ops/nexus-opencode-server-client",
         })
+    if isinstance(components, dict) and isinstance(components.get("workflow_doctor"), dict):
+        required.update({
+            "scripts/ops/nexus-workflow-doctor",
+            "scripts/ops/install_nexus_workflow_doctor.sh",
+            "nexus/services/workflow_doctor.py",
+            "nexus/services/direct_operation_journal.py",
+        })
     if not required.issubset(seen):
         raise HostSyncError("HOST_MANIFEST_REQUIRED_RUNTIME_PATH_MISSING")
     return manifest
@@ -404,6 +411,17 @@ def _install_quota(snapshot: Path, target: Path) -> None:
     _run(["bash", str(installer)], cwd=snapshot, env=env)
 
 
+def _install_workflow_doctor(snapshot: Path, target: Path) -> None:
+    installer = snapshot / "scripts" / "ops" / "install_nexus_workflow_doctor.sh"
+    env = os.environ.copy()
+    env.update({
+        "NEXUS_WORKFLOW_DOCTOR_REPO_ROOT": str(snapshot),
+        "NEXUS_WORKFLOW_DOCTOR_SNAPSHOT": str(snapshot),
+        "NEXUS_WORKFLOW_DOCTOR_TARGET": str(target),
+    })
+    _run(["bash", str(installer)], cwd=snapshot, env=env)
+
+
 def _install_external_worker_dispatch(snapshot: Path, target: Path) -> None:
     installer = snapshot / "scripts" / "ops" / "install_nexus_external_worker_dispatch.sh"
     env = os.environ.copy()
@@ -457,6 +475,12 @@ def _verify_release_for_activation(
         raise HostSyncError(f"RELEASE_QUOTA_MISSING:{quota}")
     if _sha256(quota) != generation.get("quota_sha256"):
         raise HostSyncError("RELEASE_QUOTA_HASH_MISMATCH")
+    if _manifest_has_component(manifest, "workflow_doctor"):
+        workflow_doctor = release / "bin" / "nexus-workflow-doctor"
+        if not workflow_doctor.is_file():
+            raise HostSyncError(f"RELEASE_WORKFLOW_DOCTOR_MISSING:{workflow_doctor}")
+        if _sha256(workflow_doctor) != generation.get("workflow_doctor_sha256"):
+            raise HostSyncError("RELEASE_WORKFLOW_DOCTOR_HASH_MISMATCH")
     if _manifest_has_component(manifest, "external_worker_dispatch"):
         external_dispatch = release / "bin" / "nexus-external-worker-dispatch"
         if not external_dispatch.is_file():
@@ -521,9 +545,12 @@ def _materialize_release(
         bin_dir.mkdir()
         dispatch_target = bin_dir / "nexus-agy-dispatch"
         quota_target = bin_dir / "nexus-agy-quota"
+        workflow_doctor_target = bin_dir / "nexus-workflow-doctor"
         external_dispatch_target = bin_dir / "nexus-external-worker-dispatch"
         _install_dispatch(snapshot, dispatch_target)
         _install_quota(snapshot, quota_target)
+        if _manifest_has_component(manifest, "workflow_doctor"):
+            _install_workflow_doctor(snapshot, workflow_doctor_target)
         if _manifest_has_component(manifest, "external_worker_dispatch"):
             _install_external_worker_dispatch(snapshot, external_dispatch_target)
 
@@ -531,6 +558,10 @@ def _materialize_release(
         source_quota = snapshot / "scripts" / "ops" / "nexus-agy-quota"
         installed_sha = _sha256(dispatch_target)
         quota_sha = _sha256(quota_target)
+        workflow_doctor_sha = None
+        if _manifest_has_component(manifest, "workflow_doctor"):
+            source_workflow_doctor = snapshot / "scripts" / "ops" / "nexus-workflow-doctor"
+            workflow_doctor_sha = _sha256(workflow_doctor_target)
         external_dispatch_sha = None
         if _manifest_has_component(manifest, "external_worker_dispatch"):
             source_external_dispatch = (
@@ -541,6 +572,11 @@ def _materialize_release(
             raise HostSyncError("DISPATCH_INSTALL_HASH_MISMATCH")
         if _sha256(source_quota) != quota_sha:
             raise HostSyncError("QUOTA_INSTALL_HASH_MISMATCH")
+        if (
+            workflow_doctor_sha is not None
+            and _sha256(source_workflow_doctor) != workflow_doctor_sha
+        ):
+            raise HostSyncError("WORKFLOW_DOCTOR_INSTALL_HASH_MISMATCH")
         if (
             external_dispatch_sha is not None
             and _sha256(source_external_dispatch) != external_dispatch_sha
@@ -557,6 +593,8 @@ def _materialize_release(
             "agy_account_manager": manager["observed"],
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
+        if workflow_doctor_sha is not None:
+            generation["workflow_doctor_sha256"] = workflow_doctor_sha
         if external_dispatch_sha is not None:
             generation["external_dispatcher_sha256"] = external_dispatch_sha
         (tmp / "host-generation.json").write_text(
@@ -590,6 +628,7 @@ def _activate(
     runtime_root: Path,
     dispatch_target: Path,
     quota_target: Path,
+    workflow_doctor_target: Path,
     sync_target: Path,
     external_dispatch_target: Path,
 ) -> None:
@@ -607,10 +646,19 @@ def _activate(
 
     _backup_entrypoint(dispatch_target, runtime_root)
     _backup_entrypoint(quota_target, runtime_root)
+    _backup_entrypoint(workflow_doctor_target, runtime_root)
     _backup_entrypoint(sync_target, runtime_root)
     _backup_entrypoint(external_dispatch_target, runtime_root)
     _atomic_symlink(current / "bin" / "nexus-agy-dispatch", dispatch_target)
     _atomic_symlink(current / "bin" / "nexus-agy-quota", quota_target)
+    workflow_doctor_bin = release / "bin" / "nexus-workflow-doctor"
+    if workflow_doctor_bin.is_file():
+        _atomic_symlink(
+            current / "bin" / "nexus-workflow-doctor",
+            workflow_doctor_target,
+        )
+    elif workflow_doctor_target.is_symlink():
+        workflow_doctor_target.unlink()
     _atomic_symlink(current / "snapshot" / "scripts" / "ops" / "nexus-host-sync", sync_target)
     external_bin = release / "bin" / "nexus-external-worker-dispatch"
     if external_bin.is_file():
@@ -633,6 +681,7 @@ def _status(
     runtime_root: Path,
     dispatch_target: Path,
     quota_target: Path,
+    workflow_doctor_target: Path,
     sync_target: Path,
     external_dispatch_target: Path,
     manager_python: Path,
@@ -702,6 +751,21 @@ def _status(
         "sha256": actual_quota_sha,
         "entrypoint": str(quota_target),
     }
+
+    if _manifest_has_component(manifest, "workflow_doctor"):
+        workflow_doctor = release / "bin" / "nexus-workflow-doctor"
+        actual_workflow_doctor_sha = _sha256(workflow_doctor) if workflow_doctor.is_file() else None
+        workflow_doctor_ok = actual_workflow_doctor_sha == generation.get(
+            "workflow_doctor_sha256"
+        ) and _same_target(
+            workflow_doctor_target,
+            current / "bin" / "nexus-workflow-doctor",
+        )
+        payload["components"]["workflow_doctor"] = {
+            "status": "VERIFIED" if workflow_doctor_ok else "DRIFT",
+            "sha256": actual_workflow_doctor_sha,
+            "entrypoint": str(workflow_doctor_target),
+        }
 
     sync_ok = _same_target(
         sync_target,
@@ -808,10 +872,11 @@ def _prune_releases(runtime_root: Path) -> None:
 
 def _common_paths(
     args: argparse.Namespace,
-) -> tuple[Path, Path, Path, Path, Path, Path]:
+) -> tuple[Path, Path, Path, Path, Path, Path, Path]:
     runtime_root = Path(args.runtime_root).expanduser().resolve()
     dispatch_target = Path(os.path.abspath(os.path.expanduser(args.dispatch_target)))
     quota_target = Path(os.path.abspath(os.path.expanduser(args.quota_target)))
+    workflow_doctor_target = Path(os.path.abspath(os.path.expanduser(args.workflow_doctor_target)))
     sync_target = Path(os.path.abspath(os.path.expanduser(args.sync_target)))
     external_dispatch_target = Path(
         os.path.abspath(os.path.expanduser(args.external_dispatch_target))
@@ -823,6 +888,7 @@ def _common_paths(
         runtime_root,
         dispatch_target,
         quota_target,
+        workflow_doctor_target,
         sync_target,
         external_dispatch_target,
         manager_python,
@@ -877,6 +943,13 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--workflow-doctor-target",
+        default=os.getenv(
+            "NEXUS_WORKFLOW_DOCTOR_TARGET",
+            str(Path.home() / ".local/bin/nexus-workflow-doctor"),
+        ),
+    )
+    parser.add_argument(
         "--sync-target",
         default=os.getenv(
             "NEXUS_HOST_SYNC_TARGET",
@@ -928,6 +1001,7 @@ def main(argv: list[str] | None = None) -> int:
         runtime_root,
         dispatch_target,
         quota_target,
+        workflow_doctor_target,
         sync_target,
         external_dispatch_target,
         manager_python,
@@ -939,6 +1013,7 @@ def main(argv: list[str] | None = None) -> int:
                 runtime_root=runtime_root,
                 dispatch_target=dispatch_target,
                 quota_target=quota_target,
+                workflow_doctor_target=workflow_doctor_target,
                 sync_target=sync_target,
                 external_dispatch_target=external_dispatch_target,
                 manager_python=manager_python,
@@ -953,6 +1028,7 @@ def main(argv: list[str] | None = None) -> int:
                 runtime_root=runtime_root,
                 dispatch_target=dispatch_target,
                 quota_target=quota_target,
+                workflow_doctor_target=workflow_doctor_target,
                 sync_target=sync_target,
                 external_dispatch_target=external_dispatch_target,
                 manager_python=manager_python,
@@ -986,6 +1062,7 @@ def main(argv: list[str] | None = None) -> int:
                 runtime_root=runtime_root,
                 dispatch_target=dispatch_target,
                 quota_target=quota_target,
+                workflow_doctor_target=workflow_doctor_target,
                 sync_target=sync_target,
                 external_dispatch_target=external_dispatch_target,
                 manager_python=manager_python,
@@ -1016,6 +1093,7 @@ def main(argv: list[str] | None = None) -> int:
                 runtime_root=runtime_root,
                 dispatch_target=dispatch_target,
                 quota_target=quota_target,
+                workflow_doctor_target=workflow_doctor_target,
                 sync_target=sync_target,
                 external_dispatch_target=external_dispatch_target,
             )
@@ -1024,6 +1102,7 @@ def main(argv: list[str] | None = None) -> int:
                 runtime_root=runtime_root,
                 dispatch_target=dispatch_target,
                 quota_target=quota_target,
+                workflow_doctor_target=workflow_doctor_target,
                 sync_target=sync_target,
                 external_dispatch_target=external_dispatch_target,
                 manager_python=manager_python,
@@ -1046,6 +1125,7 @@ def main(argv: list[str] | None = None) -> int:
                 runtime_root=runtime_root,
                 dispatch_target=dispatch_target,
                 quota_target=quota_target,
+                workflow_doctor_target=workflow_doctor_target,
                 sync_target=sync_target,
                 external_dispatch_target=external_dispatch_target,
             )
@@ -1054,6 +1134,7 @@ def main(argv: list[str] | None = None) -> int:
                 runtime_root=runtime_root,
                 dispatch_target=dispatch_target,
                 quota_target=quota_target,
+                workflow_doctor_target=workflow_doctor_target,
                 sync_target=sync_target,
                 external_dispatch_target=external_dispatch_target,
                 manager_python=manager_python,

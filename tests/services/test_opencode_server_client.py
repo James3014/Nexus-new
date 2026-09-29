@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import socket
 from pathlib import Path
 
 import pytest
@@ -32,8 +33,8 @@ def test_server_env_is_isolated_and_strips_owner_credentials(
     assert env["HOME"].startswith(str(client.state_root))
     assert env["XDG_DATA_HOME"].startswith(str(client.state_root))
     assert env["OPENCODE_DISABLE_PROJECT_CONFIG"] == "true"
-    assert env["OPENCODE_SERVER_USERNAME"] == "nexus"
-    assert env["OPENCODE_SERVER_PASSWORD"]
+    assert "OPENCODE_SERVER_USERNAME" not in env
+    assert "OPENCODE_SERVER_PASSWORD" not in env
     assert "GITHUB_TOKEN" not in env
     assert "GH_TOKEN" not in env
     assert "SSH_AUTH_SOCK" not in env
@@ -41,8 +42,13 @@ def test_server_env_is_isolated_and_strips_owner_credentials(
 
 def test_permission_contract_is_read_only_by_default_and_explicit_for_act() -> None:
     plan = OpenCodeServerClient._permission("plan", False)
-    assert {"permission": "edit", "pattern": "*", "action": "deny"} in plan
+    assert plan[0] == {"permission": "*", "pattern": "*", "action": "deny"}
+    for permission in ("read", "list", "glob", "grep"):
+        assert {"permission": permission, "pattern": "*", "action": "allow"} in plan
     assert {"permission": "external_directory", "pattern": "*", "action": "deny"} in plan
+    assert not any(
+        rule["permission"] in {"bash", "edit"} and rule["action"] == "allow" for rule in plan
+    )
 
     with pytest.raises(OpenCodeServerError, match="OPENCODE_ACT_REQUIRES_AUTO_APPROVE"):
         OpenCodeServerClient._permission("act", False)
@@ -50,6 +56,19 @@ def test_permission_contract_is_read_only_by_default_and_explicit_for_act() -> N
     act = OpenCodeServerClient._permission("act", True)
     assert act[0] == {"permission": "*", "pattern": "*", "action": "allow"}
     assert {"permission": "external_directory", "pattern": "*", "action": "deny"} in act
+
+
+def test_http_socket_timeout_is_classified_as_opencode_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = _client(tmp_path, monkeypatch)
+
+    def raise_timeout(*args, **kwargs):
+        raise socket.timeout("not ready")
+
+    monkeypatch.setattr("urllib.request.urlopen", raise_timeout)
+    with pytest.raises(OpenCodeRequestTimeout, match="OPENCODE_HTTP_TIMEOUT"):
+        client._request("GET", "/global/health", timeout=0.1)
 
 
 def test_zero_cost_model_requires_all_declared_costs_zero() -> None:
@@ -125,6 +144,73 @@ def test_run_attests_provider_model_cost_and_counts_tool_parts(
     assert result.tool_event_count == 1
     assert result.text == "OK"
     assert ("POST", "/session/ses_test/message") in calls
+
+
+def test_run_waits_for_terminal_assistant_message_when_post_response_is_not_final(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = _client(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        client,
+        "ensure_server",
+        lambda **kwargs: {"healthy": True, "version": "1.18.32"},
+    )
+    monkeypatch.setattr(
+        client,
+        "_attest_model",
+        lambda directory, model, require_free: "mimo-v2.6-flash-free",
+    )
+    message_reads = 0
+
+    def fake_request(method, path, **kwargs):
+        nonlocal message_reads
+        if method == "POST" and path == "/session":
+            return {"id": "ses_race"}
+        if method == "POST" and path == "/session/ses_race/message":
+            return {
+                "info": {
+                    "id": "msg_partial",
+                    "role": "assistant",
+                    "providerID": "opencode",
+                    "modelID": "mimo-v2.6-flash-free",
+                    "cost": 0,
+                },
+                "parts": [{"type": "text", "text": "partial"}],
+            }
+        if method == "GET" and path == "/session/ses_race/message":
+            message_reads += 1
+            finish = None if message_reads == 1 else "stop"
+            info = {
+                "id": "msg_final",
+                "role": "assistant",
+                "providerID": "opencode",
+                "modelID": "mimo-v2.6-flash-free",
+                "cost": 0,
+            }
+            if finish is not None:
+                info["finish"] = finish
+            return [
+                {
+                    "info": info,
+                    "parts": [{"type": "text", "text": "done"}],
+                }
+            ]
+        raise AssertionError((method, path, kwargs))
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    result = client.run(
+        model="opencode/mimo-v2.6-flash-free",
+        prompt="hello",
+        directory=str(tmp_path),
+        mode="plan",
+        auto_approve=False,
+        timeout_seconds=20,
+        require_free=True,
+    )
+    assert message_reads == 2
+    assert result.finish == "stop"
+    assert result.text == "done"
+    assert result.message_id == "msg_final"
 
 
 def test_run_aborts_session_on_http_timeout(

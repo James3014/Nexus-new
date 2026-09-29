@@ -123,6 +123,10 @@ class AsyncProcessExecutor:
 
 if not _LEGACY_AVAILABLE:
     def nexus():
+        if sys.argv[1:3] == ["workflow", "doctor"]:
+            from nexus.services.workflow_doctor import main as workflow_doctor_main
+
+            raise SystemExit(workflow_doctor_main(sys.argv[3:]))
         if any(arg in sys.argv[1:] for arg in ("--help", "-h")):
             print("Usage: nexus [OPTIONS] COMMAND [ARGS]...")
             print("")
@@ -354,6 +358,44 @@ else:
             report_file=report_file,
             local_assist_policy=local_assist_policy,
             online_policy=online_policy,
+        )
+
+
+    @nexus.group(name="workflow")
+    def workflow_group():
+        """Read-only durable workflow observation surfaces."""
+        pass
+
+
+    @workflow_group.command(name="doctor")
+    @click.option("--json", "as_json", is_flag=True)
+    @click.option("--repo-root", default=None)
+    @click.option("--repository", default=None)
+    @click.option("--issue", "issue_number", type=int, default=None)
+    @click.option("--pr", "pr_number", type=int, default=None)
+    @click.option("--operation-id", default=None)
+    def workflow_doctor(
+        as_json: bool,
+        repo_root: str | None,
+        repository: str | None,
+        issue_number: int | None,
+        pr_number: int | None,
+        operation_id: str | None,
+    ) -> None:
+        """Project canonical workflow evidence without taking workflow authority."""
+        from nexus.services.workflow_doctor import collect_workflow_doctor, render_text
+
+        payload = collect_workflow_doctor(
+            repo_root=Path(repo_root or os.getcwd()),
+            repository=repository,
+            issue_number=issue_number,
+            pr_number=pr_number,
+            operation_id=operation_id,
+        )
+        click.echo(
+            json.dumps(payload, indent=2, sort_keys=True)
+            if as_json
+            else render_text(payload)
         )
 
 
