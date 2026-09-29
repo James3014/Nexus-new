@@ -1,0 +1,309 @@
+#!/usr/bin/env python3
+"""Machine-local Grok account onboarding, inventory, and health operator."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Any
+
+
+def _default_snapshot() -> Path:
+    checkout = Path(__file__).resolve().parents[2]
+    if (checkout / "nexus/services/grok_account_pool.py").is_file():
+        return checkout
+    host_runtime = Path.home() / ".local/share/nexus-host-runtime/current/snapshot"
+    if host_runtime.is_dir():
+        return host_runtime
+    return Path.home() / ".local/share/nexus-grok-accounts/Nexus-new"
+
+
+SNAPSHOT = Path(
+    os.getenv("NEXUS_GROK_ACCOUNTS_SNAPSHOT", str(_default_snapshot()))
+)
+if not SNAPSHOT.is_dir():
+    raise SystemExit("NEXUS_GROK_ACCOUNTS_SNAPSHOT_MISSING")
+sys.path.insert(0, str(SNAPSHOT))
+
+from nexus.services.external_worker_runtime import GrokExecutionAdapter  # noqa: E402
+from nexus.services.grok_account_pool import (  # noqa: E402
+    GrokAccountPoolError,
+    GrokAccountPoolManager,
+    build_grok_profile_env,
+    classify_grok_failure,
+)
+
+SIGNED_IN_RE = re.compile(r"Signed in as\s+([^\s]+)", re.IGNORECASE)
+MODEL_RE = re.compile(r"^\s*\*?\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\(default\))?\s*$")
+
+
+def _pool_root() -> Path:
+    configured = os.getenv("NEXUS_GROK_ACCOUNT_POOL_ROOT", "").strip()
+    return Path(configured).expanduser() if configured else Path.home() / ".nexus/grok-account-pool"
+
+
+def _profile_root() -> Path:
+    configured = os.getenv("NEXUS_GROK_PROFILE_ROOT", "").strip()
+    return Path(configured).expanduser() if configured else Path.home() / ".grok-accounts"
+
+
+def _manager() -> GrokAccountPoolManager:
+    return GrokAccountPoolManager(_pool_root())
+
+
+def _emit(payload: Any, *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return
+    if isinstance(payload, list):
+        for row in payload:
+            print(
+                f"{row['alias']:12} "
+                f"enabled={str(row['enabled']).lower():5} "
+                f"leased={str(row['leased']).lower():5} "
+                f"home={row['home_state']:7} "
+                f"cooldown={row['cooldown_state']:7} "
+                f"label={row.get('display_label') or '-'}"
+            )
+        return
+    print(json.dumps(payload, indent=2, sort_keys=True))
+
+
+def _inventory(*, show_identities: bool) -> list[dict[str, Any]]:
+    now = time.time()
+    rows = []
+    for account in _manager().local_accounts():
+        row: dict[str, Any] = {
+            "alias": account.alias,
+            "enabled": account.enabled,
+            "leased": account.leased,
+            "home_state": "PRESENT" if account.home_exists else "MISSING",
+            "cooldown_state": "ACTIVE" if account.cooldown_until > now else "READY",
+            "cooldown_until": account.cooldown_until,
+            "last_failure_reason": account.last_failure_reason,
+        }
+        if show_identities:
+            row["display_label"] = account.display_label
+        rows.append(row)
+    return rows
+
+
+def _run_probe(home_path: str, *, grok_bin: str) -> tuple[int, str]:
+    env = build_grok_profile_env(home_path)
+    proc = subprocess.run(
+        [grok_bin, "models"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+
+
+def _models(text: str) -> list[str]:
+    result: list[str] = []
+    in_available = False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.lower().startswith("available models"):
+            in_available = True
+            continue
+        if not in_available:
+            continue
+        match = MODEL_RE.match(line)
+        if match:
+            value = match.group(1)
+            if value not in result:
+                result.append(value)
+    return result
+
+
+def cmd_list(args: argparse.Namespace) -> int:
+    rows = _inventory(show_identities=args.show_identities)
+    _emit(rows, as_json=args.json)
+    return 0
+
+
+def cmd_health(args: argparse.Namespace) -> int:
+    rows: list[dict[str, Any]] = []
+    failed = False
+    accounts = {item.alias: item for item in _manager().local_accounts()}
+    selected = [args.alias] if args.alias else sorted(accounts)
+    for alias in selected:
+        account = accounts.get(alias)
+        if account is None:
+            rows.append({"alias": alias, "status": "NOT_REGISTERED"})
+            failed = True
+            continue
+        row: dict[str, Any] = {
+            "alias": alias,
+            "enabled": account.enabled,
+            "leased": account.leased,
+            "home_state": "PRESENT" if account.home_exists else "MISSING",
+            "status": "HEALTHY",
+            "models": [],
+        }
+        if args.show_identities:
+            row["display_label"] = account.display_label
+        if not account.home_exists:
+            row["status"] = "PROFILE_HOME_MISSING"
+            failed = True
+        elif account.leased and not args.probe_busy:
+            row["status"] = "BUSY_LEASE"
+        else:
+            rc, output = _run_probe(account.home_path, grok_bin=args.grok_bin)
+            models = _models(output)
+            row["models"] = models
+            if rc != 0:
+                row["status"] = classify_grok_failure(output).value
+                failed = True
+            elif args.expected_model and args.expected_model not in models:
+                row["status"] = "MODEL_POLICY_MISMATCH"
+                row["expected_model"] = args.expected_model
+                failed = True
+        rows.append(row)
+    _emit(rows, as_json=args.json)
+    return 2 if failed else 0
+
+
+def _next_alias(manager: GrokAccountPoolManager) -> str:
+    existing = {item.alias for item in manager.local_accounts()}
+    for number in range(2, 1000):
+        alias = f"grok-{number:02d}"
+        if alias not in existing:
+            return alias
+    raise GrokAccountPoolError("GROK_ACCOUNT_ALIAS_SPACE_EXHAUSTED")
+
+
+def _run_login(
+    home: Path,
+    *,
+    grok_bin: str,
+    show_identity: bool,
+) -> tuple[int, str]:
+    env = build_grok_profile_env(home)
+    proc = subprocess.Popen(
+        [grok_bin, "login", "--device-code"],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    captured: list[str] = []
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        captured.append(line)
+        visible = (
+            line
+            if show_identity
+            else SIGNED_IN_RE.sub("Signed in as [redacted]", line)
+        )
+        print(visible, end="", flush=True)
+    return proc.wait(), "".join(captured)
+
+
+def cmd_onboard(args: argparse.Namespace) -> int:
+    manager = _manager()
+    alias = args.alias or _next_alias(manager)
+    profile = (
+        Path(args.profile_home).expanduser()
+        if args.profile_home
+        else _profile_root() / alias
+    )
+    if not profile.is_absolute():
+        raise GrokAccountPoolError("GROK_PROFILE_HOME_INVALID")
+    if profile.exists() and any(profile.iterdir()) and not args.reuse_profile:
+        raise GrokAccountPoolError("GROK_PROFILE_HOME_NOT_EMPTY")
+    profile.mkdir(parents=True, exist_ok=True)
+    profile.chmod(0o700)
+
+    login_rc, login_output = _run_login(
+        profile,
+        grok_bin=args.grok_bin,
+        show_identity=args.show_identity,
+    )
+    if login_rc != 0:
+        print("GROK_ONBOARD_LOGIN_FAILED", file=sys.stderr)
+        return 2
+
+    probe_rc, probe_output = _run_probe(str(profile), grok_bin=args.grok_bin)
+    if probe_rc != 0:
+        print("GROK_ONBOARD_HEALTH_FAILED", file=sys.stderr)
+        print(probe_output, file=sys.stderr)
+        return 2
+    models = _models(probe_output)
+    if not models:
+        print("GROK_ONBOARD_MODELS_UNOBSERVED", file=sys.stderr)
+        return 2
+
+    match = SIGNED_IN_RE.search(login_output)
+    provider_identity = match.group(1) if match else None
+    display_label = provider_identity or (args.display_label.strip() if args.display_label else None)
+    account = manager.register_local_profile(
+        alias=alias,
+        home_path=profile,
+        display_label=display_label,
+    )
+    payload = {
+        "schema": "nexus.grok_account_onboarding.v1",
+        "status": "REGISTERED",
+        "alias": account.alias,
+        "models": models,
+    }
+    if args.show_identity:
+        payload["display_label"] = account.display_label
+    _emit(payload, as_json=args.json)
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--grok-bin",
+        default=os.getenv("NEXUS_GROK_BIN", "grok"),
+        help="Grok CLI executable.",
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    list_cmd = sub.add_parser("list")
+    list_cmd.add_argument("--show-identities", action="store_true")
+    list_cmd.add_argument("--json", action="store_true")
+    list_cmd.set_defaults(func=cmd_list)
+
+    health = sub.add_parser("health")
+    health.add_argument("--alias")
+    health.add_argument(
+        "--expected-model",
+        default=GrokExecutionAdapter().default_model(),
+    )
+    health.add_argument("--show-identities", action="store_true")
+    health.add_argument("--probe-busy", action="store_true")
+    health.add_argument("--json", action="store_true")
+    health.set_defaults(func=cmd_health)
+
+    onboard = sub.add_parser("onboard")
+    onboard.add_argument("--alias")
+    onboard.add_argument("--profile-home")
+    onboard.add_argument("--display-label")
+    onboard.add_argument("--show-identity", action="store_true")
+    onboard.add_argument("--reuse-profile", action="store_true")
+    onboard.add_argument("--json", action="store_true")
+    onboard.set_defaults(func=cmd_onboard)
+
+    args = parser.parse_args(argv)
+    try:
+        return int(args.func(args))
+    except (GrokAccountPoolError, OSError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
