@@ -137,6 +137,103 @@ def test_weekly_only_dual_family_account_enters_reserve() -> None:
     assert state["unknown"] == ["unknown"]
 
 
+def test_expiry_aware_draining_orders_five_hour_accounts_by_pressure() -> None:
+    now = 2_000_000_000.0
+    snapshot = {
+        "checked_at": _iso(now),
+        "accounts": [
+            {
+                "account": "far-high",
+                "ok": True,
+                "groups": {
+                    "Gemini Models": {
+                        "5h": _window(90.0, reset_at=_iso(now + 9 * 3600)),
+                    }
+                },
+            },
+            {
+                "account": "near-medium",
+                "ok": True,
+                "groups": {
+                    "Gemini Models": {
+                        "5h": _window(60.0, reset_at=_iso(now + 2 * 3600)),
+                    }
+                },
+            },
+            {
+                "account": "near-low",
+                "ok": True,
+                "groups": {
+                    "Gemini Models": {
+                        "5h": _window(5.0, reset_at=_iso(now + 3600)),
+                    }
+                },
+            },
+            {
+                "account": "no-reset",
+                "ok": True,
+                "groups": {
+                    "Gemini Models": {
+                        "5h": _window(100.0),
+                    }
+                },
+            },
+        ],
+    }
+
+    state = dispatch._dynamic_availability_state(
+        "gemini-3.8-flash-medium",
+        snapshot,
+        now_ts=now,
+        max_age_seconds=900,
+    )
+
+    # Pressure = remaining_pct / hours_to_reset:
+    # near-medium=30, far-high=10, near-low=5; unknown reset comes last.
+    assert state["preferred"] == [
+        "near-medium",
+        "far-high",
+        "near-low",
+        "no-reset",
+    ]
+
+
+def test_expiry_aware_draining_orders_weekly_fallback_by_pressure() -> None:
+    now = 2_000_000_000.0
+    snapshot = {
+        "checked_at": _iso(now),
+        "accounts": [
+            {
+                "account": "weekly-later",
+                "ok": True,
+                "groups": {
+                    "Gemini Models": {
+                        "weekly": _window(90.0, reset_at=_iso(now + 90 * 3600)),
+                    }
+                },
+            },
+            {
+                "account": "weekly-soon",
+                "ok": True,
+                "groups": {
+                    "Gemini Models": {
+                        "weekly": _window(50.0, reset_at=_iso(now + 10 * 3600)),
+                    }
+                },
+            },
+        ],
+    }
+
+    state = dispatch._dynamic_availability_state(
+        "gemini-3.8-flash-medium",
+        snapshot,
+        now_ts=now,
+        max_age_seconds=900,
+    )
+
+    assert state["fallback"] == ["weekly-soon", "weekly-later"]
+
+
 def test_stale_quota_snapshot_cannot_block_or_prioritize_accounts() -> None:
     now = 2_000_000_000.0
     snapshot = {

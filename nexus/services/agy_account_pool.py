@@ -24,7 +24,7 @@ from nexus.services.external_account_pool import (
 # GitHub credential keys are stripped from every worker execution environment
 # so a delegated worker never inherits a broad Owner GitHub credential that
 # could be interpreted as external-publication authority.
-AGY_ACCOUNT_PREFERENCE_TIERS_VERSION = 2
+AGY_ACCOUNT_PREFERENCE_TIERS_VERSION = 3
 
 GITHUB_CREDENTIAL_KEYS = (
     "GH_TOKEN",
@@ -1093,44 +1093,57 @@ class CrossProcessLeaseCoordinator:
 
                     if available_accounts:
                         has_healthy_candidates = True
-                        preferred_accounts = {
-                            name.strip()
-                            for name in os.getenv("NEXUS_AGY_PREFERRED_ACCOUNTS", "").split(",")
-                            if name.strip()
-                        }
-                        reserve_accounts = {
-                            name.strip()
-                            for name in os.getenv("NEXUS_AGY_RESERVE_ACCOUNTS", "").split(",")
-                            if name.strip()
-                        } - preferred_accounts
-                        fallback_accounts = (
-                            {
-                                name.strip()
-                                for name in os.getenv("NEXUS_AGY_FALLBACK_ACCOUNTS", "").split(",")
-                                if name.strip()
-                            }
-                            - preferred_accounts
-                            - reserve_accounts
+
+                        def _ordered_rank(env_name: str, excluded: set[str]) -> dict[str, int]:
+                            ranks: dict[str, int] = {}
+                            for raw_name in os.getenv(env_name, "").split(","):
+                                name = raw_name.strip()
+                                if not name or name in excluded or name in ranks:
+                                    continue
+                                ranks[name] = len(ranks)
+                            return ranks
+
+                        preferred_ranks = _ordered_rank(
+                            "NEXUS_AGY_PREFERRED_ACCOUNTS",
+                            set(),
+                        )
+                        reserve_ranks = _ordered_rank(
+                            "NEXUS_AGY_RESERVE_ACCOUNTS",
+                            set(preferred_ranks),
+                        )
+                        fallback_ranks = _ordered_rank(
+                            "NEXUS_AGY_FALLBACK_ACCOUNTS",
+                            set(preferred_ranks) | set(reserve_ranks),
                         )
 
                         def _candidate_sort_key(
                             account: InternalAccountRecord,
                         ) -> tuple[object, ...]:
-                            if account.internal_id in preferred_accounts:
+                            if account.internal_id in preferred_ranks:
                                 tier = 0
-                            elif account.internal_id in reserve_accounts:
+                                drain_rank = preferred_ranks[account.internal_id]
+                            elif account.internal_id in reserve_ranks:
                                 tier = 1
-                            elif account.internal_id in fallback_accounts:
+                                drain_rank = reserve_ranks[account.internal_id]
+                            elif account.internal_id in fallback_ranks:
                                 tier = 2
+                                drain_rank = fallback_ranks[account.internal_id]
                             else:
                                 tier = 3
-                            # Spread independent dispatches inside each capability tier without
-                            # a second shared scheduler state. Per-account flock remains the
-                            # authoritative cross-process exclusivity boundary.
+                                drain_rank = 0
+                            # Model-family availability establishes the tier. Within a tier,
+                            # dispatcher-provided order drains quota that is both abundant and
+                            # near reset before load/session spread breaks remaining ties.
                             spread = hashlib.sha256(
                                 f"{consumer_id}\0{account.internal_id}".encode("utf-8")
                             ).hexdigest()
-                            return (tier, account.load, spread, account.alias_hash)
+                            return (
+                                tier,
+                                drain_rank,
+                                account.load,
+                                spread,
+                                account.alias_hash,
+                            )
 
                         candidates = sorted(available_accounts, key=_candidate_sort_key)
 

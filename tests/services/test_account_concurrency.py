@@ -548,6 +548,46 @@ class TestAccountConcurrencyModel(unittest.TestCase):
                 else:
                     os.environ[key] = value
 
+    def test_same_tier_order_precedes_session_spread(self):
+        accounts = [
+            AgyAccount(alias="urgent", home_dir=f"{self.test_dir}/home_urgent"),
+            AgyAccount(alias="later", home_dir=f"{self.test_dir}/home_later"),
+        ]
+        mgr = self._create_manager(accounts)
+        coord = self._create_coordinator(mgr)
+        keys = {
+            "NEXUS_AGY_PREFERRED_ACCOUNTS": "urgent,later",
+            "NEXUS_AGY_RESERVE_ACCOUNTS": "",
+            "NEXUS_AGY_FALLBACK_ACCOUNTS": "",
+            "NEXUS_AGY_BLOCKED_ACCOUNTS": "",
+        }
+        old = {key: os.environ.get(key) for key in keys}
+        first = None
+        second = None
+        try:
+            os.environ.update(keys)
+            first = coord.acquire_claim(
+                "worker-expiry-priority-1",
+                model_family="gemini",
+            )
+            second = coord.acquire_claim(
+                "worker-expiry-priority-2",
+                model_family="gemini",
+            )
+            by_hash = {account.alias_hash: account.alias for account in accounts}
+            self.assertEqual(by_hash[first.account_alias_hash], "urgent")
+            self.assertEqual(by_hash[second.account_alias_hash], "later")
+        finally:
+            if second is not None:
+                second.release()
+            if first is not None:
+                first.release()
+            for key, value in old.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
     def test_model_family_quota_retirement_blocks_only_failed_family(self):
         """Quota exhaustion must not disable a dual-purpose account for another family."""
         alias = "dual_family_account"
