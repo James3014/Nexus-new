@@ -651,6 +651,125 @@ def test_r1_manifest_readiness_and_reconcile_contract_is_typed_and_hash_bound():
         )
 
 
+def test_r1_recovery_source_set_accepts_fixed_james_host_interpreter():
+    from nexus.contracts.gateway_deployment import (
+        RecoveryEntrypointIdentity,
+        RecoverySourceSet,
+        validate_recovery_source_set,
+    )
+
+    interpreter = InterpreterIdentity(
+        path="/Users/james/workspace/Nexus-new/.venv/bin/python",
+        resolved_path=(
+            "/Users/james/.local/share/uv/python/"
+            "cpython-3.12.14-macos-aarch64-none/bin/python3.12"
+        ),
+        sha256="2d96eb826dc74db4fcd5da6dde045a6fa145e292e07e69d1bdd1a19fa90ffc22",
+        uid=501,
+        gid=20,
+        mode="lrwxr-xr-x",
+    )
+    values = {
+        "repository": REPOSITORY,
+        "accepted_commit": "a" * 40,
+        "accepted_tree": "b" * 40,
+        "accepted_entrypoint": RecoveryEntrypointIdentity(
+            path=ENTRYPOINT, blob_oid="0" * 40, sha256="1" * 64
+        ),
+        "desired_commit": "c" * 40,
+        "desired_tree": "d" * 40,
+        "desired_entrypoint": RecoveryEntrypointIdentity(
+            path=ENTRYPOINT, blob_oid="e" * 40, sha256="f" * 64
+        ),
+        "predecessor_commit": "1" * 40,
+        "predecessor_tree": "2" * 40,
+        "predecessor_entrypoint": RecoveryEntrypointIdentity(
+            path=ENTRYPOINT, blob_oid="3" * 40, sha256="4" * 64
+        ),
+        "interpreter": interpreter,
+    }
+    source_set = RecoverySourceSet(
+        **values, source_set_sha256=canonical_hash(values)
+    )
+    assert validate_recovery_source_set(source_set) == source_set
+
+
+def test_r1_recovery_source_set_rejects_arbitrary_third_interpreter():
+    from nexus.contracts.gateway_deployment import (
+        RecoveryEntrypointIdentity,
+        RecoverySourceSet,
+        validate_recovery_source_set,
+    )
+
+    interpreter = InterpreterIdentity(
+        path="/Users/other/workspace/Nexus-new/.venv/bin/python",
+        resolved_path="/Users/other/.local/python3.12",
+        sha256="9" * 64,
+        uid=501,
+        gid=20,
+        mode="lrwxr-xr-x",
+    )
+    values = {
+        "repository": REPOSITORY,
+        "accepted_commit": "a" * 40,
+        "accepted_tree": "b" * 40,
+        "accepted_entrypoint": RecoveryEntrypointIdentity(
+            path=ENTRYPOINT, blob_oid="0" * 40, sha256="1" * 64
+        ),
+        "desired_commit": "c" * 40,
+        "desired_tree": "d" * 40,
+        "desired_entrypoint": RecoveryEntrypointIdentity(
+            path=ENTRYPOINT, blob_oid="e" * 40, sha256="f" * 64
+        ),
+        "predecessor_commit": "1" * 40,
+        "predecessor_tree": "2" * 40,
+        "predecessor_entrypoint": RecoveryEntrypointIdentity(
+            path=ENTRYPOINT, blob_oid="3" * 40, sha256="4" * 64
+        ),
+        "interpreter": interpreter,
+    }
+    source_set = RecoverySourceSet(
+        **values, source_set_sha256=canonical_hash(values)
+    )
+    with pytest.raises(ContractError, match="interpreter"):
+        validate_recovery_source_set(source_set)
+
+
+def test_r1_recovery_host_binding_allows_only_two_fixed_plists():
+    from nexus.contracts.gateway_deployment import (
+        JAMES_RECOVERY_INTERPRETER_IDENTITY,
+        JAMES_RECOVERY_PLIST,
+        PLIST,
+        recovery_interpreter_for_plist,
+    )
+
+    assert recovery_interpreter_for_plist(PLIST) == InterpreterIdentity()
+    assert (
+        recovery_interpreter_for_plist(JAMES_RECOVERY_PLIST)
+        == JAMES_RECOVERY_INTERPRETER_IDENTITY
+    )
+    with pytest.raises(ContractError, match="host plist"):
+        recovery_interpreter_for_plist(
+            "/Users/other/Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist"
+        )
+
+
+def test_r1_recovery_authority_rejects_cross_host_interpreter_substitution():
+    from nexus.contracts.gateway_deployment import (
+        JAMES_RECOVERY_PLIST,
+        RecoveryAuthorityReceipt,
+        validate_recovery_authority,
+    )
+
+    receipt = _r1_authority_fixture()
+    values = {**receipt.__dict__, "plist_path": JAMES_RECOVERY_PLIST}
+    values["receipt_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key != "receipt_hash"
+    })
+    with pytest.raises(ContractError, match="host/interpreter binding"):
+        validate_recovery_authority(RecoveryAuthorityReceipt(**values))
+
+
 def test_legacy_host_authority_cannot_authorize_durable_recovery():
     request = _request()
     altered = HostEffectAuthorityReceipt(**{

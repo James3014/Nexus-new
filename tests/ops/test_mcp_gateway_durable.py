@@ -306,6 +306,14 @@ def test_r1b1_staging_does_not_accept_caller_selected_git_refs():
     assert tuple(parameters) == ("request", "receipt")
 
 
+def test_r1_interpreter_identity_never_falls_back_from_unknown_manager_interpreter(
+    monkeypatch,
+):
+    monkeypatch.setattr(g, "_ACTUAL_INTERPRETER", "/Users/other/bin/python")
+    with pytest.raises(g.GatewayContractError, match="interpreter"):
+        g._r1_interpreter_identity()
+
+
 def _r1b1_fixture(
     tmp_path, monkeypatch, *, identity_seed=None, gitlink=False,
     gitlink_path="nested-repository", external_bootstrap=False,
