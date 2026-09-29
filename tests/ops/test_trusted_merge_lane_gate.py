@@ -9,9 +9,11 @@ import pytest
 from scripts.ops.trusted_merge_lane_gate import (
     BINDING_SCHEMA,
     REBIND_SCHEMA,
+    IssueClosureIntentError,
     LaneBindingError,
     canonical_hash,
     render_binding,
+    render_intent,
     validate_event,
 )
 
@@ -282,3 +284,93 @@ def test_tracked_task_that_began_direct_needs_no_rebind(tmp_path: Path):
         repo_root=repo,
     )
     assert result["reason"] == "TRACKED_TASK_BEGAN_DIRECT"
+
+
+def test_fixture_1191_negated_close_with_keep_open_blocks_gate(tmp_path: Path):
+    repo, base, head, _ = _repo(tmp_path)
+    binding = _binding(lane="DIRECT_CANONICAL", head=head)
+    intent = render_intent([{"issue": 1188, "on_merge": "KEEP_OPEN"}])
+    body = (
+        f"{render_binding(binding)}\n\n"
+        f"{intent}\n\n"
+        "This does not close #1188; the umbrella remains open for its standalone-owner child contracts."
+    )
+    with pytest.raises(IssueClosureIntentError, match="REJECTED_CLOSING_KEYWORD_FOR_KEEP_OPEN"):
+        validate_event(
+            _event(base=base, head=head, body=body),
+            repo_root=repo,
+        )
+
+
+def test_fixture_1191_negated_close_without_intent_blocks_gate(tmp_path: Path):
+    repo, base, head, _ = _repo(tmp_path)
+    binding = _binding(lane="DIRECT_CANONICAL", head=head)
+    body = (
+        f"{render_binding(binding)}\n\n"
+        "This does not close #1188; the umbrella remains open for its standalone-owner child contracts."
+    )
+    with pytest.raises(
+        IssueClosureIntentError, match="UNINTENDED_CLOSING_KEYWORD_FOR_UNTRACKED_ISSUE"
+    ):
+        validate_event(
+            _event(base=base, head=head, body=body),
+            repo_root=repo,
+        )
+
+
+def test_neutral_prose_with_keep_open_passes_gate(tmp_path: Path):
+    repo, base, head, _ = _repo(tmp_path)
+    binding = _binding(lane="DIRECT_CANONICAL", head=head)
+    intent = render_intent([{"issue": 1188, "on_merge": "KEEP_OPEN"}])
+    body = (
+        f"{render_binding(binding)}\n\n"
+        f"{intent}\n\n"
+        "#1188 remains open for its standalone-owner child contracts."
+    )
+    result = validate_event(
+        _event(base=base, head=head, body=body),
+        repo_root=repo,
+    )
+    assert result["status"] == "PASS"
+    assert result["issue_closure_intent"]["status"] == "PASS"
+    assert result["issue_closure_intent"]["intents"] == [
+        {"issue_number": 1188, "on_merge": "KEEP_OPEN"}
+    ]
+
+
+def test_explicit_positive_close_passes_gate(tmp_path: Path):
+    repo, base, head, _ = _repo(tmp_path)
+    binding = _binding(lane="DIRECT_CANONICAL", head=head)
+    intent = render_intent([{"issue": 1199, "on_merge": "CLOSE"}])
+    body = (
+        f"{render_binding(binding)}\n\n"
+        f"{intent}\n\n"
+        "Closes #1199 with deterministic closure intent guard."
+    )
+    result = validate_event(
+        _event(base=base, head=head, body=body),
+        repo_root=repo,
+    )
+    assert result["status"] == "PASS"
+    assert result["issue_closure_intent"]["status"] == "PASS"
+    assert result["issue_closure_intent"]["intents"] == [
+        {"issue_number": 1199, "on_merge": "CLOSE"}
+    ]
+
+
+def test_unintended_closing_keyword_blocks_gate(tmp_path: Path):
+    repo, base, head, _ = _repo(tmp_path)
+    binding = _binding(lane="DIRECT_CANONICAL", head=head)
+    intent = render_intent([{"issue": 1199, "on_merge": "CLOSE"}])
+    body = (
+        f"{render_binding(binding)}\n\n"
+        f"{intent}\n\n"
+        "Closes #1199. Also accidentally fixes #999 without declaring intent."
+    )
+    with pytest.raises(
+        IssueClosureIntentError, match="UNINTENDED_CLOSING_KEYWORD_FOR_UNTRACKED_ISSUE"
+    ):
+        validate_event(
+            _event(base=base, head=head, body=body),
+            repo_root=repo,
+        )
