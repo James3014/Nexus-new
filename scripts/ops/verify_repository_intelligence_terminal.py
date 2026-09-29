@@ -25,6 +25,10 @@ CHECK_ROLE_SCHEMA = "repository_intelligence.check_roles.v1"
 CHECK_ROLE_CLAIM_CEILING = "CI_POLICY_ROLE_EVIDENCE_ONLY"
 ADVISORY_CLAIM_CEILING = "ADVISORY_EVIDENCE_ONLY"
 ALLOWED_CLAIM_CEILINGS = frozenset({CHECK_ROLE_CLAIM_CEILING, ADVISORY_CLAIM_CEILING})
+TERMINAL_SCHEMA = "reviewer.repository_intelligence_terminal_cloud.v1"
+TERMINAL_OBSERVATION_SCHEMA = "reviewer.repository_intelligence_terminal_observation.v1"
+TERMINAL_SNAPSHOT_SEMANTICS = "OBSERVED_CHECK_SET_TERMINAL_AFTER_QUIESCENCE"
+CLOUD_SCHEMA = "reviewer.repository_intelligence_cloud.v1"
 
 PINNED_ACTION_COMMIT = "b1a0bd882e37a08a3a540947ae767a23d752bd67"
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
@@ -45,6 +49,74 @@ def canonical_hash(value: Mapping[str, Any]) -> str:
             allow_nan=False,
         ).encode("utf-8")
     ).hexdigest()
+
+
+def _verify_hash_bound_payload(value: Mapping[str, Any], name: str) -> None:
+    supplied = str(value.get("content_sha256") or "").strip().lower()
+    if not SHA64.fullmatch(supplied):
+        raise RepositoryIntelligenceConsumerError(f"INVALID_{name}_CONTENT_SHA256")
+    material = {k: v for k, v in value.items() if k != "content_sha256"}
+    if canonical_hash(material) != supplied:
+        raise RepositoryIntelligenceConsumerError(f"{name}_CONTENT_SHA256_MISMATCH")
+
+
+def _validate_successful_terminal_bundle(
+    data: Mapping[str, Any], identity: Mapping[str, Any]
+) -> None:
+    if data.get("schema") != TERMINAL_SCHEMA:
+        raise RepositoryIntelligenceConsumerError("INVALID_TERMINAL_SCHEMA")
+    if data.get("claim_ceiling") != ADVISORY_CLAIM_CEILING:
+        raise RepositoryIntelligenceConsumerError("INVALID_TERMINAL_CLAIM_CEILING")
+    if data.get("snapshot_semantics") != TERMINAL_SNAPSHOT_SEMANTICS:
+        raise RepositoryIntelligenceConsumerError("INVALID_SNAPSHOT_SEMANTICS")
+
+    _verify_hash_bound_payload(data, "TERMINAL_BUNDLE")
+
+    expected_identity = [
+        identity["repository"],
+        identity["pr_number"],
+        identity["head_sha"],
+        identity["base_sha"],
+        identity["current_main_sha"],
+    ]
+    if data.get("review_identity") != expected_identity:
+        raise RepositoryIntelligenceConsumerError("REVIEW_IDENTITY_MISMATCH")
+
+    witness = data.get("terminal_observation")
+    if not isinstance(witness, Mapping):
+        raise RepositoryIntelligenceConsumerError("MISSING_TERMINAL_OBSERVATION")
+    if witness.get("schema") != TERMINAL_OBSERVATION_SCHEMA:
+        raise RepositoryIntelligenceConsumerError("INVALID_TERMINAL_OBSERVATION_SCHEMA")
+    if witness.get("semantics") != TERMINAL_SNAPSHOT_SEMANTICS:
+        raise RepositoryIntelligenceConsumerError("INVALID_TERMINAL_OBSERVATION_SEMANTICS")
+    if witness.get("expected_head_sha") != identity["head_sha"]:
+        raise RepositoryIntelligenceConsumerError("TERMINAL_OBSERVATION_HEAD_MISMATCH")
+
+    checks = witness.get("observed_checks")
+    count = witness.get("observed_external_check_count")
+    if (
+        not isinstance(checks, list)
+        or not checks
+        or not isinstance(count, int)
+        or isinstance(count, bool)
+        or count != len(checks)
+    ):
+        raise RepositoryIntelligenceConsumerError("INVALID_OBSERVED_CHECK_SET")
+    for check in checks:
+        if not isinstance(check, Mapping) or check.get("head_sha") != identity["head_sha"]:
+            raise RepositoryIntelligenceConsumerError("OBSERVED_CHECK_IDENTITY_MISMATCH")
+
+    cloud_bundle = data.get("cloud_bundle")
+    if not isinstance(cloud_bundle, Mapping):
+        raise RepositoryIntelligenceConsumerError("MISSING_CLOUD_BUNDLE")
+    if (
+        cloud_bundle.get("schema") != CLOUD_SCHEMA
+        or cloud_bundle.get("claim_ceiling") != ADVISORY_CLAIM_CEILING
+    ):
+        raise RepositoryIntelligenceConsumerError("INVALID_CLOUD_BUNDLE")
+    _verify_hash_bound_payload(cloud_bundle, "CLOUD_BUNDLE")
+    if cloud_bundle.get("review_identity") != expected_identity:
+        raise RepositoryIntelligenceConsumerError("CLOUD_BUNDLE_IDENTITY_MISMATCH")
 
 
 def _validate_40_hex(value: Any, name: str) -> str:
@@ -159,7 +231,9 @@ def verify_advisory_terminal_evidence(
     if not SHA64.fullmatch(content_sha):
         raise RepositoryIntelligenceConsumerError("INVALID_CONTENT_SHA256")
 
-    # Record exact action commit in evidence
+    _validate_successful_terminal_bundle(data, identity)
+
+    # Record exact action commit in the consumer evidence after donor verification.
     data["action_commit"] = validated_commit
     data["content_sha256"] = canonical_hash({
         k: v for k, v in data.items() if k != "content_sha256"

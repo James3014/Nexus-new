@@ -26,6 +26,47 @@ IDENTITY = {
 }
 
 
+def _valid_terminal_bundle() -> dict:
+    review_identity = [
+        IDENTITY["repository"],
+        IDENTITY["pr_number"],
+        IDENTITY["head_sha"],
+        IDENTITY["base_sha"],
+        IDENTITY["current_main_sha"],
+    ]
+    cloud_bundle = {
+        "schema": "reviewer.repository_intelligence_cloud.v1",
+        "claim_ceiling": "ADVISORY_EVIDENCE_ONLY",
+        "review_identity": review_identity,
+        "reports": {},
+    }
+    cloud_bundle["content_sha256"] = canonical_hash(cloud_bundle)
+
+    terminal_observation = {
+        "schema": "reviewer.repository_intelligence_terminal_observation.v1",
+        "semantics": "OBSERVED_CHECK_SET_TERMINAL_AFTER_QUIESCENCE",
+        "expected_head_sha": IDENTITY["head_sha"],
+        "observed_external_check_count": 1,
+        "observed_checks": [
+            {
+                "name": "Exact-base impact gate",
+                "status": "success",
+                "head_sha": IDENTITY["head_sha"],
+            }
+        ],
+    }
+    bundle = {
+        "schema": "reviewer.repository_intelligence_terminal_cloud.v1",
+        "claim_ceiling": "ADVISORY_EVIDENCE_ONLY",
+        "snapshot_semantics": "OBSERVED_CHECK_SET_TERMINAL_AFTER_QUIESCENCE",
+        "review_identity": review_identity,
+        "terminal_observation": terminal_observation,
+        "cloud_bundle": cloud_bundle,
+    }
+    bundle["content_sha256"] = canonical_hash(bundle)
+    return bundle
+
+
 def test_action_commit_pinned_to_pr34():
     assert PINNED_ACTION_COMMIT == "b1a0bd882e37a08a3a540947ae767a23d752bd67"
 
@@ -58,13 +99,7 @@ def test_timeout_fixture_produces_valid_advisory_incomplete_evidence(tmp_path: P
 def test_successful_action_validates_and_records_commit_sha(tmp_path: Path):
     """Successful terminal observation validates envelope and records exact commit SHA."""
     report_file = tmp_path / "terminal.json"
-    bundle = {
-        "schema": "reviewer.repository_intelligence_terminal_cloud.v1",
-        "claim_ceiling": "ADVISORY_EVIDENCE_ONLY",
-        "snapshot_semantics": "OBSERVED_CHECK_SET_TERMINAL_AFTER_QUIESCENCE",
-        "content_sha256": "1" * 64,
-        "review_identity": IDENTITY,
-    }
+    bundle = _valid_terminal_bundle()
     report_file.write_text(json.dumps(bundle), encoding="utf-8")
 
     result = verify_advisory_terminal_evidence(
@@ -77,6 +112,40 @@ def test_successful_action_validates_and_records_commit_sha(tmp_path: Path):
     assert result["action_commit"] == PINNED_ACTION_COMMIT
     assert len(result["content_sha256"]) == 64
     assert result["claim_ceiling"] == "ADVISORY_EVIDENCE_ONLY"
+
+
+def test_successful_action_rejects_stale_review_identity(tmp_path: Path):
+    report_file = tmp_path / "stale.json"
+    bundle = _valid_terminal_bundle()
+    bundle["review_identity"][2] = "0" * 40
+    bundle["content_sha256"] = canonical_hash(
+        {k: v for k, v in bundle.items() if k != "content_sha256"}
+    )
+    report_file.write_text(json.dumps(bundle), encoding="utf-8")
+
+    with pytest.raises(RepositoryIntelligenceConsumerError, match="REVIEW_IDENTITY_MISMATCH"):
+        verify_advisory_terminal_evidence(
+            report_path=report_file,
+            action_outcome="success",
+            identity=IDENTITY,
+        )
+
+
+def test_successful_action_rejects_tampered_terminal_bundle(tmp_path: Path):
+    report_file = tmp_path / "tampered.json"
+    bundle = _valid_terminal_bundle()
+    bundle["terminal_observation"]["observed_external_check_count"] = 2
+    report_file.write_text(json.dumps(bundle), encoding="utf-8")
+
+    with pytest.raises(
+        RepositoryIntelligenceConsumerError,
+        match="TERMINAL_BUNDLE_CONTENT_SHA256_MISMATCH",
+    ):
+        verify_advisory_terminal_evidence(
+            report_path=report_file,
+            action_outcome="success",
+            identity=IDENTITY,
+        )
 
 
 def test_malformed_evidence_fails_visibly(tmp_path: Path):
