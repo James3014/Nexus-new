@@ -66,6 +66,14 @@
     {
       "path": "nexus/services/workflow_doctor.py",
       "mode": "0644"
+    },
+    {
+      "path": "scripts/ops/nexus-opencode-server-client",
+      "mode": "0755"
+    },
+    {
+      "path": "nexus/services/opencode_server_client.py",
+      "mode": "0644"
     }
   ],
   "components": {

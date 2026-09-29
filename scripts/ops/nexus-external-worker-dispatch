@@ -298,12 +298,15 @@ def _run_operation(
             list(command.argv),
             cwd=cwd,
             env=dict(command.env),
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.PIPE if command.stdin_text is not None else subprocess.DEVNULL,
             stdout=out_fh,
             stderr=err_fh,
             start_new_session=True,
             close_fds=True,
         )
+        if proc.stdin is not None:
+            proc.stdin.write((command.stdin_text or "").encode("utf-8"))
+            proc.stdin.close()
         journal.heartbeat(
             operation_id,
             phase="PROVIDER_RUNNING",

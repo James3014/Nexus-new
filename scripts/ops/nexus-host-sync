@@ -201,6 +201,8 @@ def _parse_manifest(data: bytes) -> dict[str, Any]:
             "scripts/ops/install_nexus_external_worker_dispatch.sh",
             "nexus/services/direct_operation_journal.py",
             "nexus/services/external_worker_runtime.py",
+            "nexus/services/opencode_server_client.py",
+            "scripts/ops/nexus-opencode-server-client",
         })
     if isinstance(components, dict) and isinstance(components.get("workflow_doctor"), dict):
         required.update({
