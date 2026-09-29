@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import stat
+import subprocess
 import time
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -212,3 +213,129 @@ def test_background_opencode_receives_stdin_eof_and_completes(
     assert current["provider_session_id"] == "ses_fake"
     assert current["reconciliation"]["retry_permitted"] is False
     assert not journal.prompt_path(operation_id).exists()
+
+
+def _fake_grok_with_profile_failover(path: Path) -> None:
+    body = """#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "grok 1.0.41"
+  exit 0
+fi
+if [ -f "$HOME/fail-auth" ]; then
+  echo '{"error":"You are not authenticated."}'
+  exit 1
+fi
+echo '{"model":"grok-4.5","session_id":"grok-session-ok","finish_reason":"stop","text":"OK"}'
+exit 0
+"""
+    path.write_text(body, encoding="utf-8")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
+def test_background_grok_rotates_once_with_same_operation_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = tmp_path / "grok"
+    _fake_grok_with_profile_failover(fake)
+    monkeypatch.setenv("NEXUS_GROK_BIN", str(fake))
+
+    pool_root = tmp_path / "grok-pool"
+    first_home = tmp_path / "profile-a"
+    second_home = tmp_path / "profile-b"
+    first_home.mkdir()
+    second_home.mkdir()
+    (first_home / "fail-auth").write_text("1", encoding="utf-8")
+    pool_root.mkdir()
+    (pool_root / "state.json").write_text(
+        __import__("json").dumps({
+            "accounts": {
+                "a-first": {
+                    "home_path": str(first_home),
+                    "enabled": True,
+                    "cooldown_until": 0.0,
+                    "last_failure_reason": "",
+                    "last_failure_timestamp": 0.0,
+                },
+                "b-second": {
+                    "home_path": str(second_home),
+                    "enabled": True,
+                    "cooldown_until": 0.0,
+                    "last_failure_reason": "",
+                    "last_failure_timestamp": 0.0,
+                },
+            },
+            "active_alias": "a-first",
+            "updated_at": 0.0,
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NEXUS_GROK_ACCOUNT_POOL_ROOT", str(pool_root))
+    from nexus.services.grok_account_pool import set_grok_account_pool_manager
+
+    set_grok_account_pool_manager(None)
+    root = tmp_path / "ops"
+    record = dispatch._spawn_background(
+        provider="grok",
+        model="grok-4.5",
+        prompt="hello",
+        cwd=str(tmp_path),
+        mode="plan",
+        auto_approve=False,
+        timeout_seconds=10,
+        require_free=False,
+        thinking="none",
+        operation_root=root,
+    )
+    operation_id = record["operation_id"]
+
+    deadline = time.time() + 5
+    journal = dispatch._journal("grok", root)
+    while time.time() < deadline:
+        current = journal.read(operation_id)
+        if current["status"] in {"COMPLETED", "FAILED", "OUTCOME_UNKNOWN"}:
+            break
+        time.sleep(0.05)
+
+    current = journal.read(operation_id)
+    assert current["operation_id"] == operation_id
+    assert current["status"] == "COMPLETED"
+    assert current["attempts"] == 2
+    assert current["rotations"] == 1
+    assert current["observed_provider"] == "grok"
+    assert current["observed_model"] == "grok-4.5"
+    assert current["provider_session_id"] == "grok-session-ok"
+    assert current["reconciliation"]["retry_permitted"] is False
+    state = __import__("json").loads((pool_root / "state.json").read_text())
+    assert state["accounts"]["a-first"]["last_failure_reason"] == "AUTH_OR_SESSION_INVALID"
+    assert state.get("leases", {}) == {}
+    set_grok_account_pool_manager(None)
+
+
+def test_runtime_revision_binds_explicit_snapshot_git_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "snapshot"
+    repo.mkdir()
+    subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.email", "test@example.invalid"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.name", "Snapshot Test"],
+        check=True,
+    )
+    (repo / "README.md").write_text("snapshot\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "README.md"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "snapshot"], check=True)
+    head = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    monkeypatch.setenv("NEXUS_EXTERNAL_WORKER_SNAPSHOT", str(repo))
+    monkeypatch.setattr(dispatch, "SNAPSHOT", repo)
+
+    assert dispatch._runtime_revision() == head
