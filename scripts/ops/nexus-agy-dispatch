@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -459,6 +460,56 @@ def classify_failure(
     return AccountFailureKind.UNKNOWN
 
 
+_AGY_ALIAS_RESOLUTION_RE = re.compile(
+    r'model alias "(?P<alias>[^"\n]+)" resolved to "(?P<resolved>[^"\n]+)"'
+)
+_AGY_RESOLVING_MODEL_RE = re.compile(r"Resolving model (?P<resolved>[^\s]+)")
+_AGY_CONVERSATION_RE = re.compile(
+    r"Created conversation (?P<conversation>[0-9a-fA-F-]{36})"
+)
+
+
+def _parse_agy_attestation(
+    log_path: Path,
+    *,
+    requested_model: str | None,
+) -> dict[str, str | None]:
+    """Parse Agy-owned execution witnesses without trusting configured identity."""
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {
+            "observed_provider": None,
+            "observed_model": None,
+            "provider_session_id": None,
+        }
+
+    resolved_models: list[str] = []
+    for match in _AGY_ALIAS_RESOLUTION_RE.finditer(text):
+        if requested_model is None or match.group("alias") == requested_model:
+            resolved_models.append(match.group("resolved"))
+    if not resolved_models and requested_model:
+        for match in _AGY_RESOLVING_MODEL_RE.finditer(text):
+            resolved = match.group("resolved")
+            if resolved == requested_model:
+                resolved_models.append(resolved)
+
+    conversations = [
+        match.group("conversation") for match in _AGY_CONVERSATION_RE.finditer(text)
+    ]
+    if not resolved_models or not conversations:
+        return {
+            "observed_provider": None,
+            "observed_model": None,
+            "provider_session_id": None,
+        }
+    return {
+        "observed_provider": "agy",
+        "observed_model": resolved_models[-1],
+        "provider_session_id": conversations[-1],
+    }
+
+
 def run_agy(
     *,
     env: dict[str, str],
@@ -484,6 +535,11 @@ def run_agy(
         "--print-timeout",
         f"{timeout}s",
     ]
+    attestation_log = os.getenv("NEXUS_AGY_ATTESTATION_LOG")
+    if attestation_log:
+        log_path = Path(attestation_log).expanduser()
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        argv += ["--log-file", str(log_path)]
     if model:
         argv += ["--model", model]
     if effort:
@@ -1027,6 +1083,9 @@ def _run_background_operation(
     heartbeat_thread.start()
 
     exit_code: int | None = None
+    attestation_log_path = journal.operation_dir(operation_id) / "agy.log"
+    prior_attestation_log = os.environ.get("NEXUS_AGY_ATTESTATION_LOG")
+    os.environ["NEXUS_AGY_ATTESTATION_LOG"] = str(attestation_log_path)
     try:
         exit_code = dispatch_run(
             prompt=prompt,
@@ -1060,6 +1119,10 @@ def _run_background_operation(
             terminal_status = "FAILED"
             reconciliation = None
 
+        attestation = _parse_agy_attestation(
+            attestation_log_path,
+            requested_model=model,
+        )
         journal.mark_terminal(
             operation_id,
             status=terminal_status,
@@ -1071,9 +1134,14 @@ def _run_background_operation(
             account_alias_hash=snapshot.get("account_alias_hash"),
             lease_id_hash=snapshot.get("lease_id_hash"),
             reconciliation=reconciliation,
+            **attestation,
         )
         return int(exit_code or 0)
     except BaseException as exc:
+        attestation = _parse_agy_attestation(
+            attestation_log_path,
+            requested_model=model,
+        )
         journal.mark_terminal(
             operation_id,
             status="OUTCOME_UNKNOWN",
@@ -1085,9 +1153,14 @@ def _run_background_operation(
                 "result": "WRAPPER_EXCEPTION_WITH_UNKNOWN_PROVIDER_EFFECT",
                 "retry_permitted": False,
             },
+            **attestation,
         )
         raise
     finally:
+        if prior_attestation_log is None:
+            os.environ.pop("NEXUS_AGY_ATTESTATION_LOG", None)
+        else:
+            os.environ["NEXUS_AGY_ATTESTATION_LOG"] = prior_attestation_log
         stop.set()
         heartbeat_thread.join(timeout=2.0)
 
