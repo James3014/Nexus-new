@@ -16,7 +16,9 @@ from nexus.contracts.autonomy_goal import (
 from nexus.contracts.github_orchestration import MainMovementEvidence, canonical_hash
 from nexus.orchestrator.autonomy_policy import StandingGrantOutcome, StandingGrantRequest
 from nexus.orchestrator.github_orchestration import (
+    GovernedEvidenceProjectionError,
     _resolve_durable_merge_authorization_at,
+    build_governed_orchestration_evidence,
     evaluate_action,
     prepare_merge_intent,
     requalify_main_movement,
@@ -1019,3 +1021,238 @@ def test_reviewer_implementer_identity_cannot_collude():
     raw["candidate"]["implementer"] = "reviewer"
     with pytest.raises(ValueError, match="MALFORMED_INPUT"):
         prepare_merge_intent(context(), request(context()), raw, now=NOW)
+
+
+def _compat_projection_inputs():
+    base = "1" * 40
+    head = "2" * 40
+    tree = "3" * 40
+    paths = ("nexus/a.py", "tests/test_a.py")
+    task_card = (
+        "# Task Card: TASK-COMPAT\n\n"
+        "artifact_authority: current\n"
+        "task_id: `TASK-COMPAT`\n"
+        "owner: James Chen\n"
+        "status: ACTIVE\n"
+        "commit_required: true\n"
+        "candidate_required: true\n\n"
+        "## Allowed files\n\n"
+        "- `nexus/a.py`\n"
+        "- `tests/test_a.py`\n\n"
+        "## Verification commands\n"
+    ).encode()
+    card_hash = __import__("hashlib").sha256(task_card).hexdigest()
+    lane = {
+        "schema": "nexus.merge_lane_binding.v1",
+        "execution_lane": "GOVERNED",
+        "contract_kind": "TRACKED_TASK_CARD",
+        "owner_id": "James3014",
+        "issue_number": 1211,
+        "task_id": "TASK-COMPAT",
+        "attempt_id": "ATTEMPT-COMPAT-A1",
+        "task_card_path": "tasks/compat/00-task.md",
+        "task_card_sha256": card_hash,
+        "owner_lane_rebind": None,
+    }
+    lane["binding_hash"] = canonical_hash(lane)
+    pr_body = (
+        "<!-- NEXUS_MERGE_LANE_V1\n"
+        + json.dumps(lane, sort_keys=True, separators=(",", ":"))
+        + "\nNEXUS_MERGE_LANE_V1 -->"
+    )
+    workflow_identity = {
+        "event_name": "pull_request_target",
+        "repository": "James3014/Nexus-new",
+        "default_branch": "main",
+        "workflow_ref": "James3014/Nexus-new/.github/workflows/trusted.yml@refs/heads/main",
+        "workflow_sha": base,
+        "run_id": 123,
+        "pull_request_number": 1210,
+    }
+    diff_hash = "4" * 64
+    manifest = {
+        "status": "CONTROLLER_COMPLETE",
+        "workflow_identity": workflow_identity,
+        "run_id": 123,
+        "base_sha": base,
+        "head_sha": head,
+        "head_tree": tree,
+        "raw_diff_sha256": diff_hash,
+    }
+    verifier = {
+        **manifest,
+        "status": "COMPLETE",
+        "executor": {"exit_code": 0},
+    }
+    acceptance = (
+        "Independent acceptance — exact Candidate A4\n\n"
+        f"- base: `{base}`\n"
+        f"- head: `{head}`\n"
+        f"- tree: `{tree}`\n"
+        f"- Task Card SHA-256: `{card_hash}`\n"
+        "- reviewer transport/session: Codex independent session `review-session-1`\n"
+        f"- reviewer output SHA-256: `{'5' * 64}`\n\n"
+        "Verdict: **BLOCKERS: none**\n"
+        "Maximum claim: `R1_SOURCE_CANDIDATE_ACCEPTED`."
+    )
+    checks = [
+        {
+            "name": "Exact-base impact gate",
+            "status": "completed",
+            "conclusion": "success",
+            "head_sha": head,
+        },
+        {
+            "name": "Trusted verifier (default branch)",
+            "status": "completed",
+            "conclusion": "success",
+            "head_sha": head,
+        },
+    ]
+    plan = {
+        "base_sha": base,
+        "head_sha": head,
+        "source_tree": tree,
+        "changed_paths": list(paths),
+    }
+    classification = {
+        "classification": "EXACT_BASELINE_DEBT",
+        "blocking": False,
+        "new_failures": [],
+    }
+    return {
+        "repository": "James3014/Nexus-new",
+        "issue_number": 1211,
+        "pull_request_number": 1210,
+        "pr_body": pr_body,
+        "task_card_path": "tasks/compat/00-task.md",
+        "task_card_bytes": task_card,
+        "controller_manifest_bytes": json.dumps(manifest, sort_keys=True).encode(),
+        "verifier_evidence_bytes": json.dumps(verifier, sort_keys=True).encode(),
+        "acceptance_comment_id": 5891783503,
+        "acceptance_comment_author": "James3014",
+        "acceptance_comment_body": acceptance,
+        "required_check_names": (
+            "Exact-base impact gate",
+            "Trusted verifier (default branch)",
+        ),
+        "check_observations": checks,
+        "impact_plan": plan,
+        "impact_classification": classification,
+        "implementer": "coordinator-implementer",
+        "observed_at": NOW,
+        "fresh_until": NOW + timedelta(hours=1),
+    }
+
+
+def test_governed_evidence_projection_builds_existing_v2_from_raw_evidence():
+    values = _compat_projection_inputs()
+    projected = build_governed_orchestration_evidence(**values)
+    assert projected.schema == "nexus.github_orchestration_evidence.v2"
+    assert projected.candidate.task_id == "TASK-COMPAT"
+    assert projected.candidate.attempt_id == "ATTEMPT-COMPAT-A1"
+    assert projected.candidate.reviewer == "review-session-1"
+    assert projected.candidate.candidate_state_hash != "4" * 64
+    assert projected.verifier_hash == projected.candidate.verified_receipt_hash
+    assert projected.changed_paths == projected.allowed_paths
+
+
+@pytest.mark.parametrize(
+    ("mutation", "code"),
+    [
+        ("card", "MERGE_LANE_BINDING_INVALID"),
+        ("controller", "CANDIDATE_SUBJECT_MISMATCH"),
+        ("verifier", "VERIFIER_SUBJECT_MISMATCH"),
+        ("acceptance", "INDEPENDENT_ACCEPTANCE_SUBJECT_MISMATCH"),
+        ("check", "REQUIRED_CHECK_STATE_UNPROVEN"),
+        ("impact", "IMPACT_EVIDENCE_UNPROVEN"),
+    ],
+)
+def test_governed_evidence_projection_fails_closed_on_subject_tamper(mutation, code):
+    values = _compat_projection_inputs()
+    if mutation == "card":
+        values["task_card_bytes"] += b"tamper\n"
+    elif mutation == "controller":
+        payload = json.loads(values["controller_manifest_bytes"])
+        payload["head_sha"] = "9" * 40
+        values["controller_manifest_bytes"] = json.dumps(payload).encode()
+    elif mutation == "verifier":
+        payload = json.loads(values["verifier_evidence_bytes"])
+        payload["raw_diff_sha256"] = "9" * 64
+        values["verifier_evidence_bytes"] = json.dumps(payload).encode()
+    elif mutation == "acceptance":
+        values["acceptance_comment_body"] = values["acceptance_comment_body"].replace(
+            "2" * 40, "9" * 40
+        )
+    elif mutation == "check":
+        values["check_observations"][0]["conclusion"] = "failure"
+    else:
+        values["impact_classification"]["blocking"] = True
+    with pytest.raises(GovernedEvidenceProjectionError, match=code):
+        build_governed_orchestration_evidence(**values)
+
+
+def test_governed_evidence_projection_rejects_arbitrary_authoritative_hash_inputs():
+    import inspect
+
+    parameters = inspect.signature(build_governed_orchestration_evidence).parameters
+    forbidden = {
+        "candidate_state_hash",
+        "verified_receipt_hash",
+        "verifier_hash",
+        "independent_acceptance_hash",
+        "checks_hash",
+        "reviews_hash",
+        "impact_hash",
+        "diff_hash",
+        "task_attempt_contract_hash",
+    }
+    assert not (forbidden & set(parameters))
+
+
+def _rebind_card(values, task_card_bytes):
+    old_hash = __import__("hashlib").sha256(values["task_card_bytes"]).hexdigest()
+    new_hash = __import__("hashlib").sha256(task_card_bytes).hexdigest()
+    match = __import__("re").search(
+        r"<!-- NEXUS_MERGE_LANE_V1\n(.*?)\nNEXUS_MERGE_LANE_V1 -->",
+        values["pr_body"],
+        __import__("re").DOTALL,
+    )
+    assert match
+    lane = json.loads(match.group(1))
+    lane["task_card_sha256"] = new_hash
+    lane.pop("binding_hash")
+    lane["binding_hash"] = canonical_hash(lane)
+    values["pr_body"] = (
+        "<!-- NEXUS_MERGE_LANE_V1\n"
+        + json.dumps(lane, sort_keys=True, separators=(",", ":"))
+        + "\nNEXUS_MERGE_LANE_V1 -->"
+    )
+    values["task_card_bytes"] = task_card_bytes
+    values["acceptance_comment_body"] = values["acceptance_comment_body"].replace(
+        old_hash, new_hash
+    )
+
+
+def test_governed_evidence_projection_current_card_uses_same_builder():
+    values = _compat_projection_inputs()
+    card = values["task_card_bytes"].replace(
+        b"status: ACTIVE\n", b"status: ACTIVE\nexecution_lane: GOVERNED\n"
+    )
+    _rebind_card(values, card)
+    projected = build_governed_orchestration_evidence(**values)
+    assert projected.candidate.task_id == "TASK-COMPAT"
+    assert projected.candidate.attempt_id == "ATTEMPT-COMPAT-A1"
+
+
+def test_governed_evidence_projection_rejects_explicit_non_governed_card():
+    values = _compat_projection_inputs()
+    card = values["task_card_bytes"].replace(
+        b"status: ACTIVE\n", b"status: ACTIVE\nexecution_lane: DIRECT_CANONICAL\n"
+    )
+    _rebind_card(values, card)
+    with pytest.raises(
+        GovernedEvidenceProjectionError,
+        match="UNSUPPORTED_LEGACY_CONTRACT_GENERATION",
+    ):
+        build_governed_orchestration_evidence(**values)
