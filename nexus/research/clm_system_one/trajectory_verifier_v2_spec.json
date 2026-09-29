@@ -1,0 +1,30 @@
+{
+  "schema": "nexus.research_experiment_spec.v1",
+  "issue": 1197,
+  "experiment_id": "NEXUS_SYSTEM_ONE_CLM_V2",
+  "track_id": "TRACK_1_TRAJECTORY_VERIFIER_HEAD",
+  "lifecycle_disposition": "WAITING_FOR_DATA",
+  "experimental_verdict": "TRAJECTORY_VERIFIER_INCONCLUSIVE_MORE_DATA_REQUIRED",
+  "claim_ceiling": "EXPERIMENTAL_SHADOW_ONLY",
+  "resume_gate": "TRAJECTORY_CORPUS_READY_FOR_T1_REAUDIT",
+  "next_allowed_action": "WAIT_FOR_MORE_VERIFIER_BACKED_TRAJECTORIES",
+  "auto_chain": false,
+  "holdout_manifest": {
+    "path": "docs/research/trajectory_verifier_v2/FINAL_HOLDOUT_DO_NOT_TRAIN.json",
+    "sha256": "399407569ed1220f968746bd6f7df3a65c3fc11486b4ae2d853b2212658b88bf"
+  },
+  "last_corpus_audit": {
+    "path": "docs/research/trajectory_verifier_v2/TRAJECTORY_CORPUS_READINESS_REPORT.md",
+    "sha256": "8169b1fd7e2a2c523f765e3602183c96c6efd662fb62524648d35cd04fce89d2"
+  },
+  "last_experiment_report": {
+    "path": "docs/research/trajectory_verifier_v2/TRAJECTORY_VERIFIER_EXPERIMENT_REPORT.md",
+    "sha256": "e96231e610c21f7d902e9db45e9b549dd9cfe442d6537f70e4bf0eb5dc387e9a"
+  },
+  "continuity": {
+    "canonical_state_root_source": "nexus_gateway_status.lifecycle.canonical_state_root",
+    "checkpoint_relative_root": "research/clm_system_one",
+    "readback_module": "nexus.research.clm_system_one.trajectory_continuity",
+    "chat_memory_is_authority": false
+  }
+}
