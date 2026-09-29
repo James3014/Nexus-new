@@ -194,6 +194,8 @@ def _spawn_background(
         argv.append("--auto-approve")
     if require_free:
         argv.append("--require-free")
+    else:
+        argv.append("--allow-paid-model")
 
     stdout_path = journal.stdout_path(operation_id)
     stderr_path = journal.stderr_path(operation_id)
