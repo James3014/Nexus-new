@@ -491,3 +491,15 @@ def test_registered_refresh_persists_ready_to_reaudit_without_auto_chain(
         / "readiness.json"
     )
     assert readiness_pointer.exists()
+
+
+def test_registered_v2_spec_artifact_digests_match_repository():
+    repo = Path(__file__).resolve().parents[2]
+    spec_path = repo / "nexus" / "research" / "clm_system_one" / "trajectory_verifier_v2_spec.json"
+    spec = json.loads(spec_path.read_text(encoding="utf-8"))
+
+    for key in ("holdout_manifest", "last_corpus_audit", "last_experiment_report"):
+        artifact = dict(spec[key])
+        target = repo / artifact["path"]
+        assert target.exists(), f"missing registered artifact: {target}"
+        assert hashlib.sha256(target.read_bytes()).hexdigest() == artifact["sha256"]

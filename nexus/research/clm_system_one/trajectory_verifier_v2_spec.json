@@ -15,7 +15,7 @@
   },
   "last_corpus_audit": {
     "path": "docs/research/trajectory_verifier_v2/TRAJECTORY_CORPUS_READINESS_REPORT.md",
-    "sha256": "8169b1fd7e2a2c523f765e3602183c96c6efd662fb62524648d35cd04fce89d2"
+    "sha256": "ce7a61bf8494dbb9425b8dd800e566d285a8a97d80549cad07cbdd2196daf723"
   },
   "last_experiment_report": {
     "path": "docs/research/trajectory_verifier_v2/TRAJECTORY_VERIFIER_EXPERIMENT_REPORT.md",
