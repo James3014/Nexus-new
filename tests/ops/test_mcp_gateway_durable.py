@@ -306,6 +306,14 @@ def test_r1b1_staging_does_not_accept_caller_selected_git_refs():
     assert tuple(parameters) == ("request", "receipt")
 
 
+def test_r1_interpreter_identity_never_falls_back_from_unknown_manager_interpreter(
+    monkeypatch,
+):
+    monkeypatch.setattr(g, "_ACTUAL_INTERPRETER", "/Users/other/bin/python")
+    with pytest.raises(g.GatewayContractError, match="interpreter"):
+        g._r1_interpreter_identity()
+
+
 def _r1b1_fixture(
     tmp_path, monkeypatch, *, identity_seed=None, gitlink=False,
     gitlink_path="nested-repository", external_bootstrap=False,
@@ -326,7 +334,7 @@ def _r1b1_fixture(
     )
 
     seed = identity_seed or hashlib.sha256(str(tmp_path).encode()).hexdigest()[:12]
-    monkeypatch.setattr(g, "INTERPRETER", sys.executable)
+    monkeypatch.setattr(g, "_ACTUAL_INTERPRETER", sys.executable)
     monkeypatch.setattr(
         g,
         "_r1_interpreter_identity",
@@ -1291,7 +1299,7 @@ def test_r1b1_named_role_swap_extra_refs_and_valid_bundle_encodings(tmp_path, mo
 
 
 def test_r1b1_bounded_subprocess_import_failure_is_rejected(tmp_path, monkeypatch):
-    monkeypatch.setattr(g, "INTERPRETER", sys.executable)
+    monkeypatch.setattr(g, "_ACTUAL_INTERPRETER", sys.executable)
     root = tmp_path / "checkout"
     entrypoint = root / g.GATEWAY_ENTRYPOINT
     entrypoint.parent.mkdir(parents=True)
@@ -3768,7 +3776,7 @@ def test_r1_live_production_wrapper_and_plist_are_fixed_and_secret_free(
     tmp_path, monkeypatch
 ):
     fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
-    monkeypatch.setattr(g, "INTERPRETER", "/Users/jameschen/Workspace/Nexus-new/.venv/bin/python")
+    monkeypatch.setattr(g, "_ACTUAL_INTERPRETER", "/Users/jameschen/Workspace/Nexus-new/.venv/bin/python")
     plan = g._recovery_plan(fixture["request"], fixture["receipt"])
 
     payload = plistlib.loads(g._recovery_expected_plist_bytes(plan.desired_root))
