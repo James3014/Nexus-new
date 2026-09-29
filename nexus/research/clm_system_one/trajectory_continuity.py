@@ -92,7 +92,13 @@ def resolve_research_evidence_root(repo_root: str | Path) -> Path:
     override = os.getenv("NEXUS_CLM_CANDIDATE_EVIDENCE_ROOT", "").strip()
     if override:
         return Path(override).expanduser().resolve()
-    return (Path(repo_root).expanduser().resolve() / ".nexus" / "research" / "clm_system_one" / "candidate_evidence").resolve()
+    return (
+        Path(repo_root).expanduser().resolve()
+        / ".nexus"
+        / "research"
+        / "clm_system_one"
+        / "candidate_evidence"
+    ).resolve()
 
 
 def _contains_forbidden_future_key(value: Any) -> bool:
@@ -203,7 +209,13 @@ def bind_trajectory_step_result(
     }
     record_sha = _sha256_json(body)
     record = dict(body, record_sha256=record_sha)
-    record_path = root / "trajectory" / "step_results" / step_ref.trajectory_id / f"{step_ref.step_index:08d}.json"
+    record_path = (
+        root
+        / "trajectory"
+        / "step_results"
+        / step_ref.trajectory_id
+        / f"{step_ref.step_index:08d}.json"
+    )
     _write_create_only(record_path, _json_bytes(record))
     return str(record_path.relative_to(root))
 
@@ -352,7 +364,9 @@ def project_corpus_readiness(
         blockers.append("holdout_overlap")
     if malformed:
         blockers.append("malformed_evidence")
-    disposition = "READY_TO_REAUDIT" if not blockers and pass_count and fail_count else "WAITING_FOR_DATA"
+    disposition = (
+        "READY_TO_REAUDIT" if not blockers and pass_count and fail_count else "WAITING_FOR_DATA"
+    )
     provenance: dict[str, int] = {}
     for row in valid:
         label = str(row.get("label_quality") or "")
@@ -488,7 +502,9 @@ def refresh_checkpoint_from_readiness(
         blockers=list(readiness.get("blockers") or []),
         resume_gate="TRAJECTORY_CORPUS_READY_FOR_T1_REAUDIT",
         next_allowed_action=(
-            "T0_T1_REAUDIT_ONLY" if status == "READY_TO_REAUDIT" else "WAIT_FOR_MORE_VERIFIER_BACKED_TRAJECTORIES"
+            "T0_T1_REAUDIT_ONLY"
+            if status == "READY_TO_REAUDIT"
+            else "WAIT_FOR_MORE_VERIFIER_BACKED_TRAJECTORIES"
         ),
         evidence_refs=evidence_refs,
     )
@@ -504,9 +520,8 @@ def read_registered_experiment(
     spec_path = repo / "nexus" / "research" / "clm_system_one" / spec_name
     spec = json.loads(spec_path.read_text(encoding="utf-8"))
     continuity = dict(spec.get("continuity") or {})
-    checkpoint_root = (
-        Path(canonical_state_root).expanduser().resolve()
-        / str(continuity.get("checkpoint_relative_root") or "research/clm_system_one")
+    checkpoint_root = Path(canonical_state_root).expanduser().resolve() / str(
+        continuity.get("checkpoint_relative_root") or "research/clm_system_one"
     )
     checkpoint = read_experiment_checkpoint(
         evidence_root=checkpoint_root,
