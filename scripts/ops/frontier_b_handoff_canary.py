@@ -3,6 +3,7 @@
 This module consumes a durable canary receipt. It owns no task state and grants
 no scheduling, routing, mutation, merge, release, deployment, or retry authority.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -115,7 +116,9 @@ def validate_receipt(value: Mapping[str, Any]) -> dict[str, Any]:
         repos.add(repo)
         if owner.get("issue_state") != "CLOSED" or owner.get("pr_state") != "MERGED":
             raise CanaryError("owner contract is not terminal")
-        _git_revision("git-commit:" + _text(owner.get("merge_sha"), "owner.merge_sha"), "owner.merge_sha")
+        _git_revision(
+            "git-commit:" + _text(owner.get("merge_sha"), "owner.merge_sha"), "owner.merge_sha"
+        )
 
     policy = receipt.get("required_vs_advisory")
     if not isinstance(policy, Mapping):
@@ -175,9 +178,7 @@ def recover_from_receipt(
     """Recover one non-terminal workflow using only durable receipt fields."""
     validated = validate_receipt(receipt)
     checkpoint = validated["checkpoint"]
-    source = _git_revision(
-        current_source_revision, "current_source_revision"
-    )
+    source = _git_revision(current_source_revision, "current_source_revision")
     expected_source = checkpoint["identity"]["source_revision"]
     drift = source != expected_source
     effects = [
