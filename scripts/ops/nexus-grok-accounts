@@ -181,7 +181,12 @@ def _next_alias(manager: GrokAccountPoolManager) -> str:
     raise GrokAccountPoolError("GROK_ACCOUNT_ALIAS_SPACE_EXHAUSTED")
 
 
-def _run_login(home: Path, *, grok_bin: str) -> tuple[int, str]:
+def _run_login(
+    home: Path,
+    *,
+    grok_bin: str,
+    show_identity: bool,
+) -> tuple[int, str]:
     env = build_grok_profile_env(home)
     proc = subprocess.Popen(
         [grok_bin, "login", "--device-code"],
@@ -195,7 +200,12 @@ def _run_login(home: Path, *, grok_bin: str) -> tuple[int, str]:
     assert proc.stdout is not None
     for line in proc.stdout:
         captured.append(line)
-        print(line, end="", flush=True)
+        visible = (
+            line
+            if show_identity
+            else SIGNED_IN_RE.sub("Signed in as [redacted]", line)
+        )
+        print(visible, end="", flush=True)
     return proc.wait(), "".join(captured)
 
 
@@ -214,7 +224,11 @@ def cmd_onboard(args: argparse.Namespace) -> int:
     profile.mkdir(parents=True, exist_ok=True)
     profile.chmod(0o700)
 
-    login_rc, login_output = _run_login(profile, grok_bin=args.grok_bin)
+    login_rc, login_output = _run_login(
+        profile,
+        grok_bin=args.grok_bin,
+        show_identity=args.show_identity,
+    )
     if login_rc != 0:
         print("GROK_ONBOARD_LOGIN_FAILED", file=sys.stderr)
         return 2
