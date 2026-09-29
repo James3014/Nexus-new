@@ -2798,6 +2798,9 @@ class LocalModelExecutor:
                     _dr_collection_attempt_id = (
                         f"attempt-{len(profile_attempts)}" if profile_attempts else "attempt-1"
                     )
+                    _dr_trajectory_ids: dict[str, str] = {}
+                    _dr_trajectory_next_step: dict[str, int] = {}
+                    _dr_trajectory_capture_errors: list[str] = []
                     import sys as _dbg
                     import json as _json
                     print(f"[C15-5C] candidate_models={_dr_candidate_models} len={len(_dr_candidate_models)}", file=_dbg.stderr)
@@ -2811,12 +2814,17 @@ class LocalModelExecutor:
                             _safe_model_slug = _re.sub(r'[^a-zA-Z0-9]', '-', _dr_cand_model.lower())
                             _safe_model_slug = _re.sub(r'-+', '-', _safe_model_slug).strip('-')
                             _cand_id = f"{request.task_id}#delegated-retry-{idx:02d}-{_safe_model_slug}"
+                            _trajectory_id = f"{_cand_id}#provider-trajectory"
+                            _dr_trajectory_ids[_cand_id] = _trajectory_id
+                            _dr_trajectory_next_step[_cand_id] = 0
 
                             # Explicitly capture current context before closure definition
                             current_attempt_id = f"attempt-{len(profile_attempts)}" if profile_attempts else "attempt-1"
                             current_execution_profile = profile_attempts[-1] if profile_attempts else "FULL"
 
-                            def _make_committee_provider(_model_name):
+                            def _make_committee_provider(
+                                _model_name, _candidate_id, _candidate_trajectory_id
+                            ):
                                 def _cp_gen(system_prompt_or_req, user_prompt=None, model=None, timeout=None, options=None, api_type=None, **kwargs):
                                     from nexus.services.local_heal.local_model_provider import LocalModelProviderRequest
                                     if user_prompt is not None:
@@ -2826,6 +2834,11 @@ class LocalModelExecutor:
                                     _resolved_model = _model_name
                                     # Alias resolution is owned by OllamaLocalModelProvider.
                                     _opts = options or kwargs.get("options")
+                                    _phase = kwargs.get("phase", "retry")
+                                    _attempt_id = kwargs.get("attempt_id", current_attempt_id)
+                                    _execution_profile = kwargs.get(
+                                        "execution_profile", current_execution_profile
+                                    )
                                     prov_req = LocalModelProviderRequest(
                                         task_id=request.task_id,
                                         prompt=prompt,
@@ -2833,17 +2846,117 @@ class LocalModelExecutor:
                                         model_name=_resolved_model,
                                         timeout_sec=provider_timeout_sec,
                                         options=_opts,
-                                        phase=kwargs.get("phase", "retry"), # 這是 retry phase
-                                        attempt_id=kwargs.get("attempt_id", current_attempt_id),
-                                        execution_profile=kwargs.get("execution_profile", current_execution_profile),
+                                        phase=_phase,
+                                        attempt_id=_attempt_id,
+                                        execution_profile=_execution_profile,
                                     )
-                                    prov_resp = provider.generate(prov_req)
+                                    _trajectory_step_ref = None
+                                    try:
+                                        from nexus.research.clm_system_one.trajectory_continuity import (
+                                            resolve_research_evidence_root,
+                                            seal_trajectory_step,
+                                        )
+
+                                        _step_index = _dr_trajectory_next_step[_candidate_id]
+                                        _trajectory_step_ref = seal_trajectory_step(
+                                            evidence_root=resolve_research_evidence_root(
+                                                request.repo_root
+                                            ),
+                                            task_id=request.task_id,
+                                            trajectory_id=_candidate_trajectory_id,
+                                            attempt_id=_dr_collection_attempt_id,
+                                            candidate_id=_candidate_id,
+                                            step_index=_step_index,
+                                            source_revision=str(
+                                                _dr_route_ctx.get("source_revision")
+                                                or _dr_route_ctx.get("workspace_revision")
+                                                or ""
+                                            ),
+                                            pre_action_state={
+                                                "task_objective": request.problem_statement,
+                                                "target_file": request.target_file,
+                                                "prompt": prompt,
+                                                "phase": _phase,
+                                                "evidence_refs": [
+                                                    str(ref)
+                                                    for ref in (request.evidence_refs or [])
+                                                ],
+                                            },
+                                            action_type="local_model_generate",
+                                            action_payload={
+                                                "model_name": _resolved_model,
+                                                "api_type": api_type or "generate",
+                                                "attempt_id": _attempt_id,
+                                                "execution_profile": _execution_profile,
+                                                "options_repr": repr(_opts),
+                                            },
+                                        )
+                                        _dr_trajectory_next_step[_candidate_id] = _step_index + 1
+                                    except Exception as _trace_exc:
+                                        _dr_trajectory_capture_errors.append(
+                                            f"seal:{type(_trace_exc).__name__}"
+                                        )
+
+                                    try:
+                                        prov_resp = provider.generate(prov_req)
+                                    except Exception as _provider_exc:
+                                        if _trajectory_step_ref is not None:
+                                            try:
+                                                from nexus.research.clm_system_one.trajectory_continuity import (
+                                                    bind_trajectory_step_result,
+                                                    resolve_research_evidence_root,
+                                                )
+
+                                                bind_trajectory_step_result(
+                                                    evidence_root=resolve_research_evidence_root(
+                                                        request.repo_root
+                                                    ),
+                                                    step_ref=_trajectory_step_ref,
+                                                    action_result={
+                                                        "response_type": "Exception",
+                                                        "exception_type": type(
+                                                            _provider_exc
+                                                        ).__name__,
+                                                        "error": str(_provider_exc),
+                                                    },
+                                                )
+                                            except Exception as _trace_exc:
+                                                _dr_trajectory_capture_errors.append(
+                                                    f"result:{type(_trace_exc).__name__}"
+                                                )
+                                        raise
                                     out = prov_resp.output_text or ""
+                                    if _trajectory_step_ref is not None:
+                                        try:
+                                            from nexus.research.clm_system_one.trajectory_continuity import (
+                                                bind_trajectory_step_result,
+                                                resolve_research_evidence_root,
+                                            )
+
+                                            bind_trajectory_step_result(
+                                                evidence_root=resolve_research_evidence_root(
+                                                    request.repo_root
+                                                ),
+                                                step_ref=_trajectory_step_ref,
+                                                action_result={
+                                                    "response_type": type(prov_resp).__name__,
+                                                    "output_text": out,
+                                                    "error": str(prov_resp.error or ""),
+                                                },
+                                            )
+                                        except Exception as _trace_exc:
+                                            _dr_trajectory_capture_errors.append(
+                                                f"result:{type(_trace_exc).__name__}"
+                                            )
                                     print(f"[C15-5C] _cp_gen model={_model_name} resolved={_resolved_model} prompt_len={len(prompt)} out_len={len(out)} err={prov_resp.error}", file=_dbg.stderr)
                                     return out
                                 return _cp_gen
 
-                            _cp_pipeline = HealPipeline(ollama_generate_fn=_make_committee_provider(_dr_cand_resolved))
+                            _cp_pipeline = HealPipeline(
+                                ollama_generate_fn=_make_committee_provider(
+                                    _dr_cand_resolved, _cand_id, _trajectory_id
+                                )
+                            )
                             _cp_route_ctx = dict(route_ctx)
                             _cp_route_ctx["semantic_retry_seed"] = route_ctx.get("semantic_retry_seed", {})
                             _cp_heal_ctx = LegacyHealContext(
@@ -3165,6 +3278,77 @@ class LocalModelExecutor:
                         )
                         raw_meta["candidate_evidence_collection_eligible_rows"] = (
                             _dr_collection.eligible_count
+                        )
+
+                        _dr_trajectory_outcomes_bound = 0
+                        _dr_trajectory_outcomes_skipped = 0
+                        try:
+                            from nexus.research.clm_system_one.trajectory_continuity import (
+                                bind_trajectory_outcome,
+                                refresh_registered_experiment,
+                                resolve_research_evidence_root,
+                            )
+
+                            _trajectory_evidence_root = resolve_research_evidence_root(
+                                request.repo_root
+                            )
+                            for _cand, _row_ref in zip(
+                                _dr_collection_candidates,
+                                _dr_collection.row_refs,
+                                strict=True,
+                            ):
+                                _cid = str(_cand.get("candidate_id") or "")
+                                if _dr_trajectory_next_step.get(_cid, 0) <= 0:
+                                    _dr_trajectory_outcomes_skipped += 1
+                                    continue
+                                try:
+                                    bind_trajectory_outcome(
+                                        evidence_root=_trajectory_evidence_root,
+                                        trajectory_id=_dr_trajectory_ids[_cid],
+                                        candidate_evidence_ref=_row_ref,
+                                    )
+                                except ValueError:
+                                    _dr_trajectory_outcomes_skipped += 1
+                                else:
+                                    _dr_trajectory_outcomes_bound += 1
+
+                            if _dr_trajectory_outcomes_bound:
+                                _refresh = refresh_registered_experiment(
+                                    repo_root=request.repo_root,
+                                    candidate_evidence_root=_trajectory_evidence_root,
+                                )
+                                _refresh_checkpoint = dict(
+                                    _refresh.get("checkpoint") or {}
+                                )
+                                _refresh_readiness = dict(
+                                    _refresh.get("readiness") or {}
+                                )
+                                raw_meta["trajectory_corpus_checkpoint_status"] = (
+                                    _refresh_checkpoint.get("status")
+                                )
+                                raw_meta["trajectory_corpus_checkpoint_sha256"] = (
+                                    _refresh_checkpoint.get("checkpoint_sha256")
+                                )
+                                raw_meta["trajectory_corpus_readiness"] = (
+                                    _refresh_readiness.get("disposition")
+                                )
+                        except Exception as _trajectory_refresh_exc:
+                            _dr_trajectory_capture_errors.append(
+                                "refresh:"
+                                + type(_trajectory_refresh_exc).__name__
+                            )
+
+                        raw_meta["trajectory_capture_step_count"] = sum(
+                            _dr_trajectory_next_step.values()
+                        )
+                        raw_meta["trajectory_outcomes_bound"] = (
+                            _dr_trajectory_outcomes_bound
+                        )
+                        raw_meta["trajectory_outcomes_skipped"] = (
+                            _dr_trajectory_outcomes_skipped
+                        )
+                        raw_meta["trajectory_capture_errors"] = list(
+                            _dr_trajectory_capture_errors
                         )
                         raw_meta["candidate_evidence_delivered_winner_id"] = (
                             _dr_delivered_candidate_id

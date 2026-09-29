@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -88,6 +89,13 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _trajectory_storage_key(trajectory_id: str) -> str:
+    value = str(trajectory_id or "").strip()
+    if not value:
+        raise ValueError("trajectory_id is required")
+    return _sha256_bytes(value.encode("utf-8"))
+
+
 def resolve_research_evidence_root(repo_root: str | Path) -> Path:
     override = os.getenv("NEXUS_CLM_CANDIDATE_EVIDENCE_ROOT", "").strip()
     if override:
@@ -149,7 +157,7 @@ def seal_trajectory_step(
     _write_create_only(state_path, _json_bytes(pre_action_state))
     _write_create_only(action_path, _json_bytes(action_payload))
 
-    steps_dir = root / "trajectory" / "steps" / trajectory_id
+    steps_dir = root / "trajectory" / "steps" / _trajectory_storage_key(trajectory_id)
     previous_sha = ""
     if step_index:
         previous_path = steps_dir / f"{step_index - 1:08d}.json"
@@ -213,7 +221,7 @@ def bind_trajectory_step_result(
         root
         / "trajectory"
         / "step_results"
-        / step_ref.trajectory_id
+        / _trajectory_storage_key(step_ref.trajectory_id)
         / f"{step_ref.step_index:08d}.json"
     )
     _write_create_only(record_path, _json_bytes(record))
@@ -251,14 +259,14 @@ def bind_trajectory_outcome(
     }
     record_sha = _sha256_json(body)
     record = dict(body, record_sha256=record_sha)
-    path = root / "trajectory" / "outcomes" / f"{trajectory_id}.json"
+    path = root / "trajectory" / "outcomes" / f"{_trajectory_storage_key(trajectory_id)}.json"
     _write_create_only(path, _json_bytes(record))
     return str(path.relative_to(root))
 
 
 def _trajectory_complete(root: Path, trajectory_id: str) -> tuple[bool, list[str]]:
-    steps_dir = root / "trajectory" / "steps" / trajectory_id
-    result_dir = root / "trajectory" / "step_results" / trajectory_id
+    steps_dir = root / "trajectory" / "steps" / _trajectory_storage_key(trajectory_id)
+    result_dir = root / "trajectory" / "step_results" / _trajectory_storage_key(trajectory_id)
     if not steps_dir.exists():
         return False, ["missing_steps"]
     steps = sorted(steps_dir.glob("*.json"))
@@ -562,4 +570,120 @@ def read_registered_experiment(
         "artifact_integrity": integrity,
         "checkpoint_matches_spec": checkpoint_matches_spec,
         "readback_ok": all_integrity_ok,
+    }
+
+
+def resolve_canonical_state_root() -> Path:
+    configured = os.getenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    home = Path.home()
+    for candidate in (
+        home / "Workspace" / "Nexus-new-self-hosted-state",
+        home / "workspace" / "Nexus-new-self-hosted-state",
+    ):
+        if candidate.exists():
+            return candidate.resolve()
+    raise FileNotFoundError("canonical Nexus state root is unavailable")
+
+
+def _git_head(repo: Path) -> str:
+    proc = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
+def _write_readiness_snapshot(
+    *,
+    checkpoint_root: Path,
+    experiment_id: str,
+    track_id: str,
+    readiness: Mapping[str, Any],
+) -> tuple[str, str]:
+    body = dict(readiness)
+    digest = _sha256_json(body)
+    slug = f"{experiment_id}__{track_id}"
+    path = checkpoint_root / "experiments" / slug / "readiness" / f"{digest}.json"
+    _write_create_only(path, _json_bytes(body))
+    pointer = {
+        "schema": "nexus.clm_trajectory_corpus_readiness_pointer.v1",
+        "readiness_sha256": digest,
+        "readiness_ref": str(path.relative_to(checkpoint_root)),
+        "updated_at": body.get("observed_at") or _now(),
+    }
+    _atomic_replace(
+        checkpoint_root / "experiments" / slug / "readiness.json",
+        _json_bytes(pointer),
+    )
+    return str(path.relative_to(checkpoint_root)), digest
+
+
+def refresh_registered_experiment(
+    *,
+    repo_root: str | Path,
+    candidate_evidence_root: str | Path | None = None,
+    canonical_state_root: str | Path | None = None,
+    spec_name: str = "trajectory_verifier_v2_spec.json",
+) -> dict[str, Any]:
+    repo = Path(repo_root).expanduser().resolve()
+    spec_path = repo / "nexus" / "research" / "clm_system_one" / spec_name
+    spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    holdout_info = dict(spec.get("holdout_manifest") or {})
+    holdout_path = (repo / str(holdout_info.get("path") or "")).resolve()
+    if repo not in holdout_path.parents or not holdout_path.exists():
+        raise ValueError("registered holdout manifest is unavailable")
+    holdout = json.loads(holdout_path.read_text(encoding="utf-8"))
+    holdout_tasks = list(holdout.get("historical_replay_tasks") or [])
+
+    evidence_root = (
+        Path(candidate_evidence_root).expanduser().resolve()
+        if candidate_evidence_root is not None
+        else resolve_research_evidence_root(repo)
+    )
+    readiness = project_corpus_readiness(
+        evidence_root=evidence_root,
+        holdout_task_ids=holdout_tasks,
+    )
+    state_root = (
+        Path(canonical_state_root).expanduser().resolve()
+        if canonical_state_root is not None
+        else resolve_canonical_state_root()
+    )
+    continuity = dict(spec.get("continuity") or {})
+    checkpoint_root = state_root / str(
+        continuity.get("checkpoint_relative_root") or "research/clm_system_one"
+    )
+    readiness_ref, readiness_sha = _write_readiness_snapshot(
+        checkpoint_root=checkpoint_root,
+        experiment_id=str(spec.get("experiment_id") or ""),
+        track_id=str(spec.get("track_id") or ""),
+        readiness=readiness,
+    )
+    audit = dict(spec.get("last_corpus_audit") or {})
+    checkpoint = refresh_checkpoint_from_readiness(
+        evidence_root=checkpoint_root,
+        experiment_id=str(spec.get("experiment_id") or ""),
+        track_id=str(spec.get("track_id") or ""),
+        readiness=readiness,
+        claim_ceiling=str(spec.get("claim_ceiling") or "EXPERIMENTAL_SHADOW_ONLY"),
+        source_revision=_git_head(repo),
+        holdout_manifest_ref=str(holdout_info.get("path") or ""),
+        holdout_manifest_sha256=str(holdout_info.get("sha256") or ""),
+        corpus_audit_ref=str(audit.get("path") or ""),
+        corpus_audit_sha256=str(audit.get("sha256") or ""),
+        evidence_refs=[
+            f"readiness:{readiness_sha}:{readiness_ref}",
+            "github:James3014/Nexus-new#1197",
+        ],
+    )
+    return {
+        "schema": "nexus.research_experiment_refresh.v1",
+        "readiness": readiness,
+        "readiness_ref": readiness_ref,
+        "readiness_sha256": readiness_sha,
+        "checkpoint": checkpoint,
     }

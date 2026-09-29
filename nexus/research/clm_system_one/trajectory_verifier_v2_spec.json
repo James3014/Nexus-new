@@ -26,5 +26,15 @@
     "checkpoint_relative_root": "research/clm_system_one",
     "readback_module": "nexus.research.clm_system_one.trajectory_continuity",
     "chat_memory_is_authority": false
+  },
+  "passive_capture": {
+    "status": "WIRED_CANDIDATE",
+    "seams": [
+      "localheal_delegated_retry_committee"
+    ],
+    "step_semantics": "seal_pre_action_state_and_action_then_bind_result",
+    "outcome_binding": "dataset_eligible_strong_verifier_only",
+    "readiness_refresh": "ON_STRONG_OUTCOME_BINDING",
+    "authority_effect": "NONE"
   }
 }

@@ -14,6 +14,7 @@ from nexus.research.clm_system_one.trajectory_continuity import (
     read_experiment_checkpoint,
     read_registered_experiment,
     refresh_checkpoint_from_readiness,
+    refresh_registered_experiment,
     seal_trajectory_step,
     write_experiment_checkpoint,
 )
@@ -384,3 +385,109 @@ def test_registered_experiment_readback_needs_no_chat_context(tmp_path: Path):
     assert readback["readback_ok"] is True
     assert readback["checkpoint"]["status"] == "WAITING_FOR_DATA"
     assert readback["checkpoint"]["resume_gate"] == "TRAJECTORY_CORPUS_READY_FOR_T1_REAUDIT"
+
+
+def test_trajectory_identity_is_not_used_as_a_filesystem_path(tmp_path: Path):
+    root = tmp_path / "evidence"
+    step = seal_trajectory_step(
+        evidence_root=root,
+        task_id="task-1",
+        trajectory_id="../../escape",
+        attempt_id="attempt-1",
+        candidate_id="candidate-1",
+        step_index=0,
+        source_revision="a" * 40,
+        pre_action_state={"known": ["safe"]},
+        action_type="read",
+        action_payload={"path": "file.py"},
+    )
+    step_path = (root / step.step_ref).resolve()
+    assert root.resolve() in step_path.parents
+    assert ".." not in Path(step.step_ref).parts
+    assert len(step_path.parent.name) == 64
+
+
+def test_registered_refresh_persists_ready_to_reaudit_without_auto_chain(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    repo = tmp_path / "repo"
+    state_root = tmp_path / "state"
+    evidence_root = repo / "evidence"
+    docs = repo / "docs" / "research" / "trajectory_verifier_v2"
+    spec_dir = repo / "nexus" / "research" / "clm_system_one"
+    docs.mkdir(parents=True)
+    spec_dir.mkdir(parents=True)
+
+    holdout = docs / "FINAL_HOLDOUT_DO_NOT_TRAIN.json"
+    audit = docs / "TRAJECTORY_CORPUS_READINESS_REPORT.md"
+    report = docs / "TRAJECTORY_VERIFIER_EXPERIMENT_REPORT.md"
+    holdout.write_text('{"historical_replay_tasks":["R01"]}\n')
+    audit.write_text("not ready\n")
+    report.write_text("inconclusive\n")
+
+    def sha(path: Path) -> str:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    spec = {
+        "schema": "nexus.research_experiment_spec.v1",
+        "issue": 1197,
+        "experiment_id": "NEXUS_SYSTEM_ONE_CLM_V2",
+        "track_id": "TRACK_1_TRAJECTORY_VERIFIER_HEAD",
+        "claim_ceiling": "EXPERIMENTAL_SHADOW_ONLY",
+        "holdout_manifest": {
+            "path": str(holdout.relative_to(repo)),
+            "sha256": sha(holdout),
+        },
+        "last_corpus_audit": {
+            "path": str(audit.relative_to(repo)),
+            "sha256": sha(audit),
+        },
+        "last_experiment_report": {
+            "path": str(report.relative_to(repo)),
+            "sha256": sha(report),
+        },
+        "continuity": {"checkpoint_relative_root": "research/clm_system_one"},
+    }
+    (spec_dir / "trajectory_verifier_v2_spec.json").write_text(json.dumps(spec))
+
+    monkeypatch.setenv("NEXUS_CLM_CANDIDATE_EVIDENCE_ROOT", str(evidence_root))
+    rows: list[tuple[str, str, str]] = []
+    for task_id in ("task-a", "task-b"):
+        for status in ("pass", "fail"):
+            candidate_id = f"{task_id}-{status}"
+            _, row_ref = _candidate_row(
+                repo,
+                monkeypatch,
+                task_id=task_id,
+                candidate_id=candidate_id,
+                status=status,
+            )
+            rows.append((task_id, candidate_id, row_ref))
+    for task_id, candidate_id, row_ref in rows:
+        _trajectory(
+            evidence_root,
+            task_id=task_id,
+            trajectory_id=f"traj-{candidate_id}",
+            candidate_id=candidate_id,
+            candidate_ref=row_ref,
+        )
+
+    refreshed = refresh_registered_experiment(
+        repo_root=repo,
+        candidate_evidence_root=evidence_root,
+        canonical_state_root=state_root,
+    )
+    assert refreshed["readiness"]["disposition"] == "READY_TO_REAUDIT"
+    assert refreshed["checkpoint"]["status"] == "READY_TO_REAUDIT"
+    assert refreshed["checkpoint"]["next_allowed_action"] == "T0_T1_REAUDIT_ONLY"
+    assert refreshed["checkpoint"]["auto_chain"] is False
+    readiness_pointer = (
+        state_root
+        / "research"
+        / "clm_system_one"
+        / "experiments"
+        / "NEXUS_SYSTEM_ONE_CLM_V2__TRACK_1_TRAJECTORY_VERIFIER_HEAD"
+        / "readiness.json"
+    )
+    assert readiness_pointer.exists()

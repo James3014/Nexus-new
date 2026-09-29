@@ -6951,6 +6951,7 @@ def test_c15_6e_controlled_committee_success_proven(tmp_path) -> None:
         execution_topology="localheal_pipeline",
         route_context={
             "locked_search": "def double(x):\n    return x * 2",
+            "source_revision": "a" * 40,
             "verifier_command": ["python3", "-c", "exit(0)"],
             "signal_snapshot": {
                 "execution_topology": "localheal_pipeline",
@@ -7010,7 +7011,17 @@ def test_c15_6e_controlled_committee_success_proven(tmp_path) -> None:
             ]
 
     def mock_pipeline_run(self, ctx):
-        return MockHealResult(ctx.committee_proposer_model)
+        model_name = getattr(ctx, "committee_proposer_model", "")
+        if model_name:
+            self.ollama_generate(
+                "system",
+                "user",
+                model=model_name,
+                phase="patch",
+                attempt_id="attempt-1",
+                execution_profile="FULL",
+            )
+        return MockHealResult(model_name)
 
     # Mock isolated apply: succeeds for both candidates
     # Mock isolated verifier: passes for ornith:9b (the winning candidate)
@@ -7118,6 +7129,23 @@ def test_c15_6e_controlled_committee_success_proven(tmp_path) -> None:
 
     # Check for expected label markers
     assert any(c.get("candidate_model") == "ornith:9b" and c.get("selected") is True for c in candidates)
+
+    # Issue #1197: real delegated-retry model calls must passively emit
+    # pre-action state/action/result trajectory evidence before final verifier binding.
+    assert meta.get("trajectory_capture_step_count") == 2
+    assert meta.get("trajectory_outcomes_bound") == 2
+    assert meta.get("trajectory_outcomes_skipped") == 0
+    assert not [
+        error
+        for error in meta.get("trajectory_capture_errors", [])
+        if not str(error).startswith("refresh:")
+    ]
+    trajectory_root = (
+        tmp_path / ".nexus" / "research" / "clm_system_one" / "candidate_evidence" / "trajectory"
+    )
+    assert len(list((trajectory_root / "steps").glob("*/*.json"))) == 2
+    assert len(list((trajectory_root / "step_results").glob("*/*.json"))) == 2
+    assert len(list((trajectory_root / "outcomes").glob("*.json"))) == 2
 
     # Expose label for the report
     res.raw_model_metadata["C15_6E_CONTROLLED_COMMITTEE_SUCCESS_PROVEN"] = True
