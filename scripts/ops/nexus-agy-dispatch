@@ -96,6 +96,7 @@ QUOTA_SNAPSHOT_PATH = Path(
 
 DEFAULT_QUOTA_MAX_AGE_SECONDS = 900.0
 DEFAULT_QUOTA_FAMILY_BLOCK_SECONDS = 300.0
+MIN_DRAIN_HORIZON_SECONDS = 60.0
 
 
 def _model_family(model: str | None) -> str:
@@ -199,6 +200,69 @@ def _quota_window_state(
     return "unknown", reset_ts
 
 
+def _quota_window_drain_pressure(
+    window: object,
+    *,
+    now_ts: float,
+) -> float | None:
+    """Return expiring quota pressure as remaining_pct per hour until reset."""
+    if not isinstance(window, dict) or window.get("status") != "known":
+        return None
+    remaining = window.get("remaining_pct")
+    reset_ts = _parse_reset_at(window.get("reset_at"))
+    if (
+        not isinstance(remaining, (int, float))
+        or float(remaining) <= 0.0
+        or reset_ts is None
+        or reset_ts <= now_ts
+    ):
+        return None
+    hours_to_reset = max(
+        (reset_ts - now_ts) / 3600.0,
+        MIN_DRAIN_HORIZON_SECONDS / 3600.0,
+    )
+    return float(remaining) / hours_to_reset
+
+
+def _family_drain_pressure(
+    groups: dict,
+    group_name: str,
+    family_state: str,
+    *,
+    now_ts: float,
+) -> float | None:
+    group = groups.get(group_name) if isinstance(groups, dict) else None
+    if not isinstance(group, dict):
+        return None
+    if family_state == "five_hour":
+        return _quota_window_drain_pressure(group.get("5h"), now_ts=now_ts)
+    if family_state == "weekly":
+        return _quota_window_drain_pressure(group.get("weekly"), now_ts=now_ts)
+    return None
+
+
+def _order_accounts_by_drain_pressure(
+    entries: list[tuple[str, float | None]],
+) -> list[str]:
+    """Prioritize known high burn pressure, then deterministic account identity."""
+    deduped: dict[str, float | None] = {}
+    for name, pressure in entries:
+        if name not in deduped:
+            deduped[name] = pressure
+            continue
+        current = deduped[name]
+        if pressure is not None and (current is None or pressure > current):
+            deduped[name] = pressure
+
+    def sort_key(item: tuple[str, float | None]) -> tuple[object, ...]:
+        name, pressure = item
+        if pressure is None:
+            return (1, 0.0, name)
+        return (0, -pressure, name)
+
+    return [name for name, _pressure in sorted(deduped.items(), key=sort_key)]
+
+
 def _family_quota_state(
     groups: dict,
     group_name: str,
@@ -288,9 +352,9 @@ def _dynamic_availability_state(
         return result
 
     result["snapshot_fresh"] = True
-    preferred: list[str] = []
-    reserve: list[str] = []
-    fallback: list[str] = []
+    preferred: list[tuple[str, float | None]] = []
+    reserve: list[tuple[str, float | None]] = []
+    fallback: list[tuple[str, float | None]] = []
     blocked: list[str] = []
     unknown: list[str] = []
     target_group = "Gemini Models" if family == "gemini" else "Claude and GPT models"
@@ -321,29 +385,45 @@ def _dynamic_availability_state(
         target_state, _target_reset = _family_quota_state(
             groups,
             target_group,
-            now_ts=now_ts,
+            now_ts=current,
         )
         other_state, _other_reset = _family_quota_state(
             groups,
             other_group,
-            now_ts=now_ts,
+            now_ts=current,
+        )
+        drain_pressure = _family_drain_pressure(
+            groups,
+            target_group,
+            target_state,
+            now_ts=current,
         )
         if target_state == "five_hour":
             if other_state == "five_hour":
-                reserve.append(name)
+                reserve.append((name, drain_pressure))
             else:
-                preferred.append(name)
+                preferred.append((name, drain_pressure))
         elif target_state == "weekly":
-            fallback.append(name)
+            fallback.append((name, drain_pressure))
         elif target_state == "blocked":
             blocked.append(name)
         else:
             unknown.append(name)
 
+    ordered_preferred = _order_accounts_by_drain_pressure(preferred)
+    ordered_reserve = _order_accounts_by_drain_pressure(reserve)
+    ordered_fallback = _order_accounts_by_drain_pressure(fallback)
+    preferred_names = set(ordered_preferred)
+    reserve_names = set(ordered_reserve) - preferred_names
+
     result.update({
-        "preferred": sorted(set(preferred)),
-        "reserve": sorted(set(reserve) - set(preferred)),
-        "fallback": sorted(set(fallback) - set(preferred) - set(reserve)),
+        "preferred": ordered_preferred,
+        "reserve": [name for name in ordered_reserve if name in reserve_names],
+        "fallback": [
+            name
+            for name in ordered_fallback
+            if name not in preferred_names and name not in reserve_names
+        ],
         "blocked": sorted(set(blocked)),
         "unknown": sorted(set(unknown)),
     })
@@ -356,7 +436,7 @@ def _dynamic_preference_tiers(model: str | None, snapshot: dict) -> tuple[list[s
 
 
 def _apply_dynamic_availability(model: str | None) -> tuple[dict, dict[str, object]]:
-    if AGY_ACCOUNT_PREFERENCE_TIERS_VERSION != 2:
+    if AGY_ACCOUNT_PREFERENCE_TIERS_VERSION != 3:
         raise RuntimeError("AGY_ACCOUNT_PREFERENCE_TIERS_VERSION_MISMATCH")
     snapshot = _load_quota_snapshot()
     state = _dynamic_availability_state(model, snapshot)
