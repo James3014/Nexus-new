@@ -379,26 +379,121 @@ class OpenCodeServerClient:
         return requested
 
     @staticmethod
-    def _permission(mode: str, auto_approve: bool) -> list[dict[str, str]]:
-        common = [
-            {"permission": "external_directory", "pattern": "*", "action": "deny"},
-            {"permission": "question", "pattern": "*", "action": "deny"},
-            {"permission": "read", "pattern": "*.env", "action": "deny"},
-            {"permission": "read", "pattern": "*.env.*", "action": "deny"},
+    def _permission_forbidden(request: dict[str, Any]) -> bool:
+        permission = str(request.get("permission") or "")
+        if permission in {"external_directory", "question"}:
+            return True
+        if permission == "read":
+            for pattern in request.get("patterns", []):
+                name = Path(str(pattern)).name
+                if name == ".env" or name.startswith(".env."):
+                    return True
+        return False
+
+    def _handle_pending_permissions(
+        self,
+        *,
+        session_id: str,
+        directory: str,
+        mode: str,
+        auto_approve: bool,
+    ) -> None:
+        pending = self._request(
+            "GET",
+            "/permission",
+            query={"directory": directory},
+            timeout=3,
+        )
+        if not isinstance(pending, list):
+            return
+        for request in pending:
+            if not isinstance(request, dict) or request.get("sessionID") != session_id:
+                continue
+            request_id = str(request.get("id") or "")
+            permission = str(request.get("permission") or "unknown")
+            if not request_id:
+                raise OpenCodeServerError("OPENCODE_PERMISSION_REQUEST_INVALID")
+            forbidden = self._permission_forbidden(request)
+            allow_once = mode == "act" and auto_approve and not forbidden
+            self._request(
+                "POST",
+                f"/permission/{request_id}/reply",
+                query={"directory": directory},
+                payload={"reply": "once" if allow_once else "reject"},
+                timeout=3,
+            )
+            if forbidden:
+                raise OpenCodeServerError(f"OPENCODE_PERMISSION_DENIED:{permission}")
+            if not allow_once:
+                raise OpenCodeServerError(f"OPENCODE_PERMISSION_REQUIRED:{permission}")
+
+    def _reject_pending_questions(self, *, session_id: str, directory: str) -> None:
+        pending = self._request(
+            "GET",
+            "/question",
+            query={"directory": directory},
+            timeout=3,
+        )
+        if not isinstance(pending, list):
+            return
+        for request in pending:
+            if not isinstance(request, dict) or request.get("sessionID") != session_id:
+                continue
+            request_id = str(request.get("id") or "")
+            if request_id:
+                self._request(
+                    "POST",
+                    f"/question/{request_id}/reject",
+                    query={"directory": directory},
+                    timeout=3,
+                )
+            raise OpenCodeServerError("OPENCODE_QUESTION_REQUIRED")
+
+    def _abort_session(self, session_id: str, directory: str) -> None:
+        try:
+            self._request(
+                "POST",
+                f"/session/{session_id}/abort",
+                query={"directory": directory},
+                timeout=3,
+            )
+        except OpenCodeServerError:
+            pass
+
+    @staticmethod
+    def _assistant_messages(messages: Any) -> list[dict[str, Any]]:
+        if not isinstance(messages, list):
+            return []
+        return [
+            message
+            for message in messages
+            if isinstance(message, dict)
+            and isinstance(message.get("info"), dict)
+            and message["info"].get("role") == "assistant"
         ]
-        if mode == "plan":
-            return [
-                {"permission": "*", "pattern": "*", "action": "deny"},
-                {"permission": "read", "pattern": "*", "action": "allow"},
-                {"permission": "list", "pattern": "*", "action": "allow"},
-                {"permission": "glob", "pattern": "*", "action": "allow"},
-                {"permission": "grep", "pattern": "*", "action": "allow"},
-            ] + common
-        if mode != "act":
-            raise OpenCodeServerError("OPENCODE_MODE_INVALID")
-        if not auto_approve:
-            raise OpenCodeServerError("OPENCODE_ACT_REQUIRES_AUTO_APPROVE")
-        return [{"permission": "*", "pattern": "*", "action": "allow"}] + common
+
+    @staticmethod
+    def _finish_from_parts(parts: Any) -> str | None:
+        if not isinstance(parts, list):
+            return None
+        for part in reversed(parts):
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") == "step-finish" and part.get("reason") is not None:
+                return str(part["reason"])
+        return None
+
+    @staticmethod
+    def _assistant_error(info: dict[str, Any]) -> str | None:
+        error = info.get("error")
+        if not isinstance(error, dict):
+            return None
+        data = error.get("data")
+        if isinstance(data, dict) and data.get("message"):
+            return str(data["message"])
+        if error.get("name"):
+            return str(error["name"])
+        return "unknown assistant error"
 
     def run(
         self,
@@ -420,7 +515,6 @@ class OpenCodeServerClient:
             payload={
                 "title": "Nexus external-worker operation",
                 "model": {"id": model_id, "providerID": "opencode"},
-                "permission": self._permission(mode, auto_approve),
             },
             timeout=10,
         )
@@ -432,64 +526,96 @@ class OpenCodeServerClient:
             "agent": "plan" if mode == "plan" else "build",
             "parts": [{"type": "text", "text": prompt}],
         }
+
+        # The free OpenCode provider rejects the synchronous /message route in
+        # current 1.18.x builds with "free tier can only be used from within
+        # OpenCode". The native asynchronous route is accepted by the same
+        # server/provider/model and is therefore the canonical direct-worker
+        # transport. Terminal truth is read back from session status/messages.
         try:
-            response = self._request(
+            self._request(
                 "POST",
-                f"/session/{session_id}/message",
+                f"/session/{session_id}/prompt_async",
                 query={"directory": directory},
                 payload=body,
-                timeout=max(1, timeout_seconds),
+                timeout=min(10, max(1, timeout_seconds)),
+                expect_json=False,
             )
-        except OpenCodeRequestTimeout:
-            try:
-                self._request(
-                    "POST",
-                    f"/session/{session_id}/abort",
+
+            deadline = time.monotonic() + max(1, timeout_seconds)
+            messages: Any = None
+            final_info: dict[str, Any] | None = None
+            final_parts: Any = []
+            final_finish: str | None = None
+            seen_busy = False
+
+            while time.monotonic() < deadline:
+                statuses = self._request(
+                    "GET",
+                    "/session/status",
                     query={"directory": directory},
-                    timeout=3,
+                    timeout=5,
                 )
-            except OpenCodeServerError:
-                pass
+                state: str | None = None
+                if isinstance(statuses, dict):
+                    current = statuses.get(session_id)
+                    if isinstance(current, dict) and current.get("type") is not None:
+                        state = str(current["type"])
+                if state in {"busy", "retry"}:
+                    seen_busy = True
+
+                self._handle_pending_permissions(
+                    session_id=session_id,
+                    directory=directory,
+                    mode=mode,
+                    auto_approve=auto_approve,
+                )
+                self._reject_pending_questions(
+                    session_id=session_id,
+                    directory=directory,
+                )
+
+                messages = self._request(
+                    "GET",
+                    f"/session/{session_id}/message",
+                    query={"directory": directory},
+                    timeout=8,
+                )
+                assistant_messages = self._assistant_messages(messages)
+                if assistant_messages:
+                    latest = assistant_messages[-1]
+                    latest_info = latest.get("info")
+                    if isinstance(latest_info, dict):
+                        final_info = latest_info
+                        final_parts = latest.get("parts", [])
+                        error = self._assistant_error(final_info)
+                        if error is not None:
+                            raise OpenCodeServerError(f"OPENCODE_ASSISTANT_ERROR:{error}")
+                        final_finish = (
+                            str(final_info["finish"])
+                            if final_info.get("finish") is not None
+                            else self._finish_from_parts(final_parts)
+                        )
+                        completed = (
+                            isinstance(final_info.get("time"), dict)
+                            and final_info["time"].get("completed") is not None
+                        )
+                        if final_finish is not None:
+                            break
+                        if completed and state not in {"busy", "retry"} and seen_busy:
+                            raise OpenCodeServerError("OPENCODE_TERMINAL_FINISH_MISSING")
+                time.sleep(0.1)
+            else:
+                raise OpenCodeRequestTimeout("OPENCODE_SESSION_TIMEOUT")
+        except OpenCodeRequestTimeout:
+            self._abort_session(session_id, directory)
+            raise
+        except OpenCodeServerError:
+            self._abort_session(session_id, directory)
             raise
 
-        if not isinstance(response, dict):
-            raise OpenCodeServerError("OPENCODE_MESSAGE_RESPONSE_INVALID")
-        response_info = response.get("info")
-        if not isinstance(response_info, dict):
-            raise OpenCodeServerError("OPENCODE_MESSAGE_INFO_MISSING")
-
-        # OpenCode can return from POST /message before the terminal finish
-        # field is visible on the response object. Poll the canonical session
-        # message list briefly and attest against the final assistant message.
-        deadline = time.monotonic() + min(max(2.0, timeout_seconds / 4), 10.0)
-        messages: Any = None
-        final_info = response_info
-        final_parts = response.get("parts", [])
-        while True:
-            messages = self._request(
-                "GET",
-                f"/session/{session_id}/message",
-                query={"directory": directory},
-                timeout=10,
-            )
-            assistant_messages: list[dict[str, Any]] = []
-            if isinstance(messages, list):
-                assistant_messages = [
-                    message
-                    for message in messages
-                    if isinstance(message, dict)
-                    and isinstance(message.get("info"), dict)
-                    and message["info"].get("role") == "assistant"
-                ]
-            if assistant_messages:
-                latest = assistant_messages[-1]
-                latest_info = latest.get("info")
-                if isinstance(latest_info, dict):
-                    final_info = {**response_info, **latest_info}
-                    final_parts = latest.get("parts", [])
-            if final_info.get("finish") is not None or time.monotonic() >= deadline:
-                break
-            time.sleep(0.1)
+        if final_info is None or final_finish is None:
+            raise OpenCodeServerError("OPENCODE_TERMINAL_MESSAGE_MISSING")
 
         tool_event_count = 0
         if isinstance(messages, list):
@@ -509,7 +635,7 @@ class OpenCodeServerClient:
             provider=str(final_info.get("providerID") or ""),
             model=str(final_info.get("modelID") or ""),
             cost=float(final_info.get("cost") or 0.0),
-            finish=(str(final_info["finish"]) if final_info.get("finish") is not None else None),
+            finish=final_finish,
             session_id=session_id,
             message_id=str(final_info["id"]) if final_info.get("id") else None,
             tool_event_count=tool_event_count,
