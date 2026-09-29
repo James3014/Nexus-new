@@ -118,11 +118,9 @@ def test_successful_action_rejects_stale_review_identity(tmp_path: Path):
     report_file = tmp_path / "stale.json"
     bundle = _valid_terminal_bundle()
     bundle["review_identity"][2] = "0" * 40
-    bundle["content_sha256"] = canonical_hash(
-        {
-            k: v for k, v in bundle.items() if k != "content_sha256"
-        }
-    )
+    bundle["content_sha256"] = canonical_hash({
+        k: v for k, v in bundle.items() if k != "content_sha256"
+    })
     report_file.write_text(json.dumps(bundle), encoding="utf-8")
 
     with pytest.raises(RepositoryIntelligenceConsumerError, match="REVIEW_IDENTITY_MISMATCH"):
