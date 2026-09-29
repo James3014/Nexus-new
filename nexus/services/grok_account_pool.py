@@ -76,6 +76,7 @@ def classify_grok_failure(text: str, *, timed_out: bool = False) -> AccountFailu
         x in value
         for x in (
             "not authenticated",
+            "not signed in",
             "authentication failed",
             "authentication error",
             "unauthorized",

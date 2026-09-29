@@ -131,6 +131,7 @@ def test_lease_environment_does_not_inherit_secret_keys(
     ("text", "expected"),
     [
         ("You are not authenticated.", AccountFailureKind.AUTH_OR_SESSION_INVALID),
+        ("Error: Not signed in.", AccountFailureKind.AUTH_OR_SESSION_INVALID),
         ("429 rate limit", AccountFailureKind.RATE_LIMITED),
         ("quota exhausted", AccountFailureKind.QUOTA_EXHAUSTED),
         ("service unavailable 503", AccountFailureKind.ACCOUNT_UNAVAILABLE),
