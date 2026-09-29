@@ -70,6 +70,20 @@ jobs:
           poll-seconds: "5"
           quiescence-seconds: "20"
 
+      - name: Resolve current main identity
+        id: current-main
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          current_main_sha="$(git ls-remote origin "refs/heads/$DEFAULT_BRANCH" | awk 'NR == 1 {print $1}')"
+          if [[ ! "$current_main_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Unable to resolve exact current main SHA" >&2
+            exit 1
+          fi
+          echo "sha=$current_main_sha" >> "$GITHUB_OUTPUT"
+
       - name: Validate terminal advisory envelope
         shell: bash
         env:
@@ -79,6 +93,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CURRENT_MAIN_SHA: ${{ steps.current-main.outputs.sha }}
         run: |
           set -euo pipefail
           python3 scripts/ops/verify_repository_intelligence_terminal.py \
@@ -88,6 +103,7 @@ jobs:
             --pr-number "$PR_NUMBER" \
             --head-sha "$HEAD_SHA" \
             --base-sha "$BASE_SHA" \
+            --current-main-sha "$CURRENT_MAIN_SHA" \
             --output "$REPORT_PATH" \
             --step-summary "$GITHUB_STEP_SUMMARY"
 
