@@ -56,9 +56,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
       - name: Observe terminal external check set
         id: ri-terminal
-        uses: James3014/repository-intelligence-engine/terminal@7d7a0e375f0b7be7b57d96653a4064fd379231eb
+        continue-on-error: true
+        uses: James3014/repository-intelligence-engine/terminal@b1a0bd882e37a08a3a540947ae767a23d752bd67
         with:
           pr-number: ${{ github.event.pull_request.number }}
           expected-head-sha: ${{ github.event.pull_request.head.sha }}
@@ -69,23 +73,28 @@ jobs:
       - name: Validate terminal advisory envelope
         shell: bash
         env:
-          REPORT_PATH: ${{ steps.ri-terminal.outputs.report-path }}
-          CONTENT_SHA256: ${{ steps.ri-terminal.outputs.content-sha256 }}
-          CLAIM_CEILING: ${{ steps.ri-terminal.outputs.claim-ceiling }}
-          SNAPSHOT_SEMANTICS: ${{ steps.ri-terminal.outputs.snapshot-semantics }}
-          OBSERVED_COUNT: ${{ steps.ri-terminal.outputs.observed-external-check-count }}
+          REPORT_PATH: ${{ steps.ri-terminal.outputs.report-path || 'repository-intelligence-terminal.json' }}
+          ACTION_OUTCOME: ${{ steps.ri-terminal.outcome }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          test -s "$REPORT_PATH"
-          test "$CLAIM_CEILING" = "ADVISORY_EVIDENCE_ONLY"
-          test "$SNAPSHOT_SEMANTICS" = "OBSERVED_CHECK_SET_TERMINAL_AFTER_QUIESCENCE"
-          test "${#CONTENT_SHA256}" -eq 64
-          test "$OBSERVED_COUNT" -gt 0
+          python3 scripts/ops/verify_repository_intelligence_terminal.py \
+            --report-path "$REPORT_PATH" \
+            --action-outcome "$ACTION_OUTCOME" \
+            --repository "$GITHUB_REPOSITORY" \
+            --pr-number "$PR_NUMBER" \
+            --head-sha "$HEAD_SHA" \
+            --base-sha "$BASE_SHA" \
+            --output "$REPORT_PATH" \
+            --step-summary "$GITHUB_STEP_SUMMARY"
 
       - name: Upload terminal Repository Intelligence evidence
         uses: actions/upload-artifact@v4
         with:
           name: repository-intelligence-terminal-pr-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
-          path: ${{ steps.ri-terminal.outputs.report-path }}
+          path: ${{ steps.ri-terminal.outputs.report-path || 'repository-intelligence-terminal.json' }}
           if-no-files-found: error
           retention-days: 30
