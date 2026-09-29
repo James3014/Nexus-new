@@ -48,6 +48,66 @@ def test_existing_state_schema_is_upgraded_with_cross_process_lease(tmp_path: Pa
     manager.release(lease)
 
 
+def test_register_local_profile_creates_private_state_and_inventory(tmp_path: Path) -> None:
+    root = tmp_path / "pool"
+    home = tmp_path / "profile"
+    home.mkdir(mode=0o700)
+    manager = GrokAccountPoolManager(root)
+
+    registered = manager.register_local_profile(
+        alias="grok-02",
+        home_path=home,
+        display_label="owner@example.invalid",
+    )
+
+    assert registered.alias == "grok-02"
+    assert registered.display_label == "owner@example.invalid"
+    state = json.loads((root / "state.json").read_text())
+    assert state["accounts"]["grok-02"]["home_path"] == str(home.resolve())
+    assert state["accounts"]["grok-02"]["display_label"] == "owner@example.invalid"
+    assert (root / "state.json").stat().st_mode & 0o077 == 0
+    inventory = manager.local_accounts()
+    assert len(inventory) == 1
+    assert inventory[0].home_exists is True
+    assert inventory[0].leased is False
+
+
+def test_register_local_profile_rejects_duplicate_alias_home_and_label(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "pool"
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir(mode=0o700)
+    second.mkdir(mode=0o700)
+    manager = GrokAccountPoolManager(root)
+    manager.register_local_profile(
+        alias="grok-02",
+        home_path=first,
+        display_label="same@example.invalid",
+    )
+
+    with pytest.raises(GrokAccountPoolError, match="ALIAS_ALREADY_REGISTERED"):
+        manager.register_local_profile(alias="grok-02", home_path=second)
+    with pytest.raises(GrokAccountPoolError, match="PROFILE_HOME_ALREADY_REGISTERED"):
+        manager.register_local_profile(alias="grok-03", home_path=first)
+    with pytest.raises(GrokAccountPoolError, match="DISPLAY_LABEL_DUPLICATE"):
+        manager.register_local_profile(
+            alias="grok-03",
+            home_path=second,
+            display_label="SAME@example.invalid",
+        )
+
+
+def test_register_local_profile_rejects_open_permissions(tmp_path: Path) -> None:
+    home = tmp_path / "profile"
+    home.mkdir(mode=0o755)
+    manager = GrokAccountPoolManager(tmp_path / "pool")
+
+    with pytest.raises(GrokAccountPoolError, match="PERMISSIONS_TOO_OPEN"):
+        manager.register_local_profile(alias="grok-02", home_path=home)
+
+
 def test_two_live_leases_get_distinct_profiles(tmp_path: Path) -> None:
     root = tmp_path / "pool"
     _state(root, [tmp_path / "a", tmp_path / "b"])

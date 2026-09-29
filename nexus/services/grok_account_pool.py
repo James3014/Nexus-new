@@ -10,6 +10,8 @@ import fcntl
 import hashlib
 import json
 import os
+import re
+import stat
 import time
 import uuid
 from dataclasses import dataclass
@@ -48,6 +50,24 @@ class GrokLease:
     execution_env: Mapping[str, str]
 
 
+@dataclass(frozen=True)
+class GrokLocalAccount:
+    """Machine-local operator view. Never put this object in public receipts."""
+
+    alias: str
+    home_path: str
+    display_label: str | None
+    enabled: bool
+    cooldown_until: float
+    last_failure_reason: str
+    last_failure_timestamp: float
+    leased: bool
+    home_exists: bool
+
+
+_ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
 def _hash(value: str, length: int = 12) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:length]
 
@@ -62,6 +82,19 @@ def _pid_alive(pid: object) -> bool:
     except PermissionError:
         return True
     return True
+
+
+def build_grok_profile_env(home_path: str | Path) -> dict[str, str]:
+    """Build the minimal environment used for local Grok profile probes."""
+
+    source = Path(home_path).expanduser()
+    if not source.is_absolute() or not source.is_dir():
+        raise GrokAccountPoolError("GROK_PROFILE_HOME_INVALID")
+    env = {key: os.environ[key] for key in _NEUTRAL_ENV_KEYS if key in os.environ}
+    env["HOME"] = str(source)
+    for key in _SENSITIVE_ENV_KEYS:
+        env.pop(key, None)
+    return env
 
 
 def classify_grok_failure(text: str, *, timed_out: bool = False) -> AccountFailureKind:
@@ -149,6 +182,130 @@ class GrokAccountPoolManager:
         fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
         return fh
 
+    def _load_state_or_empty(self) -> dict[str, Any]:
+        try:
+            return self._load_state()
+        except GrokAccountPoolExhaustedError as exc:
+            if str(exc) != "GROK_ACCOUNT_POOL_STATE_MISSING":
+                raise
+            return {
+                "accounts": {},
+                "leases": {},
+                "active_alias": None,
+                "updated_at": 0.0,
+            }
+
+    def local_accounts(self) -> tuple[GrokLocalAccount, ...]:
+        """Read machine-local inventory without reading credential contents."""
+
+        lock = self._lock()
+        try:
+            state = self._load_state_or_empty()
+            live_aliases = {
+                str(record.get("alias"))
+                for record in state.get("leases", {}).values()
+                if isinstance(record, dict)
+                and record.get("alias")
+                and _pid_alive(record.get("pid"))
+            }
+            result: list[GrokLocalAccount] = []
+            for alias, record in sorted(state["accounts"].items()):
+                if not isinstance(record, dict):
+                    raise GrokAccountPoolError("GROK_ACCOUNT_RECORD_INVALID")
+                raw_home = str(record.get("home_path") or "")
+                result.append(
+                    GrokLocalAccount(
+                        alias=str(alias),
+                        home_path=raw_home,
+                        display_label=(
+                            str(record["display_label"]).strip()
+                            if record.get("display_label")
+                            else None
+                        ),
+                        enabled=bool(record.get("enabled", True)),
+                        cooldown_until=float(record.get("cooldown_until") or 0.0),
+                        last_failure_reason=str(record.get("last_failure_reason") or ""),
+                        last_failure_timestamp=float(record.get("last_failure_timestamp") or 0.0),
+                        leased=str(alias) in live_aliases,
+                        home_exists=Path(raw_home).expanduser().is_dir(),
+                    )
+                )
+            return tuple(result)
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+            lock.close()
+
+    def register_local_profile(
+        self,
+        *,
+        alias: str,
+        home_path: str | Path,
+        display_label: str | None = None,
+    ) -> GrokLocalAccount:
+        """Atomically register one already-authenticated local profile."""
+
+        normalized_alias = str(alias).strip()
+        if not _ALIAS_RE.fullmatch(normalized_alias):
+            raise GrokAccountPoolError("GROK_ACCOUNT_ALIAS_INVALID")
+        source = Path(home_path).expanduser()
+        if not source.is_absolute() or not source.is_dir():
+            raise GrokAccountPoolError("GROK_PROFILE_HOME_INVALID")
+        if stat.S_IMODE(source.stat().st_mode) & 0o077:
+            raise GrokAccountPoolError("GROK_PROFILE_HOME_PERMISSIONS_TOO_OPEN")
+        resolved_home = str(source.resolve())
+        normalized_label = str(display_label or "").strip() or None
+
+        lock = self._lock()
+        try:
+            state = self._load_state_or_empty()
+            self._prune_dead_leases(state)
+            accounts = state.setdefault("accounts", {})
+            if normalized_alias in accounts:
+                raise GrokAccountPoolError("GROK_ACCOUNT_ALIAS_ALREADY_REGISTERED")
+            for record in accounts.values():
+                if not isinstance(record, dict):
+                    raise GrokAccountPoolError("GROK_ACCOUNT_RECORD_INVALID")
+                existing_home = Path(str(record.get("home_path") or "")).expanduser()
+                if existing_home.is_absolute() and existing_home.exists():
+                    try:
+                        if existing_home.resolve() == source.resolve():
+                            raise GrokAccountPoolError("GROK_PROFILE_HOME_ALREADY_REGISTERED")
+                    except OSError:
+                        pass
+                existing_label = str(record.get("display_label") or "").strip()
+                if (
+                    normalized_label
+                    and existing_label
+                    and existing_label.casefold() == normalized_label.casefold()
+                ):
+                    raise GrokAccountPoolError("GROK_ACCOUNT_DISPLAY_LABEL_DUPLICATE")
+            now = time.time()
+            accounts[normalized_alias] = {
+                "home_path": resolved_home,
+                "enabled": True,
+                "cooldown_until": 0.0,
+                "last_failure_reason": "",
+                "last_failure_timestamp": 0.0,
+            }
+            if normalized_label:
+                accounts[normalized_alias]["display_label"] = normalized_label
+            state["updated_at"] = now
+            self._write_state(state)
+            return GrokLocalAccount(
+                alias=normalized_alias,
+                home_path=resolved_home,
+                display_label=normalized_label,
+                enabled=True,
+                cooldown_until=0.0,
+                last_failure_reason="",
+                last_failure_timestamp=0.0,
+                leased=False,
+                home_exists=True,
+            )
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+            lock.close()
+
     @staticmethod
     def _prune_dead_leases(state: dict[str, Any]) -> None:
         leases = state.setdefault("leases", {})
@@ -173,11 +330,7 @@ class GrokAccountPoolManager:
         return str(opaque)
 
     def _execution_env(self, alias: str, raw_home: str) -> dict[str, str]:
-        env = {key: os.environ[key] for key in _NEUTRAL_ENV_KEYS if key in os.environ}
-        env["HOME"] = self._opaque_home(alias, raw_home)
-        for key in _SENSITIVE_ENV_KEYS:
-            env.pop(key, None)
-        return env
+        return build_grok_profile_env(self._opaque_home(alias, raw_home))
 
     @staticmethod
     def _eligible(state: dict[str, Any], now: float) -> list[tuple[str, dict[str, Any]]]:
