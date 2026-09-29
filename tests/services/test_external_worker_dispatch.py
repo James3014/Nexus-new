@@ -267,7 +267,8 @@ def test_background_codex_operation_reaches_terminal_receipt(
     current = journal.read(operation_id)
     assert current["status"] == "COMPLETED"
     assert current["observed_provider"] == "codex"
-    assert current["observed_model"] == "gpt-6-luna"
+    assert current["model"] == "gpt-6-luna"
+    assert current["observed_model"] is None
     assert current["total_cost"] is None
     assert current["provider_session_id"] == "thread-fake"
     assert current["tool_event_count"] == 1

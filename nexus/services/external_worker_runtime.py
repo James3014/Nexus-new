@@ -397,6 +397,7 @@ class CodexExecutionAdapter:
             "exec",
             "--json",
             "--ignore-user-config",
+            "--ignore-rules",
             "--skip-git-repo-check",
             "-m",
             request.model,
@@ -463,7 +464,9 @@ class CodexExecutionAdapter:
 
         terminal_success = exit_code == 0 and bool(turn_completed) and not failures
         observed_provider = "codex" if provider_session_id else None
-        observed_model = request.model if provider_session_id else None
+        # Codex CLI 0.158 JSONL attests thread/turn lifecycle but does not echo the selected model id.
+        # Keep the requested model in the journal model field; do not claim it as provider-observed.
+        observed_model = None
 
         if terminal_success:
             return WorkerOutcome(
@@ -476,7 +479,10 @@ class CodexExecutionAdapter:
                 provider_session_id=provider_session_id,
                 tool_event_count=len(tool_ids),
                 retry_permitted=False,
-                details={"attestation": "explicit-model-arg+turn.completed"},
+                details={
+                    "attestation": "request-bound-model+turn.completed",
+                    "requested_model": request.model,
+                },
             )
 
         failure_text = (stderr_text + "\n" + stdout_text).lower()
@@ -511,7 +517,8 @@ class CodexExecutionAdapter:
             details={
                 "exit_code": exit_code,
                 "failure_event_count": len(failures),
-                "attestation": "explicit-model-arg+terminal-event",
+                "attestation": "request-bound-model+terminal-event",
+                "requested_model": request.model,
             },
         )
 

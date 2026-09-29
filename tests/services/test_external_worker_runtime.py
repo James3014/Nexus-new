@@ -427,6 +427,7 @@ def test_codex_compile_is_explicit_noninteractive_and_chatgpt_auth_safe(
     assert argv[1:5] == ["--no-daemon", "-a", "never", "exec"]
     assert "--json" in argv
     assert "--ignore-user-config" in argv
+    assert "--ignore-rules" in argv
     assert "--skip-git-repo-check" in argv
     assert argv[argv.index("-m") + 1] == "gpt-6-luna"
     assert argv[argv.index("-c") + 1] == 'model_reasoning_effort="low"'
@@ -521,12 +522,13 @@ def test_codex_success_uses_thread_and_turn_terminal_receipt(tmp_path: Path) -> 
     assert result.status == "COMPLETED"
     assert result.failure_kind is None
     assert result.observed_provider == "codex"
-    assert result.observed_model == "gpt-6-luna"
+    assert result.observed_model is None
     assert result.provider_session_id == "thread-fixture"
     assert result.tool_event_count == 1
     assert result.total_cost is None
     assert result.retry_permitted is False
-    assert result.details["attestation"] == "explicit-model-arg+turn.completed"
+    assert result.details["attestation"] == "request-bound-model+turn.completed"
+    assert result.details["requested_model"] == "gpt-6-luna"
 
 
 def test_codex_quota_failure_is_classified_without_retry_permission(
