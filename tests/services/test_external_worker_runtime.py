@@ -9,7 +9,9 @@ import pytest
 from nexus.services.external_worker_runtime import (
     AccountBinding,
     ClineExecutionAdapter,
+    CodexExecutionAdapter,
     ExternalWorkerRuntimeError,
+    GrokExecutionAdapter,
     NoopAccountAdapter,
     OpenCodeExecutionAdapter,
     WorkerRequest,
@@ -374,4 +376,166 @@ def test_opencode_quota_failure_is_classified_without_retry_permission(
     )
     assert result.status == "FAILED"
     assert result.failure_kind == "QUOTA_EXHAUSTED"
+    assert result.retry_permitted is False
+
+
+def _codex_request(
+    tmp_path: Path,
+    *,
+    mode: str = "plan",
+    auto_approve: bool = False,
+    thinking: str = "medium",
+) -> WorkerRequest:
+    return WorkerRequest(
+        provider="codex",
+        model="gpt-5.6-luna",
+        prompt="Reply exactly OK",
+        cwd=str(tmp_path),
+        mode=mode,
+        auto_approve=auto_approve,
+        timeout_seconds=60,
+        thinking=thinking,
+    )
+
+
+def test_codex_compile_matches_current_headless_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = tmp_path / "codex"
+    fake.write_text("#!/bin/sh\necho codex-cli 0.158.0\n", encoding="utf-8")
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("NEXUS_CODEX_BIN", str(fake))
+
+    command = CodexExecutionAdapter().compile(
+        _codex_request(tmp_path),
+        binding=AccountBinding(provider="codex"),
+    )
+
+    argv = list(command.argv)
+    assert argv[1:4] == ["exec", "--json", "--ephemeral"]
+    assert "--skip-git-repo-check" in argv
+    assert argv[argv.index("--sandbox") + 1] == "read-only"
+    assert argv[argv.index("-m") + 1] == "gpt-5.6-luna"
+    assert argv[argv.index("-C") + 1] == str(tmp_path)
+    assert 'model_reasoning_effort="medium"' in argv
+    assert command.cli_version == "codex-cli 0.158.0"
+
+
+def test_codex_success_requires_ordered_terminal_jsonl(tmp_path: Path) -> None:
+    request = _codex_request(tmp_path)
+    stdout = "\n".join([
+        json.dumps({"type": "thread.started", "thread_id": "thread-1"}),
+        json.dumps({"type": "turn.started"}),
+        json.dumps({
+            "type": "item.completed",
+            "item": {"type": "agent_message", "text": "OK"},
+        }),
+        json.dumps({"type": "turn.completed", "usage": {"input_tokens": 1}}),
+    ])
+
+    result = CodexExecutionAdapter().interpret(
+        request,
+        exit_code=0,
+        stdout_text=stdout,
+        stderr_text="",
+    )
+
+    assert result.status == "COMPLETED"
+    assert result.provider_session_id == "thread-1"
+    assert result.observed_provider == "codex"
+    assert result.observed_model is None
+    assert result.details["model_attestation"] == "NOT_EMITTED_BY_CODEX_JSONL"
+
+
+def test_codex_missing_terminal_sequence_fails_closed(tmp_path: Path) -> None:
+    request = _codex_request(tmp_path)
+    result = CodexExecutionAdapter().interpret(
+        request,
+        exit_code=0,
+        stdout_text=json.dumps({"type": "thread.started", "thread_id": "thread-1"}),
+        stderr_text="",
+    )
+    assert result.status == "FAILED"
+    assert result.retry_permitted is False
+
+
+def _grok_request(tmp_path: Path) -> WorkerRequest:
+    return WorkerRequest(
+        provider="grok",
+        model="grok-4.5",
+        prompt="Reply exactly OK",
+        cwd=str(tmp_path),
+        mode="plan",
+        auto_approve=False,
+        timeout_seconds=60,
+        thinking="none",
+    )
+
+
+def test_grok_compile_uses_bound_profile_home_and_plan_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = tmp_path / "grok"
+    fake.write_text("#!/bin/sh\necho 'grok 1.0.41'\n", encoding="utf-8")
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("NEXUS_GROK_BIN", str(fake))
+    bound_home = str(tmp_path / "opaque-profile")
+
+    command = GrokExecutionAdapter().compile(
+        _grok_request(tmp_path),
+        binding=AccountBinding(provider="grok", execution_env={"HOME": bound_home}),
+    )
+
+    argv = list(command.argv)
+    assert argv[argv.index("--model") + 1] == "grok-4.5"
+    assert argv[argv.index("--permission-mode") + 1] == "plan"
+    assert argv[argv.index("--output-format") + 1] == "json"
+    assert "--no-subagents" in argv
+    assert command.env["HOME"] == bound_home
+    assert command.cli_version == "grok 1.0.41"
+
+
+def test_grok_terminal_account_failure_is_rotation_eligible(tmp_path: Path) -> None:
+    request = _grok_request(tmp_path)
+    result = GrokExecutionAdapter().interpret(
+        request,
+        exit_code=1,
+        stdout_text='{"error":"You are not authenticated."}',
+        stderr_text="",
+    )
+    assert result.status == "FAILED"
+    assert result.failure_kind == "AUTH_OR_SESSION_INVALID"
+    assert result.retry_permitted is True
+    assert result.tool_event_count == 0
+
+
+def test_grok_success_accepts_provider_model_attestation(tmp_path: Path) -> None:
+    request = _grok_request(tmp_path)
+    result = GrokExecutionAdapter().interpret(
+        request,
+        exit_code=0,
+        stdout_text=json.dumps({
+            "model": "grok-4.5",
+            "session_id": "grok-session-1",
+            "finish_reason": "stop",
+            "text": "OK",
+        }),
+        stderr_text="",
+    )
+    assert result.status == "COMPLETED"
+    assert result.observed_model == "grok-4.5"
+    assert result.provider_session_id == "grok-session-1"
+    assert result.retry_permitted is False
+
+
+def test_grok_model_mismatch_fails_closed(tmp_path: Path) -> None:
+    request = _grok_request(tmp_path)
+    result = GrokExecutionAdapter().interpret(
+        request,
+        exit_code=0,
+        stdout_text=json.dumps({"model": "grok-other", "text": "OK"}),
+        stderr_text="",
+    )
+    assert result.status == "FAILED"
+    assert result.failure_kind == "PROVIDER_ATTESTATION_MISMATCH"
     assert result.retry_permitted is False

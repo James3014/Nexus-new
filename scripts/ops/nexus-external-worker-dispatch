@@ -86,6 +86,17 @@ def _provider_from_operation_id(operation_id: str) -> str:
 
 
 def _runtime_revision() -> str | None:
+    explicit_snapshot = os.getenv("NEXUS_EXTERNAL_WORKER_SNAPSHOT", "").strip()
+    if explicit_snapshot:
+        proc = subprocess.run(
+            ["git", "-C", str(SNAPSHOT), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            return proc.stdout.strip()
+
     candidates = [
         SNAPSHOT.parent / "host-generation.json",
         Path.home() / ".local/share/nexus-host-runtime/current/host-generation.json",
@@ -243,8 +254,6 @@ def _run_operation(
     journal.mark_started(operation_id, pid=os.getpid())
     adapter = get_execution_adapter(provider)
     account_adapter = get_account_adapter(provider)
-    binding = account_adapter.acquire(operation_id)
-
     request = WorkerRequest(
         provider=provider,
         model=model,
@@ -256,15 +265,15 @@ def _run_operation(
         require_free=require_free,
         thinking=thinking,
     )
+
     try:
-        command = adapter.compile(request, binding=binding)
+        binding = account_adapter.acquire(operation_id)
     except BaseException as exc:
-        account_adapter.release(binding)
         journal.mark_terminal(
             operation_id,
             status="FAILED",
             exit_code=None,
-            failure_kind=f"COMMAND_COMPILE_FAILED:{type(exc).__name__}",
+            failure_kind=f"ACCOUNT_ACQUIRE_FAILED:{type(exc).__name__}",
             cwd=cwd,
             reconciliation={
                 "at": utc_now(),
@@ -272,130 +281,234 @@ def _run_operation(
                 "retry_permitted": False,
             },
         )
-        raise
+        return 1
 
-    journal.heartbeat(
-        operation_id,
-        phase="PROVIDER_STARTING",
-        account_alias_hash=binding.account_alias_hash,
-        lease_id_hash=binding.lease_id_hash,
-        cli_version=command.cli_version,
-        command_sha256=_command_hash(command.argv),
-    )
-
+    max_rotations = max(0, int(getattr(account_adapter, "max_failover_retries", 0)))
+    attempts = 0
+    rotations = 0
     stdout_path = journal.stdout_path(operation_id)
     stderr_path = journal.stderr_path(operation_id)
     stdout_path.parent.mkdir(parents=True, exist_ok=True)
-    started = time.monotonic()
-    last_heartbeat = 0.0
-    last_sizes = (-1, -1)
 
-    with (
-        stdout_path.open("ab", buffering=0) as out_fh,
-        stderr_path.open("ab", buffering=0) as err_fh,
-    ):
-        proc = subprocess.Popen(
-            list(command.argv),
-            cwd=cwd,
-            env=dict(command.env),
-            stdin=subprocess.DEVNULL,
-            stdout=out_fh,
-            stderr=err_fh,
-            start_new_session=True,
-            close_fds=True,
-        )
+    while True:
+        attempts += 1
+        try:
+            command = adapter.compile(request, binding=binding)
+        except BaseException as exc:
+            try:
+                account_adapter.release(binding)
+            finally:
+                journal.mark_terminal(
+                    operation_id,
+                    status="FAILED",
+                    exit_code=None,
+                    failure_kind=f"COMMAND_COMPILE_FAILED:{type(exc).__name__}",
+                    cwd=cwd,
+                    attempts=attempts,
+                    rotations=rotations,
+                    reconciliation={
+                        "at": utc_now(),
+                        "result": "NO_PROVIDER_PROCESS_STARTED",
+                        "retry_permitted": False,
+                    },
+                )
+            return 1
+
         journal.heartbeat(
             operation_id,
-            phase="PROVIDER_RUNNING",
-            provider_pid=proc.pid,
+            phase="PROVIDER_STARTING",
+            attempts=attempts,
+            rotations=rotations,
+            account_alias_hash=binding.account_alias_hash,
+            lease_id_hash=binding.lease_id_hash,
+            cli_version=command.cli_version,
+            command_sha256=_command_hash(command.argv),
         )
-        deadline = started + timeout_seconds + max(1.0, outer_grace_seconds)
-        timed_out = False
-        while proc.poll() is None:
-            now = time.monotonic()
-            if now >= deadline:
-                timed_out = True
-                _kill_process_group(proc)
-                break
-            if now - last_heartbeat >= max(1.0, heartbeat_interval):
-                try:
-                    sizes = (
-                        stdout_path.stat().st_size if stdout_path.exists() else 0,
-                        stderr_path.stat().st_size if stderr_path.exists() else 0,
-                    )
-                except OSError:
-                    sizes = last_sizes
+
+        stdout_start = stdout_path.stat().st_size if stdout_path.exists() else 0
+        stderr_start = stderr_path.stat().st_size if stderr_path.exists() else 0
+        started = time.monotonic()
+        last_heartbeat = 0.0
+        last_sizes = (stdout_start, stderr_start)
+
+        try:
+            with (
+                stdout_path.open("ab", buffering=0) as out_fh,
+                stderr_path.open("ab", buffering=0) as err_fh,
+            ):
+                proc = subprocess.Popen(
+                    list(command.argv),
+                    cwd=cwd,
+                    env=dict(command.env),
+                    stdin=subprocess.DEVNULL,
+                    stdout=out_fh,
+                    stderr=err_fh,
+                    start_new_session=True,
+                    close_fds=True,
+                )
                 journal.heartbeat(
                     operation_id,
                     phase="PROVIDER_RUNNING",
-                    output_observed=sizes != last_sizes and sizes != (0, 0),
+                    provider_pid=proc.pid,
+                    attempts=attempts,
+                    rotations=rotations,
                 )
-                last_sizes = sizes
-                last_heartbeat = now
-            time.sleep(0.25)
+                deadline = started + timeout_seconds + max(1.0, outer_grace_seconds)
+                timed_out = False
+                while proc.poll() is None:
+                    now = time.monotonic()
+                    if now >= deadline:
+                        timed_out = True
+                        _kill_process_group(proc)
+                        break
+                    if now - last_heartbeat >= max(1.0, heartbeat_interval):
+                        try:
+                            sizes = (
+                                stdout_path.stat().st_size if stdout_path.exists() else 0,
+                                stderr_path.stat().st_size if stderr_path.exists() else 0,
+                            )
+                        except OSError:
+                            sizes = last_sizes
+                        journal.heartbeat(
+                            operation_id,
+                            phase="PROVIDER_RUNNING",
+                            attempts=attempts,
+                            rotations=rotations,
+                            output_observed=sizes != last_sizes,
+                        )
+                        last_sizes = sizes
+                        last_heartbeat = now
+                    time.sleep(0.25)
+        except BaseException as exc:
+            try:
+                account_adapter.release(binding)
+            except BaseException:
+                pass
+            journal.mark_terminal(
+                operation_id,
+                status="FAILED",
+                exit_code=None,
+                failure_kind=f"PROVIDER_START_FAILED:{type(exc).__name__}",
+                cwd=cwd,
+                attempts=attempts,
+                rotations=rotations,
+                reconciliation={
+                    "at": utc_now(),
+                    "result": "NO_CONFIRMED_PROVIDER_PROCESS",
+                    "retry_permitted": False,
+                },
+            )
+            return 1
 
-    if timed_out:
-        try:
-            account_adapter.release(binding)
-        finally:
+        if timed_out:
+            try:
+                account_adapter.release(binding)
+            except BaseException:
+                pass
             journal.mark_terminal(
                 operation_id,
                 status="OUTCOME_UNKNOWN",
                 exit_code=None,
                 failure_kind="WRAPPER_WALL_TIMEOUT_AFTER_PROVIDER_START",
                 cwd=cwd,
+                attempts=attempts,
+                rotations=rotations,
                 reconciliation={
                     "at": utc_now(),
                     "result": "PROVIDER_PROCESS_TIMED_OUT_AFTER_START",
                     "retry_permitted": False,
                 },
             )
-        return 124
+            return 124
 
-    exit_code = int(proc.returncode or 0)
-    stdout_text = stdout_path.read_text(encoding="utf-8", errors="replace")
-    stderr_text = stderr_path.read_text(encoding="utf-8", errors="replace")
-    outcome = adapter.interpret(
-        request,
-        exit_code=exit_code,
-        stdout_text=stdout_text,
-        stderr_text=stderr_text,
-    )
+        exit_code = int(proc.returncode or 0)
+        stdout_bytes = stdout_path.read_bytes()
+        stderr_bytes = stderr_path.read_bytes()
+        stdout_text = stdout_bytes[stdout_start:].decode("utf-8", errors="replace")
+        stderr_text = stderr_bytes[stderr_start:].decode("utf-8", errors="replace")
+        outcome = adapter.interpret(
+            request,
+            exit_code=exit_code,
+            stdout_text=stdout_text,
+            stderr_text=stderr_text,
+        )
 
-    rotation_binding = None
-    failure_enum = None
-    if outcome.failure_kind:
+        failure_enum = None
+        if outcome.failure_kind:
+            try:
+                failure_enum = AccountFailureKind(outcome.failure_kind)
+            except ValueError:
+                failure_enum = None
+
+        can_rotate = (
+            failure_enum is not None
+            and outcome.retry_permitted
+            and is_rotation_eligible(failure_enum)
+            and rotations < max_rotations
+        )
+        if can_rotate:
+            journal.heartbeat(
+                operation_id,
+                phase="ACCOUNT_ROTATING",
+                attempts=attempts,
+                rotations=rotations,
+                failure_kind=outcome.failure_kind,
+            )
+            try:
+                replacement = account_adapter.report_failure(binding, failure_enum)
+            except BaseException as exc:
+                journal.mark_terminal(
+                    operation_id,
+                    status="FAILED",
+                    exit_code=exit_code,
+                    failure_kind=f"ACCOUNT_ROTATION_FAILED:{type(exc).__name__}",
+                    cwd=cwd,
+                    attempts=attempts,
+                    rotations=rotations,
+                    observed_provider=outcome.observed_provider,
+                    observed_model=outcome.observed_model,
+                    reconciliation={
+                        "at": utc_now(),
+                        "result": "PROVIDER_TERMINAL_ACCOUNT_FAILURE_NO_REPLACEMENT",
+                        "retry_permitted": False,
+                    },
+                )
+                return exit_code or 1
+            if replacement is not None:
+                binding = replacement
+                rotations += 1
+                continue
+
         try:
-            failure_enum = AccountFailureKind(outcome.failure_kind)
-        except ValueError:
-            failure_enum = None
-    if failure_enum is not None and outcome.retry_permitted and is_rotation_eligible(failure_enum):
-        rotation_binding = account_adapter.report_failure(binding, failure_enum)
-    account_adapter.release(binding)
-
-    reconciliation = {
-        "at": utc_now(),
-        "result": "PROVIDER_TERMINAL_RECEIPT",
-        "retry_permitted": bool(outcome.retry_permitted),
-        "account_rotation_available": rotation_binding is not None,
-    }
-    journal.mark_terminal(
-        operation_id,
-        status=outcome.status,
-        exit_code=exit_code,
-        failure_kind=outcome.failure_kind,
-        cwd=cwd,
-        observed_provider=outcome.observed_provider,
-        observed_model=outcome.observed_model,
-        finish_reason=outcome.finish_reason,
-        total_cost=outcome.total_cost,
-        provider_session_id=outcome.provider_session_id,
-        tool_event_count=outcome.tool_event_count,
-        reconciliation=reconciliation,
-    )
-    if rotation_binding is not None:
-        account_adapter.release(rotation_binding)
-    return 0 if outcome.status == "COMPLETED" else (exit_code or 1)
+            account_adapter.release(binding)
+        except BaseException:
+            pass
+        journal.mark_terminal(
+            operation_id,
+            status=outcome.status,
+            exit_code=exit_code,
+            failure_kind=outcome.failure_kind,
+            cwd=cwd,
+            attempts=attempts,
+            rotations=rotations,
+            account_alias_hash=binding.account_alias_hash,
+            lease_id_hash=binding.lease_id_hash,
+            observed_provider=outcome.observed_provider,
+            observed_model=outcome.observed_model,
+            finish_reason=outcome.finish_reason,
+            total_cost=outcome.total_cost,
+            provider_session_id=outcome.provider_session_id,
+            tool_event_count=outcome.tool_event_count,
+            reconciliation={
+                "at": utc_now(),
+                "result": "PROVIDER_TERMINAL_RECEIPT",
+                "retry_permitted": False,
+                "rotation_budget_exhausted": bool(
+                    outcome.retry_permitted and rotations >= max_rotations
+                ),
+            },
+        )
+        return 0 if outcome.status == "COMPLETED" else (exit_code or 1)
 
 
 def _print_operation(record: dict[str, Any]) -> None:

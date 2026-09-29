@@ -102,6 +102,10 @@ def _make_source_repo(tmp_path: Path) -> Path:
             ROOT / "nexus/services/external_worker_runtime.py",
             "nexus/services/external_worker_runtime.py",
         ),
+        (
+            ROOT / "nexus/services/grok_account_pool.py",
+            "nexus/services/grok_account_pool.py",
+        ),
     ]:
         dest = repo / relative
         dest.parent.mkdir(parents=True, exist_ok=True)

@@ -56,6 +56,10 @@
       "mode": "0644"
     },
     {
+      "path": "nexus/services/grok_account_pool.py",
+      "mode": "0644"
+    },
+    {
       "path": "scripts/ops/nexus-workflow-doctor",
       "mode": "0755"
     },
