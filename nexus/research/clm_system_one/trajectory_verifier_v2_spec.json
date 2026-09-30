@@ -21,6 +21,18 @@
     "path": "docs/research/trajectory_verifier_v2/TRAJECTORY_VERIFIER_EXPERIMENT_REPORT.md",
     "sha256": "e96231e610c21f7d902e9db45e9b549dd9cfe442d6537f70e4bf0eb5dc387e9a"
   },
+  "corpus_exclusions": {
+    "reason": "PRE_ACTIVATION_TEST_FIXTURE_CONTAMINATION",
+    "trajectory_ids": [
+      "c15-6e-controlled-success#delegated-retry-01-ornith-9b#provider-trajectory",
+      "c15-6e-controlled-success#delegated-retry-02-qwythos-9b#provider-trajectory"
+    ],
+    "evidence": [
+      "candidate source_revision=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "outcome bound_at=2026-09-30T02:11:24Z before Wave-0 runtime activation at 2026-09-30T04:04:00Z",
+      "github:James3014/nexus-deployment-lab#8"
+    ]
+  },
   "continuity": {
     "canonical_state_root_source": "nexus_gateway_status.lifecycle.canonical_state_root",
     "checkpoint_relative_root": "research/clm_system_one",

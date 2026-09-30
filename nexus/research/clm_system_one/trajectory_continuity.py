@@ -772,6 +772,7 @@ def project_corpus_readiness(
     evidence_root: str | Path,
     holdout_task_ids: Sequence[str] = (),
     task_family_by_task: Mapping[str, str] | None = None,
+    excluded_trajectory_ids: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Assess corpus readiness for T1 re-audit.
 
@@ -789,16 +790,21 @@ def project_corpus_readiness(
     root = Path(evidence_root).expanduser().resolve()
     holdout = set(holdout_task_ids)
     families = dict(task_family_by_task or {})
+    excluded_ids = {str(value) for value in excluded_trajectory_ids if str(value)}
     valid: list[dict[str, Any]] = []
     malformed: list[str] = []
     leakage: list[str] = []
     overlap: list[str] = []
+    excluded: list[str] = []
     outcomes_dir = root / "trajectory" / "outcomes"
     if outcomes_dir.exists():
         for path in sorted(outcomes_dir.glob("*.json")):
             try:
                 outcome = json.loads(path.read_text(encoding="utf-8"))
                 trajectory_id = str(outcome.get("trajectory_id") or "")
+                if trajectory_id in excluded_ids:
+                    excluded.append(trajectory_id)
+                    continue
                 complete, problems = _trajectory_complete(root, trajectory_id)
                 if not complete:
                     leakage.extend(f"{trajectory_id}:{problem}" for problem in problems)
@@ -902,6 +908,7 @@ def project_corpus_readiness(
         "task_disjoint_split_possible": task_split,
         "family_disjoint_split_possible": family_disjoint_split_possible,
         "holdout_overlap_trajectories": overlap,
+        "excluded_trajectories": sorted(excluded),
         "leakage_findings": leakage,
         "malformed_evidence": malformed,
         "blockers": blockers,
@@ -1148,6 +1155,8 @@ def refresh_registered_experiment(
         raise ValueError("registered holdout manifest is unavailable")
     holdout = json.loads(holdout_path.read_text(encoding="utf-8"))
     holdout_tasks = list(holdout.get("historical_replay_tasks") or [])
+    corpus_exclusions = dict(spec.get("corpus_exclusions") or {})
+    excluded_trajectories = list(corpus_exclusions.get("trajectory_ids") or [])
 
     evidence_root = (
         Path(candidate_evidence_root).expanduser().resolve()
@@ -1157,6 +1166,7 @@ def refresh_registered_experiment(
     readiness = project_corpus_readiness(
         evidence_root=evidence_root,
         holdout_task_ids=holdout_tasks,
+        excluded_trajectory_ids=excluded_trajectories,
     )
     state_root = (
         Path(canonical_state_root).expanduser().resolve()
