@@ -403,15 +403,15 @@ def _verify_post_merge_issues(
         )
         return record, None
 
+    if not hasattr(port, "read_issue_states"):
+        return None, "READ_ISSUE_STATES_PORT_UNAVAILABLE"
+
     issue_numbers = tuple(int(item["issue_number"]) for item in declared_intents)
     try:
-        if hasattr(port, "read_issue_states"):
-            actual_states = port.read_issue_states(
-                repository=repository,
-                issue_numbers=issue_numbers,
-            )
-        else:
-            actual_states = {}
+        actual_states = port.read_issue_states(
+            repository=repository,
+            issue_numbers=issue_numbers,
+        )
     except Exception as exc:
         return None, f"READ_ISSUE_STATES_FAILED:{exc}"
 
@@ -1014,26 +1014,40 @@ def run_github_completion_loop(
 
         # G07: Pre-effect binding: validate machine-readable Issue closure intent
         # against fresh PR body and final submitted merge parameters before any merge effect.
+        if not hasattr(port, "read_final_merge_fields"):
+            return CompletionLoopResult(
+                outcome=CompletionLoopOutcome.BLOCKED,
+                reason="FINAL_MERGE_FIELDS_PORT_UNAVAILABLE",
+                generation=current_generation,
+                integration_head_sha=last_produced_head_sha,
+                evidence=current_evidence,
+                intent=intent,
+            )
+
         try:
-            if hasattr(port, "read_final_merge_fields"):
-                final_fields = port.read_final_merge_fields(
-                    repository=current_evidence.repository,
-                    pull_request_number=current_evidence.pull_request_number,
-                )
-            else:
-                final_fields = FinalMergeFields(
-                    pr_number=current_evidence.pull_request_number,
-                    head_sha=current_evidence.head_sha,
-                    base_sha=current_evidence.base_sha,
-                    merge_method="squash",
-                    pr_body=None,
-                    commit_title=None,
-                    commit_message=None,
-                )
+            final_fields = port.read_final_merge_fields(
+                repository=current_evidence.repository,
+                pull_request_number=current_evidence.pull_request_number,
+            )
         except Exception as exc:
             return CompletionLoopResult(
                 outcome=CompletionLoopOutcome.BLOCKED,
                 reason=f"READ_FINAL_MERGE_FIELDS_FAILED:{exc}",
+                generation=current_generation,
+                integration_head_sha=last_produced_head_sha,
+                evidence=current_evidence,
+                intent=intent,
+            )
+
+        if (
+            final_fields is None
+            or final_fields.pr_body is None
+            or not isinstance(final_fields.pr_body, str)
+            or not final_fields.pr_body.strip()
+        ):
+            return CompletionLoopResult(
+                outcome=CompletionLoopOutcome.BLOCKED,
+                reason="FINAL_MERGE_INTENT_PR_BODY_MISSING",
                 generation=current_generation,
                 integration_head_sha=last_produced_head_sha,
                 evidence=current_evidence,
@@ -1148,6 +1162,13 @@ def run_github_completion_loop(
                 declared_intents=g07_binding.get("intents", []),
             )
             if post_err:
+                verification_payload = post_merge_recon or {
+                    "schema": "nexus.post_merge_issue_state_verification.v1",
+                    "status": "STATE_MISMATCH_DETECTED",
+                    "disposition": "RECONCILIATION_REQUIRED",
+                    "allow_second_merge": False,
+                    "error": post_err,
+                }
                 return CompletionLoopResult(
                     outcome=CompletionLoopOutcome.BLOCKED,
                     reason=f"AMBIGUOUS_MERGE_POST_VERIFICATION_FAILED:{post_err}",
@@ -1156,7 +1177,7 @@ def run_github_completion_loop(
                     merged_commit_sha=recon.observed_main_commit_sha,
                     evidence=current_evidence,
                     intent=intent,
-                    details={"post_merge_verification": post_merge_recon},
+                    details={"post_merge_verification": verification_payload},
                 )
 
             return CompletionLoopResult(
@@ -1215,6 +1236,13 @@ def run_github_completion_loop(
                 declared_intents=g07_binding.get("intents", []),
             )
             if post_err:
+                verification_payload = post_merge_recon or {
+                    "schema": "nexus.post_merge_issue_state_verification.v1",
+                    "status": "STATE_MISMATCH_DETECTED",
+                    "disposition": "RECONCILIATION_REQUIRED",
+                    "allow_second_merge": False,
+                    "error": post_err,
+                }
                 return CompletionLoopResult(
                     outcome=CompletionLoopOutcome.BLOCKED,
                     reason=f"POST_MERGE_ISSUE_STATE_MISMATCH:{post_err}",
@@ -1223,7 +1251,7 @@ def run_github_completion_loop(
                     merged_commit_sha=recon.observed_main_commit_sha,
                     evidence=current_evidence,
                     intent=intent,
-                    details={"post_merge_verification": post_merge_recon},
+                    details={"post_merge_verification": verification_payload},
                 )
 
             return CompletionLoopResult(

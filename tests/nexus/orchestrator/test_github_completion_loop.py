@@ -81,7 +81,11 @@ class SpyGitHubCompletionPort:
         )
         self.post_merge_results = list(post_merge_results) if post_merge_results is not None else []
         self.final_merge_fields = final_merge_fields
-        self.issue_states = dict(issue_states) if issue_states is not None else None
+        self.issue_states = (
+            dict(issue_states)
+            if (issue_states is not None and not callable(issue_states))
+            else issue_states
+        )
 
         # Spies
         self.calls: list[tuple[str, dict[str, Any]]] = []
@@ -327,7 +331,7 @@ class SpyGitHubCompletionPort:
                 head_sha=self.current_pr_head,
                 base_sha=None,
                 merge_method="squash",
-                pr_body=None,
+                pr_body="<!-- NEXUS_ISSUE_INTENT_V1\n[]\nNEXUS_ISSUE_INTENT_V1 -->",
                 commit_title=None,
                 commit_message=None,
             )
@@ -2604,3 +2608,156 @@ def test_g07_test_o_ambiguous_ack_physical_merge_confirmed_issue_mismatch_blocks
     assert "STATE_MISMATCH" in result.reason
     assert result.details["post_merge_verification"]["allow_second_merge"] is False
     assert len(port.cas_merge_calls) == 1  # Exactly 1 merge call, zero retry/second merge
+
+
+class _PortWithMissingMethods:
+    def __init__(self, inner, missing_methods: tuple[str, ...]):
+        self._inner = inner
+        self._missing = set(missing_methods)
+
+    def __getattr__(self, name: str):
+        if name in self._missing:
+            raise AttributeError(f"Port has no attribute {name!r}")
+        return getattr(self._inner, name)
+
+
+def test_g07_production_regression_1_missing_read_final_merge_fields_blocks(monkeypatch):
+    """Test 1: Host adapter port lacks read_final_merge_fields -> BLOCKED, 0 merges (FINAL_MERGE_FIELDS_PORT_UNAVAILABLE)."""
+    ev, req = _setup_g07_test(monkeypatch)
+    inner_port = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+    )
+    port = _PortWithMissingMethods(inner_port, ("read_final_merge_fields",))
+
+    result = run_github_completion_loop(initial_evidence=ev, request=req, port=port)
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert result.reason == "FINAL_MERGE_FIELDS_PORT_UNAVAILABLE"
+    assert len(inner_port.cas_merge_calls) == 0
+
+
+def test_g07_production_regression_2_missing_or_failed_pr_body_blocks(monkeypatch):
+    """Test 2: Host adapter read failure or pr_body=None/empty -> BLOCKED, 0 merges."""
+    ev, req = _setup_g07_test(monkeypatch)
+
+    # 2a: port read_final_merge_fields raises exception
+    def failing_read(*a, **k):
+        raise RuntimeError("GitHub API connection timeout")
+
+    port_err = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+        final_merge_fields=failing_read,
+    )
+    r_err = run_github_completion_loop(initial_evidence=ev, request=req, port=port_err)
+    assert r_err.outcome is CompletionLoopOutcome.BLOCKED
+    assert "READ_FINAL_MERGE_FIELDS_FAILED:GitHub API connection timeout" in r_err.reason
+    assert len(port_err.cas_merge_calls) == 0
+
+    # 2b: port returns pr_body=None
+    fields_none = FinalMergeFields(
+        pr_number=ev.pull_request_number,
+        head_sha=ev.head_sha,
+        base_sha=ev.base_sha,
+        merge_method="squash",
+        pr_body=None,
+    )
+    port_none = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+        final_merge_fields=fields_none,
+    )
+    r_none = run_github_completion_loop(initial_evidence=ev, request=req, port=port_none)
+    assert r_none.outcome is CompletionLoopOutcome.BLOCKED
+    assert r_none.reason == "FINAL_MERGE_INTENT_PR_BODY_MISSING"
+    assert len(port_none.cas_merge_calls) == 0
+
+    # 2c: port returns empty / whitespace pr_body
+    fields_empty = FinalMergeFields(
+        pr_number=ev.pull_request_number,
+        head_sha=ev.head_sha,
+        base_sha=ev.base_sha,
+        merge_method="squash",
+        pr_body="   \n\t  ",
+    )
+    port_empty = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+        final_merge_fields=fields_empty,
+    )
+    r_empty = run_github_completion_loop(initial_evidence=ev, request=req, port=port_empty)
+    assert r_empty.outcome is CompletionLoopOutcome.BLOCKED
+    assert r_empty.reason == "FINAL_MERGE_INTENT_PR_BODY_MISSING"
+    assert len(port_empty.cas_merge_calls) == 0
+
+
+def test_g07_production_regression_4_governed_keep_open_contradictory_message_blocks(monkeypatch):
+    """Test 4: GOVERNED KEEP_OPEN + contradictory final message (Closes #1232) -> Loop blocks, 0 merges."""
+    ev, req = _setup_g07_test(monkeypatch)
+    pr_body = _make_g07_pr_body([(1232, "KEEP_OPEN")], extra_prose="#1232 remains open.")
+    fields = FinalMergeFields(
+        pr_number=ev.pull_request_number,
+        head_sha=ev.head_sha,
+        base_sha=ev.base_sha,
+        merge_method="squash",
+        pr_body=pr_body,
+        commit_title="fix(#1232): separate expired predecessor",
+        commit_message="Closes #1232\n\nFull description.",
+    )
+    port = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+        final_merge_fields=fields,
+    )
+    result = run_github_completion_loop(initial_evidence=ev, request=req, port=port)
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "FINAL_MERGE_INTENT_BINDING_REJECTED" in result.reason
+    assert "REJECTED_CLOSING_KEYWORD_FOR_KEEP_OPEN_IN_FINAL_MERGE_FIELDS" in result.reason
+    assert len(port.cas_merge_calls) == 0
+
+
+def test_g07_production_regression_5_post_merge_issue_readback_missing_or_failing(monkeypatch):
+    """Test 5: Post-merge issue readback missing or failing -> Reconciliation fails closed, allow_second_merge: False, 0 second merge."""
+    ev, req = _setup_g07_test(monkeypatch)
+    pr_body = _make_g07_pr_body([(1232, "KEEP_OPEN")], extra_prose="#1232 remains open.")
+    fields = FinalMergeFields(
+        pr_number=ev.pull_request_number,
+        head_sha=ev.head_sha,
+        base_sha=ev.base_sha,
+        merge_method="squash",
+        pr_body=pr_body,
+    )
+
+    # 5a: port lacks read_issue_states
+    inner_no_states = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+        final_merge_fields=fields,
+    )
+    port_no_states = _PortWithMissingMethods(inner_no_states, ("read_issue_states",))
+
+    r_no_states = run_github_completion_loop(initial_evidence=ev, request=req, port=port_no_states)
+    assert r_no_states.outcome is CompletionLoopOutcome.BLOCKED
+    assert "POST_MERGE_ISSUE_STATE_MISMATCH" in r_no_states.reason
+    assert "READ_ISSUE_STATES_PORT_UNAVAILABLE" in r_no_states.reason
+    assert r_no_states.details["post_merge_verification"]["allow_second_merge"] is False
+    assert len(inner_no_states.cas_merge_calls) == 1  # Exactly 1 merge occurred, 0 second merge
+
+    # 5b: port read_issue_states raises exception
+    def failing_issue_states(*a, **k):
+        raise RuntimeError("GitHub GraphQL rate limit exceeded")
+
+    port_failing_states = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+        final_merge_fields=fields,
+        issue_states=failing_issue_states,
+    )
+    r_failing = run_github_completion_loop(
+        initial_evidence=ev, request=req, port=port_failing_states
+    )
+    assert r_failing.outcome is CompletionLoopOutcome.BLOCKED
+    assert "POST_MERGE_ISSUE_STATE_MISMATCH" in r_failing.reason
+    assert "READ_ISSUE_STATES_FAILED" in r_failing.reason
+    assert r_failing.details["post_merge_verification"]["allow_second_merge"] is False
+    assert len(port_failing_states.cas_merge_calls) == 1  # 0 second merge

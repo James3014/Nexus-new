@@ -23,6 +23,8 @@ INTENT_END_MARKER = "NEXUS_ISSUE_INTENT_V1 -->"
 ON_MERGE_KEEP_OPEN = "KEEP_OPEN"
 ON_MERGE_CLOSE = "CLOSE"
 VALID_ON_MERGE_ACTIONS = frozenset({ON_MERGE_KEEP_OPEN, ON_MERGE_CLOSE})
+MERGE_INTENT_BINDING_SCHEMA = "nexus.merge_intent_binding.v1"
+SUPPORTED_MERGE_METHODS = frozenset({"merge", "squash", "rebase"})
 CLOSING_KEYWORD_FAMILIES = (
     "close",
     "closes",
@@ -250,6 +252,102 @@ def render_intent(intents: Sequence[Mapping[str, Any]] | Mapping[str, Any]) -> s
     return f"{INTENT_START_MARKER}\n{payload}\n{INTENT_END_MARKER}"
 
 
+def validate_final_merge_intent_binding(
+    *,
+    pr_body: str | None,
+    pr_number: int,
+    head_sha: str,
+    base_sha: str,
+    expected_pr_number: int,
+    expected_head_sha: str,
+    expected_base_sha: str,
+    merge_method: str = "squash",
+    commit_title: str | None = None,
+    commit_message: str | None = None,
+) -> dict[str, Any]:
+    if pr_body is None or not isinstance(pr_body, str) or not pr_body.strip():
+        raise IssueClosureIntentError("PR_BODY_REQUIRED")
+    if not isinstance(pr_number, int) or isinstance(pr_number, bool) or pr_number <= 0:
+        raise IssueClosureIntentError("PR_NUMBER_INVALID")
+    if (
+        not isinstance(expected_pr_number, int)
+        or isinstance(expected_pr_number, bool)
+        or expected_pr_number <= 0
+    ):
+        raise IssueClosureIntentError("EXPECTED_PR_NUMBER_INVALID")
+    if pr_number != expected_pr_number:
+        raise IssueClosureIntentError(
+            f"PR_NUMBER_MISMATCH: expected {expected_pr_number}, got {pr_number}"
+        )
+
+    if not isinstance(head_sha, str) or not isinstance(expected_head_sha, str):
+        raise IssueClosureIntentError("HEAD_SHA_INVALID")
+    if head_sha.strip().lower() != expected_head_sha.strip().lower():
+        raise IssueClosureIntentError(
+            f"HEAD_SHA_MISMATCH: expected {expected_head_sha}, got {head_sha}"
+        )
+
+    if not isinstance(base_sha, str) or not isinstance(expected_base_sha, str):
+        raise IssueClosureIntentError("BASE_SHA_INVALID")
+    if base_sha.strip().lower() != expected_base_sha.strip().lower():
+        raise IssueClosureIntentError(
+            f"BASE_SHA_MISMATCH: expected {expected_base_sha}, got {base_sha}"
+        )
+
+    norm_method = str(merge_method or "squash").strip().lower()
+    if norm_method not in SUPPORTED_MERGE_METHODS:
+        raise IssueClosureIntentError(f"UNSUPPORTED_MERGE_METHOD: {merge_method!r}")
+
+    intent_result = validate_issue_closure_intent(pr_body)
+    intents = intent_result.get("intents", [])
+
+    final_fields_prose = f"{commit_title or ''}\n\n{commit_message or ''}"
+    final_refs = find_closing_keyword_references(final_fields_prose)
+
+    detected_in_final: dict[int, list[str]] = {}
+    for kw, num in final_refs:
+        detected_in_final.setdefault(num, []).append(kw)
+
+    intent_by_issue = {item["issue_number"]: item["on_merge"] for item in intents}
+
+    untracked_issues = set(detected_in_final.keys()) - set(intent_by_issue.keys())
+    if untracked_issues:
+        culprits = ", ".join(
+            f"#{num} ({', '.join(detected_in_final[num])})" for num in sorted(untracked_issues)
+        )
+        raise IssueClosureIntentError(
+            f"UNINTENDED_CLOSING_KEYWORD_FOR_UNTRACKED_ISSUE: Final merge fields contain GitHub closing keywords targeting {culprits}. "
+            "Remove closing keywords or declare explicit intent in PR body."
+        )
+
+    for issue_num, action in intent_by_issue.items():
+        if action == ON_MERGE_KEEP_OPEN:
+            if issue_num in detected_in_final:
+                kws = ", ".join(detected_in_final[issue_num])
+                raise IssueClosureIntentError(
+                    f"REJECTED_CLOSING_KEYWORD_FOR_KEEP_OPEN_IN_FINAL_MERGE_FIELDS: Final merge commit fields contain closing keyword '{kws}' targeting #{issue_num}, "
+                    f"which contradicts declared KEEP_OPEN intent and would trigger GitHub auto-close."
+                )
+
+    result: dict[str, Any] = {
+        "schema": MERGE_INTENT_BINDING_SCHEMA,
+        "status": "PASS",
+        "pr_number": pr_number,
+        "head_sha": head_sha.strip().lower(),
+        "base_sha": base_sha.strip().lower(),
+        "merge_method": norm_method,
+        "intents": intents,
+        "detected_final_closing_references": [
+            {"issue_number": num, "keyword": kw} for kw, num in final_refs
+        ],
+        "claim_ceiling": "PR_ISSUE_CLOSURE_INTENT_VALIDATION_ONLY",
+    }
+    result["content_sha256"] = canonical_hash({
+        k: v for k, v in result.items() if k != "content_sha256"
+    })
+    return result
+
+
 def _git_show(repo_root: Path, revision: str, path: str) -> bytes:
     proc = subprocess.run(
         ["git", "-C", str(repo_root), "show", f"{revision}:{path}"],
@@ -381,6 +479,25 @@ def validate_event(
 
     intent_result = validate_issue_closure_intent(pr.get("body"))
 
+    commit_title = pr.get("commit_title")
+    if commit_title is None:
+        commit_title = pr.get("title")
+    commit_message = pr.get("commit_message")
+    merge_method = pr.get("merge_method") or "squash"
+
+    final_binding = validate_final_merge_intent_binding(
+        pr_body=pr.get("body"),
+        pr_number=pr_number,
+        head_sha=head_sha,
+        base_sha=base_sha,
+        expected_pr_number=pr_number,
+        expected_head_sha=head_sha,
+        expected_base_sha=base_sha,
+        merge_method=merge_method,
+        commit_title=commit_title,
+        commit_message=commit_message,
+    )
+
     binding = extract_binding(pr.get("body"))
     if binding.get("schema") != BINDING_SCHEMA:
         raise LaneBindingError("MERGE_LANE_BINDING_SCHEMA_INVALID")
@@ -431,6 +548,7 @@ def validate_event(
             "execution_lane": lane,
             "binding_hash": binding["binding_hash"],
             "issue_closure_intent": intent_result,
+            "merge_intent_binding": final_binding,
         }
 
     issue_number = _exact_int(binding.get("issue_number"), "ISSUE_NUMBER")
@@ -466,6 +584,7 @@ def validate_event(
             "execution_lane": lane,
             "binding_hash": binding["binding_hash"],
             "issue_closure_intent": intent_result,
+            "merge_intent_binding": final_binding,
         }
 
     if card_lane == lane:
@@ -480,6 +599,7 @@ def validate_event(
             "execution_lane": lane,
             "binding_hash": binding["binding_hash"],
             "issue_closure_intent": intent_result,
+            "merge_intent_binding": final_binding,
         }
 
     if card_lane != "GOVERNED":
@@ -506,6 +626,7 @@ def validate_event(
         "execution_lane": lane,
         "binding_hash": binding["binding_hash"],
         "issue_closure_intent": intent_result,
+        "merge_intent_binding": final_binding,
     }
 
 

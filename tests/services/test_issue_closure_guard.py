@@ -357,3 +357,19 @@ def test_verify_post_merge_state_reconciliation_contract():
     assert record["disposition"] == "RECONCILIATION_REQUIRED"
     assert record["allow_second_merge"] is False
     assert record["merged_pr"]["merge_commit_sha"] == "c" * 40
+
+
+def test_validate_final_merge_intent_binding_pr_body_required():
+    """PR body is strictly required for final merge intent binding validation."""
+    for invalid_body in (None, "", "   ", "\n\t"):
+        with pytest.raises(IssueClosureIntentError, match="PR_BODY_REQUIRED"):
+            validate_final_merge_intent_binding(
+                pr_body=invalid_body,
+                pr_number=1191,
+                head_sha="a" * 40,
+                base_sha="b" * 40,
+                expected_pr_number=1191,
+                expected_head_sha="a" * 40,
+                expected_base_sha="b" * 40,
+                merge_method="squash",
+            )

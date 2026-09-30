@@ -63,7 +63,7 @@ def _repo(tmp_path: Path, *, card_lane: str = "GOVERNED", change_card_on_head: b
     return repo, base, head, card_bytes
 
 
-def _event(*, base: str, head: str, body: str | None, number: int = PR_NUMBER):
+def _event(*, base: str, head: str, body: str | None, number: int = PR_NUMBER, **pr_extras):
     return {
         "event_name": "pull_request_target",
         "repository": {"full_name": REPOSITORY},
@@ -72,6 +72,7 @@ def _event(*, base: str, head: str, body: str | None, number: int = PR_NUMBER):
             "body": body,
             "base": {"sha": base},
             "head": {"sha": head},
+            **pr_extras,
         },
     }
 
@@ -372,5 +373,94 @@ def test_unintended_closing_keyword_blocks_gate(tmp_path: Path):
     ):
         validate_event(
             _event(base=base, head=head, body=body),
+            repo_root=repo,
+        )
+
+
+def test_direct_lane_keep_open_with_contradictory_final_commit_message_fails(tmp_path: Path):
+    """DIRECT lane with declared KEEP_OPEN fails if final commit message has closing keyword."""
+    repo, base, head, _ = _repo(tmp_path)
+    binding = _binding(lane="DIRECT_CANONICAL", head=head)
+    intent = render_intent([{"issue": 1232, "on_merge": "KEEP_OPEN"}])
+    body = f"{render_binding(binding)}\n\n{intent}\n\n#1232 remains open."
+    with pytest.raises(
+        IssueClosureIntentError,
+        match="REJECTED_CLOSING_KEYWORD_FOR_KEEP_OPEN_IN_FINAL_MERGE_FIELDS",
+    ):
+        validate_event(
+            _event(
+                base=base,
+                head=head,
+                body=body,
+                commit_title="fix(#1232): work on issue",
+                commit_message="Closes #1232\n\nAdditional details.",
+            ),
+            repo_root=repo,
+        )
+
+
+def test_direct_lane_keep_open_with_contradictory_squash_title_fallback_fails(tmp_path: Path):
+    """DIRECT lane with declared KEEP_OPEN fails if squash fallback title has closing keyword."""
+    repo, base, head, _ = _repo(tmp_path)
+    binding = _binding(lane="DIRECT_CANONICAL", head=head)
+    intent = render_intent([{"issue": 1232, "on_merge": "KEEP_OPEN"}])
+    body = f"{render_binding(binding)}\n\n{intent}\n\n#1232 remains open."
+    with pytest.raises(
+        IssueClosureIntentError,
+        match="REJECTED_CLOSING_KEYWORD_FOR_KEEP_OPEN_IN_FINAL_MERGE_FIELDS",
+    ):
+        validate_event(
+            _event(
+                base=base,
+                head=head,
+                body=body,
+                title="fix(#1232): Closes #1232",
+                commit_message="#1232 remains open.",
+            ),
+            repo_root=repo,
+        )
+
+
+def test_direct_lane_keep_open_with_neutral_final_fields_passes(tmp_path: Path):
+    """DIRECT lane with declared KEEP_OPEN passes when final commit fields are neutral."""
+    repo, base, head, _ = _repo(tmp_path)
+    binding = _binding(lane="DIRECT_CANONICAL", head=head)
+    intent = render_intent([{"issue": 1232, "on_merge": "KEEP_OPEN"}])
+    body = f"{render_binding(binding)}\n\n{intent}\n\n#1232 remains open."
+    result = validate_event(
+        _event(
+            base=base,
+            head=head,
+            body=body,
+            commit_title="fix(#1232): work on issue",
+            commit_message="Implement changes.\n\n#1232 remains open.",
+        ),
+        repo_root=repo,
+    )
+    assert result["status"] == "PASS"
+    assert result["merge_intent_binding"]["status"] == "PASS"
+    assert result["merge_intent_binding"]["intents"] == [
+        {"issue_number": 1232, "on_merge": "KEEP_OPEN"}
+    ]
+
+
+def test_governed_lane_keep_open_with_contradictory_final_commit_message_fails(tmp_path: Path):
+    """GOVERNED lane with declared KEEP_OPEN fails if final commit message has closing keyword."""
+    repo, base, head, card_bytes = _repo(tmp_path, card_lane="GOVERNED")
+    binding = _binding(lane="GOVERNED", head=head, card_bytes=card_bytes, issue_number=1232)
+    intent = render_intent([{"issue": 1232, "on_merge": "KEEP_OPEN"}])
+    body = f"{render_binding(binding)}\n\n{intent}\n\n#1232 remains open."
+    with pytest.raises(
+        IssueClosureIntentError,
+        match="REJECTED_CLOSING_KEYWORD_FOR_KEEP_OPEN_IN_FINAL_MERGE_FIELDS",
+    ):
+        validate_event(
+            _event(
+                base=base,
+                head=head,
+                body=body,
+                commit_title="fix(#1232): work on task",
+                commit_message="Fixes #1232\n\nSome description.",
+            ),
             repo_root=repo,
         )
