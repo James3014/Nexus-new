@@ -1563,6 +1563,11 @@ class LocalModelExecutor:
 
             attempt_id_val = f"attempt-{len(profile_attempts)}" if profile_attempts else "attempt-1"
             execution_profile_val = profile_attempts[-1] if profile_attempts else "FULL"
+            _lc_source_revision = str(
+                request.route_context.get("source_revision")
+                or request.route_context.get("workspace_revision")
+                or ""
+            ) if isinstance(request.route_context, dict) else ""
             candidates = LocalCommitteeCandidateProvider.generate_committee_candidates(
                 task_id=request.task_id,
                 problem_statement=enhanced_problem,
@@ -1575,6 +1580,8 @@ class LocalModelExecutor:
                 route_context=request.route_context,
                 attempt_id=attempt_id_val,
                 execution_profile=execution_profile_val,
+                repo_root=request.repo_root,
+                source_revision=_lc_source_revision,
             )
 
             # Update cap_ctx with candidates for this topology
@@ -2122,6 +2129,113 @@ class LocalModelExecutor:
                 raw_meta[
                     "candidate_evidence_collection_eligible_rows"
                 ] = _lc_collection.eligible_count
+
+                # Bind strong dataset-eligible candidate outcomes to their trajectory steps.
+                # Only the selected candidate with a strong label (ISOLATED_VERIFIER) can
+                # be bound. TRACE_ONLY/unselected/blocked rows are never bound.
+                # All failures here are telemetry-only and must not affect selection,
+                # verifier result, or returned metadata semantics.
+                _lc_traj_outcomes_bound = 0
+                _lc_traj_capture_errors: list[str] = []
+                try:
+                    from nexus.research.clm_system_one.trajectory_continuity import (
+                        bind_trajectory_outcome,
+                        refresh_registered_experiment,
+                        resolve_research_evidence_root,
+                    )
+                    from nexus.services.local_heal.local_committee_candidate_provider import (
+                        stable_committee_trajectory_id,
+                    )
+
+                    _lc_traj_evidence_root = resolve_research_evidence_root(request.repo_root)
+
+                    # Build a map from candidate_id -> stable trajectory_id using the same
+                    # helper that was used during generate_committee_candidates.
+                    # committee_models ordering: judge at idx=1, then proposers.
+                    # We replicate the same enumeration to get stable member_index.
+                    _lc_signal_snapshot = (
+                        request.route_context.get("signal_snapshot", {})
+                        if isinstance(request.route_context, dict)
+                        else {}
+                    )
+                    _lc_proposer_specs = list(_lc_signal_snapshot.get("proposer_specs") or [])
+                    _lc_judge_model = str(_lc_signal_snapshot.get("judge_model") or "")
+                    # Reconstruct full committee ordering (judge first, then proposers)
+                    _lc_committee_ordered = [(_lc_judge_model, "judge")]
+                    for _spec in _lc_proposer_specs:
+                        _lc_committee_ordered.append(
+                            (str(_spec.get("model") or ""), f"{_spec.get('role')}_proposer")
+                        )
+
+                    # Zip collection candidates (non-judge only) against row_refs.
+                    # The collection candidates list excludes judges (see _lc_collection_candidates
+                    # construction above). To get the correct member_index we need to track
+                    # per-model within the full committee ordering.
+                    _lc_model_to_member_index: dict[str, int] = {
+                        model: member_idx
+                        for member_idx, (model, _role) in enumerate(_lc_committee_ordered, 1)
+                        if _role != "judge"
+                    }
+
+                    for _lc_cand_row, _lc_row_ref in zip(
+                        _lc_collection_candidates,
+                        _lc_collection.row_refs,
+                        strict=True,
+                    ):
+                        _lc_cid = str(_lc_cand_row.get("candidate_id") or "")
+                        _lc_label_quality = str(_lc_cand_row.get("label_quality") or "")
+                        # Only bind strong-label selected rows.
+                        if _lc_label_quality != "ISOLATED_VERIFIER":
+                            continue
+                        if not _lc_cand_row.get("selected"):
+                            continue
+                        # Find member_index for this candidate's model.
+                        _lc_cand_model = str(_lc_cand_row.get("candidate_model") or "")
+                        _lc_member_idx = _lc_model_to_member_index.get(_lc_cand_model)
+                        if _lc_member_idx is None:
+                            _lc_traj_capture_errors.append(
+                                f"no_member_index:{_lc_cand_model}"
+                            )
+                            continue
+                        _lc_traj_id = stable_committee_trajectory_id(
+                            task_id=request.task_id,
+                            attempt_id=attempt_id_val,
+                            member_index=_lc_member_idx,
+                            model_name=_lc_cand_model,
+                        )
+                        try:
+                            bind_trajectory_outcome(
+                                evidence_root=_lc_traj_evidence_root,
+                                trajectory_id=_lc_traj_id,
+                                candidate_evidence_ref=_lc_row_ref,
+                            )
+                            _lc_traj_outcomes_bound += 1
+                        except Exception as _lc_bind_exc:
+                            _lc_traj_capture_errors.append(
+                                f"bind:{type(_lc_bind_exc).__name__}"
+                            )
+
+                    if _lc_traj_outcomes_bound:
+                        try:
+                            refresh_registered_experiment(
+                                repo_root=request.repo_root,
+                                candidate_evidence_root=_lc_traj_evidence_root,
+                            )
+                        except Exception as _lc_refresh_exc:
+                            _lc_traj_capture_errors.append(
+                                f"refresh:{type(_lc_refresh_exc).__name__}"
+                            )
+
+                except Exception as _lc_traj_exc:
+                    _lc_traj_capture_errors.append(
+                        f"traj_outer:{type(_lc_traj_exc).__name__}"
+                    )
+
+                # Persist read-only trajectory telemetry — fail-visible only.
+                # Must not affect selection, verifier, routing, winner, or return values.
+                raw_meta["lc_trajectory_outcomes_bound"] = _lc_traj_outcomes_bound
+                raw_meta["lc_trajectory_capture_errors"] = list(_lc_traj_capture_errors)
+
             except Exception as _lc_collection_exc:
                 raw_meta["candidate_evidence_collection_status"] = "ERROR"
                 raw_meta["candidate_evidence_collection_error_type"] = type(
