@@ -105,6 +105,7 @@ from nexus.orchestrator.standing_grant_store import (
     StandingGrantReceiptError,
     authorize_durable_standing_grant_effect,
     load_keyed_standing_grant_receipt,
+    load_keyed_standing_grant_receipt_structural,
     restore_task_card_authority,
     switch_task_card_authority,
     write_keyed_standing_grant_receipt,
@@ -3315,18 +3316,27 @@ class UnifiedMCPGateway:
         )
 
         try:
-            current = load_keyed_standing_grant_receipt(key, now=now)
-            if current is not None and current.receipt_hash == receipt.receipt_hash:
+            current = load_keyed_standing_grant_receipt_structural(key)
+            if current is None:
+                current_hash = None
+            else:
+                if current.context.revoked_at is not None:
+                    raise StandingGrantReceiptError("REVOKED")
+                if now < current.context.issued_at:
+                    raise StandingGrantReceiptError("NOT_YET_VALID")
+                current_hash = current.receipt_hash
+
+            if current_hash == receipt.receipt_hash:
                 status = "REPLAYED"
             else:
-                if current is None and expected_current is not None:
+                if current_hash is None and expected_current is not None:
                     raise StandingGrantReceiptError("EXPECTED_PREDECESSOR_MISSING")
-                if current is not None and expected_current is None:
+                if current_hash is not None and expected_current is None:
                     raise StandingGrantReceiptError("CURRENT_RECEIPT_EXISTS_CAS_REQUIRED")
                 if (
-                    current is not None
+                    current_hash is not None
                     and expected_current is not None
-                    and current.receipt_hash != expected_current
+                    and current_hash != expected_current
                 ):
                     raise StandingGrantReceiptError("CAS_MISMATCH")
                 write_keyed_standing_grant_receipt(

@@ -30,6 +30,7 @@ from nexus.orchestrator.standing_grant_store import (
     _write_standing_grant_receipt_at,
     authorize_durable_standing_grant_effect,
     load_keyed_standing_grant_receipt,
+    load_keyed_standing_grant_receipt_structural,
     load_standing_grant_receipt,
     restore_task_card_authority,
     switch_task_card_authority,
@@ -713,6 +714,44 @@ def test_keyed_batch2_inspection_expired_and_revoked(tmp_path, monkeypatch):
         key=standing_grant_store.standing_grant_key(revoked), now=NOW
     )
     assert result["status"] == "REVOKED" and result["goal_id"] == "revoked-key"
+
+
+def test_keyed_structural_loader_preserves_expired_and_revoked_identity_without_authority(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    expired = StandingGrantReceipt.issue(
+        grant_id="structural-expired",
+        context=_make_context(
+            goal_id="structural-expired",
+            expires_at=NOW - timedelta(minutes=1),
+        ),
+    )
+    revoked = StandingGrantReceipt.issue(
+        grant_id="structural-revoked",
+        context=_make_context(
+            goal_id="structural-revoked",
+            revoked_at=NOW,
+            revocation_reason="owner",
+        ),
+    )
+    for receipt in (expired, revoked):
+        write_keyed_standing_grant_receipt(receipt)
+        key = standing_grant_store.standing_grant_key(receipt)
+        assert load_keyed_standing_grant_receipt_structural(key) == receipt
+
+    with pytest.raises(StandingGrantReceiptError, match="EXPIRED"):
+        load_keyed_standing_grant_receipt(
+            standing_grant_store.standing_grant_key(expired),
+            now=NOW,
+        )
+    with pytest.raises(StandingGrantReceiptError, match="REVOKED"):
+        load_keyed_standing_grant_receipt(
+            standing_grant_store.standing_grant_key(revoked),
+            now=NOW,
+        )
 
 
 def test_exact_key_ignores_unrelated_corrupt_key(tmp_path, monkeypatch):
