@@ -131,6 +131,8 @@ class IndependentRecoveryEvidence:
         _require_sha64(self.evidence_sha256, "EVIDENCE_SHA256")
         if self.independent is not True:
             raise RecoveryContractError("INDEPENDENT_EVIDENCE_REQUIRED")
+        if type(self.normal_governance_available) is not bool:
+            raise RecoveryContractError("NORMAL_GOVERNANCE_AVAILABILITY_INVALID")
 
 
 @dataclass(frozen=True)
@@ -146,6 +148,14 @@ class RecoveryObservation:
 
 @dataclass(frozen=True)
 class RecoveryDecision:
+    """Decision record for minimum external recovery.
+
+    Note on G03 invariant: ``decision_sha256`` is a narrow decision-summary checksum
+    over the canonical decision payload. It does NOT serve as standalone external
+    authority; authoritative consumers re-verify exact grant, evidence, and
+    observation identities rather than trusting this digest alone.
+    """
+
     schema: str
     disposition: RecoveryDisposition
     reason: str
@@ -185,7 +195,27 @@ def evaluate_minimum_external_recovery(
     observation: RecoveryObservation,
     now: datetime,
 ) -> RecoveryDecision:
-    evidence.validate()
+    try:
+        evidence.validate()
+    except RecoveryContractError as exc:
+        return _decision(
+            RecoveryDisposition.DENY,
+            str(exc),
+            grant_id=grant.grant_id if grant else None,
+            effect_id=getattr(observation, "effect_id", None),
+        )
+
+    # G01: prior_effect_state must strictly be a valid PriorEffectState enum instance
+    if (
+        not isinstance(observation.prior_effect_state, PriorEffectState)
+        or type(observation.prior_effect_state) is not PriorEffectState
+    ):
+        return _decision(
+            RecoveryDisposition.DENY,
+            "PRIOR_EFFECT_STATE_INVALID",
+            grant_id=grant.grant_id if grant else None,
+            effect_id=getattr(observation, "effect_id", None),
+        )
 
     if observation.prior_effect_state is PriorEffectState.OUTCOME_UNKNOWN:
         return _decision(
@@ -201,6 +231,14 @@ def evaluate_minimum_external_recovery(
             grant_id=grant.grant_id if grant else None,
             effect_id=observation.effect_id,
         )
+    if observation.prior_effect_state is not PriorEffectState.NONE:
+        return _decision(
+            RecoveryDisposition.DENY,
+            "PRIOR_EFFECT_STATE_INVALID",
+            grant_id=grant.grant_id if grant else None,
+            effect_id=observation.effect_id,
+        )
+
     if grant is None:
         return _decision(
             RecoveryDisposition.DENY,
@@ -248,6 +286,15 @@ def evaluate_minimum_external_recovery(
         return _decision(
             RecoveryDisposition.DENY,
             "RECOVERY_SUBJECT_MISMATCH",
+            grant_id=grant.grant_id,
+            effect_id=observation.effect_id,
+        )
+
+    # G02: only strict boolean False permits recovery; True denies; malformed values fail closed
+    if type(evidence.normal_governance_available) is not bool:
+        return _decision(
+            RecoveryDisposition.DENY,
+            "NORMAL_GOVERNANCE_AVAILABILITY_INVALID",
             grant_id=grant.grant_id,
             effect_id=observation.effect_id,
         )
