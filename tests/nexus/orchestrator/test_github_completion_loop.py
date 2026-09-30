@@ -1,6 +1,7 @@
 import inspect
+import json
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 import pytest
 
@@ -18,6 +19,7 @@ from nexus.orchestrator.github_completion_loop import (
     CasMergeStatus,
     CompletionLoopOutcome,
     DimensionRevalidationReceipt,
+    FinalMergeFields,
     IntegrationMaterializationResult,
     PostMergeReconciliationResult,
     _validate_reconciliation_facts,
@@ -54,6 +56,8 @@ class SpyGitHubCompletionPort:
         is_platform_approval: bool = False,
         cas_merge_results: list[CasMergeResult] | None = None,
         post_merge_results: list[PostMergeReconciliationResult] | None = None,
+        final_merge_fields: FinalMergeFields | list[FinalMergeFields] | Any = None,
+        issue_states: Mapping[int, str] | None = None,
     ):
         self.main_states = list(main_states)
         self.pr_heads = list(pr_heads) if pr_heads is not None else None
@@ -76,6 +80,8 @@ class SpyGitHubCompletionPort:
             else [CasMergeResult(status=CasMergeStatus.SUCCESS, merged_sha="a" * 40)]
         )
         self.post_merge_results = list(post_merge_results) if post_merge_results is not None else []
+        self.final_merge_fields = final_merge_fields
+        self.issue_states = dict(issue_states) if issue_states is not None else None
 
         # Spies
         self.calls: list[tuple[str, dict[str, Any]]] = []
@@ -85,6 +91,8 @@ class SpyGitHubCompletionPort:
         self.checks_calls: list[dict[str, Any]] = []
         self.cas_merge_calls: list[dict[str, Any]] = []
         self.reconcile_calls: list[dict[str, Any]] = []
+        self.read_final_merge_fields_calls: list[dict[str, Any]] = []
+        self.read_issue_states_calls: list[dict[str, Any]] = []
 
     def read_main_state(self) -> tuple[str, str]:
         state = self.main_states[0] if len(self.main_states) == 1 else self.main_states.pop(0)
@@ -282,15 +290,63 @@ class SpyGitHubCompletionPort:
         if self.post_merge_results:
             res = self.post_merge_results.pop(0)
         else:
-            # Default tree sha matches the integration tree of the current generation
-            gen = self.materialize_calls[-1]["generation"] if self.materialize_calls else 1
-            def_tree_sha = f"{gen:02x}" * 20
+            if "observed_main_tree" in self.tree_shas:
+                def_tree_sha = self.tree_shas["observed_main_tree"]
+            elif self.materialize_calls:
+                gen = self.materialize_calls[-1]["generation"]
+                def_tree_sha = f"{gen:02x}" * 20
+            else:
+                def_tree_sha = "c" * 40
             res = PostMergeReconciliationResult(
                 observed_main_commit_sha="a" * 40,
-                observed_main_tree_sha=self.tree_shas.get("observed_main_tree", def_tree_sha),
+                observed_main_tree_sha=def_tree_sha,
                 observed_parent_shas=(expected_base_sha, expected_head_sha),
             )
         self.calls.append(("reconcile_post_merge", {"input": call_info, "result": res}))
+        return res
+
+    def read_final_merge_fields(
+        self,
+        *,
+        repository: str,
+        pull_request_number: int,
+    ) -> FinalMergeFields:
+        call_info = {"repository": repository, "pull_request_number": pull_request_number}
+        self.read_final_merge_fields_calls.append(call_info)
+        if callable(self.final_merge_fields):
+            res = self.final_merge_fields(repository=repository, pull_request_number=pull_request_number)
+        elif isinstance(self.final_merge_fields, list):
+            res = self.final_merge_fields.pop(0)
+        elif self.final_merge_fields is not None:
+            res = self.final_merge_fields
+        else:
+            res = FinalMergeFields(
+                pr_number=pull_request_number,
+                head_sha=self.current_pr_head,
+                base_sha=None,
+                merge_method="squash",
+                pr_body=None,
+                commit_title=None,
+                commit_message=None,
+            )
+        self.calls.append(("read_final_merge_fields", {"input": call_info, "result": res}))
+        return res
+
+    def read_issue_states(
+        self,
+        *,
+        repository: str,
+        issue_numbers: tuple[int, ...],
+    ) -> Mapping[int, str]:
+        call_info = {"repository": repository, "issue_numbers": issue_numbers}
+        self.read_issue_states_calls.append(call_info)
+        if callable(self.issue_states):
+            res = self.issue_states(repository=repository, issue_numbers=issue_numbers)
+        elif self.issue_states is not None:
+            res = {num: self.issue_states.get(num, "") for num in issue_numbers}
+        else:
+            res = {num: "open" for num in issue_numbers}
+        self.calls.append(("read_issue_states", {"input": call_info, "result": res}))
         return res
 
 
@@ -2022,3 +2078,523 @@ def test_hostile_materialized_tree_malformed_readback_blocks(monkeypatch):
     assert "GET_TREE_SHA_FAILED" in res_err.reason
     assert len(port_err.checks_calls) == 0
     assert len(port_err.cas_merge_calls) == 0
+
+
+# ==============================================================================
+# Issue #1247 G07 regression test matrix (Tests A through O)
+# ==============================================================================
+
+
+def _setup_g07_test(monkeypatch, **evidence_kwargs):
+    ev = _base_evidence(**evidence_kwargs)
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    monkeypatch.setattr(
+        "nexus.orchestrator.github_completion_loop.resolve_durable_merge_authorization",
+        lambda *a, **k: evaluate_action(ctx, req),
+    )
+    return ev, req
+
+
+def _make_g07_pr_body(intents: list[tuple[int, str]], extra_prose: str = "") -> str:
+    items = [{"issue": num, "on_merge": action} for num, action in intents]
+    payload = json.dumps(items, indent=2)
+    return f"{extra_prose}\n\n<!-- NEXUS_ISSUE_INTENT_V1\n{payload}\nNEXUS_ISSUE_INTENT_V1 -->\n"
+
+
+def test_g07_test_a_keep_open_neutral_fields_pass(monkeypatch):
+    """Test A: KEEP_OPEN + neutral final fields -> PASS, cas_merge called exactly once."""
+    ev, req = _setup_g07_test(monkeypatch)
+    pr_body = _make_g07_pr_body([(1232, "KEEP_OPEN")], extra_prose="#1232 remains open.")
+    fields = FinalMergeFields(
+        pr_number=ev.pull_request_number,
+        head_sha=ev.head_sha,
+        base_sha=ev.base_sha,
+        merge_method="squash",
+        pr_body=pr_body,
+        commit_title="feat: neutral commit title",
+        commit_message="Detailed description (#1232 remains open)",
+    )
+    port = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+        final_merge_fields=fields,
+        issue_states={1232: "open"},
+    )
+    result = run_github_completion_loop(initial_evidence=ev, request=req, port=port)
+    assert result.outcome is CompletionLoopOutcome.COMPLETED
+    assert result.reason == "MERGE_SUCCESS_AND_RECONCILED"
+    assert len(port.cas_merge_calls) == 1
+
+
+def test_g07_test_b_keep_open_with_closes_keyword_blocked(monkeypatch):
+    """Test B: KEEP_OPEN + 'Closes #N' in final fields -> BLOCKED, 0 cas_merge calls."""
+    ev, req = _setup_g07_test(monkeypatch)
+    pr_body = _make_g07_pr_body([(1232, "KEEP_OPEN")], extra_prose="#1232 remains open.")
+    fields = FinalMergeFields(
+        pr_number=ev.pull_request_number,
+        head_sha=ev.head_sha,
+        base_sha=ev.base_sha,
+        merge_method="squash",
+        pr_body=pr_body,
+        commit_title="feat: something",
+        commit_message="Closes #1232",
+    )
+    port = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+        final_merge_fields=fields,
+        issue_states={1232: "open"},
+    )
+    result = run_github_completion_loop(initial_evidence=ev, request=req, port=port)
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "FINAL_MERGE_INTENT_BINDING_REJECTED" in result.reason
+    assert "REJECTED_CLOSING_KEYWORD_FOR_KEEP_OPEN" in result.reason
+    assert len(port.cas_merge_calls) == 0
+
+
+def test_g07_test_c_keep_open_with_fixes_keyword_blocked(monkeypatch):
+    """Test C: KEEP_OPEN + 'Fixes #N' in final fields -> BLOCKED, 0 cas_merge calls."""
+    ev, req = _setup_g07_test(monkeypatch)
+    pr_body = _make_g07_pr_body([(1232, "KEEP_OPEN")], extra_prose="#1232 remains open.")
+    fields = FinalMergeFields(
+        pr_number=ev.pull_request_number,
+        head_sha=ev.head_sha,
+        base_sha=ev.base_sha,
+        merge_method="squash",
+        pr_body=pr_body,
+        commit_title="Fixes #1232",
+        commit_message="neutral details",
+    )
+    port = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+        final_merge_fields=fields,
+        issue_states={1232: "open"},
+    )
+    result = run_github_completion_loop(initial_evidence=ev, request=req, port=port)
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "FINAL_MERGE_INTENT_BINDING_REJECTED" in result.reason
+    assert len(port.cas_merge_calls) == 0
+
+
+def test_g07_test_d_closing_keyword_targeting_undeclared_issue_blocked(monkeypatch):
+    """Test D: closing keyword targeting undeclared Issue in final fields -> BLOCKED, 0 merges."""
+    ev, req = _setup_g07_test(monkeypatch)
+    pr_body = _make_g07_pr_body([(1232, "KEEP_OPEN")], extra_prose="#1232 remains open.")
+    fields = FinalMergeFields(
+        pr_number=ev.pull_request_number,
+        head_sha=ev.head_sha,
+        base_sha=ev.base_sha,
+        merge_method="squash",
+        pr_body=pr_body,
+        commit_title="feat: update",
+        commit_message="Closes #999",
+    )
+    port = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+        final_merge_fields=fields,
+        issue_states={1232: "open"},
+    )
+    result = run_github_completion_loop(initial_evidence=ev, request=req, port=port)
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "UNINTENDED_CLOSING_KEYWORD_FOR_UNTRACKED_ISSUE" in result.reason
+    assert len(port.cas_merge_calls) == 0
+
+
+def test_g07_test_e_authorized_close_with_matching_final_field(monkeypatch):
+    """Test E: authorized CLOSE + matching closing final field -> merge allowed and completed."""
+    ev, req = _setup_g07_test(monkeypatch)
+    pr_body = _make_g07_pr_body([(1232, "CLOSE")], extra_prose="Closes #1232.")
+    fields = FinalMergeFields(
+        pr_number=ev.pull_request_number,
+        head_sha=ev.head_sha,
+        base_sha=ev.base_sha,
+        merge_method="squash",
+        pr_body=pr_body,
+        commit_title="fix(#1232): resolve defect",
+        commit_message="Closes #1232",
+    )
+    port = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+        final_merge_fields=fields,
+        issue_states={1232: "closed"},
+    )
+    result = run_github_completion_loop(initial_evidence=ev, request=req, port=port)
+    assert result.outcome is CompletionLoopOutcome.COMPLETED
+    assert len(port.cas_merge_calls) == 1
+
+
+def test_g07_test_f_stale_identity_fields_fail_closed(monkeypatch):
+    """Test F: stale PR number, head SHA, or base SHA fail closed before cas_merge."""
+    ev, req = _setup_g07_test(monkeypatch)
+    pr_body = _make_g07_pr_body([(1232, "KEEP_OPEN")], extra_prose="#1232 remains open.")
+
+    # F1: Wrong PR number
+    f1 = FinalMergeFields(
+        pr_number=99999,
+        head_sha=ev.head_sha,
+        base_sha=ev.base_sha,
+        merge_method="squash",
+        pr_body=pr_body,
+    )
+    port1 = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+        final_merge_fields=f1,
+    )
+    res1 = run_github_completion_loop(initial_evidence=ev, request=req, port=port1)
+    assert res1.outcome is CompletionLoopOutcome.BLOCKED
+    assert "PR_NUMBER_MISMATCH" in res1.reason
+    assert len(port1.cas_merge_calls) == 0
+
+    # F2: Stale head SHA
+    f2 = FinalMergeFields(
+        pr_number=ev.pull_request_number,
+        head_sha="0" * 40,
+        base_sha=ev.base_sha,
+        merge_method="squash",
+        pr_body=pr_body,
+    )
+    port2 = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+        final_merge_fields=f2,
+    )
+    res2 = run_github_completion_loop(initial_evidence=ev, request=req, port=port2)
+    assert res2.outcome is CompletionLoopOutcome.BLOCKED
+    assert "HEAD_SHA_MISMATCH" in res2.reason
+    assert len(port2.cas_merge_calls) == 0
+
+    # F3: Stale base SHA
+    f3 = FinalMergeFields(
+        pr_number=ev.pull_request_number,
+        head_sha=ev.head_sha,
+        base_sha="0" * 40,
+        merge_method="squash",
+        pr_body=pr_body,
+    )
+    port3 = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+        final_merge_fields=f3,
+    )
+    res3 = run_github_completion_loop(initial_evidence=ev, request=req, port=port3)
+    assert res3.outcome is CompletionLoopOutcome.BLOCKED
+    assert "BASE_SHA_MISMATCH" in res3.reason
+    assert len(port3.cas_merge_calls) == 0
+
+
+def test_g07_test_g_merge_methods_closure_semantics_invariance(monkeypatch):
+    """Test G: merge methods (merge, squash, rebase) enforce identical G07 semantics, unsupported fails."""
+    ev, req = _setup_g07_test(monkeypatch)
+    pr_body = _make_g07_pr_body([(1232, "KEEP_OPEN")], extra_prose="#1232 remains open.")
+
+    for method in ("merge", "squash", "rebase"):
+        # Neutral fields -> Pass
+        pass_fields = FinalMergeFields(
+            pr_number=ev.pull_request_number,
+            head_sha=ev.head_sha,
+            base_sha=ev.base_sha,
+            merge_method=method,
+            pr_body=pr_body,
+            commit_title="neutral title",
+        )
+        port_pass = SpyGitHubCompletionPort(
+            main_states=[(ev.base_sha, ev.tree_sha)],
+            default_pr_head=ev.head_sha,
+            final_merge_fields=pass_fields,
+            issue_states={1232: "open"},
+        )
+        res_pass = run_github_completion_loop(initial_evidence=ev, request=req, port=port_pass)
+        assert res_pass.outcome is CompletionLoopOutcome.COMPLETED
+        assert len(port_pass.cas_merge_calls) == 1
+
+        # Closes keyword -> Blocked
+        block_fields = FinalMergeFields(
+            pr_number=ev.pull_request_number,
+            head_sha=ev.head_sha,
+            base_sha=ev.base_sha,
+            merge_method=method,
+            pr_body=pr_body,
+            commit_title="Closes #1232",
+        )
+        port_block = SpyGitHubCompletionPort(
+            main_states=[(ev.base_sha, ev.tree_sha)],
+            default_pr_head=ev.head_sha,
+            final_merge_fields=block_fields,
+            issue_states={1232: "open"},
+        )
+        res_block = run_github_completion_loop(initial_evidence=ev, request=req, port=port_block)
+        assert res_block.outcome is CompletionLoopOutcome.BLOCKED
+        assert len(port_block.cas_merge_calls) == 0
+
+    # Unsupported method
+    bad_method_fields = FinalMergeFields(
+        pr_number=ev.pull_request_number,
+        head_sha=ev.head_sha,
+        base_sha=ev.base_sha,
+        merge_method="cherry-pick",
+        pr_body=pr_body,
+    )
+    port_bad = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+        final_merge_fields=bad_method_fields,
+    )
+    res_bad = run_github_completion_loop(initial_evidence=ev, request=req, port=port_bad)
+    assert res_bad.outcome is CompletionLoopOutcome.BLOCKED
+    assert "UNSUPPORTED_MERGE_METHOD" in res_bad.reason
+    assert len(port_bad.cas_merge_calls) == 0
+
+
+def test_g07_test_h_drift_generation_revalidates_g07(monkeypatch):
+    """Test H: generation N drift re-validates fresh merge fields; stale validation is not reused."""
+    old_main = "d" * 40
+    new_main = "e" * 40
+    int_head = "01" * 20
+
+    ev, req = _setup_g07_test(monkeypatch, current_main_sha=old_main, base_sha=old_main)
+    pr_body = _make_g07_pr_body([(1232, "KEEP_OPEN")], extra_prose="#1232 remains open.")
+
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {"valid": True, "proven_paths": tuple(k["changed_main_paths"])},
+    )
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.build_impact_plan",
+        lambda *a, **k: type(
+            "Plan",
+            (),
+            {
+                "impact_class": "DOCS_GOVERNANCE",
+                "unmatched_paths": [],
+                "changed_paths": ["docs/unrelated.md"],
+            },
+        )(),
+    )
+
+    # Generation 1 dynamic fields provider that provides fresh base and head
+    def dynamic_fields(*, repository, pull_request_number):
+        return FinalMergeFields(
+            pr_number=pull_request_number,
+            head_sha=int_head,
+            base_sha=new_main,
+            merge_method="squash",
+            pr_body=pr_body,
+            commit_title="neutral generation 1",
+        )
+
+    port = SpyGitHubCompletionPort(
+        main_states=[(new_main, "2" * 40)],
+        default_pr_head="b" * 40,
+        cas_merge_results=[
+            CasMergeResult(status=CasMergeStatus.BASE_MOVED),  # Gen 0 drifts
+            CasMergeResult(status=CasMergeStatus.SUCCESS, merged_sha="a" * 40),
+        ],
+        final_merge_fields=dynamic_fields,
+        issue_states={1232: "open"},
+    )
+    res = run_github_completion_loop(initial_evidence=ev, request=req, port=port)
+    assert res.outcome is CompletionLoopOutcome.COMPLETED
+    assert res.generation == 1
+    # Verify read_final_merge_fields was called on both generation attempts
+    assert len(port.read_final_merge_fields_calls) >= 2
+
+
+def test_g07_test_i_post_effect_keep_open_actual_open_completed(monkeypatch):
+    """Test I: KEEP_OPEN + merged + actual Issue=open -> COMPLETED."""
+    ev, req = _setup_g07_test(monkeypatch)
+    pr_body = _make_g07_pr_body([(1232, "KEEP_OPEN")], extra_prose="#1232 remains open.")
+    fields = FinalMergeFields(
+        pr_number=ev.pull_request_number,
+        head_sha=ev.head_sha,
+        base_sha=ev.base_sha,
+        merge_method="squash",
+        pr_body=pr_body,
+    )
+    port = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+        final_merge_fields=fields,
+        issue_states={1232: "open"},
+    )
+    result = run_github_completion_loop(initial_evidence=ev, request=req, port=port)
+    assert result.outcome is CompletionLoopOutcome.COMPLETED
+    assert result.reason == "MERGE_SUCCESS_AND_RECONCILED"
+
+
+def test_g07_test_j_post_effect_keep_open_actual_closed_mismatch_blocks(monkeypatch):
+    """Test J: KEEP_OPEN + merged + actual Issue=closed -> BLOCKED, no second merge."""
+    ev, req = _setup_g07_test(monkeypatch)
+    pr_body = _make_g07_pr_body([(1232, "KEEP_OPEN")], extra_prose="#1232 remains open.")
+    fields = FinalMergeFields(
+        pr_number=ev.pull_request_number,
+        head_sha=ev.head_sha,
+        base_sha=ev.base_sha,
+        merge_method="squash",
+        pr_body=pr_body,
+    )
+    port = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+        final_merge_fields=fields,
+        issue_states={1232: "closed"},  # Unexpected closed state!
+    )
+    result = run_github_completion_loop(initial_evidence=ev, request=req, port=port)
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "POST_MERGE_ISSUE_STATE_MISMATCH" in result.reason
+    assert "STATE_MISMATCH expected 'open' (KEEP_OPEN), observed 'closed'" in result.reason
+    assert result.details["post_merge_verification"]["allow_second_merge"] is False
+    assert len(port.cas_merge_calls) == 1  # Exactly 1 merge, NO second merge!
+
+
+def test_g07_test_k_post_effect_close_actual_open_mismatch_blocks(monkeypatch):
+    """Test K: CLOSE + merged + actual Issue=open -> BLOCKED, no second merge."""
+    ev, req = _setup_g07_test(monkeypatch)
+    pr_body = _make_g07_pr_body([(1232, "CLOSE")], extra_prose="Closes #1232.")
+    fields = FinalMergeFields(
+        pr_number=ev.pull_request_number,
+        head_sha=ev.head_sha,
+        base_sha=ev.base_sha,
+        merge_method="squash",
+        pr_body=pr_body,
+        commit_title="fix(#1232): fix defect",
+        commit_message="Closes #1232",
+    )
+    port = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+        final_merge_fields=fields,
+        issue_states={1232: "open"},  # Unexpected open state!
+    )
+    result = run_github_completion_loop(initial_evidence=ev, request=req, port=port)
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "POST_MERGE_ISSUE_STATE_MISMATCH" in result.reason
+    assert "STATE_MISMATCH expected 'closed' (CLOSE), observed 'open'" in result.reason
+    assert result.details["post_merge_verification"]["allow_second_merge"] is False
+    assert len(port.cas_merge_calls) == 1
+
+
+def test_g07_test_l_post_effect_issue_state_unknown_blocks(monkeypatch):
+    """Test L: Issue state readback unavailable/unknown -> BLOCKED, fails closed."""
+    ev, req = _setup_g07_test(monkeypatch)
+    pr_body = _make_g07_pr_body([(1232, "KEEP_OPEN")], extra_prose="#1232 remains open.")
+    fields = FinalMergeFields(
+        pr_number=ev.pull_request_number,
+        head_sha=ev.head_sha,
+        base_sha=ev.base_sha,
+        merge_method="squash",
+        pr_body=pr_body,
+    )
+    port = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+        final_merge_fields=fields,
+        issue_states={},  # Missing state -> will be UNKNOWN
+    )
+    result = run_github_completion_loop(initial_evidence=ev, request=req, port=port)
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "ACTUAL_STATE_UNKNOWN" in result.reason
+    assert len(port.cas_merge_calls) == 1
+
+
+def test_g07_test_m_multi_issue_intent_independent_verification(monkeypatch):
+    """Test M: multi-Issue intent verifies each issue independently without cross-authorization."""
+    ev, req = _setup_g07_test(monkeypatch)
+    pr_body = _make_g07_pr_body(
+        [(101, "KEEP_OPEN"), (102, "CLOSE")],
+        extra_prose="#101 remains open. Closes #102.",
+    )
+    fields = FinalMergeFields(
+        pr_number=ev.pull_request_number,
+        head_sha=ev.head_sha,
+        base_sha=ev.base_sha,
+        merge_method="squash",
+        pr_body=pr_body,
+        commit_title="feat: update",
+        commit_message="Closes #102",
+    )
+
+    # M1: Both match
+    p1 = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+        final_merge_fields=fields,
+        issue_states={101: "open", 102: "closed"},
+    )
+    r1 = run_github_completion_loop(initial_evidence=ev, request=req, port=p1)
+    assert r1.outcome is CompletionLoopOutcome.COMPLETED
+
+    # M2: 101 closed unexpectedly
+    p2 = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+        final_merge_fields=fields,
+        issue_states={101: "closed", 102: "closed"},
+    )
+    r2 = run_github_completion_loop(initial_evidence=ev, request=req, port=p2)
+    assert r2.outcome is CompletionLoopOutcome.BLOCKED
+    assert "#101" in r2.reason
+
+    # M3: 102 remained open unexpectedly
+    p3 = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+        final_merge_fields=fields,
+        issue_states={101: "open", 102: "open"},
+    )
+    r3 = run_github_completion_loop(initial_evidence=ev, request=req, port=p3)
+    assert r3.outcome is CompletionLoopOutcome.BLOCKED
+    assert "#102" in r3.reason
+
+
+def test_g07_test_n_ambiguous_ack_physical_merge_confirmed_issue_state_matches(monkeypatch):
+    """Test N: ambiguous ACK + physical merge confirmed + Issue state matches -> COMPLETED."""
+    ev, req = _setup_g07_test(monkeypatch)
+    pr_body = _make_g07_pr_body([(1232, "KEEP_OPEN")], extra_prose="#1232 remains open.")
+    fields = FinalMergeFields(
+        pr_number=ev.pull_request_number,
+        head_sha=ev.head_sha,
+        base_sha=ev.base_sha,
+        merge_method="squash",
+        pr_body=pr_body,
+    )
+    port = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+        cas_merge_results=[CasMergeResult(status=CasMergeStatus.AMBIGUOUS_ACK, merged_sha="a" * 40)],
+        final_merge_fields=fields,
+        issue_states={1232: "open"},
+    )
+    result = run_github_completion_loop(initial_evidence=ev, request=req, port=port)
+    assert result.outcome is CompletionLoopOutcome.COMPLETED
+    assert result.reason == "AMBIGUOUS_ACK_RECONCILED_SUCCESS"
+
+
+def test_g07_test_o_ambiguous_ack_physical_merge_confirmed_issue_mismatch_blocks(monkeypatch):
+    """Test O: ambiguous ACK + physical merge confirmed + Issue mismatch -> BLOCKED, 0 second merge."""
+    ev, req = _setup_g07_test(monkeypatch)
+    pr_body = _make_g07_pr_body([(1232, "KEEP_OPEN")], extra_prose="#1232 remains open.")
+    fields = FinalMergeFields(
+        pr_number=ev.pull_request_number,
+        head_sha=ev.head_sha,
+        base_sha=ev.base_sha,
+        merge_method="squash",
+        pr_body=pr_body,
+    )
+    port = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+        cas_merge_results=[CasMergeResult(status=CasMergeStatus.AMBIGUOUS_ACK, merged_sha="a" * 40)],
+        final_merge_fields=fields,
+        issue_states={1232: "closed"},  # Mismatch under KEEP_OPEN!
+    )
+    result = run_github_completion_loop(initial_evidence=ev, request=req, port=port)
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "AMBIGUOUS_MERGE_POST_VERIFICATION_FAILED" in result.reason
+    assert "STATE_MISMATCH" in result.reason
+    assert result.details["post_merge_verification"]["allow_second_merge"] is False
+    assert len(port.cas_merge_calls) == 1  # Exactly 1 merge call, zero retry/second merge
