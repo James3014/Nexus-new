@@ -12,6 +12,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from nexus.research.clm_system_one.research_evidence_root import (
+    resolve_research_evidence_root,
+)
+
 STEP_SCHEMA = "nexus.clm_trajectory_step.v1"
 STEP_RESULT_SCHEMA = "nexus.clm_trajectory_step_result.v1"
 OUTCOME_SCHEMA = "nexus.clm_trajectory_outcome_binding.v1"
@@ -171,19 +175,6 @@ def _trajectory_storage_key(trajectory_id: str) -> str:
     if not value:
         raise ValueError("trajectory_id is required")
     return _sha256_bytes(value.encode("utf-8"))
-
-
-def resolve_research_evidence_root(repo_root: str | Path) -> Path:
-    override = os.getenv("NEXUS_CLM_CANDIDATE_EVIDENCE_ROOT", "").strip()
-    if override:
-        return Path(override).expanduser().resolve()
-    return (
-        Path(repo_root).expanduser().resolve()
-        / ".nexus"
-        / "research"
-        / "clm_system_one"
-        / "candidate_evidence"
-    ).resolve()
 
 
 def _contains_forbidden_future_key(value: Any) -> bool:
