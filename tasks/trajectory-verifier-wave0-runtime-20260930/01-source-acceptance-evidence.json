@@ -1,0 +1,166 @@
+{
+  "accepted_source": {
+    "final_manager_sha256": "6e4fa4af4ba50eeb956c7b2ed2579c06dbc392576bf5893f4e93505f6120a6ef",
+    "merge_sha": "77e4aeffe3d43706eefe9bd19751326aad158a4e",
+    "parents": [
+      "6ef68ffc7ac374822a0e3ef3b2c73e4b8a9f5c5a",
+      "b7e0213351dc7528968c7d0f4af1a29b469ea05e"
+    ],
+    "tree_sha": "7ed5485de142d09f67e649b448acff7ae8efb038"
+  },
+  "claim_ceiling": "TRACK1_WAVE0_SOURCE_ACCEPTANCE_ONLY",
+  "deployment_issue": "James3014/nexus-deployment-lab#8",
+  "evidence_class": "INDEPENDENT_SOURCE_ACCEPTANCE_ONLY",
+  "independent_acceptance": {
+    "candidate_head": "b7e0213351dc7528968c7d0f4af1a29b469ea05e",
+    "merge_sha": "77e4aeffe3d43706eefe9bd19751326aad158a4e",
+    "merge_tree_sha": "7ed5485de142d09f67e649b448acff7ae8efb038",
+    "pull_request": 1220,
+    "receipt_hash": "86755fd08d2c99930e9b1d575d0c7aa0ed4742148b0e23ab866a2fb66880030e",
+    "repository": "James3014/Nexus-new",
+    "required_checks": [
+      {
+        "check_run_id": 109708698926,
+        "conclusion": "success",
+        "head_sha": "b7e0213351dc7528968c7d0f4af1a29b469ea05e",
+        "name": "Exact-base impact gate",
+        "run_id": 36658779630,
+        "status": "completed"
+      },
+      {
+        "check_run_id": 109708699178,
+        "conclusion": "success",
+        "head_sha": "b7e0213351dc7528968c7d0f4af1a29b469ea05e",
+        "name": "Full published Git history secret audit",
+        "run_id": 36658779714,
+        "status": "completed"
+      },
+      {
+        "check_run_id": 109709101174,
+        "conclusion": "success",
+        "head_sha": "b7e0213351dc7528968c7d0f4af1a29b469ea05e",
+        "name": "Trusted verifier (default branch)",
+        "run_id": 36658776406,
+        "status": "completed"
+      }
+    ],
+    "reviewer_id": "github-trusted-verifier-exact-head",
+    "schema": "nexus.gateway.independent_source_acceptance.v1",
+    "verdict": "ACCEPT"
+  },
+  "issue_number": 1197,
+  "issued_at": "2026-09-30T02:44:31Z",
+  "owner_activation": {
+    "activation_id": "BREAK_GLASS_TRACK1_WAVE0_RUNTIME_ACTIVATION_20260930_V1",
+    "message_sha256": "ddf4f8293a2835fa184894dc30609a37502cbc5de850123651f77e8b41d17e32",
+    "source_thread": "deployment-lab-8-comment-5903016267"
+  },
+  "receipt_hash": "edd081c008c942da5a517e5d49550783e2e59f17ba1c99ec6eaf93cd30f06138",
+  "receipt_id": "track1-wave0-source-acceptance-77e4aeffe3d4",
+  "receipt_version": 1,
+  "repository": "James3014/Nexus-new",
+  "required_checks": [
+    {
+      "check_run_id": 109708698926,
+      "conclusion": "success",
+      "head_sha": "b7e0213351dc7528968c7d0f4af1a29b469ea05e",
+      "name": "Exact-base impact gate",
+      "run_id": 36658779630,
+      "status": "completed"
+    },
+    {
+      "check_run_id": 109708699178,
+      "conclusion": "success",
+      "head_sha": "b7e0213351dc7528968c7d0f4af1a29b469ea05e",
+      "name": "Full published Git history secret audit",
+      "run_id": 36658779714,
+      "status": "completed"
+    },
+    {
+      "check_run_id": 109709101174,
+      "conclusion": "success",
+      "head_sha": "b7e0213351dc7528968c7d0f4af1a29b469ea05e",
+      "name": "Trusted verifier (default branch)",
+      "run_id": 36658776406,
+      "status": "completed"
+    }
+  ],
+  "review": {
+    "coordinator_id": "chatgpt-primary-controller",
+    "notes": [
+      "PR #1220 exact head passed required gates",
+      "merge commit/tree re-read after merge",
+      "Wave-0 authority remains deployment-only; no training authority"
+    ],
+    "reviewer_id": "github-trusted-verifier-exact-head",
+    "verdict": "ACCEPT"
+  },
+  "schema": "nexus.gateway.r1_source_acceptance.v1",
+  "source_lineage": {
+    "pull_requests": [
+      {
+        "base_sha": "6ef68ffc7ac374822a0e3ef3b2c73e4b8a9f5c5a",
+        "head_sha": "b7e0213351dc7528968c7d0f4af1a29b469ea05e",
+        "merge_sha": "77e4aeffe3d43706eefe9bd19751326aad158a4e",
+        "merge_tree_sha": "7ed5485de142d09f67e649b448acff7ae8efb038",
+        "merged_at": "2026-09-30T02:31:20Z",
+        "number": 1220
+      }
+    ],
+    "scope": {
+      "deleted_files": [],
+      "files": [
+        "nexus/research/clm_system_one/candidate_evidence_collector.py",
+        "nexus/research/clm_system_one/research_evidence_root.py",
+        "nexus/research/clm_system_one/trajectory_continuity.py",
+        "tests/research/test_research_evidence_root.py"
+      ],
+      "sha256": "b5689eca5808e2da56669ca0aaa6eaf274789fd8618a209e522359351f073602"
+    },
+    "scope_base_sha": "6ef68ffc7ac374822a0e3ef3b2c73e4b8a9f5c5a"
+  },
+  "task_id": "TRACK1-WAVE0-RUNTIME-ACTIVATION",
+  "verifier_results": [
+    {
+      "failed": 0,
+      "id": "research-root-candidate-trajectory",
+      "kind": "pytest",
+      "passed": 96,
+      "status": "PASS"
+    },
+    {
+      "failed": 0,
+      "id": "local-committee-trajectory",
+      "kind": "pytest",
+      "passed": 17,
+      "status": "PASS"
+    },
+    {
+      "failed": 0,
+      "id": "repair-battle-trajectory",
+      "kind": "pytest",
+      "passed": 22,
+      "status": "PASS"
+    },
+    {
+      "failed": 0,
+      "id": "cli-worker-trajectory",
+      "kind": "pytest",
+      "passed": 39,
+      "status": "PASS"
+    },
+    {
+      "failed": 0,
+      "id": "local-model-executor",
+      "kind": "pytest",
+      "passed": 187,
+      "skipped": 1,
+      "status": "PASS"
+    },
+    {
+      "id": "ruff-format-diff-check",
+      "kind": "command",
+      "status": "PASS"
+    }
+  ]
+}
