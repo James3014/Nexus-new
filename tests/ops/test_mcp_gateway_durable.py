@@ -666,6 +666,102 @@ def _r1m_clear_materialized_stores(fixture, monkeypatch):
             pass
 
 
+def _r1m_write_recovery_ledger(fixture, monkeypatch, *, terminal_state):
+    from nexus.contracts.gateway_deployment import DeploymentState
+
+    ledger_path = fixture["state"] / "ledger.jsonl"
+    monkeypatch.setattr(g, "GATEWAY_LEDGER", ledger_path)
+    rows = []
+    evidence = SimpleNamespace(evidence_hash="b" * 64)
+    states = [
+        DeploymentState.REQUESTED,
+        DeploymentState.PREFLIGHTED,
+        DeploymentState.TARGET_READY,
+        DeploymentState.ROLLBACK_READY,
+        DeploymentState.EFFECT_STARTED,
+        DeploymentState.SERVICE_OBSERVED,
+        DeploymentState.IDENTITY_VERIFIED,
+        DeploymentState.CLIENT_BOUND,
+    ]
+    if terminal_state is DeploymentState.VERIFIED:
+        states.append(DeploymentState.VERIFIED)
+    for state in states:
+        record = g._recovery_record(
+            rows,
+            fixture["request"],
+            fixture["receipt"],
+            None if state is DeploymentState.REQUESTED else evidence,
+            state,
+        )
+        rows.append(record.model_dump())
+        if state is terminal_state:
+            break
+    ledger_path.write_bytes(
+        b"".join(
+            json.dumps(row, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+            for row in rows
+        )
+    )
+    ledger_path.chmod(0o600)
+    return ledger_path
+
+
+def _r1m_stub_predecessor_materialization(fixture, monkeypatch):
+    monkeypatch.setattr(
+        g,
+        "_r1_materialize_predecessor_artifact",
+        lambda _receipt: fixture["predecessor_artifact"],
+    )
+
+
+def _r1m_publish_successor(
+    fixture, *, request_id="request-2", idempotency_fence="fence-2"
+):
+    from nexus.contracts.gateway_deployment import (
+        RecoveryAuthorityReceipt,
+        canonical_hash,
+        derive_gateway_recovery_request,
+    )
+
+    values = fixture["receipt"].model_dump()
+    values.pop("receipt_hash")
+    values.update({
+        "receipt_id": "receipt-2",
+        "request_id": request_id,
+        "idempotency_fence": idempotency_fence,
+    })
+    successor = RecoveryAuthorityReceipt(
+        **values,
+        receipt_hash=canonical_hash(values),
+    )
+    request = derive_gateway_recovery_request(successor)
+    raw = json.dumps(
+        successor.model_dump(), sort_keys=True, separators=(",", ":")
+    ).encode()
+    tracked = fixture["mirror"] / g.RECOVERY_AUTHORITY_SOURCE_PATH
+    tracked.write_bytes(raw)
+    subprocess.run(["git", "-C", str(fixture["mirror"]), "add", "-A"], check=True)
+    subprocess.run(
+        ["git", "-C", str(fixture["mirror"]), "commit", "-q", "-m", "successor"],
+        check=True,
+    )
+    successor_head = subprocess.check_output(
+        ["git", "-C", str(fixture["mirror"]), "rev-parse", "HEAD"], text=True
+    ).strip()
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(fixture["mirror"]),
+            "update-ref",
+            "refs/heads/main",
+            successor_head,
+        ],
+        check=True,
+    )
+    return successor, request, raw
+
+
 def test_r1b1_materialize_creates_fixed_stores_and_starts_no_effect(tmp_path, monkeypatch):
     fixture = _r1b1_fixture(tmp_path, monkeypatch)
     _r1m_clear_materialized_stores(fixture, monkeypatch)
@@ -765,6 +861,177 @@ def test_r1b1_materialize_is_idempotent_and_rejects_post_materialization_drift(
     )
     with pytest.raises(g.GatewayContractError, match="store drift"):
         g.gateway_recovery_materialize(request)
+
+
+def test_r1b1_materialize_rotates_only_from_terminal_verified_generation(
+    tmp_path, monkeypatch
+):
+    from nexus.contracts.gateway_deployment import DeploymentState
+
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    _r1m_clear_materialized_stores(fixture, monkeypatch)
+    _r1m_stub_predecessor_materialization(fixture, monkeypatch)
+    first = g.gateway_recovery_materialize(
+        _r1m_materialization_request(fixture["receipt"])
+    )
+    _r1m_write_recovery_ledger(
+        fixture, monkeypatch, terminal_state=DeploymentState.VERIFIED
+    )
+    successor, successor_request, successor_raw = _r1m_publish_successor(fixture)
+    calls = []
+    monkeypatch.setattr(
+        g, "_launchctl_observation", lambda *args, **kwargs: calls.append((args, kwargs))
+    )
+
+    outcome = g.gateway_recovery_materialize(
+        _r1m_materialization_request(successor)
+    )
+
+    assert first["recovery_authority_id"] == fixture["receipt"].receipt_id
+    assert outcome["recovery_authority_id"] == successor.receipt_id
+    assert outcome["effect_started"] is False
+    assert calls == []
+    assert g.GATEWAY_RECOVERY_AUTHORITY_STORE.read_bytes() == successor_raw
+    assert json.loads(g.GATEWAY_REQUEST_STORE.read_text()) == successor_request.model_dump()
+
+
+def test_r1b1_materialize_rejects_nonterminal_successor_rotation(
+    tmp_path, monkeypatch
+):
+    from nexus.contracts.gateway_deployment import DeploymentState
+
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    _r1m_clear_materialized_stores(fixture, monkeypatch)
+    _r1m_stub_predecessor_materialization(fixture, monkeypatch)
+    g.gateway_recovery_materialize(_r1m_materialization_request(fixture["receipt"]))
+    old_authority = g.GATEWAY_RECOVERY_AUTHORITY_STORE.read_bytes()
+    old_request = g.GATEWAY_REQUEST_STORE.read_bytes()
+    _r1m_write_recovery_ledger(
+        fixture, monkeypatch, terminal_state=DeploymentState.CLIENT_BOUND
+    )
+    successor, _successor_request, _successor_raw = _r1m_publish_successor(fixture)
+
+    with pytest.raises(g.GatewayContractError, match="terminal VERIFIED"):
+        g.gateway_recovery_materialize(_r1m_materialization_request(successor))
+
+    assert g.GATEWAY_RECOVERY_AUTHORITY_STORE.read_bytes() == old_authority
+    assert g.GATEWAY_REQUEST_STORE.read_bytes() == old_request
+
+
+def test_r1b1_materialize_reconciles_request_first_partial_successor(
+    tmp_path, monkeypatch
+):
+    from nexus.contracts.gateway_deployment import DeploymentState
+
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    _r1m_clear_materialized_stores(fixture, monkeypatch)
+    _r1m_stub_predecessor_materialization(fixture, monkeypatch)
+    g.gateway_recovery_materialize(_r1m_materialization_request(fixture["receipt"]))
+    old_authority = g.GATEWAY_RECOVERY_AUTHORITY_STORE.read_bytes()
+    _r1m_write_recovery_ledger(
+        fixture, monkeypatch, terminal_state=DeploymentState.VERIFIED
+    )
+    successor, successor_request, successor_raw = _r1m_publish_successor(fixture)
+    materialize_request = _r1m_materialization_request(successor)
+    real_replace = g._r1_replace_materialization_store
+
+    def crash_after_request(path, *, expected, desired):
+        written = real_replace(path, expected=expected, desired=desired)
+        if Path(path) == Path(g.GATEWAY_REQUEST_STORE):
+            raise RuntimeError("simulated request-first crash")
+        return written
+
+    monkeypatch.setattr(g, "_r1_replace_materialization_store", crash_after_request)
+    with pytest.raises(RuntimeError, match="simulated request-first crash"):
+        g.gateway_recovery_materialize(materialize_request)
+    monkeypatch.setattr(g, "_r1_replace_materialization_store", real_replace)
+
+    successor_request_bytes = json.dumps(
+        successor_request.model_dump(), sort_keys=True, separators=(",", ":")
+    ).encode()
+    assert g.GATEWAY_REQUEST_STORE.read_bytes() == successor_request_bytes
+    assert g.GATEWAY_RECOVERY_AUTHORITY_STORE.read_bytes() == old_authority
+    with pytest.raises(g.GatewayContractError):
+        g._load_recovery_authority(successor_request)
+
+    outcome = g.gateway_recovery_materialize(materialize_request)
+
+    assert outcome["effect_started"] is False
+    assert g.GATEWAY_REQUEST_STORE.read_bytes() == successor_request_bytes
+    assert g.GATEWAY_RECOVERY_AUTHORITY_STORE.read_bytes() == successor_raw
+
+
+def test_r1b1_materialize_rejects_authority_first_partial_successor(
+    tmp_path, monkeypatch
+):
+    from nexus.contracts.gateway_deployment import DeploymentState
+
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    _r1m_clear_materialized_stores(fixture, monkeypatch)
+    _r1m_stub_predecessor_materialization(fixture, monkeypatch)
+    g.gateway_recovery_materialize(_r1m_materialization_request(fixture["receipt"]))
+    old_request = g.GATEWAY_REQUEST_STORE.read_bytes()
+    _r1m_write_recovery_ledger(
+        fixture, monkeypatch, terminal_state=DeploymentState.VERIFIED
+    )
+    successor, _successor_request, successor_raw = _r1m_publish_successor(fixture)
+    g.GATEWAY_RECOVERY_AUTHORITY_STORE.write_bytes(successor_raw)
+    assert g.GATEWAY_REQUEST_STORE.read_bytes() == old_request
+
+    with pytest.raises(
+        g.GatewayContractError,
+        match="unsafe authority-first partial materialization state",
+    ):
+        g.gateway_recovery_materialize(_r1m_materialization_request(successor))
+
+
+@pytest.mark.parametrize("reuse", ["request_id", "idempotency_fence"])
+def test_r1b1_materialize_rejects_successor_request_or_fence_reuse(
+    tmp_path, monkeypatch, reuse
+):
+    from nexus.contracts.gateway_deployment import DeploymentState
+
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    _r1m_clear_materialized_stores(fixture, monkeypatch)
+    _r1m_stub_predecessor_materialization(fixture, monkeypatch)
+    g.gateway_recovery_materialize(_r1m_materialization_request(fixture["receipt"]))
+    _r1m_write_recovery_ledger(
+        fixture, monkeypatch, terminal_state=DeploymentState.VERIFIED
+    )
+    kwargs = {
+        reuse: getattr(fixture["request"], reuse),
+    }
+    successor, _successor_request, _successor_raw = _r1m_publish_successor(
+        fixture, **kwargs
+    )
+
+    with pytest.raises(
+        g.GatewayContractError,
+        match="successor recovery request/fence identity reused",
+    ):
+        g.gateway_recovery_materialize(_r1m_materialization_request(successor))
+
+
+def test_r1b1_materialize_rejects_malformed_prior_request_on_successor(
+    tmp_path, monkeypatch
+):
+    from nexus.contracts.gateway_deployment import DeploymentState
+
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    _r1m_clear_materialized_stores(fixture, monkeypatch)
+    _r1m_stub_predecessor_materialization(fixture, monkeypatch)
+    g.gateway_recovery_materialize(_r1m_materialization_request(fixture["receipt"]))
+    _r1m_write_recovery_ledger(
+        fixture, monkeypatch, terminal_state=DeploymentState.VERIFIED
+    )
+    successor, _successor_request, _successor_raw = _r1m_publish_successor(fixture)
+    g.GATEWAY_REQUEST_STORE.write_bytes(b"{}")
+
+    with pytest.raises(
+        g.GatewayContractError,
+        match="prior materialized recovery request invalid",
+    ):
+        g.gateway_recovery_materialize(_r1m_materialization_request(successor))
 
 
 def test_r1b1_materialize_rejects_identity_and_fence_mismatch(tmp_path, monkeypatch):

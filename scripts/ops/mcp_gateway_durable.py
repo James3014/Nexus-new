@@ -1954,6 +1954,205 @@ def _r1_materialize_value_store(path: Path, data: bytes) -> bytes:
     return written
 
 
+def _r1_parse_materialized_recovery_authority(raw: bytes) -> RecoveryAuthorityReceipt:
+    try:
+        payload = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_pairs)
+        receipt = RecoveryAuthorityReceipt.model_validate(payload)
+        validate_recovery_authority(receipt)
+    except (UnicodeError, ValueError, ContractError) as exc:
+        raise _gateway_error("R1 prior materialized recovery authority invalid", exc) from exc
+    canonical = json.dumps(
+        receipt.model_dump(), sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    if raw != canonical:
+        raise _gateway_error("R1 prior materialized recovery authority is not canonical")
+    return receipt
+
+
+def _r1_parse_materialized_recovery_request(raw: bytes) -> GatewayRecoveryRequest:
+    try:
+        payload = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_pairs)
+        request = GatewayRecoveryRequest.model_validate(payload)
+        validate_recovery_request(request)
+    except (UnicodeError, ValueError, ContractError) as exc:
+        raise _gateway_error("R1 prior materialized recovery request invalid", exc) from exc
+    canonical = json.dumps(
+        request.model_dump(), sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    if raw != canonical:
+        raise _gateway_error("R1 prior materialized recovery request is not canonical")
+    return request
+
+
+def _r1_require_terminal_verified_generation(
+    receipt: RecoveryAuthorityReceipt,
+    request: GatewayRecoveryRequest,
+) -> None:
+    try:
+        validate_recovery_authority(receipt, request=request)
+        validate_recovery_request(request)
+    except ContractError as exc:
+        raise _gateway_error("R1 prior materialized recovery pair invalid", exc) from exc
+    ledger = GatewayLedger(path=GATEWAY_LEDGER, lock_path=GATEWAY_LOCK)
+    rows = ledger._scan_unlocked()
+    latest_by_request: dict[str, Mapping[str, Any]] = {}
+    for row in rows:
+        if (
+            row["schema"] == "nexus.gateway.ledger.v2"
+            and row["operation"] == "gateway-recover"
+        ):
+            latest_by_request[row["request_id"]] = row
+    latest = latest_by_request.get(request.request_id)
+    if latest is None or latest["state"] != DeploymentState.VERIFIED.value:
+        raise _gateway_error(
+            "R1 prior materialized recovery is not terminal VERIFIED"
+        )
+    expected = {
+        "request_hash": request.request_hash,
+        "idempotency_fence": request.idempotency_fence,
+        "receipt_id": receipt.receipt_id,
+        "receipt_hash": receipt.receipt_hash,
+        "desired_manifest_id": request.desired_manifest_id,
+        "desired_manifest_hash": request.desired_manifest_hash,
+        "predecessor_manifest_id": request.predecessor_manifest_id,
+        "predecessor_manifest_hash": request.predecessor_manifest_hash,
+    }
+    if any(latest.get(key) != value for key, value in expected.items()):
+        raise _gateway_error("R1 prior terminal recovery ledger binding mismatch")
+    terminal_states = {
+        DeploymentState.VERIFIED.value,
+        DeploymentState.BLOCKED.value,
+        DeploymentState.ROLLED_BACK.value,
+    }
+    if any(
+        request_id != request.request_id and row["state"] not in terminal_states
+        for request_id, row in latest_by_request.items()
+    ):
+        raise _gateway_error("R1 another recovery generation is nonterminal")
+
+
+def _r1_replace_materialization_store(
+    path: Path,
+    *,
+    expected: bytes,
+    desired: bytes,
+) -> bytes:
+    if not desired or len(desired) > MAX_GATEWAY_STORE_BYTES:
+        raise _gateway_error("R1 materialization payload size invalid")
+    path = _safe_store_path(path, leaf_mode=0o600, create=True)
+    try:
+        current = path.read_bytes()
+    except OSError as exc:
+        raise _gateway_error("R1 materialization compare-and-swap source missing", exc) from exc
+    if current != expected:
+        raise _gateway_error("R1 materialization compare-and-swap conflict")
+    if current == desired:
+        return current
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    try:
+        os.chmod(tmp, 0o600)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(desired)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if path.read_bytes() != expected:
+            raise _gateway_error("R1 materialization compare-and-swap conflict")
+        os.replace(tmp, path)
+        _fsync_dir(path.parent)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+    written = path.read_bytes()
+    if written != desired:
+        raise _gateway_error("R1 materialization successor write identity mismatch")
+    return written
+
+
+def _r1_materialize_recovery_pair(
+    authority_bytes: bytes,
+    request: GatewayRecoveryRequest,
+    request_bytes: bytes,
+) -> tuple[bytes, bytes]:
+    authority_path = _safe_store_path(
+        GATEWAY_RECOVERY_AUTHORITY_STORE, leaf_mode=0o600, create=True
+    )
+    request_path = _safe_store_path(
+        GATEWAY_REQUEST_STORE, leaf_mode=0o600, create=True
+    )
+    try:
+        current_authority = authority_path.read_bytes()
+    except OSError:
+        current_authority = None
+    try:
+        current_request = request_path.read_bytes()
+    except OSError:
+        current_request = None
+
+    if current_authority == authority_bytes:
+        if current_request == request_bytes:
+            return current_authority, current_request
+        if current_request is None:
+            materialized_request = _r1_materialize_value_store(
+                GATEWAY_REQUEST_STORE, request_bytes
+            )
+            return current_authority, materialized_request
+        raise _gateway_error(
+            "R1 unsafe authority-first partial materialization state"
+        )
+
+    if current_authority is None:
+        if current_request not in {None, request_bytes}:
+            raise _gateway_error("R1 materialization orphan request store rejected")
+        materialized_request = _r1_materialize_value_store(
+            GATEWAY_REQUEST_STORE, request_bytes
+        )
+        materialized_authority = _r1_materialize_value_store(
+            GATEWAY_RECOVERY_AUTHORITY_STORE, authority_bytes
+        )
+        return materialized_authority, materialized_request
+
+    try:
+        prior_receipt = _r1_parse_materialized_recovery_authority(current_authority)
+    except GatewayContractError as exc:
+        raise _gateway_error(
+            "R1 materialization store drift; refusing to overwrite", exc
+        ) from exc
+    prior_request = derive_gateway_recovery_request(prior_receipt)
+    validate_recovery_request(prior_request)
+    _r1_require_terminal_verified_generation(prior_receipt, prior_request)
+    if (
+        request.request_id == prior_request.request_id
+        or request.idempotency_fence == prior_request.idempotency_fence
+    ):
+        raise _gateway_error("R1 successor recovery request/fence identity reused")
+
+    if current_request == request_bytes:
+        materialized_authority = _r1_replace_materialization_store(
+            GATEWAY_RECOVERY_AUTHORITY_STORE,
+            expected=current_authority,
+            desired=authority_bytes,
+        )
+        return materialized_authority, current_request
+    if current_request is None:
+        raise _gateway_error("R1 materialization prior request store missing")
+
+    stored_prior_request = _r1_parse_materialized_recovery_request(current_request)
+    if stored_prior_request.model_dump() != prior_request.model_dump():
+        raise _gateway_error("R1 prior materialized recovery pair mismatch")
+
+    materialized_request = _r1_replace_materialization_store(
+        GATEWAY_REQUEST_STORE,
+        expected=current_request,
+        desired=request_bytes,
+    )
+    materialized_authority = _r1_replace_materialization_store(
+        GATEWAY_RECOVERY_AUTHORITY_STORE,
+        expected=current_authority,
+        desired=authority_bytes,
+    )
+    return materialized_authority, materialized_request
+
+
 def _r1_materialize_predecessor_artifact(receipt: RecoveryAuthorityReceipt) -> Path:
     artifact = _r1_predecessor_artifact_path(receipt)
     try:
@@ -2087,11 +2286,10 @@ def _r1_reconcile_materialization_receipt(
         raise _gateway_error("R1 durable materialization authority bytes drift")
     if hashlib.sha256(request_bytes).hexdigest() != receipt.materialized_request_sha256:
         raise _gateway_error("R1 durable materialization request bytes drift")
-    materialized_authority = _r1_materialize_value_store(
-        GATEWAY_RECOVERY_AUTHORITY_STORE, tracked_bytes
-    )
-    materialized_request = _r1_materialize_value_store(
-        GATEWAY_REQUEST_STORE, request_bytes
+    materialized_authority, materialized_request = _r1_materialize_recovery_pair(
+        tracked_bytes,
+        canonical_request,
+        request_bytes,
     )
     _r1_materialize_predecessor_artifact(tracked_receipt)
     checked_authority = _safe_store_path(GATEWAY_RECOVERY_AUTHORITY_STORE)
