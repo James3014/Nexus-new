@@ -21,6 +21,7 @@ WORKFLOW_DOCTOR = ROOT / "scripts" / "ops" / "nexus-workflow-doctor"
 WORKFLOW_DOCTOR_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_workflow_doctor.sh"
 EXTERNAL_DISPATCH = ROOT / "scripts" / "ops" / "nexus-external-worker-dispatch"
 EXTERNAL_DISPATCH_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_external_worker_dispatch.sh"
+GROK_ACCOUNTS = ROOT / "scripts" / "ops" / "nexus-grok-accounts"
 MANAGER_SHA = "4c0e326fc72ea98f9d6d80957055a4e8a2d7387f681dea903f2a072942d2e31c"
 LAUNCHD_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_host_sync_launchd.sh"
 BOOTSTRAP_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_host_sync.sh"
@@ -77,6 +78,7 @@ def _make_source_repo(tmp_path: Path) -> Path:
             "scripts/ops/install_nexus_workflow_doctor.sh",
         ),
         (EXTERNAL_DISPATCH, "scripts/ops/nexus-external-worker-dispatch"),
+        (GROK_ACCOUNTS, "scripts/ops/nexus-grok-accounts"),
         (
             EXTERNAL_DISPATCH_INSTALLER,
             "scripts/ops/install_nexus_external_worker_dispatch.sh",
@@ -131,6 +133,7 @@ def _invoke(
     quota_target = dispatch_target.parent / "nexus-agy-quota"
     workflow_doctor_target = dispatch_target.parent / "nexus-workflow-doctor"
     external_dispatch_target = dispatch_target.parent / "nexus-external-worker-dispatch"
+    grok_accounts_target = dispatch_target.parent / "nexus-grok-accounts"
     argv = [
         sys.executable,
         str(HOST_SYNC),
@@ -146,6 +149,8 @@ def _invoke(
         str(sync_target),
         "--external-dispatch-target",
         str(external_dispatch_target),
+        "--grok-accounts-target",
+        str(grok_accounts_target),
         "--manager-python",
         str(manager_python),
         command,
@@ -193,11 +198,15 @@ def test_sync_materializes_exact_generation_and_entrypoints(tmp_path: Path) -> N
     assert payload["components"]["agy_quota"]["status"] == "VERIFIED"
     assert payload["components"]["workflow_doctor"]["status"] == "VERIFIED"
     assert payload["components"]["external_worker_dispatch"]["status"] == "VERIFIED"
+    assert payload["components"]["grok_accounts"]["status"] == "VERIFIED"
     assert payload["components"]["agy_account_manager"]["status"] == "VERIFIED"
     assert dispatch_target.is_symlink()
     assert (dispatch_target.parent / "nexus-agy-quota").is_symlink()
     assert (dispatch_target.parent / "nexus-workflow-doctor").is_symlink()
     assert (dispatch_target.parent / "nexus-external-worker-dispatch").is_symlink()
+    grok_accounts_target = dispatch_target.parent / "nexus-grok-accounts"
+    assert grok_accounts_target.is_symlink()
+    assert grok_accounts_target.resolve().read_bytes() == GROK_ACCOUNTS.read_bytes()
     assert sync_target.is_symlink()
 
     receipt = json.loads((runtime_root / "releases" / bundle / "host-generation.json").read_text())

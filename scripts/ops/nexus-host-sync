@@ -209,6 +209,8 @@ def _parse_manifest(data: bytes) -> dict[str, Any]:
             "nexus/services/workflow_doctor.py",
             "nexus/services/direct_operation_journal.py",
         })
+    if isinstance(components, dict) and isinstance(components.get("grok_accounts"), dict):
+        required.add("scripts/ops/nexus-grok-accounts")
     if not required.issubset(seen):
         raise HostSyncError("HOST_MANIFEST_REQUIRED_RUNTIME_PATH_MISSING")
     return manifest
@@ -629,6 +631,7 @@ def _activate(
     workflow_doctor_target: Path,
     sync_target: Path,
     external_dispatch_target: Path,
+    grok_accounts_target: Path,
 ) -> None:
     current = runtime_root / "current"
     previous = runtime_root / "previous"
@@ -647,6 +650,7 @@ def _activate(
     _backup_entrypoint(workflow_doctor_target, runtime_root)
     _backup_entrypoint(sync_target, runtime_root)
     _backup_entrypoint(external_dispatch_target, runtime_root)
+    _backup_entrypoint(grok_accounts_target, runtime_root)
     _atomic_symlink(current / "bin" / "nexus-agy-dispatch", dispatch_target)
     _atomic_symlink(current / "bin" / "nexus-agy-quota", quota_target)
     workflow_doctor_bin = release / "bin" / "nexus-workflow-doctor"
@@ -666,6 +670,17 @@ def _activate(
         )
     elif external_dispatch_target.is_symlink():
         external_dispatch_target.unlink()
+    grok_accounts_source = release / "snapshot" / "scripts" / "ops" / "nexus-grok-accounts"
+    release_manifest, _ = _snapshot_manifest(release / "snapshot")
+    if _manifest_has_component(release_manifest, "grok_accounts"):
+        if not grok_accounts_source.is_file():
+            raise HostSyncError(f"RELEASE_GROK_ACCOUNTS_MISSING:{grok_accounts_source}")
+        _atomic_symlink(
+            current / "snapshot" / "scripts" / "ops" / "nexus-grok-accounts",
+            grok_accounts_target,
+        )
+    elif grok_accounts_target.is_symlink():
+        grok_accounts_target.unlink()
 
 
 def _same_target(link: Path, expected: Path) -> bool:
@@ -682,6 +697,7 @@ def _status(
     workflow_doctor_target: Path,
     sync_target: Path,
     external_dispatch_target: Path,
+    grok_accounts_target: Path,
     manager_python: Path,
     desired_revision: str | None,
     desired_bundle_sha: str | None,
@@ -773,6 +789,18 @@ def _status(
         "status": "VERIFIED" if sync_ok else "DRIFT",
         "entrypoint": str(sync_target),
     }
+
+    if _manifest_has_component(manifest, "grok_accounts"):
+        grok_accounts_source = release / "snapshot" / "scripts" / "ops" / "nexus-grok-accounts"
+        grok_accounts_ok = grok_accounts_source.is_file() and _same_target(
+            grok_accounts_target,
+            current / "snapshot" / "scripts" / "ops" / "nexus-grok-accounts",
+        )
+        payload["components"]["grok_accounts"] = {
+            "status": "VERIFIED" if grok_accounts_ok else "DRIFT",
+            "sha256": _sha256(grok_accounts_source) if grok_accounts_source.is_file() else None,
+            "entrypoint": str(grok_accounts_target),
+        }
 
     if _manifest_has_component(manifest, "external_worker_dispatch"):
         external_dispatch = release / "bin" / "nexus-external-worker-dispatch"
@@ -870,7 +898,7 @@ def _prune_releases(runtime_root: Path) -> None:
 
 def _common_paths(
     args: argparse.Namespace,
-) -> tuple[Path, Path, Path, Path, Path, Path, Path]:
+) -> tuple[Path, Path, Path, Path, Path, Path, Path, Path]:
     runtime_root = Path(args.runtime_root).expanduser().resolve()
     dispatch_target = Path(os.path.abspath(os.path.expanduser(args.dispatch_target)))
     quota_target = Path(os.path.abspath(os.path.expanduser(args.quota_target)))
@@ -879,6 +907,7 @@ def _common_paths(
     external_dispatch_target = Path(
         os.path.abspath(os.path.expanduser(args.external_dispatch_target))
     )
+    grok_accounts_target = Path(os.path.abspath(os.path.expanduser(args.grok_accounts_target)))
     # Keep the venv entrypoint path itself. Resolving a venv bin/python symlink
     # to the system interpreter would discard the venv package identity.
     manager_python = Path(os.path.abspath(os.path.expanduser(args.manager_python)))
@@ -889,6 +918,7 @@ def _common_paths(
         workflow_doctor_target,
         sync_target,
         external_dispatch_target,
+        grok_accounts_target,
         manager_python,
     )
 
@@ -962,6 +992,13 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--grok-accounts-target",
+        default=os.getenv(
+            "NEXUS_GROK_ACCOUNTS_TARGET",
+            str(Path.home() / ".local/bin/nexus-grok-accounts"),
+        ),
+    )
+    parser.add_argument(
         "--manager-python",
         default=os.getenv(
             "NEXUS_AGY_MANAGER_PYTHON",
@@ -1002,6 +1039,7 @@ def main(argv: list[str] | None = None) -> int:
         workflow_doctor_target,
         sync_target,
         external_dispatch_target,
+        grok_accounts_target,
         manager_python,
     ) = _common_paths(args)
 
@@ -1014,6 +1052,7 @@ def main(argv: list[str] | None = None) -> int:
                 workflow_doctor_target=workflow_doctor_target,
                 sync_target=sync_target,
                 external_dispatch_target=external_dispatch_target,
+                grok_accounts_target=grok_accounts_target,
                 manager_python=manager_python,
                 desired_revision=None,
                 desired_bundle_sha=args.desired_bundle_sha256,
@@ -1029,6 +1068,7 @@ def main(argv: list[str] | None = None) -> int:
                 workflow_doctor_target=workflow_doctor_target,
                 sync_target=sync_target,
                 external_dispatch_target=external_dispatch_target,
+                grok_accounts_target=grok_accounts_target,
                 manager_python=manager_python,
                 desired_revision=None,
                 desired_bundle_sha=args.desired_bundle_sha256,
@@ -1063,6 +1103,7 @@ def main(argv: list[str] | None = None) -> int:
                 workflow_doctor_target=workflow_doctor_target,
                 sync_target=sync_target,
                 external_dispatch_target=external_dispatch_target,
+                grok_accounts_target=grok_accounts_target,
                 manager_python=manager_python,
                 desired_revision=revision,
                 desired_bundle_sha=bundle_sha,
@@ -1094,6 +1135,7 @@ def main(argv: list[str] | None = None) -> int:
                 workflow_doctor_target=workflow_doctor_target,
                 sync_target=sync_target,
                 external_dispatch_target=external_dispatch_target,
+                grok_accounts_target=grok_accounts_target,
             )
             _prune_releases(runtime_root)
             payload = _status(
@@ -1103,6 +1145,7 @@ def main(argv: list[str] | None = None) -> int:
                 workflow_doctor_target=workflow_doctor_target,
                 sync_target=sync_target,
                 external_dispatch_target=external_dispatch_target,
+                grok_accounts_target=grok_accounts_target,
                 manager_python=manager_python,
                 desired_revision=revision,
                 desired_bundle_sha=bundle_sha,
@@ -1126,6 +1169,7 @@ def main(argv: list[str] | None = None) -> int:
                 workflow_doctor_target=workflow_doctor_target,
                 sync_target=sync_target,
                 external_dispatch_target=external_dispatch_target,
+                grok_accounts_target=grok_accounts_target,
             )
             _prune_releases(runtime_root)
             payload = _status(
@@ -1135,6 +1179,7 @@ def main(argv: list[str] | None = None) -> int:
                 workflow_doctor_target=workflow_doctor_target,
                 sync_target=sync_target,
                 external_dispatch_target=external_dispatch_target,
+                grok_accounts_target=grok_accounts_target,
                 manager_python=manager_python,
                 desired_revision=None,
                 desired_bundle_sha=None,
