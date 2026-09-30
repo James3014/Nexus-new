@@ -468,12 +468,10 @@ def extract_closure_intents(body: Any) -> list[dict[str, Any]]:
         if action not in VALID_ON_MERGE_ACTIONS:
             raise IssueClosureIntentError(f"INVALID_ON_MERGE_ACTION: {action!r}")
 
-        normalized.append(
-            {
-                "issue_number": issue,
-                "on_merge": action,
-            }
-        )
+        normalized.append({
+            "issue_number": issue,
+            "on_merge": action,
+        })
 
     return normalized
 
@@ -544,9 +542,9 @@ def validate_issue_closure_intent(body: Any) -> dict[str, Any]:
         ],
         "claim_ceiling": "PR_ISSUE_CLOSURE_INTENT_VALIDATION_ONLY",
     }
-    result["content_sha256"] = canonical_hash(
-        {k: v for k, v in result.items() if k != "content_sha256"}
-    )
+    result["content_sha256"] = canonical_hash({
+        k: v for k, v in result.items() if k != "content_sha256"
+    })
     return result
 
 
