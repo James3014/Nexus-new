@@ -19,6 +19,7 @@ from nexus.research.clm_system_one.trajectory_continuity import (
     read_experiment_checkpoint,
     read_registered_experiment,
     refresh_checkpoint_from_readiness,
+    refresh_registered_experiment,
     seal_trajectory_step,
     write_experiment_checkpoint,
 )
@@ -298,6 +299,66 @@ def test_holdout_overlap_blocks_readiness(tmp_path: Path, monkeypatch):
     assert readiness["disposition"] == "WAITING_FOR_DATA"
     assert "holdout_overlap" in readiness["blockers"]
     assert readiness["holdout_overlap_trajectories"]
+
+
+def test_explicit_trajectory_exclusion_is_not_counted(tmp_path: Path, monkeypatch):
+    root, row_ref = _candidate_row(
+        tmp_path,
+        monkeypatch,
+        task_id="fixture-task",
+        candidate_id="fixture-candidate",
+        status="pass",
+    )
+    _trajectory(
+        root,
+        task_id="fixture-task",
+        trajectory_id="fixture-trajectory",
+        candidate_id="fixture-candidate",
+        candidate_ref=row_ref,
+    )
+
+    readiness = project_corpus_readiness(
+        evidence_root=root,
+        excluded_trajectory_ids=["fixture-trajectory"],
+    )
+
+    assert readiness["eligible_strong_label_trajectories"] == 0
+    assert readiness["pass_trajectories"] == 0
+    assert readiness["excluded_trajectories"] == ["fixture-trajectory"]
+    assert "no_strong_label_trajectories" in readiness["blockers"]
+
+
+def test_registered_refresh_applies_spec_trajectory_exclusions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    repo = Path(__file__).resolve().parents[2]
+    excluded_id = "c15-6e-controlled-success#delegated-retry-01-ornith-9b#provider-trajectory"
+    root, row_ref = _candidate_row(
+        tmp_path,
+        monkeypatch,
+        task_id="fixture-task",
+        candidate_id="fixture-candidate",
+        status="pass",
+    )
+    _trajectory(
+        root,
+        task_id="fixture-task",
+        trajectory_id=excluded_id,
+        candidate_id="fixture-candidate",
+        candidate_ref=row_ref,
+    )
+
+    refreshed = refresh_registered_experiment(
+        repo_root=repo,
+        candidate_evidence_root=root,
+        canonical_state_root=tmp_path / "state",
+    )
+
+    assert refreshed["readiness"]["eligible_strong_label_trajectories"] == 0
+    assert refreshed["readiness"]["excluded_trajectories"] == [excluded_id]
+    assert refreshed["checkpoint"]["status"] == "WAITING_FOR_DATA"
+    assert refreshed["checkpoint"]["auto_chain"] is False
 
 
 def test_checkpoint_history_and_fresh_session_readback(tmp_path: Path):
