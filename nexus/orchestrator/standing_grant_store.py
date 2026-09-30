@@ -1531,6 +1531,22 @@ def write_keyed_standing_grant_receipt(
     return destination
 
 
+def load_keyed_standing_grant_receipt_structural(
+    key: StandingGrantKey,
+) -> StandingGrantReceipt | None:
+    """Load one exact keyed receipt structurally without granting live authority."""
+    if not isinstance(key, StandingGrantKey):
+        raise TypeError("key must be a StandingGrantKey")
+    selected = _select_structural_entry(
+        repository=key.repository, goal_id=key.goal_id, thread_id=key.coordinator_thread
+    )
+    if selected is None:
+        return None
+    receipt = selected[2]
+    _ensure_key_matches(receipt, key)
+    return receipt
+
+
 def load_keyed_standing_grant_receipt(
     key: StandingGrantKey, *, now: datetime | None = None
 ) -> StandingGrantReceipt | None:

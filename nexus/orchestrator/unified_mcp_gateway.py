@@ -104,8 +104,8 @@ from nexus.orchestrator.standing_grant_store import (
     StandingGrantReceipt,
     StandingGrantReceiptError,
     authorize_durable_standing_grant_effect,
-    inspect_keyed_standing_grant_receipt,
     load_keyed_standing_grant_receipt,
+    load_keyed_standing_grant_receipt_structural,
     restore_task_card_authority,
     switch_task_card_authority,
     write_keyed_standing_grant_receipt,
@@ -3316,24 +3316,15 @@ class UnifiedMCPGateway:
         )
 
         try:
-            inspection = inspect_keyed_standing_grant_receipt(key, now=now)
-            inspection_status = inspection.get("status")
-            if inspection_status == "MISSING":
+            current = load_keyed_standing_grant_receipt_structural(key)
+            if current is None:
                 current_hash = None
-            elif inspection_status == "INVALID":
-                raise StandingGrantReceiptError(
-                    str(inspection.get("reason") or "STRUCTURAL_PREDECESSOR_INVALID")
-                )
-            elif inspection_status == "REVOKED":
-                raise StandingGrantReceiptError("REVOKED")
-            elif inspection_status == "NOT_YET_VALID":
-                raise StandingGrantReceiptError("NOT_YET_VALID")
-            elif inspection_status in {"VALID", "EXPIRED"}:
-                current_hash = str(inspection.get("receipt_hash") or "")
-                if not _SHA64_RE.fullmatch(current_hash):
-                    raise StandingGrantReceiptError("STRUCTURAL_PREDECESSOR_HASH_INVALID")
             else:
-                raise StandingGrantReceiptError("STRUCTURAL_PREDECESSOR_STATUS_INVALID")
+                if current.context.revoked_at is not None:
+                    raise StandingGrantReceiptError("REVOKED")
+                if now < current.context.issued_at:
+                    raise StandingGrantReceiptError("NOT_YET_VALID")
+                current_hash = current.receipt_hash
 
             if current_hash == receipt.receipt_hash:
                 status = "REPLAYED"
