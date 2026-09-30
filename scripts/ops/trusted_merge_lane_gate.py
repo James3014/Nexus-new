@@ -359,6 +359,25 @@ def _git_show(repo_root: Path, revision: str, path: str) -> bytes:
     return proc.stdout
 
 
+def _candidate_commit_messages(repo_root: Path, *, base_sha: str, head_sha: str) -> str:
+    proc = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo_root),
+            "log",
+            "--format=%B%x00",
+            f"{base_sha}..{head_sha}",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        raise LaneBindingError("CANDIDATE_COMMIT_MESSAGES_UNAVAILABLE")
+    return "\n\n".join(part.strip() for part in proc.stdout.split("\x00") if part.strip())
+
+
 def _task_card_metadata(card: bytes) -> tuple[str | None, str | None, str | None]:
     try:
         text = card.decode("utf-8")
@@ -483,6 +502,12 @@ def validate_event(
     if commit_title is None:
         commit_title = pr.get("title")
     commit_message = pr.get("commit_message")
+    if commit_message is None:
+        commit_message = _candidate_commit_messages(
+            repo_root,
+            base_sha=base_sha,
+            head_sha=head_sha,
+        )
     merge_method = pr.get("merge_method") or "squash"
 
     final_binding = validate_final_merge_intent_binding(
