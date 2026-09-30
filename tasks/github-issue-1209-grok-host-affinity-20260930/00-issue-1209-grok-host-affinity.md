@@ -3,7 +3,9 @@
 artifact_authority: current
 task_id: `issue-1209-grok-host-affinity`
 owner: James Chen
-status: ACTIVE
+status: SUPERSEDED
+superseded_by: `01-issue-1209-grok-host-affinity-r5.md`
+supersession_reason: `CI_CALLER_FIXTURE_REQUIRES_SCOPE_WIDENING`
 execution_lane: GOVERNED
 commit_required: true
 candidate_required: true
