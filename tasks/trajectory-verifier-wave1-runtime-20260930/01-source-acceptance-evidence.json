@@ -1,0 +1,135 @@
+{
+  "accepted_source": {
+    "final_manager_sha256": "6e4fa4af4ba50eeb956c7b2ed2579c06dbc392576bf5893f4e93505f6120a6ef",
+    "merge_sha": "81e60d6e718d76ff601666a82af061548b755135",
+    "parents": [
+      "8008cec052e03ea3cdc874b58883cdb2c126f48b"
+    ],
+    "tree_sha": "981f05042b46b8379b0dff522439ac157ae84966"
+  },
+  "claim_ceiling": "TRACK1_WAVE1_SOURCE_ACCEPTANCE_ONLY",
+  "deployment_issue": "James3014/nexus-deployment-lab#8",
+  "evidence_class": "INDEPENDENT_SOURCE_ACCEPTANCE_ONLY",
+  "independent_acceptance": {
+    "candidate_head": "2da5445c302369c4280c4f4104f034f881e10fb5",
+    "merge_sha": "81e60d6e718d76ff601666a82af061548b755135",
+    "merge_tree_sha": "981f05042b46b8379b0dff522439ac157ae84966",
+    "pull_request": 1225,
+    "receipt_hash": "b305e68dc9df3f17c7ed0ae66925cd3bfb0a010b39f8ff21343f675ae9eb45b7",
+    "repository": "James3014/Nexus-new",
+    "required_checks": [
+      {
+        "check_run_id": 109740049552,
+        "conclusion": "success",
+        "head_sha": "2da5445c302369c4280c4f4104f034f881e10fb5",
+        "name": "Exact-base impact gate",
+        "run_id": 36669097651,
+        "status": "completed"
+      },
+      {
+        "check_run_id": 109740049124,
+        "conclusion": "success",
+        "head_sha": "2da5445c302369c4280c4f4104f034f881e10fb5",
+        "name": "Full published Git history secret audit",
+        "run_id": 36669097583,
+        "status": "completed"
+      },
+      {
+        "check_run_id": 109740425071,
+        "conclusion": "success",
+        "head_sha": "2da5445c302369c4280c4f4104f034f881e10fb5",
+        "name": "Trusted verifier (default branch)",
+        "run_id": 36669097426,
+        "status": "completed"
+      }
+    ],
+    "reviewer_id": "github-trusted-verifier-exact-head",
+    "schema": "nexus.gateway.independent_source_acceptance.v1",
+    "verdict": "ACCEPT"
+  },
+  "issue_number": 1197,
+  "issued_at": "2026-09-30T04:50:36Z",
+  "owner_activation": {
+    "activation_id": "BREAK_GLASS_TRACK1_WAVE1_RUNTIME_RECONCILIATION_20260930_V3",
+    "message_sha256": "ab58fb9e3814b3ced4550e431ae2089fa3be32b8d656fc84f794b835b701bf97",
+    "source_thread": "deployment-lab-8-comment-5904254266"
+  },
+  "receipt_hash": "c282d7bff780b2ec4d088961692abd2c0ceedddb3f0af591481a37f1f61632d1",
+  "receipt_id": "track1-wave1-source-acceptance-81e60d6e718d",
+  "receipt_version": 1,
+  "repository": "James3014/Nexus-new",
+  "required_checks": [
+    {
+      "check_run_id": 109740049552,
+      "conclusion": "success",
+      "head_sha": "2da5445c302369c4280c4f4104f034f881e10fb5",
+      "name": "Exact-base impact gate",
+      "run_id": 36669097651,
+      "status": "completed"
+    },
+    {
+      "check_run_id": 109740049124,
+      "conclusion": "success",
+      "head_sha": "2da5445c302369c4280c4f4104f034f881e10fb5",
+      "name": "Full published Git history secret audit",
+      "run_id": 36669097583,
+      "status": "completed"
+    },
+    {
+      "check_run_id": 109740425071,
+      "conclusion": "success",
+      "head_sha": "2da5445c302369c4280c4f4104f034f881e10fb5",
+      "name": "Trusted verifier (default branch)",
+      "run_id": 36669097426,
+      "status": "completed"
+    }
+  ],
+  "review": {
+    "coordinator_id": "chatgpt-primary-controller",
+    "notes": [
+      "PR #1225 exact head passed required gates",
+      "pre-activation fixture exclusion is explicit and immutable-evidence preserving",
+      "Wave-1 runtime authority is deployment/readiness-only; no training authority"
+    ],
+    "reviewer_id": "github-trusted-verifier-exact-head",
+    "verdict": "ACCEPT"
+  },
+  "schema": "nexus.gateway.r1_source_acceptance.v1",
+  "source_lineage": {
+    "pull_requests": [
+      {
+        "base_sha": "8008cec052e03ea3cdc874b58883cdb2c126f48b",
+        "head_sha": "2da5445c302369c4280c4f4104f034f881e10fb5",
+        "merge_sha": "81e60d6e718d76ff601666a82af061548b755135",
+        "merge_tree_sha": "981f05042b46b8379b0dff522439ac157ae84966",
+        "merged_at": "2026-09-30T04:45:18Z",
+        "number": 1225
+      }
+    ],
+    "scope": {
+      "deleted_files": [],
+      "files": [
+        "nexus/research/clm_system_one/trajectory_continuity.py",
+        "nexus/research/clm_system_one/trajectory_verifier_v2_spec.json",
+        "tests/research/test_trajectory_continuity.py"
+      ],
+      "sha256": "44d69bf1f55b03ff6bbf56d86462e5f8b938f564ecc0979ae78c8588355d60e2"
+    },
+    "scope_base_sha": "8008cec052e03ea3cdc874b58883cdb2c126f48b"
+  },
+  "task_id": "TRACK1-WAVE1-RUNTIME-RECONCILIATION",
+  "verifier_results": [
+    {
+      "failed": 0,
+      "id": "trajectory-readiness-focused",
+      "kind": "pytest",
+      "passed": 98,
+      "status": "PASS"
+    },
+    {
+      "id": "ruff-format-json-diff-check",
+      "kind": "command",
+      "status": "PASS"
+    }
+  ]
+}
