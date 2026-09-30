@@ -227,6 +227,7 @@ def test_candidate_adopt_external_public_schema_is_closed_and_registered():
     assert "nexus_candidate_adopt_external" in names
     assert spec["inputSchema"]["additionalProperties"] is False
     assert "action" in spec["inputSchema"]["required"]
+    assert {"campaign_id", "spec_id", "spec_sha256"}.isdisjoint(spec["inputSchema"]["required"])
 
 
 def test_durable_owner_effect_schemas_require_explicit_authority_selectors():
@@ -261,6 +262,47 @@ def test_candidate_adopt_external_rejects_unknown_field_without_service_call(mon
     })
     assert response["result"]["isError"] is True
     assert "CANDIDATE_ADOPTION_SCHEMA_CLOSED" in response["result"]["structuredContent"]["error"]
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "legacy_metadata",
+    [
+        {"campaign_id": "not-epb"},
+        {
+            "campaign_id": "CAMPAIGN-ISSUE-1209-GROK-HOST-AFFINITY-01",
+            "spec_id": "SPEC-ISSUE-1209-EXTERNAL-CANDIDATE-ADOPTION-EXEC-001",
+            "spec_sha256": "a" * 64,
+        },
+    ],
+)
+def test_candidate_adopt_external_rejects_unbound_legacy_metadata_without_service_call(
+    legacy_metadata,
+):
+    service = FakeService()
+    calls = []
+    service.adopt_external_candidate = lambda request: calls.append(request)  # type: ignore[attr-defined]
+    gateway = UnifiedMCPGateway(service=service)
+    response = gateway.handle({
+        "jsonrpc": "2.0", "id": 46015, "method": "tools/call",
+        "params": {"name": "nexus_candidate_adopt_external", "arguments": {
+            **legacy_metadata,
+            **AUTHORITY_ARGS,
+            "server_instance_id": SERVER_INSTANCE_ID,
+            "lifecycle_revision": LIFECYCLE_REVISION,
+            "full_tool_schema_hash": FULL_TOOL_SCHEMA_HASH,
+            "permission_policy_hash": PERMISSION_POLICY_HASH,
+            "controller_repo_root": str(Path.cwd()),
+            "controller_branch": "main",
+            "controller_head": "a" * 40,
+        }},
+    })
+    assert response["result"]["isError"] is True
+    error = response["result"]["structuredContent"]["error"]
+    assert (
+        "CANDIDATE_ADOPTION_LEGACY_METADATA_INCOMPLETE" in error
+        or "CANDIDATE_ADOPTION_LEGACY_METADATA_MISMATCH" in error
+    )
     assert calls == []
 
 
@@ -384,8 +426,7 @@ def test_candidate_adopt_external_positive_binds_runtime_and_calls_service_once(
         attempt_id=base["attempt_id"], action_id=base["action_id"], idempotency_key=base["idempotency_key"],
     ).model_dump(mode="json")
     arguments = {
-        **base, **AUTHORITY_ARGS, "action": action, "campaign_id": gateway_module.EPB_CAMPAIGN_ID,
-        "spec_id": gateway_module.EPB_SPEC_ID, "spec_sha256": gateway_module.EPB_SPEC_SHA256,
+        **base, **AUTHORITY_ARGS, "action": action,
         "controller_repo_root": str(gateway_module.CANONICAL_SOURCE_ROOT), "controller_branch": "main",
         "controller_head": head,
     }
@@ -395,9 +436,27 @@ def test_candidate_adopt_external_positive_binds_runtime_and_calls_service_once(
     assert len(calls) == 1 and isinstance(calls[0], ExternalCandidateAdoptionRequest)
     assert len(owner_effects) == 1
     assert owner_effects[0][0] is gateway_module.AutonomyActionClass.CANDIDATE_ADOPT_EXTERNAL
-    assert owner_effects[0][1]["spec_sha256"] == gateway_module.EPB_SPEC_SHA256
+    assert "campaign_id" not in owner_effects[0][1]
+    assert "spec_id" not in owner_effects[0][1]
+    assert "spec_sha256" not in owner_effects[0][1]
+    assert owner_effects[0][1]["task_card_hash"] == base["task_card_hash"]
     assert owner_effects[0][1]["full_tool_schema_hash"] == FULL_TOOL_SCHEMA_HASH
     assert "NO_MERGE" in response["result"]["structuredContent"]["claim_ceiling"]
+
+    legacy_arguments = {
+        **arguments,
+        "campaign_id": gateway_module._LEGACY_EPB_CAMPAIGN_ID,
+        "spec_id": gateway_module._LEGACY_EPB_SPEC_ID,
+        "spec_sha256": gateway_module._LEGACY_EPB_SPEC_SHA256,
+    }
+    legacy_response = gateway.handle({
+        "jsonrpc": "2.0", "id": 4604, "method": "tools/call",
+        "params": {"name": "nexus_candidate_adopt_external", "arguments": legacy_arguments},
+    })
+    assert legacy_response["result"]["isError"] is False, legacy_response
+    assert owner_effects[-1][1]["campaign_id"] == gateway_module._LEGACY_EPB_CAMPAIGN_ID
+    assert owner_effects[-1][1]["spec_id"] == gateway_module._LEGACY_EPB_SPEC_ID
+    assert owner_effects[-1][1]["spec_sha256"] == gateway_module._LEGACY_EPB_SPEC_SHA256
 
 
 @pytest.mark.parametrize("bad_result", [
