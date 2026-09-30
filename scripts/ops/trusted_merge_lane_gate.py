@@ -5,17 +5,26 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 ENFORCEMENT_START_PR_NUMBER = 1061
 BINDING_SCHEMA = "nexus.merge_lane_binding.v1"
 REBIND_SCHEMA = "nexus.owner_execution_lane_rebind.v1"
+BREAK_GLASS_CONTRACT_KIND = "BREAK_GLASS_OWNER_INTEGRATION"
+BREAK_GLASS_LANE = "BREAK_GLASS"
+BREAK_GLASS_INTEGRATION_SCHEMA = "nexus.break_glass_owner_integration.v1"
+BREAK_GLASS_AUTHORITY_ISSUE = 806
+BREAK_GLASS_OWNER = "James3014"
 DIRECT_LANES = {"DIRECT_CANONICAL", "DIRECT_DELEGATED"}
-ALL_LANES = DIRECT_LANES | {"GOVERNED"}
-CONTRACT_KINDS = {"OWNER_INLINE", "TRACKED_TASK_CARD"}
+ALL_LANES = DIRECT_LANES | {"GOVERNED", BREAK_GLASS_LANE}
+CONTRACT_KINDS = {"OWNER_INLINE", "TRACKED_TASK_CARD", BREAK_GLASS_CONTRACT_KIND}
 START_MARKER = "<!-- NEXUS_MERGE_LANE_V1"
 END_MARKER = "NEXUS_MERGE_LANE_V1 -->"
 INTENT_START_MARKER = "<!-- NEXUS_ISSUE_INTENT_V1"
@@ -125,6 +134,301 @@ def extract_binding(body: Any) -> dict[str, Any]:
 def render_binding(binding: Mapping[str, Any]) -> str:
     payload = json.dumps(dict(binding), ensure_ascii=False, indent=2, sort_keys=True)
     return f"{START_MARKER}\n{payload}\n{END_MARKER}"
+
+
+def _fetch_break_glass_comment(comment_id: int) -> Mapping[str, Any]:
+    if comment_id <= 0:
+        raise LaneBindingError("BREAK_GLASS_COMMENT_ID_INVALID")
+    url = f"https://api.github.com/repos/James3014/Nexus-new/issues/comments/{comment_id}"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "nexus-trusted-merge-lane-gate/1.0",
+    }
+    token = os.getenv("TRUSTED_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=10.0) as response:  # nosec B310 - fixed GitHub HTTPS endpoint
+            if response.geturl() != url:
+                raise LaneBindingError("BREAK_GLASS_COMMENT_REDIRECT_REJECTED")
+            raw = response.read()
+    except (OSError, urllib.error.URLError, urllib.error.HTTPError) as exc:
+        raise LaneBindingError("BREAK_GLASS_COMMENT_FETCH_FAILED") from exc
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise LaneBindingError("BREAK_GLASS_COMMENT_MALFORMED") from exc
+    if not isinstance(value, Mapping):
+        raise LaneBindingError("BREAK_GLASS_COMMENT_MALFORMED")
+    return value
+
+
+def _parse_break_glass_integration_comment(
+    comment: Mapping[str, Any], *, expected_payload_sha256: str
+) -> dict[str, Any]:
+    try:
+        comment_id = int(comment["id"])
+        issue_url = str(comment["issue_url"])
+        comment_url = str(comment["html_url"])
+        owner_login = str(comment["user"]["login"])
+        body = str(comment["body"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise LaneBindingError("BREAK_GLASS_COMMENT_MALFORMED") from exc
+    if issue_url != "https://api.github.com/repos/James3014/Nexus-new/issues/806":
+        raise LaneBindingError("BREAK_GLASS_COMMENT_ISSUE_MISMATCH")
+    if owner_login != BREAK_GLASS_OWNER:
+        raise LaneBindingError("BREAK_GLASS_COMMENT_OWNER_MISMATCH")
+    expected_url = f"https://github.com/James3014/Nexus-new/issues/806#issuecomment-{comment_id}"
+    if comment_url != expected_url:
+        raise LaneBindingError("BREAK_GLASS_COMMENT_URL_MISMATCH")
+    hash_matches = re.findall(r"Canonical integration payload SHA-256:\s*`([0-9a-f]{64})`", body)
+    json_matches = re.findall(r"```json\s*\n(.*?)\n```", body, flags=re.DOTALL)
+    if len(hash_matches) != 1 or len(json_matches) != 1:
+        raise LaneBindingError("BREAK_GLASS_INTEGRATION_BLOCK_INVALID")
+    try:
+        payload = json.loads(json_matches[0])
+    except json.JSONDecodeError as exc:
+        raise LaneBindingError("BREAK_GLASS_INTEGRATION_JSON_INVALID") from exc
+    if type(payload) is not dict:
+        raise LaneBindingError("BREAK_GLASS_INTEGRATION_JSON_INVALID")
+    declared_hash = hash_matches[0]
+    actual_hash = canonical_hash(payload)
+    if declared_hash != actual_hash or declared_hash != expected_payload_sha256:
+        raise LaneBindingError("BREAK_GLASS_INTEGRATION_HASH_MISMATCH")
+    return payload
+
+
+def _parse_bound_owner_payload(
+    comment: Mapping[str, Any],
+    *,
+    marker: str,
+    expected_payload_sha256: str,
+    expected_schema: str,
+) -> dict[str, Any]:
+    try:
+        comment_id = int(comment["id"])
+        issue_url = str(comment["issue_url"])
+        comment_url = str(comment["html_url"])
+        owner_login = str(comment["user"]["login"])
+        body = str(comment["body"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise LaneBindingError("BREAK_GLASS_COMMENT_MALFORMED") from exc
+    if issue_url != "https://api.github.com/repos/James3014/Nexus-new/issues/806":
+        raise LaneBindingError("BREAK_GLASS_COMMENT_ISSUE_MISMATCH")
+    if owner_login != BREAK_GLASS_OWNER:
+        raise LaneBindingError("BREAK_GLASS_COMMENT_OWNER_MISMATCH")
+    if (
+        comment_url
+        != f"https://github.com/James3014/Nexus-new/issues/806#issuecomment-{comment_id}"
+    ):
+        raise LaneBindingError("BREAK_GLASS_COMMENT_URL_MISMATCH")
+    hashes = re.findall(rf"{re.escape(marker)}:\s*`([0-9a-f]{{64}})`", body)
+    blocks = re.findall(r"```json\s*\n(.*?)\n```", body, flags=re.DOTALL)
+    if len(hashes) != 1 or len(blocks) != 1:
+        raise LaneBindingError("BREAK_GLASS_EVIDENCE_BLOCK_INVALID")
+    try:
+        payload = json.loads(blocks[0])
+    except json.JSONDecodeError as exc:
+        raise LaneBindingError("BREAK_GLASS_EVIDENCE_JSON_INVALID") from exc
+    if type(payload) is not dict or payload.get("schema") != expected_schema:
+        raise LaneBindingError("BREAK_GLASS_EVIDENCE_SCHEMA_INVALID")
+    actual_hash = canonical_hash(payload)
+    if hashes[0] != actual_hash or hashes[0] != expected_payload_sha256:
+        raise LaneBindingError("BREAK_GLASS_EVIDENCE_HASH_MISMATCH")
+    return payload
+
+
+def _parse_timestamp(value: Any, label: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except ValueError as exc:
+        raise LaneBindingError(f"{label}_INVALID") from exc
+    if parsed.tzinfo is None:
+        raise LaneBindingError(f"{label}_INVALID")
+    return parsed.astimezone(timezone.utc)
+
+
+def _validate_break_glass_integration(
+    reference: Any,
+    *,
+    repository: str,
+    pull_request_number: int,
+    base_sha: str,
+    head_sha: str,
+    owner_id: str,
+    comment_fetcher: Callable[[int], Mapping[str, Any]],
+    now: datetime,
+) -> dict[str, Any]:
+    value = _exact_dict(reference, "BREAK_GLASS_INTEGRATION")
+    required_reference_fields = {
+        "source_comment_id",
+        "verification_comment_id",
+        "integration_comment_id",
+        "integration_payload_sha256",
+    }
+    if set(value) != required_reference_fields:
+        raise LaneBindingError("BREAK_GLASS_INTEGRATION_REFERENCE_FIELDS_INVALID")
+    source_comment_id = _exact_int(value.get("source_comment_id"), "BREAK_GLASS_SOURCE_COMMENT_ID")
+    verification_comment_id = _exact_int(
+        value.get("verification_comment_id"), "BREAK_GLASS_VERIFICATION_COMMENT_ID"
+    )
+    comment_id = _exact_int(value.get("integration_comment_id"), "BREAK_GLASS_COMMENT_ID")
+    payload_sha256 = _sha(
+        value.get("integration_payload_sha256"), "BREAK_GLASS_PAYLOAD_SHA256", size=64
+    )
+    payload = _parse_break_glass_integration_comment(
+        comment_fetcher(comment_id), expected_payload_sha256=payload_sha256
+    )
+    required_fields = {
+        "schema",
+        "repository",
+        "issue",
+        "owner_login",
+        "recovery_id",
+        "integration_attempt_id",
+        "source_attempt_id",
+        "source_activation_payload_sha256",
+        "verification_payload_sha256",
+        "effect_class",
+        "pr_number",
+        "accepted_head_sha",
+        "accepted_tree_sha",
+        "accepted_diff_sha256",
+        "expected_base_sha",
+        "merge_method",
+        "checks",
+        "issued_at",
+        "expires_at",
+        "claim_ceiling",
+    }
+    if set(payload) != required_fields:
+        raise LaneBindingError("BREAK_GLASS_INTEGRATION_PAYLOAD_FIELDS_INVALID")
+    if payload.get("schema") != BREAK_GLASS_INTEGRATION_SCHEMA:
+        raise LaneBindingError("BREAK_GLASS_INTEGRATION_SCHEMA_INVALID")
+    if payload.get("repository") != repository:
+        raise LaneBindingError("BREAK_GLASS_REPOSITORY_MISMATCH")
+    if payload.get("issue") != BREAK_GLASS_AUTHORITY_ISSUE:
+        raise LaneBindingError("BREAK_GLASS_AUTHORITY_ISSUE_MISMATCH")
+    if payload.get("owner_login") != owner_id or owner_id != BREAK_GLASS_OWNER:
+        raise LaneBindingError("BREAK_GLASS_OWNER_MISMATCH")
+    if payload.get("effect_class") != "EMERGENCY_INTEGRATION":
+        raise LaneBindingError("BREAK_GLASS_EFFECT_CLASS_INVALID")
+    if payload.get("claim_ceiling") != "emergency_integration_only":
+        raise LaneBindingError("BREAK_GLASS_CLAIM_CEILING_INVALID")
+    if payload.get("merge_method") != "merge":
+        raise LaneBindingError("BREAK_GLASS_MERGE_METHOD_INVALID")
+    if payload.get("pr_number") != pull_request_number:
+        raise LaneBindingError("BREAK_GLASS_PR_MISMATCH")
+    if payload.get("accepted_head_sha") != head_sha:
+        raise LaneBindingError("BREAK_GLASS_HEAD_MISMATCH")
+    if payload.get("expected_base_sha") != base_sha:
+        raise LaneBindingError("BREAK_GLASS_BASE_MISMATCH")
+    _sha(payload.get("accepted_tree_sha"), "BREAK_GLASS_ACCEPTED_TREE_SHA", size=40)
+    _sha(payload.get("accepted_diff_sha256"), "BREAK_GLASS_ACCEPTED_DIFF_SHA256", size=64)
+    _sha(
+        payload.get("source_activation_payload_sha256"),
+        "BREAK_GLASS_SOURCE_ACTIVATION_SHA256",
+        size=64,
+    )
+    _sha(payload.get("verification_payload_sha256"), "BREAK_GLASS_VERIFICATION_SHA256", size=64)
+    issued_at = _parse_timestamp(payload.get("issued_at"), "BREAK_GLASS_ISSUED_AT")
+    expires_at = _parse_timestamp(payload.get("expires_at"), "BREAK_GLASS_EXPIRES_AT")
+    if expires_at <= issued_at:
+        raise LaneBindingError("BREAK_GLASS_INTEGRATION_WINDOW_INVALID")
+    instant = now.astimezone(timezone.utc)
+    if instant < issued_at:
+        raise LaneBindingError("BREAK_GLASS_INTEGRATION_NOT_YET_VALID")
+    if instant >= expires_at:
+        raise LaneBindingError("BREAK_GLASS_INTEGRATION_EXPIRED")
+    checks = payload.get("checks")
+    if not isinstance(checks, list) or not checks:
+        raise LaneBindingError("BREAK_GLASS_CHECK_SET_INVALID")
+    seen_names: set[str] = set()
+    seen_runs: set[int] = set()
+    for raw_check in checks:
+        check = _exact_dict(raw_check, "BREAK_GLASS_CHECK")
+        if set(check) != {"schema", "name", "run_id", "head_sha", "conclusion"}:
+            raise LaneBindingError("BREAK_GLASS_CHECK_FIELDS_INVALID")
+        if check.get("schema") != "nexus.break_glass_check_evidence.v1":
+            raise LaneBindingError("BREAK_GLASS_CHECK_SCHEMA_INVALID")
+        name = _exact_str(check.get("name"), "BREAK_GLASS_CHECK_NAME")
+        run_id = _exact_int(check.get("run_id"), "BREAK_GLASS_CHECK_RUN_ID")
+        if name in seen_names or run_id in seen_runs:
+            raise LaneBindingError("BREAK_GLASS_CHECK_SET_DUPLICATE")
+        seen_names.add(name)
+        seen_runs.add(run_id)
+        if check.get("head_sha") != head_sha:
+            raise LaneBindingError("BREAK_GLASS_CHECK_SUBJECT_MISMATCH")
+        if check.get("conclusion") != "success":
+            raise LaneBindingError("BREAK_GLASS_CHECK_NOT_SUCCESS")
+    recovery_id = _safe_id(payload.get("recovery_id"), "BREAK_GLASS_RECOVERY_ID")
+    source_attempt_id = _safe_id(payload.get("source_attempt_id"), "BREAK_GLASS_SOURCE_ATTEMPT_ID")
+    source_hash = _sha(
+        payload.get("source_activation_payload_sha256"),
+        "BREAK_GLASS_SOURCE_ACTIVATION_SHA256",
+        size=64,
+    )
+    verification_hash = _sha(
+        payload.get("verification_payload_sha256"), "BREAK_GLASS_VERIFICATION_SHA256", size=64
+    )
+    source = _parse_bound_owner_payload(
+        comment_fetcher(source_comment_id),
+        marker="Canonical activation payload SHA-256",
+        expected_payload_sha256=source_hash,
+        expected_schema="nexus.break_glass_owner_activation.v1",
+    )
+    verification = _parse_bound_owner_payload(
+        comment_fetcher(verification_comment_id),
+        marker="Canonical verification payload SHA-256",
+        expected_payload_sha256=verification_hash,
+        expected_schema="nexus.break_glass_owner_verification.v1",
+    )
+    if (
+        source.get("repository") != repository
+        or source.get("issue") != BREAK_GLASS_AUTHORITY_ISSUE
+        or source.get("owner_login") != BREAK_GLASS_OWNER
+        or source.get("recovery_id") != recovery_id
+        or source.get("attempt_id") != source_attempt_id
+        or source.get("effect_class") != "SOURCE_REPAIR"
+        or source.get("claim_ceiling") != "break_glass_source_candidate_only"
+    ):
+        raise LaneBindingError("BREAK_GLASS_SOURCE_AUTHORITY_MISMATCH")
+    if (
+        verification.get("repository") != repository
+        or verification.get("issue") != BREAK_GLASS_AUTHORITY_ISSUE
+        or verification.get("owner_login") != BREAK_GLASS_OWNER
+        or verification.get("recovery_id") != recovery_id
+        or verification.get("source_attempt_id") != source_attempt_id
+        or verification.get("source_activation_payload_sha256") != source_hash
+        or verification.get("claim_ceiling") != "source_repair_verification_only"
+    ):
+        raise LaneBindingError("BREAK_GLASS_VERIFICATION_AUTHORITY_MISMATCH")
+    if (
+        verification.get("verified_commit_sha") != head_sha
+        or verification.get("verified_tree_sha") != payload.get("accepted_tree_sha")
+        or verification.get("verified_diff_sha256") != payload.get("accepted_diff_sha256")
+    ):
+        raise LaneBindingError("BREAK_GLASS_VERIFICATION_SUBJECT_MISMATCH")
+    source_expires = _parse_timestamp(source.get("expires_at"), "BREAK_GLASS_SOURCE_EXPIRES_AT")
+    verification_issued = _parse_timestamp(
+        verification.get("issued_at"), "BREAK_GLASS_VERIFICATION_ISSUED_AT"
+    )
+    verification_expires = _parse_timestamp(
+        verification.get("expires_at"), "BREAK_GLASS_VERIFICATION_EXPIRES_AT"
+    )
+    if not (verification_issued <= issued_at < verification_expires and issued_at < source_expires):
+        raise LaneBindingError("BREAK_GLASS_EVIDENCE_NOT_CURRENT_AT_INTEGRATION_ISSUANCE")
+    return {
+        "source_comment_id": source_comment_id,
+        "verification_comment_id": verification_comment_id,
+        "integration_comment_id": comment_id,
+        "integration_payload_sha256": payload_sha256,
+        "integration_attempt_id": _safe_id(
+            payload.get("integration_attempt_id"), "BREAK_GLASS_INTEGRATION_ATTEMPT_ID"
+        ),
+        "recovery_id": recovery_id,
+    }
 
 
 def extract_closure_intents(body: Any) -> list[dict[str, Any]]:
@@ -357,6 +661,8 @@ def validate_event(
     *,
     repo_root: Path,
     enforcement_start_pr_number: int = ENFORCEMENT_START_PR_NUMBER,
+    break_glass_comment_fetcher: Callable[[int], Mapping[str, Any]] = _fetch_break_glass_comment,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     root = _exact_dict(event, "EVENT")
     if root.get("event_name") != "pull_request_target":
@@ -384,7 +690,10 @@ def validate_event(
     binding = extract_binding(pr.get("body"))
     if binding.get("schema") != BINDING_SCHEMA:
         raise LaneBindingError("MERGE_LANE_BINDING_SCHEMA_INVALID")
-    required_binding_fields = {
+    contract_kind = _exact_str(binding.get("contract_kind"), "CONTRACT_KIND")
+    if contract_kind not in CONTRACT_KINDS:
+        raise LaneBindingError("CONTRACT_KIND_UNSUPPORTED")
+    legacy_binding_fields = {
         "schema",
         "execution_lane",
         "contract_kind",
@@ -397,17 +706,55 @@ def validate_event(
         "owner_lane_rebind",
         "binding_hash",
     }
-    if set(binding) != required_binding_fields:
+    break_glass_binding_fields = {
+        "schema",
+        "execution_lane",
+        "contract_kind",
+        "owner_id",
+        "break_glass_integration",
+        "binding_hash",
+    }
+    expected_fields = (
+        break_glass_binding_fields
+        if contract_kind == BREAK_GLASS_CONTRACT_KIND
+        else legacy_binding_fields
+    )
+    if set(binding) != expected_fields:
         raise LaneBindingError("MERGE_LANE_BINDING_SCHEMA_FIELDS_INVALID")
     _validate_hash_field(binding, "binding_hash")
 
     lane = _exact_str(binding.get("execution_lane"), "EXECUTION_LANE")
     if lane not in ALL_LANES:
         raise LaneBindingError("EXECUTION_LANE_UNSUPPORTED")
-    contract_kind = _exact_str(binding.get("contract_kind"), "CONTRACT_KIND")
-    if contract_kind not in CONTRACT_KINDS:
-        raise LaneBindingError("CONTRACT_KIND_UNSUPPORTED")
     owner_id = _validate_owner(repository, binding.get("owner_id"))
+
+    if contract_kind == BREAK_GLASS_CONTRACT_KIND:
+        if lane != BREAK_GLASS_LANE:
+            raise LaneBindingError("BREAK_GLASS_CONTRACT_REQUIRES_BREAK_GLASS_LANE")
+        integration = _validate_break_glass_integration(
+            binding.get("break_glass_integration"),
+            repository=repository,
+            pull_request_number=pr_number,
+            base_sha=base_sha,
+            head_sha=head_sha,
+            owner_id=owner_id,
+            comment_fetcher=break_glass_comment_fetcher,
+            now=now or datetime.now(timezone.utc),
+        )
+        return {
+            "schema": "nexus.trusted_merge_lane_gate_result.v1",
+            "status": "PASS",
+            "reason": "BREAK_GLASS_OWNER_INTEGRATION_VALID",
+            "pull_request_number": pr_number,
+            "head_sha": head_sha,
+            "execution_lane": lane,
+            "binding_hash": binding["binding_hash"],
+            "break_glass_integration": integration,
+            "issue_closure_intent": intent_result,
+        }
+
+    if lane == BREAK_GLASS_LANE:
+        raise LaneBindingError("BREAK_GLASS_LANE_REQUIRES_BREAK_GLASS_CONTRACT")
 
     if contract_kind == "OWNER_INLINE":
         if lane not in DIRECT_LANES:

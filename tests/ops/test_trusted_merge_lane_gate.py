@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -134,6 +136,255 @@ def _binding(
             value["owner_lane_rebind"] = record
     value["binding_hash"] = canonical_hash(value)
     return value
+
+
+def _owner_comment(
+    payload: dict[str, object],
+    *,
+    marker: str,
+    comment_id: int,
+    owner: str = "James3014",
+) -> dict[str, object]:
+    payload_hash = canonical_hash(payload)
+    return {
+        "id": comment_id,
+        "html_url": f"https://github.com/James3014/Nexus-new/issues/806#issuecomment-{comment_id}",
+        "issue_url": "https://api.github.com/repos/James3014/Nexus-new/issues/806",
+        "user": {"login": owner},
+        "body": (
+            f"{marker}: `{payload_hash}`\n\n"
+            "```json\n" + json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n```\n"
+        ),
+    }
+
+
+def _break_glass_chain(
+    *,
+    base: str,
+    head: str,
+    conclusion: str = "success",
+    integration_expires_at: str = "2026-09-30T04:00:00+00:00",
+) -> tuple[dict[str, object], dict[int, dict[str, object]]]:
+    source = {
+        "schema": "nexus.break_glass_owner_activation.v1",
+        "repository": REPOSITORY,
+        "issue": 806,
+        "owner_login": "James3014",
+        "recovery_id": "BG-806-1218-20260930",
+        "attempt_id": "BG-806-1218-A1",
+        "failure_class": "GOVERNANCE_PLANE_RECOVERY_REQUIRED",
+        "failure_evidence_sha256": "1" * 64,
+        "effect_class": "SOURCE_REPAIR",
+        "base_sha": "b" * 40,
+        "base_tree": "a" * 40,
+        "allowed_paths": ["scripts/ops/trusted_merge_lane_gate.py"],
+        "forbidden_paths": [".git"],
+        "verifier_commands": ["pytest"],
+        "issued_at": "2026-09-30T02:00:00+00:00",
+        "expires_at": "2026-09-30T03:45:00+00:00",
+        "claim_ceiling": "break_glass_source_candidate_only",
+    }
+    source_hash = canonical_hash(source)
+    verification = {
+        "schema": "nexus.break_glass_owner_verification.v1",
+        "repository": REPOSITORY,
+        "issue": 806,
+        "owner_login": "James3014",
+        "recovery_id": "BG-806-1218-20260930",
+        "source_attempt_id": "BG-806-1218-A1",
+        "source_activation_payload_sha256": source_hash,
+        "verified_commit_sha": head,
+        "verified_tree_sha": "c" * 40,
+        "verified_diff_sha256": "d" * 64,
+        "verifier_id": "independent-verifier",
+        "checks": [
+            {
+                "schema": "nexus.break_glass_check_evidence.v1",
+                "name": "source verification",
+                "run_id": 8999,
+                "head_sha": head,
+                "conclusion": "success",
+            }
+        ],
+        "issued_at": "2026-09-30T02:40:00+00:00",
+        "expires_at": "2026-09-30T03:40:00+00:00",
+        "claim_ceiling": "source_repair_verification_only",
+    }
+    verification_hash = canonical_hash(verification)
+    integration = {
+        "schema": "nexus.break_glass_owner_integration.v1",
+        "repository": REPOSITORY,
+        "issue": 806,
+        "owner_login": "James3014",
+        "recovery_id": "BG-806-1218-20260930",
+        "integration_attempt_id": "BG-806-1218-I1",
+        "source_attempt_id": "BG-806-1218-A1",
+        "source_activation_payload_sha256": source_hash,
+        "verification_payload_sha256": verification_hash,
+        "effect_class": "EMERGENCY_INTEGRATION",
+        "pr_number": PR_NUMBER,
+        "accepted_head_sha": head,
+        "accepted_tree_sha": "c" * 40,
+        "accepted_diff_sha256": "d" * 64,
+        "expected_base_sha": base,
+        "merge_method": "merge",
+        "checks": [
+            {
+                "schema": "nexus.break_glass_check_evidence.v1",
+                "name": "independent source verification",
+                "run_id": 9001,
+                "head_sha": head,
+                "conclusion": conclusion,
+            }
+        ],
+        "issued_at": "2026-09-30T03:00:00+00:00",
+        "expires_at": integration_expires_at,
+        "claim_ceiling": "emergency_integration_only",
+    }
+    comments = {
+        1231: _owner_comment(
+            source,
+            marker="Canonical activation payload SHA-256",
+            comment_id=1231,
+        ),
+        1232: _owner_comment(
+            verification,
+            marker="Canonical verification payload SHA-256",
+            comment_id=1232,
+        ),
+        1234: _owner_comment(
+            integration,
+            marker="Canonical integration payload SHA-256",
+            comment_id=1234,
+        ),
+    }
+    return integration, comments
+
+
+def _break_glass_binding(
+    payload: dict[str, object],
+    *,
+    payload_hash: str | None = None,
+) -> dict[str, object]:
+    value: dict[str, object] = {
+        "schema": BINDING_SCHEMA,
+        "execution_lane": "BREAK_GLASS",
+        "contract_kind": "BREAK_GLASS_OWNER_INTEGRATION",
+        "owner_id": "James3014",
+        "break_glass_integration": {
+            "source_comment_id": 1231,
+            "verification_comment_id": 1232,
+            "integration_comment_id": 1234,
+            "integration_payload_sha256": payload_hash or canonical_hash(payload),
+        },
+    }
+    value["binding_hash"] = canonical_hash(value)
+    return value
+
+
+def _comment_fetcher(comments: dict[int, dict[str, object]]):
+    return lambda comment_id: comments[comment_id]
+
+
+def test_break_glass_owner_integration_passes_with_external_owner_chain(tmp_path: Path):
+    repo, base, head, _ = _repo(tmp_path)
+    payload, comments = _break_glass_chain(base=base, head=head)
+    binding = _break_glass_binding(payload)
+    result = validate_event(
+        _event(base=base, head=head, body=render_binding(binding)),
+        repo_root=repo,
+        break_glass_comment_fetcher=_comment_fetcher(comments),
+        now=datetime(2026, 9, 30, 3, 30, tzinfo=timezone.utc),
+    )
+    assert result["status"] == "PASS"
+    assert result["reason"] == "BREAK_GLASS_OWNER_INTEGRATION_VALID"
+    assert result["execution_lane"] == "BREAK_GLASS"
+    assert result["break_glass_integration"]["integration_attempt_id"] == "BG-806-1218-I1"
+    assert result["break_glass_integration"]["verification_comment_id"] == 1232
+
+
+def test_break_glass_payload_hash_tamper_blocks(tmp_path: Path):
+    repo, base, head, _ = _repo(tmp_path)
+    payload, comments = _break_glass_chain(base=base, head=head)
+    binding = _break_glass_binding(payload, payload_hash="0" * 64)
+    with pytest.raises(LaneBindingError, match="BREAK_GLASS_INTEGRATION_HASH_MISMATCH"):
+        validate_event(
+            _event(base=base, head=head, body=render_binding(binding)),
+            repo_root=repo,
+            break_glass_comment_fetcher=_comment_fetcher(comments),
+            now=datetime(2026, 9, 30, 3, 30, tzinfo=timezone.utc),
+        )
+
+
+def test_break_glass_exact_subject_mismatch_blocks(tmp_path: Path):
+    repo, base, head, _ = _repo(tmp_path)
+    payload, comments = _break_glass_chain(base=base, head="a" * 40)
+    binding = _break_glass_binding(payload)
+    with pytest.raises(LaneBindingError, match="BREAK_GLASS_HEAD_MISMATCH"):
+        validate_event(
+            _event(base=base, head=head, body=render_binding(binding)),
+            repo_root=repo,
+            break_glass_comment_fetcher=_comment_fetcher(comments),
+            now=datetime(2026, 9, 30, 3, 30, tzinfo=timezone.utc),
+        )
+
+
+def test_break_glass_expired_authority_blocks(tmp_path: Path):
+    repo, base, head, _ = _repo(tmp_path)
+    payload, comments = _break_glass_chain(
+        base=base,
+        head=head,
+        integration_expires_at="2026-09-30T03:20:00+00:00",
+    )
+    binding = _break_glass_binding(payload)
+    with pytest.raises(LaneBindingError, match="BREAK_GLASS_INTEGRATION_EXPIRED"):
+        validate_event(
+            _event(base=base, head=head, body=render_binding(binding)),
+            repo_root=repo,
+            break_glass_comment_fetcher=_comment_fetcher(comments),
+            now=datetime(2026, 9, 30, 3, 30, tzinfo=timezone.utc),
+        )
+
+
+def test_break_glass_failed_check_blocks(tmp_path: Path):
+    repo, base, head, _ = _repo(tmp_path)
+    payload, comments = _break_glass_chain(base=base, head=head, conclusion="failure")
+    binding = _break_glass_binding(payload)
+    with pytest.raises(LaneBindingError, match="BREAK_GLASS_CHECK_NOT_SUCCESS"):
+        validate_event(
+            _event(base=base, head=head, body=render_binding(binding)),
+            repo_root=repo,
+            break_glass_comment_fetcher=_comment_fetcher(comments),
+            now=datetime(2026, 9, 30, 3, 30, tzinfo=timezone.utc),
+        )
+
+
+def test_break_glass_forged_integration_owner_blocks(tmp_path: Path):
+    repo, base, head, _ = _repo(tmp_path)
+    payload, comments = _break_glass_chain(base=base, head=head)
+    comments[1234]["user"] = {"login": "attacker"}
+    binding = _break_glass_binding(payload)
+    with pytest.raises(LaneBindingError, match="BREAK_GLASS_COMMENT_OWNER_MISMATCH"):
+        validate_event(
+            _event(base=base, head=head, body=render_binding(binding)),
+            repo_root=repo,
+            break_glass_comment_fetcher=_comment_fetcher(comments),
+            now=datetime(2026, 9, 30, 3, 30, tzinfo=timezone.utc),
+        )
+
+
+def test_break_glass_forged_verification_owner_blocks(tmp_path: Path):
+    repo, base, head, _ = _repo(tmp_path)
+    payload, comments = _break_glass_chain(base=base, head=head)
+    comments[1232]["user"] = {"login": "attacker"}
+    binding = _break_glass_binding(payload)
+    with pytest.raises(LaneBindingError, match="BREAK_GLASS_COMMENT_OWNER_MISMATCH"):
+        validate_event(
+            _event(base=base, head=head, body=render_binding(binding)),
+            repo_root=repo,
+            break_glass_comment_fetcher=_comment_fetcher(comments),
+            now=datetime(2026, 9, 30, 3, 30, tzinfo=timezone.utc),
+        )
 
 
 def test_pre_enforcement_pr_keeps_compatibility(tmp_path: Path):
