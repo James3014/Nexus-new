@@ -13,4 +13,7 @@ Implement Issue #1209: make the existing Grok credential pool host-affine with a
 
 | Order | Task ID | Card | Status | Dependency |
 |---:|---|---|---|---|
-| 0 | `issue-1209-grok-host-affinity` | `00-issue-1209-grok-host-affinity.md` | ACTIVE | Owner confirmation |
+| 0 | `issue-1209-grok-host-affinity` | `00-issue-1209-grok-host-affinity.md` | SUPERSEDED | R5 scope correction required by exact-base CI |
+| 1 | `issue-1209-grok-host-affinity` | `01-issue-1209-grok-host-affinity-r5.md` | SUPERSEDED | R5 Agy implementation complete; R6 reconciles final PR scope projection |
+| 2 | `issue-1209-grok-host-affinity` | `02-issue-1209-grok-host-affinity-r6.md` | SUPERSEDED | R6 exposed base-stability requirement in trusted merge-lane gate |
+| 3 | `issue-1209-grok-host-affinity` | `03-issue-1209-grok-host-affinity-r7.md` | ACTIVE | Base-stable final integration contract; six product/test/doc paths |
