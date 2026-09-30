@@ -104,6 +104,7 @@ from nexus.orchestrator.standing_grant_store import (
     StandingGrantReceipt,
     StandingGrantReceiptError,
     authorize_durable_standing_grant_effect,
+    inspect_keyed_standing_grant_receipt,
     load_keyed_standing_grant_receipt,
     restore_task_card_authority,
     switch_task_card_authority,
@@ -3315,18 +3316,36 @@ class UnifiedMCPGateway:
         )
 
         try:
-            current = load_keyed_standing_grant_receipt(key, now=now)
-            if current is not None and current.receipt_hash == receipt.receipt_hash:
+            inspection = inspect_keyed_standing_grant_receipt(key, now=now)
+            inspection_status = inspection.get("status")
+            if inspection_status == "MISSING":
+                current_hash = None
+            elif inspection_status == "INVALID":
+                raise StandingGrantReceiptError(
+                    str(inspection.get("reason") or "STRUCTURAL_PREDECESSOR_INVALID")
+                )
+            elif inspection_status == "REVOKED":
+                raise StandingGrantReceiptError("REVOKED")
+            elif inspection_status == "NOT_YET_VALID":
+                raise StandingGrantReceiptError("NOT_YET_VALID")
+            elif inspection_status in {"VALID", "EXPIRED"}:
+                current_hash = str(inspection.get("receipt_hash") or "")
+                if not _SHA64_RE.fullmatch(current_hash):
+                    raise StandingGrantReceiptError("STRUCTURAL_PREDECESSOR_HASH_INVALID")
+            else:
+                raise StandingGrantReceiptError("STRUCTURAL_PREDECESSOR_STATUS_INVALID")
+
+            if current_hash == receipt.receipt_hash:
                 status = "REPLAYED"
             else:
-                if current is None and expected_current is not None:
+                if current_hash is None and expected_current is not None:
                     raise StandingGrantReceiptError("EXPECTED_PREDECESSOR_MISSING")
-                if current is not None and expected_current is None:
+                if current_hash is not None and expected_current is None:
                     raise StandingGrantReceiptError("CURRENT_RECEIPT_EXISTS_CAS_REQUIRED")
                 if (
-                    current is not None
+                    current_hash is not None
                     and expected_current is not None
-                    and current.receipt_hash != expected_current
+                    and current_hash != expected_current
                 ):
                     raise StandingGrantReceiptError("CAS_MISMATCH")
                 write_keyed_standing_grant_receipt(

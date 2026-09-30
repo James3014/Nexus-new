@@ -3199,6 +3199,235 @@ def test_gateway_owner_standing_grant_issue_is_typed_cas_and_idempotent(monkeypa
     ]
 
 
+def test_gateway_owner_standing_grant_issue_accepts_exact_expired_predecessor(
+    monkeypatch, tmp_path
+):
+    import nexus.orchestrator.standing_grant_store as sg_store
+
+    receipt_path = tmp_path / "authority" / "standing-grant.json"
+    monkeypatch.setattr(sg_store, "DEFAULT_RECEIPT_PATH", receipt_path)
+    gateway = UnifiedMCPGateway(service=FakeService())
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    repository = RepositoryIdentity(
+        repository_id="James3014/Nexus-new",
+        canonical_remote="https://github.com/James3014/Nexus-new.git",
+    )
+    context = StandingGrantContext.issue(
+        owner_id="James3014",
+        coordinator_id="chatgpt-primary",
+        repository=repository,
+        thread_id="issue-1232-expired-scope",
+        goal_id="issue-1232-expired-goal",
+        allowed_actions=(AutonomyActionClass.GITHUB_MERGE,),
+        issued_at=now - timedelta(minutes=10),
+        expires_at=now - timedelta(minutes=1),
+    )
+    predecessor = StandingGrantReceipt.issue(
+        grant_id="issue-1232-expired-predecessor",
+        context=context,
+    )
+    sg_store.write_keyed_standing_grant_receipt(predecessor)
+    key = sg_store.standing_grant_key(predecessor)
+
+    inspection = sg_store.inspect_keyed_standing_grant_receipt(key, now=now)
+    assert inspection["status"] == "EXPIRED"
+    assert inspection["receipt_hash"] == predecessor.receipt_hash
+    with pytest.raises(sg_store.StandingGrantReceiptError, match="EXPIRED"):
+        sg_store.load_keyed_standing_grant_receipt(key, now=now)
+
+    response = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 923,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_owner_standing_grant_issue",
+            "arguments": {
+                "ownerConfirmation": True,
+                "repository": "James3014/Nexus-new",
+                "coordinatorId": "chatgpt-primary",
+                "goalId": context.goal_id,
+                "coordinationScopeId": context.thread_id,
+                "allowedActions": ["GITHUB_MERGE"],
+                "ttlMinutes": 30,
+                "issuedAt": now.isoformat(),
+                "expectedCurrentReceiptHash": predecessor.receipt_hash,
+            },
+        },
+    })
+
+    assert response["result"]["isError"] is False, response
+    payload = response["result"]["structuredContent"]
+    assert payload["status"] == "ISSUED"
+    assert payload["supersedes_grant_hash"] == predecessor.receipt_hash
+    assert payload["allowed_actions"] == ["GITHUB_MERGE"]
+    rebound = sg_store.load_keyed_standing_grant_receipt(key, now=now)
+    assert rebound is not None
+    assert rebound.receipt_hash == payload["receipt_hash"]
+    assert rebound.supersedes_grant_hash == predecessor.receipt_hash
+
+
+def test_gateway_owner_standing_grant_issue_rejects_revoked_structural_predecessor(
+    monkeypatch, tmp_path
+):
+    import nexus.orchestrator.standing_grant_store as sg_store
+
+    receipt_path = tmp_path / "authority" / "standing-grant.json"
+    monkeypatch.setattr(sg_store, "DEFAULT_RECEIPT_PATH", receipt_path)
+    gateway = UnifiedMCPGateway(service=FakeService())
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    repository = RepositoryIdentity(
+        repository_id="James3014/Nexus-new",
+        canonical_remote="https://github.com/James3014/Nexus-new.git",
+    )
+    context = StandingGrantContext.issue(
+        owner_id="James3014",
+        coordinator_id="chatgpt-primary",
+        repository=repository,
+        thread_id="issue-1232-revoked-scope",
+        goal_id="issue-1232-revoked-goal",
+        allowed_actions=(AutonomyActionClass.GITHUB_MERGE,),
+        issued_at=now - timedelta(minutes=10),
+        expires_at=now + timedelta(minutes=30),
+        revoked_at=now - timedelta(minutes=1),
+        revocation_reason="owner revoked",
+    )
+    predecessor = StandingGrantReceipt.issue(
+        grant_id="issue-1232-revoked-predecessor",
+        context=context,
+    )
+    sg_store.write_keyed_standing_grant_receipt(predecessor)
+    key = sg_store.standing_grant_key(predecessor)
+
+    response = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 924,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_owner_standing_grant_issue",
+            "arguments": {
+                "ownerConfirmation": True,
+                "repository": "James3014/Nexus-new",
+                "coordinatorId": "chatgpt-primary",
+                "goalId": context.goal_id,
+                "coordinationScopeId": context.thread_id,
+                "allowedActions": ["GITHUB_MERGE"],
+                "ttlMinutes": 30,
+                "issuedAt": now.isoformat(),
+                "expectedCurrentReceiptHash": predecessor.receipt_hash,
+            },
+        },
+    })
+
+    assert response["result"]["isError"] is True
+    assert "REVOKED" in response["result"]["structuredContent"]["error"]
+    inspection = sg_store.inspect_keyed_standing_grant_receipt(key, now=now)
+    assert inspection["status"] == "REVOKED"
+    assert inspection["receipt_hash"] == predecessor.receipt_hash
+
+
+def test_gateway_owner_standing_grant_issue_structural_predecessor_hostile_controls(
+    monkeypatch, tmp_path
+):
+    import nexus.orchestrator.standing_grant_store as sg_store
+
+    receipt_path = tmp_path / "authority" / "standing-grant.json"
+    monkeypatch.setattr(sg_store, "DEFAULT_RECEIPT_PATH", receipt_path)
+    gateway = UnifiedMCPGateway(service=FakeService())
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    repository = RepositoryIdentity(
+        repository_id="James3014/Nexus-new",
+        canonical_remote="https://github.com/James3014/Nexus-new.git",
+    )
+
+    def issue(arguments, request_id):
+        return gateway.handle({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "tools/call",
+            "params": {
+                "name": "nexus_owner_standing_grant_issue",
+                "arguments": arguments,
+            },
+        })
+
+    base = {
+        "ownerConfirmation": True,
+        "repository": "James3014/Nexus-new",
+        "coordinatorId": "chatgpt-primary",
+        "goalId": "issue-1232-hostile-goal",
+        "coordinationScopeId": "issue-1232-hostile-scope",
+        "allowedActions": ["GITHUB_MERGE"],
+        "ttlMinutes": 30,
+        "issuedAt": now.isoformat(),
+    }
+
+    missing = issue(
+        {**base, "expectedCurrentReceiptHash": "1" * 64},
+        925,
+    )
+    assert missing["result"]["isError"] is True
+    assert "EXPECTED_PREDECESSOR_MISSING" in missing["result"]["structuredContent"]["error"]
+
+    context = StandingGrantContext.issue(
+        owner_id="James3014",
+        coordinator_id="chatgpt-primary",
+        repository=repository,
+        thread_id=base["coordinationScopeId"],
+        goal_id=base["goalId"],
+        allowed_actions=(AutonomyActionClass.GITHUB_MERGE,),
+        issued_at=now - timedelta(minutes=10),
+        expires_at=now - timedelta(minutes=1),
+    )
+    predecessor = StandingGrantReceipt.issue(
+        grant_id="issue-1232-hostile-predecessor",
+        context=context,
+    )
+    sg_store.write_keyed_standing_grant_receipt(predecessor)
+
+    wrong_hash = issue(
+        {**base, "expectedCurrentReceiptHash": "2" * 64},
+        926,
+    )
+    assert wrong_hash["result"]["isError"] is True
+    assert "CAS_MISMATCH" in wrong_hash["result"]["structuredContent"]["error"]
+
+    other_context = StandingGrantContext.issue(
+        owner_id="James3014",
+        coordinator_id="chatgpt-primary",
+        repository=repository,
+        thread_id="issue-1232-other-scope",
+        goal_id="issue-1232-other-goal",
+        allowed_actions=(AutonomyActionClass.GITHUB_MERGE,),
+        issued_at=now - timedelta(minutes=10),
+        expires_at=now - timedelta(minutes=1),
+    )
+    other = StandingGrantReceipt.issue(
+        grant_id="issue-1232-other-predecessor",
+        context=other_context,
+    )
+    sg_store.write_keyed_standing_grant_receipt(other)
+    cross_key = issue(
+        {
+            **base,
+            "goalId": "issue-1232-cross-key-target",
+            "coordinationScopeId": "issue-1232-cross-key-target",
+            "expectedCurrentReceiptHash": other.receipt_hash,
+        },
+        927,
+    )
+    assert cross_key["result"]["isError"] is True
+    assert "EXPECTED_PREDECESSOR_MISSING" in cross_key["result"]["structuredContent"]["error"]
+
+    path = sg_store._keyed_receipt_path(sg_store.standing_grant_key(predecessor))
+    path.write_text("{not-json", encoding="utf-8")
+    malformed = issue(
+        {**base, "expectedCurrentReceiptHash": predecessor.receipt_hash},
+        928,
+    )
+    assert malformed["result"]["isError"] is True
+    assert "MALFORMED" in malformed["result"]["structuredContent"]["error"]
+
+
 def test_gateway_owner_standing_grant_issue_fails_closed_before_write(monkeypatch, tmp_path):
     import nexus.orchestrator.standing_grant_store as sg_store
 
