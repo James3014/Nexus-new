@@ -141,9 +141,9 @@ PERMISSION_POLICY = {
 PERMISSION_POLICY_HASH = hashlib.sha256(
     json.dumps(PERMISSION_POLICY, sort_keys=True, separators=(",", ":")).encode("utf-8")
 ).hexdigest()
-EPB_CAMPAIGN_ID = "CAMPAIGN-EVIDENCE-PRODUCER-BRIDGE-01"
-EPB_SPEC_ID = "SPEC-EPB-EXTERNAL-CANDIDATE-ADOPTION-EXEC-001"
-EPB_SPEC_SHA256 = "9e841f43d63ffc10704f00b4d21b88f9fbf78f3a473839a1409f278a951251a1"
+_LEGACY_EPB_CAMPAIGN_ID = "CAMPAIGN-EVIDENCE-PRODUCER-BRIDGE-01"
+_LEGACY_EPB_SPEC_ID = "SPEC-EPB-EXTERNAL-CANDIDATE-ADOPTION-EXEC-001"
+_LEGACY_EPB_SPEC_SHA256 = "9e841f43d63ffc10704f00b4d21b88f9fbf78f3a473839a1409f278a951251a1"
 MAX_READ_BYTES = 1024 * 1024
 MAX_RESULT_BYTES = 1024 * 1024
 MAX_SEARCH_RESULTS = 200
@@ -4618,7 +4618,7 @@ class UnifiedMCPGateway:
                 "inputSchema": {
                     "type": "object",
                     "required": [
-                        "campaign_id", "spec_id", "spec_sha256", "server_instance_id", "lifecycle_revision",
+                        "server_instance_id", "lifecycle_revision",
                         "tool_manifest_hash", "full_tool_schema_hash", "permission_policy_hash", "controller_repo_root",
                         "controller_branch", "controller_head", "schema", "repository", "task_id",
                         "attempt_id", "action_id", "idempotency_key", "task_card_path", "task_card_hash",
@@ -4631,10 +4631,10 @@ class UnifiedMCPGateway:
                     ],
                     "additionalProperties": False,
                     "properties": {
-                        "campaign_id": {"type": "string", "const": EPB_CAMPAIGN_ID},
-                        "spec_id": {"type": "string", "const": EPB_SPEC_ID},
+                        "campaign_id": {"type": "string", "minLength": 1, "maxLength": 256},
+                        "spec_id": {"type": "string", "minLength": 1, "maxLength": 256},
                         "server_instance_id": {"type": "string"}, "lifecycle_revision": {"type": "string"},
-                        "spec_sha256": {"type": "string", "const": EPB_SPEC_SHA256},
+                        "spec_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                         "tool_manifest_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                         "full_tool_schema_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                         "permission_policy_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
@@ -5464,11 +5464,12 @@ class UnifiedMCPGateway:
             "controller_head", "campaign_id", "spec_id", "spec_sha256",
             "authority_goal_id", "authority_coordination_scope_id",
         }
+        required_runtime_fields = runtime_fields - {"campaign_id", "spec_id", "spec_sha256"}
         request_fields = set(ExternalCandidateAdoptionRequest.model_fields)
         unknown = set(arguments) - request_fields - runtime_fields
         if unknown:
             raise GatewayInputError("CANDIDATE_ADOPTION_SCHEMA_CLOSED")
-        missing_runtime = runtime_fields - set(arguments)
+        missing_runtime = required_runtime_fields - set(arguments)
         if missing_runtime:
             raise GatewayInputError(
                 "CANDIDATE_ADOPTION_RUNTIME_BINDING_REQUIRED:" + ",".join(sorted(missing_runtime))
@@ -5481,10 +5482,23 @@ class UnifiedMCPGateway:
             raise GatewayInputError("CANDIDATE_ADOPTION_TOOL_SCHEMA_MISMATCH")
         if str(arguments["permission_policy_hash"]) != PERMISSION_POLICY_HASH:
             raise GatewayInputError("CANDIDATE_ADOPTION_PERMISSION_POLICY_MISMATCH")
-        if str(arguments["campaign_id"]) != EPB_CAMPAIGN_ID:
-            raise GatewayInputError("CANDIDATE_ADOPTION_CAMPAIGN_MISMATCH")
-        if str(arguments["spec_id"]) != EPB_SPEC_ID or str(arguments.get("spec_sha256")) != EPB_SPEC_SHA256:
-            raise GatewayInputError("CANDIDATE_ADOPTION_SPEC_MISMATCH")
+        legacy_fields = {"campaign_id", "spec_id", "spec_sha256"}
+        supplied_legacy_fields = legacy_fields & set(arguments)
+        if supplied_legacy_fields and supplied_legacy_fields != legacy_fields:
+            raise GatewayInputError("CANDIDATE_ADOPTION_LEGACY_METADATA_INCOMPLETE")
+        legacy_metadata = None
+        if supplied_legacy_fields:
+            legacy_metadata = {
+                "campaign_id": str(arguments["campaign_id"]).strip(),
+                "spec_id": str(arguments["spec_id"]).strip(),
+                "spec_sha256": str(arguments["spec_sha256"]).strip(),
+            }
+            if legacy_metadata != {
+                "campaign_id": _LEGACY_EPB_CAMPAIGN_ID,
+                "spec_id": _LEGACY_EPB_SPEC_ID,
+                "spec_sha256": _LEGACY_EPB_SPEC_SHA256,
+            }:
+                raise GatewayInputError("CANDIDATE_ADOPTION_LEGACY_METADATA_MISMATCH")
         if str(arguments.get("repository")) != GITHUB_REPOSITORY.repository_id:
             raise GatewayInputError("CANDIDATE_ADOPTION_REPOSITORY_MISMATCH")
 
@@ -5512,9 +5526,6 @@ class UnifiedMCPGateway:
         if request.action.expected_head != request.controller_revision:
             raise GatewayInputError("CANDIDATE_ADOPTION_ACTION_HEAD_MISMATCH")
         effect = {
-            "campaign_id": str(arguments["campaign_id"]),
-            "spec_id": str(arguments["spec_id"]),
-            "spec_sha256": EPB_SPEC_SHA256,
             "repository": request.repository,
             "task_id": request.task_id,
             "attempt_id": request.attempt_id,
@@ -5540,6 +5551,8 @@ class UnifiedMCPGateway:
             "controller_head": current_head,
             "action": request.action.model_dump(mode="json"),
         }
+        if legacy_metadata is not None:
+            effect.update(legacy_metadata)
         owner_authority = self._require_owner_effect_authority(
             AutonomyActionClass.CANDIDATE_ADOPT_EXTERNAL, effect,
             key=self._owner_effect_key(arguments),
