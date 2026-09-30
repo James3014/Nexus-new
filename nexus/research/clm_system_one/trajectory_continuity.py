@@ -781,10 +781,11 @@ def project_corpus_readiness(
       {``PASS``, ``FAIL``}, and rows without a strong label are all ineligible
       (already enforced via ``dataset_eligible`` on the candidate evidence but
       guarded explicitly here too).
-    - Requires ≥ ``_MIN_TASK_FAMILIES`` (5) independent task families, each
-      with strong PASS+FAIL coverage, for the split to be considered valid.
-    - ``task_disjoint_split_possible`` now requires family-level not just
-      task-level disjoint coverage.
+    - Requires ≥ ``_MIN_TASK_FAMILIES`` (5) distinct mapped task families,
+      overall strong PASS+FAIL coverage, and family-disjoint split capability;
+      an individual family does not need to contain both labels.
+    - Task-level and family-level split capability are reported separately;
+      readiness requires the family-disjoint capability.
     - ``READY_TO_REAUDIT`` still means ``AUTO_CHAIN=false``.
     """
     root = Path(evidence_root).expanduser().resolve()
