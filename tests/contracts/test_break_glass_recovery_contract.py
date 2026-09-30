@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from pydantic import ValidationError
@@ -438,6 +438,56 @@ def test_github_integration_readback_rejects_main_mismatch() -> None:
     pull_request, main_branch = github_integration_readback(main_sha="9" * 40)
     with pytest.raises(BreakGlassContractError, match="INTEGRATION_READBACK_MISMATCH"):
         integration_readback_from_github(integration, pull_request, main_branch)
+
+
+def test_github_integration_readback_g05_pre_effect_chronology_violation() -> None:
+    """G05 regression fixture: physical merge preceded authority issuance (#1236 fixture)."""
+    integration = BreakGlassOwnerIntegrationPayload.model_validate(integration_payload_dict())
+    # Merge happened 1 hour before authority was issued
+    merged_before = (integration.issued_at - timedelta(hours=1)).isoformat()
+    pull_request, main_branch = github_integration_readback()
+    pull_request["merged_at"] = merged_before
+    with pytest.raises(
+        BreakGlassContractError,
+        match="PRE_EFFECT_CHRONOLOGY_VIOLATION_MERGE_PRECEDED_AUTHORITY",
+    ):
+        integration_readback_from_github(integration, pull_request, main_branch)
+
+
+def test_github_integration_readback_g06_merge_method_squash_substitution() -> None:
+    """G06 regression fixture: merge method was squash instead of authorized merge (#1236 fixture)."""
+    integration = BreakGlassOwnerIntegrationPayload.model_validate(integration_payload_dict())
+    pull_request, main_branch = github_integration_readback()
+    # Single parent indicates a squash or direct commit rather than merge commit
+    main_branch["commit"]["parents"] = [{"sha": "1" * 40}]
+    with pytest.raises(
+        BreakGlassContractError,
+        match="MERGE_METHOD_SUBSTITUTION_SQUASH_DETECTED",
+    ):
+        integration_readback_from_github(integration, pull_request, main_branch)
+
+
+def test_github_integration_readback_g06_merge_method_mismatch() -> None:
+    """G06: declared merge method is merge; PR observed as squash must fail closed."""
+    integration = BreakGlassOwnerIntegrationPayload.model_validate(integration_payload_dict())
+    pull_request, main_branch = github_integration_readback()
+    pull_request["merge_method"] = "squash"
+    with pytest.raises(BreakGlassContractError, match="MERGE_METHOD_MISMATCH"):
+        integration_readback_from_github(integration, pull_request, main_branch)
+
+
+def test_github_integration_readback_g05_g06_positive_control() -> None:
+    """Positive control: valid chronology and true merge commit pass readback."""
+    integration = BreakGlassOwnerIntegrationPayload.model_validate(integration_payload_dict())
+    pull_request, main_branch = github_integration_readback()
+    pull_request["merged_at"] = (integration.issued_at + timedelta(minutes=5)).isoformat()
+    pull_request["merge_method"] = "merge"
+    main_branch["commit"]["parents"] = [{"sha": "1" * 40}, {"sha": "2" * 40}]
+    assert integration_readback_from_github(integration, pull_request, main_branch) == (
+        "8" * 40,
+        "8" * 40,
+        808,
+    )
 
 
 def test_owner_terminal_comment_binds_global_consumption() -> None:

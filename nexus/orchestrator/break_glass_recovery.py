@@ -11,7 +11,7 @@ import json
 import os
 import pwd
 import stat
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -30,6 +30,11 @@ from nexus.contracts.break_glass_recovery import (
     canonical_json_bytes,
     canonical_sha256,
 )
+
+
+def _utc(dt: datetime) -> datetime:
+    return dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
 
 _HOME = Path(pwd.getpwuid(os.getuid()).pw_dir)
 DEFAULT_BREAK_GLASS_ROOT = _HOME / ".local/state/nexus/authority/break-glass"
@@ -548,6 +553,8 @@ def record_emergency_integration_consumed(
     observed_main_sha: str,
     merged_pr_number: int,
     now: datetime,
+    observed_merge_method: str | None = None,
+    merged_at: datetime | None = None,
     state_root: Path | None = None,
 ) -> dict[str, Any]:
     integration = integration_envelope.payload
@@ -558,6 +565,19 @@ def record_emergency_integration_consumed(
         raise BreakGlassRecoveryError("GIT_SHA_INVALID")
     if merge_commit_sha != observed_main_sha:
         raise BreakGlassRecoveryError("INTEGRATION_READBACK_MISMATCH")
+
+    # G05: pre-effect chronology
+    if merged_at is not None and _utc(merged_at) < _utc(integration.issued_at):
+        raise BreakGlassRecoveryError("PRE_EFFECT_CHRONOLOGY_VIOLATION_MERGE_PRECEDED_AUTHORITY")
+
+    # G06: merge method binding
+    if (
+        observed_merge_method is not None
+        and str(observed_merge_method).lower() != integration.merge_method
+    ):
+        raise BreakGlassRecoveryError(
+            f"MERGE_METHOD_MISMATCH: expected {integration.merge_method}, observed {observed_merge_method}"
+        )
 
     attempt_dir = _integration_attempt_dir(integration, state_root=state_root)
     _ensure_safe_dir(attempt_dir, create=False)
