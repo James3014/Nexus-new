@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
+import re
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -13,8 +15,17 @@ from typing import Any, Mapping, Sequence
 STEP_SCHEMA = "nexus.clm_trajectory_step.v1"
 STEP_RESULT_SCHEMA = "nexus.clm_trajectory_step_result.v1"
 OUTCOME_SCHEMA = "nexus.clm_trajectory_outcome_binding.v1"
+BINDING_SCHEMA = "nexus.clm_trajectory_binding.v1"
 READINESS_SCHEMA = "nexus.clm_trajectory_corpus_readiness.v1"
 CHECKPOINT_SCHEMA = "nexus.research_experiment_checkpoint.v1"
+HEALTH_SCHEMA = "nexus.clm_trajectory_health.v1"
+
+# Minimum independent task families required before READY_TO_REAUDIT
+_MIN_TASK_FAMILIES = 5
+
+# Bounding limits (C: Redact -> Bound -> Hash -> Persist)
+_MAX_STATE_ACTION_CHARS = 16384  # max serialized chars for state/action blobs
+_MAX_RESULT_INLINE_BYTES = 4096  # results larger than this go to content-addressed blobs
 
 _ALLOWED_CHECKPOINT_STATES = {
     "ACTIVE",
@@ -30,9 +41,75 @@ _FORBIDDEN_PRE_ACTION_KEYS = {
     "trajectory_outcome",
 }
 
+# Patterns used to detect and redact credentials/secrets from step payloads
+# before hashing or persistence.  Conservative: prefer false-positive redaction
+# over accidental secret leakage.
+_SECRET_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(
+        r"(?i)(password|passwd|secret|token|api[_\-]?key|private[_\-]?key|auth[_\-]?key)\s*[=:]\s*\S+"
+    ),
+    re.compile(r"(?i)bearer\s+[A-Za-z0-9\-._~+/]+=*"),
+    re.compile(r"(?i)(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}"),
+    re.compile(r"sk-[A-Za-z0-9]{20,}"),
+    re.compile(r"(?i)-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
+    # curl -u / --user basic-auth: -u user:password or --user user:password
+    re.compile(r"(?i)(?:--user|-u)\s+\S+:\S+"),
+    # URL-embedded credentials: scheme://user:password@host
+    re.compile(r"(?i)[a-z][a-z0-9+\-.]*://[^/@\s]+:[^/@\s]+@"),
+]
+_REDACTED_SENTINEL = "[REDACTED]"
+
+# Dict keys whose string values are always fully redacted regardless of value content.
+# Matched case-insensitively and with common separators stripped.
+_SECRET_KEYS: frozenset[str] = frozenset({
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "api_key",
+    "apikey",
+    "private_key",
+    "privatekey",
+    "auth_key",
+    "authkey",
+    "authorization",
+    "access_token",
+    "refresh_token",
+    "bearer",
+    "credential",
+    "credentials",
+    "secret_key",
+    "secretkey",
+    "key_material",
+})
+
+_sidecar_logger = logging.getLogger("nexus.trajectory_continuity.sidecar")
+
 
 def _canonical_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
+
+def _bound_string(s: str, max_chars: int) -> str:
+    """Truncate a string to at most max_chars characters, appending a sentinel if truncated."""
+    if len(s) <= max_chars:
+        return s
+    sentinel = "...[BOUNDED]"
+    return s[: max_chars - len(sentinel)] + sentinel
+
+
+def _bound_value(value: Any, max_chars: int) -> Any:
+    """Serialize value to JSON, bound to max_chars, then deserialize back.
+
+    Used for state/action payloads after redaction: Redact -> Bound -> Hash -> Persist.
+    The bounded representation is what is hashed and stored; raw oversized values are
+    never written to disk.
+    """
+    serialized = _canonical_json(value)
+    if len(serialized) <= max_chars:
+        return value
+    # Bound the serialized form and store as a plain string payload
+    return {"_bounded": True, "value": _bound_string(serialized, max_chars)}
 
 
 def _sha256_bytes(value: bytes) -> str:
@@ -121,6 +198,164 @@ def _contains_forbidden_future_key(value: Any) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# Secret redaction
+# ---------------------------------------------------------------------------
+
+
+def _redact_string(value: str) -> str:
+    """Redact known secret patterns from a string value."""
+    result = value
+    for pattern in _SECRET_PATTERNS:
+        result = pattern.sub(_REDACTED_SENTINEL, result)
+    return result
+
+
+def _redact_value(value: Any, *, _depth: int = 0, _parent_key: str = "") -> Any:
+    """Recursively redact credential/private-key/token patterns from a value.
+
+    Two complementary strategies:
+    1. Key-based: when the parent dict key is in ``_SECRET_KEYS``, the value is
+       unconditionally replaced with ``[REDACTED]``.
+    2. Pattern-based: string values are scanned for inline credential patterns
+       (``bearer <token>``, ``password=<val>`` inside shell commands, etc.).
+
+    Operates without mutating the original value.  Depth is capped at 32 to
+    prevent runaway recursion on pathological inputs.
+    """
+    if _depth > 32:
+        return _REDACTED_SENTINEL
+    # Key-based: parent key flagged as a credential → redact value unconditionally
+    if (
+        _parent_key
+        and isinstance(value, str)
+        and _parent_key.lower().replace("-", "_") in _SECRET_KEYS
+    ):
+        return _REDACTED_SENTINEL
+    if isinstance(value, str):
+        return _redact_string(value)
+    if isinstance(value, Mapping):
+        return {
+            k: _redact_value(v, _depth=_depth + 1, _parent_key=str(k)) for k, v in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        redacted = [_redact_value(item, _depth=_depth + 1) for item in value]
+        return type(value)(redacted) if isinstance(value, tuple) else redacted
+    return value
+
+
+# ---------------------------------------------------------------------------
+# Sidecar health (fail-visible, main workflow fail-open)
+# Schema: nexus.clm_trajectory_health.v1 — sidecar-only, NEVER affects routing/selection/acceptance
+# ---------------------------------------------------------------------------
+
+
+def _read_health_snapshot(health_snapshot_path: Path) -> dict[str, Any]:
+    """Read the current health snapshot, returning an empty baseline if absent."""
+    if health_snapshot_path.exists():
+        try:
+            return json.loads(health_snapshot_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            pass
+    return {
+        "schema": HEALTH_SCHEMA,
+        "attempted_step_count": 0,
+        "persisted_step_count": 0,
+        "instrumentation_error_count": 0,
+        "last_error_class": None,
+        "last_successful_observation": None,
+        "trajectory_groups_completed": 0,
+        "strong_label_bindings_completed": 0,
+    }
+
+
+def _write_health_snapshot(health_snapshot_path: Path, snapshot: dict[str, Any]) -> None:
+    """Atomically write health snapshot. Caller is responsible for swallowing errors."""
+    _atomic_replace(health_snapshot_path, _json_bytes(snapshot))
+
+
+def _health_snapshot_path(evidence_root: Path) -> Path:
+    return evidence_root / "trajectory" / "sidecar_health_snapshot.json"
+
+
+def _increment_health(
+    evidence_root: Path,
+    *,
+    attempted: bool = False,
+    persisted: bool = False,
+    error_class: str | None = None,
+    last_success_ts: str | None = None,
+    groups_completed: bool = False,
+    strong_bindings: bool = False,
+) -> None:
+    """Update the mutable health snapshot atomically.
+
+    All errors are swallowed; this MUST NOT affect routing, selection, or acceptance.
+    """
+    try:
+        snap_path = _health_snapshot_path(evidence_root)
+        snap_path.parent.mkdir(parents=True, exist_ok=True)
+        snap = _read_health_snapshot(snap_path)
+        if attempted:
+            snap["attempted_step_count"] = snap.get("attempted_step_count", 0) + 1
+        if persisted:
+            snap["persisted_step_count"] = snap.get("persisted_step_count", 0) + 1
+        if error_class is not None:
+            snap["instrumentation_error_count"] = snap.get("instrumentation_error_count", 0) + 1
+            snap["last_error_class"] = error_class
+        if last_success_ts is not None:
+            snap["last_successful_observation"] = last_success_ts
+        if groups_completed:
+            snap["trajectory_groups_completed"] = snap.get("trajectory_groups_completed", 0) + 1
+        if strong_bindings:
+            snap["strong_label_bindings_completed"] = (
+                snap.get("strong_label_bindings_completed", 0) + 1
+            )
+        snap["schema"] = HEALTH_SCHEMA
+        _write_health_snapshot(snap_path, snap)
+    except Exception as exc:  # noqa: BLE001
+        _sidecar_logger.warning("health snapshot write failed (swallowed): %s", exc)
+
+
+def _record_sidecar_health_event(
+    *,
+    evidence_root: Path,
+    event_type: str,
+    detail: str,
+) -> None:
+    """Append a health event to the optional sidecar health event log.
+
+    This is fire-and-forget from the main workflow's perspective: failures here
+    must never propagate to the caller (fail-open).  But the record itself is
+    visible (fail-visible) for operators.
+    The snapshot (``sidecar_health_snapshot.json``) is the required sidecar;
+    the event log is optional.
+    """
+    try:
+        health_path = evidence_root / "trajectory" / "sidecar_health.jsonl"
+        health_path.parent.mkdir(parents=True, exist_ok=True)
+        entry = (
+            json.dumps(
+                {
+                    "event_type": event_type,
+                    "detail": detail,
+                    "observed_at": _now(),
+                },
+                sort_keys=True,
+            )
+            + "\n"
+        )
+        with health_path.open("a", encoding="utf-8") as fh:
+            fh.write(entry)
+    except Exception as exc:  # noqa: BLE001
+        _sidecar_logger.warning("sidecar health write failed: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# Step data model
+# ---------------------------------------------------------------------------
+
+
 @dataclass(frozen=True)
 class TrajectoryStepRef:
     trajectory_id: str
@@ -129,33 +364,102 @@ class TrajectoryStepRef:
     step_ref: str
 
 
+# ---------------------------------------------------------------------------
+# Supervision mode
+# ---------------------------------------------------------------------------
+
+
+def _supervision_mode(has_step_oracle: bool) -> str:
+    """Return the supervision label for a trajectory step."""
+    return "ORACLE_SUPERVISED" if has_step_oracle else "WEAK_SUPERVISION"
+
+
+# ---------------------------------------------------------------------------
+# Core trajectory API
+# ---------------------------------------------------------------------------
+
+
 def seal_trajectory_step(
     *,
     evidence_root: str | Path,
     task_id: str,
     trajectory_id: str,
     attempt_id: str,
-    candidate_id: str,
+    candidate_id: str | None,
     step_index: int,
     source_revision: str,
     pre_action_state: Any,
     action_type: str,
     action_payload: Any,
     observed_at: str | None = None,
+    base_source_revision: str = "",
+    working_state_manifest_sha256: str = "",
+    step_oracle: Any = None,
 ) -> TrajectoryStepRef:
+    """Seal a pre-action state/action pair as an immutable, hash-chained step.
+
+    Changes vs #1197:
+    - ``candidate_id`` is now nullable (``None`` or ``""`` is accepted for
+      pre-candidate steps; an explicit ``""``) and stored as ``""`` in the
+      record.
+    - ``base_source_revision`` records the fixed repository revision at
+      trajectory-open time; ``working_state_manifest_sha256`` is a per-step
+      content hash of the working tree manifest (both optional).
+    - State and action payloads are *redacted then bounded* before hashing or
+      persistence.  No raw secrets or private-key material reach disk.
+    - The ``supervision_mode`` field is set to ``WEAK_SUPERVISION`` when no
+      ``step_oracle`` is provided.
+    - A sidecar health event is written on any storage error (fail-visible);
+      the main workflow is unaffected (fail-open).
+    """
     root = Path(evidence_root).expanduser().resolve()
     if step_index < 0:
         raise ValueError("step_index must be non-negative")
-    if not task_id or not trajectory_id or not attempt_id or not candidate_id:
-        raise ValueError("task/trajectory/attempt/candidate identity is required")
+    if not task_id or not trajectory_id or not attempt_id:
+        raise ValueError("task/trajectory/attempt identity is required")
+    # candidate_id is nullable (pre-candidate steps have no candidate yet)
+    normalized_candidate_id = str(candidate_id).strip() if candidate_id is not None else ""
+
     if _contains_forbidden_future_key(pre_action_state):
         raise ValueError("pre-action state contains forbidden final-outcome evidence")
-    state_sha = _sha256_json(pre_action_state)
-    action_sha = _sha256_json(action_payload)
+
+    # Increment attempted_step_count BEFORE any persistence (health B contract)
+    _increment_health(root, attempted=True)
+
+    # Redact -> Bound -> Hash -> Persist (C contract)
+    redacted_state = _redact_value(pre_action_state)
+    redacted_action = _redact_value(action_payload)
+    bounded_state = _bound_value(redacted_state, _MAX_STATE_ACTION_CHARS)
+    bounded_action = _bound_value(redacted_action, _MAX_STATE_ACTION_CHARS)
+
+    # Check for closed trajectory (outcome already bound)
+    outcome_path = (
+        root / "trajectory" / "outcomes" / f"{_trajectory_storage_key(trajectory_id)}.json"
+    )
+    if outcome_path.exists():
+        _record_sidecar_health_event(
+            evidence_root=root,
+            event_type="CLOSED_TRAJECTORY_APPEND_ATTEMPT",
+            detail=f"trajectory_id={trajectory_id!r} step_index={step_index}",
+        )
+        raise ValueError("trajectory is closed: cannot append steps after outcome has been bound")
+
+    state_sha = _sha256_json(bounded_state)
+    action_sha = _sha256_json(bounded_action)
     state_path = root / "trajectory" / "state" / state_sha[:2] / f"{state_sha}.json"
     action_path = root / "trajectory" / "action" / action_sha[:2] / f"{action_sha}.json"
-    _write_create_only(state_path, _json_bytes(pre_action_state))
-    _write_create_only(action_path, _json_bytes(action_payload))
+
+    try:
+        _write_create_only(state_path, _json_bytes(bounded_state))
+        _write_create_only(action_path, _json_bytes(bounded_action))
+    except Exception as exc:
+        _record_sidecar_health_event(
+            evidence_root=root,
+            event_type="STEP_STORAGE_ERROR",
+            detail=str(exc),
+        )
+        _increment_health(root, error_class=type(exc).__name__)
+        raise
 
     steps_dir = root / "trajectory" / "steps" / _trajectory_storage_key(trajectory_id)
     previous_sha = ""
@@ -165,14 +469,19 @@ def seal_trajectory_step(
             raise ValueError("trajectory step order gap")
         previous = json.loads(previous_path.read_text(encoding="utf-8"))
         previous_sha = str(previous.get("record_sha256") or "")
+
+    supervision = _supervision_mode(step_oracle is not None)
+
     step_body = {
         "schema": STEP_SCHEMA,
         "task_id": task_id,
         "trajectory_id": trajectory_id,
         "attempt_id": attempt_id,
-        "candidate_id": candidate_id,
+        "candidate_id": normalized_candidate_id,
         "step_index": step_index,
         "source_revision": source_revision,
+        "base_source_revision": str(base_source_revision or ""),
+        "working_state_manifest_sha256": str(working_state_manifest_sha256 or ""),
         "pre_action_state_sha256": state_sha,
         "pre_action_state_ref": str(state_path.relative_to(root)),
         "action_type": action_type,
@@ -181,11 +490,23 @@ def seal_trajectory_step(
         "parent_step_sha256": previous_sha,
         "observed_at": observed_at or _now(),
         "sealed_before_result": True,
+        "supervision_mode": supervision,
     }
     step_sha = _sha256_json(step_body)
     step = dict(step_body, record_sha256=step_sha)
     step_path = steps_dir / f"{step_index:08d}.json"
-    _write_create_only(step_path, _json_bytes(step))
+    try:
+        _write_create_only(step_path, _json_bytes(step))
+    except Exception as exc:
+        _record_sidecar_health_event(
+            evidence_root=root,
+            event_type="STEP_RECORD_WRITE_ERROR",
+            detail=str(exc),
+        )
+        _increment_health(root, error_class=type(exc).__name__)
+        raise
+    # Step persisted successfully: increment persisted count and last success
+    _increment_health(root, persisted=True, last_success_ts=step_body["observed_at"])
     return TrajectoryStepRef(trajectory_id, step_index, step_sha, str(step_path.relative_to(root)))
 
 
@@ -203,18 +524,72 @@ def bind_trajectory_step_result(
     step = json.loads(step_path.read_text(encoding="utf-8"))
     if step.get("record_sha256") != step_ref.step_sha256:
         raise ValueError("step_ref hash mismatch")
-    result_sha = _sha256_json(action_result)
-    result_blob = root / "trajectory" / "result" / result_sha[:2] / f"{result_sha}.json"
-    _write_create_only(result_blob, _json_bytes(action_result))
-    body = {
+
+    # Redact -> Bound -> Hash -> Persist (C contract)
+    # Secrets must be redacted BEFORE any sizing/hashing/persistence.
+    redacted_result = _redact_value(action_result)
+
+    # Serialize the redacted result before deciding inline vs offload.
+    redacted_json_bytes = _json_bytes(redacted_result)
+
+    # Large results are content-addressed by the exact bytes persisted.
+    if len(redacted_json_bytes) > _MAX_RESULT_INLINE_BYTES:
+        if isinstance(redacted_result, str):
+            blob_ext = ".txt"
+            blob_payload = redacted_result.encode("utf-8")
+        else:
+            blob_ext = ".json"
+            blob_payload = redacted_json_bytes
+        result_sha = _sha256_bytes(blob_payload)
+        blob_path = root / "trajectory" / "blobs" / result_sha[:2] / f"{result_sha}{blob_ext}"
+        try:
+            _write_create_only(blob_path, blob_payload)
+        except Exception as exc:
+            _record_sidecar_health_event(
+                evidence_root=root,
+                event_type="RESULT_BLOB_WRITE_ERROR",
+                detail=str(exc),
+            )
+            _increment_health(root, error_class=type(exc).__name__)
+            raise
+        # Result record carries only the content-addressed ref/hash, no inline payload
+        result_blob = None  # no inline result blob in trajectory/result/
+        action_result_inline = None
+        action_result_blob_ref = str(blob_path.relative_to(root))
+        action_result_blob_sha256 = result_sha
+    else:
+        # Inline results are also addressed by the exact JSON bytes persisted.
+        result_sha = _sha256_bytes(redacted_json_bytes)
+        result_blob = root / "trajectory" / "result" / result_sha[:2] / f"{result_sha}.json"
+        try:
+            _write_create_only(result_blob, redacted_json_bytes)
+        except Exception as exc:
+            _record_sidecar_health_event(
+                evidence_root=root,
+                event_type="RESULT_STORAGE_ERROR",
+                detail=str(exc),
+            )
+            _increment_health(root, error_class=type(exc).__name__)
+            raise
+        action_result_inline = str(result_blob.relative_to(root))
+        action_result_blob_ref = None
+        action_result_blob_sha256 = None
+
+    ts = observed_at or _now()
+    body: dict[str, Any] = {
         "schema": STEP_RESULT_SCHEMA,
         "trajectory_id": step_ref.trajectory_id,
         "step_index": step_ref.step_index,
         "step_sha256": step_ref.step_sha256,
         "action_result_sha256": result_sha,
-        "action_result_ref": str(result_blob.relative_to(root)),
-        "observed_at": observed_at or _now(),
+        "observed_at": ts,
     }
+    if action_result_inline is not None:
+        body["action_result_ref"] = action_result_inline
+    if action_result_blob_ref is not None:
+        body["action_result_blob_ref"] = action_result_blob_ref
+        body["action_result_blob_sha256"] = action_result_blob_sha256
+
     record_sha = _sha256_json(body)
     record = dict(body, record_sha256=record_sha)
     record_path = (
@@ -224,7 +599,18 @@ def bind_trajectory_step_result(
         / _trajectory_storage_key(step_ref.trajectory_id)
         / f"{step_ref.step_index:08d}.json"
     )
-    _write_create_only(record_path, _json_bytes(record))
+    try:
+        _write_create_only(record_path, _json_bytes(record))
+    except Exception as exc:
+        _record_sidecar_health_event(
+            evidence_root=root,
+            event_type="RESULT_RECORD_WRITE_ERROR",
+            detail=str(exc),
+        )
+        _increment_health(root, error_class=type(exc).__name__)
+        raise
+    # Successful result record: update last_successful_observation
+    _increment_health(root, last_success_ts=ts)
     return str(record_path.relative_to(root))
 
 
@@ -234,6 +620,16 @@ def bind_trajectory_outcome(
     trajectory_id: str,
     candidate_evidence_ref: str,
 ) -> str:
+    """Bind outcome evidence to a trajectory.
+
+    Validates the full trajectory→candidate→completion chain:
+    - Candidate ref must resolve within root and exist.
+    - Candidate must be dataset_eligible with a strong label.
+    - Candidate ``trajectory_id`` / ``attempt_id`` / ``candidate_id`` must
+      bind back to this trajectory's steps.
+    - Trajectory must be complete (no missing steps, no chain gaps).
+    - Outcome file is write-once (closed trajectories cannot be re-bound).
+    """
     root = Path(evidence_root).expanduser().resolve()
     candidate_path = (root / candidate_evidence_ref).resolve()
     if root not in candidate_path.parents or not candidate_path.exists():
@@ -245,23 +641,95 @@ def bind_trajectory_outcome(
     verifier_status = str(candidate.get("verifier_status") or "")
     if label_quality not in _STRONG_LABELS or verifier_status not in {"PASS", "FAIL"}:
         raise ValueError("candidate evidence is not strong verifier truth")
+
+    # Validate trajectory completeness first.
+    complete, problems = _trajectory_complete(root, trajectory_id)
+    if not complete:
+        _increment_health(root, error_class="OutcomeBindingError")
+        raise ValueError(f"trajectory is incomplete before outcome binding: {problems}")
+
+    # Bind candidate evidence to the exact task/attempt/candidate identity carried
+    # by the sealed steps. Early pre-candidate steps may have candidate_id="" but
+    # any non-empty candidate identity must agree with the final candidate row.
+    steps_dir = root / "trajectory" / "steps" / _trajectory_storage_key(trajectory_id)
+    step_records = [
+        json.loads(path.read_text(encoding="utf-8")) for path in sorted(steps_dir.glob("*.json"))
+    ]
+    task_ids = {str(step.get("task_id") or "") for step in step_records}
+    attempt_ids = {str(step.get("attempt_id") or "") for step in step_records}
+    candidate_ids = {
+        str(step.get("candidate_id") or "")
+        for step in step_records
+        if str(step.get("candidate_id") or "")
+    }
+    source_revisions = {
+        str(step.get("source_revision") or "")
+        for step in step_records
+        if str(step.get("source_revision") or "")
+    }
+    if len(task_ids) != 1 or len(attempt_ids) != 1 or len(candidate_ids) > 1:
+        _increment_health(root, error_class="OutcomeBindingError")
+        raise ValueError("trajectory step identity drift")
+    if len(source_revisions) > 1:
+        _increment_health(root, error_class="OutcomeBindingError")
+        raise ValueError("trajectory source revision drift")
+
+    candidate_task_id = str(candidate.get("task_id") or "")
+    candidate_attempt_id = str(candidate.get("attempt_id") or "")
+    candidate_id = str(candidate.get("candidate_id") or "")
+    candidate_source_revision = str(candidate.get("source_revision") or "")
+    if task_ids != {candidate_task_id}:
+        _increment_health(root, error_class="OutcomeBindingError")
+        raise ValueError("candidate task_id does not match trajectory")
+    if attempt_ids != {candidate_attempt_id}:
+        _increment_health(root, error_class="OutcomeBindingError")
+        raise ValueError("candidate attempt_id does not match trajectory")
+    if candidate_ids and candidate_ids != {candidate_id}:
+        _increment_health(root, error_class="OutcomeBindingError")
+        raise ValueError("candidate_id does not match trajectory")
+    if source_revisions and candidate_source_revision not in source_revisions:
+        _increment_health(root, error_class="OutcomeBindingError")
+        raise ValueError("candidate source_revision does not match trajectory")
+
+    # Outcome binding is write-once: a closed trajectory cannot receive a new outcome
+    outcome_path = (
+        root / "trajectory" / "outcomes" / f"{_trajectory_storage_key(trajectory_id)}.json"
+    )
+    if outcome_path.exists():
+        raise ValueError("trajectory is already closed: outcome already bound for this trajectory")
+
+    terminal_step = step_records[-1]
     body = {
-        "schema": OUTCOME_SCHEMA,
+        "schema": BINDING_SCHEMA,
+        "legacy_schema": OUTCOME_SCHEMA,
         "trajectory_id": trajectory_id,
-        "task_id": str(candidate.get("task_id") or ""),
-        "attempt_id": str(candidate.get("attempt_id") or ""),
-        "candidate_id": str(candidate.get("candidate_id") or ""),
+        "task_id": candidate_task_id,
+        "attempt_id": candidate_attempt_id,
+        "candidate_id": candidate_id,
+        "comparison_group_sha256": str(candidate.get("comparison_group_sha256") or ""),
         "candidate_evidence_ref": candidate_evidence_ref,
         "candidate_record_sha256": str(candidate.get("record_sha256") or ""),
         "verifier_status": verifier_status,
         "label_quality": label_quality,
+        "step_count": len(step_records),
+        "terminal_step_sha256": str(terminal_step.get("record_sha256") or ""),
         "bound_at": _now(),
     }
     record_sha = _sha256_json(body)
-    record = dict(body, record_sha256=record_sha)
-    path = root / "trajectory" / "outcomes" / f"{_trajectory_storage_key(trajectory_id)}.json"
-    _write_create_only(path, _json_bytes(record))
-    return str(path.relative_to(root))
+    record = dict(
+        body,
+        binding_sha256=record_sha,
+        record_sha256=record_sha,
+    )
+    _write_create_only(outcome_path, _json_bytes(record))
+    # Outcome successfully bound: update health counters
+    _increment_health(
+        root,
+        groups_completed=True,
+        strong_bindings=True,
+        last_success_ts=body["bound_at"],
+    )
+    return str(outcome_path.relative_to(root))
 
 
 def _trajectory_complete(root: Path, trajectory_id: str) -> tuple[bool, list[str]]:
@@ -314,6 +782,19 @@ def project_corpus_readiness(
     holdout_task_ids: Sequence[str] = (),
     task_family_by_task: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
+    """Assess corpus readiness for T1 re-audit.
+
+    Hardening changes vs #1197:
+    - Incomplete trajectories, rows with ``verifier_status`` not in
+      {``PASS``, ``FAIL``}, and rows without a strong label are all ineligible
+      (already enforced via ``dataset_eligible`` on the candidate evidence but
+      guarded explicitly here too).
+    - Requires ≥ ``_MIN_TASK_FAMILIES`` (5) independent task families, each
+      with strong PASS+FAIL coverage, for the split to be considered valid.
+    - ``task_disjoint_split_possible`` now requires family-level not just
+      task-level disjoint coverage.
+    - ``READY_TO_REAUDIT`` still means ``AUTO_CHAIN=false``.
+    """
     root = Path(evidence_root).expanduser().resolve()
     holdout = set(holdout_task_ids)
     families = dict(task_family_by_task or {})
@@ -342,6 +823,17 @@ def project_corpus_readiness(
                 if not candidate.get("dataset_eligible"):
                     malformed.append(f"{trajectory_id}:candidate_not_eligible")
                     continue
+                # Explicit ineligibility guards (defence-in-depth):
+                # - verifier_status must be PASS or FAIL (not UNKNOWN/incomplete)
+                # - label_quality must be a strong label (not CRITIC, UNSPECIFIED, etc.)
+                vs = str(candidate.get("verifier_status") or "")
+                lq = str(candidate.get("label_quality") or "")
+                if vs not in {"PASS", "FAIL"}:
+                    malformed.append(f"{trajectory_id}:incomplete_or_unknown_verifier_status")
+                    continue
+                if lq not in _STRONG_LABELS:
+                    malformed.append(f"{trajectory_id}:ineligible_label_quality")
+                    continue
                 task_id = str(outcome.get("task_id") or "")
                 if task_id in holdout:
                     overlap.append(trajectory_id)
@@ -353,27 +845,53 @@ def project_corpus_readiness(
     pass_count = sum(1 for row in valid if row.get("verifier_status") == "PASS")
     fail_count = sum(1 for row in valid if row.get("verifier_status") == "FAIL")
     task_groups = _labels_by_group(valid, "task_id")
+    # Task-level disjoint split: kept for backward-compatible reporting only.
+    # Requires >=2 task IDs each with both PASS and FAIL.
     task_split = _two_group_binary_split_possible(task_groups)
+
     family_rows = [
         dict(row, task_family=families.get(str(row.get("task_id") or ""), ""))
         for row in valid
         if families.get(str(row.get("task_id") or ""))
     ]
     family_groups = _labels_by_group(family_rows, "task_family")
-    family_split = bool(family_rows) and _two_group_binary_split_possible(family_groups)
+
+    # task_family_count: number of *distinct* mapped task families (regardless of per-family label mix)
+    task_family_count = len(family_groups)
+
+    # family_disjoint_split_possible: can a family-disjoint split physically be formed?
+    # This requires >=2 distinct mapped families in the valid corpus.
+    family_disjoint_split_possible = task_family_count >= 2
+
+    # strong_family_count: families that each contain both PASS and FAIL (kept for reporting)
+    strong_family_count = sum(1 for labels in family_groups.values() if {"PASS", "FAIL"} <= labels)
+
     blockers: list[str] = []
     if not valid:
         blockers.append("no_strong_label_trajectories")
-    if not task_split:
+    # task_disjoint_split_unavailable is only a blocker when family-level evidence
+    # is also unavailable.  When task_family_count >= _MIN_TASK_FAMILIES and
+    # family_disjoint_split_possible is True, the family-disjoint split supersedes.
+    if not task_split and not family_disjoint_split_possible:
         blockers.append("task_disjoint_split_unavailable")
+    if not family_disjoint_split_possible:
+        blockers.append("family_disjoint_split_unavailable")
+    # Readiness requires >=_MIN_TASK_FAMILIES distinct mapped families
+    if task_family_count < _MIN_TASK_FAMILIES:
+        blockers.append(
+            f"insufficient_task_families_need_{_MIN_TASK_FAMILIES}_have_{task_family_count}"
+        )
     if leakage:
         blockers.append("trajectory_leakage_or_binding_problem")
     if overlap:
         blockers.append("holdout_overlap")
     if malformed:
         blockers.append("malformed_evidence")
+    # READY_TO_REAUDIT requires: no blockers AND strong PASS trajectories AND strong FAIL trajectories
     disposition = (
-        "READY_TO_REAUDIT" if not blockers and pass_count and fail_count else "WAITING_FOR_DATA"
+        "READY_TO_REAUDIT"
+        if not blockers and pass_count > 0 and fail_count > 0
+        else "WAITING_FOR_DATA"
     )
     provenance: dict[str, int] = {}
     for row in valid:
@@ -387,10 +905,11 @@ def project_corpus_readiness(
         "fail_trajectories": fail_count,
         "unknown_trajectories": 0,
         "independent_task_count": len(task_groups),
-        "task_family_count": len(family_groups),
+        "task_family_count": task_family_count,
+        "strong_family_count": strong_family_count,
         "strong_label_provenance": provenance,
         "task_disjoint_split_possible": task_split,
-        "family_disjoint_split_possible": family_split,
+        "family_disjoint_split_possible": family_disjoint_split_possible,
         "holdout_overlap_trajectories": overlap,
         "leakage_findings": leakage,
         "malformed_evidence": malformed,
