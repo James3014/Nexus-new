@@ -51,6 +51,14 @@ INTERPRETER_TARGET = (
     "/Users/jameschen/.local/share/uv/python/cpython-3.14.0-macos-aarch64-none/bin/python3.14"
 )
 INTERPRETER_SHA256 = "c89af0b037c601180919ca5fd8a936bd2568cbb4976f91a208c10f54c17a1b78"
+JAMES_RECOVERY_PLIST = "/Users/james/Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist"
+JAMES_RECOVERY_INTERPRETER = "/Users/james/workspace/Nexus-new/.venv/bin/python"
+JAMES_RECOVERY_INTERPRETER_TARGET = (
+    "/Users/james/.local/share/uv/python/cpython-3.12.14-macos-aarch64-none/bin/python3.12"
+)
+JAMES_RECOVERY_INTERPRETER_SHA256 = (
+    "2d96eb826dc74db4fcd5da6dde045a6fa145e292e07e69d1bdd1a19fa90ffc22"
+)
 ENTRYPOINT = "scripts/ops/nexus_mcp_gateway_http.py"
 GATEWAY_ACTION = "gateway-rebind"
 GATEWAY_TASK_ID = "TASK-526-A"
@@ -338,6 +346,36 @@ class InterpreterIdentity(StrictRecord):
     uid: int = 501
     gid: int = 20
     mode: str = "lrwxr-xr-x"
+
+
+LEGACY_RECOVERY_INTERPRETER_IDENTITY = InterpreterIdentity()
+JAMES_RECOVERY_INTERPRETER_IDENTITY = InterpreterIdentity(
+    path=JAMES_RECOVERY_INTERPRETER,
+    resolved_path=JAMES_RECOVERY_INTERPRETER_TARGET,
+    sha256=JAMES_RECOVERY_INTERPRETER_SHA256,
+)
+RECOVERY_HOST_BINDINGS: tuple[tuple[str, InterpreterIdentity], ...] = (
+    (PLIST, LEGACY_RECOVERY_INTERPRETER_IDENTITY),
+    (JAMES_RECOVERY_PLIST, JAMES_RECOVERY_INTERPRETER_IDENTITY),
+)
+
+
+def recovery_interpreter_for_plist(plist_path: str) -> InterpreterIdentity:
+    _absolute(plist_path, "R1 recovery plist")
+    for bound_plist, interpreter in RECOVERY_HOST_BINDINGS:
+        if plist_path == bound_plist:
+            return interpreter
+    raise ContractError("R1 recovery host plist mismatch")
+
+
+def validate_recovery_interpreter_identity(
+    identity: InterpreterIdentity,
+) -> InterpreterIdentity:
+    if not isinstance(identity, InterpreterIdentity):
+        raise ContractError("R1 recovery interpreter must be typed")
+    if identity not in {item[1] for item in RECOVERY_HOST_BINDINGS}:
+        raise ContractError("R1 recovery interpreter mismatch")
+    return identity
 
 
 @dataclass(frozen=True)
@@ -994,15 +1032,13 @@ def validate_deployment_manifest(manifest: DeploymentManifest) -> DeploymentMani
     })
     if manifest.manifest_sha256 != expected_manifest_hash:
         raise ContractError("deployment manifest hash mismatch")
-    fixed_interpreter = InterpreterIdentity()
+    fixed_interpreter = validate_recovery_interpreter_identity(manifest.interpreter)
     if (
         manifest.owner_uid != fixed_interpreter.uid
         or manifest.owner_gid != fixed_interpreter.gid
         or manifest.mode != 0o644
     ):
         raise ContractError("deployment ownership/mode mismatch")
-    if manifest.interpreter != fixed_interpreter:
-        raise ContractError("deployment interpreter mismatch")
     return manifest
 
 
@@ -1029,8 +1065,7 @@ def validate_recovery_source_set(source_set: RecoverySourceSet) -> RecoverySourc
             raise ContractError(f"{role} source-set entrypoint mismatch")
         _hash(entrypoint.blob_oid, f"{role} entrypoint blob", 40)
         _hash(entrypoint.sha256, f"{role} entrypoint hash")
-    if source_set.interpreter != InterpreterIdentity():
-        raise ContractError("recovery source-set interpreter mismatch")
+    validate_recovery_interpreter_identity(source_set.interpreter)
     _hash(source_set.source_set_sha256, "recovery source-set hash")
     expected = canonical_hash({
         key: value for key, value in source_set.model_dump().items() if key != "source_set_sha256"
@@ -2316,12 +2351,15 @@ def validate_recovery_authority(
         or receipt.source_base_tree != SOURCE_BASE_TREE
     ):
         raise ContractError("R1 recovery source binding mismatch")
-    if (
-        receipt.service_label != LABEL
-        or receipt.plist_path != PLIST
-        or receipt.endpoint != ENDPOINT
-    ):
+    if receipt.service_label != LABEL or receipt.endpoint != ENDPOINT:
         raise ContractError("R1 recovery fixed service mismatch")
+    expected_interpreter = recovery_interpreter_for_plist(receipt.plist_path)
+    if (
+        receipt.source_set.interpreter != expected_interpreter
+        or receipt.desired_manifest.interpreter != expected_interpreter
+        or receipt.predecessor_manifest.interpreter != expected_interpreter
+    ):
+        raise ContractError("R1 recovery host/interpreter binding mismatch")
     exact = {
         "issuer_id": "owner-james",
         "coordinator_id": "coordinator-codex",
