@@ -199,6 +199,113 @@ def validate_issue_closure_intent(body: str | None) -> dict[str, Any]:
     return result
 
 
+MERGE_INTENT_BINDING_SCHEMA = "nexus.merge_intent_binding.v1"
+SUPPORTED_MERGE_METHODS = frozenset({"merge", "squash", "rebase"})
+
+
+def validate_final_merge_intent_binding(
+    *,
+    pr_body: str | None,
+    pr_number: int,
+    head_sha: str,
+    base_sha: str,
+    expected_pr_number: int,
+    expected_head_sha: str,
+    expected_base_sha: str,
+    merge_method: str,
+    commit_title: str | None = None,
+    commit_message: str | None = None,
+) -> dict[str, Any]:
+    """Validate that the final merge request and actually submitted commit fields satisfy declared Issue intent.
+
+    Enforces:
+    - Exact PR/head/base identity match (stale/head/base/Issue substitution fails closed);
+    - Valid supported merge method (squash/merge/rebase preserve identical closure semantics);
+    - PR body machine-readable intent validation via validate_issue_closure_intent;
+    - Final submitted commit title and commit message cannot contain closing keywords targeting
+      an issue declared KEEP_OPEN (preventing the #1236/#1232 historical regression fixture);
+    - Untracked closing keywords in final submitted fields fail closed;
+    - Explicit authorized CLOSE remains permitted.
+    """
+    if not isinstance(pr_number, int) or isinstance(pr_number, bool) or pr_number <= 0:
+        raise IssueClosureIntentError("PR_NUMBER_INVALID")
+    if (
+        not isinstance(expected_pr_number, int)
+        or isinstance(expected_pr_number, bool)
+        or expected_pr_number <= 0
+    ):
+        raise IssueClosureIntentError("EXPECTED_PR_NUMBER_INVALID")
+    if pr_number != expected_pr_number:
+        raise IssueClosureIntentError(
+            f"PR_NUMBER_MISMATCH: expected {expected_pr_number}, got {pr_number}"
+        )
+
+    if not isinstance(head_sha, str) or not isinstance(expected_head_sha, str):
+        raise IssueClosureIntentError("HEAD_SHA_INVALID")
+    if head_sha.strip().lower() != expected_head_sha.strip().lower():
+        raise IssueClosureIntentError(
+            f"HEAD_SHA_MISMATCH: expected {expected_head_sha}, got {head_sha}"
+        )
+
+    if not isinstance(base_sha, str) or not isinstance(expected_base_sha, str):
+        raise IssueClosureIntentError("BASE_SHA_INVALID")
+    if base_sha.strip().lower() != expected_base_sha.strip().lower():
+        raise IssueClosureIntentError(
+            f"BASE_SHA_MISMATCH: expected {expected_base_sha}, got {base_sha}"
+        )
+
+    norm_method = str(merge_method or "").strip().lower()
+    if norm_method not in SUPPORTED_MERGE_METHODS:
+        raise IssueClosureIntentError(f"UNSUPPORTED_MERGE_METHOD: {merge_method!r}")
+
+    intent_result = validate_issue_closure_intent(pr_body)
+    intents = intent_result.get("intents", [])
+
+    final_fields_prose = f"{commit_title or ''}\n\n{commit_message or ''}"
+    final_refs = find_closing_keyword_references(final_fields_prose)
+
+    detected_in_final: dict[int, list[str]] = {}
+    for kw, num in final_refs:
+        detected_in_final.setdefault(num, []).append(kw)
+
+    intent_by_issue = {item["issue_number"]: item["on_merge"] for item in intents}
+
+    untracked_issues = set(detected_in_final.keys()) - set(intent_by_issue.keys())
+    if untracked_issues:
+        culprits = ", ".join(
+            f"#{num} ({', '.join(detected_in_final[num])})" for num in sorted(untracked_issues)
+        )
+        raise IssueClosureIntentError(
+            f"UNINTENDED_CLOSING_KEYWORD_FOR_UNTRACKED_ISSUE: Final merge fields contain GitHub closing keywords targeting {culprits}. "
+            "Remove closing keywords or declare explicit intent in PR body."
+        )
+
+    for issue_num, action in intent_by_issue.items():
+        if action == ON_MERGE_KEEP_OPEN:
+            if issue_num in detected_in_final:
+                kws = ", ".join(detected_in_final[issue_num])
+                raise IssueClosureIntentError(
+                    f"REJECTED_CLOSING_KEYWORD_FOR_KEEP_OPEN_IN_FINAL_MERGE_FIELDS: Final merge commit fields contain closing keyword '{kws}' targeting #{issue_num}, "
+                    f"which contradicts declared KEEP_OPEN intent and would trigger GitHub auto-close."
+                )
+
+    result: dict[str, Any] = {
+        "schema": MERGE_INTENT_BINDING_SCHEMA,
+        "status": "PASS",
+        "pr_number": pr_number,
+        "head_sha": head_sha.strip().lower(),
+        "base_sha": base_sha.strip().lower(),
+        "merge_method": norm_method,
+        "intents": intents,
+        "detected_final_closing_references": [
+            {"issue_number": num, "keyword": kw} for kw, num in final_refs
+        ],
+        "claim_ceiling": CLAIM_CEILING,
+    }
+    result["content_sha256"] = _hash({k: v for k, v in result.items() if k != "content_sha256"})
+    return result
+
+
 def verify_post_merge_state(
     *,
     intents: Sequence[Mapping[str, Any]],
@@ -208,6 +315,7 @@ def verify_post_merge_state(
     """Post-merge truth check comparing declared on_merge intent against actual GitHub issue state.
 
     Detects and records durable mismatch failures without trusting session memory.
+    If a mismatch occurs, signals that reconciliation is required and prohibits executing a second merge.
     """
     head_sha = str(merged_pr.get("head_sha") or "").strip()
     pr_number = merged_pr.get("pr_number")
@@ -255,13 +363,22 @@ def verify_post_merge_state(
             "matched": matched,
         })
 
+    disposition = "PASS" if not mismatches else "RECONCILIATION_REQUIRED"
+    merged_pr_identity: dict[str, Any] = {
+        "pr_number": pr_number,
+        "head_sha": head_sha,
+    }
+    if "base_sha" in merged_pr:
+        merged_pr_identity["base_sha"] = merged_pr["base_sha"]
+    if "merge_commit_sha" in merged_pr:
+        merged_pr_identity["merge_commit_sha"] = merged_pr["merge_commit_sha"]
+
     record: dict[str, Any] = {
         "schema": VERIFICATION_SCHEMA,
         "status": "PASS" if not mismatches else "STATE_MISMATCH_DETECTED",
-        "merged_pr": {
-            "pr_number": pr_number,
-            "head_sha": head_sha,
-        },
+        "disposition": disposition,
+        "allow_second_merge": False,
+        "merged_pr": merged_pr_identity,
         "checks": checks,
         "mismatches": mismatches,
         "claim_ceiling": CLAIM_CEILING,
@@ -272,13 +389,16 @@ def verify_post_merge_state(
 
 __all__ = [
     "INTENT_SCHEMA",
+    "MERGE_INTENT_BINDING_SCHEMA",
     "VERIFICATION_SCHEMA",
     "CLAIM_CEILING",
     "ON_MERGE_KEEP_OPEN",
     "ON_MERGE_CLOSE",
+    "SUPPORTED_MERGE_METHODS",
     "CLOSING_KEYWORD_FAMILIES",
     "extract_closure_intents",
     "validate_issue_closure_intent",
+    "validate_final_merge_intent_binding",
     "verify_post_merge_state",
     "IssueClosureIntentError",
 ]
