@@ -640,6 +640,93 @@ def _r1m_materialization_request(
     return {**values, "request_hash": canonical_hash(values)}
 
 
+def _r1m_commit_successor_generation(fixture, *, suffix="2"):
+    values = {
+        key: value
+        for key, value in fixture["receipt"].__dict__.items()
+        if key != "receipt_hash"
+    }
+    values.update(
+        receipt_id=f"receipt-{suffix}",
+        request_id=f"request-{suffix}",
+        idempotency_fence=f"fence-{suffix}",
+    )
+    receipt = g.RecoveryAuthorityReceipt(
+        **values,
+        receipt_hash=g.canonical_hash(values),
+    )
+    g.validate_recovery_authority(receipt)
+    request = g.derive_gateway_recovery_request(receipt)
+    g.validate_recovery_request(request)
+    raw = json.dumps(
+        receipt.model_dump(),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    tracked = fixture["mirror"] / g.RECOVERY_AUTHORITY_SOURCE_PATH
+    tracked.write_bytes(raw)
+    subprocess.run(
+        ["git", "-C", str(fixture["mirror"]), "add", "-A"],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(fixture["mirror"]),
+            "commit",
+            "-q",
+            "-m",
+            f"successor-{suffix}",
+        ],
+        check=True,
+    )
+    successor_head = subprocess.check_output(
+        ["git", "-C", str(fixture["mirror"]), "rev-parse", "HEAD"],
+        text=True,
+    ).strip()
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(fixture["mirror"]),
+            "update-ref",
+            "refs/heads/main",
+            successor_head,
+        ],
+        check=True,
+    )
+    return receipt, request, raw
+
+
+def _r1m_make_prior_generation_verified(fixture, monkeypatch):
+    _r1m_clear_materialized_stores(fixture, monkeypatch)
+    materialization = g.gateway_recovery_materialize(
+        _r1m_materialization_request(fixture["receipt"])
+    )
+    assert materialization["effect_started"] is False
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"],
+        lock_path=fixture["lock_path"],
+    )
+    terminal = g._gateway_recover_with_adapters(
+        fixture["request"],
+        adapters=_r1b2_adapters(fixture, ledger),
+        ledger=ledger,
+    )
+    assert terminal.result == "VERIFIED"
+    assert (
+        ledger.current_recovery_state(
+            fixture["request"].request_id,
+            request=fixture["request"],
+            receipt=fixture["receipt"],
+            source_bundle_evidence=None,
+        )
+        == "VERIFIED"
+    )
+    return ledger
+
+
 def _r1m_clear_materialized_stores(fixture, monkeypatch):
     monkeypatch.setattr(
         g, "GATEWAY_REQUEST_STORE", fixture["state"] / "request.json"
@@ -823,6 +910,170 @@ def test_r1b1_materialize_refreshes_stale_mirror_before_reading(tmp_path, monkey
         ["git", "-C", str(fixture["mirror"]), "rev-parse", "HEAD"], text=True
     ).strip() == receipt_sha
     assert g._load_recovery_authority(fixture["request"]) == fixture["receipt"]
+
+
+def test_r1b1_materialize_rotates_only_from_prior_terminal_verified_generation(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = _r1m_make_prior_generation_verified(fixture, monkeypatch)
+    old_authority = g.GATEWAY_RECOVERY_AUTHORITY_STORE.read_bytes()
+    old_request = g.GATEWAY_REQUEST_STORE.read_bytes()
+    successor, successor_request, successor_authority = (
+        _r1m_commit_successor_generation(fixture)
+    )
+    outcome = g.gateway_recovery_materialize(
+        _r1m_materialization_request(successor)
+    )
+
+    assert outcome["effect_started"] is False
+    assert g.GATEWAY_RECOVERY_AUTHORITY_STORE.read_bytes() == successor_authority
+    expected_request = json.dumps(
+        successor_request.model_dump(),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    assert g.GATEWAY_REQUEST_STORE.read_bytes() == expected_request
+    assert old_authority != successor_authority
+    assert old_request != expected_request
+    assert (
+        ledger.current_recovery_state(
+            fixture["request"].request_id,
+            request=fixture["request"],
+            receipt=fixture["receipt"],
+            source_bundle_evidence=None,
+        )
+        == "VERIFIED"
+    )
+
+
+def test_r1b1_materialize_rejects_successor_from_nonterminal_generation(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    _r1m_clear_materialized_stores(fixture, monkeypatch)
+    g.gateway_recovery_materialize(
+        _r1m_materialization_request(fixture["receipt"])
+    )
+    successor, _successor_request, _successor_authority = (
+        _r1m_commit_successor_generation(fixture)
+    )
+
+    with pytest.raises(
+        g.GatewayContractError,
+        match="requires prior terminal VERIFIED",
+    ):
+        g.gateway_recovery_materialize(
+            _r1m_materialization_request(successor)
+        )
+
+
+def test_r1b1_materialize_rejects_successor_from_blocked_terminal_generation(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    _r1m_clear_materialized_stores(fixture, monkeypatch)
+    g.gateway_recovery_materialize(
+        _r1m_materialization_request(fixture["receipt"])
+    )
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"],
+        lock_path=fixture["lock_path"],
+    )
+    materialize = g._r1_materialize_worktree
+
+    def missing_predecessor(manifest):
+        if manifest.role == "predecessor":
+            raise g.GatewayContractError("missing predecessor")
+        return materialize(manifest)
+
+    monkeypatch.setattr(g, "_r1_materialize_worktree", missing_predecessor)
+    terminal = g._gateway_recover_with_adapters(
+        fixture["request"],
+        adapters=_r1b2_adapters(fixture, ledger),
+        ledger=ledger,
+    )
+    assert terminal.result == "BLOCKED"
+    monkeypatch.setattr(g, "_r1_materialize_worktree", materialize)
+    successor, _successor_request, _successor_authority = (
+        _r1m_commit_successor_generation(fixture)
+    )
+
+    with pytest.raises(
+        g.GatewayContractError,
+        match="requires prior terminal VERIFIED",
+    ):
+        g.gateway_recovery_materialize(
+            _r1m_materialization_request(successor)
+        )
+
+
+def test_r1b1_materialize_successor_replays_request_first_crash(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    _r1m_make_prior_generation_verified(fixture, monkeypatch)
+    old_authority = g.GATEWAY_RECOVERY_AUTHORITY_STORE.read_bytes()
+    successor, successor_request, successor_authority = (
+        _r1m_commit_successor_generation(fixture)
+    )
+    target_request = json.dumps(
+        successor_request.model_dump(),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    materialization_request = _r1m_materialization_request(successor)
+    replace = g._r1_replace_value_store_cas
+
+    def crash_after_request(path, *, expected, target):
+        written = replace(path, expected=expected, target=target)
+        if Path(path) == g.GATEWAY_REQUEST_STORE:
+            raise _R1B2Crash("after-successor-request-cas")
+        return written
+
+    monkeypatch.setattr(
+        g,
+        "_r1_replace_value_store_cas",
+        crash_after_request,
+    )
+    with pytest.raises(_R1B2Crash):
+        g.gateway_recovery_materialize(materialization_request)
+
+    assert g.GATEWAY_REQUEST_STORE.read_bytes() == target_request
+    assert g.GATEWAY_RECOVERY_AUTHORITY_STORE.read_bytes() == old_authority
+    durable = (
+        g.GATEWAY_RECOVERY_MATERIALIZATION_ROOT
+        / f"{materialization_request['request_hash']}.json"
+    )
+    assert durable.is_file()
+    assert json.loads(durable.read_text())["effect_started"] is False
+
+    monkeypatch.setattr(g, "_r1_replace_value_store_cas", replace)
+    replay = g.gateway_recovery_materialize(materialization_request)
+    assert replay["effect_started"] is False
+    assert g.GATEWAY_REQUEST_STORE.read_bytes() == target_request
+    assert g.GATEWAY_RECOVERY_AUTHORITY_STORE.read_bytes() == successor_authority
+
+
+def test_r1b1_materialize_rejects_authority_first_successor_mixed_state(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    _r1m_make_prior_generation_verified(fixture, monkeypatch)
+    old_request = g.GATEWAY_REQUEST_STORE.read_bytes()
+    successor, _successor_request, successor_authority = (
+        _r1m_commit_successor_generation(fixture)
+    )
+    g.GATEWAY_RECOVERY_AUTHORITY_STORE.write_bytes(successor_authority)
+
+    with pytest.raises(
+        g.GatewayContractError,
+        match="unsafe authority-first mixed state",
+    ):
+        g.gateway_recovery_materialize(
+            _r1m_materialization_request(successor)
+        )
+    assert g.GATEWAY_REQUEST_STORE.read_bytes() == old_request
 
 
 def test_r1b1_materialize_has_no_caller_selectable_surface():
