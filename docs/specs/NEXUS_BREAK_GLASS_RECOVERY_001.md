@@ -43,6 +43,7 @@ retroactive Task Card, acceptance, merge, runtime, or release authority.
 - **ADDED:** externally materialized GitHub Owner activation, verification, emergency-integration, and terminal/revocation comment envelopes with exact canonical payload hash binding.
 - **ADDED:** durable host-local source-repair evidence chain `PREPARED -> APPLIED -> VERIFIED -> CONSUMED` plus a separate emergency-integration `PREPARED -> CONSUMED` chain.
 - **ADDED:** narrow operator CLI that reads fixed Git/GitHub evidence but performs no repair, merge, push, reload, or release effect itself.
+- **ADDED:** trusted merge-lane projection for `BREAK_GLASS_OWNER_INTEGRATION`; it re-reads the exact #806 Owner integration comment and validates exact PR/base/head/check/expiry semantics, but still delegates physical integration to the existing exact-head/CAS merge sink.
 - **MODIFIED:** bootstrap recovery documentation now requires this canonical authority for governance-plane self-repair.
 - **UNCHANGED:** normal standing grants, Task Cards, CapabilityPlanner, Workforce Admission, Candidate acceptance, protected merge, Gateway reload/rebind, release, and production authority.
 
@@ -122,6 +123,21 @@ preserving the accepted head as merge lineage. No force push, ref deletion,
 unrelated merge, runtime
 activation, release, or production/public claim is granted.
 
+### REQ-007B — Trusted merge-lane break-glass projection
+
+The default-branch trusted merge-lane gate MAY recognize exactly one additional
+contract kind, `BREAK_GLASS_OWNER_INTEGRATION`, only when its binding points to
+an immutable #806 Owner integration comment and canonical payload SHA-256. The
+gate SHALL re-read that GitHub comment itself and validate Owner identity,
+authority Issue, payload hash, effect/claim ceiling, current validity window,
+merge method, exact PR/base/head and successful exact-head check evidence.
+
+This projection is validation only. It SHALL NOT mint integration authority,
+change a required check result, weaken a ruleset, relabel the recovery as
+`DIRECT_CANONICAL`, fabricate a Task Card, or perform the merge. Existing
+`OWNER_INLINE` and `TRACKED_TASK_CARD` binding shapes remain byte-compatible;
+physical integration remains owned by the existing exact-head/CAS sink.
+
 ### REQ-008 — Crash/retry/replay safety
 
 Each source or integration attempt SHALL use stable recovery/effect identity and
@@ -171,6 +187,7 @@ break-glass authority is terminal and replay is denied.
 | AC-007 | REQ-007A/009 | A separate Owner integration grant rebinds the freshly observed current main and exact PR/head/checks; only an existing exact-head/CAS merge sink may consume it. Source-repair base may remain older immutable provenance. Source CONSUMED requires a fresh Owner GitHub canary comment bound to the physical normal-governance evidence plus a global Owner terminal/revocation comment. | Source authority cannot merge; stale integration base is rejected by the merge sink; integration grant cannot widen effect; caller-local canary JSON/hashes cannot consume source authority; local and fresh-session global post-consume replay fail. |
 | AC-008 | REQ-010 | Integrated revision passes focused/regression evidence and a fresh Owner-bound normal-governance canary, then terminal/replay-denial evidence is recorded. | Green source tests alone, merged PR without physical canary evidence, or caller-authored canary JSON cannot close #806. |
 | AC-009 | REQ-003/007A/009 | Controlled self-hosting E2E starts with normal governance unavailable, exercises real break-glass source/integration contracts, restores the normal-path canary, consumes emergency authority, and proves replay denial. | Harness that never begins in a failed-governance state or never exercises replay denial is not sufficient. |
+| AC-010 | REQ-007B | Trusted merge-lane gate accepts a valid external Owner `BREAK_GLASS_OWNER_INTEGRATION` reference while preserving existing binding formats and leaving physical merge to the existing sink. | Forged Owner/comment/hash, stale/expired authority, PR/base/head substitution, failed/non-exact-head checks, or use of `BREAK_GLASS` with another contract kind fail closed. |
 
 ## Verification set for G1 source Candidate
 
