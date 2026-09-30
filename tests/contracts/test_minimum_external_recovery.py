@@ -145,3 +145,141 @@ def test_recovery_path_is_denied_when_normal_governance_is_available(
     )
     assert decision.disposition is RecoveryDisposition.DENY
     assert decision.reason == "NORMAL_GOVERNANCE_AVAILABLE_USE_NORMAL_PATH"
+
+
+def test_g01_prior_effect_state_fail_closed_on_malformed_or_raw_values(
+    exact_grant: MinimumExternalRecoveryGrant,
+    independent_evidence: IndependentRecoveryEvidence,
+    observation: RecoveryObservation,
+) -> None:
+    # 1. Canonical positive control: NONE proceeds to ALLOW
+    pos_decision = evaluate_minimum_external_recovery(
+        grant=exact_grant,
+        evidence=independent_evidence,
+        observation=replace(observation, prior_effect_state=PriorEffectState.NONE),
+        now=NOW,
+    )
+    assert pos_decision.disposition is RecoveryDisposition.ALLOW_ONE_BOUNDED_EFFECT
+    assert pos_decision.reason == "EXACT_EXTERNAL_RECOVERY_CONTRACT_SATISFIED"
+
+    # 2. Canonical negative controls
+    consumed_decision = evaluate_minimum_external_recovery(
+        grant=exact_grant,
+        evidence=independent_evidence,
+        observation=replace(observation, prior_effect_state=PriorEffectState.CONSUMED),
+        now=NOW,
+    )
+    assert consumed_decision.disposition is RecoveryDisposition.DENY
+    assert consumed_decision.reason == "RECOVERY_REPLAY_DENIED"
+
+    unknown_decision = evaluate_minimum_external_recovery(
+        grant=exact_grant,
+        evidence=independent_evidence,
+        observation=replace(observation, prior_effect_state=PriorEffectState.OUTCOME_UNKNOWN),
+        now=NOW,
+    )
+    assert unknown_decision.disposition is RecoveryDisposition.RECONCILE_ONLY
+    assert unknown_decision.reason == "AMBIGUOUS_PRIOR_EFFECT"
+
+    # 3. Raw strings and malformed values must NOT bypass enum check or ALLOW
+    malformed_states = [
+        "CONSUMED",
+        "OUTCOME_UNKNOWN",
+        "NONE",
+        None,
+        0,
+        1,
+        "INVALID_STATE",
+        {},
+        [],
+    ]
+    for bad_state in malformed_states:
+        bad_obs = replace(observation, prior_effect_state=bad_state)  # type: ignore[arg-type]
+        dec = evaluate_minimum_external_recovery(
+            grant=exact_grant,
+            evidence=independent_evidence,
+            observation=bad_obs,
+            now=NOW,
+        )
+        assert dec.disposition is RecoveryDisposition.DENY
+        assert dec.reason == "PRIOR_EFFECT_STATE_INVALID", f"Expected failure for {bad_state!r}"
+
+
+def test_g02_normal_governance_available_fail_closed_on_non_bool_values(
+    exact_grant: MinimumExternalRecoveryGrant,
+    independent_evidence: IndependentRecoveryEvidence,
+    observation: RecoveryObservation,
+) -> None:
+    # 1. Valid boolean False allows recovery
+    valid_dec = evaluate_minimum_external_recovery(
+        grant=exact_grant,
+        evidence=replace(independent_evidence, normal_governance_available=False),
+        observation=observation,
+        now=NOW,
+    )
+    assert valid_dec.disposition is RecoveryDisposition.ALLOW_ONE_BOUNDED_EFFECT
+
+    # 2. Valid boolean True denies recovery
+    true_dec = evaluate_minimum_external_recovery(
+        grant=exact_grant,
+        evidence=replace(independent_evidence, normal_governance_available=True),
+        observation=observation,
+        now=NOW,
+    )
+    assert true_dec.disposition is RecoveryDisposition.DENY
+    assert true_dec.reason == "NORMAL_GOVERNANCE_AVAILABLE_USE_NORMAL_PATH"
+
+    # 3. Malformed / non-bool values must fail closed to DENY (never treated as unavailable)
+    malformed_values = [
+        None,
+        "true",
+        "false",
+        0,
+        1,
+        {},
+        [],
+        object(),
+    ]
+    for bad_val in malformed_values:
+        bad_ev = replace(independent_evidence, normal_governance_available=bad_val)  # type: ignore[arg-type]
+        dec = evaluate_minimum_external_recovery(
+            grant=exact_grant,
+            evidence=bad_ev,
+            observation=observation,
+            now=NOW,
+        )
+        assert dec.disposition is RecoveryDisposition.DENY
+        assert dec.reason == "NORMAL_GOVERNANCE_AVAILABILITY_INVALID", (
+            f"Expected failure for {bad_val!r}"
+        )
+
+
+def test_g03_decision_sha256_checksum_behavior(
+    exact_grant: MinimumExternalRecoveryGrant,
+    independent_evidence: IndependentRecoveryEvidence,
+    observation: RecoveryObservation,
+) -> None:
+    # decision_sha256 is deterministic
+    dec1 = evaluate_minimum_external_recovery(
+        grant=exact_grant,
+        evidence=independent_evidence,
+        observation=observation,
+        now=NOW,
+    )
+    dec2 = evaluate_minimum_external_recovery(
+        grant=exact_grant,
+        evidence=independent_evidence,
+        observation=observation,
+        now=NOW,
+    )
+    assert dec1.decision_sha256 == dec2.decision_sha256
+    assert len(dec1.decision_sha256) == 64
+
+    # Different outcomes yield different decision_sha256
+    dec_consumed = evaluate_minimum_external_recovery(
+        grant=exact_grant,
+        evidence=independent_evidence,
+        observation=replace(observation, prior_effect_state=PriorEffectState.CONSUMED),
+        now=NOW,
+    )
+    assert dec_consumed.decision_sha256 != dec1.decision_sha256
