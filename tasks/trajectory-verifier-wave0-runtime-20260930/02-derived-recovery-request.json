@@ -1,0 +1,14 @@
+{
+  "desired_manifest_hash": "24d6c03eaefa970e6cfba779354f06252fce9c3c9292d913a99ac3cd05d7b08f",
+  "desired_manifest_id": "r1-fc76e1de91b60698962707f8654a7f6c65fcef37",
+  "effect_class": "GATEWAY_DURABLE_RECOVERY",
+  "idempotency_fence": "track1-wave0-runtime-recovery-fence-20260930-v2",
+  "operation": "gateway-recover",
+  "predecessor_manifest_hash": "dfdd4b4aada94b695b7887a408655240585bea41c646ea37ace76cb57613682d",
+  "predecessor_manifest_id": "r1-119bb465c0f8de1c3958ada292cc9a446be51be6",
+  "recovery_authority_hash": "02a0e0b6a26c3b6478b4ca66b5dd4fd9e95a3a6a54d7774a25ca2ca94be62027",
+  "recovery_authority_id": "track1-wave0-runtime-recovery-authority-20260930-v2",
+  "request_hash": "8a2b00d421a1942aa46c7f6386828330bd65796591c577036e349b6fd47e39d5",
+  "request_id": "track1-wave0-runtime-recovery-20260930-v2",
+  "schema": "nexus.gateway.durable_recovery_request.v2"
+}

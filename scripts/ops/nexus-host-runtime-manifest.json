@@ -60,6 +60,10 @@
       "mode": "0644"
     },
     {
+      "path": "scripts/ops/nexus-grok-accounts",
+      "mode": "0755"
+    },
+    {
       "path": "scripts/ops/nexus-workflow-doctor",
       "mode": "0755"
     },
@@ -93,6 +97,9 @@
     "workflow_doctor": {
       "source_path": "scripts/ops/nexus-workflow-doctor",
       "installer_path": "scripts/ops/install_nexus_workflow_doctor.sh"
+    },
+    "grok_accounts": {
+      "source_path": "scripts/ops/nexus-grok-accounts"
     }
   }
 }

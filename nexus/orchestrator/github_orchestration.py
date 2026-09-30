@@ -2,16 +2,24 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Mapping, Sequence
 
 from nexus.contracts.autonomy_goal import StandingGrantContext
 from nexus.contracts.github_orchestration import (
+    CandidateLineage,
+    CheckResult,
     GitHubOrchestrationEvidence,
+    ImpactResult,
     MainMovementDimensionResult,
     MainMovementEvidence,
     MainMovementRequalification,
     MergeIntent,
+    ReviewResult,
     canonical_hash,
 )
 from nexus.orchestrator.autonomy_policy import (
@@ -362,4 +370,455 @@ def _resolve_durable_merge_authorization_at(
         receipt.context,
         safe_request,
         platform_approval_required=platform_approval_required,
+    )
+
+
+_MERGE_LANE_BLOCK_RE = re.compile(
+    r"<!--\s*NEXUS_MERGE_LANE_V1\s*\n(.*?)\nNEXUS_MERGE_LANE_V1\s*-->",
+    re.DOTALL,
+)
+_BACKTICK_SHA_RE = re.compile(r"`([0-9a-f]{40,64})`")
+_PATH_BULLET_RE = re.compile(r"^\s*-\s+`?([^`]+?)`?\s*$")
+_TASK_ID_RE = re.compile(r"^task_id:\s*`?([^`\s]+)`?\s*$", re.MULTILINE)
+
+
+class GovernedEvidenceProjectionError(ValueError):
+    """Typed fail-closed error for governed evidence compatibility projection."""
+
+
+def _projection_error(code: str) -> GovernedEvidenceProjectionError:
+    return GovernedEvidenceProjectionError(code)
+
+
+def _sha256_bytes(value: bytes) -> str:
+    if not isinstance(value, bytes) or not value:
+        raise _projection_error("SUBJECT_IDENTITY_MISMATCH")
+    return hashlib.sha256(value).hexdigest()
+
+
+def _json_bytes(value: bytes, *, missing_code: str) -> Mapping[str, Any]:
+    if not isinstance(value, bytes) or not value:
+        raise _projection_error(missing_code)
+    try:
+        payload = json.loads(value)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise _projection_error(missing_code) from exc
+    if not isinstance(payload, dict):
+        raise _projection_error(missing_code)
+    return payload
+
+
+def _parse_merge_lane_binding(pr_body: str) -> Mapping[str, Any]:
+    if not isinstance(pr_body, str):
+        raise _projection_error("MERGE_LANE_BINDING_INVALID")
+    matches = _MERGE_LANE_BLOCK_RE.findall(pr_body)
+    if len(matches) != 1:
+        raise _projection_error("MERGE_LANE_BINDING_INVALID")
+    try:
+        payload = json.loads(matches[0])
+    except json.JSONDecodeError as exc:
+        raise _projection_error("MERGE_LANE_BINDING_INVALID") from exc
+    if not isinstance(payload, dict):
+        raise _projection_error("MERGE_LANE_BINDING_INVALID")
+    binding_hash = payload.get("binding_hash")
+    unsigned = {key: value for key, value in payload.items() if key != "binding_hash"}
+    if (
+        payload.get("schema") != "nexus.merge_lane_binding.v1"
+        or payload.get("execution_lane") != "GOVERNED"
+        or not isinstance(binding_hash, str)
+        or canonical_hash(unsigned) != binding_hash
+    ):
+        raise _projection_error("MERGE_LANE_BINDING_INVALID")
+    return payload
+
+
+def governed_evidence_task_card_path(pr_body: str) -> str:
+    """Return the Task Card path from the canonical merge-lane binding."""
+    payload = _parse_merge_lane_binding(pr_body)
+    path = payload.get("task_card_path")
+    if not isinstance(path, str) or not path or path.startswith("/") or ".." in path.split("/"):
+        raise _projection_error("MERGE_LANE_BINDING_INVALID")
+    return path
+
+
+def _parse_task_card(task_card_bytes: bytes) -> tuple[str, tuple[str, ...], str]:
+    try:
+        text = task_card_bytes.decode("utf-8")
+    except (AttributeError, UnicodeDecodeError) as exc:
+        raise _projection_error("TASK_CARD_IDENTITY_MISSING") from exc
+    task_match = _TASK_ID_RE.search(text)
+    if not task_match:
+        raise _projection_error("TASK_CARD_IDENTITY_MISSING")
+    declared_lanes = re.findall(
+        r"^execution_lane:\s*`?([A-Z_]+)`?\s*$",
+        text,
+        re.MULTILINE,
+    )
+    if len(declared_lanes) > 1 or (declared_lanes and declared_lanes[0] != "GOVERNED"):
+        raise _projection_error("UNSUPPORTED_LEGACY_CONTRACT_GENERATION")
+
+    sources: list[tuple[str, ...]] = []
+    lines = text.splitlines()
+
+    for index, line in enumerate(lines):
+        if line.strip() != "allowed_files:":
+            continue
+        values: list[str] = []
+        for candidate in lines[index + 1 :]:
+            stripped = candidate.strip()
+            match = _PATH_BULLET_RE.match(candidate)
+            if match:
+                path = match.group(1).strip()
+                if path.startswith("/") or ".." in path.split("/"):
+                    raise _projection_error("TASK_CARD_IDENTITY_MISSING")
+                values.append(path)
+                continue
+            if not stripped:
+                continue
+            break
+        if values:
+            sources.append(tuple(sorted(set(values))))
+
+    for index, line in enumerate(lines):
+        if line.strip().lower() != "## allowed files":
+            continue
+        values = []
+        for candidate in lines[index + 1 :]:
+            stripped = candidate.strip()
+            if stripped.startswith("## "):
+                break
+            match = _PATH_BULLET_RE.match(candidate)
+            if match:
+                path = match.group(1).strip()
+                if path.startswith("/") or ".." in path.split("/"):
+                    raise _projection_error("TASK_CARD_IDENTITY_MISSING")
+                values.append(path)
+        if values:
+            sources.append(tuple(sorted(set(values))))
+
+    if not sources or any(source != sources[0] for source in sources[1:]):
+        raise _projection_error("TASK_CARD_IDENTITY_MISSING")
+    return (
+        task_match.group(1),
+        sources[0],
+        hashlib.sha256(task_card_bytes).hexdigest(),
+    )
+
+
+def _require_subject(
+    payload: Mapping[str, Any],
+    *,
+    repository: str,
+    pull_request_number: int,
+    base_sha: str,
+    head_sha: str,
+    tree_sha: str,
+    diff_hash: str | None = None,
+    status: str | None = None,
+    error_code: str,
+) -> None:
+    identity = payload.get("workflow_identity")
+    if not isinstance(identity, dict):
+        raise _projection_error(error_code)
+    if (
+        identity.get("repository") != repository
+        or identity.get("pull_request_number") != pull_request_number
+        or identity.get("event_name") != "pull_request_target"
+        or identity.get("default_branch") != "main"
+        or identity.get("workflow_sha") != base_sha
+        or not str(identity.get("workflow_ref", "")).endswith("@refs/heads/main")
+        or payload.get("base_sha") != base_sha
+        or payload.get("head_sha") != head_sha
+        or payload.get("head_tree") != tree_sha
+        or identity.get("run_id") != payload.get("run_id")
+    ):
+        raise _projection_error(error_code)
+    if diff_hash is not None and payload.get("raw_diff_sha256") != diff_hash:
+        raise _projection_error(error_code)
+    if status is not None and payload.get("status") != status:
+        raise _projection_error(error_code)
+
+
+def _parse_legacy_acceptance(
+    body: str,
+    *,
+    comment_id: int,
+    author: str,
+    base_sha: str,
+    head_sha: str,
+    tree_sha: str,
+    card_hash: str,
+) -> tuple[str, str]:
+    if not isinstance(body, str) or not body.strip():
+        raise _projection_error("INDEPENDENT_ACCEPTANCE_MISSING")
+
+    def one(pattern: str) -> str:
+        found = re.findall(pattern, body, re.IGNORECASE)
+        if len(found) != 1:
+            raise _projection_error("INDEPENDENT_ACCEPTANCE_SUBJECT_MISMATCH")
+        return found[0]
+
+    observed_base = one(r"base:\s*`([0-9a-f]{40})`")
+    observed_head = one(r"head:\s*`([0-9a-f]{40})`")
+    observed_tree = one(r"tree:\s*`([0-9a-f]{40})`")
+    observed_card = one(r"Task Card SHA-256:\s*`([0-9a-f]{64})`")
+    reviewer = one(r"(?:reviewer transport/session|reviewer session):[^`\n]*`([^`\n]+)`")
+    output_hash = one(r"reviewer output SHA-256:\s*`([0-9a-f]{64})`")
+    max_claim = one(r"(?:Maximum claim|max(?:imum)? claim):\s*`([^`]+)`")
+    lower = body.lower()
+    accepted = (
+        "blockers: none" in lower or "accept_candidate" in lower or "accept candidate" in lower
+    )
+    if not accepted:
+        raise _projection_error("INDEPENDENT_ACCEPTANCE_MISSING")
+    if (observed_base, observed_head, observed_tree, observed_card) != (
+        base_sha,
+        head_sha,
+        tree_sha,
+        card_hash,
+    ):
+        raise _projection_error("INDEPENDENT_ACCEPTANCE_SUBJECT_MISMATCH")
+    projection = {
+        "schema": "nexus.legacy_independent_acceptance_projection.v1",
+        "comment_id": comment_id,
+        "comment_author": author,
+        "base_sha": observed_base,
+        "head_sha": observed_head,
+        "tree_sha": observed_tree,
+        "task_card_sha256": observed_card,
+        "reviewer": reviewer,
+        "reviewer_output_sha256": output_hash,
+        "verdict": "ACCEPT",
+        "maximum_claim": max_claim,
+    }
+    return reviewer, canonical_hash(projection)
+
+
+def _project_required_checks(
+    required_names: Sequence[str],
+    observations: Sequence[Mapping[str, Any]],
+    *,
+    head_sha: str,
+) -> tuple[CheckResult, ...]:
+    names = tuple(sorted(set(str(name) for name in required_names if str(name).strip())))
+    if not names:
+        raise _projection_error("REQUIRED_CHECK_STATE_UNPROVEN")
+    by_name: dict[str, Mapping[str, Any]] = {}
+    for item in observations:
+        name = item.get("name")
+        if name not in names:
+            continue
+        if name in by_name:
+            raise _projection_error("REQUIRED_CHECK_STATE_UNPROVEN")
+        by_name[str(name)] = item
+    if set(by_name) != set(names):
+        raise _projection_error("REQUIRED_CHECK_STATE_UNPROVEN")
+    projected: list[CheckResult] = []
+    for name in names:
+        item = by_name[name]
+        if (
+            item.get("head_sha") != head_sha
+            or str(item.get("status", "")).lower() not in {"completed", "success", "passed"}
+            or str(item.get("conclusion", "")).lower() not in {"success", "passed"}
+        ):
+            raise _projection_error("REQUIRED_CHECK_STATE_UNPROVEN")
+        projected.append(
+            CheckResult(
+                name=name,
+                status=str(item["status"]),
+                conclusion=str(item["conclusion"]),
+                terminal=True,
+                head_sha=head_sha,
+            )
+        )
+    return tuple(projected)
+
+
+def _project_impact(
+    plan: Mapping[str, Any],
+    classification: Mapping[str, Any],
+    *,
+    base_sha: str,
+    head_sha: str,
+    tree_sha: str,
+    changed_paths: tuple[str, ...],
+) -> ImpactResult:
+    if (
+        plan.get("base_sha") != base_sha
+        or plan.get("head_sha") != head_sha
+        or plan.get("source_tree") != tree_sha
+        or tuple(sorted(plan.get("changed_paths") or ())) != changed_paths
+        or classification.get("blocking") is not False
+        or classification.get("new_failures") not in ([], ())
+        or str(classification.get("classification", "")).upper()
+        in {"", "UNKNOWN", "IMPACT_UNKNOWN", "NEW_REGRESSION", "REGRESSION"}
+    ):
+        raise _projection_error("IMPACT_EVIDENCE_UNPROVEN")
+    return ImpactResult(
+        classification=str(classification["classification"]),
+        known=True,
+        regression_free=True,
+    )
+
+
+def build_governed_orchestration_evidence(
+    *,
+    repository: str,
+    issue_number: int,
+    pull_request_number: int,
+    pr_body: str,
+    task_card_path: str,
+    task_card_bytes: bytes,
+    controller_manifest_bytes: bytes,
+    verifier_evidence_bytes: bytes,
+    acceptance_comment_id: int,
+    acceptance_comment_author: str,
+    acceptance_comment_body: str,
+    required_check_names: Sequence[str],
+    check_observations: Sequence[Mapping[str, Any]],
+    impact_plan: Mapping[str, Any],
+    impact_classification: Mapping[str, Any],
+    implementer: str,
+    observed_at: datetime,
+    fresh_until: datetime,
+) -> GitHubOrchestrationEvidence:
+    """Project authoritative legacy/current evidence into the existing v2 contract.
+
+    This function is deliberately pure: it performs no network, subprocess,
+    grant, merge, runtime, or filesystem effects.
+    """
+    binding = _parse_merge_lane_binding(pr_body)
+    task_id, allowed_paths, card_hash = _parse_task_card(task_card_bytes)
+    if (
+        repository != "James3014/Nexus-new"
+        or binding.get("owner_id") != "James3014"
+        or binding.get("issue_number") != issue_number
+        or binding.get("task_id") != task_id
+        or binding.get("task_card_path") != task_card_path
+        or binding.get("task_card_sha256") != card_hash
+    ):
+        raise _projection_error("MERGE_LANE_BINDING_INVALID")
+    attempt_id = binding.get("attempt_id")
+    if not isinstance(attempt_id, str) or not attempt_id.strip():
+        raise _projection_error("MERGE_LANE_BINDING_INVALID")
+
+    manifest = _json_bytes(controller_manifest_bytes, missing_code="CANDIDATE_PROVENANCE_MISSING")
+    verifier = _json_bytes(verifier_evidence_bytes, missing_code="VERIFIER_PROVENANCE_MISSING")
+    try:
+        base_sha = str(manifest["base_sha"])
+        head_sha = str(manifest["head_sha"])
+        tree_sha = str(manifest["head_tree"])
+        diff_hash = str(manifest["raw_diff_sha256"])
+    except KeyError as exc:
+        raise _projection_error("CANDIDATE_PROVENANCE_MISSING") from exc
+    _require_subject(
+        manifest,
+        repository=repository,
+        pull_request_number=pull_request_number,
+        base_sha=base_sha,
+        head_sha=head_sha,
+        tree_sha=tree_sha,
+        diff_hash=diff_hash,
+        status="CONTROLLER_COMPLETE",
+        error_code="CANDIDATE_SUBJECT_MISMATCH",
+    )
+    if (
+        impact_plan.get("base_sha") != base_sha
+        or impact_plan.get("head_sha") != head_sha
+        or impact_plan.get("source_tree") != tree_sha
+    ):
+        raise _projection_error("CANDIDATE_SUBJECT_MISMATCH")
+    _require_subject(
+        verifier,
+        repository=repository,
+        pull_request_number=pull_request_number,
+        base_sha=base_sha,
+        head_sha=head_sha,
+        tree_sha=tree_sha,
+        diff_hash=diff_hash,
+        status="COMPLETE",
+        error_code="VERIFIER_SUBJECT_MISMATCH",
+    )
+    executor = verifier.get("executor")
+    if not isinstance(executor, dict) or executor.get("exit_code") != 0:
+        raise _projection_error("VERIFIER_PROVENANCE_MISSING")
+
+    changed_paths = tuple(sorted(str(path) for path in impact_plan.get("changed_paths") or ()))
+    if changed_paths != allowed_paths:
+        raise _projection_error("SUBJECT_IDENTITY_MISMATCH")
+    impact = _project_impact(
+        impact_plan,
+        impact_classification,
+        base_sha=base_sha,
+        head_sha=head_sha,
+        tree_sha=tree_sha,
+        changed_paths=changed_paths,
+    )
+    reviewer, acceptance_hash = _parse_legacy_acceptance(
+        acceptance_comment_body,
+        comment_id=acceptance_comment_id,
+        author=acceptance_comment_author,
+        base_sha=base_sha,
+        head_sha=head_sha,
+        tree_sha=tree_sha,
+        card_hash=card_hash,
+    )
+    if not implementer.strip() or implementer.strip() == reviewer.strip():
+        raise _projection_error("SUBJECT_IDENTITY_MISMATCH")
+    checks = _project_required_checks(required_check_names, check_observations, head_sha=head_sha)
+    reviews = (ReviewResult(reviewer=reviewer, state="APPROVED", unresolved_threads=0),)
+    contract_hash = canonical_hash({
+        "schema": "nexus.governed_task_attempt_projection.v1",
+        "repository": repository,
+        "issue_number": issue_number,
+        "pull_request_number": pull_request_number,
+        "execution_lane": "GOVERNED",
+        "task_id": task_id,
+        "attempt_id": attempt_id,
+        "task_card_path": task_card_path,
+        "task_card_sha256": card_hash,
+        "candidate_head_sha": head_sha,
+        "merge_lane_binding_hash": binding["binding_hash"],
+    })
+    candidate_state_hash = _sha256_bytes(controller_manifest_bytes)
+    verifier_hash = _sha256_bytes(verifier_evidence_bytes)
+    candidate = CandidateLineage(
+        task_id=task_id,
+        attempt_id=attempt_id,
+        contract_hash=contract_hash,
+        card_hash=card_hash,
+        candidate_commit_sha=head_sha,
+        candidate_tree_sha=tree_sha,
+        candidate_state_hash=candidate_state_hash,
+        verified_receipt_hash=verifier_hash,
+        independent_acceptance_hash=acceptance_hash,
+        reviewer=reviewer,
+        implementer=implementer.strip(),
+    )
+    return GitHubOrchestrationEvidence(
+        repository=repository,
+        issue_number=issue_number,
+        pull_request_number=pull_request_number,
+        base_sha=base_sha,
+        head_sha=head_sha,
+        tree_sha=tree_sha,
+        current_main_sha=base_sha,
+        diff_hash=diff_hash,
+        checks_hash=canonical_hash({"checks": [item.model_dump(mode="json") for item in checks]}),
+        reviews_hash=canonical_hash({
+            "reviews": [item.model_dump(mode="json") for item in reviews]
+        }),
+        task_attempt_contract_hash=contract_hash,
+        candidate_hash=candidate_state_hash,
+        verifier_hash=verifier_hash,
+        independent_acceptance_hash=acceptance_hash,
+        impact_hash=canonical_hash(impact.model_dump(mode="json")),
+        observed_at=observed_at,
+        fresh_until=fresh_until,
+        allowed_paths=allowed_paths,
+        changed_paths=changed_paths,
+        required_checks=checks,
+        reviews=reviews,
+        candidate=candidate,
+        impact=impact,
     )

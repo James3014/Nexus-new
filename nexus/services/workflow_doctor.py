@@ -290,6 +290,25 @@ def _collect_pr(
             unknown.append(item)
         elif name not in required_names:
             item["policy_role"] = "ADVISORY_CHECK"
+            status = str(row.get("status") or "").strip().lower()
+            conclusion = str(row.get("conclusion") or "").strip().lower()
+            if status in {
+                "in_progress",
+                "queued",
+                "pending",
+                "requested",
+                "waiting",
+            } or conclusion in {
+                "timed_out",
+                "action_required",
+            }:
+                item["observer_state"] = "ADVISORY_INCOMPLETE"
+            elif conclusion in {"failure", "cancelled"}:
+                item["observer_state"] = "ADVISORY_FAILED"
+            elif conclusion in {"success", "neutral", "skipped"}:
+                item["observer_state"] = "OK"
+            else:
+                item["observer_state"] = "OBSERVED"
             advisory.append(item)
 
     return (
