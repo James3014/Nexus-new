@@ -464,3 +464,33 @@ def test_governed_lane_keep_open_with_contradictory_final_commit_message_fails(t
             ),
             repo_root=repo,
         )
+
+
+def test_keep_open_blocks_candidate_commit_message_closing_keyword_without_event_override(
+    tmp_path: Path,
+):
+    """Trusted gate inspects exact base..head commit messages when event has no final message."""
+    repo, base, head, _ = _repo(tmp_path)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "--allow-empty", "-m", "Closes #1232"],
+        check=True,
+        capture_output=True,
+    )
+    head = _git(repo, "rev-parse", "HEAD")
+    binding = _binding(lane="DIRECT_CANONICAL", head=head)
+    intent = render_intent([{"issue": 1232, "on_merge": "KEEP_OPEN"}])
+    body = f"{render_binding(binding)}\n\n{intent}\n\n#1232 remains open."
+
+    with pytest.raises(
+        IssueClosureIntentError,
+        match="REJECTED_CLOSING_KEYWORD_FOR_KEEP_OPEN_IN_FINAL_MERGE_FIELDS",
+    ):
+        validate_event(
+            _event(
+                base=base,
+                head=head,
+                body=body,
+                title="fix(#1232): neutral title",
+            ),
+            repo_root=repo,
+        )
