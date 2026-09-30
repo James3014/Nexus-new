@@ -17,19 +17,15 @@ from typing import Any, Mapping
 _SHA64 = re.compile(r"^[0-9a-f]{64}$")
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _ALLOWED_OWNER = "James3014"
-_GOVERNANCE_AUTHORITY_PATHS = frozenset(
-    {
-        "nexus/orchestrator/standing_grant_store.py",
-        "nexus/orchestrator/unified_mcp_gateway.py",
-    }
-)
-_GOVERNANCE_REQUIRED_CHECKS = frozenset(
-    {
-        "Exact-base impact gate",
-        "Trusted verifier (default branch)",
-        "Full published Git history secret audit",
-    }
-)
+_GOVERNANCE_AUTHORITY_PATHS = frozenset({
+    "nexus/orchestrator/standing_grant_store.py",
+    "nexus/orchestrator/unified_mcp_gateway.py",
+})
+_GOVERNANCE_REQUIRED_CHECKS = frozenset({
+    "Exact-base impact gate",
+    "Trusted verifier (default branch)",
+    "Full published Git history secret audit",
+})
 
 
 class RecoveryContractError(ValueError):
@@ -125,24 +121,22 @@ class GovernanceIntegrationSubject:
     @property
     def effect_identity_sha256(self) -> str:
         self.validate()
-        return _canonical_sha256(
-            {
-                "repository": self.repository,
-                "issue_number": self.issue_number,
-                "pull_request_number": self.pull_request_number,
-                "expected_base_sha": self.expected_base_sha,
-                "accepted_head_sha": self.accepted_head_sha,
-                "accepted_tree_sha": self.accepted_tree_sha,
-                "accepted_diff_sha256": self.accepted_diff_sha256,
-                "independent_acceptance_sha256": self.independent_acceptance_sha256,
-                "required_check_names": list(self.required_check_names),
-                "repaired_authority_paths": list(self.repaired_authority_paths),
-                "failed_action": self.failed_action,
-                "failure_code": self.failure_code,
-                "failure_evidence_sha256": self.failure_evidence_sha256,
-                "merge_method": self.merge_method,
-            }
-        )
+        return _canonical_sha256({
+            "repository": self.repository,
+            "issue_number": self.issue_number,
+            "pull_request_number": self.pull_request_number,
+            "expected_base_sha": self.expected_base_sha,
+            "accepted_head_sha": self.accepted_head_sha,
+            "accepted_tree_sha": self.accepted_tree_sha,
+            "accepted_diff_sha256": self.accepted_diff_sha256,
+            "independent_acceptance_sha256": self.independent_acceptance_sha256,
+            "required_check_names": list(self.required_check_names),
+            "repaired_authority_paths": list(self.repaired_authority_paths),
+            "failed_action": self.failed_action,
+            "failure_code": self.failure_code,
+            "failure_evidence_sha256": self.failure_evidence_sha256,
+            "merge_method": self.merge_method,
+        })
 
 
 @dataclass(frozen=True)
