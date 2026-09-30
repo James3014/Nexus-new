@@ -9,6 +9,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from nexus.research.clm_system_one.research_evidence_root import (
+    resolve_research_evidence_root,
+)
+
 EVIDENCE_SCHEMA = "nexus.clm_candidate_evidence.v1"
 COLLECTION_RESULT_SCHEMA = "nexus.clm_candidate_evidence_collection.v1"
 GROUP_MANIFEST_SCHEMA = "nexus.clm_candidate_evidence_group_manifest.v1"
@@ -178,10 +182,7 @@ class CandidateEvidenceCollectionResult:
 
 
 def _collection_root(repo_root: Path) -> Path:
-    override = os.getenv("NEXUS_CLM_CANDIDATE_EVIDENCE_ROOT", "").strip()
-    if override:
-        return Path(override).expanduser().resolve()
-    return (repo_root / DEFAULT_RELATIVE_ROOT).resolve()
+    return resolve_research_evidence_root(repo_root)
 
 
 def collect_candidate_group(
