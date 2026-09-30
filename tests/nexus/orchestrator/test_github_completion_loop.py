@@ -130,20 +130,24 @@ class SpyGitHubCompletionPort:
     def read_blob_sha(self, commit_or_tree_sha: str, path: str) -> str:
         self.read_blob_calls.append((commit_or_tree_sha, path))
         res = self.blob_shas.get((commit_or_tree_sha, path), self.default_blob_sha)
-        self.calls.append((
-            "read_blob_sha",
-            {"commit_or_tree": commit_or_tree_sha, "path": path, "result": res},
-        ))
+        self.calls.append(
+            (
+                "read_blob_sha",
+                {"commit_or_tree": commit_or_tree_sha, "path": path, "result": res},
+            )
+        )
         return res
 
     def get_changed_main_paths(self, old_main_sha: str, new_main_sha: str) -> tuple[str, ...]:
         res = self.changed_main_paths_map.get(
             (old_main_sha, new_main_sha), self.default_changed_paths
         )
-        self.calls.append((
-            "get_changed_main_paths",
-            {"old": old_main_sha, "new": new_main_sha, "result": res},
-        ))
+        self.calls.append(
+            (
+                "get_changed_main_paths",
+                {"old": old_main_sha, "new": new_main_sha, "result": res},
+            )
+        )
         return res
 
     def revalidate_affected_dimension(
@@ -167,10 +171,12 @@ class SpyGitHubCompletionPort:
                 source_candidate_tree_sha=movement.candidate_tree_sha,
                 passed=True,
             )
-        self.calls.append((
-            "revalidate_affected_dimension",
-            {"dimension": dimension, "generation": generation, "result": res},
-        ))
+        self.calls.append(
+            (
+                "revalidate_affected_dimension",
+                {"dimension": dimension, "generation": generation, "result": res},
+            )
+        )
         return res
 
     def materialize_integration_head(
@@ -243,10 +249,12 @@ class SpyGitHubCompletionPort:
         repository: str,
         pull_request_number: int,
     ) -> bool:
-        self.calls.append((
-            "is_platform_approval_required",
-            {"repository": repository, "pr": pull_request_number},
-        ))
+        self.calls.append(
+            (
+                "is_platform_approval_required",
+                {"repository": repository, "pr": pull_request_number},
+            )
+        )
         return self.is_platform_approval
 
     def cas_merge(
@@ -314,7 +322,9 @@ class SpyGitHubCompletionPort:
         call_info = {"repository": repository, "pull_request_number": pull_request_number}
         self.read_final_merge_fields_calls.append(call_info)
         if callable(self.final_merge_fields):
-            res = self.final_merge_fields(repository=repository, pull_request_number=pull_request_number)
+            res = self.final_merge_fields(
+                repository=repository, pull_request_number=pull_request_number
+            )
         elif isinstance(self.final_merge_fields, list):
             res = self.final_merge_fields.pop(0)
         elif self.final_merge_fields is not None:
@@ -2565,7 +2575,9 @@ def test_g07_test_n_ambiguous_ack_physical_merge_confirmed_issue_state_matches(m
     port = SpyGitHubCompletionPort(
         main_states=[(ev.base_sha, ev.tree_sha)],
         default_pr_head=ev.head_sha,
-        cas_merge_results=[CasMergeResult(status=CasMergeStatus.AMBIGUOUS_ACK, merged_sha="a" * 40)],
+        cas_merge_results=[
+            CasMergeResult(status=CasMergeStatus.AMBIGUOUS_ACK, merged_sha="a" * 40)
+        ],
         final_merge_fields=fields,
         issue_states={1232: "open"},
     )
@@ -2588,7 +2600,9 @@ def test_g07_test_o_ambiguous_ack_physical_merge_confirmed_issue_mismatch_blocks
     port = SpyGitHubCompletionPort(
         main_states=[(ev.base_sha, ev.tree_sha)],
         default_pr_head=ev.head_sha,
-        cas_merge_results=[CasMergeResult(status=CasMergeStatus.AMBIGUOUS_ACK, merged_sha="a" * 40)],
+        cas_merge_results=[
+            CasMergeResult(status=CasMergeStatus.AMBIGUOUS_ACK, merged_sha="a" * 40)
+        ],
         final_merge_fields=fields,
         issue_states={1232: "closed"},  # Mismatch under KEEP_OPEN!
     )

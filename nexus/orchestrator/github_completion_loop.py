@@ -544,9 +544,9 @@ def run_github_completion_loop(
                 {**c, "head_sha": source_candidate_commit_sha, "generation": None}
                 for c in cand_base_dict.get("required_checks", [])
             ]
-            cand_base_dict["checks_hash"] = canonical_hash({
-                "checks": cand_base_dict["required_checks"]
-            })
+            cand_base_dict["checks_hash"] = canonical_hash(
+                {"checks": cand_base_dict["required_checks"]}
+            )
             try:
                 base_cand_evidence = GitHubOrchestrationEvidence.model_validate(cand_base_dict)
             except Exception as exc:
@@ -885,9 +885,9 @@ def run_github_completion_loop(
                 current_main_sha=current_main_sha,
                 diff_hash=source_candidate_diff_hash,
                 checks_hash=canonical_hash({"checks": [c.model_dump(mode="json") for c in checks]}),
-                reviews_hash=canonical_hash({
-                    "reviews": [r.model_dump(mode="json") for r in reviews]
-                }),
+                reviews_hash=canonical_hash(
+                    {"reviews": [r.model_dump(mode="json") for r in reviews]}
+                ),
                 task_attempt_contract_hash=initial_evidence.task_attempt_contract_hash,
                 candidate_hash=initial_evidence.candidate_hash,
                 verifier_hash=initial_evidence.verifier_hash,
@@ -947,10 +947,12 @@ def run_github_completion_loop(
             "claim_ceiling": "m4_merge_eligible_and_intent_ready_only",
         }
         try:
-            intent = MergeIntent.model_validate({
-                **intent_payload,
-                "intent_hash": canonical_hash(intent_payload),
-            })
+            intent = MergeIntent.model_validate(
+                {
+                    **intent_payload,
+                    "intent_hash": canonical_hash(intent_payload),
+                }
+            )
         except Exception as exc:
             return CompletionLoopResult(
                 outcome=CompletionLoopOutcome.BLOCKED,
