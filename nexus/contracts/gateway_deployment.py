@@ -1377,9 +1377,9 @@ def validate_recovery_effect_plan(
         "predecessor_manifest_hash": receipt.predecessor_manifest_sha256,
         "desired_root": str(Path(deployment_root) / receipt.desired_manifest_id),
         "predecessor_root": str(Path(deployment_root) / receipt.predecessor_manifest_id),
-        "service_label": LABEL,
-        "plist_path": PLIST,
-        "endpoint": ENDPOINT,
+        "service_label": receipt.service_label,
+        "plist_path": receipt.plist_path,
+        "endpoint": receipt.endpoint,
     }
     for name, expected in fixed.items():
         if getattr(plan, name) != expected:
