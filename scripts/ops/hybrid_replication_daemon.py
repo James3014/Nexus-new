@@ -176,20 +176,32 @@ def advance_all(
         ),
     )
     advanced: list[dict[str, Any]] = []
+    failures: list[dict[str, Any]] = []
     for state_path in sorted(store.tasks_root.glob("*/state.json")):
         state = json.loads(state_path.read_text(encoding="utf-8"))
         if state.get("admission_disposition") != "ADMITTED_PRIMARY_FRESH_TASK":
             continue
+        task_key = str(state["task_key"])
         before = str(state.get("phase"))
-        after = controller.advance(str(state["task_key"]))
+        try:
+            after = controller.advance(task_key)
+        except Exception as exc:  # noqa: BLE001 - per-task fail-closed isolation
+            failures.append({
+                "task_key": task_key,
+                "phase": before,
+                "error_type": type(exc).__name__,
+                "error": str(exc)[:500],
+            })
+            continue
         advanced.append({
-            "task_key": state["task_key"],
+            "task_key": task_key,
             "before": before,
             "after": after.get("phase"),
         })
     return {
         "schema": "nexus.hybrid_replication.daemon_advance.v1",
         "advanced": advanced,
+        "failures": failures,
     }
 
 
@@ -224,6 +236,8 @@ def main() -> int:
         ground_truth_command=args.ground_truth_command,
     )
     print(json.dumps(advance_report, ensure_ascii=False, sort_keys=True, indent=2))
+    if advance_report["failures"]:
+        return 5
     if ingest_report["missing_capture"]:
         return 3
     if ingest_report["missing_admission"]:
