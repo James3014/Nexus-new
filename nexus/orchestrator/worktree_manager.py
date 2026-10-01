@@ -360,8 +360,6 @@ def _normalize_mutation_lane(val: Any) -> str:
     if hasattr(val, "value"):
         val = val.value
     raw = str(val or "").strip().upper()
-    if "." in raw:
-        raw = raw.split(".")[-1]
     if raw in {"WORKING_TREE_ONLY", "GOVERNED"}:
         return "ISOLATED_TARGET"
     return raw
@@ -413,7 +411,6 @@ def evaluate_cross_entrypoint_conflict(
     cand_mode = _normalize_mutation_lane(
         _record_value(cand_contract, "mutation_mode")
         or _record_value(candidate, "mutation_mode")
-        or "ISOLATED_TARGET"
     )
     cand_rev = str(
         _record_value(candidate, "controller_revision")
@@ -470,7 +467,7 @@ def evaluate_cross_entrypoint_conflict(
             "candidate_mode": cand_mode,
             "conflicting_writers": [],
         }
-    if not inventory_complete:
+    if inventory_complete is not True:
         return {
             "schema": MUTATION_CONFLICT_SCHEMA,
             "claim_ceiling": MUTATION_CONFLICT_CLAIM_CEILING,
@@ -558,7 +555,6 @@ def evaluate_cross_entrypoint_conflict(
         writer_mode = _normalize_mutation_lane(
             _record_value(writer_contract, "mutation_mode")
             or _record_value(writer, "mutation_mode")
-            or "ISOLATED_TARGET"
         )
         writer_rev = str(
             _record_value(writer, "controller_revision")
@@ -577,13 +573,6 @@ def evaluate_cross_entrypoint_conflict(
                 "conflicting_writers": [writer_task_id],
             }
 
-        if (
-            writer_task_id == cand_task_id
-            and writer_attempt_id
-            and writer_attempt_id == cand_attempt_id
-        ):
-            continue
-
         if writer_rev != exp_rev:
             return {
                 "schema": MUTATION_CONFLICT_SCHEMA,
@@ -593,6 +582,13 @@ def evaluate_cross_entrypoint_conflict(
                 "candidate_task_id": cand_task_id,
                 "conflicting_writers": [writer_task_id],
             }
+
+        if (
+            writer_task_id == cand_task_id
+            and writer_attempt_id
+            and writer_attempt_id == cand_attempt_id
+        ):
+            continue
 
         if cand_mode == "DIRECT_CANONICAL" and writer_mode == "DIRECT_CANONICAL":
             return {

@@ -296,3 +296,66 @@ def test_target_only_or_unproven_empty_inventory_never_clears():
         inventory_complete=True,
     )
     assert proven["disposition"] == CONFLICT_CLEAR
+
+
+def test_missing_candidate_or_writer_lane_fails_closed():
+    cand = _writer("task-cand", ["nexus/a.py"])
+    cand["mutation_mode"] = ""
+    cand["contract"]["mutation_mode"] = ""
+    res = evaluate_cross_entrypoint_conflict(
+        cand,
+        [],
+        expected_revision="a" * 40,
+        inventory_complete=True,
+    )
+    assert res["disposition"] == CONFLICT_UNKNOWN
+    assert "UNSUPPORTED_MUTATION_LANE" in res["reason"]
+
+    valid = _writer("task-valid", ["nexus/a.py"], mutation_mode="DIRECT_CANONICAL")
+    writer = _writer("task-writer", ["nexus/b.py"])
+    writer["mutation_mode"] = ""
+    writer["contract"]["mutation_mode"] = ""
+    res2 = evaluate_cross_entrypoint_conflict(
+        valid,
+        [writer],
+        expected_revision="a" * 40,
+        inventory_complete=True,
+    )
+    assert res2["disposition"] == CONFLICT_UNKNOWN
+    assert "UNSUPPORTED_MUTATION_LANE" in res2["reason"]
+
+
+def test_same_task_attempt_stale_writer_cannot_skip_revision_gate():
+    cand = _writer(
+        "task-same",
+        ["nexus/a.py"],
+        attempt_id="attempt-same",
+        controller_revision="a" * 40,
+    )
+    stale = _writer(
+        "task-same",
+        ["nexus/a.py"],
+        attempt_id="attempt-same",
+        controller_revision="b" * 40,
+    )
+    res = evaluate_cross_entrypoint_conflict(
+        cand,
+        [stale],
+        expected_revision="a" * 40,
+        inventory_complete=True,
+    )
+    assert res["disposition"] == CONFLICT_STALE
+    assert res["reason"].startswith("WRITER_REVISION_STALE")
+
+
+def test_inventory_complete_requires_literal_true():
+    cand = _writer("task-1", ["nexus/a.py"])
+    for non_true in (False, "False", "true", 1, 0, [], {}):
+        res = evaluate_cross_entrypoint_conflict(
+            cand,
+            [],
+            expected_revision="a" * 40,
+            inventory_complete=non_true,
+        )
+        assert res["disposition"] == CONFLICT_UNKNOWN
+        assert res["reason"] == "CROSS_ENTRYPOINT_INVENTORY_INCOMPLETE"
