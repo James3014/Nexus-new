@@ -23,8 +23,8 @@ def test_automation_contract_does_not_activate_primary_cohort_in_wave1() -> None
 
 def test_daemon_is_fail_closed_on_capture_and_admission_gaps() -> None:
     text = Path("scripts/ops/hybrid_replication_daemon.py").read_text(encoding="utf-8")
-    assert 'return 3' in text
-    assert 'return 4' in text
+    assert "return 3" in text
+    assert "return 4" in text
     assert '"missing_capture"' in text
     assert '"missing_admission"' in text
     assert "ExternalFrozenStackRunner" in text
