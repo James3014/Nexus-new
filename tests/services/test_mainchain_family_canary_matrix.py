@@ -1541,9 +1541,7 @@ def test_retired_integration_manager_is_quarantine_reference_only() -> None:
     assert result["gate_passed"] is False
     assert result["mutation_performed"] is False
     assert result["retired_callable"].endswith("IntegrationManager.batch_integrate")
-    assert result["replacement_callable"].endswith(
-        "SelfHostedTaskService.integrate_approved"
-    )
+    assert result["replacement_callable"].endswith("SelfHostedTaskService.integrate_approved")
 
 
 def test_retired_integration_reference_proof_rejects_false_green() -> None:
@@ -1555,8 +1553,7 @@ def test_retired_integration_reference_proof_rejects_false_green() -> None:
             "nexus.orchestrator.integration_manager.IntegrationManager.batch_integrate"
         ),
         "replacement_callable": (
-            "nexus.orchestrator.self_hosted_task_service."
-            "SelfHostedTaskService.integrate_approved"
+            "nexus.orchestrator.self_hosted_task_service.SelfHostedTaskService.integrate_approved"
         ),
     }
     common = {
