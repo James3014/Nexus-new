@@ -347,7 +347,10 @@ class AdmissionReceipt:
             "activation_boundary": activation_boundary,
             "admitted_at": admitted_at,
         }
-        return cls(receipt_sha256=_sha256(_canonical_bytes(payload)), **{k: v for k, v in payload.items() if k != "schema"})
+        return cls(
+            receipt_sha256=_sha256(_canonical_bytes(payload)),
+            **{k: v for k, v in payload.items() if k != "schema"},
+        )
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -365,7 +368,9 @@ def build_admission_comment(receipt: AdmissionReceipt) -> str:
     return (
         f"{ADMISSION_MARKER}\n"
         "Authority: `RESEARCH_OBSERVATION_ONLY / NO_ENGINEERING_AUTHORITY`\n\n"
-        "```json\n" + json.dumps(receipt.to_payload(), ensure_ascii=False, sort_keys=True, indent=2) + "\n```"
+        "```json\n"
+        + json.dumps(receipt.to_payload(), ensure_ascii=False, sort_keys=True, indent=2)
+        + "\n```"
     )
 
 
@@ -480,10 +485,24 @@ def frozen_stack_outcome_from_payload(payload: Mapping[str, Any]) -> FrozenStack
     outcome = FrozenStackOutcome(
         stratum=str(payload.get("stratum") or ""),
         deterministic_receipt=dict(payload.get("deterministic_receipt") or {}),
-        candidate_packet=(None if payload.get("candidate_packet") is None else dict(payload.get("candidate_packet") or {})),
-        jev_raw_response=(None if payload.get("jev_raw_response") is None else dict(payload.get("jev_raw_response") or {})),
-        dm1_decision=(None if payload.get("dm1_decision") is None else dict(payload.get("dm1_decision") or {})),
-        strong_online_raw_response=(None if payload.get("strong_online_raw_response") is None else dict(payload.get("strong_online_raw_response") or {})),
+        candidate_packet=(
+            None
+            if payload.get("candidate_packet") is None
+            else dict(payload.get("candidate_packet") or {})
+        ),
+        jev_raw_response=(
+            None
+            if payload.get("jev_raw_response") is None
+            else dict(payload.get("jev_raw_response") or {})
+        ),
+        dm1_decision=(
+            None if payload.get("dm1_decision") is None else dict(payload.get("dm1_decision") or {})
+        ),
+        strong_online_raw_response=(
+            None
+            if payload.get("strong_online_raw_response") is None
+            else dict(payload.get("strong_online_raw_response") or {})
+        ),
         raw_result=raw,
     )
     outcome.validate()
@@ -505,7 +524,9 @@ class ExternalFrozenStackRunner:
             check=False,
         )
         if completed.returncode != 0:
-            raise RuntimeError(f"frozen_stack_command_failed:{completed.returncode}:{completed.stderr.strip()}")
+            raise RuntimeError(
+                f"frozen_stack_command_failed:{completed.returncode}:{completed.stderr.strip()}"
+            )
         try:
             payload = json.loads(completed.stdout)
         except json.JSONDecodeError as exc:
@@ -532,7 +553,9 @@ class ExternalGroundTruthResolver:
         if completed.returncode == 3:
             return None
         if completed.returncode != 0:
-            raise RuntimeError(f"ground_truth_command_failed:{completed.returncode}:{completed.stderr.strip()}")
+            raise RuntimeError(
+                f"ground_truth_command_failed:{completed.returncode}:{completed.stderr.strip()}"
+            )
         payload = json.loads(completed.stdout)
         if payload is None:
             return None
@@ -571,18 +594,22 @@ class AutomaticReplicationController:
             return state
         if state.get("phase") == "ADMITTED":
             payload = dict(state["snapshot"])
-            snapshot = parse_capture_comment(build_capture_comment(TaskSnapshot.create(
-                repository=str(payload["repository"]),
-                issue_number=int(payload["issue_number"]),
-                created_at=str(payload["created_at"]),
-                captured_at=str(payload["captured_at"]),
-                issue_updated_at=str(payload["issue_updated_at"]),
-                title=str(payload["title"]),
-                body=_decode_body(str(payload["body_gzip_base64"])),
-                pre_implementation_revision=str(payload["pre_implementation_revision"]),
-                default_branch=str(payload["default_branch"]),
-                source_event_id=str(payload["source_event_id"]),
-            )))
+            snapshot = parse_capture_comment(
+                build_capture_comment(
+                    TaskSnapshot.create(
+                        repository=str(payload["repository"]),
+                        issue_number=int(payload["issue_number"]),
+                        created_at=str(payload["created_at"]),
+                        captured_at=str(payload["captured_at"]),
+                        issue_updated_at=str(payload["issue_updated_at"]),
+                        title=str(payload["title"]),
+                        body=_decode_body(str(payload["body_gzip_base64"])),
+                        pre_implementation_revision=str(payload["pre_implementation_revision"]),
+                        default_branch=str(payload["default_branch"]),
+                        source_event_id=str(payload["source_event_id"]),
+                    )
+                )
+            )
             outcome = self.stack_runner(snapshot)
             if not isinstance(outcome, FrozenStackOutcome):
                 raise ValueError("stack_runner_must_return_frozen_stack_outcome")
@@ -715,7 +742,11 @@ class AutomaticReplicationStore:
         state["admission_receipt_sha256"] = receipt.receipt_sha256
         state["activation_boundary"] = receipt.activation_boundary
         state["admitted_at"] = receipt.admitted_at
-        state["phase"] = "ADMITTED" if receipt.disposition == "ADMITTED_PRIMARY_FRESH_TASK" else "CAPTURED_EXCLUDED"
+        state["phase"] = (
+            "ADMITTED"
+            if receipt.disposition == "ADMITTED_PRIMARY_FRESH_TASK"
+            else "CAPTURED_EXCLUDED"
+        )
         self._write_json(self._state_path(receipt.task_key), state)
         return state
 
@@ -753,7 +784,11 @@ class AutomaticReplicationStore:
         raw_payload = asdict(raw)
         raw_path = self._dir(task_key) / "raw.json"
         raw_sha = self._write_json(raw_path, raw_payload, create_only=True)
-        seal = {"schema": "nexus.hybrid_replication.raw_seal.v1", "raw_sha256": raw_sha, "path": "raw.json"}
+        seal = {
+            "schema": "nexus.hybrid_replication.raw_seal.v1",
+            "raw_sha256": raw_sha,
+            "path": "raw.json",
+        }
         self._write_json(self._dir(task_key) / "raw_seal.json", seal, create_only=True)
         state["raw_seal"] = seal
         state["phase"] = "RAW_SEALED"
@@ -771,7 +806,9 @@ class AutomaticReplicationStore:
         if actual_raw_sha != state["raw_seal"].get("raw_sha256"):
             raise ValueError("raw_seal_hash_mismatch")
         payload = asdict(evidence)
-        gt_sha = self._write_json(self._dir(task_key) / "ground_truth.json", payload, create_only=True)
+        gt_sha = self._write_json(
+            self._dir(task_key) / "ground_truth.json", payload, create_only=True
+        )
         state["ground_truth"] = {"sha256": gt_sha, **payload}
         state["phase"] = "GROUND_TRUTH_BOUND"
         self._write_json(self._state_path(task_key), state)
