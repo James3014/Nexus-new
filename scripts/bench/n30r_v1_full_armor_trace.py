@@ -13,7 +13,6 @@ Changes from prior:
 """
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
 import os
@@ -21,11 +20,14 @@ import shutil
 import sys
 import tempfile
 import time
+import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scripts.bench.n30r_runner import _materialize_task
+from nexus.services.local_heal.armor_artifact_storage import is_ephemeral_path
 from nexus.services.local_heal.local_model_capability_wiring import (
     project_planner_capabilities_for_local_executor,
 )
@@ -37,6 +39,7 @@ from nexus.services.local_heal.local_model_provider import (
     InjectedLocalModelProvider,
     LocalModelProviderRequest,
 )
+from scripts.bench.n30r_runner import _materialize_task
 
 
 def _sha256_json(obj: object) -> str:
@@ -54,12 +57,17 @@ def _sha256_text(text: str) -> str:
 
 def _invoke_planner(task_desc: str) -> dict:
     from nexus.engine.capability_planner import CapabilityPlanner
+
     planner = CapabilityPlanner()
-    os.environ["NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR"] = "1"
-    os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY"] = "localheal_pipeline"
-    os.environ["NEXUS_LOCAL_MODEL_CALL_ALLOWED"] = "1"
-    os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER"] = "ollama"
-    os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_MODEL"] = "qwen2.5-coder:7b-instruct"
+    overrides = {
+        "NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR": "1",
+        "NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY": "localheal_pipeline",
+        "NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1",
+        "NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER": "ollama",
+        "NEXUS_LOCAL_MODEL_EXECUTOR_MODEL": "qwen2.5-coder:7b-instruct",
+    }
+    previous = {key: os.environ.get(key) for key in overrides}
+    os.environ.update(overrides)
     try:
         plan = planner.plan(
             task_desc=task_desc,
@@ -71,10 +79,11 @@ def _invoke_planner(task_desc: str) -> dict:
         )
         return plan.signal_snapshot
     finally:
-        for key in ("NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR", "NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY",
-                     "NEXUS_LOCAL_MODEL_CALL_ALLOWED", "NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER",
-                     "NEXUS_LOCAL_MODEL_EXECUTOR_MODEL"):
-            os.environ.pop(key, None)
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def _load_source_from_fixture(source_relpath: str) -> str:
@@ -221,14 +230,75 @@ def deterministic_provider(req: LocalModelProviderRequest) -> str:
 _SOURCE_RELPATH = "fixtures/python/is_even_wrong_parity/ORIGINAL.py"
 
 
+def _validate_repo_workspace_path(repo_root: Path, candidate: Path, label: str) -> Path:
+    if ".." in candidate.parts:
+        raise ValueError(f"{label}_path_traversal")
+    resolved_root = repo_root.expanduser().resolve()
+    resolved_candidate = candidate.expanduser().resolve()
+    try:
+        resolved_candidate.relative_to(resolved_root)
+    except ValueError as exc:
+        raise ValueError(f"{label}_outside_repository") from exc
+    if is_ephemeral_path(resolved_candidate):
+        raise ValueError(f"{label}_ephemeral")
+    return resolved_candidate
+
+
+def _repo_workspace_parent(repo_root: Path) -> Path:
+    resolved_root = repo_root.expanduser().resolve()
+    parent = resolved_root / ".nexus" / "bench_cases"
+    parent = _validate_repo_workspace_path(
+        resolved_root, parent, "n30r_v1_workspace_parent"
+    )
+    parent.mkdir(parents=True, exist_ok=True)
+    parent = _validate_repo_workspace_path(
+        resolved_root, parent, "n30r_v1_workspace_parent"
+    )
+    if not parent.is_dir():
+        raise ValueError("n30r_v1_workspace_parent_missing")
+    return parent
+
+
+@contextmanager
+def _temporary_benchmark_workspace(repo_root: Path) -> Iterator[Path]:
+    parent = _repo_workspace_parent(repo_root)
+    with tempfile.TemporaryDirectory(prefix="n30r-v1-", dir=str(parent)) as workspace:
+        resolved_workspace = _validate_repo_workspace_path(
+            repo_root, Path(workspace), "n30r_v1_workspace"
+        )
+        yield resolved_workspace
+
+
 def run_v1_trace(custom_source_content: str | None = None) -> dict:
+    repo_root = Path(__file__).resolve().parents[2]
+    run_id = uuid.uuid4().hex
+    artifacts_dir = repo_root / "docs" / "bench" / "n30r" / "v1_artifacts" / run_id
+    artifacts_owned = False
+    try:
+        with _temporary_benchmark_workspace(repo_root) as workspace:
+            artifacts_dir.mkdir(parents=True, exist_ok=False)
+            artifacts_owned = True
+            return _run_v1_trace_in_workspace(
+                custom_source_content, workspace, repo_root, run_id, artifacts_dir
+            )
+    except BaseException:
+        # Remove only this run's partial artifacts; successful receipts retain theirs.
+        if artifacts_owned:
+            shutil.rmtree(artifacts_dir)
+        raise
+
+
+def _run_v1_trace_in_workspace(
+    custom_source_content: str | None, workspace: Path, repo_root: Path,
+    run_id: str, artifacts_dir: Path,
+) -> dict:
     """Run the V1 full armor trace and return the receipt."""
     global _provider_call_count, _prompt_telemetry
     _provider_call_count = 0
     _prompt_telemetry = []
     start = time.time()
 
-    manifest_path = Path(__file__).resolve().parents[2] / "docs" / "bench" / "n30r" / "smoke_manifest.json"
+    manifest_path = repo_root / "docs" / "bench" / "n30r" / "smoke_manifest.json"
     manifest = json.loads(manifest_path.read_text())
     task = _materialize_task(manifest["tasks"][2])
 
@@ -236,11 +306,9 @@ def run_v1_trace(custom_source_content: str | None = None) -> dict:
     source_sha256 = _sha256_text(source_content)
     source_length = len(source_content)
 
-    workspace = tempfile.mkdtemp(prefix=f"n30r-v1-{task.task_id}-")
+    workspace = str(workspace)
     target_relpath = "f.py"
     with open(os.path.join(workspace, target_relpath), "w") as f:
-        f.write(source_content)
-    with open(os.path.join(workspace, "f.py"), "w") as f:
         f.write(source_content)
 
     # Record canonical source before any mutation
@@ -274,9 +342,6 @@ def run_v1_trace(custom_source_content: str | None = None) -> dict:
     locked_search_count = source_content.count(locked_search) if locked_search else 0
 
     verifier_command = tuple(task.verifier_command)
-    run_id = str(int(start))
-    artifacts_dir = Path(__file__).resolve().parents[2] / "docs" / "bench" / "n30r" / "v1_artifacts" / run_id
-    artifacts_dir.mkdir(parents=True, exist_ok=True)
 
     evidence_refs = (f"v1:{run_id}:source", f"v1:{run_id}:localization", f"v1:{run_id}:verifier")
 
@@ -345,7 +410,6 @@ def run_v1_trace(custom_source_content: str | None = None) -> dict:
     }
 
     # ── Semantic retry evidence ───────────────────────────────────────
-    sr_telemetry = meta.get("_semantic_retry_telemetry", {}) or {}
     sr_prompts = [t for t in _prompt_telemetry
                   if t["classification"] == "SEMANTIC_RETRY_WITH_VERIFIER_EVIDENCE"]
     sr_prompt = sr_prompts[0] if sr_prompts else {}
@@ -452,9 +516,6 @@ def run_v1_trace(custom_source_content: str | None = None) -> dict:
     prompt_telemetry_path = artifacts_dir / "prompt_telemetry.json"
     prompt_telemetry_path.write_text(json.dumps(_prompt_telemetry, indent=2))
 
-    meta_caps_used = meta.get("selected_capabilities_used")
-    meta_caps_tuple = tuple(meta_caps_used) if isinstance(meta_caps_used, (list, tuple)) else ()
-
     # ── Build classification summary ──────────────────────────────────
     prompt_classifications = [t["classification"] for t in _prompt_telemetry]
     semantic_retry_prompts_count = sum(1 for c in prompt_classifications if c == "SEMANTIC_RETRY_WITH_VERIFIER_EVIDENCE")
@@ -514,7 +575,6 @@ def run_v1_trace(custom_source_content: str | None = None) -> dict:
         + len(projection.unknown_capabilities) + len(projection.dropped_capabilities)
     )
     receipt["wall_time_sec"] = round(time.time() - start, 3)
-    shutil.rmtree(workspace, ignore_errors=True)
     return receipt
 
 
