@@ -15,9 +15,15 @@ def test_hybrid_replication_capture_workflow_is_event_driven_and_fail_closed() -
     assert "NEXUS-HYBRID-REPLICATION-ADMISSION-V1" in text
     assert "NEXUS-HYBRID-REPLICATION-CONTRACT-DELTA-V1" in text
     assert "NEXUS-HYBRID-REPLICATION-INTAKE-GAP-V1" in text
+    assert "NEXUS_HYBRID_REPLICATION_ACTIVATION_STATE" in text
     assert "NEXUS_HYBRID_REPLICATION_T_AUTO" in text
-    assert "if not t_auto:" in text
-    assert "no prospective admission is created" in text
+    assert "NEXUS_HYBRID_REPLICATION_EXCLUSION_SET_SHA256" in text
+    assert 'activation_state != "AUTOMATIC_CAPTURE_READY"' in text
+    assert "activation exclusion-set hash mismatch; admission blocked" in text
+    assert "implementation_pr_numbers" in text
+    assert "INTAKE_PROTOCOL_LOSS_IMPLEMENTATION_PRESENT" in text
+    assert "INTAKE_PROTOCOL_LOSS_TERMINAL_BEFORE_ADMISSION" in text
+    assert "EXCLUDE_PARENT_TASK_PRE_BOUNDARY" in text
     assert "opening_capture_missing_or_ambiguous_before_edit" in text
 
 
