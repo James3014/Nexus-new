@@ -244,8 +244,6 @@ def test_c_prompt_forbids_prohibited_actions_and_future_outcomes() -> None:
         assert forbidden_word in prompt.lower()
 
 
-
-
 def _canonical_dispatch_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     dispatch_file = tmp_path / "nexus-agy-dispatch"
     dispatch_file.write_text("#!/bin/sh\n", encoding="utf-8")
@@ -255,6 +253,7 @@ def _canonical_dispatch_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
         digest,
     )
     return dispatch_file
+
 
 def _init_test_git_repo(path: Path) -> str:
     path.mkdir(parents=True, exist_ok=True)
@@ -508,9 +507,9 @@ def test_c_diff_sealing_captures_physical_binary_diff(tmp_path: Path) -> None:
     # Untracked files list
     assert len(sealing["untracked_files"]) == 1
     assert sealing["untracked_files"][0]["path"] == "untracked.py"
-    assert sealing["untracked_files"][0]["sha256"] == hashlib.sha256(
-        b"print('hello')\n"
-    ).hexdigest()
+    assert (
+        sealing["untracked_files"][0]["sha256"] == hashlib.sha256(b"print('hello')\n").hexdigest()
+    )
 
 
 def test_c_scope_rejection_for_out_of_scope_and_oversized_artifacts(tmp_path: Path) -> None:

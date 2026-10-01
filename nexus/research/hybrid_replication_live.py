@@ -246,24 +246,17 @@ def resolve_ground_truth_payload(
 
     issue_number = int(issue.get("number") or 0)
     changed_files = sorted({
-        str(path)
-        for pr in eligible_prs
-        for path in pr.get("changed_files", ())
-        if str(path)
+        str(path) for pr in eligible_prs for path in pr.get("changed_files", ()) if str(path)
     })
     check_rows = sorted({
-        (str(name), str(state))
-        for pr in eligible_prs
-        for name, state in pr.get("checks", ())
+        (str(name), str(state)) for pr in eligible_prs for name, state in pr.get("checks", ())
     })
     refs = [f"issue:{issue_number}:closed@{terminal_at}"]
     for pr in eligible_prs:
         refs.append(f"pr:{int(pr['number'])}@{str(pr.get('merge_commit_sha') or '')}")
 
     return {
-        "terminal_state": (
-            "CLOSED_WITH_MERGED_PR" if eligible_prs else "CLOSED_WITHOUT_MERGED_PR"
-        ),
+        "terminal_state": ("CLOSED_WITH_MERGED_PR" if eligible_prs else "CLOSED_WITHOUT_MERGED_PR"),
         "terminal_at": terminal_at,
         "evidence_refs": refs,
         "details": {
@@ -1054,9 +1047,7 @@ def _run_codex_candidate(
             if tracked.returncode != 0 or untracked.returncode != 0:
                 raise RuntimeError("shadow_candidate_status_failed")
             changed_files = sorted({
-                item
-                for item in (tracked.stdout + untracked.stdout).split("\0")
-                if item
+                item for item in (tracked.stdout + untracked.stdout).split("\0") if item
             })
             diff = _run(["git", "diff", "--binary", "HEAD"], cwd=source, timeout=30)
             if diff.returncode != 0:
@@ -1075,9 +1066,9 @@ def _run_codex_candidate(
                     "size": len(data),
                 }
                 if len(data) <= 5_000_000:
-                    row["gzip_base64"] = base64.b64encode(
-                        gzip.compress(data, mtime=0)
-                    ).decode("ascii")
+                    row["gzip_base64"] = base64.b64encode(gzip.compress(data, mtime=0)).decode(
+                        "ascii"
+                    )
                 else:
                     oversized_untracked.append(rel)
                 untracked_rows.append(row)
@@ -1089,10 +1080,7 @@ def _run_codex_candidate(
                 if any(pattern.search(command) for pattern in _FORBIDDEN_SHADOW_COMMANDS)
             })
             protocol_valid = (
-                cp.returncode == 0
-                and bool(result)
-                and not forbidden
-                and not oversized_untracked
+                cp.returncode == 0 and bool(result) and not forbidden and not oversized_untracked
             )
             return (
                 {
@@ -1112,9 +1100,9 @@ def _run_codex_candidate(
                     "final_response": result,
                     "changed_files": changed_files,
                     "diff_sha256": _sha256_bytes(diff_bytes),
-                    "diff_gzip_base64": base64.b64encode(
-                        gzip.compress(diff_bytes, mtime=0)
-                    ).decode("ascii"),
+                    "diff_gzip_base64": base64.b64encode(gzip.compress(diff_bytes, mtime=0)).decode(
+                        "ascii"
+                    ),
                     "untracked_files": untracked_rows,
                     "oversized_untracked_files": oversized_untracked,
                     "observed_commands": list(commands),
@@ -1174,9 +1162,7 @@ def _expected_agy_dispatch_sha256(binding: Mapping[str, Any] | None) -> str:
             expected = agy.get("dispatch_sha256")
     value = str(expected or CANONICAL_AGY_DISPATCH_SHA256)
     if value != CANONICAL_AGY_DISPATCH_SHA256:
-        raise RuntimeError(
-            f"agy_dispatch_generation_drift:{value}:{CANONICAL_AGY_DISPATCH_SHA256}"
-        )
+        raise RuntimeError(f"agy_dispatch_generation_drift:{value}:{CANONICAL_AGY_DISPATCH_SHA256}")
     return value
 
 
@@ -1218,9 +1204,7 @@ def resolve_canonical_agy_dispatch_path(
             raise RuntimeError(f"unexpected_agy_dispatch_name:{cand_expanded.name}")
         actual_sha256 = _sha256_file(cand_expanded)
         if actual_sha256 != expected_sha256:
-            raise RuntimeError(
-                f"agy_dispatch_hash_drift:{actual_sha256}:{expected_sha256}"
-            )
+            raise RuntimeError(f"agy_dispatch_hash_drift:{actual_sha256}:{expected_sha256}")
         return cand_expanded
 
     raise RuntimeError("canonical_nexus_agy_dispatch_not_found")
@@ -1314,12 +1298,8 @@ def evaluate_agy_receipt(
     schema: str = AGY_RAW_RECEIPT_SCHEMA,
     extra_checks: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    stdout_bytes = (
-        stdout_path.read_bytes() if (stdout_path and stdout_path.is_file()) else b""
-    )
-    stderr_bytes = (
-        stderr_path.read_bytes() if (stderr_path and stderr_path.is_file()) else b""
-    )
+    stdout_bytes = stdout_path.read_bytes() if (stdout_path and stdout_path.is_file()) else b""
+    stderr_bytes = stderr_path.read_bytes() if (stderr_path and stderr_path.is_file()) else b""
     stdout_sha256 = _sha256_bytes(stdout_bytes)
     stderr_sha256 = _sha256_bytes(stderr_bytes)
     output_oversized = (
@@ -1395,9 +1375,7 @@ def evaluate_agy_receipt(
         "exit_code": record.get("exit_code") if record else None,
         "wall_time_seconds": wall_time_seconds,
         "usage": usage,
-        "usage_observation": (
-            "OBSERVED" if usage else "UNAVAILABLE_NOT_ZERO"
-        ),
+        "usage_observation": ("OBSERVED" if usage else "UNAVAILABLE_NOT_ZERO"),
     }
 
 
@@ -1438,9 +1416,7 @@ def seal_shadow_candidate(
             "size": len(data),
         }
         if len(data) <= max_file_size:
-            row["gzip_base64"] = base64.b64encode(
-                gzip.compress(data, mtime=0)
-            ).decode("ascii")
+            row["gzip_base64"] = base64.b64encode(gzip.compress(data, mtime=0)).decode("ascii")
         else:
             oversized_untracked.append(rel)
         untracked_rows.append(row)
@@ -1461,9 +1437,7 @@ def seal_shadow_candidate(
     return {
         "changed_files": changed_files,
         "diff_sha256": _sha256_bytes(diff_bytes),
-        "diff_gzip_base64": base64.b64encode(
-            gzip.compress(diff_bytes, mtime=0)
-        ).decode("ascii"),
+        "diff_gzip_base64": base64.b64encode(gzip.compress(diff_bytes, mtime=0)).decode("ascii"),
         "untracked_files": untracked_rows,
         "oversized_untracked_files": oversized_untracked,
         "out_of_scope_paths": sorted(out_of_scope),
@@ -1498,11 +1472,7 @@ def _run_agy_dispatch(
             operation_root = Path.home() / ".local/state/nexus-agy-operations"
 
     online = binding.get("strong_online")
-    effort = (
-        str(online.get("effort") or "medium")
-        if isinstance(online, Mapping)
-        else "medium"
-    )
+    effort = str(online.get("effort") or "medium") if isinstance(online, Mapping) else "medium"
     cmd = [
         str(dispatch_path),
         "--background",
@@ -1541,12 +1511,10 @@ def _run_agy_dispatch(
         return None, wall, None, None, False, "MISSING_OR_CORRUPT_JOURNAL", dispatch_path
 
     stdout_path = Path(
-        initial.get("stdout_path")
-        or (operation_root / "operations" / operation_id / "stdout.log")
+        initial.get("stdout_path") or (operation_root / "operations" / operation_id / "stdout.log")
     )
     stderr_path = Path(
-        initial.get("stderr_path")
-        or (operation_root / "operations" / operation_id / "stderr.log")
+        initial.get("stderr_path") or (operation_root / "operations" / operation_id / "stderr.log")
     )
     operation_json = stdout_path.parent / "operation.json"
 
@@ -2047,9 +2015,7 @@ def _resolve_ground_truth_from_state(state: Mapping[str, Any]) -> dict[str, Any]
             "head_sha": head_sha,
             "merged_at": merged_at,
             "changed_files": tuple(
-                str(item.get("filename") or "")
-                for item in files
-                if item.get("filename")
+                str(item.get("filename") or "") for item in files if item.get("filename")
             ),
             "checks": _check_runs_until(repository, head_sha, terminal_time),
         })
@@ -2102,10 +2068,7 @@ def _identity_preflight_main(binding_path: Path) -> int:
     online = binding.get("strong_online") or {}
     provider = str(online.get("provider") or "")
     created_at_utc = (
-        dt.datetime.now(dt.timezone.utc)
-        .replace(microsecond=0)
-        .isoformat()
-        .replace("+00:00", "Z")
+        dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     )
     if provider == "agy":
         dispatch_path = resolve_canonical_agy_dispatch_path(binding)
@@ -2123,9 +2086,7 @@ def _identity_preflight_main(binding_path: Path) -> int:
             requested_provider=provider,
             requested_model=str(online.get("requested_model") or ""),
             execution_generation=str(online.get("execution_generation") or ""),
-            previous_execution_generation=str(
-                online.get("previous_execution_generation") or ""
-            ),
+            previous_execution_generation=str(online.get("previous_execution_generation") or ""),
             jev_requested_model=str(binding["jev"]["requested_model"]),
             jev_resolved_model=str(jev_raw.get("resolved_model") or ""),
             expected_jev_resolved_model=str(binding["jev"]["resolved_model"]),
