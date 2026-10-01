@@ -11,6 +11,8 @@ def test_hybrid_replication_capture_workflow_is_event_driven_and_fail_closed() -
     assert "issues:" in text
     assert "types: [opened, edited]" in text
     assert "NEXUS_HYBRID_REPLICATION_CAPTURE_V1" not in text
+    assert 'EVENT_PATH: ${{ github.event_path }}' not in text
+    assert 'os.environ["GITHUB_EVENT_PATH"]' in text
     assert "NEXUS-HYBRID-REPLICATION-CAPTURE-V1" in text
     assert "NEXUS-HYBRID-REPLICATION-ADMISSION-V1" in text
     assert "NEXUS-HYBRID-REPLICATION-CONTRACT-DELTA-V1" in text
