@@ -598,7 +598,7 @@ def test_legacy_r21_fanout_projection_fails_closed_without_dispatch(tmp_path, at
 
 @pytest.mark.parametrize(
     "malformed_attempt_id",
-    ["-" * 36, "not-a-uuid", str(uuid.uuid4()).upper()],
+    ["-" * 36, "not-a-uuid", "2A40CC3C-3B9C-4E92-96E1-38D6E90B2243"],
 )
 def test_legacy_r21_malformed_attempt_id_fails_closed_without_dispatch(
     tmp_path, malformed_attempt_id
