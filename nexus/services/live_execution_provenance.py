@@ -14,11 +14,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
+from nexus.services.agy_operation_journal import AgyOperationJournal
 from nexus.services.direct_operation_journal import DirectOperationJournal
 
 LIVE_EXECUTION_PROVENANCE_SCHEMA = "nexus.integration.live_execution_provenance.v1"
@@ -73,6 +77,44 @@ PRODUCER_SCHEMA_RDC_V1 = "nexus.rdc.receipt.v1"
 PRODUCER_SCHEMA_GOVERNED_TARGET_V1 = "nexus.target_ownership.v1"
 SUPPORTED_PRODUCER_SCHEMAS = TRUSTED_JOURNAL_SCHEMAS
 
+_EXTERNAL_WORKER_PREFIXES = {
+    "cline": "clineop_",
+    "opencode": "opencodeop_",
+    "codex": "codexop_",
+    "grok": "grokop_",
+}
+_AGY_OPERATION_PREFIX = "agyop_"
+
+
+def _external_worker_operation_root() -> Path:
+    return Path(
+        os.getenv(
+            "NEXUS_EXTERNAL_WORKER_OPERATION_ROOT",
+            str(Path.home() / ".local/state/nexus-external-worker"),
+        )
+    ).expanduser().resolve()
+
+
+def _agy_operation_root() -> Path:
+    return Path(
+        os.getenv(
+            "NEXUS_AGY_OPERATION_ROOT",
+            str(Path.home() / ".local/state/nexus-agy-operations"),
+        )
+    ).expanduser().resolve()
+
+
+def _external_provider_for_operation_id(operation_id: str) -> str:
+    matches = [
+        provider
+        for provider, prefix in _EXTERNAL_WORKER_PREFIXES.items()
+        if operation_id.startswith(prefix)
+    ]
+    if len(matches) != 1:
+        raise ProvenanceContractError("external worker operation_id has no canonical provider")
+    return matches[0]
+
+
 # Normalized Execution States
 EXECUTION_STATE_ACTIVE = "ACTIVE"
 EXECUTION_STATE_COMPLETED = "COMPLETED"
@@ -113,7 +155,13 @@ def _sha256(data: Any) -> str:
 class VerifiedProducerRecord:
     """Opaque immutable envelope minted only from an owning journal read."""
 
-    __slots__ = ("_record_json", "_record_sha256", "_source_ref", "_transport_kind")
+    __slots__ = (
+        "_record_json",
+        "_record_sha256",
+        "_source_ref",
+        "_transport_kind",
+        "_record_path",
+    )
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         raise TypeError("VerifiedProducerRecord may not be subclassed")
@@ -130,6 +178,7 @@ class VerifiedProducerRecord:
         record: Mapping[str, Any],
         source_ref: str,
         transport_kind: str,
+        record_path: str | Path,
     ) -> "VerifiedProducerRecord":
         if not isinstance(record, Mapping):
             raise ProvenanceContractError("verified producer record must be a Mapping")
@@ -156,8 +205,12 @@ class VerifiedProducerRecord:
             "_record_sha256",
             hashlib.sha256(record_json.encode("utf-8")).hexdigest(),
         )
+        record_path_value = str(Path(record_path).expanduser().resolve())
+        if not record_path_value:
+            raise ProvenanceContractError("verified producer record_path is required")
         object.__setattr__(self, "_source_ref", source_ref)
         object.__setattr__(self, "_transport_kind", transport_kind)
+        object.__setattr__(self, "_record_path", record_path_value)
         return self
 
     @property
@@ -176,6 +229,60 @@ class VerifiedProducerRecord:
     def record_sha256(self) -> str:
         return self._record_sha256
 
+    @property
+    def record_path(self) -> str:
+        return self._record_path
+
+
+def _expected_record_path(record: Mapping[str, Any]) -> Path:
+    schema = str(record.get("schema") or "")
+    operation_id = str(record.get("operation_id") or "")
+    if schema == PRODUCER_SCHEMA_EXTERNAL_WORKER_V1:
+        provider = _external_provider_for_operation_id(operation_id)
+        return (
+            _external_worker_operation_root()
+            / provider
+            / "operations"
+            / operation_id
+            / "operation.json"
+        ).resolve()
+    if schema == PRODUCER_SCHEMA_AGY_OPERATION_V1:
+        if not operation_id.startswith(_AGY_OPERATION_PREFIX):
+            raise ProvenanceContractError("Agy operation_id has invalid canonical prefix")
+        return (
+            _agy_operation_root()
+            / "operations"
+            / operation_id
+            / "operation.json"
+        ).resolve()
+    raise ProvenanceContractError(f"producer schema is not trusted: {schema!r}")
+
+
+def _reread_verified_record(evidence: VerifiedProducerRecord) -> dict[str, Any]:
+    record = dict(evidence.record)
+    expected_path = _expected_record_path(record)
+    actual_path = Path(evidence.record_path).expanduser().resolve()
+    if actual_path != expected_path:
+        raise ProvenanceContractError(
+            f"producer record path is not canonical: {actual_path} != {expected_path}"
+        )
+    try:
+        current = json.loads(actual_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ProvenanceContractError("canonical producer record is unreadable") from exc
+    current_json = json.dumps(
+        current,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
+    current_sha = hashlib.sha256(current_json.encode("utf-8")).hexdigest()
+    if current_sha != evidence.record_sha256:
+        raise ProvenanceContractError("canonical producer record changed; fresh read required")
+    if current != record:
+        raise ProvenanceContractError("canonical producer record differs from verified envelope")
+    return current
+
 
 def read_operation_journal_evidence(
     journal: Any,
@@ -183,20 +290,51 @@ def read_operation_journal_evidence(
     *,
     transport_kind: str = TRANSPORT_KIND_LOCAL_RUNNER,
 ) -> VerifiedProducerRecord:
-    """Read one exact operation through its owning DirectOperationJournal API."""
+    """Read one exact operation from a recognized canonical producer root."""
 
-    if type(journal) is not DirectOperationJournal:
-        raise ProvenanceContractError("journal must be an exact DirectOperationJournal")
-    record = DirectOperationJournal.read(journal, operation_id)
+    operation_id = str(operation_id)
+    if type(journal) is DirectOperationJournal:
+        provider = _external_provider_for_operation_id(operation_id)
+        expected_root = (_external_worker_operation_root() / provider).resolve()
+        expected_prefix = _EXTERNAL_WORKER_PREFIXES[provider]
+        if (
+            journal.root.expanduser().resolve() != expected_root
+            or journal.schema != PRODUCER_SCHEMA_EXTERNAL_WORKER_V1
+            or journal.operation_prefix != expected_prefix
+        ):
+            raise ProvenanceContractError(
+                "external worker journal is not bound to its canonical producer root"
+            )
+        record = DirectOperationJournal.read(journal, operation_id)
+    elif type(journal) is AgyOperationJournal:
+        if (
+            journal.root.expanduser().resolve() != _agy_operation_root()
+            or journal.schema != PRODUCER_SCHEMA_AGY_OPERATION_V1
+            or journal.operation_prefix != _AGY_OPERATION_PREFIX
+        ):
+            raise ProvenanceContractError(
+                "Agy journal is not bound to its canonical producer root"
+            )
+        record = DirectOperationJournal.read(journal, operation_id)
+    else:
+        raise ProvenanceContractError(
+            "journal must be an exact recognized operation journal"
+        )
+
     schema = str(record.get("schema") or "")
     if schema not in TRUSTED_JOURNAL_SCHEMAS:
         raise ProvenanceContractError(f"producer schema is not trusted: {schema!r}")
-    if str(record.get("operation_id") or "") != str(operation_id):
+    if str(record.get("operation_id") or "") != operation_id:
         raise ProvenanceContractError("producer operation_id does not match requested operation")
+
+    record_path = journal.record_path(operation_id).expanduser().resolve()
+    if record_path != _expected_record_path(record):
+        raise ProvenanceContractError("producer record path is not canonical")
     return VerifiedProducerRecord._mint(
         record=record,
         source_ref=f"operation-journal:{schema}:{operation_id}",
         transport_kind=transport_kind,
+        record_path=record_path,
     )
 
 
@@ -510,8 +648,31 @@ def build_live_execution_provenance(
             observed_at="",
         )
 
-    rcpt = dict(transport_receipt.record)
     transport = transport_receipt.transport_kind
+    try:
+        rcpt = _reread_verified_record(transport_receipt)
+    except ProvenanceContractError as exc:
+        declared = dict(transport_receipt.record)
+        return LiveExecutionProvenance(
+            repository=repo,
+            work_contract_id=work_id,
+            task_id=task_id,
+            attempt_id=attempt_id,
+            execution_lane=effective_lane,
+            transport_kind=transport,
+            operation_id=str(declared.get("operation_id") or ""),
+            host_id="",
+            requested_worker=req_worker,
+            requested_provider=req_provider,
+            requested_model=req_model,
+            observed_worker="",
+            observed_provider="",
+            observed_model="",
+            execution_state=EXECUTION_STATE_UNKNOWN,
+            phase=f"PRODUCER_EVIDENCE_REVALIDATION_FAILED: {exc}",
+            source_revision=src_rev,
+            observed_at="",
+        )
     if observed_transport_kind and observed_transport_kind != transport:
         raise ProvenanceContractError(
             f"observed_transport_kind {observed_transport_kind!r} conflicts with verified producer transport {transport!r}"
@@ -617,12 +778,24 @@ def build_live_execution_provenance(
             if dt.tzinfo is None:
                 raise ValueError("producer timestamp must be timezone-aware")
             observed_at = producer_ts
-            if norm_state == EXECUTION_STATE_ACTIVE and max_staleness_seconds > 0:
-                now_dt = datetime.now(timezone.utc)
-                diff = (now_dt - dt).total_seconds()
-                if diff > max_staleness_seconds:
-                    norm_state = EXECUTION_STATE_STALE
-                    rcpt_phase = f"HEARTBEAT_EXPIRED: age {int(diff)}s > max {int(max_staleness_seconds)}s"
+            if norm_state == EXECUTION_STATE_ACTIVE:
+                if (
+                    isinstance(max_staleness_seconds, bool)
+                    or not isinstance(max_staleness_seconds, (int, float))
+                    or not math.isfinite(float(max_staleness_seconds))
+                    or float(max_staleness_seconds) <= 0
+                ):
+                    norm_state = EXECUTION_STATE_UNKNOWN
+                    rcpt_phase = "INVALID_STALENESS_LIMIT"
+                else:
+                    now_dt = datetime.now(timezone.utc)
+                    diff = (now_dt - dt).total_seconds()
+                    if diff > float(max_staleness_seconds):
+                        norm_state = EXECUTION_STATE_STALE
+                        rcpt_phase = (
+                            f"HEARTBEAT_EXPIRED: age {int(diff)}s > "
+                            f"max {int(float(max_staleness_seconds))}s"
+                        )
         except (TypeError, ValueError, OverflowError):
             norm_state = EXECUTION_STATE_UNKNOWN
             rcpt_phase = "INVALID_PRODUCER_TIMESTAMP"

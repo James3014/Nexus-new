@@ -6,19 +6,23 @@ through repository-owned durable producer APIs.
 
 from __future__ import annotations
 
+import os
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
+from nexus.services.agy_operation_journal import AgyOperationJournal
 from nexus.services.direct_operation_journal import DirectOperationJournal
 from nexus.services.live_execution_provenance import (
     EXECUTION_LANE_DIRECT_DELEGATED,
     EXECUTION_LANE_UNKNOWN,
     EXECUTION_STATE_ACTIVE,
+    EXECUTION_STATE_COMPLETED,
     EXECUTION_STATE_STALE,
     EXECUTION_STATE_UNKNOWN,
+    PRODUCER_SCHEMA_AGY_OPERATION_V1,
     PRODUCER_SCHEMA_EXTERNAL_WORKER_V1,
     TRANSPORT_KIND_LOCAL_RUNNER,
     TRANSPORT_KIND_RDC,
@@ -51,10 +55,11 @@ def _verified_external_worker(
     observed_provider: str = "openai",
     observed_model: str = "gpt-test",
 ):
+    os.environ["NEXUS_EXTERNAL_WORKER_OPERATION_ROOT"] = str(tmp_path)
     journal = DirectOperationJournal(
-        tmp_path / "journal",
+        tmp_path / "codex",
         schema=PRODUCER_SCHEMA_EXTERNAL_WORKER_V1,
-        operation_prefix="extop_",
+        operation_prefix="codexop_",
     )
     op_id = operation_id or journal.new_operation_id()
     initial = {"repo_root": "James3014/Nexus-new"}
@@ -296,7 +301,7 @@ def test_cache_rebuild_from_verified_producer_records(tmp_path: Path):
     sources = []
     for idx in range(2):
         journal, evidence, context = _verified_external_worker(
-            tmp_path / str(idx),
+            tmp_path,
             task_id=f"task-{idx}",
             attempt_id=f"attempt-{idx}",
         )
@@ -352,7 +357,7 @@ def test_fake_journal_object_cannot_mint_verified_evidence():
                 "status": "RUNNING",
             }
 
-    with pytest.raises(ProvenanceContractError, match="DirectOperationJournal"):
+    with pytest.raises(ProvenanceContractError, match="recognized operation journal"):
         read_operation_journal_evidence(FakeJournal(), "extop_forged")
 
 
@@ -371,8 +376,8 @@ def test_direct_operation_journal_subclass_cannot_mint_trust(tmp_path: Path):
         schema=PRODUCER_SCHEMA_EXTERNAL_WORKER_V1,
         operation_prefix="extop_",
     )
-    with pytest.raises(ProvenanceContractError, match="exact DirectOperationJournal"):
-        read_operation_journal_evidence(fake, "extop_" + "a" * 32)
+    with pytest.raises(ProvenanceContractError, match="recognized operation journal"):
+        read_operation_journal_evidence(fake, "codexop_" + "a" * 32)
 
 
 def test_verified_envelope_payload_is_copy_and_not_replaceable(tmp_path: Path):
@@ -432,3 +437,99 @@ def test_running_with_malformed_timestamp_and_zero_staleness_limit_fails_closed(
     )
     assert result.execution_state == EXECUTION_STATE_UNKNOWN
     assert result.phase == "INVALID_PRODUCER_TIMESTAMP"
+
+
+def test_exact_journal_at_noncanonical_root_is_rejected(tmp_path: Path):
+    os.environ["NEXUS_EXTERNAL_WORKER_OPERATION_ROOT"] = str(tmp_path / "canonical")
+    journal = DirectOperationJournal(
+        tmp_path / "attacker" / "codex",
+        schema=PRODUCER_SCHEMA_EXTERNAL_WORKER_V1,
+        operation_prefix="codexop_",
+    )
+    with pytest.raises(ProvenanceContractError, match="canonical producer root"):
+        read_operation_journal_evidence(journal, "codexop_" + "a" * 32)
+
+
+def test_private_mint_is_not_a_trust_boundary(tmp_path: Path):
+    op_id = "codexop_" + "b" * 32
+    context = {
+        "repository": "James3014/Nexus-new",
+        "task_id": "task-forged",
+        "attempt_id": "attempt-forged",
+        "operation_id": op_id,
+        "execution_lane": EXECUTION_LANE_DIRECT_DELEGATED,
+    }
+    record = {
+        "schema": PRODUCER_SCHEMA_EXTERNAL_WORKER_V1,
+        "repository": "James3014/Nexus-new",
+        "task_id": "task-forged",
+        "attempt_id": "attempt-forged",
+        "operation_id": op_id,
+        "status": "RUNNING",
+        "host_id": "host-forged",
+        "provider_session_id": "session-forged",
+        "last_heartbeat_at": _iso_now(),
+    }
+    envelope = VerifiedProducerRecord._mint(
+        record=record,
+        source_ref="caller:forged",
+        transport_kind=TRANSPORT_KIND_LOCAL_RUNNER,
+        record_path=tmp_path / "fake-operation.json",
+    )
+    result = build_live_execution_provenance(context, envelope)
+    assert result.execution_state == EXECUTION_STATE_UNKNOWN
+    assert result.phase.startswith("PRODUCER_EVIDENCE_REVALIDATION_FAILED")
+
+
+def test_old_envelope_fails_closed_after_producer_record_changes(tmp_path: Path):
+    journal, evidence, context = _verified_external_worker(tmp_path)
+    first = build_live_execution_provenance(context, evidence)
+    assert first.execution_state == EXECUTION_STATE_ACTIVE
+
+    journal.update(
+        context["operation_id"],
+        status="COMPLETED",
+        phase="COMPLETED",
+        last_heartbeat_at=_iso_now(),
+    )
+    stale = build_live_execution_provenance(context, evidence)
+    assert stale.execution_state == EXECUTION_STATE_UNKNOWN
+    assert "fresh read required" in stale.phase
+
+    fresh = read_operation_journal_evidence(journal, context["operation_id"])
+    completed = build_live_execution_provenance(context, fresh)
+    assert completed.execution_state == EXECUTION_STATE_COMPLETED
+
+
+@pytest.mark.parametrize("limit", [0, -1, float("nan"), float("inf")])
+def test_invalid_staleness_limit_never_keeps_running_record_active(
+    tmp_path: Path,
+    limit: float,
+):
+    _journal, evidence, context = _verified_external_worker(tmp_path)
+    result = build_live_execution_provenance(
+        context,
+        evidence,
+        max_staleness_seconds=limit,
+    )
+    assert result.execution_state == EXECUTION_STATE_UNKNOWN
+    assert result.phase == "INVALID_STALENESS_LIMIT"
+
+
+def test_canonical_agy_journal_reader_is_supported(tmp_path: Path):
+    os.environ["NEXUS_AGY_OPERATION_ROOT"] = str(tmp_path)
+    journal = AgyOperationJournal(tmp_path)
+    operation_id = journal.new_operation_id()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id="attempt-agy",
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="high",
+        prompt_sha256="a" * 64,
+        runtime_revision="b" * 40,
+    )
+    evidence = read_operation_journal_evidence(journal, operation_id)
+    assert evidence.record["schema"] == PRODUCER_SCHEMA_AGY_OPERATION_V1
+    assert Path(evidence.record_path).resolve() == journal.record_path(operation_id).resolve()
