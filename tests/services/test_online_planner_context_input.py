@@ -38,6 +38,7 @@ def _context() -> dict:
     return {
         "schema": "nexus.unified_runtime.request.v1",
         "task_id": "task-online",
+        "workspace_revision": "r" * 40,
         "task_statement": "bounded online task",
         "execution_attempt": {"attempt_id": "attempt-1"},
         "online_prompt": "bounded online task",
