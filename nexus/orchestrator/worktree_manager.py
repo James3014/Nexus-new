@@ -7,10 +7,16 @@ import stat
 import subprocess
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence
 from uuid import uuid4
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
 
 from nexus.orchestrator.collaboration_realm import CollaborationRealmVerifier
 from nexus.orchestrator.task_contract import ApprovalStatus, SelfHostedTaskContract
@@ -337,6 +343,250 @@ def _validate_ownership_record(
             raise ValueError("MUTATION_IDENTITY_INVALID: source identity mismatch with authoritative service state")
 
 
+MUTATION_CONFLICT_SCHEMA = "nexus.orchestrator.mutation_conflict_admission.v1"
+MUTATION_CONFLICT_CLAIM_CEILING = "PHYSICAL_MUTATION_CONFLICT_DISPOSITION_ONLY"
+
+CONFLICT_CLEAR = "CLEAR"
+CONFLICT_OVERLAP = "OVERLAP"
+CONFLICT_UNKNOWN = "UNKNOWN"
+CONFLICT_STALE = "STALE"
+CONFLICT_RECONCILE_REQUIRED = "RECONCILE_REQUIRED"
+
+SUPPORTED_MUTATION_LANES = frozenset(
+    {"DIRECT_CANONICAL", "DIRECT_DELEGATED", "GOVERNED", "ISOLATED_TARGET", "LOCAL"}
+)
+
+
+def evaluate_cross_entrypoint_conflict(
+    candidate: Any,
+    active_writers: Optional[Sequence[Any]] = None,
+    *,
+    expected_revision: Optional[str] = None,
+) -> dict[str, Any]:
+    """Fail-closed cross-entrypoint conflict admission evaluation.
+
+    Evaluates physical mutation conflict across DIRECT_CANONICAL, DIRECT_DELEGATED,
+    GOVERNED (ISOLATED_TARGET), and qualified LOCAL writers.
+    Returns structured admission disposition:
+      CLEAR, OVERLAP, UNKNOWN, STALE, RECONCILE_REQUIRED
+    """
+    if candidate is None:
+        return {
+            "schema": MUTATION_CONFLICT_SCHEMA,
+            "claim_ceiling": MUTATION_CONFLICT_CLAIM_CEILING,
+            "disposition": CONFLICT_UNKNOWN,
+            "reason": "CANDIDATE_MISSING",
+            "candidate": None,
+            "conflicting_writers": [],
+        }
+
+    try:
+        _validate_mutation_identity(candidate)
+    except ValueError as exc:
+        return {
+            "schema": MUTATION_CONFLICT_SCHEMA,
+            "claim_ceiling": MUTATION_CONFLICT_CLAIM_CEILING,
+            "disposition": CONFLICT_RECONCILE_REQUIRED,
+            "reason": f"CANDIDATE_IDENTITY_INVALID: {exc}",
+            "candidate": None,
+            "conflicting_writers": [],
+        }
+
+    cand_contract = _record_contract(candidate)
+    cand_task_id = str(
+        _record_value(candidate, "task_id")
+        or _record_value(cand_contract, "task_id")
+        or ""
+    )
+    cand_attempt_id = str(_record_value(candidate, "attempt_id") or "")
+    cand_mode = str(
+        _record_value(cand_contract, "mutation_mode")
+        or _record_value(candidate, "mutation_mode")
+        or "ISOLATED_TARGET"
+    ).upper()
+    cand_rev = str(
+        _record_value(candidate, "controller_revision")
+        or _record_value(cand_contract, "controller_revision")
+        or ""
+    )
+
+    if expected_revision and cand_rev != expected_revision:
+        return {
+            "schema": MUTATION_CONFLICT_SCHEMA,
+            "claim_ceiling": MUTATION_CONFLICT_CLAIM_CEILING,
+            "disposition": CONFLICT_STALE,
+            "reason": f"CANDIDATE_REVISION_STALE: expected {expected_revision}, got {cand_rev}",
+            "candidate_task_id": cand_task_id,
+            "candidate_attempt_id": cand_attempt_id,
+            "conflicting_writers": [],
+        }
+
+    cand_unknown = _record_value(candidate, "unknown_effect_refs") or _record_value(
+        candidate, "unresolved_effects"
+    )
+    if cand_unknown:
+        return {
+            "schema": MUTATION_CONFLICT_SCHEMA,
+            "claim_ceiling": MUTATION_CONFLICT_CLAIM_CEILING,
+            "disposition": CONFLICT_RECONCILE_REQUIRED,
+            "reason": "CANDIDATE_UNRESOLVED_PRIOR_EFFECTS",
+            "candidate_task_id": cand_task_id,
+            "candidate_attempt_id": cand_attempt_id,
+            "conflicting_writers": [],
+        }
+
+    try:
+        cand_paths = _normalized_mutation_paths(candidate)
+    except ValueError as exc:
+        return {
+            "schema": MUTATION_CONFLICT_SCHEMA,
+            "claim_ceiling": MUTATION_CONFLICT_CLAIM_CEILING,
+            "disposition": CONFLICT_RECONCILE_REQUIRED,
+            "reason": f"CANDIDATE_PATHS_MALFORMED: {exc}",
+            "candidate_task_id": cand_task_id,
+            "candidate_attempt_id": cand_attempt_id,
+            "conflicting_writers": [],
+        }
+
+    conflicting_writers = []
+    writers = list(active_writers or ())
+    for writer in writers:
+        if writer is None:
+            return {
+                "schema": MUTATION_CONFLICT_SCHEMA,
+                "claim_ceiling": MUTATION_CONFLICT_CLAIM_CEILING,
+                "disposition": CONFLICT_UNKNOWN,
+                "reason": "ACTIVE_WRITER_MISSING_OR_CORRUPT",
+                "candidate_task_id": cand_task_id,
+                "conflicting_writers": [],
+            }
+
+        writer_unknown = _record_value(writer, "unknown_effect_refs") or _record_value(
+            writer, "unresolved_effects"
+        )
+        if writer_unknown:
+            return {
+                "schema": MUTATION_CONFLICT_SCHEMA,
+                "claim_ceiling": MUTATION_CONFLICT_CLAIM_CEILING,
+                "disposition": CONFLICT_RECONCILE_REQUIRED,
+                "reason": "ACTIVE_WRITER_UNRESOLVED_PRIOR_EFFECTS",
+                "candidate_task_id": cand_task_id,
+                "conflicting_writers": [str(_record_value(writer, "task_id") or "")],
+            }
+
+        try:
+            _validate_mutation_identity(writer)
+        except ValueError as exc:
+            return {
+                "schema": MUTATION_CONFLICT_SCHEMA,
+                "claim_ceiling": MUTATION_CONFLICT_CLAIM_CEILING,
+                "disposition": CONFLICT_RECONCILE_REQUIRED,
+                "reason": f"ACTIVE_WRITER_IDENTITY_INVALID: {exc}",
+                "candidate_task_id": cand_task_id,
+                "conflicting_writers": [str(_record_value(writer, "task_id") or "")],
+            }
+
+        writer_contract = _record_contract(writer)
+        writer_task_id = str(
+            _record_value(writer, "task_id")
+            or _record_value(writer_contract, "task_id")
+            or ""
+        )
+        writer_attempt_id = str(_record_value(writer, "attempt_id") or "")
+        writer_mode = str(
+            _record_value(writer_contract, "mutation_mode")
+            or _record_value(writer, "mutation_mode")
+            or "ISOLATED_TARGET"
+        ).upper()
+        writer_rev = str(
+            _record_value(writer, "controller_revision")
+            or _record_value(writer_contract, "controller_revision")
+            or ""
+        )
+
+        if (
+            writer_task_id == cand_task_id
+            and writer_attempt_id
+            and writer_attempt_id == cand_attempt_id
+        ):
+            continue
+
+        if writer_rev != cand_rev:
+            return {
+                "schema": MUTATION_CONFLICT_SCHEMA,
+                "claim_ceiling": MUTATION_CONFLICT_CLAIM_CEILING,
+                "disposition": CONFLICT_STALE,
+                "reason": f"WRITER_REVISION_MISMATCH: candidate has {cand_rev}, writer {writer_task_id} has {writer_rev}",
+                "candidate_task_id": cand_task_id,
+                "conflicting_writers": [writer_task_id],
+            }
+
+        if cand_mode == "DIRECT_CANONICAL" and writer_mode == "DIRECT_CANONICAL":
+            return {
+                "schema": MUTATION_CONFLICT_SCHEMA,
+                "claim_ceiling": MUTATION_CONFLICT_CLAIM_CEILING,
+                "disposition": CONFLICT_OVERLAP,
+                "reason": "CONCURRENT_DIRECT_CANONICAL_CONFLICT",
+                "candidate_task_id": cand_task_id,
+                "conflicting_writers": [writer_task_id],
+            }
+
+        try:
+            writer_paths = _normalized_mutation_paths(writer)
+        except ValueError as exc:
+            return {
+                "schema": MUTATION_CONFLICT_SCHEMA,
+                "claim_ceiling": MUTATION_CONFLICT_CLAIM_CEILING,
+                "disposition": CONFLICT_RECONCILE_REQUIRED,
+                "reason": f"WRITER_PATHS_MALFORMED: {exc}",
+                "candidate_task_id": cand_task_id,
+                "conflicting_writers": [writer_task_id],
+            }
+
+        overlaps = [
+            cp
+            for cp in cand_paths
+            for wp in writer_paths
+            if cp == wp or cp.startswith(wp + "/") or wp.startswith(cp + "/")
+        ]
+        if overlaps:
+            conflicting_writers.append(
+                {
+                    "task_id": writer_task_id,
+                    "attempt_id": writer_attempt_id,
+                    "mutation_mode": writer_mode,
+                    "overlapping_paths": sorted(set(overlaps)),
+                }
+            )
+
+    if conflicting_writers:
+        return {
+            "schema": MUTATION_CONFLICT_SCHEMA,
+            "claim_ceiling": MUTATION_CONFLICT_CLAIM_CEILING,
+            "disposition": CONFLICT_OVERLAP,
+            "reason": "MUTATION_DOMAINS_OVERLAP",
+            "candidate_task_id": cand_task_id,
+            "candidate_attempt_id": cand_attempt_id,
+            "candidate_mode": cand_mode,
+            "conflicting_writers": conflicting_writers,
+            "normalized_domain": list(cand_paths),
+            "observed_at": _utc_now(),
+        }
+
+    return {
+        "schema": MUTATION_CONFLICT_SCHEMA,
+        "claim_ceiling": MUTATION_CONFLICT_CLAIM_CEILING,
+        "disposition": CONFLICT_CLEAR,
+        "reason": "DISJOINT_AND_VALID",
+        "candidate_task_id": cand_task_id,
+        "candidate_attempt_id": cand_attempt_id,
+        "candidate_mode": cand_mode,
+        "normalized_domain": list(cand_paths),
+        "active_writer_count": len(writers),
+        "observed_at": _utc_now(),
+    }
+
+
 def mutation_domains_conflict(left: Any, right: Any) -> bool:
     """Fail-closed conflict predicate for two isolated mutation domains."""
     _validate_mutation_identity(left)
@@ -345,7 +595,7 @@ def mutation_domains_conflict(left: Any, right: Any) -> bool:
     right_contract = _record_contract(right)
     left_mode = str(_record_value(left_contract, "mutation_mode") or "ISOLATED_TARGET").upper()
     right_mode = str(_record_value(right_contract, "mutation_mode") or "ISOLATED_TARGET").upper()
-    if left_mode == "DIRECT_CANONICAL" or right_mode == "DIRECT_CANONICAL":
+    if left_mode == "DIRECT_CANONICAL" and right_mode == "DIRECT_CANONICAL":
         return True
     left_controller = str(_record_value(left, "controller_worktree") or _record_value(left_contract, "controller_repo_root") or "")
     right_controller = str(_record_value(right, "controller_worktree") or _record_value(right_contract, "controller_repo_root") or "")
@@ -1440,6 +1690,34 @@ class WorktreeManager:
             task_states=task_states,
         )
         return lease
+
+    def evaluate_admission(
+        self,
+        candidate: Any,
+        active_writers: Optional[Sequence[Any]] = None,
+        *,
+        expected_revision: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Evaluate cross-entrypoint physical conflict admission for candidate."""
+        return evaluate_cross_entrypoint_conflict(
+            candidate,
+            active_writers=active_writers,
+            expected_revision=expected_revision,
+        )
+
+    def readback_conflict_state(
+        self,
+        candidate: Any,
+        active_writers: Optional[Sequence[Any]] = None,
+        *,
+        expected_revision: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Readback physical conflict admission disposition for candidate."""
+        return self.evaluate_admission(
+            candidate,
+            active_writers=active_writers,
+            expected_revision=expected_revision,
+        )
 
     def target_conflict(
         self,
