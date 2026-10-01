@@ -324,9 +324,25 @@ class AdmissionReceipt:
     capture_sha256: str
     disposition: str
     activation_boundary: str
+    activation_state: str
+    exclusion_set_sha256: str
+    issue_state_at_admission: str
+    implementation_pr_numbers: tuple[int, ...]
+    tracked_parent_issue_number: int | None
+    tracked_parent_created_at: str | None
     admitted_at: str
     receipt_sha256: str
     schema: str = "nexus.hybrid_replication.admission.v1"
+
+    def __post_init__(self) -> None:
+        if self.activation_state != "AUTOMATIC_CAPTURE_READY":
+            raise ValueError("automatic_capture_ready_required")
+        if len(self.exclusion_set_sha256) != 64 or any(
+            char not in "0123456789abcdef" for char in self.exclusion_set_sha256
+        ):
+            raise ValueError("exclusion_set_sha256_required")
+        if self.issue_state_at_admission not in {"open", "closed"}:
+            raise ValueError("invalid_issue_state_at_admission")
 
     @classmethod
     def create(
@@ -335,21 +351,47 @@ class AdmissionReceipt:
         snapshot: TaskSnapshot,
         disposition: str,
         activation_boundary: str,
+        activation_state: str,
+        exclusion_set_sha256: str,
+        issue_state_at_admission: str,
+        implementation_pr_numbers: tuple[int, ...],
+        tracked_parent_issue_number: int | None,
+        tracked_parent_created_at: str | None,
         admitted_at: str,
     ) -> "AdmissionReceipt":
         if not activation_boundary:
             raise ValueError("activation_boundary_required")
+        if activation_state != "AUTOMATIC_CAPTURE_READY":
+            raise ValueError("automatic_capture_ready_required")
+        if len(exclusion_set_sha256) != 64:
+            raise ValueError("exclusion_set_sha256_required")
         payload = {
             "schema": "nexus.hybrid_replication.admission.v1",
             "task_key": snapshot.task_key,
             "capture_sha256": snapshot.capture_sha256,
             "disposition": disposition,
             "activation_boundary": activation_boundary,
+            "activation_state": activation_state,
+            "exclusion_set_sha256": exclusion_set_sha256,
+            "issue_state_at_admission": issue_state_at_admission,
+            "implementation_pr_numbers": list(implementation_pr_numbers),
+            "tracked_parent_issue_number": tracked_parent_issue_number,
+            "tracked_parent_created_at": tracked_parent_created_at,
             "admitted_at": admitted_at,
         }
         return cls(
+            task_key=snapshot.task_key,
+            capture_sha256=snapshot.capture_sha256,
+            disposition=disposition,
+            activation_boundary=activation_boundary,
+            activation_state=activation_state,
+            exclusion_set_sha256=exclusion_set_sha256,
+            issue_state_at_admission=issue_state_at_admission,
+            implementation_pr_numbers=tuple(implementation_pr_numbers),
+            tracked_parent_issue_number=tracked_parent_issue_number,
+            tracked_parent_created_at=tracked_parent_created_at,
+            admitted_at=admitted_at,
             receipt_sha256=_sha256(_canonical_bytes(payload)),
-            **{k: v for k, v in payload.items() if k != "schema"},
         )
 
     def to_payload(self) -> dict[str, Any]:
@@ -359,6 +401,12 @@ class AdmissionReceipt:
             "capture_sha256": self.capture_sha256,
             "disposition": self.disposition,
             "activation_boundary": self.activation_boundary,
+            "activation_state": self.activation_state,
+            "exclusion_set_sha256": self.exclusion_set_sha256,
+            "issue_state_at_admission": self.issue_state_at_admission,
+            "implementation_pr_numbers": list(self.implementation_pr_numbers),
+            "tracked_parent_issue_number": self.tracked_parent_issue_number,
+            "tracked_parent_created_at": self.tracked_parent_created_at,
             "admitted_at": self.admitted_at,
             "receipt_sha256": self.receipt_sha256,
         }
@@ -394,6 +442,22 @@ def parse_admission_comment(body: str) -> AdmissionReceipt:
         capture_sha256=str(payload["capture_sha256"]),
         disposition=str(payload["disposition"]),
         activation_boundary=str(payload["activation_boundary"]),
+        activation_state=str(payload["activation_state"]),
+        exclusion_set_sha256=str(payload["exclusion_set_sha256"]),
+        issue_state_at_admission=str(payload["issue_state_at_admission"]),
+        implementation_pr_numbers=tuple(
+            int(item) for item in payload.get("implementation_pr_numbers", []) or []
+        ),
+        tracked_parent_issue_number=(
+            None
+            if payload.get("tracked_parent_issue_number") is None
+            else int(payload["tracked_parent_issue_number"])
+        ),
+        tracked_parent_created_at=(
+            None
+            if payload.get("tracked_parent_created_at") is None
+            else str(payload["tracked_parent_created_at"])
+        ),
         admitted_at=str(payload["admitted_at"]),
         receipt_sha256=supplied,
     )
@@ -407,7 +471,14 @@ class IssueAdmissionPolicy:
     excluded_task_keys: tuple[str, ...] = ()
 
 
-def classify_opened_issue(snapshot: TaskSnapshot, policy: IssueAdmissionPolicy) -> str:
+def classify_opened_issue(
+    snapshot: TaskSnapshot,
+    policy: IssueAdmissionPolicy,
+    *,
+    issue_state_at_admission: str = "open",
+    implementation_pr_numbers: tuple[int, ...] = (),
+    tracked_parent_created_at: str | None = None,
+) -> str:
     if snapshot.repository not in set(policy.candidate_repositories):
         return "UNTRACKED_WORK_ITEM_SCOPE_GAP"
     if snapshot.task_key == policy.experiment_control_task:
@@ -416,6 +487,10 @@ def classify_opened_issue(snapshot: TaskSnapshot, policy: IssueAdmissionPolicy) 
         return "CONTAMINATION_EXCLUDED"
     if snapshot.created_at < policy.prospective_boundary:
         return "EXCLUDED_PRE_BOUNDARY"
+    if tracked_parent_created_at is not None:
+        if tracked_parent_created_at < policy.prospective_boundary:
+            return "EXCLUDE_PARENT_TASK_PRE_BOUNDARY"
+        return "PARENT_TASK_SCOPE_GAP"
     referenced = {
         repo
         for repo in policy.candidate_repositories
@@ -423,6 +498,10 @@ def classify_opened_issue(snapshot: TaskSnapshot, policy: IssueAdmissionPolicy) 
     }
     if referenced:
         return "CROSS_REPO_SCOPE_GAP"
+    if issue_state_at_admission != "open":
+        return "INTAKE_PROTOCOL_LOSS_TERMINAL_BEFORE_ADMISSION"
+    if implementation_pr_numbers:
+        return "INTAKE_PROTOCOL_LOSS_IMPLEMENTATION_PRESENT"
     return "ADMITTED_PRIMARY_FRESH_TASK"
 
 
@@ -691,6 +770,10 @@ class AutomaticReplicationStore:
             "CROSS_REPO_SCOPE_GAP",
             "CONTAMINATION_EXCLUDED",
             "UNTRACKED_WORK_ITEM_SCOPE_GAP",
+            "EXCLUDE_PARENT_TASK_PRE_BOUNDARY",
+            "PARENT_TASK_SCOPE_GAP",
+            "INTAKE_PROTOCOL_LOSS_TERMINAL_BEFORE_ADMISSION",
+            "INTAKE_PROTOCOL_LOSS_IMPLEMENTATION_PRESENT",
             "PRE_AUTOMATION_PROVISIONAL_CAPTURE",
         }:
             raise ValueError("invalid_admission_disposition")
