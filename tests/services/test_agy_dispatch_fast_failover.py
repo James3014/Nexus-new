@@ -174,7 +174,7 @@ def test_stale_quota_refresh_skips_blocked_account_before_worker(monkeypatch) ->
 def test_model_output_quota_word_is_not_quota_exhaustion() -> None:
     kind = dispatch.classify_failure(
         1,
-        "I analyzed the quota policy and found a syntax issue.",
+        "The report says quota exhausted, but this is ordinary model output.",
         "",
         False,
     )
@@ -224,3 +224,37 @@ def test_quota_failover_has_separate_bounded_ceiling(monkeypatch) -> None:
     assert code == 75
     assert calls == ["a", "b", "c"]
     assert [name for name, _kind in coordinator.retired] == ["a", "b", "c"]
+
+
+def test_run_agy_terminates_promptly_on_provider_quota_stderr(tmp_path: Path, monkeypatch) -> None:
+    fake_agy = tmp_path / "fake-agy"
+    fake_agy.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys, time\n"
+        "sys.stderr.write('RESOURCE_EXHAUSTED: quota exhausted\\n')\n"
+        "sys.stderr.flush()\n"
+        "time.sleep(5)\n",
+        encoding="utf-8",
+    )
+    fake_agy.chmod(0o755)
+    monkeypatch.setattr(dispatch.shutil, "which", lambda _name: str(fake_agy))
+
+    code, out, err, timed_out, wall_ms = dispatch.run_agy(
+        env=os.environ.copy(),
+        prompt="quota canary",
+        cwd=str(tmp_path),
+        mode="plan",
+        model="gemini-3.8-flash-high",
+        effort="low",
+        timeout=30,
+    )
+
+    assert code not in (None, 0)
+    assert out == ""
+    assert "RESOURCE_EXHAUSTED" in err
+    assert timed_out is False
+    assert wall_ms < 2000
+    assert (
+        dispatch.classify_failure(code, out, err, timed_out)
+        is dispatch.AccountFailureKind.QUOTA_EXHAUSTED
+    )

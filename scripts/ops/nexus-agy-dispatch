@@ -581,25 +581,30 @@ def _family_failure_unavailable_until(
     return current + DEFAULT_QUOTA_FAMILY_BLOCK_SECONDS
 
 
+_QUOTA_FAILURE_MARKERS = (
+    "resource_exhausted",
+    "exceeded your current quota",
+    "insufficient_quota",
+    "quota exhausted",
+    "quota_exhausted",
+    "quota exceeded",
+    "quota limit reached",
+    "quota limit exceeded",
+)
+
+
+def _has_quota_failure_signal(text: str) -> bool:
+    lowered = text.lower()
+    return any(marker in lowered for marker in _QUOTA_FAILURE_MARKERS)
+
+
 def classify_failure(
     returncode: int | None, stdout: str, stderr: str, timed_out: bool
 ) -> AccountFailureKind:
     if timed_out:
         return AccountFailureKind.TIMEOUT
     text = (stdout + "\n" + stderr).lower()
-    if any(
-        k in text
-        for k in (
-            "resource_exhausted",
-            "exceeded your current quota",
-            "insufficient_quota",
-            "quota exhausted",
-            "quota_exhausted",
-            "quota exceeded",
-            "quota limit reached",
-            "quota limit exceeded",
-        )
-    ):
+    if _has_quota_failure_signal(stderr):
         return AccountFailureKind.QUOTA_EXHAUSTED
     if any(k in text for k in ("429", "rate limit", "ratelimit")):
         return AccountFailureKind.RATE_LIMITED
@@ -714,31 +719,86 @@ def run_agy(
     if effort:
         argv += ["--effort", effort]
     argv += ["--print", prompt]
+
     started = time.monotonic()
-    try:
-        p = subprocess.run(
-            argv,
-            cwd=cwd,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=timeout + 10,
-        )
-        stderr_lower = (p.stderr or "").lower()
-        agy_print_timed_out = (
-            "[agy] print timeout after" in stderr_lower and "turn in progress" in stderr_lower
-        )
+    process = subprocess.Popen(
+        argv,
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
+    quota_failure = threading.Event()
+
+    def _drain(stream, sink: list[str], *, detect_quota: bool = False) -> None:
+        if stream is None:
+            return
+        for line in iter(stream.readline, ""):
+            sink.append(line)
+            if detect_quota and _has_quota_failure_signal(line):
+                quota_failure.set()
+        stream.close()
+
+    stdout_thread = threading.Thread(
+        target=_drain,
+        args=(process.stdout, stdout_lines),
+        daemon=True,
+    )
+    stderr_thread = threading.Thread(
+        target=_drain,
+        args=(process.stderr, stderr_lines),
+        kwargs={"detect_quota": True},
+        daemon=True,
+    )
+    stdout_thread.start()
+    stderr_thread.start()
+
+    timed_out = False
+    quota_terminated = False
+    deadline = started + max(1, timeout) + 10
+    while process.poll() is None:
+        if quota_failure.wait(0.05):
+            quota_terminated = True
+            process.terminate()
+            break
+        if time.monotonic() >= deadline:
+            timed_out = True
+            process.terminate()
+            break
+        time.sleep(0.05)
+
+    if process.poll() is None:
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=2)
+
+    stdout_thread.join(timeout=2)
+    stderr_thread.join(timeout=2)
+    out = "".join(stdout_lines)
+    err = "".join(stderr_lines)
+    stderr_lower = err.lower()
+    agy_print_timed_out = (
+        "[agy] print timeout after" in stderr_lower and "turn in progress" in stderr_lower
+    )
+    wall_ms = int((time.monotonic() - started) * 1000)
+
+    if timed_out:
+        return None, out, err, True, wall_ms
+    if quota_terminated:
         return (
-            p.returncode,
-            p.stdout,
-            p.stderr,
-            agy_print_timed_out,
-            int((time.monotonic() - started) * 1000),
+            process.returncode if process.returncode not in (None, 0) else 1,
+            out,
+            err,
+            False,
+            wall_ms,
         )
-    except subprocess.TimeoutExpired as exc:
-        out = exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-        err = exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
-        return None, out, err, True, int((time.monotonic() - started) * 1000)
+    return process.returncode, out, err, agy_print_timed_out, wall_ms
 
 
 def emit_meta(data: dict) -> None:
