@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from nexus.orchestrator.worktree_manager import (
     CONFLICT_CLEAR,
     CONFLICT_OVERLAP,
@@ -25,6 +27,7 @@ from nexus.orchestrator.worktree_manager import (
     MUTATION_CONFLICT_SCHEMA,
     WorktreeManager,
     evaluate_cross_entrypoint_conflict,
+    mutation_domains_conflict,
 )
 
 
@@ -71,7 +74,9 @@ def test_direct_gpt_vs_overlapping_rdc_worker():
         mutation_mode="DIRECT_DELEGATED",
     )
 
-    res = evaluate_cross_entrypoint_conflict(direct_gpt, [rdc_worker], expected_revision="a" * 40, inventory_complete=True)
+    res = evaluate_cross_entrypoint_conflict(
+        direct_gpt, [rdc_worker], expected_revision="a" * 40, inventory_complete=True
+    )
     assert res["schema"] == MUTATION_CONFLICT_SCHEMA
     assert res["claim_ceiling"] == MUTATION_CONFLICT_CLAIM_CEILING
     assert res["disposition"] == CONFLICT_OVERLAP
@@ -91,7 +96,9 @@ def test_rdc_worker_vs_local_writer_overlapping_domain():
         mutation_mode="LOCAL",
     )
 
-    res = evaluate_cross_entrypoint_conflict(local_writer, [rdc_worker], expected_revision="a" * 40, inventory_complete=True)
+    res = evaluate_cross_entrypoint_conflict(
+        local_writer, [rdc_worker], expected_revision="a" * 40, inventory_complete=True
+    )
     assert res["disposition"] == CONFLICT_OVERLAP
 
 
@@ -108,7 +115,9 @@ def test_governed_target_vs_direct_mutation():
         mutation_mode="DIRECT_CANONICAL",
     )
 
-    res = evaluate_cross_entrypoint_conflict(governed, [direct], expected_revision="a" * 40, inventory_complete=True)
+    res = evaluate_cross_entrypoint_conflict(
+        governed, [direct], expected_revision="a" * 40, inventory_complete=True
+    )
     assert res["disposition"] == CONFLICT_OVERLAP
 
 
@@ -131,7 +140,9 @@ def test_disjoint_mutation_domains_allows_clear():
     )
 
     res = evaluate_cross_entrypoint_conflict(
-        direct_gpt, [rdc_worker, isolated_target], expected_revision="a" * 40,
+        direct_gpt,
+        [rdc_worker, isolated_target],
+        expected_revision="a" * 40,
         inventory_complete=True,
     )
     assert res["disposition"] == CONFLICT_CLEAR
@@ -147,12 +158,16 @@ def test_stale_writer_identity_fails_closed():
     stale_active = _writer("task-2", ["nexus/b.py"], controller_revision=stale_rev)
 
     # Writer stale against expected revision
-    res = evaluate_cross_entrypoint_conflict(cand, [stale_active], expected_revision=base_rev, inventory_complete=True)
+    res = evaluate_cross_entrypoint_conflict(
+        cand, [stale_active], expected_revision=base_rev, inventory_complete=True
+    )
     assert res["disposition"] == CONFLICT_STALE
 
     # Candidate stale against expected revision
     res_cand_stale = evaluate_cross_entrypoint_conflict(
-        cand, [stale_active], expected_revision="c" * 40,
+        cand,
+        [stale_active],
+        expected_revision="c" * 40,
         inventory_complete=True,
     )
     assert res_cand_stale["disposition"] == CONFLICT_STALE
@@ -164,7 +179,9 @@ def test_unresolved_unknown_prior_effect_fails_closed():
         ["nexus/a.py"],
         unknown_effect_refs=["unconfirmed_git_push"],
     )
-    res = evaluate_cross_entrypoint_conflict(cand_unknown, [], expected_revision="a" * 40, inventory_complete=True)
+    res = evaluate_cross_entrypoint_conflict(
+        cand_unknown, [], expected_revision="a" * 40, inventory_complete=True
+    )
     assert res["disposition"] == CONFLICT_RECONCILE_REQUIRED
     assert res["reason"] == "CANDIDATE_UNRESOLVED_PRIOR_EFFECTS"
 
@@ -175,7 +192,9 @@ def test_unresolved_unknown_prior_effect_fails_closed():
         unresolved_effects=True,
     )
     res_active = evaluate_cross_entrypoint_conflict(
-        cand_clean, [active_with_unknown], expected_revision="a" * 40,
+        cand_clean,
+        [active_with_unknown],
+        expected_revision="a" * 40,
         inventory_complete=True,
     )
     assert res_active["disposition"] == CONFLICT_RECONCILE_REQUIRED
@@ -184,7 +203,9 @@ def test_unresolved_unknown_prior_effect_fails_closed():
 
 def test_missing_or_corrupt_active_writer_fails_closed_to_unknown():
     cand = _writer("task-1", ["nexus/a.py"])
-    res = evaluate_cross_entrypoint_conflict(cand, [None], expected_revision="a" * 40, inventory_complete=True)
+    res = evaluate_cross_entrypoint_conflict(
+        cand, [None], expected_revision="a" * 40, inventory_complete=True
+    )
     assert res["disposition"] == CONFLICT_UNKNOWN
     assert res["reason"] == "ACTIVE_WRITER_MISSING_OR_CORRUPT"
 
@@ -196,28 +217,38 @@ def test_worktree_manager_methods_and_cleanup_isolation(tmp_path: Path):
     other = _writer("task-2", ["nexus/b.py"])
 
     # evaluate_admission and readback_conflict_state with explicit expected_revision
-    adm = manager.evaluate_admission(cand, [other], expected_revision="a" * 40, inventory_complete=True)
+    adm = manager.evaluate_admission(
+        cand, [other], expected_revision="a" * 40, inventory_complete=True
+    )
     assert adm["disposition"] == CONFLICT_CLEAR
 
-    rb = manager.readback_conflict_state(cand, [other], expected_revision="a" * 40, inventory_complete=True)
+    rb = manager.readback_conflict_state(
+        cand, [other], expected_revision="a" * 40, inventory_complete=True
+    )
     assert rb["disposition"] == CONFLICT_CLEAR
     assert rb["schema"] == MUTATION_CONFLICT_SCHEMA
 
     # Overlap readback
     overlap_writer = _writer("task-3", ["nexus/a.py"])
-    rb_overlap = manager.readback_conflict_state(cand, [overlap_writer], expected_revision="a" * 40, inventory_complete=True)
+    rb_overlap = manager.readback_conflict_state(
+        cand, [overlap_writer], expected_revision="a" * 40, inventory_complete=True
+    )
     assert rb_overlap["disposition"] == CONFLICT_OVERLAP
 
 
 def test_missing_writer_inventory_fails_closed():
     cand = _writer("task-1", ["nexus/a.py"])
     # Passing active_writers=None must fail closed to UNKNOWN, never default to empty list/CLEAR
-    res = evaluate_cross_entrypoint_conflict(cand, active_writers=None, expected_revision="a" * 40, inventory_complete=True)
+    res = evaluate_cross_entrypoint_conflict(
+        cand, active_writers=None, expected_revision="a" * 40, inventory_complete=True
+    )
     assert res["disposition"] == CONFLICT_UNKNOWN
     assert res["reason"] == "ACTIVE_WRITER_INVENTORY_MISSING"
 
     manager = WorktreeManager()
-    res_mgr = manager.evaluate_admission(cand, active_writers=None, expected_revision="a" * 40, inventory_complete=True)
+    res_mgr = manager.evaluate_admission(
+        cand, active_writers=None, expected_revision="a" * 40, inventory_complete=True
+    )
     assert res_mgr["disposition"] == CONFLICT_UNKNOWN
     assert res_mgr["reason"] == "ACTIVE_WRITER_INVENTORY_MISSING"
 
@@ -225,19 +256,25 @@ def test_missing_writer_inventory_fails_closed():
 def test_empty_proven_inventory_vs_unknown_inventory():
     cand = _writer("task-1", ["nexus/a.py"])
     # Proven empty inventory with current revision yields CLEAR
-    res_proven = evaluate_cross_entrypoint_conflict(cand, active_writers=[], expected_revision="a" * 40, inventory_complete=True)
+    res_proven = evaluate_cross_entrypoint_conflict(
+        cand, active_writers=[], expected_revision="a" * 40, inventory_complete=True
+    )
     assert res_proven["disposition"] == CONFLICT_CLEAR
     assert res_proven["active_writer_count"] == 0
 
     # Missing inventory yields UNKNOWN
-    res_unknown = evaluate_cross_entrypoint_conflict(cand, active_writers=None, expected_revision="a" * 40, inventory_complete=True)
+    res_unknown = evaluate_cross_entrypoint_conflict(
+        cand, active_writers=None, expected_revision="a" * 40, inventory_complete=True
+    )
     assert res_unknown["disposition"] == CONFLICT_UNKNOWN
 
 
 def test_missing_expected_revision_fails_closed():
     cand = _writer("task-1", ["nexus/a.py"])
     # Missing expected_revision fails closed
-    res = evaluate_cross_entrypoint_conflict(cand, active_writers=[], expected_revision=None, inventory_complete=True)
+    res = evaluate_cross_entrypoint_conflict(
+        cand, active_writers=[], expected_revision=None, inventory_complete=True
+    )
     assert res["disposition"] == CONFLICT_UNKNOWN
     assert res["reason"] == "EXPECTED_REVISION_REQUIRED_FOR_ADMISSION"
 
@@ -248,7 +285,9 @@ def test_stale_all_writers_snapshot_fails_closed():
     writer = _writer("task-2", ["nexus/b.py"], controller_revision="b" * 40)
 
     # Even though both writers match each other, both are stale compared to current expected revision
-    res = evaluate_cross_entrypoint_conflict(cand, [writer], expected_revision="a" * 40, inventory_complete=True)
+    res = evaluate_cross_entrypoint_conflict(
+        cand, [writer], expected_revision="a" * 40, inventory_complete=True
+    )
     assert res["disposition"] == CONFLICT_STALE
     assert res["reason"].startswith("CANDIDATE_REVISION_STALE")
 
@@ -256,14 +295,18 @@ def test_stale_all_writers_snapshot_fails_closed():
 def test_unsupported_mutation_lane_fails_closed():
     # Attempting to pass a transport name as a mutation authority lane
     cand_rdc = _writer("task-1", ["nexus/a.py"], mutation_mode="RDC")
-    res = evaluate_cross_entrypoint_conflict(cand_rdc, active_writers=[], expected_revision="a" * 40, inventory_complete=True)
+    res = evaluate_cross_entrypoint_conflict(
+        cand_rdc, active_writers=[], expected_revision="a" * 40, inventory_complete=True
+    )
     assert res["disposition"] == CONFLICT_UNKNOWN
     assert "UNSUPPORTED_MUTATION_LANE" in res["reason"]
 
     # Candidate valid, but writer uses pseudo lane
     cand_valid = _writer("task-1", ["nexus/a.py"], mutation_mode="DIRECT_CANONICAL")
     writer_dev_mcp = _writer("task-2", ["nexus/b.py"], mutation_mode="DEV_MCP")
-    res2 = evaluate_cross_entrypoint_conflict(cand_valid, [writer_dev_mcp], expected_revision="a" * 40, inventory_complete=True)
+    res2 = evaluate_cross_entrypoint_conflict(
+        cand_valid, [writer_dev_mcp], expected_revision="a" * 40, inventory_complete=True
+    )
     assert res2["disposition"] == CONFLICT_UNKNOWN
     assert "UNSUPPORTED_MUTATION_LANE" in res2["reason"]
 
@@ -271,7 +314,9 @@ def test_unsupported_mutation_lane_fails_closed():
 def test_readback_conflict_state_controller_unavailable_fails_closed():
     cand = _writer("task-1", ["nexus/a.py"], controller_worktree="/nonexistent/controller")
     manager = WorktreeManager()
-    res = manager.readback_conflict_state(cand, active_writers=None, expected_revision="a" * 40, inventory_complete=True)
+    res = manager.readback_conflict_state(
+        cand, active_writers=None, expected_revision="a" * 40, inventory_complete=True
+    )
     assert res["disposition"] == CONFLICT_UNKNOWN
     assert res["reason"] == "CANONICAL_READBACK_CONTROLLER_UNAVAILABLE"
 
@@ -359,3 +404,50 @@ def test_inventory_complete_requires_literal_true():
         )
         assert res["disposition"] == CONFLICT_UNKNOWN
         assert res["reason"] == "CROSS_ENTRYPOINT_INVENTORY_INCOMPLETE"
+
+
+@pytest.mark.parametrize(
+    "paths",
+    [
+        [],
+        ["../escape.py"],
+        ["/absolute.py"],
+        ["scope", "scope/a.py"],
+    ],
+)
+def test_same_attempt_writer_still_requires_valid_mutation_domain(paths):
+    candidate = _writer(
+        "task-same",
+        ["scope/a.py"],
+        attempt_id="attempt-same",
+        controller_revision="a" * 40,
+    )
+    writer = _writer(
+        "task-same",
+        paths,
+        attempt_id="attempt-same",
+        controller_revision="a" * 40,
+    )
+    result = evaluate_cross_entrypoint_conflict(
+        candidate,
+        [writer],
+        expected_revision="a" * 40,
+        inventory_complete=True,
+    )
+    assert result["disposition"] == CONFLICT_RECONCILE_REQUIRED
+    assert result["reason"].startswith("WRITER_PATHS_MALFORMED:")
+
+
+def test_existing_direct_canonical_guard_remains_fail_closed():
+    direct = _writer(
+        "task-direct",
+        ["src/direct.py"],
+        mutation_mode="DIRECT_CANONICAL",
+    )
+    isolated = _writer(
+        "task-isolated",
+        ["other/isolated.py"],
+        mutation_mode="ISOLATED_TARGET",
+    )
+    assert mutation_domains_conflict(direct, isolated) is True
+    assert mutation_domains_conflict(isolated, direct) is True
