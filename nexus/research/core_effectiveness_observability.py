@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from datetime import datetime
 from typing import Any, Iterable, Mapping
 
 OBSERVATION_SCHEMA = "nexus.core_effectiveness.attempt_observation.v1"
@@ -58,6 +59,15 @@ def _present(value: Any) -> bool:
     if isinstance(value, str):
         return bool(value.strip())
     return True
+
+
+def _timestamp(value: Any) -> datetime | None:
+    if not _present(value) or not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def _missing_fields(row: Mapping[str, Any], fields: Iterable[str]) -> list[str]:
@@ -132,7 +142,15 @@ def from_devspace_core_session(
     session: Mapping[str, Any],
     transport: str = "DEVSPACE",
 ) -> dict[str, Any]:
-    """Project an already-authoritative pre-effect Core session into the study schema."""
+    """Project an already-authoritative Core session into the study schema."""
+
+    created_at = session.get("createdAt")
+    first_effect_at = session.get("firstEffectAt")
+    created_time = _timestamp(created_at)
+    first_effect_time = _timestamp(first_effect_at)
+    prospective = created_time is not None and (
+        first_effect_time is None or created_time < first_effect_time
+    )
 
     return normalize_observation({
         "schema": OBSERVATION_SCHEMA,
@@ -140,7 +158,8 @@ def from_devspace_core_session(
         "work_item_id": work_item_id,
         "attempt_id": session.get("attemptId"),
         "attempt_index": attempt_index,
-        "enrolled_at": session.get("createdAt"),
+        "enrolled_at": created_at,
+        "first_effect_at": first_effect_at,
         "source_revision": session.get("sourceHead"),
         "source_tree": session.get("sourceTree"),
         "task_family": task_family,
@@ -148,7 +167,7 @@ def from_devspace_core_session(
         "execution_lane": execution_lane,
         "transport": transport,
         "eligibility_disposition": ELIGIBLE,
-        "prospective": not bool(session.get("firstEffectAt")),
+        "prospective": prospective,
         "terminal": False,
         "operation_id": session.get("operationId"),
         "workspace_session_id": session.get("workspaceSessionId"),
