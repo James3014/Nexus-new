@@ -509,3 +509,50 @@ def test_explicit_parent_created_before_boundary_is_not_reaged() -> None:
         )
         == "EXCLUDE_PARENT_TASK_PRE_BOUNDARY"
     )
+
+
+def test_ground_truth_details_are_sealed_with_terminal_identity(tmp_path: Path) -> None:
+    store = AutomaticReplicationStore(tmp_path)
+    snapshot = _snapshot(1320)
+    store.capture(snapshot, admission_disposition="ADMITTED_PRIMARY_FRESH_TASK")
+    store.freeze_route(
+        snapshot.task_key,
+        RouteClassification(
+            stratum="C",
+            reason="strong semantic work",
+            capture_sha256=snapshot.capture_sha256,
+            frozen_policy_sha256="7" * 64,
+            decided_at="2026-10-01T00:01:00Z",
+        ),
+    )
+    store.seal_raw(
+        snapshot.task_key,
+        RawRouteResult.create(
+            route="C",
+            provider="openai",
+            requested_model="gpt-5.6-luna",
+            resolved_model="gpt-5.6-luna",
+            model_call_count=1,
+            input_tokens=10,
+            uncached_input_tokens=10,
+            output_tokens=2,
+            wall_time_seconds=0.5,
+            failures=(),
+            retries=0,
+            fallbacks=(),
+            raw_response={"summary": "bounded"},
+        ),
+    )
+    state = store.bind_ground_truth(
+        snapshot.task_key,
+        GroundTruthEvidence(
+            terminal_state="CLOSED_WITH_MERGED_PR",
+            terminal_at="2026-10-01T00:30:00Z",
+            evidence_refs=("pr:1321@" + "b" * 40,),
+            details={
+                "changed_files": ["nexus/example.py"],
+                "checks": [{"name": "test", "state": "success"}],
+            },
+        ),
+    )
+    assert state["ground_truth"]["details"]["changed_files"] == ["nexus/example.py"]

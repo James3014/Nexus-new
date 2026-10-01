@@ -6,7 +6,7 @@ import hashlib
 import json
 import shlex
 import subprocess
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -299,6 +299,7 @@ class GroundTruthEvidence:
     terminal_state: str
     terminal_at: str
     evidence_refs: tuple[str, ...]
+    details: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.terminal_state.strip():
@@ -644,6 +645,7 @@ class ExternalGroundTruthResolver:
             terminal_state=str(payload.get("terminal_state") or ""),
             terminal_at=str(payload.get("terminal_at") or ""),
             evidence_refs=tuple(str(item) for item in payload.get("evidence_refs", []) or []),
+            details=dict(payload.get("details") or {}),
         )
 
 
