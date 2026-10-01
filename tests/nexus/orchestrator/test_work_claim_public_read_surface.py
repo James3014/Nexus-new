@@ -110,7 +110,10 @@ def test_read_work_claim_exposes_all_required_contract_fields(service: SelfHoste
     assert claim["attempt_id"] == f"attempt-{task_id}"
     assert claim["claim_id"]
     assert claim["generation"] == 1
-    assert claim["fencing_token"] == f"{claim['claim_id']}:1"
+    # Raw mutation credential MUST NOT be exposed in public read projection
+    assert "fencing_token" not in claim
+    assert claim["fence_identity"] == f"urn:nexus:claim_fence:{claim['claim_id']}:1"
+    assert claim["fence_hash"]
     assert claim["holder"] == "worker-luna"
     assert claim["provider"] == "openai"
     assert claim["model"] == "gpt-6-luna"
@@ -131,7 +134,7 @@ def test_read_work_claim_exposes_all_required_contract_fields(service: SelfHoste
     }
 
 
-def test_read_work_claim_detects_stale_generation(service: SelfHostedTaskService):
+def test_read_work_claim_detects_stale_and_future_generation(service: SelfHostedTaskService):
     task_id = "task-gen-test"
     _seed_task_state(service, task_id)
     req = _sample_claim_request(task_id=task_id)
@@ -159,6 +162,15 @@ def test_read_work_claim_detects_stale_generation(service: SelfHostedTaskService
     # Read probing current generation 2 -> CURRENT
     current_probe = service.read_work_claim({"task_id": task_id, "generation": 2})
     assert current_probe["claim"]["generation_status"] == "CURRENT"
+
+    # Read probing future generation 3 -> marked FUTURE_GENERATION (never false-safe CURRENT)
+    future_probe = service.read_work_claim({"task_id": task_id, "generation": 3})
+    assert future_probe["claim"]["generation_status"] == "FUTURE_GENERATION"
+
+    # Invalid generation type probe fails closed
+    inv_probe = service.read_work_claim({"task_id": task_id, "generation": "two"})
+    assert inv_probe["status"] == "BLOCKED"
+    assert inv_probe["reason"] == "INVALID_GENERATION"
 
 
 def test_read_claim_is_strictly_read_only_and_never_mints_ownership(service: SelfHostedTaskService):
@@ -236,3 +248,43 @@ def test_list_active_work_claims_skips_malformed_records_gracefully(service: Sel
     # Listing must not raise, skips invalid claim record
     claims = service.list_active_work_claims()
     assert len(claims) == 0
+
+
+def test_read_work_claim_fails_closed_on_tampered_stored_record(service: SelfHostedTaskService):
+    task_id = "task-tampered"
+    _seed_task_state(service, task_id)
+    req = _sample_claim_request(task_id=task_id)
+    service.acquire_work_claim(req)
+
+    # Tamper with the stored state file directly
+    with service._state_lock():
+        path = service._state_path(task_id)
+        state = json.loads(path.read_text(encoding="utf-8"))
+        state["work_claim"]["identity_hash"] = "forged-identity-hash"
+        path.write_text(json.dumps(state), encoding="utf-8")
+
+    # Read must fail closed rather than return forged/tampered claim
+    res = service.read_work_claim({"task_id": task_id})
+    assert res["status"] == "BLOCKED"
+    assert res["reason"] == "WORK_CLAIM_TAMPERED"
+    assert res["found"] is False
+
+
+def test_read_work_claim_does_not_leak_mutation_credential(service: SelfHostedTaskService):
+    task_id = "task-credential-guard"
+    _seed_task_state(service, task_id)
+    req = _sample_claim_request(task_id=task_id)
+    acq = service.acquire_work_claim(req)
+    raw_token = acq["claim"]["fencing_token"]
+    assert raw_token  # Authoritative acquire returned token to holder
+
+    read_res = service.read_work_claim({"task_id": task_id})
+    assert read_res["found"] is True
+    claim = read_res["claim"]
+
+    # Raw token must not appear in any value of the projected public dictionary
+    for k, v in claim.items():
+        assert v != raw_token, f"raw token leaked in key {k}"
+    assert "fencing_token" not in claim
+    assert claim["fence_identity"]
+    assert claim["fence_hash"]

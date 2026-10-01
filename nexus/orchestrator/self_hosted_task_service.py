@@ -2670,13 +2670,19 @@ class SelfHostedTaskService:
             or str(identity.get("role") or "")
             or str(identity.get("provider") or "")
         )
+        claim_id = str(claim_record.get("claim_id") or "")
+        gen = int(claim_record.get("generation") or 1)
+        raw_fencing_token = str(claim_record.get("fencing_token") or "")
+        fence_identity = f"urn:nexus:claim_fence:{claim_id}:{gen}"
+        fence_hash = hashlib.sha256(raw_fencing_token.encode("utf-8")).hexdigest() if raw_fencing_token else ""
         return {
             "schema": self.PUBLIC_WORK_CLAIM_SCHEMA,
             "claim_ceiling": self.PUBLIC_WORK_CLAIM_CEILING,
             "claim_enforcement_state": "FAIL_CLOSED_PROJECTION_ONLY",
-            "claim_id": str(claim_record.get("claim_id") or ""),
-            "generation": int(claim_record.get("generation") or 1),
-            "fencing_token": str(claim_record.get("fencing_token") or ""),
+            "claim_id": claim_id,
+            "generation": gen,
+            "fence_identity": fence_identity,
+            "fence_hash": fence_hash,
             "state": str(claim_record.get("status") or "CLAIMED"),
             "holder": holder,
             "repository": str(identity.get("repository") or ""),
@@ -2724,21 +2730,31 @@ class SelfHostedTaskService:
                     "found": False,
                     "task_id": task_id,
                 }
-            self._validate_claim_record(claim_record)
+            try:
+                self._validate_claim_record(claim_record)
+            except RuntimeError as exc:
+                return {
+                    "status": "BLOCKED",
+                    "reason": str(exc),
+                    "found": False,
+                    "task_id": task_id,
+                }
 
             expected_generation = request.get("generation")
-            is_stale_generation = False
+            generation_status = "CURRENT"
             if expected_generation is not None:
                 if not isinstance(expected_generation, int) or isinstance(expected_generation, bool):
                     return {"status": "BLOCKED", "reason": "INVALID_GENERATION", "found": False}
-                if expected_generation < claim_record["generation"]:
-                    is_stale_generation = True
+                current_gen = int(claim_record.get("generation") or 1)
+                if expected_generation < current_gen:
+                    generation_status = "STALE_GENERATION"
+                elif expected_generation > current_gen:
+                    generation_status = "FUTURE_GENERATION"
+                else:
+                    generation_status = "CURRENT"
 
             projected = self._project_public_claim(claim_record, state=state)
-            if is_stale_generation:
-                projected["generation_status"] = "STALE_GENERATION"
-            else:
-                projected["generation_status"] = "CURRENT"
+            projected["generation_status"] = generation_status
 
             return {
                 "status": "FOUND",
