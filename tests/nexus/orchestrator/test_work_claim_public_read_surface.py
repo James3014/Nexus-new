@@ -108,11 +108,13 @@ def test_read_work_claim_exposes_all_required_contract_fields(service: SelfHoste
     assert claim["issue"] == "129"
     assert claim["task_id"] == task_id
     assert claim["attempt_id"] == f"attempt-{task_id}"
-    assert claim["claim_id"]
+    assert "claim_id" not in claim
+    assert claim["claim_identity"].startswith("urn:nexus:claim:")
     assert claim["generation"] == 1
-    # Raw mutation credential MUST NOT be exposed in public read projection
+    # Neither the raw mutation credential nor enough material to reconstruct it
+    # may be exposed by the public projection.
     assert "fencing_token" not in claim
-    assert claim["fence_identity"] == f"urn:nexus:claim_fence:{claim['claim_id']}:1"
+    assert claim["fence_identity"].startswith("urn:nexus:claim_fence:")
     assert claim["fence_hash"]
     assert claim["holder"] == "worker-luna"
     assert claim["provider"] == "openai"
@@ -297,9 +299,17 @@ def test_read_work_claim_does_not_leak_mutation_credential(service: SelfHostedTa
     assert read_res["found"] is True
     claim = read_res["claim"]
 
-    # Raw token must not appear in any value of the projected public dictionary
+    # Raw token and its reconstructable claim_id component must not appear in
+    # any public projection value.  Generation alone is observational.
+    raw_claim_id = acq["claim"]["claim_id"]
     for k, v in claim.items():
         assert v != raw_token, f"raw token leaked in key {k}"
+        assert v != raw_claim_id, f"raw claim_id leaked in key {k}"
+        if isinstance(v, str):
+            assert raw_claim_id not in v, f"raw claim_id embedded in key {k}"
     assert "fencing_token" not in claim
+    assert "claim_id" not in claim
+    assert claim["claim_identity"]
     assert claim["fence_identity"]
     assert claim["fence_hash"]
+    assert f"{raw_claim_id}:{claim['generation']}" == raw_token

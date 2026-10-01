@@ -2673,13 +2673,15 @@ class SelfHostedTaskService:
         claim_id = str(claim_record.get("claim_id") or "")
         gen = int(claim_record.get("generation") or 1)
         raw_fencing_token = str(claim_record.get("fencing_token") or "")
-        fence_identity = f"urn:nexus:claim_fence:{claim_id}:{gen}"
+        claim_identity_hash = hashlib.sha256(claim_id.encode("utf-8")).hexdigest() if claim_id else ""
+        claim_identity = f"urn:nexus:claim:{claim_identity_hash}" if claim_identity_hash else ""
         fence_hash = hashlib.sha256(raw_fencing_token.encode("utf-8")).hexdigest() if raw_fencing_token else ""
+        fence_identity = f"urn:nexus:claim_fence:{fence_hash}" if fence_hash else ""
         return {
             "schema": self.PUBLIC_WORK_CLAIM_SCHEMA,
             "claim_ceiling": self.PUBLIC_WORK_CLAIM_CEILING,
             "claim_enforcement_state": "FAIL_CLOSED_PROJECTION_ONLY",
-            "claim_id": claim_id,
+            "claim_identity": claim_identity,
             "generation": gen,
             "fence_identity": fence_identity,
             "fence_hash": fence_hash,
