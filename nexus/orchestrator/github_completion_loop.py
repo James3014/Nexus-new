@@ -44,6 +44,11 @@ from nexus.orchestrator.github_orchestration import (
     requalify_main_movement,
     resolve_durable_merge_authorization,
 )
+from nexus.services.issue_closure_guard import (
+    IssueClosureIntentError,
+    validate_final_merge_intent_binding,
+    verify_post_merge_state,
+)
 
 MAX_INTEGRATION_GENERATIONS: int = 3
 MAX_COMPLETION_ELAPSED_SECONDS: float = 2700.0
@@ -210,6 +215,17 @@ class CompletionLoopResult:
     details: dict[str, Any] = field(default_factory=dict)
 
 
+class FinalMergeFields(_FrozenModel):
+    schema: Literal["nexus.final_merge_fields.v1"] = "nexus.final_merge_fields.v1"
+    merge_method: StrictStr = "squash"
+    pr_body: str | None = None
+    commit_title: str | None = None
+    commit_message: str | None = None
+    pr_number: int | None = None
+    head_sha: str | None = None
+    base_sha: str | None = None
+
+
 class GitHubCompletionPort(Protocol):
     def read_main_state(self) -> tuple[str, str]:
         """Return (main_head_sha, main_tree_sha)."""
@@ -299,6 +315,24 @@ class GitHubCompletionPort(Protocol):
         """Confirm merged head/tree/lineage on main after merge or upon ambiguous ACK."""
         ...
 
+    def read_final_merge_fields(
+        self,
+        *,
+        repository: str,
+        pull_request_number: int,
+    ) -> FinalMergeFields:
+        """Read fresh PR body and final merge submission parameters before merge effect."""
+        ...
+
+    def read_issue_states(
+        self,
+        *,
+        repository: str,
+        issue_numbers: tuple[int, ...],
+    ) -> Mapping[int, str]:
+        """Read actual state ('open' or 'closed') for the given issue numbers."""
+        ...
+
 
 def _validate_reconciliation_facts(
     recon: Any,
@@ -339,6 +373,58 @@ def _validate_reconciliation_facts(
         )
 
     return True, None
+
+
+def _verify_post_merge_issues(
+    *,
+    port: GitHubCompletionPort,
+    repository: str,
+    pull_request_number: int,
+    head_sha: str,
+    base_sha: str,
+    merge_commit_sha: str,
+    declared_intents: Sequence[Mapping[str, Any]],
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Read actual issue states from port and run verify_post_merge_state.
+
+    Returns (verification_record, error_message_or_None).
+    """
+    merged_pr = {
+        "pr_number": pull_request_number,
+        "head_sha": head_sha,
+        "base_sha": base_sha,
+        "merge_commit_sha": merge_commit_sha,
+    }
+    if not declared_intents:
+        record = verify_post_merge_state(
+            intents=[],
+            actual_issue_states={},
+            merged_pr=merged_pr,
+        )
+        return record, None
+
+    if not hasattr(port, "read_issue_states"):
+        return None, "READ_ISSUE_STATES_PORT_UNAVAILABLE"
+
+    issue_numbers = tuple(int(item["issue_number"]) for item in declared_intents)
+    try:
+        actual_states = port.read_issue_states(
+            repository=repository,
+            issue_numbers=issue_numbers,
+        )
+    except Exception as exc:
+        return None, f"READ_ISSUE_STATES_FAILED:{exc}"
+
+    record = verify_post_merge_state(
+        intents=declared_intents,
+        actual_issue_states=actual_states,
+        merged_pr=merged_pr,
+    )
+    if record.get("disposition") != "PASS":
+        mismatches = record.get("mismatches", [])
+        return record, "; ".join(mismatches) if mismatches else "STATE_MISMATCH_DETECTED"
+
+    return record, None
 
 
 def run_github_completion_loop(
@@ -926,6 +1012,97 @@ def run_github_completion_loop(
                 intent=intent,
             )
 
+        # G07: Pre-effect binding: validate machine-readable Issue closure intent
+        # against fresh PR body and final submitted merge parameters before any merge effect.
+        if not hasattr(port, "read_final_merge_fields"):
+            return CompletionLoopResult(
+                outcome=CompletionLoopOutcome.BLOCKED,
+                reason="FINAL_MERGE_FIELDS_PORT_UNAVAILABLE",
+                generation=current_generation,
+                integration_head_sha=last_produced_head_sha,
+                evidence=current_evidence,
+                intent=intent,
+            )
+
+        try:
+            final_fields = port.read_final_merge_fields(
+                repository=current_evidence.repository,
+                pull_request_number=current_evidence.pull_request_number,
+            )
+        except Exception as exc:
+            return CompletionLoopResult(
+                outcome=CompletionLoopOutcome.BLOCKED,
+                reason=f"READ_FINAL_MERGE_FIELDS_FAILED:{exc}",
+                generation=current_generation,
+                integration_head_sha=last_produced_head_sha,
+                evidence=current_evidence,
+                intent=intent,
+            )
+
+        if (
+            final_fields is None
+            or final_fields.pr_body is None
+            or not isinstance(final_fields.pr_body, str)
+            or not final_fields.pr_body.strip()
+        ):
+            return CompletionLoopResult(
+                outcome=CompletionLoopOutcome.BLOCKED,
+                reason="FINAL_MERGE_INTENT_PR_BODY_MISSING",
+                generation=current_generation,
+                integration_head_sha=last_produced_head_sha,
+                evidence=current_evidence,
+                intent=intent,
+            )
+
+        actual_pr_num = (
+            final_fields.pr_number
+            if final_fields.pr_number is not None
+            else current_evidence.pull_request_number
+        )
+        actual_head = (
+            final_fields.head_sha
+            if final_fields.head_sha is not None
+            else current_evidence.head_sha
+        )
+        actual_base = (
+            final_fields.base_sha
+            if final_fields.base_sha is not None
+            else current_evidence.base_sha
+        )
+
+        try:
+            g07_binding = validate_final_merge_intent_binding(
+                pr_body=final_fields.pr_body,
+                pr_number=actual_pr_num,
+                head_sha=actual_head,
+                base_sha=actual_base,
+                expected_pr_number=current_evidence.pull_request_number,
+                expected_head_sha=current_evidence.head_sha,
+                expected_base_sha=current_evidence.base_sha,
+                merge_method=final_fields.merge_method,
+                commit_title=final_fields.commit_title,
+                commit_message=final_fields.commit_message,
+            )
+        except IssueClosureIntentError as exc:
+            return CompletionLoopResult(
+                outcome=CompletionLoopOutcome.BLOCKED,
+                reason=f"FINAL_MERGE_INTENT_BINDING_REJECTED:{exc}",
+                generation=current_generation,
+                integration_head_sha=last_produced_head_sha,
+                evidence=current_evidence,
+                intent=intent,
+                details={"binding_error": str(exc)},
+            )
+        except Exception as exc:
+            return CompletionLoopResult(
+                outcome=CompletionLoopOutcome.BLOCKED,
+                reason=f"FINAL_MERGE_INTENT_BINDING_FAILED:{exc}",
+                generation=current_generation,
+                integration_head_sha=last_produced_head_sha,
+                evidence=current_evidence,
+                intent=intent,
+            )
+
         # Perform CAS merge operation
         cas_result = port.cas_merge(
             repository=current_evidence.repository,
@@ -965,23 +1142,53 @@ def run_github_completion_loop(
                 expected_integration_tree_sha=current_evidence.tree_sha,
                 cas_merged_sha=cas_result.merged_sha,
             )
-            if valid_recon:
+            if not valid_recon:
                 return CompletionLoopResult(
-                    outcome=CompletionLoopOutcome.COMPLETED,
-                    reason="AMBIGUOUS_ACK_RECONCILED_SUCCESS",
+                    outcome=CompletionLoopOutcome.BLOCKED,
+                    reason=f"AMBIGUOUS_MERGE_RECONCILIATION_FAILED:{recon_err}",
+                    generation=current_generation,
+                    integration_head_sha=last_produced_head_sha,
+                    evidence=current_evidence,
+                    intent=intent,
+                )
+
+            post_merge_recon, post_err = _verify_post_merge_issues(
+                port=port,
+                repository=current_evidence.repository,
+                pull_request_number=current_evidence.pull_request_number,
+                head_sha=current_evidence.head_sha,
+                base_sha=current_evidence.base_sha,
+                merge_commit_sha=recon.observed_main_commit_sha,
+                declared_intents=g07_binding.get("intents", []),
+            )
+            if post_err:
+                verification_payload = post_merge_recon or {
+                    "schema": "nexus.post_merge_issue_state_verification.v1",
+                    "status": "STATE_MISMATCH_DETECTED",
+                    "disposition": "RECONCILIATION_REQUIRED",
+                    "allow_second_merge": False,
+                    "error": post_err,
+                }
+                return CompletionLoopResult(
+                    outcome=CompletionLoopOutcome.BLOCKED,
+                    reason=f"AMBIGUOUS_MERGE_POST_VERIFICATION_FAILED:{post_err}",
                     generation=current_generation,
                     integration_head_sha=last_produced_head_sha,
                     merged_commit_sha=recon.observed_main_commit_sha,
                     evidence=current_evidence,
                     intent=intent,
+                    details={"post_merge_verification": verification_payload},
                 )
+
             return CompletionLoopResult(
-                outcome=CompletionLoopOutcome.BLOCKED,
-                reason=f"AMBIGUOUS_MERGE_RECONCILIATION_FAILED:{recon_err}",
+                outcome=CompletionLoopOutcome.COMPLETED,
+                reason="AMBIGUOUS_ACK_RECONCILED_SUCCESS",
                 generation=current_generation,
                 integration_head_sha=last_produced_head_sha,
+                merged_commit_sha=recon.observed_main_commit_sha,
                 evidence=current_evidence,
                 intent=intent,
+                details={"post_merge_verification": post_merge_recon},
             )
 
         if cas_result.status == CasMergeStatus.SUCCESS:
@@ -1009,23 +1216,53 @@ def run_github_completion_loop(
                 expected_integration_tree_sha=current_evidence.tree_sha,
                 cas_merged_sha=cas_result.merged_sha,
             )
-            if valid_recon:
+            if not valid_recon:
                 return CompletionLoopResult(
-                    outcome=CompletionLoopOutcome.COMPLETED,
-                    reason="MERGE_SUCCESS_AND_RECONCILED",
+                    outcome=CompletionLoopOutcome.BLOCKED,
+                    reason=f"POST_MERGE_RECONCILIATION_FAILED:{recon_err}",
+                    generation=current_generation,
+                    integration_head_sha=last_produced_head_sha,
+                    evidence=current_evidence,
+                    intent=intent,
+                )
+
+            post_merge_recon, post_err = _verify_post_merge_issues(
+                port=port,
+                repository=current_evidence.repository,
+                pull_request_number=current_evidence.pull_request_number,
+                head_sha=current_evidence.head_sha,
+                base_sha=current_evidence.base_sha,
+                merge_commit_sha=recon.observed_main_commit_sha,
+                declared_intents=g07_binding.get("intents", []),
+            )
+            if post_err:
+                verification_payload = post_merge_recon or {
+                    "schema": "nexus.post_merge_issue_state_verification.v1",
+                    "status": "STATE_MISMATCH_DETECTED",
+                    "disposition": "RECONCILIATION_REQUIRED",
+                    "allow_second_merge": False,
+                    "error": post_err,
+                }
+                return CompletionLoopResult(
+                    outcome=CompletionLoopOutcome.BLOCKED,
+                    reason=f"POST_MERGE_ISSUE_STATE_MISMATCH:{post_err}",
                     generation=current_generation,
                     integration_head_sha=last_produced_head_sha,
                     merged_commit_sha=recon.observed_main_commit_sha,
                     evidence=current_evidence,
                     intent=intent,
+                    details={"post_merge_verification": verification_payload},
                 )
+
             return CompletionLoopResult(
-                outcome=CompletionLoopOutcome.BLOCKED,
-                reason=f"POST_MERGE_RECONCILIATION_FAILED:{recon_err}",
+                outcome=CompletionLoopOutcome.COMPLETED,
+                reason="MERGE_SUCCESS_AND_RECONCILED",
                 generation=current_generation,
                 integration_head_sha=last_produced_head_sha,
+                merged_commit_sha=recon.observed_main_commit_sha,
                 evidence=current_evidence,
                 intent=intent,
+                details={"post_merge_verification": post_merge_recon},
             )
 
         # Any other CAS status is a rejection/conflict/failure

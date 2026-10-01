@@ -227,6 +227,8 @@ def validate_final_merge_intent_binding(
     - Untracked closing keywords in final submitted fields fail closed;
     - Explicit authorized CLOSE remains permitted.
     """
+    if pr_body is None or not isinstance(pr_body, str) or not pr_body.strip():
+        raise IssueClosureIntentError("PR_BODY_REQUIRED")
     if not isinstance(pr_number, int) or isinstance(pr_number, bool) or pr_number <= 0:
         raise IssueClosureIntentError("PR_NUMBER_INVALID")
     if (
