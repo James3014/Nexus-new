@@ -64,9 +64,7 @@ def _missing_fields(row: Mapping[str, Any], fields: Iterable[str]) -> list[str]:
     explicit = row.get("missingness")
     explicit_missing = set(explicit) if isinstance(explicit, Mapping) else set()
     return sorted(
-        field
-        for field in fields
-        if not _present(row.get(field)) or field in explicit_missing
+        field for field in fields if not _present(row.get(field)) or field in explicit_missing
     )
 
 
@@ -92,9 +90,7 @@ def normalize_observation(raw: Mapping[str, Any]) -> dict[str, Any]:
 
     attempt_index = raw.get("attempt_index")
     if attempt_index is not None and (
-        isinstance(attempt_index, bool)
-        or not isinstance(attempt_index, int)
-        or attempt_index < 1
+        isinstance(attempt_index, bool) or not isinstance(attempt_index, int) or attempt_index < 1
     ):
         raise ObservabilityContractError("attempt_index_must_be_positive_integer")
 
@@ -108,9 +104,7 @@ def normalize_observation(raw: Mapping[str, Any]) -> dict[str, Any]:
     ):
         value = raw.get(counter_field)
         if value is not None and (
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or value < 0
+            isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0
         ):
             raise ObservabilityContractError(f"{counter_field}_must_be_non_negative")
 
@@ -140,30 +134,28 @@ def from_devspace_core_session(
 ) -> dict[str, Any]:
     """Project an already-authoritative pre-effect Core session into the study schema."""
 
-    return normalize_observation(
-        {
-            "schema": OBSERVATION_SCHEMA,
-            "repository": repository,
-            "work_item_id": work_item_id,
-            "attempt_id": session.get("attemptId"),
-            "attempt_index": attempt_index,
-            "enrolled_at": session.get("createdAt"),
-            "source_revision": session.get("sourceHead"),
-            "source_tree": session.get("sourceTree"),
-            "task_family": task_family,
-            "risk_class": risk_class,
-            "execution_lane": execution_lane,
-            "transport": transport,
-            "eligibility_disposition": ELIGIBLE,
-            "prospective": not bool(session.get("firstEffectAt")),
-            "terminal": False,
-            "operation_id": session.get("operationId"),
-            "workspace_session_id": session.get("workspaceSessionId"),
-            "binding_id": session.get("bindingId"),
-            "binding_hash": session.get("bindingHash"),
-            "missingness": {},
-        }
-    )
+    return normalize_observation({
+        "schema": OBSERVATION_SCHEMA,
+        "repository": repository,
+        "work_item_id": work_item_id,
+        "attempt_id": session.get("attemptId"),
+        "attempt_index": attempt_index,
+        "enrolled_at": session.get("createdAt"),
+        "source_revision": session.get("sourceHead"),
+        "source_tree": session.get("sourceTree"),
+        "task_family": task_family,
+        "risk_class": risk_class,
+        "execution_lane": execution_lane,
+        "transport": transport,
+        "eligibility_disposition": ELIGIBLE,
+        "prospective": not bool(session.get("firstEffectAt")),
+        "terminal": False,
+        "operation_id": session.get("operationId"),
+        "workspace_session_id": session.get("workspaceSessionId"),
+        "binding_id": session.get("bindingId"),
+        "binding_hash": session.get("bindingHash"),
+        "missingness": {},
+    })
 
 
 def identity_gap(
@@ -181,32 +173,30 @@ def identity_gap(
     reason = str(reason).strip()
     if not reason:
         raise ObservabilityContractError("identity_gap_reason_required")
-    return normalize_observation(
-        {
-            "schema": OBSERVATION_SCHEMA,
-            "repository": repository,
-            "work_item_id": work_item_id,
-            "attempt_id": None,
-            "attempt_index": None,
-            "enrolled_at": None,
-            "source_revision": None,
-            "source_tree": None,
-            "task_family": task_family,
-            "risk_class": risk_class,
-            "execution_lane": execution_lane,
-            "transport": transport,
-            "eligibility_disposition": IDENTITY_GAP,
-            "prospective": False,
-            "terminal": False,
-            "missingness": {
-                "attempt_id": reason,
-                "attempt_index": reason,
-                "enrolled_at": reason,
-                "source_revision": reason,
-                "source_tree": reason,
-            },
-        }
-    )
+    return normalize_observation({
+        "schema": OBSERVATION_SCHEMA,
+        "repository": repository,
+        "work_item_id": work_item_id,
+        "attempt_id": None,
+        "attempt_index": None,
+        "enrolled_at": None,
+        "source_revision": None,
+        "source_tree": None,
+        "task_family": task_family,
+        "risk_class": risk_class,
+        "execution_lane": execution_lane,
+        "transport": transport,
+        "eligibility_disposition": IDENTITY_GAP,
+        "prospective": False,
+        "terminal": False,
+        "missingness": {
+            "attempt_id": reason,
+            "attempt_index": reason,
+            "enrolled_at": reason,
+            "source_revision": reason,
+            "source_tree": reason,
+        },
+    })
 
 
 def build_g0_coverage_report(
@@ -239,26 +229,18 @@ def build_g0_coverage_report(
             raise ObservabilityContractError("duplicate_attempt_identity")
         identities.add(identity)
 
-    primary = [
-        row for row in rows if row["eligibility_disposition"] in PRIMARY_DISPOSITIONS
-    ]
+    primary = [row for row in rows if row["eligibility_disposition"] in PRIMARY_DISPOSITIONS]
     complete_enrollment: list[dict[str, Any]] = []
     enrollment_missing = Counter()
     for row in primary:
         missing = _missing_fields(row, ENROLLMENT_FIELDS)
         for field in missing:
             enrollment_missing[field] += 1
-        if (
-            row["eligibility_disposition"] == ELIGIBLE
-            and row["prospective"]
-            and not missing
-        ):
+        if row["eligibility_disposition"] == ELIGIBLE and row["prospective"] and not missing:
             complete_enrollment.append(row)
 
     denominator = len(primary)
-    enrollment_coverage = (
-        len(complete_enrollment) / denominator if denominator else None
-    )
+    enrollment_coverage = len(complete_enrollment) / denominator if denominator else None
 
     terminal = [row for row in primary if row["terminal"]]
     complete_terminal: list[dict[str, Any]] = []
@@ -267,16 +249,10 @@ def build_g0_coverage_report(
         missing = _missing_fields(row, ENROLLMENT_FIELDS + TERMINAL_FIELDS)
         for field in missing:
             terminal_missing[field] += 1
-        if (
-            row["eligibility_disposition"] == ELIGIBLE
-            and row["prospective"]
-            and not missing
-        ):
+        if row["eligibility_disposition"] == ELIGIBLE and row["prospective"] and not missing:
             complete_terminal.append(row)
 
-    terminal_coverage = (
-        len(complete_terminal) / len(terminal) if terminal else None
-    )
+    terminal_coverage = len(complete_terminal) / len(terminal) if terminal else None
 
     gap_counts = Counter(row["eligibility_disposition"] for row in rows)
     if denominator == 0:
