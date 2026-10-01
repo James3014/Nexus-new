@@ -22,6 +22,13 @@ from p0t5_live_provider_canary import (
 from nexus.services.unified_runtime import resolve_registered_online_cli_spec
 
 
+@pytest.fixture(autouse=True)
+def _registered_opencode_test_command(monkeypatch):
+    """Keep resolver tests hermetic without bypassing registered CLI resolution."""
+    monkeypatch.setenv("NEXUS_OPENCODE_COMMAND", sys.executable)
+    monkeypatch.delenv("NEXUS_OPENCODE_BIN", raising=False)
+
+
 def _make_fixture_runner(nonce_store: list[str]):
     invok_count = 0
 
@@ -529,6 +536,21 @@ def test_provider_version_uses_same_executable_as_inference(tmp_path: Path):
     assert "executable_path_hash" in ident
 
 
+def test_registered_resolver_fails_closed_without_opencode_binary(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.delenv("NEXUS_OPENCODE_COMMAND", raising=False)
+    monkeypatch.delenv("NEXUS_OPENCODE_BIN", raising=False)
+    monkeypatch.setenv("PATH", "")
+
+    with pytest.raises(ValueError, match="provider_binary_not_found"):
+        resolve_registered_online_cli_spec(
+            "opencode",
+            environ=os.environ,
+            working_directory=str(tmp_path),
+        )
+
+
 def test_provider_identity_hash_matches_process_evidence(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("NEXUS_P0T5_ALLOW_REAL_PROVIDER", "1")
     nonces = []
@@ -648,6 +670,7 @@ def test_canary_does_not_reresolve_after_path_change(tmp_path: Path, monkeypatch
     bin_b.chmod(0o755)
 
     monkeypatch.setenv("PATH", f"{dir_a}:{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("NEXUS_OPENCODE_COMMAND", str(bin_a))
 
     nonces = []
     summary = run_canary_campaign(
