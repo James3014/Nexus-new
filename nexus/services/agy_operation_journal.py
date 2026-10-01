@@ -48,7 +48,35 @@ def _process_alive(pid: object) -> bool:
     return True
 
 
+def _process_group_rows(pgid: object) -> list[tuple[str, str]]:
+    if not isinstance(pgid, int) or pgid <= 0:
+        return []
+    proc = subprocess.run(
+        ["ps", "axww", "-o", "pgid=,stat=,command="],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return []
+    rows: list[tuple[str, str]] = []
+    for line in proc.stdout.splitlines():
+        parts = line.strip().split(None, 2)
+        if len(parts) != 3:
+            continue
+        try:
+            row_pgid = int(parts[0])
+        except ValueError:
+            continue
+        if row_pgid == pgid:
+            rows.append((parts[1], parts[2]))
+    return rows
+
+
 def _process_group_alive(pgid: object) -> bool:
+    rows = _process_group_rows(pgid)
+    if rows:
+        return any(not stat.startswith("Z") for stat, _command in rows)
     if not isinstance(pgid, int) or pgid <= 0:
         return False
     try:
@@ -61,25 +89,7 @@ def _process_group_alive(pgid: object) -> bool:
 
 
 def _group_has_operation_marker(pgid: int, marker: str) -> bool:
-    proc = subprocess.run(
-        ["ps", "-axo", "pid=,pgid=,command="],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if proc.returncode != 0:
-        return False
-    for line in proc.stdout.splitlines():
-        parts = line.strip().split(None, 2)
-        if len(parts) != 3:
-            continue
-        try:
-            row_pgid = int(parts[1])
-        except ValueError:
-            continue
-        if row_pgid == pgid and marker in parts[2]:
-            return True
-    return False
+    return any(marker in command for _stat, command in _process_group_rows(pgid))
 
 
 def _stop_process_group(pgid: int, *, grace_seconds: float = 2.0) -> bool:
