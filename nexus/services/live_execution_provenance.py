@@ -86,22 +86,29 @@ _EXTERNAL_WORKER_PREFIXES = {
 _AGY_OPERATION_PREFIX = "agyop_"
 
 
+_CANONICAL_EXTERNAL_WORKER_OPERATION_ROOT = Path(
+    os.getenv(
+        "NEXUS_EXTERNAL_WORKER_OPERATION_ROOT",
+        str(Path.home() / ".local/state/nexus-external-worker"),
+    )
+).expanduser().resolve()
+
+_CANONICAL_AGY_OPERATION_ROOT = Path(
+    os.getenv(
+        "NEXUS_AGY_OPERATION_ROOT",
+        str(Path.home() / ".local/state/nexus-agy-operations"),
+    )
+).expanduser().resolve()
+
+
 def _external_worker_operation_root() -> Path:
-    return Path(
-        os.getenv(
-            "NEXUS_EXTERNAL_WORKER_OPERATION_ROOT",
-            str(Path.home() / ".local/state/nexus-external-worker"),
-        )
-    ).expanduser().resolve()
+    """Return the process-start-bound external worker producer root."""
+    return _CANONICAL_EXTERNAL_WORKER_OPERATION_ROOT
 
 
 def _agy_operation_root() -> Path:
-    return Path(
-        os.getenv(
-            "NEXUS_AGY_OPERATION_ROOT",
-            str(Path.home() / ".local/state/nexus-agy-operations"),
-        )
-    ).expanduser().resolve()
+    """Return the process-start-bound Agy producer root."""
+    return _CANONICAL_AGY_OPERATION_ROOT
 
 
 def _external_provider_for_operation_id(operation_id: str) -> str:

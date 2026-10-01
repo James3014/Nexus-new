@@ -6,13 +6,13 @@ through repository-owned durable producer APIs.
 
 from __future__ import annotations
 
-import os
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
+import nexus.services.live_execution_provenance as provenance_module
 from nexus.services.agy_operation_journal import AgyOperationJournal
 from nexus.services.direct_operation_journal import DirectOperationJournal
 from nexus.services.live_execution_provenance import (
@@ -55,7 +55,7 @@ def _verified_external_worker(
     observed_provider: str = "openai",
     observed_model: str = "gpt-test",
 ):
-    os.environ["NEXUS_EXTERNAL_WORKER_OPERATION_ROOT"] = str(tmp_path)
+    provenance_module._CANONICAL_EXTERNAL_WORKER_OPERATION_ROOT = tmp_path.resolve()
     journal = DirectOperationJournal(
         tmp_path / "codex",
         schema=PRODUCER_SCHEMA_EXTERNAL_WORKER_V1,
@@ -440,7 +440,7 @@ def test_running_with_malformed_timestamp_and_zero_staleness_limit_fails_closed(
 
 
 def test_exact_journal_at_noncanonical_root_is_rejected(tmp_path: Path):
-    os.environ["NEXUS_EXTERNAL_WORKER_OPERATION_ROOT"] = str(tmp_path / "canonical")
+    provenance_module._CANONICAL_EXTERNAL_WORKER_OPERATION_ROOT = (tmp_path / "canonical").resolve()
     journal = DirectOperationJournal(
         tmp_path / "attacker" / "codex",
         schema=PRODUCER_SCHEMA_EXTERNAL_WORKER_V1,
@@ -517,7 +517,7 @@ def test_invalid_staleness_limit_never_keeps_running_record_active(
 
 
 def test_canonical_agy_journal_reader_is_supported(tmp_path: Path):
-    os.environ["NEXUS_AGY_OPERATION_ROOT"] = str(tmp_path)
+    provenance_module._CANONICAL_AGY_OPERATION_ROOT = tmp_path.resolve()
     journal = AgyOperationJournal(tmp_path)
     operation_id = journal.new_operation_id()
     journal.create(
@@ -533,3 +533,20 @@ def test_canonical_agy_journal_reader_is_supported(tmp_path: Path):
     evidence = read_operation_journal_evidence(journal, operation_id)
     assert evidence.record["schema"] == PRODUCER_SCHEMA_AGY_OPERATION_V1
     assert Path(evidence.record_path).resolve() == journal.record_path(operation_id).resolve()
+
+
+def test_runtime_env_mutation_cannot_rebind_canonical_producer_root(tmp_path: Path, monkeypatch):
+    startup_root = (tmp_path / "startup-root").resolve()
+    attacker_root = (tmp_path / "attacker-root").resolve()
+    provenance_module._CANONICAL_EXTERNAL_WORKER_OPERATION_ROOT = startup_root
+    monkeypatch.setenv("NEXUS_EXTERNAL_WORKER_OPERATION_ROOT", str(attacker_root))
+
+    assert provenance_module._external_worker_operation_root() == startup_root
+
+    journal = DirectOperationJournal(
+        attacker_root / "codex",
+        schema=PRODUCER_SCHEMA_EXTERNAL_WORKER_V1,
+        operation_prefix="codexop_",
+    )
+    with pytest.raises(ProvenanceContractError, match="canonical producer root"):
+        read_operation_journal_evidence(journal, "codexop_" + "c" * 32)
