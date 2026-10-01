@@ -25,6 +25,8 @@ def temp_git_repo(tmp_path):
     repo_dir.mkdir()
     env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"}
     subprocess.run(["git", "init", "-b", "main"], cwd=repo_dir, check=True, env=env)
+    subprocess.run(["git", "config", "user.email", "worktree-manager@example.test"], cwd=repo_dir, check=True, env=env)
+    subprocess.run(["git", "config", "user.name", "Worktree Manager Test"], cwd=repo_dir, check=True, env=env)
     subprocess.run(
         ["git", "-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-m", "Initial commit"],
         cwd=repo_dir, check=True, env=env,
