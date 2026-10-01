@@ -2528,6 +2528,9 @@ class SelfHostedTaskService:
 
     # Issue #129: the claim is deliberately a subrecord of the existing task
     # receipt.  The state lock above is the sole serialization point.
+    PUBLIC_WORK_CLAIM_SCHEMA = "nexus.orchestrator.work_claim_view.v1"
+    PUBLIC_WORK_CLAIM_CEILING = "PROJECTION_READ_ONLY_NOT_REPO_ENFORCED"
+
     @staticmethod
     def _claim_identity(request: Mapping[str, Any]) -> dict[str, Any]:
         admission = request.get("workforce_admission", request.get("admission_binding"))
@@ -2575,11 +2578,44 @@ class SelfHostedTaskService:
             raise RuntimeError("WORK_CLAIM_TAMPERED")
         if not isinstance(record.get("generation"), int) or isinstance(record.get("generation"), bool) or record["generation"] < 1 or not isinstance(record.get("claim_id"), str) or not record["claim_id"]:
             raise RuntimeError("WORK_CLAIM_MALFORMED")
+        if record.get("status") != "CLAIMED":
+            raise RuntimeError("WORK_CLAIM_MALFORMED")
+        expected_fencing_token = f"{record['claim_id']}:{record['generation']}"
+        if (
+            not isinstance(record.get("fencing_token"), str)
+            or record["fencing_token"] != expected_fencing_token
+        ):
+            raise RuntimeError("WORK_CLAIM_STALE_FENCE")
+
+    @classmethod
+    def _validate_claim_enclosure(
+        cls,
+        state: Mapping[str, Any],
+        record: Mapping[str, Any],
+        *,
+        expected_task_id: str = "",
+    ) -> None:
+        identity = record.get("identity") or {}
+        state_task_id = str(state.get("task_id") or "").strip()
+        claim_task_id = str(identity.get("task_id") or "").strip()
+        if not state_task_id or claim_task_id != state_task_id:
+            raise RuntimeError("WORK_CLAIM_TAMPERED")
+        if expected_task_id and state_task_id != expected_task_id:
+            raise RuntimeError("WORK_CLAIM_TAMPERED")
+        state_attempt_id = str(state.get("attempt_id") or "").strip()
+        claim_attempt_id = str(identity.get("attempt_id") or "").strip()
+        if state_attempt_id and claim_attempt_id != state_attempt_id:
+            raise RuntimeError("WORK_CLAIM_TAMPERED")
 
     @classmethod
     def _validate_claim_locked(cls, state: Mapping[str, Any], request: Mapping[str, Any]) -> Mapping[str, Any]:
         record = state.get("work_claim")
         cls._validate_claim_record(record)
+        cls._validate_claim_enclosure(
+            state,
+            record,
+            expected_task_id=str(request.get("task_id") or "").strip(),
+        )
         expected = cls._claim_identity(request)
         if record["identity_hash"] != cls._claim_hash(expected):
             raise RuntimeError("WORK_CLAIM_FENCE_MISMATCH")
@@ -2657,6 +2693,172 @@ class SelfHostedTaskService:
             return {"status": "CLAIMED", "claim": record}
 
     renew_work_claim = validate_work_claim
+
+    def _project_public_claim(
+        self, claim_record: Mapping[str, Any], *, state: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        identity = dict(claim_record.get("identity") or {})
+        holder = (
+            str(identity.get("worker_id") or "")
+            or str(identity.get("role") or "")
+            or str(identity.get("provider") or "")
+        )
+        gen = int(claim_record.get("generation") or 1)
+        identity_hash = str(claim_record.get("identity_hash") or "")
+        claim_projection_hash = hashlib.sha256(
+            f"claim-view:{identity_hash}".encode("utf-8")
+        ).hexdigest()
+        fence_projection_hash = hashlib.sha256(
+            f"claim-fence-view:{identity_hash}:{gen}".encode("utf-8")
+        ).hexdigest()
+        claim_identity = f"urn:nexus:claim:{claim_projection_hash}"
+        fence_hash = fence_projection_hash
+        fence_identity = f"urn:nexus:claim_fence:{fence_projection_hash}"
+        return {
+            "schema": self.PUBLIC_WORK_CLAIM_SCHEMA,
+            "claim_ceiling": self.PUBLIC_WORK_CLAIM_CEILING,
+            "claim_enforcement_state": "FAIL_CLOSED_PROJECTION_ONLY",
+            "claim_identity": claim_identity,
+            "generation": gen,
+            "fence_identity": fence_identity,
+            "fence_hash": fence_hash,
+            "state": str(claim_record["status"]),
+            "holder": holder,
+            "repository": str(identity.get("repository") or ""),
+            "issue": str(identity.get("issue") or ""),
+            "task_id": str(identity.get("task_id") or ""),
+            "attempt_id": str(identity.get("attempt_id") or ""),
+            "action_id": str(identity.get("action_id") or ""),
+            "worker_id": str(identity.get("worker_id") or ""),
+            "provider": str(identity.get("provider") or ""),
+            "model": str(identity.get("model") or ""),
+            "role": str(identity.get("role") or ""),
+            "allowed_files": list(identity.get("allowed_files") or []),
+            "mutation_domain": list(identity.get("allowed_files") or []),
+            "base_revision": str(identity.get("base_revision") or ""),
+            "source_hash": str(identity.get("source_hash") or ""),
+            "task_card_path": str(identity.get("task_card_path") or ""),
+            "admission_identity": str(identity.get("admission_identity") or ""),
+            "provider_preflight_identity": str(identity.get("provider_preflight_identity") or ""),
+            "identity_hash": str(claim_record.get("identity_hash") or ""),
+            "claimed_at": str(claim_record.get("claimed_at") or ""),
+            "recovered_at": str(claim_record.get("recovered_at") or ""),
+            "recovery_reason": str(claim_record.get("recovery_reason") or ""),
+            "observed_at": _utc_now(),
+            "canonical_revision": int(state.get("revision") or state.get("task_revision") or 1),
+        }
+
+    def read_work_claim(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        task_id = str(request.get("task_id") or "").strip()
+        if not task_id:
+            return {"status": "BLOCKED", "reason": "TASK_ID_REQUIRED", "found": False}
+        path = self._state_path(task_id)
+        if not path.exists():
+            return {
+                "status": "NOT_FOUND",
+                "reason": "TASK_NOT_FOUND",
+                "found": False,
+                "task_id": task_id,
+            }
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {
+                "status": "BLOCKED",
+                "reason": "WORK_CLAIM_STATE_UNREADABLE",
+                "found": False,
+                "task_id": task_id,
+            }
+        claim_record = state.get("work_claim")
+        if claim_record is None:
+            return {
+                "status": "NO_ACTIVE_CLAIM",
+                "found": False,
+                "task_id": task_id,
+            }
+        try:
+            self._validate_claim_record(claim_record)
+            self._validate_claim_enclosure(
+                state,
+                claim_record,
+                expected_task_id=task_id,
+            )
+        except RuntimeError as exc:
+            return {
+                "status": "BLOCKED",
+                "reason": str(exc),
+                "found": False,
+                "task_id": task_id,
+            }
+
+        expected_generation = request.get("generation")
+        generation_status = "CURRENT"
+        if expected_generation is not None:
+            if not isinstance(expected_generation, int) or isinstance(expected_generation, bool):
+                return {"status": "BLOCKED", "reason": "INVALID_GENERATION", "found": False}
+            current_gen = int(claim_record.get("generation") or 1)
+            if expected_generation < current_gen:
+                generation_status = "STALE_GENERATION"
+            elif expected_generation > current_gen:
+                generation_status = "FUTURE_GENERATION"
+
+        projected = self._project_public_claim(claim_record, state=state)
+        projected["generation_status"] = generation_status
+        return {
+            "status": "FOUND",
+            "found": True,
+            "task_id": task_id,
+            "claim": projected,
+        }
+
+    read_claim = read_work_claim
+
+    def list_active_work_claims(
+        self, filter_spec: Mapping[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
+        results = []
+        spec = dict(filter_spec or {})
+        repo_filter = str(spec.get("repository") or spec.get("repo") or "").strip()
+        issue_filter = str(spec.get("issue") or spec.get("issue_number") or "").strip()
+        worker_filter = str(spec.get("worker_id") or spec.get("worker") or "").strip()
+        status_filter = str(spec.get("status") or "").strip()
+
+        candidates = sorted(self.state_dir.glob("*.json")) if self.state_dir.exists() else []
+        for path in candidates:
+            if path.name.startswith("."):
+                continue
+            try:
+                state = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise RuntimeError(
+                    "WORK_CLAIM_LIST_BLOCKED:WORK_CLAIM_STATE_UNREADABLE"
+                ) from exc
+            claim_record = state.get("work_claim")
+            if claim_record is None:
+                continue
+            if not isinstance(claim_record, Mapping):
+                raise RuntimeError("WORK_CLAIM_LIST_BLOCKED:WORK_CLAIM_MALFORMED")
+            try:
+                self._validate_claim_record(claim_record)
+                self._validate_claim_enclosure(state, claim_record)
+            except RuntimeError as exc:
+                raise RuntimeError(f"WORK_CLAIM_LIST_BLOCKED:{exc}") from exc
+
+            identity = claim_record.get("identity") or {}
+            if repo_filter and identity.get("repository") != repo_filter:
+                continue
+            if issue_filter and identity.get("issue") != issue_filter:
+                continue
+            if worker_filter and identity.get("worker_id") != worker_filter:
+                continue
+            if status_filter and claim_record.get("status") != status_filter:
+                continue
+
+            results.append(self._project_public_claim(claim_record, state=state))
+
+        return sorted(results, key=lambda c: (str(c.get("task_id")), str(c.get("claimed_at"))))
+
+    list_active_claims = list_active_work_claims
 
     def _record_event_append_failure(self, task_id: str, error: Exception) -> None:
         """Persist the state/event reconciliation debt without emitting another event."""
