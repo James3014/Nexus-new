@@ -82,7 +82,7 @@ def test_devspace_pre_effect_session_is_complete_prospective_enrollment() -> Non
     assert report["small_n_zero_error_is_not_fleet_proof"] is True
 
 
-def test_session_observed_after_first_effect_is_not_prospective() -> None:
+def test_session_read_after_first_effect_preserves_durable_prospective_order() -> None:
     row = from_devspace_core_session(
         repository="James3014/Nexus-new",
         work_item_id="James3014/Nexus-new#2001",
@@ -91,6 +91,25 @@ def test_session_observed_after_first_effect_is_not_prospective() -> None:
         risk_class="low",
         execution_lane="DIRECT_CANONICAL",
         session=_session(1, first_effect="2026-10-01T07:01:01Z"),
+    )
+
+    report = build_g0_coverage_report([row])
+
+    assert row["first_effect_at"] == "2026-10-01T07:01:01Z"
+    assert row["prospective"] is True
+    assert report["prospective_enrollment_coverage"] == 1.0
+    assert report["gate"] == "G0_COVERAGE_TARGET_MET"
+
+
+def test_session_with_reversed_effect_order_is_not_prospective() -> None:
+    row = from_devspace_core_session(
+        repository="James3014/Nexus-new",
+        work_item_id="James3014/Nexus-new#2002",
+        attempt_index=1,
+        task_family="bounded_change",
+        risk_class="low",
+        execution_lane="DIRECT_CANONICAL",
+        session=_session(2, first_effect="2026-10-01T07:01:59Z"),
     )
 
     report = build_g0_coverage_report([row])
