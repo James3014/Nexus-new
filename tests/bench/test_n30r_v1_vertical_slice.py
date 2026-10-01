@@ -5,29 +5,35 @@ Tests: deterministic trace output, hash chain integrity, semantic retry lifecycl
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scripts.bench.n30r_runner import _materialize_task
+import scripts.bench.n30r_v1_full_armor_trace as n30r_trace
 from scripts.bench.n30r_v1_full_armor_trace import (
-    classify_provider_prompt,
-    WRONG_PATCH,
     CORRECT_PATCH,
+    WRONG_PATCH,
+    classify_provider_prompt,
 )
+
+_TRACE_ARTIFACT_DIRS: set[Path] = set()
 
 
 def _run_trace():
-    from scripts.bench.n30r_v1_full_armor_trace import run_v1_trace
-    return run_v1_trace()
+    receipt = n30r_trace.run_v1_trace()
+    _TRACE_ARTIFACT_DIRS.add(Path(receipt["shadow_outcome_path"]).parent)
+    return receipt
+
+
+def teardown_module():
+    for artifact_dir in _TRACE_ARTIFACT_DIRS:
+        shutil.rmtree(artifact_dir)
 
 
 def _reset_provider_state():
@@ -36,6 +42,162 @@ def _reset_provider_state():
     T._prompt_telemetry = []
     T._provider_call_count = 0
 
+
+class TestBenchmarkWorkspace:
+    def test_workspace_isolated_repo_contained_and_cleaned_on_failure(self, tmp_path, monkeypatch):
+        repo_root = Path(__file__).resolve().parents[2]
+        override = tmp_path / "alternate-temp-root"
+        override.mkdir()
+        monkeypatch.setenv("TMPDIR", str(override))
+        monkeypatch.setenv("NEXUS_ARMOR_WORKSPACE_ROOT", str(override))
+        monkeypatch.setenv("NEXUS_ARMOR_ALLOW_EPHEMERAL", "1")
+        paths = []
+        with pytest.raises(RuntimeError, match="cleanup probe"):
+            with n30r_trace._temporary_benchmark_workspace(repo_root) as first:
+                paths.append(first)
+                assert first.parent == repo_root / ".nexus" / "bench_cases"
+                with n30r_trace._temporary_benchmark_workspace(repo_root) as second:
+                    paths.append(second)
+                    assert second != first
+                    assert second.parent == first.parent
+                    raise RuntimeError("cleanup probe")
+        assert len(paths) == 2
+        assert all(not path.exists() for path in paths)
+
+    @pytest.mark.parametrize("relative", ["../outside", "child/../inside"])
+    def test_workspace_rejects_lexical_traversal(self, tmp_path, monkeypatch, relative):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        monkeypatch.setattr(n30r_trace, "is_ephemeral_path", lambda _path: False)
+        with pytest.raises(ValueError, match="path_traversal"):
+            n30r_trace._validate_repo_workspace_path(
+                repo_root, repo_root / relative, "n30r_v1_workspace"
+            )
+
+    def test_workspace_rejects_external_target(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(n30r_trace, "is_ephemeral_path", lambda _path: False)
+        with pytest.raises(ValueError, match="outside_repository"):
+            n30r_trace._validate_repo_workspace_path(
+                tmp_path / "repo", tmp_path / "outside", "n30r_v1_workspace"
+            )
+
+    @pytest.mark.parametrize("symlink_name", [".nexus", ".nexus/bench_cases"])
+    def test_workspace_parent_rejects_symlink_escape(self, tmp_path, monkeypatch, symlink_name):
+        repo_root = tmp_path / "repo"
+        outside = tmp_path / "outside"
+        repo_root.mkdir()
+        outside.mkdir()
+        link = repo_root / symlink_name
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(outside, target_is_directory=True)
+        monkeypatch.setattr(n30r_trace, "is_ephemeral_path", lambda _path: False)
+        with pytest.raises(ValueError, match="workspace_parent_outside_repository"):
+            n30r_trace._repo_workspace_parent(repo_root)
+        assert list(outside.iterdir()) == []
+
+    def test_ephemeral_workspace_blocked_despite_override(self, tmp_path, monkeypatch):
+        repo_root = tmp_path / "ephemeral-repo"
+        repo_root.mkdir()
+        monkeypatch.setenv("NEXUS_ARMOR_ALLOW_EPHEMERAL", "1")
+        with pytest.raises(ValueError, match="workspace_parent_ephemeral"):
+            n30r_trace._repo_workspace_parent(repo_root)
+        assert not (repo_root / ".nexus").exists()
+
+    @pytest.mark.parametrize("failure_point", ["executor", "artifact_write"])
+    def test_trace_exception_cleans_owned_workspace_and_artifacts(self, monkeypatch, failure_point):
+        repo_root = Path(__file__).resolve().parents[2]
+        workspaces = repo_root / ".nexus" / "bench_cases"
+        artifacts = repo_root / "docs" / "bench" / "n30r" / "v1_artifacts"
+        before_workspaces = set(workspaces.glob("n30r-v1-*"))
+        before_artifacts = set(artifacts.glob("*"))
+
+        def fail_executor(*args, **kwargs):
+            raise RuntimeError("injected executor failure")
+
+        original_write = Path.write_text
+
+        def fail_artifact(path, *args, **kwargs):
+            if path.name == "prompt_telemetry.json" and path.parent.parent == artifacts:
+                raise RuntimeError("injected artifact failure")
+            return original_write(path, *args, **kwargs)
+
+        if failure_point == "executor":
+            monkeypatch.setattr(n30r_trace.LocalModelExecutor, "run", fail_executor)
+        else:
+            monkeypatch.setattr(Path, "write_text", fail_artifact)
+        with pytest.raises(RuntimeError, match="injected"):
+            n30r_trace.run_v1_trace()
+        assert set(workspaces.glob("n30r-v1-*")) == before_workspaces
+        assert set(artifacts.glob("*")) == before_artifacts
+
+    def test_successful_runs_have_unique_artifacts_and_no_source_workspace(self):
+        first, second = _run_trace(), _run_trace()
+        assert first["shadow_outcome_path"] != second["shadow_outcome_path"]
+        assert first["source_sha256"] == second["source_sha256"]
+        repo_root = Path(__file__).resolve().parents[2]
+        for receipt in (first, second):
+            workspace = Path(receipt["workspace_reset"]["workspace_first_candidate"])
+            assert workspace.parent == repo_root / ".nexus" / "bench_cases"
+            assert not workspace.exists()
+            assert Path(receipt["shadow_outcome_path"]).is_file()
+
+    def test_real_pipeline_and_verifier_are_reached(self, monkeypatch):
+        metadata = {}
+        original_run = n30r_trace.LocalModelExecutor.run
+
+        def observe_executor(*args, **kwargs):
+            response = original_run(*args, **kwargs)
+            metadata.update(response.raw_model_metadata)
+            return response
+
+        monkeypatch.setattr(n30r_trace.LocalModelExecutor, "run", observe_executor)
+        receipt = _run_trace()
+        assert metadata["localheal_pipeline_run_called"] is True
+        assert metadata["orchestrator_run_reachable"] is True
+        verifier = metadata["world_c_receipt"]["authoritative_verifier"]
+        assert verifier["invoked"] is True
+        assert verifier["evidence_refs"]
+        assert receipt["provider_call_count"] > 0
+        assert receipt["mock_provider"] is True
+        assert receipt["live_ollama_calls"] == 0
+
+    def test_artifact_collision_does_not_delete_existing_run(self, monkeypatch):
+        from types import SimpleNamespace
+
+        receipt = _run_trace()
+        artifact_dir = Path(receipt["shadow_outcome_path"]).parent
+        original = Path(receipt["shadow_outcome_path"]).read_bytes()
+        monkeypatch.setattr(n30r_trace.uuid, "uuid4", lambda: SimpleNamespace(hex=artifact_dir.name))
+        with pytest.raises(FileExistsError):
+            n30r_trace.run_v1_trace()
+        assert Path(receipt["shadow_outcome_path"]).read_bytes() == original
+
+
+class TestPlannerEnvironment:
+    @pytest.mark.parametrize("fail", [False, True])
+    def test_planner_restores_callers_environment(self, monkeypatch, fail):
+        from nexus.engine.capability_planner import CapabilityPlanner
+
+        keys = (
+            "NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR", "NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY",
+            "NEXUS_LOCAL_MODEL_CALL_ALLOWED", "NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER",
+            "NEXUS_LOCAL_MODEL_EXECUTOR_MODEL",
+        )
+        for key in keys[:-1]:
+            monkeypatch.setenv(key, "caller-owned-value")
+        monkeypatch.delenv(keys[-1], raising=False)
+        before = {key: os.environ.get(key) for key in keys}
+
+        def fail_planner(*args, **kwargs):
+            raise RuntimeError("injected planner failure")
+
+        if fail:
+            monkeypatch.setattr(CapabilityPlanner, "plan", fail_planner)
+            with pytest.raises(RuntimeError, match="injected planner failure"):
+                _run_trace()
+        else:
+            _run_trace()
+        assert {key: os.environ.get(key) for key in keys} == before
 
 # ── Mock prompts matching production markers ──────────────────────────
 
@@ -210,8 +372,7 @@ class TestDeterministicProviderPerCallSemantic:
     def test_semantic_retry_prompt_telemetry_records_markers(self):
         """Prompt telemetry for semantic retry contains key markers."""
         _reset_provider_state()
-        from scripts.bench.n30r_v1_full_armor_trace import deterministic_provider
-        from scripts.bench.n30r_v1_full_armor_trace import _prompt_telemetry
+        from scripts.bench.n30r_v1_full_armor_trace import _prompt_telemetry, deterministic_provider
         req = self._make_request(_SEMANTIC_RETRY_PROMPT)
         deterministic_provider(req)
 
@@ -242,8 +403,7 @@ class TestWrongOnlyProvider:
 
     def test_wrong_only_provider_triggers_semantic_retry(self):
         _reset_provider_state()
-        from scripts.bench.n30r_v1_full_armor_trace import deterministic_provider, _prompt_telemetry
-        from nexus.services.local_heal.local_model_provider import LocalModelProviderRequest
+        from scripts.bench.n30r_v1_full_armor_trace import _prompt_telemetry, deterministic_provider
 
         # Simulate pipeline: initial attempt → WRONG, then orchestrator retry
         init_req = self._make_request(_INITIAL_REPAIR_PROMPT)
@@ -333,7 +493,10 @@ class TestV1TracePipelineStages:
         assert "local_model_executor" in receipt["planner_capabilities"]
 
     def test_executor_capabilities_present(self, receipt):
-        assert len(receipt["executor_capabilities"]) == 5
+        assert receipt["executor_capabilities"] == [
+            "artifact_gate", "claim_gate", "delivery_gate",
+            "local_model_executor", "mempalace_gate", "repair_loop",
+        ]
         assert "repair_loop" in receipt["executor_capabilities"]
 
     def test_planner_to_projection_accounted(self, receipt):
@@ -617,7 +780,6 @@ class TestBehaviorCollapseGuard:
         )
 
     def test_first_attempt_no_collapse(self):
-        from nexus.services.local_heal.protocol import PatchIntent
         intents = [self._make_intent("def foo():", "def foo(): pass")]
         last_texts = []
         for intent in intents:
