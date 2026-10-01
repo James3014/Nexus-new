@@ -9,7 +9,10 @@ def test_automation_contract_does_not_activate_primary_cohort_in_wave1() -> None
         )
     )
     assert payload["status"] == "SOURCE_READY_PENDING_LIVE_ACTIVATION"
+    assert payload["activation"]["activation_state"] is None
     assert payload["activation"]["t_auto"] is None
+    assert payload["activation"]["exclusion_set_sha256"] is None
+    assert payload["activation"]["required_status"] == "AUTOMATIC_CAPTURE_READY"
     assert payload["activation"]["wave1_must_not_create_primary_scoring_boundary"] is True
     assert (
         payload["superseded_provisional_boundary"]["status"]
