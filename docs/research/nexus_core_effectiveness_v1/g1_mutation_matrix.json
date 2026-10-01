@@ -1,0 +1,214 @@
+{
+  "schema": "nexus.core_effectiveness.g1_mutation_matrix.v1",
+  "study_issue": "James3014/Nexus-new#1278",
+  "gate_issue": "James3014/Nexus-new#1286",
+  "authority": "RESEARCH_OBSERVATION_ONLY",
+  "claim_ceiling": "CONTROLLED_FIXTURE_CORRECTNESS_ONLY",
+  "auto_chain": false,
+  "subject": {
+    "repository": "James3014/nexus-core",
+    "revision": "2c9b746d0ae2da87af4a252b39eb09ae623d7467",
+    "tree": "f418704c4241e089bc52e6d2966b8a6f6786b47e",
+    "ci_run_id": 36842914100,
+    "ci_job_id": 110305991522,
+    "ci_conclusion": "success",
+    "product_test_command": "uv run pytest -q tests/product",
+    "product_test_passed": 1113,
+    "product_test_deselected": 1
+  },
+  "mutants": [
+    {
+      "id": "M01",
+      "description": "Verifier PASS evidence is stale after the claimed final content changes.",
+      "witness_kind": "SUBJECT_TEST",
+      "selector": "tests/product/test_completion_evidence_applicability.py::test_modify_pass_modify_again_marks_prior_verification_stale",
+      "expected_outcome": "FAIL_CLOSED",
+      "expected_signals": [
+        "REJECTED_STALE"
+      ]
+    },
+    {
+      "id": "M02",
+      "description": "Receipt is rebound to a wrong source tree after generation.",
+      "witness_kind": "SUBJECT_TEST",
+      "selector": "tests/product/test_local_golden_path.py::test_receipt_rejects_rehashed_source_target_duplicate_tamper",
+      "expected_outcome": "FAIL_CLOSED",
+      "expected_signals": [
+        "RECEIPT_BINDING_MISMATCH:source_tree"
+      ]
+    },
+    {
+      "id": "M03",
+      "description": "Receipt is rebound to a wrong target tree after generation.",
+      "witness_kind": "SUBJECT_TEST",
+      "selector": "tests/product/test_local_golden_path.py::test_receipt_rejects_rehashed_source_target_duplicate_tamper",
+      "expected_outcome": "FAIL_CLOSED",
+      "expected_signals": [
+        "RECEIPT_BINDING_MISMATCH:target_tree"
+      ]
+    },
+    {
+      "id": "M04",
+      "description": "Configured base is not an ancestor of the candidate HEAD.",
+      "witness_kind": "SUBJECT_TEST",
+      "selector": "tests/product/test_local_golden_path.py::test_doctor_and_check_reject_base_ref_outside_head_ancestry",
+      "expected_outcome": "FAIL_CLOSED",
+      "expected_signals": [
+        "BASE_REF_NOT_ANCESTOR"
+      ]
+    },
+    {
+      "id": "M05",
+      "description": "An untracked changed file is omitted from an otherwise re-sealed evidence manifest.",
+      "witness_kind": "EXTERNAL_BLACK_BOX_PROBE",
+      "selector": "probe:omitted_untracked",
+      "expected_outcome": "FAIL_CLOSED",
+      "expected_signals": [
+        "GIT_MANIFEST_MISMATCH"
+      ]
+    },
+    {
+      "id": "M06",
+      "description": "Evidence is re-sealed to the staged index tree while the physical worktree has newer content.",
+      "witness_kind": "EXTERNAL_BLACK_BOX_PROBE",
+      "selector": "probe:index_worktree_mismatch",
+      "expected_outcome": "FAIL_CLOSED",
+      "expected_signals": [
+        "GIT_MANIFEST_MISMATCH"
+      ]
+    },
+    {
+      "id": "M07",
+      "description": "Change touches a path outside the configured allow-list.",
+      "witness_kind": "SUBJECT_TEST",
+      "selector": "tests/product/test_local_golden_path.py::test_policy_projection_fails_closed_with_typed_reason",
+      "expected_outcome": "FAIL_CLOSED",
+      "expected_signals": [
+        "FORBIDDEN_PATH"
+      ]
+    },
+    {
+      "id": "M08",
+      "description": "Change deletes a path while deletion policy is FORBID.",
+      "witness_kind": "SUBJECT_TEST",
+      "selector": "tests/product/test_local_golden_path.py::test_policy_projection_fails_closed_with_typed_reason",
+      "expected_outcome": "FAIL_CLOSED",
+      "expected_signals": [
+        "FORBIDDEN_DELETION"
+      ]
+    },
+    {
+      "id": "M09",
+      "description": "Configured verifier exits non-zero.",
+      "witness_kind": "SUBJECT_TEST",
+      "selector": "tests/product/test_local_golden_path.py::test_verifier_fail_is_failed_verification_not_transport_error",
+      "expected_outcome": "FAIL_CLOSED",
+      "expected_signals": [
+        "VERIFIER_FAILED"
+      ]
+    },
+    {
+      "id": "M10",
+      "description": "Configured verifier exceeds the bounded timeout.",
+      "witness_kind": "SUBJECT_TEST",
+      "selector": "tests/product/test_local_golden_path.py::test_verifier_timeout_fails_closed_with_typed_reason",
+      "expected_outcome": "FAIL_CLOSED",
+      "expected_signals": [
+        "VERIFIER_TIMEOUT"
+      ]
+    },
+    {
+      "id": "M11",
+      "description": "Verifier artifact hash is tampered while the outer receipt is re-sealed.",
+      "witness_kind": "EXTERNAL_BLACK_BOX_PROBE",
+      "selector": "probe:verifier_artifact_hash_tamper",
+      "expected_outcome": "FAIL_CLOSED",
+      "expected_signals": [
+        "VERIFIER_ARTIFACT_MISMATCH"
+      ]
+    },
+    {
+      "id": "M12",
+      "description": "Canonical verification request is tampered while the outer receipt is re-sealed.",
+      "witness_kind": "EXTERNAL_BLACK_BOX_PROBE",
+      "selector": "probe:canonical_request_tamper",
+      "expected_outcome": "FAIL_CLOSED",
+      "expected_signals": [
+        "CORE_RESPONSE_MISMATCH"
+      ]
+    },
+    {
+      "id": "M13",
+      "description": "Receipt or envelope bytes are tampered without a matching integrity root.",
+      "witness_kind": "SUBJECT_TEST",
+      "selector": "tests/product/test_local_golden_path.py::test_receipt_rejects_tampered_manifest_and_result",
+      "expected_outcome": "FAIL_CLOSED",
+      "expected_signals": [
+        "RECEIPT_HASH_MISMATCH"
+      ]
+    },
+    {
+      "id": "M14",
+      "description": "Evidence bound to an old ChangeSet is applied to a newer revision.",
+      "witness_kind": "SUBJECT_TEST",
+      "selector": "tests/product/test_completion_evidence_applicability.py::test_stale_evidence_binding_blocks_analysis_from_verify",
+      "expected_outcome": "FAIL_CLOSED",
+      "expected_signals": [
+        "STALE_BINDING"
+      ]
+    },
+    {
+      "id": "M15",
+      "description": "Verifier evidence refers to content outside the changed scope.",
+      "witness_kind": "SUBJECT_TEST",
+      "selector": "tests/product/test_completion_evidence_applicability.py::test_irrelevant_verification_does_not_apply",
+      "expected_outcome": "FAIL_CLOSED",
+      "expected_signals": [
+        "REJECTED_IRRELEVANT"
+      ]
+    }
+  ],
+  "controls": [
+    {
+      "id": "C01",
+      "description": "Committed external repository change verifies and receipt replays.",
+      "witness_kind": "SUBJECT_TEST",
+      "selector": "tests/product/test_local_golden_path.py::test_committed_external_repo_check_is_verified_and_replayable",
+      "expected_outcome": "ACCEPT",
+      "expected_signals": [
+        "VERIFIED"
+      ]
+    },
+    {
+      "id": "C02",
+      "description": "Equivalent final content remains fresh after modification.",
+      "witness_kind": "SUBJECT_TEST",
+      "selector": "tests/product/test_completion_evidence_applicability.py::test_equivalent_content_still_fresh_after_modify",
+      "expected_outcome": "ACCEPT",
+      "expected_signals": [
+        "ACCEPTED"
+      ]
+    },
+    {
+      "id": "C03",
+      "description": "Dirty tracked and untracked worktree verifies without mutating caller HEAD or index.",
+      "witness_kind": "SUBJECT_TEST",
+      "selector": "tests/product/test_local_golden_path.py::test_dirty_check_preserves_head_index_and_worktree",
+      "expected_outcome": "ACCEPT",
+      "expected_signals": [
+        "VERIFIED",
+        "INDEX_PRESERVED"
+      ]
+    },
+    {
+      "id": "C04",
+      "description": "A deletion verifies when the contract explicitly allows deletion.",
+      "witness_kind": "SUBJECT_TEST",
+      "selector": "tests/product/test_generic_verification_protocol.py::test_forbidden_deletion_is_failed_verification_but_allow_can_verify",
+      "expected_outcome": "ACCEPT",
+      "expected_signals": [
+        "DELETION_ALLOW_VERIFIED"
+      ]
+    }
+  ]
+}
