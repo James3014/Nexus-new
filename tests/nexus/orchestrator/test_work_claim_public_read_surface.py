@@ -10,7 +10,7 @@ Invariants verified:
   source/admission binding, freshness, canonical_revision
 - Stale generation is detectably marked
 - Filtering by repo, issue, worker, status
-- Malformed/tampered claims are skipped during list without crashing
+- Malformed/tampered active claims make list fail closed instead of disappearing
 """
 
 from __future__ import annotations
@@ -237,17 +237,20 @@ def test_list_active_work_claims_and_filtering(service: SelfHostedTaskService):
     ]
 
 
-def test_list_active_work_claims_skips_malformed_records_gracefully(service: SelfHostedTaskService):
+def test_list_active_work_claims_fails_closed_on_malformed_active_claim(service: SelfHostedTaskService):
     task_id = "task-corrupted"
     _seed_task_state(service, task_id)
     with service._state_lock():
         path = service._state_path(task_id)
-        # Put an invalid work_claim record missing identity
-        path.write_text(json.dumps({"task_id": task_id, "work_claim": {"claim_id": "bad"}}), encoding="utf-8")
+        # Put an invalid active work_claim record missing identity.
+        path.write_text(
+            json.dumps({"task_id": task_id, "work_claim": {"claim_id": "bad"}}),
+            encoding="utf-8",
+        )
 
-    # Listing must not raise, skips invalid claim record
-    claims = service.list_active_work_claims()
-    assert len(claims) == 0
+    # A corrupted active claim must never disappear into an apparently empty list.
+    with pytest.raises(RuntimeError, match="WORK_CLAIM_LIST_BLOCKED:WORK_CLAIM_MALFORMED"):
+        service.list_active_work_claims()
 
 
 def test_read_work_claim_fails_closed_on_tampered_stored_record(service: SelfHostedTaskService):
@@ -268,6 +271,10 @@ def test_read_work_claim_fails_closed_on_tampered_stored_record(service: SelfHos
     assert res["status"] == "BLOCKED"
     assert res["reason"] == "WORK_CLAIM_TAMPERED"
     assert res["found"] is False
+
+    # Listing the same canonical store must also fail closed instead of hiding it.
+    with pytest.raises(RuntimeError, match="WORK_CLAIM_LIST_BLOCKED:WORK_CLAIM_TAMPERED"):
+        service.list_active_work_claims()
 
 
 def test_read_work_claim_does_not_leak_mutation_credential(service: SelfHostedTaskService):

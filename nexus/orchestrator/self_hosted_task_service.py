@@ -2782,15 +2782,23 @@ class SelfHostedTaskService:
                     continue
                 try:
                     state = json.loads(path.read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError):
-                    continue
+                except (OSError, json.JSONDecodeError) as exc:
+                    raise RuntimeError(
+                        "WORK_CLAIM_LIST_BLOCKED:WORK_CLAIM_STATE_UNREADABLE"
+                    ) from exc
                 claim_record = state.get("work_claim")
-                if claim_record is None or not isinstance(claim_record, Mapping):
+                if claim_record is None:
                     continue
+                if not isinstance(claim_record, Mapping):
+                    raise RuntimeError(
+                        "WORK_CLAIM_LIST_BLOCKED:WORK_CLAIM_MALFORMED"
+                    )
                 try:
                     self._validate_claim_record(claim_record)
-                except RuntimeError:
-                    continue
+                except RuntimeError as exc:
+                    raise RuntimeError(
+                        f"WORK_CLAIM_LIST_BLOCKED:{exc}"
+                    ) from exc
 
                 identity = claim_record.get("identity") or {}
                 if repo_filter and identity.get("repository") != repo_filter:
