@@ -32,3 +32,18 @@ def test_daemon_is_fail_closed_on_capture_and_admission_gaps() -> None:
     assert '"missing_admission"' in text
     assert "ExternalFrozenStackRunner" in text
     assert "ExternalGroundTruthResolver" in text
+
+
+def test_automation_contract_binds_wave2_live_entrypoints_without_activation() -> None:
+    payload = json.loads(
+        Path("docs/research/hybrid_replication_v2/AUTOMATION_CONTRACT.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    live = payload["live_binding"]
+    assert live["frozen_stack_command"] == "scripts/ops/hybrid_replication_live_stack.py"
+    assert live["ground_truth_command"] == "scripts/ops/hybrid_replication_ground_truth.py"
+    assert live["installer"] == "scripts/ops/hybrid_replication_live_install.py"
+    assert live["launchd_or_scheduler"] == "com.nexus.hybrid-replication"
+    assert live["activation_state"] == "PENDING_STRONG_ONLINE_LIVE_CANARY"
+    assert payload["activation"]["t_auto"] is None
