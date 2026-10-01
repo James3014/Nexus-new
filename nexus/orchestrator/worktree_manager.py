@@ -372,6 +372,7 @@ def evaluate_cross_entrypoint_conflict(
     active_writers: Optional[Sequence[Any]] = None,
     *,
     expected_revision: Optional[str] = None,
+    inventory_complete: bool = False,
 ) -> dict[str, Any]:
     """Fail-closed cross-entrypoint conflict admission evaluation.
 
@@ -455,7 +456,9 @@ def evaluate_cross_entrypoint_conflict(
             "conflicting_writers": [],
         }
 
-    # Missing active writer inventory must fail closed (never default to empty list)
+    # Missing/incomplete active-writer inventory must fail closed.  An empty
+    # list is only meaningful when the caller can prove all entrypoints were
+    # observed; Target-only ownership records are not a complete inventory.
     if active_writers is None:
         return {
             "schema": MUTATION_CONFLICT_SCHEMA,
@@ -465,6 +468,18 @@ def evaluate_cross_entrypoint_conflict(
             "candidate_task_id": cand_task_id,
             "candidate_attempt_id": cand_attempt_id,
             "candidate_mode": cand_mode,
+            "conflicting_writers": [],
+        }
+    if not inventory_complete:
+        return {
+            "schema": MUTATION_CONFLICT_SCHEMA,
+            "claim_ceiling": MUTATION_CONFLICT_CLAIM_CEILING,
+            "disposition": CONFLICT_UNKNOWN,
+            "reason": "CROSS_ENTRYPOINT_INVENTORY_INCOMPLETE",
+            "candidate_task_id": cand_task_id,
+            "candidate_attempt_id": cand_attempt_id,
+            "candidate_mode": cand_mode,
+            "observed_writer_count": len(active_writers),
             "conflicting_writers": [],
         }
 
@@ -1591,21 +1606,9 @@ class WorktreeManager:
         if self.target_conflict(contract, task_states=task_states):
             raise RuntimeError("serial Target budget exceeded: active Target limit is 1")
 
-        # Cross-entrypoint physical conflict admission check before effect
-        known_writers = []
-        for rec in self._all_ownership_records(controller_root):
-            rec_task_id = str(rec.get("task_id") or "")
-            if rec_task_id != contract.task_id and not rec.get("invalid"):
-                known_writers.append(rec)
-        admission = self.evaluate_admission(
-            contract,
-            active_writers=known_writers,
-            expected_revision=contract.controller_revision,
-        )
-        if admission["disposition"] != CONFLICT_CLEAR:
-            raise RuntimeError(
-                f"Target lease admission rejected: {admission['disposition']} ({admission['reason']})"
-            )
+        # Cross-entrypoint admission is intentionally not enforced here yet.
+        # The controller-owned records below cover isolated Targets only; treating
+        # them as the complete DIRECT/RDC/LOCAL inventory would create a false CLEAR.
         if target_path.exists():
             entry = self._worktree_entry(controller_root, target_path)
             if entry is None:
@@ -1771,6 +1774,7 @@ class WorktreeManager:
         active_writers: Optional[Sequence[Any]] = None,
         *,
         expected_revision: Optional[str] = None,
+        inventory_complete: bool = False,
     ) -> dict[str, Any]:
         """Evaluate cross-entrypoint physical conflict admission for candidate."""
         if active_writers is None:
@@ -1798,6 +1802,7 @@ class WorktreeManager:
             candidate,
             active_writers=active_writers,
             expected_revision=expected_revision,
+            inventory_complete=inventory_complete,
         )
 
     def readback_conflict_state(
@@ -1806,6 +1811,7 @@ class WorktreeManager:
         active_writers: Optional[Sequence[Any]] = None,
         *,
         expected_revision: Optional[str] = None,
+        inventory_complete: bool = False,
     ) -> dict[str, Any]:
         """Readback physical conflict admission disposition for candidate."""
         contract = _record_contract(candidate)
@@ -1844,11 +1850,14 @@ class WorktreeManager:
                 }
             cand_task_id = str(_record_value(candidate, "task_id") or _record_value(contract, "task_id") or "")
             active_writers = [r for r in raw_records if str(r.get("task_id") or "") != cand_task_id]
+            # Controller ownership records cover isolated Targets only.
+            inventory_complete = False
 
         return evaluate_cross_entrypoint_conflict(
             candidate,
             active_writers=active_writers,
             expected_revision=expected_revision,
+            inventory_complete=inventory_complete,
         )
 
     def target_conflict(
