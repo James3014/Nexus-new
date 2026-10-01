@@ -89,6 +89,11 @@
       "execution_lane",
       "transport"
     ],
+    "ordering_evidence_fields": [
+      "enrolled_at",
+      "first_effect_at"
+    ],
+    "ordering_rule": "A durable attempt is prospective when enrolled_at exists and either no effect has happened yet or enrolled_at is strictly earlier than first_effect_at. Reading the durable session after first effect does not make the enrollment retrospective.",
     "terminal_adjudication_fields": [
       "target_revision",
       "target_tree",
