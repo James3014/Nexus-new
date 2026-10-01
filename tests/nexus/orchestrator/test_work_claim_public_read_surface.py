@@ -201,11 +201,17 @@ def test_list_active_work_claims_and_filtering(service: SelfHostedTaskService):
         _seed_task_state(service, f"task-{i}")
 
     # Task 1: repo A, issue 129, worker luna
-    service.acquire_work_claim(_sample_claim_request(task_id="task-1", repository="repo-A", issue="129", worker_id="luna"))
+    service.acquire_work_claim(
+        _sample_claim_request(task_id="task-1", repository="repo-A", issue="129", worker_id="luna")
+    )
     # Task 2: repo A, issue 98, worker bob
-    service.acquire_work_claim(_sample_claim_request(task_id="task-2", repository="repo-A", issue="98", worker_id="bob"))
+    service.acquire_work_claim(
+        _sample_claim_request(task_id="task-2", repository="repo-A", issue="98", worker_id="bob")
+    )
     # Task 3: repo B, issue 129, worker luna
-    service.acquire_work_claim(_sample_claim_request(task_id="task-3", repository="repo-B", issue="129", worker_id="luna"))
+    service.acquire_work_claim(
+        _sample_claim_request(task_id="task-3", repository="repo-B", issue="129", worker_id="luna")
+    )
 
     # Unfiltered listing
     all_claims = service.list_active_work_claims()
@@ -237,7 +243,9 @@ def test_list_active_work_claims_and_filtering(service: SelfHostedTaskService):
     ]
 
 
-def test_list_active_work_claims_fails_closed_on_malformed_active_claim(service: SelfHostedTaskService):
+def test_list_active_work_claims_fails_closed_on_malformed_active_claim(
+    service: SelfHostedTaskService,
+):
     task_id = "task-corrupted"
     _seed_task_state(service, task_id)
     with service._state_lock():
