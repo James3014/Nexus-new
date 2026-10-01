@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -1499,6 +1500,87 @@ def _run_background_operation(
         heartbeat_thread.join(timeout=2.0)
 
 
+def _cleanup_reconciled_lease(record: dict[str, Any]) -> dict[str, Any]:
+    reconciliation = record.get("reconciliation")
+    if (
+        not isinstance(reconciliation, dict)
+        or reconciliation.get("provider_alive_after") is not False
+    ):
+        return {"result": "NOT_SAFE_TO_CLEAN"}
+
+    alias_hash = record.get("account_alias_hash")
+    lease_id_hash = record.get("lease_id_hash")
+    owner_pid = record.get("pid")
+    if (
+        not isinstance(alias_hash, str)
+        or not alias_hash
+        or not isinstance(lease_id_hash, str)
+        or not lease_id_hash
+        or not isinstance(owner_pid, int)
+        or owner_pid <= 0
+    ):
+        return {"result": "LEASE_IDENTITY_INCOMPLETE"}
+
+    lock_path = LEASES_DIR / f"{alias_hash}.lock"
+    receipt_path = LEASES_DIR / f"{alias_hash}.receipt.json"
+    if not receipt_path.exists():
+        return {"result": "ALREADY_ABSENT"}
+
+    LEASES_DIR.mkdir(parents=True, exist_ok=True)
+    lock_obj = lock_path.open("a+")
+    try:
+        try:
+            fcntl.flock(lock_obj.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (BlockingIOError, OSError):
+            return {"result": "LEASE_BUSY_PRESERVED"}
+
+        try:
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {"result": "LEASE_RECEIPT_UNREADABLE_PRESERVED"}
+
+        expected = {
+            "account_alias_hash": alias_hash,
+            "lease_id_hash": lease_id_hash,
+            "pid": owner_pid,
+        }
+        observed = {
+            "account_alias_hash": receipt.get("account_alias_hash"),
+            "lease_id_hash": receipt.get("lease_id_hash"),
+            "pid": receipt.get("pid"),
+        }
+        if observed != expected:
+            return {
+                "result": "LEASE_IDENTITY_MISMATCH_PRESERVED",
+                "observed": observed,
+            }
+
+        try:
+            receipt_path.unlink()
+        except OSError as exc:
+            return {
+                "result": "LEASE_RECEIPT_REMOVE_FAILED",
+                "error": type(exc).__name__,
+            }
+        return {"result": "LEASE_RECEIPT_REMOVED"}
+    finally:
+        try:
+            fcntl.flock(lock_obj.fileno(), fcntl.LOCK_UN)
+        finally:
+            lock_obj.close()
+
+
+def _reconcile_operation(
+    journal: AgyOperationJournal,
+    operation_id: str,
+) -> dict[str, Any]:
+    record = journal.reconcile(operation_id)
+    lease_cleanup = _cleanup_reconciled_lease(record)
+    reconciliation = dict(record.get("reconciliation") or {})
+    reconciliation["lease_cleanup"] = lease_cleanup
+    return journal.update(operation_id, reconciliation=reconciliation)
+
+
 def _print_operation(record: dict[str, Any]) -> None:
     print(json.dumps(public_operation_view(record), indent=2, sort_keys=True))
 
@@ -1551,7 +1633,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.reconcile:
-        _print_operation(journal.reconcile(args.reconcile))
+        _print_operation(_reconcile_operation(journal, args.reconcile))
         return 0
 
     cwd = str(Path(args.cwd).expanduser().resolve())
