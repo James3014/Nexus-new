@@ -43,28 +43,26 @@ def _observation(index: int) -> dict[str, object]:
 
 def _terminal(row: dict[str, object]) -> dict[str, object]:
     out = copy.deepcopy(row)
-    out.update(
-        {
-            "terminal": True,
-            "target_revision": "f" * 40,
-            "target_tree": "e" * 40,
-            "core_invoked": True,
-            "core_verdict": "VERIFIED",
-            "core_reason": "VERIFIER_AND_TREE_BOUND",
-            "receipt_hash": "d" * 64,
-            "baseline_result": "PASS",
-            "terminal_outcome": "SUCCEEDED",
-            "t_core_detection": "2026-10-01T08:00:01Z",
-            "t_baseline_detection": "2026-10-01T08:00:03Z",
-            "t_terminal_result": "2026-10-01T08:00:04Z",
-            "core_orchestration_runtime_ms": 20,
-            "verifier_runtime_ms": 100,
-            "duplicate_verifier_runtime_ms": 0,
-            "reviewer_calls": 0,
-            "manual_interventions": 0,
-            "attempts_to_green": 1,
-        }
-    )
+    out.update({
+        "terminal": True,
+        "target_revision": "f" * 40,
+        "target_tree": "e" * 40,
+        "core_invoked": True,
+        "core_verdict": "VERIFIED",
+        "core_reason": "VERIFIER_AND_TREE_BOUND",
+        "receipt_hash": "d" * 64,
+        "baseline_result": "PASS",
+        "terminal_outcome": "SUCCEEDED",
+        "t_core_detection": "2026-10-01T08:00:01Z",
+        "t_baseline_detection": "2026-10-01T08:00:03Z",
+        "t_terminal_result": "2026-10-01T08:00:04Z",
+        "core_orchestration_runtime_ms": 20,
+        "verifier_runtime_ms": 100,
+        "duplicate_verifier_runtime_ms": 0,
+        "reviewer_calls": 0,
+        "manual_interventions": 0,
+        "attempts_to_green": 1,
+    })
     return out
 
 
@@ -141,16 +139,14 @@ def test_exact_nineteen_of_twenty_meets_95_percent_target() -> None:
 
 def test_eighteen_of_twenty_fails_95_percent_target() -> None:
     rows = [_observation(index) for index in range(1, 19)]
-    rows.extend(
-        [
-            identity_gap(
-                repository="James3014/devspace",
-                work_item_id=f"James3014/devspace#{999 + index}",
-                reason="pre-effect identity missing",
-            )
-            for index in range(2)
-        ]
-    )
+    rows.extend([
+        identity_gap(
+            repository="James3014/devspace",
+            work_item_id=f"James3014/devspace#{999 + index}",
+            reason="pre-effect identity missing",
+        )
+        for index in range(2)
+    ])
 
     report = build_g0_coverage_report(rows)
 
@@ -185,19 +181,17 @@ def test_identity_gap_requires_explicit_missingness() -> None:
         ObservabilityContractError,
         match="identity_gap_requires_attempt_id_and_enrolled_at_missingness",
     ):
-        build_g0_coverage_report(
-            [
-                {
-                    "schema": OBSERVATION_SCHEMA,
-                    "repository": "James3014/Nexus-new",
-                    "work_item_id": "James3014/Nexus-new#1",
-                    "eligibility_disposition": IDENTITY_GAP,
-                    "prospective": False,
-                    "terminal": False,
-                    "missingness": {},
-                }
-            ]
-        )
+        build_g0_coverage_report([
+            {
+                "schema": OBSERVATION_SCHEMA,
+                "repository": "James3014/Nexus-new",
+                "work_item_id": "James3014/Nexus-new#1",
+                "eligibility_disposition": IDENTITY_GAP,
+                "prospective": False,
+                "terminal": False,
+                "missingness": {},
+            }
+        ])
 
 
 def test_empty_population_does_not_claim_coverage() -> None:
