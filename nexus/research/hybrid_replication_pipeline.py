@@ -6,7 +6,7 @@ import hashlib
 import json
 import shlex
 import subprocess
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -106,6 +106,10 @@ class TaskSnapshot:
             contract_sha256=contract_sha256,
             capture_sha256=capture_sha256,
         )
+
+    @property
+    def task_key(self) -> str:
+        return _task_key(self.repository, self.issue_number)
 
     def to_capture_payload(self) -> dict[str, Any]:
         return {
@@ -299,6 +303,7 @@ class GroundTruthEvidence:
     terminal_state: str
     terminal_at: str
     evidence_refs: tuple[str, ...]
+    details: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.terminal_state.strip():
@@ -313,9 +318,6 @@ def _task_dir_name(task_key: str) -> str:
 
 def _task_key(repository: str, issue_number: int) -> str:
     return f"{repository}#{int(issue_number)}"
-
-
-TaskSnapshot.task_key = property(lambda self: _task_key(self.repository, self.issue_number))  # type: ignore[attr-defined]
 
 
 @dataclass(frozen=True)
@@ -644,6 +646,7 @@ class ExternalGroundTruthResolver:
             terminal_state=str(payload.get("terminal_state") or ""),
             terminal_at=str(payload.get("terminal_at") or ""),
             evidence_refs=tuple(str(item) for item in payload.get("evidence_refs", []) or []),
+            details=dict(payload.get("details") or {}),
         )
 
 
