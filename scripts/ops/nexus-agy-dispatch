@@ -499,19 +499,17 @@ def _dynamic_availability_state(
     preferred_names = set(ordered_preferred)
     reserve_names = set(ordered_reserve) - preferred_names
 
-    result.update(
-        {
-            "preferred": ordered_preferred,
-            "reserve": [name for name in ordered_reserve if name in reserve_names],
-            "fallback": [
-                name
-                for name in ordered_fallback
-                if name not in preferred_names and name not in reserve_names
-            ],
-            "blocked": sorted(set(blocked)),
-            "unknown": sorted(set(unknown)),
-        }
-    )
+    result.update({
+        "preferred": ordered_preferred,
+        "reserve": [name for name in ordered_reserve if name in reserve_names],
+        "fallback": [
+            name
+            for name in ordered_fallback
+            if name not in preferred_names and name not in reserve_names
+        ],
+        "blocked": sorted(set(blocked)),
+        "unknown": sorted(set(unknown)),
+    })
     return result
 
 
@@ -936,26 +934,22 @@ def dispatch_run(
             model_family=scoped_model_family,
         )
     except AgyAccountPoolBusyError:
-        emit_meta(
-            {
-                "status": "pool_busy",
-                "attempts": 0,
-                "rotations": 0,
-                "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
-                "wall_ms": 0,
-            }
-        )
+        emit_meta({
+            "status": "pool_busy",
+            "attempts": 0,
+            "rotations": 0,
+            "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
+            "wall_ms": 0,
+        })
         return 75
     except AgyAccountPoolExhaustedError:
-        emit_meta(
-            {
-                "status": "pool_exhausted",
-                "attempts": 0,
-                "rotations": 0,
-                "failure_kind": "ACCOUNT_UNAVAILABLE",
-                "wall_ms": 0,
-            }
-        )
+        emit_meta({
+            "status": "pool_exhausted",
+            "attempts": 0,
+            "rotations": 0,
+            "failure_kind": "ACCOUNT_UNAVAILABLE",
+            "wall_ms": 0,
+        })
         return 75
 
     attempts = 0
@@ -1005,18 +999,16 @@ def dispatch_run(
                             model_family=scoped_model_family,
                             unavailable_until=unavailable_until,
                         )
-                        emit_meta(
-                            {
-                                "status": "failed",
-                                "attempts": attempts,
-                                "rotations": rotations,
-                                "failure_kind": "ACCOUNT_FAILOVER_LIMIT",
-                                "account_alias_hash": claim.account_alias_hash,
-                                "lease_id_hash": claim.lease_id_hash,
-                                "parallel_slot": True,
-                                "wall_ms": total_wall_ms,
-                            }
-                        )
+                        emit_meta({
+                            "status": "failed",
+                            "attempts": attempts,
+                            "rotations": rotations,
+                            "failure_kind": "ACCOUNT_FAILOVER_LIMIT",
+                            "account_alias_hash": claim.account_alias_hash,
+                            "lease_id_hash": claim.lease_id_hash,
+                            "parallel_slot": True,
+                            "wall_ms": total_wall_ms,
+                        })
                         return 75
                     try:
                         claim = coordinator.rotate_claim(
@@ -1039,26 +1031,22 @@ def dispatch_run(
                         )
                         continue
                     except AgyAccountPoolBusyError:
-                        emit_meta(
-                            {
-                                "status": "pool_busy",
-                                "attempts": attempts,
-                                "rotations": rotations,
-                                "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
-                                "wall_ms": total_wall_ms,
-                            }
-                        )
+                        emit_meta({
+                            "status": "pool_busy",
+                            "attempts": attempts,
+                            "rotations": rotations,
+                            "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
+                            "wall_ms": total_wall_ms,
+                        })
                         return 75
                     except AgyAccountPoolExhaustedError:
-                        emit_meta(
-                            {
-                                "status": "pool_exhausted",
-                                "attempts": attempts,
-                                "rotations": rotations,
-                                "failure_kind": "QUOTA_EXHAUSTED",
-                                "wall_ms": total_wall_ms,
-                            }
-                        )
+                        emit_meta({
+                            "status": "pool_exhausted",
+                            "attempts": attempts,
+                            "rotations": rotations,
+                            "failure_kind": "QUOTA_EXHAUSTED",
+                            "wall_ms": total_wall_ms,
+                        })
                         return 75
 
             attempts += 1
@@ -1104,17 +1092,15 @@ def dispatch_run(
                 sys.stdout.write(out)
                 if err:
                     sys.stderr.write(err)
-                emit_meta(
-                    {
-                        "status": "completed",
-                        "attempts": attempts,
-                        "rotations": rotations,
-                        "account_alias_hash": claim.account_alias_hash,
-                        "lease_id_hash": claim.lease_id_hash,
-                        "parallel_slot": True,
-                        "wall_ms": total_wall_ms,
-                    }
-                )
+                emit_meta({
+                    "status": "completed",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "account_alias_hash": claim.account_alias_hash,
+                    "lease_id_hash": claim.lease_id_hash,
+                    "parallel_slot": True,
+                    "wall_ms": total_wall_ms,
+                })
                 return 0
 
             kind = classify_failure(code, out, err, timed_out)
@@ -1135,18 +1121,16 @@ def dispatch_run(
                     sys.stdout.write(out)
                 if err:
                     sys.stderr.write(err)
-                emit_meta(
-                    {
-                        "status": "failed",
-                        "attempts": attempts,
-                        "rotations": rotations,
-                        "failure_kind": last_kind,
-                        "account_alias_hash": claim.account_alias_hash,
-                        "lease_id_hash": claim.lease_id_hash,
-                        "parallel_slot": True,
-                        "wall_ms": total_wall_ms,
-                    }
-                )
+                emit_meta({
+                    "status": "failed",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": last_kind,
+                    "account_alias_hash": claim.account_alias_hash,
+                    "lease_id_hash": claim.lease_id_hash,
+                    "parallel_slot": True,
+                    "wall_ms": total_wall_ms,
+                })
                 return code if isinstance(code, int) and code != 0 else 1
 
             family_unavailable_until = None
@@ -1178,18 +1162,16 @@ def dispatch_run(
                     sys.stdout.write(out)
                 if err:
                     sys.stderr.write(err)
-                emit_meta(
-                    {
-                        "status": "failed",
-                        "attempts": attempts,
-                        "rotations": rotations,
-                        "failure_kind": last_kind,
-                        "account_alias_hash": claim.account_alias_hash,
-                        "lease_id_hash": claim.lease_id_hash,
-                        "parallel_slot": True,
-                        "wall_ms": total_wall_ms,
-                    }
-                )
+                emit_meta({
+                    "status": "failed",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": last_kind,
+                    "account_alias_hash": claim.account_alias_hash,
+                    "lease_id_hash": claim.lease_id_hash,
+                    "parallel_slot": True,
+                    "wall_ms": total_wall_ms,
+                })
                 return code if isinstance(code, int) and code != 0 else 1
 
             if rotations >= max_failovers:
@@ -1202,18 +1184,16 @@ def dispatch_run(
                     )
                 except Exception:
                     pass
-                emit_meta(
-                    {
-                        "status": "failed",
-                        "attempts": attempts,
-                        "rotations": rotations,
-                        "failure_kind": "ACCOUNT_FAILOVER_LIMIT",
-                        "account_alias_hash": claim.account_alias_hash,
-                        "lease_id_hash": claim.lease_id_hash,
-                        "parallel_slot": True,
-                        "wall_ms": total_wall_ms,
-                    }
-                )
+                emit_meta({
+                    "status": "failed",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": "ACCOUNT_FAILOVER_LIMIT",
+                    "account_alias_hash": claim.account_alias_hash,
+                    "lease_id_hash": claim.lease_id_hash,
+                    "parallel_slot": True,
+                    "wall_ms": total_wall_ms,
+                })
                 return 75
 
             # Rotation eligible: rotate claim
@@ -1236,37 +1216,31 @@ def dispatch_run(
                     lease_id_hash=claim.lease_id_hash,
                 )
             except AgyAccountPoolBusyError:
-                emit_meta(
-                    {
-                        "status": "pool_busy",
-                        "attempts": attempts,
-                        "rotations": rotations,
-                        "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
-                        "wall_ms": total_wall_ms,
-                    }
-                )
+                emit_meta({
+                    "status": "pool_busy",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
+                    "wall_ms": total_wall_ms,
+                })
                 return 75
             except AgyAccountPoolExhaustedError:
-                emit_meta(
-                    {
-                        "status": "pool_exhausted",
-                        "attempts": attempts,
-                        "rotations": rotations,
-                        "failure_kind": last_kind,
-                        "wall_ms": total_wall_ms,
-                    }
-                )
+                emit_meta({
+                    "status": "pool_exhausted",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": last_kind,
+                    "wall_ms": total_wall_ms,
+                })
                 return 75
             except Exception:
-                emit_meta(
-                    {
-                        "status": "failed",
-                        "attempts": attempts,
-                        "rotations": rotations,
-                        "failure_kind": last_kind,
-                        "wall_ms": total_wall_ms,
-                    }
-                )
+                emit_meta({
+                    "status": "failed",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": last_kind,
+                    "wall_ms": total_wall_ms,
+                })
                 return 75
     finally:
         if claim is not None:
