@@ -5,7 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import signal
 import stat
+import subprocess
+import sys
 from pathlib import Path
 
 from nexus.services.agy_operation_journal import (
@@ -113,3 +116,74 @@ def test_record_is_valid_json_after_repeated_updates(tmp_path: Path) -> None:
     payload = json.loads(journal.record_path(operation_id).read_text(encoding="utf-8"))
     assert payload["phase"] == "PHASE_19"
     assert payload["attempts"] == 19
+
+
+def _process_group_alive(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def test_reconcile_dead_wrapper_terminates_exact_surviving_provider_group(
+    tmp_path: Path,
+) -> None:
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id, _ = _create(journal, tmp_path)
+    marker = str(journal.operation_dir(operation_id) / "agy.log")
+    wrapper_code = (
+        "import subprocess,sys;"
+        "subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)',sys.argv[1]]);"
+    )
+    wrapper = subprocess.Popen(
+        [sys.executable, "-c", wrapper_code, marker],
+        start_new_session=True,
+    )
+    wrapper.wait(timeout=3)
+    assert _process_group_alive(wrapper.pid)
+
+    try:
+        journal.mark_started(operation_id, pid=wrapper.pid)
+
+        result = journal.reconcile(operation_id)
+
+        assert result["status"] == "OUTCOME_UNKNOWN"
+        assert result["reconciliation"]["result"] == "ORPHAN_PROVIDER_TERMINATED"
+        assert result["reconciliation"]["provider_alive_before"] is True
+        assert result["reconciliation"]["provider_alive_after"] is False
+        assert _process_group_alive(wrapper.pid) is False
+    finally:
+        if _process_group_alive(wrapper.pid):
+            os.killpg(wrapper.pid, signal.SIGKILL)
+
+
+def test_reconcile_dead_wrapper_does_not_kill_unverified_reused_group(
+    tmp_path: Path,
+) -> None:
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id, _ = _create(journal, tmp_path)
+    wrapper_code = (
+        "import subprocess,sys;"
+        "subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)','unrelated']);"
+    )
+    wrapper = subprocess.Popen(
+        [sys.executable, "-c", wrapper_code],
+        start_new_session=True,
+    )
+    wrapper.wait(timeout=3)
+    assert _process_group_alive(wrapper.pid)
+
+    try:
+        journal.mark_started(operation_id, pid=wrapper.pid)
+
+        result = journal.reconcile(operation_id)
+
+        assert result["status"] == "RUNNING"
+        assert result["phase"] == "RECONCILE_REQUIRED"
+        assert result["reconciliation"]["result"] == "ORPHAN_PROCESS_GROUP_UNVERIFIED"
+        assert result["reconciliation"]["retry_permitted"] is False
+        assert _process_group_alive(wrapper.pid) is True
+    finally:
+        if _process_group_alive(wrapper.pid):
+            os.killpg(wrapper.pid, signal.SIGKILL)

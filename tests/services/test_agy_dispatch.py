@@ -532,6 +532,7 @@ def test_background_spawn_returns_durable_operation_identity(tmp_path: Path, mon
     raw = (root / "operations" / record["operation_id"] / "operation.json").read_text()
     assert "do not persist this prompt" not in raw
     assert "--operation-run" in captured["argv"]
+    assert captured["kwargs"]["start_new_session"] is True
     prompt_path = root / "operations" / record["operation_id"] / ".prompt"
     assert stat.S_IMODE(prompt_path.stat().st_mode) == 0o600
 
