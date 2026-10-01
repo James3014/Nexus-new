@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
+import subprocess  # nosec B404
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +31,7 @@ CANDIDATE_REPOSITORIES = (
 
 
 def _gh_json(*args: str) -> Any:
-    completed = subprocess.run(
+    completed = subprocess.run(  # nosec B603 B607
         ["gh", "api", *args],
         text=True,
         capture_output=True,
@@ -207,12 +207,12 @@ def main() -> int:
     ingest_report = ingest(store=store, since=args.since)
     print(json.dumps(ingest_report, ensure_ascii=False, sort_keys=True, indent=2))
 
-    if ingest_report["missing_capture"]:
-        return 3
     if args.ingest_only:
+        if ingest_report["missing_capture"]:
+            return 3
+        if ingest_report["missing_admission"]:
+            return 4
         return 0
-    if ingest_report["missing_admission"]:
-        return 4
     if not (args.frozen_policy_sha256 and args.stack_command and args.ground_truth_command):
         raise SystemExit(
             "advance mode requires frozen policy, stack command, and ground-truth command"
@@ -224,6 +224,10 @@ def main() -> int:
         ground_truth_command=args.ground_truth_command,
     )
     print(json.dumps(advance_report, ensure_ascii=False, sort_keys=True, indent=2))
+    if ingest_report["missing_capture"]:
+        return 3
+    if ingest_report["missing_admission"]:
+        return 4
     return 0
 
 
