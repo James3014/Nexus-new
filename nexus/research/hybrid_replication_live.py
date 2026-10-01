@@ -164,14 +164,12 @@ def build_d2_candidate_packet(
         why = list(evidence.get(path, ()))
         if path in literal_set and "literal_path_in_issue_body" not in why:
             why.insert(0, "literal_path_in_issue_body")
-        catalog.append(
-            {
-                "id": f"C{index}",
-                "path": path,
-                "source": "LITERAL_TASK_PATH" if path in literal_set else "D0_V2_FROZEN",
-                "evidence": why[:12],
-            }
-        )
+        catalog.append({
+            "id": f"C{index}",
+            "path": path,
+            "source": "LITERAL_TASK_PATH" if path in literal_set else "D0_V2_FROZEN",
+            "evidence": why[:12],
+        })
 
     payload = {
         "schema": "nexus.hybrid_replication.d2_live_packet.v1",
@@ -198,29 +196,18 @@ def resolve_ground_truth_payload(
         return None
 
     issue_number = int(issue.get("number") or 0)
-    changed_files = sorted(
-        {
-            str(path)
-            for pr in merged_prs
-            for path in pr.get("changed_files", ())
-            if str(path)
-        }
-    )
-    check_rows = sorted(
-        {
-            (str(name), str(state))
-            for pr in merged_prs
-            for name, state in pr.get("checks", ())
-        }
-    )
+    changed_files = sorted({
+        str(path) for pr in merged_prs for path in pr.get("changed_files", ()) if str(path)
+    })
+    check_rows = sorted({
+        (str(name), str(state)) for pr in merged_prs for name, state in pr.get("checks", ())
+    })
     refs = [f"issue:{issue_number}:closed"]
     for pr in merged_prs:
         refs.append(f"pr:{int(pr['number'])}@{str(pr.get('merge_commit_sha') or '')}")
 
     return {
-        "terminal_state": (
-            "CLOSED_WITH_MERGED_PR" if merged_prs else "CLOSED_WITHOUT_MERGED_PR"
-        ),
+        "terminal_state": ("CLOSED_WITH_MERGED_PR" if merged_prs else "CLOSED_WITHOUT_MERGED_PR"),
         "terminal_at": str(issue.get("closed_at") or ""),
         "evidence_refs": refs,
         "details": {
@@ -233,10 +220,7 @@ def resolve_ground_truth_payload(
                 for pr in merged_prs
             ],
             "changed_files": changed_files,
-            "checks": [
-                {"name": name, "state": state}
-                for name, state in check_rows
-            ],
+            "checks": [{"name": name, "state": state} for name, state in check_rows],
         },
     }
 
@@ -377,10 +361,7 @@ def _rank_candidates(
         f"ISSUE #{snapshot.issue_number}\nTITLE: {snapshot.title}\n\n{snapshot.body}",
         freeze["weights"],
     )
-    evidence = {
-        path: tuple(str(item) for item in why.get(path, ())[:12])
-        for path in ranked
-    }
+    evidence = {path: tuple(str(item) for item in why.get(path, ())[:12]) for path in ranked}
     return tuple(ranked), evidence
 
 
@@ -549,27 +530,23 @@ def _jev_request(
             wall = time.perf_counter() - started
             total_wall += wall
             body = exc.read().decode("utf-8", "replace")[:300]
-            attempts.append(
-                {
-                    "attempt": attempt,
-                    "status": f"HTTP_{exc.code}",
-                    "latency_ms": wall * 1000,
-                    "detail": body,
-                }
-            )
+            attempts.append({
+                "attempt": attempt,
+                "status": f"HTTP_{exc.code}",
+                "latency_ms": wall * 1000,
+                "detail": body,
+            })
             if exc.code not in {429, 500, 502, 503, 504}:
                 break
         except Exception as exc:
             wall = time.perf_counter() - started
             total_wall += wall
-            attempts.append(
-                {
-                    "attempt": attempt,
-                    "status": "NETWORK_FAILURE",
-                    "latency_ms": wall * 1000,
-                    "detail": str(exc)[:300],
-                }
-            )
+            attempts.append({
+                "attempt": attempt,
+                "status": "NETWORK_FAILURE",
+                "latency_ms": wall * 1000,
+                "detail": str(exc)[:300],
+            })
 
     if out is None:
         return (
@@ -741,7 +718,9 @@ def _run_codex(
         )
 
 
-def _b_fallback_prompt(snapshot: TaskSnapshot, packet: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+def _b_fallback_prompt(
+    snapshot: TaskSnapshot, packet: Mapping[str, Any]
+) -> tuple[str, dict[str, Any]]:
     paths = [item["path"] for item in packet["candidate_catalog"]]
     schema = {
         "type": "object",
@@ -842,10 +821,13 @@ def run_frozen_stack(
     if family == "B":
         ranked, evidence = _rank_candidates(snapshot=snapshot, repo=repo, binding=binding)
         repo_files = set(
-            _git(repo, "ls-tree", "-r", "--name-only", snapshot.pre_implementation_revision).splitlines()
+            _git(
+                repo, "ls-tree", "-r", "--name-only", snapshot.pre_implementation_revision
+            ).splitlines()
         )
         literal = tuple(
-            path for path in extract_literal_paths(f"{snapshot.title}\n{snapshot.body}")
+            path
+            for path in extract_literal_paths(f"{snapshot.title}\n{snapshot.body}")
             if path in repo_files
         )
         packet = build_d2_candidate_packet(
@@ -961,8 +943,7 @@ def run_frozen_stack(
         input_tokens=int(usage.get("input_tokens", 0) or 0),
         uncached_input_tokens=max(
             0,
-            int(usage.get("input_tokens", 0) or 0)
-            - int(usage.get("cached_input_tokens", 0) or 0),
+            int(usage.get("input_tokens", 0) or 0) - int(usage.get("cached_input_tokens", 0) or 0),
         ),
         output_tokens=int(usage.get("output_tokens", 0) or 0),
         wall_time_seconds=wall,
@@ -1011,19 +992,17 @@ def _resolve_ground_truth_from_state(state: Mapping[str, Any]) -> dict[str, Any]
         "-f",
         "per_page=100",
     )
-    pr_numbers = sorted(
-        {
-            int(source_issue["number"])
-            for item in timeline
-            if isinstance(item, dict) and item.get("event") == "cross-referenced"
-            for source in [item.get("source") or {}]
-            for source_issue in [source.get("issue") or {}]
-            if "pull_request" in source_issue
-            and str(source_issue.get("repository_url") or "")
-            == f"https://api.github.com/repos/{repository}"
-            and isinstance(source_issue.get("number"), int)
-        }
-    )
+    pr_numbers = sorted({
+        int(source_issue["number"])
+        for item in timeline
+        if isinstance(item, dict) and item.get("event") == "cross-referenced"
+        for source in [item.get("source") or {}]
+        for source_issue in [source.get("issue") or {}]
+        if "pull_request" in source_issue
+        and str(source_issue.get("repository_url") or "")
+        == f"https://api.github.com/repos/{repository}"
+        and isinstance(source_issue.get("number"), int)
+    })
     merged: list[dict[str, Any]] = []
     for number in pr_numbers:
         pr = _gh_json(f"repos/{repository}/pulls/{number}")
@@ -1038,26 +1017,24 @@ def _resolve_ground_truth_from_state(state: Mapping[str, Any]) -> dict[str, Any]
         )
         head_sha = str((pr.get("head") or {}).get("sha") or "")
         checks = _gh_json(f"repos/{repository}/commits/{head_sha}/check-runs?per_page=100")
-        merged.append(
-            {
-                "number": number,
-                "merge_commit_sha": str(pr.get("merge_commit_sha") or ""),
-                "head_sha": head_sha,
-                "changed_files": tuple(
-                    str(item.get("filename") or "")
-                    for item in files
-                    if isinstance(item, dict) and item.get("filename")
-                ),
-                "checks": tuple(
-                    (
-                        str(item.get("name") or ""),
-                        str(item.get("conclusion") or item.get("status") or ""),
-                    )
-                    for item in checks.get("check_runs", [])
-                    if isinstance(item, dict)
-                ),
-            }
-        )
+        merged.append({
+            "number": number,
+            "merge_commit_sha": str(pr.get("merge_commit_sha") or ""),
+            "head_sha": head_sha,
+            "changed_files": tuple(
+                str(item.get("filename") or "")
+                for item in files
+                if isinstance(item, dict) and item.get("filename")
+            ),
+            "checks": tuple(
+                (
+                    str(item.get("name") or ""),
+                    str(item.get("conclusion") or item.get("status") or ""),
+                )
+                for item in checks.get("check_runs", [])
+                if isinstance(item, dict)
+            ),
+        })
     return resolve_ground_truth_payload(issue=issue, merged_prs=tuple(merged))
 
 
@@ -1116,7 +1093,11 @@ def _identity_preflight_main(binding_path: Path) -> int:
         jev_status=str(jev_raw.get("status") or ""),
         jev_usage=dict(jev_raw.get("usage") or {}),
         jev_latency_ms=wall * 1000,
-        created_at_utc=dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        created_at_utc=dt.datetime
+        .now(dt.timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z"),
     )
     receipt["jev_retries"] = retries
     receipt["jev_request_sha256"] = jev_raw.get("request_sha256")
