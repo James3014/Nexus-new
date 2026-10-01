@@ -11,6 +11,8 @@
     "tree": "f418704c4241e089bc52e6d2966b8a6f6786b47e",
     "ci_run_id": 36842914100,
     "ci_job_id": 110305991522,
+    "ci_url": "https://github.com/James3014/nexus-core/actions/runs/36842914100",
+    "evidence_class": "SUBJECT_EXACT_SHA_CI_PLUS_EXTERNAL_BLACK_BOX_PROBES",
     "ci_conclusion": "success",
     "product_test_command": "uv run pytest -q tests/product",
     "product_test_passed": 1113,
