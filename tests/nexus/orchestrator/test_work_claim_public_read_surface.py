@@ -5,9 +5,9 @@ Invariants verified:
 - No second claim registry
 - read/list never mints, transfers, or releases ownership
 - claim_enforcement_state remains below REPO_ENFORCED (FAIL_CLOSED_PROJECTION_ONLY)
-- Truthful exposure of all required fields: repository, issue, task_id, attempt_id,
-  claim_id, holder, generation, fencing_token, scope/mutation_domain, state,
-  source/admission binding, freshness, canonical_revision
+- Truthful exposure of observational fields: repository, issue, task_id, attempt_id,
+  opaque claim/fence identities, holder, generation, scope/mutation_domain, state,
+  source/admission binding, freshness, canonical_revision; raw mutation credentials stay private
 - Stale generation is detectably marked
 - Filtering by repo, issue, worker, status
 - Malformed/tampered active claims make list fail closed instead of disappearing
@@ -15,6 +15,7 @@ Invariants verified:
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -388,3 +389,22 @@ def test_read_and_list_reject_claim_transplanted_between_task_states(
 
     with pytest.raises(RuntimeError, match="WORK_CLAIM_LIST_BLOCKED:WORK_CLAIM_TAMPERED"):
         service.list_active_work_claims()
+
+
+def test_public_projection_does_not_hash_mutation_credential_material(
+    service: SelfHostedTaskService,
+):
+    task_id = "task-low-entropy-claim-id"
+    _seed_task_state(service, task_id)
+    req = _sample_claim_request(task_id=task_id)
+    req["claim_id"] = "1"
+    acquired = service.acquire_work_claim(req)
+    assert acquired["claim"]["claim_id"] == "1"
+    assert acquired["claim"]["fencing_token"] == "1:1"
+
+    projected = service.read_work_claim({"task_id": task_id})["claim"]
+    leaked_claim_hash = hashlib.sha256(b"1").hexdigest()
+    leaked_fence_hash = hashlib.sha256(b"1:1").hexdigest()
+    assert leaked_claim_hash not in projected["claim_identity"]
+    assert leaked_fence_hash != projected["fence_hash"]
+    assert leaked_fence_hash not in projected["fence_identity"]

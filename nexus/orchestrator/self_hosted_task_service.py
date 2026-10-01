@@ -2703,13 +2703,17 @@ class SelfHostedTaskService:
             or str(identity.get("role") or "")
             or str(identity.get("provider") or "")
         )
-        claim_id = str(claim_record.get("claim_id") or "")
         gen = int(claim_record.get("generation") or 1)
-        raw_fencing_token = str(claim_record.get("fencing_token") or "")
-        claim_identity_hash = hashlib.sha256(claim_id.encode("utf-8")).hexdigest() if claim_id else ""
-        claim_identity = f"urn:nexus:claim:{claim_identity_hash}" if claim_identity_hash else ""
-        fence_hash = hashlib.sha256(raw_fencing_token.encode("utf-8")).hexdigest() if raw_fencing_token else ""
-        fence_identity = f"urn:nexus:claim_fence:{fence_hash}" if fence_hash else ""
+        identity_hash = str(claim_record.get("identity_hash") or "")
+        claim_projection_hash = hashlib.sha256(
+            f"claim-view:{identity_hash}".encode("utf-8")
+        ).hexdigest()
+        fence_projection_hash = hashlib.sha256(
+            f"claim-fence-view:{identity_hash}:{gen}".encode("utf-8")
+        ).hexdigest()
+        claim_identity = f"urn:nexus:claim:{claim_projection_hash}"
+        fence_hash = fence_projection_hash
+        fence_identity = f"urn:nexus:claim_fence:{fence_projection_hash}"
         return {
             "schema": self.PUBLIC_WORK_CLAIM_SCHEMA,
             "claim_ceiling": self.PUBLIC_WORK_CLAIM_CEILING,
