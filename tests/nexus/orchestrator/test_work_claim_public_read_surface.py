@@ -181,20 +181,24 @@ def test_read_claim_is_strictly_read_only_and_never_mints_ownership(service: Sel
     path = service._state_path(task_id)
     state_before = path.read_text(encoding="utf-8")
 
-    # Read unclaimed task
+    # Remove the writer lock artifact: public reads must not recreate it.
+    lock_path = service._lock_path()
+    lock_path.unlink(missing_ok=True)
+
     service.read_work_claim({"task_id": task_id})
     assert path.read_text(encoding="utf-8") == state_before
+    assert not lock_path.exists()
 
-    # Acquire claim
     req = _sample_claim_request(task_id=task_id)
     service.acquire_work_claim(req)
     state_with_claim = path.read_text(encoding="utf-8")
+    lock_path.unlink(missing_ok=True)
 
-    # Multiple reads do not alter state file
     service.read_work_claim({"task_id": task_id})
     service.read_claim({"task_id": task_id})
     service.list_active_work_claims()
     assert path.read_text(encoding="utf-8") == state_with_claim
+    assert not lock_path.exists()
 
 
 def test_list_active_work_claims_and_filtering(service: SelfHostedTaskService):
@@ -313,3 +317,23 @@ def test_read_work_claim_does_not_leak_mutation_credential(service: SelfHostedTa
     assert claim["fence_identity"]
     assert claim["fence_hash"]
     assert f"{raw_claim_id}:{claim['generation']}" == raw_token
+
+
+def test_read_and_list_fail_closed_on_tampered_fencing_token(service: SelfHostedTaskService):
+    task_id = "task-fence-tamper"
+    _seed_task_state(service, task_id)
+    service.acquire_work_claim(_sample_claim_request(task_id=task_id))
+
+    with service._state_lock():
+        path = service._state_path(task_id)
+        state = json.loads(path.read_text(encoding="utf-8"))
+        state["work_claim"]["fencing_token"] = "forged-token"
+        path.write_text(json.dumps(state), encoding="utf-8")
+
+    read_res = service.read_work_claim({"task_id": task_id})
+    assert read_res["status"] == "BLOCKED"
+    assert read_res["reason"] == "WORK_CLAIM_STALE_FENCE"
+    assert read_res["found"] is False
+
+    with pytest.raises(RuntimeError, match="WORK_CLAIM_LIST_BLOCKED:WORK_CLAIM_STALE_FENCE"):
+        service.list_active_work_claims()
