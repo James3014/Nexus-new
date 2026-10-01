@@ -2578,6 +2578,8 @@ class SelfHostedTaskService:
             raise RuntimeError("WORK_CLAIM_TAMPERED")
         if not isinstance(record.get("generation"), int) or isinstance(record.get("generation"), bool) or record["generation"] < 1 or not isinstance(record.get("claim_id"), str) or not record["claim_id"]:
             raise RuntimeError("WORK_CLAIM_MALFORMED")
+        if record.get("status") != "CLAIMED":
+            raise RuntimeError("WORK_CLAIM_MALFORMED")
         expected_fencing_token = f"{record['claim_id']}:{record['generation']}"
         if (
             not isinstance(record.get("fencing_token"), str)
@@ -2586,9 +2588,34 @@ class SelfHostedTaskService:
             raise RuntimeError("WORK_CLAIM_STALE_FENCE")
 
     @classmethod
+    def _validate_claim_enclosure(
+        cls,
+        state: Mapping[str, Any],
+        record: Mapping[str, Any],
+        *,
+        expected_task_id: str = "",
+    ) -> None:
+        identity = record.get("identity") or {}
+        state_task_id = str(state.get("task_id") or "").strip()
+        claim_task_id = str(identity.get("task_id") or "").strip()
+        if not state_task_id or claim_task_id != state_task_id:
+            raise RuntimeError("WORK_CLAIM_TAMPERED")
+        if expected_task_id and state_task_id != expected_task_id:
+            raise RuntimeError("WORK_CLAIM_TAMPERED")
+        state_attempt_id = str(state.get("attempt_id") or "").strip()
+        claim_attempt_id = str(identity.get("attempt_id") or "").strip()
+        if state_attempt_id and claim_attempt_id != state_attempt_id:
+            raise RuntimeError("WORK_CLAIM_TAMPERED")
+
+    @classmethod
     def _validate_claim_locked(cls, state: Mapping[str, Any], request: Mapping[str, Any]) -> Mapping[str, Any]:
         record = state.get("work_claim")
         cls._validate_claim_record(record)
+        cls._validate_claim_enclosure(
+            state,
+            record,
+            expected_task_id=str(request.get("task_id") or "").strip(),
+        )
         expected = cls._claim_identity(request)
         if record["identity_hash"] != cls._claim_hash(expected):
             raise RuntimeError("WORK_CLAIM_FENCE_MISMATCH")
@@ -2691,7 +2718,7 @@ class SelfHostedTaskService:
             "generation": gen,
             "fence_identity": fence_identity,
             "fence_hash": fence_hash,
-            "state": str(claim_record.get("status") or "CLAIMED"),
+            "state": str(claim_record["status"]),
             "holder": holder,
             "repository": str(identity.get("repository") or ""),
             "issue": str(identity.get("issue") or ""),
@@ -2747,6 +2774,11 @@ class SelfHostedTaskService:
             }
         try:
             self._validate_claim_record(claim_record)
+            self._validate_claim_enclosure(
+                state,
+                claim_record,
+                expected_task_id=task_id,
+            )
         except RuntimeError as exc:
             return {
                 "status": "BLOCKED",
@@ -2804,6 +2836,7 @@ class SelfHostedTaskService:
                 raise RuntimeError("WORK_CLAIM_LIST_BLOCKED:WORK_CLAIM_MALFORMED")
             try:
                 self._validate_claim_record(claim_record)
+                self._validate_claim_enclosure(state, claim_record)
             except RuntimeError as exc:
                 raise RuntimeError(f"WORK_CLAIM_LIST_BLOCKED:{exc}") from exc
 

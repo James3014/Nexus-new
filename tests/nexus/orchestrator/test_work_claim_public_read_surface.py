@@ -337,3 +337,54 @@ def test_read_and_list_fail_closed_on_tampered_fencing_token(service: SelfHosted
 
     with pytest.raises(RuntimeError, match="WORK_CLAIM_LIST_BLOCKED:WORK_CLAIM_STALE_FENCE"):
         service.list_active_work_claims()
+
+
+@pytest.mark.parametrize("status", [None, True, "SUPERSEDED"])
+def test_read_and_list_reject_malformed_active_claim_status(
+    service: SelfHostedTaskService,
+    status,
+):
+    task_id = "task-status-tamper"
+    _seed_task_state(service, task_id)
+    service.acquire_work_claim(_sample_claim_request(task_id=task_id))
+
+    with service._state_lock():
+        path = service._state_path(task_id)
+        state = json.loads(path.read_text(encoding="utf-8"))
+        if status is None:
+            state["work_claim"].pop("status", None)
+        else:
+            state["work_claim"]["status"] = status
+        path.write_text(json.dumps(state), encoding="utf-8")
+
+    read_res = service.read_work_claim({"task_id": task_id})
+    assert read_res["status"] == "BLOCKED"
+    assert read_res["reason"] == "WORK_CLAIM_MALFORMED"
+    assert read_res["found"] is False
+
+    with pytest.raises(RuntimeError, match="WORK_CLAIM_LIST_BLOCKED:WORK_CLAIM_MALFORMED"):
+        service.list_active_work_claims()
+
+
+def test_read_and_list_reject_claim_transplanted_between_task_states(
+    service: SelfHostedTaskService,
+):
+    for task_id in ("task-enclosure-a", "task-enclosure-b"):
+        _seed_task_state(service, task_id)
+        service.acquire_work_claim(_sample_claim_request(task_id=task_id))
+
+    with service._state_lock():
+        path_a = service._state_path("task-enclosure-a")
+        path_b = service._state_path("task-enclosure-b")
+        state_a = json.loads(path_a.read_text(encoding="utf-8"))
+        state_b = json.loads(path_b.read_text(encoding="utf-8"))
+        state_a["work_claim"] = state_b["work_claim"]
+        path_a.write_text(json.dumps(state_a), encoding="utf-8")
+
+    read_res = service.read_work_claim({"task_id": "task-enclosure-a"})
+    assert read_res["status"] == "BLOCKED"
+    assert read_res["reason"] == "WORK_CLAIM_TAMPERED"
+    assert read_res["found"] is False
+
+    with pytest.raises(RuntimeError, match="WORK_CLAIM_LIST_BLOCKED:WORK_CLAIM_TAMPERED"):
+        service.list_active_work_claims()
