@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import copy
 import hashlib
 import json
 import subprocess
@@ -104,9 +103,9 @@ def _receipt(api: Mapping[str, Any], repo: Path) -> dict[str, Any]:
 
 
 def _reseal_receipt(api: Mapping[str, Any], payload: dict[str, Any]) -> None:
-    payload["receipt_hash"] = api["canonical_hash"](
-        {key: value for key, value in payload.items() if key != "receipt_hash"}
-    )
+    payload["receipt_hash"] = api["canonical_hash"]({
+        key: value for key, value in payload.items() if key != "receipt_hash"
+    })
 
 
 def _recompute_request(api: Mapping[str, Any], payload: dict[str, Any]) -> None:
@@ -135,7 +134,9 @@ def _recompute_request(api: Mapping[str, Any], payload: dict[str, Any]) -> None:
 
     status, response = api["verify_generic_changeset"](request)
     if status != 200:
-        raise AssertionError(f"re-sealed probe request was not internally valid: {status} {response}")
+        raise AssertionError(
+            f"re-sealed probe request was not internally valid: {status} {response}"
+        )
     payload["manifest_hash"] = api["change_manifest_hash"](manifest)
     payload["core_response"] = response
     payload["outcome"]["status"] = response["verification"]["status"]
@@ -177,9 +178,7 @@ def _probe_omitted_untracked(api: Mapping[str, Any]) -> tuple[list[str], str]:
             entry for entry in entries if entry["path"] != "new.py"
         ]
         _recompute_request(api, payload)
-        return _validation_probe(
-            api, payload, repo, required_signal="GIT_MANIFEST_MISMATCH"
-        )
+        return _validation_probe(api, payload, repo, required_signal="GIT_MANIFEST_MISMATCH")
 
 
 def _probe_index_worktree_mismatch(api: Mapping[str, Any]) -> tuple[list[str], str]:
@@ -201,9 +200,7 @@ def _probe_index_worktree_mismatch(api: Mapping[str, Any]) -> tuple[list[str], s
         payload["target_revision"] = f"git-tree:{index_tree}"
         payload["target_tree"] = f"git-tree:{index_tree}"
         _recompute_request(api, payload)
-        return _validation_probe(
-            api, payload, repo, required_signal="GIT_MANIFEST_MISMATCH"
-        )
+        return _validation_probe(api, payload, repo, required_signal="GIT_MANIFEST_MISMATCH")
 
 
 def _probe_verifier_artifact_hash_tamper(
@@ -216,9 +213,7 @@ def _probe_verifier_artifact_hash_tamper(
         payload = _receipt(api, repo)
         payload["verifier"]["artifact_hash"] = "sha256:" + "0" * 64
         _reseal_receipt(api, payload)
-        return _validation_probe(
-            api, payload, repo, required_signal="VERIFIER_ARTIFACT_MISMATCH"
-        )
+        return _validation_probe(api, payload, repo, required_signal="VERIFIER_ARTIFACT_MISMATCH")
 
 
 def _probe_canonical_request_tamper(api: Mapping[str, Any]) -> tuple[list[str], str]:
@@ -229,9 +224,7 @@ def _probe_canonical_request_tamper(api: Mapping[str, Any]) -> tuple[list[str], 
         payload = _receipt(api, repo)
         payload["inputs"]["request"]["acceptance_contract"]["allowed_paths"] = ["other.py"]
         _reseal_receipt(api, payload)
-        return _validation_probe(
-            api, payload, repo, required_signal="CORE_RESPONSE_MISMATCH"
-        )
+        return _validation_probe(api, payload, repo, required_signal="CORE_RESPONSE_MISMATCH")
 
 
 _PROBES: dict[str, Callable[[Mapping[str, Any]], tuple[list[str], str]]] = {

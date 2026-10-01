@@ -161,9 +161,7 @@ def evaluate_g1_results(
             "controls_passed": 0,
             "deterministic_mutant_escape_count": len(checked["mutants"]),
             "false_block_control_count": 0,
-            "failed_case_ids": sorted(
-                [case["id"] for case in checked["mutants"]]
-            ),
+            "failed_case_ids": sorted([case["id"] for case in checked["mutants"]]),
         }
 
     failed_mutants: list[str] = []
