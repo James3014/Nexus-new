@@ -406,6 +406,12 @@ def test_admission_receipt_round_trip_is_bound_to_capture() -> None:
         snapshot=snapshot,
         disposition="ADMITTED_PRIMARY_FRESH_TASK",
         activation_boundary="2026-10-01T00:00:00Z",
+        activation_state="AUTOMATIC_CAPTURE_READY",
+        exclusion_set_sha256="6" * 64,
+        issue_state_at_admission="open",
+        implementation_pr_numbers=(),
+        tracked_parent_issue_number=None,
+        tracked_parent_created_at=None,
         admitted_at="2026-10-01T00:00:03Z",
     )
     comment = build_admission_comment(receipt)
@@ -423,8 +429,83 @@ def test_provisional_capture_can_promote_only_with_matching_admission(tmp_path: 
         snapshot=snapshot,
         disposition="ADMITTED_PRIMARY_FRESH_TASK",
         activation_boundary="2026-10-01T00:00:00Z",
+        activation_state="AUTOMATIC_CAPTURE_READY",
+        exclusion_set_sha256="6" * 64,
+        issue_state_at_admission="open",
+        implementation_pr_numbers=(),
+        tracked_parent_issue_number=None,
+        tracked_parent_created_at=None,
         admitted_at="2026-10-01T00:00:03Z",
     )
     promoted = store.apply_admission(receipt)
     assert promoted["phase"] == "ADMITTED"
     assert promoted["admission_receipt_sha256"] == receipt.receipt_sha256
+
+
+def test_admission_requires_explicit_automatic_capture_ready() -> None:
+    snapshot = _snapshot(1315)
+    with pytest.raises(ValueError, match="automatic_capture_ready_required"):
+        AdmissionReceipt.create(
+            snapshot=snapshot,
+            disposition="ADMITTED_PRIMARY_FRESH_TASK",
+            activation_boundary="2026-10-01T00:00:00Z",
+            activation_state="SOURCE_READY_PENDING_LIVE_ACTIVATION",
+            exclusion_set_sha256="6" * 64,
+            issue_state_at_admission="open",
+            implementation_pr_numbers=(),
+            tracked_parent_issue_number=None,
+            tracked_parent_created_at=None,
+            admitted_at="2026-10-01T00:00:03Z",
+        )
+
+
+def test_existing_implementation_pr_blocks_prospective_admission() -> None:
+    snapshot = _snapshot(1316)
+    policy = IssueAdmissionPolicy(
+        prospective_boundary="2026-10-01T00:00:00Z",
+        experiment_control_task="James3014/Nexus-new#1216",
+        candidate_repositories=("James3014/Nexus-new",),
+    )
+    assert (
+        classify_opened_issue(
+            snapshot,
+            policy,
+            issue_state_at_admission="open",
+            implementation_pr_numbers=(1317,),
+        )
+        == "INTAKE_PROTOCOL_LOSS_IMPLEMENTATION_PRESENT"
+    )
+
+
+def test_terminal_issue_blocks_prospective_admission() -> None:
+    snapshot = _snapshot(1318)
+    policy = IssueAdmissionPolicy(
+        prospective_boundary="2026-10-01T00:00:00Z",
+        experiment_control_task="James3014/Nexus-new#1216",
+        candidate_repositories=("James3014/Nexus-new",),
+    )
+    assert (
+        classify_opened_issue(
+            snapshot,
+            policy,
+            issue_state_at_admission="closed",
+        )
+        == "INTAKE_PROTOCOL_LOSS_TERMINAL_BEFORE_ADMISSION"
+    )
+
+
+def test_explicit_parent_created_before_boundary_is_not_reaged() -> None:
+    snapshot = _snapshot(1319)
+    policy = IssueAdmissionPolicy(
+        prospective_boundary="2026-10-01T00:00:00Z",
+        experiment_control_task="James3014/Nexus-new#1216",
+        candidate_repositories=("James3014/Nexus-new",),
+    )
+    assert (
+        classify_opened_issue(
+            snapshot,
+            policy,
+            tracked_parent_created_at="2026-09-30T23:59:59Z",
+        )
+        == "EXCLUDE_PARENT_TASK_PRE_BOUNDARY"
+    )
