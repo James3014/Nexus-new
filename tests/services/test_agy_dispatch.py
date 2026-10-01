@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import stat
 import subprocess
@@ -697,3 +698,63 @@ def test_run_agy_passes_operation_local_attestation_log(tmp_path: Path, monkeypa
     assert "--log-file" in argv
     assert argv[argv.index("--log-file") + 1] == str(log)
     assert log.parent.is_dir()
+
+
+def test_cleanup_reconciled_lease_removes_only_exact_stale_receipt(
+    tmp_path: Path, monkeypatch
+) -> None:
+    leases = tmp_path / "leases"
+    leases.mkdir()
+    monkeypatch.setattr(dispatch, "LEASES_DIR", leases)
+    alias_hash = "a" * 12
+    lease_hash = "b" * 12
+    receipt = leases / f"{alias_hash}.receipt.json"
+    receipt.write_text(
+        json.dumps({
+            "account_alias_hash": alias_hash,
+            "lease_id_hash": lease_hash,
+            "consumer_id": "agy-operation",
+            "claimed_at": 1.0,
+            "pid": 4242,
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+    record = {
+        "account_alias_hash": alias_hash,
+        "lease_id_hash": lease_hash,
+        "pid": 4242,
+        "reconciliation": {"provider_alive_after": False},
+    }
+
+    result = dispatch._cleanup_reconciled_lease(record)
+
+    assert result == {"result": "LEASE_RECEIPT_REMOVED"}
+    assert receipt.exists() is False
+
+
+def test_cleanup_reconciled_lease_preserves_new_owner_receipt(tmp_path: Path, monkeypatch) -> None:
+    leases = tmp_path / "leases"
+    leases.mkdir()
+    monkeypatch.setattr(dispatch, "LEASES_DIR", leases)
+    alias_hash = "a" * 12
+    receipt = leases / f"{alias_hash}.receipt.json"
+    payload = {
+        "account_alias_hash": alias_hash,
+        "lease_id_hash": "newleasehash",
+        "consumer_id": "new-worker",
+        "claimed_at": 2.0,
+        "pid": 9999,
+    }
+    receipt.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    record = {
+        "account_alias_hash": alias_hash,
+        "lease_id_hash": "oldleasehash",
+        "pid": 4242,
+        "reconciliation": {"provider_alive_after": False},
+    }
+
+    result = dispatch._cleanup_reconciled_lease(record)
+
+    assert result["result"] == "LEASE_IDENTITY_MISMATCH_PRESERVED"
+    assert json.loads(receipt.read_text(encoding="utf-8")) == payload

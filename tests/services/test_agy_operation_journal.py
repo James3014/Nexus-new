@@ -187,3 +187,45 @@ def test_reconcile_dead_wrapper_does_not_kill_unverified_reused_group(
     finally:
         if _process_group_alive(wrapper.pid):
             os.killpg(wrapper.pid, signal.SIGKILL)
+
+
+def test_outcome_unknown_can_reconcile_same_surviving_provider_group(
+    tmp_path: Path,
+) -> None:
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id, _ = _create(journal, tmp_path)
+    marker = str(journal.operation_dir(operation_id) / "agy.log")
+    wrapper_code = (
+        "import subprocess,sys;"
+        "subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)',sys.argv[1]]);"
+    )
+    wrapper = subprocess.Popen(
+        [sys.executable, "-c", wrapper_code, marker],
+        start_new_session=True,
+    )
+    wrapper.wait(timeout=3)
+    assert _process_group_alive(wrapper.pid)
+
+    try:
+        journal.mark_started(operation_id, pid=wrapper.pid)
+        journal.mark_terminal(
+            operation_id,
+            status="OUTCOME_UNKNOWN",
+            exit_code=None,
+            failure_kind="PROCESS_NOT_RUNNING_WITHOUT_TERMINAL_RECEIPT",
+            cwd=str(tmp_path),
+            reconciliation={
+                "result": "OUTCOME_UNKNOWN",
+                "retry_permitted": False,
+            },
+        )
+
+        result = journal.reconcile(operation_id)
+
+        assert result["status"] == "OUTCOME_UNKNOWN"
+        assert result["reconciliation"]["result"] == "ORPHAN_PROVIDER_TERMINATED"
+        assert result["reconciliation"]["provider_alive_after"] is False
+        assert _process_group_alive(wrapper.pid) is False
+    finally:
+        if _process_group_alive(wrapper.pid):
+            os.killpg(wrapper.pid, signal.SIGKILL)

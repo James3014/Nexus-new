@@ -161,21 +161,59 @@ class AgyOperationJournal(DirectOperationJournal):
         heartbeat_stale_seconds: float = 120.0,
     ) -> dict[str, Any]:
         record = self.read(operation_id)
-        if record["status"] in TERMINAL_STATES:
+        status = record["status"]
+        if status in TERMINAL_STATES and status != "OUTCOME_UNKNOWN":
             return record
 
         wrapper_pid = record.get("pid")
-        if _process_alive(wrapper_pid):
+        wrapper_alive = _process_alive(wrapper_pid)
+        group_alive = _process_group_alive(wrapper_pid)
+
+        if wrapper_alive:
+            if status == "OUTCOME_UNKNOWN":
+                return self.update(
+                    operation_id,
+                    phase="RECONCILE_REQUIRED",
+                    reconciliation={
+                        "at": utc_now(),
+                        "result": "PROVIDER_OR_WRAPPER_STILL_RUNNING",
+                        "pid_alive": True,
+                        "provider_alive_before": True,
+                        "provider_alive_after": True,
+                        "retry_permitted": False,
+                    },
+                )
             return super().reconcile(
                 operation_id,
                 heartbeat_stale_seconds=heartbeat_stale_seconds,
             )
 
-        if not _process_group_alive(wrapper_pid):
-            return super().reconcile(
+        if not group_alive:
+            if status == "OUTCOME_UNKNOWN":
+                reconciliation = dict(record.get("reconciliation") or {})
+                reconciliation.update({
+                    "at": utc_now(),
+                    "result": reconciliation.get("result") or "OUTCOME_UNKNOWN",
+                    "pid_alive": False,
+                    "provider_alive_before": False,
+                    "provider_alive_after": False,
+                    "retry_permitted": False,
+                })
+                return self.update(
+                    operation_id,
+                    phase="TERMINAL",
+                    reconciliation=reconciliation,
+                )
+            result = super().reconcile(
                 operation_id,
                 heartbeat_stale_seconds=heartbeat_stale_seconds,
             )
+            reconciliation = dict(result.get("reconciliation") or {})
+            reconciliation.update({
+                "provider_alive_before": False,
+                "provider_alive_after": False,
+            })
+            return self.update(operation_id, reconciliation=reconciliation)
 
         assert isinstance(wrapper_pid, int)
         marker = str(self.operation_dir(operation_id) / "agy.log")
@@ -212,7 +250,9 @@ class AgyOperationJournal(DirectOperationJournal):
             operation_id,
             status="OUTCOME_UNKNOWN",
             exit_code=None,
-            failure_kind="PROCESS_NOT_RUNNING_WITHOUT_TERMINAL_RECEIPT",
+            failure_kind=(
+                record.get("failure_kind") or "PROCESS_NOT_RUNNING_WITHOUT_TERMINAL_RECEIPT"
+            ),
             cwd=record.get("cwd"),
             reconciliation={
                 "at": utc_now(),
