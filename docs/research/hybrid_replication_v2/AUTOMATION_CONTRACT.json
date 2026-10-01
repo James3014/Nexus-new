@@ -59,8 +59,11 @@
     "SCORED"
   ],
   "live_binding": {
-    "frozen_stack_command": null,
-    "ground_truth_command": null,
-    "launchd_or_scheduler": null
+    "frozen_stack_command": "scripts/ops/hybrid_replication_live_stack.py",
+    "ground_truth_command": "scripts/ops/hybrid_replication_ground_truth.py",
+    "installer": "scripts/ops/hybrid_replication_live_install.py",
+    "launchd_or_scheduler": "com.nexus.hybrid-replication",
+    "activation_state": "PENDING_STRONG_ONLINE_LIVE_CANARY",
+    "authority": "RESEARCH_OBSERVATION_ONLY"
   }
 }
