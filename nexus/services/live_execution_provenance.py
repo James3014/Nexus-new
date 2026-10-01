@@ -15,9 +15,8 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Optional
 
 from nexus.services.direct_operation_journal import DirectOperationJournal
@@ -111,31 +110,71 @@ def _sha256(data: Any) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-_PRODUCER_READ_SENTINEL = object()
-
-
-@dataclass(frozen=True)
 class VerifiedProducerRecord:
-    """A record minted only by a repository-owned producer read adapter."""
+    """Opaque immutable envelope minted only from an owning journal read."""
 
-    record: Mapping[str, Any]
-    source_ref: str
-    transport_kind: str
-    _verification_token: object = field(repr=False, compare=False)
+    __slots__ = ("_record_json", "_record_sha256", "_source_ref", "_transport_kind")
 
-    def __post_init__(self) -> None:
-        if self._verification_token is not _PRODUCER_READ_SENTINEL:
-            raise ProvenanceContractError("verified producer record must come from an owning read adapter")
-        if not isinstance(self.record, Mapping):
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        raise TypeError("VerifiedProducerRecord may not be subclassed")
+
+    def __new__(cls, *args: Any, **kwargs: Any) -> "VerifiedProducerRecord":
+        raise ProvenanceContractError(
+            "verified producer record must come from an owning read adapter"
+        )
+
+    @classmethod
+    def _mint(
+        cls,
+        *,
+        record: Mapping[str, Any],
+        source_ref: str,
+        transport_kind: str,
+    ) -> "VerifiedProducerRecord":
+        if not isinstance(record, Mapping):
             raise ProvenanceContractError("verified producer record must be a Mapping")
-        schema = str(self.record.get("schema") or "")
+        schema = str(record.get("schema") or "")
         if schema not in TRUSTED_JOURNAL_SCHEMAS:
             raise ProvenanceContractError(f"producer schema is not trusted: {schema!r}")
-        if self.transport_kind not in RECOGNIZED_TRANSPORT_KINDS:
-            raise ProvenanceContractError(f"unrecognized transport_kind: {self.transport_kind!r}")
-        if not self.source_ref:
+        if transport_kind not in RECOGNIZED_TRANSPORT_KINDS:
+            raise ProvenanceContractError(f"unrecognized transport_kind: {transport_kind!r}")
+        if not source_ref:
             raise ProvenanceContractError("verified producer source_ref is required")
-        object.__setattr__(self, "record", dict(self.record))
+        try:
+            record_json = json.dumps(
+                dict(record),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ProvenanceContractError("producer record must be JSON serializable") from exc
+        self = object.__new__(cls)
+        object.__setattr__(self, "_record_json", record_json)
+        object.__setattr__(
+            self,
+            "_record_sha256",
+            hashlib.sha256(record_json.encode("utf-8")).hexdigest(),
+        )
+        object.__setattr__(self, "_source_ref", source_ref)
+        object.__setattr__(self, "_transport_kind", transport_kind)
+        return self
+
+    @property
+    def record(self) -> Mapping[str, Any]:
+        return json.loads(self._record_json)
+
+    @property
+    def source_ref(self) -> str:
+        return self._source_ref
+
+    @property
+    def transport_kind(self) -> str:
+        return self._transport_kind
+
+    @property
+    def record_sha256(self) -> str:
+        return self._record_sha256
 
 
 def read_operation_journal_evidence(
@@ -146,17 +185,18 @@ def read_operation_journal_evidence(
 ) -> VerifiedProducerRecord:
     """Read one exact operation through its owning DirectOperationJournal API."""
 
-    if not isinstance(journal, DirectOperationJournal):
-        raise ProvenanceContractError("journal must be a DirectOperationJournal")
-    record = journal.read(operation_id)
+    if type(journal) is not DirectOperationJournal:
+        raise ProvenanceContractError("journal must be an exact DirectOperationJournal")
+    record = DirectOperationJournal.read(journal, operation_id)
     schema = str(record.get("schema") or "")
     if schema not in TRUSTED_JOURNAL_SCHEMAS:
         raise ProvenanceContractError(f"producer schema is not trusted: {schema!r}")
-    return VerifiedProducerRecord(
+    if str(record.get("operation_id") or "") != str(operation_id):
+        raise ProvenanceContractError("producer operation_id does not match requested operation")
+    return VerifiedProducerRecord._mint(
         record=record,
         source_ref=f"operation-journal:{schema}:{operation_id}",
         transport_kind=transport_kind,
-        _verification_token=_PRODUCER_READ_SENTINEL,
     )
 
 
@@ -532,7 +572,7 @@ def build_live_execution_provenance(
     if missing_bindings:
         norm_state = EXECUTION_STATE_UNKNOWN
         rcpt_phase = "MISSING_CROSS_BINDING_IDENTITY: " + ",".join(missing_bindings)
-    elif Path(rcpt_repo).name != Path(repo).name and rcpt_repo != repo:
+    elif rcpt_repo != repo:
         norm_state = EXECUTION_STATE_UNKNOWN
         rcpt_phase = f"CROSS_BINDING_MISMATCH: repository mismatch ({repo} vs {rcpt_repo})"
     elif rcpt_task_id != task_id:
@@ -571,20 +611,22 @@ def build_live_execution_provenance(
             rcpt_phase = "MISSING_PRODUCER_TIMESTAMP"
         observed_at = ""
     else:
-        observed_at = producer_ts
-        if norm_state == EXECUTION_STATE_ACTIVE and max_staleness_seconds > 0:
-            try:
-                ts_clean = producer_ts.replace("Z", "+00:00")
-                dt = datetime.fromisoformat(ts_clean)
+        try:
+            ts_clean = producer_ts.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(ts_clean)
+            if dt.tzinfo is None:
+                raise ValueError("producer timestamp must be timezone-aware")
+            observed_at = producer_ts
+            if norm_state == EXECUTION_STATE_ACTIVE and max_staleness_seconds > 0:
                 now_dt = datetime.now(timezone.utc)
                 diff = (now_dt - dt).total_seconds()
                 if diff > max_staleness_seconds:
                     norm_state = EXECUTION_STATE_STALE
                     rcpt_phase = f"HEARTBEAT_EXPIRED: age {int(diff)}s > max {int(max_staleness_seconds)}s"
-            except (TypeError, ValueError, OverflowError):
-                norm_state = EXECUTION_STATE_UNKNOWN
-                rcpt_phase = "INVALID_PRODUCER_TIMESTAMP"
-                observed_at = ""
+        except (TypeError, ValueError, OverflowError):
+            norm_state = EXECUTION_STATE_UNKNOWN
+            rcpt_phase = "INVALID_PRODUCER_TIMESTAMP"
+            observed_at = ""
 
     if effective_state is not None:
         norm_state = effective_state

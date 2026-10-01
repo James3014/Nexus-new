@@ -6,6 +6,7 @@ through repository-owned durable producer APIs.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -353,3 +354,81 @@ def test_fake_journal_object_cannot_mint_verified_evidence():
 
     with pytest.raises(ProvenanceContractError, match="DirectOperationJournal"):
         read_operation_journal_evidence(FakeJournal(), "extop_forged")
+
+
+def test_direct_operation_journal_subclass_cannot_mint_trust(tmp_path: Path):
+    class FakeJournal(DirectOperationJournal):
+        def read(self, operation_id):
+            return {
+                "schema": PRODUCER_SCHEMA_EXTERNAL_WORKER_V1,
+                "operation_id": operation_id,
+                "attempt_id": "attempt-forged",
+                "status": "RUNNING",
+            }
+
+    fake = FakeJournal(
+        tmp_path / "fake",
+        schema=PRODUCER_SCHEMA_EXTERNAL_WORKER_V1,
+        operation_prefix="extop_",
+    )
+    with pytest.raises(ProvenanceContractError, match="exact DirectOperationJournal"):
+        read_operation_journal_evidence(fake, "extop_" + "a" * 32)
+
+
+def test_verified_envelope_payload_is_copy_and_not_replaceable(tmp_path: Path):
+    _journal, evidence, context = _verified_external_worker(tmp_path)
+    original = build_live_execution_provenance(context, evidence)
+    assert original.execution_state == EXECUTION_STATE_ACTIVE
+
+    leaked = evidence.record
+    leaked["status"] = "FAILED"
+    leaked["observed_model"] = "forged-model"
+    replay = build_live_execution_provenance(context, evidence)
+    assert replay.execution_state == EXECUTION_STATE_ACTIVE
+    assert replay.observed_model == "gpt-test"
+
+    with pytest.raises(TypeError):
+        replace(evidence, source_ref="caller:forged")
+
+
+@pytest.mark.parametrize(
+    "repository",
+    ["Attacker/Nexus-new", "/unrelated/checkouts/Nexus-new"],
+)
+def test_repository_cross_binding_requires_exact_identity(tmp_path: Path, repository: str):
+    _journal, evidence, context = _verified_external_worker(tmp_path)
+    context = dict(context)
+    context["repository"] = repository
+    result = build_live_execution_provenance(context, evidence)
+    assert result.execution_state == EXECUTION_STATE_UNKNOWN
+    assert "CROSS_BINDING_MISMATCH: repository mismatch" in result.phase
+
+
+def test_completed_with_malformed_timestamp_fails_closed(tmp_path: Path):
+    _journal, evidence, context = _verified_external_worker(
+        tmp_path,
+        status="COMPLETED",
+        timestamp="not-a-time",
+    )
+    result = build_live_execution_provenance(
+        context,
+        evidence,
+        max_staleness_seconds=0,
+    )
+    assert result.execution_state == EXECUTION_STATE_UNKNOWN
+    assert result.phase == "INVALID_PRODUCER_TIMESTAMP"
+
+
+def test_running_with_malformed_timestamp_and_zero_staleness_limit_fails_closed(tmp_path: Path):
+    _journal, evidence, context = _verified_external_worker(
+        tmp_path,
+        status="RUNNING",
+        timestamp="not-a-time",
+    )
+    result = build_live_execution_provenance(
+        context,
+        evidence,
+        max_staleness_seconds=0,
+    )
+    assert result.execution_state == EXECUTION_STATE_UNKNOWN
+    assert result.phase == "INVALID_PRODUCER_TIMESTAMP"
