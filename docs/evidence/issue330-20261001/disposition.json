@@ -1,5 +1,5 @@
 {
-  "adjudication_updated_at": "2026-10-01T11:14:22.109555+00:00",
+  "adjudication_updated_at": "2026-10-01T12:24:00+00:00",
   "all_causal_roots_proven": false,
   "artifact_kind": "issue330_read_only_disposition_ledger",
   "bounded_followup_packets": [
@@ -16402,7 +16402,9 @@
       "tests/nexus/orchestrator/test_cross_entrypoint_conflict_admission.py",
       "tests/nexus/orchestrator/test_work_claim_public_read_surface.py",
       "tests/ops/test_hybrid_replication_capture_workflow.py",
-      "tests/research/test_core_effectiveness_observability.py"
+      "tests/research/test_core_effectiveness_observability.py",
+      "nexus/services/live_execution_provenance.py",
+      "tests/services/test_live_execution_provenance.py"
     ],
     "disposition": "RETAIN_IMMUTABLE_FULL_RUN_AND_CLASSIFICATIONS_RECHECK_CHANGED_ENTRYPOINTS_BEFORE_REPAIR",
     "evidence_source_blobs": [
@@ -17213,9 +17215,9 @@
     ],
     "full_run_performed_on_rebound_main": false,
     "full_run_source": "199feb12fdd9726684785d5420e6b48da03a155f",
-    "observed_at": "2026-10-01T11:16:03.047362+00:00",
-    "qualification": "Existing exact-run failures remain historical observations of this run. Unchanged source witnesses and AST-equal methods may be reused as source evidence only; new entrypoint/conflict-admission behavior is not covered by the old full run.",
-    "rebound_main": "260184bb789b8be5038d9530f659da1a00c611e4"
+    "observed_at": "2026-10-01T12:24:00+00:00",
+    "qualification": "Existing exact-run failures remain immutable observations of source 199feb12. Movement from 260184bb to 89251bb adds only live_execution_provenance.py and its test, with no overlap against the adjudicated source/test witness set; retain all Wave 2 dispositions. New behavior remains outside the historical full-run claim boundary and must be independently tested before any future repair/merge claim.",
+    "rebound_main": "89251bbdb304d72318ab31c2b5e8de13e8bbd1ce"
   },
   "summary": {
     "adjudicated_group_count": 101,
