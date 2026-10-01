@@ -24,6 +24,7 @@ from nexus.services.live_execution_provenance import (
     LiveExecutionProvenance,
     LiveExecutionProvenanceView,
     ProvenanceContractError,
+    VerifiedProducerRecord,
     build_live_execution_provenance,
     make_dev_mcp_receipt,
     make_rdc_receipt,
@@ -322,3 +323,33 @@ def test_forbidden_authority_boundaries():
     ):
         with pytest.raises(NotImplementedError, match=message):
             method()
+
+
+def test_verified_record_cannot_be_minted_by_caller():
+    forged = {
+        "schema": PRODUCER_SCHEMA_EXTERNAL_WORKER_V1,
+        "operation_id": "extop_forged",
+        "attempt_id": "attempt-forged",
+        "status": "RUNNING",
+    }
+    with pytest.raises(ProvenanceContractError, match="owning read adapter"):
+        VerifiedProducerRecord(
+            record=forged,
+            source_ref="caller:forged",
+            transport_kind=TRANSPORT_KIND_LOCAL_RUNNER,
+            _verification_token=object(),
+        )
+
+
+def test_fake_journal_object_cannot_mint_verified_evidence():
+    class FakeJournal:
+        def read(self, operation_id):
+            return {
+                "schema": PRODUCER_SCHEMA_EXTERNAL_WORKER_V1,
+                "operation_id": operation_id,
+                "attempt_id": "attempt-forged",
+                "status": "RUNNING",
+            }
+
+    with pytest.raises(ProvenanceContractError, match="DirectOperationJournal"):
+        read_operation_journal_evidence(FakeJournal(), "extop_forged")

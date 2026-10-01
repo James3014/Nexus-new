@@ -15,10 +15,12 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+
+from nexus.services.direct_operation_journal import DirectOperationJournal
 
 LIVE_EXECUTION_PROVENANCE_SCHEMA = "nexus.integration.live_execution_provenance.v1"
 LIVE_EXECUTION_PROVENANCE_CLAIM_CEILING = "PROVENANCE_READ_ONLY_OBSERVATIONAL"
@@ -109,15 +111,21 @@ def _sha256(data: Any) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+_PRODUCER_READ_SENTINEL = object()
+
+
 @dataclass(frozen=True)
 class VerifiedProducerRecord:
-    """A record obtained from a repository-owned producer read API."""
+    """A record minted only by a repository-owned producer read adapter."""
 
     record: Mapping[str, Any]
     source_ref: str
     transport_kind: str
+    _verification_token: object = field(repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        if self._verification_token is not _PRODUCER_READ_SENTINEL:
+            raise ProvenanceContractError("verified producer record must come from an owning read adapter")
         if not isinstance(self.record, Mapping):
             raise ProvenanceContractError("verified producer record must be a Mapping")
         schema = str(self.record.get("schema") or "")
@@ -138,6 +146,8 @@ def read_operation_journal_evidence(
 ) -> VerifiedProducerRecord:
     """Read one exact operation through its owning DirectOperationJournal API."""
 
+    if not isinstance(journal, DirectOperationJournal):
+        raise ProvenanceContractError("journal must be a DirectOperationJournal")
     record = journal.read(operation_id)
     schema = str(record.get("schema") or "")
     if schema not in TRUSTED_JOURNAL_SCHEMAS:
@@ -146,6 +156,7 @@ def read_operation_journal_evidence(
         record=record,
         source_ref=f"operation-journal:{schema}:{operation_id}",
         transport_kind=transport_kind,
+        _verification_token=_PRODUCER_READ_SENTINEL,
     )
 
 
@@ -293,7 +304,11 @@ def make_dev_mcp_receipt(
     repository: str = "",
     evidence_refs: Sequence[str] = (),
 ) -> dict[str, Any]:
-    """Produce a canonical Dev MCP execution receipt."""
+    """Build an unverified Dev MCP-shaped observation for compatibility/tests.
+
+    This helper does not mint producer trust. Passing its mapping directly to
+    build_live_execution_provenance() must remain UNKNOWN.
+    """
     return {
         "schema": PRODUCER_SCHEMA_DEV_MCP_V1,
         "transport_kind": TRANSPORT_KIND_DEV_MCP,
@@ -331,7 +346,11 @@ def make_rdc_receipt(
     repository: str = "",
     evidence_refs: Sequence[str] = (),
 ) -> dict[str, Any]:
-    """Produce a canonical RDC delegated worker receipt."""
+    """Build an unverified RDC-shaped observation for compatibility/tests.
+
+    This helper does not mint producer trust. A future RDC owning adapter must
+    read canonical durable evidence before ACTIVE/COMPLETED can be projected.
+    """
     return {
         "schema": PRODUCER_SCHEMA_RDC_V1,
         "transport_kind": TRANSPORT_KIND_RDC,
