@@ -15,7 +15,13 @@
   "authority": "RESEARCH_OBSERVATION_ONLY",
   "auto_chain": false,
   "activation": {
+    "activation_state": null,
+    "activation_state_variable": "NEXUS_HYBRID_REPLICATION_ACTIVATION_STATE",
     "t_auto": null,
+    "t_auto_variable": "NEXUS_HYBRID_REPLICATION_T_AUTO",
+    "excluded_tasks_variable": "NEXUS_HYBRID_REPLICATION_EXCLUDED_TASKS",
+    "exclusion_set_sha256": null,
+    "exclusion_set_sha256_variable": "NEXUS_HYBRID_REPLICATION_EXCLUSION_SET_SHA256",
     "required_status": "AUTOMATIC_CAPTURE_READY",
     "wave1_must_not_create_primary_scoring_boundary": true
   },
