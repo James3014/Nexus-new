@@ -1,0 +1,149 @@
+{
+  "schema": "nexus.core_effectiveness.g0_observability_contract.v1",
+  "study_issue": "James3014/Nexus-new#1278",
+  "status": "G0_CONTRACT_FROZEN",
+  "authority": "RESEARCH_OBSERVATION_ONLY",
+  "claim_ceiling": "G0_OBSERVABILITY_ONLY_NO_UTILITY_CLAIM",
+  "auto_chain": false,
+  "population": {
+    "work_item_census_source": "NEXUS-HYBRID-REPLICATION-CAPTURE-V1",
+    "candidate_repositories": [
+      "James3014/Nexus-new",
+      "James3014/devspace",
+      "James3014/nexus-core",
+      "James3014/nexus-learning",
+      "James3014/nexus-open-swe-runtime",
+      "James3014/repository-intelligence-engine",
+      "James3014/nexus-runtime",
+      "James3014/nexus-opencli-reviewer"
+    ],
+    "eligible_attempt_definition": "A real repository mutation attempt linked to a prospectively captured tracked work item. The attempt is enrolled before its first repository effect when an existing durable attempt identity is available. A mutation-bearing work item later observed without such enrollment remains in the denominator as ATTEMPT_IDENTITY_GAP; it is never silently excluded or retroactively admitted.",
+    "non_mutating_work_item_disposition": "NO_MUTATION_EFFECT",
+    "missing_pre_effect_identity_disposition": "ATTEMPT_IDENTITY_GAP",
+    "retroactive_primary_enrollment_allowed": false
+  },
+  "existing_surfaces": {
+    "work_item_capture": {
+      "source": "Nexus-new hybrid replication issue observer",
+      "event": "issues.opened",
+      "identity_fields": [
+        "repository",
+        "issue_number",
+        "created_at",
+        "captured_at",
+        "pre_implementation_revision",
+        "source_event_id",
+        "contract_sha256",
+        "capture_sha256"
+      ]
+    },
+    "attempt_identity": {
+      "source": "DevSpace Core mutation session or another already-authoritative pre-effect attempt identity",
+      "devspace_fields": [
+        "operationId",
+        "attemptId",
+        "sourceHead",
+        "sourceTree",
+        "createdAt",
+        "firstEffectAt"
+      ]
+    },
+    "core_evidence": {
+      "source": "Nexus Core verification receipt / Core-bound mutation snapshot",
+      "fields": [
+        "source_revision",
+        "source_tree",
+        "target_revision",
+        "target_tree",
+        "receipt_hash",
+        "core_verdict",
+        "core_reason",
+        "verifier_status"
+      ]
+    },
+    "workflow_outcome": {
+      "source": "existing CI/reviewer/acceptance evidence and Nexus Learning replay projection",
+      "reused_fields": [
+        "attempt_id",
+        "action_id",
+        "verifier_status",
+        "terminal_outcome",
+        "measured_elapsed_seconds",
+        "intervention_count"
+      ]
+    }
+  },
+  "event_schema": {
+    "required_identity_fields": [
+      "repository",
+      "work_item_id",
+      "attempt_id",
+      "attempt_index",
+      "enrolled_at",
+      "source_revision",
+      "source_tree"
+    ],
+    "required_context_fields": [
+      "task_family",
+      "risk_class",
+      "execution_lane",
+      "transport"
+    ],
+    "terminal_adjudication_fields": [
+      "target_revision",
+      "target_tree",
+      "core_invoked",
+      "core_verdict",
+      "core_reason",
+      "receipt_hash",
+      "baseline_result",
+      "terminal_outcome",
+      "t_core_detection",
+      "t_baseline_detection",
+      "t_terminal_result",
+      "core_orchestration_runtime_ms",
+      "verifier_runtime_ms",
+      "duplicate_verifier_runtime_ms",
+      "reviewer_calls",
+      "manual_interventions",
+      "attempts_to_green"
+    ],
+    "missingness": {
+      "field": "missingness",
+      "format": "object mapping missing field name to explicit reason",
+      "silent_drop_allowed": false
+    }
+  },
+  "coverage": {
+    "primary_metric": "prospective_enrollment_coverage",
+    "formula": "complete prospectively enrolled eligible attempts / all eligible attempts including detected identity gaps",
+    "g0_target": 0.95,
+    "terminal_metric": "adjudication_completeness",
+    "terminal_formula": "terminal eligible attempts complete enough for later adjudication / all terminal eligible attempts",
+    "small_n_zero_error_is_not_fleet_proof": true
+  },
+  "ordering": [
+    "WORK_ITEM_CAPTURED",
+    "ATTEMPT_ENROLLED_OR_GAP_RECORDED",
+    "FIRST_REPOSITORY_EFFECT",
+    "CORE_OBSERVED",
+    "BASELINE_OBSERVED",
+    "TERMINAL_BOUND",
+    "ADJUDICATION_READY"
+  ],
+  "failure_semantics": {
+    "missing_work_item_capture": "INTAKE_GAP",
+    "mutation_without_pre_effect_attempt_identity": "ATTEMPT_IDENTITY_GAP",
+    "late_attempt_record": "RETROACTIVE_ONLY_NOT_PRIMARY",
+    "missing_required_field": "EXPLICIT_MISSINGNESS_REQUIRED",
+    "coverage_below_target": "G0_COVERAGE_INSUFFICIENT"
+  },
+  "non_goals": [
+    "No route or CapabilityPlanner authority change",
+    "No Workforce admission or model selection change",
+    "No merge, acceptance, release, deployment, or production authority",
+    "No new engineering lifecycle",
+    "No automatic G1/G2/G3 transition",
+    "No utility claim from G0"
+  ]
+}
