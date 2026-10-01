@@ -9,9 +9,9 @@ import hashlib
 import importlib.util
 import io
 import json
-import os
 import re
-import subprocess
+import subprocess  # nosec B404
+import sys
 import tarfile
 import tempfile
 import time
@@ -83,7 +83,7 @@ def _run(
     input_text: str | None = None,
     timeout: float = 60,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    return subprocess.run(  # nosec B603
         list(argv),
         cwd=None if cwd is None else str(cwd),
         input=input_text,
@@ -359,7 +359,7 @@ def _load_d0(binding: Mapping[str, Any], repo: Path) -> tuple[Any, Mapping[str, 
         raise ValueError("d0_import_spec_unavailable")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    module.REPO = repo
+    setattr(module, "REPO", repo)
     for name in ("FILE_CACHE", "GREP_CACHE", "LOG_CACHE", "SHOW_NAMES_CACHE"):
         getattr(module, name).clear()
     return module, freeze
@@ -526,8 +526,11 @@ def _jev_request(
     total_wall = 0.0
     for attempt in range(1, 3):
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        endpoint = str(binding["jev"]["endpoint"])
+        if endpoint != JEV_ENDPOINT:
+            raise ValueError("jev_endpoint_identity_drift")
         req = urllib.request.Request(
-            str(binding["jev"]["endpoint"]),
+            endpoint,
             data=data,
             headers={
                 "Content-Type": "application/json",
@@ -536,7 +539,7 @@ def _jev_request(
         )
         started = time.perf_counter()
         try:
-            with urllib.request.urlopen(req, timeout=45) as response:
+            with urllib.request.urlopen(req, timeout=45) as response:  # nosec B310
                 out = json.loads(response.read())
             wall = time.perf_counter() - started
             total_wall += wall
@@ -643,8 +646,8 @@ def _codex_usage(events: str) -> dict[str, Any]:
 
 
 def _export_revision(repo: Path, revision: str, target: Path) -> None:
-    cp = subprocess.run(
-        ["git", "archive", "--format=tar", revision],
+    cp = subprocess.run(  # nosec B603
+        ["/usr/bin/git", "archive", "--format=tar", revision],
         cwd=repo,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -654,7 +657,7 @@ def _export_revision(repo: Path, revision: str, target: Path) -> None:
     if cp.returncode != 0:
         raise RuntimeError(f"git_archive_failed:{cp.stderr.decode('utf-8', 'replace')[:300]}")
     with tarfile.open(fileobj=io.BytesIO(cp.stdout), mode="r:") as archive:
-        archive.extractall(target)
+        archive.extractall(target, filter="data")
 
 
 def _run_codex(
@@ -1123,7 +1126,7 @@ def _identity_preflight_main(binding_path: Path) -> int:
 
 
 def _stack_main(binding_path: Path) -> int:
-    payload = json.load(os.sys.stdin)
+    payload = json.load(sys.stdin)
     snapshot = _snapshot_from_capture_payload(payload)
     binding = _load_binding(binding_path)
     outcome = run_frozen_stack(snapshot, binding=binding)
@@ -1132,7 +1135,7 @@ def _stack_main(binding_path: Path) -> int:
 
 
 def _ground_truth_main() -> int:
-    state = json.load(os.sys.stdin)
+    state = json.load(sys.stdin)
     payload = _resolve_ground_truth_from_state(state)
     if payload is None:
         return 3

@@ -107,6 +107,10 @@ class TaskSnapshot:
             capture_sha256=capture_sha256,
         )
 
+    @property
+    def task_key(self) -> str:
+        return _task_key(self.repository, self.issue_number)
+
     def to_capture_payload(self) -> dict[str, Any]:
         return {
             "schema": self.schema,
@@ -314,9 +318,6 @@ def _task_dir_name(task_key: str) -> str:
 
 def _task_key(repository: str, issue_number: int) -> str:
     return f"{repository}#{int(issue_number)}"
-
-
-TaskSnapshot.task_key = property(lambda self: _task_key(self.repository, self.issue_number))  # type: ignore[attr-defined]
 
 
 @dataclass(frozen=True)
