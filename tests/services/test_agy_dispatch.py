@@ -653,20 +653,32 @@ def test_background_terminal_receipt_persists_agy_attestation(tmp_path: Path, mo
 def test_run_agy_passes_operation_local_attestation_log(tmp_path: Path, monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    class Result:
-        returncode = 0
-        stdout = "ok"
-        stderr = ""
+    from io import StringIO
 
-    def fake_run(argv, **kwargs):
-        captured["argv"] = argv
-        captured["kwargs"] = kwargs
-        return Result()
+    class FakeProcess:
+        def __init__(self, argv, **kwargs):
+            captured["argv"] = argv
+            captured["kwargs"] = kwargs
+            self.stdout = StringIO("ok")
+            self.stderr = StringIO("")
+            self.returncode = 0
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = -15
+
+        def kill(self):
+            self.returncode = -9
 
     log = tmp_path / "operation" / "agy.log"
     monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(log))
     monkeypatch.setattr(dispatch.shutil, "which", lambda name: "/tmp/fake-agy")
-    monkeypatch.setattr(dispatch.subprocess, "run", fake_run)
+    monkeypatch.setattr(dispatch.subprocess, "Popen", FakeProcess)
     code, out, err, timed_out, _ = dispatch.run_agy(
         env={"HOME": str(tmp_path)},
         prompt="identity probe",

@@ -94,8 +94,10 @@ QUOTA_SNAPSHOT_PATH = Path(
 )
 
 
-DEFAULT_QUOTA_MAX_AGE_SECONDS = 900.0
+DEFAULT_QUOTA_MAX_AGE_SECONDS = 300.0
 DEFAULT_QUOTA_FAMILY_BLOCK_SECONDS = 300.0
+DEFAULT_QUOTA_PREFLIGHT_TIMEOUT_SECONDS = 12
+DEFAULT_MAX_ACCOUNT_FAILOVERS = 16
 MIN_DRAIN_HORIZON_SECONDS = 60.0
 
 
@@ -319,6 +321,87 @@ def _load_quota_snapshot(path: Path = QUOTA_SNAPSHOT_PATH) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _max_account_failovers() -> int:
+    raw = os.getenv("NEXUS_AGY_MAX_ACCOUNT_FAILOVERS")
+    if raw is None:
+        return DEFAULT_MAX_ACCOUNT_FAILOVERS
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_MAX_ACCOUNT_FAILOVERS
+    return max(1, value)
+
+
+def _quota_refresh_binary() -> str | None:
+    explicit = os.getenv("NEXUS_AGY_QUOTA_COMMAND", "").strip()
+    if explicit:
+        return explicit
+    found = shutil.which("nexus-agy-quota")
+    if found:
+        return found
+    sibling = Path(__file__).resolve().with_name("nexus-agy-quota")
+    return str(sibling) if sibling.is_file() else None
+
+
+def _refresh_quota_snapshot_for_account(
+    account_name: str,
+    *,
+    timeout: int = DEFAULT_QUOTA_PREFLIGHT_TIMEOUT_SECONDS,
+) -> dict:
+    command = _quota_refresh_binary()
+    if not command:
+        return _load_quota_snapshot()
+    try:
+        subprocess.run(
+            [command, account_name, "--timeout", str(max(1, timeout))],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=max(10, timeout) + 5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return _load_quota_snapshot()
+
+
+def _account_family_quota_state(
+    snapshot: dict,
+    *,
+    account_name: str,
+    model_family: str,
+    now_ts: float | None = None,
+) -> tuple[str, float | None, bool]:
+    if model_family not in {"gemini", "claude_gpt"}:
+        return "unknown", None, False
+    current = time.time() if now_ts is None else float(now_ts)
+    max_age = _quota_max_age_seconds()
+    if not _snapshot_is_fresh(snapshot, now_ts=current, max_age_seconds=max_age):
+        return "stale", None, False
+    rows = snapshot.get("accounts") if isinstance(snapshot, dict) else None
+    if not isinstance(rows, list):
+        return "unknown", None, False
+    group_name = "Gemini Models" if model_family == "gemini" else "Claude and GPT models"
+    for row in rows:
+        if not isinstance(row, dict) or row.get("account") != account_name:
+            continue
+        if not _row_is_fresh(
+            row,
+            snapshot,
+            now_ts=current,
+            max_age_seconds=max_age,
+        ):
+            return "stale", None, False
+        if row.get("ok") is not True:
+            return "unknown", None, True
+        groups = row.get("groups")
+        if not isinstance(groups, dict):
+            return "unknown", None, True
+        state, reset_ts = _family_quota_state(groups, group_name, now_ts=current)
+        return state, reset_ts, True
+    return "unknown", None, False
+
+
 def _dynamic_availability_state(
     model: str | None,
     snapshot: dict,
@@ -435,15 +518,19 @@ def _dynamic_preference_tiers(model: str | None, snapshot: dict) -> tuple[list[s
     return list(state["preferred"]), list(state["reserve"])
 
 
+def _publish_dynamic_availability(state: dict[str, object]) -> None:
+    os.environ["NEXUS_AGY_PREFERRED_ACCOUNTS"] = ",".join(state["preferred"])
+    os.environ["NEXUS_AGY_RESERVE_ACCOUNTS"] = ",".join(state["reserve"])
+    os.environ["NEXUS_AGY_FALLBACK_ACCOUNTS"] = ",".join(state["fallback"])
+    os.environ["NEXUS_AGY_BLOCKED_ACCOUNTS"] = ",".join(state["blocked"])
+
+
 def _apply_dynamic_availability(model: str | None) -> tuple[dict, dict[str, object]]:
     if AGY_ACCOUNT_PREFERENCE_TIERS_VERSION != 3:
         raise RuntimeError("AGY_ACCOUNT_PREFERENCE_TIERS_VERSION_MISMATCH")
     snapshot = _load_quota_snapshot()
     state = _dynamic_availability_state(model, snapshot)
-    os.environ["NEXUS_AGY_PREFERRED_ACCOUNTS"] = ",".join(state["preferred"])
-    os.environ["NEXUS_AGY_RESERVE_ACCOUNTS"] = ",".join(state["reserve"])
-    os.environ["NEXUS_AGY_FALLBACK_ACCOUNTS"] = ",".join(state["fallback"])
-    os.environ["NEXUS_AGY_BLOCKED_ACCOUNTS"] = ",".join(state["blocked"])
+    _publish_dynamic_availability(state)
     return snapshot, state
 
 
@@ -492,21 +579,30 @@ def _family_failure_unavailable_until(
     return current + DEFAULT_QUOTA_FAMILY_BLOCK_SECONDS
 
 
+_QUOTA_FAILURE_MARKERS = (
+    "resource_exhausted",
+    "exceeded your current quota",
+    "insufficient_quota",
+    "quota exhausted",
+    "quota_exhausted",
+    "quota exceeded",
+    "quota limit reached",
+    "quota limit exceeded",
+)
+
+
+def _has_quota_failure_signal(text: str) -> bool:
+    lowered = text.lower()
+    return any(marker in lowered for marker in _QUOTA_FAILURE_MARKERS)
+
+
 def classify_failure(
     returncode: int | None, stdout: str, stderr: str, timed_out: bool
 ) -> AccountFailureKind:
     if timed_out:
         return AccountFailureKind.TIMEOUT
     text = (stdout + "\n" + stderr).lower()
-    if any(
-        k in text
-        for k in (
-            "quota",
-            "resource_exhausted",
-            "exceeded your current quota",
-            "insufficient_quota",
-        )
-    ):
+    if _has_quota_failure_signal(stderr):
         return AccountFailureKind.QUOTA_EXHAUSTED
     if any(k in text for k in ("429", "rate limit", "ratelimit")):
         return AccountFailureKind.RATE_LIMITED
@@ -544,9 +640,7 @@ _AGY_ALIAS_RESOLUTION_RE = re.compile(
     r'model alias "(?P<alias>[^"\n]+)" resolved to "(?P<resolved>[^"\n]+)"'
 )
 _AGY_RESOLVING_MODEL_RE = re.compile(r"Resolving model (?P<resolved>[^\s]+)")
-_AGY_CONVERSATION_RE = re.compile(
-    r"Created conversation (?P<conversation>[0-9a-fA-F-]{36})"
-)
+_AGY_CONVERSATION_RE = re.compile(r"Created conversation (?P<conversation>[0-9a-fA-F-]{36})")
 
 
 def _parse_agy_attestation(
@@ -574,9 +668,7 @@ def _parse_agy_attestation(
             if resolved == requested_model:
                 resolved_models.append(resolved)
 
-    conversations = [
-        match.group("conversation") for match in _AGY_CONVERSATION_RE.finditer(text)
-    ]
+    conversations = [match.group("conversation") for match in _AGY_CONVERSATION_RE.finditer(text)]
     if not resolved_models or not conversations:
         return {
             "observed_provider": None,
@@ -625,31 +717,86 @@ def run_agy(
     if effort:
         argv += ["--effort", effort]
     argv += ["--print", prompt]
+
     started = time.monotonic()
-    try:
-        p = subprocess.run(
-            argv,
-            cwd=cwd,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=timeout + 10,
-        )
-        stderr_lower = (p.stderr or "").lower()
-        agy_print_timed_out = (
-            "[agy] print timeout after" in stderr_lower and "turn in progress" in stderr_lower
-        )
+    process = subprocess.Popen(
+        argv,
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
+    quota_failure = threading.Event()
+
+    def _drain(stream, sink: list[str], *, detect_quota: bool = False) -> None:
+        if stream is None:
+            return
+        for line in iter(stream.readline, ""):
+            sink.append(line)
+            if detect_quota and _has_quota_failure_signal(line):
+                quota_failure.set()
+        stream.close()
+
+    stdout_thread = threading.Thread(
+        target=_drain,
+        args=(process.stdout, stdout_lines),
+        daemon=True,
+    )
+    stderr_thread = threading.Thread(
+        target=_drain,
+        args=(process.stderr, stderr_lines),
+        kwargs={"detect_quota": True},
+        daemon=True,
+    )
+    stdout_thread.start()
+    stderr_thread.start()
+
+    timed_out = False
+    quota_terminated = False
+    deadline = started + max(1, timeout) + 10
+    while process.poll() is None:
+        if quota_failure.wait(0.05):
+            quota_terminated = True
+            process.terminate()
+            break
+        if time.monotonic() >= deadline:
+            timed_out = True
+            process.terminate()
+            break
+        time.sleep(0.05)
+
+    if process.poll() is None:
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=2)
+
+    stdout_thread.join(timeout=2)
+    stderr_thread.join(timeout=2)
+    out = "".join(stdout_lines)
+    err = "".join(stderr_lines)
+    stderr_lower = err.lower()
+    agy_print_timed_out = (
+        "[agy] print timeout after" in stderr_lower and "turn in progress" in stderr_lower
+    )
+    wall_ms = int((time.monotonic() - started) * 1000)
+
+    if timed_out:
+        return None, out, err, True, wall_ms
+    if quota_terminated:
         return (
-            p.returncode,
-            p.stdout,
-            p.stderr,
-            agy_print_timed_out,
-            int((time.monotonic() - started) * 1000),
+            process.returncode if process.returncode not in (None, 0) else 1,
+            out,
+            err,
+            False,
+            wall_ms,
         )
-    except subprocess.TimeoutExpired as exc:
-        out = exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-        err = exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
-        return None, out, err, True, int((time.monotonic() - started) * 1000)
+    return process.returncode, out, err, agy_print_timed_out, wall_ms
 
 
 def emit_meta(data: dict) -> None:
@@ -806,7 +953,10 @@ def dispatch_run(
         return 75
 
     attempts = 0
+    work_failures = 0
+    work_budget = max(1, max_calls)
     rotations = 0
+    max_failovers = _max_account_failovers()
     last_kind = None
     total_wall_ms = 0
 
@@ -820,7 +970,85 @@ def dispatch_run(
     )
 
     try:
-        while attempts < max(1, max_calls):
+        while True:
+            if scoped_model_family is not None:
+                quota_state, reset_ts, evidence_fresh = _account_family_quota_state(
+                    quota_snapshot,
+                    account_name=claim.internal_id,
+                    model_family=scoped_model_family,
+                )
+                if not evidence_fresh:
+                    quota_snapshot = _refresh_quota_snapshot_for_account(claim.internal_id)
+                    availability_state = _dynamic_availability_state(model, quota_snapshot)
+                    _publish_dynamic_availability(availability_state)
+                    quota_state, reset_ts, evidence_fresh = _account_family_quota_state(
+                        quota_snapshot,
+                        account_name=claim.internal_id,
+                        model_family=scoped_model_family,
+                    )
+                if evidence_fresh and quota_state == "blocked":
+                    unavailable_until = (
+                        reset_ts
+                        if reset_ts is not None and reset_ts > time.time()
+                        else time.time() + DEFAULT_QUOTA_FAMILY_BLOCK_SECONDS
+                    )
+                    if rotations >= max_failovers:
+                        coordinator.retire_failed_claim(
+                            claim,
+                            AccountFailureKind.QUOTA_EXHAUSTED,
+                            model_family=scoped_model_family,
+                            unavailable_until=unavailable_until,
+                        )
+                        emit_meta({
+                            "status": "failed",
+                            "attempts": attempts,
+                            "rotations": rotations,
+                            "failure_kind": "ACCOUNT_FAILOVER_LIMIT",
+                            "account_alias_hash": claim.account_alias_hash,
+                            "lease_id_hash": claim.lease_id_hash,
+                            "parallel_slot": True,
+                            "wall_ms": total_wall_ms,
+                        })
+                        return 75
+                    try:
+                        claim = coordinator.rotate_claim(
+                            current_claim=claim,
+                            failure_kind=AccountFailureKind.QUOTA_EXHAUSTED,
+                            exclude_hashes=exclude_hashes,
+                            wait_timeout=pool_wait_timeout,
+                            model_family=scoped_model_family,
+                            unavailable_until=unavailable_until,
+                        )
+                        rotations += 1
+                        _operation_hook(
+                            operation_hook,
+                            phase="ACCOUNT_ROTATED",
+                            attempts=attempts,
+                            rotations=rotations,
+                            failure_kind=AccountFailureKind.QUOTA_EXHAUSTED.value,
+                            account_alias_hash=claim.account_alias_hash,
+                            lease_id_hash=claim.lease_id_hash,
+                        )
+                        continue
+                    except AgyAccountPoolBusyError:
+                        emit_meta({
+                            "status": "pool_busy",
+                            "attempts": attempts,
+                            "rotations": rotations,
+                            "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
+                            "wall_ms": total_wall_ms,
+                        })
+                        return 75
+                    except AgyAccountPoolExhaustedError:
+                        emit_meta({
+                            "status": "pool_exhausted",
+                            "attempts": attempts,
+                            "rotations": rotations,
+                            "failure_kind": "QUOTA_EXHAUSTED",
+                            "wall_ms": total_wall_ms,
+                        })
+                        return 75
+
             attempts += 1
             _operation_hook(
                 operation_hook,
@@ -914,9 +1142,13 @@ def dispatch_run(
                     failure_kind=kind,
                 )
 
-            if attempts >= max_calls:
-                # Rotation eligible, but retry budget exhausted (including --max-calls 1):
-                # Retire the failed availability scope, but do not acquire a replacement.
+            if kind != AccountFailureKind.QUOTA_EXHAUSTED:
+                work_failures += 1
+
+            if kind != AccountFailureKind.QUOTA_EXHAUSTED and work_failures >= work_budget:
+                # Real work failure budget is independent from account-selection
+                # failover. Retire the current failed scope without acquiring
+                # another account when the model-work budget is exhausted.
                 try:
                     coordinator.retire_failed_claim(
                         claim,
@@ -941,6 +1173,28 @@ def dispatch_run(
                     "wall_ms": total_wall_ms,
                 })
                 return code if isinstance(code, int) and code != 0 else 1
+
+            if rotations >= max_failovers:
+                try:
+                    coordinator.retire_failed_claim(
+                        claim,
+                        kind,
+                        model_family=scoped_model_family,
+                        unavailable_until=family_unavailable_until,
+                    )
+                except Exception:
+                    pass
+                emit_meta({
+                    "status": "failed",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": "ACCOUNT_FAILOVER_LIMIT",
+                    "account_alias_hash": claim.account_alias_hash,
+                    "lease_id_hash": claim.lease_id_hash,
+                    "parallel_slot": True,
+                    "wall_ms": total_wall_ms,
+                })
+                return 75
 
             # Rotation eligible: rotate claim
             try:

@@ -670,7 +670,7 @@ class TestAccountConcurrencyModel(unittest.TestCase):
         self.assertFalse(path.exists())
 
     def test_n_final_attempt_rotation_eligible_retires_without_replacement(self):
-        """N. Final-attempt rotation-eligible failure path (max_calls exhausted / max_calls=1 semantics) retires failed account but does not acquire a replacement."""
+        """N. Non-quota rotation-eligible failure still consumes max_calls and retires without replacement."""
         if not dispatch_module:
             self.skipTest("dispatch_module not loaded")
 
@@ -684,7 +684,7 @@ class TestAccountConcurrencyModel(unittest.TestCase):
 
         def mock_run_agy(*, env, prompt, cwd, mode, model, effort, timeout):
             calls.append(dict(env))
-            return 1, "", "429 Quota exceeded: resource exhausted", False, 50
+            return 1, "", "429 rate limit", False, 50
 
         code = dispatch_module.dispatch_run(
             prompt="test prompt final attempt",
@@ -876,17 +876,33 @@ class TestAccountConcurrencyModel(unittest.TestCase):
         if not dispatch_module:
             self.skipTest("dispatch_module not loaded")
 
-        from types import SimpleNamespace
+        from io import StringIO
+
+        class FakeProcess:
+            def __init__(self, *args, **kwargs):
+                self.stdout = StringIO("")
+                self.stderr = StringIO(
+                    "[agy] print timeout after 2m0s with turn in progress; returning partial output\n"
+                )
+                self.returncode = 0
+
+            def poll(self):
+                return self.returncode
+
+            def wait(self, timeout=None):
+                return self.returncode
+
+            def terminate(self):
+                self.returncode = -15
+
+            def kill(self):
+                self.returncode = -9
 
         original_which = dispatch_module.shutil.which
-        original_run = dispatch_module.subprocess.run
+        original_popen = dispatch_module.subprocess.Popen
         try:
             dispatch_module.shutil.which = lambda name: "/tmp/fake-agy"
-            dispatch_module.subprocess.run = lambda *args, **kwargs: SimpleNamespace(
-                returncode=0,
-                stdout="",
-                stderr="[agy] print timeout after 2m0s with turn in progress; returning partial output\n",
-            )
+            dispatch_module.subprocess.Popen = FakeProcess
             code, out, err, timed_out, wall_ms = dispatch_module.run_agy(
                 env={"HOME": self.test_dir},
                 prompt="timeout probe",
@@ -898,7 +914,7 @@ class TestAccountConcurrencyModel(unittest.TestCase):
             )
         finally:
             dispatch_module.shutil.which = original_which
-            dispatch_module.subprocess.run = original_run
+            dispatch_module.subprocess.Popen = original_popen
 
         self.assertEqual(code, 0)
         self.assertEqual(out, "")
