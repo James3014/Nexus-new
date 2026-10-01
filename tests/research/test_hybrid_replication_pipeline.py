@@ -50,7 +50,6 @@ def test_capture_comment_round_trip_preserves_pre_execution_contract() -> None:
     assert recovered.capture_sha256
 
 
-
 def _snapshot(issue: int = 1300) -> TaskSnapshot:
     return TaskSnapshot.create(
         repository="James3014/Nexus-new",
@@ -126,12 +125,10 @@ def test_watchdog_reports_missing_capture_without_backfilling(tmp_path: Path) ->
     store = AutomaticReplicationStore(tmp_path)
     store.capture(_snapshot(1300), admission_disposition="ADMITTED_PRIMARY_FRESH_TASK")
 
-    report = store.reconcile_expected_work_items(
-        [
-            ("James3014/Nexus-new", 1300),
-            ("James3014/devspace", 401),
-        ]
-    )
+    report = store.reconcile_expected_work_items([
+        ("James3014/Nexus-new", 1300),
+        ("James3014/devspace", 401),
+    ])
 
     assert report["status"] == "INTAKE_GAP"
     assert report["missing"] == ["James3014/devspace#401"]
@@ -159,7 +156,6 @@ def test_duplicate_capture_is_idempotent_but_conflicting_capture_fails(tmp_path:
     )
     with pytest.raises(ValueError, match="capture_identity_conflict"):
         store.capture(conflicting, admission_disposition="ADMITTED_PRIMARY_FRESH_TASK")
-
 
 
 def test_opened_issue_is_admitted_automatically_at_event_time() -> None:
@@ -217,7 +213,6 @@ def test_issue_edit_is_contract_delta_not_snapshot_rewrite() -> None:
     recovered = parse_contract_delta_comment(comment)
     assert recovered["original_capture_sha256"] == snapshot.capture_sha256
     assert recovered["body"].endswith("plus a bounded clarification")
-
 
 
 def test_frozen_stack_outcome_enforces_a_b_c_contract() -> None:
@@ -325,7 +320,6 @@ def test_low_margin_b_requires_strong_online_fallback() -> None:
         bad.validate()
 
 
-
 def _c_outcome() -> FrozenStackOutcome:
     return FrozenStackOutcome(
         stratum="C",
@@ -404,7 +398,6 @@ def test_controller_joins_terminal_only_after_raw_seal(tmp_path: Path) -> None:
     result = controller.advance(snapshot.task_key)
     assert result["phase"] == "GROUND_TRUTH_BOUND"
     assert result["raw_seal"]["raw_sha256"]
-
 
 
 def test_admission_receipt_round_trip_is_bound_to_capture() -> None:
