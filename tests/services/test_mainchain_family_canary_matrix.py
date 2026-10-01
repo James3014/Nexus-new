@@ -333,6 +333,34 @@ _REQUEST_EVIDENCE_KEYS = (
 )
 
 
+def _retired_integration_reference_proven(
+    *,
+    invoked: bool,
+    skipped: bool,
+    gate: Any,
+    outcome: Mapping[str, Any],
+    evidence_refs: list[str],
+    outcome_contributed: bool,
+) -> bool:
+    """Accept only the exact non-mutating legacy IntegrationManager quarantine."""
+    return bool(
+        invoked
+        and not skipped
+        and gate is False
+        and str(outcome.get("action") or "") == "legacy_integration_quarantine"
+        and str(outcome.get("semantic_status") or "") == "BLOCKED"
+        and outcome.get("mutation_performed") is False
+        and str(outcome.get("retired_callable") or "").endswith(
+            "IntegrationManager.batch_integrate"
+        )
+        and str(outcome.get("replacement_callable") or "").endswith(
+            "SelfHostedTaskService.integrate_approved"
+        )
+        and evidence_refs
+        and not outcome_contributed
+    )
+
+
 @lru_cache(maxsize=None)
 def _run_family_canary(
     name: str,
@@ -855,7 +883,21 @@ def _run_family_canary(
         final_status = "PROBE"
 
     if positive:
-        if (
+        if name == "integration_manager" and ec == EXECUTION_CLASS_CONTROL_PLANE_REFERENCE:
+            if _retired_integration_reference_proven(
+                invoked=invoked,
+                skipped=skipped,
+                gate=gate,
+                outcome=nested or {},
+                evidence_refs=evidence,
+                outcome_contributed=outcome_contributed,
+            ):
+                first_broken = None
+                final_status = "OK"
+            else:
+                first_broken = first_broken or "retired_integration_quarantine_not_proven"
+                final_status = "FAIL"
+        elif (
             bool(contract.get("provider_authorization_required"))
             and ec != EXECUTION_CLASS_LEGACY_ALIAS
         ):
@@ -1101,6 +1143,9 @@ def _run_family_canary(
         "outcome_error": outcome_error,
         "outcome_auth_required": outcome_auth_required,
         "outcome_contributed": outcome_contributed,
+        "mutation_performed": (nested or {}).get("mutation_performed"),
+        "retired_callable": str((nested or {}).get("retired_callable") or ""),
+        "replacement_callable": str((nested or {}).get("replacement_callable") or ""),
         "local_stage_status": str(local_stage.get("status") or ""),
         "local_stage_reason": str(local_stage.get("reason") or ""),
         "local_provider": str(local_response.get("provider") or ""),
@@ -1482,6 +1527,71 @@ def test_family_canary_reads_production_executor_outcome_not_wrapper_shell() -> 
     assert result["action"] == "lookup_implementation"
     assert result["semantic_status"] == "SUCCEEDED"
     assert result["contract_violations"] == []
+
+
+def test_retired_integration_manager_is_quarantine_reference_only() -> None:
+    result = _run_family_canary("integration_manager", positive=True)
+
+    contract = PLANNER_EXECUTION_CONTRACTS["integration_manager"]
+    assert contract["execution_class"] == EXECUTION_CLASS_CONTROL_PLANE_REFERENCE
+    assert contract["provider_authorization_required"] is False
+    assert result["final_status"] == "OK"
+    assert result["action"] == "legacy_integration_quarantine"
+    assert result["semantic_status"] == "BLOCKED"
+    assert result["gate_passed"] is False
+    assert result["mutation_performed"] is False
+    assert result["retired_callable"].endswith("IntegrationManager.batch_integrate")
+    assert result["replacement_callable"].endswith(
+        "SelfHostedTaskService.integrate_approved"
+    )
+
+
+def test_retired_integration_reference_proof_rejects_false_green() -> None:
+    outcome = {
+        "action": "legacy_integration_quarantine",
+        "semantic_status": "BLOCKED",
+        "mutation_performed": False,
+        "retired_callable": (
+            "nexus.orchestrator.integration_manager.IntegrationManager.batch_integrate"
+        ),
+        "replacement_callable": (
+            "nexus.orchestrator.self_hosted_task_service."
+            "SelfHostedTaskService.integrate_approved"
+        ),
+    }
+    common = {
+        "invoked": True,
+        "skipped": False,
+        "gate": False,
+        "evidence_refs": ["ev:retired-integration"],
+        "outcome_contributed": False,
+    }
+
+    assert _retired_integration_reference_proven(outcome=outcome, **common) is True
+    assert (
+        _retired_integration_reference_proven(
+            outcome={**outcome, "mutation_performed": True},
+            **common,
+        )
+        is False
+    )
+    assert (
+        _retired_integration_reference_proven(
+            outcome={
+                **outcome,
+                "replacement_callable": "legacy.IntegrationManager.batch_integrate",
+            },
+            **common,
+        )
+        is False
+    )
+    assert (
+        _retired_integration_reference_proven(
+            outcome={**outcome, "semantic_status": "SUCCEEDED"},
+            **common,
+        )
+        is False
+    )
 
 
 @pytest.mark.parametrize("name", _promotable_names())
