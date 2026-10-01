@@ -1,0 +1,66 @@
+{
+  "schema": "nexus.hybrid_replication.automation_contract.v1",
+  "experiment_issue": "James3014/Nexus-new#1216",
+  "status": "SOURCE_READY_PENDING_LIVE_ACTIVATION",
+  "candidate_repositories": [
+    "James3014/Nexus-new",
+    "James3014/devspace",
+    "James3014/nexus-core",
+    "James3014/nexus-learning",
+    "James3014/nexus-open-swe-runtime",
+    "James3014/repository-intelligence-engine",
+    "James3014/nexus-runtime",
+    "James3014/nexus-opencli-reviewer"
+  ],
+  "authority": "RESEARCH_OBSERVATION_ONLY",
+  "auto_chain": false,
+  "activation": {
+    "activation_state": null,
+    "activation_state_variable": "NEXUS_HYBRID_REPLICATION_ACTIVATION_STATE",
+    "t_auto": null,
+    "t_auto_variable": "NEXUS_HYBRID_REPLICATION_T_AUTO",
+    "excluded_tasks_variable": "NEXUS_HYBRID_REPLICATION_EXCLUDED_TASKS",
+    "exclusion_set_sha256": null,
+    "exclusion_set_sha256_variable": "NEXUS_HYBRID_REPLICATION_EXCLUSION_SET_SHA256",
+    "required_status": "AUTOMATIC_CAPTURE_READY",
+    "wave1_must_not_create_primary_scoring_boundary": true
+  },
+  "superseded_provisional_boundary": {
+    "utc": "2026-09-30T23:08:07Z",
+    "status": "PRE_AUTOMATION_PROVISIONAL_GENERATION",
+    "primary_scoring_allowed": false
+  },
+  "frozen_incumbent": {
+    "r3_receipt_sha256": "77dee0030b022240ec8b23c388b0a957dc70878dc28ebae03d0d4d720402db37",
+    "d2_receipt_sha256": "4873ae4c96b63a0306c5dcc3afff039ab8df8ff6c7ee7070382eebb4d4268e79",
+    "dm1_receipt_sha256": "d85acab617dca8e2eab04c0e63246b41e1382ca0871607a96a424828bb05be99",
+    "re2_receipt_sha256": "ae1414c73107140b234d38178165769faad9d33f217a3b1f8064953e144efc63",
+    "dm1_top_probability_min": 0.7,
+    "dm1_margin_min": 0.3,
+    "retune_during_replication": false
+  },
+  "event_capture": {
+    "primary": "github_issues_opened_event",
+    "contract_delta": "github_issues_edited_event",
+    "capture_marker": "NEXUS-HYBRID-REPLICATION-CAPTURE-V1",
+    "admission_marker": "NEXUS-HYBRID-REPLICATION-ADMISSION-V1"
+  },
+  "watchdog": {
+    "mode": "independent_periodic_reconciliation",
+    "silent_skip_allowed": false,
+    "retroactive_primary_admission_allowed": false
+  },
+  "ordering": [
+    "CAPTURED",
+    "ADMITTED",
+    "ROUTE_FROZEN",
+    "RAW_SEALED",
+    "GROUND_TRUTH_BOUND",
+    "SCORED"
+  ],
+  "live_binding": {
+    "frozen_stack_command": null,
+    "ground_truth_command": null,
+    "launchd_or_scheduler": null
+  }
+}
