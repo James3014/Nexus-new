@@ -758,3 +758,145 @@ def test_cleanup_reconciled_lease_preserves_new_owner_receipt(tmp_path: Path, mo
 
     assert result["result"] == "LEASE_IDENTITY_MISMATCH_PRESERVED"
     assert json.loads(receipt.read_text(encoding="utf-8")) == payload
+
+
+class _WriteScopeClaim:
+    def __init__(self, home: Path) -> None:
+        self.account_alias_hash = "write-scope"
+        self.lease_id_hash = "lease-write"
+        self.internal_id = "write-scope-account"
+        self.lease = type(
+            "Lease",
+            (),
+            {"execution_env": {"HOME": str(home), "ACCOUNT": "write-scope-account"}},
+        )()
+        self.released = False
+
+    def release(self) -> None:
+        self.released = True
+
+
+class _WriteScopeCoordinator:
+    def __init__(self, home: Path) -> None:
+        self.claim = _WriteScopeClaim(home)
+        self.acquire_count = 0
+
+    def acquire_claim(self, **_kwargs):
+        self.acquire_count += 1
+        return self.claim
+
+
+def test_accept_edits_without_write_scope_fails_before_account_claim(
+    tmp_path: Path,
+) -> None:
+    coordinator = _WriteScopeCoordinator(tmp_path / "home")
+    runner_called = False
+
+    def runner(**_kwargs):
+        nonlocal runner_called
+        runner_called = True
+        return 0, "unexpected", "", False, 1
+
+    code = dispatch.dispatch_run(
+        prompt="edit something",
+        cwd=str(tmp_path),
+        mode="accept-edits",
+        coordinator=coordinator,
+        run_agy_fn=runner,
+    )
+
+    assert code == 64
+    assert coordinator.acquire_count == 0
+    assert runner_called is False
+
+
+def test_plan_without_write_scope_remains_allowed(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+
+    code = dispatch.dispatch_run(
+        prompt="inspect only",
+        cwd=str(tmp_path),
+        mode="plan",
+        coordinator=coordinator,
+        run_agy_fn=lambda **_kwargs: (0, "ok", "", False, 1),
+    )
+
+    assert code == 0
+    assert coordinator.acquire_count == 1
+    assert coordinator.claim.released is True
+
+
+def test_accept_edits_projects_bounded_write_scope_and_restores(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+    settings = home / ".gemini" / "antigravity-cli" / "settings.json"
+
+    def runner(**_kwargs):
+        data = json.loads(settings.read_text(encoding="utf-8"))
+        assert f"write_file({work})" in data["permissions"]["allow"]
+        assert "command(*)" in data["permissions"]["allow"]
+        return 0, "ok", "", False, 1
+
+    code = dispatch.dispatch_run(
+        prompt="bounded edit",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(work)],
+        temp_command_permissions=True,
+        coordinator=coordinator,
+        run_agy_fn=runner,
+    )
+
+    assert code == 0
+    assert settings.exists() is False
+    assert coordinator.claim.released is True
+
+
+def test_accept_edits_rejects_write_path_outside_cwd_before_claim(
+    tmp_path: Path,
+) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    coordinator = _WriteScopeCoordinator(tmp_path / "home")
+
+    code = dispatch.dispatch_run(
+        prompt="bad scope",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(outside)],
+        coordinator=coordinator,
+        run_agy_fn=lambda **_kwargs: (0, "unexpected", "", False, 1),
+    )
+
+    assert code == 64
+    assert coordinator.acquire_count == 0
+
+
+def test_accept_edits_existing_narrow_write_allow_is_supported(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+
+    code = dispatch.dispatch_run(
+        prompt="legacy narrow scope",
+        cwd=str(work),
+        mode="accept-edits",
+        allow=[f"write_file({work})"],
+        coordinator=coordinator,
+        run_agy_fn=lambda **_kwargs: (0, "ok", "", False, 1),
+    )
+
+    assert code == 0
