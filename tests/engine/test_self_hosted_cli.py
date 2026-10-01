@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -10,10 +12,19 @@ sys.path.insert(0, repo_root)
 import pytest
 from click.testing import CliRunner
 
+from nexus.contracts.lifecycle_action import (  # noqa: E402
+    ContractKind,
+    ExternalCandidateAdoptionRequest,
+    LifecycleActionType,
+    MutationDomain,
+    PermissionProfile,
+    build_action_envelope,
+)
 from scripts.engine.nexus_cli import nexus
 import scripts.engine.commands.self_hosted_actions as self_hosted_actions
 from scripts.engine.commands.exception_translation import NexusCliActionError
 from scripts.engine.commands.self_hosted_actions import (
+    run_self_hosted_adopt_external,
     run_self_hosted_cleanup,
     run_self_hosted_retry,
     run_self_hosted_workspace_converge,
@@ -74,6 +85,59 @@ def _valid_request(tmp_path: Path, **overrides) -> dict:
     return req
 
 
+def _valid_adoption_request(task_id: str = "adopt-cli-typed") -> dict:
+    validation = b'{"schema":"validation"}'
+    acceptance = b'{"schema":"acceptance"}'
+    payload = {
+        "schema": "nexus.external_candidate_adoption_request.v1",
+        "repository": "LOCAL_TEST",
+        "task_id": task_id,
+        "attempt_id": "attempt-adopt-typed",
+        "action_id": "action-adopt-typed",
+        "idempotency_key": "adopt-cli-typed:one",
+        "task_card_path": "tasks/test/adopt-cli-typed.md",
+        "task_card_hash": "c" * 64,
+        "controller_revision": "a" * 40,
+        "tool_manifest_hash": "b" * 64,
+        "full_tool_schema_hash": "d" * 64,
+        "permission_policy_hash": "e" * 64,
+        "lifecycle_revision": "lifecycle-test-1",
+        "server_instance_id": "server-test-1",
+        "target_base_revision": "f" * 40,
+        "candidate_commit_sha": "1" * 40,
+        "candidate_tree_sha": "2" * 40,
+        "candidate_diff_sha256": "3" * 64,
+        "validation_receipt_sha256": hashlib.sha256(validation).hexdigest(),
+        "acceptance_receipt_sha256": hashlib.sha256(acceptance).hexdigest(),
+        "validation_receipt_b64": base64.b64encode(validation).decode(),
+        "acceptance_receipt_b64": base64.b64encode(acceptance).decode(),
+        "allowed_files": ("README.md",),
+        "forbidden_files": (),
+        "authorized_deletions": (),
+        "verifier_commands": ("git diff --check",),
+        "protected_contracts": (),
+    }
+    semantic_hash = ExternalCandidateAdoptionRequest.semantic_hash_for(payload)
+    payload["action"] = build_action_envelope(
+        task_id=payload["task_id"],
+        action_type=LifecycleActionType.CANDIDATE_ADOPT_EXTERNAL,
+        request={"adoption_request_hash": semantic_hash},
+        tool_manifest_hash=payload["tool_manifest_hash"],
+        expected_head=payload["controller_revision"],
+        allowed_paths=payload["allowed_files"],
+        mutation=True,
+        task_card_path=payload["task_card_path"],
+        task_card_hash=payload["task_card_hash"],
+        contract_kind=ContractKind.TRACKED_TASK_CARD,
+        permission_profile=PermissionProfile.CANDIDATE,
+        mutation_domain=MutationDomain.CANDIDATE_REF,
+        attempt_id=payload["attempt_id"],
+        action_id=payload["action_id"],
+        idempotency_key=payload["idempotency_key"],
+    ).model_dump(mode="json")
+    return payload
+
+
 def test_self_hosted_submit_and_status_success(tmp_path: Path):
     runner = CliRunner()
     state_dir = str(tmp_path / "state")
@@ -109,6 +173,135 @@ def test_self_hosted_submit_and_status_success(tmp_path: Path):
     status_data = json.loads(status_res.output)
     assert status_data["task_id"] == "test-sh-001"
     assert status_data["status"] in {"SUBMITTED", "CANDIDATE_COMMITTED", "CANDIDATE_CAPTURED", "PENDING_HUMAN_APPROVAL"}
+
+
+def test_run_self_hosted_adopt_external_forwards_request_once():
+    calls = []
+    request = _valid_adoption_request()
+    expected = {"task_id": request["task_id"], "status": "PENDING_HUMAN_APPROVAL"}
+
+    class FakeService:
+        def adopt_external_candidate(self, received):
+            calls.append(received)
+            return expected
+
+    result = run_self_hosted_adopt_external(request, service=FakeService())
+    assert result is expected
+    assert len(calls) == 1
+    assert isinstance(calls[0], ExternalCandidateAdoptionRequest)
+    assert calls[0].task_id == request["task_id"]
+
+
+def test_run_self_hosted_adopt_external_rejects_nonobject_without_service_call():
+    with pytest.raises(NexusCliActionError, match="JSON object"):
+        run_self_hosted_adopt_external([], service=object())  # type: ignore[arg-type]
+
+
+def test_self_hosted_adopt_external_cli_reads_closed_request_and_calls_once(tmp_path, monkeypatch):
+    request = _valid_adoption_request("adopt-cli-002")
+    request_path = tmp_path / "adoption.json"
+    request_path.write_text(json.dumps(request), encoding="utf-8")
+    calls = []
+
+    class FakeService:
+        def adopt_external_candidate(self, received):
+            calls.append(received)
+            return {"task_id": received.task_id, "status": "PENDING_HUMAN_APPROVAL"}
+
+    monkeypatch.setattr(self_hosted_actions, "get_self_hosted_service", lambda **_: FakeService())
+    result = CliRunner().invoke(nexus, [
+        "nexus", "self-hosted", "adopt-external", "--request-file", str(request_path),
+    ])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["task_id"] == request["task_id"]
+    assert len(calls) == 1
+    assert isinstance(calls[0], ExternalCandidateAdoptionRequest)
+    assert calls[0].task_id == request["task_id"]
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [("not json", "invalid adoption request JSON"), (["not", "an", "object"], "JSON object")],
+)
+def test_self_hosted_adopt_external_cli_rejects_malformed_or_nonobject(tmp_path, monkeypatch, payload, message):
+    request_path = tmp_path / "invalid-adoption.json"
+    if isinstance(payload, str):
+        request_path.write_text(payload, encoding="utf-8")
+    else:
+        request_path.write_text(json.dumps(payload), encoding="utf-8")
+    calls = []
+
+    class FakeService:
+        def adopt_external_candidate(self, request):
+            calls.append(request)
+            return {}
+
+    monkeypatch.setattr(self_hosted_actions, "get_self_hosted_service", lambda **_: FakeService())
+    result = CliRunner().invoke(nexus, [
+        "nexus", "self-hosted", "adopt-external", "--request-file", str(request_path),
+    ])
+    assert result.exit_code == 1
+    assert message in result.output
+    assert calls == []
+
+
+def test_self_hosted_adopt_external_cli_translates_service_error(tmp_path, monkeypatch):
+    request_path = tmp_path / "adoption-error.json"
+    request_path.write_text(json.dumps(_valid_adoption_request()), encoding="utf-8")
+
+    class BrokenService:
+        def adopt_external_candidate(self, request):
+            raise RuntimeError("candidate binding mismatch")
+
+    monkeypatch.setattr(self_hosted_actions, "get_self_hosted_service", lambda **_: BrokenService())
+    result = CliRunner().invoke(nexus, [
+        "nexus", "self-hosted", "adopt-external", "--request-file", str(request_path),
+    ])
+    assert result.exit_code == 1
+    assert "candidate binding mismatch" in result.output
+
+
+@pytest.mark.parametrize("field", ["approved_binding", "integration_result"])
+def test_self_hosted_adopt_external_rejects_unknown_authority_fields(tmp_path, monkeypatch, field):
+    request = _valid_adoption_request()
+    request[field] = {"status": "APPROVED"}
+    request_path = tmp_path / f"unknown-{field}.json"
+    request_path.write_text(json.dumps(request), encoding="utf-8")
+    calls = []
+
+    class FakeService:
+        def adopt_external_candidate(self, request):
+            calls.append(request)
+            return {}
+
+    monkeypatch.setattr(self_hosted_actions, "get_self_hosted_service", lambda **_: FakeService())
+    result = CliRunner().invoke(nexus, [
+        "nexus", "self-hosted", "adopt-external", "--request-file", str(request_path),
+    ])
+    assert result.exit_code == 1
+    assert "extra inputs are not permitted" in result.output.lower()
+    assert calls == []
+
+
+def test_self_hosted_adopt_external_rejects_missing_typed_fields(tmp_path, monkeypatch):
+    request = _valid_adoption_request()
+    del request["candidate_commit_sha"]
+    request_path = tmp_path / "missing-adoption-field.json"
+    request_path.write_text(json.dumps(request), encoding="utf-8")
+    calls = []
+
+    class FakeService:
+        def adopt_external_candidate(self, request):
+            calls.append(request)
+            return {}
+
+    monkeypatch.setattr(self_hosted_actions, "get_self_hosted_service", lambda **_: FakeService())
+    result = CliRunner().invoke(nexus, [
+        "nexus", "self-hosted", "adopt-external", "--request-file", str(request_path),
+    ])
+    assert result.exit_code == 1
+    assert "candidate_commit_sha" in result.output
+    assert calls == []
 
 
 def test_self_hosted_submit_from_request_file(tmp_path: Path):

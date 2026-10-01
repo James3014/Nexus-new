@@ -10,6 +10,7 @@ from nexus.services.external_intelligence import (
     CONTROL_CAPSULE_SCHEMA,
     ENVELOPE_SCHEMA,
     RECEIPT_SCHEMA,
+    SOURCE_EVIDENCE_KINDS,
     ExternalIntelligenceError,
     ExternalIntelligenceSidecar,
     ExternalIntelligenceStore,
@@ -1237,3 +1238,366 @@ def test_normal_ask_path_with_marker_unchanged(monkeypatch):
     assert result.raw == stable
     assert result.conversation_id == "conv-1"
     assert [call[2] for call in calls] == ["ask", "detail"]
+
+
+def sample_selected_worker():
+    return {
+        "worker_id": "agy-gemini-3.7-flash-medium",
+        "provider": "agy",
+        "model": "gemini-3.7-flash-medium",
+        "role_ceiling": "DIRECT_DELEGATED_IMPLEMENTER",
+        "admission_evidence_ref": "tasks/admission/receipt.json",
+        "admission_evidence_hash": "c" * 64,
+        "selection_evidence_ref": "tasks/selection/decision.json",
+        "selection_evidence_hash": "d" * 64,
+    }
+
+
+def envelope_v2_for(request, context_pack=None, **updates):
+    identity = request["identity"]
+    evidence_refs = updates.pop("evidence_refs", None)
+    if evidence_refs is None:
+        if context_pack is not None:
+            evidence_refs = [
+                e["evidence_ref"]
+                for e in context_pack.get("entries", [])
+                if e.get("kind") in SOURCE_EVIDENCE_KINDS
+            ]
+            if not evidence_refs and context_pack.get("entries"):
+                evidence_refs = [context_pack["entries"][0]["evidence_ref"]]
+        else:
+            evidence_refs = ["source:nexus/example.py@default"]
+    value = {
+        "schema": "external_execution_envelope.v2",
+        "binding": {
+            "repository": identity["repository"],
+            "item_type": identity["item_type"],
+            "item_id": identity["item_id"],
+            "revision": identity["revision"],
+            "main_sha": identity["main_sha"],
+            "task_card_ref": identity["task_card_ref"],
+            "task_card_hash": identity["task_card_hash"],
+            "context_pack_sha256": request["context_pack_sha256"],
+        },
+        "selected_worker": dict(request.get("selected_worker") or sample_selected_worker()),
+        "objective": "Implement the bounded task.",
+        "definition_of_done": ["All verifiers pass.", "No out-of-scope files modified."],
+        "evidence_refs": evidence_refs,
+        "diagnosis": {
+            "status": "PROVEN",
+            "hypothesis": "Root cause isolated.",
+            "next_probe": "Run tests.",
+        },
+        "scope_signal": {
+            "production_edit_paths": ["nexus/example.py"],
+            "required_test_edit_paths": ["tests/test_example.py"],
+            "conditional_migration_paths": [],
+            "read_only_authorities": ["AGENTS.md"],
+            "verification_only_paths": [],
+            "forbidden_paths": ["nexus/orchestrator/unified_mcp_gateway.py"],
+            "max_files": 2,
+            "scope_confidence": "HIGH",
+            "scope_block_conditions": ["task card scope expands"],
+        },
+        "inspect_first": ["nexus/example.py"],
+        "required_semantics": ["preserve existing API"],
+        "implementation_direction": ["make the smallest bounded change"],
+        "verification_focus": ["pytest -q tests/test_example.py"],
+        "failure_guards": ["No wide imports."],
+        "stop_and_escalate": ["task card scope expands"],
+    }
+    value.update(updates)
+    return value
+
+
+def test_validate_selected_worker_valid_and_invalid():
+    from nexus.services.external_intelligence import (
+        validate_selected_worker,
+    )
+
+    valid = sample_selected_worker()
+    assert validate_selected_worker(valid) == valid
+
+    # Missing required key
+    for key in (
+        "worker_id",
+        "provider",
+        "model",
+        "role_ceiling",
+        "admission_evidence_ref",
+        "admission_evidence_hash",
+        "selection_evidence_ref",
+        "selection_evidence_hash",
+    ):
+        invalid = dict(valid)
+        del invalid[key]
+        with pytest.raises(ExternalIntelligenceError, match="INVALID_SELECTED_WORKER"):
+            validate_selected_worker(invalid)
+
+    # Invalid sha256 hash
+    invalid_hash = dict(valid, admission_evidence_hash="not-a-hash")
+    with pytest.raises(ExternalIntelligenceError, match="INVALID_SELECTED_WORKER"):
+        validate_selected_worker(invalid_hash)
+
+    # Not a mapping
+    with pytest.raises(ExternalIntelligenceError, match="INVALID_SELECTED_WORKER"):
+        validate_selected_worker("string_worker")
+
+
+def test_build_request_v2_and_prompt_v2_without_deepseek_standing_policy():
+    from nexus.services.external_intelligence import (
+        REQUEST_SCHEMA_V2,
+        build_prompt,
+        build_prompt_v2,
+        build_request,
+        build_request_v2,
+    )
+
+    worker = sample_selected_worker()
+    intake = normalize_intake(record())
+    context_pack = build_context_pack(sources())
+    req_v2 = build_request_v2(intake, context_pack, selected_worker=worker)
+    assert req_v2["schema"] == REQUEST_SCHEMA_V2
+    assert req_v2["selected_worker"] == worker
+
+    req_dispatched = build_request(intake, context_pack, selected_worker=worker)
+    assert req_dispatched == req_v2
+
+    prompt = build_prompt(req_v2, context_pack)
+    prompt_v2 = build_prompt_v2(req_v2, context_pack)
+    assert prompt == prompt_v2
+    assert "NEXUS_REQUEST_SHA256=" in prompt
+    assert "external_execution_envelope.v2" in prompt
+    assert "gemini-3.7-flash-medium" in prompt
+    assert "DeepSeek" not in prompt
+
+
+def test_parse_external_execution_envelope_v2_proven_diagnosis_requires_evidence():
+    from nexus.services.external_intelligence import (
+        parse_external_execution_envelope,
+        parse_external_execution_envelope_v2,
+    )
+
+    intake = normalize_intake(record())
+    context_pack = build_context_pack(sources())
+    source_evidence_ref = [
+        e["evidence_ref"] for e in context_pack["entries"] if e["kind"] == "source"
+    ][0]
+    req = build_request(intake, context_pack, selected_worker=sample_selected_worker())
+    env_v2 = envelope_v2_for(req, context_pack=context_pack)
+
+    parsed = parse_external_execution_envelope_v2(json.dumps(env_v2), context_pack=context_pack)
+    assert parsed["schema"] == "external_execution_envelope.v2"
+    assert parsed == parse_external_execution_envelope(
+        json.dumps(env_v2), context_pack=context_pack
+    )
+
+    # Proven without evidence must fail closed
+    env_proven_no_evidence = envelope_v2_for(req, context_pack=context_pack)
+    env_proven_no_evidence["diagnosis"]["status"] = "PROVEN"
+    env_proven_no_evidence["evidence_refs"] = []
+    with pytest.raises(ExternalIntelligenceError, match="UNSUPPORTED_PROVEN_DIAGNOSIS"):
+        parse_external_execution_envelope_v2(
+            json.dumps(env_proven_no_evidence), context_pack=context_pack
+        )
+
+    # Proven with valid source evidence succeeds
+    env_proven_with_evidence = envelope_v2_for(req, context_pack=context_pack)
+    env_proven_with_evidence["diagnosis"]["status"] = "PROVEN"
+    env_proven_with_evidence["evidence_refs"] = [source_evidence_ref]
+    assert (
+        parse_external_execution_envelope_v2(
+            json.dumps(env_proven_with_evidence), context_pack=context_pack
+        )["diagnosis"]["status"]
+        == "PROVEN"
+    )
+
+    # UNKNOWN diagnosis succeeds with empty refs
+    env_unknown = envelope_v2_for(req, context_pack=context_pack)
+    env_unknown["diagnosis"]["status"] = "UNKNOWN"
+    env_unknown["evidence_refs"] = []
+    env_unknown["diagnosis"]["hypothesis"] = "Needs exploration."
+    env_unknown["diagnosis"]["next_probe"] = "Run probe tests."
+    assert (
+        parse_external_execution_envelope_v2(json.dumps(env_unknown), context_pack=context_pack)[
+            "diagnosis"
+        ]["status"]
+        == "UNKNOWN"
+    )
+
+    # Stale/unsupported status fails closed
+    env_stale_status = envelope_v2_for(req, context_pack=context_pack)
+    env_stale_status["diagnosis"]["status"] = "PLAUSIBLE"
+    with pytest.raises(ExternalIntelligenceError, match="INTELLIGENCE_PARSE_FAILED"):
+        parse_external_execution_envelope_v2(
+            json.dumps(env_stale_status), context_pack=context_pack
+        )
+
+
+def test_parse_external_execution_envelope_v2_evidence_ref_resolution_and_rejections():
+    from nexus.services.external_intelligence import (
+        parse_external_execution_envelope_v2,
+    )
+
+    intake = normalize_intake(record())
+    context_pack = build_context_pack(
+        sources()
+    )  # contains 'tasks/campaign/00-task.md' and 'nexus/example.py'
+    req = build_request(intake, context_pack, selected_worker=sample_selected_worker())
+
+    canonical_source_ref = [
+        e["evidence_ref"] for e in context_pack["entries"] if e["ref"] == "nexus/example.py"
+    ][0]
+    canonical_card_ref = [
+        e["evidence_ref"]
+        for e in context_pack["entries"]
+        if e["ref"] == "tasks/campaign/00-task.md"
+    ][0]
+
+    # Exact canonical evidence_ref succeeds
+    env1 = envelope_v2_for(req, evidence_refs=[canonical_source_ref])
+    assert parse_external_execution_envelope_v2(json.dumps(env1), context_pack=context_pack)
+
+    # Multiple valid refs from context pack (including source + card) succeeds
+    env_multi = envelope_v2_for(req, evidence_refs=[canonical_card_ref, canonical_source_ref])
+    assert parse_external_execution_envelope_v2(json.dumps(env_multi), context_pack=context_pack)
+
+    # Plain path without canonical token must fail closed
+    env_plain = envelope_v2_for(req, evidence_refs=["nexus/example.py"])
+    with pytest.raises(ExternalIntelligenceError, match="UNKNOWN_EVIDENCE_REF"):
+        parse_external_execution_envelope_v2(json.dumps(env_plain), context_pack=context_pack)
+
+    # file: prefix stripped candidate must fail closed
+    env_file = envelope_v2_for(req, evidence_refs=["file:nexus/example.py"])
+    with pytest.raises(ExternalIntelligenceError, match="UNKNOWN_EVIDENCE_REF"):
+        parse_external_execution_envelope_v2(json.dumps(env_file), context_pack=context_pack)
+
+    # #L1-L10 line anchor candidate must fail closed
+    env_anchor = envelope_v2_for(req, evidence_refs=[f"{canonical_source_ref}#L1-L10"])
+    with pytest.raises(ExternalIntelligenceError, match="UNKNOWN_EVIDENCE_REF"):
+        parse_external_execution_envelope_v2(json.dumps(env_anchor), context_pack=context_pack)
+
+    # Plain path with anchor must fail closed
+    env_path_anchor = envelope_v2_for(req, evidence_refs=["nexus/example.py#L1-L10"])
+    with pytest.raises(ExternalIntelligenceError, match="UNKNOWN_EVIDENCE_REF"):
+        parse_external_execution_envelope_v2(json.dumps(env_path_anchor), context_pack=context_pack)
+
+    # Unrecognized / invented ref not in context pack must fail closed
+    env_invented = envelope_v2_for(
+        req, evidence_refs=["source:nexus/unknown_file.py@0123456789abcdef"]
+    )
+    with pytest.raises(ExternalIntelligenceError, match="UNKNOWN_EVIDENCE_REF"):
+        parse_external_execution_envelope_v2(json.dumps(env_invented), context_pack=context_pack)
+
+    # Stale evidence_ref from another pack (different revision/content) fails even for same path
+    other_sources = [
+        {
+            "kind": "source",
+            "ref": "nexus/example.py",
+            "revision": "b" * 40,
+            "provenance": "git",
+            "content": "def value():\n    return 2\n",
+        }
+    ]
+    other_pack = build_context_pack(other_sources)
+    other_pack_ref = other_pack["entries"][0]["evidence_ref"]
+    assert other_pack_ref != canonical_source_ref
+    env_other_pack = envelope_v2_for(req, evidence_refs=[other_pack_ref])
+    with pytest.raises(ExternalIntelligenceError, match="UNKNOWN_EVIDENCE_REF"):
+        parse_external_execution_envelope_v2(json.dumps(env_other_pack), context_pack=context_pack)
+
+    # Context pack sha mismatch fails closed
+    env_hash_mismatch = envelope_v2_for(req, evidence_refs=[canonical_source_ref])
+    env_hash_mismatch["binding"]["context_pack_sha256"] = "0" * 64
+    with pytest.raises(ExternalIntelligenceError, match="CONTEXT_PACK_HASH_MISMATCH"):
+        parse_external_execution_envelope_v2(
+            json.dumps(env_hash_mismatch), context_pack=context_pack
+        )
+
+    # Tampered context pack content with stale declared pack hash is rejected
+    tampered_pack = dict(context_pack)
+    tampered_entries = [dict(e) for e in context_pack["entries"]]
+    tampered_entries[0]["content"] = "tampered content"
+    tampered_pack["entries"] = tampered_entries
+    with pytest.raises(ExternalIntelligenceError, match="INVALID_CONTEXT_PACK"):
+        parse_external_execution_envelope_v2(json.dumps(env1), context_pack=tampered_pack)
+
+    # Tampered entry hash / evidence_ref is rejected
+    tampered_pack2 = dict(context_pack)
+    tampered_entries2 = [dict(e) for e in context_pack["entries"]]
+    tampered_entries2[0]["evidence_ref"] = "source:tasks/campaign/00-task.md@fake"
+    tampered_pack2["entries"] = tampered_entries2
+    with pytest.raises(ExternalIntelligenceError, match="INVALID_CONTEXT_PACK"):
+        parse_external_execution_envelope_v2(json.dumps(env1), context_pack=tampered_pack2)
+
+    # Contradictory / issue prose-only evidence cannot establish PROVEN when source entries are present
+    env_card_only_proven = envelope_v2_for(req, evidence_refs=[canonical_card_ref])
+    env_card_only_proven["diagnosis"]["status"] = "PROVEN"
+    with pytest.raises(ExternalIntelligenceError, match="UNSUPPORTED_PROVEN_DIAGNOSIS"):
+        parse_external_execution_envelope_v2(
+            json.dumps(env_card_only_proven), context_pack=context_pack
+        )
+
+    # But non-proven (UNKNOWN / LIKELY) allows non-source refs
+    env_card_only_unknown = envelope_v2_for(req, evidence_refs=[canonical_card_ref])
+    env_card_only_unknown["diagnosis"]["status"] = "UNKNOWN"
+    assert parse_external_execution_envelope_v2(
+        json.dumps(env_card_only_unknown), context_pack=context_pack
+    )
+
+
+def test_sidecar_v2_roundtrip_and_telemetry(tmp_path):
+    worker = sample_selected_worker()
+    intake = normalize_intake(record())
+    context_pack = build_context_pack(sources())
+    req = build_request(intake, context_pack, selected_worker=worker)
+    env = envelope_v2_for(req, context_pack=context_pack)
+    raw_env = json.dumps(env)
+
+    store = ExternalIntelligenceStore(tmp_path)
+
+    class FakeTransport:
+        def __init__(self):
+            self.calls = []
+
+        def invoke(self, prompt: str):
+            self.calls.append(prompt)
+            return TransportResult(
+                "INTELLIGENCE_COMPLETED",
+                raw=raw_env,
+                conversation_id="conv-v2-1",
+                safe_argv=("opencli", "chatgpt", "ask", "<prompt>"),
+            )
+
+    transport = FakeTransport()
+    sidecar = ExternalIntelligenceSidecar(transport=transport, store=store)
+    receipt = sidecar.analyze(record(), sources(), selected_worker=worker)
+
+    assert receipt["schema"] == "external_intelligence_receipt.v2"
+    assert receipt["status"] == "COMPLETED"
+    assert receipt["selected_worker"] == worker
+    assert receipt["telemetry"]["compiler_input_tokens"] == "NOT_OBSERVED"
+    assert receipt["telemetry"]["compiler_output_tokens"] == "NOT_OBSERVED"
+    assert receipt["telemetry"]["compiler_input_bytes"] > 0
+    assert receipt["telemetry"]["compiler_output_bytes"] > 0
+    assert receipt["control_capsule"]["schema"] == "control_capsule.v2"
+    assert receipt["control_capsule"]["selected_worker"] == worker
+
+
+def test_project_refresh_detects_selected_worker_change():
+    worker1 = sample_selected_worker()
+    worker2 = {**worker1, "worker_id": "gemini-1.5-pro", "model": "gemini-1.5-pro"}
+    intake = normalize_intake(record())
+    context_pack = build_context_pack(sources())
+    req1 = build_request(intake, context_pack, selected_worker=worker1)
+    req2 = build_request(intake, context_pack, selected_worker=worker2)
+
+    receipt1 = {
+        "schema": "external_intelligence_receipt.v2",
+        "request": req1,
+        "context_pack_sha256": req1["context_pack_sha256"],
+        "semantic_contract_sha256": req1["semantic_contract_sha256"],
+    }
+    proj = project_refresh(receipt1, req2)
+    assert proj["status"] == "STALE"
+    assert "selected_worker" in proj["changed_fields"]

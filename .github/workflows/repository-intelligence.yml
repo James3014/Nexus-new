@@ -1,0 +1,116 @@
+name: Repository Intelligence
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - converted_to_draft
+      - labeled
+      - unlabeled
+      - edited
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: read
+  statuses: read
+
+concurrency:
+  group: repository-intelligence-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Collect Repository Intelligence
+        id: ri
+        uses: James3014/repository-intelligence-engine@v0.1.1
+
+      - name: Validate advisory envelope
+        shell: bash
+        env:
+          REPORT_PATH: ${{ steps.ri.outputs.report-path }}
+          CONTENT_SHA256: ${{ steps.ri.outputs.content-sha256 }}
+          CLAIM_CEILING: ${{ steps.ri.outputs.claim-ceiling }}
+        run: |
+          set -euo pipefail
+          test -s "$REPORT_PATH"
+          test "$CLAIM_CEILING" = "ADVISORY_EVIDENCE_ONLY"
+          test "${#CONTENT_SHA256}" -eq 64
+
+      - name: Upload Repository Intelligence evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: repository-intelligence-pr-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ steps.ri.outputs.report-path }}
+          if-no-files-found: error
+          retention-days: 30
+
+  terminal:
+    needs: snapshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Observe terminal external check set
+        id: ri-terminal
+        continue-on-error: true
+        uses: James3014/repository-intelligence-engine/terminal@b1a0bd882e37a08a3a540947ae767a23d752bd67
+        with:
+          pr-number: ${{ github.event.pull_request.number }}
+          expected-head-sha: ${{ github.event.pull_request.head.sha }}
+          timeout-seconds: "900"
+          poll-seconds: "5"
+          quiescence-seconds: "20"
+
+      - name: Resolve current main identity
+        id: current-main
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          current_main_sha="$(git ls-remote origin "refs/heads/$DEFAULT_BRANCH" | awk 'NR == 1 {print $1}')"
+          if [[ ! "$current_main_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Unable to resolve exact current main SHA" >&2
+            exit 1
+          fi
+          echo "sha=$current_main_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Validate terminal advisory envelope
+        shell: bash
+        env:
+          REPORT_PATH: ${{ steps.ri-terminal.outputs.report-path || 'repository-intelligence-terminal.json' }}
+          ACTION_OUTCOME: ${{ steps.ri-terminal.outcome }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CURRENT_MAIN_SHA: ${{ steps.current-main.outputs.sha }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ops/verify_repository_intelligence_terminal.py \
+            --report-path "$REPORT_PATH" \
+            --action-outcome "$ACTION_OUTCOME" \
+            --repository "$GITHUB_REPOSITORY" \
+            --pr-number "$PR_NUMBER" \
+            --head-sha "$HEAD_SHA" \
+            --base-sha "$BASE_SHA" \
+            --current-main-sha "$CURRENT_MAIN_SHA" \
+            --output "$REPORT_PATH" \
+            --step-summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload terminal Repository Intelligence evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: repository-intelligence-terminal-pr-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ steps.ri-terminal.outputs.report-path || 'repository-intelligence-terminal.json' }}
+          if-no-files-found: error
+          retention-days: 30

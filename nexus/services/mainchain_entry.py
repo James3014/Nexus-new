@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import Any, Callable, Mapping
 
-from nexus.engine.canonical_execution import plan_canonical_task_bundle
 from nexus.services.capability_registry import (
     build_default_mainchain_invokers,
     ensure_selected_coverage_invokers,
@@ -17,11 +16,12 @@ from nexus.services.online_nexus_context import (
     make_with_nexus_online_invoker,
     prompt_has_with_nexus_sections,
 )
-from nexus.services.unified_runtime import (
+from nexus.services.runtime_compat import (
     UnifiedRuntime,
     UnifiedRuntimeRequest,
     build_canonical_runtime_context,
     normalize_online_invoker_payload,
+    plan_canonical_task_bundle,
 )
 
 ROUTE_FLAG_WITH_NEXUS = "with_nexus_armor"
@@ -166,7 +166,9 @@ def run_mainchain(
     )
     canonical_bundle = request.canonical_planning_bundle
     if canonical_bundle is None:
-        canonical_bundle = plan_canonical_task_bundle(build_canonical_runtime_context(request))
+        canonical_bundle = plan_canonical_task_bundle(
+            build_canonical_runtime_context(request)
+        )
     # Frozen dataclass — rebuild request with stamped route.
     fields = {
         "task_id": request.task_id,

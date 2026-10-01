@@ -344,6 +344,37 @@ class TargetIntegrationLifecycle:
             raise RuntimeError("authorization task card drift")
         if current_integration_plan_hash is not None and auth.integration_plan_hash != current_integration_plan_hash:
             raise RuntimeError("authorization integration plan drift")
+        current_universe = {
+            "task_id": task_id,
+            "campaign_id": auth.campaign_id,
+            "task_card_hash": current_task_card_hash if current_task_card_hash is not None else auth.task_card_hash,
+            "candidate_commit": candidate_commit if candidate_commit is not None else auth.candidate_commit,
+            "candidate_receipt_hash": auth.candidate_receipt_hash,
+            "acceptance_receipt_hash": acceptance.receipt_hash,
+            "canonical_root": str(canonical_root) if canonical_root is not None else auth.canonical_root,
+            "canonical_branch": auth.canonical_branch,
+            "expected_canonical_head": expected_canonical_head if expected_canonical_head is not None else auth.expected_canonical_head,
+            "canonical_dirty_baseline": auth.canonical_dirty_baseline,
+            "integration_plan_hash": current_integration_plan_hash if current_integration_plan_hash is not None else auth.integration_plan_hash,
+            "cleanup_target_id": auth.cleanup_target_id,
+            "cleanup_target_path": auth.cleanup_target_path,
+            "durable_ref": auth.durable_ref,
+            "attempt_id": auth.attempt_id,
+            "candidate_tree_sha": auth.candidate_tree_sha,
+            "candidate_state_hash": auth.candidate_state_hash,
+            "reviewer_id": acceptance.reviewer_id,
+            "verifier_artifact_hash": auth.verifier_artifact_hash,
+            "require_clean": auth.require_clean,
+            "strategy": auth.strategy,
+            "verification_commands_hash": auth.verification_commands_hash,
+            "post_apply_commands_hash": auth.post_apply_commands_hash,
+            "cleanup_requested": auth.cleanup_requested,
+            "approval_scope": auth.approval_scope,
+        }
+        try:
+            auth.validate_current(current_universe)
+        except ValueError as exc:
+            raise RuntimeError(f"authorization validation failed: {exc}") from exc
         state = dict(lifecycle_state or {})
         authorization_state = auth.to_dict()
         authorization_state["authorization_hash"] = auth.authorization_hash

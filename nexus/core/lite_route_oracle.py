@@ -88,10 +88,26 @@ def should_use_lite_route(
     """🛡️ Pure function SSOT for LiteRoute classification decisions."""
     # Convert inputs to standard formats
     risk_upper = str(risk_level).upper()
-    task_desc_lower = str(task_desc or "").lower()
 
-    # 1. NEXUS_LIGHT_ROUTE_FORCE env var acts as a hard override
+    # Pre-evaluate safety blockers (SSOT)
+    safety_blockers = lite_route_safety_blockers(
+        risk_level=risk_level,
+        impact_complexity=impact_complexity,
+        belief_confidence=belief_confidence,
+        cross_module=cross_module,
+        hard_signal=hard_signal,
+        candidate_count=candidate_count,
+        task_desc=task_desc,
+    )
+
+    # 1. NEXUS_LIGHT_ROUTE_FORCE env var: override only if no safety blockers
     if os.environ.get("NEXUS_LIGHT_ROUTE_FORCE") == "1":
+        if safety_blockers:
+            return LiteRouteDecision(
+                is_lite=False,
+                reason="standard_heavy_route_blocked_lite",
+                skipped_phases=[],
+            )
         return LiteRouteDecision(
             is_lite=True,
             reason="env_override_light_route_force",
@@ -124,16 +140,6 @@ def should_use_lite_route(
         )
 
     # 4. Check block conditions: LITE mode is unsafe if any safety blockers present
-    safety_blockers = lite_route_safety_blockers(
-        risk_level=risk_level,
-        impact_complexity=impact_complexity,
-        belief_confidence=belief_confidence,
-        cross_module=cross_module,
-        hard_signal=hard_signal,
-        candidate_count=candidate_count,
-        task_desc=task_desc,
-    )
-
     if safety_blockers:
         return LiteRouteDecision(
             is_lite=False,

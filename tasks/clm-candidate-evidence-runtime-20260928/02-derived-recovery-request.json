@@ -1,0 +1,14 @@
+{
+  "desired_manifest_hash": "9228750cc9ecda21f0f507fa88fbcdd98cfc33a8960e17af5b61b7109ee22e80",
+  "desired_manifest_id": "r1-de6bb162d89e8b22d491113afa8405aae1c75ca0",
+  "effect_class": "GATEWAY_DURABLE_RECOVERY",
+  "idempotency_fence": "issue526-clm-candidate-evidence-runtime-20260928-fence-v1",
+  "operation": "gateway-recover",
+  "predecessor_manifest_hash": "6b7778c639d5087f2ecc19b6bc26573d075cfe26b684647ef92b3a5aaab5b87a",
+  "predecessor_manifest_id": "r1-cb22343fdab29e5e00ab7d2a81aa51e2189c4a25",
+  "recovery_authority_hash": "26dc7608349fca94f6089002d1dffe4b4a6d68114e89053e2834b5c5a6bbb92c",
+  "recovery_authority_id": "issue526-clm-candidate-evidence-runtime-20260928-recovery-authority-v1",
+  "request_hash": "19048eb867bae8a9ca1fb5043f97a7fb7df2e3ad3488c21d81a7057b20adef40",
+  "request_id": "issue526-clm-candidate-evidence-runtime-20260928-recovery-v1",
+  "schema": "nexus.gateway.durable_recovery_request.v2"
+}

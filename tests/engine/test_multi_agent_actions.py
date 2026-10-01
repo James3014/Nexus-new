@@ -21,7 +21,6 @@ from scripts.engine.commands.multi_agent_actions import (
     get_multi_agent_task_status,
     integrate_multi_agent_tasks,
     render_multi_agent_metrics,
-    render_multi_agent_task_integration,
     render_multi_agent_task_audit,
     render_multi_agent_task_start,
     render_multi_agent_task_status,
@@ -158,39 +157,31 @@ def test_start_multi_agent_task_returns_worktree_view_without_click():
 
 
 def test_integrate_multi_agent_tasks_parses_ids_and_uses_integration_manager_without_click():
-    class IntegrateOrchestrator(FakeOrchestrator):
-        evidence_collector = object()
+    # Preserve the historical pytest node id while changing the contract to fail closed.
+    calls = []
 
-    class FakeIntegrationManager:
-        def __init__(self):
-            self.calls = []
+    def bomb_orchestrator():
+        calls.append("orchestrator")
+        raise AssertionError("retired integration must not construct the orchestrator")
 
-        def batch_integrate(self, task_ids, target_branch):
-            self.calls.append((task_ids, target_branch))
-            return ["T-ok"], ["T-bad"]
+    def bomb_manager(_state_store, _evidence_collector):
+        calls.append("integration-manager")
+        raise AssertionError("retired integration must not construct the legacy manager")
 
-    manager = FakeIntegrationManager()
+    try:
+        integrate_multi_agent_tasks(
+            "T-ok, T-bad",
+            target_branch="release",
+            orchestrator_factory=bomb_orchestrator,
+            integration_manager_factory=bomb_manager,
+        )
+    except NexusCliActionError as exc:
+        assert "LEGACY_INTEGRATION_PATH_RETIRED_USE_CONTROLLED_INTEGRATION" in str(exc)
+        assert "SelfHostedTaskService/ControlledIntegrationManager" in str(exc)
+    else:
+        raise AssertionError("retired legacy integration path must fail closed")
 
-    view = integrate_multi_agent_tasks(
-        "T-ok, T-bad",
-        target_branch="release",
-        orchestrator_factory=IntegrateOrchestrator,
-        integration_manager_factory=lambda state_store, evidence_collector: manager,
-    )
-
-    assert manager.calls == [(["T-ok", "T-bad"], "release")]
-    assert view == TaskIntegrationView(
-        task_ids=["T-ok", "T-bad"],
-        target_branch="release",
-        success=["T-ok"],
-        failed=["T-bad"],
-        text_lines=[
-            "🚢 Integrating tasks: ['T-ok', 'T-bad'] into release...",
-            "✅ Successfully integrated: ['T-ok']",
-            "❌ Failed to integrate: ['T-bad']",
-        ],
-    )
-    assert render_multi_agent_task_integration(view) == view.text_lines
+    assert calls == []
 
 
 def test_submit_multi_agent_task_blocks_when_verification_fails_without_side_effects(tmp_path):

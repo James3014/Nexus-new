@@ -24,3 +24,9 @@ def apply_learning_policy(
         reasons[cap].append("learning_policy_penalized")
         if learning_policy.get("enforce_penalties") is True and states.get(cap) == "conditional":
             states[cap] = "optional"
+
+    # Governed episodic memory injection adoption
+    episodic_injection = learning_policy.get("episodic_memory_injection", {})
+    if isinstance(episodic_injection, dict) and episodic_injection.get("enabled") is True:
+        if "memory" in nodes:
+            enable("memory", "governed_learning_policy_adoption")

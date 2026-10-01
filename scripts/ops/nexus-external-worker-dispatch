@@ -1,0 +1,622 @@
+#!/usr/bin/env python3
+"""Durable direct dispatcher for external CLI workers.
+
+Provider-specific transport/account behavior lives behind adapters. This tool
+only owns execution observation and bounded process supervision.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+from importlib import import_module
+from pathlib import Path
+from typing import Any
+
+
+def _default_snapshot() -> Path:
+    host_runtime = Path.home() / ".local/share/nexus-host-runtime/current/snapshot"
+    if host_runtime.is_dir():
+        return host_runtime
+    return Path.home() / ".local/share/nexus-external-worker/Nexus-new"
+
+
+SNAPSHOT = Path(
+    os.getenv(
+        "NEXUS_EXTERNAL_WORKER_SNAPSHOT",
+        str(_default_snapshot()),
+    )
+)
+if not SNAPSHOT.is_dir():
+    raise SystemExit("NEXUS_EXTERNAL_WORKER_SNAPSHOT_MISSING")
+sys.path.insert(0, str(SNAPSHOT))
+
+_journal_module = import_module("nexus.services.direct_operation_journal")
+_runtime_module = import_module("nexus.services.external_worker_runtime")
+DirectOperationJournal = _journal_module.DirectOperationJournal
+DirectOperationJournalError = _journal_module.DirectOperationJournalError
+new_attempt_id = _journal_module.new_attempt_id
+public_operation_view = _journal_module.public_operation_view
+utc_now = _journal_module.utc_now
+WorkerRequest = _runtime_module.WorkerRequest
+ExternalWorkerRuntimeError = _runtime_module.ExternalWorkerRuntimeError
+get_execution_adapter = _runtime_module.get_execution_adapter
+get_account_adapter = _runtime_module.get_account_adapter
+is_rotation_eligible = import_module("nexus.services.external_account_pool").is_rotation_eligible
+AccountFailureKind = import_module("nexus.services.external_account_pool").AccountFailureKind
+
+OPERATION_SCHEMA = "nexus.external_worker_operation.v1"
+OPERATION_ROOT = Path(
+    os.getenv(
+        "NEXUS_EXTERNAL_WORKER_OPERATION_ROOT",
+        str(Path.home() / ".local/state/nexus-external-worker"),
+    )
+)
+_PROVIDER_PREFIXES = {
+    "cline": "clineop_",
+    "opencode": "opencodeop_",
+    "codex": "codexop_",
+    "grok": "grokop_",
+}
+
+
+def _journal(provider: str, root: Path) -> DirectOperationJournal:
+    key = provider.strip().lower()
+    prefix = _PROVIDER_PREFIXES.get(key)
+    if prefix is None:
+        raise ExternalWorkerRuntimeError(f"EXTERNAL_WORKER_PROVIDER_UNSUPPORTED:{key}")
+    return DirectOperationJournal(
+        root / key,
+        schema=OPERATION_SCHEMA,
+        operation_prefix=prefix,
+    )
+
+
+def _provider_from_operation_id(operation_id: str) -> str:
+    for provider, prefix in _PROVIDER_PREFIXES.items():
+        if operation_id.startswith(prefix):
+            return provider
+    raise ExternalWorkerRuntimeError("OPERATION_PROVIDER_UNKNOWN")
+
+
+def _runtime_revision() -> str | None:
+    explicit_snapshot = os.getenv("NEXUS_EXTERNAL_WORKER_SNAPSHOT", "").strip()
+    if explicit_snapshot:
+        proc = subprocess.run(
+            ["git", "-C", str(SNAPSHOT), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            return proc.stdout.strip()
+
+    candidates = [
+        SNAPSHOT.parent / "host-generation.json",
+        Path.home() / ".local/share/nexus-host-runtime/current/host-generation.json",
+    ]
+    seen: set[Path] = set()
+    for receipt in candidates:
+        if receipt in seen:
+            continue
+        seen.add(receipt)
+        try:
+            data = json.loads(receipt.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        value = data.get("source_revision")
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _write_private_prompt(path: Path, prompt: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(prompt)
+        fh.flush()
+        os.fsync(fh.fileno())
+
+
+def _command_hash(argv: tuple[str, ...]) -> str:
+    payload = json.dumps(list(argv), separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _kill_process_group(proc: subprocess.Popen[bytes]) -> None:
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        return
+    try:
+        proc.wait(timeout=2)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def _spawn_background(
+    *,
+    provider: str,
+    model: str,
+    prompt: str,
+    cwd: str,
+    mode: str,
+    auto_approve: bool,
+    timeout_seconds: int,
+    require_free: bool,
+    thinking: str,
+    operation_root: Path,
+) -> dict[str, Any]:
+    journal = _journal(provider, operation_root)
+    operation_id = journal.new_operation_id()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=new_attempt_id(),
+        cwd=cwd,
+        provider=provider,
+        model=model,
+        effort=thinking,
+        prompt_sha256=hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+        runtime_revision=_runtime_revision(),
+        initial_fields={
+            "mode": mode,
+            "auto_approve": auto_approve,
+            "require_free": require_free,
+        },
+    )
+    prompt_path = journal.prompt_path(operation_id)
+    _write_private_prompt(prompt_path, prompt)
+
+    argv = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--operation-run",
+        operation_id,
+        "--provider",
+        provider,
+        "--model",
+        model,
+        "--operation-root",
+        str(operation_root),
+        "--prompt-file",
+        str(prompt_path),
+        "--cwd",
+        cwd,
+        "--mode",
+        mode,
+        "--timeout",
+        str(timeout_seconds),
+        "--thinking",
+        thinking,
+    ]
+    if auto_approve:
+        argv.append("--auto-approve")
+    if require_free:
+        argv.append("--require-free")
+
+    stdout_path = journal.stdout_path(operation_id)
+    stderr_path = journal.stderr_path(operation_id)
+    stdout_path.parent.mkdir(parents=True, exist_ok=True)
+    with (
+        stdout_path.open("ab", buffering=0) as out_fh,
+        stderr_path.open("ab", buffering=0) as err_fh,
+    ):
+        proc = subprocess.Popen(
+            argv,
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,
+            stdout=out_fh,
+            stderr=err_fh,
+            start_new_session=True,
+            close_fds=True,
+        )
+    return journal.bind_pid(operation_id, proc.pid)
+
+
+def _run_operation(
+    *,
+    operation_id: str,
+    provider: str,
+    model: str,
+    prompt_file: str,
+    cwd: str,
+    mode: str,
+    auto_approve: bool,
+    timeout_seconds: int,
+    require_free: bool,
+    thinking: str,
+    operation_root: Path,
+    heartbeat_interval: float = 15.0,
+    outer_grace_seconds: float = 15.0,
+) -> int:
+    journal = _journal(provider, operation_root)
+    prompt_path = Path(prompt_file)
+    try:
+        prompt = prompt_path.read_text(encoding="utf-8")
+    finally:
+        try:
+            prompt_path.unlink()
+        except FileNotFoundError:
+            pass
+
+    journal.mark_started(operation_id, pid=os.getpid())
+    adapter = get_execution_adapter(provider)
+    account_adapter = get_account_adapter(provider)
+    request = WorkerRequest(
+        provider=provider,
+        model=model,
+        prompt=prompt,
+        cwd=cwd,
+        mode=mode,
+        auto_approve=auto_approve,
+        timeout_seconds=timeout_seconds,
+        require_free=require_free,
+        thinking=thinking,
+    )
+
+    try:
+        binding = account_adapter.acquire(operation_id)
+    except BaseException as exc:
+        journal.mark_terminal(
+            operation_id,
+            status="FAILED",
+            exit_code=None,
+            failure_kind=f"ACCOUNT_ACQUIRE_FAILED:{type(exc).__name__}",
+            cwd=cwd,
+            reconciliation={
+                "at": utc_now(),
+                "result": "NO_PROVIDER_PROCESS_STARTED",
+                "retry_permitted": False,
+            },
+        )
+        return 1
+
+    max_rotations = max(0, int(getattr(account_adapter, "max_failover_retries", 0)))
+    attempts = 0
+    rotations = 0
+    stdout_path = journal.stdout_path(operation_id)
+    stderr_path = journal.stderr_path(operation_id)
+    stdout_path.parent.mkdir(parents=True, exist_ok=True)
+
+    while True:
+        attempts += 1
+        try:
+            command = adapter.compile(request, binding=binding)
+        except BaseException as exc:
+            try:
+                account_adapter.release(binding)
+            finally:
+                journal.mark_terminal(
+                    operation_id,
+                    status="FAILED",
+                    exit_code=None,
+                    failure_kind=f"COMMAND_COMPILE_FAILED:{type(exc).__name__}",
+                    cwd=cwd,
+                    attempts=attempts,
+                    rotations=rotations,
+                    reconciliation={
+                        "at": utc_now(),
+                        "result": "NO_PROVIDER_PROCESS_STARTED",
+                        "retry_permitted": False,
+                    },
+                )
+            return 1
+
+        journal.heartbeat(
+            operation_id,
+            phase="PROVIDER_STARTING",
+            attempts=attempts,
+            rotations=rotations,
+            account_alias_hash=binding.account_alias_hash,
+            lease_id_hash=binding.lease_id_hash,
+            cli_version=command.cli_version,
+            command_sha256=_command_hash(command.argv),
+        )
+
+        stdout_start = stdout_path.stat().st_size if stdout_path.exists() else 0
+        stderr_start = stderr_path.stat().st_size if stderr_path.exists() else 0
+        started = time.monotonic()
+        last_heartbeat = 0.0
+        last_sizes = (stdout_start, stderr_start)
+
+        try:
+            with (
+                stdout_path.open("ab", buffering=0) as out_fh,
+                stderr_path.open("ab", buffering=0) as err_fh,
+            ):
+                proc = subprocess.Popen(
+                    list(command.argv),
+                    cwd=cwd,
+                    env=dict(command.env),
+                    stdin=subprocess.DEVNULL,
+                    stdout=out_fh,
+                    stderr=err_fh,
+                    start_new_session=True,
+                    close_fds=True,
+                )
+                journal.heartbeat(
+                    operation_id,
+                    phase="PROVIDER_RUNNING",
+                    provider_pid=proc.pid,
+                    attempts=attempts,
+                    rotations=rotations,
+                )
+                deadline = started + timeout_seconds + max(1.0, outer_grace_seconds)
+                timed_out = False
+                while proc.poll() is None:
+                    now = time.monotonic()
+                    if now >= deadline:
+                        timed_out = True
+                        _kill_process_group(proc)
+                        break
+                    if now - last_heartbeat >= max(1.0, heartbeat_interval):
+                        try:
+                            sizes = (
+                                stdout_path.stat().st_size if stdout_path.exists() else 0,
+                                stderr_path.stat().st_size if stderr_path.exists() else 0,
+                            )
+                        except OSError:
+                            sizes = last_sizes
+                        journal.heartbeat(
+                            operation_id,
+                            phase="PROVIDER_RUNNING",
+                            attempts=attempts,
+                            rotations=rotations,
+                            output_observed=sizes != last_sizes,
+                        )
+                        last_sizes = sizes
+                        last_heartbeat = now
+                    time.sleep(0.25)
+        except BaseException as exc:
+            try:
+                account_adapter.release(binding)
+            except BaseException:
+                pass
+            journal.mark_terminal(
+                operation_id,
+                status="FAILED",
+                exit_code=None,
+                failure_kind=f"PROVIDER_START_FAILED:{type(exc).__name__}",
+                cwd=cwd,
+                attempts=attempts,
+                rotations=rotations,
+                reconciliation={
+                    "at": utc_now(),
+                    "result": "NO_CONFIRMED_PROVIDER_PROCESS",
+                    "retry_permitted": False,
+                },
+            )
+            return 1
+
+        if timed_out:
+            try:
+                account_adapter.release(binding)
+            except BaseException:
+                pass
+            journal.mark_terminal(
+                operation_id,
+                status="OUTCOME_UNKNOWN",
+                exit_code=None,
+                failure_kind="WRAPPER_WALL_TIMEOUT_AFTER_PROVIDER_START",
+                cwd=cwd,
+                attempts=attempts,
+                rotations=rotations,
+                reconciliation={
+                    "at": utc_now(),
+                    "result": "PROVIDER_PROCESS_TIMED_OUT_AFTER_START",
+                    "retry_permitted": False,
+                },
+            )
+            return 124
+
+        exit_code = int(proc.returncode or 0)
+        stdout_bytes = stdout_path.read_bytes()
+        stderr_bytes = stderr_path.read_bytes()
+        stdout_text = stdout_bytes[stdout_start:].decode("utf-8", errors="replace")
+        stderr_text = stderr_bytes[stderr_start:].decode("utf-8", errors="replace")
+        outcome = adapter.interpret(
+            request,
+            exit_code=exit_code,
+            stdout_text=stdout_text,
+            stderr_text=stderr_text,
+        )
+
+        failure_enum = None
+        if outcome.failure_kind:
+            try:
+                failure_enum = AccountFailureKind(outcome.failure_kind)
+            except ValueError:
+                failure_enum = None
+
+        can_rotate = (
+            failure_enum is not None
+            and outcome.retry_permitted
+            and is_rotation_eligible(failure_enum)
+            and rotations < max_rotations
+        )
+        if can_rotate:
+            journal.heartbeat(
+                operation_id,
+                phase="ACCOUNT_ROTATING",
+                attempts=attempts,
+                rotations=rotations,
+                failure_kind=outcome.failure_kind,
+            )
+            try:
+                replacement = account_adapter.report_failure(binding, failure_enum)
+            except BaseException as exc:
+                journal.mark_terminal(
+                    operation_id,
+                    status="FAILED",
+                    exit_code=exit_code,
+                    failure_kind=f"ACCOUNT_ROTATION_FAILED:{type(exc).__name__}",
+                    cwd=cwd,
+                    attempts=attempts,
+                    rotations=rotations,
+                    observed_provider=outcome.observed_provider,
+                    observed_model=outcome.observed_model,
+                    reconciliation={
+                        "at": utc_now(),
+                        "result": "PROVIDER_TERMINAL_ACCOUNT_FAILURE_NO_REPLACEMENT",
+                        "retry_permitted": False,
+                    },
+                )
+                return exit_code or 1
+            if replacement is not None:
+                binding = replacement
+                rotations += 1
+                continue
+
+        try:
+            account_adapter.release(binding)
+        except BaseException:
+            pass
+        journal.mark_terminal(
+            operation_id,
+            status=outcome.status,
+            exit_code=exit_code,
+            failure_kind=outcome.failure_kind,
+            cwd=cwd,
+            attempts=attempts,
+            rotations=rotations,
+            account_alias_hash=binding.account_alias_hash,
+            lease_id_hash=binding.lease_id_hash,
+            observed_provider=outcome.observed_provider,
+            observed_model=outcome.observed_model,
+            finish_reason=outcome.finish_reason,
+            total_cost=outcome.total_cost,
+            provider_session_id=outcome.provider_session_id,
+            tool_event_count=outcome.tool_event_count,
+            reconciliation={
+                "at": utc_now(),
+                "result": "PROVIDER_TERMINAL_RECEIPT",
+                "retry_permitted": False,
+                "rotation_budget_exhausted": bool(
+                    outcome.retry_permitted and rotations >= max_rotations
+                ),
+            },
+        )
+        return 0 if outcome.status == "COMPLETED" else (exit_code or 1)
+
+
+def _print_operation(record: dict[str, Any]) -> None:
+    print(json.dumps(public_operation_view(record), indent=2, sort_keys=True))
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("prompt", nargs="?")
+    ap.add_argument("--prompt", dest="prompt_flag")
+    ap.add_argument("--prompt-file")
+    ap.add_argument("--provider", default="cline")
+    ap.add_argument("--model")
+    ap.add_argument("--cwd", default=os.getcwd())
+    ap.add_argument("--mode", choices=("plan", "act"), default="plan")
+    ap.add_argument("--auto-approve", action="store_true")
+    ap.add_argument("--timeout", type=int, default=900)
+    ap.add_argument("--thinking", default="none")
+    ap.add_argument("--require-free", action="store_true")
+    ap.add_argument("--allow-paid-model", action="store_true")
+    ap.add_argument("--background", action="store_true")
+    ap.add_argument("--status", metavar="OPERATION_ID")
+    ap.add_argument("--reconcile", metavar="OPERATION_ID")
+    ap.add_argument("--operation-root", default=str(OPERATION_ROOT))
+    ap.add_argument("--operation-run", metavar="OPERATION_ID", help=argparse.SUPPRESS)
+    args = ap.parse_args(argv)
+
+    operation_root = Path(args.operation_root).expanduser()
+    if args.status or args.reconcile:
+        operation_id = args.status or args.reconcile
+        provider = _provider_from_operation_id(operation_id)
+        journal = _journal(provider, operation_root)
+        record = journal.read(operation_id) if args.status else journal.reconcile(operation_id)
+        _print_operation(record)
+        return 0
+
+    provider = args.provider.strip().lower()
+    adapter = get_execution_adapter(provider)
+    model = str(args.model or adapter.default_model()).strip()
+    cwd = str(Path(args.cwd).expanduser().resolve())
+    if not Path(cwd).is_dir():
+        raise SystemExit("INVALID_CWD")
+
+    prompt_text = args.prompt_flag if args.prompt_flag is not None else args.prompt
+    if args.prompt_file:
+        prompt = Path(args.prompt_file).read_text(encoding="utf-8")
+    elif prompt_text is not None:
+        prompt = prompt_text
+    else:
+        prompt = sys.stdin.read()
+    if not prompt.strip():
+        raise SystemExit("EMPTY_PROMPT")
+
+    require_free = bool(args.require_free or not args.allow_paid_model)
+
+    if args.operation_run:
+        return _run_operation(
+            operation_id=args.operation_run,
+            provider=provider,
+            model=model,
+            prompt_file=args.prompt_file,
+            cwd=cwd,
+            mode=args.mode,
+            auto_approve=args.auto_approve,
+            timeout_seconds=args.timeout,
+            require_free=require_free,
+            thinking=args.thinking,
+            operation_root=operation_root,
+        )
+
+    record = _spawn_background(
+        provider=provider,
+        model=model,
+        prompt=prompt,
+        cwd=cwd,
+        mode=args.mode,
+        auto_approve=args.auto_approve,
+        timeout_seconds=args.timeout,
+        require_free=require_free,
+        thinking=args.thinking,
+        operation_root=operation_root,
+    )
+    _print_operation(record)
+    if args.background:
+        return 0
+
+    operation_id = str(record["operation_id"])
+    while True:
+        time.sleep(0.5)
+        current = _journal(provider, operation_root).read(operation_id)
+        if current.get("status") in {"COMPLETED", "FAILED", "CANCELLED", "OUTCOME_UNKNOWN"}:
+            _print_operation(current)
+            return 0 if current.get("status") == "COMPLETED" else 1
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except (DirectOperationJournalError, ExternalWorkerRuntimeError) as exc:
+        print(
+            json.dumps(
+                {
+                    "schema": OPERATION_SCHEMA,
+                    "state": "ERROR",
+                    "error": str(exc),
+                },
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+        raise SystemExit(2)

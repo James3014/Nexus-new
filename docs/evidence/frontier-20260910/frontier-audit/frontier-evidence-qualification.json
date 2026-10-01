@@ -1,0 +1,105 @@
+{
+  "audit": "Owner Nexus frontier regression qualification",
+  "frozen_revisions": {
+    "nexus_new": "d1b02c15fda5700fa60db07f8fffc70652f2f98d",
+    "nexus_core": "87204263637058453cb83d10f0f370995fe01cfb",
+    "nexus_learning": "d09f05b942f35236562ae26e7b718d111368b0b1",
+    "nexus_open_swe_runtime": "3eb673bfcfd874043a70743e34761784fda39c10",
+    "devspace": "38803ad3aff1689dbcb449dea1ced72a117b9cd8"
+  },
+  "evidence": [
+    {
+      "invariant": "#827 Owner representation; #854 exact target-operation consumer binding; #855 provider/model attestation",
+      "root": "/tmp/nexus-frontier-audit",
+      "head": "d1b02c15fda5700fa60db07f8fffc70652f2f98d",
+      "tree": "e6418f3af280ead71b97b13da14055eb065de640",
+      "command": "python3 -m pytest -q tests/nexus/orchestrator/test_owner_representation.py tests/services/test_open_swe_worker_transport.py tests/services/test_external_intelligence_closure.py tests/services/test_external_intelligence_fanout.py tests/services/test_open_swe_external_intelligence.py",
+      "exit": 0,
+      "result": "270 passed, 2 skipped",
+      "log": "nexus-new-focused-rs.log",
+      "log_sha256": "30f6e541b08677f318e3bbd6067dcf2cd5b0477fc00350b8e61d354544dc47ec",
+      "skip_reasons": [
+        "test_open_swe_worker_transport.py:860 deepagents unavailable",
+        "test_open_swe_external_intelligence.py:954 deepagents unavailable"
+      ]
+    },
+    {
+      "invariant": "G8/G9 bounded consumer and collision retirement",
+      "root": "/tmp/nexus-frontier-audit",
+      "head": "d1b02c15fda5700fa60db07f8fffc70652f2f98d",
+      "tree": "e6418f3af280ead71b97b13da14055eb065de640",
+      "command": "python3 -m pytest -q tests/services/test_mainchain_false_green_gates.py -k 'consumer or collision or generation'",
+      "exit": 0,
+      "result": "2 passed, 101 deselected",
+      "log": "nexus-new-consumer-collision.log",
+      "log_sha256": "06d897ee9424423a68862c716c0667114b6069aaf633d7316e7c8c6fbc894c90"
+    },
+    {
+      "invariant": "G8/G9 terminal runtime contract, lifecycle phase closure, legacy/certification client and collision controls",
+      "root": "/tmp/nexus-frontier-audit",
+      "head": "d1b02c15fda5700fa60db07f8fffc70652f2f98d",
+      "tree": "e6418f3af280ead71b97b13da14055eb065de640",
+      "command": "PYTHONPATH=.:/tmp/nexus-learning-frozen-audit python3 scripts/ops/nexus_runtime_lifecycle_acceptance.py; python3 -m pytest -q tests/product/test_client_conformance.py tests/product/test_github_action_core_binding.py tests/product/test_github_adapter.py",
+      "exit": 0,
+      "result": "lifecycle verifier PASS_LOCAL_CANDIDATE with 5/5 checks; product terminal contract 44 passed",
+      "logs": [
+        {"path": "nexus-runtime-lifecycle-acceptance.log", "sha256": "f60e85a0e6de854cfd38262b397f2b3d21e08b0b73b206647dc0841b3da32713"},
+        {"path": "nexus-new-g8g9-contract.log", "sha256": "3ebf984551cd64861db3fc2d5e06c15bb1e098c88711a140ef0832c097f89705"}
+      ],
+      "claim_ceiling": "local contract evidence only; no production/public readiness"
+    },
+    {
+      "invariant": "nexus-core TG8 protocol gate and repository cutover",
+      "root": "/tmp/nexus-core-frozen-audit",
+      "head": "87204263637058453cb83d10f0f370995fe01cfb",
+      "tree": "de5ad9619f1f3ad772404b9f8ff12480fb42f9bb",
+      "command": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -q tests/benchmark/test_core_v1_tg8_protocol_gate.py tests/benchmark/test_core_v1_tg8_repository_cutover.py",
+      "exit": 0,
+      "result": "35 passed",
+      "log": "nexus-core-frozen.log",
+      "log_sha256": "7e19c1e4869b2373f6042b615eeeba8adbb26667c40d37459a35ee95e1b86f89"
+    },
+    {
+      "invariant": "nexus-learning closure, bounded consumer payload, duplicate identity collision rejection",
+      "root": "/tmp/nexus-learning-frozen-audit",
+      "head": "d09f05b942f35236562ae26e7b718d111368b0b1",
+      "tree": "a549ebcd46970fd5246decefcd770906ae9ef70a",
+      "command": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -q tests/test_learning_closure_effectiveness.py tests/test_learning_effectiveness_measurement.py tests/test_learning_coverage_contract.py",
+      "exit": 0,
+      "result": "78 passed",
+      "log": "nexus-learning-frozen.log",
+      "log_sha256": "43a0f0f7465317bc520970a538cd37b0354e08d322aaf6265355996b242eafcc"
+    },
+    {
+      "invariant": "DevSpace #31 generation closure, exact generation continuation/legacy rejection, cutover recovery",
+      "root": "/tmp/devspace-frozen-audit.vSsa7G",
+      "head": "38803ad3aff1689dbcb449dea1ced72a117b9cd8",
+      "tree": "58b8e26e49702236d4a645504b287ac3c08372b8",
+      "command": "for f in src/execution-protocol.test.ts src/local-agent-execution-contract.test.ts src/server.test.ts src/local-agent-profile-source.test.ts src/local-agent-opencode-catalog.test.ts; do npx tsx \"$f\" || exit $?; done",
+      "exit": 0,
+      "result": "execution protocol passed; server generation closure 38 passed; profile source and catalog checks passed; cutover tests are separately covered by prior issue31 evidence",
+      "log": "devspace-frozen-38803-generation.log",
+      "log_sha256": "21ade136f1b42ac6ff480dd8c8b5c7da3029dc87e0260c73e4b4a6e7bf7f5895",
+      "dependency_setup": "npm ci --ignore-scripts; npm rebuild better-sqlite3"
+    },
+    {
+      "invariant": "nexus-open-swe runtime compatibility and cross-repository acceptance",
+      "root": "/tmp/nexus-runtime-frozen-audit",
+      "head": "3eb673bfcfd874043a70743e34761784fda39c10",
+      "tree": "3fc5b2ed0a795800a103baf69ea59581de35b6d7",
+      "command": "uv sync --frozen --dev && ./.venv/bin/pytest -q tests/test_runtime.py tests/test_cross_repo_acceptance.py",
+      "exit": 0,
+      "result": "153 passed, 1 skipped",
+      "log": "nexus-runtime-frozen-rs.log",
+      "log_sha256": "5d924b534c5f9c1d79048335197bcfe496031922f877a09ab939c77399862fe0",
+      "skip_reasons": [
+        "tests/test_cross_repo_acceptance.py:33 isolated frozen checkout has no Nexus-new checkout for live cross-repo import"
+      ]
+    }
+  ],
+  "qualification": {
+    "all_required_bounded_checks_executed": true,
+    "blocking_gap": null,
+    "scope": "read-only isolated verification; no shared checkout, daemon, canonical dirty state, GitHub write, merge, or deployment effect"
+  }
+}

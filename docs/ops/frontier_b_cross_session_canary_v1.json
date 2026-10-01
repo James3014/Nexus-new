@@ -1,0 +1,248 @@
+{
+  "schema": "nexus.frontier_b.cross_session_canary.v1",
+  "recorded_at": "2026-09-29T07:37:00Z",
+  "parent_issue": "James3014/Nexus-new#1188",
+  "claim_ceiling": "WORKFLOW_HARDENING_ACCEPTANCE_EVIDENCE_ONLY",
+  "chat_memory_required": false,
+  "durable_inputs": [
+    "github_issue",
+    "machine_readable_checkpoint",
+    "exact_git_runtime_identities",
+    "receipt_refs"
+  ],
+  "owner_contracts": [
+    {
+      "repository": "James3014/nexus-runtime",
+      "issue": 41,
+      "role": "durable task/attempt checkpoint + resume contract",
+      "pr": 43,
+      "pr_state": "MERGED",
+      "issue_state": "CLOSED",
+      "merge_sha": "4c9e1481346ee62f3adcdcd4ba3538e3564a8e03",
+      "post_merge_required_checks": [
+        "Python 3.11 POSIX installed wheel",
+        "full-suite"
+      ]
+    },
+    {
+      "repository": "James3014/nexus-core",
+      "issue": 59,
+      "role": "handoff evidence freshness/applicability/tamper verification",
+      "pr": 62,
+      "pr_state": "MERGED",
+      "issue_state": "CLOSED",
+      "merge_sha": "e43fb0fd8579eba80c54392dd00e8773056a30d2",
+      "post_merge_required_checks": [
+        "test"
+      ]
+    },
+    {
+      "repository": "James3014/nexus-learning",
+      "issue": 34,
+      "role": "evidence-bounded workflow recommendations",
+      "pr": 36,
+      "pr_state": "MERGED",
+      "issue_state": "CLOSED",
+      "merge_sha": "cc05e79c590f32a416a802d63bf2cef098e81870",
+      "post_merge_required_checks": [
+        "test"
+      ]
+    },
+    {
+      "repository": "James3014/nexus-open-swe-runtime",
+      "issue": 69,
+      "role": "replay-safe execution resume",
+      "pr": 71,
+      "pr_state": "MERGED",
+      "issue_state": "CLOSED",
+      "merge_sha": "4db0625c7c7b7b337ab569db068bfb8533dd8b3e",
+      "post_merge_required_checks": [
+        "test"
+      ]
+    },
+    {
+      "repository": "James3014/repository-intelligence-engine",
+      "issue": 32,
+      "role": "required/advisory check classification + stability",
+      "pr": 34,
+      "pr_state": "MERGED",
+      "issue_state": "CLOSED",
+      "merge_sha": "b1a0bd882e37a08a3a540947ae767a23d752bd67",
+      "post_merge_required_checks": [
+        "test"
+      ]
+    },
+    {
+      "repository": "James3014/nexus-opencli-reviewer",
+      "issue": 46,
+      "role": "durable review/publication identity",
+      "pr": 48,
+      "pr_state": "MERGED",
+      "issue_state": "CLOSED",
+      "merge_sha": "2e7a0f3c04d078506e548a15776e719c8c6555a0",
+      "post_merge_required_checks": [
+        "test"
+      ]
+    },
+    {
+      "repository": "James3014/nexus-deployment-lab",
+      "issue": 5,
+      "role": "exact-SHA activation/canary/rollback receipts",
+      "pr": 7,
+      "pr_state": "MERGED",
+      "issue_state": "CLOSED",
+      "merge_sha": "f3cd4f469fb373dd1d3ce97b61555482ba8927cf",
+      "post_merge_required_checks": []
+    }
+  ],
+  "checkpoint": {
+    "schema": "nexus.runtime.workflow_checkpoint.v1",
+    "task_id": "frontier-b-1188-cross-session-canary",
+    "operation_id": "frontier-b-op-1188-closeout",
+    "attempt_id": "frontier-b-attempt-1",
+    "revision": 1,
+    "status": "RUNNING",
+    "phase": "HANDOFF",
+    "next_gate": "VERIFY_PARENT_CLOSEOUT",
+    "identity": {
+      "repository": "James3014/nexus-runtime",
+      "source_revision": "git-commit:4c9e1481346ee62f3adcdcd4ba3538e3564a8e03",
+      "runtime_identity": "github-main:4c9e1481346ee62f3adcdcd4ba3538e3564a8e03",
+      "target_revision": "git-commit:4c9e1481346ee62f3adcdcd4ba3538e3564a8e03"
+    },
+    "external_operation_ids": {
+      "parent_issue": "James3014/Nexus-new#1188"
+    },
+    "leases": [],
+    "evidence_refs": [
+      "github:James3014/nexus-runtime#43@4c9e1481346ee62f3adcdcd4ba3538e3564a8e03",
+      "github:James3014/nexus-core#62@e43fb0fd8579eba80c54392dd00e8773056a30d2",
+      "github:James3014/nexus-learning#36@cc05e79c590f32a416a802d63bf2cef098e81870",
+      "github:James3014/nexus-open-swe-runtime#71@4db0625c7c7b7b337ab569db068bfb8533dd8b3e",
+      "github:James3014/repository-intelligence-engine#34@b1a0bd882e37a08a3a540947ae767a23d752bd67",
+      "github:James3014/nexus-opencli-reviewer#48@2e7a0f3c04d078506e548a15776e719c8c6555a0",
+      "github:James3014/nexus-deployment-lab#7@f3cd4f469fb373dd1d3ce97b61555482ba8927cf"
+    ],
+    "completed_effects": [
+      {
+        "effect_key": "merge:nexus-runtime#43",
+        "receipt_ref": "git-commit:4c9e1481346ee62f3adcdcd4ba3538e3564a8e03",
+        "effect_hash": ""
+      },
+      {
+        "effect_key": "merge:nexus-core#62",
+        "receipt_ref": "git-commit:e43fb0fd8579eba80c54392dd00e8773056a30d2",
+        "effect_hash": ""
+      },
+      {
+        "effect_key": "merge:nexus-learning#36",
+        "receipt_ref": "git-commit:cc05e79c590f32a416a802d63bf2cef098e81870",
+        "effect_hash": ""
+      },
+      {
+        "effect_key": "merge:nexus-open-swe-runtime#71",
+        "receipt_ref": "git-commit:4db0625c7c7b7b337ab569db068bfb8533dd8b3e",
+        "effect_hash": ""
+      },
+      {
+        "effect_key": "merge:repository-intelligence-engine#34",
+        "receipt_ref": "git-commit:b1a0bd882e37a08a3a540947ae767a23d752bd67",
+        "effect_hash": ""
+      },
+      {
+        "effect_key": "merge:nexus-opencli-reviewer#48",
+        "receipt_ref": "git-commit:2e7a0f3c04d078506e548a15776e719c8c6555a0",
+        "effect_hash": ""
+      },
+      {
+        "effect_key": "merge:nexus-deployment-lab#7",
+        "receipt_ref": "git-commit:f3cd4f469fb373dd1d3ce97b61555482ba8927cf",
+        "effect_hash": ""
+      }
+    ],
+    "pending_steps": [
+      "record_parent_closeout_receipt",
+      "close_parent_issue_after_exact_gates"
+    ],
+    "retry_history": [],
+    "blocked_reason": "",
+    "claim_ceiling": "RUNTIME_SESSION_CHECKPOINT_EXECUTION_STATE_ONLY",
+    "checkpoint_hash": "afc0272d8d1a3276df4e926dbba79b10ad65fb6b26f3d8d61e7ee71e9bbb8a79"
+  },
+  "fresh_session_canary": {
+    "process_boundary": "new Python process reads only the committed JSON receipt",
+    "expected_task_id": "frontier-b-1188-cross-session-canary",
+    "expected_operation_id": "frontier-b-op-1188-closeout",
+    "expected_attempt_id": "frontier-b-attempt-1",
+    "expected_next_gate": "VERIFY_PARENT_CLOSEOUT",
+    "expected_resume_disposition": "SAFE",
+    "completed_effects_replay_allowed": false,
+    "drift_probe_expected_disposition": "RECONCILE"
+  },
+  "required_vs_advisory": {
+    "subject": "James3014/nexus-core#62",
+    "required_gates": [
+      "test"
+    ],
+    "advisory_observers": [
+      "snapshot",
+      "terminal"
+    ],
+    "unknown_policy_checks": [],
+    "advisory_failure_blocks_merge": false
+  },
+  "doctor": {
+    "schema": "nexus.workflow_doctor.v1",
+    "repository": "James3014/Nexus-new",
+    "landed_pr": 1191,
+    "landed_merge_sha": "a486dbe12fa6199f5b4ee20e97c3455135df2baf",
+    "observed_source_sha": "57edae9832392e3e369ee039b2e12f18b8c433df",
+    "read_only": true,
+    "authority": [
+      "observe",
+      "classify",
+      "project"
+    ],
+    "forbidden_authority": [
+      "route",
+      "dispatch",
+      "mutate",
+      "approve",
+      "merge",
+      "release",
+      "deploy"
+    ]
+  },
+  "deployment_closeout_path": {
+    "owner": "James3014/nexus-deployment-lab#5",
+    "contract_merge_sha": "f3cd4f469fb373dd1d3ce97b61555482ba8927cf",
+    "steps": [
+      "exact_merged_sha",
+      "bundle_hash",
+      "host_identity",
+      "installed_identity",
+      "loaded_identity",
+      "bounded_canary",
+      "rollback_receipt"
+    ],
+    "healthy_requires": [
+      "installed_sha_equals_source_sha",
+      "loaded_sha_equals_source_sha",
+      "canary_pass"
+    ],
+    "branch_name_or_latest_tag_is_not_activation_evidence": true
+  },
+  "source_first_rule": [
+    "canonical_source",
+    "tests",
+    "pull_request",
+    "required_gates",
+    "exact_protected_merge",
+    "exact_merged_sha_deployment",
+    "physical_readback",
+    "bounded_canary",
+    "terminal_receipt_or_learning_episode"
+  ],
+  "result": "PASS",
+  "content_sha256": "7cd7d8a1c064e1c8a988a712ce3f2e16f3195aa3e54f6382e8dad42358d024fe"
+}

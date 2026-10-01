@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 import hashlib
 import json
 import os
+import re
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from nexus.orchestrator.candidate_verifier import VerifiedCandidateReceipt
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
-from nexus.orchestrator.worktree_manager import TargetWorktreeLease, WorktreeManager, get_canonical_git_hooks_dir
+from nexus.orchestrator.worktree_manager import (
+    TargetWorktreeLease,
+    WorktreeManager,
+    get_canonical_git_hooks_dir,
+)
 
 
 @dataclass(frozen=True)
@@ -34,6 +39,18 @@ class PromotionApprovalPacket:
     authority_change_required: bool = False
     authority_findings_sha256: str = ""
     collaboration_provenance: Optional[dict[str, object]] = None
+
+
+_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_SESSION_RE = re.compile(r"^cms_[0-9a-f]{32}$")
+
+
+def _is_valid_hash(value: Any) -> bool:
+    return isinstance(value, str) and bool(_HASH_RE.fullmatch(value))
+
+
+def _is_valid_session(value: Any) -> bool:
+    return isinstance(value, str) and bool(_SESSION_RE.fullmatch(value))
 
 
 class CandidateCommitter:
@@ -89,6 +106,18 @@ class CandidateCommitter:
     ) -> PromotionApprovalPacket:
         if not receipt.verified or not receipt.candidate_commit_allowed:
             raise RuntimeError("Verified Candidate Receipt is required before candidate commit")
+        if receipt.core_provenance_required:
+            if (
+                receipt.core_verification_status != "VERIFIED"
+                or not _is_valid_hash(receipt.core_binding_hash)
+                or not _is_valid_session(receipt.core_mutation_session_id)
+                or not _is_valid_hash(receipt.core_change_set_hash)
+                or not _is_valid_hash(receipt.core_evidence_bundle_hash)
+                or not _is_valid_hash(receipt.core_verification_result_hash)
+            ):
+                raise RuntimeError(
+                    "Core-verified physical Candidate provenance is required before candidate commit"
+                )
         expected_authorized_deletions = tuple(sorted(set(contract.authorized_deletions)))
         expected_authorized_deletions_hash = hashlib.sha256(
             json.dumps(expected_authorized_deletions, separators=(",", ":")).encode("utf-8")
@@ -133,17 +162,29 @@ class CandidateCommitter:
         if not paths:
             raise RuntimeError("candidate commit requires a non-empty candidate diff")
         target_head = self.worktree_manager._run_git(["rev-parse", "HEAD"], cwd=target)
+        if target_head != current.target_head:
+            raise RuntimeError("candidate tip changed after verification")
         if target_head != lease.initial_head:
             # Workers are allowed to create scoped commits in the isolated
             # Target.  Reuse that exact commit chain; never create a second
             # wrapper commit or rewrite worker history.
             if self.worktree_manager._run_git(["status", "--short"], cwd=target):
                 raise RuntimeError("precommitted Target must be clean before capture")
-            parents = self.worktree_manager._run_git(
-                ["rev-list", "--parents", "-n", "1", target_head], cwd=target,
-            ).split()
-            if len(parents) != 2:
-                raise RuntimeError("precommitted candidate must not be a merge commit")
+            try:
+                self.worktree_manager._run_git(
+                    ["merge-base", "--is-ancestor", lease.initial_head, target_head],
+                    cwd=target,
+                )
+            except RuntimeError as exc:
+                raise RuntimeError(
+                    "precommitted candidate tip must descend from leased initial_head"
+                ) from exc
+            merge_commits = self.worktree_manager._run_git(
+                ["rev-list", "--merges", f"{lease.initial_head}..{target_head}"],
+                cwd=target,
+            ).splitlines()
+            if merge_commits:
+                raise RuntimeError("precommitted candidate chain must not contain merge commits")
             committed_paths = self.worktree_manager._run_git(
                 ["diff", "--name-only", lease.initial_head, target_head], cwd=target,
             ).splitlines()
@@ -180,13 +221,17 @@ class CandidateCommitter:
                 env=commit_env,
             )
             commit_sha = self.worktree_manager._run_git(["rev-parse", "HEAD"], cwd=target)
-        tree_sha = self.worktree_manager._run_git(["rev-parse", "HEAD^{tree}"], cwd=target)
+        final_head = self.worktree_manager._run_git(["rev-parse", "HEAD"], cwd=target)
+        if final_head != commit_sha:
+            raise RuntimeError("candidate tip changed during commit")
+        tree_sha = self.worktree_manager._run_git(
+            ["rev-parse", f"{commit_sha}^{{tree}}"], cwd=target,
+        )
         committed_paths = self.worktree_manager._run_git(
-            ["diff-tree", "--no-commit-id", "--name-only", "-r", commit_sha],
-            cwd=target,
+            ["diff", "--name-only", lease.initial_head, commit_sha], cwd=target,
         ).splitlines()
-        if committed_paths != paths:
-            raise RuntimeError("candidate commit tree differs from verified paths")
+        if sorted(committed_paths) != paths:
+            raise RuntimeError("candidate commit range differs from verified paths")
         if self.worktree_manager._run_git(["status", "--short"], cwd=target):
             raise RuntimeError("candidate worktree is not clean after commit")
         self.worktree_manager.verify_controller_unchanged(contract)

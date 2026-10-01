@@ -1,9 +1,8 @@
-from dataclasses import asdict, replace
-import json
 import os
 import subprocess
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -60,6 +59,84 @@ def _scenario(tmp_path: Path):
     candidate = controller.collect_candidate(contract, lease)
     verified = CandidateVerifier(manager).verify(contract, lease, candidate)
     return contract, lease, verified, manager
+
+
+def test_core_required_candidate_cannot_commit_from_local_verifier_alone(tmp_path):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    local_only = replace(
+        verified,
+        core_provenance_required=True,
+        candidate_commit_allowed=False,
+    )
+
+    with pytest.raises(RuntimeError, match="Verified Candidate Receipt"):
+        CandidateCommitter(manager).create_candidate_commit(contract, lease, local_only)
+
+
+def test_candidate_commit_rejects_incomplete_core_provenance_even_if_commit_flag_is_forged(tmp_path):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    incomplete = replace(
+        verified,
+        core_provenance_required=True,
+        candidate_commit_allowed=True,
+        core_verification_status="VERIFIED",
+    )
+
+    with pytest.raises(RuntimeError, match="Core-verified physical Candidate provenance"):
+        CandidateCommitter(manager).create_candidate_commit(contract, lease, incomplete)
+
+
+def test_candidate_commit_rejects_malformed_prefixed_core_provenance(tmp_path):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    valid_hash = "sha256:" + "a" * 64
+    valid_session = "cms_" + "b" * 32
+    valid_params = {
+        "core_provenance_required": True,
+        "candidate_commit_allowed": True,
+        "core_verification_status": "VERIFIED",
+        "core_binding_hash": valid_hash,
+        "core_mutation_session_id": valid_session,
+        "core_change_set_hash": valid_hash,
+        "core_evidence_bundle_hash": valid_hash,
+        "core_verification_result_hash": valid_hash,
+    }
+    test_cases = [
+        {"core_binding_hash": "sha256:"},
+        {"core_mutation_session_id": "cms_"},
+        {"core_mutation_session_id": "cms_x"},
+        {"core_change_set_hash": "sha256:not64chars"},
+        {"core_evidence_bundle_hash": "sha256:" + "g" * 64},
+        {"core_verification_result_hash": "sha256:" + "0" * 63},
+        {"core_verification_status": "PENDING"},
+    ]
+    for override in test_cases:
+        params = dict(valid_params)
+        params.update(override)
+        malformed = replace(verified, **params)
+        with pytest.raises(
+            RuntimeError,
+            match="Core-verified physical Candidate provenance",
+        ):
+            CandidateCommitter(manager).create_candidate_commit(contract, lease, malformed)
+
+
+def test_candidate_commit_accepts_valid_exact_core_provenance(tmp_path):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    valid_hash = "sha256:" + "a" * 64
+    valid_session = "cms_" + "b" * 32
+    core_verified = replace(
+        verified,
+        core_provenance_required=True,
+        candidate_commit_allowed=True,
+        core_verification_status="VERIFIED",
+        core_binding_hash=valid_hash,
+        core_mutation_session_id=valid_session,
+        core_change_set_hash=valid_hash,
+        core_evidence_bundle_hash=valid_hash,
+        core_verification_result_hash=valid_hash,
+    )
+    packet = CandidateCommitter(manager).create_candidate_commit(contract, lease, core_verified)
+    assert packet.candidate_commit_created is True
 
 
 def test_candidate_commit_is_automatic_but_promotion_pending(tmp_path):
@@ -126,6 +203,60 @@ def test_precommitted_worker_candidate_is_reused_without_wrapper_commit(tmp_path
     assert packet.candidate_commit_created is True
     assert packet.candidate_commit_sha == worker_head
     assert _git(target, "rev-list", "--count", f"{lease.initial_head}..HEAD") == "1"
+
+
+def test_precommitted_multi_commit_candidate_reuses_exact_tip_and_full_range_paths(tmp_path):
+    contract, lease, _, manager = _scenario(tmp_path)
+    contract = contract.model_copy(update={"allowed_files": ["bounded.txt", "second.txt"]})
+    target = Path(lease.target_worktree)
+    target.joinpath("bounded.txt").write_text("worker commit one\n", encoding="utf-8")
+    _git(target, "add", "bounded.txt")
+    _git(target, "commit", "-m", "worker candidate one")
+    target.joinpath("second.txt").write_text("worker commit two\n", encoding="utf-8")
+    _git(target, "add", "second.txt")
+    _git(target, "commit", "-m", "worker candidate two")
+    worker_head = _git(target, "rev-parse", "HEAD")
+    candidate = manager.capture_candidate(contract, lease)
+    verified = CandidateVerifier(manager).verify(contract, lease, candidate)
+    assert verified.verified is True
+    packet = CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
+    assert packet.candidate_commit_created is True
+    assert packet.candidate_commit_sha == worker_head
+    assert _git(target, "rev-list", "--count", f"{lease.initial_head}..HEAD") == "2"
+    assert _git(target, "diff", "--name-only", lease.initial_head, worker_head).splitlines() == ["bounded.txt", "second.txt"]
+
+
+def test_precommitted_clean_head_advancement_after_capture_is_rejected(tmp_path, monkeypatch):
+    contract, lease, _, manager = _scenario(tmp_path)
+    target = Path(lease.target_worktree)
+    target.joinpath("bounded.txt").write_text("worker committed\n", encoding="utf-8")
+    _git(target, "add", "bounded.txt")
+    _git(target, "commit", "-m", "worker candidate")
+    candidate = manager.capture_candidate(contract, lease)
+    verified = CandidateVerifier(manager).verify(contract, lease, candidate)
+
+    original_run_git = manager._run_git
+    original_capture = manager.capture_candidate
+    capture_finished = False
+    advanced = False
+
+    def advance_after_capture(args, *, cwd, env=None):
+        nonlocal advanced
+        if capture_finished and not advanced and args == ["rev-parse", "HEAD"]:
+            _git(target, "commit", "--allow-empty", "-m", "unverified advancement")
+            advanced = True
+        return original_run_git(args, cwd=cwd, env=env)
+
+    def capture_then_arm(contract_arg, lease_arg):
+        nonlocal capture_finished
+        result = original_capture(contract_arg, lease_arg)
+        capture_finished = True
+        return result
+
+    monkeypatch.setattr(manager, "_run_git", advance_after_capture)
+    monkeypatch.setattr(manager, "capture_candidate", capture_then_arm)
+    with pytest.raises(RuntimeError, match="candidate tip changed after verification"):
+        CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
 
 
 def test_candidate_commit_rejects_unverified_receipt(tmp_path):

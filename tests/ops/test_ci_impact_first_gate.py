@@ -42,7 +42,7 @@ GATES: dict[str, dict[str, Any]] = {
 }
 
 IMPACT_STEP = "Decide cheap exact-base impact"
-INSTALL_STEP = "Install uv and dependencies"
+INSTALL_STEPS = ("Install uv", "Install dependencies")
 REQUIRED_TRUE = "steps.impact.outputs.required == 'true'"
 REQUIRED_FALSE = "steps.impact.outputs.required != 'true'"
 
@@ -76,8 +76,10 @@ def _triggers(gate: str) -> dict[str, Any]:
 @pytest.mark.parametrize("gate", sorted(GATES))
 def test_impact_decision_precedes_dependency_install(gate: str) -> None:
     names = [step.get("name", "") for step in _steps(gate)]
-    assert names.index(IMPACT_STEP) < names.index(INSTALL_STEP)
-    assert _step(gate, INSTALL_STEP).get("if") == REQUIRED_TRUE
+    impact_index = names.index(IMPACT_STEP)
+    for install_step in INSTALL_STEPS:
+        assert impact_index < names.index(install_step)
+        assert _step(gate, install_step).get("if") == REQUIRED_TRUE
 
 
 @pytest.mark.parametrize("gate", sorted(GATES))
@@ -114,7 +116,8 @@ def test_unknown_identity_cannot_skip_gate(gate: str) -> None:
     assert '"$(git rev-parse HEAD)" != "$HEAD_SHA"' in impact
     assert "git cat-file -e" in impact
     assert "required=true" in impact
-    assert _step(gate, INSTALL_STEP).get("if") == REQUIRED_TRUE
+    for install_step in INSTALL_STEPS:
+        assert _step(gate, install_step).get("if") == REQUIRED_TRUE
 
 
 @pytest.mark.parametrize("gate", sorted(GATES))

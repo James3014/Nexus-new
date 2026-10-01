@@ -247,6 +247,14 @@ def _completion_snapshot(history: dict[str, str | Path]) -> dict:
                 "status": "PASS",
                 "bound_sha": main,
                 "bound_tree_sha": str(history["tree"]),
+                "witness_kind": "POSITIVE_CONTROL",
+            }
+        ],
+        "acceptance_criteria": [
+            {
+                "id": "AC-BASELINE",
+                "status": "SATISFIED_CURRENT",
+                "evidence_ids": ["post-merge-verifier"],
             }
         ],
         "hard_prerequisites": [],
@@ -259,7 +267,7 @@ def _completion_snapshot(history: dict[str, str | Path]) -> dict:
 
 
 def _completion_bindings(snapshot: dict) -> dict:
-    return {
+    bindings = {
         "repository": snapshot["repository"],
         "issue_number": snapshot["issue"]["number"],
         "issue_contract_revision": snapshot["issue"]["contract_revision"],
@@ -273,7 +281,39 @@ def _completion_bindings(snapshot: dict) -> dict:
         "current_main_tree_sha": snapshot["current_main"]["tree_sha"],
         "required_evidence_ids": list(snapshot["required_evidence_ids"]),
         "required_predecessors": list(snapshot["hard_prerequisites"]),
+        "required_acceptance_criteria": list(
+            snapshot.get(
+                "required_acceptance_criteria",
+                [
+                    {
+                        "id": "AC-BASELINE",
+                        "required_witness_kinds": ["POSITIVE_CONTROL"],
+                    }
+                ],
+            )
+        ),
     }
+    if "prior_closure_history" in snapshot:
+        history = snapshot["prior_closure_history"]
+        if history is not None:
+            bindings["prior_closure_history"] = dict(history)
+            if (
+                "previous_closure_falsifiers" in history
+                and "required_previous_falsifiers" not in history
+            ):
+                bindings["prior_closure_history"]["required_previous_falsifiers"] = [
+                    {
+                        "id": f["id"],
+                        "required_recurrence_witness_kinds": f.get(
+                            "required_recurrence_witness_kinds",
+                            f.get("required_witness_kinds", ["MECHANICAL_ENFORCEMENT"]),
+                        ),
+                    }
+                    for f in history["previous_closure_falsifiers"]
+                ]
+    if "issue_reopened_same_contract" in snapshot:
+        bindings["issue_reopened_same_contract"] = snapshot["issue_reopened_same_contract"]
+    return bindings
 
 
 def _evaluate(snapshot: dict, history: dict[str, str | Path], *, expected: dict | None = None):
@@ -296,6 +336,122 @@ def test_completion_snapshot_binds_issue_candidate_merge_and_current_main(tmp_pa
         "downstream_ready": True,
         "failures": [],
     }
+
+
+def test_completion_snapshot_rejects_semantic_false_green_without_required_witness_coverage(
+    tmp_path,
+):
+    history = _completion_repo(tmp_path)
+    snapshot = _completion_snapshot(history)
+    snapshot["evidence"][0]["witness_kind"] = "POSITIVE_CONTROL"
+    snapshot["acceptance_criteria"] = [
+        {
+            "id": "AC-FIRST-PROJECT-ACTION",
+            "status": "SATISFIED_CURRENT",
+            "evidence_ids": ["post-merge-verifier"],
+        }
+    ]
+    snapshot["required_acceptance_criteria"] = [
+        {
+            "id": "AC-FIRST-PROJECT-ACTION",
+            "required_witness_kinds": ["POSITIVE_CONTROL", "NEGATIVE_CONTROL"],
+        }
+    ]
+
+    result = _evaluate(snapshot, history)
+
+    assert result["disposition"] == "BLOCKED_EVIDENCE"
+    assert (
+        "criterion_witness_kind_missing:AC-FIRST-PROJECT-ACTION:NEGATIVE_CONTROL"
+        in result["failures"]
+    )
+
+
+def test_completion_snapshot_requires_fresh_acceptance_criterion_binding(tmp_path):
+    history = _completion_repo(tmp_path)
+    snapshot = _completion_snapshot(history)
+    expected = _completion_snapshot(history)
+    expected["required_acceptance_criteria"] = []
+
+    result = _evaluate(snapshot, history, expected=expected)
+
+    assert result["disposition"] == "BLOCKED_EVIDENCE"
+    assert "expected_acceptance_criteria_invalid" in result["failures"]
+
+
+def test_completion_snapshot_rejects_omitted_material_acceptance_criterion(tmp_path):
+    history = _completion_repo(tmp_path)
+    snapshot = _completion_snapshot(history)
+    snapshot["required_acceptance_criteria"] = [
+        {
+            "id": "AC-BASELINE",
+            "required_witness_kinds": ["POSITIVE_CONTROL"],
+        },
+        {
+            "id": "AC-NEGATIVE-CONTROL",
+            "required_witness_kinds": ["NEGATIVE_CONTROL"],
+        },
+    ]
+
+    result = _evaluate(snapshot, history)
+
+    assert result["disposition"] == "BLOCKED_EVIDENCE"
+    assert "acceptance_criterion_set_mismatch" in result["failures"]
+    assert "acceptance_criterion_missing:AC-NEGATIVE-CONTROL" in result["failures"]
+
+
+def test_completion_snapshot_keeps_open_for_current_falsified_criterion(tmp_path):
+    history = _completion_repo(tmp_path)
+    snapshot = _completion_snapshot(history)
+    snapshot["original_contract_satisfied"] = False
+    snapshot["acceptance_criteria"][0]["status"] = "UNSATISFIED_CURRENT"
+    snapshot["evidence"][0]["witness_kind"] = "FALSIFIER"
+
+    result = _evaluate(snapshot, history)
+
+    assert result["disposition"] == "KEEP_OPEN"
+    assert result["terminal"] is False
+    assert result["downstream_ready"] is False
+    assert result["failures"] == []
+
+
+def test_completion_snapshot_blocks_unavailable_criterion_evidence(tmp_path):
+    history = _completion_repo(tmp_path)
+    snapshot = _completion_snapshot(history)
+    snapshot["original_contract_satisfied"] = False
+    snapshot["acceptance_criteria"][0] = {
+        "id": "AC-BASELINE",
+        "status": "EVIDENCE_UNAVAILABLE",
+        "evidence_ids": [],
+    }
+
+    result = _evaluate(snapshot, history)
+
+    assert result["disposition"] == "BLOCKED_EVIDENCE"
+    assert "criterion_evidence_unavailable:AC-BASELINE" in result["failures"]
+
+
+def test_completion_snapshot_rejects_stale_criterion_witness(tmp_path):
+    history = _completion_repo(tmp_path)
+    snapshot = _completion_snapshot(history)
+    snapshot["evidence"][0]["bound_sha"] = "a" * 40
+
+    result = _evaluate(snapshot, history)
+
+    assert result["disposition"] == "BLOCKED_EVIDENCE"
+    assert "criterion_evidence_not_current:AC-BASELINE:post-merge-verifier" in result["failures"]
+
+
+def test_completion_snapshot_rejects_bare_original_satisfied_assertion(tmp_path):
+    history = _completion_repo(tmp_path)
+    snapshot = _completion_snapshot(history)
+    snapshot["acceptance_criteria"][0]["status"] = "UNSATISFIED_CURRENT"
+    snapshot["evidence"][0]["witness_kind"] = "FALSIFIER"
+
+    result = _evaluate(snapshot, history)
+
+    assert result["disposition"] == "BLOCKED_EVIDENCE"
+    assert "original_contract_satisfied_mismatch" in result["failures"]
 
 
 def test_completion_snapshot_stale_main_fails_closed(tmp_path):
@@ -352,6 +508,8 @@ def test_completion_snapshot_does_not_unlock_downstream_for_open_predecessor(tmp
     history = _completion_repo(tmp_path)
     snapshot = _completion_snapshot(history)
     snapshot["original_contract_satisfied"] = False
+    snapshot["acceptance_criteria"][0]["status"] = "UNSATISFIED_CURRENT"
+    snapshot["evidence"][0]["witness_kind"] = "FALSIFIER"
     snapshot["requested_downstream_ready"] = True
     snapshot["hard_prerequisites"] = [
         {
@@ -604,3 +762,659 @@ def test_completion_snapshot_cli_requires_fresh_bindings_and_explicit_main_ref(t
     assert "Completion bindings are required" in missing_bindings.stdout
     assert valid.returncode == 0
     assert json.loads(valid.stdout)["disposition"] == "DONE_NO_FOLLOW_UP"
+
+
+def test_completion_snapshot_rejects_missing_prior_closure_history_when_expected(tmp_path):
+    history = _completion_repo(tmp_path)
+    snapshot = _completion_snapshot(history)
+    expected = _completion_snapshot(history)
+    expected["prior_closure_history"] = {
+        "prior_terminal_identity": "comment_123",
+        "prior_reopen_identity": "comment_456",
+        "reopen_reason": "SAME_CONTRACT_INCOMPLETENESS",
+        "escalation_classification": "REOPENED_SAME_CONTRACT",
+        "recurrence_count": 1,
+        "required_previous_falsifiers": [
+            {
+                "id": "FALSIFIER-TEST",
+                "required_recurrence_witness_kinds": ["MECHANICAL_ENFORCEMENT"],
+            }
+        ],
+    }
+
+    result = _evaluate(snapshot, history, expected=expected)
+
+    assert result["disposition"] == "BLOCKED_EVIDENCE"
+    assert "prior_closure_history_missing" in result["failures"]
+
+
+def test_completion_snapshot_rejects_omitted_prior_closure_falsifier(tmp_path):
+    history = _completion_repo(tmp_path)
+    snapshot = _completion_snapshot(history)
+    expected = _completion_snapshot(history)
+    expected["prior_closure_history"] = {
+        "prior_terminal_identity": "comment_123",
+        "prior_reopen_identity": "comment_456",
+        "reopen_reason": "SAME_CONTRACT_INCOMPLETENESS",
+        "escalation_classification": "REOPENED_SAME_CONTRACT",
+        "recurrence_count": 1,
+        "required_previous_falsifiers": [
+            {
+                "id": "FALSIFIER-A",
+                "required_recurrence_witness_kinds": ["MECHANICAL_ENFORCEMENT"],
+            },
+            {
+                "id": "FALSIFIER-B",
+                "required_recurrence_witness_kinds": ["HOSTILE_REGRESSION"],
+            },
+        ],
+    }
+    snapshot["prior_closure_history"] = {
+        "prior_terminal_identity": "comment_123",
+        "prior_reopen_identity": "comment_456",
+        "reopen_reason": "SAME_CONTRACT_INCOMPLETENESS",
+        "escalation_classification": "REOPENED_SAME_CONTRACT",
+        "recurrence_count": 1,
+        "previous_closure_falsifiers": [
+            {
+                "id": "FALSIFIER-A",
+                "status": "SEALED_CURRENT",
+                "proof_mechanism": "MECHANICAL_ENFORCEMENT",
+                "evidence_ids": ["post-merge-verifier"],
+            }
+        ],
+    }
+
+    result = _evaluate(snapshot, history, expected=expected)
+
+    assert result["disposition"] == "BLOCKED_EVIDENCE"
+    assert "previous_closure_falsifier_set_mismatch" in result["failures"]
+
+
+def test_completion_snapshot_rejects_stale_prior_falsifier_witness(tmp_path):
+    history = _completion_repo(tmp_path)
+    snapshot = _completion_snapshot(history)
+    snapshot["evidence"].append({
+        "id": "stale-witness",
+        "kind": "POST_MERGE_CURRENT_MAIN",
+        "status": "PASS",
+        "bound_sha": "a" * 40,
+        "bound_tree_sha": "b" * 40,
+        "witness_kind": "MECHANICAL_ENFORCEMENT",
+    })
+    snapshot["required_evidence_ids"].append("stale-witness")
+    snapshot["prior_closure_history"] = {
+        "prior_terminal_identity": "comment_123",
+        "prior_reopen_identity": "comment_456",
+        "reopen_reason": "SAME_CONTRACT_INCOMPLETENESS",
+        "escalation_classification": "REOPENED_SAME_CONTRACT",
+        "recurrence_count": 1,
+        "previous_closure_falsifiers": [
+            {
+                "id": "FALSIFIER-TEST",
+                "status": "SEALED_CURRENT",
+                "proof_mechanism": "MECHANICAL_ENFORCEMENT",
+                "evidence_ids": ["stale-witness"],
+            }
+        ],
+    }
+    expected = _completion_snapshot(history)
+    expected["required_evidence_ids"].append("stale-witness")
+    expected["prior_closure_history"] = {
+        "prior_terminal_identity": "comment_123",
+        "prior_reopen_identity": "comment_456",
+        "reopen_reason": "SAME_CONTRACT_INCOMPLETENESS",
+        "escalation_classification": "REOPENED_SAME_CONTRACT",
+        "recurrence_count": 1,
+        "required_previous_falsifiers": [
+            {
+                "id": "FALSIFIER-TEST",
+                "required_recurrence_witness_kinds": ["MECHANICAL_ENFORCEMENT"],
+            }
+        ],
+    }
+
+    result = _evaluate(snapshot, history, expected=expected)
+
+    assert result["disposition"] == "BLOCKED_EVIDENCE"
+    assert any("falsifier_evidence_not_current" in f for f in result["failures"])
+
+
+def test_completion_snapshot_blocks_unavailable_prior_falsifier_evidence(tmp_path):
+    history = _completion_repo(tmp_path)
+    snapshot = _completion_snapshot(history)
+    snapshot["prior_closure_history"] = {
+        "prior_terminal_identity": "comment_123",
+        "prior_reopen_identity": "comment_456",
+        "reopen_reason": "SAME_CONTRACT_INCOMPLETENESS",
+        "escalation_classification": "REOPENED_SAME_CONTRACT",
+        "recurrence_count": 1,
+        "previous_closure_falsifiers": [
+            {
+                "id": "FALSIFIER-TEST",
+                "status": "EVIDENCE_UNAVAILABLE",
+            }
+        ],
+    }
+    expected = _completion_snapshot(history)
+    expected["prior_closure_history"] = {
+        "prior_terminal_identity": "comment_123",
+        "prior_reopen_identity": "comment_456",
+        "reopen_reason": "SAME_CONTRACT_INCOMPLETENESS",
+        "escalation_classification": "REOPENED_SAME_CONTRACT",
+        "recurrence_count": 1,
+        "required_previous_falsifiers": [
+            {
+                "id": "FALSIFIER-TEST",
+                "required_recurrence_witness_kinds": ["MECHANICAL_ENFORCEMENT"],
+            }
+        ],
+    }
+
+    result = _evaluate(snapshot, history, expected=expected)
+
+    assert result["disposition"] == "BLOCKED_EVIDENCE"
+    assert "previous_closure_falsifier_evidence_unavailable:FALSIFIER-TEST" in result["failures"]
+
+
+def test_completion_snapshot_keeps_open_for_still_reproducible_prior_falsifier(tmp_path):
+    history = _completion_repo(tmp_path)
+    snapshot = _completion_snapshot(history)
+    snapshot["original_contract_satisfied"] = False
+    snapshot["prior_closure_history"] = {
+        "prior_terminal_identity": "comment_123",
+        "prior_reopen_identity": "comment_456",
+        "reopen_reason": "SAME_CONTRACT_INCOMPLETENESS",
+        "escalation_classification": "REOPENED_SAME_CONTRACT",
+        "recurrence_count": 1,
+        "previous_closure_falsifiers": [
+            {
+                "id": "FALSIFIER-TEST",
+                "status": "STILL_REPRODUCIBLE",
+            }
+        ],
+    }
+    expected = _completion_snapshot(history)
+    expected["prior_closure_history"] = {
+        "prior_terminal_identity": "comment_123",
+        "prior_reopen_identity": "comment_456",
+        "reopen_reason": "SAME_CONTRACT_INCOMPLETENESS",
+        "escalation_classification": "REOPENED_SAME_CONTRACT",
+        "recurrence_count": 1,
+        "required_previous_falsifiers": [
+            {
+                "id": "FALSIFIER-TEST",
+                "required_recurrence_witness_kinds": ["MECHANICAL_ENFORCEMENT"],
+            }
+        ],
+    }
+
+    result = _evaluate(snapshot, history, expected=expected)
+
+    assert result["disposition"] == "KEEP_OPEN"
+    assert result["terminal"] is False
+    assert "previous_closure_falsifier_still_reproducible:FALSIFIER-TEST" in result["failures"]
+
+
+def test_completion_snapshot_accepts_fully_closed_recurrence_with_witness_coverage(tmp_path):
+    history = _completion_repo(tmp_path)
+    snapshot = _completion_snapshot(history)
+    snapshot["evidence"][0]["witness_kind"] = "MECHANICAL_ENFORCEMENT"
+    snapshot["acceptance_criteria"][0]["evidence_ids"] = ["post-merge-verifier"]
+    snapshot["required_acceptance_criteria"] = [
+        {"id": "AC-BASELINE", "required_witness_kinds": ["MECHANICAL_ENFORCEMENT"]}
+    ]
+    snapshot["prior_closure_history"] = {
+        "prior_terminal_identity": "comment_123",
+        "prior_reopen_identity": "comment_456",
+        "reopen_reason": "SAME_CONTRACT_INCOMPLETENESS",
+        "escalation_classification": "REOPENED_SAME_CONTRACT",
+        "recurrence_count": 1,
+        "previous_closure_falsifiers": [
+            {
+                "id": "FALSIFIER-TEST",
+                "status": "SEALED_CURRENT",
+                "proof_mechanism": "MECHANICAL_ENFORCEMENT",
+                "evidence_ids": ["post-merge-verifier"],
+            }
+        ],
+    }
+    expected = dict(snapshot)
+    expected["prior_closure_history"] = {
+        "prior_terminal_identity": "comment_123",
+        "prior_reopen_identity": "comment_456",
+        "reopen_reason": "SAME_CONTRACT_INCOMPLETENESS",
+        "escalation_classification": "REOPENED_SAME_CONTRACT",
+        "recurrence_count": 1,
+        "required_previous_falsifiers": [
+            {
+                "id": "FALSIFIER-TEST",
+                "required_recurrence_witness_kinds": ["MECHANICAL_ENFORCEMENT"],
+            }
+        ],
+    }
+
+    result = _evaluate(snapshot, history, expected=expected)
+
+    assert result == {
+        "disposition": "DONE_NO_FOLLOW_UP",
+        "terminal": True,
+        "downstream_ready": True,
+        "failures": [],
+    }
+
+
+def test_completion_snapshot_requires_architecture_review_for_repeated_false_closure(tmp_path):
+    history = _completion_repo(tmp_path)
+    snapshot = _completion_snapshot(history)
+    snapshot["evidence"][0]["witness_kind"] = "MECHANICAL_ENFORCEMENT"
+    snapshot["required_acceptance_criteria"] = [
+        {"id": "AC-BASELINE", "required_witness_kinds": ["MECHANICAL_ENFORCEMENT"]}
+    ]
+    snapshot["prior_closure_history"] = {
+        "prior_terminal_identity": "comment_123",
+        "prior_reopen_identity": "comment_456",
+        "reopen_reason": "SAME_CONTRACT_INCOMPLETENESS",
+        "escalation_classification": "REPEATED_FALSE_CLOSURE",
+        "recurrence_count": 2,
+        "previous_closure_falsifiers": [
+            {
+                "id": "FALSIFIER-TEST",
+                "status": "SEALED_CURRENT",
+                "proof_mechanism": "MECHANICAL_ENFORCEMENT",
+                "evidence_ids": ["post-merge-verifier"],
+            }
+        ],
+    }
+    expected = dict(snapshot)
+    expected["prior_closure_history"] = {
+        "prior_terminal_identity": "comment_123",
+        "prior_reopen_identity": "comment_456",
+        "reopen_reason": "SAME_CONTRACT_INCOMPLETENESS",
+        "escalation_classification": "REPEATED_FALSE_CLOSURE",
+        "recurrence_count": 2,
+        "required_previous_falsifiers": [
+            {
+                "id": "FALSIFIER-TEST",
+                "required_recurrence_witness_kinds": ["MECHANICAL_ENFORCEMENT"],
+            }
+        ],
+    }
+
+    result = _evaluate(snapshot, history, expected=expected)
+    assert result["disposition"] == "BLOCKED_EVIDENCE"
+    assert "architecture_review_not_confirmed" in result["failures"]
+
+    snapshot["prior_closure_history"]["architecture_review_confirmed"] = True
+    result_reviewed = _evaluate(snapshot, history, expected=expected)
+    assert result_reviewed["disposition"] == "DONE_NO_FOLLOW_UP"
+    assert result_reviewed["terminal"] is True
+    assert result_reviewed["failures"] == []
+
+
+def test_completion_snapshot_rejects_omitted_history_when_issue_reopened_same_contract(tmp_path):
+    history = _completion_repo(tmp_path)
+    snapshot = _completion_snapshot(history)
+    snapshot["issue"]["reopened_same_contract"] = True
+
+    result = _evaluate(snapshot, history)
+
+    assert result["disposition"] == "BLOCKED_EVIDENCE"
+    assert "prior_closure_history_required" in result["failures"]
+
+
+def test_completion_snapshot_rejects_unexpected_prior_closure_history(tmp_path):
+    history = _completion_repo(tmp_path)
+    snapshot = _completion_snapshot(history)
+    expected = _completion_snapshot(history)
+    snapshot["prior_closure_history"] = {
+        "prior_terminal_identity": "comment_123",
+        "prior_reopen_identity": "comment_456",
+        "reopen_reason": "SAME_CONTRACT_INCOMPLETENESS",
+        "escalation_classification": "REOPENED_SAME_CONTRACT",
+        "recurrence_count": 1,
+        "previous_closure_falsifiers": [],
+    }
+
+    result = _evaluate(snapshot, history, expected=expected)
+
+    assert result["disposition"] == "BLOCKED_EVIDENCE"
+    assert "unexpected_prior_closure_history" in result["failures"]
+
+
+def test_completion_snapshot_regression_fixture_issue_842_prior_narrow_prompt_witness(tmp_path):
+    history = _completion_repo(tmp_path)
+    main = str(history["main"])
+    tree = str(history["tree"])
+
+    snapshot = _completion_snapshot(history)
+    snapshot["issue"]["number"] = 842
+    snapshot["candidate"]["issue_number"] = 842
+    snapshot["pull_request"]["issue_number"] = 842
+
+    snapshot["evidence"] = [
+        {
+            "id": "post-merge-verifier",
+            "kind": "POST_MERGE_CURRENT_MAIN",
+            "status": "PASS",
+            "bound_sha": main,
+            "bound_tree_sha": tree,
+            "witness_kind": "POSITIVE_CONTROL",
+        },
+        {
+            "id": "evidence-842-manifest-drift-guard",
+            "kind": "POST_MERGE_CURRENT_MAIN",
+            "status": "PASS",
+            "bound_sha": main,
+            "bound_tree_sha": tree,
+            "witness_kind": "MECHANICAL_ENFORCEMENT",
+        },
+        {
+            "id": "evidence-842-caller-surface-convergence",
+            "kind": "POST_MERGE_CURRENT_MAIN",
+            "status": "PASS",
+            "bound_sha": main,
+            "bound_tree_sha": tree,
+            "witness_kind": "CALLER_SURFACE_CONVERGENCE",
+        },
+    ]
+    snapshot["required_evidence_ids"] = [
+        "post-merge-verifier",
+        "evidence-842-manifest-drift-guard",
+        "evidence-842-caller-surface-convergence",
+    ]
+    snapshot["acceptance_criteria"] = [
+        {
+            "id": "AC-PROJECT-ENTRY-READINESS",
+            "status": "SATISFIED_CURRENT",
+            "evidence_ids": [
+                "post-merge-verifier",
+                "evidence-842-manifest-drift-guard",
+                "evidence-842-caller-surface-convergence",
+            ],
+        }
+    ]
+    snapshot["required_acceptance_criteria"] = [
+        {
+            "id": "AC-PROJECT-ENTRY-READINESS",
+            "required_witness_kinds": [
+                "POSITIVE_CONTROL",
+                "MECHANICAL_ENFORCEMENT",
+                "CALLER_SURFACE_CONVERGENCE",
+            ],
+        }
+    ]
+    expected_history = {
+        "prior_terminal_identity": "comment_5613422356",
+        "prior_reopen_identity": "comment_5816956253",
+        "reopen_reason": "SAME_CONTRACT_INCOMPLETENESS",
+        "escalation_classification": "REOPENED_SAME_CONTRACT",
+        "recurrence_count": 1,
+        "required_previous_falsifiers": [
+            {
+                "id": "FALSIFIER-842-FIRST-PROJECT-ACTION-BYPASS",
+                "required_recurrence_witness_kinds": ["MECHANICAL_ENFORCEMENT"],
+            },
+            {
+                "id": "FALSIFIER-842-CALLER-SURFACE-STALE-DRIFT",
+                "required_recurrence_witness_kinds": ["CALLER_SURFACE_CONVERGENCE"],
+            },
+        ],
+    }
+
+    # Case 1: Caller-surface drift falsifier is still reproducible (not yet activated)
+    snapshot_reproduced = dict(snapshot)
+    snapshot_reproduced["original_contract_satisfied"] = False
+    snapshot_reproduced["prior_closure_history"] = {
+        "prior_terminal_identity": "comment_5613422356",
+        "prior_reopen_identity": "comment_5816956253",
+        "reopen_reason": "SAME_CONTRACT_INCOMPLETENESS",
+        "escalation_classification": "REOPENED_SAME_CONTRACT",
+        "recurrence_count": 1,
+        "previous_closure_falsifiers": [
+            {
+                "id": "FALSIFIER-842-FIRST-PROJECT-ACTION-BYPASS",
+                "status": "SEALED_CURRENT",
+                "proof_mechanism": "MECHANICAL_ENFORCEMENT",
+                "evidence_ids": ["evidence-842-manifest-drift-guard"],
+            },
+            {
+                "id": "FALSIFIER-842-CALLER-SURFACE-STALE-DRIFT",
+                "status": "STILL_REPRODUCIBLE",
+            },
+        ],
+    }
+    expected = dict(snapshot)
+    expected["prior_closure_history"] = expected_history
+
+    result_reproduced = _evaluate(snapshot_reproduced, history, expected=expected)
+    assert result_reproduced["disposition"] == "KEEP_OPEN"
+    assert result_reproduced["terminal"] is False
+    assert (
+        "previous_closure_falsifier_still_reproducible:FALSIFIER-842-CALLER-SURFACE-STALE-DRIFT"
+        in result_reproduced["failures"]
+    )
+
+    # Case 2: Both falsifiers are sealed with mechanical invariant and caller surface convergence
+    snapshot_sealed = dict(snapshot)
+    snapshot_sealed["prior_closure_history"] = {
+        "prior_terminal_identity": "comment_5613422356",
+        "prior_reopen_identity": "comment_5816956253",
+        "reopen_reason": "SAME_CONTRACT_INCOMPLETENESS",
+        "escalation_classification": "REOPENED_SAME_CONTRACT",
+        "recurrence_count": 1,
+        "previous_closure_falsifiers": [
+            {
+                "id": "FALSIFIER-842-FIRST-PROJECT-ACTION-BYPASS",
+                "status": "SEALED_CURRENT",
+                "proof_mechanism": "MECHANICAL_ENFORCEMENT",
+                "evidence_ids": ["evidence-842-manifest-drift-guard"],
+            },
+            {
+                "id": "FALSIFIER-842-CALLER-SURFACE-STALE-DRIFT",
+                "status": "SEALED_CURRENT",
+                "proof_mechanism": "MECHANICAL_ENFORCEMENT",
+                "evidence_ids": ["evidence-842-caller-surface-convergence"],
+            },
+        ],
+    }
+
+    result_sealed = _evaluate(snapshot_sealed, history, expected=expected)
+    assert result_sealed == {
+        "disposition": "DONE_NO_FOLLOW_UP",
+        "terminal": True,
+        "downstream_ready": True,
+        "failures": [],
+    }
+
+
+def test_completion_snapshot_regression_fixture_issue_807_caller_actuator_witness(tmp_path):
+    history = _completion_repo(tmp_path)
+    main = str(history["main"])
+    tree = str(history["tree"])
+
+    snapshot = _completion_snapshot(history)
+    snapshot["issue"]["number"] = 807
+    snapshot["candidate"]["issue_number"] = 807
+    snapshot["pull_request"]["issue_number"] = 807
+
+    snapshot["evidence"] = [
+        {
+            "id": "post-merge-verifier",
+            "kind": "POST_MERGE_CURRENT_MAIN",
+            "status": "PASS",
+            "bound_sha": main,
+            "bound_tree_sha": tree,
+            "witness_kind": "POSITIVE_CONTROL",
+        },
+        {
+            "id": "evidence-807-inner-vs-caller-boundary",
+            "kind": "POST_MERGE_CURRENT_MAIN",
+            "status": "PASS",
+            "bound_sha": main,
+            "bound_tree_sha": tree,
+            "witness_kind": "MECHANICAL_ENFORCEMENT",
+        },
+        {
+            "id": "evidence-807-host-actuator-reachability",
+            "kind": "POST_MERGE_CURRENT_MAIN",
+            "status": "PASS",
+            "bound_sha": main,
+            "bound_tree_sha": tree,
+            "witness_kind": "ACTUATOR_REACHABILITY",
+        },
+    ]
+    snapshot["required_evidence_ids"] = [
+        "post-merge-verifier",
+        "evidence-807-inner-vs-caller-boundary",
+        "evidence-807-host-actuator-reachability",
+    ]
+    snapshot["acceptance_criteria"] = [
+        {
+            "id": "AC-READINESS-CONVERGENCE",
+            "status": "SATISFIED_CURRENT",
+            "evidence_ids": [
+                "post-merge-verifier",
+                "evidence-807-inner-vs-caller-boundary",
+                "evidence-807-host-actuator-reachability",
+            ],
+        }
+    ]
+    snapshot["required_acceptance_criteria"] = [
+        {
+            "id": "AC-READINESS-CONVERGENCE",
+            "required_witness_kinds": [
+                "POSITIVE_CONTROL",
+                "MECHANICAL_ENFORCEMENT",
+                "ACTUATOR_REACHABILITY",
+            ],
+        }
+    ]
+    expected_history = {
+        "prior_terminal_identity": "comment_5615174160",
+        "prior_reopen_identity": "comment_5822582459",
+        "reopen_reason": "SAME_CONTRACT_INCOMPLETENESS",
+        "escalation_classification": "REOPENED_SAME_CONTRACT",
+        "recurrence_count": 1,
+        "required_previous_falsifiers": [
+            {
+                "id": "FALSIFIER-807-INNER-GATEWAY-CALLER-ACTUATOR-MISMATCH",
+                "required_recurrence_witness_kinds": ["MECHANICAL_ENFORCEMENT"],
+            },
+            {
+                "id": "FALSIFIER-807-REQUIRED-HOST-ACTUATOR-REACHABILITY",
+                "required_recurrence_witness_kinds": ["ACTUATOR_REACHABILITY"],
+            },
+        ],
+    }
+
+    # Case 1: Actuator reachability witness omitted -> fails closed as BLOCKED_EVIDENCE
+    snapshot_missing_witness = dict(snapshot)
+    snapshot_missing_witness["prior_closure_history"] = {
+        "prior_terminal_identity": "comment_5615174160",
+        "prior_reopen_identity": "comment_5822582459",
+        "reopen_reason": "SAME_CONTRACT_INCOMPLETENESS",
+        "escalation_classification": "REOPENED_SAME_CONTRACT",
+        "recurrence_count": 1,
+        "previous_closure_falsifiers": [
+            {
+                "id": "FALSIFIER-807-INNER-GATEWAY-CALLER-ACTUATOR-MISMATCH",
+                "status": "SEALED_CURRENT",
+                "proof_mechanism": "MECHANICAL_ENFORCEMENT",
+                "evidence_ids": ["evidence-807-inner-vs-caller-boundary"],
+            },
+            {
+                "id": "FALSIFIER-807-REQUIRED-HOST-ACTUATOR-REACHABILITY",
+                "status": "SEALED_CURRENT",
+                "proof_mechanism": "MECHANICAL_ENFORCEMENT",
+                "evidence_ids": ["evidence-807-inner-vs-caller-boundary"],
+            },
+        ],
+    }
+    expected = dict(snapshot)
+    expected["prior_closure_history"] = expected_history
+
+    result_missing = _evaluate(snapshot_missing_witness, history, expected=expected)
+    assert result_missing["disposition"] == "BLOCKED_EVIDENCE"
+    assert (
+        "falsifier_witness_kind_missing:FALSIFIER-807-REQUIRED-HOST-ACTUATOR-REACHABILITY:ACTUATOR_REACHABILITY"
+        in result_missing["failures"]
+    )
+
+    # Case 2: All falsifiers sealed with required witness kinds -> DONE_NO_FOLLOW_UP
+    snapshot_sealed = dict(snapshot)
+    snapshot_sealed["prior_closure_history"] = {
+        "prior_terminal_identity": "comment_5615174160",
+        "prior_reopen_identity": "comment_5822582459",
+        "reopen_reason": "SAME_CONTRACT_INCOMPLETENESS",
+        "escalation_classification": "REOPENED_SAME_CONTRACT",
+        "recurrence_count": 1,
+        "previous_closure_falsifiers": [
+            {
+                "id": "FALSIFIER-807-INNER-GATEWAY-CALLER-ACTUATOR-MISMATCH",
+                "status": "SEALED_CURRENT",
+                "proof_mechanism": "MECHANICAL_ENFORCEMENT",
+                "evidence_ids": ["evidence-807-inner-vs-caller-boundary"],
+            },
+            {
+                "id": "FALSIFIER-807-REQUIRED-HOST-ACTUATOR-REACHABILITY",
+                "status": "SEALED_CURRENT",
+                "proof_mechanism": "MECHANICAL_ENFORCEMENT",
+                "evidence_ids": ["evidence-807-host-actuator-reachability"],
+            },
+        ],
+    }
+
+    result_sealed = _evaluate(snapshot_sealed, history, expected=expected)
+    assert result_sealed == {
+        "disposition": "DONE_NO_FOLLOW_UP",
+        "terminal": True,
+        "downstream_ready": True,
+        "failures": [],
+    }
+
+
+def test_completion_snapshot_cli_enforces_prior_closure_history(tmp_path):
+    history = _completion_repo(tmp_path)
+    snapshot = _completion_snapshot(history)
+    expected = _completion_snapshot(history)
+    expected["prior_closure_history"] = {
+        "prior_terminal_identity": "comment_123",
+        "prior_reopen_identity": "comment_456",
+        "reopen_reason": "SAME_CONTRACT_INCOMPLETENESS",
+        "escalation_classification": "REOPENED_SAME_CONTRACT",
+        "recurrence_count": 1,
+        "required_previous_falsifiers": [
+            {
+                "id": "FALSIFIER-TEST",
+                "required_recurrence_witness_kinds": ["MECHANICAL_ENFORCEMENT"],
+            }
+        ],
+    }
+    snapshot_path = tmp_path / "snapshot.json"
+    bindings_path = tmp_path / "bindings.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    bindings_path.write_text(json.dumps(_completion_bindings(expected)), encoding="utf-8")
+    script = ROOT / "scripts/ops/agent_protocol_check.py"
+
+    run_res = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--completion-snapshot",
+            str(snapshot_path),
+            "--completion-bindings",
+            str(bindings_path),
+            "--main-ref",
+            "refs/remotes/nexus-new/main",
+        ],
+        cwd=history["repo"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert run_res.returncode == 1
+    result = json.loads(run_res.stdout)
+    assert result["disposition"] == "BLOCKED_EVIDENCE"
+    assert "prior_closure_history_missing" in result["failures"]

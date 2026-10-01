@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
+import shutil
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, Sequence
@@ -17,7 +21,32 @@ from nexus.services.external_account_pool import (
     is_rotation_eligible,
 )
 
-SENSITIVE_API_KEYS = ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY")
+# GitHub credential keys are stripped from every worker execution environment
+# so a delegated worker never inherits a broad Owner GitHub credential that
+# could be interpreted as external-publication authority.
+AGY_ACCOUNT_PREFERENCE_TIERS_VERSION = 3
+
+GITHUB_CREDENTIAL_KEYS = (
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GH_ENTERPRISE_TOKEN",
+    "GITHUB_ENTERPRISE_TOKEN",
+    "GITHUB_PAT",
+    "GITHUB_ACTIONS_TOKEN",
+)
+
+SENSITIVE_API_KEYS = (
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GOOGLE_GENAI_API_KEY",
+) + GITHUB_CREDENTIAL_KEYS
+
+
+SUPPORTED_AGY_MODEL_FAMILIES = frozenset({"gemini", "claude_gpt"})
+MODEL_FAMILY_SCOPED_FAILURES = frozenset({
+    AccountFailureKind.QUOTA_EXHAUSTED,
+})
+DEFAULT_FAMILY_UNAVAILABLE_TTL_SECONDS = 300.0
 
 
 class AgyAccountPoolError(RuntimeError):
@@ -28,8 +57,65 @@ class AgyAccountPoolExhaustedError(AgyAccountPoolError):
     """Raised when no active account is available in the pool."""
 
 
+class AgyAccountPoolBusyError(AgyAccountPoolError):
+    """Raised when all active accounts are currently locked/leased across processes."""
+
+
 class AgyAccountPoolManagerError(AgyAccountPoolError):
     """Raised when the account pool manager CLI fails or returns invalid data."""
+
+
+def is_agy_rotation_eligible(failure_kind: AccountFailureKind) -> bool:
+    """Agy provider timeouts cool down the current account before another attempt."""
+    return failure_kind == AccountFailureKind.TIMEOUT or is_rotation_eligible(failure_kind)
+
+
+@dataclass
+class AccountLeaseClaim:
+    """Exclusive cross-process lease claim on one account.
+
+    Maintains an exclusive OS-level flock on the account's lock file
+    for the entire duration of the worker's execution.
+    """
+
+    lease: AccountLease
+    lock_file_obj: Any
+    lock_path: Path
+    receipt_path: Path
+    account_alias_hash: str
+    lease_id_hash: str
+    manager: Any
+    internal_id: str
+    released: bool = False
+
+    def release(self) -> None:
+        """Release the per-account exclusive lock, durable receipt, and manager lease."""
+        if self.released:
+            return
+        self.released = True
+        try:
+            if self.receipt_path.exists():
+                self.receipt_path.unlink()
+        except OSError:
+            pass
+        try:
+            if self.lock_file_obj:
+                import fcntl
+
+                fcntl.flock(self.lock_file_obj.fileno(), fcntl.LOCK_UN)
+                self.lock_file_obj.close()
+        except OSError:
+            pass
+        try:
+            self.manager.release(self.lease)
+        except Exception:
+            pass
+
+    def __enter__(self) -> AccountLeaseClaim:
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.release()
 
 
 @dataclass
@@ -56,13 +142,59 @@ def build_isolated_env(
     return env
 
 
+def _ensure_macos_isolated_keychain(home_dir: str) -> None:
+    """Give an isolated AGY HOME its own default keychain on macOS."""
+    if sys.platform != "darwin":
+        return
+    security = shutil.which("security")
+    if not security:
+        raise AgyAccountPoolManagerError("AGY_KEYCHAIN_SECURITY_TOOL_MISSING")
+
+    home = Path(home_dir)
+    if not home.is_dir():
+        raise AgyAccountPoolManagerError(f"AGY_KEYCHAIN_HOME_MISSING:{home}")
+
+    keychains_dir = home / "Library" / "Keychains"
+    prefs_dir = home / "Library" / "Preferences"
+    keychains_dir.mkdir(parents=True, exist_ok=True)
+    prefs_dir.mkdir(parents=True, exist_ok=True)
+    keychain = keychains_dir / "agy.keychain-db"
+    env = dict(os.environ)
+    env["HOME"] = str(home)
+
+    def run(*args: str) -> None:
+        proc = subprocess.run(
+            [security, *args],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        if proc.returncode != 0:
+            detail = (proc.stderr or "").strip().replace("\n", " ")[:240]
+            raise AgyAccountPoolManagerError(
+                f"AGY_KEYCHAIN_SETUP_FAILED:{args[0]}:{proc.returncode}:{detail}"
+            )
+
+    if not keychain.exists():
+        run("create-keychain", "-p", "", str(keychain))
+        try:
+            keychain.chmod(0o600)
+        except OSError:
+            pass
+    run("unlock-keychain", "-p", "", str(keychain))
+    run("set-keychain-settings", str(keychain))
+    run("default-keychain", "-s", str(keychain))
+    run("list-keychains", "-s", str(keychain), "/Library/Keychains/System.keychain")
+
+
 def _is_populated_runtime(path: Path) -> bool:
     if not path.exists() or not path.is_dir():
         return False
     state_json = path / "state.json"
     if state_json.exists() and state_json.is_file():
         try:
-            import json
             data = json.loads(state_json.read_text(encoding="utf-8"))
             accounts = data.get("accounts")
             if isinstance(accounts, dict) and len(accounts) > 0:
@@ -101,7 +233,9 @@ class AgyAccountPoolManager:
             self._use_real_manager = use_real_manager
         else:
             resolved_mgr = self.resolve_manager_path(manager_path)
-            self._use_real_manager = bool(resolved_mgr and Path(resolved_mgr).is_file() and accounts is None)
+            self._use_real_manager = bool(
+                resolved_mgr and Path(resolved_mgr).is_file() and accounts is None
+            )
 
         if self._use_real_manager:
             if not self._manager_path:
@@ -129,7 +263,9 @@ class AgyAccountPoolManager:
         return str(default_path.resolve()) if default_path.exists() else str(default_path)
 
     @staticmethod
-    def resolve_manager_root(override_root: Optional[str] = None, manager_path: Optional[str] = None) -> str:
+    def resolve_manager_root(
+        override_root: Optional[str] = None, manager_path: Optional[str] = None
+    ) -> str:
         if override_root:
             p = Path(override_root).expanduser()
             return str(p.resolve()) if p.exists() else str(p)
@@ -155,7 +291,11 @@ class AgyAccountPoolManager:
 
         if derived_from_mgr:
             if _is_populated_runtime(derived_from_mgr) or manager_path is not None:
-                return str(derived_from_mgr.resolve()) if derived_from_mgr.exists() else str(derived_from_mgr)
+                return (
+                    str(derived_from_mgr.resolve())
+                    if derived_from_mgr.exists()
+                    else str(derived_from_mgr)
+                )
 
         candidates = [Path.home() / ".nexus/agy-account-pool/runtime"]
 
@@ -168,7 +308,11 @@ class AgyAccountPoolManager:
                 return str(cand.resolve())
 
         if derived_from_mgr:
-            return str(derived_from_mgr.resolve()) if derived_from_mgr.exists() else str(derived_from_mgr)
+            return (
+                str(derived_from_mgr.resolve())
+                if derived_from_mgr.exists()
+                else str(derived_from_mgr)
+            )
 
         fallback_root = Path.home() / ".nexus/agy-account-pool/runtime"
         return str(fallback_root.resolve()) if fallback_root.exists() else str(fallback_root)
@@ -179,6 +323,7 @@ class AgyAccountPoolManager:
             raise AgyAccountPoolManagerError("AGY account pool manager binary not found")
         root = self._manager_root or self.resolve_manager_root(manager_path=mgr)
         import subprocess
+
         cmd = [mgr, "--root", root] + args
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=30.0)
@@ -192,32 +337,37 @@ class AgyAccountPoolManager:
         if not expect_json:
             return res.stdout
         try:
-            import json
             return json.loads(res.stdout)
         except json.JSONDecodeError as exc:
-            raise AgyAccountPoolManagerError(
-                "Invalid JSON returned by agy-cli-manager"
-            ) from exc
+            raise AgyAccountPoolManagerError("Invalid JSON returned by agy-cli-manager") from exc
 
     def _sync_real_active_account(self) -> AgyAccount:
         data = self._call_manager_cli(["ensure-active", "--json"])
         active_name = data.get("active") or data.get("switched_to")
         if not active_name:
-            raise AgyAccountPoolExhaustedError("AGY_ACCOUNT_POOL_EXHAUSTED: No active AGY account available")
+            raise AgyAccountPoolExhaustedError(
+                "AGY_ACCOUNT_POOL_EXHAUSTED: No active AGY account available"
+            )
 
         status = self._call_manager_cli(["status", "--json"])
         if not active_name:
             active_name = status.get("active")
         if not active_name:
-            raise AgyAccountPoolExhaustedError("AGY_ACCOUNT_POOL_EXHAUSTED: No active AGY account available")
+            raise AgyAccountPoolExhaustedError(
+                "AGY_ACCOUNT_POOL_EXHAUSTED: No active AGY account available"
+            )
 
         live_dir_str = status.get("live_dir")
         if not live_dir_str:
-            raise AgyAccountPoolManagerError("Active account live_dir is missing from manager status")
+            raise AgyAccountPoolManagerError(
+                "Active account live_dir is missing from manager status"
+            )
 
         live_dir_path = Path(live_dir_str)
         if not live_dir_path.is_absolute() or not live_dir_path.is_dir():
-            raise AgyAccountPoolManagerError("Active account live_dir is not an absolute existing directory")
+            raise AgyAccountPoolManagerError(
+                "Active account live_dir is not an absolute existing directory"
+            )
 
         # Resolve request lease using provider-owned immutable account snapshot HOME
         mgr_root = self._manager_root or status.get("root")
@@ -284,14 +434,21 @@ class AgyAccountPoolManager:
                 self._call_manager_cli(["mark-bad", failed_alias, "--reason", reason])
                 data = self._call_manager_cli(["ensure-active", "--json"])
             else:
-                data = self._call_manager_cli(["rotate-after-failure", "--reason", reason, "--json"])
+                data = self._call_manager_cli([
+                    "rotate-after-failure",
+                    "--reason",
+                    reason,
+                    "--json",
+                ])
 
             new_active = data.get("switched_to") or data.get("active")
             outcome = data.get("outcome")
             if not new_active or outcome in ("no_active_account", "marked_bad_no_standby"):
                 self._accounts = []
                 self._active_index = -1
-                raise AgyAccountPoolExhaustedError("AGY_ACCOUNT_POOL_EXHAUSTED: No available AGY accounts remaining in pool")
+                raise AgyAccountPoolExhaustedError(
+                    "AGY_ACCOUNT_POOL_EXHAUSTED: No available AGY accounts remaining in pool"
+                )
             return self._sync_real_active_account()
 
         if not self._accounts:
@@ -361,6 +518,7 @@ class AgyAccountPoolManager:
                         if cooldown_val:
                             try:
                                 from datetime import datetime, timezone
+
                                 cooldown_str = str(cooldown_val).replace("Z", "+00:00")
                                 dt = datetime.fromisoformat(cooldown_str)
                                 if dt > datetime.now(timezone.utc):
@@ -368,8 +526,17 @@ class AgyAccountPoolManager:
                             except Exception:
                                 is_cooldown = True
                         if not is_cooldown:
-                            is_avail = True
+                            if "identity" not in info:
+                                is_avail = True
+                            else:
+                                ident = info.get("identity") or {}
+                                if (
+                                    ident.get("account_name")
+                                    and ident.get("source") != "unavailable"
+                                ):
+                                    is_avail = True
 
+                    _ensure_macos_isolated_keychain(str(snapshot_dir))
                     env = build_isolated_env(home_dir=str(snapshot_dir))
                     h = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
                     records.append(
@@ -436,6 +603,7 @@ class AgyAccountPoolManager:
                 if cooldown_val:
                     try:
                         from datetime import datetime, timezone
+
                         cooldown_str = str(cooldown_val).replace("Z", "+00:00")
                         dt = datetime.fromisoformat(cooldown_str)
                         if dt > datetime.now(timezone.utc):
@@ -443,11 +611,17 @@ class AgyAccountPoolManager:
                     except Exception:
                         is_cooldown = True
                 if not is_cooldown:
-                    is_avail = True
+                    if "identity" not in info:
+                        is_avail = True
+                    else:
+                        ident = info.get("identity") or {}
+                        if ident.get("account_name") and ident.get("source") != "unavailable":
+                            is_avail = True
 
             if record is not None:
                 record.is_available = is_avail
             else:
+                _ensure_macos_isolated_keychain(str(snapshot_dir))
                 env = build_isolated_env(home_dir=str(snapshot_dir))
                 h = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
                 new_rec = InternalAccountRecord(
@@ -496,7 +670,9 @@ class AgyAccountPoolManager:
         if is_rotation_eligible(failure_kind):
             if self._use_real_manager:
                 # Execute mark-bad without parsing as JSON and propagate errors
-                self._call_manager_cli(["mark-bad", failed_alias, "--reason", failure_kind.value], expect_json=False)
+                self._call_manager_cli(
+                    ["mark-bad", failed_alias, "--reason", failure_kind.value], expect_json=False
+                )
             else:
                 for acc in self._accounts:
                     if acc.alias == failed_alias:
@@ -514,6 +690,565 @@ class AgyAccountPoolManager:
             return next_lease
         return None
 
+    def mark_account_bad(
+        self,
+        lease: AccountLease,
+        failure_kind: AccountFailureKind,
+    ) -> bool:
+        """Mark one account unavailable and report whether provider-manager state was durably persisted.
+
+        In-memory managers return False so cross-process callers know they still need a
+        host-local durable quarantine. Real-manager success returns True.
+        """
+        failed_alias = self._lease_to_raw_alias.get(lease.lease_id)
+        if failed_alias is None and self._pool:
+            try:
+                failed_alias = self._pool._require_active_lease(lease)
+            except Exception:
+                pass
+
+        if failed_alias is None and self._pool:
+            for acc_id, record in self._pool._accounts.items():
+                if record.alias_hash == lease.account_alias_hash:
+                    failed_alias = acc_id
+                    break
+
+        if failed_alias is None and self._accounts:
+            for acc in self._accounts:
+                if acc.alias_hash == lease.account_alias_hash:
+                    failed_alias = acc.alias
+                    break
+
+        for acc in self._accounts:
+            if (
+                failed_alias and acc.alias == failed_alias
+            ) or acc.alias_hash == lease.account_alias_hash:
+                acc.is_active = False
+
+        if self._pool:
+            for acc_id, record in self._pool._accounts.items():
+                if (
+                    failed_alias and acc_id == failed_alias
+                ) or record.alias_hash == lease.account_alias_hash:
+                    record.is_available = False
+
+        manager_persisted = False
+        if self._use_real_manager:
+            if not failed_alias:
+                raise AgyAccountPoolManagerError(
+                    f"Cannot mark account bad: alias for hash {lease.account_alias_hash} not found"
+                )
+            self._call_manager_cli(
+                ["mark-bad", failed_alias, "--reason", failure_kind.value], expect_json=False
+            )
+            manager_persisted = True
+
+        try:
+            self._refresh_pool_health()
+        except Exception:
+            pass
+        return manager_persisted
+
+
+class CrossProcessLeaseCoordinator:
+    """Coordinates cross-process exclusive account leases.
+
+    Implements the two-tier lock topology:
+    1. Short-lived allocator lock (~/.nexus/agy-account-pool/allocator.lock):
+       held ONLY during health refresh, inspecting claimed accounts, selecting one free healthy
+       account, atomically claiming the per-account lock, and recording the durable lease receipt.
+       Immediately unlocked.
+    2. Per-account exclusive lock (~/.nexus/agy-account-pool/leases/<account_alias_hash>.lock):
+       held exclusively by the worker process while running Agy. Released upon completion/error.
+    """
+
+    def __init__(
+        self,
+        manager: AgyAccountPoolManager,
+        allocator_lock_path: Optional[Path] = None,
+        leases_dir: Optional[Path] = None,
+        poll_interval: float = 0.2,
+        default_wait_timeout: float = 15.0,
+    ):
+        self.manager = manager
+
+        env_alloc = os.getenv("NEXUS_AGY_ALLOCATOR_LOCK_PATH")
+        if allocator_lock_path is not None:
+            self.allocator_lock_path = Path(allocator_lock_path).resolve()
+        elif env_alloc:
+            self.allocator_lock_path = Path(env_alloc).expanduser().resolve()
+        else:
+            mgr_root = Path(manager._manager_root or AgyAccountPoolManager.resolve_manager_root())
+            base_dir = mgr_root.parent if mgr_root.name == "runtime" else mgr_root
+            self.allocator_lock_path = base_dir / "allocator.lock"
+
+        env_leases = os.getenv("NEXUS_AGY_LEASES_DIR")
+        if leases_dir is not None:
+            self.leases_dir = Path(leases_dir).resolve()
+        elif env_leases:
+            self.leases_dir = Path(env_leases).expanduser().resolve()
+        else:
+            mgr_root = Path(manager._manager_root or AgyAccountPoolManager.resolve_manager_root())
+            base_dir = mgr_root.parent if mgr_root.name == "runtime" else mgr_root
+            self.leases_dir = base_dir / "leases"
+
+        self.poll_interval = poll_interval
+        self.default_wait_timeout = default_wait_timeout
+
+    def _family_unavailable_path(self, account_alias_hash: str, model_family: str) -> Path:
+        if model_family not in SUPPORTED_AGY_MODEL_FAMILIES:
+            raise ValueError(f"Unsupported Agy model family: {model_family}")
+        return self.leases_dir / (f"{account_alias_hash}.family-unavailable.{model_family}.json")
+
+    def mark_family_unavailable(
+        self,
+        account_alias_hash: str,
+        *,
+        model_family: str,
+        reason: str,
+        unavailable_until: float | None = None,
+        claim: Optional[AccountLeaseClaim] = None,
+    ) -> Path:
+        """Durably block one account only for one model family across processes."""
+        import time
+
+        self.leases_dir.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        until = (
+            float(unavailable_until)
+            if unavailable_until is not None and float(unavailable_until) > now
+            else now + DEFAULT_FAMILY_UNAVAILABLE_TTL_SECONDS
+        )
+        path = self._family_unavailable_path(account_alias_hash, model_family)
+        payload = {
+            "account_alias_hash": account_alias_hash,
+            "model_family": model_family,
+            "reason": reason,
+            "unavailable_at": now,
+            "unavailable_until": until,
+            "lease_id_hash": claim.lease_id_hash if claim else "none",
+            "consumer_id": claim.lease.consumer_id if claim else "unknown",
+            "pid": os.getpid(),
+        }
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+        try:
+            tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            os.replace(tmp, path)
+        finally:
+            if tmp.exists():
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+        return path
+
+    def get_family_unavailable_hashes(
+        self,
+        model_family: str | None,
+        *,
+        now_ts: float | None = None,
+    ) -> set[str]:
+        """Return active family-scoped blocks, pruning expired markers."""
+        import time
+
+        if model_family not in SUPPORTED_AGY_MODEL_FAMILIES:
+            return set()
+        if not self.leases_dir.exists():
+            return set()
+
+        current = time.time() if now_ts is None else float(now_ts)
+        suffix = f".family-unavailable.{model_family}.json"
+        blocked: set[str] = set()
+        for path in self.leases_dir.glob(f"*{suffix}"):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                until = float(payload.get("unavailable_until"))
+                alias_hash = str(payload.get("account_alias_hash") or "")
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                # A malformed durable block fails closed for the encoded account hash.
+                alias_hash = path.name[: -len(suffix)]
+                if alias_hash:
+                    blocked.add(alias_hash)
+                continue
+
+            if until <= current:
+                try:
+                    path.unlink()
+                except OSError:
+                    blocked.add(alias_hash or path.name[: -len(suffix)])
+                continue
+            if alias_hash:
+                blocked.add(alias_hash)
+        return blocked
+
+    def is_family_unavailable(
+        self,
+        account_alias_hash: str,
+        model_family: str | None,
+        *,
+        now_ts: float | None = None,
+    ) -> bool:
+        return account_alias_hash in self.get_family_unavailable_hashes(
+            model_family,
+            now_ts=now_ts,
+        )
+
+    def quarantine_account(
+        self,
+        account_alias_hash: str,
+        reason: str,
+        claim: Optional[AccountLeaseClaim] = None,
+    ) -> Path:
+        """Durably quarantine an account across processes by alias hash only.
+
+        Writes an atomic quarantine marker in leases_dir. No raw alias/email/credentials
+        are exposed in the filename or content.
+        """
+        import json
+        import time
+
+        self.leases_dir.mkdir(parents=True, exist_ok=True)
+        q_path = self.leases_dir / f"{account_alias_hash}.quarantine.json"
+        data: dict[str, Any] = {
+            "account_alias_hash": account_alias_hash,
+            "lease_id_hash": claim.lease_id_hash if claim else "none",
+            "consumer_id": claim.lease.consumer_id if claim else "unknown",
+            "reason": reason,
+            "quarantined_at": time.time(),
+            "pid": os.getpid(),
+        }
+
+        tmp_path = (
+            self.leases_dir / f".{account_alias_hash}.quarantine.{os.getpid()}.{time.time_ns()}.tmp"
+        )
+        try:
+            tmp_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+            os.replace(tmp_path, q_path)
+        except Exception:
+            try:
+                q_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+            finally:
+                if tmp_path.exists():
+                    try:
+                        tmp_path.unlink()
+                    except OSError:
+                        pass
+        return q_path
+
+    def unquarantine_account(self, account_alias_hash: str) -> bool:
+        """Explicit conservative unquarantine for recovery paths only.
+
+        Requires explicit target hash; no automatic unquarantine is performed.
+        """
+        removed = False
+        for suffix in (".quarantine.json", ".quarantine"):
+            p = self.leases_dir / f"{account_alias_hash}{suffix}"
+            if p.exists():
+                try:
+                    p.unlink()
+                    removed = True
+                except OSError:
+                    pass
+        return removed
+
+    def is_quarantined(self, account_alias_hash: str) -> bool:
+        """Check whether an account hash is currently quarantined."""
+        q_json = self.leases_dir / f"{account_alias_hash}.quarantine.json"
+        if q_json.exists():
+            return True
+        q_raw = self.leases_dir / f"{account_alias_hash}.quarantine"
+        if q_raw.exists():
+            return True
+        return False
+
+    def get_quarantined_hashes(self) -> set[str]:
+        """Return the set of all quarantined account alias hashes."""
+        quarantined = set()
+        if not self.leases_dir.exists():
+            return quarantined
+        try:
+            for p in self.leases_dir.iterdir():
+                if p.name.endswith(".quarantine.json"):
+                    quarantined.add(p.name[: -len(".quarantine.json")])
+                elif p.name.endswith(".quarantine"):
+                    quarantined.add(p.name[: -len(".quarantine")])
+        except OSError:
+            pass
+        return quarantined
+
+    def retire_failed_claim(
+        self,
+        claim: AccountLeaseClaim,
+        failure_kind: AccountFailureKind,
+        *,
+        model_family: str | None = None,
+        unavailable_until: float | None = None,
+    ) -> None:
+        """Retire a failed claim at the narrowest durable availability scope.
+
+        Quota exhaustion with a known model family is isolated to
+        account x model_family. Rate limits and authentication/session/account failures remain
+        account-global and keep the provider manager's normal cooldown semantics.
+        """
+        if not is_agy_rotation_eligible(failure_kind):
+            return
+
+        if claim.released:
+            return
+
+        if (
+            failure_kind in MODEL_FAMILY_SCOPED_FAILURES
+            and model_family in SUPPORTED_AGY_MODEL_FAMILIES
+        ):
+            try:
+                self.mark_family_unavailable(
+                    claim.account_alias_hash,
+                    model_family=model_family,
+                    reason=failure_kind.value,
+                    unavailable_until=unavailable_until,
+                    claim=claim,
+                )
+            except Exception as exc:
+                raise AgyAccountPoolManagerError(
+                    "AGY_FAMILY_RETIREMENT_UNSAFE: family availability state was not persisted"
+                ) from exc
+            claim.release()
+            return
+
+        # Account-global failures keep the provider-manager bad/cooldown state.
+        manager_persisted = False
+        manager_error: Exception | None = None
+        try:
+            manager_persisted = bool(self.manager.mark_account_bad(claim.lease, failure_kind))
+        except Exception as exc:
+            manager_error = exc
+
+        quarantine_persisted = False
+        quarantine_error: Exception | None = None
+        if not manager_persisted:
+            try:
+                self.quarantine_account(
+                    claim.account_alias_hash,
+                    reason=failure_kind.value,
+                    claim=claim,
+                )
+                quarantine_persisted = True
+            except Exception as exc:
+                quarantine_error = exc
+
+        if not manager_persisted and not quarantine_persisted:
+            detail = manager_error or quarantine_error
+            raise AgyAccountPoolManagerError(
+                "AGY_ACCOUNT_RETIREMENT_UNSAFE: no durable manager or local quarantine state"
+            ) from detail
+
+        claim.release()
+
+    def acquire_claim(
+        self,
+        consumer_id: str,
+        exclude_hashes: Optional[set[str]] = None,
+        wait_timeout: Optional[float] = None,
+        *,
+        model_family: str | None = None,
+    ) -> AccountLeaseClaim:
+        import fcntl
+        import time
+
+        timeout = wait_timeout if wait_timeout is not None else self.default_wait_timeout
+        deadline = time.monotonic() + max(0.0, timeout)
+
+        self.allocator_lock_path.parent.mkdir(parents=True, exist_ok=True)
+        self.leases_dir.mkdir(parents=True, exist_ok=True)
+
+        excluded = set(exclude_hashes or ())
+
+        while True:
+            claimed: Optional[AccountLeaseClaim] = None
+            has_healthy_candidates = False
+
+            with self.allocator_lock_path.open("a+") as alloc_f:
+                fcntl.flock(alloc_f.fileno(), fcntl.LOCK_EX)
+                try:
+                    self.manager._refresh_pool_health()
+                    pool = self.manager._ensure_pool()
+
+                    quarantined_hashes = self.get_quarantined_hashes()
+                    family_unavailable_hashes = self.get_family_unavailable_hashes(model_family)
+                    blocked_accounts = {
+                        name.strip()
+                        for name in os.getenv("NEXUS_AGY_BLOCKED_ACCOUNTS", "").split(",")
+                        if name.strip()
+                    }
+
+                    available_accounts = [
+                        acc
+                        for acc in pool._accounts.values()
+                        if acc.is_available
+                        and acc.alias_hash not in excluded
+                        and acc.alias_hash not in quarantined_hashes
+                        and acc.alias_hash not in family_unavailable_hashes
+                        and acc.internal_id not in blocked_accounts
+                    ]
+
+                    if available_accounts:
+                        has_healthy_candidates = True
+
+                        def _ordered_rank(env_name: str, excluded: set[str]) -> dict[str, int]:
+                            ranks: dict[str, int] = {}
+                            for raw_name in os.getenv(env_name, "").split(","):
+                                name = raw_name.strip()
+                                if not name or name in excluded or name in ranks:
+                                    continue
+                                ranks[name] = len(ranks)
+                            return ranks
+
+                        preferred_ranks = _ordered_rank(
+                            "NEXUS_AGY_PREFERRED_ACCOUNTS",
+                            set(),
+                        )
+                        reserve_ranks = _ordered_rank(
+                            "NEXUS_AGY_RESERVE_ACCOUNTS",
+                            set(preferred_ranks),
+                        )
+                        fallback_ranks = _ordered_rank(
+                            "NEXUS_AGY_FALLBACK_ACCOUNTS",
+                            set(preferred_ranks) | set(reserve_ranks),
+                        )
+
+                        def _candidate_sort_key(
+                            account: InternalAccountRecord,
+                        ) -> tuple[object, ...]:
+                            if account.internal_id in preferred_ranks:
+                                tier = 0
+                                drain_rank = preferred_ranks[account.internal_id]
+                            elif account.internal_id in reserve_ranks:
+                                tier = 1
+                                drain_rank = reserve_ranks[account.internal_id]
+                            elif account.internal_id in fallback_ranks:
+                                tier = 2
+                                drain_rank = fallback_ranks[account.internal_id]
+                            else:
+                                tier = 3
+                                drain_rank = 0
+                            # Model-family availability establishes the tier. Within a tier,
+                            # dispatcher-provided order drains quota that is both abundant and
+                            # near reset before load/session spread breaks remaining ties.
+                            spread = hashlib.sha256(
+                                f"{consumer_id}\0{account.internal_id}".encode("utf-8")
+                            ).hexdigest()
+                            return (
+                                tier,
+                                drain_rank,
+                                account.load,
+                                spread,
+                                account.alias_hash,
+                            )
+
+                        candidates = sorted(available_accounts, key=_candidate_sort_key)
+
+                        for candidate in candidates:
+                            if candidate.alias_hash in quarantined_hashes:
+                                continue
+
+                            lock_path = self.leases_dir / f"{candidate.alias_hash}.lock"
+                            receipt_path = self.leases_dir / f"{candidate.alias_hash}.receipt.json"
+
+                            lock_obj = None
+                            try:
+                                lock_obj = lock_path.open("a+")
+                                fcntl.flock(lock_obj.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                            except (BlockingIOError, OSError):
+                                if lock_obj is not None:
+                                    try:
+                                        lock_obj.close()
+                                    except Exception:
+                                        pass
+                                continue
+
+                            assert lock_obj is not None
+
+                            # Atomically claimed per-account lock
+                            lease = pool.acquire(
+                                consumer_id, preferred_account_id=candidate.internal_id
+                            )
+                            self.manager._lease_to_raw_alias[lease.lease_id] = candidate.internal_id
+
+                            lease_id_hash = hashlib.sha256(
+                                lease.lease_id.encode("utf-8")
+                            ).hexdigest()[:12]
+                            receipt_data = {
+                                "account_alias_hash": candidate.alias_hash,
+                                "lease_id_hash": lease_id_hash,
+                                "consumer_id": consumer_id,
+                                "claimed_at": time.time(),
+                                "pid": os.getpid(),
+                            }
+                            receipt_path.write_text(
+                                json.dumps(receipt_data) + "\n", encoding="utf-8"
+                            )
+
+                            claimed = AccountLeaseClaim(
+                                lease=lease,
+                                lock_file_obj=lock_obj,
+                                lock_path=lock_path,
+                                receipt_path=receipt_path,
+                                account_alias_hash=candidate.alias_hash,
+                                lease_id_hash=lease_id_hash,
+                                manager=self.manager,
+                                internal_id=candidate.internal_id,
+                            )
+                            break
+                finally:
+                    fcntl.flock(alloc_f.fileno(), fcntl.LOCK_UN)
+
+            if claimed is not None:
+                return claimed
+
+            if not has_healthy_candidates:
+                raise AgyAccountPoolExhaustedError(
+                    "AGY_ACCOUNT_POOL_EXHAUSTED: No available healthy accounts"
+                )
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise AgyAccountPoolBusyError(
+                    "AGY_ACCOUNT_POOL_BUSY: All healthy accounts currently leased"
+                )
+
+            time.sleep(min(self.poll_interval, max(0.01, remaining)))
+
+    def rotate_claim(
+        self,
+        current_claim: AccountLeaseClaim,
+        failure_kind: AccountFailureKind,
+        exclude_hashes: set[str],
+        wait_timeout: Optional[float] = None,
+        *,
+        model_family: str | None = None,
+        unavailable_until: float | None = None,
+    ) -> AccountLeaseClaim:
+        old_hash = current_claim.account_alias_hash
+        old_lease = current_claim.lease
+        consumer_id = old_lease.consumer_id
+
+        # 1. Safely retire the failed claim at account or model-family scope.
+        self.retire_failed_claim(
+            current_claim,
+            failure_kind,
+            model_family=model_family,
+            unavailable_until=unavailable_until,
+        )
+        exclude_hashes.add(old_hash)
+
+        # 2. Briefly acquire allocator lock and claim another healthy account.
+        return self.acquire_claim(
+            consumer_id=consumer_id,
+            exclude_hashes=exclude_hashes,
+            wait_timeout=wait_timeout,
+            model_family=model_family,
+        )
+
 
 _GLOBAL_POOL_MANAGER: Optional[AgyAccountPoolManager] = None
 
@@ -524,10 +1259,16 @@ def get_account_pool_manager() -> AgyAccountPoolManager:
         return _GLOBAL_POOL_MANAGER
 
     manager_path = AgyAccountPoolManager.resolve_manager_path()
-    use_real = bool(manager_path and Path(manager_path).is_file() and os.getenv("NEXUS_AGY_ACCOUNT_ALIASES", "") == "")
+    use_real = bool(
+        manager_path
+        and Path(manager_path).is_file()
+        and os.getenv("NEXUS_AGY_ACCOUNT_ALIASES", "") == ""
+    )
 
     if use_real:
-        _GLOBAL_POOL_MANAGER = AgyAccountPoolManager(use_real_manager=True, manager_path=manager_path)
+        _GLOBAL_POOL_MANAGER = AgyAccountPoolManager(
+            use_real_manager=True, manager_path=manager_path
+        )
         return _GLOBAL_POOL_MANAGER
 
     accounts: list[AgyAccount] = []

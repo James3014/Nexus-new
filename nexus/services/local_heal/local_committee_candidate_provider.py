@@ -1,15 +1,52 @@
 from __future__ import annotations
 
 import hashlib
-import os
 from typing import Any
+
+from nexus.services.local_heal.backend_resource_policy import DEFAULT_POLICIES, ResourcePolicy
 from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
 from nexus.services.local_heal.local_model_provider import (
     LocalModelProvider,
     LocalModelProviderRequest,
 )
-from nexus.services.local_heal.role_contract import ROLE_CONTRACT, ModelRole, MODEL_ROLE_ALIASES
-from nexus.services.local_heal.backend_resource_policy import DEFAULT_POLICIES, ResourcePolicy
+
+# Lazy module-level references for trajectory telemetry — patchable by tests.
+# These are resolved once at import time; if the research package is unavailable
+# the attributes are left as None and telemetry is skipped entirely (fail-open).
+try:
+    from nexus.research.clm_system_one.trajectory_continuity import (
+        bind_trajectory_step_result,
+        resolve_research_evidence_root,
+        seal_trajectory_step,
+    )
+except Exception:  # pragma: no cover
+    resolve_research_evidence_root = None  # type: ignore[assignment]
+    seal_trajectory_step = None  # type: ignore[assignment]
+    bind_trajectory_step_result = None  # type: ignore[assignment]
+
+
+def stable_committee_trajectory_id(
+    *,
+    task_id: str,
+    attempt_id: str,
+    member_index: int,
+    model_name: str,
+) -> str:
+    """Derive a stable, collision-safe trajectory_id for a committee member.
+
+    The key components are:
+    - task_id: bound to this specific task
+    - attempt_id: bound to this generation attempt
+    - member_index: the original 1-based index in the full committee list
+      (judge at index 1, proposers at 2..N) — stable across retries
+    - model_name: the model identity
+
+    Hash-derived to guarantee no collision across different (task, attempt,
+    index, model) combinations even if individual components share prefixes.
+    """
+    key = f"{task_id}\x00{attempt_id}\x00{member_index}\x00{model_name}"
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    return f"lc-traj-{digest}"
 
 
 class LocalCommitteeCandidateProvider:
@@ -27,6 +64,8 @@ class LocalCommitteeCandidateProvider:
         route_context: dict[str, Any] | None = None,
         attempt_id: str = "attempt-1",
         execution_profile: str = "FULL",
+        repo_root: str = "",
+        source_revision: str = "",
     ) -> list[CandidateEnvelope]:
         # 1. Define committee members, roles and protocols.
         signal_snapshot = route_context.get("signal_snapshot", {}) if isinstance(route_context, dict) else {}
@@ -67,6 +106,15 @@ class LocalCommitteeCandidateProvider:
         envelopes = []
         anchor_hash = hashlib.sha256(locked_search.encode("utf-8")).hexdigest() if locked_search else ""
         
+        # Resolve telemetry context once — absent = no telemetry attempted.
+        _telem_enabled = bool(repo_root) and resolve_research_evidence_root is not None
+        _evidence_root = None
+        if _telem_enabled:
+            try:
+                _evidence_root = resolve_research_evidence_root(repo_root)  # type: ignore[misc]
+            except Exception:
+                _telem_enabled = False
+
         import re
         for idx, (model_name, role, patch_protocol) in enumerate(committee_models, 1):
             # Create a safe model slug (lowercase, replace non-alphanumeric chars with hyphens)
@@ -157,9 +205,81 @@ class LocalCommitteeCandidateProvider:
                 attempt_id=attempt_id,
                 execution_profile=execution_profile,
             )
-            
-            prov_resp = provider.generate(prov_req)
-            
+
+            # 4. Pre-action trajectory capture for non-judge proposers (fail-open).
+            _traj_step_ref = None
+            _is_proposer = role != "judge"
+            if _is_proposer and _telem_enabled and _evidence_root is not None and seal_trajectory_step is not None:
+                try:
+                    _traj_id = stable_committee_trajectory_id(
+                        task_id=task_id,
+                        attempt_id=attempt_id,
+                        member_index=idx,
+                        model_name=model_name,
+                    )
+                    _traj_step_ref = seal_trajectory_step(  # type: ignore[misc]
+                        evidence_root=_evidence_root,
+                        task_id=task_id,
+                        trajectory_id=_traj_id,
+                        attempt_id=attempt_id,
+                        candidate_id=None,  # not yet known before generate
+                        step_index=0,
+                        source_revision=source_revision,
+                        base_source_revision=source_revision,
+                        pre_action_state={
+                            "task_objective": problem_statement,
+                            "target_file": target_file,
+                            "evidence_refs": [str(r) for r in (evidence_refs or [])],
+                            "phase": "proposer",
+                        },
+                        action_type="local_committee_generate",
+                        action_payload={
+                            "model_name": model_name,
+                            "role": role,
+                            "patch_protocol": patch_protocol,
+                            "attempt_id": attempt_id,
+                            "execution_profile": execution_profile,
+                        },
+                    )
+                except Exception:
+                    # Telemetry must never affect candidate generation.
+                    _traj_step_ref = None
+
+            # 5. Invoke provider — wrap with trajectory result binding.
+            try:
+                prov_resp = provider.generate(prov_req)
+            except Exception as _gen_exc:
+                # Bind exception result for the sealed step, then re-raise.
+                if _traj_step_ref is not None and bind_trajectory_step_result is not None:
+                    try:
+                        bind_trajectory_step_result(  # type: ignore[misc]
+                            evidence_root=_evidence_root,
+                            step_ref=_traj_step_ref,
+                            action_result={
+                                "response_type": "Exception",
+                                "exception_type": type(_gen_exc).__name__,
+                                "error": str(_gen_exc),
+                            },
+                        )
+                    except Exception:
+                        pass
+                raise
+
+            # Bind success result for the sealed step.
+            if _traj_step_ref is not None and bind_trajectory_step_result is not None:
+                try:
+                    bind_trajectory_step_result(  # type: ignore[misc]
+                        evidence_root=_evidence_root,
+                        step_ref=_traj_step_ref,
+                        action_result={
+                            "response_type": type(prov_resp).__name__,
+                            "output_text": prov_resp.output_text or "",
+                            "error": str(prov_resp.error or ""),
+                        },
+                    )
+                except Exception:
+                    pass
+
             if prov_resp.error:
                 env = CandidateEnvelope(
                     candidate_id=f"{task_id}-{role}-{idx:02d}-{safe_model_slug}-error",

@@ -1,7 +1,7 @@
 ---
 schema: devspace-agent/v1
 name: opencode-deepseek-free-implement
-description: Writable implementation profile using the free DeepSeek flash model through OpenCode.
+description: COMPATIBILITY_ONLY - writable implementation profile retained for explicit DevSpace transport selection.
 provider: opencode
 model: opencode/deepseek-v4-flash-free
 write_mode: allowed

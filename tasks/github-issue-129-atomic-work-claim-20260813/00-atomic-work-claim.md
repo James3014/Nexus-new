@@ -19,18 +19,82 @@ allowed_files:
   - tasks/github-issue-129-atomic-work-claim-20260813/INDEX.md
   - tasks/github-issue-129-atomic-work-claim-20260813/00-atomic-work-claim.md
 authorized_deletions: []
-reconciled_main: 9622b24c321d02a59cb5cc2de2d948a60fa90df1
-current_main: 9622b24c321d02a59cb5cc2de2d948a60fa90df1
-terminal_marker: ATOMIC_READY_ISSUE_WORK_CLAIM_PROVEN
-claim_ceiling: ATOMIC_READY_ISSUE_WORK_CLAIM_PROVEN_EXISTING_SELF_HOSTED_SERVICE_ONLY
-shared_file_gate: SATISFIED_BY_PR226_MERGE_A787E8E7
-implementation_gate: CANDIDATE_PENDING_OWNER_RECONCILIATION
+reconciled_main: 18fb8c5a1849908e28e8f37c2a4e13e2c2837a8b
+current_main: 18fb8c5a1849908e28e8f37c2a4e13e2c2837a8b
+current_main_tree: a1689d50f46ce03aa03455668ef825c8d8fc5e72
+historical_terminal_marker: ATOMIC_READY_ISSUE_WORK_CLAIM_PROVEN
+terminal_marker: null
+claim_ceiling: ATOMIC_WORK_CLAIM_ENFORCEMENT_CANDIDATE_PR_ONLY
+shared_file_gate: SATISFIED_BY_PR581_MERGE_50A6FBC
+contract_delta: CANONICAL_CLAIM_ENFORCEMENT_INTEGRATION
+contract_delta_comment_id: 5336198602
+overlap_bind: OPEN_PR_EXACT_FOUR_PATH_SCAN_CLEAR_EXCLUDING_SELF_AT_18FB8C5A
+overlap_observed_at: 2026-08-27T08:59:15Z
+overlap_evidence_sha256: 4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945
+fast_start_cache_authority: ADVISORY_CACHE_ONLY
+fast_start_cache_registry_revision: 7
+fast_start_cache_entry_state: EVIDENCE_BLOCKED_REBOUND
+fast_start_rebind_result: TARGETED_REBIND_CLEAR
+fast_start_blocker_pr: 479
+fast_start_blocker_head: aa042582ccc55227db89a8a6ae86cf2d0286f31e
+fast_start_blocker_state: CLOSED
+allowed_scope_sha256: 354cda2ab9426878412ca8f924a6360bf223d176babad6a91227444233d84291
+source_blob: b5a1fd7da4e1d27e9607eedc7d352df592580d6e
+source_sha256: d566cdc7f546b6f2d754f2b1c8da8aee07220ab92e28904d3dea37f58f00722a
+test_blob: 41eaf842640d08bd1df45a43eea09afd3e4e220b
+test_sha256: aff86b50d2d8291294043b36544571c9018608d08e29f95bd0ac60e12816e7f3
+fresh_admission_required: true
+implementation_gate: READY_FOR_BOUNDED_IMPLEMENTATION_AFTER_FRESH_ADMISSION_AND_OVERLAP_BIND
 ---
 
 # Atomic Ready-Issue work claim
 
 - task_id: `github-issue-129-atomic-work-claim`
-- status: `ACTIVE` (candidate pending Owner Issue reconciliation)
+- status: `ACTIVE` (`READY_FOR_BOUNDED_IMPLEMENTATION_AFTER_FRESH_ADMISSION_AND_OVERLAP_BIND`)
+
+## Current Contract Delta — canonical claim enforcement integration
+
+Owner-settled Issue #129 comment `5336198602` supersedes the historical
+primitive-only frontier without rewriting its evidence. The atomic claim
+primitive is already present; the current bounded objective is to wire that
+primitive into the existing `SelfHostedTaskService` production dispatch path.
+
+Current baseline is `18fb8c5a1849908e28e8f37c2a4e13e2c2837a8b` / tree
+`a1689d50f46ce03aa03455668ef825c8d8fc5e72`. The two implementation blobs are
+byte-identical to historical shared-file baseline `50a6fbc7`; PR #581 remains
+the historical merge that closed the prior #467 overlap. A fresh GitHub scan at
+`2026-08-27T08:59:15Z` found no other open PR changing any of the exact four
+allowed paths. Fresh Workforce Admission is still required at dispatch time.
+The mandatory #549 Fast Start cache was consumed as `ADVISORY_CACHE_ONLY`:
+registry revision 7 reported stale evidence blocking on PR #479, whose exact
+head remains closed; target blobs and overlap were freshly rebound, producing
+`TARGETED_REBIND_CLEAR` without treating the cache as authority.
+
+Canonical boundaries for this delta:
+
+1. after durable task-state creation and before `_launch_worker`, acquire the
+   exact claim; a blocked acquisition launches no worker;
+2. at `_run_default_resumable` entry, validate the current claim before any
+   Target/worktree mutation;
+3. in `_revalidate_provider_boundary`, validate the claim immediately before
+   every provider invocation/retry together with the existing task-card,
+   Workforce, source, overlap, and provider facts;
+4. immediately before Candidate capture/commit/ref protection and any
+   claim-required release, recovery, or cleanup, validate the same current
+   fencing generation/token and full identity tuple.
+
+Claim-required behavior applies only when an explicit repository-enforced claim
+envelope is present. Existing manual-dispatch flows must not fabricate claims or
+silently become autonomous. Missing/stale/tampered claims, changed
+source/base/scope/admission/preflight/overlap facts, or stale recovery holders
+must fail closed before the affected provider/Target/Candidate/release/cleanup
+side effect.
+
+This delta remains inside the existing four-file ceiling. It does not modify
+`work_consumption.py`, #130, #98 Target concurrency, Workforce policy, routing,
+approval, merge, runtime, release, or production authority. Candidate evidence
+must stop at `ATOMIC_WORK_CLAIM_ENFORCEMENT_CANDIDATE_PR_ONLY`; it must not
+promote `claim_enforcement_state` from `PROJECTION_ONLY` to `REPO_ENFORCED`.
 
 ## Objective
 
@@ -54,16 +118,19 @@ id, and monotonic generation/fencing identity.
   shared service-test overlap is closed.
 - The current source owner is `SelfHostedTaskService`; the implementation must
   reuse its canonical state directory, per-task JSON, `.state.lock`, atomic
-  replace, task/attempt/action identity, and existing lifecycle authority.
+  replace, task/attempt/action identity, and existing lifecycle authority. The
+  current source/test blobs are exact `b5a1fd7d` / `41eaf842` and remain
+  unchanged from the accepted `50a6fbc7` shared-file baseline.
 - `CapabilityPlanner` remains the sole route selector. Workforce Admission is
   eligibility evidence only and must be freshly verified, not recomputed into
   routing authority by the claim seam.
 
-## Rebind and frozen contract
+## Historical primitive rebind and frozen contract
 
-This card is freshly bound to exact `nexus-new/main` commit
-`8e0986b40db56016c79b03eb81ff3d03c85c6f32`; no force, rebase, or history
-rewrite is permitted. The Owner authorizes only the persistent claim subrecord
+The original primitive implementation was bound to exact `nexus-new/main`
+commit `8e0986b40db56016c79b03eb81ff3d03c85c6f32`; that historical binding is
+preserved as evidence and is not the current enforcement-delta baseline. No
+force, rebase, or history rewrite is permitted. The Owner authorizes only the persistent claim subrecord
 and recovery protocol within the existing `SelfHostedTaskService` state
 directory and `.state.lock`. The implementation must freeze, validate, and
 hash-bind the following exact identity tuple before any mutable callback:
@@ -150,9 +217,14 @@ format delta is allowed in changed hunks.
 
 ## Exit
 
-Stop at an exact four-file Candidate commit/PR with deterministic hostile
-tests, scope/deletion audit, exact-base static evidence, and independent review
-pending. `AUTO_CHAIN=false`.
+For the current contract delta, stop at an exact four-file Candidate commit/PR
+that wires the existing claim primitive into the production dispatch boundary,
+with deterministic hostile tests, scope/deletion audit, exact-base static
+evidence, and independent review pending. `AUTO_CHAIN=false`.
+
+Maximum current claim:
+`ATOMIC_WORK_CLAIM_ENFORCEMENT_CANDIDATE_PR_ONLY`. Candidate evidence does not
+activate #130 or establish repository-wide `REPO_ENFORCED` truth.
 
 ## Historical Physical Receipt (not current Issue closure)
 
@@ -166,9 +238,11 @@ tests and all 291 SelfHostedTaskService tests, with no new exact-base Ruff
 debt and no hostile behavioral finding.
 
 This historical receipt is preserved as repository-contained physical evidence
-only. The current metadata baseline is
-`9622b24c321d02a59cb5cc2de2d948a60fa90df1`; the Issue remains a candidate
-pending Owner reconciliation, and no new terminal/closure receipt is asserted.
+only. The historical metadata reconciliation baseline was
+`9622b24c321d02a59cb5cc2de2d948a60fa90df1`; the current enforcement-delta
+baseline is `18fb8c5a1849908e28e8f37c2a4e13e2c2837a8b`. Historical
+`50a6fbc766218a17fa9296edf23ce95504fee8c8` remains ancestor/shared-file
+evidence only. No new terminal/closure receipt is asserted.
 
 `ATOMIC_READY_ISSUE_WORK_CLAIM_PROVEN` covers only the canonical atomic claim
 subrecord in the existing SelfHostedTaskService state and `.state.lock`. It

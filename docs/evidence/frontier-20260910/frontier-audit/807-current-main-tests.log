@@ -1,0 +1,66 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.0, pytest-9.0.3, pluggy-1.6.0
+rootdir: /private/tmp/nexus-807-audit.x1Jbwd
+configfile: pytest.ini
+plugins: timeout-2.4.0, asyncio-1.3.0, anyio-4.13.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 266 items
+
+tests/nexus/orchestrator/test_execution_readiness.py ................... [  7%]
+..............................................                           [ 24%]
+tests/nexus/orchestrator/test_unified_mcp_gateway.py ................... [ 31%]
+........................................................................ [ 58%]
+........................................................................ [ 85%]
+......................................                                   [100%]
+
+=============================== warnings summary ===============================
+nexus/contracts/autonomy_goal.py:113
+  /private/tmp/nexus-807-audit.x1Jbwd/nexus/contracts/autonomy_goal.py:113: UserWarning: Field name "schema" in "StandingGrantContext" shadows an attribute in parent "_FrozenModel"
+    class StandingGrantContext(_FrozenModel):
+
+nexus/contracts/autonomy_goal.py:267
+  /private/tmp/nexus-807-audit.x1Jbwd/nexus/contracts/autonomy_goal.py:267: UserWarning: Field name "schema" in "AutonomyGoalGrantSpec" shadows an attribute in parent "_FrozenModel"
+    class AutonomyGoalGrantSpec(_FrozenModel):
+
+nexus/orchestrator/autonomy_policy.py:115
+  /private/tmp/nexus-807-audit.x1Jbwd/nexus/orchestrator/autonomy_policy.py:115: UserWarning: Field name "schema" in "StandingGrantRequest" shadows an attribute in parent "_FrozenModel"
+    class StandingGrantRequest(_FrozenModel):
+
+nexus/orchestrator/autonomy_policy.py:137
+  /private/tmp/nexus-807-audit.x1Jbwd/nexus/orchestrator/autonomy_policy.py:137: UserWarning: Field name "schema" in "StandingGrantDecision" shadows an attribute in parent "_FrozenModel"
+    class StandingGrantDecision(_FrozenModel):
+
+nexus/orchestrator/autonomy_policy.py:396
+  /private/tmp/nexus-807-audit.x1Jbwd/nexus/orchestrator/autonomy_policy.py:396: UserWarning: Field name "schema" in "AutonomySubmissionBindingSpec" shadows an attribute in parent "_FrozenModel"
+    class AutonomySubmissionBindingSpec(_FrozenModel):
+
+nexus/orchestrator/autonomy_policy.py:457
+  /private/tmp/nexus-807-audit.x1Jbwd/nexus/orchestrator/autonomy_policy.py:457: UserWarning: Field name "schema" in "AutonomyEvaluationInput" shadows an attribute in parent "_FrozenModel"
+    class AutonomyEvaluationInput(_FrozenModel):
+
+nexus/orchestrator/autonomy_policy.py:507
+  /private/tmp/nexus-807-audit.x1Jbwd/nexus/orchestrator/autonomy_policy.py:507: UserWarning: Field name "schema" in "AutonomyDecision" shadows an attribute in parent "_FrozenModel"
+    class AutonomyDecision(_FrozenModel):
+
+nexus/orchestrator/standing_grant_store.py:67
+  /private/tmp/nexus-807-audit.x1Jbwd/nexus/orchestrator/standing_grant_store.py:67: UserWarning: Field name "schema" in "StandingGrantReceipt" shadows an attribute in parent "_FrozenModel"
+    class StandingGrantReceipt(_FrozenModel):
+
+nexus/contracts/lifecycle_action.py:319
+  /private/tmp/nexus-807-audit.x1Jbwd/nexus/contracts/lifecycle_action.py:319: UserWarning: Field name "schema" in "LifecycleActionEnvelope" shadows an attribute in parent "BaseModel"
+    class LifecycleActionEnvelope(BaseModel):
+
+nexus/contracts/lifecycle_action.py:406
+  /private/tmp/nexus-807-audit.x1Jbwd/nexus/contracts/lifecycle_action.py:406: UserWarning: Field name "schema" in "ExternalCandidateAdoptionRequest" shadows an attribute in parent "BaseModel"
+    class ExternalCandidateAdoptionRequest(BaseModel):
+
+nexus/contracts/collaboration_realm.py:101
+  /private/tmp/nexus-807-audit.x1Jbwd/nexus/contracts/collaboration_realm.py:101: UserWarning: Field name "schema" in "CollaborationExecutionRealmSpec" shadows an attribute in parent "_FrozenModel"
+    class CollaborationExecutionRealmSpec(_FrozenModel):
+
+nexus/contracts/operator_outcome_receipt.py:86
+  /private/tmp/nexus-807-audit.x1Jbwd/nexus/contracts/operator_outcome_receipt.py:86: UserWarning: Field name "schema" in "OperatorOutcomeReceipt" shadows an attribute in parent "BaseModel"
+    class OperatorOutcomeReceipt(BaseModel):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+====================== 266 passed, 12 warnings in 16.31s =======================

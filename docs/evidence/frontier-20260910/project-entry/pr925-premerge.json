@@ -1,0 +1,129 @@
+{
+  "baseRefOid": "9d768a527078eb82dde4048e83e029f0c4f2e73e",
+  "headRefOid": "16758457f552e874358f5566b9a70a11d5b4dfbb",
+  "mergeStateStatus": "CLEAN",
+  "mergeable": "MERGEABLE",
+  "state": "OPEN",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T04:43:33Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/James3014/Nexus-new/actions/runs/34438274029/job/102747794065",
+      "name": "invalidator",
+      "startedAt": "2026-09-10T04:43:23Z",
+      "status": "COMPLETED",
+      "workflowName": "Fast Start v2 Invalidator"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T04:44:15Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/James3014/Nexus-new/actions/runs/34438273947/job/102747793371",
+      "name": "Full published Git history secret audit",
+      "startedAt": "2026-09-10T04:43:22Z",
+      "status": "COMPLETED",
+      "workflowName": "Git History Secret Audit"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T04:43:37Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/James3014/Nexus-new/actions/runs/34438274011/job/102747793579",
+      "name": "Exact-base Bandit regression gate",
+      "startedAt": "2026-09-10T04:43:23Z",
+      "status": "COMPLETED",
+      "workflowName": "Nexus Exact-Base Bandit CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T04:43:35Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/James3014/Nexus-new/actions/runs/34438274080/job/102747793638",
+      "name": "Exact-base Pyright regression gate",
+      "startedAt": "2026-09-10T04:43:23Z",
+      "status": "COMPLETED",
+      "workflowName": "Nexus Exact-Base Pyright CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T04:44:05Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/James3014/Nexus-new/actions/runs/34438274038/job/102747793545",
+      "name": "Exact-base Ruff regression gate",
+      "startedAt": "2026-09-10T04:43:23Z",
+      "status": "COMPLETED",
+      "workflowName": "Nexus Exact-Base Ruff CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T04:47:28Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/James3014/Nexus-new/actions/runs/34438274085/job/102747793877",
+      "name": "Exact-base impact gate",
+      "startedAt": "2026-09-10T04:43:23Z",
+      "status": "COMPLETED",
+      "workflowName": "Nexus Pytest CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T04:43:51Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/James3014/Nexus-new/actions/runs/34438274008/job/102747793542",
+      "name": "Trusted controller (default branch)",
+      "startedAt": "2026-09-10T04:43:23Z",
+      "status": "COMPLETED",
+      "workflowName": "Trusted deletion-evidence bootstrap anchor"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T04:43:33Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/James3014/Nexus-new/actions/runs/34438273966/job/102747793492",
+      "name": "Exact-base Wiki governance regression gate",
+      "startedAt": "2026-09-10T04:43:22Z",
+      "status": "COMPLETED",
+      "workflowName": "Wiki Exact-Base Governance CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T04:43:21Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/James3014/Nexus-new/actions/runs/34438274085/job/102747794613",
+      "name": "Tier 3 full regression",
+      "startedAt": "2026-09-10T04:43:21Z",
+      "status": "COMPLETED",
+      "workflowName": "Nexus Pytest CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T04:43:31Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/James3014/Nexus-new/actions/runs/34438274029/job/102747794095",
+      "name": "reconciler",
+      "startedAt": "2026-09-10T04:43:23Z",
+      "status": "COMPLETED",
+      "workflowName": "Fast Start v2 Invalidator"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T04:44:21Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/James3014/Nexus-new/actions/runs/34438274008/job/102747889826",
+      "name": "Unprivileged executor (bundle only)",
+      "startedAt": "2026-09-10T04:43:53Z",
+      "status": "COMPLETED",
+      "workflowName": "Trusted deletion-evidence bootstrap anchor"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-10T04:44:34Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/James3014/Nexus-new/actions/runs/34438274008/job/102747985868",
+      "name": "Trusted verifier (default branch)",
+      "startedAt": "2026-09-10T04:44:23Z",
+      "status": "COMPLETED",
+      "workflowName": "Trusted deletion-evidence bootstrap anchor"
+    }
+  ]
+}

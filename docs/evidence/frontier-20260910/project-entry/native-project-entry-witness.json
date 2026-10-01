@@ -1,0 +1,37 @@
+{
+  "source": "ChatGPT UI expanded tool call",
+  "conversation_url": "https://chatgpt.com/c/6aa223f2-3e30-83e8-825d-42df1831335b",
+  "first_user_input": "continue James3014/Nexus-new #842",
+  "attached_plugin": "nexus",
+  "copied_handoff": false,
+  "tool": "nexus_project_entry",
+  "arguments": {
+    "issue_number": 842,
+    "repository_name": "Nexus-new",
+    "repository_owner": "James3014"
+  },
+  "observed_at": "2026-09-10T03:29:12.879407+00:00",
+  "status": "NO_TASK",
+  "project_binding_hash": "b7fb3a683c7b56abccc183656cefa9b24c8966f42d01c7d0508a9f981749ee70",
+  "readiness_outcome": "READY_TO_EXECUTE",
+  "readiness_request_hash": "b19bbe1e53227ec5fa51906ad270dad12b0a1f05715e8c630af5add36d3be175",
+  "source_commit": "9f7b4c8cac25b6e5630239711857b2318059479c",
+  "source_tree": "e5bf29dc5982f5e67a357fb7a26958eb06908bab",
+  "claim_ceiling": "PROJECT_ENTRY_OBSERVE_ONLY_NO_DOWNSTREAM_EFFECTS",
+  "same_chat_switch": {
+    "from_issue": 842,
+    "to_issue": 806,
+    "user_input": "continue James3014/Nexus-new #806",
+    "tool": "nexus_project_entry",
+    "arguments": {
+      "issue_number": 806,
+      "repository_name": "Nexus-new",
+      "repository_owner": "James3014"
+    },
+    "status": "BLOCKED",
+    "blocker": "PROJECT_ENTRY_ISSUE_NOT_OPEN",
+    "task_resolution": "NOT_RESOLVED",
+    "project_binding_hash": "f01dc0e7e5ae19e9d9cb53776a378eade05a3e9641c685bcb45d3f4a427324a8",
+    "prior_ready_reused": false
+  }
+}

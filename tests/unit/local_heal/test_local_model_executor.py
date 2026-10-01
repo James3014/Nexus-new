@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import pytest
 from pathlib import Path
 from dataclasses import replace
@@ -356,7 +357,7 @@ def test_local_model_executor_committee_topology_uses_candidate_decision_adapter
     assert resp.raw_model_metadata.get("selected_by") == "custom_logic"
 
 
-def test_local_model_executor_committee_selected_patch_enters_isolation(monkeypatch):
+def test_local_model_executor_committee_selected_patch_enters_isolation(monkeypatch, tmp_path: Path):
     from unittest.mock import patch
 
     from nexus.services.local_heal.candidate_decision_adapter import (
@@ -410,6 +411,7 @@ def test_local_model_executor_committee_selected_patch_enters_isolation(monkeypa
         evidence_refs=("ref1",),
         route_context={
             "verifier_command": ["python3", "-c", "print(1)"],
+            "source_revision": "b" * 40,
             "signal_snapshot": {
                 "execution_topology": "local_committee_only",
                 "protocol_mode": "anchored_edit",
@@ -423,6 +425,10 @@ def test_local_model_executor_committee_selected_patch_enters_isolation(monkeypa
             },
         },
     )
+    evidence_root = tmp_path / "candidate-evidence"
+    monkeypatch.setenv("NEXUS_CLM_CANDIDATE_EVIDENCE_ROOT", str(evidence_root))
+    monkeypatch.setenv("NEXUS_CLM_CANDIDATE_EVIDENCE_ENABLED", "1")
+    monkeypatch.setenv("NEXUS_CLM_CANDIDATE_EVIDENCE_RATE_PERCENT", "100")
 
     with patch("nexus.services.local_heal.local_model_executor.run_isolated_workspace_apply") as mock_apply, \
          patch("nexus.services.local_heal.local_model_executor.run_isolated_verifier") as mock_verify:
@@ -462,6 +468,16 @@ def test_local_model_executor_committee_selected_patch_enters_isolation(monkeypa
     assert meta.get("route_mode") == "local_only_executed"
     assert meta.get("authority") == "internal_only"
     assert meta.get("solved") is True
+    assert meta.get("candidate_evidence_collection_status") == "COLLECTED"
+    assert meta.get("candidate_evidence_collection_rows") == 1
+    assert meta.get("candidate_evidence_collection_eligible_rows") == 1
+    group_sha = meta.get("candidate_evidence_collection_group_sha256")
+    row_path = next((evidence_root / "groups" / group_sha).glob("*.json"))
+    row = json.loads(row_path.read_text(encoding="utf-8"))
+    assert row["candidate_id"] == "c-1"
+    assert row["verifier_status"] == "PASS"
+    assert row["label_quality"] == "ISOLATED_VERIFIER"
+    assert row["dataset_eligible"] is True
 
 
 def test_local_model_executor_committee_parse_failure_skips_isolation(monkeypatch):
@@ -1878,7 +1894,7 @@ def _make_pipeline_verifier_fail_mock(task_id, diff_text, diff_hash, apply_fn, v
     return mock_exec_result
 
 
-def test_committee_trial_flows(monkeypatch) -> None:
+def test_committee_trial_flows(monkeypatch, tmp_path: Path) -> None:
     """C15-5C: 2-candidate committee (Qwen 7B + DeepSeek 6.7B).
     First round verifier fails → delegated retry committee runs →
     DeepSeek wins (verifier pass) → winner metadata written."""
@@ -1934,6 +1950,7 @@ def test_committee_trial_flows(monkeypatch) -> None:
         route_context={
             "verifier_command": ["python3", "-c", "raise SystemExit(1)"],
             "python_executable": "/tmp/venv/bin/python",
+            "source_revision": "a" * 40,
             "signal_snapshot": {
                 "execution_topology": "localheal_pipeline",
                 "executor_model": "qwen2.5-coder:7b-instruct",
@@ -1944,6 +1961,10 @@ def test_committee_trial_flows(monkeypatch) -> None:
             },
         },
     )
+    evidence_root = tmp_path / "candidate-evidence"
+    monkeypatch.setenv("NEXUS_CLM_CANDIDATE_EVIDENCE_ROOT", str(evidence_root))
+    monkeypatch.setenv("NEXUS_CLM_CANDIDATE_EVIDENCE_ENABLED", "1")
+    monkeypatch.setenv("NEXUS_CLM_CANDIDATE_EVIDENCE_RATE_PERCENT", "100")
 
     with patch(
         "nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute"
@@ -2013,6 +2034,205 @@ def test_committee_trial_flows(monkeypatch) -> None:
     assert ds_cand["rejection_reason"] == ""
 
     assert meta.get("delegated_retry_heterogeneous_winner_model") == "deepseek-coder:6.7b-instruct"
+    assert meta.get("candidate_evidence_collection_status") == "COLLECTED"
+    assert meta.get("candidate_evidence_collection_rows") == 2
+    assert meta.get("candidate_evidence_collection_eligible_rows") == 2
+    group_sha = meta.get("candidate_evidence_collection_group_sha256")
+    rows = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted((evidence_root / "groups" / group_sha).glob("*.json"))
+    ]
+    assert len(rows) == 2
+    assert {row["candidate_id"] for row in rows} == {
+        candidate["candidate_id"] for candidate in candidates
+    }
+    assert {row["verifier_status"] for row in rows} == {"PASS", "FAIL"}
+    assert [row["candidate_id"] for row in rows if row["selected"]] == [
+        ds_cand["candidate_id"]
+    ]
+    assert all((evidence_root / row["candidate_payload_ref"]).exists() for row in rows)
+
+
+def test_candidate_evidence_binds_actual_delivered_winner_not_autoreason_advice(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Collector must mirror actual runtime delivery when Autoreason disagrees.
+
+    This test deliberately preserves the current runtime behavior: the first
+    verifier-pass committee candidate remains the delivered result_ctx even
+    when Autoreason recommends the second passing candidate.
+    """
+    from unittest.mock import MagicMock, patch
+
+    from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
+    from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
+    from nexus.services.local_heal.local_model_capability_executors import (
+        CapabilityExecutionResult,
+    )
+
+    diff_text = "--- a/toy/math_util.py\n+++ b/toy/math_util.py\n@@ -1 +1 @@\n-old\n+new\n"
+
+    def mock_apply(req):
+        return IsolatedApplyReceipt(
+            task_id=req.task_id,
+            patch_apply_status="applied",
+            patch_apply_error="",
+            target_file=req.target_file,
+            selected_candidate_hash=req.selected_candidate_hash,
+            applied_patch_hash=req.selected_candidate_hash,
+            selected_candidate_hash_matches_applied=True,
+            candidate_output_isolated=True,
+            workspace_path="/tmp/ws",
+            mutation_allowed=True,
+            applied_patch_hash_source="git_diff",
+        )
+
+    def mock_verify(req):
+        # Initial verifier fails to enter delegated retry.  Both committee
+        # candidates then pass, forcing the Autoreason tie-break path.
+        status = "fail" if "#committee-" not in req.task_id else "pass"
+        return IsolatedVerifierReceipt(
+            task_id=req.task_id,
+            verifier_status=status,
+            exit_code=0 if status == "pass" else 1,
+            stdout_tail="",
+            stderr_tail="",
+            verifier_error="",
+            verifier_allowed=True,
+        )
+
+    req = make_test_request(
+        "committee-autoreason-evidence",
+        execution_topology="localheal_pipeline",
+        target_file="toy/math_util.py",
+        route_context={
+            "verifier_command": ["python3", "-c", "raise SystemExit(1)"],
+            "python_executable": "/tmp/venv/bin/python",
+            "source_revision": "c" * 40,
+            "signal_snapshot": {
+                "execution_topology": "localheal_pipeline",
+                "executor_model": "qwen2.5-coder:7b-instruct",
+                "protocol_mode": "anchored_edit",
+                "mutation_allowed": True,
+                "verifier_allowed": True,
+                "delegated_retry_candidate_models": [
+                    "qwen2.5-coder:7b-instruct",
+                    "deepseek-coder:6.7b-instruct",
+                ],
+            },
+        },
+    )
+    evidence_root = tmp_path / "candidate-evidence"
+    monkeypatch.setenv("NEXUS_CLM_CANDIDATE_EVIDENCE_ROOT", str(evidence_root))
+    monkeypatch.setenv("NEXUS_CLM_CANDIDATE_EVIDENCE_ENABLED", "1")
+    monkeypatch.setenv("NEXUS_CLM_CANDIDATE_EVIDENCE_RATE_PERCENT", "100")
+
+    def make_pipeline_run_result(_heal_ctx):
+        result = MagicMock()
+        result.final_patch = diff_text
+        result.failure_reason = ""
+        result.model_decisions = [
+            {
+                "phase": "patch",
+                "output_class": "VALID_SEARCH_REPLACE",
+                "parser_error_kind": "none",
+                "status": "SUCCESS",
+                "output_excerpt": "<<<<<<< SEARCH",
+            }
+        ]
+        result._orchestrator_verifier_evidence_passed = False
+        result._orchestrator_verifier_evidence_fields = ""
+        result._orchestrator_retry_prompt_evidence_hash = ""
+        result._semantic_retry_telemetry = {}
+        return result
+
+    with (
+        patch(
+            "nexus.services.local_heal.local_model_capability_executors."
+            "LocalHealPipelineCapabilityExecutor.execute"
+        ) as mock_exec,
+        patch(
+            "nexus.services.local_heal.local_model_executor."
+            "run_isolated_workspace_apply",
+            side_effect=mock_apply,
+        ),
+        patch(
+            "nexus.services.local_heal.local_model_executor.run_isolated_verifier",
+            side_effect=mock_verify,
+        ),
+        patch(
+            "nexus.services.local_heal.pipeline.HealPipeline.__init__",
+            return_value=None,
+        ),
+        patch(
+            "nexus.services.local_heal.pipeline.HealPipeline.run",
+            side_effect=make_pipeline_run_result,
+        ),
+        patch(
+            "nexus.engine.autoreason_service.AutoreasonService.run",
+            return_value={
+                "winner": (
+                    "committee-autoreason-evidence"
+                    "#delegated-retry-02-deepseek-coder-6-7b-instruct"
+                ),
+                "borda_scores": {},
+            },
+        ),
+    ):
+        mock_exec.return_value = CapabilityExecutionResult(
+            name="repair_loop",
+            selected=True,
+            invoked=True,
+            gate_passed=True,
+            outcome_contributed=True,
+            evidence_present=True,
+            failure_reason="",
+            telemetries={
+                "pipeline_final_patch": diff_text,
+                "pipeline_solve_eligible": True,
+                "pipeline_failure_reason": "",
+                "patch_synthesis_output_len": len(diff_text),
+                "patch_synthesis_model_name": "qwen2.5-coder:7b-instruct",
+                "patch_synthesis_model_called": True,
+                "provider_invoked": True,
+                "model_called": True,
+                "localheal_pipeline_run_called": True,
+                "localheal_pipeline_run_success": True,
+                "localheal_pipeline_invoked": True,
+                "localheal_pipeline_actual_execution": True,
+                "orchestrator_run_reachable": True,
+                "path_a_actual_execution": True,
+            },
+        )
+        resp = LocalModelExecutor.run(
+            req, provider=InjectedLocalModelProvider(lambda _: diff_text)
+        )
+
+    meta = resp.raw_model_metadata
+    assert meta["delegated_retry_autoreason_invoked"] is True
+    assert not meta.get("delegated_retry_autoreason_error"), meta.get(
+        "delegated_retry_autoreason_error"
+    )
+    assert (
+        meta["delegated_retry_autoreason_winner"]
+        == "deepseek-coder:6.7b-instruct"
+    )
+    # Current runtime still delivers the first verifier-pass candidate.
+    assert (
+        meta["delegated_retry_heterogeneous_winner_model"]
+        == "qwen2.5-coder:7b-instruct"
+    )
+    assert meta["candidate_evidence_autoreason_delivery_mismatch"] is True
+
+    group_sha = meta["candidate_evidence_collection_group_sha256"]
+    rows = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in (evidence_root / "groups" / group_sha).glob("*.json")
+    ]
+    selected = [row for row in rows if row["selected"]]
+    assert len(selected) == 1
+    assert "qwen2.5-coder" in selected[0]["candidate_model"]
+    assert selected[0]["winner_id"] == selected[0]["candidate_id"]
 
 
 def test_committee_triple_and_limits(monkeypatch) -> None:
@@ -6731,6 +6951,7 @@ def test_c15_6e_controlled_committee_success_proven(tmp_path) -> None:
         execution_topology="localheal_pipeline",
         route_context={
             "locked_search": "def double(x):\n    return x * 2",
+            "source_revision": "a" * 40,
             "verifier_command": ["python3", "-c", "exit(0)"],
             "signal_snapshot": {
                 "execution_topology": "localheal_pipeline",
@@ -6790,7 +7011,17 @@ def test_c15_6e_controlled_committee_success_proven(tmp_path) -> None:
             ]
 
     def mock_pipeline_run(self, ctx):
-        return MockHealResult(ctx.committee_proposer_model)
+        model_name = getattr(ctx, "committee_proposer_model", "")
+        if model_name:
+            self.ollama_generate(
+                "system",
+                "user",
+                model=model_name,
+                phase="patch",
+                attempt_id="attempt-1",
+                execution_profile="FULL",
+            )
+        return MockHealResult(model_name)
 
     # Mock isolated apply: succeeds for both candidates
     # Mock isolated verifier: passes for ornith:9b (the winning candidate)
@@ -6898,6 +7129,23 @@ def test_c15_6e_controlled_committee_success_proven(tmp_path) -> None:
 
     # Check for expected label markers
     assert any(c.get("candidate_model") == "ornith:9b" and c.get("selected") is True for c in candidates)
+
+    # Issue #1197: real delegated-retry model calls must passively emit
+    # pre-action state/action/result trajectory evidence before final verifier binding.
+    assert meta.get("trajectory_capture_step_count") == 2
+    assert meta.get("trajectory_outcomes_bound") == 2
+    assert meta.get("trajectory_outcomes_skipped") == 0
+    assert not [
+        error
+        for error in meta.get("trajectory_capture_errors", [])
+        if not str(error).startswith("refresh:")
+    ]
+    trajectory_root = (
+        tmp_path / ".nexus" / "research" / "clm_system_one" / "candidate_evidence" / "trajectory"
+    )
+    assert len(list((trajectory_root / "steps").glob("*/*.json"))) == 2
+    assert len(list((trajectory_root / "step_results").glob("*/*.json"))) == 2
+    assert len(list((trajectory_root / "outcomes").glob("*.json"))) == 2
 
     # Expose label for the report
     res.raw_model_metadata["C15_6E_CONTROLLED_COMMITTEE_SUCCESS_PROVEN"] = True

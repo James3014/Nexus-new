@@ -1,0 +1,656 @@
+AUDIT_ROOT=/tmp/nexus-807-audit.x1Jbwd
+## HEAD (no branch)
+HEAD=d1b02c15fda5700fa60db07f8fffc70652f2f98d
+TREE=e6418f3af280ead71b97b13da14055eb065de640
+SOURCE_LANDING=
+diff --git a/nexus/orchestrator/execution_readiness.py b/nexus/orchestrator/execution_readiness.py
+index f098502da..c8f76139d 100644
+--- a/nexus/orchestrator/execution_readiness.py
++++ b/nexus/orchestrator/execution_readiness.py
+@@ -441,6 +441,16 @@ def _canonical_authority_observation(
+                 f"authority_action_family={request.required_action_family}",
+             ),
+         )
++    if not request.durable_coordination_scope_id or not request.durable_repository_canonical_remote:
++        return PlaneObservation(
++            plane=ExecutionReadinessPlane.AUTHORITY,
++            status=ExecutionReadinessStatus.BLOCKED,
++            blocker_code=ExecutionReadinessBlockerCode.TASK_AUTHORITY_MISSING,
++            evidence_identities=(
++                f"authority_goal_id={goal_id}",
++                "authority_durable_coordination_scope_id_missing",
++            ),
++        )
+     action = _authority_action(request)
+     if action is None:
+         return PlaneObservation(
+@@ -458,7 +468,16 @@ def _canonical_authority_observation(
+             inspect_standing_grant_receipt,
+         )
+
+-        snapshot = inspect_standing_grant_receipt(now=moment)
++        authority_repository = RepositoryIdentity(
++            repository_id=f"{request.repository_owner}/{request.repository_name}",
++            canonical_remote=request.durable_repository_canonical_remote,
++        )
++        snapshot = inspect_standing_grant_receipt(
++            now=moment,
++            repository=authority_repository,
++            goal_id=goal_id,
++            thread_id=request.durable_coordination_scope_id,
++        )
+     except Exception as exc:
+         return PlaneObservation(
+             plane=ExecutionReadinessPlane.AUTHORITY,
+@@ -489,17 +508,14 @@ def _canonical_authority_observation(
+             evidence_identities=evidence,
+         )
+     try:
+-        canonical_remote = str(snapshot.get("canonical_remote") or "").strip()
+         decision = evaluate_rehydrated_durable_standing_grant(
+             requested_owner_id=str(snapshot.get("owner_id") or ""),
+             requested_coordinator_id=str(snapshot.get("coordinator_id") or ""),
+-            repository=RepositoryIdentity(
+-                repository_id=f"{request.repository_owner}/{request.repository_name}",
+-                canonical_remote=canonical_remote,
+-            ),
++            repository=authority_repository,
+             goal_id=goal_id,
+             action=action,
+             requested_at=moment,
++            coordination_scope_id=request.durable_coordination_scope_id,
+         )
+     except Exception as exc:
+         return PlaneObservation(
+diff --git a/nexus/orchestrator/unified_mcp_gateway.py b/nexus/orchestrator/unified_mcp_gateway.py
+index 3e30bf1ec..296c55894 100644
+--- a/nexus/orchestrator/unified_mcp_gateway.py
++++ b/nexus/orchestrator/unified_mcp_gateway.py
+@@ -25,6 +25,7 @@ import time
+ from datetime import datetime, timedelta, timezone
+ from pathlib import Path
+ from typing import Any, Mapping, Optional
++from urllib.parse import urlsplit
+ from uuid import uuid4
+
+ from nexus.contracts.autonomy_goal import AutonomyActionClass, RepositoryIdentity
+@@ -82,6 +83,7 @@ from nexus.orchestrator.self_hosted_task_service import (
+     validate_task_card_binding,
+ )
+ from nexus.orchestrator.standing_grant_store import (
++    StandingGrantKey,
+     StandingGrantReceiptError,
+     authorize_durable_standing_grant_effect,
+     restore_task_card_authority,
+@@ -364,6 +366,19 @@ def _in_process_readiness_plane_observations(
+                     ),
+                 )
+                 continue
++            # Workforce evidence is completed by the canonical evaluator.  A
++            # missing env status must not prevent the evaluator from proving
++            # the non-material case or returning WORKFORCE_NOT_READY for
++            # material constraints without a typed binding.
++            if plane is ExecutionReadinessPlane.WORKFORCE:
++                observations[plane] = (
++                    PlaneObservation(
++                        plane=plane,
++                        status=ExecutionReadinessStatus.PASSED,
++                        evidence_identities=("workforce_plane:canonical_evaluator_pending",),
++                    ),
++                )
++                continue
+             default_identity = _READINESS_DEFAULTED_PASSED_PLANES.get(plane)
+             if default_identity is not None:
+                 observations[plane] = (
+@@ -518,6 +533,68 @@ def _git(*args: str, timeout: float = 3.0) -> str:
+     return result.stdout
+
+
++def observe_github_issue(repository: str, issue_number: int) -> dict[str, Any]:
++    """Fresh, bounded GitHub observation; never writes or infers missing state."""
++    try:
++        result = subprocess.run(
++            [
++                "gh", "issue", "view", str(issue_number), "--repo", repository,
++                "--json", "number,state,updatedAt,url",
++            ],
++            cwd=CANONICAL_SOURCE_ROOT,
++            capture_output=True,
++            text=True,
++            timeout=5,
++            check=False,
++        )
++    except (OSError, subprocess.TimeoutExpired) as exc:
++        return {
++            "ok": False,
++            "blocker": "GITHUB_ISSUE_OBSERVER_UNAVAILABLE",
++            "detail": str(exc),
++        }
++    if result.returncode != 0:
++        return {
++            "ok": False,
++            "blocker": "GITHUB_ISSUE_OBSERVER_UNAVAILABLE",
++            "detail": result.stderr.strip(),
++        }
++    try:
++        payload = json.loads(result.stdout)
++    except json.JSONDecodeError as exc:
++        return {
++            "ok": False,
++            "blocker": "GITHUB_ISSUE_OBSERVER_UNAVAILABLE",
++            "detail": str(exc),
++        }
++    if not isinstance(payload, Mapping) or str(payload.get("number")) != str(issue_number):
++        return {
++            "ok": False,
++            "blocker": "GITHUB_ISSUE_OBSERVER_UNAVAILABLE",
++            "detail": "issue identity mismatch",
++        }
++    return {
++        "ok": True,
++        "issue": dict(payload),
++        "observed_at": datetime.now(timezone.utc).isoformat(),
++    }
++
++
++def _canonical_remote_matches(origin: str, repository: str) -> bool:
++    value = str(origin).strip()
++    if value.startswith("git@"):
++        host_path = value[4:]
++        host, sep, path = host_path.partition(":")
++        return sep == ":" and host.lower() == "github.com" and path.removesuffix(".git") == repository
++    parsed = urlsplit(value)
++    return (
++        parsed.scheme.lower() == "https" and parsed.hostname
++        and parsed.hostname.lower() == "github.com" and not parsed.username
++        and not parsed.password and not parsed.query and not parsed.fragment
++        and parsed.path.removesuffix("/").removesuffix(".git").lstrip("/") == repository
++    )
++
++
+ def _bounded_text(value: str, field: str) -> str:
+     if len(value.encode("utf-8")) > MAX_RESULT_BYTES:
+         raise RuntimeError(f"{field} exceeds {MAX_RESULT_BYTES} bytes")
+@@ -1188,7 +1265,14 @@ def _evaluate_freshness(
+ class UnifiedMCPGateway:
+     """JSON-RPC MCP server with one public identity and bounded tools."""
+
+-    def __init__(self, service: Optional[SelfHostedTaskService] = None, *, model_runner: Any = None, apply_runner: Any = None):
++    def __init__(
++        self,
++        service: Optional[SelfHostedTaskService] = None,
++        *,
++        model_runner: Any = None,
++        apply_runner: Any = None,
++        github_issue_observer: Any = None,
++    ):
+         self.service = service or SelfHostedTaskService()
+         # These kwargs remain accepted for compatibility with older callers,
+         # but neither runner is a gateway authority.  Assisted jobs are
+@@ -1202,6 +1286,7 @@ class UnifiedMCPGateway:
+         self._calibration_planner = CalibrationPlanner(self._lineage_registry)
+         self._assist_processes: dict[str, subprocess.Popen[str]] = {}
+         self._assist_lock = threading.RLock()
++        self._github_issue_observer = github_issue_observer or observe_github_issue
+
+     @staticmethod
+     def _utc_now() -> str:
+@@ -1211,16 +1296,40 @@ class UnifiedMCPGateway:
+     def _require_owner_effect_authority(
+         action: AutonomyActionClass,
+         effect: Mapping[str, Any],
++        *,
++        key: StandingGrantKey,
+     ) -> dict[str, Any]:
+         try:
+             return authorize_durable_standing_grant_effect(
+                 repository=GITHUB_REPOSITORY,
+                 action=action,
+                 effect=effect,
++                key=key,
+             )
+         except StandingGrantReceiptError as exc:
+             raise GatewayInputError(f"OWNER_AUTHORITY_REQUIRED:{exc}") from exc
+
++    @staticmethod
++    def _owner_effect_key(arguments: Mapping[str, Any]) -> StandingGrantKey:
++        """Resolve the explicit Goal/coordination scope for durable effects."""
++        try:
++            goal_id = _text(arguments.get("authority_goal_id"), "authority_goal_id", max_length=128)
++            scope_id = _text(
++                arguments.get("authority_coordination_scope_id"),
++                "authority_coordination_scope_id",
++                max_length=128,
++            )
++            return StandingGrantKey(GITHUB_REPOSITORY, goal_id, scope_id)
++        except (GatewayInputError, TypeError, ValueError) as exc:
++            raise GatewayInputError(f"OWNER_AUTHORITY_KEY_REQUIRED:{exc}") from exc
++
++    @staticmethod
++    def _standing_key(goal_id: str, thread_id: str) -> StandingGrantKey:
++        try:
++            return StandingGrantKey(GITHUB_REPOSITORY, goal_id, thread_id)
++        except (TypeError, ValueError) as exc:
++            raise GatewayInputError(f"OWNER_AUTHORITY_KEY_REQUIRED:{exc}") from exc
++
+     def _assist_root(self) -> Path:
+         configured = getattr(self.service, "state_dir", None)
+         root = Path(configured).expanduser().resolve() if configured else Path("/tmp/nexus-mcp-gateway-assist-jobs")
+@@ -2607,6 +2716,7 @@ class UnifiedMCPGateway:
+     def _task_card_create(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+         if arguments.get("owner_confirmation") is not True:
+             raise GatewayInputError("OWNER_CONFIRMATION_REQUIRED")
++        owner_key = self._owner_effect_key(arguments)
+         campaign = self._safe_slug(arguments.get("campaign_id"), "campaign_id")
+         task_id = self._safe_slug(arguments.get("task_id"), "task_id")
+         objective = _text(arguments.get("objective"), "objective", max_length=4000)
+@@ -2629,6 +2739,7 @@ class UnifiedMCPGateway:
+                 "verifier_commands": verifiers,
+                 "objective_sha256": hashlib.sha256(objective.encode("utf-8")).hexdigest(),
+             },
++            key=owner_key,
+         )
+         campaign_root = CANONICAL_SOURCE_ROOT / "tasks" / campaign
+         index_path = campaign_root / "INDEX.md"
+@@ -2694,6 +2805,7 @@ class UnifiedMCPGateway:
+     def _task_card_commit(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+         if arguments.get("owner_confirmation") is not True:
+             raise GatewayInputError("OWNER_CONFIRMATION_REQUIRED")
++        owner_key = self._owner_effect_key(arguments)
+         campaign = self._safe_slug(arguments.get("campaign_id"), "campaign_id")
+         task_id = self._safe_slug(arguments.get("task_id"), "task_id")
+         expected_head = str(arguments.get("expected_head") or "").strip().lower()
+@@ -2744,6 +2856,7 @@ class UnifiedMCPGateway:
+                 "card_hash": expected_card_hash,
+                 "index_hash": expected_index_hash,
+             },
++            key=owner_key,
+         )
+         branch = subprocess.run(
+             ["git", "symbolic-ref", "-q", "--short", "HEAD"],
+@@ -2849,6 +2962,7 @@ class UnifiedMCPGateway:
+             "attemptKey",
+             "expectedCurrentReceiptHash",
+             "expectedCurrentGoalId",
++            "expectedCurrentThreadId",
+             "successorGoalId",
+             "successorThreadId",
+             "ttlMinutes",
+@@ -2872,6 +2986,11 @@ class UnifiedMCPGateway:
+             "expectedCurrentGoalId",
+             max_length=128,
+         )
++        expected_current_thread_id = _text(
++            arguments.get("expectedCurrentThreadId"),
++            "expectedCurrentThreadId",
++            max_length=128,
++        )
+         successor_goal_id = _text(
+             arguments.get("successorGoalId"),
+             "successorGoalId",
+@@ -2891,6 +3010,9 @@ class UnifiedMCPGateway:
+
+         try:
+             return switch_task_card_authority(
++                current_key=self._standing_key(
++                    expected_current_goal_id, expected_current_thread_id
++                ),
+                 attempt_key=attempt_key,
+                 expected_current_receipt_hash=expected_current_receipt_hash,
+                 expected_current_goal_id=expected_current_goal_id,
+@@ -2908,6 +3030,8 @@ class UnifiedMCPGateway:
+             "attemptKey",
+             "switchOperationId",
+             "expectedTemporaryReceiptHash",
++            "expectedCurrentGoalId",
++            "expectedCurrentThreadId",
+         }
+         unknown_keys = set(arguments.keys()) - allowed_keys
+         if unknown_keys:
+@@ -2926,11 +3050,22 @@ class UnifiedMCPGateway:
+             "expectedTemporaryReceiptHash",
+             max_length=64,
+         ).lower()
++        expected_current_goal_id = _text(
++            arguments.get("expectedCurrentGoalId"), "expectedCurrentGoalId", max_length=128
++        )
++        expected_current_thread_id = _text(
++            arguments.get("expectedCurrentThreadId"), "expectedCurrentThreadId", max_length=128
++        )
+         if not _SHA64_RE.fullmatch(expected_temporary_receipt_hash):
+-            raise GatewayInputError("expectedTemporaryReceiptHash must be a lowercase 64-hex SHA-256")
++            raise GatewayInputError(
++                "expectedTemporaryReceiptHash must be a lowercase 64-hex SHA-256"
++            )
+
+         try:
+             return restore_task_card_authority(
++                current_key=self._standing_key(
++                    expected_current_goal_id, expected_current_thread_id
++                ),
+                 attempt_key=attempt_key,
+                 switch_operation_id=switch_operation_id,
+                 expected_temporary_receipt_hash=expected_temporary_receipt_hash,
+@@ -3535,6 +3670,23 @@ class UnifiedMCPGateway:
+                 "description": "Read the single gateway identity, manifest, route stages, and lifecycle counts.",
+                 "inputSchema": {"type": "object", "properties": {}},
+             },
++            {
++                "name": "nexus_project_entry",
++                "description": (
++                    "Freshly observe one GitHub Issue and rehydrate only its exact "
++                    "canonical task binding; observe-only."
++                ),
++                "inputSchema": {
++                    "type": "object",
++                    "required": ["repository_owner", "repository_name", "issue_number"],
++                    "properties": {
++                        "repository_owner": {"type": "string", "maxLength": 128},
++                        "repository_name": {"type": "string", "maxLength": 128},
++                        "issue_number": {"type": "integer", "minimum": 1},
++                    },
++                    "additionalProperties": False,
++                },
++            },
+             {
+                 "name": "nexus_execution_readiness",
+                 "description": (
+@@ -3559,6 +3711,8 @@ class UnifiedMCPGateway:
+                         "intended_source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                         "intended_source_tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                         "task_campaign_goal_identity": {"type": "string", "maxLength": 4096},
++                        "durable_coordination_scope_id": {"type": "string", "maxLength": 4096},
++                        "durable_repository_canonical_remote": {"type": "string", "maxLength": 4096},
+                         "desired_deployment_identity": {"type": "string", "maxLength": 4096},
+                         "execution_realm": {"type": "string", "enum": ["in_process_preflight"]},
+                         "required_action_family": {"type": "string", "maxLength": 128},
+@@ -3810,7 +3964,8 @@ class UnifiedMCPGateway:
+                 "description": "Create exactly one new governed campaign INDEX and Task Card after explicit owner confirmation.",
+                 "inputSchema": {
+                     "type": "object",
+-                    "required": ["owner_confirmation", "campaign_id", "task_id", "objective", "allowed_files", "verifier_commands"],
++                    "additionalProperties": False,
++                    "required": ["owner_confirmation", "campaign_id", "task_id", "objective", "allowed_files", "verifier_commands", "authority_goal_id", "authority_coordination_scope_id"],
+                     "properties": {
+                         "owner_confirmation": {"type": "boolean"},
+                         "campaign_id": {"type": "string"},
+@@ -3818,6 +3973,8 @@ class UnifiedMCPGateway:
+                         "objective": {"type": "string"},
+                         "allowed_files": {"type": "array", "items": {"type": "string"}, "maxItems": 10},
+                         "verifier_commands": {"type": "array", "items": {"type": "string"}, "minItems": 1},
++                        "authority_goal_id": {"type": "string", "maxLength": 128},
++                        "authority_coordination_scope_id": {"type": "string", "maxLength": 128},
+                     },
+                 },
+             },
+@@ -3826,7 +3983,7 @@ class UnifiedMCPGateway:
+                 "description": "Commit exactly one pending Task Card and INDEX on a detached clean Controller after explicit owner confirmation.",
+                 "inputSchema": {
+                     "type": "object",
+-                    "required": ["owner_confirmation", "campaign_id", "task_id", "expected_head", "card_hash", "index_hash"],
++                    "required": ["owner_confirmation", "campaign_id", "task_id", "expected_head", "card_hash", "index_hash", "authority_goal_id", "authority_coordination_scope_id"],
+                     "additionalProperties": False,
+                     "properties": {
+                         "owner_confirmation": {"type": "boolean"},
+@@ -3835,6 +3992,8 @@ class UnifiedMCPGateway:
+                         "expected_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                         "card_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                         "index_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
++                        "authority_goal_id": {"type": "string", "maxLength": 128},
++                        "authority_coordination_scope_id": {"type": "string", "maxLength": 128},
+                     },
+                 },
+             },
+@@ -3849,6 +4008,7 @@ class UnifiedMCPGateway:
+                         "attemptKey",
+                         "expectedCurrentReceiptHash",
+                         "expectedCurrentGoalId",
++                        "expectedCurrentThreadId",
+                         "successorGoalId",
+                         "successorThreadId",
+                         "ttlMinutes",
+@@ -3858,6 +4018,7 @@ class UnifiedMCPGateway:
+                         "attemptKey": {"type": "string", "maxLength": 128},
+                         "expectedCurrentReceiptHash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                         "expectedCurrentGoalId": {"type": "string", "maxLength": 128},
++                        "expectedCurrentThreadId": {"type": "string", "maxLength": 128},
+                         "successorGoalId": {"type": "string", "maxLength": 128},
+                         "successorThreadId": {"type": "string", "maxLength": 128},
+                         "ttlMinutes": {"type": "integer", "minimum": 1, "maximum": 30},
+@@ -3875,12 +4036,16 @@ class UnifiedMCPGateway:
+                         "attemptKey",
+                         "switchOperationId",
+                         "expectedTemporaryReceiptHash",
++                        "expectedCurrentGoalId",
++                        "expectedCurrentThreadId",
+                     ],
+                     "properties": {
+                         "ownerConfirmation": {"type": "boolean", "const": True},
+                         "attemptKey": {"type": "string", "maxLength": 128},
+                         "switchOperationId": {"type": "string", "maxLength": 128},
+                         "expectedTemporaryReceiptHash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
++                        "expectedCurrentGoalId": {"type": "string", "maxLength": 128},
++                        "expectedCurrentThreadId": {"type": "string", "maxLength": 128},
+                     },
+                 },
+             },
+@@ -3951,6 +4116,7 @@ class UnifiedMCPGateway:
+                         "acceptance_receipt_sha256", "validation_receipt_b64", "acceptance_receipt_b64",
+                         "allowed_files", "forbidden_files", "authorized_deletions",
+                         "verifier_commands", "protected_contracts", "action",
++                        "authority_goal_id", "authority_coordination_scope_id",
+                     ],
+                     "additionalProperties": False,
+                     "properties": {
+@@ -3981,6 +4147,8 @@ class UnifiedMCPGateway:
+                         "authorized_deletions": {"type": "array", "items": {"type": "string"}},
+                         "verifier_commands": {"type": "array", "items": {"type": "string"}},
+                         "protected_contracts": {"type": "array", "items": {"type": "string"}},
++                        "authority_goal_id": {"type": "string", "maxLength": 128},
++                        "authority_coordination_scope_id": {"type": "string", "maxLength": 128},
+                         "action": {
+                             "type": "object", "additionalProperties": False,
+                             "required": ["schema", "task_id", "attempt_id", "action_id", "idempotency_key", "action_type", "task_card_path", "task_card_hash", "contract_kind", "expected_head", "allowed_paths", "permission_profile", "approval_scope", "mutation_domain", "tool_manifest_hash", "request_hash", "mutation"],
+@@ -4115,7 +4283,7 @@ class UnifiedMCPGateway:
+             {
+                 "name": "nexus_candidate_dispose",
+                 "description": "Dispose a pending Candidate as REJECTED or SUPERSEDED through cleanup authority.",
+-                "inputSchema": {"type": "object", "required": ["task_id", "disposition"], "properties": {"task_id": {"type": "string"}, "disposition": {"type": "string", "enum": ["REJECTED", "SUPERSEDED"]}, "superseded_by": {"type": "string"}}},
++                "inputSchema": {"type": "object", "additionalProperties": False, "required": ["task_id", "disposition", "authority_goal_id", "authority_coordination_scope_id"], "properties": {"task_id": {"type": "string"}, "disposition": {"type": "string", "enum": ["REJECTED", "SUPERSEDED"]}, "superseded_by": {"type": "string"}, "authority_goal_id": {"type": "string", "maxLength": 128}, "authority_coordination_scope_id": {"type": "string", "maxLength": 128}}},
+             },
+         ]
+
+@@ -4248,7 +4416,12 @@ class UnifiedMCPGateway:
+             if raw is None:
+                 raise GatewayInputError(f"{field} is required")
+             fields[field] = _text(raw, field, max_length=4096)
+-        optional_fields = ("task_campaign_goal_identity", "desired_deployment_identity")
++        optional_fields = (
++            "task_campaign_goal_identity",
++            "durable_coordination_scope_id",
++            "durable_repository_canonical_remote",
++            "desired_deployment_identity",
++        )
+         optionals: dict[str, str] = {}
+         for field in optional_fields:
+             raw = arguments.get(field)
+@@ -4274,6 +4447,10 @@ class UnifiedMCPGateway:
+                 required_action_family=fields["required_action_family"],
+                 execution_contract_kind=fields["execution_contract_kind"],
+                 task_campaign_goal_identity=optionals.get("task_campaign_goal_identity"),
++                durable_coordination_scope_id=optionals.get("durable_coordination_scope_id"),
++                durable_repository_canonical_remote=optionals.get(
++                    "durable_repository_canonical_remote"
++                ),
+                 desired_deployment_identity=optionals.get("desired_deployment_identity"),
+                 worker_constraints=worker_constraint_values,
+                 workforce_dispatch_binding=arguments.get("workforce_dispatch_binding"),
+@@ -4329,6 +4506,111 @@ class UnifiedMCPGateway:
+         }
+         return payload
+
++    def _project_entry(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
++        owner = _text(arguments.get("repository_owner"), "repository_owner", max_length=128)
++        name = _text(arguments.get("repository_name"), "repository_name", max_length=128)
++        raw_issue = arguments.get("issue_number")
++        if isinstance(raw_issue, bool) or not isinstance(raw_issue, int) or raw_issue <= 0:
++            raise GatewayInputError("issue_number must be a positive integer")
++        repository = f"{owner}/{name}"
++        if repository != GITHUB_REPOSITORY.repository_id:
++            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_REPOSITORY_MISMATCH", "repository is outside canonical scope")
++        try:
++            origin = _git("config", "--get", "remote.origin.url").strip()
++            head = _git("rev-parse", "HEAD").strip()
++            tree = _git("rev-parse", "HEAD^{tree}").strip()
++        except RuntimeError as exc:
++            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_SOURCE_OBSERVER_FAILED", str(exc))
++        if not _SHA_RE.fullmatch(head) or not _SHA_RE.fullmatch(tree):
++            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_SOURCE_OBSERVER_FAILED", "invalid source identity")
++        if not _canonical_remote_matches(origin, repository):
++            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_REPOSITORY_MISMATCH", "origin identity mismatch")
++        canonical_remote = GITHUB_REPOSITORY.canonical_remote
++        observation = self._github_issue_observer(repository, raw_issue)
++        if not isinstance(observation, Mapping) or observation.get("ok") is not True:
++            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_GITHUB_OBSERVER_FAILED", "fresh Issue observation unavailable")
++        issue = observation.get("issue")
++        if not isinstance(issue, Mapping) or str(issue.get("number")) != str(raw_issue) or not issue.get("state"):
++            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_GITHUB_OBSERVER_FAILED", "fresh Issue identity/state unavailable")
++        if str(issue.get("state")).upper() != "OPEN":
++            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_ISSUE_NOT_OPEN", "Issue is not open")
++        try:
++            matches = self.service.find_tasks_by_repository_issue(repository, raw_issue)
++        except Exception as exc:
++            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_TASK_RESOLUTION_FAILED", str(exc))
++        if len(matches) > 1:
++            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_AMBIGUOUS_TASK_BINDING", "multiple exact task bindings")
++        readiness_args = {
++            "repository_owner": owner, "repository_name": name,
++            "intended_source_commit": head, "intended_source_tree": tree,
++            "execution_realm": "in_process_preflight",
++            "required_action_family": "project_entry_observe",
++            "execution_contract_kind": "observe_only",
++        }
++        if not matches:
++            readiness = self._gateway_execution_readiness(readiness_args)
++            result = {"schema": "nexus.project_entry.v1", "status": "NO_TASK", "repository": repository,
++                    "issue": dict(issue), "source": {"commit": head, "tree": tree, "canonical_remote": canonical_remote},
++                    "issue_observation": dict(observation), "task_resolution": {"status": "NO_EXACT_TASK"},
++                    "readiness_request": readiness_args, "readiness_result": readiness,
++                    "readiness_scope": "PROJECT_ENTRY_OBSERVATION_ONLY",
++                    "claim_ceiling": "PROJECT_ENTRY_OBSERVE_ONLY_NO_DOWNSTREAM_EFFECTS",
++                    "claim_ceiling_excludes": ["execution", "verification", "acceptance", "merge", "release", "production"]}
++            result["project_binding_hash"] = self._project_entry_binding_hash(result)
++            return result
++        state = matches[0]
++        task_id = str(state.get("task_id") or "")
++        try:
++            entry = self.service.rehydrate_project_entry(
++                task_id, state.get("attempt_id"), repository=repository, issue_number=raw_issue
++            )
++            projection = entry["continuation"]
++        except Exception as exc:
++            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_CONTINUATION_INVALID", str(exc), task_id=task_id)
++        authority_binding = entry.get("authority_binding") if isinstance(entry, Mapping) else None
++        if authority_binding is not None:
++            readiness_args.update({
++                "task_campaign_goal_identity": authority_binding["goal_id"],
++                "durable_coordination_scope_id": authority_binding["coordination_scope_id"],
++                "durable_repository_canonical_remote": authority_binding["canonical_remote"],
++                "required_action_family": authority_binding["intended_action_family"],
++            })
++        readiness = self._gateway_execution_readiness(readiness_args)
++        result = {"schema": "nexus.project_entry.v1", "status": "TASK_REHYDRATED", "repository": repository,
++                "issue": dict(issue), "source": {"commit": head, "tree": tree, "canonical_remote": canonical_remote},
++                "issue_observation": dict(observation), "task_resolution": {"status": "EXACT_TASK", "task_id": task_id},
++                "continuation": projection, "readiness_request": readiness_args, "readiness_result": readiness,
++                "readiness_scope": "PROJECT_ENTRY_OBSERVATION_ONLY",
++                "claim_ceiling": "PROJECT_ENTRY_OBSERVE_ONLY_NO_DOWNSTREAM_EFFECTS",
++                "claim_ceiling_excludes": ["execution", "verification", "acceptance", "merge", "release", "production"]}
++        result["project_binding_hash"] = self._project_entry_binding_hash(result)
++        return result
++
++    @staticmethod
++    def _project_entry_binding_hash(payload: Mapping[str, Any]) -> str:
++        volatile = {"evaluated_at", "observed_at", "timestamp", "created_at", "updated_at_runtime"}
++        def scrub(value: Any) -> Any:
++            if isinstance(value, Mapping):
++                return {str(k): scrub(v) for k, v in value.items() if k not in volatile and k != "project_binding_hash"}
++            if isinstance(value, list):
++                return [scrub(item) for item in value]
++            return value
++        stable = scrub(json.loads(json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)))
++        return hashlib.sha256(json.dumps(stable, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
++
++    @staticmethod
++    def _project_entry_blocker(repository: str, issue: int, code: str, detail: str, *, task_id: str | None = None) -> dict[str, Any]:
++        safe_detail = f"diagnostic_class={code}; diagnostic_sha256={hashlib.sha256(str(detail).encode()).hexdigest()}"
++        result = {"schema": "nexus.project_entry.v1", "status": "BLOCKED", "repository": repository,
++                  "issue_number": issue, "task_resolution": {"status": "NOT_RESOLVED"},
++                  "blocker": {"code": code, "detail": safe_detail},
++                  "claim_ceiling": "PROJECT_ENTRY_OBSERVE_ONLY_NO_DOWNSTREAM_EFFECTS",
++                  "claim_ceiling_excludes": ["execution", "verification", "acceptance", "merge", "release", "production"]}
++        if task_id:
++            result["task_resolution"] = {"status": "INVALID_CONTINUATION", "task_id": task_id}
++        result["project_binding_hash"] = UnifiedMCPGateway._project_entry_binding_hash(result)
++        return result
++
+     @staticmethod
+     def _recovery_payload(state: Mapping[str, Any], *, operation: str = "status", include_state: bool = False) -> dict[str, Any]:
+         """Normalize every recovery response to one actionable contract."""
+@@ -4543,6 +4825,7 @@ class UnifiedMCPGateway:
+             "server_instance_id", "lifecycle_revision", "full_tool_schema_hash",
+             "permission_policy_hash", "controller_repo_root", "controller_branch",
+             "controller_head", "campaign_id", "spec_id", "spec_sha256",
++            "authority_goal_id", "authority_coordination_scope_id",
+         }
+         request_fields = set(ExternalCandidateAdoptionRequest.model_fields)
+         unknown = set(arguments) - request_fields - runtime_fields
+@@ -4622,6 +4905,7 @@ class UnifiedMCPGateway:
+         }
+         owner_authority = self._require_owner_effect_authority(
+             AutonomyActionClass.CANDIDATE_ADOPT_EXTERNAL, effect,
++            key=self._owner_effect_key(arguments),
+         )
+         rebound_root = Path(str(arguments["controller_repo_root"])).expanduser().resolve()
+         rebound_branch = _git("branch", "--show-current").strip()
+@@ -4951,6 +5235,14 @@ class UnifiedMCPGateway:
+         return payload
+
+     def _candidate_dispose(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
++        allowed_keys = {
++            "task_id", "disposition", "superseded_by",
++            "authority_goal_id", "authority_coordination_scope_id",
++        }
++        unknown_keys = set(arguments) - allowed_keys
++        if unknown_keys:
++            raise GatewayInputError(f"unknown arguments: {', '.join(sorted(unknown_keys))}")
++        owner_key = self._owner_effect_key(arguments)
+         task_id = _text(arguments.get("task_id"), "task_id")
+         disposition = str(arguments.get("disposition") or "").strip().upper()
+         if disposition not in {"REJECTED", "SUPERSEDED"}:
+@@ -4999,6 +5291,7 @@ class UnifiedMCPGateway:
+                 "superseded_by": superseded_by,
+                 **candidate_binding,
+             },
++            key=owner_key,
+         )
+         action_request = {**dict(arguments), "source_attempt_id": state.get("attempt_id"), "candidate_binding": {
+             "candidate_commit_sha": packet.get("candidate_commit_sha") or state.get("candidate_commit_sha"),
+@@ -5382,6 +5675,8 @@ class UnifiedMCPGateway:
+             return self._gateway_status()
+         if name == EXECUTION_READINESS_TOOL_NAME:
+             return self._gateway_execution_readiness(arguments)
++        if name == "nexus_project_entry":
++            return self._project_entry(arguments)
+         if name == "nexus_workspace_snapshot":
+             return self._workspace_snapshot()
+         if name == "nexus_read":
+FOCUSED=266 passed
+RECEIPT_G9=/Users/jameschen/Workspace/Nexus-new/.recovery/issue807-reboot-20260908/g9-0ce450d6.md
+RECEIPT_POSTMERGE=/Users/jameschen/Workspace/Nexus-new/.recovery/issue807-reboot-20260908/TERMINAL-POSTMERGE.md
+main=d1b02c15fda5700fa60db07f8fffc70652f2f98d tree=e6418f3af280ead71b97b13da14055eb065de640
+accepted_head_is_ancestor=PASS
+merge_commit_is_ancestor=PASS
+d0e269c83aad20f7d09b0d79f067180254a3ebd7 4c2268f7ae11d0dcac924d6608a48247a6b1629f 0ce450d6a96da665945a709d0731e185587cfe01
+receipt_sha=c61e25fb4a55a770c2694039c0dcbb2766028851f03b03573693530e2606b5d7
+postmerge_sha=56f3cebb3167ffb6fab0ec6bfc050ea7c9852f8434b5d2ed04e6eefbbb4dee4e

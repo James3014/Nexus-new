@@ -1295,13 +1295,24 @@ class LocalModelExecutor:
                 )
                 from nexus.services.local_heal.memory_trace import build_memory_trace_from_adapter
                 adapter = MemoryRetrievalAdapter(enabled=True)
+                source_rev = str(request.route_context.get("source_revision") or request.route_context.get("workspace_revision") or "").strip()
+                contract_rev = str(request.route_context.get("contract_revision") or "").strip()
+                current_state = {
+                    "runtime_identity": "local_model_executor",
+                }
+                if source_rev:
+                    current_state["source_revision"] = source_rev
+                if contract_rev:
+                    current_state["contract_revision"] = contract_rev
+
                 lessons = adapter.retrieve_reranked(
                     query_text=request.problem_statement,
                     anchor_symbol=request.route_context.get("target_symbol") or "",
                     anchor_file=request.target_file,
                     limit=3,
                     max_chars=800,
-                    task_id=request.task_id
+                    task_id=request.task_id,
+                    current_state=current_state,
                 )
                 adapter.last_metadata["prompt_included"] = bool(lessons)
                 memory_adapter_metadata = dict(adapter.last_metadata)
@@ -1552,6 +1563,11 @@ class LocalModelExecutor:
 
             attempt_id_val = f"attempt-{len(profile_attempts)}" if profile_attempts else "attempt-1"
             execution_profile_val = profile_attempts[-1] if profile_attempts else "FULL"
+            _lc_source_revision = str(
+                request.route_context.get("source_revision")
+                or request.route_context.get("workspace_revision")
+                or ""
+            ) if isinstance(request.route_context, dict) else ""
             candidates = LocalCommitteeCandidateProvider.generate_committee_candidates(
                 task_id=request.task_id,
                 problem_statement=enhanced_problem,
@@ -1564,6 +1580,8 @@ class LocalModelExecutor:
                 route_context=request.route_context,
                 attempt_id=attempt_id_val,
                 execution_profile=execution_profile_val,
+                repo_root=request.repo_root,
+                source_revision=_lc_source_revision,
             )
 
             # Update cap_ctx with candidates for this topology
@@ -2013,6 +2031,216 @@ class LocalModelExecutor:
                 patch_lifecycle_state=raw_meta["patch_lifecycle_state"],
             )
             raw_meta.update(vfe)
+            # Research-only sidecar for the primary local committee.  Only the
+            # selected candidate has isolated verifier truth in this topology;
+            # unselected candidates are preserved as UNKNOWN rather than being
+            # mislabeled as failures.
+            try:
+                from nexus.research.clm_system_one.candidate_evidence_collector import (
+                    collect_candidate_group,
+                )
+
+                _lc_contract_identity = {
+                    "problem_statement": request.problem_statement,
+                    "target_file": request.target_file,
+                    "selected_capabilities": list(request.selected_capabilities),
+                    "locked_search_sha256": hashlib.sha256(
+                        str(locked_search or "").encode("utf-8")
+                    ).hexdigest(),
+                }
+                _lc_collection_candidates = []
+                for _lc_candidate in candidates:
+                    if getattr(_lc_candidate, "role", "") == "judge":
+                        continue
+                    _lc_selected = (
+                        _lc_candidate.candidate_id == decision.selected_candidate_id
+                    )
+                    _lc_payload = (
+                        selected_patch
+                        if _lc_selected
+                        else str(getattr(_lc_candidate, "candidate_patch", "") or "")
+                    )
+                    _lc_collection_candidates.append(
+                        {
+                            "candidate_id": _lc_candidate.candidate_id,
+                            "candidate_model": _lc_candidate.model,
+                            "candidate_source": "local_committee_only",
+                            "candidate_payload": _lc_payload,
+                            "candidate_payload_sha256": "",
+                            "candidate_state_hash": "",
+                            "verifier_status": (
+                                isolated_verifier_status if _lc_selected else "not_run"
+                            ),
+                            "label_quality": (
+                                "ISOLATED_VERIFIER" if _lc_selected else "TRACE_ONLY"
+                            ),
+                            "verifier_evidence": (
+                                {
+                                    "verifier_kind": "isolated_verifier",
+                                    "verifier_invoked": candidate_isolation_attempted,
+                                    "verifier_status": isolated_verifier_status,
+                                    "exit_code": isolated_verifier_exit_code,
+                                    "stdout_sha256": hashlib.sha256(
+                                        isolated_verifier_stdout_tail.encode("utf-8")
+                                    ).hexdigest(),
+                                    "stderr_sha256": hashlib.sha256(
+                                        isolated_verifier_stderr_tail.encode("utf-8")
+                                    ).hexdigest(),
+                                    "verifier_error": isolated_verifier_error,
+                                    "apply_status": isolated_apply_status,
+                                }
+                                if _lc_selected
+                                else {}
+                            ),
+                            "failure_reason_codes": (
+                                [str(raw_meta.get("verifier_failure_kind") or "")]
+                                if _lc_selected
+                                and str(raw_meta.get("verifier_failure_kind") or "")
+                                else []
+                            ),
+                            "selected": _lc_selected,
+                        }
+                    )
+                _lc_collection = collect_candidate_group(
+                    repo_root=request.repo_root,
+                    task_id=request.task_id,
+                    attempt_id=attempt_id_val,
+                    collector_source="local_committee_only",
+                    source_revision=str(
+                        request.route_context.get("source_revision")
+                        or request.route_context.get("workspace_revision")
+                        or ""
+                    ),
+                    contract_identity=_lc_contract_identity,
+                    verifier_identity={
+                        "kind": "isolated_verifier",
+                        "command": list(verifier_command),
+                    },
+                    candidates=_lc_collection_candidates,
+                    winner_id=decision.selected_candidate_id,
+                )
+                raw_meta["candidate_evidence_collection_status"] = _lc_collection.status
+                raw_meta[
+                    "candidate_evidence_collection_group_sha256"
+                ] = _lc_collection.group_sha256
+                raw_meta[
+                    "candidate_evidence_collection_rows"
+                ] = _lc_collection.collected_count
+                raw_meta[
+                    "candidate_evidence_collection_eligible_rows"
+                ] = _lc_collection.eligible_count
+
+                # Bind strong dataset-eligible candidate outcomes to their trajectory steps.
+                # Only the selected candidate with a strong label (ISOLATED_VERIFIER) can
+                # be bound. TRACE_ONLY/unselected/blocked rows are never bound.
+                # All failures here are telemetry-only and must not affect selection,
+                # verifier result, or returned metadata semantics.
+                _lc_traj_outcomes_bound = 0
+                _lc_traj_capture_errors: list[str] = []
+                try:
+                    from nexus.research.clm_system_one.trajectory_continuity import (
+                        bind_trajectory_outcome,
+                        refresh_registered_experiment,
+                        resolve_research_evidence_root,
+                    )
+                    from nexus.services.local_heal.local_committee_candidate_provider import (
+                        stable_committee_trajectory_id,
+                    )
+
+                    _lc_traj_evidence_root = resolve_research_evidence_root(request.repo_root)
+
+                    # Build a map from candidate_id -> stable trajectory_id using the same
+                    # helper that was used during generate_committee_candidates.
+                    # committee_models ordering: judge at idx=1, then proposers.
+                    # We replicate the same enumeration to get stable member_index.
+                    _lc_signal_snapshot = (
+                        request.route_context.get("signal_snapshot", {})
+                        if isinstance(request.route_context, dict)
+                        else {}
+                    )
+                    _lc_proposer_specs = list(_lc_signal_snapshot.get("proposer_specs") or [])
+                    _lc_judge_model = str(_lc_signal_snapshot.get("judge_model") or "")
+                    # Reconstruct full committee ordering (judge first, then proposers)
+                    _lc_committee_ordered = [(_lc_judge_model, "judge")]
+                    for _spec in _lc_proposer_specs:
+                        _lc_committee_ordered.append(
+                            (str(_spec.get("model") or ""), f"{_spec.get('role')}_proposer")
+                        )
+
+                    # Zip collection candidates (non-judge only) against row_refs.
+                    # The collection candidates list excludes judges (see _lc_collection_candidates
+                    # construction above). To get the correct member_index we need to track
+                    # per-model within the full committee ordering.
+                    _lc_model_to_member_index: dict[str, int] = {
+                        model: member_idx
+                        for member_idx, (model, _role) in enumerate(_lc_committee_ordered, 1)
+                        if _role != "judge"
+                    }
+
+                    for _lc_cand_row, _lc_row_ref in zip(
+                        _lc_collection_candidates,
+                        _lc_collection.row_refs,
+                        strict=True,
+                    ):
+                        _lc_cid = str(_lc_cand_row.get("candidate_id") or "")
+                        _lc_label_quality = str(_lc_cand_row.get("label_quality") or "")
+                        # Only bind strong-label selected rows.
+                        if _lc_label_quality != "ISOLATED_VERIFIER":
+                            continue
+                        if not _lc_cand_row.get("selected"):
+                            continue
+                        # Find member_index for this candidate's model.
+                        _lc_cand_model = str(_lc_cand_row.get("candidate_model") or "")
+                        _lc_member_idx = _lc_model_to_member_index.get(_lc_cand_model)
+                        if _lc_member_idx is None:
+                            _lc_traj_capture_errors.append(
+                                f"no_member_index:{_lc_cand_model}"
+                            )
+                            continue
+                        _lc_traj_id = stable_committee_trajectory_id(
+                            task_id=request.task_id,
+                            attempt_id=attempt_id_val,
+                            member_index=_lc_member_idx,
+                            model_name=_lc_cand_model,
+                        )
+                        try:
+                            bind_trajectory_outcome(
+                                evidence_root=_lc_traj_evidence_root,
+                                trajectory_id=_lc_traj_id,
+                                candidate_evidence_ref=_lc_row_ref,
+                            )
+                            _lc_traj_outcomes_bound += 1
+                        except Exception as _lc_bind_exc:
+                            _lc_traj_capture_errors.append(
+                                f"bind:{type(_lc_bind_exc).__name__}"
+                            )
+
+                    if _lc_traj_outcomes_bound:
+                        try:
+                            refresh_registered_experiment(
+                                repo_root=request.repo_root,
+                                candidate_evidence_root=_lc_traj_evidence_root,
+                            )
+                        except Exception as _lc_refresh_exc:
+                            _lc_traj_capture_errors.append(
+                                f"refresh:{type(_lc_refresh_exc).__name__}"
+                            )
+
+                except Exception as _lc_traj_exc:
+                    _lc_traj_capture_errors.append(
+                        f"traj_outer:{type(_lc_traj_exc).__name__}"
+                    )
+
+                # Persist read-only trajectory telemetry — fail-visible only.
+                # Must not affect selection, verifier, routing, winner, or return values.
+                raw_meta["lc_trajectory_outcomes_bound"] = _lc_traj_outcomes_bound
+                raw_meta["lc_trajectory_capture_errors"] = list(_lc_traj_capture_errors)
+
+            except Exception as _lc_collection_exc:
+                raw_meta["candidate_evidence_collection_status"] = "ERROR"
+                raw_meta["candidate_evidence_collection_error_type"] = type(
+                    _lc_collection_exc
+                ).__name__
             # C15-3E: Verifier receipt presence fields
             raw_meta["verifier_stdout_tail_present"] = bool(isolated_verifier_stdout_tail)
             raw_meta["verifier_stderr_tail_present"] = bool(isolated_verifier_stderr_tail)
@@ -2679,6 +2907,14 @@ class LocalModelExecutor:
                     _dr_committee_winner = None
                     _dr_committee_candidate_count = 0
                     _dr_committee_candidates_list = []
+                    _dr_candidate_payloads: dict[str, str] = {}
+                    _dr_candidate_verifier_evidence: dict[str, dict[str, Any]] = {}
+                    _dr_collection_attempt_id = (
+                        f"attempt-{len(profile_attempts)}" if profile_attempts else "attempt-1"
+                    )
+                    _dr_trajectory_ids: dict[str, str] = {}
+                    _dr_trajectory_next_step: dict[str, int] = {}
+                    _dr_trajectory_capture_errors: list[str] = []
                     import sys as _dbg
                     import json as _json
                     print(f"[C15-5C] candidate_models={_dr_candidate_models} len={len(_dr_candidate_models)}", file=_dbg.stderr)
@@ -2692,12 +2928,17 @@ class LocalModelExecutor:
                             _safe_model_slug = _re.sub(r'[^a-zA-Z0-9]', '-', _dr_cand_model.lower())
                             _safe_model_slug = _re.sub(r'-+', '-', _safe_model_slug).strip('-')
                             _cand_id = f"{request.task_id}#delegated-retry-{idx:02d}-{_safe_model_slug}"
+                            _trajectory_id = f"{_cand_id}#provider-trajectory"
+                            _dr_trajectory_ids[_cand_id] = _trajectory_id
+                            _dr_trajectory_next_step[_cand_id] = 0
 
                             # Explicitly capture current context before closure definition
                             current_attempt_id = f"attempt-{len(profile_attempts)}" if profile_attempts else "attempt-1"
                             current_execution_profile = profile_attempts[-1] if profile_attempts else "FULL"
 
-                            def _make_committee_provider(_model_name):
+                            def _make_committee_provider(
+                                _model_name, _candidate_id, _candidate_trajectory_id
+                            ):
                                 def _cp_gen(system_prompt_or_req, user_prompt=None, model=None, timeout=None, options=None, api_type=None, **kwargs):
                                     from nexus.services.local_heal.local_model_provider import LocalModelProviderRequest
                                     if user_prompt is not None:
@@ -2707,6 +2948,11 @@ class LocalModelExecutor:
                                     _resolved_model = _model_name
                                     # Alias resolution is owned by OllamaLocalModelProvider.
                                     _opts = options or kwargs.get("options")
+                                    _phase = kwargs.get("phase", "retry")
+                                    _attempt_id = kwargs.get("attempt_id", current_attempt_id)
+                                    _execution_profile = kwargs.get(
+                                        "execution_profile", current_execution_profile
+                                    )
                                     prov_req = LocalModelProviderRequest(
                                         task_id=request.task_id,
                                         prompt=prompt,
@@ -2714,17 +2960,117 @@ class LocalModelExecutor:
                                         model_name=_resolved_model,
                                         timeout_sec=provider_timeout_sec,
                                         options=_opts,
-                                        phase=kwargs.get("phase", "retry"), # 這是 retry phase
-                                        attempt_id=kwargs.get("attempt_id", current_attempt_id),
-                                        execution_profile=kwargs.get("execution_profile", current_execution_profile),
+                                        phase=_phase,
+                                        attempt_id=_attempt_id,
+                                        execution_profile=_execution_profile,
                                     )
-                                    prov_resp = provider.generate(prov_req)
+                                    _trajectory_step_ref = None
+                                    try:
+                                        from nexus.research.clm_system_one.trajectory_continuity import (
+                                            resolve_research_evidence_root,
+                                            seal_trajectory_step,
+                                        )
+
+                                        _step_index = _dr_trajectory_next_step[_candidate_id]
+                                        _trajectory_step_ref = seal_trajectory_step(
+                                            evidence_root=resolve_research_evidence_root(
+                                                request.repo_root
+                                            ),
+                                            task_id=request.task_id,
+                                            trajectory_id=_candidate_trajectory_id,
+                                            attempt_id=_dr_collection_attempt_id,
+                                            candidate_id=_candidate_id,
+                                            step_index=_step_index,
+                                            source_revision=str(
+                                                _dr_route_ctx.get("source_revision")
+                                                or _dr_route_ctx.get("workspace_revision")
+                                                or ""
+                                            ),
+                                            pre_action_state={
+                                                "task_objective": request.problem_statement,
+                                                "target_file": request.target_file,
+                                                "prompt": prompt,
+                                                "phase": _phase,
+                                                "evidence_refs": [
+                                                    str(ref)
+                                                    for ref in (request.evidence_refs or [])
+                                                ],
+                                            },
+                                            action_type="local_model_generate",
+                                            action_payload={
+                                                "model_name": _resolved_model,
+                                                "api_type": api_type or "generate",
+                                                "attempt_id": _attempt_id,
+                                                "execution_profile": _execution_profile,
+                                                "options_repr": repr(_opts),
+                                            },
+                                        )
+                                        _dr_trajectory_next_step[_candidate_id] = _step_index + 1
+                                    except Exception as _trace_exc:
+                                        _dr_trajectory_capture_errors.append(
+                                            f"seal:{type(_trace_exc).__name__}"
+                                        )
+
+                                    try:
+                                        prov_resp = provider.generate(prov_req)
+                                    except Exception as _provider_exc:
+                                        if _trajectory_step_ref is not None:
+                                            try:
+                                                from nexus.research.clm_system_one.trajectory_continuity import (
+                                                    bind_trajectory_step_result,
+                                                    resolve_research_evidence_root,
+                                                )
+
+                                                bind_trajectory_step_result(
+                                                    evidence_root=resolve_research_evidence_root(
+                                                        request.repo_root
+                                                    ),
+                                                    step_ref=_trajectory_step_ref,
+                                                    action_result={
+                                                        "response_type": "Exception",
+                                                        "exception_type": type(
+                                                            _provider_exc
+                                                        ).__name__,
+                                                        "error": str(_provider_exc),
+                                                    },
+                                                )
+                                            except Exception as _trace_exc:
+                                                _dr_trajectory_capture_errors.append(
+                                                    f"result:{type(_trace_exc).__name__}"
+                                                )
+                                        raise
                                     out = prov_resp.output_text or ""
+                                    if _trajectory_step_ref is not None:
+                                        try:
+                                            from nexus.research.clm_system_one.trajectory_continuity import (
+                                                bind_trajectory_step_result,
+                                                resolve_research_evidence_root,
+                                            )
+
+                                            bind_trajectory_step_result(
+                                                evidence_root=resolve_research_evidence_root(
+                                                    request.repo_root
+                                                ),
+                                                step_ref=_trajectory_step_ref,
+                                                action_result={
+                                                    "response_type": type(prov_resp).__name__,
+                                                    "output_text": out,
+                                                    "error": str(prov_resp.error or ""),
+                                                },
+                                            )
+                                        except Exception as _trace_exc:
+                                            _dr_trajectory_capture_errors.append(
+                                                f"result:{type(_trace_exc).__name__}"
+                                            )
                                     print(f"[C15-5C] _cp_gen model={_model_name} resolved={_resolved_model} prompt_len={len(prompt)} out_len={len(out)} err={prov_resp.error}", file=_dbg.stderr)
                                     return out
                                 return _cp_gen
 
-                            _cp_pipeline = HealPipeline(ollama_generate_fn=_make_committee_provider(_dr_cand_resolved))
+                            _cp_pipeline = HealPipeline(
+                                ollama_generate_fn=_make_committee_provider(
+                                    _dr_cand_resolved, _cand_id, _trajectory_id
+                                )
+                            )
                             _cp_route_ctx = dict(route_ctx)
                             _cp_route_ctx["semantic_retry_seed"] = route_ctx.get("semantic_retry_seed", {})
                             _cp_heal_ctx = LegacyHealContext(
@@ -2751,6 +3097,10 @@ class LocalModelExecutor:
                                     pass
 
                             _cp_patch = str(getattr(_cp_result, "pre_verification_final_patch", "") or getattr(_cp_result, "final_patch", "") or "")
+                            # Candidate hash below uses rstrip("\n"); persist the
+                            # exact same normalized bytes so the content-addressed
+                            # sidecar binds to the runtime's existing hash.
+                            _dr_candidate_payloads[_cand_id] = _cp_patch.rstrip("\n")
 
                             import hashlib as _hashlib
                             _cp_patch_hash = _hashlib.sha256(_cp_patch.rstrip("\n").encode()).hexdigest() if _cp_patch.strip() else ""
@@ -2791,6 +3141,7 @@ class LocalModelExecutor:
                             _conversion_candidate_hash = ""
                             _target_file_correct = True
                             _preimage_match_status = "not_applicable"
+                            _cp_verify = None
                             if _last_patch_decision:
                                 _conversion_status = _last_patch_decision.get("conversion_status", "none")
                                 _conversion_source_hash_before = _last_patch_decision.get("conversion_source_hash_before", "")
@@ -2844,6 +3195,24 @@ class LocalModelExecutor:
                                     if _cp_verify.verifier_status != "pass":
                                         _rejection_reason = "verifier_failed"
 
+                            _dr_candidate_verifier_evidence[_cand_id] = {
+                                "verifier_kind": "isolated_verifier",
+                                "verifier_invoked": _cp_verify is not None,
+                                "verifier_status": _verifier_result,
+                                "exit_code": getattr(_cp_verify, "exit_code", None),
+                                "stdout_sha256": _hashlib.sha256(
+                                    str(getattr(_cp_verify, "stdout_tail", "") or "").encode("utf-8")
+                                ).hexdigest(),
+                                "stderr_sha256": _hashlib.sha256(
+                                    str(getattr(_cp_verify, "stderr_tail", "") or "").encode("utf-8")
+                                ).hexdigest(),
+                                "verifier_error": str(
+                                    getattr(_cp_verify, "verifier_error", "") or ""
+                                ),
+                                "apply_status": _apply_status,
+                                "rejection_reason": _rejection_reason,
+                            }
+
                             _cand_data = {
                                 "candidate_id": _cand_id,
                                 "model": _dr_cand_resolved,
@@ -2885,6 +3254,7 @@ class LocalModelExecutor:
                     # 若有多個 verifier-pass 候選，交給既有 AutoreasonService 做信心排名，
                     # 選出最高分候選，而非直接選第一個。
                     _dr_autoreason_winner_model = ""
+                    _dr_autoreason_winner_candidate_id = ""
                     _dr_autoreason_invoked = False
                     _passing_cands = [
                         c for c in _dr_committee_candidates_list
@@ -2911,6 +3281,7 @@ class LocalModelExecutor:
                             _ar_winner_id = _ar_result.get("winner")
                             _dr_autoreason_invoked = True
                             if _ar_winner_id:
+                                _dr_autoreason_winner_candidate_id = str(_ar_winner_id)
                                 _winner_cand = next((c for c in _dr_committee_candidates_list if c["candidate_id"] == _ar_winner_id), None)
                                 _winner_model = _winner_cand["model"] if _winner_cand else _ar_winner_id
                                 _dr_autoreason_winner_model = _winner_model
@@ -2922,10 +3293,188 @@ class LocalModelExecutor:
                                     _dr_committee_winner,  # fallback 保持原值
                                 )
                             raw_meta["delegated_retry_autoreason_winner"] = _dr_autoreason_winner_model
+                            raw_meta["delegated_retry_autoreason_winner_candidate_id"] = (
+                                _dr_autoreason_winner_candidate_id
+                            )
                             raw_meta["delegated_retry_autoreason_borda"] = str(_ar_result.get("borda_scores", {}))
                         except Exception as _ar_err:
                             raw_meta["delegated_retry_autoreason_error"] = str(_ar_err)
                     raw_meta["delegated_retry_autoreason_invoked"] = _dr_autoreason_invoked
+
+                    # Research-only sidecar: persist every committee candidate and
+                    # its already-computed isolated verifier outcome.  The
+                    # collector does not run a verifier, select a winner, or
+                    # participate in delivery; collection failures are telemetry
+                    # only and must not change the runtime outcome.
+                    try:
+                        from nexus.research.clm_system_one.candidate_evidence_collector import (
+                            collect_candidate_group,
+                        )
+
+                        # Bind evidence to the candidate the runtime will
+                        # actually deliver below, not to Autoreason's advisory
+                        # selected flag.  Existing runtime semantics can retain
+                        # their own behavior without contaminating the corpus.
+                        _dr_delivered_candidate_id = str(
+                            (_dr_committee_winner or {}).get("candidate_id") or ""
+                        )
+                        _dr_autoreason_delivery_mismatch = bool(
+                            _dr_autoreason_winner_candidate_id
+                            and _dr_delivered_candidate_id
+                            and _dr_autoreason_winner_candidate_id
+                            != _dr_delivered_candidate_id
+                        )
+                        _dr_verifier_command = tuple(
+                            request.route_context.get("verifier_command", []) or []
+                        )
+                        _dr_contract_identity = {
+                            "problem_statement": request.problem_statement,
+                            "target_file": request.target_file,
+                            "selected_capabilities": list(request.selected_capabilities),
+                            "locked_search_sha256": _hashlib.sha256(
+                                str(route_ctx.get("locked_search") or "").encode("utf-8")
+                            ).hexdigest(),
+                        }
+                        _dr_collection_candidates = []
+                        for _cand in _dr_committee_candidates_list:
+                            _cid = str(_cand.get("candidate_id") or "")
+                            _dr_collection_candidates.append(
+                                {
+                                    "candidate_id": _cid,
+                                    "candidate_model": str(_cand.get("model") or ""),
+                                    "candidate_source": "delegated_retry_committee",
+                                    "candidate_payload": _dr_candidate_payloads.get(_cid, ""),
+                                    "candidate_payload_sha256": str(
+                                        _cand.get("candidate_hash") or ""
+                                    ),
+                                    "candidate_state_hash": "",
+                                    "verifier_status": str(
+                                        _cand.get("verifier_result") or ""
+                                    ),
+                                    "label_quality": "ISOLATED_VERIFIER",
+                                    "verifier_evidence": _dr_candidate_verifier_evidence.get(
+                                        _cid, {}
+                                    ),
+                                    "failure_reason_codes": [
+                                        str(_cand.get("rejection_reason") or "")
+                                    ]
+                                    if str(_cand.get("rejection_reason") or "")
+                                    else [],
+                                    "selected": _cid == _dr_delivered_candidate_id,
+                                }
+                            )
+                        _dr_collection = collect_candidate_group(
+                            repo_root=request.repo_root,
+                            task_id=request.task_id,
+                            attempt_id=_dr_collection_attempt_id,
+                            collector_source="localheal_delegated_retry_committee",
+                            source_revision=str(
+                                request.route_context.get("source_revision")
+                                or request.route_context.get("workspace_revision")
+                                or ""
+                            ),
+                            contract_identity=_dr_contract_identity,
+                            verifier_identity={
+                                "kind": "isolated_verifier",
+                                "command": list(_dr_verifier_command),
+                            },
+                            candidates=_dr_collection_candidates,
+                            winner_id=_dr_delivered_candidate_id,
+                        )
+                        raw_meta["candidate_evidence_collection_status"] = (
+                            _dr_collection.status
+                        )
+                        raw_meta["candidate_evidence_collection_group_sha256"] = (
+                            _dr_collection.group_sha256
+                        )
+                        raw_meta["candidate_evidence_collection_rows"] = (
+                            _dr_collection.collected_count
+                        )
+                        raw_meta["candidate_evidence_collection_eligible_rows"] = (
+                            _dr_collection.eligible_count
+                        )
+
+                        _dr_trajectory_outcomes_bound = 0
+                        _dr_trajectory_outcomes_skipped = 0
+                        try:
+                            from nexus.research.clm_system_one.trajectory_continuity import (
+                                bind_trajectory_outcome,
+                                refresh_registered_experiment,
+                                resolve_research_evidence_root,
+                            )
+
+                            _trajectory_evidence_root = resolve_research_evidence_root(
+                                request.repo_root
+                            )
+                            for _cand, _row_ref in zip(
+                                _dr_collection_candidates,
+                                _dr_collection.row_refs,
+                                strict=True,
+                            ):
+                                _cid = str(_cand.get("candidate_id") or "")
+                                if _dr_trajectory_next_step.get(_cid, 0) <= 0:
+                                    _dr_trajectory_outcomes_skipped += 1
+                                    continue
+                                try:
+                                    bind_trajectory_outcome(
+                                        evidence_root=_trajectory_evidence_root,
+                                        trajectory_id=_dr_trajectory_ids[_cid],
+                                        candidate_evidence_ref=_row_ref,
+                                    )
+                                except ValueError:
+                                    _dr_trajectory_outcomes_skipped += 1
+                                else:
+                                    _dr_trajectory_outcomes_bound += 1
+
+                            if _dr_trajectory_outcomes_bound:
+                                _refresh = refresh_registered_experiment(
+                                    repo_root=request.repo_root,
+                                    candidate_evidence_root=_trajectory_evidence_root,
+                                )
+                                _refresh_checkpoint = dict(
+                                    _refresh.get("checkpoint") or {}
+                                )
+                                _refresh_readiness = dict(
+                                    _refresh.get("readiness") or {}
+                                )
+                                raw_meta["trajectory_corpus_checkpoint_status"] = (
+                                    _refresh_checkpoint.get("status")
+                                )
+                                raw_meta["trajectory_corpus_checkpoint_sha256"] = (
+                                    _refresh_checkpoint.get("checkpoint_sha256")
+                                )
+                                raw_meta["trajectory_corpus_readiness"] = (
+                                    _refresh_readiness.get("disposition")
+                                )
+                        except Exception as _trajectory_refresh_exc:
+                            _dr_trajectory_capture_errors.append(
+                                "refresh:"
+                                + type(_trajectory_refresh_exc).__name__
+                            )
+
+                        raw_meta["trajectory_capture_step_count"] = sum(
+                            _dr_trajectory_next_step.values()
+                        )
+                        raw_meta["trajectory_outcomes_bound"] = (
+                            _dr_trajectory_outcomes_bound
+                        )
+                        raw_meta["trajectory_outcomes_skipped"] = (
+                            _dr_trajectory_outcomes_skipped
+                        )
+                        raw_meta["trajectory_capture_errors"] = list(
+                            _dr_trajectory_capture_errors
+                        )
+                        raw_meta["candidate_evidence_delivered_winner_id"] = (
+                            _dr_delivered_candidate_id
+                        )
+                        raw_meta[
+                            "candidate_evidence_autoreason_delivery_mismatch"
+                        ] = _dr_autoreason_delivery_mismatch
+                    except Exception as _collection_exc:
+                        raw_meta["candidate_evidence_collection_status"] = "ERROR"
+                        raw_meta["candidate_evidence_collection_error_type"] = type(
+                            _collection_exc
+                        ).__name__
 
                     _dr_judge_model = _dr_signal.get("judge_model") or ""
                     raw_meta["delegated_retry_proposer_count_expected"] = len(_dr_candidate_models)
@@ -3489,7 +4038,10 @@ class LocalModelExecutor:
                 f"1. The diff header MUST use exactly: --- a/{request.target_file}  and  +++ b/{request.target_file}\n"
                 f"2. The @@ hunk header MUST use the EXACT line numbers from the source above.\n"
                 f"3. Context lines (no +/-) MUST EXACTLY match the source file character-for-character including indentation.\n"
-                f"4. Return ONLY the diff wrapped in a ```diff fenced block. No prose, no explanation.\n"
+                f"4. The hunk MUST contain an effective edit: do not emit a context-only or duplicated-context hunk.\n"
+                f"5. For a replacement, include the original line(s) with '-' and the replacement line(s) with '+'; for a pure insertion or deletion, the corresponding '+' or '-' lines are sufficient.\n"
+                f"6. The hunk body counts and context must match the lines actually emitted; never fabricate source context or line ranges.\n"
+                f"7. Return ONLY the diff wrapped in a ```diff fenced block. No prose, no explanation.\n"
             )
 
         model_name = signal_snapshot["executor_model"]

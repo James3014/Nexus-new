@@ -1,0 +1,30 @@
+{
+  "resource": "James3014/Nexus-new#842/project-entry-authority-composition",
+  "owner_thread": "01a08944-28b8-7db1-b7a8-ea5a050c038e",
+  "operation": "CONTROLLER_INTEGRATION_DEPLOYMENT_ACCEPTANCE",
+  "scope": [
+    "nexus/orchestrator/self_hosted_task_service.py",
+    "nexus/orchestrator/unified_mcp_gateway.py",
+    "tests/nexus/orchestrator/test_self_hosted_task_service.py",
+    "tests/nexus/orchestrator/test_unified_mcp_gateway.py",
+    "tasks/github-issue-526-g20-r1-source-contract-delta-20260903/02-r1-complete-deployment-recovery-authority-receipt.json"
+  ],
+  "base_revision": "9d768a527078eb82dde4048e83e029f0c4f2e73e",
+  "worker": null,
+  "worktree": "/Users/jameschen/Workspace/Nexus-new-worktrees/issue842-project-entry-r9",
+  "expires_at": "2026-09-10T06:47:18.406232+00:00",
+  "terminal_state": "COMPLETED_RELEASED",
+  "acceptance": [
+    "explicit persisted binding validated on submit and rehydrate",
+    "existing canonical readiness calls #515",
+    "fresh-process real persisted positive; invalid/foreign/expired/revoked/tampered and issue switch controls",
+    "no-task native behavior unchanged",
+    "independent frozen revision review",
+    "exact source runtime rebind and native ChatGPT acceptance"
+  ],
+  "no_new_authority": true,
+  "superseded_worker": "r9_retry_receipt",
+  "candidate_revision": "16758457f552e874358f5566b9a70a11d5b4dfbb",
+  "released_at": "2026-09-10T05:00:05.319024+00:00",
+  "remaining_gap": null
+}

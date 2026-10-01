@@ -36,7 +36,7 @@ from nexus.research.epistemic_benchmark.phase1a_qualification import (
     select_formal_effect_rows,
 )
 from nexus.services.verified_assist_contract import (
-    evaluate_assist_credit,
+    verify_consumption_projection,
     verify_consumption_proof,
 )
 
@@ -188,6 +188,10 @@ def _verified_assist_packet_body(packet: Mapping[str, Any]) -> dict[str, Any]:
         "treatment_run_id": packet.get("treatment_run_id"),
         "planner_decision_id": packet.get("planner_decision_id"),
         "task_contract_hash": packet.get("task_contract_hash"),
+        "canonical_execution": packet.get("canonical_execution"),
+        "execution_attempt": packet.get("execution_attempt"),
+        "source_hash": packet.get("source_hash"),
+        "execution_world": packet.get("execution_world"),
     }
 
 
@@ -260,7 +264,7 @@ def _validate_assist_binding(run: Phase1AReportRunSource) -> dict[str, Any]:
         raise ValueError("observation-set arm identity drift")
     if run.verified_assist_packet is None or run.verified_assist_consumption is None:
         raise ValueError(
-            f"Arm {_arm_key(run.arm)} requires packet and physical consumption evidence"
+            f"Arm {_arm_key(run.arm)} requires packet and serialized projection evidence"
         )
 
     proof = verify_observation_set_consumption(
@@ -269,13 +273,13 @@ def _validate_assist_binding(run: Phase1AReportRunSource) -> dict[str, Any]:
         run.verified_assist_consumption,
     )
     if proof.get("ok") is not True:
-        raise ValueError(f"physical consumption verification failed: {proof.get('reason')}")
+        raise ValueError(f"measurement projection verification failed: {proof.get('reason')}")
     consumption_check = verify_consumption_proof(run.verified_assist_consumption)
     if consumption_check.get("ok") is not True:
         raise ValueError(f"consumption proof invalid: {consumption_check.get('reason')}")
-    credit = evaluate_assist_credit(run.verified_assist_consumption)
-    if credit.get("assist_credited") is not True:
-        raise ValueError(f"assist credit denied: {credit.get('reason')}")
+    projection = verify_consumption_projection(run.verified_assist_consumption)
+    if projection.get("measurement_consumption_eligible") is not True:
+        raise ValueError(f"measurement projection denied: {projection.get('reason')}")
 
     packet = _mapping(run.verified_assist_packet, "verified_assist_packet")
     consumption = _mapping(run.verified_assist_consumption, "verified_assist_consumption")
@@ -303,8 +307,13 @@ def _validate_assist_binding(run: Phase1AReportRunSource) -> dict[str, Any]:
     settlement_credit = settlement.get("assist_credit")
     if not isinstance(settlement_credit, Mapping):
         raise ValueError("settlement assist-credit projection missing")
-    if settlement_credit.get("assist_credited") is not True:
-        raise ValueError("settlement does not credit physically consumed assist")
+    if settlement_credit.get("assist_credited") is not False:
+        raise ValueError("research settlement must not mint product assist credit")
+    claim_boundary = settlement.get("claim_boundary")
+    if not isinstance(claim_boundary, Mapping):
+        raise ValueError("settlement claim boundary missing")
+    if claim_boundary.get("assist_contributed") is not False:
+        raise ValueError("serialized projection cannot contribute to product settlement")
     if str(settlement_credit.get("packet_hash") or "") != packet_hash:
         raise ValueError("settlement packet identity mismatch")
     if str(settlement.get("treatment_run_id") or "") != run_id:

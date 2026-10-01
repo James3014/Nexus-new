@@ -42,10 +42,12 @@ class IsolatedApplyReceipt:
 def _canonicalize_effective_diff(diff_text: str) -> str:
     """Canonicalize one target's selected/applied effect for hash binding.
 
-    Git may add or drop pure blank *unchanged* context when it renders the
-    applied diff.  Exclude only those lines; hunk order, nonblank context, and
-    every added or removed payload line remain part of the identity.  Target,
-    source, successful apply, isolation, and verifier checks are separate gates.
+    Git may render a different unchanged context window around the same
+    payload.  Keep the nearest unchanged line on either side of the payload;
+    this preserves a local anchor while making the hash independent of extra
+    context that git adds when it renders the applied diff.  Every added or
+    removed payload line remains part of the identity.  Target, source,
+    successful apply, isolation, and verifier checks are separate gates.
     """
     output: list[str] = []
     hunk_lines: list[str] = []
@@ -55,6 +57,18 @@ def _canonicalize_effective_diff(diff_text: str) -> str:
         nonlocal hunk_lines, in_hunk
         if not in_hunk:
             return
+        changes = [
+            index for index, line in enumerate(hunk_lines) if line.startswith(("+", "-"))
+        ]
+        if changes:
+            first_change, last_change = changes[0], changes[-1]
+            start = first_change
+            end = last_change
+            if start > 0 and hunk_lines[start - 1].startswith(" "):
+                start -= 1
+            if end + 1 < len(hunk_lines) and hunk_lines[end + 1].startswith(" "):
+                end += 1
+            hunk_lines[:] = hunk_lines[start : end + 1]
         old_count = sum(1 for line in hunk_lines if not line.startswith("+"))
         new_count = sum(1 for line in hunk_lines if not line.startswith("-"))
         output.append(f"@@ -0,{old_count} +0,{new_count} @@")

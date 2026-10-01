@@ -1,0 +1,382 @@
+[
+  {
+    "id": 1,
+    "jsonrpc": "2.0",
+    "result": {
+      "content": [
+        {
+          "text": "{\"claim_ceiling\": \"PROJECT_ENTRY_OBSERVE_ONLY_NO_DOWNSTREAM_EFFECTS\", \"claim_ceiling_excludes\": [\"execution\", \"verification\", \"acceptance\", \"merge\", \"release\", \"production\"], \"issue\": {\"number\": 842, \"state\": \"OPEN\", \"updatedAt\": \"2026-09-10T03:43:42Z\", \"url\": \"https://github.com/James3014/Nexus-new/issues/842\"}, \"issue_observation\": {\"issue\": {\"number\": 842, \"state\": \"OPEN\", \"updatedAt\": \"2026-09-10T03:43:42Z\", \"url\": \"https://github.com/James3014/Nexus-new/issues/842\"}, \"observed_at\": \"2026-09-10T04:54:53.271279+00:00\", \"ok\": true}, \"project_binding_hash\": \"e11521f271c38bcbc5463e089c173d3ff8be309db6433f8417616cf61cda8335\", \"readiness_request\": {\"execution_contract_kind\": \"observe_only\", \"execution_realm\": \"in_process_preflight\", \"intended_source_commit\": \"6d1e32216434bdda7930c0cf21921209d9243c6d\", \"intended_source_tree\": \"06a796e22bc8fa756cd965fcb0fcd6becae97498\", \"repository_name\": \"Nexus-new\", \"repository_owner\": \"James3014\", \"required_action_family\": \"project_entry_observe\"}, \"readiness_result\": {\"certification_fence\": {\"forbidden_vocabulary_ref\": \"NEXUS_EXECUTION_READINESS_FORBIDDEN_CERTIFICATION_VOCABULARY\", \"ready_vocabulary\": [\"READY_TO_EXECUTE\"], \"satisfied\": true}, \"evaluated_at\": \"2026-09-10T04:54:53.463313Z\", \"outcome\": \"READY_TO_EXECUTE\", \"plane_results\": [{\"blocker_code\": null, \"evidence_identities\": [\"governance_observer=standing_grant_store.inspect_standing_grant_receipt\", \"governance_snapshot_schema=nexus.standing_grant_inspection.v1\", \"governance_authority_snapshot_status=INVALID\"], \"plane\": \"GOVERNANCE_PLANE\", \"schema_name\": \"nexus.execution_readiness_plane_results.v1\", \"status\": \"PASSED\"}, {\"blocker_code\": null, \"evidence_identities\": [\"source_requested_repository=James3014/Nexus-new\", \"source_observed_repository=James3014/Nexus-new\", \"source_desired_commit=6d1e32216434bdda7930c0cf21921209d9243c6d\", \"source_desired_tree=06a796e22bc8fa756cd965fcb0fcd6becae97498\", \"source_observed_commit=6d1e32216434bdda7930c0cf21921209d9243c6d\", \"source_observed_tree=06a796e22bc8fa756cd965fcb0fcd6becae97498\"], \"plane\": \"SOURCE_PLANE\", \"schema_name\": \"nexus.execution_readiness_plane_results.v1\", \"status\": \"PASSED\"}, {\"blocker_code\": null, \"evidence_identities\": [\"gateway_instance=81c3389f257d433491579dd5ad296739\", \"gateway_reload_required=false\", \"gateway_runtime_sha256=70a455ce096d0a4e93efceb32b7be7c1d23bc5f015e72fd54b8dfb259185bac0\"], \"plane\": \"GATEWAY_PLANE\", \"schema_name\": \"nexus.execution_readiness_plane_results.v1\", \"status\": \"PASSED\"}, {\"blocker_code\": null, \"evidence_identities\": [\"host_binding:com.nexus.mcp.gateway.direct:in_process\"], \"plane\": \"HOST_BINDING_PLANE\", \"schema_name\": \"nexus.execution_readiness_plane_results.v1\", \"status\": \"PASSED\"}, {\"blocker_code\": null, \"evidence_identities\": [\"action_surface:manifest=696f365d13ca0b4b4f88995dcfbd2afdb2cb946c2d6c90fd295b02815cd19b7a\", \"action_surface:schema=43ccbcb78f746aeb02db378166da5c8d7d34f1a69c5a797b897ac8f915c3404b\", \"action_surface:permission=45910e1e37069abf3d5b01f15196548da094e2fc6b71cf8a6136e8cdf9fd71cf\"], \"plane\": \"ACTION_SURFACE_PLANE\", \"schema_name\": \"nexus.execution_readiness_plane_results.v1\", \"status\": \"PASSED\"}, {\"blocker_code\": null, \"evidence_identities\": [\"authority_plane:non_material:no_task_campaign_goal_identity\", \"authority_action_family=project_entry_observe\"], \"plane\": \"AUTHORITY_PLANE\", \"schema_name\": \"nexus.execution_readiness_plane_results.v1\", \"status\": \"PASSED\"}, {\"blocker_code\": null, \"evidence_identities\": [\"replay_fence_plane:non_material:no_tracked_task_binding\"], \"plane\": \"REPLAY_FENCE_PLANE\", \"schema_name\": \"nexus.execution_readiness_plane_results.v1\", \"status\": \"PASSED\"}, {\"blocker_code\": null, \"evidence_identities\": [\"workforce_plane:non_material:no_worker_constraints\"], \"plane\": \"WORKFORCE_PLANE\", \"schema_name\": \"nexus.execution_readiness_plane_results.v1\", \"status\": \"PASSED\"}], \"primary_blocker\": null, \"ready_planes\": [\"GOVERNANCE_PLANE\", \"SOURCE_PLANE\", \"GATEWAY_PLANE\", \"HOST_BINDING_PLANE\", \"ACTION_SURFACE_PLANE\", \"AUTHORITY_PLANE\", \"REPLAY_FENCE_PLANE\", \"WORKFORCE_PLANE\"], \"request_hash\": \"3f09b21dbb4259ee76c6d18172cda65b13274f6ceabc9ed5a8e6c4aabe6f94d8\", \"schema_name\": \"nexus.execution_readiness.v1\"}, \"readiness_scope\": \"PROJECT_ENTRY_OBSERVATION_ONLY\", \"repository\": \"James3014/Nexus-new\", \"schema\": \"nexus.project_entry.v1\", \"source\": {\"canonical_remote\": \"https://github.com/James3014/Nexus-new.git\", \"commit\": \"6d1e32216434bdda7930c0cf21921209d9243c6d\", \"tree\": \"06a796e22bc8fa756cd965fcb0fcd6becae97498\"}, \"status\": \"NO_TASK\", \"task_resolution\": {\"status\": \"NO_EXACT_TASK\"}}",
+          "type": "text"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "claim_ceiling": "PROJECT_ENTRY_OBSERVE_ONLY_NO_DOWNSTREAM_EFFECTS",
+        "claim_ceiling_excludes": [
+          "execution",
+          "verification",
+          "acceptance",
+          "merge",
+          "release",
+          "production"
+        ],
+        "issue": {
+          "number": 842,
+          "state": "OPEN",
+          "updatedAt": "2026-09-10T03:43:42Z",
+          "url": "https://github.com/James3014/Nexus-new/issues/842"
+        },
+        "issue_observation": {
+          "issue": {
+            "number": 842,
+            "state": "OPEN",
+            "updatedAt": "2026-09-10T03:43:42Z",
+            "url": "https://github.com/James3014/Nexus-new/issues/842"
+          },
+          "observed_at": "2026-09-10T04:54:53.271279+00:00",
+          "ok": true
+        },
+        "project_binding_hash": "e11521f271c38bcbc5463e089c173d3ff8be309db6433f8417616cf61cda8335",
+        "readiness_request": {
+          "execution_contract_kind": "observe_only",
+          "execution_realm": "in_process_preflight",
+          "intended_source_commit": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+          "intended_source_tree": "06a796e22bc8fa756cd965fcb0fcd6becae97498",
+          "repository_name": "Nexus-new",
+          "repository_owner": "James3014",
+          "required_action_family": "project_entry_observe"
+        },
+        "readiness_result": {
+          "certification_fence": {
+            "forbidden_vocabulary_ref": "NEXUS_EXECUTION_READINESS_FORBIDDEN_CERTIFICATION_VOCABULARY",
+            "ready_vocabulary": [
+              "READY_TO_EXECUTE"
+            ],
+            "satisfied": true
+          },
+          "evaluated_at": "2026-09-10T04:54:53.463313Z",
+          "outcome": "READY_TO_EXECUTE",
+          "plane_results": [
+            {
+              "blocker_code": null,
+              "evidence_identities": [
+                "governance_observer=standing_grant_store.inspect_standing_grant_receipt",
+                "governance_snapshot_schema=nexus.standing_grant_inspection.v1",
+                "governance_authority_snapshot_status=INVALID"
+              ],
+              "plane": "GOVERNANCE_PLANE",
+              "schema_name": "nexus.execution_readiness_plane_results.v1",
+              "status": "PASSED"
+            },
+            {
+              "blocker_code": null,
+              "evidence_identities": [
+                "source_requested_repository=James3014/Nexus-new",
+                "source_observed_repository=James3014/Nexus-new",
+                "source_desired_commit=6d1e32216434bdda7930c0cf21921209d9243c6d",
+                "source_desired_tree=06a796e22bc8fa756cd965fcb0fcd6becae97498",
+                "source_observed_commit=6d1e32216434bdda7930c0cf21921209d9243c6d",
+                "source_observed_tree=06a796e22bc8fa756cd965fcb0fcd6becae97498"
+              ],
+              "plane": "SOURCE_PLANE",
+              "schema_name": "nexus.execution_readiness_plane_results.v1",
+              "status": "PASSED"
+            },
+            {
+              "blocker_code": null,
+              "evidence_identities": [
+                "gateway_instance=81c3389f257d433491579dd5ad296739",
+                "gateway_reload_required=false",
+                "gateway_runtime_sha256=70a455ce096d0a4e93efceb32b7be7c1d23bc5f015e72fd54b8dfb259185bac0"
+              ],
+              "plane": "GATEWAY_PLANE",
+              "schema_name": "nexus.execution_readiness_plane_results.v1",
+              "status": "PASSED"
+            },
+            {
+              "blocker_code": null,
+              "evidence_identities": [
+                "host_binding:com.nexus.mcp.gateway.direct:in_process"
+              ],
+              "plane": "HOST_BINDING_PLANE",
+              "schema_name": "nexus.execution_readiness_plane_results.v1",
+              "status": "PASSED"
+            },
+            {
+              "blocker_code": null,
+              "evidence_identities": [
+                "action_surface:manifest=696f365d13ca0b4b4f88995dcfbd2afdb2cb946c2d6c90fd295b02815cd19b7a",
+                "action_surface:schema=43ccbcb78f746aeb02db378166da5c8d7d34f1a69c5a797b897ac8f915c3404b",
+                "action_surface:permission=45910e1e37069abf3d5b01f15196548da094e2fc6b71cf8a6136e8cdf9fd71cf"
+              ],
+              "plane": "ACTION_SURFACE_PLANE",
+              "schema_name": "nexus.execution_readiness_plane_results.v1",
+              "status": "PASSED"
+            },
+            {
+              "blocker_code": null,
+              "evidence_identities": [
+                "authority_plane:non_material:no_task_campaign_goal_identity",
+                "authority_action_family=project_entry_observe"
+              ],
+              "plane": "AUTHORITY_PLANE",
+              "schema_name": "nexus.execution_readiness_plane_results.v1",
+              "status": "PASSED"
+            },
+            {
+              "blocker_code": null,
+              "evidence_identities": [
+                "replay_fence_plane:non_material:no_tracked_task_binding"
+              ],
+              "plane": "REPLAY_FENCE_PLANE",
+              "schema_name": "nexus.execution_readiness_plane_results.v1",
+              "status": "PASSED"
+            },
+            {
+              "blocker_code": null,
+              "evidence_identities": [
+                "workforce_plane:non_material:no_worker_constraints"
+              ],
+              "plane": "WORKFORCE_PLANE",
+              "schema_name": "nexus.execution_readiness_plane_results.v1",
+              "status": "PASSED"
+            }
+          ],
+          "primary_blocker": null,
+          "ready_planes": [
+            "GOVERNANCE_PLANE",
+            "SOURCE_PLANE",
+            "GATEWAY_PLANE",
+            "HOST_BINDING_PLANE",
+            "ACTION_SURFACE_PLANE",
+            "AUTHORITY_PLANE",
+            "REPLAY_FENCE_PLANE",
+            "WORKFORCE_PLANE"
+          ],
+          "request_hash": "3f09b21dbb4259ee76c6d18172cda65b13274f6ceabc9ed5a8e6c4aabe6f94d8",
+          "schema_name": "nexus.execution_readiness.v1"
+        },
+        "readiness_scope": "PROJECT_ENTRY_OBSERVATION_ONLY",
+        "repository": "James3014/Nexus-new",
+        "schema": "nexus.project_entry.v1",
+        "source": {
+          "canonical_remote": "https://github.com/James3014/Nexus-new.git",
+          "commit": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+          "tree": "06a796e22bc8fa756cd965fcb0fcd6becae97498"
+        },
+        "status": "NO_TASK",
+        "task_resolution": {
+          "status": "NO_EXACT_TASK"
+        }
+      }
+    }
+  },
+  {
+    "id": 1,
+    "jsonrpc": "2.0",
+    "result": {
+      "content": [
+        {
+          "text": "{\"blocker\": {\"code\": \"PROJECT_ENTRY_ISSUE_NOT_OPEN\", \"detail\": \"diagnostic_class=PROJECT_ENTRY_ISSUE_NOT_OPEN; diagnostic_sha256=bca6834d80b06f45db868450fd45c3527568aaee6cd30e71389e1b387ccb1f5c\"}, \"claim_ceiling\": \"PROJECT_ENTRY_OBSERVE_ONLY_NO_DOWNSTREAM_EFFECTS\", \"claim_ceiling_excludes\": [\"execution\", \"verification\", \"acceptance\", \"merge\", \"release\", \"production\"], \"issue_number\": 806, \"project_binding_hash\": \"f01dc0e7e5ae19e9d9cb53776a378eade05a3e9641c685bcb45d3f4a427324a8\", \"repository\": \"James3014/Nexus-new\", \"schema\": \"nexus.project_entry.v1\", \"status\": \"BLOCKED\", \"task_resolution\": {\"status\": \"NOT_RESOLVED\"}}",
+          "type": "text"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "blocker": {
+          "code": "PROJECT_ENTRY_ISSUE_NOT_OPEN",
+          "detail": "diagnostic_class=PROJECT_ENTRY_ISSUE_NOT_OPEN; diagnostic_sha256=bca6834d80b06f45db868450fd45c3527568aaee6cd30e71389e1b387ccb1f5c"
+        },
+        "claim_ceiling": "PROJECT_ENTRY_OBSERVE_ONLY_NO_DOWNSTREAM_EFFECTS",
+        "claim_ceiling_excludes": [
+          "execution",
+          "verification",
+          "acceptance",
+          "merge",
+          "release",
+          "production"
+        ],
+        "issue_number": 806,
+        "project_binding_hash": "f01dc0e7e5ae19e9d9cb53776a378eade05a3e9641c685bcb45d3f4a427324a8",
+        "repository": "James3014/Nexus-new",
+        "schema": "nexus.project_entry.v1",
+        "status": "BLOCKED",
+        "task_resolution": {
+          "status": "NOT_RESOLVED"
+        }
+      }
+    }
+  },
+  {
+    "id": 1,
+    "jsonrpc": "2.0",
+    "result": {
+      "content": [
+        {
+          "text": "{\"claim_ceiling\": \"PROJECT_ENTRY_OBSERVE_ONLY_NO_DOWNSTREAM_EFFECTS\", \"claim_ceiling_excludes\": [\"execution\", \"verification\", \"acceptance\", \"merge\", \"release\", \"production\"], \"issue\": {\"number\": 842, \"state\": \"OPEN\", \"updatedAt\": \"2026-09-10T03:43:42Z\", \"url\": \"https://github.com/James3014/Nexus-new/issues/842\"}, \"issue_observation\": {\"issue\": {\"number\": 842, \"state\": \"OPEN\", \"updatedAt\": \"2026-09-10T03:43:42Z\", \"url\": \"https://github.com/James3014/Nexus-new/issues/842\"}, \"observed_at\": \"2026-09-10T04:54:54.699562+00:00\", \"ok\": true}, \"project_binding_hash\": \"e11521f271c38bcbc5463e089c173d3ff8be309db6433f8417616cf61cda8335\", \"readiness_request\": {\"execution_contract_kind\": \"observe_only\", \"execution_realm\": \"in_process_preflight\", \"intended_source_commit\": \"6d1e32216434bdda7930c0cf21921209d9243c6d\", \"intended_source_tree\": \"06a796e22bc8fa756cd965fcb0fcd6becae97498\", \"repository_name\": \"Nexus-new\", \"repository_owner\": \"James3014\", \"required_action_family\": \"project_entry_observe\"}, \"readiness_result\": {\"certification_fence\": {\"forbidden_vocabulary_ref\": \"NEXUS_EXECUTION_READINESS_FORBIDDEN_CERTIFICATION_VOCABULARY\", \"ready_vocabulary\": [\"READY_TO_EXECUTE\"], \"satisfied\": true}, \"evaluated_at\": \"2026-09-10T04:54:54.869922Z\", \"outcome\": \"READY_TO_EXECUTE\", \"plane_results\": [{\"blocker_code\": null, \"evidence_identities\": [\"governance_observer=standing_grant_store.inspect_standing_grant_receipt\", \"governance_snapshot_schema=nexus.standing_grant_inspection.v1\", \"governance_authority_snapshot_status=INVALID\"], \"plane\": \"GOVERNANCE_PLANE\", \"schema_name\": \"nexus.execution_readiness_plane_results.v1\", \"status\": \"PASSED\"}, {\"blocker_code\": null, \"evidence_identities\": [\"source_requested_repository=James3014/Nexus-new\", \"source_observed_repository=James3014/Nexus-new\", \"source_desired_commit=6d1e32216434bdda7930c0cf21921209d9243c6d\", \"source_desired_tree=06a796e22bc8fa756cd965fcb0fcd6becae97498\", \"source_observed_commit=6d1e32216434bdda7930c0cf21921209d9243c6d\", \"source_observed_tree=06a796e22bc8fa756cd965fcb0fcd6becae97498\"], \"plane\": \"SOURCE_PLANE\", \"schema_name\": \"nexus.execution_readiness_plane_results.v1\", \"status\": \"PASSED\"}, {\"blocker_code\": null, \"evidence_identities\": [\"gateway_instance=81c3389f257d433491579dd5ad296739\", \"gateway_reload_required=false\", \"gateway_runtime_sha256=70a455ce096d0a4e93efceb32b7be7c1d23bc5f015e72fd54b8dfb259185bac0\"], \"plane\": \"GATEWAY_PLANE\", \"schema_name\": \"nexus.execution_readiness_plane_results.v1\", \"status\": \"PASSED\"}, {\"blocker_code\": null, \"evidence_identities\": [\"host_binding:com.nexus.mcp.gateway.direct:in_process\"], \"plane\": \"HOST_BINDING_PLANE\", \"schema_name\": \"nexus.execution_readiness_plane_results.v1\", \"status\": \"PASSED\"}, {\"blocker_code\": null, \"evidence_identities\": [\"action_surface:manifest=696f365d13ca0b4b4f88995dcfbd2afdb2cb946c2d6c90fd295b02815cd19b7a\", \"action_surface:schema=43ccbcb78f746aeb02db378166da5c8d7d34f1a69c5a797b897ac8f915c3404b\", \"action_surface:permission=45910e1e37069abf3d5b01f15196548da094e2fc6b71cf8a6136e8cdf9fd71cf\"], \"plane\": \"ACTION_SURFACE_PLANE\", \"schema_name\": \"nexus.execution_readiness_plane_results.v1\", \"status\": \"PASSED\"}, {\"blocker_code\": null, \"evidence_identities\": [\"authority_plane:non_material:no_task_campaign_goal_identity\", \"authority_action_family=project_entry_observe\"], \"plane\": \"AUTHORITY_PLANE\", \"schema_name\": \"nexus.execution_readiness_plane_results.v1\", \"status\": \"PASSED\"}, {\"blocker_code\": null, \"evidence_identities\": [\"replay_fence_plane:non_material:no_tracked_task_binding\"], \"plane\": \"REPLAY_FENCE_PLANE\", \"schema_name\": \"nexus.execution_readiness_plane_results.v1\", \"status\": \"PASSED\"}, {\"blocker_code\": null, \"evidence_identities\": [\"workforce_plane:non_material:no_worker_constraints\"], \"plane\": \"WORKFORCE_PLANE\", \"schema_name\": \"nexus.execution_readiness_plane_results.v1\", \"status\": \"PASSED\"}], \"primary_blocker\": null, \"ready_planes\": [\"GOVERNANCE_PLANE\", \"SOURCE_PLANE\", \"GATEWAY_PLANE\", \"HOST_BINDING_PLANE\", \"ACTION_SURFACE_PLANE\", \"AUTHORITY_PLANE\", \"REPLAY_FENCE_PLANE\", \"WORKFORCE_PLANE\"], \"request_hash\": \"3f09b21dbb4259ee76c6d18172cda65b13274f6ceabc9ed5a8e6c4aabe6f94d8\", \"schema_name\": \"nexus.execution_readiness.v1\"}, \"readiness_scope\": \"PROJECT_ENTRY_OBSERVATION_ONLY\", \"repository\": \"James3014/Nexus-new\", \"schema\": \"nexus.project_entry.v1\", \"source\": {\"canonical_remote\": \"https://github.com/James3014/Nexus-new.git\", \"commit\": \"6d1e32216434bdda7930c0cf21921209d9243c6d\", \"tree\": \"06a796e22bc8fa756cd965fcb0fcd6becae97498\"}, \"status\": \"NO_TASK\", \"task_resolution\": {\"status\": \"NO_EXACT_TASK\"}}",
+          "type": "text"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "claim_ceiling": "PROJECT_ENTRY_OBSERVE_ONLY_NO_DOWNSTREAM_EFFECTS",
+        "claim_ceiling_excludes": [
+          "execution",
+          "verification",
+          "acceptance",
+          "merge",
+          "release",
+          "production"
+        ],
+        "issue": {
+          "number": 842,
+          "state": "OPEN",
+          "updatedAt": "2026-09-10T03:43:42Z",
+          "url": "https://github.com/James3014/Nexus-new/issues/842"
+        },
+        "issue_observation": {
+          "issue": {
+            "number": 842,
+            "state": "OPEN",
+            "updatedAt": "2026-09-10T03:43:42Z",
+            "url": "https://github.com/James3014/Nexus-new/issues/842"
+          },
+          "observed_at": "2026-09-10T04:54:54.699562+00:00",
+          "ok": true
+        },
+        "project_binding_hash": "e11521f271c38bcbc5463e089c173d3ff8be309db6433f8417616cf61cda8335",
+        "readiness_request": {
+          "execution_contract_kind": "observe_only",
+          "execution_realm": "in_process_preflight",
+          "intended_source_commit": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+          "intended_source_tree": "06a796e22bc8fa756cd965fcb0fcd6becae97498",
+          "repository_name": "Nexus-new",
+          "repository_owner": "James3014",
+          "required_action_family": "project_entry_observe"
+        },
+        "readiness_result": {
+          "certification_fence": {
+            "forbidden_vocabulary_ref": "NEXUS_EXECUTION_READINESS_FORBIDDEN_CERTIFICATION_VOCABULARY",
+            "ready_vocabulary": [
+              "READY_TO_EXECUTE"
+            ],
+            "satisfied": true
+          },
+          "evaluated_at": "2026-09-10T04:54:54.869922Z",
+          "outcome": "READY_TO_EXECUTE",
+          "plane_results": [
+            {
+              "blocker_code": null,
+              "evidence_identities": [
+                "governance_observer=standing_grant_store.inspect_standing_grant_receipt",
+                "governance_snapshot_schema=nexus.standing_grant_inspection.v1",
+                "governance_authority_snapshot_status=INVALID"
+              ],
+              "plane": "GOVERNANCE_PLANE",
+              "schema_name": "nexus.execution_readiness_plane_results.v1",
+              "status": "PASSED"
+            },
+            {
+              "blocker_code": null,
+              "evidence_identities": [
+                "source_requested_repository=James3014/Nexus-new",
+                "source_observed_repository=James3014/Nexus-new",
+                "source_desired_commit=6d1e32216434bdda7930c0cf21921209d9243c6d",
+                "source_desired_tree=06a796e22bc8fa756cd965fcb0fcd6becae97498",
+                "source_observed_commit=6d1e32216434bdda7930c0cf21921209d9243c6d",
+                "source_observed_tree=06a796e22bc8fa756cd965fcb0fcd6becae97498"
+              ],
+              "plane": "SOURCE_PLANE",
+              "schema_name": "nexus.execution_readiness_plane_results.v1",
+              "status": "PASSED"
+            },
+            {
+              "blocker_code": null,
+              "evidence_identities": [
+                "gateway_instance=81c3389f257d433491579dd5ad296739",
+                "gateway_reload_required=false",
+                "gateway_runtime_sha256=70a455ce096d0a4e93efceb32b7be7c1d23bc5f015e72fd54b8dfb259185bac0"
+              ],
+              "plane": "GATEWAY_PLANE",
+              "schema_name": "nexus.execution_readiness_plane_results.v1",
+              "status": "PASSED"
+            },
+            {
+              "blocker_code": null,
+              "evidence_identities": [
+                "host_binding:com.nexus.mcp.gateway.direct:in_process"
+              ],
+              "plane": "HOST_BINDING_PLANE",
+              "schema_name": "nexus.execution_readiness_plane_results.v1",
+              "status": "PASSED"
+            },
+            {
+              "blocker_code": null,
+              "evidence_identities": [
+                "action_surface:manifest=696f365d13ca0b4b4f88995dcfbd2afdb2cb946c2d6c90fd295b02815cd19b7a",
+                "action_surface:schema=43ccbcb78f746aeb02db378166da5c8d7d34f1a69c5a797b897ac8f915c3404b",
+                "action_surface:permission=45910e1e37069abf3d5b01f15196548da094e2fc6b71cf8a6136e8cdf9fd71cf"
+              ],
+              "plane": "ACTION_SURFACE_PLANE",
+              "schema_name": "nexus.execution_readiness_plane_results.v1",
+              "status": "PASSED"
+            },
+            {
+              "blocker_code": null,
+              "evidence_identities": [
+                "authority_plane:non_material:no_task_campaign_goal_identity",
+                "authority_action_family=project_entry_observe"
+              ],
+              "plane": "AUTHORITY_PLANE",
+              "schema_name": "nexus.execution_readiness_plane_results.v1",
+              "status": "PASSED"
+            },
+            {
+              "blocker_code": null,
+              "evidence_identities": [
+                "replay_fence_plane:non_material:no_tracked_task_binding"
+              ],
+              "plane": "REPLAY_FENCE_PLANE",
+              "schema_name": "nexus.execution_readiness_plane_results.v1",
+              "status": "PASSED"
+            },
+            {
+              "blocker_code": null,
+              "evidence_identities": [
+                "workforce_plane:non_material:no_worker_constraints"
+              ],
+              "plane": "WORKFORCE_PLANE",
+              "schema_name": "nexus.execution_readiness_plane_results.v1",
+              "status": "PASSED"
+            }
+          ],
+          "primary_blocker": null,
+          "ready_planes": [
+            "GOVERNANCE_PLANE",
+            "SOURCE_PLANE",
+            "GATEWAY_PLANE",
+            "HOST_BINDING_PLANE",
+            "ACTION_SURFACE_PLANE",
+            "AUTHORITY_PLANE",
+            "REPLAY_FENCE_PLANE",
+            "WORKFORCE_PLANE"
+          ],
+          "request_hash": "3f09b21dbb4259ee76c6d18172cda65b13274f6ceabc9ed5a8e6c4aabe6f94d8",
+          "schema_name": "nexus.execution_readiness.v1"
+        },
+        "readiness_scope": "PROJECT_ENTRY_OBSERVATION_ONLY",
+        "repository": "James3014/Nexus-new",
+        "schema": "nexus.project_entry.v1",
+        "source": {
+          "canonical_remote": "https://github.com/James3014/Nexus-new.git",
+          "commit": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+          "tree": "06a796e22bc8fa756cd965fcb0fcd6becae97498"
+        },
+        "status": "NO_TASK",
+        "task_resolution": {
+          "status": "NO_EXACT_TASK"
+        }
+      }
+    }
+  }
+]

@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from enum import Enum
 import hashlib
+import logging
 import os
-from pathlib import Path
-import signal
 import shutil
+import signal
 import subprocess
 import time
-from typing import Callable, Mapping, Optional, Tuple
+from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
+from typing import Any, Callable, Mapping, Optional, Tuple
+
+from nexus.services.agy_account_pool import GITHUB_CREDENTIAL_KEYS
+
+_logger = logging.getLogger(__name__)
 
 
 class CliWorkerStatus(str, Enum):
@@ -20,12 +25,39 @@ class CliWorkerStatus(str, Enum):
     START_FAILED = "START_FAILED"
 
 
-_FORBIDDEN_SUBCOMMANDS = {
+_FORBIDDEN_SUBCOMMANDS = (
     ("git", "commit"),
     ("git", "merge"),
     ("git", "push"),
     ("git", "rebase"),
-}
+    ("gh", "issue", "create"),
+    ("gh", "issue", "comment"),
+    ("gh", "issue", "close"),
+    ("gh", "issue", "edit"),
+    ("gh", "issue", "delete"),
+    ("gh", "issue", "lock"),
+    ("gh", "issue", "pin"),
+    ("gh", "issue", "reopen"),
+    ("gh", "issue", "unlock"),
+    ("gh", "issue", "unpin"),
+    ("gh", "issue", "transfer"),
+    ("gh", "pr", "create"),
+    ("gh", "pr", "comment"),
+    ("gh", "pr", "close"),
+    ("gh", "pr", "edit"),
+    ("gh", "pr", "lock"),
+    ("gh", "pr", "reopen"),
+    ("gh", "pr", "unlock"),
+    ("gh", "pr", "review"),
+    ("gh", "pr", "merge"),
+    ("gh", "pr", "ready"),
+    ("gh", "pr", "revert"),
+    ("gh", "pr", "update-branch"),
+    ("gh", "repo", "fork"),
+    ("gh", "api"),
+)
+
+_GLOBAL_FLAGS_WITH_VALUES = frozenset({"--config", "--hostname", "--repo", "-r", "-R"})
 
 _INHERITED_ENV_ALLOWLIST = frozenset({
     "HOME",
@@ -38,17 +70,24 @@ _INHERITED_ENV_ALLOWLIST = frozenset({
 })
 
 
+_ENV_KEY_PRESENT_SENTINEL = "present"
+"""Presence-only sentinel used in env receipts.
+
+Contract: task-scoped env values (and any hash derived from them) MUST NOT
+persist in trajectory action payloads or result receipts.  Only key *names*
+and this static sentinel may be stored.
+"""
+
+
 def bounded_environment_receipt(
     environment: Optional[Mapping[str, str]],
 ) -> Tuple[Tuple[str, str], ...]:
-    """Bind task-scoped environment values without persisting secrets."""
-    return tuple(sorted(
-        (
-            str(key),
-            hashlib.sha256(str(value).encode("utf-8")).hexdigest(),
-        )
-        for key, value in (environment or {}).items()
-    ))
+    """Bind task-scoped env key *names* without persisting values or derived hashes.
+
+    Each entry records only the key name and a static ``"present"`` sentinel.
+    Raw values and any hash derived from those values are never stored.
+    """
+    return tuple(sorted((str(key), _ENV_KEY_PRESENT_SENTINEL) for key in (environment or {})))
 
 
 def _resolve_executable(executable: str) -> str:
@@ -71,15 +110,80 @@ def _validate_worker_argv(argv: Tuple[str, ...]) -> None:
     if not argv:
         raise ValueError("argv must be non-empty")
     normalized = tuple(str(item).strip().lower() for item in argv)
-    for command, subcommand in _FORBIDDEN_SUBCOMMANDS:
-        if command in normalized:
-            index = normalized.index(command)
-            if normalized[index + 1 : index + 2] == (subcommand,):
-                raise ValueError(f"worker command cannot invoke git {subcommand}")
+    # Ignore global options and their values (e.g. `gh --repo org/repo issue
+    # comment`) before matching a forbidden verb sequence.  Options after the
+    # verb are naturally irrelevant because the verb sequence has already
+    # matched.
+    filtered_items = []
+    index = 0
+    while index < len(normalized):
+        item = normalized[index]
+        if item.startswith("-"):
+            if "=" not in item and item in _GLOBAL_FLAGS_WITH_VALUES:
+                index += 2
+            else:
+                index += 1
+            continue
+        filtered_items.append(item)
+        index += 1
+    filtered = tuple(filtered_items)
+    for block in _FORBIDDEN_SUBCOMMANDS:
+        block_tuple = tuple(block)
+        for index in range(len(filtered) - len(block_tuple) + 1):
+            if filtered[index : index + len(block_tuple)] == block_tuple:
+                raise ValueError(f"worker command cannot invoke {' '.join(block)}")
+
+
+# GitHub credentials (GH_TOKEN / GITHUB_TOKEN / GITHUB_PAT / ...) must never
+# enter a worker process namespace: a delegated worker could otherwise
+# interpret an inherited broad Owner GitHub credential as external-publication
+# authority.  The canonical key set is owned by
+# nexus.services.agy_account_pool.GITHUB_CREDENTIAL_KEYS.
+_GITHUB_CREDENTIAL_ENV_KEYS = frozenset(key.upper() for key in GITHUB_CREDENTIAL_KEYS)
+
+
+def _reject_github_credentials(environment: Optional[Mapping[str, str]]) -> None:
+    """Fail closed when a worker environment carries a GitHub credential key."""
+    if environment is None:
+        return
+    present = sorted(key for key in environment if str(key).upper() in _GITHUB_CREDENTIAL_ENV_KEYS)
+    if present:
+        raise ValueError(
+            "worker environment cannot carry GitHub credentials: " + ", ".join(present)
+        )
 
 
 def _hash_file(path: str) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Optional passive trajectory context (seam only – does NOT affect execution)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CliWorkerTrajectoryContext:
+    """Immutable trajectory identity context for passive telemetry seam.
+
+    All fields are passed through to ``seal_trajectory_step`` /
+    ``bind_trajectory_step_result`` without affecting CLI execution.  Any
+    telemetry failure is swallowed; CLI behaviour is identical with or without
+    this context.
+    """
+
+    repo_root: str
+    task_id: str
+    trajectory_id: str
+    attempt_id: str
+    step_index: int
+    source_revision: str
+    # Optional identity fields
+    candidate_id: Optional[str] = None
+    base_source_revision: Optional[str] = None
+    working_state_manifest_sha256: Optional[str] = None
+    # Caller-supplied pre-action state; will be redacted/bounded by the trajectory API
+    pre_action_state: Any = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -89,6 +193,8 @@ class CliWorkerRequest:
     cwd: str
     timeout_seconds: float = 60.0
     env: Optional[Mapping[str, str]] = None
+    # Optional passive trajectory telemetry context; None preserves legacy behaviour exactly.
+    trajectory_context: Optional[CliWorkerTrajectoryContext] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "executable", _resolve_executable(self.executable))
@@ -100,6 +206,7 @@ class CliWorkerRequest:
         object.__setattr__(self, "cwd", str(target_cwd))
         if self.timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
+        _reject_github_credentials(self.env)
 
     @property
     def command(self) -> Tuple[str, ...]:
@@ -144,6 +251,99 @@ def _kill_process_group(process: subprocess.Popen[bytes]) -> bool:
         return False
 
 
+# ---------------------------------------------------------------------------
+# Passive trajectory telemetry helpers (fail-open; MUST NOT affect execution)
+# ---------------------------------------------------------------------------
+
+
+def _build_action_payload(request: CliWorkerRequest) -> dict[str, Any]:
+    """Construct a bounded action payload for trajectory telemetry.
+
+    Only identifies the executable, argv, cwd, and timeout.  Task-scoped env
+    key *names* are recorded as presence-only metadata sufficient for action
+    identity.  Raw env values and any hash derived from those values are never
+    stored; inherited ambient env is also excluded.
+    """
+    return {
+        "executable": request.executable,
+        "argv": list(request.argv),
+        "cwd": request.cwd,
+        "timeout_seconds": request.timeout_seconds,
+        # Presence-only: key names only – no raw values, no value-derived hashes,
+        # no ambient env.
+        "task_env_receipt": [{"key": str(k)} for k in sorted((request.env or {}).keys())],
+    }
+
+
+def _seal_step(
+    ctx: CliWorkerTrajectoryContext,
+    request: CliWorkerRequest,
+) -> Any:
+    """Call seal_trajectory_step; return TrajectoryStepRef or None on any failure."""
+    try:
+        from nexus.research.clm_system_one.trajectory_continuity import (
+            resolve_research_evidence_root,
+            seal_trajectory_step,
+        )
+
+        evidence_root = resolve_research_evidence_root(ctx.repo_root)
+        return seal_trajectory_step(
+            evidence_root=evidence_root,
+            task_id=ctx.task_id,
+            trajectory_id=ctx.trajectory_id,
+            attempt_id=ctx.attempt_id,
+            candidate_id=ctx.candidate_id,
+            step_index=ctx.step_index,
+            source_revision=ctx.source_revision,
+            base_source_revision=ctx.base_source_revision or "",
+            working_state_manifest_sha256=ctx.working_state_manifest_sha256 or "",
+            pre_action_state=ctx.pre_action_state,
+            action_type="cli_worker_execute",
+            action_payload=_build_action_payload(request),
+        )
+    except Exception as exc:  # noqa: BLE001
+        _logger.debug("trajectory seal_step failed (swallowed): %s", exc)
+        return None
+
+
+def _bind_result(
+    ctx: CliWorkerTrajectoryContext,
+    step_ref: Any,
+    result: CliWorkerResult,
+) -> None:
+    """Call bind_trajectory_step_result; swallow all failures."""
+    if step_ref is None:
+        return
+    try:
+        from nexus.research.clm_system_one.trajectory_continuity import (
+            bind_trajectory_step_result,
+            resolve_research_evidence_root,
+        )
+
+        evidence_root = resolve_research_evidence_root(ctx.repo_root)
+        action_result: dict[str, Any] = {
+            "status": result.status.value,
+            "exit_code": result.exit_code,
+            "stdout": result.stdout.decode("utf-8", errors="replace"),
+            "stderr": result.stderr.decode("utf-8", errors="replace"),
+            "wall_time_ms": result.wall_time_ms,
+            "timed_out": result.timed_out,
+            "process_group_killed": result.process_group_killed,
+        }
+        bind_trajectory_step_result(
+            evidence_root=evidence_root,
+            step_ref=step_ref,
+            action_result=action_result,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _logger.debug("trajectory bind_result failed (swallowed): %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# Main execution entry point
+# ---------------------------------------------------------------------------
+
+
 def run_cli_worker(
     request: CliWorkerRequest,
     *,
@@ -157,12 +357,28 @@ def run_cli_worker(
     # or target-root overrides.  Callers can still pass task-scoped values
     # explicitly through ``request.env``.
     environment = {
-        key: value for key, value in os.environ.items()
-        if key in _INHERITED_ENV_ALLOWLIST
+        key: value for key, value in os.environ.items() if key in _INHERITED_ENV_ALLOWLIST
     }
+    # Defensive second check: the request constructor already rejects GitHub
+    # credential keys, but the send path must also fail closed so a future
+    # env-supplying caller can never reintroduce a broad Owner credential.
+    _reject_github_credentials(request.env)
     if request.env is not None:
         environment.update({str(key): str(value) for key, value in request.env.items()})
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
+
+    # ------------------------------------------------------------------
+    # Passive trajectory telemetry seam (pre-Popen)
+    # Seal BEFORE subprocess.Popen; failures are swallowed and MUST NOT
+    # affect CLI execution or the returned CliWorkerResult.
+    # ------------------------------------------------------------------
+    _step_ref: Any = None
+    if request.trajectory_context is not None:
+        try:
+            _step_ref = _seal_step(request.trajectory_context, request)
+        except Exception as exc:  # noqa: BLE001
+            _logger.debug("trajectory seam seal failure (swallowed): %s", exc)
+
     process: Optional[subprocess.Popen[bytes]] = None
     try:
         process = subprocess.Popen(
@@ -204,8 +420,9 @@ def run_cli_worker(
     finally:
         if on_process_group is not None:
             on_process_group(None)
+
     wall_time_ms = max(0, int((time.monotonic() - started) * 1000))
-    return CliWorkerResult(
+    result = CliWorkerResult(
         status=status,
         executable_identity=request.executable,
         executable_sha256=executable_sha256,
@@ -226,3 +443,16 @@ def run_cli_worker(
             "process_group_id": process_group_id or 0,
         },
     )
+
+    # ------------------------------------------------------------------
+    # Passive trajectory telemetry seam (post-execution)
+    # Bind result AFTER execution; failures are swallowed and MUST NOT
+    # change the returned CliWorkerResult.
+    # ------------------------------------------------------------------
+    if request.trajectory_context is not None:
+        try:
+            _bind_result(request.trajectory_context, _step_ref, result)
+        except Exception as exc:  # noqa: BLE001
+            _logger.debug("trajectory seam bind failure (swallowed): %s", exc)
+
+    return result

@@ -1,0 +1,45 @@
+✔ active cutover is durable, exclusive, and never expires into takeover authority (13.975834ms)
+✔ concurrent controllers create exactly one active cutover (10.686ms)
+✔ restart request requires drain, survives replacement, and is idempotent (24.585542ms)
+✔ concurrent restart requesters produce exactly one restart authority winner (21.229792ms)
+✔ restart scheduling requires build-ready attestation and marker is durable and idempotent (29.610083ms)
+✔ restart scheduling fails closed without a build-ready attestation (20.155208ms)
+✔ concurrent schedulers produce exactly one restart schedule winner (28.614541ms)
+✔ invalid build-ready receipt and malformed schedule fence fail closed (21.046542ms)
+✔ schedule fence from another cutover or a missing marker reads safely (25.622792ms)
+✔ drain evidence and terminal reconciliation receipt survive store replacement (17.110833ms)
+✔ recoverSupersede terminally supersedes a stale cutover and establishes a fresh successor (23.076417ms)
+✔ recoverSupersede rendezvouses to the same successor and refuses a changed target (24.144125ms)
+✔ recoverSupersede resumes a superseded terminal when the successor was lost (C2) (21.806958ms)
+✔ recoverSupersede resumes an intent-only crash window and fences a changed target (C1) (21.128208ms)
+✔ concurrent recoverers produce exactly one successor cutover (28.85475ms)
+✔ recoverSupersede rejects a closed cutover and a mismatched active id (17.94025ms)
+✔ successor lifecycle drains, restarts, schedules, and closes with scoped markers (42.333292ms)
+✔ malformed supersession records fail closed on parse (18.470666ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 415.969042
+
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'zod' imported from /Users/jameschen/Workspace/nexus-automation-repos/devspace/src/local-agent-config.ts
+    at Object.getPackageJSONURL (node:internal/modules/package_json_reader:268:9)
+    at packageResolve (node:internal/modules/esm/resolve:768:81)
+    at moduleResolve (node:internal/modules/esm/resolve:858:18)
+    at defaultResolve (node:internal/modules/esm/resolve:990:11)
+    at nextResolve (node:internal/modules/esm/hooks:748:28)
+    at resolveBase (file:///Users/jameschen/.npm/_npx/fd45a72a545557e9/node_modules/tsx/dist/register-SoqaU4rg.mjs:2:10334)
+    at resolveDirectory (file:///Users/jameschen/.npm/_npx/fd45a72a545557e9/node_modules/tsx/dist/register-SoqaU4rg.mjs:2:11421)
+    at resolveTsPaths (file:///Users/jameschen/.npm/_npx/fd45a72a545557e9/node_modules/tsx/dist/register-SoqaU4rg.mjs:2:13062)
+    at resolve (file:///Users/jameschen/.npm/_npx/fd45a72a545557e9/node_modules/tsx/dist/register-SoqaU4rg.mjs:2:14748)
+    at nextResolve (node:internal/modules/esm/hooks:748:28) {
+  code: 'ERR_MODULE_NOT_FOUND'
+}
+
+Node.js v24.5.0

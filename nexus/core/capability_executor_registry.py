@@ -3489,90 +3489,32 @@ def _exec_formal_report(plan: CapabilityExecutionPlan, task_desc: str) -> Capabi
 def _exec_integration_manager(
     plan: CapabilityExecutionPlan, task_desc: str
 ) -> CapabilityReceipt:
-    start = time.monotonic()
-    if not _provider_auth_allowed(require_external=True):
-        return _auth_blocked_receipt(
-            "integration_manager",
-            plan,
-            wall_time_ms=int((time.monotonic() - start) * 1000),
-            reason="BLOCKED_EXTERNAL_AUTH:git_integration",
-        )
-    try:
-        from nexus.orchestrator.evidence_collector import EvidenceCollector
-        from nexus.orchestrator.integration_manager import IntegrationManager
-        from nexus.orchestrator.state_store import StateStore
+    """Compatibility executor for the retired pre-#957 integration path."""
 
-        constraints = dict(plan.constraints or {})
-        repo_root = Path(str(constraints.get("workspace_root") or "")).expanduser().resolve()
-        task_ids = [
-            str(item)
-            for item in constraints.get("integration_task_ids", []) or []
-            if str(item).strip()
-        ]
-        target_branch = str(constraints.get("integration_target_branch") or "").strip()
-        state_dir = str(constraints.get("integration_state_dir") or "").strip()
-        if not str(constraints.get("workspace_root") or "").strip() or not task_ids or not target_branch or not state_dir:
-            return _make_receipt(
-                "integration_manager",
-                plan,
-                invoked=True,
-                gate_passed=False,
-                wall_time_ms=int((time.monotonic() - start) * 1000),
-                outcome=_structured_outcome(
-                    action="batch_integrate",
-                    semantic_status="BLOCKED",
-                    error="INTEGRATION_TASK_CONTEXT_REQUIRED",
-                    evidence_refs=[f"ev_integration_blocked_{plan.task_id}"],
-                    physical_callable="nexus.orchestrator.integration_manager.IntegrationManager.batch_integrate",
-                ),
-            )
-        store = StateStore(storage_dir=state_dir)
-        evidence = EvidenceCollector(
-            reports_dir=str(repo_root / ".nexus" / "integration" / plan.task_id),
-            evidence_file=str(repo_root / ".nexus" / "integration" / plan.task_id / "evidence.json"),
-        )
-        mgr = IntegrationManager(
-            state_store=store,
-            evidence_collector=evidence,
-            repo_root=repo_root,
-            require_clean_preflight=True,
-        )
-        result = mgr.batch_integrate(task_ids, target_branch=target_branch)
-        succeeded, failed = result if isinstance(result, tuple) and len(result) == 2 else ([], ["INVALID_RESULT"])
-        elapsed = int((time.monotonic() - start) * 1000)
-        ok = sorted(str(item) for item in succeeded) == sorted(task_ids) and not failed
-        return _make_receipt(
-            "integration_manager",
-            plan,
-            wall_time_ms=elapsed,
-            gate_passed=ok,
-            outcome=_structured_outcome(
-                action="batch_integrate",
-                semantic_status="VERIFIED" if ok else "FAILED",
-                evidence_refs=[f"ev_integration_manager_{plan.task_id}"],
-                result={"succeeded": list(succeeded), "failed": list(failed)},
-                physical_callable="nexus.orchestrator.integration_manager.IntegrationManager.batch_integrate",
-                task_hint=str(task_desc or "")[:80],
-                integrated_task_ids=list(succeeded),
-                failed_task_ids=list(failed),
-                target_branch=target_branch,
-                transactional_rollback_supported=True,
+    start = time.monotonic()
+    return _make_receipt(
+        "integration_manager",
+        plan,
+        invoked=True,
+        gate_passed=False,
+        wall_time_ms=int((time.monotonic() - start) * 1000),
+        outcome=_structured_outcome(
+            action="legacy_integration_quarantine",
+            semantic_status="BLOCKED",
+            error="LEGACY_INTEGRATION_PATH_RETIRED_USE_CONTROLLED_INTEGRATION",
+            evidence_refs=[f"ev_integration_retired_{plan.task_id}"],
+            task_hint=str(task_desc or "")[:80],
+            mutation_performed=False,
+            retired_callable=(
+                "nexus.orchestrator.integration_manager."
+                "IntegrationManager.batch_integrate"
             ),
-        )
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt(
-            "integration_manager",
-            plan,
-            invoked=True,
-            gate_passed=False,
-            wall_time_ms=elapsed,
-            outcome=_structured_outcome(
-                action="batch_integrate",
-                semantic_status="FAILED",
-                error=str(exc)[:300],
+            replacement_callable=(
+                "nexus.orchestrator.self_hosted_task_service."
+                "SelfHostedTaskService.integrate_approved"
             ),
-        )
+        ),
+    )
 
 
 def _exec_xray(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:

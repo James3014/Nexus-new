@@ -1,0 +1,111 @@
+{
+  "accepted_source": {
+    "final_manager_sha256": "7af3760bd2b6729654a89d7b07fa4c43bb9b323e8e0006a08aa5e485d78562ac",
+    "merge_sha": "8bf586e3db31972e7ac7535226b313094dda20c7",
+    "parents": [
+      "53980fede804b94f5b4cda741537db2a6cc3e228",
+      "0ea262de4144c78c2b72549fd1ece85822025068"
+    ],
+    "tree_sha": "a8e2df968cdac6deac1a50c5cc168f0b0a66cc0a"
+  },
+  "card": {
+    "path": "tasks/g20-learning-runtime-closure-20260903/01-learning-adoption-runtime-wiring.md",
+    "sha256": "2242c967aa5c5c01525fdd596207672fb188046e2252c8d82d847ec36c4334ec"
+  },
+  "claim_ceiling": "G20_RUNTIME_BUDGET_SOURCE_ACCEPTANCE_ONLY",
+  "evidence_class": "INDEPENDENT_SOURCE_ACCEPTANCE_ONLY",
+  "issue_number": 526,
+  "issued_at": "2026-09-04T07:05:33Z",
+  "owner_activation": {
+    "activation_id": "OWNER_G20_LEARNING_RUNTIME_CLOSURE_TASK_CARD_20260903",
+    "message": "目標完成g20，沒完成不要回報",
+    "message_sha256": "bfa8ac4907f5c41d6666cfefd5e35aef332e4f52a4f8947c19ccfecd71c70d68"
+  },
+  "receipt_hash": "e485192ff54122dbde114ffcf02b9f58942140fc3ac31fc3bc1315f51fcb7e0b",
+  "receipt_id": "g20-r1-source-acceptance-8bf586e3db31",
+  "receipt_version": 1,
+  "repository": "James3014/Nexus-new",
+  "required_checks": [
+    {
+      "check_run_id": 100938520825,
+      "check_suite_id": 91726372625,
+      "conclusion": "success",
+      "head_sha": "0ea262de4144c78c2b72549fd1ece85822025068",
+      "name": "Exact-base impact gate",
+      "status": "completed"
+    },
+    {
+      "check_run_id": 100938879776,
+      "check_suite_id": 91726372271,
+      "conclusion": "success",
+      "head_sha": "0ea262de4144c78c2b72549fd1ece85822025068",
+      "name": "Trusted verifier (default branch)",
+      "status": "completed"
+    },
+    {
+      "check_run_id": 100938520666,
+      "check_suite_id": 91726372329,
+      "conclusion": "success",
+      "head_sha": "0ea262de4144c78c2b72549fd1ece85822025068",
+      "name": "Full published Git history secret audit",
+      "status": "completed"
+    }
+  ],
+  "review": {
+    "coordinator_id": "chatgpt-primary-controller",
+    "reviewer_id": "chatgpt-independent-acceptance",
+    "verdict": "ACCEPT"
+  },
+  "schema": "nexus.gateway.r1_source_acceptance.v1",
+  "source_lineage": {
+    "pull_requests": [
+      {
+        "base_sha": "53980fede804b94f5b4cda741537db2a6cc3e228",
+        "head_sha": "0ea262de4144c78c2b72549fd1ece85822025068",
+        "merge_sha": "8bf586e3db31972e7ac7535226b313094dda20c7",
+        "merge_tree_sha": "a8e2df968cdac6deac1a50c5cc168f0b0a66cc0a",
+        "merged_at": "2026-09-04T07:05:33Z",
+        "number": 760
+      }
+    ],
+    "scope": {
+      "deleted_files": [],
+      "files": [
+        "nexus/engine/canonical_task_seam.py",
+        "tests/engine/test_canonical_task_seam.py"
+      ],
+      "sha256": "a373791c563d43cbf8b0103fcafed71f56aeadf35af33103d27e68cd7ac566cd"
+    },
+    "scope_base_sha": "53980fede804b94f5b4cda741537db2a6cc3e228"
+  },
+  "task_id": "G20-LEARNING-ADOPTION-RUNTIME-WIRING",
+  "verifier_results": [
+    {
+      "failed": 0,
+      "id": "canonical-seam",
+      "kind": "pytest",
+      "passed": 28,
+      "status": "PASS"
+    },
+    {
+      "failed": 0,
+      "id": "affected-learning-seam",
+      "kind": "pytest",
+      "passed": 34,
+      "status": "PASS"
+    },
+    {
+      "id": "diff-check",
+      "kind": "command",
+      "status": "PASS"
+    },
+    {
+      "base_result": "request.budget == {}",
+      "candidate_result": "governed learning_policy budget present",
+      "classification": "CANDIDATE_IMPROVEMENT",
+      "id": "exact-base-differential-oracle",
+      "kind": "behavior",
+      "status": "PASS"
+    }
+  ]
+}

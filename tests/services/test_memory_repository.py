@@ -1,8 +1,11 @@
-from pathlib import Path
-import pytest
-import pandas as pd
+import sys
 from unittest.mock import MagicMock, patch
+
+import pandas as pd
+import pytest
+
 from nexus.services.memory_repository import MemoryRepository
+
 
 @pytest.fixture
 def repo(tmp_path):
@@ -16,7 +19,8 @@ def test_memory_repository_init(repo):
 def test_get_db_connection_fail(repo):
     """驗證當 LanceDB 連線失敗時應拋出 InfrastructureError。"""
     # 確保 lancedb 被模擬
-    with patch("nexus.services.memory_repository.lancedb") as mock_lancedb:
+    with patch.dict(sys.modules, {"lancedb": MagicMock()}):
+        mock_lancedb = sys.modules["lancedb"]
         mock_lancedb.connect.side_effect = Exception("DB Fail")
         with pytest.raises(Exception, match="LanceDB connection failed"):
             repo._get_db()
@@ -29,7 +33,8 @@ def test_add_rows_and_get_all(repo):
     mock_db.open_table.return_value = mock_table
     mock_table.to_pandas.return_value = pd.DataFrame([{"id": "s1", "text": "hello"}])
     
-    with patch("nexus.services.memory_repository.lancedb") as mock_lancedb:
+    with patch.dict(sys.modules, {"lancedb": MagicMock()}):
+        mock_lancedb = sys.modules["lancedb"]
         mock_lancedb.connect.return_value = mock_db
         repo._db = mock_db
         

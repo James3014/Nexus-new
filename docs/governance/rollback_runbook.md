@@ -61,6 +61,16 @@ without circularly trusting that defect. An ordinary provider, model, quota,
 test, timeout, or correctly blocking healthy lifecycle failure does not
 qualify; it remains on the normal governed path.
 
+For a qualifying bounded repair, materialize the canonical one-shot Owner
+recovery authority defined by `docs/specs/NEXUS_BREAK_GLASS_RECOVERY_001.md`
+before source mutation. The authority source is an externally fetched Owner
+GitHub activation comment bound to exact repository/Issue, base HEAD/tree,
+failure evidence, recovery/attempt identity, effect class, scope, verifier set,
+expiry, and claim ceiling. A caller boolean, worker assertion, failed Task Card,
+normal standing grant, Gateway session, or model identity is not break-glass
+authority. The independent host-local consumer records only recovery evidence;
+it does not execute source mutation, merge, runtime reload, or release.
+
 For a qualifying bounded repair:
 
 1. Stop retrying the untrustworthy self-hosted mutation path.
@@ -75,13 +85,42 @@ For a qualifying bounded repair:
    checks. A retry keeps the same `task_id` and uses fresh `attempt_id`,
    `action_id`, and `idempotency_key` values; it must not create a second
    Controller or a `v2`/`v3` task identity.
-8. Obtain independent review of the frozen commit and its evidence by an
-   authority distinct from the implementer.
+8. Obtain independent review and verification of the frozen commit by an
+   authority distinct from the implementer and from evidence outside the
+   implementer's own assertion. For #806, the production consumer requires
+   an Owner GitHub verification comment bound to the exact commit/tree/full-diff
+   and successful exact-head check run identities; a caller-supplied verifier
+   string/hash is insufficient.
 9. Keep Candidate approval, integration, push, reload, activation, and cleanup as
-   separate explicit authorities; repair completion performs none of them.
+   separate explicit authorities; repair completion performs none of them. If
+   normal merge authority is part of the failed plane, require a separate Owner
+   `EMERGENCY_INTEGRATION` grant and delegate only its exact PR/head plus the
+   freshly observed integration-time main/base with `merge` method to the existing
+   bounded exact-head/CAS merge sink. The original SOURCE_REPAIR base remains
+   immutable provenance and may be older after benign concurrent main movement;
+   never silently reuse it as the integration expected base. Squash and rebase
+   are outside break-glass integration. Never treat that sink's caller
+   confirmation Boolean as the break-glass authority source.
 10. After separately authorized clean-source acceptance and activation,
    reacquire loaded source/runtime/action identity and verify affected live
    behavior, not process liveness alone.
+11. Advance source recovery evidence through `PREPARED -> APPLIED -> VERIFIED`;
+   if emergency integration is required, advance its distinct durable attempt
+   through `PREPARED -> CONSUMED` only after authoritative PR/main readback.
+   `SOURCE_REPAIR`, `EMERGENCY_INTEGRATION`, and `RUNTIME_RECOVERY` are separate
+   Owner authorities. A source-repair activation cannot be reused for merge or
+   runtime effects.
+12. After the normal governance canary succeeds, publish a canonical Owner
+   canary comment bound to the physical source/runtime identity, action binding,
+   normal authority readback, bounded governance operation, and verifier receipt.
+   Caller-local JSON or opaque hashes are not sufficient. Re-read that exact
+   Owner canary comment, record SOURCE_REPAIR as `CONSUMED` binding its payload,
+   and publish a canonical Owner terminal/revocation comment bound to the original
+   source activation. Recovery
+   consumers must scan that global terminal witness before later source mutation
+   so a fresh session cannot replay authority merely because it lacks the prior
+   host-local state. Then prove both source-repair and any emergency-integration
+   replay are denied. Do not leave standing emergency authority behind.
 
 Exit bootstrap recovery as soon as the repaired canonical authority can again
 establish trustworthy current identity. Resume the normal governed path;

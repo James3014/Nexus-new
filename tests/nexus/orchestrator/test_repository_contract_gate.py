@@ -655,6 +655,13 @@ def test_new_execution_topology_config_is_blocked(tmp_path):
     receipt = RepositoryContractGate(controller.worktree_manager).evaluate(contract, lease, current, current)
     assert any(reason.startswith("effective_route_authority_change:") for reason in receipt.blocking_reasons)
 
+    path.write_text("execution_lane: alternate\nroute_authority: forged\n", encoding="utf-8")
+    tampered = controller.collect_candidate(contract, lease)
+    tampered_receipt = RepositoryContractGate(controller.worktree_manager).evaluate(
+        contract, lease, tampered, tampered
+    )
+    assert any(reason.startswith("effective_route_authority_change:") for reason in tampered_receipt.blocking_reasons)
+
 
 def test_tampered_topology_bypass_remains_blocked(tmp_path):
     controller_root = tmp_path / "controller"

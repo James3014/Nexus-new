@@ -295,8 +295,7 @@ class RepairExecutor:
         except Exception as exc:
             return 1, f"sandbox_error:{type(exc).__name__}:{exc}"
         finally:
-            if sandbox_root:
-                sandbox.cleanup()
+            sandbox.cleanup()
             self._last_sandbox_report = sandbox.sandbox_report
 
     def _write_evidence_json(self, return_codes: dict[str, int], notes: list[str], telemetry: dict[str, object]) -> Path:

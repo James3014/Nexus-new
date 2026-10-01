@@ -251,6 +251,79 @@ def test_canonical_product_task_enters_gateway_once_without_legacy_fallback(
     assert result.production_runtime_entry_count == 1
 
 
+def test_canonical_product_loads_governed_learning_policy_before_planner(
+    monkeypatch,
+    tmp_path,
+):
+    from nexus.engine.canonical_task_seam import execute_canonical_product_task
+
+    captured = {}
+
+    def _runtime_budget(project_root, budget, **scope):
+        captured["policy_root"] = project_root
+        captured["policy_budget"] = budget
+        captured["policy_scope"] = scope
+        return {
+            "learning_policy": {
+                "episodic_memory_injection": {"enabled": True, "scope": "record_serialization"},
+                "adoption_lineage": {"adoption_id": "ladopt:test", "status": "ACTIVE_CANDIDATE"},
+            }
+        }
+
+    class _Gateway:
+        def __init__(self, project_root):
+            pass
+
+        def ask_unified(self, request, **kwargs):
+            captured["request"] = request
+            receipt = {
+                "terminal_status": "SUCCEEDED",
+                "receipt_complete": True,
+                "canonical_execution": {"execution_decision_authority": "CapabilityPlanner"},
+                "root_receipt": {"schema": "nexus.root_receipt.v1"},
+            }
+            _write_runtime_receipt(kwargs["receipt_path"], receipt)
+            return receipt
+
+    monkeypatch.setattr(
+        "nexus.engine.learning_policy_loader.merge_runtime_learning_policy",
+        _runtime_budget,
+    )
+    monkeypatch.setattr("nexus.services.gateway.BattlesuitGateway", _Gateway)
+    monkeypatch.setattr(
+        "nexus.contracts.root_receipt.validate_root_receipt",
+        lambda _root: (True, []),
+    )
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_EXECUTOR_MODEL", "qwen2.5-coder:7b")
+
+    execute_canonical_product_task(
+        "repair record_serialization for user profile",
+        tmp_path,
+        execution_context={
+            "task_id": "canonical-learning-policy-1",
+            "workspace_revision": "rev-current",
+            "local_assist_mode": "disabled",
+            "online_policy": "auto",
+        },
+    )
+
+    assert captured["policy_root"] == tmp_path.resolve()
+    assert captured["policy_scope"] == {
+        "task_desc": "repair record_serialization for user profile",
+        "target_model": "qwen2.5-coder:7b",
+        "runtime_identity": "local_model_executor",
+        "source_revision": "rev-current",
+    }
+    plan = captured["request"].canonical_planning_bundle.plan
+    assert "memory" in plan.selected_capabilities
+    assert plan.signal_snapshot["learning_policy"]["adoption_lineage"]["adoption_id"] == "ladopt:test"
+    assert plan.signal_snapshot["route_truth_source"] == "CapabilityPlanner"
+    assert (
+        captured["request"].budget["learning_policy"]["adoption_lineage"]["adoption_id"]
+        == "ladopt:test"
+    )
+
+
 def test_canonical_product_verified_repair_topology_is_planner_owned(
     monkeypatch,
     tmp_path,
@@ -511,3 +584,105 @@ def test_canonical_product_rejects_target_symlink_outside_workspace(tmp_path):
                 "verifier_command": ["python", "-m", "py_compile", "target.py"],
             },
         )
+
+def _verified_campaign_test_identities(tmp_path, campaign_id):
+    import hashlib
+
+    from nexus.engine.canonical_task_seam import (
+        VerifiedCampaignIdentity,
+        VerifiedTaskCardIdentity,
+    )
+
+    task_id = "issue-982-wave-b3-governed-opencode-witness-20260919"
+    canonical_card = tmp_path / "02-governed-opencode-runtime-witness.md"
+    canonical_card.write_text(
+        "# Task Card: B3 test\n"
+        f"task_id: `{task_id}`\n"
+        f"campaign_id: `{campaign_id}`\n",
+        encoding="utf-8",
+    )
+    task_card_hash = hashlib.sha256(canonical_card.read_bytes()).hexdigest()
+    card = VerifiedTaskCardIdentity(
+        task_id=task_id,
+        task_card_path=(
+            "tasks/github-issue-982-wave-b-20260919/"
+            "02-governed-opencode-runtime-witness.md"
+        ),
+        canonical_task_card_path=str(canonical_card),
+        task_card_hash=task_card_hash,
+    )
+    campaign = VerifiedCampaignIdentity(
+        campaign_id=campaign_id,
+        task_id=task_id,
+        task_card_hash=task_card_hash,
+    )
+    return task_id, card, campaign
+
+
+def test_b3_verified_campaign_projects_mimo_candidate_generation(tmp_path):
+    from nexus.engine.canonical_task_seam import build_canonical_planner_admission
+
+    task_id, card, campaign = _verified_campaign_test_identities(
+        tmp_path,
+        "github-issue-982-wave-b-20260919",
+    )
+    result = build_canonical_planner_admission(
+        task_id=task_id,
+        task_text="produce the bounded B3 OpenCode canary candidate",
+        allowed_files=("README.md",),
+        verifier_command=("python", "-m", "pytest"),
+        task_card_identity=card,
+        campaign_identity=campaign,
+    )
+
+    demand = result["workforce_demands"]["demands"][0]
+    assert demand["requested_role"] == "bounded_candidate_generation"
+    assert demand["minimum_autonomy"] == "L1"
+    assert demand["context_class"] == "nexus_bounded"
+    assert demand["mutation_intent"] is False
+    assert result["binding"]["worker_id"] == "opencode_mimo_free"
+    assert result["binding"]["provider"] == "opencode"
+    assert result["binding"]["model"] == "opencode/mimo-v2.5-free"
+
+
+def test_b3_campaign_text_without_verified_identity_does_not_mint_route(tmp_path):
+    from nexus.engine.canonical_task_seam import build_canonical_planner_admission
+
+    task_id, card, _campaign = _verified_campaign_test_identities(
+        tmp_path,
+        "github-issue-982-wave-b-20260919",
+    )
+    result = build_canonical_planner_admission(
+        task_id=task_id,
+        task_text="produce a bounded candidate",
+        allowed_files=("README.md",),
+        verifier_command=("python", "-m", "pytest"),
+        task_card_identity=card,
+    )
+
+    demand = result["workforce_demands"]["demands"][0]
+    assert demand["requested_role"] == "fast_bounded_implementation"
+    assert demand["mutation_intent"] is True
+    assert result["binding"]["worker_id"] == "agy_flash_37_medium"
+
+
+def test_b3_near_match_verified_campaign_does_not_select_mimo(tmp_path):
+    from nexus.engine.canonical_task_seam import build_canonical_planner_admission
+
+    task_id, card, campaign = _verified_campaign_test_identities(
+        tmp_path,
+        "github-issue-982-wave-b-20260919-suffix",
+    )
+    result = build_canonical_planner_admission(
+        task_id=task_id,
+        task_text="produce a bounded candidate",
+        allowed_files=("README.md",),
+        verifier_command=("python", "-m", "pytest"),
+        task_card_identity=card,
+        campaign_identity=campaign,
+    )
+
+    demand = result["workforce_demands"]["demands"][0]
+    assert demand["requested_role"] == "fast_bounded_implementation"
+    assert result["binding"]["worker_id"] == "agy_flash_37_medium"
+

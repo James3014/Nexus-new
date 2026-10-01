@@ -246,7 +246,12 @@ def test_cline_adapter_is_registered_and_binds_glm_52_on_target(monkeypatch, tmp
     assert receipt.evidence_complete is True
 
 
-def test_codex_adapter_normalizes_provider_receipt_to_common_contract(tmp_path):
+def test_codex_adapter_normalizes_provider_receipt_to_common_contract(tmp_path, monkeypatch):
+    executable = tmp_path / "codex"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+    monkeypatch.setenv("NEXUS_CODEX_BIN", str(executable))
+
     class FakeExecutor:
         def invoke(self, contract, lease, *, prompt):
             return CodexExecutionReceipt(
@@ -262,6 +267,7 @@ def test_codex_adapter_normalizes_provider_receipt_to_common_contract(tmp_path):
                 wall_time_ms=17,
                 process_group_id=123,
                 provider_calls=1,
+                provider_attempt_count=1,
                 commit_created=False,
                 merge_performed=False,
             )
@@ -340,6 +346,23 @@ def test_opencode_args_match_current_cli_without_removed_auto_flag():
 
     assert argv == ("run", "--model", "opencode/mimo-v2.5-free", "test prompt")
     assert "--auto" not in argv
+
+
+def test_grok_args_match_current_headless_cli():
+    from nexus.executors.worker_registry import _grok_args
+
+    argv = _grok_args("test prompt", "grok-4.6")
+
+    assert argv == (
+        "--model",
+        "grok-4.6",
+        "--single",
+        "test prompt",
+        "--output-format",
+        "json",
+        "--no-alt-screen",
+    )
+    assert "--prompt" not in argv
 
 
 def test_every_adapter_exit_0_result_is_execution_completed(tmp_path, monkeypatch):

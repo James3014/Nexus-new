@@ -19,7 +19,11 @@ from nexus.services.local_heal.local_model_provider import InjectedLocalModelPro
 from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
 from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
 from nexus.services.model_workforce_policy import WorkforcePolicyLoader
-from nexus.services.unified_runtime import UnifiedRuntime, UnifiedRuntimeRequest
+from nexus.services.unified_runtime import (
+    UnifiedRuntime,
+    UnifiedRuntimeRequest,
+    build_structured_online_invoker,
+)
 
 
 POLICY = ROOT / "nexus/config/model_workforce.yaml"
@@ -141,6 +145,7 @@ def _online(context: dict[str, object]) -> dict[str, object]:
 
 _online.provider = "codex"
 _online.online_invoker_provider = "codex"
+_online.physical_provider_transport = False
 
 
 def _verifier(context: dict[str, object]) -> dict[str, object]:
@@ -658,7 +663,7 @@ def test_local_authority_failures_are_zero_call_and_identical_across_receipt_sur
     monkeypatch: pytest.MonkeyPatch,
     tamper: str,
 ) -> None:
-    import nexus.services.unified_runtime as unified_runtime_module
+    import nexus_runtime_support_candidate.composition as unified_runtime_module
 
     original = unified_runtime_module.evaluate_runtime_workforce_admission
 
@@ -681,6 +686,8 @@ def test_local_authority_failures_are_zero_call_and_identical_across_receipt_sur
         "evaluate_runtime_workforce_admission",
         tampered,
     )
+    from nexus.services import runtime_compat
+    monkeypatch.setattr(sys.modules[__name__], "UnifiedRuntime", runtime_compat.build_host_runtime_exports().UnifiedRuntime)
     receipt, local = _local_case()
 
     authority = receipt["local_model_invocation_authority"]
@@ -715,6 +722,64 @@ def test_ambiguous_local_records_are_zero_call() -> None:
     )
     assert receipt["local"]["invoked"] is False
     assert local.calls == 0
+
+
+@pytest.mark.parametrize("flag_value", [None, False])
+def test_physical_local_service_forces_fresh_admission_when_flag_omitted_or_false(flag_value) -> None:
+    planner = _Planner(selected=["local_model_executor"])
+    local = _CapturingLocal()
+    local.physical_model_transport = True
+    route: dict[str, object] = {"recommended_flow": "direct"}
+    if flag_value is not None:
+        route["workforce_admission_enabled"] = flag_value
+    request = _request(route, local=True, online=False)
+
+    receipt = UnifiedRuntime(
+        planner=planner,
+        local_service=local,
+        workforce_policy_loader=_Loader(),
+    ).run(request, verifier=_verifier, learning=_learning)
+
+    assert receipt["workforce_admission"]["overall_decision"] == "BLOCK"
+    assert receipt["local"]["invoked"] is False
+    assert local.calls == 0
+
+
+@pytest.mark.parametrize("flag_value", [None, False])
+def test_physical_online_invoker_forces_fresh_admission_when_flag_omitted_or_false(flag_value) -> None:
+    calls = 0
+
+    def physical_online(context):
+        nonlocal calls
+        calls += 1
+        return _online(context)
+
+    physical_online.provider = "codex"
+    physical_online.online_invoker_provider = "codex"
+    route: dict[str, object] = {"recommended_flow": "direct"}
+    if flag_value is not None:
+        route["workforce_admission_enabled"] = flag_value
+    request = _request(route, local=False, online=True)
+
+    receipt = UnifiedRuntime(
+        planner=_Planner(),
+        workforce_policy_loader=_Loader(),
+    ).run(request, online_invoker=physical_online, verifier=_verifier, learning=_learning)
+
+    assert receipt["workforce_admission"]["overall_decision"] == "BLOCK"
+    assert receipt["online"]["invoked"] is False
+    assert calls == 0
+
+
+def test_structured_provider_adapter_is_explicitly_physical() -> None:
+    invoker = build_structured_online_invoker(
+        lambda **_kwargs: ({"status": "ok"}, "ok"),
+        provider="fixture_gateway",
+    )
+
+    assert invoker.provider == "fixture_gateway"
+    assert invoker.online_invoker_provider == "fixture_gateway"
+    assert invoker.physical_provider_transport is True
 
 
 def test_admission_disabled_preserves_legacy_overlay_and_7b_normalization() -> None:
@@ -1397,7 +1462,7 @@ def test_missing_invoker_provider_identity_is_zero_call() -> None:
 
 
 def test_admission_hash_mismatch_is_zero_call(monkeypatch: pytest.MonkeyPatch) -> None:
-    import nexus.services.unified_runtime as unified_runtime_module
+    import nexus_runtime_support_candidate.composition as unified_runtime_module
 
     original = unified_runtime_module.evaluate_runtime_workforce_admission
 
@@ -1411,6 +1476,8 @@ def test_admission_hash_mismatch_is_zero_call(monkeypatch: pytest.MonkeyPatch) -
         "evaluate_runtime_workforce_admission",
         tampered,
     )
+    from nexus.services import runtime_compat
+    monkeypatch.setattr(sys.modules[__name__], "UnifiedRuntime", runtime_compat.build_host_runtime_exports().UnifiedRuntime)
     receipt, calls = _run_online_authority_case(_online_authority_route())
     assert receipt["online"]["reason"] == "workforce_admission_record_binding_hash_mismatch"
     assert receipt["online"]["response"]["provider_call_count"] == 0
@@ -1443,13 +1510,15 @@ def test_admitted_online_authority_is_exact_and_receipt_bound() -> None:
 def test_evidence_seal_failure_preserves_admitted_online_authority_without_invoking(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import nexus.services.capability_evidence_bundle as evidence_bundle_module
+    import nexus_runtime_support_candidate.composition as evidence_bundle_module
 
     monkeypatch.setattr(
         evidence_bundle_module,
-        "verify_capability_evidence_bundle",
+        "_verify_evidence_bundle",
         lambda _bundle: {"ok": False, "blockers": ["forced_seal_failure"]},
     )
+    from nexus.services import runtime_compat
+    monkeypatch.setattr(sys.modules[__name__], "UnifiedRuntime", runtime_compat.build_host_runtime_exports().UnifiedRuntime)
     planner = _Planner(
         _demands(_demand("online", role="main_engineering", autonomy="L3_HISTORICAL")),
         selected=["memory"],

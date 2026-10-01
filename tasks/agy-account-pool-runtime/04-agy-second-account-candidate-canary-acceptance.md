@@ -33,7 +33,7 @@ Account A evidence supports only the first-account provider invocation:
 
 ```yaml
 account_a:
-  alias_hash: f13b48bb5924
+  alias_hash: <runtime-local-redacted>
   provider_started: true
   exit_code: 0
   provider_calls: 1
@@ -46,7 +46,7 @@ It does not by itself complete Card 03.
 ## Account B acceptance contract
 
 The current switched account is expected to have alias hash
-`fd84db4038d7`. If `ensure-active` changes the active account before provider
+`<runtime-local-redacted>`. If `ensure-active` changes the active account before provider
 execution, the final provider receipt alias is authoritative; it must differ
 from Account A.
 
@@ -113,7 +113,7 @@ The provider receipt alias must match the final `ensure-active` alias.
 
 ```yaml
 account_b:
-  manager_preflight_alias: fd84db4038d7
+  manager_preflight_alias: <runtime-local-redacted>
   provider_receipt_alias_matches: true
   provider_exit_code: 0
   candidate_diff_non_empty: true
@@ -124,8 +124,8 @@ account_b:
   target_cleanup_complete: true
 
 switch_proof:
-  account_a_alias: f13b48bb5924
-  account_b_alias: fd84db4038d7
+  account_a_alias: <runtime-local-redacted>
+  account_b_alias: <runtime-local-redacted>
   aliases_distinct: true
   same_agy_executable: true
   manager_switch_verified: true
@@ -177,7 +177,7 @@ task_card:
   path: tasks/agy-account-pool-runtime/04-agy-second-account-candidate-canary-acceptance.md
   hash:
 account_a:
-  alias_hash: f13b48bb5924
+  alias_hash: <runtime-local-redacted>
   provider_exit_code: 0
   provider_calls: 1
   canonical_unchanged: true

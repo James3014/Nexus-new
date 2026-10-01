@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Mapping, Optional
 
+from nexus.contracts.lifecycle_action import ExternalCandidateAdoptionRequest
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 from scripts.engine.commands.exception_translation import NexusCliActionError
-
 
 _TEST_RUNNER: Optional[Callable[..., Any]] = None
 
@@ -38,6 +38,31 @@ def run_self_hosted_submit(
     try:
         return svc.submit_task(request)
     except (ValueError, KeyError, RuntimeError, TypeError) as exc:
+        raise NexusCliActionError(str(exc), exit_code=1) from exc
+
+
+def run_self_hosted_adopt_external(
+    request: Mapping[str, Any] | ExternalCandidateAdoptionRequest,
+    state_dir: str | Path | None = None,
+    service: SelfHostedTaskService | None = None,
+) -> dict[str, Any]:
+    """Forward one closed external-adoption request to the lifecycle service.
+
+    The CLI adapter deliberately performs no verification or state mutation of
+    its own; those responsibilities remain in ``SelfHostedTaskService``.
+    """
+    try:
+        if isinstance(request, ExternalCandidateAdoptionRequest):
+            validated = request
+        elif isinstance(request, Mapping):
+            validated = ExternalCandidateAdoptionRequest.model_validate(dict(request))
+        else:
+            raise NexusCliActionError("request must be a JSON object", exit_code=1)
+        svc = get_self_hosted_service(state_dir=state_dir, service=service)
+        return svc.adopt_external_candidate(validated)
+    except (OSError, ValueError, KeyError, RuntimeError, TypeError) as exc:
+        if isinstance(exc, NexusCliActionError):
+            raise
         raise NexusCliActionError(str(exc), exit_code=1) from exc
 
 

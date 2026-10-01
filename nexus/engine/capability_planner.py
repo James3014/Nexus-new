@@ -964,12 +964,17 @@ class CapabilityPlanner:
             "confirmation_required": research_isolation.level.value == "L2",
         }
         if learning_policy:
-            signal_snapshot["learning_policy"] = {
+            snapshot_lp: dict[str, Any] = {
                 "influenced": True,
                 "source_experiences": tuple(learning_policy.get("source_experiences", ()) or ()),
                 "promoted_capabilities": tuple(learning_policy.get("promoted_capabilities", ()) or ()),
                 "penalized_capabilities": tuple(learning_policy.get("penalized_capabilities", ()) or ()),
             }
+            if "episodic_memory_injection" in learning_policy:
+                snapshot_lp["episodic_memory_injection"] = learning_policy["episodic_memory_injection"]
+            if "adoption_lineage" in learning_policy:
+                snapshot_lp["adoption_lineage"] = learning_policy["adoption_lineage"]
+            signal_snapshot["learning_policy"] = snapshot_lp
         if route_cost_policy:
             signal_snapshot["route_cost_policy"] = {
                 "influenced": True,

@@ -15,6 +15,10 @@ from nexus.delivery.submission import (
 )
 from scripts.engine.commands.exception_translation import NexusCliActionError
 
+LEGACY_INTEGRATION_PATH_RETIRED = (
+    "LEGACY_INTEGRATION_PATH_RETIRED_USE_CONTROLLED_INTEGRATION"
+)
+
 
 class OrchestratorLike(Protocol):
     logger: Any
@@ -27,14 +31,8 @@ class MetricsAggregatorLike(Protocol):
         ...
 
 
-class IntegrationManagerLike(Protocol):
-    def batch_integrate(self, task_ids: list[str], target_branch: str) -> tuple[list[str], list[str]]:
-        ...
-
-
 OrchestratorFactory = Callable[[], OrchestratorLike]
 MetricsAggregatorFactory = Callable[[Any], MetricsAggregatorLike]
-IntegrationManagerFactory = Callable[[Any, Any], IntegrationManagerLike]
 ReceiptLoader = Callable[[Path], dict[str, Any]]
 GovernanceEventAppender = Callable[[str, dict[str, Any]], None]
 CommitShaProvider = Callable[[], str]
@@ -93,12 +91,6 @@ def _default_metrics_aggregator_factory(logger: Any) -> MetricsAggregatorLike:
     from nexus.orchestrator.metrics import MetricsAggregator
 
     return MetricsAggregator(logger)
-
-
-def _default_integration_manager_factory(state_store: Any, evidence_collector: Any) -> IntegrationManagerLike:
-    from nexus.orchestrator.integration_manager import IntegrationManager
-
-    return IntegrationManager(state_store, evidence_collector)
 
 
 def _default_governance_event_appender(repo_root: str, payload: dict[str, Any]) -> None:
@@ -273,26 +265,19 @@ def integrate_multi_agent_tasks(
     *,
     target_branch: str,
     orchestrator_factory: OrchestratorFactory | None = None,
-    integration_manager_factory: IntegrationManagerFactory | None = None,
+    integration_manager_factory: Callable[[Any, Any], Any] | None = None,
 ) -> TaskIntegrationView:
-    orchestrator = (orchestrator_factory or _default_orchestrator_factory)()
-    manager = (integration_manager_factory or _default_integration_manager_factory)(
-        orchestrator.state_store,
-        orchestrator.evidence_collector,
-    )
+    """Fail closed: the pre-#957 batch integration route is retired."""
+
+    del orchestrator_factory, integration_manager_factory
     task_ids = _parse_csv(task_ids_csv)
-    success, failed = manager.batch_integrate(task_ids, target_branch)
-    text_lines = [f"🚢 Integrating tasks: {task_ids} into {target_branch}..."]
-    if success:
-        text_lines.append(f"✅ Successfully integrated: {success}")
-    if failed:
-        text_lines.append(f"❌ Failed to integrate: {failed}")
-    return TaskIntegrationView(
-        task_ids=task_ids,
-        target_branch=target_branch,
-        success=list(success),
-        failed=list(failed),
-        text_lines=text_lines,
+    requested = ",".join(task_ids) or "<none>"
+    raise NexusCliActionError(
+        f"{LEGACY_INTEGRATION_PATH_RETIRED}: "
+        "multi-agent integrate no longer performs repository mutation; "
+        "use the approved SelfHostedTaskService/ControlledIntegrationManager path "
+        f"(tasks={requested}, target={target_branch})",
+        exit_code=1,
     )
 
 

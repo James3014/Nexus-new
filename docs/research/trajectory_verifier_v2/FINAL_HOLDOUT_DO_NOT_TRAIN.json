@@ -1,0 +1,33 @@
+{
+  "schema": "nexus.trajectory_verifier.final_holdout.v1",
+  "experiment": "NEXUS_SYSTEM_ONE_CLM_V2",
+  "track": "TRACK_1_TRAJECTORY_VERIFIER_HEAD",
+  "status": "FINAL_HOLDOUT_DO_NOT_TRAIN",
+  "frozen_at": "2026-09-29T16:59:00+08:00",
+  "claim_ceiling": "EXPERIMENTAL_SHADOW_ONLY",
+  "rules": [
+    "No training or dev tuning on any listed artifact, task, candidate identity, oracle/fix content, or near-duplicate bug-family fixture.",
+    "No paraphrased or rewritten form of R01-R10 may enter training/dev.",
+    "No hyperparameter, representation, aggregation, threshold, prompt, or normalization tuning against this holdout."
+  ],
+  "historical_replay_tasks": ["R01","R02","R03","R04","R05","R06","R07","R08","R09","R10"],
+  "artifacts": [
+    {"file":"replay_manifest_resolved.json","sha256":"1a377c3b66f0e6061e7a02a7940e326056bfed220e3d9ea1f3823f32702ef168"},
+    {"file":"replay_baseline_results.json","sha256":"f9599e46abd4938a4c460ad7da22833de1d0159ee7a2e7123cedae0cda93b416"},
+    {"file":"replay_oracle_results.json","sha256":"1ebde6415311b7ea1cc010522f403401b2f25abb6bb739f21aeb563516478e92"},
+    {"file":"candidate_verifier_results.json","sha256":"311fe95170df81c04714729718d61f5a99e97d79fe1654cbd72f8377a677986b"},
+    {"file":"candidate_AB_verification.json","sha256":"a3a1837ca93699d3311cba0fdba29b436a45862dd55e76b49d384bd8afd08829"},
+    {"file":"ranking_blind_10_v2.json","sha256":"ea1141018937b44915b1d42555deb832c0a84f6e86483a6dbca7b8b96b0a084e"},
+    {"file":"ranking_labels_10_v2.json","sha256":"466a05361cf42c97ea096ac240b2aed05fead97c137d55365992a13b80e4f635"},
+    {"file":"ranking_clm_real10_v2.json","sha256":"4d4a15034201021d94fc21c6ab59cf7090d0d59823c83d02f9f18ecb763fb268"},
+    {"file":"ranking_raw_real10_v2.json","sha256":"ab8f250737483be52b413786ca3cfc5c0f19f9104dbcbdf55be5a14e107761cb"},
+    {"file":"real_rank_sealed_labels.json","sha256":"0c4c61b7316a05ca14db22d10cbe938cdd28802de6f84da6e77137e344f29552"},
+    {"file":"real_rank_blind_cases.json","sha256":"4185aea49e008f8ede93b7b85c95ad0180f1f525268b194cd371bd6fe490485f"},
+    {"file":"decision_current_main.json","sha256":"c0f5ec85ad4b5ae67e80977999620d2d55fbd80c175cc0c59af3fcdb3b223a93"},
+    {"file":"decision_clm_current_main.json","sha256":"0149ccfdca306912be3ccd325bfbfadc057600acd17634082fca3b321990ecd5"},
+    {"file":"decision_raw_current_main.json","sha256":"46adee2b532ef0ea2885732b2327d6e8d42db59852b2ab37c481736247dba8ab"},
+    {"file":"phase0_verdict.json","sha256":"e559afcdf11a341dc02ee30ba1474cb582a657d2211b08ae4576f928d9db5216"}
+  ],
+  "decision_case_count": 30,
+  "historical_replay_source_revision": "015b372d8ad27356632de0b21824e908104c8a56"
+}

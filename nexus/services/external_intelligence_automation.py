@@ -6,13 +6,23 @@ import os
 import re
 import subprocess
 import tempfile
+import uuid
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping
 
+from nexus.engine.canonical_task_seam import (
+    VerifiedTaskCardIdentity,
+    build_canonical_planner_admission,
+)
 from nexus.services.external_intelligence import (
+    ExternalIntelligenceError,
     ExternalIntelligenceSidecar,
     ExternalIntelligenceStore,
+    build_context_pack,
+    build_request,
+    normalize_intake,
+    validate_selected_worker,
 )
 from nexus.services.external_intelligence_closure import (
     CLAIM_CEILING as CLOSURE_CLAIM_CEILING,
@@ -24,7 +34,10 @@ from nexus.services.external_intelligence_closure import (
     _path_matches,
     parse_task_card_authority,
 )
-from nexus.services.external_intelligence_fanout import AdaptiveDeepSeekFanoutRuntime, CapacityLease
+from nexus.services.external_intelligence_fanout import (
+    AdaptiveWorkerFanoutRuntime,
+    CapacityLease,
+)
 
 ISSUE_SCHEMA = "nexus.external_intelligence_issue.v1"
 STATE_SCHEMA = "nexus.external_intelligence_automation_state.v1"
@@ -36,6 +49,12 @@ AMBIGUOUS_STATES = {
     "INTELLIGENCE_DISPATCHING",
     "FANOUT_DISPATCHING",
     "CLOSURE_DISPATCHING",
+}
+TERMINAL_DISPOSITIONS = {
+    "REPAIR_BUDGET_EXHAUSTED",
+    "UNIT_REPAIR_REQUIRED",
+    "COMPOSITION_REPAIR_REQUIRED",
+    "SCOPE_DELTA_REQUIRED",
 }
 ALLOWED_KEYS = {
     "schema",
@@ -54,6 +73,7 @@ ALLOWED_KEYS = {
     "active_elsewhere",
     "needs_reconciliation",
     "pipeline_mode",
+    "selected_worker",
 }
 
 
@@ -102,9 +122,10 @@ def _normalize_github_repo(url_or_repo: str) -> str:
     return text.lower()
 
 
-def _validate_c_slug(value: Any, field: str) -> None:
+def _validate_c_slug(value: Any, field: str) -> str:
     if not isinstance(value, str) or not C_SLUG_RE.fullmatch(value):
         raise AutomationError(f"ISSUE_CONTRACT_{field}_INVALID")
+    return value
 
 
 def _validate_relative_path(value: Any) -> str:
@@ -185,6 +206,15 @@ def parse_issue_contract(body: str) -> dict[str, Any]:
         raise AutomationError("ISSUE_CONTRACT_MAIN_SHA_INVALID")
     if not SHA256_RE.fullmatch(value["task_card_hash"]):
         raise AutomationError("ISSUE_CONTRACT_TASK_CARD_HASH_INVALID")
+
+    top_worker = None
+    if "selected_worker" in value:
+        try:
+            top_worker = validate_selected_worker(value["selected_worker"])
+        except ExternalIntelligenceError as exc:
+            raise AutomationError("ISSUE_CONTRACT_SELECTED_WORKER_INVALID") from exc
+        value["selected_worker"] = top_worker
+
     units = value.get("execution_units")
     if not isinstance(units, list) or not units:
         raise AutomationError("ISSUE_CONTRACT_EXECUTION_UNITS_INVALID")
@@ -198,12 +228,12 @@ def parse_issue_contract(body: str) -> dict[str, Any]:
             "dependencies_ready",
             "priority",
             "allow_deletions",
+            "selected_worker",
         }
         if set(unit) - allowed_unit:
             raise AutomationError("ISSUE_CONTRACT_UNIT_KEYS_INVALID")
-        unit_id = unit.get("unit_id")
+        unit_id = _validate_c_slug(unit.get("unit_id"), "UNIT_ID")
         paths = unit.get("mutation_paths")
-        _validate_c_slug(unit_id, "UNIT_ID")
         if unit_id in seen:
             raise AutomationError("ISSUE_CONTRACT_UNIT_ID_INVALID")
         seen.add(unit_id)
@@ -222,6 +252,16 @@ def parse_issue_contract(body: str) -> dict[str, Any]:
             not isinstance(unit["priority"], int) or isinstance(unit["priority"], bool)
         ):
             raise AutomationError("ISSUE_CONTRACT_UNIT_PRIORITY_INVALID")
+        if "selected_worker" in unit:
+            try:
+                unit_w = validate_selected_worker(unit["selected_worker"])
+            except ExternalIntelligenceError as exc:
+                raise AutomationError("ISSUE_CONTRACT_SELECTED_WORKER_INVALID") from exc
+            unit["selected_worker"] = unit_w
+            if top_worker is None:
+                raise AutomationError("ISSUE_CONTRACT_UNIT_WORKER_WITHOUT_TOP_LEVEL_BINDING")
+            if unit_w != top_worker:
+                raise AutomationError("ISSUE_CONTRACT_UNIT_WORKER_MISMATCH")
     unit_verifiers = value.get("unit_verifiers")
     if not isinstance(unit_verifiers, dict) or set(unit_verifiers) != seen:
         raise AutomationError("ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID")
@@ -263,6 +303,30 @@ class IssueWorkItem:
         })
 
 
+PUBLICATION_STATES = {
+    "PREPARED",
+    "DISPATCHING",
+    "OUTCOME_UNKNOWN",
+    "COMPLETED",
+}
+
+
+def compute_publication_id(
+    repository: str,
+    issue_number: int,
+    identity_hash: str | None,
+    publication: Mapping[str, Any],
+) -> str:
+    body: dict[str, Any] = {
+        "repository": repository,
+        "issue_number": int(issue_number),
+        "payload": dict(publication),
+    }
+    if identity_hash:
+        body["identity_hash"] = str(identity_hash)
+    return _sha256_json(body)
+
+
 class AutomationStateStore:
     def __init__(self, root: str | os.PathLike[str]):
         self.root = Path(root).expanduser().resolve()
@@ -270,6 +334,10 @@ class AutomationStateStore:
     def path_for(self, item: IssueWorkItem) -> Path:
         repo = re.sub(r"[^A-Za-z0-9_.-]+", "_", item.repository)
         return self.root / repo / f"issue-{item.issue_number}-{item.identity_hash}.json"
+
+    def path_for_keys(self, repository: str, issue_number: int, identity_hash: str) -> Path:
+        repo = re.sub(r"[^A-Za-z0-9_.-]+", "_", repository)
+        return self.root / repo / f"issue-{issue_number}-{identity_hash}.json"
 
     def load(self, item: IssueWorkItem) -> dict[str, Any] | None:
         path = self.path_for(item)
@@ -290,6 +358,21 @@ class AutomationStateStore:
             **extra,
         }
         _atomic_json(self.path_for(item), value)
+        return value
+
+    def update_publication_record(
+        self,
+        repository: str,
+        issue_number: int,
+        identity_hash: str,
+        publication_record: Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        path = self.path_for_keys(repository, issue_number, identity_hash)
+        if not path.exists():
+            return None
+        value = json.loads(path.read_text(encoding="utf-8"))
+        value["publication_record"] = dict(publication_record)
+        _atomic_json(path, value)
         return value
 
 
@@ -319,7 +402,7 @@ class ExternalIntelligenceAutomation:
         state_store: AutomationStateStore,
         intelligence_store: ExternalIntelligenceStore,
         sidecar: ExternalIntelligenceSidecar,
-        c_runtime: AdaptiveDeepSeekFanoutRuntime | Any,
+        c_runtime: AdaptiveWorkerFanoutRuntime | Any,
         d_runtime: ExternalIntelligenceClosureRuntime | Any,
         capacity_factory: Callable[[Mapping[str, Any]], CapacityLease] | None = None,
     ):
@@ -330,6 +413,7 @@ class ExternalIntelligenceAutomation:
         self.c_runtime = c_runtime
         self.d_runtime = d_runtime
         self.capacity_factory = capacity_factory or self._default_capacity
+        self._worker_binding: dict[str, str] | None = None
 
     @staticmethod
     def _default_capacity(contract: Mapping[str, Any]) -> CapacityLease:
@@ -419,6 +503,74 @@ class ExternalIntelligenceAutomation:
             raise AutomationError("TASK_CARD_DECODE_FAILED") from exc
         return Path(rel.as_posix()), text
 
+    def _read_git_blob(self, main_sha: str, rel_path: str) -> tuple[bool, str]:
+        rel_str = str(rel_path or "").strip()
+        try:
+            rel = PurePosixPath(rel_str)
+        except (TypeError, ValueError) as exc:
+            raise AutomationError("MUTATION_PATH_INVALID") from exc
+        if (
+            not rel_str
+            or rel.is_absolute()
+            or ".." in rel.parts
+            or "\\" in rel_str
+            or "\x00" in rel_str
+        ):
+            raise AutomationError("MUTATION_PATH_INVALID")
+        spec = f"{main_sha}:{rel.as_posix()}"
+        res = subprocess.run(
+            ["git", "cat-file", "blob", spec],
+            cwd=self.repository_root,
+            capture_output=True,
+            check=False,
+            timeout=30.0,
+        )
+        if res.returncode != 0:
+            return False, f"FILE_NOT_FOUND_AT_REVISION:{main_sha}:{rel.as_posix()}"
+        try:
+            text = res.stdout.decode("utf-8")
+        except UnicodeDecodeError:
+            text = f"BINARY_OR_UNDECODABLE_CONTENT:{main_sha}:{rel.as_posix()}"
+        return True, text
+
+    @staticmethod
+    def _extract_verifier_paths(contract: Mapping[str, Any]) -> list[str]:
+        paths: set[str] = set()
+        all_specs: list[Mapping[str, Any]] = []
+        unit_verifiers = contract.get("unit_verifiers") or {}
+        if isinstance(unit_verifiers, Mapping):
+            for specs in unit_verifiers.values():
+                if isinstance(specs, list):
+                    all_specs.extend(s for s in specs if isinstance(s, Mapping))
+        whole_verifiers = contract.get("whole_verifiers") or []
+        if isinstance(whole_verifiers, list):
+            all_specs.extend(s for s in whole_verifiers if isinstance(s, Mapping))
+        for spec in all_specs:
+            argv = spec.get("argv") or []
+            if isinstance(argv, list):
+                for part in argv:
+                    if (
+                        not isinstance(part, str)
+                        or not part
+                        or part.startswith("-")
+                        or "\x00" in part
+                        or "\\" in part
+                    ):
+                        continue
+                    if part in ("python", "python3", "pytest", "bash", "sh", "node", "uv"):
+                        continue
+                    try:
+                        p = PurePosixPath(part)
+                        if (
+                            not p.is_absolute()
+                            and ".." not in p.parts
+                            and ("." in p.name or len(p.parts) > 1)
+                        ):
+                            paths.add(p.as_posix())
+                    except Exception:
+                        continue
+        return sorted(paths)
+
     def _validate_task_card_authority(
         self, contract: Mapping[str, Any], task_card_text: str
     ) -> TaskCardAuthority:
@@ -469,22 +621,190 @@ class ExternalIntelligenceAutomation:
         }
 
     def _sources(self, item: IssueWorkItem, task_card_text: str) -> list[dict[str, Any]]:
-        return [
+        main_sha = str(item.contract["main_sha"])
+        sources: list[dict[str, Any]] = [
             {
                 "kind": "github_issue",
                 "ref": f"github://{item.repository}/issues/{item.issue_number}",
-                "revision": item.contract["revision"],
+                "revision": str(item.contract["revision"]),
                 "provenance": "github",
                 "content": f"{item.title}\n\n{item.body}",
             },
             {
                 "kind": "task_card",
-                "ref": item.contract["task_card_ref"],
-                "revision": item.contract["task_card_hash"],
+                "ref": str(item.contract["task_card_ref"]),
+                "revision": str(item.contract["task_card_hash"]),
                 "provenance": "git",
                 "content": task_card_text,
             },
         ]
+
+        seen_paths: set[str] = set()
+        for unit in item.contract.get("execution_units", []):
+            for path in unit.get("mutation_paths", []):
+                norm = _validate_relative_path(path)
+                if norm not in seen_paths:
+                    seen_paths.add(norm)
+
+        for path in sorted(seen_paths):
+            exists, content = self._read_git_blob(main_sha, path)
+            sources.append({
+                "kind": "source_file" if exists else "source_absence",
+                "ref": path,
+                "revision": main_sha,
+                "provenance": f"git:{main_sha}",
+                "content": content,
+            })
+
+        verifier_paths = self._extract_verifier_paths(item.contract)
+        for path in sorted(verifier_paths):
+            if path in seen_paths:
+                continue
+            exists, content = self._read_git_blob(main_sha, path)
+            sources.append({
+                "kind": "verifier_source" if exists else "source_absence",
+                "ref": path,
+                "revision": main_sha,
+                "provenance": f"git:{main_sha}",
+                "content": content,
+            })
+
+        return sources
+
+    def _intelligence_effect_id(self, item: IssueWorkItem, task_card_text: str) -> str:
+        intake = normalize_intake(self._record(item))
+        context_pack = build_context_pack(self._sources(item, task_card_text))
+        request = build_request(
+            intake,
+            context_pack,
+            selected_worker=self._worker_binding,
+        )
+        return str(request["request_sha256"])
+
+    def _canonical_worker_binding(
+        self, item: IssueWorkItem, task_card_path: Path, task_card_text: str
+    ) -> dict[str, str]:
+        self.state_store.root.mkdir(parents=True, exist_ok=True)
+        materialized = tempfile.NamedTemporaryFile(
+            mode="wb", prefix=".task-card.", dir=self.state_store.root, delete=False
+        )
+        try:
+            materialized.write(task_card_text.encode("utf-8"))
+            materialized.flush()
+            os.fsync(materialized.fileno())
+            materialized.close()
+        except Exception:
+            materialized.close()
+            Path(materialized.name).unlink(missing_ok=True)
+            raise
+        allowed_files = tuple(
+            dict.fromkeys(
+                path for unit in item.contract["execution_units"] for path in unit["mutation_paths"]
+            )
+        )
+        verifier_command = tuple(item.contract["whole_verifiers"][0]["argv"])
+        identity = VerifiedTaskCardIdentity(
+            task_id=str(item.contract["task_id"]),
+            task_card_path=task_card_path.as_posix(),
+            canonical_task_card_path=str(Path(materialized.name).resolve()),
+            task_card_hash=str(item.contract["task_card_hash"]).lower(),
+        )
+        try:
+            result = build_canonical_planner_admission(
+                task_id=identity.task_id,
+                task_text=f"{item.title}\n\n{item.contract['task_id']}\n{task_card_text}",
+                allowed_files=allowed_files,
+                verifier_command=verifier_command,
+                task_card_identity=identity,
+            )
+        except (TypeError, ValueError, RuntimeError) as exc:
+            raise AutomationError(f"CANONICAL_WORKFORCE_BINDING_INVALID:{exc}") from exc
+        finally:
+            Path(materialized.name).unlink(missing_ok=True)
+        binding = result.get("binding") if isinstance(result, Mapping) else None
+        required = {
+            "demand_id",
+            "worker_id",
+            "provider",
+            "model",
+            "policy_hash",
+            "binding_hash",
+            "aggregate_binding_hash",
+        }
+        if not isinstance(binding, Mapping) or set(binding) != required:
+            raise AutomationError("CANONICAL_WORKFORCE_BINDING_MALFORMED")
+        for key in required:
+            if not isinstance(binding.get(key), str) or not str(binding[key]).strip():
+                raise AutomationError("CANONICAL_WORKFORCE_BINDING_MALFORMED")
+        for key in ("policy_hash", "binding_hash", "aggregate_binding_hash"):
+            if len(binding[key]) != 64 or any(
+                char not in "0123456789abcdef" for char in binding[key].lower()
+            ):
+                raise AutomationError("CANONICAL_WORKFORCE_BINDING_EVIDENCE_INVALID")
+        planner = result.get("planner_output")
+        admission = result.get("workforce_admission")
+        if not isinstance(planner, Mapping) or not isinstance(admission, Mapping):
+            raise AutomationError("CANONICAL_WORKFORCE_EVIDENCE_MISSING")
+        records = admission.get("records")
+        if (
+            admission.get("overall_decision") != "ALLOW"
+            or not isinstance(records, list)
+            or len(records) != 1
+            or not isinstance(records[0], Mapping)
+            or not isinstance(records[0].get("decision"), Mapping)
+            or records[0]["decision"].get("decision") != "ALLOW"
+        ):
+            raise AutomationError("CANONICAL_WORKFORCE_ADMISSION_NOT_SINGLE_ALLOW")
+        decision = records[0]["decision"]
+        for admission_key, binding_key in (
+            ("resolved_worker_id", "worker_id"),
+            ("resolved_provider", "provider"),
+            ("resolved_model", "model"),
+        ):
+            if decision.get(admission_key) != binding.get(binding_key):
+                raise AutomationError("CANONICAL_WORKFORCE_BINDING_ADMISSION_MISMATCH")
+        evidence_root = self.state_store.root / "canonical-workforce-evidence"
+        planner_hash = _sha256_json(planner)
+        admission_hash = _sha256_json(admission)
+        artifacts = (("planner", planner_hash, planner), ("admission", admission_hash, admission))
+        try:
+            for kind, digest, payload in artifacts:
+                path = evidence_root / f"{kind}-{digest}.json"
+                if path.exists():
+                    existing = json.loads(path.read_text(encoding="utf-8"))
+                    if _sha256_json(existing) != digest or existing != dict(payload):
+                        raise AutomationError("CANONICAL_WORKFORCE_EVIDENCE_COLLISION")
+                else:
+                    _atomic_json(path, payload)
+                readback = json.loads(path.read_text(encoding="utf-8"))
+                if _sha256_json(readback) != digest or readback != dict(payload):
+                    raise AutomationError("CANONICAL_WORKFORCE_EVIDENCE_READBACK_MISMATCH")
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise AutomationError("CANONICAL_WORKFORCE_EVIDENCE_PERSIST_FAILED") from exc
+        demands = result.get("workforce_demands") or {}
+        demand = (demands.get("demands") or [{}])[0]
+        selection_hash = str(planner.get("decision_hash") or "").lower()
+        if len(selection_hash) != 64 or any(
+            char not in "0123456789abcdef" for char in selection_hash
+        ):
+            raise AutomationError("CANONICAL_WORKFORCE_SELECTION_EVIDENCE_INVALID")
+        role_ceiling = str(demand.get("requested_role") or "").strip()
+        if not role_ceiling:
+            raise AutomationError("CANONICAL_WORKFORCE_ROLE_CEILING_MISSING")
+        worker = {
+            "worker_id": str(binding["worker_id"]),
+            "provider": str(binding["provider"]),
+            "model": str(binding["model"]),
+            "role_ceiling": role_ceiling,
+            "admission_evidence_ref": str(evidence_root / f"admission-{admission_hash}.json"),
+            "admission_evidence_hash": admission_hash,
+            "selection_evidence_ref": str(evidence_root / f"planner-{planner_hash}.json"),
+            "selection_evidence_hash": planner_hash,
+        }
+        try:
+            return validate_selected_worker(worker)
+        except ExternalIntelligenceError as exc:
+            raise AutomationError("CANONICAL_WORKFORCE_BINDING_INVALID") from exc
 
     def _c_units(
         self, item: IssueWorkItem, intelligence: Mapping[str, Any]
@@ -500,8 +820,12 @@ class ExternalIntelligenceAutomation:
         if _sha256_json(json.loads(envelope_path.read_text(encoding="utf-8"))) != envelope_sha:
             raise AutomationError("INTELLIGENCE_ENVELOPE_ARTIFACT_MISMATCH")
         units: list[dict[str, Any]] = []
+        contract_worker = self._worker_binding
         for unit in item.contract["execution_units"]:
-            units.append({
+            # Issue prose is never workforce authority; every unit inherits the
+            # single binding resolved by the canonical planner seam.
+            unit_worker = contract_worker
+            unit_data = {
                 "task_id": item.contract["task_id"],
                 "unit_id": unit["unit_id"],
                 "envelope_ref": str(envelope_path),
@@ -511,8 +835,24 @@ class ExternalIntelligenceAutomation:
                 "dependencies_ready": unit.get("dependencies_ready", True),
                 "priority": unit.get("priority", 0),
                 "allow_deletions": unit.get("allow_deletions", False),
-            })
+            }
+            if unit_worker:
+                unit_data["selected_worker"] = dict(unit_worker)
+            units.append(unit_data)
         return units
+
+    def _validate_worker_transport_binding(self) -> None:
+        """Reject a planner binding incompatible with the configured worker before effect."""
+        if self._worker_binding is None:
+            return
+        transport = getattr(self.c_runtime, "transport", None)
+        bind_worker = getattr(transport, "bind_worker", None)
+        if not callable(bind_worker):
+            return
+        try:
+            bind_worker(dict(self._worker_binding))
+        except Exception as exc:
+            raise AutomationError(f"CANONICAL_WORKER_TRANSPORT_BINDING_INVALID:{exc}") from exc
 
     @staticmethod
     def _valid_receipts(run: Mapping[str, Any], expected_ids: set[str]) -> list[Mapping[str, Any]]:
@@ -531,29 +871,191 @@ class ExternalIntelligenceAutomation:
             ordered.append(receipt)
         return ordered
 
+    def _fanout_attempts(self, units: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        """Read the durable fanout attempts for same-operation recovery."""
+        fanout_store = getattr(self.c_runtime, "store", None)
+        loader = getattr(fanout_store, "existing_initial_attempt", None)
+        if not callable(loader):
+            return {}
+        from nexus.services.external_intelligence_fanout import ExecutionUnit
+
+        attempts: dict[str, dict[str, Any]] = {}
+        for unit in units:
+            try:
+                attempt = loader(ExecutionUnit.from_mapping(unit))
+            except Exception:
+                return {}
+            if not isinstance(attempt, Mapping):
+                return {}
+            attempts[str(unit["unit_id"])] = dict(attempt)
+        return attempts
+
+    def _save_fanout_reconciliation(
+        self,
+        item: IssueWorkItem,
+        *,
+        intelligence_effect_id: str,
+        worker_binding: Mapping[str, Any] | None,
+        units: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        extra: dict[str, Any] = {
+            "prior_state": "FANOUT_DISPATCHING",
+            "intelligence_effect_id": intelligence_effect_id,
+            "reconcile_only": True,
+            "semantic_dispatched": True,
+            "error": "FANOUT_RECONCILIATION_REQUIRED",
+        }
+        if worker_binding is not None:
+            extra["worker_binding"] = dict(worker_binding)
+        attempts = self._fanout_attempts(units)
+        if not self._fanout_attempts_are_reconcilable(units, attempts):
+            return self.state_store.save(
+                item,
+                "BLOCKED",
+                stage="FANOUT",
+                error="FANOUT_RECONCILIATION_BINDING_INVALID",
+                semantic_dispatched=True,
+            )
+        extra["fanout_attempts"] = attempts
+        return self.state_store.save(item, "RECONCILIATION_REQUIRED", **extra)
+
+    @staticmethod
+    def _fanout_attempts_are_reconcilable(
+        units: list[dict[str, Any]], attempts: Mapping[str, Mapping[str, Any]]
+    ) -> bool:
+        from nexus.services.external_intelligence_fanout import ExecutionUnit
+
+        if set(attempts) != {str(unit["unit_id"]) for unit in units}:
+            return False
+        for unit in units:
+            attempt = attempts[str(unit["unit_id"])]
+            if attempt.get("state") not in {"OUTCOME_UNKNOWN", "DISPATCHING"}:
+                return False
+            if (
+                attempt.get("unit_identity_sha256")
+                != ExecutionUnit.from_mapping(unit).identity_sha256
+            ):
+                return False
+            attempt_id = str(attempt.get("attempt_id") or "")
+            try:
+                parsed_attempt_id = uuid.UUID(attempt_id)
+            except (ValueError, AttributeError):
+                return False
+            if (
+                parsed_attempt_id.version != 4
+                or str(parsed_attempt_id) != attempt_id
+                or not str(attempt.get("workspace_id") or "")
+                or not str(attempt.get("workspace_path") or "")
+                or attempt.get("expected_base_sha") != unit["expected_base_sha"]
+                or not SHA256_RE.fullmatch(str(attempt.get("operation_id") or ""))
+            ):
+                return False
+        return True
+
+    def _legacy_fanout_recovery_allowed(self, units: list[dict[str, Any]]) -> bool:
+        """Validate the bounded r21 compatibility projection before resuming."""
+        attempts = self._fanout_attempts(units)
+        return self._fanout_attempts_are_reconcilable(units, attempts)
+
+    def _fanout_snapshot_matches(
+        self, previous: Mapping[str, Any], units: list[dict[str, Any]]
+    ) -> bool:
+        snapshot = previous.get("fanout_attempts")
+        if not isinstance(snapshot, Mapping):
+            return False
+        live = self._fanout_attempts(units)
+        if not self._fanout_attempts_are_reconcilable(units, live):
+            return False
+        fields = (
+            "attempt_id",
+            "operation_id",
+            "workspace_id",
+            "workspace_path",
+            "expected_base_sha",
+            "unit_identity_sha256",
+        )
+        for unit in units:
+            unit_id = str(unit["unit_id"])
+            saved = snapshot.get(unit_id)
+            current = live.get(unit_id)
+            if not isinstance(saved, Mapping) or not isinstance(current, Mapping):
+                return False
+            if any(saved.get(field) != current.get(field) for field in fields):
+                return False
+        return True
+
+    def _load_completed_intelligence(
+        self, item: IssueWorkItem, task_card_text: str
+    ) -> dict[str, Any] | None:
+        """Rehydrate completed semantic evidence without invoking the sidecar."""
+        intake = normalize_intake(self._record(item))
+        context_pack = build_context_pack(self._sources(item, task_card_text))
+        request = build_request(intake, context_pack, selected_worker=self._worker_binding)
+        loader = getattr(self.intelligence_store, "existing_receipt", None)
+        if not callable(loader):
+            return None
+        receipt = loader(request)
+        if not isinstance(receipt, Mapping):
+            return None
+        capsule = receipt.get("control_capsule")
+        envelope_sha = (
+            str(capsule.get("intelligence_envelope_sha256") or "")
+            if isinstance(capsule, Mapping)
+            else ""
+        )
+        envelope_sha = envelope_sha or str(receipt.get("envelope_sha256") or "")
+        if not envelope_sha:
+            return None
+        return {
+            "status": "COMPLETED",
+            "receipt_id": str(receipt.get("receipt_id") or ""),
+            "request": {"request_sha256": str(request["request_sha256"])},
+            "envelope_sha256": envelope_sha,
+        }
+
     def run_issue(
         self, repository: str, issue_number: int, title: str, body: str
     ) -> dict[str, Any]:
+        self._worker_binding = None
         try:
             contract = parse_issue_contract(body)
         except AutomationError as exc:
             return {"state": "BLOCKED", "error": str(exc), "semantic_dispatched": False}
         item = IssueWorkItem(repository, int(issue_number), title, body, contract)
         previous = self.state_store.load(item)
-        previous_state = str((previous or {}).get("state") or "")
-        resume_from = previous_state
-        if previous_state == "COMPLETE":
-            return {**previous, "reuse": True, "semantic_dispatched": True}
-        if previous_state == "RECONCILIATION_REQUIRED":
-            prior_state = str((previous or {}).get("prior_state") or "")
-            if prior_state not in {"INTELLIGENCE_DISPATCHING", "FANOUT_DISPATCHING"}:
-                return {**previous, "semantic_dispatched": True}
-            resume_from = prior_state
+        legacy_fanout_recovery = bool(
+            previous
+            and previous.get("state") == "BLOCKED"
+            and previous.get("error") == "FANOUT_INCOMPLETE"
+            and previous.get("semantic_dispatched") is True
+        )
+        if previous is not None:
+            previous_state = str(previous.get("state") or "")
+            if previous_state == "COMPLETE" or previous_state in TERMINAL_DISPOSITIONS:
+                return {**previous, "reuse": True, "semantic_dispatched": True}
+            if (
+                previous_state == "BLOCKED"
+                and bool(previous.get("semantic_dispatched"))
+                and not legacy_fanout_recovery
+            ):
+                return {**previous, "reuse": True, "semantic_dispatched": True}
+            if previous_state == "RECONCILIATION_REQUIRED":
+                prior_state = str(previous.get("prior_state") or "")
+                if prior_state not in {"INTELLIGENCE_DISPATCHING", "FANOUT_DISPATCHING"}:
+                    return {**previous, "semantic_dispatched": True}
+                resume_from = prior_state
+            else:
+                resume_from = previous_state
+        else:
+            resume_from = ""
+        if legacy_fanout_recovery:
+            resume_from = "FANOUT_DISPATCHING"
         if resume_from == "CLOSURE_DISPATCHING":
             return self.state_store.save(
                 item,
                 "RECONCILIATION_REQUIRED",
                 prior_state="CLOSURE_DISPATCHING",
+                reconcile_only=True,
                 semantic_dispatched=True,
             )
         recoverable_states = {
@@ -569,11 +1071,119 @@ class ExternalIntelligenceAutomation:
         dispatched = False
         try:
             self._validate_source_lineage(item.repository, str(contract["main_sha"]))
-            _, task_card_text = self._task_card(contract)
+            task_card_path, task_card_text = self._task_card(contract)
             self._validate_task_card_authority(contract, task_card_text)
             record = self._record(item)
-            self.state_store.save(item, "INTELLIGENCE_DISPATCHING")
-            intelligence = self.sidecar.analyze(record, self._sources(item, task_card_text))
+            intake = normalize_intake(record)
+            if intake["disposition"] == "EXECUTABLE":
+                self._worker_binding = self._canonical_worker_binding(
+                    item, task_card_path, task_card_text
+                )
+                self._validate_worker_transport_binding()
+            prior_dispatch_state = resume_from in {
+                "INTELLIGENCE_DISPATCHING",
+                "INTELLIGENCE_COMPLETED",
+                "FANOUT_DISPATCHING",
+                "FANOUT_COMPLETED",
+            } or (
+                previous is not None
+                and str(previous.get("state") or "") == "RECONCILIATION_REQUIRED"
+                and str(previous.get("prior_state") or "")
+                in {
+                    "INTELLIGENCE_DISPATCHING",
+                    "INTELLIGENCE_COMPLETED",
+                    "FANOUT_DISPATCHING",
+                    "FANOUT_COMPLETED",
+                }
+            )
+            if prior_dispatch_state and not legacy_fanout_recovery:
+                persisted_binding = previous.get("worker_binding") if previous else None
+                if not isinstance(persisted_binding, Mapping):
+                    return self.state_store.save(
+                        item,
+                        "RECONCILIATION_REQUIRED",
+                        prior_state=resume_from,
+                        error="CANONICAL_WORKFORCE_BINDING_MISSING",
+                        reconcile_only=True,
+                        semantic_dispatched=True,
+                    )
+                if dict(persisted_binding) != self._worker_binding:
+                    return self.state_store.save(
+                        item,
+                        "RECONCILIATION_REQUIRED",
+                        prior_state=resume_from,
+                        error="CANONICAL_WORKFORCE_BINDING_REPLAY_MISMATCH",
+                        reconcile_only=True,
+                        semantic_dispatched=True,
+                    )
+            intelligence_effect_id = (
+                self._intelligence_effect_id(item, task_card_text)
+                if intake["disposition"] == "EXECUTABLE"
+                else None
+            )
+            prior_intelligence_state = resume_from in {
+                "INTELLIGENCE_DISPATCHING",
+                "INTELLIGENCE_COMPLETED",
+                "FANOUT_DISPATCHING",
+                "FANOUT_COMPLETED",
+            } or (
+                previous is not None
+                and str(previous.get("state") or "") == "RECONCILIATION_REQUIRED"
+                and str(previous.get("prior_state") or "")
+                in {
+                    "INTELLIGENCE_DISPATCHING",
+                    "INTELLIGENCE_COMPLETED",
+                    "FANOUT_DISPATCHING",
+                    "FANOUT_COMPLETED",
+                }
+            )
+            if prior_intelligence_state and not legacy_fanout_recovery:
+                persisted_effect_id = previous.get("intelligence_effect_id") if previous else None
+                if not persisted_effect_id:
+                    return self.state_store.save(
+                        item,
+                        "RECONCILIATION_REQUIRED",
+                        prior_state=resume_from,
+                        error="INTELLIGENCE_DISPATCH_BINDING_MISSING",
+                        reconcile_only=True,
+                        semantic_dispatched=True,
+                    )
+                if persisted_effect_id != intelligence_effect_id:
+                    return self.state_store.save(
+                        item,
+                        "RECONCILIATION_REQUIRED",
+                        prior_state=resume_from,
+                        error="INTELLIGENCE_DISPATCH_BINDING_MISMATCH",
+                        reconcile_only=True,
+                        semantic_dispatched=True,
+                    )
+            dispatch_state = {}
+            if intelligence_effect_id is not None:
+                dispatch_state["intelligence_effect_id"] = intelligence_effect_id
+            if resume_from == "FANOUT_DISPATCHING":
+                intelligence = self._load_completed_intelligence(item, task_card_text)
+                if intelligence is None:
+                    return self.state_store.save(
+                        item,
+                        "BLOCKED",
+                        error="INTELLIGENCE_RECEIPT_MISSING",
+                        semantic_dispatched=True,
+                    )
+            else:
+                self.state_store.save(
+                    item,
+                    "INTELLIGENCE_DISPATCHING",
+                    worker_binding=self._worker_binding,
+                    **dispatch_state,
+                )
+                sidecar_kwargs = {}
+                if self._worker_binding is not None:
+                    sidecar_kwargs["selected_worker"] = self._worker_binding
+                intelligence = self.sidecar.analyze(
+                    record,
+                    self._sources(item, task_card_text),
+                    **sidecar_kwargs,
+                )
             if intelligence.get("status") != "COMPLETED":
                 return self.state_store.save(
                     item,
@@ -583,19 +1193,84 @@ class ExternalIntelligenceAutomation:
                     semantic_dispatched=False,
                 )
             dispatched = True
+            completed_state = {"intelligence_receipt_id": intelligence.get("receipt_id")}
+            if intelligence_effect_id is not None:
+                completed_state["intelligence_effect_id"] = intelligence_effect_id
             self.state_store.save(
                 item,
                 "INTELLIGENCE_COMPLETED",
-                intelligence_receipt_id=intelligence.get("receipt_id"),
+                worker_binding=self._worker_binding,
+                **completed_state,
             )
 
             units = self._c_units(item, intelligence)
-            self.state_store.save(item, "FANOUT_DISPATCHING")
+            if legacy_fanout_recovery and not self._legacy_fanout_recovery_allowed(units):
+                return self.state_store.save(
+                    item,
+                    "BLOCKED",
+                    error="FANOUT_LEGACY_RECONCILIATION_INVALID",
+                    semantic_dispatched=True,
+                )
+            if (
+                previous is not None
+                and previous.get("state") == "RECONCILIATION_REQUIRED"
+                and previous.get("prior_state") == "FANOUT_DISPATCHING"
+                and not self._fanout_snapshot_matches(previous, units)
+            ):
+                return self.state_store.save(
+                    item,
+                    "BLOCKED",
+                    stage="FANOUT",
+                    error="FANOUT_RECONCILIATION_BINDING_DRIFT",
+                    semantic_dispatched=True,
+                )
+            self.state_store.save(
+                item,
+                "FANOUT_DISPATCHING",
+                intelligence_effect_id=intelligence_effect_id,
+                worker_binding=self._worker_binding,
+            )
             fanout = self.c_runtime.run(units, self.capacity_factory(contract))
-            receipts = self._valid_receipts(fanout, {unit["unit_id"] for unit in units})
-            self.state_store.save(item, "FANOUT_COMPLETED", run_sha256=fanout.get("run_sha256"))
+            admitted_ids = set(
+                (fanout.get("decision") or {}).get("admitted_units")
+                or [unit["unit_id"] for unit in units]
+            )
+            errors = fanout.get("errors") or {}
+            if (
+                admitted_ids
+                and set(errors) == admitted_ids
+                and all(error == "FANOUT_RECONCILIATION_REQUIRED" for error in errors.values())
+            ):
+                return self._save_fanout_reconciliation(
+                    item,
+                    intelligence_effect_id=str(intelligence_effect_id or ""),
+                    worker_binding=self._worker_binding,
+                    units=units,
+                )
+            try:
+                receipts = self._valid_receipts(fanout, {unit["unit_id"] for unit in units})
+            except AutomationError as exc:
+                return self.state_store.save(
+                    item,
+                    "BLOCKED",
+                    stage="FANOUT",
+                    error=str(exc),
+                    semantic_dispatched=True,
+                )
+            self.state_store.save(
+                item,
+                "FANOUT_COMPLETED",
+                intelligence_effect_id=intelligence_effect_id,
+                run_sha256=fanout.get("run_sha256"),
+                worker_binding=self._worker_binding,
+            )
 
-            self.state_store.save(item, "CLOSURE_DISPATCHING")
+            self.state_store.save(
+                item,
+                "CLOSURE_DISPATCHING",
+                intelligence_effect_id=intelligence_effect_id,
+                worker_binding=self._worker_binding,
+            )
             closure = self.d_runtime.close_task(
                 main_sha=str(contract["main_sha"]),
                 unit_receipts=receipts,
@@ -610,6 +1285,15 @@ class ExternalIntelligenceAutomation:
                 or not isinstance(closure.get("control_capsule"), Mapping)
                 or not closure["control_capsule"]
             ):
+                closure_status = str(closure.get("status") or "")
+                if closure_status in TERMINAL_DISPOSITIONS:
+                    return self.state_store.save(
+                        item,
+                        closure_status,
+                        closure_status=closure_status,
+                        closure_run_id=closure.get("run_id"),
+                        semantic_dispatched=True,
+                    )
                 return self.state_store.save(
                     item,
                     "BLOCKED",
@@ -618,13 +1302,25 @@ class ExternalIntelligenceAutomation:
                     semantic_dispatched=True,
                 )
             publication = compact_publication_payload(closure)
+            pub_id = compute_publication_id(
+                item.repository, item.issue_number, item.identity_hash, publication
+            )
+            publication_record = {
+                "publication_id": pub_id,
+                "state": "PREPARED",
+                "marker": f"<!-- nexus-external-intelligence:{pub_id} -->",
+                "payload": publication,
+            }
             return self.state_store.save(
                 item,
                 "COMPLETE",
+                intelligence_effect_id=intelligence_effect_id,
+                worker_binding=self._worker_binding,
                 intelligence_receipt_id=intelligence.get("receipt_id"),
                 fanout_run_sha256=fanout.get("run_sha256"),
                 closure_run_id=closure.get("run_id"),
                 publication=publication,
+                publication_record=publication_record,
                 semantic_dispatched=True,
             )
         except AutomationError as exc:
@@ -638,7 +1334,10 @@ class ExternalIntelligenceAutomation:
                     item,
                     "RECONCILIATION_REQUIRED",
                     prior_state=current.get("state"),
+                    intelligence_effect_id=current.get("intelligence_effect_id"),
+                    worker_binding=self._worker_binding or current.get("worker_binding"),
                     error=type(exc).__name__,
+                    reconcile_only=True,
                     semantic_dispatched=dispatched,
                 )
             return self.state_store.save(
@@ -653,7 +1352,10 @@ __all__ = [
     "ExternalIntelligenceAutomation",
     "ISSUE_SCHEMA",
     "IssueWorkItem",
+    "PUBLICATION_STATES",
+    "TERMINAL_DISPOSITIONS",
     "_normalize_github_repo",
     "compact_publication_payload",
+    "compute_publication_id",
     "parse_issue_contract",
 ]

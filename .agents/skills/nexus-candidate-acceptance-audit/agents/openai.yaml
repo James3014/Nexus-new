@@ -1,0 +1,7 @@
+interface:
+  display_name: "Nexus Candidate Acceptance Audit"
+  short_description: "Verify an exact Candidate before owner approval"
+  default_prompt: "Use $nexus-candidate-acceptance-audit to independently audit an exact Nexus Candidate."
+
+policy:
+  allow_implicit_invocation: true

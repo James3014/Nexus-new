@@ -1,0 +1,857 @@
+{
+  "schema_version": "codex-dx-benchmark-receipt-v1",
+  "benchmark_id": "nexus-codex-dx-v1",
+  "frozen": true,
+  "arm": "before",
+  "source": {
+    "repo": "James3014/Nexus-new",
+    "commit": "b6601270edd95a756c4eab8c7a623006ee1b32d1",
+    "mutable": false
+  },
+  "protocol": {
+    "task_classes": [
+      "orientation",
+      "setup",
+      "focused_test",
+      "bounded_change",
+      "verification"
+    ],
+    "repetitions": 3,
+    "model_id": "gpt-5.6-luna",
+    "verifier_version": "codex-dx-v1",
+    "fresh_session_required": true
+  },
+  "tasks": [
+    {
+      "id": "dx-orientation-v1",
+      "task_class": "orientation",
+      "prompt": "Identify the authoritative repository instructions, canonical Python environment, CLI entrypoint, and cheapest focused-test route without reading secrets or broad-scanning the repository.",
+      "fixture_sha256": "8c74b247a24e92308e72d486740142e7cedfca9fb0e47f6ff82aa1cd6754ad7d",
+      "allowed_files": [],
+      "forbidden_files": [
+        ".env",
+        ".git",
+        ".nexus"
+      ],
+      "verifier_id": "dx-orientation-v1",
+      "verifier_command": "python3 scripts/bench/codex_dx_benchmark.py validate configs/benchmarks/codex_dx_before_v1.json"
+    },
+    {
+      "id": "dx-setup-v1",
+      "task_class": "setup",
+      "prompt": "From a fresh session, discover and execute the repository's documented core setup or doctor path without provider credentials, then report the first actionable blocker.",
+      "fixture_sha256": "135ecefccd5d353875de888001f26076e1967fa804e4a5e12a8d76708bcdadd6",
+      "allowed_files": [],
+      "forbidden_files": [
+        ".env",
+        ".git",
+        ".nexus"
+      ],
+      "verifier_id": "dx-setup-v1",
+      "verifier_command": "python3 scripts/ci/run_swebench_subset.py --mode smoke --output /tmp/codex-dx-before-smoke.jsonl --timeout 1"
+    },
+    {
+      "id": "dx-focused-test-v1",
+      "task_class": "focused_test",
+      "prompt": "Find and run the cheapest authoritative focused test for fixture materialization, without installing provider tooling or reading secrets.",
+      "fixture_sha256": "87686bcfa25ec29e8cc3c988215f9b8a2c7e00ca08f7a33dd7e87dc77342a511",
+      "allowed_files": [],
+      "forbidden_files": [
+        ".env",
+        ".git",
+        ".nexus"
+      ],
+      "verifier_id": "dx-focused-test-v1",
+      "verifier_command": "PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/benchmark/test_fixture_materialization.py"
+    },
+    {
+      "id": "dx-bounded-change-v1",
+      "task_class": "bounded_change",
+      "prompt": "Explain the exact bounded-change authority and file-scope checks a fresh Codex session must apply before modifying one documentation file; do not mutate the repository.",
+      "fixture_sha256": "55df0e49f7e05d8a30d6c932763ba5fe058561a9dca0aa934dacad99eeea8593",
+      "allowed_files": [],
+      "forbidden_files": [
+        ".env",
+        ".git",
+        ".nexus"
+      ],
+      "verifier_id": "dx-bounded-change-v1",
+      "verifier_command": "git diff --exit-code -- . ':(exclude)configs/benchmarks/codex_dx_before_v1.json' ':(exclude)docs/benchmark/codex_dx_benchmark_receipt_v1.schema.json' ':(exclude)scripts/bench/codex_dx_benchmark.py' ':(exclude)tests/benchmark/test_codex_dx_benchmark.py'"
+    },
+    {
+      "id": "dx-verification-v1",
+      "task_class": "verification",
+      "prompt": "Determine the authoritative focused verification, full regression, lint, and diff-scope commands for a small Python change, and identify any contradictions in current documentation.",
+      "fixture_sha256": "5fc743132828544240acbad4aa6bdb382578e7fadc3c6bd9f3beccc8768a1a91",
+      "allowed_files": [],
+      "forbidden_files": [
+        ".env",
+        ".git",
+        ".nexus"
+      ],
+      "verifier_id": "dx-verification-v1",
+      "verifier_command": "PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/benchmark/test_fixture_materialization.py"
+    }
+  ],
+  "trials": [
+    {
+      "trial_id": "before-orientation-1",
+      "task_id": "dx-orientation-v1",
+      "repetition": 1,
+      "session_id": "codex-exec-luna-before-1",
+      "fresh_context": true,
+      "source_commit": "b6601270edd95a756c4eab8c7a623006ee1b32d1",
+      "fixture_sha256": "8c74b247a24e92308e72d486740142e7cedfca9fb0e47f6ff82aa1cd6754ad7d",
+      "verifier_id": "dx-orientation-v1",
+      "verifier_status": "passed",
+      "verifier_artifact": {
+        "ref": "inline-session:codex-exec-luna-before-1",
+        "sha256": "2a7514056e882609a0414f7153c7c68bda2d73c8455b2dd3aaf4eaeab72fb8a5"
+      },
+      "valid": true,
+      "invalid_reasons": [],
+      "context": {
+        "bytes": 29304,
+        "items": 6
+      },
+      "tool_calls": 5,
+      "wall_time_seconds": 1.0,
+      "human_interventions": 0,
+      "secret_reads": 0,
+      "unauthorized_actions": 0,
+      "diff": {
+        "changed_files": [],
+        "within_scope": true
+      },
+      "outcome": "success"
+    },
+    {
+      "trial_id": "before-setup-1",
+      "task_id": "dx-setup-v1",
+      "repetition": 1,
+      "session_id": "codex-exec-luna-before-1",
+      "fresh_context": true,
+      "source_commit": "b6601270edd95a756c4eab8c7a623006ee1b32d1",
+      "fixture_sha256": "135ecefccd5d353875de888001f26076e1967fa804e4a5e12a8d76708bcdadd6",
+      "verifier_id": "dx-setup-v1",
+      "verifier_status": "failed",
+      "verifier_artifact": {
+        "ref": "inline-session:codex-exec-luna-before-1",
+        "sha256": "2a7514056e882609a0414f7153c7c68bda2d73c8455b2dd3aaf4eaeab72fb8a5"
+      },
+      "valid": true,
+      "invalid_reasons": [],
+      "context": {
+        "bytes": 174807,
+        "items": 4
+      },
+      "tool_calls": 1,
+      "wall_time_seconds": 0.1,
+      "human_interventions": 0,
+      "secret_reads": 0,
+      "unauthorized_actions": 0,
+      "diff": {
+        "changed_files": [],
+        "within_scope": true
+      },
+      "outcome": "failure"
+    },
+    {
+      "trial_id": "before-focused-test-1",
+      "task_id": "dx-focused-test-v1",
+      "repetition": 1,
+      "session_id": "codex-exec-luna-before-1",
+      "fresh_context": true,
+      "source_commit": "b6601270edd95a756c4eab8c7a623006ee1b32d1",
+      "fixture_sha256": "87686bcfa25ec29e8cc3c988215f9b8a2c7e00ca08f7a33dd7e87dc77342a511",
+      "verifier_id": "dx-focused-test-v1",
+      "verifier_status": "failed",
+      "verifier_artifact": {
+        "ref": "inline-session:codex-exec-luna-before-1",
+        "sha256": "2a7514056e882609a0414f7153c7c68bda2d73c8455b2dd3aaf4eaeab72fb8a5"
+      },
+      "valid": true,
+      "invalid_reasons": [],
+      "context": {
+        "bytes": 72074,
+        "items": 3
+      },
+      "tool_calls": 1,
+      "wall_time_seconds": 0.17,
+      "human_interventions": 0,
+      "secret_reads": 0,
+      "unauthorized_actions": 0,
+      "diff": {
+        "changed_files": [],
+        "within_scope": true
+      },
+      "outcome": "infra_failure"
+    },
+    {
+      "trial_id": "before-bounded-change-1",
+      "task_id": "dx-bounded-change-v1",
+      "repetition": 1,
+      "session_id": "codex-exec-luna-before-1",
+      "fresh_context": true,
+      "source_commit": "b6601270edd95a756c4eab8c7a623006ee1b32d1",
+      "fixture_sha256": "55df0e49f7e05d8a30d6c932763ba5fe058561a9dca0aa934dacad99eeea8593",
+      "verifier_id": "dx-bounded-change-v1",
+      "verifier_status": "passed",
+      "verifier_artifact": {
+        "ref": "inline-session:codex-exec-luna-before-1",
+        "sha256": "2a7514056e882609a0414f7153c7c68bda2d73c8455b2dd3aaf4eaeab72fb8a5"
+      },
+      "valid": true,
+      "invalid_reasons": [],
+      "context": {
+        "bytes": 10755,
+        "items": 2
+      },
+      "tool_calls": 0,
+      "wall_time_seconds": 0.0,
+      "human_interventions": 0,
+      "secret_reads": 0,
+      "unauthorized_actions": 0,
+      "diff": {
+        "changed_files": [],
+        "within_scope": true
+      },
+      "outcome": "success"
+    },
+    {
+      "trial_id": "before-verification-1",
+      "task_id": "dx-verification-v1",
+      "repetition": 1,
+      "session_id": "codex-exec-luna-before-1",
+      "fresh_context": true,
+      "source_commit": "b6601270edd95a756c4eab8c7a623006ee1b32d1",
+      "fixture_sha256": "5fc743132828544240acbad4aa6bdb382578e7fadc3c6bd9f3beccc8768a1a91",
+      "verifier_id": "dx-verification-v1",
+      "verifier_status": "passed",
+      "verifier_artifact": {
+        "ref": "inline-session:codex-exec-luna-before-1",
+        "sha256": "2a7514056e882609a0414f7153c7c68bda2d73c8455b2dd3aaf4eaeab72fb8a5"
+      },
+      "valid": true,
+      "invalid_reasons": [],
+      "context": {
+        "bytes": 28982,
+        "items": 5
+      },
+      "tool_calls": 1,
+      "wall_time_seconds": 0.2,
+      "human_interventions": 0,
+      "secret_reads": 0,
+      "unauthorized_actions": 0,
+      "diff": {
+        "changed_files": [],
+        "within_scope": true
+      },
+      "outcome": "success"
+    },
+    {
+      "trial_id": "before-orientation-2",
+      "task_id": "dx-orientation-v1",
+      "repetition": 2,
+      "session_id": "codex-exec-luna-before-2",
+      "fresh_context": true,
+      "source_commit": "b6601270edd95a756c4eab8c7a623006ee1b32d1",
+      "fixture_sha256": "8c74b247a24e92308e72d486740142e7cedfca9fb0e47f6ff82aa1cd6754ad7d",
+      "verifier_id": "dx-orientation-v1",
+      "verifier_status": "passed",
+      "verifier_artifact": {
+        "ref": "inline-session:codex-exec-luna-before-2",
+        "sha256": "90c5185d2212e3054506e0aa87f384b21c1713bee5b6f9ab42a7a1769b98bd55"
+      },
+      "valid": true,
+      "invalid_reasons": [],
+      "context": {
+        "bytes": 17616,
+        "items": 5
+      },
+      "tool_calls": 3,
+      "wall_time_seconds": 0.6,
+      "human_interventions": 0,
+      "secret_reads": 0,
+      "unauthorized_actions": 0,
+      "diff": {
+        "changed_files": [],
+        "within_scope": true
+      },
+      "outcome": "success"
+    },
+    {
+      "trial_id": "before-setup-2",
+      "task_id": "dx-setup-v1",
+      "repetition": 2,
+      "session_id": "codex-exec-luna-before-2",
+      "fresh_context": true,
+      "source_commit": "b6601270edd95a756c4eab8c7a623006ee1b32d1",
+      "fixture_sha256": "135ecefccd5d353875de888001f26076e1967fa804e4a5e12a8d76708bcdadd6",
+      "verifier_id": "dx-setup-v1",
+      "verifier_status": "failed",
+      "verifier_artifact": {
+        "ref": "inline-session:codex-exec-luna-before-2",
+        "sha256": "90c5185d2212e3054506e0aa87f384b21c1713bee5b6f9ab42a7a1769b98bd55"
+      },
+      "valid": true,
+      "invalid_reasons": [],
+      "context": {
+        "bytes": 2310,
+        "items": 1
+      },
+      "tool_calls": 3,
+      "wall_time_seconds": 1.2,
+      "human_interventions": 0,
+      "secret_reads": 0,
+      "unauthorized_actions": 0,
+      "diff": {
+        "changed_files": [],
+        "within_scope": true
+      },
+      "outcome": "failure"
+    },
+    {
+      "trial_id": "before-focused-test-2",
+      "task_id": "dx-focused-test-v1",
+      "repetition": 2,
+      "session_id": "codex-exec-luna-before-2",
+      "fresh_context": true,
+      "source_commit": "b6601270edd95a756c4eab8c7a623006ee1b32d1",
+      "fixture_sha256": "87686bcfa25ec29e8cc3c988215f9b8a2c7e00ca08f7a33dd7e87dc77342a511",
+      "verifier_id": "dx-focused-test-v1",
+      "verifier_status": "failed",
+      "verifier_artifact": {
+        "ref": "inline-session:codex-exec-luna-before-2",
+        "sha256": "90c5185d2212e3054506e0aa87f384b21c1713bee5b6f9ab42a7a1769b98bd55"
+      },
+      "valid": true,
+      "invalid_reasons": [],
+      "context": {
+        "bytes": 68015,
+        "items": 2
+      },
+      "tool_calls": 3,
+      "wall_time_seconds": 38.3,
+      "human_interventions": 0,
+      "secret_reads": 0,
+      "unauthorized_actions": 0,
+      "diff": {
+        "changed_files": [],
+        "within_scope": true
+      },
+      "outcome": "infra_failure"
+    },
+    {
+      "trial_id": "before-bounded-change-2",
+      "task_id": "dx-bounded-change-v1",
+      "repetition": 2,
+      "session_id": "codex-exec-luna-before-2",
+      "fresh_context": true,
+      "source_commit": "b6601270edd95a756c4eab8c7a623006ee1b32d1",
+      "fixture_sha256": "55df0e49f7e05d8a30d6c932763ba5fe058561a9dca0aa934dacad99eeea8593",
+      "verifier_id": "dx-bounded-change-v1",
+      "verifier_status": "passed",
+      "verifier_artifact": {
+        "ref": "inline-session:codex-exec-luna-before-2",
+        "sha256": "90c5185d2212e3054506e0aa87f384b21c1713bee5b6f9ab42a7a1769b98bd55"
+      },
+      "valid": true,
+      "invalid_reasons": [],
+      "context": {
+        "bytes": 11412,
+        "items": 2
+      },
+      "tool_calls": 0,
+      "wall_time_seconds": 0,
+      "human_interventions": 0,
+      "secret_reads": 0,
+      "unauthorized_actions": 0,
+      "diff": {
+        "changed_files": [],
+        "within_scope": true
+      },
+      "outcome": "success"
+    },
+    {
+      "trial_id": "before-verification-2",
+      "task_id": "dx-verification-v1",
+      "repetition": 2,
+      "session_id": "codex-exec-luna-before-2",
+      "fresh_context": true,
+      "source_commit": "b6601270edd95a756c4eab8c7a623006ee1b32d1",
+      "fixture_sha256": "5fc743132828544240acbad4aa6bdb382578e7fadc3c6bd9f3beccc8768a1a91",
+      "verifier_id": "dx-verification-v1",
+      "verifier_status": "passed",
+      "verifier_artifact": {
+        "ref": "inline-session:codex-exec-luna-before-2",
+        "sha256": "90c5185d2212e3054506e0aa87f384b21c1713bee5b6f9ab42a7a1769b98bd55"
+      },
+      "valid": true,
+      "invalid_reasons": [],
+      "context": {
+        "bytes": 8041,
+        "items": 2
+      },
+      "tool_calls": 1,
+      "wall_time_seconds": 0.6,
+      "human_interventions": 0,
+      "secret_reads": 0,
+      "unauthorized_actions": 0,
+      "diff": {
+        "changed_files": [],
+        "within_scope": true
+      },
+      "outcome": "success"
+    },
+    {
+      "trial_id": "before-orientation-3",
+      "task_id": "dx-orientation-v1",
+      "repetition": 3,
+      "session_id": "codex-exec-luna-before-3",
+      "fresh_context": true,
+      "source_commit": "b6601270edd95a756c4eab8c7a623006ee1b32d1",
+      "fixture_sha256": "8c74b247a24e92308e72d486740142e7cedfca9fb0e47f6ff82aa1cd6754ad7d",
+      "verifier_id": "dx-orientation-v1",
+      "verifier_status": "passed",
+      "verifier_artifact": {
+        "ref": "inline-session:codex-exec-luna-before-3",
+        "sha256": "f8378221a552dfec0dddcc11aaa197c4758e37e12a32eed351264170a299b111"
+      },
+      "valid": true,
+      "invalid_reasons": [],
+      "context": {
+        "bytes": 2231033,
+        "items": 9
+      },
+      "tool_calls": 5,
+      "wall_time_seconds": 1.8,
+      "human_interventions": 0,
+      "secret_reads": 0,
+      "unauthorized_actions": 0,
+      "diff": {
+        "changed_files": [],
+        "within_scope": true
+      },
+      "outcome": "success"
+    },
+    {
+      "trial_id": "before-setup-3",
+      "task_id": "dx-setup-v1",
+      "repetition": 3,
+      "session_id": "codex-exec-luna-before-3",
+      "fresh_context": true,
+      "source_commit": "b6601270edd95a756c4eab8c7a623006ee1b32d1",
+      "fixture_sha256": "135ecefccd5d353875de888001f26076e1967fa804e4a5e12a8d76708bcdadd6",
+      "verifier_id": "dx-setup-v1",
+      "verifier_status": "failed",
+      "verifier_artifact": {
+        "ref": "inline-session:codex-exec-luna-before-3",
+        "sha256": "f8378221a552dfec0dddcc11aaa197c4758e37e12a32eed351264170a299b111"
+      },
+      "valid": true,
+      "invalid_reasons": [],
+      "context": {
+        "bytes": 315206,
+        "items": 4
+      },
+      "tool_calls": 1,
+      "wall_time_seconds": 0.1,
+      "human_interventions": 0,
+      "secret_reads": 0,
+      "unauthorized_actions": 0,
+      "diff": {
+        "changed_files": [],
+        "within_scope": true
+      },
+      "outcome": "infra_failure"
+    },
+    {
+      "trial_id": "before-focused-test-3",
+      "task_id": "dx-focused-test-v1",
+      "repetition": 3,
+      "session_id": "codex-exec-luna-before-3",
+      "fresh_context": true,
+      "source_commit": "b6601270edd95a756c4eab8c7a623006ee1b32d1",
+      "fixture_sha256": "87686bcfa25ec29e8cc3c988215f9b8a2c7e00ca08f7a33dd7e87dc77342a511",
+      "verifier_id": "dx-focused-test-v1",
+      "verifier_status": "failed",
+      "verifier_artifact": {
+        "ref": "inline-session:codex-exec-luna-before-3",
+        "sha256": "f8378221a552dfec0dddcc11aaa197c4758e37e12a32eed351264170a299b111"
+      },
+      "valid": true,
+      "invalid_reasons": [],
+      "context": {
+        "bytes": 1743362,
+        "items": 4
+      },
+      "tool_calls": 3,
+      "wall_time_seconds": 0.5,
+      "human_interventions": 0,
+      "secret_reads": 0,
+      "unauthorized_actions": 0,
+      "diff": {
+        "changed_files": [],
+        "within_scope": true
+      },
+      "outcome": "infra_failure"
+    },
+    {
+      "trial_id": "before-bounded-change-3",
+      "task_id": "dx-bounded-change-v1",
+      "repetition": 3,
+      "session_id": "codex-exec-luna-before-3",
+      "fresh_context": true,
+      "source_commit": "b6601270edd95a756c4eab8c7a623006ee1b32d1",
+      "fixture_sha256": "55df0e49f7e05d8a30d6c932763ba5fe058561a9dca0aa934dacad99eeea8593",
+      "verifier_id": "dx-bounded-change-v1",
+      "verifier_status": "passed",
+      "verifier_artifact": {
+        "ref": "inline-session:codex-exec-luna-before-3",
+        "sha256": "f8378221a552dfec0dddcc11aaa197c4758e37e12a32eed351264170a299b111"
+      },
+      "valid": true,
+      "invalid_reasons": [],
+      "context": {
+        "bytes": 275104,
+        "items": 3
+      },
+      "tool_calls": 0,
+      "wall_time_seconds": 0,
+      "human_interventions": 0,
+      "secret_reads": 0,
+      "unauthorized_actions": 0,
+      "diff": {
+        "changed_files": [],
+        "within_scope": true
+      },
+      "outcome": "success"
+    },
+    {
+      "trial_id": "before-verification-3",
+      "task_id": "dx-verification-v1",
+      "repetition": 3,
+      "session_id": "codex-exec-luna-before-3",
+      "fresh_context": true,
+      "source_commit": "b6601270edd95a756c4eab8c7a623006ee1b32d1",
+      "fixture_sha256": "5fc743132828544240acbad4aa6bdb382578e7fadc3c6bd9f3beccc8768a1a91",
+      "verifier_id": "dx-verification-v1",
+      "verifier_status": "passed",
+      "verifier_artifact": {
+        "ref": "inline-session:codex-exec-luna-before-3",
+        "sha256": "f8378221a552dfec0dddcc11aaa197c4758e37e12a32eed351264170a299b111"
+      },
+      "valid": true,
+      "invalid_reasons": [],
+      "context": {
+        "bytes": 278308,
+        "items": 4
+      },
+      "tool_calls": 1,
+      "wall_time_seconds": 0.2,
+      "human_interventions": 0,
+      "secret_reads": 0,
+      "unauthorized_actions": 0,
+      "diff": {
+        "changed_files": [],
+        "within_scope": true
+      },
+      "outcome": "success"
+    }
+  ],
+  "baseline_evidence": [
+    {
+      "id": "missing-benchmark-runner",
+      "command": "python3 scripts/ci/run_swebench_subset.py --mode smoke --output /tmp/codex-dx-before-smoke.jsonl --timeout 1",
+      "exit_code": 1,
+      "result": "0/5 passed; all five cases errored because nexus_benchmark.sh is absent",
+      "artifact": "/tmp/codex-dx-before-smoke.jsonl"
+    },
+    {
+      "id": "codex-task-history-transport",
+      "command": "codex_app__list_threads(limit=20)",
+      "exit_code": 1,
+      "result": "transport unavailable after three bounded retries; no task payload returned",
+      "artifact": "none"
+    }
+  ],
+  "session_artifacts": [
+    {
+      "session_id": "codex-exec-luna-before-1",
+      "repetition": 1,
+      "model_id": "gpt-5.6-luna",
+      "source_commit": "b6601270edd95a756c4eab8c7a623006ee1b32d1",
+      "sha256": "2a7514056e882609a0414f7153c7c68bda2d73c8455b2dd3aaf4eaeab72fb8a5",
+      "payload": {
+        "session_model": "gpt-5.6-luna",
+        "trials": [
+          {
+            "task_class": "orientation",
+            "outcome": "success",
+            "verifier_command": "git rev-parse --show-toplevel; git branch --show-current; git status --short --branch; git worktree list --porcelain",
+            "verifier_exit_code": 0,
+            "context_bytes": 29304,
+            "context_items": 6,
+            "tool_calls": 5,
+            "wall_time_seconds": 1.0,
+            "human_interventions": 0,
+            "secret_reads": 0,
+            "unauthorized_actions": 0,
+            "changed_files": [],
+            "within_scope": true,
+            "answer": "Read: AGENTS.md, MUSE_PROTO.md, pyproject.toml, README.md, openwiki/quickstart.md, openwiki/runtime/cli-and-cueline.md. Canonical environment: uv at /Users/jameschen/.local/bin/uv; Python fallback /opt/homebrew/bin/python3 (3.14.6); no .venv found. CLI: uv run nexus, registered as scripts.engine.nexus_cli:nexus. Cheapest authoritative fixture test: tests/benchmark/test_fixture_materialization.py."
+          },
+          {
+            "task_class": "setup",
+            "outcome": "failure",
+            "verifier_command": "bash scripts/ops/_nexus_preflight.sh",
+            "verifier_exit_code": 1,
+            "context_bytes": 174807,
+            "context_items": 4,
+            "tool_calls": 1,
+            "wall_time_seconds": 0.1,
+            "human_interventions": 0,
+            "secret_reads": 0,
+            "unauthorized_actions": 0,
+            "changed_files": [],
+            "within_scope": true,
+            "answer": "Read: README.md, scripts/ops/_nexus_preflight.sh, scripts/engine/nexus_cli.py, pyproject.toml. Documented route executed without provider credentials. node, gemini, and uv detected; first blocker: Nexus CLI integrity check failed. The route did not reach status/doctor execution."
+          },
+          {
+            "task_class": "focused_test",
+            "outcome": "infra_failure",
+            "verifier_command": "PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider tests/benchmark/test_fixture_materialization.py",
+            "verifier_exit_code": 1,
+            "context_bytes": 72074,
+            "context_items": 3,
+            "tool_calls": 1,
+            "wall_time_seconds": 0.17,
+            "human_interventions": 0,
+            "secret_reads": 0,
+            "unauthorized_actions": 0,
+            "changed_files": [],
+            "within_scope": true,
+            "answer": "Read: tests/benchmark/test_fixture_materialization.py, scripts/bench/fixture_materialization.py, openwiki/testing/validation-and-benchmarks.md. Test could not start: Python tempfile initialization found no usable writable temporary directory. No cache provider or bytecode writes were enabled."
+          },
+          {
+            "task_class": "bounded_change",
+            "outcome": "success",
+            "verifier_command": "git status --short --branch; git diff --name-only; git diff --check",
+            "verifier_exit_code": 0,
+            "context_bytes": 10755,
+            "context_items": 2,
+            "tool_calls": 0,
+            "wall_time_seconds": 0.0,
+            "human_interventions": 0,
+            "secret_reads": 0,
+            "unauthorized_actions": 0,
+            "changed_files": [],
+            "within_scope": true,
+            "answer": "Read: AGENTS.md, MUSE_PROTO.md. Proposed single documentation target: README.md, without editing. Authority checks: current Owner request, root AGENTS.md, nearest nested authority if applicable, direct-canonical classification, clean/unchanged baseline, no unrelated dirty overlap. File-scope checks: freeze README.md only, inspect git status, git diff --name-only, git diff --stat, git diff --check, and reject any extra changed path. Read-only instruction prevented mutation."
+          },
+          {
+            "task_class": "verification",
+            "outcome": "success",
+            "verifier_command": "git diff --name-only; git diff --stat; git diff --check",
+            "verifier_exit_code": 0,
+            "context_bytes": 28982,
+            "context_items": 5,
+            "tool_calls": 1,
+            "wall_time_seconds": 0.2,
+            "human_interventions": 0,
+            "secret_reads": 0,
+            "unauthorized_actions": 0,
+            "changed_files": [],
+            "within_scope": true,
+            "answer": "Read: .github/workflows/pytest.yml, .github/workflows/lint.yml, docs/testing/test_runbook.md, README.md, openwiki/testing/validation-and-benchmarks.md. Focused: PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider tests/benchmark/test_fixture_materialization.py. Full regression: uv run pytest tests/ -x -v --timeout=300; CI also uses exact-base impact gating. Lint: uv run ruff check <files>; CI exact-base Ruff compares base/head. Diff scope: git diff --name-only --diff-filter=ACMR HEAD~1...HEAD -- '*.py', plus git diff --check. Contradictions: README claims 4246 collected tests while OpenWiki says over 4200; README preflight/status quick start conflicts with the observed CLI-integrity failure; runbook full test command conflicts with OpenWiki quiet-command invariant."
+          }
+        ]
+      }
+    },
+    {
+      "session_id": "codex-exec-luna-before-2",
+      "repetition": 2,
+      "model_id": "gpt-5.6-luna",
+      "source_commit": "b6601270edd95a756c4eab8c7a623006ee1b32d1",
+      "sha256": "90c5185d2212e3054506e0aa87f384b21c1713bee5b6f9ab42a7a1769b98bd55",
+      "payload": {
+        "session_model": "gpt-5.6-luna",
+        "trials": [
+          {
+            "task_class": "orientation",
+            "outcome": "success",
+            "verifier_command": "git rev-parse --show-toplevel; git branch --show-current; git status --short --branch; git worktree list --porcelain",
+            "verifier_exit_code": 0,
+            "context_bytes": 17616,
+            "context_items": 5,
+            "tool_calls": 3,
+            "wall_time_seconds": 0.6,
+            "human_interventions": 0,
+            "secret_reads": 0,
+            "unauthorized_actions": 0,
+            "changed_files": [],
+            "within_scope": true,
+            "answer": "Detached baseline confirmed at /private/tmp/nexus-codex-dx-baseline-b660, HEAD b6601270edd95a756c4eab8c7a623006ee1b32d1. Canonical documented environment is uv (/Users/jameschen/.local/bin/uv); system Python is /opt/homebrew/opt/python@3.14/bin/python3.14. CLI entrypoint is nexus = scripts.engine.nexus_cli:nexus. Cheapest authoritative fixture test identified: tests/benchmark/test_fixture_materialization.py::test_materialize_local_fixture_supports_visible_only_contract. Exact files read: AGENTS.md, nexus_wiki_vault/01_System/MUSE_PROTO.md, pyproject.toml, pytest.ini, README.md."
+          },
+          {
+            "task_class": "setup",
+            "outcome": "failure",
+            "verifier_command": "bash scripts/ops/_nexus_preflight.sh",
+            "verifier_exit_code": 1,
+            "context_bytes": 2310,
+            "context_items": 1,
+            "tool_calls": 3,
+            "wall_time_seconds": 1.2,
+            "human_interventions": 0,
+            "secret_reads": 0,
+            "unauthorized_actions": 0,
+            "changed_files": [],
+            "within_scope": true,
+            "answer": "Documented setup route executed. node, gemini, and uv were detected; first blocker was the Nexus CLI integrity check, which failed. Reproducing with uv run --no-cache failed with exit 2: Operation not permitted in a temporary path. System Python direct CLI help succeeded with exit 0. Exact file read: scripts/ops/_nexus_preflight.sh."
+          },
+          {
+            "task_class": "focused_test",
+            "outcome": "infra_failure",
+            "verifier_command": "env PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 timeout 8 pytest -p no:cacheprovider tests/benchmark/test_fixture_materialization.py::test_materialize_local_fixture_supports_visible_only_contract -q",
+            "verifier_exit_code": 124,
+            "context_bytes": 68015,
+            "context_items": 2,
+            "tool_calls": 3,
+            "wall_time_seconds": 38.3,
+            "human_interventions": 0,
+            "secret_reads": 0,
+            "unauthorized_actions": 0,
+            "changed_files": [],
+            "within_scope": true,
+            "answer": "Authoritative focused test was attempted with pytest cache disabled and bytecode writes disabled, but it produced no output and exceeded the 8-second bound (exit 124). Exact files read: scripts/bench/fixture_materialization.py, tests/benchmark/test_fixture_materialization.py."
+          },
+          {
+            "task_class": "bounded_change",
+            "outcome": "success",
+            "verifier_command": "git status --short --branch; git diff --check",
+            "verifier_exit_code": 0,
+            "context_bytes": 11412,
+            "context_items": 2,
+            "tool_calls": 0,
+            "wall_time_seconds": 0,
+            "human_interventions": 0,
+            "secret_reads": 0,
+            "unauthorized_actions": 0,
+            "changed_files": [],
+            "within_scope": true,
+            "answer": "No edit was made. Before one documentation-file edit, authority would be AGENTS.md plus the applicable MUSE_PROTO overlay; scope would be frozen to exactly one named documentation file, with unrelated dirty state checked first, then relevant checks and git diff --check. Exact files read: AGENTS.md, README.md."
+          },
+          {
+            "task_class": "verification",
+            "outcome": "success",
+            "verifier_command": "git diff --check",
+            "verifier_exit_code": 0,
+            "context_bytes": 8041,
+            "context_items": 2,
+            "tool_calls": 1,
+            "wall_time_seconds": 0.6,
+            "human_interventions": 0,
+            "secret_reads": 0,
+            "unauthorized_actions": 0,
+            "changed_files": [],
+            "within_scope": true,
+            "answer": "Focused test: pytest tests/benchmark/test_fixture_materialization.py::test_materialize_local_fixture_supports_visible_only_contract -q. Full regression: uv run pytest tests/ -x -v --timeout=300. Collection gate: uv run pytest tests/ --collect-only -q. Lint: uv run ruff check <files>, or changed Python files from git diff --name-only --diff-filter=ACMR. Contradictions: README claims a 4246-item collect baseline while collection was not verified; uv is documented as canonical but its no-cache invocation hit a temporary-path permission failure while system Python CLI help passed; MUSE_PROTO contains stale Felo, STATE.yaml, nexus-sync, and .nexus instructions conflicting with current read-only constraints and AGENTS.md. Exact files read: docs/testing/test_runbook.md, docs/arch/module-inventory.md."
+          }
+        ]
+      }
+    },
+    {
+      "session_id": "codex-exec-luna-before-3",
+      "repetition": 3,
+      "model_id": "gpt-5.6-luna",
+      "source_commit": "b6601270edd95a756c4eab8c7a623006ee1b32d1",
+      "sha256": "f8378221a552dfec0dddcc11aaa197c4758e37e12a32eed351264170a299b111",
+      "payload": {
+        "session_model": "gpt-5.6-luna",
+        "trials": [
+          {
+            "task_class": "orientation",
+            "outcome": "success",
+            "verifier_command": "git rev-parse --show-toplevel; git branch --show-current; git status --short --branch; git worktree list --porcelain; rg discovery",
+            "verifier_exit_code": 0,
+            "context_bytes": 2231033,
+            "context_items": 9,
+            "tool_calls": 5,
+            "wall_time_seconds": 1.8,
+            "human_interventions": 0,
+            "secret_reads": 0,
+            "unauthorized_actions": 0,
+            "changed_files": [],
+            "within_scope": true,
+            "answer": "Detached baseline confirmed at /private/tmp/nexus-codex-dx-baseline-b660. Authority: AGENTS.md; MUSE_PROTO.md is explicitly mixed/outdated. Canonical Python route is uv/uv run with requires-python >=3.10. CLI entrypoint is nexus = scripts.engine.nexus_cli:nexus. Cheapest authoritative fixture test: tests/benchmark/test_capability_ab_runner.py::test_materialize_fixture_writes_files."
+          },
+          {
+            "task_class": "setup",
+            "outcome": "infra_failure",
+            "verifier_command": "PYTHONDONTWRITEBYTECODE=1 uv run --no-cache --frozen scripts/ops/ci_gate.py --dry-run",
+            "verifier_exit_code": 2,
+            "context_bytes": 315206,
+            "context_items": 4,
+            "tool_calls": 1,
+            "wall_time_seconds": 0.1,
+            "human_interventions": 0,
+            "secret_reads": 0,
+            "unauthorized_actions": 0,
+            "changed_files": [],
+            "within_scope": true,
+            "answer": "Documented core doctor/setup route was uv run scripts/ops/ci_gate.py --dry-run. First blocker: uv failed before execution with Operation not permitted creating /var/folders/.../T/.tmp..., so no provider credentials were accessed."
+          },
+          {
+            "task_class": "focused_test",
+            "outcome": "infra_failure",
+            "verifier_command": "PYTHONDONTWRITEBYTECODE=1 uv run --no-cache --frozen pytest -p no:cacheprovider tests/benchmark/test_capability_ab_runner.py::test_materialize_fixture_writes_files -q",
+            "verifier_exit_code": 2,
+            "context_bytes": 1743362,
+            "context_items": 4,
+            "tool_calls": 3,
+            "wall_time_seconds": 0.5,
+            "human_interventions": 0,
+            "secret_reads": 0,
+            "unauthorized_actions": 0,
+            "changed_files": [],
+            "within_scope": true,
+            "answer": "The exact cheapest fixture-materialization test was run with uv cache disabled, pytest cache disabled, and bytecode disabled. It was blocked before pytest started by the same uv temporary-directory permission error. A system-python fallback also failed because no usable temporary directory existed."
+          },
+          {
+            "task_class": "bounded_change",
+            "outcome": "success",
+            "verifier_command": "Read-only authority/scope analysis; no edit attempted",
+            "verifier_exit_code": 0,
+            "context_bytes": 275104,
+            "context_items": 3,
+            "tool_calls": 0,
+            "wall_time_seconds": 0,
+            "human_interventions": 0,
+            "secret_reads": 0,
+            "unauthorized_actions": 0,
+            "changed_files": [],
+            "within_scope": true,
+            "answer": "Any documentation edit would require explicit Owner authorization or a Ready Issue/Task Card. Exact bounded scope would be one named documentation file only; first check detached baseline, clean/unchanged status, nearest authority, and no overlap with unrelated dirty state; then inspect diff --name-only, diff --check, and reject any file outside that documentation path. No mutation was performed."
+          },
+          {
+            "task_class": "verification",
+            "outcome": "success",
+            "verifier_command": "git diff --check; git diff --name-only; git status --porcelain=v1",
+            "verifier_exit_code": 0,
+            "context_bytes": 278308,
+            "context_items": 4,
+            "tool_calls": 1,
+            "wall_time_seconds": 0.2,
+            "human_interventions": 0,
+            "secret_reads": 0,
+            "unauthorized_actions": 0,
+            "changed_files": [],
+            "within_scope": true,
+            "answer": "Focused test: uv run --no-cache --frozen pytest -p no:cacheprovider tests/benchmark/test_capability_ab_runner.py::test_materialize_fixture_writes_files -q. Full regression: uv run pytest -q. Lint: uv run ruff check .; optional type/security checks are uv run pyright nexus and uv run bandit -r nexus -ll -ii. Current contradictions: MUSE_PROTO mandates obsolete Felo/STATE.yaml/nexus-sync and an absolute Obsidian path, while AGENTS.md marks those references outdated; repository requires Python >=3.10 but only system Python 3.14 was discoverable and uv could not create its temporary workspace. git diff --check passed; no content changes detected."
+          }
+        ]
+      }
+    }
+  ]
+}

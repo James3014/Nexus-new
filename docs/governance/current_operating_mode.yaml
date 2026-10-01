@@ -1,0 +1,96 @@
+schema: nexus.operating_mode.v1
+mode: BOOTSTRAP
+
+# This file supplies the default engineering execution lane for new work only.
+# It does not select a CapabilityPlanner route, worker, model, verifier, approval,
+# integration, release, or production authority.
+effective_scope:
+  - nexus-core
+  - open-swe
+  - learning-wiring
+
+default_execution:
+  primary_bounded_work: DIRECT_CANONICAL
+  delegated_bounded_work: DIRECT_DELEGATED
+
+lane_selection_basis: AUTHORITY_EFFECT_AND_RISK_NOT_REPOSITORY_IDENTITY
+
+protected_merge:
+  DIRECT_CANONICAL:
+    eligible_outcome: DIRECT_MERGE_ELIGIBLE
+    merge_sink: git_merge_pull_request
+    owner_confirmation_required: true
+    exact_repository_pr_base_head_required: true
+    scope_and_deletion_audit_required: true
+    relevant_tests_and_required_checks_required: true
+    branch_protection_and_expected_head_cas_required: true
+    third_party_independent_review_required: false
+    independent_acceptance_hash_required: false
+    standing_grant_required: false
+  DIRECT_DELEGATED:
+    eligible_outcome: DIRECT_MERGE_ELIGIBLE
+    merge_sink: git_merge_pull_request
+    owner_confirmation_required: true
+    worker_may_merge: false
+    coordinator_independent_verification_required: true
+    third_party_independent_review_required: false
+    independent_acceptance_hash_required: false
+    standing_grant_required: false
+  GOVERNED:
+    merge_sink: github_complete_pull_request
+    independent_acceptance_required: true
+    machine_verifiable_acceptance_provenance_required: true
+    standing_grant_required: true
+    github_merge_action_required: true
+
+task_card_required_by_default: false
+auto_chain: false
+
+transition:
+  existing_active_work: PRESERVE_CURRENT_EXECUTION_CONTRACT_UNTIL_COMPLETION
+  new_work: READ_CURRENT_OPERATING_MODE
+  successor_work: READ_CURRENT_OPERATING_MODE
+  g10_completion: DOES_NOT_CHANGE_DEFAULT_EXECUTION
+  governance_default_ready: REQUIRES_EXPLICIT_OWNER_DECISION
+  governed_attempt_authority_failure: BLOCK_REBIND_OR_RECONCILE
+  silent_governed_to_direct_downgrade: FORBIDDEN
+
+readiness_for_nexus_governance_default:
+  decision_authority: OWNER_ONLY
+  required_evidence:
+    - representative_real_tasks_end_to_end_under_governed_authority
+    - continuation_timeout_reconcile_and_restart_exercised
+    - nexus_self_modification_without_routine_authority_recursion
+    - task_card_grant_admission_and_execution_contracts_stable_for_normal_work
+    - common_engineering_no_longer_requires_routine_direct_bypass
+    - direct_recovery_path_restores_failed_governance_plane
+  post_decision_effect: SEPARATE_POLICY_CHANGE_REQUIRED
+
+escalate_to_governed_when:
+  - nexus_lifecycle_authority_change
+  - route_or_capability_authority_change
+  - workforce_admission_or_worker_authority_change
+  - security_boundary_weakening
+  - authentication_or_authorization_security_semantics
+  - migration_or_schema_authority_change
+  - production_data_mutation_authority
+  - protected_ref_operation_outside_exact_owner_confirmed_pr_merge
+  - release_authority
+  - production_activation
+  - external_irreversible_effect
+  - public_production_claim
+  - break_glass_governance_recovery
+  - owner_selected_governed
+
+fail_closed:
+  missing_invalid_or_ambiguous_mode: REQUIRE_EXPLICIT_CURRENT_OWNER_LANE
+
+principles:
+  - GOVERNANCE_INTENSITY_SCALES_WITH_CLAIM_AND_CONSEQUENCE
+  - REPOSITORY_IDENTITY_DOES_NOT_SELECT_EXECUTION_OR_MERGE_LANE
+  - NEXUS_SELF_MODIFICATION_DOES_NOT_BY_ITSELF_REQUIRE_NEXUS_GOVERNANCE
+  - DIRECT_AND_GOVERNED_PROTECTED_MERGE_SEMANTICS_ARE_DISTINCT
+  - OPERATING_MODE_SELECTS_ENGINEERING_EXECUTION_LANE_NOT_CAPABILITYPLANNER_ROUTE
+  - G10_PROVES_GOVERNED_PATH_NOT_DEFAULT_CUTOVER
+  - GOVERNED_ATTEMPT_NEVER_SILENTLY_DOWNGRADES
+  - OWNER_DECLARATION_REQUIRED_FOR_DEFAULT_AUTHORITY_TRANSITION

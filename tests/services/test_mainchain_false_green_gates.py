@@ -125,6 +125,10 @@ def _learning(c: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_p0_tampered_seal_blocks_local_and_online(monkeypatch) -> None:
+    import nexus_runtime_support_candidate.composition as ceb
+
+    from nexus.services import runtime_compat
+
     local_calls = {"n": 0}
     online_calls = {"n": 0}
 
@@ -137,9 +141,7 @@ def test_p0_tampered_seal_blocks_local_and_online(monkeypatch) -> None:
         online_calls["n"] += 1
         return _online(ctx)
 
-    import nexus.services.capability_evidence_bundle as ceb
-
-    real_verify = ceb.verify_capability_evidence_bundle
+    real_verify = ceb._verify_evidence_bundle
 
     def _fail_verify(bundle):  # type: ignore[no-untyped-def]
         v = real_verify(bundle)
@@ -152,11 +154,12 @@ def test_p0_tampered_seal_blocks_local_and_online(monkeypatch) -> None:
             }
         return v
 
-    monkeypatch.setattr(ceb, "verify_capability_evidence_bundle", _fail_verify)
+    monkeypatch.setattr(ceb, "_verify_evidence_bundle", _fail_verify)
 
-    runtime = UnifiedRuntime(planner=_Planner(), local_service=_Local())
+    exports = runtime_compat.build_host_runtime_exports()
+    runtime = exports.UnifiedRuntime(planner=_Planner(), local_service=_Local())
     receipt = runtime.run(
-        UnifiedRuntimeRequest(
+        exports.UnifiedRuntimeRequest(
             task_id="seal-block-1",
             workspace_revision="wr",
             task_statement="must block local online on seal fail",

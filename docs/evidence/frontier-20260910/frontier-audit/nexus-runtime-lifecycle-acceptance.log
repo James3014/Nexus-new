@@ -1,0 +1,40 @@
+{
+  "attempt_id": "attempt:local-contract-matrix",
+  "checks": [
+    {
+      "detail": "receipt_bound_local_evidence",
+      "name": "phase_flow_and_terminal_contract",
+      "status": "PASS"
+    },
+    {
+      "detail": "receipt_bound_local_evidence",
+      "name": "branch_and_block_transition_matrix",
+      "status": "PASS"
+    },
+    {
+      "detail": "receipt_bound_local_evidence",
+      "name": "receipt_bound_acceptance_scenarios",
+      "status": "PASS"
+    },
+    {
+      "detail": "receipt_bound_local_evidence",
+      "name": "runtime_development_identity_mapping",
+      "status": "PASS"
+    },
+    {
+      "detail": "receipt_bound_local_evidence",
+      "name": "learning_closure_and_graduation_gate",
+      "status": "PASS"
+    }
+  ],
+  "claim_ceiling": "LOCAL_RUNTIME_PHASE_ACCEPTANCE_CANDIDATE",
+  "deferred_external": [
+    "live_provider_and_transport_acceptance",
+    "owner_P7_disposition_and_final_approval"
+  ],
+  "production_ready": false,
+  "public_claim_allowed": false,
+  "schema": "nexus.runtime_lifecycle_acceptance.v1",
+  "status": "PASS_LOCAL_CANDIDATE",
+  "task_id": "acceptance:runtime-phase-convergence"
+}

@@ -1,0 +1,102 @@
+{
+  "observed_at": "2026-09-10T07:41:15.992147+00:00",
+  "daemon": {
+    "config_path": "/Users/jameschen/.config/nexus-external-intelligence/config.json",
+    "config_sha256": "c102afc9aad3af38510fa0d5e8540136096ba12556ba5c19d8e08c6f94161ce8",
+    "heartbeat_at": 1789026068.324517,
+    "last_error": null,
+    "pid": 82559,
+    "run_id": "203f681959ff496eac3182e5f54e1e14",
+    "schema": "nexus.external_intelligence_daemon_receipt.v1",
+    "source_path": "/Users/jameschen/Workspace/nexus-automation-repos/Nexus-new/scripts/ops/external_intelligence_service.py",
+    "source_sha256": "d9bcd12192316f6b8d06382b81d49cf1677f1d430ae2122184522605677c9b4b",
+    "started_at": 1788979728.751651,
+    "status": "READY",
+    "successful_polls": 26
+  },
+  "daemon_evidence": {
+    "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/service/daemon.json",
+    "sha256": "8fbc9633bfc13c29a46d22b8d045230c2c464bf22ec80b9bc5a0c5c1f02f64a0"
+  },
+  "runtime_identity": {
+    "artifact_identity": {
+      "deepagents_version": "0.7.6",
+      "module_file": "/Users/jameschen/.local/share/nexus-open-swe-runtime/venv/lib/python3.14/site-packages/nexus_open_swe_runtime/cli.py",
+      "module_sha256": "b3b45530e4447a8ebcd97d9795e1fb7b04a2ad57503aa584babeb798a883d829"
+    },
+    "authority_boundary": "execution_runtime_only",
+    "distribution_name": "nexus-open-swe-runtime",
+    "distribution_version": "0.1.0",
+    "finished_at": "2026-09-10T07:41:16Z",
+    "kind": "identity",
+    "model_id": "",
+    "operation_id": "",
+    "outcome_unknown": false,
+    "process_started": false,
+    "provider_id": "",
+    "retry_safe": true,
+    "runtime_protocol_version": "nexus.open_swe_runtime.request.v1",
+    "schema": "nexus.open_swe_runtime.result.v1",
+    "started_at": "2026-09-10T07:41:16Z",
+    "status": "IDENTIFIED"
+  },
+  "opencli_health": "Daemon: running (PID 22359)\nVersion: v1.8.7\nUptime: 49h 46m\nExtension: connected (v1.0.24)\nProfiles: m5c6uje4 v1.0.24\nMemory: 10.8 MB\nPort: 19825\n",
+  "r28_seven_hash_checks": {
+    "acceptance_packet": {
+      "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/closure/acceptance-packets/open-swe-resident-five-repo-canary-20260908--1b089e62d2077fbc18e96e37952128155c63cec4d07d86b798075a9fef555b93.json",
+      "sha256": "bdea84330f4a25d45b8e98bcde943b098a7bd347bbdbf7255b8c04086fbb9648",
+      "matches": true
+    },
+    "effect": {
+      "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/recovery/effects/effect_ef0802c64e2a8e8f8a65ccb696adf1b0d9d50b21a06348e10d931a038d88af68.json",
+      "sha256": "aca1738ff31683aa84efd1d95b4c47c243f58e69f150ebb170fedead482f5f57",
+      "matches": true
+    },
+    "journal": {
+      "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/recovery/operations/96b83c02de43ff8e6bc37d49e0efabd3f113ac60135ea214c367094b24806574.json",
+      "sha256": "dab8273a4ee3c5c82cf91731d514ba8660e444694cdde271bc8a02e995883352",
+      "matches": true
+    },
+    "operation": {
+      "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/open_swe_runtime/operations/96b83c02de43ff8e6bc37d49e0efabd3f113ac60135ea214c367094b24806574.json",
+      "sha256": "362e512d67416ce42768e90c5d5f6d368fab59fd6301ad216bd7ae048d16e8d9",
+      "matches": true
+    },
+    "task_candidate": {
+      "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/closure/task-candidates/open-swe-resident-five-repo-canary-20260908--2975c2ea8962558cfe463842c65869a5c33d102f65e74b94a8182e8a56c6be51.json",
+      "sha256": "7765e2e0f37557752c6aef403c8bee2fb3ec568f077ac18329e14b933ceaa1bb",
+      "matches": true
+    },
+    "whole_verification": {
+      "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/closure/verifications/open-swe-resident-five-repo-canary-20260908--task--whole_task--512530748d61ea0537f5019956bbf07bbbec33a9e724a0790bdeb15cd47d3c6d.json",
+      "sha256": "b7f74f31b4507f47485abfb9fb4d94e58972c5930531643ba5744cfb94adbcd5",
+      "matches": true
+    },
+    "worker_receipt": {
+      "path": "/Users/jameschen/Workspace/nexus-self-hosted-state/external-intelligence/state/James3014_Nexus-new/fanout/receipts/open-swe-resident-five-repo-canary-20260908--resident-canary-r28--initial.json",
+      "sha256": "5438b44287b2f274ca5e181100ff9b3363af7cf6202cc7192aa22323db2e41ff",
+      "matches": true
+    }
+  },
+  "terminal_artifacts": {
+    "r28-independent-acceptance.json": {
+      "path": "/Users/jameschen/.codex/visualizations/2026/09/06/01a077e2-75c5-77a3-aa5e-cca232eab170/open-swe-web-acceptance-20260908/r28-independent-acceptance.json",
+      "sha256": "9638ef72801a31ca84560b8b7d3d99bd512925b593f7b535b993b762b5860cf6"
+    },
+    "rollback-restore-receipt-r28-final.json": {
+      "path": "/Users/jameschen/.codex/visualizations/2026/09/06/01a077e2-75c5-77a3-aa5e-cca232eab170/open-swe-web-acceptance-20260908/rollback-restore-receipt-r28-final.json",
+      "sha256": "1b7ce771a8b4aa14e94045a36b0a9aeeabcd9ed09b4a986ce1d87b1326907888"
+    },
+    "current-completion-matrix-final.json": {
+      "path": "/Users/jameschen/.codex/visualizations/2026/09/06/01a077e2-75c5-77a3-aa5e-cca232eab170/open-swe-web-acceptance-20260908/current-completion-matrix-final.json",
+      "sha256": "53de9019fb2cc491d5868682803840eb3badacb9c9b81c6c7113a7563da16a30"
+    },
+    "five-mount-receipt-final-current-main.json": {
+      "path": "/Users/jameschen/.codex/visualizations/2026/09/06/01a077e2-75c5-77a3-aa5e-cca232eab170/open-swe-web-acceptance-20260908/five-mount-receipt-final-current-main.json",
+      "sha256": "99aa7db7bb47653ad7e975c55c817419de7caa7fb26e45db7b1bdbaa04bfcded"
+    }
+  },
+  "r28_independent_reviewer": "01a07ec9-ef56-73e0-943f-eb95269fcf82",
+  "r28_producing_conversation": "6aa19e4a-8ee8-83e8-8e53-3dc49968f612",
+  "no_service_effects": true
+}

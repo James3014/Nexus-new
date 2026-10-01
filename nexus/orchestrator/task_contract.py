@@ -51,6 +51,158 @@ def _normalize_repository_path(value: str) -> str:
     return f"{normalized}/" if directory_prefix else normalized
 
 
+class EvidenceRequirementMode(str, Enum):
+    REQUIRED = "REQUIRED"
+    CONDITIONALLY_REQUIRED = "CONDITIONALLY_REQUIRED"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+
+
+class EvidenceSubjectApplicability(str, Enum):
+    APPLICABLE = "APPLICABLE"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+    UNRESOLVED = "UNRESOLVED"
+
+
+# Bounds for the optional expected-evidence universe (§20-26, §55-57).
+_MAX_EXPECTED_EVIDENCE_SUBJECTS = 256
+_MAX_LOGICAL_SUBJECT_ID_CHARS = 512
+_MAX_EVIDENCE_KIND_CHARS = 512
+
+
+def _expected_evidence_universe_canonical_value(
+    universe: Dict[str, Any],
+) -> dict[str, Any]:
+    """Return the canonical (sorted, normalized) value of an expected-evidence universe.
+
+    Transport MUST project this value verbatim (sorted, no drops, no rewrites).
+    """
+    subjects = universe.get("subjects") or []
+    return {
+        "universe_generation": universe.get("universe_generation"),
+        "subjects": [
+            {
+                "logical_subject_id": subject.get("logical_subject_id"),
+                "evidence_kind": subject.get("evidence_kind"),
+                "requirement_mode": subject.get("requirement_mode"),
+                "applicability": subject.get("applicability"),
+            }
+            for subject in sorted(subjects, key=lambda s: str(s.get("logical_subject_id") or ""))
+        ],
+    }
+
+
+def expected_evidence_universe_canonical_json(universe: Dict[str, Any]) -> str:
+    return json.dumps(
+        _expected_evidence_universe_canonical_value(universe),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+
+
+def expected_evidence_universe_identity(universe: Dict[str, Any]) -> str:
+    return "sha256:" + sha256(
+        expected_evidence_universe_canonical_json(universe).encode("utf-8")
+    ).hexdigest()
+
+
+def _validate_logical_subject_id(value: Any) -> str:
+    if not isinstance(value, str):
+        raise ValueError("logical_subject_id must be a string")
+    stripped = value.strip()
+    if not stripped:
+        raise ValueError("logical_subject_id must be nonblank")
+    if "\x00" in stripped:
+        raise ValueError("logical_subject_id must not contain NUL")
+    if len(stripped.encode("utf-8")) > _MAX_LOGICAL_SUBJECT_ID_CHARS:
+        raise ValueError("logical_subject_id exceeds 512 chars")
+    return stripped
+
+
+def _validate_evidence_kind(value: Any) -> str:
+    if not isinstance(value, str):
+        raise ValueError("evidence_kind must be a string")
+    stripped = value.strip()
+    if not stripped:
+        raise ValueError("evidence_kind must be nonblank")
+    if "\x00" in stripped:
+        raise ValueError("evidence_kind must not contain NUL")
+    if len(stripped.encode("utf-8")) > _MAX_EVIDENCE_KIND_CHARS:
+        raise ValueError("evidence_kind exceeds 512 chars")
+    return stripped
+
+
+class ExpectedEvidenceSubject(BaseModel):
+    """One declared member of the expected-evidence universe (producer-declared)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
+
+    logical_subject_id: str
+    evidence_kind: str
+    requirement_mode: EvidenceRequirementMode
+    applicability: EvidenceSubjectApplicability
+
+    @field_validator("logical_subject_id")
+    @classmethod
+    def _validate_sid(cls, value: Any) -> str:
+        return _validate_logical_subject_id(value)
+
+    @field_validator("evidence_kind")
+    @classmethod
+    def _validate_kind(cls, value: Any) -> str:
+        return _validate_evidence_kind(value)
+
+    @model_validator(mode="after")
+    def _validate_mode_applicability_consistency(self):
+        mode = self.requirement_mode
+        applicability = self.applicability
+        if mode == EvidenceRequirementMode.REQUIRED and applicability != EvidenceSubjectApplicability.APPLICABLE:
+            raise ValueError("REQUIRED requires APPLICABLE applicability")
+        if mode == EvidenceRequirementMode.NOT_APPLICABLE and applicability != EvidenceSubjectApplicability.NOT_APPLICABLE:
+            raise ValueError("NOT_APPLICABLE requires NOT_APPLICABLE applicability")
+        # CONDITIONALLY_REQUIRED allows APPLICABLE | NOT_APPLICABLE | UNRESOLVED.
+        return self
+
+
+class ExpectedEvidenceUniverse(BaseModel):
+    """Optional producer-declared expected-evidence universe (transport-opaque)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
+
+    universe_generation: int = Field(ge=0, strict=True)
+    subjects: List[ExpectedEvidenceSubject] = Field(min_length=1, max_length=_MAX_EXPECTED_EVIDENCE_SUBJECTS)
+
+    @field_validator("universe_generation")
+    @classmethod
+    def _validate_generation(cls, value: Any) -> int:
+        if type(value) is not int or isinstance(value, bool):
+            raise ValueError("universe_generation must be an integer >= 0")
+        if value < 0:
+            raise ValueError("universe_generation must be an integer >= 0")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_no_duplicate_subjects(self):
+        seen: set[str] = set()
+        for subject in self.subjects:
+            if subject.logical_subject_id in seen:
+                raise ValueError(
+                    f"duplicate logical_subject_id: {subject.logical_subject_id}"
+                )
+            seen.add(subject.logical_subject_id)
+        # Canonicalization: keep subjects sorted by logical_subject_id.
+        ordered = sorted(self.subjects, key=lambda s: s.logical_subject_id)
+        object.__setattr__(self, "subjects", ordered)
+        return self
+
+    def canonical_json(self) -> str:
+        return expected_evidence_universe_canonical_json(self.model_dump(mode="json"))
+
+    @property
+    def universe_identity(self) -> str:
+        return expected_evidence_universe_identity(self.model_dump(mode="json"))
+
+
 class SelfHostedTaskContract(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 
@@ -98,6 +250,17 @@ class SelfHostedTaskContract(BaseModel):
     mutation_mode: MutationMode = MutationMode.WORKING_TREE_ONLY
     human_approval_required: bool = True
     collaboration_realm: Optional[CollaborationExecutionRealm] = None
+    # Optional producer-declared expected-evidence universe (§20-26, §55-57).
+    # Transport-opaque: transport MUST NOT author it; it only projects it.
+    # Legacy contracts omit this field entirely and MUST parse/verify as before.
+    expected_evidence: Optional[ExpectedEvidenceUniverse] = None
+
+    @property
+    def universe_identity(self) -> Optional[str]:
+        """sha256 identity of the declared universe; None for legacy contracts."""
+        if self.expected_evidence is None:
+            return None
+        return self.expected_evidence.universe_identity
 
     @field_validator("task_id")
     @classmethod
@@ -176,12 +339,58 @@ class SelfHostedTaskContract(BaseModel):
         configured = {provider for provider in (self.preferred_provider, self.fallback_provider) if provider}
         if configured and not configured.issubset(set(self.provider_order or configured)):
             raise ValueError("provider_order must include preferred and fallback providers")
+        self._validate_evidence_universe_coupling()
         return self
+
+    def _required_verifier_id_set(self) -> set:
+        """required_verifier_ids derivation — UNCHANGED authority (§21-22).
+
+        The broader declared universe extends (never narrows) this set.
+        """
+        return set(self.verifier_commands or ())
+
+    def _validate_evidence_universe_coupling(self) -> None:
+        """Validate verifier authority coupling for the declared universe (§21-22).
+
+        - required_verifier_ids derivation from verifier_commands is UNCHANGED.
+        - New subjects extend the broader universe; they impose no narrowing.
+        - If a subject logical_subject_id exactly equals a verifier id string,
+          validate exact semantic equivalence: that verifier MUST be in the
+          verifier_commands-derived set (exact string membership), and the
+          subject must be REQUIRED/APPLICABLE (a verifier execution produces
+          applicable evidence under its own id).
+        - Namespaced ids (containing ':') impose no coupling: they are checked
+          only for the mode/applicability consistency already enforced on the
+          subject model itself.
+        """
+        universe = self.expected_evidence
+        if universe is None:
+            return
+        verifier_ids = self._required_verifier_id_set()
+        for subject in universe.subjects:
+            sid = subject.logical_subject_id
+            if ":" in sid:
+                continue  # namespaced id: no coupling to verifier authority
+            if sid in verifier_ids:
+                if (
+                    subject.requirement_mode != EvidenceRequirementMode.REQUIRED
+                    or subject.applicability != EvidenceSubjectApplicability.APPLICABLE
+                ):
+                    raise ValueError(
+                        f"subject {sid!r} equals a verifier id and must be REQUIRED/APPLICABLE"
+                    )
+                continue
+            # Bare (non-namespaced) ids that are not verifier commands impose
+            # no membership requirement — they extend the broader universe.
 
     @computed_field(return_type=str)
     @property
     def contract_hash(self) -> str:
         payload = self.model_dump(mode="json", exclude={"contract_hash"})
+        # Legacy preservation: contracts without a declared universe must hash
+        # byte-identically to before the expected_evidence field existed.
+        if payload.get("expected_evidence") is None:
+            payload.pop("expected_evidence", None)
         canonical = json.dumps(
             payload,
             sort_keys=True,

@@ -1,7 +1,8 @@
 import pytest
 import json
 from pathlib import Path
-from nexus.services.memory_indexer import rebuild_memory_index
+from datetime import datetime, timezone, timedelta
+from nexus.services.memory_indexer import rebuild_memory_index, stable_hash
 from nexus.services.lesson_retrieval import retrieve_with_resolution
 from nexus.services.continuous_learning import LessonEvent
 
@@ -13,12 +14,13 @@ def mock_repo(tmp_path):
     (tmp_path / ".nexus/runs/run1").mkdir(parents=True)
     
     # 1. 寫入 Local Lesson
+    recent = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     lesson = {
         "lesson_id": "L1",
         "category": "PYTHON",
         "root_cause": "Syntax error in list comprehension",
         "corrective_action": "Use proper bracket syntax",
-        "timestamp_utc": "2026-04-01T10:00:00Z",
+        "timestamp_utc": recent,
         "confidence": 0.9,
     }
     (tmp_path / ".nexus/knowledge/lesson_events.jsonl").write_text(json.dumps(lesson) + "\n")
@@ -33,7 +35,7 @@ def mock_repo(tmp_path):
             "category": "OS",
             "root_cause": "Permissions denied on /tmp/nexus",
             "corrective_action": "chmod 755 /tmp/nexus",
-            "timestamp_utc": "2026-04-02T10:00:00Z",
+            "timestamp_utc": recent,
         }
     }
     (tmp_path / ".nexus/learning/shared_lessons.jsonl").write_text(json.dumps(shared) + "\n")
@@ -84,6 +86,15 @@ def test_index_idempotency(mock_repo):
     # 增量語義：第二次應為 0
     assert res2["records_processed"] == 0, (
         f"Incremental sync failed: expected 0 redundant records, got {res2['records_processed']}"
+    )
+
+
+def test_stable_hash_preserves_historical_record_id_contract():
+    assert stable_hash("local_lesson", "L1") == (
+        "33b785bdff37b6aa43931e658ea81884c5948f46aafe1c717d563ed2a15071f4"
+    )
+    assert stable_hash("outcome", None, "decision", "skill") == (
+        "28c741c847d62b2e851ca5fe6944ebcbef61ddf0662033ffada4686758f3fbbb"
     )
 
 def test_hybrid_fallback_on_db_missing(mock_repo):

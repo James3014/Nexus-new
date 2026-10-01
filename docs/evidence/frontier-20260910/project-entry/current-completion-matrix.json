@@ -1,0 +1,92 @@
+{
+  "goal": "ISSUE-842-PROJECT-ENTRY",
+  "updated_at": "2026-09-10T05:00:05.319024+00:00",
+  "layers": {
+    "Implementation": {
+      "status": "IMPLEMENTED",
+      "revision": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/source-acceptance-final-6d.json",
+      "gap": null,
+      "freshness": "2026-09-10T04:43:59.661469+00:00"
+    },
+    "Source verification": {
+      "status": "PASS",
+      "revision": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/source-acceptance-final-6d.json",
+      "gap": null,
+      "freshness": "2026-09-10T04:43:59.661469+00:00"
+    },
+    "Integration": {
+      "status": "MERGED",
+      "source": "PR925 merge readback",
+      "revision": "e810851af7a83e1a3700747480163b62b1b596ba",
+      "gap": null,
+      "freshness": "2026-09-10T04:57:01.381784+00:00"
+    },
+    "Install/package": {
+      "status": "PASS",
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/r10-runtime-outcome.json",
+      "revision": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "gap": null,
+      "freshness": "2026-09-10T04:57:01.381784+00:00"
+    },
+    "Runtime": {
+      "status": "PASS",
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/r10-runtime-outcome.json",
+      "revision": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "gap": null,
+      "freshness": "2026-09-10T04:57:01.381784+00:00"
+    },
+    "Deployment": {
+      "status": "PASS",
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/r10-runtime-outcome.json",
+      "revision": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "gap": null,
+      "freshness": "2026-09-10T04:57:01.381784+00:00"
+    },
+    "Native / real entrypoint": {
+      "status": "PASS",
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/native-r10-witness.json",
+      "revision": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "gap": null,
+      "freshness": "2026-09-10T05:00:05.319024+00:00"
+    },
+    "Authorization": {
+      "status": "OWNER_DIRECT_REPAIR",
+      "source": "current user instruction: \u4f60\u5728\u4feenexus\u4e0d\u8d70\u6cbb\u7406\uff0c\u4fee\u597d\u5c31\u5c0d\u4e86",
+      "revision": null,
+      "gap": null,
+      "freshness": "2026-09-10T03:43:21.315259+00:00"
+    }
+  },
+  "retry": {
+    "pr": 925,
+    "head": "16758457f552e874358f5566b9a70a11d5b4dfbb",
+    "state": "VERIFIED",
+    "request_id": "req-issue842-project-entry-composition-r10-20260910",
+    "initial_pre_effect_rejection": "authority mirror stale; updated clean detached mirror and reconciled same request",
+    "persistent_workdir": "/Users/jameschen/Workspace/Nexus-new-authority-main"
+  },
+  "pe2": {
+    "primitive_continuity": "PASS_TWO_FRESH_PROCESSES",
+    "test_grant": "REVOKED_PHYSICAL_READBACK",
+    "project_entry_composition": "PASS_17_EXACT_6D_FRESH_PROCESS_CASES"
+  },
+  "next_work": null,
+  "candidate": {
+    "head": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+    "acceptance": "PASS",
+    "pytest": 639,
+    "composition_cases": 17
+  },
+  "terminal": {
+    "status": "COMPLETED",
+    "issue_state": "CLOSED",
+    "closed_at": "2026-09-10T04:59:24Z",
+    "marker": "CHATGPT_PROJECT_ENTRY_REHYDRATION_AND_READINESS_VERIFIED",
+    "evidence_url": "https://github.com/James3014/Nexus-new/issues/842#issuecomment-5613422356",
+    "main_readback": "e810851af7a83e1a3700747480163b62b1b596ba",
+    "runtime_readback": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+    "native_task_resume_claim": false
+  }
+}

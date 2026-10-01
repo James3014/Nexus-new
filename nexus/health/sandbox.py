@@ -15,6 +15,7 @@ class SpeculativeSandbox:
     def __init__(self, source_root: Path, mode: str = "auto"):
         self.source_root = Path(source_root)
         self.sandbox_root: Path | None = None
+        self._temp_root: Path | None = None
         
         # 🆕 自動偵測 Docker 可用性
         if mode == "auto":
@@ -47,17 +48,47 @@ class SpeculativeSandbox:
         }
 
     def fork(self) -> Path:
-        if self.mode == "docker":
-            return self._fork_docker()
-        return self._fork_tmpdir()
+        self._validate_source_root()
+        try:
+            if self.mode == "docker":
+                return self._fork_docker()
+            return self._fork_tmpdir()
+        except BaseException:
+            self.cleanup()
+            raise
 
-    def _fork_tmpdir(self) -> Path:
-        temp_dir = Path(tempfile.mkdtemp(prefix="nexus_sandbox_"))
-        self.sandbox_root = temp_dir / "repo"
+    def _validate_source_root(self) -> Path:
+        source_root = self.source_root.expanduser()
+        if source_root.is_symlink():
+            raise ValueError("sandbox source root must not be a symlink")
+        try:
+            resolved = source_root.resolve(strict=True)
+        except (FileNotFoundError, OSError) as exc:
+            raise ValueError("sandbox source root must be an existing directory") from exc
+        if not resolved.is_dir():
+            raise ValueError("sandbox source root must be an existing directory")
+
+        broad_roots = {
+            Path("/").resolve(),
+            Path.home().resolve(),
+            Path(tempfile.gettempdir()).resolve(),
+            Path("/tmp").resolve(),
+            Path("/private/tmp").resolve(),
+            Path("/var/tmp").resolve(),
+        }
+        if resolved in broad_roots:
+            raise ValueError(f"sandbox source root is too broad: {resolved}")
+        return resolved
+
+    def _copy_source_tree(self, prefix: str) -> Path:
+        source_root = self._validate_source_root()
+        self._temp_root = Path(tempfile.mkdtemp(prefix=prefix))
+        self.sandbox_root = self._temp_root / "repo"
         shutil.copytree(
-            self.source_root,
+            source_root,
             self.sandbox_root,
             dirs_exist_ok=True,
+            symlinks=True,
             ignore=shutil.ignore_patterns(
                 ".git",
                 ".venv",
@@ -70,24 +101,12 @@ class SpeculativeSandbox:
         )
         return self.sandbox_root
 
+    def _fork_tmpdir(self) -> Path:
+        return self._copy_source_tree("nexus_sandbox_")
+
     def _fork_docker(self) -> Path:
         """用 Docker 建立隔離環境"""
-        temp_dir = Path(tempfile.mkdtemp(prefix="nexus_docker_"))
-        self.sandbox_root = temp_dir / "repo"
-        shutil.copytree(
-            self.source_root,
-            self.sandbox_root,
-            dirs_exist_ok=True,
-            ignore=shutil.ignore_patterns(
-                ".git",
-                ".venv",
-                "__pycache__",
-                ".pytest_cache",
-                ".ruff_cache",
-                ".mypy_cache",
-                ".nexus/runs",
-            ),
-        )
+        self._copy_source_tree("nexus_docker_")
         
         # 建立 Dockerfile（如果專案沒有）
         dockerfile = self.sandbox_root / "Dockerfile.nexus"
@@ -167,12 +186,24 @@ COPY . .
             return 124
 
     def cleanup(self) -> None:
-        if self.mode == "docker" and hasattr(self, "_docker_tag"):
-            subprocess.run(
-                ["docker", "rmi", self._docker_tag],
-                capture_output=True, timeout=10
-            )
-        if self.sandbox_root is None:
-            return
-        shutil.rmtree(self.sandbox_root.parent, ignore_errors=True)
+        docker_tag = getattr(self, "_docker_tag", None)
+        if self.mode == "docker" and docker_tag:
+            try:
+                subprocess.run(
+                    ["docker", "rmi", docker_tag],
+                    capture_output=True, timeout=10
+                )
+            except Exception as exc:
+                logger.warning("Failed to remove sandbox Docker image %s: %s", docker_tag, exc)
+            finally:
+                delattr(self, "_docker_tag")
+
+        temp_root = self._temp_root
         self.sandbox_root = None
+        self._temp_root = None
+        if temp_root is None:
+            return
+        if temp_root.is_symlink():
+            logger.error("Refusing to remove symlinked sandbox temp root: %s", temp_root)
+            return
+        shutil.rmtree(temp_root, ignore_errors=True)

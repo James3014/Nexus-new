@@ -105,7 +105,7 @@ class CodeReviewStrategy(ReviewStrategy):
         if success:
             if phantom_reason:
                 return reviewer._build_review_result(
-                    status="REJECTED",
+                    status="RECOVERABLE_BLOCK",
                     summary=f"Rejected: {phantom_reason}",
                     patch_generated=patch_generated,
                     patch_apply_success=patch_apply_success,
@@ -125,8 +125,13 @@ class CodeReviewStrategy(ReviewStrategy):
 
         audit_metadata = data.get("audit_metadata", {})
         return_target_phase = audit_metadata.get("return_target_phase", "D")
+        # Only an explicit REJECTED response is terminal. FAIL/FAILED/unknown
+        # are repairable reviewer blocks and must not gain disposition authority.
+        terminal_rejection = str(data.get("status", "")).strip().upper() in {
+            "REJECTED", "REJECTED_WITH_REASON"
+        }
         return reviewer._build_review_result(
-            status="REJECTED",
+            status="REJECTED" if terminal_rejection else "RECOVERABLE_BLOCK",
             summary=data.get("summary"),
             violations=data.get("violations"),
             patch_generated=patch_generated,
@@ -136,6 +141,8 @@ class CodeReviewStrategy(ReviewStrategy):
             proof_value=proof_value,
             audit_metadata=audit_metadata,
             return_target_phase=return_target_phase,
+            retryable=not terminal_rejection,
+            next_action="none" if terminal_rejection else "REVISE",
         )
 
     def _get_files_and_diff(self, reviewer: Any, manual_files: Optional[list]) -> tuple:
@@ -185,8 +192,11 @@ class ConversationReviewStrategy(ReviewStrategy):
                 audit_metadata={"audit_profile": "conversation", "audit_level": audit_level},
             )
 
+        terminal_rejection = str(data.get("status", "")).strip().upper() in {
+            "REJECTED", "REJECTED_WITH_REASON"
+        }
         return reviewer._build_review_result(
-            status="REJECTED",
+            status="REJECTED" if terminal_rejection else "RECOVERABLE_BLOCK",
             summary=data.get("summary", "Conversation audit failed"),
             audit_flags=data.get("audit_flags", []),
             return_target_phase=data.get("return_target_phase", "D"),
@@ -196,6 +206,8 @@ class ConversationReviewStrategy(ReviewStrategy):
                 "missing_constraints": data.get("missing_constraints", []),
                 "assumption_gaps": data.get("assumption_gaps", []),
             },
+            retryable=not terminal_rejection,
+            next_action="none" if terminal_rejection else "REVISE",
         )
 
     def _build_prompt(self, reviewer: Any, audit_level: str, conv_pack: dict) -> str:

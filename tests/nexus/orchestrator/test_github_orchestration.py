@@ -3,6 +3,7 @@ import os
 import subprocess
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -12,18 +13,24 @@ from nexus.contracts.autonomy_goal import (
     RepositoryIdentity,
     StandingGrantContext,
 )
-from nexus.contracts.github_orchestration import canonical_hash
+from nexus.contracts.github_orchestration import MainMovementEvidence, canonical_hash
 from nexus.orchestrator.autonomy_policy import StandingGrantOutcome, StandingGrantRequest
 from nexus.orchestrator.github_orchestration import (
+    GovernedEvidenceProjectionError,
     _resolve_durable_merge_authorization_at,
+    build_governed_orchestration_evidence,
     evaluate_action,
     prepare_merge_intent,
+    requalify_main_movement,
+    resolve_durable_merge_authorization,
     resolve_merge_authorization,
     revalidate_merge_intent,
 )
 from nexus.orchestrator.standing_grant_store import (
     StandingGrantReceipt,
     _write_standing_grant_receipt_at,
+    standing_grant_key,
+    write_keyed_standing_grant_receipt,
 )
 from tests.contracts.test_github_orchestration import NOW, evidence
 
@@ -65,6 +72,74 @@ def request(ctx, **overrides):
     return StandingGrantRequest(**values)
 
 
+def test_durable_merge_authorization_selects_exact_keyed_goal_and_thread(tmp_path, monkeypatch):
+    """Same-repository keyed receipts never cross goal/thread boundaries."""
+    import nexus.orchestrator.standing_grant_store as store
+
+    monkeypatch.setattr(
+        store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    repo = RepositoryIdentity(
+        repository_id="James3014/Nexus-new",
+        canonical_remote="https://github.com/James3014/Nexus-new.git",
+    )
+    contexts = [
+        context(
+            repository=repo,
+            goal_id="goal-merge-a",
+            thread_id="thread-merge-a",
+            allowed_actions=(AutonomyActionClass.GITHUB_MERGE,),
+        ),
+        context(
+            repository=repo,
+            goal_id="goal-merge-b",
+            thread_id="thread-merge-b",
+            allowed_actions=(AutonomyActionClass.GITHUB_MERGE,),
+        ),
+    ]
+    receipts = []
+    for index, ctx in enumerate(contexts):
+        receipt = StandingGrantReceipt.issue(grant_id=f"merge-key-{index}", context=ctx)
+        write_keyed_standing_grant_receipt(receipt)
+        receipts.append(receipt)
+    ev = evidence()
+
+    def resolve(ctx):
+        req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+        intent = prepare_merge_intent(ctx, req, ev, now=NOW)
+        return resolve_durable_merge_authorization(intent, req, ev, now=NOW)
+
+    decision_a = resolve(contexts[0])
+    decision_b = resolve(contexts[1])
+    assert decision_a.outcome is StandingGrantOutcome.GRANT_MATCH
+    assert decision_b.outcome is StandingGrantOutcome.GRANT_MATCH
+    assert decision_a.context_hash == contexts[0].context_hash
+    assert decision_b.context_hash == contexts[1].context_hash
+
+    wrong_goal = request(
+        contexts[0], action=AutonomyActionClass.GITHUB_MERGE, goal_id="goal-merge-b"
+    )
+    wrong_intent = prepare_merge_intent(
+        contexts[0], request(contexts[0], action=AutonomyActionClass.GITHUB_MERGE), ev, now=NOW
+    )
+    wrong = resolve_durable_merge_authorization(wrong_intent, wrong_goal, ev, now=NOW)
+    assert wrong.outcome in {StandingGrantOutcome.INVALID, StandingGrantOutcome.OUT_OF_SCOPE}
+    wrong_thread = request(
+        contexts[0], action=AutonomyActionClass.GITHUB_MERGE, thread_id="thread-merge-b"
+    )
+    wrong_thread_result = resolve_durable_merge_authorization(
+        wrong_intent, wrong_thread, ev, now=NOW
+    )
+    assert wrong_thread_result.outcome in {
+        StandingGrantOutcome.INVALID,
+        StandingGrantOutcome.OUT_OF_SCOPE,
+    }
+
+    sibling = store._keyed_receipt_path(standing_grant_key(receipts[1]))
+    sibling.write_text("corrupt", encoding="utf-8")
+    assert resolve(contexts[0]).outcome is StandingGrantOutcome.GRANT_MATCH
+
+
 def test_valid_evidence_and_grant_produce_intent():
     intent = prepare_merge_intent(context(), request(context()), evidence(), now=NOW)
     assert (
@@ -72,6 +147,350 @@ def test_valid_evidence_and_grant_produce_intent():
         and intent.grant_outcome == "GRANT_MATCH"
         and intent.mutation_authorized is False
     )
+
+
+def movement_for(snap, **overrides):
+    value = dict(
+        old_main_sha=snap.base_sha,
+        old_main_tree_sha="1" * 40,
+        new_main_sha="e" * 40,
+        new_main_tree_sha="2" * 40,
+        candidate_head_sha=snap.head_sha,
+        candidate_tree_sha=snap.tree_sha,
+        candidate_diff_hash=snap.diff_hash,
+        candidate_changed_paths=snap.changed_paths,
+        changed_main_paths=("docs/unrelated.md",),
+        prior_impact_hash=snap.impact_hash,
+        prior_verifier_hash=snap.verifier_hash,
+    )
+    value.update(overrides)
+    return MainMovementEvidence.model_validate(value)
+
+
+def _plan(**overrides):
+    values = dict(
+        impact_class="DOCS_GOVERNANCE", unmatched_paths=[], changed_paths=["docs/unrelated.md"]
+    )
+    values.update(overrides)
+    return type("Plan", (), values)()
+
+
+def _make_requalify_git_repo(
+    tmp_path: Path, *, include_agents_change: bool = False
+) -> dict[str, Any]:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*args: str, text: bool = True):
+        return subprocess.check_output(["git", *args], cwd=repo, text=text)
+
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    (repo / "tests").mkdir()
+    (repo / "tests" / "test_smoke.py").write_text("def test_smoke(): pass\n", encoding="utf-8")
+    (repo / "docs").mkdir()
+    (repo / "docs" / "unrelated.md").write_text("initial docs\n", encoding="utf-8")
+    (repo / "AGENTS.md").write_text("initial agents\n", encoding="utf-8")
+    (repo / "nexus").mkdir()
+    (repo / "nexus" / "a.py").write_text("def a(): pass\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Nexus Test",
+            "-c",
+            "user.email=nexus@example.invalid",
+            "commit",
+            "-qm",
+            "old_main",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    old_main_sha = git("rev-parse", "HEAD").strip()
+    old_main_tree = git("rev-parse", "HEAD^{tree}").strip()
+
+    (repo / "docs" / "unrelated.md").write_text("updated docs\n", encoding="utf-8")
+    if include_agents_change:
+        (repo / "AGENTS.md").write_text("updated agents\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Nexus Test",
+            "-c",
+            "user.email=nexus@example.invalid",
+            "commit",
+            "-qm",
+            "new_main",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    new_main_sha = git("rev-parse", "HEAD").strip()
+    new_main_tree = git("rev-parse", "HEAD^{tree}").strip()
+
+    return {
+        "repo": repo,
+        "old_main_sha": old_main_sha,
+        "old_main_tree_sha": old_main_tree,
+        "new_main_sha": new_main_sha,
+        "new_main_tree_sha": new_main_tree,
+    }
+
+
+def test_main_movement_reuses_unaffected_dimensions(monkeypatch):
+    snap = evidence()
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {"valid": True, "proven_paths": tuple(k["changed_main_paths"])},
+    )
+    monkeypatch.setattr("scripts.ops.pr_impact_gate.build_impact_plan", lambda *a, **k: _plan())
+    result = requalify_main_movement(snap, movement_for(snap))
+    assert result.blocked is False
+    assert {item.action for item in result.dimensions} == {"REUSE_UNAFFECTED"}
+
+
+def test_main_movement_rechecks_overlap_and_authority(monkeypatch):
+    snap = evidence()
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {"valid": True, "proven_paths": tuple(k["changed_main_paths"])},
+    )
+    monkeypatch.setattr("scripts.ops.pr_impact_gate.build_impact_plan", lambda *a, **k: _plan())
+    result = requalify_main_movement(
+        snap,
+        movement_for(snap, changed_main_paths=("AGENTS.md", "nexus/a.py")),
+    )
+    by_name = {item.dimension: item for item in result.dimensions}
+    assert by_name["SEMANTIC_OVERLAP"].action == "RECHECK_AFFECTED"
+    assert by_name["AUTHORITY_DRIFT"].action == "RECHECK_AFFECTED"
+    assert result.blocked is True
+
+
+def test_main_movement_rechecks_test_inventory_without_blanket_invalidation(monkeypatch):
+    snap = evidence()
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {"valid": True, "proven_paths": tuple(k["changed_main_paths"])},
+    )
+    monkeypatch.setattr("scripts.ops.pr_impact_gate.build_impact_plan", lambda *a, **k: _plan())
+    result = requalify_main_movement(
+        snap,
+        movement_for(snap, changed_main_paths=("tests/unit/test_unrelated.py",)),
+    )
+    by_name = {item.dimension: item for item in result.dimensions}
+    assert by_name["TEST_IMPACT"].classification == "TEST_IMPACT"
+    assert by_name["TEST_IMPACT"].action == "RECHECK_AFFECTED"
+    assert by_name["SEMANTIC_OVERLAP"].action == "REUSE_UNAFFECTED"
+    assert by_name["TRANSPORT_DRIFT"].action == "REUSE_UNAFFECTED"
+    assert result.blocked is False
+
+
+def test_main_movement_rechecks_transport_without_blanket_invalidation(monkeypatch):
+    snap = evidence()
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {"valid": True, "proven_paths": tuple(k["changed_main_paths"])},
+    )
+    monkeypatch.setattr("scripts.ops.pr_impact_gate.build_impact_plan", lambda *a, **k: _plan())
+    result = requalify_main_movement(
+        snap,
+        movement_for(snap, changed_main_paths=("nexus/providers/example_transport.py",)),
+    )
+    by_name = {item.dimension: item for item in result.dimensions}
+    assert by_name["TRANSPORT_DRIFT"].classification == "TRANSPORT_DRIFT"
+    assert by_name["TRANSPORT_DRIFT"].action == "RECHECK_AFFECTED"
+    assert by_name["TEST_IMPACT"].action == "REUSE_UNAFFECTED"
+    assert by_name["SEMANTIC_OVERLAP"].action == "REUSE_UNAFFECTED"
+    assert result.blocked is False
+
+
+def test_main_movement_unknown_impact_universe_fails_closed_semantic_dimension(monkeypatch):
+    snap = evidence()
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {"valid": True, "proven_paths": tuple(k["changed_main_paths"])},
+    )
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.build_impact_plan",
+        lambda *a, **k: _plan(impact_class="IMPACT_UNKNOWN"),
+    )
+    result = requalify_main_movement(snap, movement_for(snap))
+    by_name = {item.dimension: item for item in result.dimensions}
+    assert by_name["SEMANTIC_OVERLAP"].classification == "IMPACT_UNKNOWN"
+    assert by_name["SEMANTIC_OVERLAP"].action == "IMPACT_UNKNOWN"
+    assert by_name["TEST_IMPACT"].action == "REUSE_UNAFFECTED"
+    assert by_name["TRANSPORT_DRIFT"].action == "REUSE_UNAFFECTED"
+    assert result.blocked is True
+
+
+def test_main_movement_tamper_fails_closed(monkeypatch):
+    snap = evidence()
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {"valid": True, "proven_paths": tuple(k["changed_main_paths"])},
+    )
+    monkeypatch.setattr("scripts.ops.pr_impact_gate.build_impact_plan", lambda *a, **k: _plan())
+    result = requalify_main_movement(snap, movement_for(snap, candidate_head_sha="a" * 40))
+    assert result.blocked is True
+    source = next(item for item in result.dimensions if item.dimension == "SOURCE_IDENTITY")
+    assert source.action == "IMPACT_UNKNOWN"
+
+
+def test_h1_omitted_authority_path_fails_closed(tmp_path: Path):
+    fixture = _make_requalify_git_repo(tmp_path, include_agents_change=True)
+    snap = evidence(base_sha=fixture["old_main_sha"], current_main_sha=fixture["old_main_sha"])
+    mov = movement_for(
+        snap,
+        old_main_sha=fixture["old_main_sha"],
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha=fixture["new_main_tree_sha"],
+        changed_main_paths=("docs/unrelated.md",),
+    )
+    result = requalify_main_movement(snap, mov, root=fixture["repo"])
+    assert result.blocked is True
+    by_name = {item.dimension: item for item in result.dimensions}
+    assert by_name["AUTHORITY_DRIFT"].action == "IMPACT_UNKNOWN"
+    assert by_name["AUTHORITY_DRIFT"].action != "REUSE_UNAFFECTED"
+    assert by_name["SOURCE_IDENTITY"].action == "IMPACT_UNKNOWN"
+
+
+def test_h2_spurious_caller_path_fails_closed(tmp_path: Path):
+    fixture = _make_requalify_git_repo(tmp_path, include_agents_change=False)
+    snap = evidence(base_sha=fixture["old_main_sha"], current_main_sha=fixture["old_main_sha"])
+    mov = movement_for(
+        snap,
+        old_main_sha=fixture["old_main_sha"],
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha=fixture["new_main_tree_sha"],
+        changed_main_paths=("docs/unrelated.md", "nexus/extra.py"),
+    )
+    result = requalify_main_movement(snap, mov, root=fixture["repo"])
+    assert result.blocked is True
+    assert all(item.action == "IMPACT_UNKNOWN" for item in result.dimensions)
+
+
+def test_h3_exact_path_set_allows_unaffected_classification(tmp_path: Path):
+    fixture = _make_requalify_git_repo(tmp_path, include_agents_change=False)
+    snap = evidence(base_sha=fixture["old_main_sha"], current_main_sha=fixture["old_main_sha"])
+    mov = movement_for(
+        snap,
+        old_main_sha=fixture["old_main_sha"],
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha=fixture["new_main_tree_sha"],
+        changed_main_paths=("docs/unrelated.md",),
+    )
+    result = requalify_main_movement(snap, mov, root=fixture["repo"])
+    assert result.blocked is False
+    assert {item.action for item in result.dimensions} == {"REUSE_UNAFFECTED"}
+
+
+def test_h4_tree_mismatch_fails_closed(tmp_path: Path):
+    fixture = _make_requalify_git_repo(tmp_path, include_agents_change=False)
+    snap = evidence(base_sha=fixture["old_main_sha"], current_main_sha=fixture["old_main_sha"])
+    mov = movement_for(
+        snap,
+        old_main_sha=fixture["old_main_sha"],
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha="0" * 40,
+        changed_main_paths=("docs/unrelated.md",),
+    )
+    result = requalify_main_movement(snap, mov, root=fixture["repo"])
+    assert result.blocked is True
+    assert all(item.action == "IMPACT_UNKNOWN" for item in result.dimensions)
+
+
+def test_h5_unresolvable_endpoint_fails_closed(tmp_path: Path):
+    fixture = _make_requalify_git_repo(tmp_path, include_agents_change=False)
+    snap = evidence(base_sha="f" * 40, current_main_sha="f" * 40)
+    mov = movement_for(
+        snap,
+        old_main_sha="f" * 40,
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha=fixture["new_main_tree_sha"],
+        changed_main_paths=("docs/unrelated.md",),
+    )
+    result = requalify_main_movement(snap, mov, root=fixture["repo"])
+    assert result.blocked is True
+    assert all(item.action == "IMPACT_UNKNOWN" for item in result.dimensions)
+
+
+def test_h6_rename_delete_ambiguity_fails_closed(tmp_path: Path, monkeypatch):
+    fixture = _make_requalify_git_repo(tmp_path, include_agents_change=False)
+    snap = evidence(base_sha=fixture["old_main_sha"], current_main_sha=fixture["old_main_sha"])
+    mov = movement_for(
+        snap,
+        old_main_sha=fixture["old_main_sha"],
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha=fixture["new_main_tree_sha"],
+        changed_main_paths=("docs/unrelated.md",),
+    )
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {
+            "valid": False,
+            "reasons": ["raw diff contains unsupported status or rename ambiguity: R100"],
+            "proven_paths": (),
+        },
+    )
+    result = requalify_main_movement(snap, mov, root=fixture["repo"])
+    assert result.blocked is True
+    assert all(item.action == "IMPACT_UNKNOWN" for item in result.dimensions)
+
+
+@pytest.mark.parametrize(
+    "tamper_field",
+    [
+        "candidate_head_sha",
+        "candidate_tree_sha",
+        "candidate_diff_hash",
+        "candidate_changed_paths",
+        "prior_impact_hash",
+        "prior_verifier_hash",
+    ],
+)
+def test_h7_existing_tamper_controls_remain_green(tamper_field, monkeypatch):
+    snap = evidence()
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {"valid": True, "proven_paths": tuple(k["changed_main_paths"])},
+    )
+    monkeypatch.setattr("scripts.ops.pr_impact_gate.build_impact_plan", lambda *a, **k: _plan())
+    tamper_val = (
+        ("nexus/tamper.py",)
+        if "paths" in tamper_field
+        else "0" * (40 if "sha" in tamper_field else 64)
+    )
+    mov = movement_for(snap, **{tamper_field: tamper_val})
+    result = requalify_main_movement(snap, mov)
+    assert result.blocked is True
+    by_name = {item.dimension: item for item in result.dimensions}
+    assert by_name["SOURCE_IDENTITY"].action == "IMPACT_UNKNOWN"
+
+
+def test_h8_no_authority_escalation(tmp_path: Path):
+    fixture = _make_requalify_git_repo(tmp_path, include_agents_change=False)
+    snap = evidence(base_sha=fixture["old_main_sha"], current_main_sha=fixture["old_main_sha"])
+    mov = movement_for(
+        snap,
+        old_main_sha=fixture["old_main_sha"],
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha=fixture["new_main_tree_sha"],
+        changed_main_paths=("docs/unrelated.md",),
+    )
+    result = requalify_main_movement(snap, mov, root=fixture["repo"])
+    assert result.claim_ceiling == "COMPLETION_PATH_COMPRESSION_TARGET_B_CANDIDATE_ONLY"
+    assert not hasattr(result, "mutation_authorized")
+    assert not hasattr(result, "grant_outcome")
 
 
 def test_durable_receipt_loads_and_authorizes_without_caller_context(tmp_path):
@@ -602,3 +1021,238 @@ def test_reviewer_implementer_identity_cannot_collude():
     raw["candidate"]["implementer"] = "reviewer"
     with pytest.raises(ValueError, match="MALFORMED_INPUT"):
         prepare_merge_intent(context(), request(context()), raw, now=NOW)
+
+
+def _compat_projection_inputs():
+    base = "1" * 40
+    head = "2" * 40
+    tree = "3" * 40
+    paths = ("nexus/a.py", "tests/test_a.py")
+    task_card = (
+        "# Task Card: TASK-COMPAT\n\n"
+        "artifact_authority: current\n"
+        "task_id: `TASK-COMPAT`\n"
+        "owner: James Chen\n"
+        "status: ACTIVE\n"
+        "commit_required: true\n"
+        "candidate_required: true\n\n"
+        "## Allowed files\n\n"
+        "- `nexus/a.py`\n"
+        "- `tests/test_a.py`\n\n"
+        "## Verification commands\n"
+    ).encode()
+    card_hash = __import__("hashlib").sha256(task_card).hexdigest()
+    lane = {
+        "schema": "nexus.merge_lane_binding.v1",
+        "execution_lane": "GOVERNED",
+        "contract_kind": "TRACKED_TASK_CARD",
+        "owner_id": "James3014",
+        "issue_number": 1211,
+        "task_id": "TASK-COMPAT",
+        "attempt_id": "ATTEMPT-COMPAT-A1",
+        "task_card_path": "tasks/compat/00-task.md",
+        "task_card_sha256": card_hash,
+        "owner_lane_rebind": None,
+    }
+    lane["binding_hash"] = canonical_hash(lane)
+    pr_body = (
+        "<!-- NEXUS_MERGE_LANE_V1\n"
+        + json.dumps(lane, sort_keys=True, separators=(",", ":"))
+        + "\nNEXUS_MERGE_LANE_V1 -->"
+    )
+    workflow_identity = {
+        "event_name": "pull_request_target",
+        "repository": "James3014/Nexus-new",
+        "default_branch": "main",
+        "workflow_ref": "James3014/Nexus-new/.github/workflows/trusted.yml@refs/heads/main",
+        "workflow_sha": base,
+        "run_id": 123,
+        "pull_request_number": 1210,
+    }
+    diff_hash = "4" * 64
+    manifest = {
+        "status": "CONTROLLER_COMPLETE",
+        "workflow_identity": workflow_identity,
+        "run_id": 123,
+        "base_sha": base,
+        "head_sha": head,
+        "head_tree": tree,
+        "raw_diff_sha256": diff_hash,
+    }
+    verifier = {
+        **manifest,
+        "status": "COMPLETE",
+        "executor": {"exit_code": 0},
+    }
+    acceptance = (
+        "Independent acceptance — exact Candidate A4\n\n"
+        f"- base: `{base}`\n"
+        f"- head: `{head}`\n"
+        f"- tree: `{tree}`\n"
+        f"- Task Card SHA-256: `{card_hash}`\n"
+        "- reviewer transport/session: Codex independent session `review-session-1`\n"
+        f"- reviewer output SHA-256: `{'5' * 64}`\n\n"
+        "Verdict: **BLOCKERS: none**\n"
+        "Maximum claim: `R1_SOURCE_CANDIDATE_ACCEPTED`."
+    )
+    checks = [
+        {
+            "name": "Exact-base impact gate",
+            "status": "completed",
+            "conclusion": "success",
+            "head_sha": head,
+        },
+        {
+            "name": "Trusted verifier (default branch)",
+            "status": "completed",
+            "conclusion": "success",
+            "head_sha": head,
+        },
+    ]
+    plan = {
+        "base_sha": base,
+        "head_sha": head,
+        "source_tree": tree,
+        "changed_paths": list(paths),
+    }
+    classification = {
+        "classification": "EXACT_BASELINE_DEBT",
+        "blocking": False,
+        "new_failures": [],
+    }
+    return {
+        "repository": "James3014/Nexus-new",
+        "issue_number": 1211,
+        "pull_request_number": 1210,
+        "pr_body": pr_body,
+        "task_card_path": "tasks/compat/00-task.md",
+        "task_card_bytes": task_card,
+        "controller_manifest_bytes": json.dumps(manifest, sort_keys=True).encode(),
+        "verifier_evidence_bytes": json.dumps(verifier, sort_keys=True).encode(),
+        "acceptance_comment_id": 5891783503,
+        "acceptance_comment_author": "James3014",
+        "acceptance_comment_body": acceptance,
+        "required_check_names": (
+            "Exact-base impact gate",
+            "Trusted verifier (default branch)",
+        ),
+        "check_observations": checks,
+        "impact_plan": plan,
+        "impact_classification": classification,
+        "implementer": "coordinator-implementer",
+        "observed_at": NOW,
+        "fresh_until": NOW + timedelta(hours=1),
+    }
+
+
+def test_governed_evidence_projection_builds_existing_v2_from_raw_evidence():
+    values = _compat_projection_inputs()
+    projected = build_governed_orchestration_evidence(**values)
+    assert projected.schema == "nexus.github_orchestration_evidence.v2"
+    assert projected.candidate.task_id == "TASK-COMPAT"
+    assert projected.candidate.attempt_id == "ATTEMPT-COMPAT-A1"
+    assert projected.candidate.reviewer == "review-session-1"
+    assert projected.candidate.candidate_state_hash != "4" * 64
+    assert projected.verifier_hash == projected.candidate.verified_receipt_hash
+    assert projected.changed_paths == projected.allowed_paths
+
+
+@pytest.mark.parametrize(
+    ("mutation", "code"),
+    [
+        ("card", "MERGE_LANE_BINDING_INVALID"),
+        ("controller", "CANDIDATE_SUBJECT_MISMATCH"),
+        ("verifier", "VERIFIER_SUBJECT_MISMATCH"),
+        ("acceptance", "INDEPENDENT_ACCEPTANCE_SUBJECT_MISMATCH"),
+        ("check", "REQUIRED_CHECK_STATE_UNPROVEN"),
+        ("impact", "IMPACT_EVIDENCE_UNPROVEN"),
+    ],
+)
+def test_governed_evidence_projection_fails_closed_on_subject_tamper(mutation, code):
+    values = _compat_projection_inputs()
+    if mutation == "card":
+        values["task_card_bytes"] += b"tamper\n"
+    elif mutation == "controller":
+        payload = json.loads(values["controller_manifest_bytes"])
+        payload["head_sha"] = "9" * 40
+        values["controller_manifest_bytes"] = json.dumps(payload).encode()
+    elif mutation == "verifier":
+        payload = json.loads(values["verifier_evidence_bytes"])
+        payload["raw_diff_sha256"] = "9" * 64
+        values["verifier_evidence_bytes"] = json.dumps(payload).encode()
+    elif mutation == "acceptance":
+        values["acceptance_comment_body"] = values["acceptance_comment_body"].replace(
+            "2" * 40, "9" * 40
+        )
+    elif mutation == "check":
+        values["check_observations"][0]["conclusion"] = "failure"
+    else:
+        values["impact_classification"]["blocking"] = True
+    with pytest.raises(GovernedEvidenceProjectionError, match=code):
+        build_governed_orchestration_evidence(**values)
+
+
+def test_governed_evidence_projection_rejects_arbitrary_authoritative_hash_inputs():
+    import inspect
+
+    parameters = inspect.signature(build_governed_orchestration_evidence).parameters
+    forbidden = {
+        "candidate_state_hash",
+        "verified_receipt_hash",
+        "verifier_hash",
+        "independent_acceptance_hash",
+        "checks_hash",
+        "reviews_hash",
+        "impact_hash",
+        "diff_hash",
+        "task_attempt_contract_hash",
+    }
+    assert not (forbidden & set(parameters))
+
+
+def _rebind_card(values, task_card_bytes):
+    old_hash = __import__("hashlib").sha256(values["task_card_bytes"]).hexdigest()
+    new_hash = __import__("hashlib").sha256(task_card_bytes).hexdigest()
+    match = __import__("re").search(
+        r"<!-- NEXUS_MERGE_LANE_V1\n(.*?)\nNEXUS_MERGE_LANE_V1 -->",
+        values["pr_body"],
+        __import__("re").DOTALL,
+    )
+    assert match
+    lane = json.loads(match.group(1))
+    lane["task_card_sha256"] = new_hash
+    lane.pop("binding_hash")
+    lane["binding_hash"] = canonical_hash(lane)
+    values["pr_body"] = (
+        "<!-- NEXUS_MERGE_LANE_V1\n"
+        + json.dumps(lane, sort_keys=True, separators=(",", ":"))
+        + "\nNEXUS_MERGE_LANE_V1 -->"
+    )
+    values["task_card_bytes"] = task_card_bytes
+    values["acceptance_comment_body"] = values["acceptance_comment_body"].replace(
+        old_hash, new_hash
+    )
+
+
+def test_governed_evidence_projection_current_card_uses_same_builder():
+    values = _compat_projection_inputs()
+    card = values["task_card_bytes"].replace(
+        b"status: ACTIVE\n", b"status: ACTIVE\nexecution_lane: GOVERNED\n"
+    )
+    _rebind_card(values, card)
+    projected = build_governed_orchestration_evidence(**values)
+    assert projected.candidate.task_id == "TASK-COMPAT"
+    assert projected.candidate.attempt_id == "ATTEMPT-COMPAT-A1"
+
+
+def test_governed_evidence_projection_rejects_explicit_non_governed_card():
+    values = _compat_projection_inputs()
+    card = values["task_card_bytes"].replace(
+        b"status: ACTIVE\n", b"status: ACTIVE\nexecution_lane: DIRECT_CANONICAL\n"
+    )
+    _rebind_card(values, card)
+    with pytest.raises(
+        GovernedEvidenceProjectionError,
+        match="UNSUPPORTED_LEGACY_CONTRACT_GENERATION",
+    ):
+        build_governed_orchestration_evidence(**values)

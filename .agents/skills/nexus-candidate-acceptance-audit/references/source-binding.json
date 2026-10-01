@@ -1,0 +1,67 @@
+{
+  "skill": "nexus-candidate-acceptance-audit",
+  "bundle_revision": "2026-09-08-r1",
+  "original_skill_sha256": "4d9ca5b5085328bab660e03b4b445aa4df6f35085203e5eb4f9dbcf42d42026d",
+  "review_basis": "original supplied skill plus applicable uploaded reconciliation; not live runtime approval",
+  "reviewed_document_count": 11,
+  "applicable_source_documents": [
+    {
+      "file": "01_24_OPTIMIZATION_PLAN_20260908.md",
+      "bytes": 12792,
+      "sha256": "9b49ddc9b11848a1a4a82aedc3e27ab6d527c7c81c7eb2960744b6f3e53c9fc0"
+    },
+    {
+      "file": "02_MODEL_WORKFORCE_THREE_ARM_CALIBRATION_20260908.md",
+      "bytes": 24045,
+      "sha256": "f0b609d679ec3cf9de66b8b0dc0f8445679970310f51091cdce809c642f98d55"
+    },
+    {
+      "file": "03_NEXUS_CORE_MENTAL_MODEL_20260908.md",
+      "bytes": 48554,
+      "sha256": "121ad464d1cfa1ffa2a49725e1c452c783beb7fece15008bec4e9e1896e269b9"
+    },
+    {
+      "file": "04_MODEL_WORKFORCE_POLICY_20260908.md",
+      "bytes": 34602,
+      "sha256": "1499f1bab1369d47dccb4fe7f9d27c265184691960de0a3996fbefec508f73ac"
+    },
+    {
+      "file": "05_NEXUS_DEVELOPMENT_INTELLIGENCE_ARCHITECTURE_LINEAGE_20260908.md",
+      "bytes": 56395,
+      "sha256": "c5c5ac47c3bea9159b699f1e6c9bc93de44814ec018dc52d1400fdc24d126834"
+    },
+    {
+      "file": "06_107_DECISIONS_COMPLETE_20260908_OVERLAY.md",
+      "bytes": 69771,
+      "sha256": "4b7a1d74bf8d6f2744a7ed0218f4d7e948fff2ad418b05b6f991d193fb6ebf90"
+    },
+    {
+      "file": "07_23_TOP_PRIORITY_RISKS_20260908.md",
+      "bytes": 13982,
+      "sha256": "75b57ae5a2e1a35ef7873274450b5c8295900428c585afbc2077b5fb8ec8aadc"
+    },
+    {
+      "file": "08_21_LEARNING_CLOSURE_MATRIX_20260908.md",
+      "bytes": 17245,
+      "sha256": "f6d95d842e1734b19a3a4ea932f5cb0f39b1fbd024483e6ba50075449ce3f375"
+    },
+    {
+      "file": "09_NEXUS_MULTI_MODEL_COLLABORATION_STANDARD_v2.9_REFRESH_20260908.md",
+      "bytes": 108358,
+      "sha256": "c477f135f73ef929ad35c8a5c2e09140d04a88debe60f14293569a85282348e8"
+    },
+    {
+      "file": "10_30_RESIDUAL_RISKS_ENGINEERING_DESIGNS_20260908.md",
+      "bytes": 16720,
+      "sha256": "4cbc7ca84bfe5786993776f5a9ef7fbb6b5d7bd3502787c9455d3d406701681d"
+    },
+    {
+      "file": "11_NEXUS_PRODUCT_ARCHITECTURE_BASELINE_v1.3_CANDIDATE_R3_20260908.md",
+      "bytes": 90078,
+      "sha256": "d4d8692db4db834402adb8087efd5babb167d3e9cfae6656e5ac2739d2f098c4"
+    }
+  ],
+  "business_policy_delta": "ONLY_EXPLICIT_SOURCE_SUPPORTED_DELTA",
+  "host_qualification": "NOT_RUN",
+  "behavioral_trigger_evaluation": "NOT_RUN"
+}
