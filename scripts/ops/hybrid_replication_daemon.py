@@ -89,7 +89,9 @@ def _comments(repository: str, issue_number: int) -> list[dict[str, Any]]:
 
 
 def _single_marker_comment(comments: list[dict[str, Any]], marker: str) -> str | None:
-    matches = [str(item.get("body") or "") for item in comments if marker in str(item.get("body") or "")]
+    matches = [
+        str(item.get("body") or "") for item in comments if marker in str(item.get("body") or "")
+    ]
     if not matches:
         return None
     if len(matches) != 1:
@@ -165,9 +167,13 @@ def advance_all(
         frozen_policy_sha256=frozen_policy_sha256,
         stack_runner=stack_runner,
         terminal_resolver=terminal_resolver,
-        clock=lambda: __import__("datetime").datetime.now(
-            __import__("datetime").timezone.utc
-        ).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        clock=lambda: (
+            __import__("datetime")
+            .datetime.now(__import__("datetime").timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        ),
     )
     advanced: list[dict[str, Any]] = []
     for state_path in sorted(store.tasks_root.glob("*/state.json")):
@@ -176,13 +182,11 @@ def advance_all(
             continue
         before = str(state.get("phase"))
         after = controller.advance(str(state["task_key"]))
-        advanced.append(
-            {
-                "task_key": state["task_key"],
-                "before": before,
-                "after": after.get("phase"),
-            }
-        )
+        advanced.append({
+            "task_key": state["task_key"],
+            "before": before,
+            "after": after.get("phase"),
+        })
     return {
         "schema": "nexus.hybrid_replication.daemon_advance.v1",
         "advanced": advanced,
@@ -210,7 +214,9 @@ def main() -> int:
     if ingest_report["missing_admission"]:
         return 4
     if not (args.frozen_policy_sha256 and args.stack_command and args.ground_truth_command):
-        raise SystemExit("advance mode requires frozen policy, stack command, and ground-truth command")
+        raise SystemExit(
+            "advance mode requires frozen policy, stack command, and ground-truth command"
+        )
     advance_report = advance_all(
         store=store,
         frozen_policy_sha256=args.frozen_policy_sha256,
