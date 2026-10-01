@@ -158,14 +158,15 @@ def test_task_ids_cannot_alias_another_case(task_id, tmp_path):
 
 
 @pytest.mark.parametrize("arm", [runner.run_bare_row, runner.run_core_row])
-@pytest.mark.parametrize("field,value", [
-    ("task_statement", "substituted statement"),
-    ("verifier_command", ["python3", "-c", "raise SystemExit(0)"]),
-    ("repo_ref", "HEAD"),
-])
-def test_prepared_direct_rows_revalidate_contract_before_provider(
-    arm, field, value, tmp_path
-):
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("task_statement", "substituted statement"),
+        ("verifier_command", ["python3", "-c", "raise SystemExit(0)"]),
+        ("repo_ref", "HEAD"),
+    ],
+)
+def test_prepared_direct_rows_revalidate_contract_before_provider(arm, field, value, tmp_path):
     task = runner._prepare_tasks(_manifest(), tmp_path)[0]
     task[field] = value
     with pytest.raises(ExternalFixturePolicyError):
@@ -292,7 +293,9 @@ def test_core_failure_cleans_workspace_and_restores_environment(monkeypatch):
 
 def test_bare_offline_patch_reaches_real_isolated_verifier(monkeypatch):
     task = _manifest()["tasks"][0]
-    fake_provider = Mock(return_value=("SEARCH:\ndef greet(name)\nREPLACE:\ndef greet(name):\n", {}))
+    fake_provider = Mock(
+        return_value=("SEARCH:\ndef greet(name)\nREPLACE:\ndef greet(name):\n", {})
+    )
     monkeypatch.setattr(runner, "_ollama_provider_with_metrics", fake_provider)
     before = set((ROOT / ".nexus/bench_cases").glob("n30r-v2-*"))
     result = runner.run_bare_row(task, task["task_seed"], "offline")

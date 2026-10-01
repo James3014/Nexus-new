@@ -201,7 +201,10 @@ def _materialize_task(task_dict: dict) -> Any:
     if task_dict.get("network_allowed", False) is not False:
         raise ExternalFixturePolicyError("N30R fixture setup must remain offline")
     root = Path(__file__).resolve().parents[2]
-    if task_dict.get("repo", str(root)) != str(root) or task_dict.get("repo_ref", "working-tree") != "working-tree":
+    if (
+        task_dict.get("repo", str(root)) != str(root)
+        or task_dict.get("repo_ref", "working-tree") != "working-tree"
+    ):
         raise ExternalFixturePolicyError("N30R fixture repository/ref is not allowed")
     relative = task_dict.get("source_relpath")
     if not isinstance(relative, str) or not relative or "\\" in relative or "\x00" in relative:
@@ -209,8 +212,10 @@ def _materialize_task(task_dict: dict) -> Any:
     if Path(relative).is_absolute() or any(part in ("", ".", "..") for part in relative.split("/")):
         raise ExternalFixturePolicyError("N30R source_relpath must stay canonical and relative")
     command = task_dict.get("verifier_command")
-    if not isinstance(command, list) or not command or any(
-        not isinstance(part, str) or not part or "\x00" in part for part in command
+    if (
+        not isinstance(command, list)
+        or not command
+        or any(not isinstance(part, str) or not part or "\x00" in part for part in command)
     ):
         raise ExternalFixturePolicyError("N30R verifier_command must be nonempty string argv")
     for field in ("source_fixture_sha256", "verifier_contract_sha256", "task_statement_sha256"):
@@ -251,9 +256,14 @@ def _extract_fixture_source(fixture: str) -> str:
     """Read literal ORIGINAL data without executing fixture setup code."""
     try:
         tree = ast.parse(fixture)
-        assignments = [node.value for node in tree.body if isinstance(node, ast.Assign)
-                       and any(isinstance(target, ast.Name) and target.id == "ORIGINAL"
-                               for target in node.targets)]
+        assignments = [
+            node.value
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "ORIGINAL" for target in node.targets
+            )
+        ]
         if not assignments:
             return fixture
         if len(assignments) != 1:
@@ -305,9 +315,7 @@ def _materialize_task_source(task_dict: dict, workspace_root: Path) -> tuple[str
         raise ExternalFixturePolicyError("N30R source fixture symlink is not allowed")
     if source_path.resolve() != source_path.absolute():
         raise ExternalFixturePolicyError("N30R source fixture symlink is not allowed")
-    case_dir = _contained_path(
-        workspace_root, workspace_root / ".nexus" / "bench_cases" / task_id
-    )
+    case_dir = _contained_path(workspace_root, workspace_root / ".nexus" / "bench_cases" / task_id)
     try:
         # Reserve this task's destination atomically; never overwrite another run.
         case_dir.mkdir(parents=True, exist_ok=False)
@@ -317,14 +325,21 @@ def _materialize_task_source(task_dict: dict, workspace_root: Path) -> tuple[str
         adapter = OfflineCachedExternalFixtureAdapter(
             workspace_root=workspace_root,
             cache_manifest=ExternalFixtureCacheManifest(
-                allowed_repo=str(repo_root), allowed_ref="working-tree", cache_dir=repo_root,
-                expected_files=(relpath,), network_allowed=False,
+                allowed_repo=str(repo_root),
+                allowed_ref="working-tree",
+                cache_dir=repo_root,
+                expected_files=(relpath,),
+                network_allowed=False,
             ),
         )
         result = resolve_external_fixture(
             ExternalFixtureRequest(
-                task_id=task_id, repo=str(repo_root), repo_ref="working-tree",
-                fixture_kind="n30r_v2_repository_fixture", target_file=relpath, test_file=relpath,
+                task_id=task_id,
+                repo=str(repo_root),
+                repo_ref="working-tree",
+                fixture_kind="n30r_v2_repository_fixture",
+                target_file=relpath,
+                test_file=relpath,
             ),
             adapter=adapter,
         )
@@ -340,7 +355,11 @@ def _materialize_task_source(task_dict: dict, workspace_root: Path) -> tuple[str
 
 def _prepare_tasks(manifest: dict[str, Any], workspace_root: Path) -> list[dict]:
     """Validate and materialize every task before any provider is constructed."""
-    if not isinstance(manifest, dict) or not isinstance(manifest.get("tasks"), list) or not manifest["tasks"]:
+    if (
+        not isinstance(manifest, dict)
+        or not isinstance(manifest.get("tasks"), list)
+        or not manifest["tasks"]
+    ):
         raise ExternalFixturePolicyError("N30R manifest requires a nonempty tasks list")
     if manifest.get("network_allowed", False) is not False:
         raise ExternalFixturePolicyError("N30R fixture setup must remain offline")
@@ -351,9 +370,15 @@ def _prepare_tasks(manifest: dict[str, Any], workspace_root: Path) -> list[dict]
     if len(task_ids) != len(set(task_ids)):
         raise ExternalFixturePolicyError("N30R manifest contains duplicate task_id")
     from scripts.bench.n30r_v2_paired_eval import VALID_ARM_IDS
+
     for task in tasks:
         order = task.get("execution_order")
-        if not isinstance(order, list) or len(order) != 2 or any(not isinstance(arm, str) for arm in order) or set(order) != VALID_ARM_IDS:
+        if (
+            not isinstance(order, list)
+            or len(order) != 2
+            or any(not isinstance(arm, str) for arm in order)
+            or set(order) != VALID_ARM_IDS
+        ):
             raise ExternalFixturePolicyError("N30R execution_order must name the two known arms")
         if type(task.get("task_seed")) is not int:
             raise ExternalFixturePolicyError("N30R task_seed must be an integer")
@@ -374,13 +399,19 @@ def _require_task_source(task_dict: dict) -> str:
     fixture = task_dict.get("_materialized_fixture")
     expected_hash = task_dict.get("source_fixture_sha256")
     if fixture is not None:
-        if task_dict.get("_task_spec") != spec or not isinstance(fixture, str) or sha256_str(fixture) != expected_hash:
+        if (
+            task_dict.get("_task_spec") != spec
+            or not isinstance(fixture, str)
+            or sha256_str(fixture) != expected_hash
+        ):
             raise ExternalFixturePolicyError("N30R materialized fixture contract/hash mismatch")
         bound_root = task_dict.get("_materialized_root")
         if not isinstance(bound_root, str):
             raise ExternalFixturePolicyError("N30R materialized fixture root is missing")
         root = Path(bound_root)
-        path = _contained_path(root, root / ".nexus" / "bench_cases" / spec.task_id / spec.source_relpath)
+        path = _contained_path(
+            root, root / ".nexus" / "bench_cases" / spec.task_id / spec.source_relpath
+        )
         if not path.is_file() or path.read_text(encoding="utf-8") != fixture:
             raise ExternalFixturePolicyError("N30R materialized fixture bytes changed")
         source = _extract_fixture_source(fixture)
@@ -389,7 +420,9 @@ def _require_task_source(task_dict: dict) -> str:
         return source
     source = task_dict.get("_materialized_source")
     if source is not None:
-        raise ExternalFixturePolicyError("N30R direct-row fixture hash lacks canonical materialization")
+        raise ExternalFixturePolicyError(
+            "N30R direct-row fixture hash lacks canonical materialization"
+        )
     with _temporary_repo_workspace() as root:
         _, source = _materialize_task_source(task_dict, root)
         return source
@@ -722,7 +755,11 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
 
 
 def _run_core_row_in_workspace(
-    task_dict: dict, seed: int, run_id: str, workspace: str, source_content: str,
+    task_dict: dict,
+    seed: int,
+    run_id: str,
+    workspace: str,
+    source_content: str,
     t_e2e_start: float,
 ) -> dict:
     """Existing production LocalModelExecutor path; no routing authority change."""
