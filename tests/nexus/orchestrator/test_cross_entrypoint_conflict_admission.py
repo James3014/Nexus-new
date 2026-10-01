@@ -71,7 +71,7 @@ def test_direct_gpt_vs_overlapping_rdc_worker():
         mutation_mode="DIRECT_DELEGATED",
     )
 
-    res = evaluate_cross_entrypoint_conflict(direct_gpt, [rdc_worker])
+    res = evaluate_cross_entrypoint_conflict(direct_gpt, [rdc_worker], expected_revision="a" * 40)
     assert res["schema"] == MUTATION_CONFLICT_SCHEMA
     assert res["claim_ceiling"] == MUTATION_CONFLICT_CLAIM_CEILING
     assert res["disposition"] == CONFLICT_OVERLAP
@@ -91,7 +91,7 @@ def test_rdc_worker_vs_local_writer_overlapping_domain():
         mutation_mode="LOCAL",
     )
 
-    res = evaluate_cross_entrypoint_conflict(local_writer, [rdc_worker])
+    res = evaluate_cross_entrypoint_conflict(local_writer, [rdc_worker], expected_revision="a" * 40)
     assert res["disposition"] == CONFLICT_OVERLAP
 
 
@@ -108,7 +108,7 @@ def test_governed_target_vs_direct_mutation():
         mutation_mode="DIRECT_CANONICAL",
     )
 
-    res = evaluate_cross_entrypoint_conflict(governed, [direct])
+    res = evaluate_cross_entrypoint_conflict(governed, [direct], expected_revision="a" * 40)
     assert res["disposition"] == CONFLICT_OVERLAP
 
 
@@ -130,7 +130,9 @@ def test_disjoint_mutation_domains_allows_clear():
         mutation_mode="ISOLATED_TARGET",
     )
 
-    res = evaluate_cross_entrypoint_conflict(direct_gpt, [rdc_worker, isolated_target])
+    res = evaluate_cross_entrypoint_conflict(
+        direct_gpt, [rdc_worker, isolated_target], expected_revision="a" * 40
+    )
     assert res["disposition"] == CONFLICT_CLEAR
     assert res["active_writer_count"] == 2
     assert res["normalized_domain"] == ["nexus/services/auth.py"]
@@ -143,12 +145,13 @@ def test_stale_writer_identity_fails_closed():
     cand = _writer("task-1", ["nexus/a.py"], controller_revision=base_rev)
     stale_active = _writer("task-2", ["nexus/b.py"], controller_revision=stale_rev)
 
-    res = evaluate_cross_entrypoint_conflict(cand, [stale_active])
+    # Writer stale against expected revision
+    res = evaluate_cross_entrypoint_conflict(cand, [stale_active], expected_revision=base_rev)
     assert res["disposition"] == CONFLICT_STALE
 
-    # Also candidate stale against expected revision
+    # Candidate stale against expected revision
     res_cand_stale = evaluate_cross_entrypoint_conflict(
-        cand, expected_revision="c" * 40
+        cand, [stale_active], expected_revision="c" * 40
     )
     assert res_cand_stale["disposition"] == CONFLICT_STALE
 
@@ -159,7 +162,7 @@ def test_unresolved_unknown_prior_effect_fails_closed():
         ["nexus/a.py"],
         unknown_effect_refs=["unconfirmed_git_push"],
     )
-    res = evaluate_cross_entrypoint_conflict(cand_unknown, [])
+    res = evaluate_cross_entrypoint_conflict(cand_unknown, [], expected_revision="a" * 40)
     assert res["disposition"] == CONFLICT_RECONCILE_REQUIRED
     assert res["reason"] == "CANDIDATE_UNRESOLVED_PRIOR_EFFECTS"
 
@@ -169,14 +172,16 @@ def test_unresolved_unknown_prior_effect_fails_closed():
         ["nexus/b.py"],
         unresolved_effects=True,
     )
-    res_active = evaluate_cross_entrypoint_conflict(cand_clean, [active_with_unknown])
+    res_active = evaluate_cross_entrypoint_conflict(
+        cand_clean, [active_with_unknown], expected_revision="a" * 40
+    )
     assert res_active["disposition"] == CONFLICT_RECONCILE_REQUIRED
     assert res_active["reason"] == "ACTIVE_WRITER_UNRESOLVED_PRIOR_EFFECTS"
 
 
 def test_missing_or_corrupt_active_writer_fails_closed_to_unknown():
     cand = _writer("task-1", ["nexus/a.py"])
-    res = evaluate_cross_entrypoint_conflict(cand, [None])
+    res = evaluate_cross_entrypoint_conflict(cand, [None], expected_revision="a" * 40)
     assert res["disposition"] == CONFLICT_UNKNOWN
     assert res["reason"] == "ACTIVE_WRITER_MISSING_OR_CORRUPT"
 
@@ -187,15 +192,82 @@ def test_worktree_manager_methods_and_cleanup_isolation(tmp_path: Path):
     cand = _writer("task-1", ["nexus/a.py"])
     other = _writer("task-2", ["nexus/b.py"])
 
-    # evaluate_admission and readback_conflict_state
-    adm = manager.evaluate_admission(cand, [other])
+    # evaluate_admission and readback_conflict_state with explicit expected_revision
+    adm = manager.evaluate_admission(cand, [other], expected_revision="a" * 40)
     assert adm["disposition"] == CONFLICT_CLEAR
 
-    rb = manager.readback_conflict_state(cand, [other])
+    rb = manager.readback_conflict_state(cand, [other], expected_revision="a" * 40)
     assert rb["disposition"] == CONFLICT_CLEAR
     assert rb["schema"] == MUTATION_CONFLICT_SCHEMA
 
     # Overlap readback
     overlap_writer = _writer("task-3", ["nexus/a.py"])
-    rb_overlap = manager.readback_conflict_state(cand, [overlap_writer])
+    rb_overlap = manager.readback_conflict_state(cand, [overlap_writer], expected_revision="a" * 40)
     assert rb_overlap["disposition"] == CONFLICT_OVERLAP
+
+
+def test_missing_writer_inventory_fails_closed():
+    cand = _writer("task-1", ["nexus/a.py"])
+    # Passing active_writers=None must fail closed to UNKNOWN, never default to empty list/CLEAR
+    res = evaluate_cross_entrypoint_conflict(cand, active_writers=None, expected_revision="a" * 40)
+    assert res["disposition"] == CONFLICT_UNKNOWN
+    assert res["reason"] == "ACTIVE_WRITER_INVENTORY_MISSING"
+
+    manager = WorktreeManager()
+    res_mgr = manager.evaluate_admission(cand, active_writers=None, expected_revision="a" * 40)
+    assert res_mgr["disposition"] == CONFLICT_UNKNOWN
+    assert res_mgr["reason"] == "ACTIVE_WRITER_INVENTORY_MISSING"
+
+
+def test_empty_proven_inventory_vs_unknown_inventory():
+    cand = _writer("task-1", ["nexus/a.py"])
+    # Proven empty inventory with current revision yields CLEAR
+    res_proven = evaluate_cross_entrypoint_conflict(cand, active_writers=[], expected_revision="a" * 40)
+    assert res_proven["disposition"] == CONFLICT_CLEAR
+    assert res_proven["active_writer_count"] == 0
+
+    # Missing inventory yields UNKNOWN
+    res_unknown = evaluate_cross_entrypoint_conflict(cand, active_writers=None, expected_revision="a" * 40)
+    assert res_unknown["disposition"] == CONFLICT_UNKNOWN
+
+
+def test_missing_expected_revision_fails_closed():
+    cand = _writer("task-1", ["nexus/a.py"])
+    # Missing expected_revision fails closed
+    res = evaluate_cross_entrypoint_conflict(cand, active_writers=[], expected_revision=None)
+    assert res["disposition"] == CONFLICT_UNKNOWN
+    assert res["reason"] == "EXPECTED_REVISION_REQUIRED_FOR_ADMISSION"
+
+
+def test_stale_all_writers_snapshot_fails_closed():
+    # Both candidate and writer have same stale revision b*40, while current expected is a*40
+    cand = _writer("task-1", ["nexus/a.py"], controller_revision="b" * 40)
+    writer = _writer("task-2", ["nexus/b.py"], controller_revision="b" * 40)
+
+    # Even though both writers match each other, both are stale compared to current expected revision
+    res = evaluate_cross_entrypoint_conflict(cand, [writer], expected_revision="a" * 40)
+    assert res["disposition"] == CONFLICT_STALE
+    assert res["reason"].startswith("CANDIDATE_REVISION_STALE")
+
+
+def test_unsupported_mutation_lane_fails_closed():
+    # Attempting to pass a transport name as a mutation authority lane
+    cand_rdc = _writer("task-1", ["nexus/a.py"], mutation_mode="RDC")
+    res = evaluate_cross_entrypoint_conflict(cand_rdc, active_writers=[], expected_revision="a" * 40)
+    assert res["disposition"] == CONFLICT_UNKNOWN
+    assert "UNSUPPORTED_MUTATION_LANE" in res["reason"]
+
+    # Candidate valid, but writer uses pseudo lane
+    cand_valid = _writer("task-1", ["nexus/a.py"], mutation_mode="DIRECT_CANONICAL")
+    writer_dev_mcp = _writer("task-2", ["nexus/b.py"], mutation_mode="DEV_MCP")
+    res2 = evaluate_cross_entrypoint_conflict(cand_valid, [writer_dev_mcp], expected_revision="a" * 40)
+    assert res2["disposition"] == CONFLICT_UNKNOWN
+    assert "UNSUPPORTED_MUTATION_LANE" in res2["reason"]
+
+
+def test_readback_conflict_state_controller_unavailable_fails_closed():
+    cand = _writer("task-1", ["nexus/a.py"], controller_worktree="/nonexistent/controller")
+    manager = WorktreeManager()
+    res = manager.readback_conflict_state(cand, active_writers=None, expected_revision="a" * 40)
+    assert res["disposition"] == CONFLICT_UNKNOWN
+    assert res["reason"] == "CANONICAL_READBACK_CONTROLLER_UNAVAILABLE"

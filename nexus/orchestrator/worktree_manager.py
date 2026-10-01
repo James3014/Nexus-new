@@ -13,13 +13,12 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence
 from uuid import uuid4
 
+from nexus.orchestrator.collaboration_realm import CollaborationRealmVerifier
+from nexus.orchestrator.task_contract import ApprovalStatus, SelfHostedTaskContract
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-from nexus.orchestrator.collaboration_realm import CollaborationRealmVerifier
-from nexus.orchestrator.task_contract import ApprovalStatus, SelfHostedTaskContract
 
 NEXUS_SALVAGE_BOT_NAME = "Nexus Salvage Bot"
 NEXUS_SALVAGE_BOT_EMAIL = "nexus-salvage-bot@nexus.local"
@@ -353,8 +352,19 @@ CONFLICT_STALE = "STALE"
 CONFLICT_RECONCILE_REQUIRED = "RECONCILE_REQUIRED"
 
 SUPPORTED_MUTATION_LANES = frozenset(
-    {"DIRECT_CANONICAL", "DIRECT_DELEGATED", "GOVERNED", "ISOLATED_TARGET", "LOCAL"}
+    {"DIRECT_CANONICAL", "DIRECT_DELEGATED", "GOVERNED", "ISOLATED_TARGET", "LOCAL", "WORKING_TREE_ONLY"}
 )
+
+
+def _normalize_mutation_lane(val: Any) -> str:
+    if hasattr(val, "value"):
+        val = val.value
+    raw = str(val or "").strip().upper()
+    if "." in raw:
+        raw = raw.split(".")[-1]
+    if raw in {"WORKING_TREE_ONLY", "GOVERNED"}:
+        return "ISOLATED_TARGET"
+    return raw
 
 
 def evaluate_cross_entrypoint_conflict(
@@ -399,25 +409,62 @@ def evaluate_cross_entrypoint_conflict(
         or ""
     )
     cand_attempt_id = str(_record_value(candidate, "attempt_id") or "")
-    cand_mode = str(
+    cand_mode = _normalize_mutation_lane(
         _record_value(cand_contract, "mutation_mode")
         or _record_value(candidate, "mutation_mode")
         or "ISOLATED_TARGET"
-    ).upper()
+    )
     cand_rev = str(
         _record_value(candidate, "controller_revision")
         or _record_value(cand_contract, "controller_revision")
         or ""
     )
 
-    if expected_revision and cand_rev != expected_revision:
+    # Validate candidate mutation lane against SUPPORTED_MUTATION_LANES
+    if cand_mode not in SUPPORTED_MUTATION_LANES:
+        return {
+            "schema": MUTATION_CONFLICT_SCHEMA,
+            "claim_ceiling": MUTATION_CONFLICT_CLAIM_CEILING,
+            "disposition": CONFLICT_UNKNOWN,
+            "reason": f"UNSUPPORTED_MUTATION_LANE: candidate has {cand_mode!r}",
+            "candidate_task_id": cand_task_id,
+            "candidate_attempt_id": cand_attempt_id,
+            "conflicting_writers": [],
+        }
+
+    # expected_revision is required to prevent mutually consistent stale records from passing
+    if expected_revision is None or not str(expected_revision).strip():
+        return {
+            "schema": MUTATION_CONFLICT_SCHEMA,
+            "claim_ceiling": MUTATION_CONFLICT_CLAIM_CEILING,
+            "disposition": CONFLICT_UNKNOWN,
+            "reason": "EXPECTED_REVISION_REQUIRED_FOR_ADMISSION",
+            "candidate_task_id": cand_task_id,
+            "candidate_attempt_id": cand_attempt_id,
+            "conflicting_writers": [],
+        }
+    exp_rev = str(expected_revision).strip()
+    if cand_rev != exp_rev:
         return {
             "schema": MUTATION_CONFLICT_SCHEMA,
             "claim_ceiling": MUTATION_CONFLICT_CLAIM_CEILING,
             "disposition": CONFLICT_STALE,
-            "reason": f"CANDIDATE_REVISION_STALE: expected {expected_revision}, got {cand_rev}",
+            "reason": f"CANDIDATE_REVISION_STALE: expected {exp_rev}, got {cand_rev}",
             "candidate_task_id": cand_task_id,
             "candidate_attempt_id": cand_attempt_id,
+            "conflicting_writers": [],
+        }
+
+    # Missing active writer inventory must fail closed (never default to empty list)
+    if active_writers is None:
+        return {
+            "schema": MUTATION_CONFLICT_SCHEMA,
+            "claim_ceiling": MUTATION_CONFLICT_CLAIM_CEILING,
+            "disposition": CONFLICT_UNKNOWN,
+            "reason": "ACTIVE_WRITER_INVENTORY_MISSING",
+            "candidate_task_id": cand_task_id,
+            "candidate_attempt_id": cand_attempt_id,
+            "candidate_mode": cand_mode,
             "conflicting_writers": [],
         }
 
@@ -449,7 +496,7 @@ def evaluate_cross_entrypoint_conflict(
         }
 
     conflicting_writers = []
-    writers = list(active_writers or ())
+    writers = list(active_writers)
     for writer in writers:
         if writer is None:
             return {
@@ -493,16 +540,27 @@ def evaluate_cross_entrypoint_conflict(
             or ""
         )
         writer_attempt_id = str(_record_value(writer, "attempt_id") or "")
-        writer_mode = str(
+        writer_mode = _normalize_mutation_lane(
             _record_value(writer_contract, "mutation_mode")
             or _record_value(writer, "mutation_mode")
             or "ISOLATED_TARGET"
-        ).upper()
+        )
         writer_rev = str(
             _record_value(writer, "controller_revision")
             or _record_value(writer_contract, "controller_revision")
             or ""
         )
+
+        # Validate writer mutation lane against SUPPORTED_MUTATION_LANES
+        if writer_mode not in SUPPORTED_MUTATION_LANES:
+            return {
+                "schema": MUTATION_CONFLICT_SCHEMA,
+                "claim_ceiling": MUTATION_CONFLICT_CLAIM_CEILING,
+                "disposition": CONFLICT_UNKNOWN,
+                "reason": f"UNSUPPORTED_MUTATION_LANE: writer {writer_task_id} has {writer_mode!r}",
+                "candidate_task_id": cand_task_id,
+                "conflicting_writers": [writer_task_id],
+            }
 
         if (
             writer_task_id == cand_task_id
@@ -511,12 +569,12 @@ def evaluate_cross_entrypoint_conflict(
         ):
             continue
 
-        if writer_rev != cand_rev:
+        if writer_rev != exp_rev:
             return {
                 "schema": MUTATION_CONFLICT_SCHEMA,
                 "claim_ceiling": MUTATION_CONFLICT_CLAIM_CEILING,
                 "disposition": CONFLICT_STALE,
-                "reason": f"WRITER_REVISION_MISMATCH: candidate has {cand_rev}, writer {writer_task_id} has {writer_rev}",
+                "reason": f"WRITER_REVISION_STALE: writer {writer_task_id} has {writer_rev}, expected {exp_rev}",
                 "candidate_task_id": cand_task_id,
                 "conflicting_writers": [writer_task_id],
             }
@@ -1532,6 +1590,22 @@ class WorktreeManager:
         branch_created_this_call = False
         if self.target_conflict(contract, task_states=task_states):
             raise RuntimeError("serial Target budget exceeded: active Target limit is 1")
+
+        # Cross-entrypoint physical conflict admission check before effect
+        known_writers = []
+        for rec in self._all_ownership_records(controller_root):
+            rec_task_id = str(rec.get("task_id") or "")
+            if rec_task_id != contract.task_id and not rec.get("invalid"):
+                known_writers.append(rec)
+        admission = self.evaluate_admission(
+            contract,
+            active_writers=known_writers,
+            expected_revision=contract.controller_revision,
+        )
+        if admission["disposition"] != CONFLICT_CLEAR:
+            raise RuntimeError(
+                f"Target lease admission rejected: {admission['disposition']} ({admission['reason']})"
+            )
         if target_path.exists():
             entry = self._worktree_entry(controller_root, target_path)
             if entry is None:
@@ -1699,6 +1773,27 @@ class WorktreeManager:
         expected_revision: Optional[str] = None,
     ) -> dict[str, Any]:
         """Evaluate cross-entrypoint physical conflict admission for candidate."""
+        if active_writers is None:
+            return {
+                "schema": MUTATION_CONFLICT_SCHEMA,
+                "claim_ceiling": MUTATION_CONFLICT_CLAIM_CEILING,
+                "disposition": CONFLICT_UNKNOWN,
+                "reason": "ACTIVE_WRITER_INVENTORY_MISSING",
+                "candidate_task_id": str(_record_value(candidate, "task_id") or ""),
+                "conflicting_writers": [],
+            }
+        contract = _record_contract(candidate)
+        if expected_revision is None:
+            ctrl_root_str = str(
+                _record_value(candidate, "controller_worktree")
+                or _record_value(contract, "controller_repo_root")
+                or ""
+            ).strip()
+            if ctrl_root_str and Path(ctrl_root_str).is_dir():
+                try:
+                    expected_revision = self._run_git(["rev-parse", "HEAD"], cwd=Path(ctrl_root_str))
+                except Exception:
+                    pass
         return evaluate_cross_entrypoint_conflict(
             candidate,
             active_writers=active_writers,
@@ -1713,7 +1808,44 @@ class WorktreeManager:
         expected_revision: Optional[str] = None,
     ) -> dict[str, Any]:
         """Readback physical conflict admission disposition for candidate."""
-        return self.evaluate_admission(
+        contract = _record_contract(candidate)
+        ctrl_root_str = str(
+            _record_value(candidate, "controller_worktree")
+            or _record_value(contract, "controller_repo_root")
+            or ""
+        ).strip()
+        controller_root = Path(ctrl_root_str).resolve() if ctrl_root_str and Path(ctrl_root_str).is_dir() else None
+
+        if expected_revision is None and controller_root is not None:
+            try:
+                expected_revision = self._run_git(["rev-parse", "HEAD"], cwd=controller_root)
+            except Exception:
+                pass
+
+        if active_writers is None:
+            if controller_root is None:
+                return {
+                    "schema": MUTATION_CONFLICT_SCHEMA,
+                    "claim_ceiling": MUTATION_CONFLICT_CLAIM_CEILING,
+                    "disposition": CONFLICT_UNKNOWN,
+                    "reason": "CANONICAL_READBACK_CONTROLLER_UNAVAILABLE",
+                    "candidate_task_id": str(_record_value(candidate, "task_id") or ""),
+                    "conflicting_writers": [],
+                }
+            raw_records = self._all_ownership_records(controller_root)
+            if any(r.get("invalid") for r in raw_records):
+                return {
+                    "schema": MUTATION_CONFLICT_SCHEMA,
+                    "claim_ceiling": MUTATION_CONFLICT_CLAIM_CEILING,
+                    "disposition": CONFLICT_RECONCILE_REQUIRED,
+                    "reason": "CORRUPT_CANONICAL_OWNERSHIP_RECORD_DETECTED",
+                    "candidate_task_id": str(_record_value(candidate, "task_id") or ""),
+                    "conflicting_writers": [],
+                }
+            cand_task_id = str(_record_value(candidate, "task_id") or _record_value(contract, "task_id") or "")
+            active_writers = [r for r in raw_records if str(r.get("task_id") or "") != cand_task_id]
+
+        return evaluate_cross_entrypoint_conflict(
             candidate,
             active_writers=active_writers,
             expected_revision=expected_revision,
