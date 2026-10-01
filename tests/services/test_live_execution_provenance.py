@@ -1,23 +1,7 @@
-"""Tests for #1266 durable transport-neutral live execution provenance.
+"""Tests for transport-neutral live execution provenance (#1266).
 
-Invariants verified:
-1. Concurrent visibility: read back Main GPT direct and RDC delegated attempts as separate exact records concurrently.
-2. execution_lane != transport_kind: DIRECT_DELEGATED + RDC without an RDC authority lane.
-3. Independent requested vs physically observed worker/provider/model.
-4. Real DirectOperationJournal readback: physically sourced external-worker journal entry rebuilds live provenance.
-5. Canonical Dev MCP and RDC receipt adapters.
-6. Negative controls:
-   - Missing execution lane -> fails closed to UNKNOWN (MISSING_OR_UNRECOGNIZED_EXECUTION_LANE)
-   - Missing receipt -> UNAVAILABLE
-   - Unrecognized/arbitrary receipt schema -> fails closed to UNKNOWN (RECEIPT_REJECTED)
-   - Missing physical operation/host/session identity -> UNKNOWN (UNVERIFIED_PHYSICAL_IDENTITY)
-   - Missing producer timestamp -> UNKNOWN (MISSING_PRODUCER_TIMESTAMP)
-   - Stale producer timestamp / expired heartbeat -> STALE
-   - Identity cross-binding mismatch (repo, task, attempt) -> UNKNOWN (CROSS_BINDING_MISMATCH)
-   - Cross-repository collision protection in LiveExecutionProvenanceView
-   - Tampered hash -> raises ProvenanceContractError
-7. Rebuildable cache: discarding cache and rebuilding from source records preserves identical view.
-8. Authority boundary: proves provenance view cannot route, claim, mutate, complete, accept, merge, or deploy.
+These tests intentionally distinguish caller-supplied observations from records read
+through repository-owned durable producer APIs.
 """
 
 from __future__ import annotations
@@ -29,17 +13,12 @@ import pytest
 
 from nexus.services.direct_operation_journal import DirectOperationJournal
 from nexus.services.live_execution_provenance import (
-    EXECUTION_LANE_DIRECT_CANONICAL,
     EXECUTION_LANE_DIRECT_DELEGATED,
-    EXECUTION_LANE_LOCAL,
     EXECUTION_LANE_UNKNOWN,
     EXECUTION_STATE_ACTIVE,
-    EXECUTION_STATE_COMPLETED,
     EXECUTION_STATE_STALE,
     EXECUTION_STATE_UNKNOWN,
-    PRODUCER_SCHEMA_DEV_MCP_V1,
-    PRODUCER_SCHEMA_OPERATION_V1,
-    TRANSPORT_KIND_DEV_MCP,
+    PRODUCER_SCHEMA_EXTERNAL_WORKER_V1,
     TRANSPORT_KIND_LOCAL_RUNNER,
     TRANSPORT_KIND_RDC,
     LiveExecutionProvenance,
@@ -48,524 +27,298 @@ from nexus.services.live_execution_provenance import (
     build_live_execution_provenance,
     make_dev_mcp_receipt,
     make_rdc_receipt,
+    read_operation_journal_evidence,
 )
 
 
 def _iso_now(offset_seconds: float = 0.0) -> str:
-    dt = datetime.now(timezone.utc) + timedelta(seconds=offset_seconds)
-    return dt.isoformat()
+    return (datetime.now(timezone.utc) + timedelta(seconds=offset_seconds)).isoformat()
 
 
-def test_concurrent_visibility_main_gpt_and_rdc():
-    now_ts = _iso_now()
-
-    # Direct Main GPT via Dev MCP
-    direct_context = {
-        "repository": "James3014/Nexus-new",
-        "work_contract_id": "1266",
-        "task_id": "task-direct-1",
-        "attempt_id": "att-direct-1",
-        "execution_lane": EXECUTION_LANE_DIRECT_CANONICAL,
-        "worker": "gpt-6-luna",
-        "provider": "openai",
-        "model": "gpt-6-luna",
-    }
-    direct_receipt = make_dev_mcp_receipt(
-        operation_id="op-mcp-01",
-        session_id="session-mcp-abc",
-        host_id="mac-local",
-        pid=12345,
-        observed_worker="gpt-6-luna-worker",
-        observed_provider="openai",
-        observed_model="gpt-6-luna-live",
-        status="RUNNING",
-        timestamp=now_ts,
-        task_id="task-direct-1",
-        attempt_id="att-direct-1",
-        repository="James3014/Nexus-new",
-    )
-    rec_direct = build_live_execution_provenance(direct_context, direct_receipt)
-
-    # RDC delegated worker
-    rdc_context = {
-        "repository": "James3014/Nexus-new",
-        "work_contract_id": "1266",
-        "task_id": "task-rdc-1",
-        "attempt_id": "att-rdc-1",
-        "execution_lane": EXECUTION_LANE_DIRECT_DELEGATED,
-        "worker": "rdc-pool-worker",
-        "provider": "openai",
-        "model": "gpt-6-luna",
-    }
-    rdc_receipt = make_rdc_receipt(
-        operation_id="op-rdc-01",
-        session_id="session-rdc-xyz",
-        host_id="remote-cluster-host-9",
-        pid=54321,
-        observed_worker="rdc-worker-slot-4",
-        observed_provider="openai",
-        observed_model="gpt-6-luna-2026",
-        status="RUNNING",
-        timestamp=now_ts,
-        task_id="task-rdc-1",
-        attempt_id="att-rdc-1",
-        repository="James3014/Nexus-new",
-    )
-    rec_rdc = build_live_execution_provenance(rdc_context, rdc_receipt)
-
-    # Ingest both into view
-    view = LiveExecutionProvenanceView()
-    view.ingest(rec_direct)
-    view.ingest(rec_rdc)
-
-    # Read back concurrently
-    live_records = view.list_live()
-    assert len(live_records) == 2
-
-    # Check Direct GPT
-    d = view.get("James3014/Nexus-new", "task-direct-1", "att-direct-1")
-    assert d is not None
-    assert d.execution_lane == EXECUTION_LANE_DIRECT_CANONICAL
-    assert d.transport_kind == TRANSPORT_KIND_DEV_MCP
-    assert d.execution_state == EXECUTION_STATE_ACTIVE
-    assert d.observed_worker == "gpt-6-luna-worker"
-    assert d.observed_model == "gpt-6-luna-live"
-
-    # Check RDC Delegated
-    r = view.get("James3014/Nexus-new", "task-rdc-1", "att-rdc-1")
-    assert r is not None
-    assert r.execution_lane == EXECUTION_LANE_DIRECT_DELEGATED
-    assert r.transport_kind == TRANSPORT_KIND_RDC
-    assert r.execution_state == EXECUTION_STATE_ACTIVE
-    assert r.observed_worker == "rdc-worker-slot-4"
-    assert r.observed_model == "gpt-6-luna-2026"
-
-
-def test_real_direct_operation_journal_readback(tmp_path: Path):
+def _verified_external_worker(
+    tmp_path: Path,
+    *,
+    task_id: str = "task-1",
+    attempt_id: str = "attempt-1",
+    operation_id: str | None = None,
+    status: str = "RUNNING",
+    timestamp: str | None = None,
+    include_task_id: bool = True,
+    include_session: bool = True,
+    include_pid: bool = True,
+    observed_provider: str = "openai",
+    observed_model: str = "gpt-test",
+):
     journal = DirectOperationJournal(
         tmp_path / "journal",
-        schema=PRODUCER_SCHEMA_OPERATION_V1,
-        operation_prefix="dir_",
+        schema=PRODUCER_SCHEMA_EXTERNAL_WORKER_V1,
+        operation_prefix="extop_",
     )
-    op_id = journal.new_operation_id()
-    att_id = "attempt_op_001"
-    now_ts = _iso_now()
-
-    # Create physically sourced record via DirectOperationJournal
+    op_id = operation_id or journal.new_operation_id()
+    initial = {"repo_root": "James3014/Nexus-new"}
+    if include_task_id:
+        initial["task_id"] = task_id
     journal.create(
         operation_id=op_id,
-        attempt_id=att_id,
+        attempt_id=attempt_id,
         cwd=str(tmp_path),
-        provider="openai",
-        model="gpt-6-luna",
+        provider="requested-provider",
+        model="requested-model",
         effort="high",
         prompt_sha256="abcd1234",
-        runtime_revision="c715962e38d8",
-        initial_fields={
-            "repo_root": "James3014/Nexus-new",
-        },
+        runtime_revision="runtime-rev",
+        initial_fields=initial,
     )
-
-    # Transition to RUNNING with physical process and observation facts
-    record = journal.update(
-        op_id,
-        status="RUNNING",
-        pid=9988,
-        started_at=now_ts,
-        last_heartbeat_at=now_ts,
-        observed_provider="openai",
-        observed_model="gpt-6-luna-audit",
-        provider_session_id="sess-direct-journal",
-    )
-
-    work_context = {
+    changes = {
+        "status": status,
+        "phase": status,
+        "host_id": "host-1",
+        "observed_provider": observed_provider,
+        "observed_model": observed_model,
+        "last_heartbeat_at": timestamp if timestamp is not None else _iso_now(),
+    }
+    if include_session:
+        changes["provider_session_id"] = "session-1"
+    if include_pid:
+        changes["pid"] = 1234
+    journal.update(op_id, **changes)
+    evidence = read_operation_journal_evidence(journal, op_id)
+    context = {
         "repository": "James3014/Nexus-new",
         "work_contract_id": "1266",
-        "task_id": "task-direct-journal",
-        "attempt_id": att_id,
-        "execution_lane": EXECUTION_LANE_DIRECT_CANONICAL,
-        "worker": "gpt-6-luna",
-        "provider": "openai",
-        "model": "gpt-6-luna",
+        "task_id": task_id,
+        "attempt_id": attempt_id,
+        "operation_id": op_id,
+        "execution_lane": EXECUTION_LANE_DIRECT_DELEGATED,
+        "worker": "requested-worker",
+        "provider": "requested-provider",
+        "model": "requested-model",
     }
-
-    # Rebuild provenance from real journal record
-    prov = build_live_execution_provenance(work_context, record)
-    assert prov.execution_lane == EXECUTION_LANE_DIRECT_CANONICAL
-    assert prov.transport_kind == TRANSPORT_KIND_DEV_MCP
-    assert prov.execution_state == EXECUTION_STATE_ACTIVE
-    assert prov.operation_id == op_id
-    assert prov.attempt_id == att_id
-    assert prov.host_id == record["host_id"]
-    assert prov.pid == 9988
-    assert prov.observed_provider == "openai"
-    assert prov.observed_model == "gpt-6-luna-audit"
-    assert prov.observed_at == now_ts
+    return journal, evidence, context
 
 
-def test_execution_lane_differs_from_transport_kind():
+def test_unverified_declared_rdc_receipt_never_becomes_active():
     context = {
-        "repository": "repo",
-        "task_id": "t1",
-        "attempt_id": "a1",
+        "repository": "James3014/Nexus-new",
+        "task_id": "victim-task",
+        "attempt_id": "victim-attempt",
+        "operation_id": "op-x",
         "execution_lane": EXECUTION_LANE_DIRECT_DELEGATED,
     }
     receipt = make_rdc_receipt(
-        operation_id="op1",
-        host_id="h1",
-        pid=123,
+        operation_id="op-x",
+        session_id="fake-session",
+        host_id="fake-host",
         status="RUNNING",
         timestamp=_iso_now(),
-        task_id="t1",
-        attempt_id="a1",
-        repository="repo",
     )
-    rec = build_live_execution_provenance(context, receipt)
-    assert rec.execution_lane == "DIRECT_DELEGATED"
-    assert rec.transport_kind == "RDC"
+    result = build_live_execution_provenance(context, receipt)
+    assert result.execution_state == EXECUTION_STATE_UNKNOWN
+    assert result.phase == "UNVERIFIED_PRODUCER_RECORD"
 
-    # Attempting to declare RDC as an execution_lane fails closed
-    with pytest.raises(ProvenanceContractError, match="unrecognized execution_lane: 'RDC'"):
-        LiveExecutionProvenance(
-            repository="repo",
-            work_contract_id="1",
-            task_id="t1",
-            attempt_id="a1",
-            execution_lane="RDC",  # Invalid! Not an authority lane
-            transport_kind=TRANSPORT_KIND_RDC,
-            operation_id="op1",
-            host_id="h1",
-            requested_worker="w",
-            requested_provider="p",
-            requested_model="m",
-            observed_worker="w",
-            observed_provider="p",
-            observed_model="m",
-            execution_state=EXECUTION_STATE_ACTIVE,
+
+def test_unverified_declared_dev_mcp_receipt_never_becomes_active():
+    context = {
+        "repository": "James3014/Nexus-new",
+        "task_id": "task-1",
+        "attempt_id": "attempt-1",
+        "operation_id": "op-x",
+        "execution_lane": EXECUTION_LANE_DIRECT_DELEGATED,
+    }
+    receipt = make_dev_mcp_receipt(
+        operation_id="op-x",
+        session_id="fake-session",
+        host_id="fake-host",
+        status="RUNNING",
+        timestamp=_iso_now(),
+    )
+    result = build_live_execution_provenance(context, receipt)
+    assert result.execution_state == EXECUTION_STATE_UNKNOWN
+    assert result.phase == "UNVERIFIED_PRODUCER_RECORD"
+
+
+def test_verified_external_worker_journal_can_produce_live_provenance(tmp_path: Path):
+    _journal, evidence, context = _verified_external_worker(tmp_path)
+    result = build_live_execution_provenance(context, evidence)
+    assert result.execution_state == EXECUTION_STATE_ACTIVE
+    assert result.transport_kind == TRANSPORT_KIND_LOCAL_RUNNER
+    assert result.task_id == "task-1"
+    assert result.attempt_id == "attempt-1"
+    assert result.observed_provider == "openai"
+    assert result.observed_model == "gpt-test"
+    assert evidence.source_ref in result.evidence_refs
+
+
+def test_verified_journal_missing_task_binding_fails_closed(tmp_path: Path):
+    _journal, evidence, context = _verified_external_worker(
+        tmp_path,
+        include_task_id=False,
+    )
+    result = build_live_execution_provenance(context, evidence)
+    assert result.execution_state == EXECUTION_STATE_UNKNOWN
+    assert "MISSING_CROSS_BINDING_IDENTITY" in result.phase
+    assert "task_id" in result.phase
+
+
+def test_verified_journal_missing_physical_identity_fails_closed(tmp_path: Path):
+    _journal, evidence, context = _verified_external_worker(
+        tmp_path,
+        include_session=False,
+        include_pid=False,
+    )
+    result = build_live_execution_provenance(context, evidence)
+    assert result.execution_state == EXECUTION_STATE_UNKNOWN
+    assert result.phase == "UNVERIFIED_PHYSICAL_IDENTITY"
+
+
+def test_invalid_producer_timestamp_fails_closed(tmp_path: Path):
+    _journal, evidence, context = _verified_external_worker(
+        tmp_path,
+        timestamp="not-a-time",
+    )
+    result = build_live_execution_provenance(context, evidence)
+    assert result.execution_state == EXECUTION_STATE_UNKNOWN
+    assert result.phase == "INVALID_PRODUCER_TIMESTAMP"
+    assert result.observed_at == ""
+
+
+def test_stale_running_producer_becomes_stale(tmp_path: Path):
+    _journal, evidence, context = _verified_external_worker(
+        tmp_path,
+        timestamp=_iso_now(-3600),
+    )
+    result = build_live_execution_provenance(
+        context,
+        evidence,
+        max_staleness_seconds=300,
+    )
+    assert result.execution_state == EXECUTION_STATE_STALE
+    assert "HEARTBEAT_EXPIRED" in result.phase
+
+
+def test_cross_binding_mismatch_fails_closed(tmp_path: Path):
+    _journal, evidence, context = _verified_external_worker(tmp_path)
+    context = dict(context)
+    context["task_id"] = "different-task"
+    result = build_live_execution_provenance(context, evidence)
+    assert result.execution_state == EXECUTION_STATE_UNKNOWN
+    assert "CROSS_BINDING_MISMATCH: task_id mismatch" in result.phase
+
+
+def test_missing_execution_lane_fails_closed_even_for_verified_evidence(tmp_path: Path):
+    _journal, evidence, context = _verified_external_worker(tmp_path)
+    context = dict(context)
+    context.pop("execution_lane")
+    result = build_live_execution_provenance(context, evidence)
+    assert result.execution_lane == EXECUTION_LANE_UNKNOWN
+    assert result.execution_state == EXECUTION_STATE_UNKNOWN
+    assert result.phase == "MISSING_OR_UNRECOGNIZED_EXECUTION_LANE"
+
+
+def test_requested_and_observed_identity_remain_separate(tmp_path: Path):
+    _journal, evidence, context = _verified_external_worker(
+        tmp_path,
+        observed_provider="observed-provider",
+        observed_model="observed-model",
+    )
+    result = build_live_execution_provenance(context, evidence)
+    assert result.requested_provider == "requested-provider"
+    assert result.requested_model == "requested-model"
+    assert result.observed_provider == "observed-provider"
+    assert result.observed_model == "observed-model"
+
+
+def test_verified_transport_override_mismatch_is_rejected(tmp_path: Path):
+    _journal, evidence, context = _verified_external_worker(tmp_path)
+    with pytest.raises(ProvenanceContractError, match="conflicts with verified producer transport"):
+        build_live_execution_provenance(
+            context,
+            evidence,
+            observed_transport_kind=TRANSPORT_KIND_RDC,
         )
 
 
-def test_independent_requested_vs_observed_identities():
-    context = {
-        "repository": "repo",
-        "task_id": "t1",
-        "attempt_id": "a1",
-        "execution_lane": EXECUTION_LANE_DIRECT_DELEGATED,
-        "worker": "requested-worker-alias",
-        "provider": "anthropic",
-        "model": "claude-3-opus",
-    }
-    # Physical receipt reports fallback to gpt-4
-    receipt = make_rdc_receipt(
-        operation_id="op-fallback",
-        host_id="h1",
-        pid=1234,
-        observed_worker="physical-worker-node-12",
-        observed_provider="openai",
-        observed_model="gpt-4-turbo",
-        status="RUNNING",
-        timestamp=_iso_now(),
-        task_id="t1",
-        attempt_id="a1",
-        repository="repo",
-    )
-    rec = build_live_execution_provenance(context, receipt)
-
-    # Requested must NOT equal observed
-    assert rec.requested_worker == "requested-worker-alias"
-    assert rec.requested_provider == "anthropic"
-    assert rec.requested_model == "claude-3-opus"
-
-    assert rec.observed_worker == "physical-worker-node-12"
-    assert rec.observed_provider == "openai"
-    assert rec.observed_model == "gpt-4-turbo"
-
-
-def test_requested_model_never_copied_to_missing_observed():
-    context = {
-        "repository": "repo",
-        "task_id": "t1",
-        "attempt_id": "a1",
-        "execution_lane": EXECUTION_LANE_DIRECT_CANONICAL,
-        "worker": "gpt-6-luna",
-        "provider": "openai",
-        "model": "gpt-6-luna",
-    }
-    # Receipt has NO observed_model
-    receipt = make_dev_mcp_receipt(
-        operation_id="op-mcp",
-        session_id="sess-1",
-        host_id="h1",
-        pid=111,
-        status="RUNNING",
-        timestamp=_iso_now(),
-        task_id="t1",
-        attempt_id="a1",
-        repository="repo",
-    )
-    rec = build_live_execution_provenance(context, receipt)
-    assert rec.requested_model == "gpt-6-luna"
-    # Must NOT copy requested_model to observed_model
-    assert rec.observed_model == ""
-    assert rec.observed_provider == ""
-
-
-def test_negative_control_missing_execution_lane():
-    # Context missing execution_lane must fail closed to UNKNOWN
-    context = {
-        "repository": "repo",
-        "task_id": "t1",
-        "attempt_id": "a1",
-    }
-    receipt = make_dev_mcp_receipt(
-        operation_id="op1",
-        session_id="sess1",
-        host_id="h1",
-        pid=123,
-        status="RUNNING",
-        timestamp=_iso_now(),
-        task_id="t1",
-        attempt_id="a1",
-        repository="repo",
-    )
-    rec = build_live_execution_provenance(context, receipt)
-    assert rec.execution_lane == EXECUTION_LANE_UNKNOWN
-    assert rec.execution_state == EXECUTION_STATE_UNKNOWN
-    assert "MISSING_OR_UNRECOGNIZED_EXECUTION_LANE" in rec.phase
-
-
-def test_negative_control_arbitrary_unrecognized_receipt_schema():
-    context = {
-        "repository": "repo",
-        "task_id": "t1",
-        "attempt_id": "a1",
-        "execution_lane": EXECUTION_LANE_DIRECT_CANONICAL,
-    }
-    # Arbitrary dictionary without canonical schema
-    arbitrary = {
-        "status": "RUNNING",
-        "operation_id": "fake-op",
-    }
-    rec = build_live_execution_provenance(context, arbitrary)
-    assert rec.execution_state == EXECUTION_STATE_UNKNOWN
-    assert "RECEIPT_REJECTED" in rec.phase
-
-
-def test_negative_control_missing_physical_identity():
-    context = {
-        "repository": "repo",
-        "task_id": "t1",
-        "attempt_id": "a1",
-        "execution_lane": EXECUTION_LANE_DIRECT_CANONICAL,
-    }
-    # Missing host_id and session_id/pid
-    receipt = {
-        "schema": PRODUCER_SCHEMA_DEV_MCP_V1,
-        "transport_kind": TRANSPORT_KIND_DEV_MCP,
-        "operation_id": "op1",
-        "status": "RUNNING",
-        "timestamp": _iso_now(),
-        "task_id": "t1",
-        "attempt_id": "a1",
-        "repository": "repo",
-    }
-    rec = build_live_execution_provenance(context, receipt)
-    assert rec.execution_state == EXECUTION_STATE_UNKNOWN
-    assert rec.phase == "UNVERIFIED_PHYSICAL_IDENTITY"
-
-
-def test_negative_control_missing_and_stale_producer_timestamps():
-    context = {
-        "repository": "repo",
-        "task_id": "t1",
-        "attempt_id": "a1",
-        "execution_lane": EXECUTION_LANE_DIRECT_CANONICAL,
-    }
-
-    # Missing timestamp
-    receipt_no_ts = {
-        "schema": PRODUCER_SCHEMA_DEV_MCP_V1,
-        "transport_kind": TRANSPORT_KIND_DEV_MCP,
-        "operation_id": "op1",
-        "session_id": "sess1",
-        "host_id": "h1",
-        "pid": 100,
-        "status": "RUNNING",
-        "task_id": "t1",
-        "attempt_id": "a1",
-        "repository": "repo",
-    }
-    rec_no_ts = build_live_execution_provenance(context, receipt_no_ts)
-    assert rec_no_ts.execution_state == EXECUTION_STATE_UNKNOWN
-    assert rec_no_ts.phase == "MISSING_PRODUCER_TIMESTAMP"
-
-    # Stale timestamp (1 hour old)
-    old_ts = _iso_now(-3600)
-    receipt_stale = make_dev_mcp_receipt(
-        operation_id="op1",
-        session_id="sess1",
-        host_id="h1",
-        pid=100,
-        status="RUNNING",
-        timestamp=old_ts,
-        task_id="t1",
-        attempt_id="a1",
-        repository="repo",
-    )
-    rec_stale = build_live_execution_provenance(context, receipt_stale, max_staleness_seconds=300.0)
-    assert rec_stale.execution_state == EXECUTION_STATE_STALE
-    assert "HEARTBEAT_EXPIRED" in rec_stale.phase
-
-
-def test_negative_control_cross_binding_mismatch():
-    context = {
-        "repository": "James3014/Nexus-new",
-        "task_id": "task-alpha",
-        "attempt_id": "att-alpha",
-        "execution_lane": EXECUTION_LANE_DIRECT_CANONICAL,
-    }
-
-    # Task ID mismatch
-    receipt_bad_task = make_dev_mcp_receipt(
-        operation_id="op1",
-        session_id="sess1",
-        host_id="h1",
-        pid=100,
-        status="RUNNING",
-        timestamp=_iso_now(),
-        task_id="task-DIFFERENT",
-        attempt_id="att-alpha",
-        repository="James3014/Nexus-new",
-    )
-    rec_bad_task = build_live_execution_provenance(context, receipt_bad_task)
-    assert rec_bad_task.execution_state == EXECUTION_STATE_UNKNOWN
-    assert "CROSS_BINDING_MISMATCH: task_id mismatch" in rec_bad_task.phase
-
-    # Repo mismatch
-    receipt_bad_repo = make_dev_mcp_receipt(
-        operation_id="op1",
-        session_id="sess1",
-        host_id="h1",
-        pid=100,
-        status="RUNNING",
-        timestamp=_iso_now(),
-        task_id="task-alpha",
-        attempt_id="att-alpha",
-        repository="OtherOwner/OtherRepo",
-    )
-    rec_bad_repo = build_live_execution_provenance(context, receipt_bad_repo)
-    assert rec_bad_repo.execution_state == EXECUTION_STATE_UNKNOWN
-    assert "CROSS_BINDING_MISMATCH: repository mismatch" in rec_bad_repo.phase
-
-
-def test_cross_repository_view_collision_prevention():
+def test_cross_repository_view_collision_prevention(tmp_path: Path):
     view = LiveExecutionProvenanceView()
-
-    ts = _iso_now()
-    # Repo A attempt
-    rec_a = build_live_execution_provenance(
-        {"repository": "repo-A", "task_id": "t1", "attempt_id": "att1", "execution_lane": EXECUTION_LANE_DIRECT_CANONICAL},
-        make_dev_mcp_receipt(operation_id="op-a", session_id="s-a", host_id="h1", pid=1, status="RUNNING", timestamp=ts, task_id="t1", attempt_id="att1", repository="repo-A"),
-    )
-    # Repo B attempt with identical task_id and attempt_id
-    rec_b = build_live_execution_provenance(
-        {"repository": "repo-B", "task_id": "t1", "attempt_id": "att1", "execution_lane": EXECUTION_LANE_DIRECT_CANONICAL},
-        make_dev_mcp_receipt(operation_id="op-b", session_id="s-b", host_id="h1", pid=2, status="RUNNING", timestamp=ts, task_id="t1", attempt_id="att1", repository="repo-B"),
-    )
-
-    view.ingest(rec_a)
-    view.ingest(rec_b)
-
-    assert len(view.list_live()) == 2
-
-    # Exact lookup by repository
-    qa = view.get("repo-A", "t1", "att1")
-    qb = view.get("repo-B", "t1", "att1")
-    assert qa is not None and qa.operation_id == "op-a"
-    assert qb is not None and qb.operation_id == "op-b"
-
-    # Ambiguous lookup without repository raises error
+    for repo in ("repo-A", "repo-B"):
+        rec = LiveExecutionProvenance(
+            repository=repo,
+            work_contract_id="1",
+            task_id="task",
+            attempt_id="attempt",
+            execution_lane=EXECUTION_LANE_DIRECT_DELEGATED,
+            transport_kind=TRANSPORT_KIND_LOCAL_RUNNER,
+            operation_id=f"op-{repo}",
+            host_id="h",
+            requested_worker="",
+            requested_provider="",
+            requested_model="",
+            observed_worker="",
+            observed_provider="",
+            observed_model="",
+            execution_state=EXECUTION_STATE_UNKNOWN,
+        )
+        view.ingest(rec)
+    assert view.get("repo-A", "task", "attempt") is not None
+    assert view.get("repo-B", "task", "attempt") is not None
     with pytest.raises(ProvenanceContractError, match="ambiguous lookup"):
-        view.get("t1", "att1")
+        view.get("task", "attempt")
 
 
-def test_negative_controls_tampered_hash_fails_closed():
-    context = {
-        "repository": "repo",
-        "task_id": "t1",
-        "attempt_id": "a1",
-        "execution_lane": EXECUTION_LANE_LOCAL,
-    }
-    receipt = {
-        "schema": PRODUCER_SCHEMA_OPERATION_V1,
-        "transport_kind": TRANSPORT_KIND_LOCAL_RUNNER,
-        "operation_id": "op-local",
-        "session_id": "sess-loc",
-        "host_id": "h-loc",
-        "pid": 999,
-        "status": "RUNNING",
-        "timestamp": _iso_now(),
-        "task_id": "t1",
-        "attempt_id": "a1",
-        "repository": "repo",
-    }
-    rec = build_live_execution_provenance(context, receipt)
-    d = rec.to_dict()
-
-    # Tamper with the state
-    d["execution_state"] = EXECUTION_STATE_COMPLETED
+def test_tampered_projection_hash_fails_closed():
+    record = LiveExecutionProvenance(
+        repository="repo",
+        work_contract_id="1",
+        task_id="task",
+        attempt_id="attempt",
+        execution_lane=EXECUTION_LANE_DIRECT_DELEGATED,
+        transport_kind=TRANSPORT_KIND_LOCAL_RUNNER,
+        operation_id="op",
+        host_id="host",
+        requested_worker="",
+        requested_provider="",
+        requested_model="",
+        observed_worker="",
+        observed_provider="",
+        observed_model="",
+        execution_state=EXECUTION_STATE_UNKNOWN,
+    )
+    payload = record.to_dict()
+    payload["execution_state"] = EXECUTION_STATE_ACTIVE
     with pytest.raises(ProvenanceContractError, match="provenance_hash mismatch"):
-        LiveExecutionProvenance.from_dict(d)
+        LiveExecutionProvenance.from_dict(payload)
 
 
-def test_rebuildable_from_canonical_sources():
+def test_cache_rebuild_from_verified_producer_records(tmp_path: Path):
     view = LiveExecutionProvenanceView()
-    now_ts = _iso_now()
-
-    for i in range(3):
-        ctx = {"repository": "repo", "task_id": f"t{i}", "attempt_id": f"a{i}", "execution_lane": EXECUTION_LANE_DIRECT_DELEGATED}
-        rcpt = make_rdc_receipt(operation_id=f"op{i}", host_id=f"h{i}", pid=100 + i, status="COMPLETED", timestamp=now_ts, task_id=f"t{i}", attempt_id=f"a{i}", repository="repo")
-        view.ingest(build_live_execution_provenance(ctx, rcpt))
-
-    assert len(view.list_live()) == 3
-
-    # Clear derived cache completely
+    sources = []
+    for idx in range(2):
+        journal, evidence, context = _verified_external_worker(
+            tmp_path / str(idx),
+            task_id=f"task-{idx}",
+            attempt_id=f"attempt-{idx}",
+        )
+        sources.append((journal, evidence, context))
+        view.ingest(build_live_execution_provenance(context, evidence))
+    assert len(view.list_live()) == 2
     view.clear_cache()
-    assert len(view.list_live()) == 0
-
-    # Re-ingest from canonical sources
-    for i in range(3):
-        ctx = {"repository": "repo", "task_id": f"t{i}", "attempt_id": f"a{i}", "execution_lane": EXECUTION_LANE_DIRECT_DELEGATED}
-        rcpt = make_rdc_receipt(operation_id=f"op{i}", host_id=f"h{i}", pid=100 + i, status="COMPLETED", timestamp=now_ts, task_id=f"t{i}", attempt_id=f"a{i}", repository="repo")
-        view.ingest(build_live_execution_provenance(ctx, rcpt))
-
-    rebuilt = view.list_live()
-    assert len(rebuilt) == 3
+    assert view.list_live() == []
+    for _journal, evidence, context in sources:
+        view.ingest(build_live_execution_provenance(context, evidence))
+    assert len(view.list_live()) == 2
 
 
 def test_forbidden_authority_boundaries():
     view = LiveExecutionProvenanceView()
-
-    with pytest.raises(NotImplementedError, match="no routing authority"):
-        view.route()
-
-    with pytest.raises(NotImplementedError, match="no model selection authority"):
-        view.select_model()
-
-    with pytest.raises(NotImplementedError, match="no claim authority"):
-        view.acquire_claim()
-
-    with pytest.raises(NotImplementedError, match="no mutation authority"):
-        view.authorize_mutation()
-
-    with pytest.raises(NotImplementedError, match="no completion authority"):
-        view.mark_completion()
-
-    with pytest.raises(NotImplementedError, match="no candidate acceptance authority"):
-        view.accept_candidate()
-
-    with pytest.raises(NotImplementedError, match="no merge authority"):
-        view.merge()
-
-    with pytest.raises(NotImplementedError, match="no deployment authority"):
-        view.deploy()
+    for method, message in (
+        (view.route, "no routing authority"),
+        (view.select_model, "no model selection authority"),
+        (view.acquire_claim, "no claim authority"),
+        (view.authorize_mutation, "no mutation authority"),
+        (view.mark_completion, "no completion authority"),
+        (view.accept_candidate, "no candidate acceptance authority"),
+        (view.merge, "no merge authority"),
+        (view.deploy, "no deployment authority"),
+    ):
+        with pytest.raises(NotImplementedError, match=message):
+            method()

@@ -55,19 +55,22 @@ RECOGNIZED_TRANSPORT_KINDS = frozenset(
     }
 )
 
-# Canonical Supported Producer Schemas
+# Canonical producer schemas that already have repository-owned durable readers.
+PRODUCER_SCHEMA_EXTERNAL_WORKER_V1 = "nexus.external_worker_operation.v1"
+PRODUCER_SCHEMA_AGY_OPERATION_V1 = "nexus.agy_operation.v1"
+TRUSTED_JOURNAL_SCHEMAS = frozenset(
+    {
+        PRODUCER_SCHEMA_EXTERNAL_WORKER_V1,
+        PRODUCER_SCHEMA_AGY_OPERATION_V1,
+    }
+)
+
+# Declared compatibility/fixture schemas are not producer proof by themselves.
 PRODUCER_SCHEMA_OPERATION_V1 = "nexus.operation.v1"
 PRODUCER_SCHEMA_DEV_MCP_V1 = "nexus.dev_mcp.receipt.v1"
 PRODUCER_SCHEMA_RDC_V1 = "nexus.rdc.receipt.v1"
 PRODUCER_SCHEMA_GOVERNED_TARGET_V1 = "nexus.target_ownership.v1"
-SUPPORTED_PRODUCER_SCHEMAS = frozenset(
-    {
-        PRODUCER_SCHEMA_OPERATION_V1,
-        PRODUCER_SCHEMA_DEV_MCP_V1,
-        PRODUCER_SCHEMA_RDC_V1,
-        PRODUCER_SCHEMA_GOVERNED_TARGET_V1,
-    }
-)
+SUPPORTED_PRODUCER_SCHEMAS = TRUSTED_JOURNAL_SCHEMAS
 
 # Normalized Execution States
 EXECUTION_STATE_ACTIVE = "ACTIVE"
@@ -104,6 +107,46 @@ def _sha256(data: Any) -> str:
     except (TypeError, ValueError) as exc:
         raise ProvenanceContractError("payload must be JSON serializable") from exc
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True)
+class VerifiedProducerRecord:
+    """A record obtained from a repository-owned producer read API."""
+
+    record: Mapping[str, Any]
+    source_ref: str
+    transport_kind: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.record, Mapping):
+            raise ProvenanceContractError("verified producer record must be a Mapping")
+        schema = str(self.record.get("schema") or "")
+        if schema not in TRUSTED_JOURNAL_SCHEMAS:
+            raise ProvenanceContractError(f"producer schema is not trusted: {schema!r}")
+        if self.transport_kind not in RECOGNIZED_TRANSPORT_KINDS:
+            raise ProvenanceContractError(f"unrecognized transport_kind: {self.transport_kind!r}")
+        if not self.source_ref:
+            raise ProvenanceContractError("verified producer source_ref is required")
+        object.__setattr__(self, "record", dict(self.record))
+
+
+def read_operation_journal_evidence(
+    journal: Any,
+    operation_id: str,
+    *,
+    transport_kind: str = TRANSPORT_KIND_LOCAL_RUNNER,
+) -> VerifiedProducerRecord:
+    """Read one exact operation through its owning DirectOperationJournal API."""
+
+    record = journal.read(operation_id)
+    schema = str(record.get("schema") or "")
+    if schema not in TRUSTED_JOURNAL_SCHEMAS:
+        raise ProvenanceContractError(f"producer schema is not trusted: {schema!r}")
+    return VerifiedProducerRecord(
+        record=record,
+        source_ref=f"operation-journal:{schema}:{operation_id}",
+        transport_kind=transport_kind,
+    )
 
 
 @dataclass(frozen=True)
@@ -311,7 +354,7 @@ def make_rdc_receipt(
 
 def build_live_execution_provenance(
     work_context: Mapping[str, Any],
-    transport_receipt: Mapping[str, Any] | None = None,
+    transport_receipt: VerifiedProducerRecord | Mapping[str, Any] | None = None,
     *,
     observed_transport_kind: str | None = None,
     max_staleness_seconds: float = 300.0,
@@ -356,7 +399,7 @@ def build_live_execution_provenance(
         phase = ""
 
     # D2: Missing transport receipt
-    if transport_receipt is None or not isinstance(transport_receipt, Mapping):
+    if transport_receipt is None:
         transport = observed_transport_kind or TRANSPORT_KIND_UNKNOWN
         if effective_lane != EXECUTION_LANE_UNKNOWN and transport == effective_lane:
             raise ProvenanceContractError("transport_kind cannot equal execution_lane")
@@ -381,21 +424,19 @@ def build_live_execution_provenance(
             observed_at="",
         )
 
-    rcpt = dict(transport_receipt)
-    rcpt_schema = str(rcpt.get("schema") or "").strip()
-
-    # D2: Canonical receipt schema validation (arbitrary mapping fails closed)
-    if rcpt_schema not in SUPPORTED_PRODUCER_SCHEMAS:
-        transport = observed_transport_kind or str(rcpt.get("transport_kind") or TRANSPORT_KIND_UNKNOWN).strip()
-        if transport not in RECOGNIZED_TRANSPORT_KINDS:
-            transport = TRANSPORT_KIND_UNKNOWN
+    # Raw mappings are observations supplied by the caller, not producer proof.
+    if not isinstance(transport_receipt, VerifiedProducerRecord):
+        rcpt = dict(transport_receipt) if isinstance(transport_receipt, Mapping) else {}
+        declared_transport = str(rcpt.get("transport_kind") or TRANSPORT_KIND_UNKNOWN).strip()
+        if declared_transport not in RECOGNIZED_TRANSPORT_KINDS:
+            declared_transport = TRANSPORT_KIND_UNKNOWN
         return LiveExecutionProvenance(
             repository=repo,
             work_contract_id=work_id,
             task_id=task_id,
             attempt_id=attempt_id,
             execution_lane=effective_lane,
-            transport_kind=transport,
+            transport_kind=declared_transport,
             operation_id=str(rcpt.get("operation_id") or ""),
             host_id=str(rcpt.get("host_id") or ""),
             requested_worker=req_worker,
@@ -405,9 +446,16 @@ def build_live_execution_provenance(
             observed_provider="",
             observed_model="",
             execution_state=EXECUTION_STATE_UNKNOWN,
-            phase=f"RECEIPT_REJECTED: unsupported schema {rcpt_schema!r}",
+            phase="UNVERIFIED_PRODUCER_RECORD",
             source_revision=src_rev,
             observed_at="",
+        )
+
+    rcpt = dict(transport_receipt.record)
+    transport = transport_receipt.transport_kind
+    if observed_transport_kind and observed_transport_kind != transport:
+        raise ProvenanceContractError(
+            f"observed_transport_kind {observed_transport_kind!r} conflicts with verified producer transport {transport!r}"
         )
 
     op_id = str(rcpt.get("operation_id") or "").strip()
@@ -423,31 +471,7 @@ def build_live_execution_provenance(
     rcpt_status = str(rcpt.get("status") or "").upper().strip()
     rcpt_phase = str(rcpt.get("phase") or rcpt_status).strip()
 
-    # Transport kind resolution
-    rcpt_transport = str(rcpt.get("transport_kind") or "").strip()
-    if rcpt_transport:
-        if observed_transport_kind and observed_transport_kind != rcpt_transport:
-            raise ProvenanceContractError(
-                f"observed_transport_kind {observed_transport_kind!r} conflicts with receipt transport {rcpt_transport!r}"
-            )
-        transport = rcpt_transport
-    elif observed_transport_kind:
-        transport = observed_transport_kind
-    elif rcpt_schema == PRODUCER_SCHEMA_OPERATION_V1:
-        transport = (
-            TRANSPORT_KIND_DEV_MCP
-            if effective_lane == EXECUTION_LANE_DIRECT_CANONICAL
-            else TRANSPORT_KIND_RDC
-        )
-    elif rcpt_schema == PRODUCER_SCHEMA_DEV_MCP_V1:
-        transport = TRANSPORT_KIND_DEV_MCP
-    elif rcpt_schema == PRODUCER_SCHEMA_RDC_V1:
-        transport = TRANSPORT_KIND_RDC
-    elif rcpt_schema == PRODUCER_SCHEMA_GOVERNED_TARGET_V1:
-        transport = TRANSPORT_KIND_ISOLATED_WORKTREE
-    else:
-        transport = TRANSPORT_KIND_UNKNOWN
-
+    # Transport kind comes from the verified producer adapter, never the payload.
     if transport not in RECOGNIZED_TRANSPORT_KINDS:
         transport = TRANSPORT_KIND_UNKNOWN
 
@@ -470,26 +494,35 @@ def build_live_execution_provenance(
     else:
         norm_state = EXECUTION_STATE_UNKNOWN
 
-    # D3: Exact cross-binding checks
+    # D3: Exact cross-binding checks. Missing required identity is also a mismatch.
     rcpt_repo = str(rcpt.get("repository") or rcpt.get("repo_root") or "").strip()
-    if rcpt_repo and repo:
-        if Path(rcpt_repo).name != Path(repo).name and rcpt_repo != repo:
-            norm_state = EXECUTION_STATE_UNKNOWN
-            rcpt_phase = f"CROSS_BINDING_MISMATCH: repository mismatch ({repo} vs {rcpt_repo})"
-
     rcpt_task_id = str(rcpt.get("task_id") or "").strip()
-    if rcpt_task_id and task_id and rcpt_task_id != task_id:
-        norm_state = EXECUTION_STATE_UNKNOWN
-        rcpt_phase = f"CROSS_BINDING_MISMATCH: task_id mismatch ({task_id} vs {rcpt_task_id})"
-
     rcpt_attempt_id = str(rcpt.get("attempt_id") or "").strip()
-    if rcpt_attempt_id and attempt_id and rcpt_attempt_id != attempt_id:
-        norm_state = EXECUTION_STATE_UNKNOWN
-        rcpt_phase = f"CROSS_BINDING_MISMATCH: attempt_id mismatch ({attempt_id} vs {rcpt_attempt_id})"
-
     rcpt_op_id = str(rcpt.get("operation_id") or "").strip()
     work_op_id = str(work_context.get("operation_id") or "").strip()
-    if work_op_id and rcpt_op_id and work_op_id != rcpt_op_id:
+
+    missing_bindings = []
+    if not repo or not rcpt_repo:
+        missing_bindings.append("repository")
+    if not task_id or not rcpt_task_id:
+        missing_bindings.append("task_id")
+    if not attempt_id or not rcpt_attempt_id:
+        missing_bindings.append("attempt_id")
+    if not work_op_id or not rcpt_op_id:
+        missing_bindings.append("operation_id")
+    if missing_bindings:
+        norm_state = EXECUTION_STATE_UNKNOWN
+        rcpt_phase = "MISSING_CROSS_BINDING_IDENTITY: " + ",".join(missing_bindings)
+    elif Path(rcpt_repo).name != Path(repo).name and rcpt_repo != repo:
+        norm_state = EXECUTION_STATE_UNKNOWN
+        rcpt_phase = f"CROSS_BINDING_MISMATCH: repository mismatch ({repo} vs {rcpt_repo})"
+    elif rcpt_task_id != task_id:
+        norm_state = EXECUTION_STATE_UNKNOWN
+        rcpt_phase = f"CROSS_BINDING_MISMATCH: task_id mismatch ({task_id} vs {rcpt_task_id})"
+    elif rcpt_attempt_id != attempt_id:
+        norm_state = EXECUTION_STATE_UNKNOWN
+        rcpt_phase = f"CROSS_BINDING_MISMATCH: attempt_id mismatch ({attempt_id} vs {rcpt_attempt_id})"
+    elif work_op_id != rcpt_op_id:
         norm_state = EXECUTION_STATE_UNKNOWN
         rcpt_phase = f"CROSS_BINDING_MISMATCH: operation_id mismatch ({work_op_id} vs {rcpt_op_id})"
 
@@ -529,14 +562,16 @@ def build_live_execution_provenance(
                 if diff > max_staleness_seconds:
                     norm_state = EXECUTION_STATE_STALE
                     rcpt_phase = f"HEARTBEAT_EXPIRED: age {int(diff)}s > max {int(max_staleness_seconds)}s"
-            except Exception:
-                pass
+            except (TypeError, ValueError, OverflowError):
+                norm_state = EXECUTION_STATE_UNKNOWN
+                rcpt_phase = "INVALID_PRODUCER_TIMESTAMP"
+                observed_at = ""
 
     if effective_state is not None:
         norm_state = effective_state
         rcpt_phase = phase
 
-    evidence_refs: list[str] = []
+    evidence_refs: list[str] = [transport_receipt.source_ref]
     for ref_key in ("stdout_path", "stderr_path", "log_path", "receipt_path"):
         val = str(rcpt.get(ref_key) or "").strip()
         if val:
