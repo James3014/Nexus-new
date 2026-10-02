@@ -55,10 +55,22 @@ def _sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _invoke_planner(task_desc: str) -> dict:
-    from nexus.engine.capability_planner import CapabilityPlanner
+def _invoke_planner(
+    task_desc: str,
+    *,
+    task_id: str,
+    source_hash: str,
+    workspace_revision: str,
+) -> dict:
+    """Build the benchmark snapshot through the same canonical identity producers as Runtime."""
+    from nexus.contracts.canonical_execution import CanonicalTaskContext
+    from nexus.engine.canonical_execution import plan_canonical_task_bundle
+    from nexus.services.capability_evidence_bundle import (
+        build_capability_evidence_bundle,
+        verify_capability_evidence_bundle,
+    )
+    from nexus.services.unified_runtime import canonical_execution_identity
 
-    planner = CapabilityPlanner()
     overrides = {
         "NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR": "1",
         "NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY": "localheal_pipeline",
@@ -69,15 +81,53 @@ def _invoke_planner(task_desc: str) -> dict:
     previous = {key: os.environ.get(key) for key in overrides}
     os.environ.update(overrides)
     try:
-        plan = planner.plan(
-            task_desc=task_desc,
+        context = CanonicalTaskContext(
+            task_id=task_id,
             task_type="swe_bounded_repair",
-            route={"task_id": "v1_slice", "task_desc": task_desc, "task_type": "swe_bounded_repair",
-                   "difficulty": "medium", "route_features": {}},
-            pillars={}, codeintel={}, phase_trace={},
-            budget={"max_cost": 20}, skills=[],
+            task_desc=task_desc,
+            execution_world="local_armor",
+            transport_ingress="bench",
+            execution_channels=("local",),
+            task_facts={
+                "mutation_requested": True,
+                "candidate_required": True,
+            },
+            authority_inputs={"isolation_required": True},
+            route_features={
+                "deterministic_verifier_available": True,
+                "bounded_allowed_file_count": 1,
+            },
+            budget={"max_cost": 20},
         )
-        return plan.signal_snapshot
+        bundle = plan_canonical_task_bundle(context)
+        payload = bundle.to_dict()
+        planner_decision_id = bundle.plan_hash
+        canonical_execution = canonical_execution_identity(bundle)
+        evidence_bundle = build_capability_evidence_bundle(
+            task_id=task_id,
+            workspace_revision=workspace_revision,
+            task_statement=task_desc,
+            plan_payload=payload["plan_payload"],
+            plan_hash=bundle.plan_hash,
+            planner_decision_id=planner_decision_id,
+            capability_results={},
+            selected_capabilities=list(bundle.decision.selected_capabilities),
+            source_hash=source_hash,
+        )
+        verdict = verify_capability_evidence_bundle(evidence_bundle)
+        if verdict.get("ok") is not True:
+            raise RuntimeError("n30r_v1_capability_evidence_bundle_invalid")
+
+        snapshot = dict(bundle.plan.signal_snapshot)
+        snapshot.update(
+            {
+                "canonical_execution": canonical_execution,
+                "capability_evidence_bundle": evidence_bundle,
+                "planner_decision_id": planner_decision_id,
+                "plan_hash": bundle.plan_hash,
+            }
+        )
+        return snapshot
     finally:
         for key, value in previous.items():
             if value is None:
@@ -314,7 +364,12 @@ def _run_v1_trace_in_workspace(
     # Record canonical source before any mutation
     canonical_source_sha256 = _sha256_text(source_content)
 
-    signal_snapshot = _invoke_planner(task.task_statement)
+    signal_snapshot = _invoke_planner(
+        task.task_statement,
+        task_id=task.task_id,
+        source_hash=source_sha256,
+        workspace_revision=f"sha256:{source_sha256}",
+    )
     planner_snapshot_sha256 = _sha256_json(signal_snapshot)
     planner_caps = list(signal_snapshot.get("ssd_route_map", {}).get("capability_reasons", {}).keys())
 
@@ -352,6 +407,9 @@ def _run_v1_trace_in_workspace(
         evidence_refs=evidence_refs, receipt_context={},
         route_context={
             "signal_snapshot": signal_snapshot,
+            "planner_decision_id": signal_snapshot["planner_decision_id"],
+            "world_c_source_root": str(repo_root),
+            "world_c_workspace_path": workspace,
             "verifier_command": list(verifier_command),
             "target_symbol": target_symbol,
             "locked_search": locked_search,
@@ -528,6 +586,14 @@ def _run_v1_trace_in_workspace(
         "baseline_sha": "0675dfed3",
         "mock_provider": True, "live_ollama_calls": 0,
         "planner_snapshot_sha256": planner_snapshot_sha256,
+        "planner_decision_id": signal_snapshot["planner_decision_id"],
+        "canonical_execution_hash": signal_snapshot["canonical_execution"]["context_hash"],
+        "canonical_execution_world": signal_snapshot["canonical_execution"]["execution_world"],
+        "canonical_execution_topology": signal_snapshot["canonical_execution"][
+            "canonical_execution_topology"
+        ],
+        "capability_evidence_bundle_hash": signal_snapshot["capability_evidence_bundle"]["bundle_hash"],
+        "capability_evidence_source_hash": signal_snapshot["capability_evidence_bundle"]["source_hash"],
         "planner_capabilities": planner_caps,
         "executor_capabilities": list(projection.executable_capabilities),
         "projection_hash": projection_hash,
