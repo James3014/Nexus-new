@@ -231,3 +231,37 @@ def test_installer_deploys_exact_canonical_review_entrypoint(tmp_path: Path) -> 
     assert mode & stat.S_IXUSR
     assert mode & stat.S_IXGRP
     assert mode & stat.S_IXOTH
+
+
+def test_same_semantic_review_from_different_physical_root_fails_closed(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    root, base, contract = make_repo(tmp_path)
+    clone = tmp_path / "clone"
+    proc = subprocess.run(
+        ["git", "clone", str(root), str(clone)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    _git(clone, "remote", "set-url", "origin", "https://github.com/James3014/Nexus-new.git")
+    (clone / "a.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+    op_root = tmp_path / "operations"
+    first_args = args_for(root, base, contract, op_root)
+    second_args = args_for(clone, base, contract, op_root)
+    FakePopen.calls = []
+    monkeypatch.setattr(review, "_dispatcher_path", lambda: Path("/fake/nexus-agy-dispatch"))
+    monkeypatch.setattr(review.subprocess, "Popen", FakePopen)
+
+    first = review.launch_review(first_args)
+    with pytest.raises(
+        review.AgyReviewError,
+        match="REVIEW_EXISTING_PACKET_MISMATCH",
+    ):
+        review.launch_review(second_args)
+
+    assert first["action"] == "DISPATCHED"
+    assert len(FakePopen.calls) == 1

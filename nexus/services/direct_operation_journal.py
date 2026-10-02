@@ -67,6 +67,7 @@ PUBLIC_OPERATION_KEYS = (
     "review_effect_id",
     "review_role",
     "review_repository",
+    "review_repo_root_sha256",
     "review_base_revision",
     "review_candidate_head",
     "candidate_digest",

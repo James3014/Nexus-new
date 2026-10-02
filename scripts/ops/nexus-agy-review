@@ -94,6 +94,7 @@ def _binding_fields(packet: dict[str, Any]) -> dict[str, Any]:
         "review_effect_id": packet["review_effect_id"],
         "review_role": packet["reviewer_role"],
         "review_repository": packet["repository"],
+        "review_repo_root_sha256": packet["repo_root_sha256"],
         "review_base_revision": packet["base_revision"],
         "review_candidate_head": packet["current_head"],
         "candidate_digest": packet["candidate_digest"],
@@ -148,6 +149,7 @@ def _current_projection(
                 packet=packet,
                 operation_record=record,
                 reviewer_output=output,
+                repo_path=str(record.get("repo_root") or record.get("cwd") or ""),
             )
             atomic_private_json(receipt_path, receipt)
         except AgyReviewError as exc:
@@ -174,7 +176,10 @@ def _current_projection(
             )
 
     if receipt is not None:
-        stable_now, current = subject_matches_packet(packet)
+        stable_now, current = subject_matches_packet(
+            packet,
+            repo_path=str(record.get("repo_root") or record.get("cwd") or ""),
+        )
         applicable_now = bool(receipt.get("review_applicable") and stable_now)
         if (
             record.get("subject_stable") != stable_now
@@ -291,7 +296,9 @@ def launch_review(args: argparse.Namespace) -> dict[str, Any]:
         persisted = load_review_packet(packet_path)
         if persisted["review_effect_id"] != effect_id:
             raise AgyReviewError("REVIEW_EFFECT_OPERATION_COLLISION")
-        _assert_record_binding(record, persisted)
+        if persisted["packet_sha256"] != packet["packet_sha256"]:
+            raise AgyReviewError("REVIEW_EXISTING_PACKET_MISMATCH")
+        _assert_record_binding(record, packet)
         status = record.get("status")
         if status == "COMPLETED":
             result = _current_projection(

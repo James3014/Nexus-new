@@ -6,7 +6,14 @@ REPO_ROOT_DEFAULT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 REPO_ROOT="${NEXUS_AGY_REPO_ROOT:-$REPO_ROOT_DEFAULT}"
 SOURCE="$REPO_ROOT/scripts/ops/nexus-agy-review"
 TARGET="${NEXUS_AGY_REVIEW_TARGET:-$HOME/.local/bin/nexus-agy-review}"
-SNAPSHOT="${NEXUS_AGY_SNAPSHOT:-$HOME/.local/share/nexus-agy-direct/Nexus-new}"
+HOST_RUNTIME_SNAPSHOT="$HOME/.local/share/nexus-host-runtime/current/snapshot"
+if [[ -n "${NEXUS_AGY_SNAPSHOT:-}" ]]; then
+  SNAPSHOT="$NEXUS_AGY_SNAPSHOT"
+elif [[ -d "$HOST_RUNTIME_SNAPSHOT" ]]; then
+  SNAPSHOT="$HOST_RUNTIME_SNAPSHOT"
+else
+  SNAPSHOT="$HOME/.local/share/nexus-agy-direct/Nexus-new"
+fi
 
 if [[ ! -f "$SOURCE" ]]; then
   echo "NEXUS_AGY_REVIEW_SOURCE_MISSING:$SOURCE" >&2

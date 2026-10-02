@@ -130,6 +130,7 @@ def _safe_untracked(root: Path, relative: str) -> dict[str, str]:
 class ReviewSubject:
     repository: str
     repo_root: str
+    repo_root_sha256: str
     base_revision: str
     current_head: str
     changed_paths: tuple[str, ...]
@@ -217,6 +218,7 @@ def collect_review_subject(
     return ReviewSubject(
         repository=repository,
         repo_root=str(root),
+        repo_root_sha256=_sha256_bytes(str(root).encode("utf-8")),
         base_revision=base,
         current_head=current_head,
         changed_paths=changed_paths,
@@ -281,8 +283,12 @@ def build_review_packet(
         len(item["content"].encode("utf-8"))
         for item in [contract, *verification, *authority]
     )
-    if evidence_bytes > MAX_PACKET_INPUT_BYTES:
-        raise AgyReviewError("REVIEW_EVIDENCE_INPUT_TOO_LARGE")
+    candidate_bytes = len(subject.tracked_diff.encode("utf-8")) + sum(
+        len(item["content"].encode("utf-8"))
+        for item in subject.untracked_files
+    )
+    if candidate_bytes + evidence_bytes > MAX_PACKET_INPUT_BYTES:
+        raise AgyReviewError("REVIEW_PACKET_INPUT_TOO_LARGE")
 
     evidence_inputs = {
         "verification_receipts": [
@@ -307,7 +313,7 @@ def build_review_packet(
         "review_effect_id": review_effect_id,
         "reviewer_role": role,
         "repository": subject.repository,
-        "repo_root": subject.repo_root,
+        "repo_root_sha256": subject.repo_root_sha256,
         "base_revision": subject.base_revision,
         "current_head": subject.current_head,
         "candidate_digest": subject.candidate_digest,
@@ -402,7 +408,8 @@ def verify_review_packet(packet: Mapping[str, Any]) -> None:
 
     subject = ReviewSubject(
         repository=str(packet.get("repository") or ""),
-        repo_root=str(packet.get("repo_root") or ""),
+        repo_root="",
+        repo_root_sha256=str(packet.get("repo_root_sha256") or ""),
         base_revision=str(packet.get("base_revision") or ""),
         current_head=str(packet.get("current_head") or ""),
         changed_paths=tuple(packet.get("changed_paths") or ()),
@@ -446,15 +453,20 @@ def parse_review_verdict(output: str) -> str:
     return matches[0]
 
 
-def subject_matches_packet(packet: Mapping[str, Any]) -> tuple[bool, ReviewSubject]:
+def subject_matches_packet(
+    packet: Mapping[str, Any],
+    *,
+    repo_path: str | os.PathLike[str],
+) -> tuple[bool, ReviewSubject]:
     verify_review_packet(packet)
     current = collect_review_subject(
-        str(packet["repo_root"]),
+        repo_path,
         expected_repository=str(packet["repository"]),
         base_revision=str(packet["base_revision"]),
     )
     stable = (
-        current.current_head == packet.get("current_head")
+        current.repo_root_sha256 == packet.get("repo_root_sha256")
+        and current.current_head == packet.get("current_head")
         and current.candidate_digest == packet.get("candidate_digest")
         and list(current.changed_paths) == packet.get("changed_paths")
     )
@@ -466,10 +478,11 @@ def build_review_receipt(
     packet: Mapping[str, Any],
     operation_record: Mapping[str, Any],
     reviewer_output: str,
+    repo_path: str | os.PathLike[str],
 ) -> dict[str, Any]:
     verify_review_packet(packet)
     verdict = parse_review_verdict(reviewer_output)
-    stable, current = subject_matches_packet(packet)
+    stable, current = subject_matches_packet(packet, repo_path=repo_path)
     transport_completed = operation_record.get("status") == "COMPLETED"
     applicable = bool(stable and transport_completed)
     receipt: dict[str, Any] = {
@@ -478,6 +491,7 @@ def build_review_receipt(
         "review_effect_id": packet["review_effect_id"],
         "reviewer_role": packet["reviewer_role"],
         "repository": packet["repository"],
+        "repo_root_sha256": packet["repo_root_sha256"],
         "base_revision": packet["base_revision"],
         "candidate_digest": packet["candidate_digest"],
         "candidate_head": packet["current_head"],
@@ -515,6 +529,7 @@ def verify_review_receipt(receipt: Mapping[str, Any], packet: Mapping[str, Any])
     for key in (
         "review_effect_id",
         "repository",
+        "repo_root_sha256",
         "base_revision",
         "candidate_digest",
         "acceptance_contract_sha256",

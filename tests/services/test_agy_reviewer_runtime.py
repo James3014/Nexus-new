@@ -105,6 +105,8 @@ def test_packet_binds_exact_subject_and_is_order_stable(tmp_path: Path) -> None:
     assert first["review_effect_id"] == second["review_effect_id"]
     assert first["packet_sha256"] == second["packet_sha256"]
     assert first["changed_paths"] == ["a.py", "b.txt", "c.txt"]
+    assert "repo_root" not in first
+    assert len(first["repo_root_sha256"]) == 64
     verify_review_packet(first)
 
 
@@ -209,13 +211,14 @@ def test_receipt_binds_transport_and_becomes_stale_after_subject_change(
         packet=packet,
         operation_record=operation,
         reviewer_output="material findings\nACCEPT\n",
+        repo_path=root,
     )
     assert receipt["subject_stable"] is True
     assert receipt["review_applicable"] is True
     verify_review_receipt(receipt, packet)
 
     (root / "a.py").write_text("VALUE = 99\n", encoding="utf-8")
-    stable, current = subject_matches_packet(packet)
+    stable, current = subject_matches_packet(packet, repo_path=root)
     assert stable is False
     assert current.candidate_digest != packet["candidate_digest"]
 
