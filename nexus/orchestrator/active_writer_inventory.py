@@ -229,7 +229,7 @@ class ActiveWriterInventoryCollector:
                         active_writers=[],
                         complete=False,
                         disposition=CONFLICT_RECONCILE_REQUIRED,
-                        reason=f"CANONICAL_PRODUCER_READ_FAILED: {source_name}: {entry.name}: {exc}",
+                        reason=f"CORRUPT_CANONICAL_OPERATION_RECORD_DETECTED: {source_name}: {entry.name}: {exc}",
                         conflicting_writers=[entry.name],
                         sources_scanned=(source_name,),
                     ),
