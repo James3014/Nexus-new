@@ -513,6 +513,7 @@ def _bind_canonical_producer_root(
     canonical_attr: str,
     root: Path,
 ) -> None:
+    root.mkdir(parents=True, exist_ok=True)
     resolved = root.resolve()
     monkeypatch.setenv(env_name, str(resolved))
     monkeypatch.setattr(provenance_module, canonical_attr, resolved)
