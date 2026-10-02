@@ -106,65 +106,23 @@ class ActiveWriterInventoryCollector:
     def __init__(
         self,
         *,
-        dev_mcp_root: Optional[Path | str] = None,
-        rdc_root: Optional[Path | str] = None,
-        external_worker_root: Optional[Path | str] = None,
-        agy_root: Optional[Path | str] = None,
-        local_writer_root: Optional[Path | str] = None,
         heartbeat_stale_seconds: float = 120.0,
     ) -> None:
-        self.dev_mcp_root = (
-            Path(dev_mcp_root).expanduser().resolve() if dev_mcp_root is not None else None
-        )
-        self.rdc_root = Path(rdc_root).expanduser().resolve() if rdc_root is not None else None
-        self.external_worker_root = (
-            Path(external_worker_root).expanduser().resolve()
-            if external_worker_root is not None
-            else None
-        )
-        self.agy_root = Path(agy_root).expanduser().resolve() if agy_root is not None else None
-        self.local_writer_root = (
-            Path(local_writer_root).expanduser().resolve()
-            if local_writer_root is not None
-            else None
-        )
         self.heartbeat_stale_seconds = float(heartbeat_stale_seconds)
 
     def _resolve_dev_mcp_root(self) -> Path:
-        if self.dev_mcp_root is not None:
-            return self.dev_mcp_root
-        env_val = os.getenv("NEXUS_DEV_MCP_OPERATION_ROOT")
-        if env_val:
-            return Path(env_val).expanduser().resolve()
         return _dev_mcp_operation_root()
 
     def _resolve_rdc_root(self) -> Path:
-        if self.rdc_root is not None:
-            return self.rdc_root
-        env_val = os.getenv("NEXUS_RDC_OPERATION_ROOT")
-        if env_val:
-            return Path(env_val).expanduser().resolve()
         return _rdc_operation_root()
 
     def _resolve_external_worker_root(self) -> Path:
-        if self.external_worker_root is not None:
-            return self.external_worker_root
-        env_val = os.getenv("NEXUS_EXTERNAL_WORKER_OPERATION_ROOT")
-        if env_val:
-            return Path(env_val).expanduser().resolve()
         return _external_worker_operation_root()
 
     def _resolve_agy_root(self) -> Path:
-        if self.agy_root is not None:
-            return self.agy_root
-        env_val = os.getenv("NEXUS_AGY_OPERATION_ROOT")
-        if env_val:
-            return Path(env_val).expanduser().resolve()
         return _agy_operation_root()
 
     def _resolve_local_writer_root(self) -> Optional[Path]:
-        if self.local_writer_root is not None:
-            return self.local_writer_root
         env_val = os.getenv("NEXUS_LOCAL_WRITER_ROOT")
         if env_val:
             return Path(env_val).expanduser().resolve()
@@ -514,6 +472,14 @@ class ActiveWriterInventoryCollector:
         scanned_sources.append("EXTERNAL_WORKERS")
         ext_root = self._resolve_external_worker_root()
         ext_required = bool(os.getenv("NEXUS_EXTERNAL_WORKER_OPERATION_ROOT"))
+        if ext_required and not ext_root.exists():
+            return ActiveWriterInventoryResult(
+                active_writers=[],
+                complete=False,
+                disposition=CONFLICT_UNKNOWN,
+                reason=f"CANONICAL_PRODUCER_ROOT_UNAVAILABLE: EXTERNAL_WORKERS: {ext_root}",
+                sources_scanned=tuple(scanned_sources),
+            )
         for provider in sorted(_EXTERNAL_WORKER_PREFIXES.keys()):
             journal = DirectOperationJournal(
                 ext_root / provider,
@@ -578,20 +544,10 @@ def collect_active_writer_inventory(
     *,
     expected_revision: Optional[str] = None,
     target_records: Optional[Sequence[Mapping[str, Any]]] = None,
-    dev_mcp_root: Optional[Path | str] = None,
-    rdc_root: Optional[Path | str] = None,
-    external_worker_root: Optional[Path | str] = None,
-    agy_root: Optional[Path | str] = None,
-    local_writer_root: Optional[Path | str] = None,
     heartbeat_stale_seconds: float = 120.0,
 ) -> ActiveWriterInventoryResult:
     """Convenience helper to collect the canonical complete active-writer inventory."""
     collector = ActiveWriterInventoryCollector(
-        dev_mcp_root=dev_mcp_root,
-        rdc_root=rdc_root,
-        external_worker_root=external_worker_root,
-        agy_root=agy_root,
-        local_writer_root=local_writer_root,
         heartbeat_stale_seconds=heartbeat_stale_seconds,
     )
     return collector.collect(
