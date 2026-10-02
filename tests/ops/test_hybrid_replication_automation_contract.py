@@ -32,3 +32,10 @@ def test_daemon_is_fail_closed_on_capture_and_admission_gaps() -> None:
     assert '"missing_admission"' in text
     assert "ExternalFrozenStackRunner" in text
     assert "ExternalGroundTruthResolver" in text
+    assert text.index("advance_report = advance_all") < text.rindex(
+        'if ingest_report["missing_capture"]'
+    )
+    assert "except Exception as exc" in text
+    assert '"failures": failures' in text
+    assert 'if advance_report["failures"]' in text
+    assert '"task_key": task_key' in text

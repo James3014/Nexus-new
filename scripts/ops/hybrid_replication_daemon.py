@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
+import subprocess  # nosec B404
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +31,7 @@ CANDIDATE_REPOSITORIES = (
 
 
 def _gh_json(*args: str) -> Any:
-    completed = subprocess.run(
+    completed = subprocess.run(  # nosec B603 B607
         ["gh", "api", *args],
         text=True,
         capture_output=True,
@@ -176,20 +176,32 @@ def advance_all(
         ),
     )
     advanced: list[dict[str, Any]] = []
+    failures: list[dict[str, Any]] = []
     for state_path in sorted(store.tasks_root.glob("*/state.json")):
         state = json.loads(state_path.read_text(encoding="utf-8"))
         if state.get("admission_disposition") != "ADMITTED_PRIMARY_FRESH_TASK":
             continue
+        task_key = str(state["task_key"])
         before = str(state.get("phase"))
-        after = controller.advance(str(state["task_key"]))
+        try:
+            after = controller.advance(task_key)
+        except Exception as exc:  # noqa: BLE001 - per-task fail-closed isolation
+            failures.append({
+                "task_key": task_key,
+                "phase": before,
+                "error_type": type(exc).__name__,
+                "error": str(exc)[:500],
+            })
+            continue
         advanced.append({
-            "task_key": state["task_key"],
+            "task_key": task_key,
             "before": before,
             "after": after.get("phase"),
         })
     return {
         "schema": "nexus.hybrid_replication.daemon_advance.v1",
         "advanced": advanced,
+        "failures": failures,
     }
 
 
@@ -207,12 +219,12 @@ def main() -> int:
     ingest_report = ingest(store=store, since=args.since)
     print(json.dumps(ingest_report, ensure_ascii=False, sort_keys=True, indent=2))
 
-    if ingest_report["missing_capture"]:
-        return 3
     if args.ingest_only:
+        if ingest_report["missing_capture"]:
+            return 3
+        if ingest_report["missing_admission"]:
+            return 4
         return 0
-    if ingest_report["missing_admission"]:
-        return 4
     if not (args.frozen_policy_sha256 and args.stack_command and args.ground_truth_command):
         raise SystemExit(
             "advance mode requires frozen policy, stack command, and ground-truth command"
@@ -224,6 +236,12 @@ def main() -> int:
         ground_truth_command=args.ground_truth_command,
     )
     print(json.dumps(advance_report, ensure_ascii=False, sort_keys=True, indent=2))
+    if advance_report["failures"]:
+        return 5
+    if ingest_report["missing_capture"]:
+        return 3
+    if ingest_report["missing_admission"]:
+        return 4
     return 0
 
 
