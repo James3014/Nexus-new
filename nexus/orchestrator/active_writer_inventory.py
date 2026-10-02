@@ -44,10 +44,11 @@ from nexus.services.live_execution_provenance import (
     _DEV_MCP_OPERATION_PREFIX,
     _EXTERNAL_WORKER_PREFIXES,
     _RDC_OPERATION_PREFIX,
-    PRODUCER_SCHEMA_AGY_OPERATION_V1,
     PRODUCER_SCHEMA_DEV_MCP_V1,
     PRODUCER_SCHEMA_EXTERNAL_WORKER_V1,
     PRODUCER_SCHEMA_RDC_V1,
+    ProvenanceContractError,
+    read_operation_journal_evidence,
     _agy_operation_root,
     _dev_mcp_operation_root,
     _external_worker_operation_root,
@@ -220,10 +221,12 @@ class ActiveWriterInventoryCollector:
 
             try:
                 # Critical trust boundary: schema-shaped raw JSON is not producer
-                # proof.  The owning journal validates operation-id, record path,
-                # schema, and status before #98 consumes the record.
-                data = journal.read(entry.name)
-            except DirectOperationJournalError as exc:
+                # proof.  Reuse #1266's canonical owning-read adapter so root,
+                # operation-id, record path, schema, status, and immutable read
+                # identity are all bound before #98 consumes the record.
+                evidence = read_operation_journal_evidence(journal, entry.name)
+                data = evidence.record
+            except (DirectOperationJournalError, ProvenanceContractError) as exc:
                 return (
                     ActiveWriterInventoryResult(
                         active_writers=[],
