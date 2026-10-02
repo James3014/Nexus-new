@@ -142,6 +142,7 @@ class AgyOperationJournal(DirectOperationJournal):
         effort: str | None,
         prompt_sha256: str,
         runtime_revision: str | None,
+        initial_fields: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return super().create(
             operation_id=operation_id,
@@ -152,6 +153,7 @@ class AgyOperationJournal(DirectOperationJournal):
             effort=effort,
             prompt_sha256=prompt_sha256,
             runtime_revision=runtime_revision,
+            initial_fields=initial_fields,
         )
 
     def reconcile(

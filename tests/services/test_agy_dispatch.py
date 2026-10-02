@@ -900,3 +900,62 @@ def test_accept_edits_existing_narrow_write_allow_is_supported(
     )
 
     assert code == 0
+
+
+def test_operation_run_rebinds_current_runtime_revision(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort=None,
+        prompt_sha256="0" * 64,
+        runtime_revision=None,
+    )
+    dispatch._write_private_prompt(prompt_path, "runtime identity probe")
+
+    monkeypatch.setattr(dispatch, "_runtime_revision", lambda: "b" * 40)
+
+    def fake_dispatch_run(**kwargs):
+        kwargs["operation_hook"]({
+            "phase": "CLASSIFYING_FAILURE",
+            "attempts": 1,
+            "rotations": 0,
+            "failure_kind": "TIMEOUT",
+            "timed_out": True,
+            "account_alias_hash": "acct",
+            "lease_id_hash": "lease",
+        })
+        return 1
+
+    monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
+
+    code = dispatch._run_background_operation(
+        operation_id=operation_id,
+        prompt_file=str(prompt_path),
+        cwd=str(tmp_path),
+        mode="accept-edits",
+        model="gemini-test",
+        effort=None,
+        timeout=30,
+        max_calls=1,
+        pool_wait_timeout=1.0,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=root,
+        heartbeat_interval=0.01,
+    )
+
+    record = journal.read(operation_id)
+    assert code == 1
+    assert record["runtime_revision"] == "b" * 40
+    assert record["status"] == "OUTCOME_UNKNOWN"

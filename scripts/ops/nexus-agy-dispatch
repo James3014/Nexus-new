@@ -1460,6 +1460,8 @@ def _run_background_operation(
         except FileNotFoundError:
             pass
 
+    current_runtime_revision = _runtime_revision()
+    journal.update(operation_id, runtime_revision=current_runtime_revision)
     journal.mark_started(operation_id, pid=os.getpid())
     stop = threading.Event()
     state: dict[str, Any] = {

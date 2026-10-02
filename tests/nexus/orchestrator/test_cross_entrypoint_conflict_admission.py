@@ -13,10 +13,15 @@ Invariants verified:
 
 from __future__ import annotations
 
+import datetime
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
 
+import nexus.services.live_execution_provenance as provenance_module
+from nexus.orchestrator.task_contract import SelfHostedTaskContract
 from nexus.orchestrator.worktree_manager import (
     CONFLICT_CLEAR,
     CONFLICT_OVERLAP,
@@ -29,6 +34,29 @@ from nexus.orchestrator.worktree_manager import (
     evaluate_cross_entrypoint_conflict,
     mutation_domains_conflict,
 )
+from nexus.services.direct_operation_journal import DirectOperationJournal
+from nexus.services.live_execution_provenance import (
+    PRODUCER_SCHEMA_AGY_OPERATION_V1,
+    PRODUCER_SCHEMA_DEV_MCP_V1,
+    PRODUCER_SCHEMA_RDC_V1,
+)
+
+
+@pytest.fixture(autouse=True)
+def _available_empty_canonical_writer_surfaces(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Make producer availability explicit for #98 inventory tests."""
+    roots = {
+        "_CANONICAL_DEV_MCP_OPERATION_ROOT": tmp_path / "canonical-writers" / "dev-mcp",
+        "_CANONICAL_RDC_OPERATION_ROOT": tmp_path / "canonical-writers" / "rdc",
+        "_CANONICAL_EXTERNAL_WORKER_OPERATION_ROOT": tmp_path / "canonical-writers" / "external",
+        "_CANONICAL_AGY_OPERATION_ROOT": tmp_path / "canonical-writers" / "agy",
+    }
+    for attr, root in roots.items():
+        root.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(provenance_module, attr, root.resolve())
 
 
 def _writer(
@@ -451,3 +479,649 @@ def test_existing_direct_canonical_guard_remains_fail_closed():
     )
     assert mutation_domains_conflict(direct, isolated) is True
     assert mutation_domains_conflict(isolated, direct) is True
+
+
+def _make_git_repo(path: Path) -> tuple[Path, str]:
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init"], cwd=path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@nexus.local"],
+        cwd=path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Nexus Test"],
+        cwd=path,
+        check=True,
+        capture_output=True,
+    )
+    (path / "src").mkdir(parents=True, exist_ok=True)
+    (path / "src" / "base.py").write_text("# base\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=path, check=True, capture_output=True)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=path, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    return path, head
+
+
+def _bind_canonical_producer_root(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    env_name: str,
+    canonical_attr: str,
+    root: Path,
+    create_root: bool = True,
+) -> None:
+    if create_root:
+        root.mkdir(parents=True, exist_ok=True)
+    resolved = root.resolve()
+    monkeypatch.setenv(env_name, str(resolved))
+    monkeypatch.setattr(provenance_module, canonical_attr, resolved)
+
+
+def test_live_dev_mcp_vs_rdc_overlap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    repo_path, head_sha = _make_git_repo(tmp_path / "repo")
+    dev_mcp_root = tmp_path / "dev_mcp"
+    rdc_root = tmp_path / "rdc"
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_DEV_MCP_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_DEV_MCP_OPERATION_ROOT",
+        root=dev_mcp_root,
+    )
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_RDC_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_RDC_OPERATION_ROOT",
+        root=rdc_root,
+    )
+
+    journal = DirectOperationJournal(
+        dev_mcp_root,
+        schema=PRODUCER_SCHEMA_DEV_MCP_V1,
+        operation_prefix="devmcpop_",
+    )
+    op_id = journal.new_operation_id()
+    journal.create(
+        operation_id=op_id,
+        attempt_id="att-mcp",
+        cwd=str(repo_path),
+        provider="dev_mcp",
+        model="gpt-test",
+        effort="high",
+        prompt_sha256="abcd" * 16,
+        runtime_revision=head_sha,
+        initial_fields={
+            "task_id": "task-mcp",
+            "allowed_files": ["src/shared.py"],
+            "mutation_mode": "DIRECT_CANONICAL",
+        },
+    )
+    journal.mark_started(op_id, pid=os.getpid())
+
+    manager = WorktreeManager(root_dir=str(tmp_path / "targets"), create_root=True)
+    rdc_cand = _writer(
+        "task-rdc",
+        ["src/shared.py"],
+        mutation_mode="DIRECT_DELEGATED",
+        controller_revision=head_sha,
+        controller_worktree=str(repo_path),
+    )
+
+    res = manager.readback_conflict_state(rdc_cand)
+    assert res["schema"] == MUTATION_CONFLICT_SCHEMA
+    assert res["claim_ceiling"] == MUTATION_CONFLICT_CLAIM_CEILING
+    assert res["disposition"] == CONFLICT_OVERLAP
+    assert res["reason"] == "MUTATION_DOMAINS_OVERLAP"
+    assert any(w["task_id"] == "task-mcp" for w in res["conflicting_writers"])
+
+
+def test_live_rdc_vs_local_overlap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    repo_path, head_sha = _make_git_repo(tmp_path / "repo")
+    rdc_root = tmp_path / "rdc"
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_RDC_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_RDC_OPERATION_ROOT",
+        root=rdc_root,
+    )
+
+    journal = DirectOperationJournal(
+        rdc_root,
+        schema=PRODUCER_SCHEMA_RDC_V1,
+        operation_prefix="rdcop_",
+    )
+    op_id = journal.new_operation_id()
+    journal.create(
+        operation_id=op_id,
+        attempt_id="att-rdc",
+        cwd=str(repo_path),
+        provider="rdc",
+        model="gpt-test",
+        effort="high",
+        prompt_sha256="abcd" * 16,
+        runtime_revision=head_sha,
+        initial_fields={
+            "task_id": "task-rdc",
+            "allowed_files": ["src/engine"],
+            "mutation_mode": "DIRECT_DELEGATED",
+        },
+    )
+    journal.mark_started(op_id, pid=os.getpid())
+
+    manager = WorktreeManager(root_dir=str(tmp_path / "targets"), create_root=True)
+    local_cand = _writer(
+        "task-local",
+        ["src/engine/planner.py"],
+        mutation_mode="LOCAL",
+        controller_revision=head_sha,
+        controller_worktree=str(repo_path),
+    )
+
+    res = manager.readback_conflict_state(local_cand)
+    assert res["disposition"] == CONFLICT_OVERLAP
+    assert any(w["task_id"] == "task-rdc" for w in res["conflicting_writers"])
+
+
+def test_live_disjoint_multiple_entrypoints_clear(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    repo_path, head_sha = _make_git_repo(tmp_path / "repo")
+    dev_mcp_root = tmp_path / "dev_mcp"
+    rdc_root = tmp_path / "rdc"
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_DEV_MCP_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_DEV_MCP_OPERATION_ROOT",
+        root=dev_mcp_root,
+    )
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_RDC_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_RDC_OPERATION_ROOT",
+        root=rdc_root,
+    )
+
+    # Dev MCP on src/dev.py
+    dev_journal = DirectOperationJournal(
+        dev_mcp_root,
+        schema=PRODUCER_SCHEMA_DEV_MCP_V1,
+        operation_prefix="devmcpop_",
+    )
+    op1 = dev_journal.new_operation_id()
+    dev_journal.create(
+        operation_id=op1,
+        attempt_id="att-1",
+        cwd=str(repo_path),
+        provider="dev_mcp",
+        model="gpt-test",
+        effort="high",
+        prompt_sha256="abcd" * 16,
+        runtime_revision=head_sha,
+        initial_fields={
+            "task_id": "task-dev",
+            "allowed_files": ["src/dev.py"],
+            "mutation_mode": "DIRECT_CANONICAL",
+        },
+    )
+    dev_journal.mark_started(op1, pid=os.getpid())
+
+    # RDC on src/rdc.py
+    rdc_journal = DirectOperationJournal(
+        rdc_root,
+        schema=PRODUCER_SCHEMA_RDC_V1,
+        operation_prefix="rdcop_",
+    )
+    op2 = rdc_journal.new_operation_id()
+    rdc_journal.create(
+        operation_id=op2,
+        attempt_id="att-2",
+        cwd=str(repo_path),
+        provider="rdc",
+        model="gpt-test",
+        effort="high",
+        prompt_sha256="abcd" * 16,
+        runtime_revision=head_sha,
+        initial_fields={
+            "task_id": "task-rdc",
+            "allowed_files": ["src/rdc.py"],
+            "mutation_mode": "DIRECT_DELEGATED",
+        },
+    )
+    rdc_journal.mark_started(op2, pid=os.getpid())
+
+    manager = WorktreeManager(root_dir=str(tmp_path / "targets"), create_root=True)
+    cand = _writer(
+        "task-cand",
+        ["src/other.py"],
+        mutation_mode="ISOLATED_TARGET",
+        controller_revision=head_sha,
+        controller_worktree=str(repo_path),
+    )
+
+    res = manager.readback_conflict_state(cand)
+    assert res["disposition"] == CONFLICT_CLEAR
+    assert res["reason"] == "DISJOINT_AND_VALID"
+    assert res["active_writer_count"] == 2
+
+
+def test_live_corrupt_operation_record_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repo_path, head_sha = _make_git_repo(tmp_path / "repo")
+    dev_mcp_root = tmp_path / "dev_mcp"
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_DEV_MCP_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_DEV_MCP_OPERATION_ROOT",
+        root=dev_mcp_root,
+    )
+
+    corrupt_dir = dev_mcp_root / "operations" / "devmcpop_corrupt"
+    corrupt_dir.mkdir(parents=True, exist_ok=True)
+    # Corrupt JSON with repo_root matching
+    (corrupt_dir / "operation.json").write_text(
+        f'{{"repo_root": "{repo_path}", invalid_json: }}', encoding="utf-8"
+    )
+
+    manager = WorktreeManager(root_dir=str(tmp_path / "targets"), create_root=True)
+    cand = _writer(
+        "task-cand",
+        ["src/any.py"],
+        controller_revision=head_sha,
+        controller_worktree=str(repo_path),
+    )
+
+    res = manager.readback_conflict_state(cand)
+    assert res["disposition"] == CONFLICT_RECONCILE_REQUIRED
+    assert "CORRUPT_CANONICAL_OPERATION_RECORD_DETECTED" in res["reason"]
+
+
+def test_live_missing_operation_json_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    repo_path, head_sha = _make_git_repo(tmp_path / "repo")
+    dev_mcp_root = tmp_path / "dev_mcp"
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_DEV_MCP_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_DEV_MCP_OPERATION_ROOT",
+        root=dev_mcp_root,
+    )
+
+    # Empty directory without operation.json
+    empty_op_dir = dev_mcp_root / "operations" / "devmcpop_empty"
+    empty_op_dir.mkdir(parents=True, exist_ok=True)
+
+    manager = WorktreeManager(root_dir=str(tmp_path / "targets"), create_root=True)
+    cand = _writer(
+        "task-cand",
+        ["src/any.py"],
+        controller_revision=head_sha,
+        controller_worktree=str(repo_path),
+    )
+
+    res = manager.readback_conflict_state(cand)
+    assert res["disposition"] == CONFLICT_RECONCILE_REQUIRED
+    assert "CORRUPT_CANONICAL_OPERATION_RECORD_DETECTED" in res["reason"]
+
+
+def test_live_configured_missing_dev_mcp_producer_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repo_path, head_sha = _make_git_repo(tmp_path / "repo")
+    missing_root = tmp_path / "missing-dev-mcp"
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_DEV_MCP_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_DEV_MCP_OPERATION_ROOT",
+        root=missing_root,
+        create_root=False,
+    )
+
+    manager = WorktreeManager(root_dir=str(tmp_path / "targets"), create_root=True)
+    cand = _writer(
+        "task-cand",
+        ["src/any.py"],
+        controller_revision=head_sha,
+        controller_worktree=str(repo_path),
+    )
+
+    res = manager.readback_conflict_state(cand)
+    assert res["disposition"] == CONFLICT_UNKNOWN
+    assert "CANONICAL_PRODUCER_ROOT_UNAVAILABLE" in res["reason"]
+
+
+def test_live_schema_shaped_record_with_invalid_operation_identity_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repo_path, head_sha = _make_git_repo(tmp_path / "repo")
+    dev_mcp_root = tmp_path / "dev_mcp"
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_DEV_MCP_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_DEV_MCP_OPERATION_ROOT",
+        root=dev_mcp_root,
+    )
+
+    forged_dir = dev_mcp_root / "operations" / "devmcpop_not-a-valid-id"
+    forged_dir.mkdir(parents=True, exist_ok=True)
+    (forged_dir / "operation.json").write_text(
+        (
+            '{"schema":"nexus.dev_mcp.receipt.v1",'
+            '"operation_id":"devmcpop_not-a-valid-id",'
+            '"attempt_id":"att-forged","status":"RUNNING",'
+            f'"repo_root":"{repo_path}","pid":{os.getpid()},'
+            f'"last_heartbeat_at":"{datetime.datetime.now(datetime.timezone.utc).isoformat()}",'
+            '"allowed_files":["src/any.py"]}'
+        ),
+        encoding="utf-8",
+    )
+
+    manager = WorktreeManager(root_dir=str(tmp_path / "targets"), create_root=True)
+    cand = _writer(
+        "task-cand",
+        ["src/other.py"],
+        controller_revision=head_sha,
+        controller_worktree=str(repo_path),
+    )
+
+    res = manager.readback_conflict_state(cand)
+    assert res["disposition"] == CONFLICT_RECONCILE_REQUIRED
+    assert "CORRUPT_CANONICAL_OPERATION_RECORD_DETECTED" in res["reason"]
+
+
+def test_live_configured_local_writer_without_canonical_producer_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repo_path, head_sha = _make_git_repo(tmp_path / "repo")
+    local_root = tmp_path / "local-writers"
+    local_root.mkdir()
+    monkeypatch.setenv("NEXUS_LOCAL_WRITER_ROOT", str(local_root))
+
+    manager = WorktreeManager(root_dir=str(tmp_path / "targets"), create_root=True)
+    cand = _writer(
+        "task-cand",
+        ["src/other.py"],
+        controller_revision=head_sha,
+        controller_worktree=str(repo_path),
+    )
+
+    res = manager.readback_conflict_state(cand)
+    assert res["disposition"] == CONFLICT_UNKNOWN
+    assert "LOCAL_WRITER_CANONICAL_PRODUCER_UNAVAILABLE" in res["reason"]
+
+
+def test_live_process_silence_without_terminal_receipt_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repo_path, head_sha = _make_git_repo(tmp_path / "repo")
+    dev_mcp_root = tmp_path / "dev_mcp"
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_DEV_MCP_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_DEV_MCP_OPERATION_ROOT",
+        root=dev_mcp_root,
+    )
+
+    journal = DirectOperationJournal(
+        dev_mcp_root,
+        schema=PRODUCER_SCHEMA_DEV_MCP_V1,
+        operation_prefix="devmcpop_",
+    )
+    op_id = journal.new_operation_id()
+    journal.create(
+        operation_id=op_id,
+        attempt_id="att-dead",
+        cwd=str(repo_path),
+        provider="dev_mcp",
+        model="gpt-test",
+        effort="high",
+        prompt_sha256="abcd" * 16,
+        runtime_revision=head_sha,
+        initial_fields={
+            "task_id": "task-dead",
+            "allowed_files": ["src/dead.py"],
+            "mutation_mode": "DIRECT_CANONICAL",
+        },
+    )
+    # Bind a non-existent dead PID
+    dead_pid = 9999999
+    journal.update(op_id, status="RUNNING", pid=dead_pid)
+
+    manager = WorktreeManager(root_dir=str(tmp_path / "targets"), create_root=True)
+    cand = _writer(
+        "task-cand",
+        ["src/other.py"],
+        controller_revision=head_sha,
+        controller_worktree=str(repo_path),
+    )
+
+    res = manager.readback_conflict_state(cand)
+    assert res["disposition"] == CONFLICT_RECONCILE_REQUIRED
+    assert "PROCESS_SILENCE_WITHOUT_TERMINAL_RECEIPT" in res["reason"]
+
+
+def test_live_stale_heartbeat_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    repo_path, head_sha = _make_git_repo(tmp_path / "repo")
+    dev_mcp_root = tmp_path / "dev_mcp"
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_DEV_MCP_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_DEV_MCP_OPERATION_ROOT",
+        root=dev_mcp_root,
+    )
+
+    journal = DirectOperationJournal(
+        dev_mcp_root,
+        schema=PRODUCER_SCHEMA_DEV_MCP_V1,
+        operation_prefix="devmcpop_",
+    )
+    op_id = journal.new_operation_id()
+    journal.create(
+        operation_id=op_id,
+        attempt_id="att-stale-hb",
+        cwd=str(repo_path),
+        provider="dev_mcp",
+        model="gpt-test",
+        effort="high",
+        prompt_sha256="abcd" * 16,
+        runtime_revision=head_sha,
+        initial_fields={
+            "task_id": "task-stale-hb",
+            "allowed_files": ["src/stale.py"],
+            "mutation_mode": "DIRECT_CANONICAL",
+        },
+    )
+    # Stale heartbeat (500s ago)
+    old_time = (
+        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=500)
+    ).isoformat()
+    journal.update(op_id, status="RUNNING", pid=os.getpid(), last_heartbeat_at=old_time)
+
+    manager = WorktreeManager(root_dir=str(tmp_path / "targets"), create_root=True)
+    cand = _writer(
+        "task-cand",
+        ["src/other.py"],
+        controller_revision=head_sha,
+        controller_worktree=str(repo_path),
+    )
+
+    res = manager.readback_conflict_state(cand)
+    assert res["disposition"] == CONFLICT_STALE
+    assert "ACTIVE_STALE_HEARTBEAT" in res["reason"]
+
+
+def test_live_outcome_unknown_operation_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repo_path, head_sha = _make_git_repo(tmp_path / "repo")
+    dev_mcp_root = tmp_path / "dev_mcp"
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_DEV_MCP_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_DEV_MCP_OPERATION_ROOT",
+        root=dev_mcp_root,
+    )
+
+    journal = DirectOperationJournal(
+        dev_mcp_root,
+        schema=PRODUCER_SCHEMA_DEV_MCP_V1,
+        operation_prefix="devmcpop_",
+    )
+    op_id = journal.new_operation_id()
+    journal.create(
+        operation_id=op_id,
+        attempt_id="att-unknown",
+        cwd=str(repo_path),
+        provider="dev_mcp",
+        model="gpt-test",
+        effort="high",
+        prompt_sha256="abcd" * 16,
+        runtime_revision=head_sha,
+        initial_fields={
+            "task_id": "task-unknown",
+            "allowed_files": ["src/unknown.py"],
+            "mutation_mode": "DIRECT_CANONICAL",
+        },
+    )
+    journal.mark_terminal(op_id, status="OUTCOME_UNKNOWN", exit_code=None)
+
+    manager = WorktreeManager(root_dir=str(tmp_path / "targets"), create_root=True)
+    cand = _writer(
+        "task-cand",
+        ["src/other.py"],
+        controller_revision=head_sha,
+        controller_worktree=str(repo_path),
+    )
+
+    res = manager.readback_conflict_state(cand)
+    assert res["disposition"] == CONFLICT_RECONCILE_REQUIRED
+    assert "ACTIVE_WRITER_UNRESOLVED_PRIOR_EFFECTS" in res["reason"]
+
+
+def test_live_terminal_completed_operation_does_not_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repo_path, head_sha = _make_git_repo(tmp_path / "repo")
+    dev_mcp_root = tmp_path / "dev_mcp"
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_DEV_MCP_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_DEV_MCP_OPERATION_ROOT",
+        root=dev_mcp_root,
+    )
+
+    journal = DirectOperationJournal(
+        dev_mcp_root,
+        schema=PRODUCER_SCHEMA_DEV_MCP_V1,
+        operation_prefix="devmcpop_",
+    )
+    op_id = journal.new_operation_id()
+    journal.create(
+        operation_id=op_id,
+        attempt_id="att-done",
+        cwd=str(repo_path),
+        provider="dev_mcp",
+        model="gpt-test",
+        effort="high",
+        prompt_sha256="abcd" * 16,
+        runtime_revision=head_sha,
+        initial_fields={
+            "task_id": "task-done",
+            "allowed_files": ["src/shared.py"],
+            "mutation_mode": "DIRECT_CANONICAL",
+        },
+    )
+    journal.mark_terminal(op_id, status="COMPLETED", exit_code=0)
+
+    manager = WorktreeManager(root_dir=str(tmp_path / "targets"), create_root=True)
+    cand = _writer(
+        "task-cand",
+        ["src/shared.py"],
+        controller_revision=head_sha,
+        controller_worktree=str(repo_path),
+    )
+
+    res = manager.readback_conflict_state(cand)
+    assert res["disposition"] == CONFLICT_CLEAR
+    assert res["active_writer_count"] == 0
+
+
+def test_live_governed_target_vs_dev_mcp_overlap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    repo_path, head_sha = _make_git_repo(tmp_path / "repo")
+    target_root = tmp_path / "targets"
+    manager = WorktreeManager(root_dir=str(target_root), create_root=True)
+
+    contract_target = SelfHostedTaskContract(
+        task_id="task-gov",
+        objective="Governed target work",
+        controller_revision=head_sha,
+        target_base_revision=head_sha,
+        controller_repo_root=str(repo_path),
+        target_repo_root=str(target_root / "task-gov"),
+        target_worktree_root=str(target_root),
+        allowed_files=["src/base.py"],
+        forbidden_files=[],
+        verifier_commands=[],
+        protected_contracts=[],
+    )
+    manager.create_lease(contract_target)
+
+    # Dev MCP candidate targeting same file src/base.py
+    dev_mcp_cand = _writer(
+        "task-dev-cand",
+        ["src/base.py"],
+        mutation_mode="DIRECT_CANONICAL",
+        controller_revision=head_sha,
+        controller_worktree=str(repo_path),
+    )
+
+    res = manager.readback_conflict_state(dev_mcp_cand)
+    assert res["disposition"] == CONFLICT_OVERLAP
+    assert any(w["task_id"] == "task-gov" for w in res["conflicting_writers"])
+
+
+def test_live_agy_operation_overlap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    repo_path, head_sha = _make_git_repo(tmp_path / "repo")
+    agy_root = tmp_path / "agy"
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_AGY_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_AGY_OPERATION_ROOT",
+        root=agy_root,
+    )
+
+    journal = DirectOperationJournal(
+        agy_root,
+        schema=PRODUCER_SCHEMA_AGY_OPERATION_V1,
+        operation_prefix="agyop_",
+    )
+    op_id = journal.new_operation_id()
+    journal.create(
+        operation_id=op_id,
+        attempt_id="att-agy",
+        cwd=str(repo_path),
+        provider="agy",
+        model="gemini-3.8-flash",
+        effort="high",
+        prompt_sha256="abcd" * 16,
+        runtime_revision=head_sha,
+        initial_fields={
+            "task_id": "task-agy",
+            "allowed_files": ["src/agy_shared.py"],
+            "mutation_mode": "DIRECT_DELEGATED",
+        },
+    )
+    journal.mark_started(op_id, pid=os.getpid())
+
+    manager = WorktreeManager(root_dir=str(tmp_path / "targets"), create_root=True)
+    cand = _writer(
+        "task-cand",
+        ["src/agy_shared.py"],
+        mutation_mode="ISOLATED_TARGET",
+        controller_revision=head_sha,
+        controller_worktree=str(repo_path),
+    )
+
+    res = manager.readback_conflict_state(cand)
+    assert res["disposition"] == CONFLICT_OVERLAP
+    assert any(w["task_id"] == "task-agy" for w in res["conflicting_writers"])
