@@ -27,17 +27,15 @@ def test_issues_since_ignores_pre_boundary_non_edit_updates(monkeypatch) -> None
         calls.append(args)
         if args[0] == "-X":
             return [issue]
-        if args[0] == "graphql":
-            return {"data": {"repository": {"issue": {"lastEditedAt": None}}}}
         raise AssertionError(args)
 
     monkeypatch.setattr(daemon, "_gh_json", fake_gh_json)
 
     assert daemon._issues_since("James3014/Nexus-new", BOUNDARY) == []
-    assert sum(args[0] == "graphql" for args in calls) == 1
+    assert all(args[0] != "graphql" for args in calls)
 
 
-def test_issues_since_keeps_pre_boundary_issue_edited_after_boundary(monkeypatch) -> None:
+def test_issues_since_ignores_pre_boundary_issue_edited_after_boundary(monkeypatch) -> None:
     issue = _issue(
         number=1200,
         created_at="2026-10-01T03:00:00Z",
@@ -47,13 +45,11 @@ def test_issues_since_keeps_pre_boundary_issue_edited_after_boundary(monkeypatch
     def fake_gh_json(*args: str) -> Any:
         if args[0] == "-X":
             return [issue]
-        if args[0] == "graphql":
-            return {"data": {"repository": {"issue": {"lastEditedAt": "2026-10-02T02:37:00Z"}}}}
         raise AssertionError(args)
 
     monkeypatch.setattr(daemon, "_gh_json", fake_gh_json)
 
-    assert daemon._issues_since("James3014/Nexus-new", BOUNDARY) == [issue]
+    assert daemon._issues_since("James3014/Nexus-new", BOUNDARY) == []
 
 
 def test_issues_since_keeps_post_boundary_open_without_graphql(monkeypatch) -> None:
