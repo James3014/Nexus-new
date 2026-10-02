@@ -34,15 +34,13 @@ EXECUTION_LANE_DIRECT_DELEGATED = "DIRECT_DELEGATED"
 EXECUTION_LANE_GOVERNED = "GOVERNED"
 EXECUTION_LANE_LOCAL = "LOCAL"
 EXECUTION_LANE_UNKNOWN = "UNKNOWN"
-RECOGNIZED_EXECUTION_LANES = frozenset(
-    {
-        EXECUTION_LANE_DIRECT_CANONICAL,
-        EXECUTION_LANE_DIRECT_DELEGATED,
-        EXECUTION_LANE_GOVERNED,
-        EXECUTION_LANE_LOCAL,
-        EXECUTION_LANE_UNKNOWN,
-    }
-)
+RECOGNIZED_EXECUTION_LANES = frozenset({
+    EXECUTION_LANE_DIRECT_CANONICAL,
+    EXECUTION_LANE_DIRECT_DELEGATED,
+    EXECUTION_LANE_GOVERNED,
+    EXECUTION_LANE_LOCAL,
+    EXECUTION_LANE_UNKNOWN,
+})
 
 # Physical Transport Kinds (Must NOT be used as execution authority lanes)
 TRANSPORT_KIND_DEV_MCP = "DEV_MCP"
@@ -50,30 +48,28 @@ TRANSPORT_KIND_RDC = "RDC"
 TRANSPORT_KIND_ISOLATED_WORKTREE = "ISOLATED_WORKTREE"
 TRANSPORT_KIND_LOCAL_RUNNER = "LOCAL_RUNNER"
 TRANSPORT_KIND_UNKNOWN = "UNKNOWN"
-RECOGNIZED_TRANSPORT_KINDS = frozenset(
-    {
-        TRANSPORT_KIND_DEV_MCP,
-        TRANSPORT_KIND_RDC,
-        TRANSPORT_KIND_ISOLATED_WORKTREE,
-        TRANSPORT_KIND_LOCAL_RUNNER,
-        TRANSPORT_KIND_UNKNOWN,
-    }
-)
+RECOGNIZED_TRANSPORT_KINDS = frozenset({
+    TRANSPORT_KIND_DEV_MCP,
+    TRANSPORT_KIND_RDC,
+    TRANSPORT_KIND_ISOLATED_WORKTREE,
+    TRANSPORT_KIND_LOCAL_RUNNER,
+    TRANSPORT_KIND_UNKNOWN,
+})
 
 # Canonical producer schemas that already have repository-owned durable readers.
 PRODUCER_SCHEMA_EXTERNAL_WORKER_V1 = "nexus.external_worker_operation.v1"
 PRODUCER_SCHEMA_AGY_OPERATION_V1 = "nexus.agy_operation.v1"
-TRUSTED_JOURNAL_SCHEMAS = frozenset(
-    {
-        PRODUCER_SCHEMA_EXTERNAL_WORKER_V1,
-        PRODUCER_SCHEMA_AGY_OPERATION_V1,
-    }
-)
+PRODUCER_SCHEMA_DEV_MCP_V1 = "nexus.dev_mcp.receipt.v1"
+PRODUCER_SCHEMA_RDC_V1 = "nexus.rdc.receipt.v1"
+TRUSTED_JOURNAL_SCHEMAS = frozenset({
+    PRODUCER_SCHEMA_EXTERNAL_WORKER_V1,
+    PRODUCER_SCHEMA_AGY_OPERATION_V1,
+    PRODUCER_SCHEMA_DEV_MCP_V1,
+    PRODUCER_SCHEMA_RDC_V1,
+})
 
 # Declared compatibility/fixture schemas are not producer proof by themselves.
 PRODUCER_SCHEMA_OPERATION_V1 = "nexus.operation.v1"
-PRODUCER_SCHEMA_DEV_MCP_V1 = "nexus.dev_mcp.receipt.v1"
-PRODUCER_SCHEMA_RDC_V1 = "nexus.rdc.receipt.v1"
 PRODUCER_SCHEMA_GOVERNED_TARGET_V1 = "nexus.target_ownership.v1"
 SUPPORTED_PRODUCER_SCHEMAS = TRUSTED_JOURNAL_SCHEMAS
 
@@ -84,21 +80,53 @@ _EXTERNAL_WORKER_PREFIXES = {
     "grok": "grokop_",
 }
 _AGY_OPERATION_PREFIX = "agyop_"
+_DEV_MCP_OPERATION_PREFIX = "devmcpop_"
+_RDC_OPERATION_PREFIX = "rdcop_"
 
 
-_CANONICAL_EXTERNAL_WORKER_OPERATION_ROOT = Path(
-    os.getenv(
-        "NEXUS_EXTERNAL_WORKER_OPERATION_ROOT",
-        str(Path.home() / ".local/state/nexus-external-worker"),
+_CANONICAL_EXTERNAL_WORKER_OPERATION_ROOT = (
+    Path(
+        os.getenv(
+            "NEXUS_EXTERNAL_WORKER_OPERATION_ROOT",
+            str(Path.home() / ".local/state/nexus-external-worker"),
+        )
     )
-).expanduser().resolve()
+    .expanduser()
+    .resolve()
+)
 
-_CANONICAL_AGY_OPERATION_ROOT = Path(
-    os.getenv(
-        "NEXUS_AGY_OPERATION_ROOT",
-        str(Path.home() / ".local/state/nexus-agy-operations"),
+_CANONICAL_AGY_OPERATION_ROOT = (
+    Path(
+        os.getenv(
+            "NEXUS_AGY_OPERATION_ROOT",
+            str(Path.home() / ".local/state/nexus-agy-operations"),
+        )
     )
-).expanduser().resolve()
+    .expanduser()
+    .resolve()
+)
+
+_CANONICAL_DEV_MCP_OPERATION_ROOT = (
+    Path(
+        os.getenv(
+            "NEXUS_DEV_MCP_OPERATION_ROOT",
+            str(Path.home() / ".local/state/nexus-dev-mcp"),
+        )
+    )
+    .expanduser()
+    .resolve()
+)
+
+_CANONICAL_RDC_OPERATION_ROOT = (
+    Path(
+        os.getenv(
+            "NEXUS_RDC_OPERATION_ROOT",
+            str(Path.home() / ".local/state/nexus-rdc-operations"),
+        )
+    )
+    .expanduser()
+    .resolve()
+)
 
 
 def _external_worker_operation_root() -> Path:
@@ -109,6 +137,16 @@ def _external_worker_operation_root() -> Path:
 def _agy_operation_root() -> Path:
     """Return the process-start-bound Agy producer root."""
     return _CANONICAL_AGY_OPERATION_ROOT
+
+
+def _dev_mcp_operation_root() -> Path:
+    """Return the process-start-bound Dev MCP producer root."""
+    return _CANONICAL_DEV_MCP_OPERATION_ROOT
+
+
+def _rdc_operation_root() -> Path:
+    """Return the process-start-bound RDC producer root."""
+    return _CANONICAL_RDC_OPERATION_ROOT
 
 
 def _external_provider_for_operation_id(operation_id: str) -> str:
@@ -130,17 +168,15 @@ EXECUTION_STATE_UNKNOWN = "UNKNOWN"
 EXECUTION_STATE_UNAVAILABLE = "UNAVAILABLE"
 EXECUTION_STATE_STALE = "STALE"
 EXECUTION_STATE_RECONCILE_REQUIRED = "RECONCILE_REQUIRED"
-RECOGNIZED_EXECUTION_STATES = frozenset(
-    {
-        EXECUTION_STATE_ACTIVE,
-        EXECUTION_STATE_COMPLETED,
-        EXECUTION_STATE_FAILED,
-        EXECUTION_STATE_UNKNOWN,
-        EXECUTION_STATE_UNAVAILABLE,
-        EXECUTION_STATE_STALE,
-        EXECUTION_STATE_RECONCILE_REQUIRED,
-    }
-)
+RECOGNIZED_EXECUTION_STATES = frozenset({
+    EXECUTION_STATE_ACTIVE,
+    EXECUTION_STATE_COMPLETED,
+    EXECUTION_STATE_FAILED,
+    EXECUTION_STATE_UNKNOWN,
+    EXECUTION_STATE_UNAVAILABLE,
+    EXECUTION_STATE_STALE,
+    EXECUTION_STATE_RECONCILE_REQUIRED,
+})
 
 
 class ProvenanceContractError(ValueError):
@@ -256,12 +292,17 @@ def _expected_record_path(record: Mapping[str, Any]) -> Path:
     if schema == PRODUCER_SCHEMA_AGY_OPERATION_V1:
         if not operation_id.startswith(_AGY_OPERATION_PREFIX):
             raise ProvenanceContractError("Agy operation_id has invalid canonical prefix")
+        return (_agy_operation_root() / "operations" / operation_id / "operation.json").resolve()
+    if schema == PRODUCER_SCHEMA_DEV_MCP_V1:
+        if not operation_id.startswith(_DEV_MCP_OPERATION_PREFIX):
+            raise ProvenanceContractError("Dev MCP operation_id has invalid canonical prefix")
         return (
-            _agy_operation_root()
-            / "operations"
-            / operation_id
-            / "operation.json"
+            _dev_mcp_operation_root() / "operations" / operation_id / "operation.json"
         ).resolve()
+    if schema == PRODUCER_SCHEMA_RDC_V1:
+        if not operation_id.startswith(_RDC_OPERATION_PREFIX):
+            raise ProvenanceContractError("RDC operation_id has invalid canonical prefix")
+        return (_rdc_operation_root() / "operations" / operation_id / "operation.json").resolve()
     raise ProvenanceContractError(f"producer schema is not trusted: {schema!r}")
 
 
@@ -295,38 +336,76 @@ def read_operation_journal_evidence(
     journal: Any,
     operation_id: str,
     *,
-    transport_kind: str = TRANSPORT_KIND_LOCAL_RUNNER,
+    transport_kind: str | None = None,
 ) -> VerifiedProducerRecord:
     """Read one exact operation from a recognized canonical producer root."""
 
     operation_id = str(operation_id)
+    resolved_transport = transport_kind
     if type(journal) is DirectOperationJournal:
-        provider = _external_provider_for_operation_id(operation_id)
-        expected_root = (_external_worker_operation_root() / provider).resolve()
-        expected_prefix = _EXTERNAL_WORKER_PREFIXES[provider]
-        if (
-            journal.root.expanduser().resolve() != expected_root
-            or journal.schema != PRODUCER_SCHEMA_EXTERNAL_WORKER_V1
-            or journal.operation_prefix != expected_prefix
-        ):
+        if journal.schema == PRODUCER_SCHEMA_EXTERNAL_WORKER_V1:
+            provider = _external_provider_for_operation_id(operation_id)
+            expected_root = (_external_worker_operation_root() / provider).resolve()
+            expected_prefix = _EXTERNAL_WORKER_PREFIXES[provider]
+            if (
+                journal.root.expanduser().resolve() != expected_root
+                or journal.operation_prefix != expected_prefix
+            ):
+                raise ProvenanceContractError(
+                    "external worker journal is not bound to its canonical producer root"
+                )
+            record = DirectOperationJournal.read(journal, operation_id)
+            if resolved_transport is None:
+                resolved_transport = TRANSPORT_KIND_LOCAL_RUNNER
+        elif journal.schema == PRODUCER_SCHEMA_DEV_MCP_V1:
+            if not operation_id.startswith(_DEV_MCP_OPERATION_PREFIX):
+                raise ProvenanceContractError("Dev MCP operation_id has invalid canonical prefix")
+            expected_root = _dev_mcp_operation_root()
+            expected_prefix = _DEV_MCP_OPERATION_PREFIX
+            if (
+                journal.root.expanduser().resolve() != expected_root
+                or journal.operation_prefix != expected_prefix
+            ):
+                raise ProvenanceContractError(
+                    "Dev MCP journal is not bound to its canonical producer root"
+                )
+            record = DirectOperationJournal.read(journal, operation_id)
+            if resolved_transport is None:
+                resolved_transport = TRANSPORT_KIND_DEV_MCP
+        elif journal.schema == PRODUCER_SCHEMA_RDC_V1:
+            if not operation_id.startswith(_RDC_OPERATION_PREFIX):
+                raise ProvenanceContractError("RDC operation_id has invalid canonical prefix")
+            expected_root = _rdc_operation_root()
+            expected_prefix = _RDC_OPERATION_PREFIX
+            if (
+                journal.root.expanduser().resolve() != expected_root
+                or journal.operation_prefix != expected_prefix
+            ):
+                raise ProvenanceContractError(
+                    "RDC journal is not bound to its canonical producer root"
+                )
+            record = DirectOperationJournal.read(journal, operation_id)
+            if resolved_transport is None:
+                resolved_transport = TRANSPORT_KIND_RDC
+        else:
             raise ProvenanceContractError(
-                "external worker journal is not bound to its canonical producer root"
+                f"DirectOperationJournal schema {journal.schema!r} is not a recognized canonical producer schema"
             )
-        record = DirectOperationJournal.read(journal, operation_id)
     elif type(journal) is AgyOperationJournal:
         if (
             journal.root.expanduser().resolve() != _agy_operation_root()
             or journal.schema != PRODUCER_SCHEMA_AGY_OPERATION_V1
             or journal.operation_prefix != _AGY_OPERATION_PREFIX
         ):
-            raise ProvenanceContractError(
-                "Agy journal is not bound to its canonical producer root"
-            )
+            raise ProvenanceContractError("Agy journal is not bound to its canonical producer root")
         record = DirectOperationJournal.read(journal, operation_id)
+        if resolved_transport is None:
+            resolved_transport = TRANSPORT_KIND_LOCAL_RUNNER
     else:
-        raise ProvenanceContractError(
-            "journal must be an exact recognized operation journal"
-        )
+        raise ProvenanceContractError("journal must be an exact recognized operation journal")
+
+    if resolved_transport is None:
+        resolved_transport = TRANSPORT_KIND_LOCAL_RUNNER
 
     schema = str(record.get("schema") or "")
     if schema not in TRUSTED_JOURNAL_SCHEMAS:
@@ -340,7 +419,7 @@ def read_operation_journal_evidence(
     return VerifiedProducerRecord._mint(
         record=record,
         source_ref=f"operation-journal:{schema}:{operation_id}",
-        transport_kind=transport_kind,
+        transport_kind=resolved_transport,
         record_path=record_path,
     )
 
@@ -589,10 +668,14 @@ def build_live_execution_provenance(
     req_worker = str(work_context.get("worker_id") or work_context.get("worker") or "").strip()
     req_provider = str(work_context.get("provider") or "").strip()
     req_model = str(work_context.get("model") or "").strip()
-    src_rev = str(work_context.get("source_revision") or work_context.get("base_revision") or "").strip()
+    src_rev = str(
+        work_context.get("source_revision") or work_context.get("base_revision") or ""
+    ).strip()
 
     # D1: Missing or unrecognized execution lane must fail closed to UNKNOWN / UNAVAILABLE
-    lane_missing = not lane or lane == EXECUTION_LANE_UNKNOWN or lane not in RECOGNIZED_EXECUTION_LANES
+    lane_missing = (
+        not lane or lane == EXECUTION_LANE_UNKNOWN or lane not in RECOGNIZED_EXECUTION_LANES
+    )
     if lane_missing:
         effective_lane = EXECUTION_LANE_UNKNOWN
         effective_state = EXECUTION_STATE_UNKNOWN
@@ -748,7 +831,9 @@ def build_live_execution_provenance(
         rcpt_phase = f"CROSS_BINDING_MISMATCH: task_id mismatch ({task_id} vs {rcpt_task_id})"
     elif rcpt_attempt_id != attempt_id:
         norm_state = EXECUTION_STATE_UNKNOWN
-        rcpt_phase = f"CROSS_BINDING_MISMATCH: attempt_id mismatch ({attempt_id} vs {rcpt_attempt_id})"
+        rcpt_phase = (
+            f"CROSS_BINDING_MISMATCH: attempt_id mismatch ({attempt_id} vs {rcpt_attempt_id})"
+        )
     elif work_op_id != rcpt_op_id:
         norm_state = EXECUTION_STATE_UNKNOWN
         rcpt_phase = f"CROSS_BINDING_MISMATCH: operation_id mismatch ({work_op_id} vs {rcpt_op_id})"
@@ -885,9 +970,7 @@ class LiveExecutionProvenanceView:
             # get(repository, task_id, attempt_id)
             return self._records.get((arg1, arg2, arg3))
         # get(task_id, attempt_id)
-        matches = [
-            r for r in self._records.values() if r.task_id == arg1 and r.attempt_id == arg2
-        ]
+        matches = [r for r in self._records.values() if r.task_id == arg1 and r.attempt_id == arg2]
         if len(matches) > 1:
             raise ProvenanceContractError(
                 f"ambiguous lookup: multiple repositories match task_id={arg1!r}, attempt_id={arg2!r}; repository is required"
