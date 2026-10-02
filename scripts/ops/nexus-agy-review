@@ -200,6 +200,25 @@ def _current_projection(
     }
 
 
+def _spawn_dispatch(
+    argv: list[str],
+    *,
+    cwd: str,
+    stdout_fh: Any,
+    stderr_fh: Any,
+) -> int:
+    proc = subprocess.Popen(
+        argv,
+        cwd=cwd,
+        stdin=subprocess.DEVNULL,
+        stdout=stdout_fh,
+        stderr=stderr_fh,
+        start_new_session=True,
+        close_fds=True,
+    )
+    return int(proc.pid)
+
+
 def _build_dispatch_argv(
     *,
     operation_id: str,
@@ -353,14 +372,11 @@ def launch_review(args: argparse.Namespace) -> dict[str, Any]:
             stdout_path.open("ab", buffering=0) as out_fh,
             stderr_path.open("ab", buffering=0) as err_fh,
         ):
-            proc = subprocess.Popen(
+            pid = _spawn_dispatch(
                 argv,
                 cwd=subject.repo_root,
-                stdin=subprocess.DEVNULL,
-                stdout=out_fh,
-                stderr=err_fh,
-                start_new_session=True,
-                close_fds=True,
+                stdout_fh=out_fh,
+                stderr_fh=err_fh,
             )
     except OSError as exc:
         journal.mark_terminal(
@@ -374,7 +390,7 @@ def launch_review(args: argparse.Namespace) -> dict[str, Any]:
         )
         raise AgyReviewError("REVIEW_DISPATCH_PRESTART_FAILED") from exc
 
-    journal.bind_pid(operation_id, proc.pid)
+    journal.bind_pid(operation_id, pid)
     record = journal.update(operation_id, review_state="DISPATCHING")
     return {
         "schema": "nexus.agy_review_status.v1",

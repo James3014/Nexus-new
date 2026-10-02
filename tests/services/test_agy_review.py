@@ -67,33 +67,34 @@ def args_for(root: Path, base: str, contract: Path, operation_root: Path):
     )
 
 
-class FakePopen:
+class FakeSpawner:
     calls: list[list[str]] = []
     next_pid = 4300
 
-    def __init__(self, argv, **kwargs):
-        self.argv = list(argv)
-        self.pid = type(self).next_pid
-        type(self).next_pid += 1
-        type(self).calls.append(self.argv)
+    @classmethod
+    def spawn(cls, argv, **kwargs):
+        cls.calls.append(list(argv))
+        pid = cls.next_pid
+        cls.next_pid += 1
+        return pid
 
 
 def test_identical_review_dispatch_is_deduplicated(monkeypatch, tmp_path: Path) -> None:
     root, base, contract = make_repo(tmp_path)
     op_root = tmp_path / "operations"
     args = args_for(root, base, contract, op_root)
-    FakePopen.calls = []
+    FakeSpawner.calls = []
     monkeypatch.setattr(review, "_dispatcher_path", lambda: Path("/fake/nexus-agy-dispatch"))
-    monkeypatch.setattr(review.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(review, "_spawn_dispatch", FakeSpawner.spawn)
 
     first = review.launch_review(args)
     second = review.launch_review(args)
 
     assert first["action"] == "DISPATCHED"
     assert second["action"] == "OBSERVE_EXISTING"
-    assert len(FakePopen.calls) == 1
+    assert len(FakeSpawner.calls) == 1
     assert first["operation"]["operation_id"] == second["operation"]["operation_id"]
-    argv = FakePopen.calls[0]
+    argv = FakeSpawner.calls[0]
     assert "--mode" in argv and argv[argv.index("--mode") + 1] == "plan"
     assert "--effort" not in argv
     assert ["--deny", "command(*)"] == argv[argv.index("--deny") : argv.index("--deny") + 2]
@@ -104,9 +105,9 @@ def test_outcome_unknown_never_redispatches(monkeypatch, tmp_path: Path) -> None
     root, base, contract = make_repo(tmp_path)
     op_root = tmp_path / "operations"
     args = args_for(root, base, contract, op_root)
-    FakePopen.calls = []
+    FakeSpawner.calls = []
     monkeypatch.setattr(review, "_dispatcher_path", lambda: Path("/fake/nexus-agy-dispatch"))
-    monkeypatch.setattr(review.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(review, "_spawn_dispatch", FakeSpawner.spawn)
 
     first = review.launch_review(args)
     opid = first["operation"]["operation_id"]
@@ -123,7 +124,7 @@ def test_outcome_unknown_never_redispatches(monkeypatch, tmp_path: Path) -> None
     second = review.launch_review(args)
 
     assert second["action"] == "RECONCILE_EXISTING"
-    assert len(FakePopen.calls) == 1
+    assert len(FakeSpawner.calls) == 1
 
 
 def test_terminal_review_receipt_is_reused_and_later_drift_blocks_applicability(
@@ -133,9 +134,9 @@ def test_terminal_review_receipt_is_reused_and_later_drift_blocks_applicability(
     root, base, contract = make_repo(tmp_path)
     op_root = tmp_path / "operations"
     args = args_for(root, base, contract, op_root)
-    FakePopen.calls = []
+    FakeSpawner.calls = []
     monkeypatch.setattr(review, "_dispatcher_path", lambda: Path("/fake/nexus-agy-dispatch"))
-    monkeypatch.setattr(review.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(review, "_spawn_dispatch", FakeSpawner.spawn)
 
     launched = review.launch_review(args)
     opid = launched["operation"]["operation_id"]
@@ -172,9 +173,9 @@ def test_malformed_terminal_verdict_never_becomes_accept(monkeypatch, tmp_path: 
     root, base, contract = make_repo(tmp_path)
     op_root = tmp_path / "operations"
     args = args_for(root, base, contract, op_root)
-    FakePopen.calls = []
+    FakeSpawner.calls = []
     monkeypatch.setattr(review, "_dispatcher_path", lambda: Path("/fake/nexus-agy-dispatch"))
-    monkeypatch.setattr(review.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(review, "_spawn_dispatch", FakeSpawner.spawn)
 
     launched = review.launch_review(args)
     opid = launched["operation"]["operation_id"]
@@ -193,16 +194,16 @@ def test_changed_contract_uses_new_semantic_operation(monkeypatch, tmp_path: Pat
     root, base, contract = make_repo(tmp_path)
     op_root = tmp_path / "operations"
     args = args_for(root, base, contract, op_root)
-    FakePopen.calls = []
+    FakeSpawner.calls = []
     monkeypatch.setattr(review, "_dispatcher_path", lambda: Path("/fake/nexus-agy-dispatch"))
-    monkeypatch.setattr(review.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(review, "_spawn_dispatch", FakeSpawner.spawn)
 
     first = review.launch_review(args)
     contract.write_text("materially changed review contract\n", encoding="utf-8")
     second = review.launch_review(args)
 
     assert first["operation"]["operation_id"] != second["operation"]["operation_id"]
-    assert len(FakePopen.calls) == 2
+    assert len(FakeSpawner.calls) == 2
 
 
 def test_installer_deploys_exact_canonical_review_entrypoint(tmp_path: Path) -> None:
@@ -250,9 +251,9 @@ def test_same_semantic_review_from_different_physical_root_fails_closed(
     op_root = tmp_path / "operations"
     first_args = args_for(root, base, contract, op_root)
     second_args = args_for(clone, base, contract, op_root)
-    FakePopen.calls = []
+    FakeSpawner.calls = []
     monkeypatch.setattr(review, "_dispatcher_path", lambda: Path("/fake/nexus-agy-dispatch"))
-    monkeypatch.setattr(review.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(review, "_spawn_dispatch", FakeSpawner.spawn)
 
     first = review.launch_review(first_args)
     with pytest.raises(
@@ -262,7 +263,7 @@ def test_same_semantic_review_from_different_physical_root_fails_closed(
         review.launch_review(second_args)
 
     assert first["action"] == "DISPATCHED"
-    assert len(FakePopen.calls) == 1
+    assert len(FakeSpawner.calls) == 1
 
 
 def test_failed_terminal_review_is_reused_without_redispatch(
@@ -272,9 +273,9 @@ def test_failed_terminal_review_is_reused_without_redispatch(
     root, base, contract = make_repo(tmp_path)
     op_root = tmp_path / "operations"
     args = args_for(root, base, contract, op_root)
-    FakePopen.calls = []
+    FakeSpawner.calls = []
     monkeypatch.setattr(review, "_dispatcher_path", lambda: Path("/fake/nexus-agy-dispatch"))
-    monkeypatch.setattr(review.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(review, "_spawn_dispatch", FakeSpawner.spawn)
 
     launched = review.launch_review(args)
     opid = launched["operation"]["operation_id"]
@@ -291,4 +292,4 @@ def test_failed_terminal_review_is_reused_without_redispatch(
 
     assert repeated["action"] == "TERMINAL_NON_ACCEPTING"
     assert repeated["receipt"] is None
-    assert len(FakePopen.calls) == 1
+    assert len(FakeSpawner.calls) == 1
