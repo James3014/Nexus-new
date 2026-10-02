@@ -98,11 +98,11 @@ def test_identical_review_dispatch_is_deduplicated(monkeypatch, tmp_path: Path) 
     assert len(FakeSpawner.calls) == 1
     assert first["operation"]["operation_id"] == second["operation"]["operation_id"]
     argv = FakeSpawner.calls[0]
-    assert "--mode" in argv and argv[argv.index("--mode") + 1] == "accept-edits"
+    assert "--mode" in argv and argv[argv.index("--mode") + 1] == "plan"
     assert "--model" in argv and argv[argv.index("--model") + 1] == "claude-sonnet-4-6"
     assert "--effort" not in argv
-    assert first["operation"]["review_launch_profile_id"] == "claude-sonnet-4-6.packet-review.v1"
-    assert first["operation"]["review_launch_mode"] == "accept-edits"
+    assert first["operation"]["review_launch_profile_id"] == "claude-sonnet-4-6.packet-review.v2"
+    assert first["operation"]["review_launch_mode"] == "plan"
     assert ["--deny", "command(*)"] == argv[argv.index("--deny") : argv.index("--deny") + 2]
     assert "--write-path" not in argv
 
@@ -165,9 +165,9 @@ def test_terminal_review_receipt_is_reused_and_later_drift_blocks_applicability(
     assert first_status["receipt"]["verdict"] == "ACCEPT"
     assert first_status["receipt"]["review_applicable"] is True
     assert (
-        first_status["receipt"]["review_launch_profile_id"] == "claude-sonnet-4-6.packet-review.v1"
+        first_status["receipt"]["review_launch_profile_id"] == "claude-sonnet-4-6.packet-review.v2"
     )
-    assert first_status["receipt"]["review_launch_mode"] == "accept-edits"
+    assert first_status["receipt"]["review_launch_mode"] == "plan"
     assert first_status["operation"]["review_applicable"] is True
 
     (root / "a.py").write_text("VALUE = 3\n", encoding="utf-8")

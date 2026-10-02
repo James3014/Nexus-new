@@ -31,7 +31,7 @@ def _start_result() -> dict:
             "pid": 4242,
             "model": "claude-sonnet-4-6",
             "review_effect_id": EFFECT,
-            "review_launch_profile_id": "claude-sonnet-4-6.packet-review.v1",
+            "review_launch_profile_id": "claude-sonnet-4-6.packet-review.v2",
         },
     }
 

@@ -102,7 +102,7 @@ def test_start_then_resume_uses_status_without_redispatch(
                 "pid": 4242,
                 "model": "claude-sonnet-4-6",
                 "review_effect_id": EFFECT,
-                "review_launch_profile_id": "claude-sonnet-4-6.packet-review.v1",
+                "review_launch_profile_id": "claude-sonnet-4-6.packet-review.v2",
             },
         }
 
@@ -154,7 +154,7 @@ def test_resume_outcome_unknown_reconciles_same_operation_only(
                 "pid": 4242,
                 "model": "claude-sonnet-4-6",
                 "review_effect_id": EFFECT,
-                "review_launch_profile_id": "claude-sonnet-4-6.packet-review.v1",
+                "review_launch_profile_id": "claude-sonnet-4-6.packet-review.v2",
             },
         }
 
