@@ -17,6 +17,11 @@ DISPATCH = ROOT / "scripts" / "ops" / "nexus-agy-dispatch"
 DISPATCH_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_agy_dispatch.sh"
 QUOTA = ROOT / "scripts" / "ops" / "nexus-agy-quota"
 QUOTA_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_agy_quota.sh"
+AGY_REVIEW = ROOT / "scripts" / "ops" / "nexus-agy-review"
+AGY_REVIEW_CANARY = ROOT / "scripts" / "ops" / "nexus-agy-review-canary"
+AGY_REVIEWER_RUNTIME = ROOT / "nexus" / "services" / "agy_reviewer_runtime.py"
+AGY_REVIEWER_PROFILES = ROOT / "nexus" / "services" / "agy_reviewer_profiles.py"
+AGY_REVIEWER_CANARY = ROOT / "nexus" / "services" / "agy_reviewer_canary.py"
 WORKFLOW_DOCTOR = ROOT / "scripts" / "ops" / "nexus-workflow-doctor"
 WORKFLOW_DOCTOR_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_workflow_doctor.sh"
 EXTERNAL_DISPATCH = ROOT / "scripts" / "ops" / "nexus-external-worker-dispatch"
@@ -72,6 +77,11 @@ def _make_source_repo(tmp_path: Path) -> Path:
         (DISPATCH_INSTALLER, "scripts/ops/install_nexus_agy_dispatch.sh"),
         (QUOTA, "scripts/ops/nexus-agy-quota"),
         (QUOTA_INSTALLER, "scripts/ops/install_nexus_agy_quota.sh"),
+        (AGY_REVIEW, "scripts/ops/nexus-agy-review"),
+        (AGY_REVIEW_CANARY, "scripts/ops/nexus-agy-review-canary"),
+        (AGY_REVIEWER_RUNTIME, "nexus/services/agy_reviewer_runtime.py"),
+        (AGY_REVIEWER_PROFILES, "nexus/services/agy_reviewer_profiles.py"),
+        (AGY_REVIEWER_CANARY, "nexus/services/agy_reviewer_canary.py"),
         (WORKFLOW_DOCTOR, "scripts/ops/nexus-workflow-doctor"),
         (
             WORKFLOW_DOCTOR_INSTALLER,
@@ -208,6 +218,19 @@ def test_sync_materializes_exact_generation_and_entrypoints(tmp_path: Path) -> N
     assert grok_accounts_target.is_symlink()
     assert grok_accounts_target.resolve().read_bytes() == GROK_ACCOUNTS.read_bytes()
     assert sync_target.is_symlink()
+
+    snapshot = runtime_root / "releases" / bundle / "snapshot"
+    for source, relative in [
+        (AGY_REVIEW, "scripts/ops/nexus-agy-review"),
+        (AGY_REVIEW_CANARY, "scripts/ops/nexus-agy-review-canary"),
+        (AGY_REVIEWER_RUNTIME, "nexus/services/agy_reviewer_runtime.py"),
+        (AGY_REVIEWER_PROFILES, "nexus/services/agy_reviewer_profiles.py"),
+        (AGY_REVIEWER_CANARY, "nexus/services/agy_reviewer_canary.py"),
+    ]:
+        deployed = snapshot / relative
+        assert deployed.read_bytes() == source.read_bytes()
+    assert (snapshot / "scripts/ops/nexus-agy-review").stat().st_mode & stat.S_IXUSR
+    assert (snapshot / "scripts/ops/nexus-agy-review-canary").stat().st_mode & stat.S_IXUSR
 
     receipt = json.loads((runtime_root / "releases" / bundle / "host-generation.json").read_text())
     assert receipt["source_revision"] == revision

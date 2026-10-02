@@ -12,6 +12,14 @@
       "mode": "0755"
     },
     {
+      "path": "scripts/ops/nexus-agy-review",
+      "mode": "0755"
+    },
+    {
+      "path": "scripts/ops/nexus-agy-review-canary",
+      "mode": "0755"
+    },
+    {
       "path": "scripts/ops/nexus-host-sync",
       "mode": "0755"
     },
@@ -37,6 +45,18 @@
     },
     {
       "path": "nexus/services/agy_operation_journal.py",
+      "mode": "0644"
+    },
+    {
+      "path": "nexus/services/agy_reviewer_runtime.py",
+      "mode": "0644"
+    },
+    {
+      "path": "nexus/services/agy_reviewer_profiles.py",
+      "mode": "0644"
+    },
+    {
+      "path": "nexus/services/agy_reviewer_canary.py",
       "mode": "0644"
     },
     {

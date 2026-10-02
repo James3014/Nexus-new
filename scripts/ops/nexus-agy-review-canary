@@ -1,0 +1,242 @@
+#!/usr/bin/env python3
+"""Controller-restart canary for the durable RDC -> Agy packet reviewer path."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+
+def _default_snapshot() -> Path:
+    host_runtime = Path.home() / ".local/share/nexus-host-runtime/current/snapshot"
+    if host_runtime.is_dir():
+        return host_runtime
+    return Path.home() / ".local/share/nexus-agy-direct/Nexus-new"
+
+
+SNAPSHOT = Path(os.getenv("NEXUS_AGY_SNAPSHOT", str(_default_snapshot())))
+if not SNAPSHOT.is_dir():
+    raise SystemExit("NEXUS_AGY_SNAPSHOT_MISSING")
+sys.path.insert(0, str(SNAPSHOT))
+
+from nexus.services.agy_reviewer_canary import (  # noqa: E402
+    AgyReviewCanaryError,
+    create_canary,
+    load_canary,
+    load_canary_receipt,
+    observe_canary,
+)
+
+CANARY_ROOT = Path(
+    os.getenv(
+        "NEXUS_AGY_REVIEW_CANARY_ROOT",
+        str(Path.home() / ".local/state/nexus-agy-review-canaries"),
+    )
+)
+OPERATION_ROOT = Path(
+    os.getenv(
+        "NEXUS_AGY_OPERATION_ROOT",
+        str(Path.home() / ".local/state/nexus-agy-operations"),
+    )
+)
+LEASE_ROOT = Path(
+    os.getenv(
+        "NEXUS_AGY_LEASES_DIR",
+        str(Path.home() / ".nexus/agy-account-pool/leases"),
+    )
+)
+
+
+def _review_path() -> Path:
+    explicit = os.getenv("NEXUS_AGY_REVIEW", "").strip()
+    if explicit:
+        candidate = Path(explicit).expanduser().resolve()
+        if candidate.is_file():
+            return candidate
+        raise AgyReviewCanaryError("CANARY_REVIEW_CLI_NOT_FOUND")
+    installed = shutil.which("nexus-agy-review")
+    if installed:
+        return Path(installed).resolve()
+    sibling = Path(__file__).resolve().with_name("nexus-agy-review")
+    if sibling.is_file():
+        return sibling
+    raise AgyReviewCanaryError("CANARY_REVIEW_CLI_NOT_FOUND")
+
+
+def _file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _run_review(argv: list[str]) -> dict[str, Any]:
+    review = _review_path()
+    proc = subprocess.run(
+        [sys.executable, str(review), *argv],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise AgyReviewCanaryError(
+            f"CANARY_REVIEW_COMMAND_FAILED:{(proc.stderr or proc.stdout).strip()[:500]}"
+        )
+    try:
+        value = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise AgyReviewCanaryError("CANARY_REVIEW_OUTPUT_INVALID") from exc
+    if not isinstance(value, dict):
+        raise AgyReviewCanaryError("CANARY_REVIEW_OUTPUT_INVALID")
+    return value
+
+
+def _print(value: dict[str, Any]) -> None:
+    print(json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False))
+
+
+def start(args: argparse.Namespace) -> dict[str, Any]:
+    review_path = _review_path()
+    review_argv = [
+        "--cwd",
+        args.cwd,
+        "--repository",
+        args.repository,
+        "--base-revision",
+        args.base_revision,
+        "--contract-file",
+        args.contract_file,
+        "--model",
+        args.model,
+        "--operation-root",
+        args.operation_root,
+        "--timeout",
+        str(args.timeout),
+        "--max-calls",
+        "1",
+        "--packet-mode",
+        args.packet_mode,
+    ]
+    if args.effort:
+        review_argv += ["--effort", args.effort]
+    if args.packet_mode == "compact":
+        review_argv += ["--compact-max-bytes", str(args.compact_max_bytes)]
+    for value in args.verification_receipt_file:
+        review_argv += ["--verification-receipt-file", value]
+    for value in args.authority_excerpt_file:
+        review_argv += ["--authority-excerpt-file", value]
+
+    result = _run_review(review_argv)
+    state = create_canary(
+        start_result=result,
+        canary_root=args.canary_root,
+        operation_root=args.operation_root,
+        lease_root=args.lease_root,
+        expected_runtime_revision=args.expected_runtime_revision,
+        review_cli_sha256=_file_sha256(review_path),
+    )
+    return {
+        "schema": "nexus.agy_review_canary_start.v1",
+        "action": "INTERRUPT_NOW",
+        "canary": state,
+    }
+
+
+def resume(args: argparse.Namespace) -> dict[str, Any]:
+    state = load_canary(args.canary_id, canary_root=args.canary_root)
+    review_path = _review_path()
+    current_sha = _file_sha256(review_path)
+    operation_id = str(state["operation_id"])
+    result = _run_review([
+        "--status",
+        operation_id,
+        "--operation-root",
+        str(state["operation_root"]),
+    ])
+    operation = result.get("operation")
+    if isinstance(operation, dict) and operation.get("status") == "OUTCOME_UNKNOWN":
+        result = _run_review([
+            "--reconcile",
+            operation_id,
+            "--operation-root",
+            str(state["operation_root"]),
+        ])
+    observed = observe_canary(
+        canary_id=args.canary_id,
+        canary_root=args.canary_root,
+        review_status=result,
+        current_review_cli_sha256=current_sha,
+    )
+    return {
+        "schema": "nexus.agy_review_canary_resume.v1",
+        **observed,
+    }
+
+
+def status(args: argparse.Namespace) -> dict[str, Any]:
+    state = load_canary(args.canary_id, canary_root=args.canary_root)
+    receipt = None
+    if state.get("phase") == "PASSED":
+        receipt = load_canary_receipt(args.canary_id, canary_root=args.canary_root)
+    return {
+        "schema": "nexus.agy_review_canary_status.v1",
+        "state": state,
+        "receipt": receipt,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(
+        description="Prove one RDC/Agy packet review survives controller restart without redispatch."
+    )
+    ap.add_argument("--canary-root", default=str(CANARY_ROOT))
+    sub = ap.add_subparsers(dest="command", required=True)
+
+    start_ap = sub.add_parser("start")
+    start_ap.add_argument("--cwd", required=True)
+    start_ap.add_argument("--repository", required=True)
+    start_ap.add_argument("--base-revision", required=True)
+    start_ap.add_argument("--contract-file", required=True)
+    start_ap.add_argument("--model", required=True)
+    start_ap.add_argument("--effort", choices=("low", "medium", "high"))
+    start_ap.add_argument("--packet-mode", choices=("full", "compact"), default="full")
+    start_ap.add_argument("--compact-max-bytes", type=int, default=1_000_000)
+    start_ap.add_argument("--verification-receipt-file", action="append", default=[])
+    start_ap.add_argument("--authority-excerpt-file", action="append", default=[])
+    start_ap.add_argument("--timeout", type=int, default=900)
+    start_ap.add_argument("--operation-root", default=str(OPERATION_ROOT))
+    start_ap.add_argument("--lease-root", default=str(LEASE_ROOT))
+    start_ap.add_argument("--expected-runtime-revision", required=True)
+
+    resume_ap = sub.add_parser("resume")
+    resume_ap.add_argument("--canary-id", required=True)
+
+    status_ap = sub.add_parser("status")
+    status_ap.add_argument("--canary-id", required=True)
+
+    args = ap.parse_args(argv)
+    try:
+        if args.command == "start":
+            _print(start(args))
+        elif args.command == "resume":
+            _print(resume(args))
+        else:
+            _print(status(args))
+        return 0
+    except AgyReviewCanaryError as exc:
+        print(
+            json.dumps(
+                {"schema": "nexus.agy_review_canary_error.v1", "error": str(exc)},
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
