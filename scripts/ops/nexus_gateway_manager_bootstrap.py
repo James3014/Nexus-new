@@ -7,6 +7,7 @@ No Gateway process, launchd, recovery, merge, or release effect is performed.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -17,14 +18,14 @@ from typing import Any, Callable
 
 REPOSITORY = "James3014/Nexus-new"
 OWNER_LOGIN = "James3014"
-OWNER_COMMENT_ID = 5915401527
-OWNER_COMMENT_SHA256 = "63386ca9ac928e2208c4667be57cae3789b724809f38c4487e6086ac6eb5e29c"
-ACCEPTED_COMMIT = "17fce58675c91fb91344da5ed5ede34a53a652a9"
-ACCEPTED_TREE = "e34fd98ca7f56a42a43dee24e91d4f0aa4e1bcdd"
+OWNER_COMMENT_ID = 5946671665
+OWNER_COMMENT_SHA256 = "5d77acb3ea9f6dc9e35c47537de6bc5f55b14f0ebc37a5efeca12023fd6bb650"
+ACCEPTED_COMMIT = "4fdd24a38a207a957328381c5f96cbeb2dbbe6b7"
+ACCEPTED_TREE = "9c0d76c0e89db06be8a30caccb8f0744f9d082a5"
 MANAGER_PATH = "scripts/ops/mcp_gateway_durable.py"
-PREDECESSOR_SHA256 = "6e4fa4af4ba50eeb956c7b2ed2579c06dbc392576bf5893f4e93505f6120a6ef"
-TARGET_SHA256 = "7f93a472870303d44f7c57b02362ac3f7599216576ce620334a847c4ce4a1e0c"
-OPERATION_ID = "issue1237-g2-stable-manager-bootstrap-20260930-v1"
+PREDECESSOR_SHA256 = "7f93a472870303d44f7c57b02362ac3f7599216576ce620334a847c4ce4a1e0c"
+TARGET_SHA256 = "8813426ee9acef45c2a5c126e356b3ad35949cd012bce5c3a27cede3832c7504"
+OPERATION_ID = "issue526-wave2-stable-manager-bootstrap-20261002-v1"
 STATE_ROOT = Path.home() / "Library" / "Application Support" / "Nexus" / "gateway-direct"
 REPOSITORY_MIRROR = STATE_ROOT / "repository.git"
 DESTINATION = STATE_ROOT / "manager.py"
@@ -63,22 +64,81 @@ def _verify_owner_activation(*, runner: Callable[..., Any] = subprocess.run) -> 
         raise BootstrapError("OWNER_ACTIVATION_BODY_MISMATCH")
 
 
-def _target_bytes(*, runner: Callable[..., Any] = subprocess.run) -> bytes:
-    if not REPOSITORY_MIRROR.is_dir():
-        raise BootstrapError("REPOSITORY_MIRROR_MISSING")
-    tree = _run(
-        ["git", "--git-dir", str(REPOSITORY_MIRROR), "rev-parse", f"{ACCEPTED_COMMIT}^{{tree}}"],
-        runner=runner,
-    ).decode().strip()
-    if tree != ACCEPTED_TREE:
-        raise BootstrapError("ACCEPTED_TREE_MISMATCH")
-    data = _run(
-        ["git", "--git-dir", str(REPOSITORY_MIRROR), "show", f"{ACCEPTED_COMMIT}:{MANAGER_PATH}"],
+def _target_bytes_from_remote(
+    *, runner: Callable[..., Any] = subprocess.run
+) -> bytes:
+    commit_raw = _run(
+        ["gh", "api", f"repos/{REPOSITORY}/git/commits/{ACCEPTED_COMMIT}"],
         runner=runner,
     )
+    try:
+        commit_payload = json.loads(commit_raw.decode("utf-8"))
+        tree = commit_payload["tree"]["sha"]
+    except (UnicodeError, ValueError, KeyError, TypeError) as exc:
+        raise BootstrapError("REMOTE_ACCEPTED_COMMIT_MALFORMED") from exc
+    if tree != ACCEPTED_TREE:
+        raise BootstrapError("ACCEPTED_TREE_MISMATCH")
+
+    file_raw = _run(
+        [
+            "gh",
+            "api",
+            f"repos/{REPOSITORY}/contents/{MANAGER_PATH}?ref={ACCEPTED_COMMIT}",
+        ],
+        runner=runner,
+    )
+    try:
+        file_payload = json.loads(file_raw.decode("utf-8"))
+        if (
+            file_payload["type"] != "file"
+            or file_payload["path"] != MANAGER_PATH
+            or file_payload["encoding"] != "base64"
+        ):
+            raise BootstrapError("REMOTE_TARGET_MANAGER_MALFORMED")
+        data = base64.b64decode(file_payload["content"])
+    except BootstrapError:
+        raise
+    except (UnicodeError, ValueError, KeyError, TypeError) as exc:
+        raise BootstrapError("REMOTE_TARGET_MANAGER_MALFORMED") from exc
     if _sha256(data) != TARGET_SHA256:
         raise BootstrapError("TARGET_MANAGER_HASH_MISMATCH")
     return data
+
+
+def _target_bytes(*, runner: Callable[..., Any] = subprocess.run) -> bytes:
+    if REPOSITORY_MIRROR.is_dir():
+        try:
+            tree = _run(
+                [
+                    "git",
+                    "--git-dir",
+                    str(REPOSITORY_MIRROR),
+                    "rev-parse",
+                    f"{ACCEPTED_COMMIT}^{{tree}}",
+                ],
+                runner=runner,
+            ).decode().strip()
+        except BootstrapError:
+            return _target_bytes_from_remote(runner=runner)
+        if tree != ACCEPTED_TREE:
+            raise BootstrapError("ACCEPTED_TREE_MISMATCH")
+        try:
+            data = _run(
+                [
+                    "git",
+                    "--git-dir",
+                    str(REPOSITORY_MIRROR),
+                    "show",
+                    f"{ACCEPTED_COMMIT}:{MANAGER_PATH}",
+                ],
+                runner=runner,
+            )
+        except BootstrapError:
+            return _target_bytes_from_remote(runner=runner)
+        if _sha256(data) != TARGET_SHA256:
+            raise BootstrapError("TARGET_MANAGER_HASH_MISMATCH")
+        return data
+    return _target_bytes_from_remote(runner=runner)
 
 
 def _fsync_dir(path: Path) -> None:
