@@ -1793,9 +1793,20 @@ class WorktreeManager:
         if self.target_conflict(contract, task_states=task_states):
             raise RuntimeError("serial Target budget exceeded: active Target limit is 1")
 
-        # Cross-entrypoint admission is intentionally not enforced here yet.
-        # The controller-owned records below cover isolated Targets only; treating
-        # them as the complete DIRECT/RDC/LOCAL inventory would create a false CLEAR.
+        # Cross-entrypoint admission enforcement before any physical worktree/branch effect.
+        candidate_record = {
+            "task_id": contract.task_id,
+            "attempt_id": attempt_id,
+            "controller_worktree": str(controller_root),
+            "controller_revision": contract.controller_revision,
+            "mutation_mode": getattr(contract, "mutation_mode", "ISOLATED_TARGET"),
+            "contract": contract,
+        }
+        admission = self.readback_conflict_state(candidate_record)
+        disposition = admission.get("disposition")
+        if disposition != CONFLICT_CLEAR:
+            reason = admission.get("reason", "MUTATION_CONFLICT_BLOCKED")
+            raise RuntimeError(f"MUTATION_CONFLICT_BLOCKED:{disposition}:{reason}")
         if target_path.exists():
             entry = self._worktree_entry(controller_root, target_path)
             if entry is None:
@@ -2027,6 +2038,25 @@ class WorktreeManager:
             inventory_complete=inventory_complete,
         )
 
+    def collect_active_writers(
+        self,
+        controller_root: Path | str,
+        *,
+        expected_revision: Optional[str] = None,
+        heartbeat_stale_seconds: float = 120.0,
+    ) -> Any:
+        """Scan all canonical entrypoints for active writers."""
+        from nexus.orchestrator.active_writer_inventory import collect_active_writer_inventory
+
+        ctrl_path = Path(controller_root).resolve()
+        raw_records = self._all_ownership_records(ctrl_path)
+        return collect_active_writer_inventory(
+            ctrl_path,
+            expected_revision=expected_revision,
+            target_records=raw_records,
+            heartbeat_stale_seconds=heartbeat_stale_seconds,
+        )
+
     def readback_conflict_state(
         self,
         candidate: Any,
@@ -2064,22 +2094,27 @@ class WorktreeManager:
                     "candidate_task_id": str(_record_value(candidate, "task_id") or ""),
                     "conflicting_writers": [],
                 }
-            raw_records = self._all_ownership_records(controller_root)
-            if any(r.get("invalid") for r in raw_records):
+            inv = self.collect_active_writers(
+                controller_root, expected_revision=expected_revision
+            )
+            if inv.disposition is not None:
                 return {
                     "schema": MUTATION_CONFLICT_SCHEMA,
                     "claim_ceiling": MUTATION_CONFLICT_CLAIM_CEILING,
-                    "disposition": CONFLICT_RECONCILE_REQUIRED,
-                    "reason": "CORRUPT_CANONICAL_OWNERSHIP_RECORD_DETECTED",
+                    "disposition": inv.disposition,
+                    "reason": inv.reason or "ACTIVE_WRITER_INVENTORY_FAILURE",
                     "candidate_task_id": str(_record_value(candidate, "task_id") or ""),
-                    "conflicting_writers": [],
+                    "conflicting_writers": inv.conflicting_writers or [],
                 }
             cand_task_id = str(
                 _record_value(candidate, "task_id") or _record_value(contract, "task_id") or ""
             )
-            active_writers = [r for r in raw_records if str(r.get("task_id") or "") != cand_task_id]
-            # Controller ownership records cover isolated Targets only.
-            inventory_complete = False
+            active_writers = [
+                w
+                for w in inv.active_writers
+                if str(_record_value(w, "task_id") or "") != cand_task_id
+            ]
+            inventory_complete = inv.complete
 
         return evaluate_cross_entrypoint_conflict(
             candidate,

@@ -169,6 +169,10 @@ class _Worker:
             state = self.service._read_state(task_id) or {}
             attempt_id = str(state.get("attempt_id") or "")
             self.service._bridge_validate_claim(task_id, attempt_id, operation="PROVIDER_INVOKE")
+            if hasattr(self.service, "_bridge_validate_mutation_conflict"):
+                self.service._bridge_validate_mutation_conflict(
+                    task_id, attempt_id, contract, operation="PROVIDER_INVOKE"
+                )
             request = state.get("request") or {}
             if self.service._ambient_core_required(contract, request) and not state.get(
                 "host_preparation"
@@ -291,6 +295,10 @@ class _Finalization:
         )
         if task_id:
             self.service._bridge_validate_claim(task_id, attempt_id, operation="FINALIZE_COMPLETED")
+            if hasattr(self.service, "_bridge_validate_mutation_conflict"):
+                self.service._bridge_validate_mutation_conflict(
+                    task_id, attempt_id, contract, operation="FINALIZE_COMPLETED"
+                )
         if self.service._ambient_core_required(contract, request) and not (
             state.get("host_preparation") if isinstance(state, Mapping) else None
         ):
