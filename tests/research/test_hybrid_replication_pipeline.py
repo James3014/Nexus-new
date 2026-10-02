@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -48,6 +51,69 @@ def test_capture_comment_round_trip_preserves_pre_execution_contract() -> None:
     assert recovered == snapshot
     assert recovered.contract_sha256
     assert recovered.capture_sha256
+
+
+def _foreign_gzip_capture_comment(snapshot: TaskSnapshot) -> tuple[str, dict[str, object]]:
+    payload = snapshot.to_capture_payload()
+    compressed = bytearray(base64.b64decode(str(payload["body_gzip_base64"])))
+    assert len(compressed) >= 10
+    compressed[9] = 3 if compressed[9] != 3 else 19
+    payload["body_gzip_base64"] = base64.b64encode(bytes(compressed)).decode("ascii")
+    unsigned = dict(payload)
+    unsigned.pop("capture_sha256")
+    payload["capture_sha256"] = hashlib.sha256(
+        json.dumps(
+            unsigned,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    comment = (
+        f"{CAPTURE_MARKER}\n"
+        "Authority: `RESEARCH_OBSERVATION_ONLY / NO_ENGINEERING_AUTHORITY`\n\n"
+        "```json\n" + json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n```"
+    )
+    return comment, payload
+
+
+def test_capture_parser_preserves_foreign_gzip_envelope_identity() -> None:
+    snapshot = _snapshot(1301)
+    comment, payload = _foreign_gzip_capture_comment(snapshot)
+
+    recovered = parse_capture_comment(comment)
+
+    assert recovered.capture_sha256 == payload["capture_sha256"]
+    assert recovered.contract_sha256 == payload["contract_sha256"]
+    assert recovered.body == snapshot.body
+    assert recovered.to_capture_payload() == payload
+
+
+def test_controller_preserves_foreign_capture_identity_through_store(tmp_path: Path) -> None:
+    original = _snapshot(1302)
+    comment, payload = _foreign_gzip_capture_comment(original)
+    snapshot = parse_capture_comment(comment)
+    store = AutomaticReplicationStore(tmp_path)
+    store.capture(snapshot, admission_disposition="ADMITTED_PRIMARY_FRESH_TASK")
+    observed: dict[str, str] = {}
+
+    def stack_runner(recovered: TaskSnapshot) -> FrozenStackOutcome:
+        observed["capture_sha256"] = recovered.capture_sha256
+        return _c_outcome()
+
+    controller = AutomaticReplicationController(
+        store=store,
+        frozen_policy_sha256="4" * 64,
+        stack_runner=stack_runner,
+        terminal_resolver=lambda _: None,
+        clock=lambda: "2026-10-02T00:00:00Z",
+    )
+
+    result = controller.advance(snapshot.task_key)
+
+    assert result["phase"] == "RAW_SEALED"
+    assert observed["capture_sha256"] == payload["capture_sha256"]
+    assert result["capture_sha256"] == payload["capture_sha256"]
 
 
 def _snapshot(issue: int = 1300) -> TaskSnapshot:
