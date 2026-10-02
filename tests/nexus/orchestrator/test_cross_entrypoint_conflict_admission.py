@@ -512,8 +512,10 @@ def _bind_canonical_producer_root(
     env_name: str,
     canonical_attr: str,
     root: Path,
+    create_root: bool = True,
 ) -> None:
-    root.mkdir(parents=True, exist_ok=True)
+    if create_root:
+        root.mkdir(parents=True, exist_ok=True)
     resolved = root.resolve()
     monkeypatch.setenv(env_name, str(resolved))
     monkeypatch.setattr(provenance_module, canonical_attr, resolved)
@@ -772,6 +774,7 @@ def test_live_configured_missing_dev_mcp_producer_fails_closed(
         env_name="NEXUS_DEV_MCP_OPERATION_ROOT",
         canonical_attr="_CANONICAL_DEV_MCP_OPERATION_ROOT",
         root=missing_root,
+        create_root=False,
     )
 
     manager = WorktreeManager(root_dir=str(tmp_path / "targets"), create_root=True)
