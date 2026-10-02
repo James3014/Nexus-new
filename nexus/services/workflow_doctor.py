@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import socket
 import subprocess
@@ -12,6 +11,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from nexus.orchestrator.canonical_source_root import (
+    CANONICAL_SOURCE_ROOT,
+    resolve_rdc_repo_root,
+)
 from nexus.services.direct_operation_journal import (
     ACTIVE_STATES,
     TERMINAL_STATES,
@@ -31,6 +34,44 @@ CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 
 class WorkflowDoctorError(RuntimeError):
     """The doctor could not build a trustworthy minimum projection."""
+
+
+def resolve_workflow_repo_root(
+    repo_root: str | Path | None,
+    repository: str | None,
+) -> Path:
+    """Return the validated repo root for workflow doctor operations.
+
+    Parameters
+    ----------
+    repo_root:
+        Explicit path supplied by the caller, or ``None``.  When ``None``,
+        ``CANONICAL_SOURCE_ROOT`` is used as the candidate — ``os.getcwd()``
+        is never a fallback.
+    repository:
+        Optional GitHub ``OWNER/REPO`` identity.  When supplied the candidate
+        is validated against the repository's origin remote via
+        ``resolve_rdc_repo_root``.  When omitted the candidate is returned
+        as-is without inventing a repository slug.
+
+    Returns
+    -------
+    Path
+        The resolved, optionally validated repository root.
+
+    Raises
+    ------
+    RuntimeError
+        Propagated from ``resolve_rdc_repo_root`` when the remote identity
+        does not match *repository* or the path is not a valid git repo.
+    """
+    candidate: Path = Path(repo_root) if repo_root is not None else CANONICAL_SOURCE_ROOT
+    if repository is not None:
+        return resolve_rdc_repo_root(
+            expected_repository=repository,
+            canonical_root=candidate,
+        )
+    return candidate.expanduser().resolve()
 
 
 def utc_now() -> str:
@@ -269,13 +310,15 @@ def _collect_pr(
     required = []
     for name in sorted(required_names):
         row = latest.get(name)
-        required.append({
-            "name": name,
-            "policy_role": "REQUIRED_GATE",
-            "status": row.get("status") if row else "missing",
-            "conclusion": row.get("conclusion") if row else None,
-            "details_url": row.get("details_url") if row else None,
-        })
+        required.append(
+            {
+                "name": name,
+                "policy_role": "REQUIRED_GATE",
+                "status": row.get("status") if row else "missing",
+                "conclusion": row.get("conclusion") if row else None,
+                "details_url": row.get("details_url") if row else None,
+            }
+        )
 
     advisory, unknown = [], []
     for name, row in sorted(latest.items()):
@@ -415,13 +458,15 @@ def _collect_quota_snapshot(home: Path) -> dict[str, Any]:
         for row in rows:
             if not isinstance(row, dict) or not isinstance(row.get("account"), str):
                 continue
-            accounts.append({
-                "account": row.get("account"),
-                "ok": row.get("ok"),
-                "checked_at": row.get("checked_at"),
-                "error": row.get("error"),
-                "groups": row.get("groups", {}),
-            })
+            accounts.append(
+                {
+                    "account": row.get("account"),
+                    "ok": row.get("ok"),
+                    "checked_at": row.get("checked_at"),
+                    "error": row.get("error"),
+                    "groups": row.get("groups", {}),
+                }
+            )
     return {
         "status": "OBSERVED",
         "path": str(path),
@@ -870,21 +915,23 @@ def render_text(payload: dict[str, Any]) -> str:
     pr = payload.get("pr", {})
     operation = payload.get("operation", {})
     gate = payload.get("next_gate", {})
-    return "\n".join([
-        f"resume={payload.get('resume_disposition')} next={gate.get('code')}",
-        f"source head={source.get('head')} github_main={source.get('github_main')} dirty={source.get('dirty')}",
-        f"runtime state={runtime.get('state')} installed={runtime.get('installed_revision')}",
-        f"quota status={(payload.get('quota') or {}).get('status')} accounts={(payload.get('quota') or {}).get('account_count')}",
-        f"issue={task.get('issue_number')} state={task.get('state')}",
-        f"pr={pr.get('pr_number')} state={pr.get('state')} head={pr.get('head_sha')}",
-        f"required_gates={len(payload.get('required_gates') or [])} advisory={len(payload.get('advisory_observers') or [])}",
-        f"active_operations={len(operation.get('active') or [])} active_leases={len((payload.get('leases') or {}).get('active') or [])}",
-    ])
+    return "\n".join(
+        [
+            f"resume={payload.get('resume_disposition')} next={gate.get('code')}",
+            f"source head={source.get('head')} github_main={source.get('github_main')} dirty={source.get('dirty')}",
+            f"runtime state={runtime.get('state')} installed={runtime.get('installed_revision')}",
+            f"quota status={(payload.get('quota') or {}).get('status')} accounts={(payload.get('quota') or {}).get('account_count')}",
+            f"issue={task.get('issue_number')} state={task.get('state')}",
+            f"pr={pr.get('pr_number')} state={pr.get('state')} head={pr.get('head_sha')}",
+            f"required_gates={len(payload.get('required_gates') or [])} advisory={len(payload.get('advisory_observers') or [])}",
+            f"active_operations={len(operation.get('active') or [])} active_leases={len((payload.get('leases') or {}).get('active') or [])}",
+        ]
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", default=os.getcwd())
+    parser.add_argument("--repo-root", default=None)
     parser.add_argument("--repository")
     parser.add_argument("--issue", dest="issue_number", type=int)
     parser.add_argument("--pr", dest="pr_number", type=int)
@@ -895,8 +942,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    resolved_root = resolve_workflow_repo_root(args.repo_root, args.repository)
     payload = collect_workflow_doctor(
-        repo_root=Path(args.repo_root),
+        repo_root=resolved_root,
         repository=args.repository,
         issue_number=args.issue_number,
         pr_number=args.pr_number,
