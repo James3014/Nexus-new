@@ -42,6 +42,25 @@ from nexus.services.live_execution_provenance import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _available_empty_canonical_writer_surfaces(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Make producer availability explicit for #98 inventory tests."""
+    roots = {
+        "_CANONICAL_DEV_MCP_OPERATION_ROOT": tmp_path / "canonical-writers" / "dev-mcp",
+        "_CANONICAL_RDC_OPERATION_ROOT": tmp_path / "canonical-writers" / "rdc",
+        "_CANONICAL_EXTERNAL_WORKER_OPERATION_ROOT": tmp_path
+        / "canonical-writers"
+        / "external",
+        "_CANONICAL_AGY_OPERATION_ROOT": tmp_path / "canonical-writers" / "agy",
+    }
+    for attr, root in roots.items():
+        root.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(provenance_module, attr, root.resolve())
+
+
 def _writer(
     task_id: str,
     allowed_files: list[str],
