@@ -20,6 +20,8 @@ from pathlib import Path
 
 import pytest
 
+import nexus.services.live_execution_provenance as provenance_module
+
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
 from nexus.orchestrator.worktree_manager import (
     CONFLICT_CLEAR,
@@ -488,12 +490,34 @@ def _make_git_repo(path: Path) -> tuple[Path, str]:
     return path, head
 
 
+def _bind_canonical_producer_root(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    env_name: str,
+    canonical_attr: str,
+    root: Path,
+) -> None:
+    resolved = root.resolve()
+    monkeypatch.setenv(env_name, str(resolved))
+    monkeypatch.setattr(provenance_module, canonical_attr, resolved)
+
+
 def test_live_dev_mcp_vs_rdc_overlap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     repo_path, head_sha = _make_git_repo(tmp_path / "repo")
     dev_mcp_root = tmp_path / "dev_mcp"
     rdc_root = tmp_path / "rdc"
-    monkeypatch.setenv("NEXUS_DEV_MCP_OPERATION_ROOT", str(dev_mcp_root))
-    monkeypatch.setenv("NEXUS_RDC_OPERATION_ROOT", str(rdc_root))
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_DEV_MCP_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_DEV_MCP_OPERATION_ROOT",
+        root=dev_mcp_root,
+    )
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_RDC_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_RDC_OPERATION_ROOT",
+        root=rdc_root,
+    )
 
     journal = DirectOperationJournal(
         dev_mcp_root,
@@ -538,7 +562,12 @@ def test_live_dev_mcp_vs_rdc_overlap(tmp_path: Path, monkeypatch: pytest.MonkeyP
 def test_live_rdc_vs_local_overlap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     repo_path, head_sha = _make_git_repo(tmp_path / "repo")
     rdc_root = tmp_path / "rdc"
-    monkeypatch.setenv("NEXUS_RDC_OPERATION_ROOT", str(rdc_root))
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_RDC_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_RDC_OPERATION_ROOT",
+        root=rdc_root,
+    )
 
     journal = DirectOperationJournal(
         rdc_root,
@@ -582,7 +611,12 @@ def test_live_target_lease_blocked_by_active_dev_mcp(
 ):
     repo_path, head_sha = _make_git_repo(tmp_path / "repo")
     dev_mcp_root = tmp_path / "dev_mcp"
-    monkeypatch.setenv("NEXUS_DEV_MCP_OPERATION_ROOT", str(dev_mcp_root))
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_DEV_MCP_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_DEV_MCP_OPERATION_ROOT",
+        root=dev_mcp_root,
+    )
 
     journal = DirectOperationJournal(
         dev_mcp_root,
@@ -635,8 +669,18 @@ def test_live_disjoint_multiple_entrypoints_clear(tmp_path: Path, monkeypatch: p
     repo_path, head_sha = _make_git_repo(tmp_path / "repo")
     dev_mcp_root = tmp_path / "dev_mcp"
     rdc_root = tmp_path / "rdc"
-    monkeypatch.setenv("NEXUS_DEV_MCP_OPERATION_ROOT", str(dev_mcp_root))
-    monkeypatch.setenv("NEXUS_RDC_OPERATION_ROOT", str(rdc_root))
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_DEV_MCP_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_DEV_MCP_OPERATION_ROOT",
+        root=dev_mcp_root,
+    )
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_RDC_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_RDC_OPERATION_ROOT",
+        root=rdc_root,
+    )
 
     # Dev MCP on src/dev.py
     dev_journal = DirectOperationJournal(
@@ -706,7 +750,12 @@ def test_live_corrupt_operation_record_fails_closed(
 ):
     repo_path, head_sha = _make_git_repo(tmp_path / "repo")
     dev_mcp_root = tmp_path / "dev_mcp"
-    monkeypatch.setenv("NEXUS_DEV_MCP_OPERATION_ROOT", str(dev_mcp_root))
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_DEV_MCP_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_DEV_MCP_OPERATION_ROOT",
+        root=dev_mcp_root,
+    )
 
     corrupt_dir = dev_mcp_root / "operations" / "devmcpop_corrupt"
     corrupt_dir.mkdir(parents=True, exist_ok=True)
@@ -731,7 +780,12 @@ def test_live_corrupt_operation_record_fails_closed(
 def test_live_missing_operation_json_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     repo_path, head_sha = _make_git_repo(tmp_path / "repo")
     dev_mcp_root = tmp_path / "dev_mcp"
-    monkeypatch.setenv("NEXUS_DEV_MCP_OPERATION_ROOT", str(dev_mcp_root))
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_DEV_MCP_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_DEV_MCP_OPERATION_ROOT",
+        root=dev_mcp_root,
+    )
 
     # Empty directory without operation.json
     empty_op_dir = dev_mcp_root / "operations" / "devmcpop_empty"
@@ -747,7 +801,92 @@ def test_live_missing_operation_json_fails_closed(tmp_path: Path, monkeypatch: p
 
     res = manager.readback_conflict_state(cand)
     assert res["disposition"] == CONFLICT_RECONCILE_REQUIRED
-    assert "CORRUPT_OPERATION_RECORD" in res["reason"]
+    assert "CORRUPT_CANONICAL_OPERATION_RECORD_DETECTED" in res["reason"]
+
+
+def test_live_configured_missing_dev_mcp_producer_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repo_path, head_sha = _make_git_repo(tmp_path / "repo")
+    missing_root = tmp_path / "missing-dev-mcp"
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_DEV_MCP_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_DEV_MCP_OPERATION_ROOT",
+        root=missing_root,
+    )
+
+    manager = WorktreeManager(root_dir=str(tmp_path / "targets"), create_root=True)
+    cand = _writer(
+        "task-cand",
+        ["src/any.py"],
+        controller_revision=head_sha,
+        controller_worktree=str(repo_path),
+    )
+
+    res = manager.readback_conflict_state(cand)
+    assert res["disposition"] == CONFLICT_UNKNOWN
+    assert "CANONICAL_PRODUCER_ROOT_UNAVAILABLE" in res["reason"]
+
+
+def test_live_schema_shaped_record_with_invalid_operation_identity_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repo_path, head_sha = _make_git_repo(tmp_path / "repo")
+    dev_mcp_root = tmp_path / "dev_mcp"
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_DEV_MCP_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_DEV_MCP_OPERATION_ROOT",
+        root=dev_mcp_root,
+    )
+
+    forged_dir = dev_mcp_root / "operations" / "devmcpop_not-a-valid-id"
+    forged_dir.mkdir(parents=True, exist_ok=True)
+    (forged_dir / "operation.json").write_text(
+        (
+            '{"schema":"nexus.dev_mcp.receipt.v1",'
+            '"operation_id":"devmcpop_not-a-valid-id",'
+            '"attempt_id":"att-forged","status":"RUNNING",'
+            f'"repo_root":"{repo_path}","pid":{os.getpid()},'
+            f'"last_heartbeat_at":"{datetime.datetime.now(datetime.timezone.utc).isoformat()}",'
+            '"allowed_files":["src/any.py"]}'
+        ),
+        encoding="utf-8",
+    )
+
+    manager = WorktreeManager(root_dir=str(tmp_path / "targets"), create_root=True)
+    cand = _writer(
+        "task-cand",
+        ["src/other.py"],
+        controller_revision=head_sha,
+        controller_worktree=str(repo_path),
+    )
+
+    res = manager.readback_conflict_state(cand)
+    assert res["disposition"] == CONFLICT_RECONCILE_REQUIRED
+    assert "CORRUPT_CANONICAL_OPERATION_RECORD_DETECTED" in res["reason"]
+
+
+def test_live_configured_local_writer_without_canonical_producer_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repo_path, head_sha = _make_git_repo(tmp_path / "repo")
+    local_root = tmp_path / "local-writers"
+    local_root.mkdir()
+    monkeypatch.setenv("NEXUS_LOCAL_WRITER_ROOT", str(local_root))
+
+    manager = WorktreeManager(root_dir=str(tmp_path / "targets"), create_root=True)
+    cand = _writer(
+        "task-cand",
+        ["src/other.py"],
+        controller_revision=head_sha,
+        controller_worktree=str(repo_path),
+    )
+
+    res = manager.readback_conflict_state(cand)
+    assert res["disposition"] == CONFLICT_UNKNOWN
+    assert "LOCAL_WRITER_CANONICAL_PRODUCER_UNAVAILABLE" in res["reason"]
 
 
 def test_live_process_silence_without_terminal_receipt_fails_closed(
@@ -755,7 +894,12 @@ def test_live_process_silence_without_terminal_receipt_fails_closed(
 ):
     repo_path, head_sha = _make_git_repo(tmp_path / "repo")
     dev_mcp_root = tmp_path / "dev_mcp"
-    monkeypatch.setenv("NEXUS_DEV_MCP_OPERATION_ROOT", str(dev_mcp_root))
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_DEV_MCP_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_DEV_MCP_OPERATION_ROOT",
+        root=dev_mcp_root,
+    )
 
     journal = DirectOperationJournal(
         dev_mcp_root,
@@ -798,7 +942,12 @@ def test_live_process_silence_without_terminal_receipt_fails_closed(
 def test_live_stale_heartbeat_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     repo_path, head_sha = _make_git_repo(tmp_path / "repo")
     dev_mcp_root = tmp_path / "dev_mcp"
-    monkeypatch.setenv("NEXUS_DEV_MCP_OPERATION_ROOT", str(dev_mcp_root))
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_DEV_MCP_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_DEV_MCP_OPERATION_ROOT",
+        root=dev_mcp_root,
+    )
 
     journal = DirectOperationJournal(
         dev_mcp_root,
@@ -845,7 +994,12 @@ def test_live_outcome_unknown_operation_fails_closed(
 ):
     repo_path, head_sha = _make_git_repo(tmp_path / "repo")
     dev_mcp_root = tmp_path / "dev_mcp"
-    monkeypatch.setenv("NEXUS_DEV_MCP_OPERATION_ROOT", str(dev_mcp_root))
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_DEV_MCP_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_DEV_MCP_OPERATION_ROOT",
+        root=dev_mcp_root,
+    )
 
     journal = DirectOperationJournal(
         dev_mcp_root,
@@ -888,7 +1042,12 @@ def test_live_terminal_completed_operation_does_not_block(
 ):
     repo_path, head_sha = _make_git_repo(tmp_path / "repo")
     dev_mcp_root = tmp_path / "dev_mcp"
-    monkeypatch.setenv("NEXUS_DEV_MCP_OPERATION_ROOT", str(dev_mcp_root))
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_DEV_MCP_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_DEV_MCP_OPERATION_ROOT",
+        root=dev_mcp_root,
+    )
 
     journal = DirectOperationJournal(
         dev_mcp_root,
@@ -963,7 +1122,12 @@ def test_live_governed_target_vs_dev_mcp_overlap(tmp_path: Path, monkeypatch: py
 def test_live_agy_operation_overlap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     repo_path, head_sha = _make_git_repo(tmp_path / "repo")
     agy_root = tmp_path / "agy"
-    monkeypatch.setenv("NEXUS_AGY_OPERATION_ROOT", str(agy_root))
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_AGY_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_AGY_OPERATION_ROOT",
+        root=agy_root,
+    )
 
     journal = DirectOperationJournal(
         agy_root,
@@ -1009,7 +1173,12 @@ def test_runtime_coordination_bridge_worker_invoke_blocked_on_mutation_conflict(
 
     repo_path, head_sha = _make_git_repo(tmp_path / "repo")
     dev_mcp_root = tmp_path / "dev_mcp"
-    monkeypatch.setenv("NEXUS_DEV_MCP_OPERATION_ROOT", str(dev_mcp_root))
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_DEV_MCP_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_DEV_MCP_OPERATION_ROOT",
+        root=dev_mcp_root,
+    )
     monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(tmp_path / "targets"))
 
     service = SelfHostedTaskService(
@@ -1096,7 +1265,12 @@ def test_runtime_coordination_bridge_finalize_blocked_on_mutation_conflict(
 
     repo_path, head_sha = _make_git_repo(tmp_path / "repo")
     dev_mcp_root = tmp_path / "dev_mcp"
-    monkeypatch.setenv("NEXUS_DEV_MCP_OPERATION_ROOT", str(dev_mcp_root))
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_DEV_MCP_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_DEV_MCP_OPERATION_ROOT",
+        root=dev_mcp_root,
+    )
     monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(tmp_path / "targets"))
 
     service = SelfHostedTaskService(
