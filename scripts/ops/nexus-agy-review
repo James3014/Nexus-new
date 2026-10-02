@@ -315,6 +315,13 @@ def launch_review(args: argparse.Namespace) -> dict[str, Any]:
                 "operation": public_operation_view(record),
                 "receipt": None,
             }
+        if status in {"FAILED", "CANCELLED"}:
+            return {
+                "schema": "nexus.agy_review_status.v1",
+                "action": "TERMINAL_NON_ACCEPTING",
+                "operation": public_operation_view(record),
+                "receipt": None,
+            }
         return {
             "schema": "nexus.agy_review_status.v1",
             "action": "OBSERVE_EXISTING",

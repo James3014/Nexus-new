@@ -265,3 +265,32 @@ def test_same_semantic_review_from_different_physical_root_fails_closed(
 
     assert first["action"] == "DISPATCHED"
     assert len(FakePopen.calls) == 1
+
+
+def test_failed_terminal_review_is_reused_without_redispatch(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    root, base, contract = make_repo(tmp_path)
+    op_root = tmp_path / "operations"
+    args = args_for(root, base, contract, op_root)
+    FakePopen.calls = []
+    monkeypatch.setattr(review, "_dispatcher_path", lambda: Path("/fake/nexus-agy-dispatch"))
+    monkeypatch.setattr(review.subprocess, "Popen", FakePopen)
+
+    launched = review.launch_review(args)
+    opid = launched["operation"]["operation_id"]
+    journal = AgyOperationJournal(op_root)
+    journal.mark_terminal(
+        opid,
+        status="FAILED",
+        exit_code=1,
+        failure_kind="TEST_FAILURE",
+        cwd=str(root),
+    )
+
+    repeated = review.launch_review(args)
+
+    assert repeated["action"] == "TERMINAL_NON_ACCEPTING"
+    assert repeated["receipt"] is None
+    assert len(FakePopen.calls) == 1
