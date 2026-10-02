@@ -2042,7 +2042,7 @@ def _r1_historical_materialized_generation(
         receipt=receipt,
         source_bundle_evidence=None,
     )
-    if not rows or rows[-1].state is not DeploymentState.VERIFIED:
+    if rows and rows[-1].state is not DeploymentState.VERIFIED:
         raise _gateway_error(
             "R1 successor requires prior terminal VERIFIED recovery"
         )
