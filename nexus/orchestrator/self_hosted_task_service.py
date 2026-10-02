@@ -2804,7 +2804,9 @@ class SelfHostedTaskService:
         if contract_data is None and state is not None:
             contract_data = state.get("contract")
         if contract_data is None:
-            return None
+            raise RuntimeError(
+                f"MUTATION_CONFLICT_BLOCKED:{operation}:UNKNOWN:MUTATION_CONTRACT_UNAVAILABLE"
+            )
         ctrl_root = (
             getattr(contract_data, "controller_repo_root", None)
             or (contract_data.get("controller_repo_root") if isinstance(contract_data, Mapping) else None)
@@ -2812,7 +2814,9 @@ class SelfHostedTaskService:
             or (contract_data.get("controller_worktree") if isinstance(contract_data, Mapping) else None)
         )
         if not ctrl_root or not Path(str(ctrl_root)).is_dir():
-            return None
+            raise RuntimeError(
+                f"MUTATION_CONFLICT_BLOCKED:{operation}:UNKNOWN:CONTROLLER_ROOT_UNAVAILABLE"
+            )
         rev = (
             getattr(contract_data, "controller_revision", None)
             or (contract_data.get("controller_revision") if isinstance(contract_data, Mapping) else None)
@@ -2837,15 +2841,19 @@ class SelfHostedTaskService:
             "contract": contract_data,
         }
         try:
-            try:
-                manager = WorktreeManager(root_dir=str(Path(str(ctrl_root)) / ".nexus/targets"), create_root=False)
-            except TypeError:
-                manager = WorktreeManager(str(Path(str(ctrl_root)) / ".nexus/targets"))
-        except Exception:
-            return None
+            manager = WorktreeManager(
+                root_dir=str(Path(str(ctrl_root)) / ".nexus/targets"),
+                create_root=False,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"MUTATION_CONFLICT_BLOCKED:{operation}:UNKNOWN:CONFLICT_MANAGER_UNAVAILABLE"
+            ) from exc
 
         if not hasattr(manager, "readback_conflict_state"):
-            return None
+            raise RuntimeError(
+                f"MUTATION_CONFLICT_BLOCKED:{operation}:UNKNOWN:CONFLICT_READBACK_UNAVAILABLE"
+            )
 
         admission = manager.readback_conflict_state(candidate_record)
         disposition = admission.get("disposition")
