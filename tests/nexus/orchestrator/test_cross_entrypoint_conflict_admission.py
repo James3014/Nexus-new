@@ -1166,6 +1166,53 @@ def test_live_agy_operation_overlap(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert any(w["task_id"] == "task-agy" for w in res["conflicting_writers"])
 
 
+def test_bridge_conflict_validation_missing_contract_fails_closed(tmp_path: Path):
+    from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        ephemeral=True,
+        auto_reconcile=False,
+    )
+    with pytest.raises(
+        RuntimeError,
+        match="MUTATION_CONFLICT_BLOCKED:PROVIDER_INVOKE:UNKNOWN:MUTATION_CONTRACT_UNAVAILABLE",
+    ):
+        service._bridge_validate_mutation_conflict(
+            "missing-task",
+            "attempt-01",
+            None,
+            operation="PROVIDER_INVOKE",
+        )
+
+
+def test_bridge_conflict_validation_missing_controller_root_fails_closed(tmp_path: Path):
+    from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        ephemeral=True,
+        auto_reconcile=False,
+    )
+    contract = {
+        "task_id": "task-missing-root",
+        "controller_repo_root": str(tmp_path / "does-not-exist"),
+        "controller_revision": "a" * 40,
+        "allowed_files": ["src/a.py"],
+        "mutation_mode": "ISOLATED_TARGET",
+    }
+    with pytest.raises(
+        RuntimeError,
+        match="MUTATION_CONFLICT_BLOCKED:FINALIZE_COMPLETED:UNKNOWN:CONTROLLER_ROOT_UNAVAILABLE",
+    ):
+        service._bridge_validate_mutation_conflict(
+            "task-missing-root",
+            "attempt-01",
+            contract,
+            operation="FINALIZE_COMPLETED",
+        )
+
+
 def test_runtime_coordination_bridge_worker_invoke_blocked_on_mutation_conflict(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
