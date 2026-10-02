@@ -2042,7 +2042,11 @@ def _r1_historical_materialized_generation(
         receipt=receipt,
         source_bundle_evidence=None,
     )
-    if not rows or rows[-1].state is not DeploymentState.VERIFIED:
+    # A coherently materialized generation may be superseded before any
+    # recovery attempt has entered the ledger. Once any recovery row exists,
+    # preserve the existing terminal-VERIFIED requirement so partial/blocked
+    # effects can never be rotated away as if they were still pre-effect.
+    if rows and rows[-1].state is not DeploymentState.VERIFIED:
         raise _gateway_error(
             "R1 successor requires prior terminal VERIFIED recovery"
         )
