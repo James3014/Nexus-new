@@ -328,3 +328,35 @@ def test_installer_deploys_exact_canonical_entrypoint(tmp_path: Path) -> None:
     assert mode & stat.S_IXUSR
     assert mode & stat.S_IXGRP
     assert mode & stat.S_IXOTH
+
+
+def test_operation_projection_exposes_bounded_review_identity(tmp_path: Path) -> None:
+    operation_path = tmp_path / "operation.json"
+    operation_path.write_text(
+        json.dumps({
+            "schema": "nexus.agy_operation.v1",
+            "operation_id": "agyop_" + ("a" * 32),
+            "attempt_id": "attempt_" + ("b" * 32),
+            "status": "COMPLETED",
+            "phase": "TERMINAL",
+            "review_effect_id": "c" * 64,
+            "review_role": "independent-acceptance",
+            "candidate_digest": "d" * 64,
+            "review_packet_sha256": "e" * 64,
+            "review_state": "TERMINAL",
+            "review_verdict": "ACCEPT",
+            "review_applicable": True,
+            "subject_stable": True,
+            "private_review_secret": "not-public",
+        }),
+        encoding="utf-8",
+    )
+
+    projected = doctor._read_operation(operation_path)
+
+    assert projected["review_effect_id"] == "c" * 64
+    assert projected["candidate_digest"] == "d" * 64
+    assert projected["review_packet_sha256"] == "e" * 64
+    assert projected["review_verdict"] == "ACCEPT"
+    assert projected["review_applicable"] is True
+    assert "private_review_secret" not in projected

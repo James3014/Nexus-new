@@ -1,0 +1,467 @@
+#!/usr/bin/env python3
+"""Durable packet-mode reviewer wrapper over the canonical Nexus Agy dispatcher."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any, Mapping
+
+
+def _default_snapshot() -> Path:
+    host_runtime = Path.home() / ".local/share/nexus-host-runtime/current/snapshot"
+    if host_runtime.is_dir():
+        return host_runtime
+    return Path.home() / ".local/share/nexus-agy-direct/Nexus-new"
+
+
+SNAPSHOT = Path(os.getenv("NEXUS_AGY_SNAPSHOT", str(_default_snapshot())))
+if not SNAPSHOT.is_dir():
+    raise SystemExit("NEXUS_AGY_SNAPSHOT_MISSING")
+sys.path.insert(0, str(SNAPSHOT))
+
+from nexus.services.agy_operation_journal import (  # noqa: E402
+    AgyOperationJournal,
+    AgyOperationJournalError,
+    new_attempt_id,
+    public_operation_view,
+)
+from nexus.services.agy_reviewer_runtime import (  # noqa: E402
+    AgyReviewError,
+    REVIEW_PROFILE_VERSION,
+    atomic_private_json,
+    atomic_private_text,
+    build_review_packet,
+    build_review_prompt,
+    build_review_receipt,
+    collect_review_subject,
+    load_review_packet,
+    operation_id_for_effect,
+    subject_matches_packet,
+    verify_review_receipt,
+)
+
+OPERATION_ROOT = Path(
+    os.getenv(
+        "NEXUS_AGY_OPERATION_ROOT",
+        str(Path.home() / ".local/state/nexus-agy-operations"),
+    )
+)
+_PACKET_NAME = "review-packet.json"
+_RECEIPT_NAME = "review-receipt.json"
+
+
+def _dispatcher_path() -> Path:
+    explicit = os.getenv("NEXUS_AGY_DISPATCH", "").strip()
+    if explicit:
+        candidate = Path(explicit).expanduser().resolve()
+        if candidate.is_file():
+            return candidate
+        raise AgyReviewError("AGY_DISPATCH_NOT_FOUND")
+    installed = shutil.which("nexus-agy-dispatch")
+    if installed:
+        return Path(installed).resolve()
+    sibling = Path(__file__).resolve().with_name("nexus-agy-dispatch")
+    if sibling.is_file():
+        return sibling
+    raise AgyReviewError("AGY_DISPATCH_NOT_FOUND")
+
+
+def _read_output(path: str | None) -> str:
+    if not path:
+        return ""
+    try:
+        return Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def _resolve_operation_id(value: str) -> tuple[str, str | None]:
+    text = str(value or "").strip()
+    if len(text) == 64 and all(ch in "0123456789abcdef" for ch in text):
+        return operation_id_for_effect(text), text
+    return text, None
+
+
+def _binding_fields(packet: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "review_profile_version": REVIEW_PROFILE_VERSION,
+        "review_effect_id": packet["review_effect_id"],
+        "review_role": packet["reviewer_role"],
+        "review_repository": packet["repository"],
+        "review_base_revision": packet["base_revision"],
+        "review_candidate_head": packet["current_head"],
+        "candidate_digest": packet["candidate_digest"],
+        "acceptance_contract_sha256": packet["acceptance_contract_sha256"],
+        "review_packet_sha256": packet["packet_sha256"],
+        "review_changed_path_count": len(packet["changed_paths"]),
+    }
+
+
+def _assert_record_binding(record: dict[str, Any], packet: dict[str, Any]) -> None:
+    for key, value in _binding_fields(packet).items():
+        if record.get(key) != value:
+            raise AgyReviewError(f"REVIEW_OPERATION_BINDING_MISMATCH:{key}")
+
+
+def _packet_path(journal: AgyOperationJournal, operation_id: str) -> Path:
+    return journal.operation_dir(operation_id) / _PACKET_NAME
+
+
+def _receipt_path(journal: AgyOperationJournal, operation_id: str) -> Path:
+    return journal.operation_dir(operation_id) / _RECEIPT_NAME
+
+
+def _current_projection(
+    journal: AgyOperationJournal,
+    operation_id: str,
+    *,
+    expected_effect_id: str | None = None,
+) -> dict[str, Any]:
+    record = journal.read(operation_id)
+    if expected_effect_id and record.get("review_effect_id") != expected_effect_id:
+        raise AgyReviewError("REVIEW_EFFECT_OPERATION_COLLISION")
+
+    packet = load_review_packet(_packet_path(journal, operation_id))
+    _assert_record_binding(record, packet)
+
+    receipt_path = _receipt_path(journal, operation_id)
+    receipt = None
+    if receipt_path.is_file():
+        try:
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise AgyReviewError("REVIEW_RECEIPT_READ_FAILED") from exc
+        if not isinstance(receipt, dict):
+            raise AgyReviewError("REVIEW_RECEIPT_INVALID")
+        verify_review_receipt(receipt, packet)
+
+    if record.get("status") == "COMPLETED" and receipt is None:
+        output = _read_output(record.get("stdout_path"))
+        try:
+            receipt = build_review_receipt(
+                packet=packet,
+                operation_record=record,
+                reviewer_output=output,
+            )
+            atomic_private_json(receipt_path, receipt)
+        except AgyReviewError as exc:
+            record = journal.update(
+                operation_id,
+                review_state="INVALID_VERDICT",
+                review_verdict=None,
+                review_applicable=False,
+                subject_stable=None,
+                review_failure_kind=str(exc),
+            )
+        else:
+            record = journal.update(
+                operation_id,
+                review_state=(
+                    "TERMINAL" if receipt["subject_stable"] else "STALE_SUBJECT"
+                ),
+                review_verdict=receipt["verdict"],
+                review_applicable=receipt["review_applicable"],
+                subject_stable=receipt["subject_stable"],
+                review_receipt_path=str(receipt_path),
+                review_receipt_sha256=receipt["receipt_sha256"],
+                review_failure_kind=None,
+            )
+
+    if receipt is not None:
+        stable_now, current = subject_matches_packet(packet)
+        applicable_now = bool(receipt.get("review_applicable") and stable_now)
+        if (
+            record.get("subject_stable") != stable_now
+            or record.get("review_applicable") != applicable_now
+        ):
+            record = journal.update(
+                operation_id,
+                review_state="TERMINAL" if applicable_now else "STALE_SUBJECT",
+                review_applicable=applicable_now,
+                subject_stable=stable_now,
+                current_candidate_digest=current.candidate_digest,
+            )
+
+    return {
+        "schema": "nexus.agy_review_status.v1",
+        "operation": public_operation_view(record),
+        "receipt": receipt,
+    }
+
+
+def _build_dispatch_argv(
+    *,
+    operation_id: str,
+    journal: AgyOperationJournal,
+    dispatcher: Path,
+    model: str | None,
+    timeout: int,
+    max_calls: int,
+    pool_wait_timeout: float,
+    cwd: str,
+) -> list[str]:
+    argv = [
+        sys.executable,
+        str(dispatcher),
+        "--operation-run",
+        operation_id,
+        "--operation-root",
+        str(journal.root),
+        "--prompt-file",
+        str(journal.prompt_path(operation_id)),
+        "--cwd",
+        cwd,
+        "--mode",
+        "plan",
+        "--timeout",
+        str(timeout),
+        "--max-calls",
+        str(max_calls),
+        "--pool-wait-timeout",
+        str(pool_wait_timeout),
+        "--deny",
+        "command(*)",
+        "--deny",
+        "read_file(*)",
+        "--deny",
+        "write_file(*)",
+    ]
+    if model:
+        argv += ["--model", model]
+    return argv
+
+
+def launch_review(args: argparse.Namespace) -> dict[str, Any]:
+    subject = collect_review_subject(
+        args.cwd,
+        expected_repository=args.repository,
+        base_revision=args.base_revision,
+    )
+    packet = build_review_packet(
+        subject,
+        acceptance_contract_file=args.contract_file,
+        reviewer_role=args.review_role,
+        verification_receipt_files=args.verification_receipt_file,
+        authority_excerpt_files=args.authority_excerpt_file,
+    )
+    effect_id = packet["review_effect_id"]
+    operation_id = operation_id_for_effect(effect_id)
+    journal = AgyOperationJournal(Path(args.operation_root).expanduser())
+
+    created = False
+    try:
+        record = journal.create(
+            operation_id=operation_id,
+            attempt_id=new_attempt_id(),
+            cwd=subject.repo_root,
+            provider="agy",
+            model=args.model,
+            effort=None,
+            prompt_sha256=hashlib.sha256(
+                build_review_prompt(packet).encode("utf-8")
+            ).hexdigest(),
+            runtime_revision=None,
+            initial_fields={
+                **_binding_fields(packet),
+                "review_state": "PREPARED",
+                "review_verdict": None,
+                "review_applicable": False,
+                "subject_stable": None,
+                "review_receipt_path": str(_receipt_path(journal, operation_id)),
+                "review_receipt_sha256": None,
+                "review_failure_kind": None,
+            },
+        )
+        created = True
+    except AgyOperationJournalError as exc:
+        if str(exc) != "OPERATION_ALREADY_EXISTS":
+            raise
+        record = journal.read(operation_id)
+
+    if not created:
+        packet_path = _packet_path(journal, operation_id)
+        if not packet_path.is_file():
+            raise AgyReviewError("REVIEW_EXISTING_OPERATION_PACKET_MISSING")
+        persisted = load_review_packet(packet_path)
+        if persisted["review_effect_id"] != effect_id:
+            raise AgyReviewError("REVIEW_EFFECT_OPERATION_COLLISION")
+        _assert_record_binding(record, persisted)
+        status = record.get("status")
+        if status == "COMPLETED":
+            result = _current_projection(
+                journal,
+                operation_id,
+                expected_effect_id=effect_id,
+            )
+            result["action"] = "REUSED_TERMINAL"
+            return result
+        if status == "OUTCOME_UNKNOWN":
+            return {
+                "schema": "nexus.agy_review_status.v1",
+                "action": "RECONCILE_EXISTING",
+                "operation": public_operation_view(record),
+                "receipt": None,
+            }
+        return {
+            "schema": "nexus.agy_review_status.v1",
+            "action": "OBSERVE_EXISTING",
+            "operation": public_operation_view(record),
+            "receipt": None,
+        }
+
+    packet_path = _packet_path(journal, operation_id)
+    prompt_path = journal.prompt_path(operation_id)
+    atomic_private_json(packet_path, packet)
+    atomic_private_text(prompt_path, build_review_prompt(packet))
+
+    dispatcher = _dispatcher_path()
+    argv = _build_dispatch_argv(
+        operation_id=operation_id,
+        journal=journal,
+        dispatcher=dispatcher,
+        model=args.model,
+        timeout=args.timeout,
+        max_calls=args.max_calls,
+        pool_wait_timeout=args.pool_wait_timeout,
+        cwd=subject.repo_root,
+    )
+    stdout_path = journal.stdout_path(operation_id)
+    stderr_path = journal.stderr_path(operation_id)
+    stdout_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with (
+            stdout_path.open("ab", buffering=0) as out_fh,
+            stderr_path.open("ab", buffering=0) as err_fh,
+        ):
+            proc = subprocess.Popen(
+                argv,
+                cwd=subject.repo_root,
+                stdin=subprocess.DEVNULL,
+                stdout=out_fh,
+                stderr=err_fh,
+                start_new_session=True,
+                close_fds=True,
+            )
+    except OSError as exc:
+        journal.mark_terminal(
+            operation_id,
+            status="FAILED",
+            exit_code=None,
+            failure_kind=f"REVIEW_DISPATCH_PRESTART:{type(exc).__name__}",
+            cwd=subject.repo_root,
+            review_state="TRANSPORT_FAILED_PRESTART",
+            review_applicable=False,
+        )
+        raise AgyReviewError("REVIEW_DISPATCH_PRESTART_FAILED") from exc
+
+    journal.bind_pid(operation_id, proc.pid)
+    record = journal.update(operation_id, review_state="DISPATCHING")
+    return {
+        "schema": "nexus.agy_review_status.v1",
+        "action": "DISPATCHED",
+        "operation": public_operation_view(record),
+        "receipt": None,
+    }
+
+
+def status_review(value: str, *, operation_root: str) -> dict[str, Any]:
+    operation_id, effect_id = _resolve_operation_id(value)
+    journal = AgyOperationJournal(Path(operation_root).expanduser())
+    result = _current_projection(
+        journal,
+        operation_id,
+        expected_effect_id=effect_id,
+    )
+    result["action"] = "STATUS"
+    return result
+
+
+def reconcile_review(value: str, *, operation_root: str) -> dict[str, Any]:
+    operation_id, effect_id = _resolve_operation_id(value)
+    journal = AgyOperationJournal(Path(operation_root).expanduser())
+    record = journal.read(operation_id)
+    if effect_id and record.get("review_effect_id") != effect_id:
+        raise AgyReviewError("REVIEW_EFFECT_OPERATION_COLLISION")
+    dispatcher = _dispatcher_path()
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(dispatcher),
+            "--reconcile",
+            operation_id,
+            "--operation-root",
+            str(journal.root),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise AgyReviewError(
+            f"REVIEW_RECONCILE_FAILED:{(proc.stderr or proc.stdout).strip()[:500]}"
+        )
+    result = _current_projection(
+        journal,
+        operation_id,
+        expected_effect_id=effect_id,
+    )
+    result["action"] = "RECONCILED"
+    return result
+
+
+def _print(value: Mapping[str, Any]) -> None:
+    print(json.dumps(dict(value), indent=2, sort_keys=True, ensure_ascii=False))
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(
+        description="Durable packet-mode reviewer over the canonical Nexus Agy dispatcher."
+    )
+    ap.add_argument("--cwd", default=os.getcwd())
+    ap.add_argument("--repository")
+    ap.add_argument("--base-revision")
+    ap.add_argument("--contract-file")
+    ap.add_argument("--review-role", default="independent-acceptance")
+    ap.add_argument("--verification-receipt-file", action="append", default=[])
+    ap.add_argument("--authority-excerpt-file", action="append", default=[])
+    ap.add_argument("--model")
+    ap.add_argument("--timeout", type=int, default=900)
+    ap.add_argument("--max-calls", type=int, default=1)
+    ap.add_argument("--pool-wait-timeout", type=float, default=15.0)
+    ap.add_argument("--operation-root", default=str(OPERATION_ROOT))
+    group = ap.add_mutually_exclusive_group()
+    group.add_argument("--status")
+    group.add_argument("--reconcile")
+    args = ap.parse_args(argv)
+
+    try:
+        if args.status:
+            _print(status_review(args.status, operation_root=args.operation_root))
+            return 0
+        if args.reconcile:
+            _print(reconcile_review(args.reconcile, operation_root=args.operation_root))
+            return 0
+        for name in ("repository", "base_revision", "contract_file"):
+            if not getattr(args, name):
+                raise AgyReviewError(f"{name.upper()}_REQUIRED")
+        _print(launch_review(args))
+        return 0
+    except (AgyReviewError, AgyOperationJournalError) as exc:
+        print(
+            json.dumps(
+                {"schema": "nexus.agy_review_error.v1", "error": str(exc)},
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
