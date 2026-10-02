@@ -1121,5 +1121,3 @@ def test_live_agy_operation_overlap(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     res = manager.readback_conflict_state(cand)
     assert res["disposition"] == CONFLICT_OVERLAP
     assert any(w["task_id"] == "task-agy" for w in res["conflicting_writers"])
-
-
