@@ -51,6 +51,7 @@ class TaskSnapshot:
     source_event_id: str
     contract_sha256: str
     capture_sha256: str
+    body_gzip_base64: str | None = None
     schema: str = CAPTURE_SCHEMA
 
     @classmethod
@@ -77,6 +78,7 @@ class TaskSnapshot:
             "updated_at": issue_updated_at,
         }
         contract_sha256 = _sha256(_canonical_bytes(contract))
+        body_gzip_base64 = _encode_body(body)
         capture_payload = {
             "schema": CAPTURE_SCHEMA,
             "repository": repository,
@@ -85,7 +87,7 @@ class TaskSnapshot:
             "captured_at": captured_at,
             "issue_updated_at": issue_updated_at,
             "title": title,
-            "body_gzip_base64": _encode_body(body),
+            "body_gzip_base64": body_gzip_base64,
             "pre_implementation_revision": pre_implementation_revision,
             "default_branch": default_branch,
             "source_event_id": source_event_id,
@@ -105,6 +107,49 @@ class TaskSnapshot:
             source_event_id=source_event_id,
             contract_sha256=contract_sha256,
             capture_sha256=capture_sha256,
+            body_gzip_base64=body_gzip_base64,
+        )
+
+    @classmethod
+    def from_capture_payload(cls, payload: Mapping[str, Any]) -> "TaskSnapshot":
+        if payload.get("schema") != CAPTURE_SCHEMA:
+            raise ValueError("capture_schema_mismatch")
+        supplied_capture_sha = str(payload.get("capture_sha256") or "")
+        hash_payload = dict(payload)
+        hash_payload.pop("capture_sha256", None)
+        expected_capture_sha = _sha256(_canonical_bytes(hash_payload))
+        if supplied_capture_sha != expected_capture_sha:
+            raise ValueError("capture_sha256_mismatch")
+
+        body_gzip_base64 = str(payload["body_gzip_base64"])
+        raw_body = _decode_body(body_gzip_base64)
+        contract = {
+            "body": raw_body,
+            "created_at": str(payload["created_at"]),
+            "issue": int(payload["issue_number"]),
+            "repository": str(payload["repository"]),
+            "title": str(payload["title"]),
+            "updated_at": str(payload["issue_updated_at"]),
+        }
+        expected_contract_sha = _sha256(_canonical_bytes(contract))
+        supplied_contract_sha = str(payload["contract_sha256"])
+        if supplied_contract_sha != expected_contract_sha:
+            raise ValueError("contract_sha256_mismatch")
+
+        return cls(
+            repository=str(payload["repository"]),
+            issue_number=int(payload["issue_number"]),
+            created_at=str(payload["created_at"]),
+            captured_at=str(payload["captured_at"]),
+            issue_updated_at=str(payload["issue_updated_at"]),
+            title=str(payload["title"]),
+            body=raw_body,
+            pre_implementation_revision=str(payload["pre_implementation_revision"]),
+            default_branch=str(payload["default_branch"]),
+            source_event_id=str(payload["source_event_id"]),
+            contract_sha256=supplied_contract_sha,
+            capture_sha256=supplied_capture_sha,
+            body_gzip_base64=body_gzip_base64,
         )
 
     @property
@@ -120,7 +165,7 @@ class TaskSnapshot:
             "captured_at": self.captured_at,
             "issue_updated_at": self.issue_updated_at,
             "title": self.title,
-            "body_gzip_base64": _encode_body(self.body),
+            "body_gzip_base64": self.body_gzip_base64 or _encode_body(self.body),
             "pre_implementation_revision": self.pre_implementation_revision,
             "default_branch": self.default_branch,
             "source_event_id": self.source_event_id,
@@ -154,32 +199,7 @@ def parse_capture_comment(body: str) -> TaskSnapshot:
     if end < 0:
         raise ValueError("capture_json_block_unterminated")
     payload = json.loads(body[start + 1 : end])
-    if payload.get("schema") != CAPTURE_SCHEMA:
-        raise ValueError("capture_schema_mismatch")
-    supplied_capture_sha = str(payload.get("capture_sha256") or "")
-    hash_payload = dict(payload)
-    hash_payload.pop("capture_sha256", None)
-    expected_capture_sha = _sha256(_canonical_bytes(hash_payload))
-    if supplied_capture_sha != expected_capture_sha:
-        raise ValueError("capture_sha256_mismatch")
-    raw_body = _decode_body(str(payload["body_gzip_base64"]))
-    snapshot = TaskSnapshot.create(
-        repository=str(payload["repository"]),
-        issue_number=int(payload["issue_number"]),
-        created_at=str(payload["created_at"]),
-        captured_at=str(payload["captured_at"]),
-        issue_updated_at=str(payload["issue_updated_at"]),
-        title=str(payload["title"]),
-        body=raw_body,
-        pre_implementation_revision=str(payload["pre_implementation_revision"]),
-        default_branch=str(payload["default_branch"]),
-        source_event_id=str(payload["source_event_id"]),
-    )
-    if snapshot.contract_sha256 != str(payload["contract_sha256"]):
-        raise ValueError("contract_sha256_mismatch")
-    if snapshot.capture_sha256 != supplied_capture_sha:
-        raise ValueError("capture_reconstruction_mismatch")
-    return snapshot
+    return TaskSnapshot.from_capture_payload(payload)
 
 
 @dataclass(frozen=True)
@@ -676,22 +696,7 @@ class AutomaticReplicationController:
             return state
         if state.get("phase") == "ADMITTED":
             payload = dict(state["snapshot"])
-            snapshot = parse_capture_comment(
-                build_capture_comment(
-                    TaskSnapshot.create(
-                        repository=str(payload["repository"]),
-                        issue_number=int(payload["issue_number"]),
-                        created_at=str(payload["created_at"]),
-                        captured_at=str(payload["captured_at"]),
-                        issue_updated_at=str(payload["issue_updated_at"]),
-                        title=str(payload["title"]),
-                        body=_decode_body(str(payload["body_gzip_base64"])),
-                        pre_implementation_revision=str(payload["pre_implementation_revision"]),
-                        default_branch=str(payload["default_branch"]),
-                        source_event_id=str(payload["source_event_id"]),
-                    )
-                )
-            )
+            snapshot = TaskSnapshot.from_capture_payload(payload)
             outcome = self.stack_runner(snapshot)
             if not isinstance(outcome, FrozenStackOutcome):
                 raise ValueError("stack_runner_must_return_frozen_stack_outcome")
