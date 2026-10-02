@@ -1665,6 +1665,24 @@ def _run_agy_candidate(
             _run(["git", "worktree", "prune"], cwd=repo, timeout=30)
 
 
+def _complete_token_usage_metrics(
+    *usage_records: Mapping[str, Any],
+) -> tuple[int | None, int | None, int | None]:
+    if not usage_records or any(not usage for usage in usage_records):
+        return None, None, None
+    input_tokens = sum(int(usage.get("input_tokens", 0) or 0) for usage in usage_records)
+    uncached_input_tokens = sum(
+        max(
+            0,
+            int(usage.get("input_tokens", 0) or 0)
+            - int(usage.get("cached_input_tokens", 0) or 0),
+        )
+        for usage in usage_records
+    )
+    output_tokens = sum(int(usage.get("output_tokens", 0) or 0) for usage in usage_records)
+    return input_tokens, uncached_input_tokens, output_tokens
+
+
 def _c_prompt(snapshot: TaskSnapshot) -> tuple[str, dict[str, Any]]:
     schema = {
         "type": "object",
@@ -1791,6 +1809,10 @@ def run_frozen_stack(
                 fallbacks = ("DM1_TO_STRONG_ONLINE",)
             jev_usage = jev_raw.get("usage") or {}
             strong_usage = (strong or {}).get("usage") or {}
+            usage_records = (jev_usage,) if accepted else (jev_usage, strong_usage)
+            input_tokens, uncached_input_tokens, output_tokens = (
+                _complete_token_usage_metrics(*usage_records)
+            )
             raw_response = {
                 "candidate_packet": packet,
                 "jev_raw_response": jev_raw,
@@ -1812,16 +1834,9 @@ def run_frozen_stack(
                     else f"{binding['jev']['resolved_model']}+{(strong or {}).get('resolved_model') or (strong or {}).get('observed_model') or EXACT_AGY_MODEL}"
                 ),
                 model_call_count=1 if accepted else 2,
-                input_tokens=int(jev_usage.get("input_tokens", 0) or 0)
-                + int(strong_usage.get("input_tokens", 0) or 0),
-                uncached_input_tokens=int(jev_usage.get("input_tokens", 0) or 0)
-                + max(
-                    0,
-                    int(strong_usage.get("input_tokens", 0) or 0)
-                    - int(strong_usage.get("cached_input_tokens", 0) or 0),
-                ),
-                output_tokens=int(jev_usage.get("output_tokens", 0) or 0)
-                + int(strong_usage.get("output_tokens", 0) or 0),
+                input_tokens=input_tokens,
+                uncached_input_tokens=uncached_input_tokens,
+                output_tokens=output_tokens,
                 wall_time_seconds=jev_wall + strong_wall,
                 failures=()
                 if jev_raw.get("status") == "VALID"
@@ -1864,6 +1879,7 @@ def run_frozen_stack(
         binding=binding,
     )
     usage = strong.get("usage") or {}
+    input_tokens, uncached_input_tokens, output_tokens = _complete_token_usage_metrics(usage)
     raw = RawRouteResult.create(
         route="C",
         provider="agy",
@@ -1872,12 +1888,9 @@ def run_frozen_stack(
             strong.get("resolved_model") or strong.get("observed_model") or EXACT_AGY_MODEL
         ),
         model_call_count=1,
-        input_tokens=int(usage.get("input_tokens", 0) or 0),
-        uncached_input_tokens=max(
-            0,
-            int(usage.get("input_tokens", 0) or 0) - int(usage.get("cached_input_tokens", 0) or 0),
-        ),
-        output_tokens=int(usage.get("output_tokens", 0) or 0),
+        input_tokens=input_tokens,
+        uncached_input_tokens=uncached_input_tokens,
+        output_tokens=output_tokens,
         wall_time_seconds=wall,
         failures=()
         if strong.get("status") == "VALID"
