@@ -1,0 +1,246 @@
+name: Core TG8 Stable Reproducibility Evidence
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  STABLE_SHA: ca003f4aa20490b3200b433970d7ccc65425aae4
+  OPS_DONOR_SHA: 7965e165384cee3ec8fcd46fdbdc3a653c33e4ca
+
+jobs:
+  stable-replay:
+    name: Stable physical replay ${{ matrix.run_index }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        run_index: [1, 2, 3]
+    steps:
+      - name: Checkout evidence harness
+        uses: actions/checkout@v4
+
+      - name: Materialize exact controller-tooling donor and Stable Core
+        run: |
+          set -euo pipefail
+          git init -q ops-donor
+          git -C ops-donor remote add origin https://github.com/James3014/Nexus-new.git
+          git -C ops-donor fetch -q --depth=1 origin "${OPS_DONOR_SHA}"
+          git -C ops-donor checkout -q --detach FETCH_HEAD
+          test "$(git -C ops-donor rev-parse HEAD)" = "${OPS_DONOR_SHA}"
+          test -z "$(git -C ops-donor status --porcelain)"
+
+          git init -q stable-core
+          git -C stable-core remote add origin https://github.com/James3014/nexus-core.git
+          git -C stable-core fetch -q --depth=1 origin "${STABLE_SHA}"
+          git -C stable-core checkout -q --detach FETCH_HEAD
+          test "$(git -C stable-core rev-parse HEAD)" = "${STABLE_SHA}"
+          test -z "$(git -C stable-core status --porcelain)"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.9.2"
+          enable-cache: false
+
+      - name: Verify Docker
+        run: docker info
+
+      - name: Install exact Stable dependencies
+        run: uv sync --directory stable-core --frozen --all-groups --all-extras
+
+      - name: Run Stable client parity witness
+        working-directory: stable-core
+        run: |
+          set -euo pipefail
+          uv run pytest -qq tests/product/test_client_conformance.py -k client_canonical_http_parity \
+            --junitxml="$RUNNER_TEMP/stable-client-parity-${{ matrix.run_index }}.xml"
+
+      - name: Capture fresh Stable TG5 receipt against real PR 635
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p physical
+          stable-core/.venv/bin/python scripts/ops/tg8_stable_tg7_replay_driver.py \
+            --ops-donor ops-donor \
+            --stable-subject stable-core \
+            --stable-sha "${STABLE_SHA}" \
+            capture-tg5 \
+            --receipt physical/tg5-receipt.json \
+            --provenance physical/tg5-reverification.json
+
+      - name: Collect fresh Stable 56-case x 2-execution semantic evidence
+        run: |
+          set -euo pipefail
+          stable-core/.venv/bin/python scripts/ops/tg8_stable_tg7_replay_driver.py \
+            --ops-donor ops-donor \
+            --stable-subject stable-core \
+            --stable-sha "${STABLE_SHA}" \
+            collect \
+            --receipt physical/tg5-receipt.json \
+            --provenance physical/tg5-reverification.json \
+            --root physical/tg7 \
+            --tar physical/tg7-stable-${{ matrix.run_index }}.tar.gz
+          sha256sum physical/tg7-stable-${{ matrix.run_index }}.tar.gz > physical/tg7-stable-${{ matrix.run_index }}.tar.gz.sha256
+
+      - name: Stage immutable Stable physical evidence root
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /private/tmp/nexus-core-v1-evidence
+          sudo chown -R "$(id -u):$(id -g)" /private
+          tar -xzf physical/tg7-stable-${{ matrix.run_index }}.tar.gz -C /private/tmp/nexus-core-v1-evidence
+          test "$(find /private/tmp/nexus-core-v1-evidence/tg7/attempts -maxdepth 1 -type f -name '*.json' | wc -l)" -eq 56
+          test "$(find /private/tmp/nexus-core-v1-evidence/tg7/observations -maxdepth 1 -type f -name '*.json' | wc -l)" -eq 112
+
+      - name: Run explicit Stable physical acceptance tests
+        working-directory: stable-core
+        env:
+          NEXUS_TG7_PHYSICAL_ACCEPTANCE: "1"
+        run: |
+          set -euo pipefail
+          uv run pytest -qq tests/product/test_false_completion_benchmark.py tests/benchmark/test_core_v1_tg7_manifest.py \
+            --junitxml="$RUNNER_TEMP/stable-physical-${{ matrix.run_index }}.xml"
+
+      - name: Independently audit Stable observations and attempts
+        run: |
+          set -euo pipefail
+          stable-core/.venv/bin/python scripts/ops/tg8_stable_tg7_replay_driver.py \
+            --ops-donor ops-donor \
+            --stable-subject stable-core \
+            --stable-sha "${STABLE_SHA}" \
+            audit \
+            --root /private/tmp/nexus-core-v1-evidence/tg7 \
+            --junit "$RUNNER_TEMP/stable-physical-${{ matrix.run_index }}.xml" \
+            --output physical/stable-independent-acceptance.json
+
+      - name: Emit Stable run source record
+        env:
+          RUN_INDEX: ${{ matrix.run_index }}
+        run: |
+          set -euo pipefail
+          cp /private/tmp/nexus-core-v1-evidence/tg7/controller-summary.json physical/controller-summary.json
+          cp /private/tmp/nexus-core-v1-evidence/tg7/report.json physical/tg7-report.json
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          a = json.loads(Path('physical/stable-independent-acceptance.json').read_text())
+          c = json.loads(Path('physical/controller-summary.json').read_text())
+          assert a['status'] == 'ACCEPT'
+          assert a['claim'] == 'CROSS_REPO_TRUST_SHADOW_VERIFIED'
+          assert a['subject'] == os.environ['STABLE_SHA']
+          assert a['attempt_count'] == 56
+          assert a['eligible_count'] == 56
+          assert a['physical_execution_ids'] == 112
+          assert a['false_certification_count'] == 0
+          assert a['pytest_skipped'] == 0
+          assert a['pytest_failures'] == 0
+          assert a['pytest_errors'] == 0
+          assert a['semantic_binding'] == 'PASS'
+          assert a['semantic_observation_count'] == 112
+          assert c['subject'] == os.environ['STABLE_SHA']
+          assert c['eligible_count'] == 56
+          assert c['false_certification_count'] == 0
+          assert c['infra_invalid_count'] == 0
+          assert c['trust_mismatches'] == 0
+          assert c['semantic_observation_set_hash'] == a['semantic_observation_set_hash']
+          payload = {
+              'schema': 'nexus.core.tg8-stable-physical-run-source.v1',
+              'run_index': int(os.environ['RUN_INDEX']),
+              'github_run_id': os.environ['GITHUB_RUN_ID'],
+              'stable_commit': os.environ['STABLE_SHA'],
+              'observed_at': a['observed_at'],
+              'eligible_attempts': a['eligible_count'],
+              'physical_execution_ids': a['physical_execution_ids'],
+              'required_skips': a['pytest_skipped'],
+              'false_certification_count': a['false_certification_count'],
+              'client_parity': True,
+              'factual_outcome_hash': a['semantic_observation_set_hash'],
+              'tg7_report_hash': c['report_hash'],
+              'tg5_receipt_hash': c['tg5_receipt_hash'],
+              'selection_hash': c['selection_hash'],
+              'corpus_hash': c['corpus_hash'],
+              'complete': True,
+              'claim_ceiling': 'TG8_STABLE_REPRODUCIBILITY_EVIDENCE_ONLY',
+          }
+          Path('physical/stable-run-source.json').write_text(json.dumps(payload, sort_keys=True, indent=2) + '\n')
+          print(json.dumps(payload, sort_keys=True))
+          PY
+
+      - name: Upload one Stable physical replay
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-tg8-stable-replay-${{ matrix.run_index }}-${{ env.STABLE_SHA }}
+          path: |
+            physical/stable-run-source.json
+            physical/stable-independent-acceptance.json
+            physical/controller-summary.json
+            physical/tg7-report.json
+            physical/tg5-receipt.json
+            physical/tg5-reverification.json
+            physical/tg7-stable-${{ matrix.run_index }}.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  reconcile:
+    name: Reconcile three Stable physical replays
+    needs: stable-replay
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all Stable replay artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: core-tg8-stable-replay-*-${{ env.STABLE_SHA }}
+          path: received
+
+      - name: Require three fresh reproducible Stable outcomes
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          paths = sorted(Path('received').glob('*/stable-run-source.json'))
+          assert len(paths) == 3, paths
+          rows = [json.loads(p.read_text()) for p in paths]
+          assert sorted(r['run_index'] for r in rows) == [1, 2, 3]
+          assert all(r['stable_commit'] == os.environ['STABLE_SHA'] for r in rows)
+          assert all(r['complete'] is True for r in rows)
+          assert all(r['eligible_attempts'] == 56 for r in rows)
+          assert all(r['physical_execution_ids'] == 112 for r in rows)
+          assert all(r['required_skips'] == 0 for r in rows)
+          assert all(r['false_certification_count'] == 0 for r in rows)
+          assert all(r['client_parity'] is True for r in rows)
+          assert len({r['observed_at'] for r in rows}) == 3
+          assert len({r['factual_outcome_hash'] for r in rows}) == 1
+          assert sum(r['eligible_attempts'] for r in rows) == 168
+          payload = {
+              'schema': 'nexus.core.tg8-stable-reproducibility.v1',
+              'stable_commit': os.environ['STABLE_SHA'],
+              'run_count': 3,
+              'aggregate_eligible_attempts': 168,
+              'distinct_observed_at': True,
+              'factual_outcome_hash': rows[0]['factual_outcome_hash'],
+              'runs': rows,
+              'result': 'THREE_FRESH_STABLE_PHYSICAL_RUNS_REPRODUCIBLE',
+              'claim_ceiling': 'TG8_STABLE_REPRODUCIBILITY_EVIDENCE_ONLY',
+          }
+          Path('stable-reproducibility-summary.json').write_text(json.dumps(payload, sort_keys=True, indent=2) + '\n')
+          print(json.dumps(payload, sort_keys=True))
+          PY
+
+      - name: Upload Stable reproducibility reconciliation
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-tg8-stable-reproducibility-${{ env.STABLE_SHA }}
+          path: stable-reproducibility-summary.json
+          if-no-files-found: error
+          retention-days: 14
