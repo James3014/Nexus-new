@@ -887,11 +887,64 @@ def restore_temp_permissions(token) -> None:
         settings.write_bytes(original)
 
 
+_WRITE_FILE_RULE_RE = re.compile(r"^write_file\((?P<path>.+)\)$")
+
+
+def _canonical_write_path(raw: str, *, cwd: str) -> str:
+    cwd_path = Path(cwd).expanduser().resolve()
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
+        candidate = cwd_path / candidate
+    resolved = candidate.resolve()
+    try:
+        resolved.relative_to(cwd_path)
+    except ValueError as exc:
+        raise ValueError(f"AGY_WRITE_PATH_OUTSIDE_CWD:{resolved}") from exc
+    return str(resolved)
+
+
+def _project_write_permissions(
+    *,
+    cwd: str,
+    mode: str,
+    write_paths: list[str] | None,
+    allow_rules: list[str],
+) -> list[str]:
+    for rule in allow_rules:
+        if rule in _UNSAFE_PERMISSION_RULES:
+            raise ValueError(f"UNSAFE_PERMISSION_RULE:{rule}")
+
+    if mode != "accept-edits":
+        return []
+
+    projected: list[str] = []
+    for raw in write_paths or []:
+        canonical = _canonical_write_path(raw, cwd=cwd)
+        rule = f"write_file({canonical})"
+        if rule not in projected:
+            projected.append(rule)
+
+    for rule in allow_rules:
+        match = _WRITE_FILE_RULE_RE.fullmatch(rule)
+        if match is None:
+            continue
+        canonical = _canonical_write_path(match.group("path"), cwd=cwd)
+        normalized = f"write_file({canonical})"
+        if normalized != rule:
+            raise ValueError(f"AGY_WRITE_RULE_NOT_CANONICAL:{rule}")
+        if normalized not in projected:
+            projected.append(normalized)
+
+    if not projected:
+        raise ValueError("AGY_WRITE_SCOPE_REQUIRED")
+    return projected
+
+
 def dispatch_run(
     *,
     prompt: str,
     cwd: str,
-    mode: str = "accept-edits",
+    mode: str = "plan",
     model: str | None = None,
     effort: str | None = None,
     timeout: int = 900,
@@ -899,11 +952,38 @@ def dispatch_run(
     pool_wait_timeout: float = 15.0,
     allow: list[str] | None = None,
     deny: list[str] | None = None,
+    write_paths: list[str] | None = None,
     temp_command_permissions: bool = False,
     coordinator: CrossProcessLeaseCoordinator | None = None,
     run_agy_fn: Any = None,
     operation_hook: Any = None,
 ) -> int:
+    user_allow = list(allow or [])
+    try:
+        projected_write_rules = _project_write_permissions(
+            cwd=cwd,
+            mode=mode,
+            write_paths=write_paths,
+            allow_rules=user_allow,
+        )
+    except ValueError as exc:
+        failure_kind = str(exc)
+        _operation_hook(
+            operation_hook,
+            phase="CONTRACT_REJECTED",
+            attempts=0,
+            rotations=0,
+            failure_kind=failure_kind,
+        )
+        emit_meta({
+            "status": "invalid_contract",
+            "attempts": 0,
+            "rotations": 0,
+            "failure_kind": failure_kind,
+            "wall_ms": 0,
+        })
+        return 64
+
     if coordinator is None:
         if not MANAGER.is_file() or not MANAGER_ROOT.is_dir():
             raise SystemExit("AGY_ACCOUNT_POOL_RUNTIME_MISSING")
@@ -1062,7 +1142,10 @@ def dispatch_run(
             env = dict(claim.lease.execution_env)
             permission_token = None
             try:
-                allow_rules = list(allow or [])
+                allow_rules = list(user_allow)
+                for rule in projected_write_rules:
+                    if rule not in allow_rules:
+                        allow_rules.append(rule)
                 deny_rules: list[str] = list(deny or [])
                 allow_unsafe_legacy = False
                 if temp_command_permissions:
@@ -1277,6 +1360,7 @@ def _spawn_background_operation(
     deny: list[str],
     temp_command_permissions: bool,
     operation_root: Path,
+    write_paths: list[str] | None = None,
 ) -> dict[str, Any]:
     journal = AgyOperationJournal(operation_root)
     operation_id = new_operation_id()
@@ -1293,6 +1377,8 @@ def _spawn_background_operation(
     )
     prompt_path = journal.prompt_path(operation_id)
     _write_private_prompt(prompt_path, prompt)
+    if write_paths:
+        journal.update(operation_id, write_paths=list(write_paths))
 
     argv = [
         sys.executable,
@@ -1324,6 +1410,8 @@ def _spawn_background_operation(
         argv += ["--allow", rule]
     for rule in deny:
         argv += ["--deny", rule]
+    for write_path in write_paths or []:
+        argv += ["--write-path", write_path]
 
     stdout_path = journal.stdout_path(operation_id)
     stderr_path = journal.stderr_path(operation_id)
@@ -1359,6 +1447,7 @@ def _run_background_operation(
     deny: list[str],
     temp_command_permissions: bool,
     operation_root: Path,
+    write_paths: list[str] | None = None,
     heartbeat_interval: float = 15.0,
 ) -> int:
     journal = AgyOperationJournal(operation_root)
@@ -1433,6 +1522,7 @@ def _run_background_operation(
             pool_wait_timeout=pool_wait_timeout,
             allow=allow,
             deny=deny,
+            write_paths=write_paths,
             temp_command_permissions=temp_command_permissions,
             operation_hook=on_event,
         )
@@ -1606,6 +1696,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--deny", action="append", default=[], help="Temporary exact Agy deny rule; repeatable"
     )
+    ap.add_argument(
+        "--write-path",
+        action="append",
+        default=[],
+        help="Bounded writable path inside --cwd for accept-edits; repeatable",
+    )
     ap.add_argument("--timeout", type=int, default=900)
     ap.add_argument("--max-calls", type=int, default=3)
     ap.add_argument(
@@ -1663,6 +1759,7 @@ def main(argv: list[str] | None = None) -> int:
             pool_wait_timeout=args.pool_wait_timeout,
             allow=args.allow,
             deny=args.deny,
+            write_paths=args.write_path,
             temp_command_permissions=args.temp_command_permissions,
             operation_root=operation_root,
         )
@@ -1679,6 +1776,7 @@ def main(argv: list[str] | None = None) -> int:
             pool_wait_timeout=args.pool_wait_timeout,
             allow=args.allow,
             deny=args.deny,
+            write_paths=args.write_path,
             temp_command_permissions=args.temp_command_permissions,
             operation_root=operation_root,
         )
@@ -1696,6 +1794,7 @@ def main(argv: list[str] | None = None) -> int:
         pool_wait_timeout=args.pool_wait_timeout,
         allow=args.allow,
         deny=args.deny,
+        write_paths=args.write_path,
         temp_command_permissions=args.temp_command_permissions,
     )
 
