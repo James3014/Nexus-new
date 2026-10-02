@@ -2530,7 +2530,7 @@ class SelfHostedTaskService:
     # Issue #129: the claim is deliberately a subrecord of the existing task
     # receipt.  The state lock above is the sole serialization point.
     PUBLIC_WORK_CLAIM_SCHEMA = "nexus.orchestrator.work_claim_view.v1"
-    PUBLIC_WORK_CLAIM_CEILING = "PROJECTION_READ_ONLY_NOT_REPO_ENFORCED"
+    PUBLIC_WORK_CLAIM_CEILING = "PROJECTION_READ_ONLY_REPO_ENFORCED"
 
     @staticmethod
     def _claim_identity(request: Mapping[str, Any]) -> dict[str, Any]:
@@ -2848,7 +2848,7 @@ class SelfHostedTaskService:
         return {
             "schema": self.PUBLIC_WORK_CLAIM_SCHEMA,
             "claim_ceiling": self.PUBLIC_WORK_CLAIM_CEILING,
-            "claim_enforcement_state": "FAIL_CLOSED_PROJECTION_ONLY",
+            "claim_enforcement_state": "REPO_ENFORCED",
             "claim_identity": claim_identity,
             "generation": gen,
             "fence_identity": fence_identity,

@@ -4,7 +4,7 @@ Invariants verified:
 - Same canonical authority/store (SelfHostedTaskService)
 - No second claim registry
 - read/list never mints, transfers, or releases ownership
-- claim_enforcement_state remains below REPO_ENFORCED (FAIL_CLOSED_PROJECTION_ONLY)
+- claim_enforcement_state reports REPO_ENFORCED after the accepted physical enforcement canary
 - Truthful exposure of observational fields: repository, issue, task_id, attempt_id,
   opaque claim/fence identities, holder, generation, scope/mutation_domain, state,
   source/admission binding, freshness, canonical_revision; raw mutation credentials stay private
@@ -100,9 +100,8 @@ def test_read_work_claim_exposes_all_required_contract_fields(service: SelfHoste
     claim = read_res["claim"]
     assert claim["schema"] == service.PUBLIC_WORK_CLAIM_SCHEMA
     assert claim["claim_ceiling"] == service.PUBLIC_WORK_CLAIM_CEILING
-    # Must NOT claim REPO_ENFORCED
-    assert claim["claim_enforcement_state"] != "REPO_ENFORCED"
-    assert claim["claim_enforcement_state"] == "FAIL_CLOSED_PROJECTION_ONLY"
+    assert claim["claim_enforcement_state"] == "REPO_ENFORCED"
+    assert claim["claim_ceiling"] == "PROJECTION_READ_ONLY_REPO_ENFORCED"
 
     # Identity and fencing fields
     assert claim["repository"] == "James3014/Nexus-new"
