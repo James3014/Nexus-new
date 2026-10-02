@@ -1793,20 +1793,11 @@ class WorktreeManager:
         if self.target_conflict(contract, task_states=task_states):
             raise RuntimeError("serial Target budget exceeded: active Target limit is 1")
 
-        # Cross-entrypoint admission enforcement before any physical worktree/branch effect.
-        candidate_record = {
-            "task_id": contract.task_id,
-            "attempt_id": attempt_id,
-            "controller_worktree": str(controller_root),
-            "controller_revision": contract.controller_revision,
-            "mutation_mode": getattr(contract, "mutation_mode", "ISOLATED_TARGET"),
-            "contract": contract,
-        }
-        admission = self.readback_conflict_state(candidate_record)
-        disposition = admission.get("disposition")
-        if disposition != CONFLICT_CLEAR:
-            reason = admission.get("reason", "MUTATION_CONFLICT_BLOCKED")
-            raise RuntimeError(f"MUTATION_CONFLICT_BLOCKED:{disposition}:{reason}")
+        # Cross-entrypoint admission remains read-only in this slice.
+        # #98 may activate it at the physical first-effect boundary only after
+        # the external producer/admission surfaces are physically bound.
+        # Until then, consumers must call readback_conflict_state explicitly
+        # and must not infer global enforcement from the inventory projection.
         if target_path.exists():
             entry = self._worktree_entry(controller_root, target_path)
             if entry is None:
