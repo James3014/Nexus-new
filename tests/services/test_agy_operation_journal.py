@@ -229,3 +229,43 @@ def test_outcome_unknown_can_reconcile_same_surviving_provider_group(
     finally:
         if _process_group_alive(wrapper.pid):
             os.killpg(wrapper.pid, signal.SIGKILL)
+
+
+def test_review_metadata_flows_through_agy_facade_and_public_view(
+    tmp_path: Path,
+) -> None:
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id = new_operation_id()
+    record = journal.create(
+        operation_id=operation_id,
+        attempt_id=new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="claude-sonnet-4-6",
+        effort=None,
+        prompt_sha256=hashlib.sha256(b"packet prompt").hexdigest(),
+        runtime_revision="b" * 40,
+        initial_fields={
+            "review_profile_version": "nexus.rdc_agy_packet_review.v1",
+            "review_effect_id": "c" * 64,
+            "review_role": "independent-acceptance",
+            "review_repository": "james3014/nexus-new",
+            "review_base_revision": "d" * 40,
+            "review_candidate_head": "e" * 40,
+            "candidate_digest": "f" * 64,
+            "acceptance_contract_sha256": "1" * 64,
+            "review_packet_sha256": "2" * 64,
+            "review_state": "PREPARED",
+            "review_applicable": False,
+            "private_review_secret": "must-not-project",
+        },
+    )
+
+    public = public_operation_view(record)
+
+    assert public["review_effect_id"] == "c" * 64
+    assert public["candidate_digest"] == "f" * 64
+    assert public["review_packet_sha256"] == "2" * 64
+    assert public["review_state"] == "PREPARED"
+    assert public["review_applicable"] is False
+    assert "private_review_secret" not in public
