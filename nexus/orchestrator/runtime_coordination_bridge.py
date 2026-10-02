@@ -120,6 +120,7 @@ class _Preparation:
         self.service = service
 
     def prepare_before_worker(self, contract, request, lease, state, *, task_id, attempt_id):
+        self.service._bridge_validate_claim(task_id, attempt_id, operation="HOST_PREPARATION")
         prep = self.service._prepare_ambient_core(
             contract,
             request,
@@ -166,11 +167,12 @@ class _Worker:
         task_id = getattr(contract, "task_id", None)
         if task_id:
             state = self.service._read_state(task_id) or {}
+            attempt_id = str(state.get("attempt_id") or "")
+            self.service._bridge_validate_claim(task_id, attempt_id, operation="PROVIDER_INVOKE")
             request = state.get("request") or {}
             if self.service._ambient_core_required(contract, request) and not state.get(
                 "host_preparation"
             ):
-                attempt_id = str(state.get("attempt_id") or "")
                 prep = self.service._prepare_ambient_core(
                     contract, request, lease, state, task_id=task_id, attempt_id=attempt_id
                 )
@@ -183,6 +185,12 @@ class _Target:
         self.service = service
 
     def initial_lease(self, contract, state):
+        task_id = getattr(contract, "task_id", None) or (
+            state.get("task_id") if isinstance(state, Mapping) else None
+        )
+        attempt_id = state.get("attempt_id") if isinstance(state, Mapping) else None
+        if task_id:
+            self.service._bridge_validate_claim(task_id, attempt_id, operation="TARGET_LEASE")
         manager = _service_module.WorktreeManager(root_dir=contract.target_worktree_root)
         controller = _service_module.SelfHostedDevelopmentController(worktree_manager=manager)
         prepare = controller.prepare_task
@@ -194,6 +202,14 @@ class _Target:
         return self.service._lease_from_state(state)
 
     def replace_failed_lease(self, contract, lease, state):
+        task_id = getattr(contract, "task_id", None) or (
+            state.get("task_id") if isinstance(state, Mapping) else None
+        )
+        attempt_id = state.get("attempt_id") if isinstance(state, Mapping) else None
+        if task_id:
+            self.service._bridge_validate_claim(
+                task_id, attempt_id, operation="TARGET_REPLACE_LEASE"
+            )
         manager = _service_module.WorktreeManager(root_dir=contract.target_worktree_root)
         controller = _service_module.SelfHostedDevelopmentController(worktree_manager=manager)
         return self.service._replace_failed_target(
@@ -273,6 +289,8 @@ class _Finalization:
                 task_id, status, values, attempt_id=attempt_id
             )
         )
+        if task_id:
+            self.service._bridge_validate_claim(task_id, attempt_id, operation="FINALIZE_COMPLETED")
         if self.service._ambient_core_required(contract, request) and not (
             state.get("host_preparation") if isinstance(state, Mapping) else None
         ):
@@ -340,6 +358,7 @@ class RuntimeCoordinationBridge:
             self.service._mutate_state(task_id, lambda s: s.update({"host_preparation": prep}))
 
     def run_owned_attempt(self, task_id, attempt_id, custom_runner=None):
+        self.service._bridge_validate_claim(task_id, attempt_id, operation="RUN_OWNED_ATTEMPT")
         self._ensure_preparation_compat(task_id, attempt_id)
         return self._coordinator(task_id, attempt_id).run_owned_attempt(
             task_id, attempt_id, custom_runner
@@ -355,6 +374,7 @@ class RuntimeCoordinationBridge:
         )
 
     def execute(self, task_id, attempt_id, *, contract=None, request=None, update=None):
+        self.service._bridge_validate_claim(task_id, attempt_id, operation="EXECUTE")
         self._ensure_preparation_compat(task_id, attempt_id, request=request)
         return self._coordinator(
             task_id, attempt_id, request=request, update=update
