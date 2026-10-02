@@ -947,25 +947,38 @@ def test_r1b1_materialize_rotates_only_from_prior_terminal_verified_generation(
     )
 
 
-def test_r1b1_materialize_rejects_successor_from_nonterminal_generation(
+def test_r1b1_materialize_rotates_from_prior_materialized_pre_effect_generation(
     tmp_path, monkeypatch
 ):
     fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
     _r1m_clear_materialized_stores(fixture, monkeypatch)
-    g.gateway_recovery_materialize(
+    prior = g.gateway_recovery_materialize(
         _r1m_materialization_request(fixture["receipt"])
     )
-    successor, _successor_request, _successor_authority = (
+    assert prior["effect_started"] is False
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"],
+        lock_path=fixture["lock_path"],
+    )
+    assert ledger.recovery_rows(
+        fixture["request"].request_id,
+        request=fixture["request"],
+        receipt=fixture["receipt"],
+        source_bundle_evidence=None,
+    ) == []
+
+    successor, successor_request, successor_authority = (
         _r1m_commit_successor_generation(fixture)
     )
+    outcome = g.gateway_recovery_materialize(
+        _r1m_materialization_request(successor)
+    )
 
-    with pytest.raises(
-        g.GatewayContractError,
-        match="requires prior terminal VERIFIED",
-    ):
-        g.gateway_recovery_materialize(
-            _r1m_materialization_request(successor)
-        )
+    assert outcome["effect_started"] is False
+    assert g.GATEWAY_RECOVERY_AUTHORITY_STORE.read_bytes() == successor_authority
+    assert json.loads(g.GATEWAY_REQUEST_STORE.read_text()) == json.loads(
+        json.dumps(successor_request.model_dump())
+    )
 
 
 def test_r1b1_materialize_rejects_successor_from_blocked_terminal_generation(
