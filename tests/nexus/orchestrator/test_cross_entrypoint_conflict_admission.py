@@ -21,7 +21,6 @@ from pathlib import Path
 import pytest
 
 import nexus.services.live_execution_provenance as provenance_module
-
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
 from nexus.orchestrator.worktree_manager import (
     CONFLICT_CLEAR,
