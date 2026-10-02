@@ -725,6 +725,42 @@ class TestV1TraceFailClosedGuards:
     def test_mock_provider_used(self, receipt):
         assert receipt["mock_provider"] is True
 
+    def test_canonical_world_c_identity_is_bound_to_physical_source(self, receipt):
+        assert receipt["canonical_execution_world"] == "local_armor"
+        assert receipt["canonical_execution_topology"] == "ISOLATED_TARGET"
+        assert len(receipt["canonical_execution_hash"]) == 64
+        assert receipt["capability_evidence_source_hash"] == receipt["source_sha256"]
+        assert len(receipt["capability_evidence_bundle_hash"]) == 64
+        assert len(receipt["planner_decision_id"]) == 64
+
+    def test_benchmark_identity_and_evidence_tamper_fail_closed(self):
+        from copy import deepcopy
+
+        import pytest
+
+        from nexus.contracts.canonical_execution import validate_canonical_execution_identity
+        from nexus.services.capability_evidence_bundle import verify_capability_evidence_bundle
+        from scripts.bench.n30r_v1_full_armor_trace import _invoke_planner
+
+        source_hash = "a" * 64
+        snapshot = _invoke_planner(
+            "repair bounded parity",
+            task_id="n30r-v1-tamper-probe",
+            source_hash=source_hash,
+            workspace_revision=f"sha256:{source_hash}",
+        )
+
+        canonical = deepcopy(snapshot["canonical_execution"])
+        canonical["context_hash"] = "0" * 64
+        with pytest.raises(ValueError, match="canonical_execution_identity"):
+            validate_canonical_execution_identity(canonical)
+
+        evidence = deepcopy(snapshot["capability_evidence_bundle"])
+        evidence["source_hash"] = "0" * 64
+        verdict = verify_capability_evidence_bundle(evidence)
+        assert verdict["ok"] is False
+        assert "immutable_but_tampered" in verdict["blockers"]
+
     def test_wall_time_positive(self, receipt):
         assert receipt["wall_time_sec"] > 0
 
