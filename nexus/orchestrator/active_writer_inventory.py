@@ -64,29 +64,21 @@ class ActiveWriterInventoryResult:
     reason: Optional[str] = None
     conflicting_writers: list[Any] = field(default_factory=list)
     sources_scanned: tuple[str, ...] = ()
-    scanned_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    scanned_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
-def _heartbeat_age_seconds(
-    last_heartbeat: Any, now_ts: Optional[float] = None
-) -> Optional[float]:
+def _heartbeat_age_seconds(last_heartbeat: Any, now_ts: Optional[float] = None) -> Optional[float]:
     if not last_heartbeat or not isinstance(last_heartbeat, str):
         return None
     try:
-        ts = datetime.fromisoformat(
-            last_heartbeat.replace("Z", "+00:00")
-        ).timestamp()
+        ts = datetime.fromisoformat(last_heartbeat.replace("Z", "+00:00")).timestamp()
         current = now_ts if now_ts is not None else datetime.now(timezone.utc).timestamp()
         return max(0.0, current - ts)
     except (ValueError, TypeError):
         return None
 
 
-def _matches_controller_repo(
-    record: Mapping[str, Any], controller_root: Path
-) -> bool:
+def _matches_controller_repo(record: Mapping[str, Any], controller_root: Path) -> bool:
     target_repo = record.get("repo_root") or record.get("cwd")
     if not target_repo:
         # If repo is unspecified, cannot assume it belongs to another repo:
@@ -118,25 +110,15 @@ class ActiveWriterInventoryCollector:
         heartbeat_stale_seconds: float = 120.0,
     ) -> None:
         self.dev_mcp_root = (
-            Path(dev_mcp_root).expanduser().resolve()
-            if dev_mcp_root is not None
-            else None
+            Path(dev_mcp_root).expanduser().resolve() if dev_mcp_root is not None else None
         )
-        self.rdc_root = (
-            Path(rdc_root).expanduser().resolve()
-            if rdc_root is not None
-            else None
-        )
+        self.rdc_root = Path(rdc_root).expanduser().resolve() if rdc_root is not None else None
         self.external_worker_root = (
             Path(external_worker_root).expanduser().resolve()
             if external_worker_root is not None
             else None
         )
-        self.agy_root = (
-            Path(agy_root).expanduser().resolve()
-            if agy_root is not None
-            else None
-        )
+        self.agy_root = Path(agy_root).expanduser().resolve() if agy_root is not None else None
         self.local_writer_root = (
             Path(local_writer_root).expanduser().resolve()
             if local_writer_root is not None
@@ -304,9 +286,7 @@ class ActiveWriterInventoryCollector:
 
             status = str(data.get("status") or "").upper()
             reconcil = data.get("reconciliation")
-            reconcil_res = (
-                reconcil.get("result") if isinstance(reconcil, Mapping) else None
-            )
+            reconcil_res = reconcil.get("result") if isinstance(reconcil, Mapping) else None
 
             # Fail closed on outcome-unknown operations
             if status == "OUTCOME_UNKNOWN" or reconcil_res == "OUTCOME_UNKNOWN":
@@ -460,7 +440,9 @@ class ActiveWriterInventoryCollector:
                         complete=False,
                         disposition=CONFLICT_RECONCILE_REQUIRED,
                         reason="CORRUPT_CANONICAL_OWNERSHIP_RECORD_DETECTED",
-                        conflicting_writers=[str(r.get("task_id") if isinstance(r, Mapping) else "")],
+                        conflicting_writers=[
+                            str(r.get("task_id") if isinstance(r, Mapping) else "")
+                        ],
                         sources_scanned=tuple(scanned_sources),
                     )
                 if r.get("unknown_effect_refs") or r.get("unresolved_effects"):

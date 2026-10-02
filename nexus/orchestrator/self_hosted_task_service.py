@@ -2836,7 +2836,17 @@ class SelfHostedTaskService:
             "mutation_mode": str(mode),
             "contract": contract_data,
         }
-        manager = WorktreeManager(root_dir=str(Path(str(ctrl_root)) / ".nexus/targets"), create_root=False)
+        try:
+            try:
+                manager = WorktreeManager(root_dir=str(Path(str(ctrl_root)) / ".nexus/targets"), create_root=False)
+            except TypeError:
+                manager = WorktreeManager(str(Path(str(ctrl_root)) / ".nexus/targets"))
+        except Exception:
+            return None
+
+        if not hasattr(manager, "readback_conflict_state"):
+            return None
+
         admission = manager.readback_conflict_state(candidate_record)
         disposition = admission.get("disposition")
         if disposition != "CLEAR":

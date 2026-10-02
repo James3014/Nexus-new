@@ -631,9 +631,7 @@ def test_live_target_lease_blocked_by_active_dev_mcp(
     assert not target_repo.exists()
 
 
-def test_live_disjoint_multiple_entrypoints_clear(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+def test_live_disjoint_multiple_entrypoints_clear(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     repo_path, head_sha = _make_git_repo(tmp_path / "repo")
     dev_mcp_root = tmp_path / "dev_mcp"
     rdc_root = tmp_path / "rdc"
@@ -730,9 +728,7 @@ def test_live_corrupt_operation_record_fails_closed(
     assert "CORRUPT_CANONICAL_OPERATION_RECORD_DETECTED" in res["reason"]
 
 
-def test_live_missing_operation_json_fails_closed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+def test_live_missing_operation_json_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     repo_path, head_sha = _make_git_repo(tmp_path / "repo")
     dev_mcp_root = tmp_path / "dev_mcp"
     monkeypatch.setenv("NEXUS_DEV_MCP_OPERATION_ROOT", str(dev_mcp_root))
@@ -799,9 +795,7 @@ def test_live_process_silence_without_terminal_receipt_fails_closed(
     assert "PROCESS_SILENCE_WITHOUT_TERMINAL_RECEIPT" in res["reason"]
 
 
-def test_live_stale_heartbeat_fails_closed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+def test_live_stale_heartbeat_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     repo_path, head_sha = _make_git_repo(tmp_path / "repo")
     dev_mcp_root = tmp_path / "dev_mcp"
     monkeypatch.setenv("NEXUS_DEV_MCP_OPERATION_ROOT", str(dev_mcp_root))
@@ -828,7 +822,9 @@ def test_live_stale_heartbeat_fails_closed(
         },
     )
     # Stale heartbeat (500s ago)
-    old_time = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=500)).isoformat()
+    old_time = (
+        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=500)
+    ).isoformat()
     journal.update(op_id, status="RUNNING", pid=os.getpid(), last_heartbeat_at=old_time)
 
     manager = WorktreeManager(root_dir=str(tmp_path / "targets"), create_root=True)
@@ -930,9 +926,7 @@ def test_live_terminal_completed_operation_does_not_block(
     assert res["active_writer_count"] == 0
 
 
-def test_live_governed_target_vs_dev_mcp_overlap(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+def test_live_governed_target_vs_dev_mcp_overlap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     repo_path, head_sha = _make_git_repo(tmp_path / "repo")
     target_root = tmp_path / "targets"
     manager = WorktreeManager(root_dir=str(target_root), create_root=True)
@@ -1177,9 +1171,7 @@ def test_runtime_coordination_bridge_finalize_blocked_on_mutation_conflict(
 
     monkeypatch.setattr(service, "_finalize_runtime_candidate", mock_finalize)
 
-    with pytest.raises(
-        RuntimeError, match="MUTATION_CONFLICT_BLOCKED:FINALIZE_COMPLETED:OVERLAP"
-    ):
+    with pytest.raises(RuntimeError, match="MUTATION_CONFLICT_BLOCKED:FINALIZE_COMPLETED:OVERLAP"):
         fin.finalize_completed(
             contract,
             {},
