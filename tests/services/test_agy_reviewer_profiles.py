@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 
 from nexus.services.agy_reviewer_profiles import (
-    AgyReviewerProfileError,
     REVIEWER_LAUNCH_CATALOG_VERSION,
+    AgyReviewerProfileError,
     launch_profile_evidence,
     resolve_reviewer_launch_profile,
     supported_reviewer_models,

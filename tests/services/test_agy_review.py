@@ -162,10 +162,7 @@ def test_terminal_review_receipt_is_reused_and_later_drift_blocks_applicability(
     first_status = review.status_review(opid, operation_root=str(op_root))
     assert first_status["receipt"]["verdict"] == "ACCEPT"
     assert first_status["receipt"]["review_applicable"] is True
-    assert (
-        first_status["receipt"]["review_launch_profile_id"]
-        == "claude-sonnet-4-6.packet-review.v1"
-    )
+    assert first_status["receipt"]["review_launch_profile_id"] == "claude-sonnet-4-6.packet-review.v1"
     assert first_status["receipt"]["review_launch_mode"] == "accept-edits"
     assert first_status["operation"]["review_applicable"] is True
 

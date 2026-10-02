@@ -3,6 +3,7 @@
 Profiles constrain transport flags only. They do not choose a reviewer, route work,
 grant tool authority, or mint acceptance/merge/release authority.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -93,13 +94,9 @@ def resolve_reviewer_launch_profile(
 
     effort = str(requested_effort or "").strip() or None
     if effort is not None and effort not in profile.supported_efforts:
-        raise AgyReviewerProfileError(
-            f"REVIEW_EFFORT_UNSUPPORTED:{model_name}:{effort}"
-        )
+        raise AgyReviewerProfileError(f"REVIEW_EFFORT_UNSUPPORTED:{model_name}:{effort}")
     if profile.mode not in {"plan", "accept-edits"}:
-        raise AgyReviewerProfileError(
-            f"REVIEW_MODE_UNSUPPORTED:{model_name}:{profile.mode}"
-        )
+        raise AgyReviewerProfileError(f"REVIEW_MODE_UNSUPPORTED:{model_name}:{profile.mode}")
     if profile.tool_policy != "packet_only_deny_all":
         raise AgyReviewerProfileError(
             f"REVIEW_TOOL_POLICY_UNSUPPORTED:{model_name}:{profile.tool_policy}"
@@ -114,9 +111,7 @@ def launch_profile_evidence(
 ) -> dict[str, Any]:
     effort = str(requested_effort or "").strip() or None
     if effort is not None and effort not in profile.supported_efforts:
-        raise AgyReviewerProfileError(
-            f"REVIEW_EFFORT_UNSUPPORTED:{profile.model}:{effort}"
-        )
+        raise AgyReviewerProfileError(f"REVIEW_EFFORT_UNSUPPORTED:{profile.model}:{effort}")
     return {
         "review_launch_catalog_version": REVIEWER_LAUNCH_CATALOG_VERSION,
         "review_launch_profile_id": profile.profile_id,
