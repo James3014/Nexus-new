@@ -31,6 +31,12 @@ from nexus.services.agy_operation_journal import (  # noqa: E402
     new_attempt_id,
     public_operation_view,
 )
+from nexus.services.agy_reviewer_profiles import (  # noqa: E402
+    AgyReviewerLaunchProfile,
+    AgyReviewerProfileError,
+    launch_profile_evidence,
+    resolve_reviewer_launch_profile,
+)
 from nexus.services.agy_reviewer_runtime import (  # noqa: E402
     AgyReviewError,
     REVIEW_PROFILE_VERSION,
@@ -224,7 +230,8 @@ def _build_dispatch_argv(
     operation_id: str,
     journal: AgyOperationJournal,
     dispatcher: Path,
-    model: str | None,
+    profile: AgyReviewerLaunchProfile,
+    requested_effort: str | None,
     timeout: int,
     max_calls: int,
     pool_wait_timeout: float,
@@ -242,7 +249,9 @@ def _build_dispatch_argv(
         "--cwd",
         cwd,
         "--mode",
-        "plan",
+        profile.mode,
+        "--model",
+        profile.model,
         "--timeout",
         str(timeout),
         "--max-calls",
@@ -256,12 +265,20 @@ def _build_dispatch_argv(
         "--deny",
         "write_file(*)",
     ]
-    if model:
-        argv += ["--model", model]
+    if requested_effort:
+        argv += ["--effort", requested_effort]
     return argv
 
 
 def launch_review(args: argparse.Namespace) -> dict[str, Any]:
+    profile = resolve_reviewer_launch_profile(
+        args.model,
+        requested_effort=args.effort,
+    )
+    profile_evidence = launch_profile_evidence(
+        profile,
+        requested_effort=args.effort,
+    )
     subject = collect_review_subject(
         args.cwd,
         expected_repository=args.repository,
@@ -285,14 +302,16 @@ def launch_review(args: argparse.Namespace) -> dict[str, Any]:
             attempt_id=new_attempt_id(),
             cwd=subject.repo_root,
             provider="agy",
-            model=args.model,
-            effort=None,
+            model=profile.model,
+            effort=args.effort,
             prompt_sha256=hashlib.sha256(
                 build_review_prompt(packet).encode("utf-8")
             ).hexdigest(),
             runtime_revision=None,
             initial_fields={
                 **_binding_fields(packet),
+                **profile_evidence,
+                "mode": profile.mode,
                 "review_state": "PREPARED",
                 "review_verdict": None,
                 "review_applicable": False,
@@ -358,7 +377,8 @@ def launch_review(args: argparse.Namespace) -> dict[str, Any]:
         operation_id=operation_id,
         journal=journal,
         dispatcher=dispatcher,
-        model=args.model,
+        profile=profile,
+        requested_effort=args.effort,
         timeout=args.timeout,
         max_calls=args.max_calls,
         pool_wait_timeout=args.pool_wait_timeout,
@@ -461,6 +481,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--verification-receipt-file", action="append", default=[])
     ap.add_argument("--authority-excerpt-file", action="append", default=[])
     ap.add_argument("--model")
+    ap.add_argument("--effort", choices=("low", "medium", "high"))
     ap.add_argument("--timeout", type=int, default=900)
     ap.add_argument("--max-calls", type=int, default=1)
     ap.add_argument("--pool-wait-timeout", type=float, default=15.0)
@@ -482,7 +503,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise AgyReviewError(f"{name.upper()}_REQUIRED")
         _print(launch_review(args))
         return 0
-    except (AgyReviewError, AgyOperationJournalError) as exc:
+    except (AgyReviewError, AgyOperationJournalError, AgyReviewerProfileError) as exc:
         print(
             json.dumps(
                 {"schema": "nexus.agy_review_error.v1", "error": str(exc)},

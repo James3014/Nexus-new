@@ -501,6 +501,19 @@ def build_review_receipt(
         "provider": operation_record.get("observed_provider") or operation_record.get("provider"),
         "model": operation_record.get("observed_model") or operation_record.get("model"),
         "provider_session_id": operation_record.get("provider_session_id"),
+        "review_launch_catalog_version": operation_record.get(
+            "review_launch_catalog_version"
+        ),
+        "review_launch_profile_id": operation_record.get(
+            "review_launch_profile_id"
+        ),
+        "review_launch_profile_sha256": operation_record.get(
+            "review_launch_profile_sha256"
+        ),
+        "review_launch_mode": operation_record.get("review_launch_mode"),
+        "review_launch_requested_effort": operation_record.get(
+            "review_launch_requested_effort"
+        ),
         "verdict": verdict,
         "subject_stable": stable,
         "review_applicable": applicable,

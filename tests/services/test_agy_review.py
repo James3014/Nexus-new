@@ -60,6 +60,7 @@ def args_for(root: Path, base: str, contract: Path, operation_root: Path):
         verification_receipt_file=[],
         authority_excerpt_file=[],
         model="claude-sonnet-4-6",
+        effort=None,
         timeout=60,
         max_calls=1,
         pool_wait_timeout=1.0,
@@ -95,8 +96,11 @@ def test_identical_review_dispatch_is_deduplicated(monkeypatch, tmp_path: Path) 
     assert len(FakeSpawner.calls) == 1
     assert first["operation"]["operation_id"] == second["operation"]["operation_id"]
     argv = FakeSpawner.calls[0]
-    assert "--mode" in argv and argv[argv.index("--mode") + 1] == "plan"
+    assert "--mode" in argv and argv[argv.index("--mode") + 1] == "accept-edits"
+    assert "--model" in argv and argv[argv.index("--model") + 1] == "claude-sonnet-4-6"
     assert "--effort" not in argv
+    assert first["operation"]["review_launch_profile_id"] == "claude-sonnet-4-6.packet-review.v1"
+    assert first["operation"]["review_launch_mode"] == "accept-edits"
     assert ["--deny", "command(*)"] == argv[argv.index("--deny") : argv.index("--deny") + 2]
     assert "--write-path" not in argv
 
@@ -158,6 +162,11 @@ def test_terminal_review_receipt_is_reused_and_later_drift_blocks_applicability(
     first_status = review.status_review(opid, operation_root=str(op_root))
     assert first_status["receipt"]["verdict"] == "ACCEPT"
     assert first_status["receipt"]["review_applicable"] is True
+    assert (
+        first_status["receipt"]["review_launch_profile_id"]
+        == "claude-sonnet-4-6.packet-review.v1"
+    )
+    assert first_status["receipt"]["review_launch_mode"] == "accept-edits"
     assert first_status["operation"]["review_applicable"] is True
 
     (root / "a.py").write_text("VALUE = 3\n", encoding="utf-8")
@@ -293,3 +302,56 @@ def test_failed_terminal_review_is_reused_without_redispatch(
     assert repeated["action"] == "TERMINAL_NON_ACCEPTING"
     assert repeated["receipt"] is None
     assert len(FakeSpawner.calls) == 1
+
+
+def test_unknown_reviewer_model_fails_before_operation_creation(tmp_path: Path) -> None:
+    root, base, contract = make_repo(tmp_path)
+    op_root = tmp_path / "operations"
+    args = args_for(root, base, contract, op_root)
+    args.model = "unknown-reviewer-model"
+
+    with pytest.raises(
+        review.AgyReviewerProfileError,
+        match="REVIEW_MODEL_PROFILE_UNKNOWN",
+    ):
+        review.launch_review(args)
+
+    assert not op_root.exists()
+
+
+def test_unsupported_effort_fails_before_operation_creation(tmp_path: Path) -> None:
+    root, base, contract = make_repo(tmp_path)
+    op_root = tmp_path / "operations"
+    args = args_for(root, base, contract, op_root)
+    args.effort = "high"
+
+    with pytest.raises(
+        review.AgyReviewerProfileError,
+        match="REVIEW_EFFORT_UNSUPPORTED",
+    ):
+        review.launch_review(args)
+
+    assert not op_root.exists()
+
+
+def test_transport_profile_change_does_not_duplicate_semantic_review(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    root, base, contract = make_repo(tmp_path)
+    op_root = tmp_path / "operations"
+    first_args = args_for(root, base, contract, op_root)
+    second_args = args_for(root, base, contract, op_root)
+    second_args.model = "gemini-3.8-flash-low"
+    FakeSpawner.calls = []
+    monkeypatch.setattr(review, "_dispatcher_path", lambda: Path("/fake/nexus-agy-dispatch"))
+    monkeypatch.setattr(review, "_spawn_dispatch", FakeSpawner.spawn)
+
+    first = review.launch_review(first_args)
+    second = review.launch_review(second_args)
+
+    assert first["operation"]["operation_id"] == second["operation"]["operation_id"]
+    assert second["action"] == "OBSERVE_EXISTING"
+    assert len(FakeSpawner.calls) == 1
+    assert first["operation"]["model"] == "claude-sonnet-4-6"
+    assert second["operation"]["model"] == "claude-sonnet-4-6"
