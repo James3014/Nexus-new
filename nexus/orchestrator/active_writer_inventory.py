@@ -48,11 +48,11 @@ from nexus.services.live_execution_provenance import (
     PRODUCER_SCHEMA_EXTERNAL_WORKER_V1,
     PRODUCER_SCHEMA_RDC_V1,
     ProvenanceContractError,
-    read_operation_journal_evidence,
     _agy_operation_root,
     _dev_mcp_operation_root,
     _external_worker_operation_root,
     _rdc_operation_root,
+    read_operation_journal_evidence,
 )
 
 ACTIVE_WRITER_INVENTORY_SCHEMA = "nexus.orchestrator.active_writer_inventory.v1"
