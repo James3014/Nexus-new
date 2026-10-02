@@ -282,8 +282,7 @@ def build_review_packet(
         len(item["content"].encode("utf-8")) for item in [contract, *verification, *authority]
     )
     candidate_bytes = len(subject.tracked_diff.encode("utf-8")) + sum(
-        len(item["content"].encode("utf-8"))
-        for item in subject.untracked_files
+        len(item["content"].encode("utf-8")) for item in subject.untracked_files
     )
     if candidate_bytes + evidence_bytes > MAX_PACKET_INPUT_BYTES:
         raise AgyReviewError("REVIEW_PACKET_INPUT_TOO_LARGE")
