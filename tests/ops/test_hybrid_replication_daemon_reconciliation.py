@@ -35,7 +35,7 @@ def test_issues_since_ignores_pre_boundary_non_edit_updates(monkeypatch) -> None
     assert all(args[0] != "graphql" for args in calls)
 
 
-def test_issues_since_ignores_pre_boundary_issue_edited_after_boundary(monkeypatch) -> None:
+def test_issues_since_keeps_pre_boundary_issue_edited_after_boundary(monkeypatch) -> None:
     issue = _issue(
         number=1200,
         created_at="2026-10-01T03:00:00Z",
