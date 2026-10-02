@@ -9,11 +9,13 @@ from pathlib import Path
 import pytest
 
 from nexus.services.agy_reviewer_runtime import (
+    PACKET_MODE_COMPACT,
     AgyReviewError,
     build_review_packet,
     build_review_prompt,
     build_review_receipt,
     collect_review_subject,
+    compact_tracked_diff,
     operation_id_for_effect,
     parse_review_verdict,
     subject_matches_packet,
@@ -229,3 +231,165 @@ def test_operation_id_is_stable_prefix_of_effect() -> None:
     assert operation_id_for_effect(effect) == "agyop_" + ("a" * 32)
     with pytest.raises(AgyReviewError, match="REVIEW_EFFECT_ID_INVALID"):
         operation_id_for_effect("short")
+
+
+def test_compact_diff_preserves_every_non_context_line() -> None:
+    source = (
+        "diff --git a/a.py b/a.py\n"
+        "index 1111111..2222222 100644\n"
+        "--- a/a.py\n"
+        "+++ b/a.py\n"
+        "@@ -1,4 +1,4 @@\n"
+        " unchanged before\n"
+        "-old value\n"
+        "+new value\n"
+        " unchanged after\n"
+        "\\ No newline at end of file\n"
+    )
+
+    compact, manifest = compact_tracked_diff(source)
+
+    assert " unchanged before\n" not in compact
+    assert " unchanged after\n" not in compact
+    for required in (
+        "diff --git a/a.py b/a.py\n",
+        "index 1111111..2222222 100644\n",
+        "--- a/a.py\n",
+        "+++ b/a.py\n",
+        "@@ -1,4 +1,4 @@\n",
+        "-old value\n",
+        "+new value\n",
+        "\\ No newline at end of file\n",
+    ):
+        assert required in compact
+    assert manifest["dropped_context_lines"] == 2
+    assert manifest["payload_bytes"] < manifest["source_bytes"]
+
+
+def test_compact_packet_preserves_semantic_identity_and_exact_untracked_content(
+    tmp_path: Path,
+) -> None:
+    root, base, contract, verify, authority, subject, full = prepare_subject(tmp_path)
+    compact = build_review_packet(
+        subject,
+        acceptance_contract_file=contract,
+        reviewer_role="independent-acceptance",
+        verification_receipt_files=[verify],
+        authority_excerpt_files=[authority],
+        packet_mode=PACKET_MODE_COMPACT,
+    )
+    repeated = build_review_packet(
+        subject,
+        acceptance_contract_file=contract,
+        reviewer_role="independent-acceptance",
+        verification_receipt_files=[verify],
+        authority_excerpt_files=[authority],
+        packet_mode=PACKET_MODE_COMPACT,
+    )
+
+    assert full["candidate_digest"] == compact["candidate_digest"]
+    assert full["review_effect_id"] == compact["review_effect_id"]
+    assert full["packet_sha256"] != compact["packet_sha256"]
+    assert compact["packet_sha256"] == repeated["packet_sha256"]
+    assert compact["untracked_files"] == full["untracked_files"]
+    assert compact["untracked_files"][0]["content"] == "new evidence\n"
+    assert compact["packet_mode"] == PACKET_MODE_COMPACT
+    assert compact["compaction"]["preservation_rule"] == "ALL_NON_CONTEXT_LINES"
+    assert not any(
+        line.startswith(" ")
+        for line in compact["tracked_diff"].splitlines(keepends=True)
+    )
+    verify_review_packet(compact)
+    assert "deterministic compact diff evidence" in build_review_prompt(compact)
+
+
+def test_default_full_packet_remains_legacy_shape(tmp_path: Path) -> None:
+    _, _, _, _, _, _, packet = prepare_subject(tmp_path)
+
+    assert "packet_mode" not in packet
+    assert "compaction" not in packet
+    assert "tracked_diff_payload_sha256" not in packet
+    verify_review_packet(packet)
+
+
+def test_compact_packet_budget_fails_closed(tmp_path: Path) -> None:
+    _, _, contract, verify, authority, subject, _ = prepare_subject(tmp_path)
+
+    with pytest.raises(AgyReviewError, match="REVIEW_COMPACT_PACKET_TOO_LARGE"):
+        build_review_packet(
+            subject,
+            acceptance_contract_file=contract,
+            reviewer_role="independent-acceptance",
+            verification_receipt_files=[verify],
+            authority_excerpt_files=[authority],
+            packet_mode=PACKET_MODE_COMPACT,
+            compact_max_bytes=64,
+        )
+
+
+def test_context_heavy_diff_is_materially_smaller() -> None:
+    context = "".join(f" unchanged line {index}\n" for index in range(2000))
+    source = (
+        "diff --git a/a.txt b/a.txt\n"
+        "--- a/a.txt\n"
+        "+++ b/a.txt\n"
+        "@@ -1,2001 +1,2001 @@\n"
+        + context
+        + "-old\n"
+        + "+new\n"
+    )
+
+    compact, manifest = compact_tracked_diff(source)
+
+    assert manifest["payload_bytes"] < manifest["source_bytes"] * 0.10
+    assert "-old\n" in compact
+    assert "+new\n" in compact
+
+
+def test_change_to_previously_context_line_changes_candidate_and_effect(
+    tmp_path: Path,
+) -> None:
+    root, base = make_repo(tmp_path)
+    lines = [f"line {index}\n" for index in range(20)]
+    (root / "a.py").write_text("".join(lines), encoding="utf-8")
+    _git(root, "add", "a.py")
+    _git(root, "commit", "-m", "context base")
+    base = _git(root, "rev-parse", "HEAD")
+    (root / "a.py").write_text(
+        "".join(lines[:10] + ["changed ten\n"] + lines[11:]),
+        encoding="utf-8",
+    )
+    contract = tmp_path / "contract.md"
+    contract.write_text("contract\n", encoding="utf-8")
+
+    first_subject = collect_review_subject(
+        root,
+        expected_repository="James3014/Nexus-new",
+        base_revision=base,
+    )
+    first = build_review_packet(
+        first_subject,
+        acceptance_contract_file=contract,
+        reviewer_role="independent-acceptance",
+        packet_mode=PACKET_MODE_COMPACT,
+    )
+
+    (root / "a.py").write_text(
+        "".join(lines[:10] + ["changed ten\n", "changed eleven\n"] + lines[12:]),
+        encoding="utf-8",
+    )
+    second_subject = collect_review_subject(
+        root,
+        expected_repository="James3014/Nexus-new",
+        base_revision=base,
+    )
+    second = build_review_packet(
+        second_subject,
+        acceptance_contract_file=contract,
+        reviewer_role="independent-acceptance",
+        packet_mode=PACKET_MODE_COMPACT,
+    )
+
+    assert first["candidate_digest"] != second["candidate_digest"]
+    assert first["review_effect_id"] != second["review_effect_id"]
+    assert "+changed eleven\n" in second["tracked_diff"]
