@@ -1674,8 +1674,7 @@ def _complete_token_usage_metrics(
     uncached_input_tokens = sum(
         max(
             0,
-            int(usage.get("input_tokens", 0) or 0)
-            - int(usage.get("cached_input_tokens", 0) or 0),
+            int(usage.get("input_tokens", 0) or 0) - int(usage.get("cached_input_tokens", 0) or 0),
         )
         for usage in usage_records
     )
@@ -1810,8 +1809,8 @@ def run_frozen_stack(
             jev_usage = jev_raw.get("usage") or {}
             strong_usage = (strong or {}).get("usage") or {}
             usage_records = (jev_usage,) if accepted else (jev_usage, strong_usage)
-            input_tokens, uncached_input_tokens, output_tokens = (
-                _complete_token_usage_metrics(*usage_records)
+            input_tokens, uncached_input_tokens, output_tokens = _complete_token_usage_metrics(
+                *usage_records
             )
             raw_response = {
                 "candidate_packet": packet,
