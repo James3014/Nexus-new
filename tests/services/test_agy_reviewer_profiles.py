@@ -25,11 +25,11 @@ def test_sonnet_profile_is_packet_only_and_does_not_emit_effort() -> None:
     profile = resolve_reviewer_launch_profile("claude-sonnet-4-6")
     evidence = launch_profile_evidence(profile)
 
-    assert profile.mode == "accept-edits"
+    assert profile.mode == "plan"
     assert profile.supported_efforts == ()
     assert profile.tool_policy == "packet_only_deny_all"
     assert evidence["review_launch_catalog_version"] == REVIEWER_LAUNCH_CATALOG_VERSION
-    assert evidence["review_launch_profile_id"] == "claude-sonnet-4-6.packet-review.v1"
+    assert evidence["review_launch_profile_id"] == "claude-sonnet-4-6.packet-review.v2"
     assert len(evidence["review_launch_profile_sha256"]) == 64
     assert evidence["review_launch_requested_effort"] is None
 
@@ -40,7 +40,7 @@ def test_gemini_profile_is_explicit_and_stable() -> None:
 
     assert first == second
     assert first.profile_sha256 == second.profile_sha256
-    assert first.mode == "accept-edits"
+    assert first.mode == "plan"
 
 
 def test_unknown_model_fails_closed() -> None:

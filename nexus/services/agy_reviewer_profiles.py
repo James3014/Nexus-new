@@ -11,7 +11,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-REVIEWER_LAUNCH_CATALOG_VERSION = "nexus.agy_reviewer_launch_catalog.v1"
+REVIEWER_LAUNCH_CATALOG_VERSION = "nexus.agy_reviewer_launch_catalog.v2"
 REVIEWER_LAUNCH_PROFILE_SCHEMA = "nexus.agy_reviewer_launch_profile.v1"
 
 
@@ -53,19 +53,19 @@ class AgyReviewerLaunchProfile:
 
 _PROFILES = (
     AgyReviewerLaunchProfile(
-        profile_id="claude-sonnet-4-6.packet-review.v1",
+        profile_id="claude-sonnet-4-6.packet-review.v2",
         model="claude-sonnet-4-6",
-        mode="accept-edits",
+        mode="plan",
     ),
     AgyReviewerLaunchProfile(
-        profile_id="gemini-3-8-flash.packet-review.v1",
+        profile_id="gemini-3-8-flash.packet-review.v2",
         model="gemini-3.8-flash",
-        mode="accept-edits",
+        mode="plan",
     ),
     AgyReviewerLaunchProfile(
-        profile_id="gemini-3-8-flash-low.packet-review.v1",
+        profile_id="gemini-3-8-flash-low.packet-review.v2",
         model="gemini-3.8-flash-low",
-        mode="accept-edits",
+        mode="plan",
     ),
 )
 
