@@ -1634,6 +1634,7 @@ class SelfHostedTaskService:
         self.worker_registry = worker_registry or WorkerRegistry.default()
         self.ambient_core_port = ambient_core_port
         self._threads: dict[str, threading.Thread] = {}
+        self._bound_attempt_claims: dict[tuple[str, str], dict[str, Any]] = {}
         self._runtime_state_bridge = RuntimeStateBridge(
             self.state_dir,
             validator=lambda task_id, payload, path: self._validate_state_payload(
@@ -2553,8 +2554,16 @@ class SelfHostedTaskService:
             "source_hash": str(request.get("source_hash") or request.get("source_revision") or "").strip(),
             "task_card_path": str(request.get("task_card_path") or "").strip(),
             "allowed_files": sorted({str(item).strip() for item in allowed if str(item).strip()}),
-            "admission_identity": hashlib.sha256(json.dumps(_jsonable(admission), sort_keys=True, separators=(",", ":")).encode()).hexdigest() if admission is not None else "",
-            "provider_preflight_identity": hashlib.sha256(json.dumps(_jsonable(preflight), sort_keys=True, separators=(",", ":")).encode()).hexdigest() if preflight is not None else "",
+            "admission_identity": (
+                str(request.get("admission_identity") or "").strip()
+                if "workforce_admission" not in request and "admission_binding" not in request and "admission_identity" in request
+                else hashlib.sha256(json.dumps(_jsonable(admission), sort_keys=True, separators=(",", ":")).encode()).hexdigest() if admission is not None else ""
+            ),
+            "provider_preflight_identity": (
+                str(request.get("provider_preflight_identity") or "").strip()
+                if "provider_preflight" not in request and "realm_preflight" not in request and "provider_preflight_identity" in request
+                else hashlib.sha256(json.dumps(_jsonable(preflight), sort_keys=True, separators=(",", ":")).encode()).hexdigest() if preflight is not None else ""
+            ),
         }
         return identity
 
@@ -2634,7 +2643,9 @@ class SelfHostedTaskService:
             raise RuntimeError("WORK_CLAIM_STALE_FENCE")
         return record
 
-    def acquire_work_claim(self, request: Mapping[str, Any]) -> dict[str, Any]:
+    def acquire_work_claim(
+        self, request: Mapping[str, Any], *, enforce_issue_uniqueness: bool = False
+    ) -> dict[str, Any]:
         candidate = self._claim_request(request)
         task_id = candidate["identity"]["task_id"]
         if not task_id:
@@ -2650,6 +2661,52 @@ class SelfHostedTaskService:
                 if existing["identity_hash"] == candidate["identity_hash"]:
                     return {"status": "ALREADY_CLAIMED", "claim": existing}
                 return {"status": "BLOCKED", "reason": "ALREADY_CLAIMED", "claim": existing}
+
+            # Check cross-task claim collision for the same repository and issue when requested
+            should_check_issue = enforce_issue_uniqueness or bool(
+                request.get("enforce_issue_uniqueness")
+            )
+            repo = candidate["identity"].get("repository")
+            issue = candidate["identity"].get("issue")
+            if should_check_issue and repo and issue and self.state_dir.exists():
+                for other_path in sorted(self.state_dir.glob("*.json")):
+                    if other_path.name.startswith(".") or other_path.name == f"{task_id}.json":
+                        continue
+                    try:
+                        other_state = json.loads(other_path.read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError) as exc:
+                        raise RuntimeError("WORK_CLAIM_INVENTORY_UNKNOWN") from exc
+                    if not isinstance(other_state, Mapping):
+                        raise RuntimeError("WORK_CLAIM_INVENTORY_UNKNOWN")
+                    other_claim = other_state.get("work_claim")
+                    if other_claim is None:
+                        continue
+                    if not isinstance(other_claim, Mapping):
+                        raise RuntimeError("WORK_CLAIM_INVENTORY_UNKNOWN")
+                    try:
+                        self._validate_claim_record(other_claim)
+                        self._validate_claim_enclosure(
+                            other_state,
+                            other_claim,
+                            expected_task_id=str(other_state.get("task_id") or "").strip(),
+                        )
+                    except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+                        raise RuntimeError("WORK_CLAIM_INVENTORY_UNKNOWN") from exc
+                    other_ident = other_claim.get("identity") or {}
+                    if (
+                        str(other_ident.get("repository") or "").strip() == repo
+                        and str(other_ident.get("issue") or "").strip() == issue
+                    ):
+                        if (
+                            other_state.get("status") not in TERMINAL_STATUSES
+                            and other_state.get("status") != "CANCELLED"
+                        ):
+                            return {
+                                "status": "BLOCKED",
+                                "reason": "ALREADY_CLAIMED",
+                                "claim": other_claim,
+                            }
+
             candidate["generation"] = 1
             candidate["fencing_token"] = f"{candidate['claim_id']}:{candidate['generation']}"
             candidate["status"] = "CLAIMED"
@@ -2659,6 +2716,80 @@ class SelfHostedTaskService:
             return {"status": "CLAIMED", "claim": candidate}
 
     claim_work = acquire_work_claim
+
+    def _bridge_validate_claim(
+        self,
+        task_id: str,
+        attempt_id: str | None = None,
+        *,
+        operation: str = "MUTATION",
+    ) -> Optional[dict[str, Any]]:
+        state = self._read_state(task_id)
+        if state is None:
+            return None
+        claim_record = state.get("work_claim")
+        req = state.get("request") if isinstance(state.get("request"), Mapping) else {}
+        contract_data = state.get("contract") if isinstance(state.get("contract"), Mapping) else {}
+        is_issue_task = bool(
+            req.get("claim_required")
+            or req.get("issue")
+            or req.get("issue_number")
+            or req.get("project_entry_authority_binding")
+            or contract_data.get("issue_number")
+            or claim_record is not None
+        )
+        if not is_issue_task:
+            return None
+        if claim_record is None:
+            raise RuntimeError(f"WORK_CLAIM_REQUIRED:{operation}")
+
+        with self._state_lock():
+            path = self._state_path(task_id)
+            if not path.exists():
+                raise RuntimeError("WORK_CLAIM_NOT_FOUND")
+            locked_state = json.loads(path.read_text(encoding="utf-8"))
+            record = locked_state.get("work_claim")
+            if record is None:
+                raise RuntimeError(f"WORK_CLAIM_REQUIRED:{operation}")
+
+            self._validate_claim_record(record)
+            self._validate_claim_enclosure(
+                locked_state,
+                record,
+                expected_task_id=task_id,
+            )
+
+            # Check for base revision drift
+            locked_contract = locked_state.get("contract") or {}
+            current_base = str(locked_contract.get("target_base_revision") or "").strip()
+            claim_base = str((record.get("identity") or {}).get("base_revision") or "").strip()
+            if current_base and claim_base and current_base != claim_base:
+                raise RuntimeError("WORK_CLAIM_BASE_REVISION_DRIFT")
+
+            current_source = str(locked_contract.get("controller_revision") or "").strip()
+            claim_source = str((record.get("identity") or {}).get("source_hash") or "").strip()
+            if current_source and claim_source and current_source != claim_source:
+                raise RuntimeError("WORK_CLAIM_SOURCE_REVISION_DRIFT")
+
+            effective_attempt_id = attempt_id or str(locked_state.get("attempt_id") or "")
+            bound_key = (task_id, effective_attempt_id) if effective_attempt_id else None
+            bound = self._bound_attempt_claims.get(bound_key) if bound_key else None
+            if bound is not None:
+                self._validate_claim_locked(locked_state, bound)
+            else:
+                if bound_key:
+                    bound_req = {
+                        **(record.get("identity") or {}),
+                        "task_id": task_id,
+                        "attempt_id": effective_attempt_id,
+                        "claim_id": record["claim_id"],
+                        "generation": record["generation"],
+                        "fencing_token": record["fencing_token"],
+                    }
+                    self._bound_attempt_claims[bound_key] = bound_req
+                    self._validate_claim_locked(locked_state, bound_req)
+
+            return record
 
     def validate_work_claim(self, request: Mapping[str, Any]) -> dict[str, Any]:
         task_id = str(request.get("task_id") or "")
@@ -4164,6 +4295,8 @@ class SelfHostedTaskService:
         self, contract, request, lease, state, attempts, update, *, execution, status
     ):
         task_id = contract.task_id
+        attempt_id = state.get("attempt_id") if isinstance(state, Mapping) else None
+        self._bridge_validate_claim(task_id, attempt_id, operation="FINALIZE_CANDIDATE")
         manager = WorktreeManager(root_dir=contract.target_worktree_root)
         controller = SelfHostedDevelopmentController(worktree_manager=manager)
         if status == "WORKER_COMPLETED":
@@ -5381,6 +5514,7 @@ class SelfHostedTaskService:
                     "route_replanned": False,
                     "task_card_created": False,
                 }
+            self._bridge_validate_claim(task_id, attempt_id, operation="RESUME_TASK")
             return self._launch_worker(task_id, attempt_id) or self._with_task_action(state)
         return self.reconcile_task(task_id)
 
@@ -6810,9 +6944,106 @@ class SelfHostedTaskService:
                     current["archive_location"] = None
                     current["merge_performed"] = False
                     current["push_performed"] = False
+                if existing.get("work_claim"):
+                    old_claim = existing["work_claim"]
+                    old_ident = old_claim.get("identity") or {}
+                    claim_req = {
+                        **old_ident,
+                        "task_id": contract.task_id,
+                        "claim_id": old_claim["claim_id"],
+                        "generation": old_claim["generation"],
+                        "fencing_token": old_claim["fencing_token"],
+                    }
+                    recovered = self.recover_work_claim(claim_req, reason="TERMINAL_RETRY")
+                    new_claim = dict(recovered["claim"])
+                    new_ident = dict(old_ident)
+                    new_ident["attempt_id"] = attempt_id
+                    new_claim["identity"] = new_ident
+                    new_claim["identity_hash"] = self._claim_hash(new_ident)
+                    with self._state_lock():
+                        retry_state = json.loads(self._state_path(contract.task_id).read_text(encoding="utf-8"))
+                        retry_state["work_claim"] = new_claim
+                        self._write_state_locked(contract.task_id, retry_state)
                 self._mutate_state(contract.task_id, retry)
                 return self._launch_worker(contract.task_id, attempt_id) or self._with_task_action(existing)
             return self.reconcile_task(contract.task_id) or existing
+        is_issue_task = bool(
+            binding is not None
+            or original_binding is not None
+            or request.get("issue")
+            or request.get("issue_number")
+            or request.get("claim_required")
+            or getattr(contract, "issue_number", None)
+        )
+        if is_issue_task:
+            claim_req = {
+                "task_id": contract.task_id,
+                "attempt_id": attempt_id,
+                "action_id": action_id or None,
+                "repository": (
+                    binding.get("repository")
+                    if binding
+                    else request.get("repository") or getattr(contract, "repository", "")
+                ),
+                "issue": (
+                    binding.get("issue_number")
+                    if binding
+                    else request.get("issue")
+                    or request.get("issue_number")
+                    or getattr(contract, "issue_number", "")
+                ),
+                "worker_id": (
+                    dispatch_binding.get("worker_id")
+                    if dispatch_binding
+                    else request.get("worker_id") or request.get("worker") or ""
+                ),
+                "provider": (
+                    dispatch_binding.get("provider")
+                    if dispatch_binding
+                    else request.get("provider") or contract.preferred_provider or ""
+                ),
+                "model": (
+                    dispatch_binding.get("model")
+                    if dispatch_binding
+                    else request.get("model") or ""
+                ),
+                "role": request.get("role")
+                or request.get("worker_role")
+                or "bounded_code_candidate",
+                "claim_ceiling": request.get("claim_ceiling")
+                or "CLAIM_PROTOCOL_CANDIDATE_PR_ONLY",
+                "base_revision": contract.target_base_revision,
+                "source_hash": (
+                    request.get("source_hash")
+                    or request.get("source_revision")
+                    or contract.controller_revision
+                    or ""
+                ),
+                "task_card_path": (
+                    request.get("task_card_path")
+                    or getattr(contract, "task_card_path", "")
+                    or ""
+                ),
+                "allowed_files": list(contract.allowed_files),
+                "workforce_admission": (
+                    dispatch_binding.get("workforce_admission")
+                    if dispatch_binding
+                    else request.get("workforce_admission")
+                    or request.get("admission_binding")
+                ),
+                "provider_preflight": (
+                    request.get("provider_preflight") or request.get("realm_preflight")
+                ),
+            }
+            claim_result = self.acquire_work_claim(claim_req, enforce_issue_uniqueness=True)
+            if claim_result.get("status") == "BLOCKED":
+                with self._state_lock():
+                    path = self._state_path(contract.task_id)
+                    if path.exists():
+                        path.unlink()
+                raise RuntimeError(
+                    f"WORK_CLAIM_BLOCKED:{claim_result.get('reason')}"
+                )
         return self._launch_worker(contract.task_id, attempt_id) or self._with_task_action(state)
 
     def retry_task(self, task_id: str) -> dict[str, Any]:
@@ -9367,6 +9598,12 @@ class SelfHostedTaskService:
         valid = bool(packet) and not any(packet.get(k) != v for k, v in expected.items())
         status = "APPROVED" if valid else "APPROVAL_INVALIDATED"
         grant = dict(approval_context or {}) if approval_context is not None else None
+        if grant is not None and (
+            grant.get("claim_ceiling") == "CLAIM_PROTOCOL_CANDIDATE_PR_ONLY"
+            or grant.get("role") in {"bounded_code_candidate", "implementer"}
+            or "work_claim" in grant
+        ):
+            raise RuntimeError("IMPLEMENTER_CLAIM_CANNOT_AUTHORIZE_APPROVAL")
         public_grant_identity_fields = (
             "bound_task_id",
             "bound_attempt_id",
