@@ -72,9 +72,7 @@ def _foreign_gzip_capture_comment(snapshot: TaskSnapshot) -> tuple[str, dict[str
     comment = (
         f"{CAPTURE_MARKER}\n"
         "Authority: `RESEARCH_OBSERVATION_ONLY / NO_ENGINEERING_AUTHORITY`\n\n"
-        "```json\n"
-        + json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2)
-        + "\n```"
+        "```json\n" + json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n```"
     )
     return comment, payload
 
