@@ -3,6 +3,7 @@
 This module owns review subject/evidence identity and receipt construction only.
 It does not own reviewer routing, acceptance authority, merge, release, or production.
 """
+
 from __future__ import annotations
 
 import hashlib

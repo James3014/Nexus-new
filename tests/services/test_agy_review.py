@@ -96,7 +96,7 @@ def test_identical_review_dispatch_is_deduplicated(monkeypatch, tmp_path: Path) 
     argv = FakePopen.calls[0]
     assert "--mode" in argv and argv[argv.index("--mode") + 1] == "plan"
     assert "--effort" not in argv
-    assert ["--deny", "command(*)"] == argv[argv.index("--deny") : argv.index("--deny") + 2
+    assert ["--deny", "command(*)"] == argv[argv.index("--deny") : argv.index("--deny") + 2]
     assert "--write-path" not in argv
 
 
