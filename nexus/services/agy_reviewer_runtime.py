@@ -20,6 +20,12 @@ REVIEW_PACKET_SCHEMA = "nexus.agy_review_packet.v1"
 REVIEW_RECEIPT_SCHEMA = "nexus.agy_review_receipt.v1"
 REVIEW_PROFILE_VERSION = "nexus.rdc_agy_packet_review.v1"
 REVIEW_CLAIM_CEILING = "REVIEW_EVIDENCE_ONLY_NOT_ACCEPTANCE_AUTHORITY"
+REVIEW_PACKET_COMPACTION_SCHEMA = "nexus.agy_review_compaction.v1"
+PACKET_MODE_FULL = "full"
+PACKET_MODE_COMPACT = "compact"
+COMPACT_TRACKED_DIFF_ENCODING = "unified_changes_only_v1"
+DEFAULT_COMPACT_PACKET_MAX_BYTES = 1_000_000
+MAX_COMPACT_SOURCE_INPUT_BYTES = 32 * 1024 * 1024
 TERMINAL_VERDICTS = frozenset({
     "ACCEPT",
     "REPAIR_REQUIRED",
@@ -46,6 +52,32 @@ def _sha256_bytes(value: bytes) -> str:
 
 def sha256_json(value: Any) -> str:
     return _sha256_bytes(_canonical(value).encode("utf-8"))
+
+
+def compact_tracked_diff(tracked_diff: str) -> tuple[str, dict[str, Any]]:
+    if not isinstance(tracked_diff, str):
+        raise AgyReviewError("REVIEW_COMPACTION_DIFF_INVALID")
+    source_bytes = tracked_diff.encode("utf-8")
+    kept: list[str] = []
+    dropped_context_lines = 0
+    for line in tracked_diff.splitlines(keepends=True):
+        if line.startswith(" "):
+            dropped_context_lines += 1
+            continue
+        kept.append(line)
+    payload = "".join(kept)
+    payload_bytes = payload.encode("utf-8")
+    manifest = {
+        "schema": REVIEW_PACKET_COMPACTION_SCHEMA,
+        "encoding": COMPACT_TRACKED_DIFF_ENCODING,
+        "source_tracked_diff_sha256": _sha256_bytes(source_bytes),
+        "payload_sha256": _sha256_bytes(payload_bytes),
+        "source_bytes": len(source_bytes),
+        "payload_bytes": len(payload_bytes),
+        "dropped_context_lines": dropped_context_lines,
+        "preservation_rule": "ALL_NON_CONTEXT_LINES",
+    }
+    return payload, manifest
 
 
 def _git_bytes(root: Path, *args: str) -> bytes:
@@ -270,10 +302,17 @@ def build_review_packet(
     reviewer_role: str,
     verification_receipt_files: Sequence[str | os.PathLike[str]] = (),
     authority_excerpt_files: Sequence[str | os.PathLike[str]] = (),
+    packet_mode: str = PACKET_MODE_FULL,
+    compact_max_bytes: int = DEFAULT_COMPACT_PACKET_MAX_BYTES,
 ) -> dict[str, Any]:
     role = str(reviewer_role or "").strip()
     if not role or len(role) > 120:
         raise AgyReviewError("REVIEWER_ROLE_INVALID")
+    mode = str(packet_mode or "").strip()
+    if mode not in {PACKET_MODE_FULL, PACKET_MODE_COMPACT}:
+        raise AgyReviewError("REVIEW_PACKET_MODE_INVALID")
+    if compact_max_bytes <= 0:
+        raise AgyReviewError("REVIEW_COMPACT_PACKET_BUDGET_INVALID")
 
     contract = _document(acceptance_contract_file, kind="acceptance_contract")
     verification = _documents(verification_receipt_files, kind="verification_receipt")
@@ -284,8 +323,16 @@ def build_review_packet(
     candidate_bytes = len(subject.tracked_diff.encode("utf-8")) + sum(
         len(item["content"].encode("utf-8")) for item in subject.untracked_files
     )
-    if candidate_bytes + evidence_bytes > MAX_PACKET_INPUT_BYTES:
+    total_source_bytes = candidate_bytes + evidence_bytes
+    if mode == PACKET_MODE_FULL and total_source_bytes > MAX_PACKET_INPUT_BYTES:
         raise AgyReviewError("REVIEW_PACKET_INPUT_TOO_LARGE")
+    if mode == PACKET_MODE_COMPACT and total_source_bytes > MAX_COMPACT_SOURCE_INPUT_BYTES:
+        raise AgyReviewError("REVIEW_COMPACT_SOURCE_INPUT_TOO_LARGE")
+
+    tracked_diff_payload = subject.tracked_diff
+    compaction = None
+    if mode == PACKET_MODE_COMPACT:
+        tracked_diff_payload, compaction = compact_tracked_diff(subject.tracked_diff)
 
     evidence_inputs = {
         "verification_receipts": [
@@ -318,7 +365,7 @@ def build_review_packet(
         "candidate_digest": subject.candidate_digest,
         "changed_paths": list(subject.changed_paths),
         "tracked_diff_sha256": subject.tracked_diff_sha256,
-        "tracked_diff": subject.tracked_diff,
+        "tracked_diff": tracked_diff_payload,
         "untracked_files": list(subject.untracked_files),
         "acceptance_contract": contract,
         "acceptance_contract_sha256": contract["sha256"],
@@ -326,7 +373,16 @@ def build_review_packet(
         "authority_excerpts": authority,
         "evidence_inputs_sha256": evidence_inputs_sha256,
     }
+    if mode == PACKET_MODE_COMPACT:
+        assert compaction is not None
+        packet["packet_mode"] = PACKET_MODE_COMPACT
+        packet["tracked_diff_payload_sha256"] = compaction["payload_sha256"]
+        packet["compaction"] = compaction
     packet["packet_sha256"] = sha256_json(packet)
+    if mode == PACKET_MODE_COMPACT:
+        packet_bytes = len(_canonical(packet).encode("utf-8"))
+        if packet_bytes > compact_max_bytes:
+            raise AgyReviewError("REVIEW_COMPACT_PACKET_TOO_LARGE")
     verify_review_packet(packet)
     return packet
 
@@ -345,8 +401,37 @@ def verify_review_packet(packet: Mapping[str, Any]) -> None:
     tracked_diff = packet.get("tracked_diff")
     if not isinstance(tracked_diff, str):
         raise AgyReviewError("REVIEW_PACKET_TRACKED_DIFF_INVALID")
-    if _sha256_bytes(tracked_diff.encode("utf-8")) != packet.get("tracked_diff_sha256"):
-        raise AgyReviewError("REVIEW_PACKET_TRACKED_DIFF_HASH_MISMATCH")
+    packet_mode = packet.get("packet_mode", PACKET_MODE_FULL)
+    if packet_mode == PACKET_MODE_FULL:
+        if _sha256_bytes(tracked_diff.encode("utf-8")) != packet.get("tracked_diff_sha256"):
+            raise AgyReviewError("REVIEW_PACKET_TRACKED_DIFF_HASH_MISMATCH")
+    elif packet_mode == PACKET_MODE_COMPACT:
+        compaction = packet.get("compaction")
+        if not isinstance(compaction, Mapping):
+            raise AgyReviewError("REVIEW_PACKET_COMPACTION_INVALID")
+        if compaction.get("schema") != REVIEW_PACKET_COMPACTION_SCHEMA:
+            raise AgyReviewError("REVIEW_PACKET_COMPACTION_SCHEMA_INVALID")
+        if compaction.get("encoding") != COMPACT_TRACKED_DIFF_ENCODING:
+            raise AgyReviewError("REVIEW_PACKET_COMPACTION_ENCODING_INVALID")
+        payload_sha = _sha256_bytes(tracked_diff.encode("utf-8"))
+        if payload_sha != packet.get("tracked_diff_payload_sha256"):
+            raise AgyReviewError("REVIEW_PACKET_COMPACT_PAYLOAD_HASH_MISMATCH")
+        if payload_sha != compaction.get("payload_sha256"):
+            raise AgyReviewError("REVIEW_PACKET_COMPACTION_MANIFEST_MISMATCH")
+        if compaction.get("source_tracked_diff_sha256") != packet.get("tracked_diff_sha256"):
+            raise AgyReviewError("REVIEW_PACKET_COMPACTION_SOURCE_MISMATCH")
+        if compaction.get("payload_bytes") != len(tracked_diff.encode("utf-8")):
+            raise AgyReviewError("REVIEW_PACKET_COMPACTION_SIZE_MISMATCH")
+        source_bytes = compaction.get("source_bytes")
+        if not isinstance(source_bytes, int) or source_bytes < compaction["payload_bytes"]:
+            raise AgyReviewError("REVIEW_PACKET_COMPACTION_SIZE_INVALID")
+        dropped = compaction.get("dropped_context_lines")
+        if not isinstance(dropped, int) or dropped < 0:
+            raise AgyReviewError("REVIEW_PACKET_COMPACTION_COUNT_INVALID")
+        if any(line.startswith(" ") for line in tracked_diff.splitlines(keepends=True)):
+            raise AgyReviewError("REVIEW_PACKET_COMPACTION_CONTEXT_RETAINED")
+    else:
+        raise AgyReviewError("REVIEW_PACKET_MODE_INVALID")
 
     untracked_rows = packet.get("untracked_files")
     if not isinstance(untracked_rows, list):
@@ -430,9 +515,18 @@ def verify_review_packet(packet: Mapping[str, Any]) -> None:
 
 def build_review_prompt(packet: Mapping[str, Any]) -> str:
     verify_review_packet(packet)
+    compact_note = ""
+    if packet.get("packet_mode") == PACKET_MODE_COMPACT:
+        compact_note = (
+            "This packet uses deterministic compact diff evidence: only unchanged unified-diff "
+            "context lines were omitted. All change lines, headers, untracked file contents, "
+            "contracts, receipts, and authority excerpts remain exact. Do not infer omitted "
+            "context. "
+        )
     return (
         "You are an independent bounded reviewer. Review ONLY the frozen evidence packet "
-        "below. Do not call tools, discover repositories/projects, or mutate anything. "
+        + compact_note
+        + "below. Do not call tools, discover repositories/projects, or mutate anything. "
         "The packet and transport do not grant acceptance, merge, release, or production "
         "authority. Return concise material findings. End with exactly one terminal verdict "
         "on its own line: ACCEPT, REPAIR_REQUIRED, OWNER_DECISION_REQUIRED, or "
@@ -496,6 +590,13 @@ def build_review_receipt(
         "acceptance_contract_sha256": packet["acceptance_contract_sha256"],
         "evidence_inputs_sha256": packet["evidence_inputs_sha256"],
         "packet_sha256": packet["packet_sha256"],
+        "packet_mode": packet.get("packet_mode", PACKET_MODE_FULL),
+        "tracked_diff_payload_sha256": packet.get("tracked_diff_payload_sha256"),
+        "compaction_schema": (
+            packet.get("compaction", {}).get("schema")
+            if isinstance(packet.get("compaction"), Mapping)
+            else None
+        ),
         "operation_id": operation_record.get("operation_id"),
         "attempt_id": operation_record.get("attempt_id"),
         "provider": operation_record.get("observed_provider") or operation_record.get("provider"),

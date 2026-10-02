@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Durable packet-mode reviewer wrapper over the canonical Nexus Agy dispatcher."""
+
 from __future__ import annotations
 
 import argparse
@@ -38,8 +39,11 @@ from nexus.services.agy_reviewer_profiles import (  # noqa: E402
     resolve_reviewer_launch_profile,
 )
 from nexus.services.agy_reviewer_runtime import (  # noqa: E402
-    AgyReviewError,
+    DEFAULT_COMPACT_PACKET_MAX_BYTES,
+    PACKET_MODE_COMPACT,
+    PACKET_MODE_FULL,
     REVIEW_PROFILE_VERSION,
+    AgyReviewError,
     atomic_private_json,
     atomic_private_text,
     build_review_packet,
@@ -95,7 +99,7 @@ def _resolve_operation_id(value: str) -> tuple[str, str | None]:
 
 
 def _binding_fields(packet: dict[str, Any]) -> dict[str, Any]:
-    return {
+    fields = {
         "review_profile_version": REVIEW_PROFILE_VERSION,
         "review_effect_id": packet["review_effect_id"],
         "review_role": packet["reviewer_role"],
@@ -108,6 +112,28 @@ def _binding_fields(packet: dict[str, Any]) -> dict[str, Any]:
         "review_packet_sha256": packet["packet_sha256"],
         "review_changed_path_count": len(packet["changed_paths"]),
     }
+    if packet.get("packet_mode") == PACKET_MODE_COMPACT:
+        fields.update({
+            "review_packet_mode": PACKET_MODE_COMPACT,
+            "review_compaction_schema": packet["compaction"]["schema"],
+            "review_compact_payload_sha256": packet["tracked_diff_payload_sha256"],
+        })
+    return fields
+
+
+def _same_semantic_subject(first: Mapping[str, Any], second: Mapping[str, Any]) -> bool:
+    keys = (
+        "review_effect_id",
+        "reviewer_role",
+        "repository",
+        "repo_root_sha256",
+        "base_revision",
+        "current_head",
+        "candidate_digest",
+        "acceptance_contract_sha256",
+        "evidence_inputs_sha256",
+    )
+    return all(first.get(key) == second.get(key) for key in keys)
 
 
 def _assert_record_binding(record: dict[str, Any], packet: dict[str, Any]) -> None:
@@ -170,9 +196,7 @@ def _current_projection(
         else:
             record = journal.update(
                 operation_id,
-                review_state=(
-                    "TERMINAL" if receipt["subject_stable"] else "STALE_SUBJECT"
-                ),
+                review_state=("TERMINAL" if receipt["subject_stable"] else "STALE_SUBJECT"),
                 review_verdict=receipt["verdict"],
                 review_applicable=receipt["review_applicable"],
                 subject_stable=receipt["subject_stable"],
@@ -290,6 +314,8 @@ def launch_review(args: argparse.Namespace) -> dict[str, Any]:
         reviewer_role=args.review_role,
         verification_receipt_files=args.verification_receipt_file,
         authority_excerpt_files=args.authority_excerpt_file,
+        packet_mode=args.packet_mode,
+        compact_max_bytes=args.compact_max_bytes,
     )
     effect_id = packet["review_effect_id"]
     operation_id = operation_id_for_effect(effect_id)
@@ -304,9 +330,7 @@ def launch_review(args: argparse.Namespace) -> dict[str, Any]:
             provider="agy",
             model=profile.model,
             effort=args.effort,
-            prompt_sha256=hashlib.sha256(
-                build_review_prompt(packet).encode("utf-8")
-            ).hexdigest(),
+            prompt_sha256=hashlib.sha256(build_review_prompt(packet).encode("utf-8")).hexdigest(),
             runtime_revision=None,
             initial_fields={
                 **_binding_fields(packet),
@@ -334,9 +358,9 @@ def launch_review(args: argparse.Namespace) -> dict[str, Any]:
         persisted = load_review_packet(packet_path)
         if persisted["review_effect_id"] != effect_id:
             raise AgyReviewError("REVIEW_EFFECT_OPERATION_COLLISION")
-        if persisted["packet_sha256"] != packet["packet_sha256"]:
+        if not _same_semantic_subject(persisted, packet):
             raise AgyReviewError("REVIEW_EXISTING_PACKET_MISMATCH")
-        _assert_record_binding(record, packet)
+        _assert_record_binding(record, persisted)
         status = record.get("status")
         if status == "COMPLETED":
             result = _current_projection(
@@ -482,6 +506,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--authority-excerpt-file", action="append", default=[])
     ap.add_argument("--model")
     ap.add_argument("--effort", choices=("low", "medium", "high"))
+    ap.add_argument(
+        "--packet-mode",
+        choices=(PACKET_MODE_FULL, PACKET_MODE_COMPACT),
+        default=PACKET_MODE_FULL,
+    )
+    ap.add_argument(
+        "--compact-max-bytes",
+        type=int,
+        default=DEFAULT_COMPACT_PACKET_MAX_BYTES,
+    )
     ap.add_argument("--timeout", type=int, default=900)
     ap.add_argument("--max-calls", type=int, default=1)
     ap.add_argument("--pool-wait-timeout", type=float, default=15.0)

@@ -61,6 +61,8 @@ def args_for(root: Path, base: str, contract: Path, operation_root: Path):
         authority_excerpt_file=[],
         model="claude-sonnet-4-6",
         effort=None,
+        packet_mode="full",
+        compact_max_bytes=1_000_000,
         timeout=60,
         max_calls=1,
         pool_wait_timeout=1.0,
@@ -354,3 +356,54 @@ def test_transport_profile_change_does_not_duplicate_semantic_review(
     assert len(FakeSpawner.calls) == 1
     assert first["operation"]["model"] == "claude-sonnet-4-6"
     assert second["operation"]["model"] == "claude-sonnet-4-6"
+
+
+def test_full_and_compact_requests_share_one_semantic_operation(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    root, base, contract = make_repo(tmp_path)
+    lines = [f"line {index}\n" for index in range(100)]
+    (root / "a.py").write_text("".join(lines), encoding="utf-8")
+    _git(root, "add", "a.py")
+    _git(root, "commit", "-m", "packet-mode-base")
+    base = _git(root, "rev-parse", "HEAD")
+    (root / "a.py").write_text(
+        "".join(lines[:50] + ["changed\n"] + lines[51:]),
+        encoding="utf-8",
+    )
+
+    op_root = tmp_path / "operations"
+    full_args = args_for(root, base, contract, op_root)
+    compact_args = args_for(root, base, contract, op_root)
+    compact_args.packet_mode = "compact"
+    FakeSpawner.calls = []
+    monkeypatch.setattr(review, "_dispatcher_path", lambda: Path("/fake/nexus-agy-dispatch"))
+    monkeypatch.setattr(review, "_spawn_dispatch", FakeSpawner.spawn)
+
+    full = review.launch_review(full_args)
+    compact = review.launch_review(compact_args)
+
+    assert full["operation"]["operation_id"] == compact["operation"]["operation_id"]
+    assert compact["action"] == "OBSERVE_EXISTING"
+    assert len(FakeSpawner.calls) == 1
+
+
+def test_compact_launch_records_bounded_compaction_evidence(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    root, base, contract = make_repo(tmp_path)
+    op_root = tmp_path / "operations"
+    args = args_for(root, base, contract, op_root)
+    args.packet_mode = "compact"
+    FakeSpawner.calls = []
+    monkeypatch.setattr(review, "_dispatcher_path", lambda: Path("/fake/nexus-agy-dispatch"))
+    monkeypatch.setattr(review, "_spawn_dispatch", FakeSpawner.spawn)
+
+    result = review.launch_review(args)
+
+    assert result["action"] == "DISPATCHED"
+    assert result["operation"]["review_packet_mode"] == "compact"
+    assert result["operation"]["review_compaction_schema"] == "nexus.agy_review_compaction.v1"
+    assert len(result["operation"]["review_compact_payload_sha256"]) == 64
