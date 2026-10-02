@@ -51,9 +51,7 @@ def _available_empty_canonical_writer_surfaces(
     roots = {
         "_CANONICAL_DEV_MCP_OPERATION_ROOT": tmp_path / "canonical-writers" / "dev-mcp",
         "_CANONICAL_RDC_OPERATION_ROOT": tmp_path / "canonical-writers" / "rdc",
-        "_CANONICAL_EXTERNAL_WORKER_OPERATION_ROOT": tmp_path
-        / "canonical-writers"
-        / "external",
+        "_CANONICAL_EXTERNAL_WORKER_OPERATION_ROOT": tmp_path / "canonical-writers" / "external",
         "_CANONICAL_AGY_OPERATION_ROOT": tmp_path / "canonical-writers" / "agy",
     }
     for attr, root in roots.items():
