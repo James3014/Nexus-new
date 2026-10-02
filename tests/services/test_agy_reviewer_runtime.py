@@ -1,4 +1,5 @@
 """Contract tests for RDC/Agy packet-mode reviewer identity and receipts."""
+
 from __future__ import annotations
 
 import json

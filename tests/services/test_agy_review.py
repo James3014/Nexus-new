@@ -1,4 +1,5 @@
 """Regression tests for the canonical RDC/Agy packet reviewer wrapper."""
+
 from __future__ import annotations
 
 import argparse
@@ -7,6 +8,8 @@ import stat
 import subprocess
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
+
+import pytest
 
 from nexus.services.agy_operation_journal import AgyOperationJournal
 
@@ -89,16 +92,11 @@ def test_identical_review_dispatch_is_deduplicated(monkeypatch, tmp_path: Path) 
     assert first["action"] == "DISPATCHED"
     assert second["action"] == "OBSERVE_EXISTING"
     assert len(FakePopen.calls) == 1
-    assert (
-        first["operation"]["operation_id"]
-        == second["operation"]["operation_id"]
-    )
+    assert first["operation"]["operation_id"] == second["operation"]["operation_id"]
     argv = FakePopen.calls[0]
     assert "--mode" in argv and argv[argv.index("--mode") + 1] == "plan"
     assert "--effort" not in argv
-    assert ["--deny", "command(*)"] == argv[
-        argv.index("--deny") : argv.index("--deny") + 2
-    ]
+    assert ["--deny", "command(*)"] == argv[argv.index("--deny") : argv.index("--deny") + 2
     assert "--write-path" not in argv
 
 

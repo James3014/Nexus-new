@@ -147,8 +147,7 @@ class ReviewSubject:
             "changed_paths": list(self.changed_paths),
             "tracked_diff_sha256": self.tracked_diff_sha256,
             "untracked_files": [
-                {"path": item["path"], "sha256": item["sha256"]}
-                for item in self.untracked_files
+                {"path": item["path"], "sha256": item["sha256"]} for item in self.untracked_files
             ],
         }
 
@@ -166,9 +165,7 @@ def collect_review_subject(
     repository = normalize_repository(remote)
     expected = normalize_repository(expected_repository)
     if repository != expected:
-        raise AgyReviewError(
-            f"REPOSITORY_IDENTITY_MISMATCH:{repository}:{expected}"
-        )
+        raise AgyReviewError(f"REPOSITORY_IDENTITY_MISMATCH:{repository}:{expected}")
 
     base = str(base_revision or "").strip().lower()
     if not _SHA1_RE.fullmatch(base):
@@ -194,10 +191,14 @@ def collect_review_subject(
         _git_bytes(root, "diff", "--name-only", "-z", base),
         label="TRACKED",
     )
-    untracked_paths = sorted(set(_decode_nul_list(
-        _git_bytes(root, "ls-files", "--others", "--exclude-standard", "-z"),
-        label="UNTRACKED",
-    )))
+    untracked_paths = sorted(
+        set(
+            _decode_nul_list(
+                _git_bytes(root, "ls-files", "--others", "--exclude-standard", "-z"),
+                label="UNTRACKED",
+            )
+        )
+    )
     untracked = tuple(_safe_untracked(root, path) for path in untracked_paths)
     changed_paths = tuple(sorted(set(tracked_paths) | set(untracked_paths)))
     if not changed_paths:
@@ -210,10 +211,7 @@ def collect_review_subject(
         "current_head": current_head,
         "changed_paths": list(changed_paths),
         "tracked_diff_sha256": tracked_diff_sha256,
-        "untracked_files": [
-            {"path": item["path"], "sha256": item["sha256"]}
-            for item in untracked
-        ],
+        "untracked_files": [{"path": item["path"], "sha256": item["sha256"]} for item in untracked],
     }
     return ReviewSubject(
         repository=repository,
@@ -280,8 +278,7 @@ def build_review_packet(
     verification = _documents(verification_receipt_files, kind="verification_receipt")
     authority = _documents(authority_excerpt_files, kind="authority_excerpt")
     evidence_bytes = sum(
-        len(item["content"].encode("utf-8"))
-        for item in [contract, *verification, *authority]
+        len(item["content"].encode("utf-8")) for item in [contract, *verification, *authority]
     )
     candidate_bytes = len(subject.tracked_diff.encode("utf-8")) + sum(
         len(item["content"].encode("utf-8"))
@@ -299,12 +296,14 @@ def build_review_packet(
         ],
     }
     evidence_inputs_sha256 = sha256_json(evidence_inputs)
-    review_effect_id = sha256_json(_effect_material(
-        subject=subject,
-        acceptance_contract_sha256=contract["sha256"],
-        reviewer_role=role,
-        evidence_inputs_sha256=evidence_inputs_sha256,
-    ))
+    review_effect_id = sha256_json(
+        _effect_material(
+            subject=subject,
+            acceptance_contract_sha256=contract["sha256"],
+            reviewer_role=role,
+            evidence_inputs_sha256=evidence_inputs_sha256,
+        )
+    )
 
     packet: dict[str, Any] = {
         "schema": REVIEW_PACKET_SCHEMA,
@@ -388,8 +387,7 @@ def verify_review_packet(packet: Mapping[str, Any]) -> None:
             for row in packet["verification_receipts"]
         ],
         "authority_excerpts": [
-            {"name": row["name"], "sha256": row["sha256"]}
-            for row in packet["authority_excerpts"]
+            {"name": row["name"], "sha256": row["sha256"]} for row in packet["authority_excerpts"]
         ],
     }
     if sha256_json(evidence_inputs) != packet.get("evidence_inputs_sha256"):
@@ -418,12 +416,14 @@ def verify_review_packet(packet: Mapping[str, Any]) -> None:
         untracked_files=tuple(dict(row) for row in untracked_rows),
         candidate_digest=str(packet.get("candidate_digest") or ""),
     )
-    expected_effect = sha256_json(_effect_material(
-        subject=subject,
-        acceptance_contract_sha256=contract_sha,
-        reviewer_role=str(packet.get("reviewer_role") or ""),
-        evidence_inputs_sha256=str(packet.get("evidence_inputs_sha256") or ""),
-    ))
+    expected_effect = sha256_json(
+        _effect_material(
+            subject=subject,
+            acceptance_contract_sha256=contract_sha,
+            reviewer_role=str(packet.get("reviewer_role") or ""),
+            evidence_inputs_sha256=str(packet.get("evidence_inputs_sha256") or ""),
+        )
+    )
     if expected_effect != packet.get("review_effect_id"):
         raise AgyReviewError("REVIEW_PACKET_EFFECT_ID_MISMATCH")
 
@@ -444,9 +444,7 @@ def build_review_prompt(packet: Mapping[str, Any]) -> str:
 
 def parse_review_verdict(output: str) -> str:
     matches = [
-        line.strip()
-        for line in str(output or "").splitlines()
-        if line.strip() in TERMINAL_VERDICTS
+        line.strip() for line in str(output or "").splitlines() if line.strip() in TERMINAL_VERDICTS
     ]
     if len(matches) != 1:
         raise AgyReviewError("REVIEW_VERDICT_NOT_EXACTLY_ONE")
@@ -500,10 +498,8 @@ def build_review_receipt(
         "packet_sha256": packet["packet_sha256"],
         "operation_id": operation_record.get("operation_id"),
         "attempt_id": operation_record.get("attempt_id"),
-        "provider": operation_record.get("observed_provider")
-        or operation_record.get("provider"),
-        "model": operation_record.get("observed_model")
-        or operation_record.get("model"),
+        "provider": operation_record.get("observed_provider") or operation_record.get("provider"),
+        "model": operation_record.get("observed_model") or operation_record.get("model"),
         "provider_session_id": operation_record.get("provider_session_id"),
         "verdict": verdict,
         "subject_stable": stable,
