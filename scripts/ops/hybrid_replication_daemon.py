@@ -211,22 +211,18 @@ def advance_all(
         try:
             after = controller.advance(task_key)
         except Exception as exc:  # noqa: BLE001 - per-task fail-closed isolation
-            failures.append(
-                {
-                    "task_key": task_key,
-                    "phase": before,
-                    "error_type": type(exc).__name__,
-                    "error": str(exc)[:500],
-                }
-            )
-            continue
-        advanced.append(
-            {
+            failures.append({
                 "task_key": task_key,
-                "before": before,
-                "after": after.get("phase"),
-            }
-        )
+                "phase": before,
+                "error_type": type(exc).__name__,
+                "error": str(exc)[:500],
+            })
+            continue
+        advanced.append({
+            "task_key": task_key,
+            "before": before,
+            "after": after.get("phase"),
+        })
     return {
         "schema": "nexus.hybrid_replication.daemon_advance.v1",
         "advanced": advanced,
