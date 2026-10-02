@@ -418,9 +418,7 @@ def verify_review_packet(packet: Mapping[str, Any]) -> None:
             raise AgyReviewError("REVIEW_PACKET_COMPACT_PAYLOAD_HASH_MISMATCH")
         if payload_sha != compaction.get("payload_sha256"):
             raise AgyReviewError("REVIEW_PACKET_COMPACTION_MANIFEST_MISMATCH")
-        if compaction.get("source_tracked_diff_sha256") != packet.get(
-            "tracked_diff_sha256"
-        ):
+        if compaction.get("source_tracked_diff_sha256") != packet.get("tracked_diff_sha256"):
             raise AgyReviewError("REVIEW_PACKET_COMPACTION_SOURCE_MISMATCH")
         if compaction.get("payload_bytes") != len(tracked_diff.encode("utf-8")):
             raise AgyReviewError("REVIEW_PACKET_COMPACTION_SIZE_MISMATCH")

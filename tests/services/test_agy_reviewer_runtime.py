@@ -296,8 +296,7 @@ def test_compact_packet_preserves_semantic_identity_and_exact_untracked_content(
     assert compact["packet_mode"] == PACKET_MODE_COMPACT
     assert compact["compaction"]["preservation_rule"] == "ALL_NON_CONTEXT_LINES"
     assert not any(
-        line.startswith(" ")
-        for line in compact["tracked_diff"].splitlines(keepends=True)
+        line.startswith(" ") for line in compact["tracked_diff"].splitlines(keepends=True)
     )
     verify_review_packet(compact)
     assert "deterministic compact diff evidence" in build_review_prompt(compact)
@@ -333,10 +332,7 @@ def test_context_heavy_diff_is_materially_smaller() -> None:
         "diff --git a/a.txt b/a.txt\n"
         "--- a/a.txt\n"
         "+++ b/a.txt\n"
-        "@@ -1,2001 +1,2001 @@\n"
-        + context
-        + "-old\n"
-        + "+new\n"
+        "@@ -1,2001 +1,2001 @@\n" + context + "-old\n" + "+new\n"
     )
 
     compact, manifest = compact_tracked_diff(source)
