@@ -1,13 +1,39 @@
-from dataclasses import replace
-from datetime import datetime, timedelta, timezone
 import re
 import subprocess
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
+import nexus.services.live_execution_provenance as provenance_module
 from nexus.orchestrator.repository_contract_gate import RepositoryContractGate
 from nexus.orchestrator.self_hosted_controller import SelfHostedDevelopmentController
 from nexus.orchestrator.task_contract import MutationMode, SelfHostedTaskContract
 from nexus.orchestrator.worktree_manager import WorktreeManager
+
+
+@pytest.fixture(autouse=True)
+def _known_empty_canonical_writer_inventory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """This module tests repository-contract behavior, not writer discovery.
+
+    Give #98 an explicit, available, empty canonical producer universe instead
+    of relying on missing producer roots to mean "no writers".
+    """
+    roots = {
+        "_CANONICAL_DEV_MCP_OPERATION_ROOT": tmp_path / "writer-inventory" / "dev-mcp",
+        "_CANONICAL_RDC_OPERATION_ROOT": tmp_path / "writer-inventory" / "rdc",
+        "_CANONICAL_EXTERNAL_WORKER_OPERATION_ROOT": tmp_path
+        / "writer-inventory"
+        / "external",
+        "_CANONICAL_AGY_OPERATION_ROOT": tmp_path / "writer-inventory" / "agy",
+    }
+    for attr, root in roots.items():
+        root.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(provenance_module, attr, root.resolve())
 
 
 def _git(cwd: Path, *args: str) -> str:
