@@ -1,16 +1,21 @@
 # Card 01 — Additive DeveloperFeedbackDecision contract/store/emitter
 
+Historical source-PR current-main binding: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`; retained as historical evidence after the Issue #428 active rebind.
+
 **artifact_authority:** current
 **owner:** James Chen
-**status:** ACTIVE / IMPLEMENTATION_FRONTIER
+**status:** COMPLETE / TERMINAL_RECONCILIATION
 **task_id:** `github-issue-79-developer-feedback-option-a-store`
 **parent_issue:** `79`
 **campaign:** `github-issue-79-developer-feedback-option-a-20260811`
 **source_main:** `70fd467ab0d29f4373616a5e98d85b014efcd4de`
+**reconciled_main:** `71ae533ec9f795477131645f96cea1c93b4f4d40`
+**previous reconciled snapshot:** `cdf2570ede5ae218f36f886b696c8da45458043a`
+**terminal_marker:** `DEVELOPER_FEEDBACK_V1_STORE_EMITTER_PROVEN`
 **decision:** `OPTION_A_ADDITIVE_COMPATIBILITY`
 **AUTO_CHAIN:** false
-**claim_ceiling:** `candidate_pr_only`
-**block_class:** `RECOVERABLE_BLOCK`
+**claim_ceiling:** `DEVELOPER_FEEDBACK_V1_STORE_EMITTER_PROVEN_ONLY`
+**block_class:** `NONE`
 
 ## Objective
 
@@ -92,11 +97,21 @@ audit. Bind candidate evidence to commit SHA and this card hash. Independent
 review remains required; this worker cannot self-approve, integrate, merge, or
 claim runtime adoption.
 
-## Exit criteria
+## Physical evidence and terminal boundary
 
-- focused RED tests fail before implementation and then GREEN;
-- compatibility tests preserve legacy imports and tail-then-filter semantics;
-- lock/observer/fsync/corruption/idempotency boundaries are evidenced;
-- only allowed files changed;
-- commit is candidate-ready and may be pushed/opened as a replacement PR only
-  after local verification.
+- Historical source main: `70fd467ab0d29f4373616a5e98d85b014efcd4de`.
+- PR #151 base: `eacbebf45be3bdd8d60177d233ce456052aabecb`.
+- PR #151 head: `329313aed70b3cb5f2c15cf102aaef417da0e884`.
+- PR #151 merge: `cab6ffdd13bb11887180017158a310dab41b7769`.
+- Exact scope: the five implementation/test files above plus this card and INDEX.
+- Owner receipts: comments `5255734957` and `5255737824`, closing Issue #79 after
+  physical merge/readback and required-check success.
+- Current-main verification: `tests/events/` plus `tests/core/test_event_bus.py` —
+  66 passed.
+- Reconciled current main: `71ae533ec9f795477131645f96cea1c93b4f4d40`.
+- Prior reconciled snapshot `cdf2570ede5ae218f36f886b696c8da45458043a` (2026-08-15) is retained as historical only.
+
+`DEVELOPER_FEEDBACK_V1_STORE_EMITTER_PROVEN` proves only the dedicated typed
+contract/store/emitter and source tests. It does not prove runtime adoption, downstream
+learning-loop closure, exactly-once notification, route/Workforce/lifecycle authority,
+approval, integration, merge, release, production, or public readiness. `AUTO_CHAIN=false`.
