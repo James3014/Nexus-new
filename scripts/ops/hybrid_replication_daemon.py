@@ -53,51 +53,16 @@ def _parse_github_timestamp(value: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def _issue_last_edited_at(repository: str, issue_number: int) -> str | None:
-    owner, name = repository.split("/", 1)
-    query = """
-    query($owner: String!, $name: String!, $number: Int!) {
-      repository(owner: $owner, name: $name) {
-        issue(number: $number) {
-          lastEditedAt
-        }
-      }
-    }
-    """
-    payload = _gh_json(
-        "graphql",
-        "-f",
-        f"query={query}",
-        "-F",
-        f"owner={owner}",
-        "-F",
-        f"name={name}",
-        "-F",
-        f"number={issue_number}",
-    )
-    data = payload.get("data") if isinstance(payload, dict) else None
-    repo_data = data.get("repository") if isinstance(data, dict) else None
-    issue = repo_data.get("issue") if isinstance(repo_data, dict) else None
-    if not isinstance(issue, dict):
-        raise RuntimeError("graphql_issue_projection_missing")
-    value = issue.get("lastEditedAt")
-    return None if value is None else str(value)
-
-
 def _capture_relevant_since(
     *,
     repository: str,
     issue: dict[str, Any],
     since: str,
 ) -> bool:
+    del repository  # repository identity remains part of the caller contract.
     boundary = _parse_github_timestamp(since)
     created_at = _parse_github_timestamp(str(issue.get("created_at") or ""))
-    if created_at >= boundary:
-        return True
-    last_edited_at = _issue_last_edited_at(repository, int(issue["number"]))
-    if last_edited_at is None:
-        return False
-    return _parse_github_timestamp(last_edited_at) >= boundary
+    return created_at >= boundary
 
 
 def _issues_since(repository: str, since: str) -> list[dict[str, Any]]:
@@ -246,18 +211,22 @@ def advance_all(
         try:
             after = controller.advance(task_key)
         except Exception as exc:  # noqa: BLE001 - per-task fail-closed isolation
-            failures.append({
-                "task_key": task_key,
-                "phase": before,
-                "error_type": type(exc).__name__,
-                "error": str(exc)[:500],
-            })
+            failures.append(
+                {
+                    "task_key": task_key,
+                    "phase": before,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc)[:500],
+                }
+            )
             continue
-        advanced.append({
-            "task_key": task_key,
-            "before": before,
-            "after": after.get("phase"),
-        })
+        advanced.append(
+            {
+                "task_key": task_key,
+                "before": before,
+                "after": after.get("phase"),
+            }
+        )
     return {
         "schema": "nexus.hybrid_replication.daemon_advance.v1",
         "advanced": advanced,
