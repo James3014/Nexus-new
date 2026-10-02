@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 from pathlib import Path
@@ -41,6 +42,48 @@ def _bind_tmp(monkeypatch, tmp_path: Path, *, predecessor: bytes) -> Path:
     return destination
 
 
+def _remote_runner(*, owner_body: str, target: bytes, tree: str = b.ACCEPTED_TREE):
+    def run(command, **_kwargs):
+        if command[:2] == ["gh", "api"]:
+            endpoint = command[2]
+            if "/issues/comments/" in endpoint:
+                payload = {"user": {"login": b.OWNER_LOGIN}, "body": owner_body}
+            elif "/git/commits/" in endpoint:
+                payload = {"tree": {"sha": tree}}
+            elif "/contents/" in endpoint:
+                payload = {
+                    "type": "file",
+                    "path": b.MANAGER_PATH,
+                    "encoding": "base64",
+                    "content": base64.b64encode(target).decode(),
+                }
+            else:
+                return _result(stderr=b"unexpected gh endpoint", code=1)
+            return _result(json.dumps(payload).encode())
+        return _result(stderr=b"unexpected command", code=1)
+
+    return run
+
+
+def test_wave2_fixed_binding_is_exact():
+    assert b.OWNER_COMMENT_ID == 5946671665
+    assert (
+        b.OWNER_COMMENT_SHA256
+        == "5d77acb3ea9f6dc9e35c47537de6bc5f55b14f0ebc37a5efeca12023fd6bb650"
+    )
+    assert b.ACCEPTED_COMMIT == "4fdd24a38a207a957328381c5f96cbeb2dbbe6b7"
+    assert b.ACCEPTED_TREE == "9c0d76c0e89db06be8a30caccb8f0744f9d082a5"
+    assert (
+        b.PREDECESSOR_SHA256
+        == "7f93a472870303d44f7c57b02362ac3f7599216576ce620334a847c4ce4a1e0c"
+    )
+    assert (
+        b.TARGET_SHA256
+        == "8813426ee9acef45c2a5c126e356b3ad35949cd012bce5c3a27cede3832c7504"
+    )
+    assert b.OPERATION_ID == "issue526-wave2-stable-manager-bootstrap-20261002-v1"
+
+
 def test_dry_run_proves_exact_transition_without_mutation(monkeypatch, tmp_path):
     predecessor = b"old-manager"
     target = b"new-manager"
@@ -58,6 +101,27 @@ def test_dry_run_proves_exact_transition_without_mutation(monkeypatch, tmp_path)
     assert result["status"] == "READY"
     assert result["effect_started"] is False
     assert destination.read_bytes() == predecessor
+
+
+def test_missing_mirror_uses_read_only_remote_source(monkeypatch, tmp_path):
+    predecessor = b"old-manager"
+    target = b"new-manager"
+    destination = _bind_tmp(monkeypatch, tmp_path, predecessor=predecessor)
+    b.REPOSITORY_MIRROR.rmdir()
+    monkeypatch.setattr(b, "PREDECESSOR_SHA256", hashlib.sha256(predecessor).hexdigest())
+    monkeypatch.setattr(b, "TARGET_SHA256", hashlib.sha256(target).hexdigest())
+    owner_body = "owner activation"
+    monkeypatch.setattr(b, "OWNER_COMMENT_SHA256", hashlib.sha256(owner_body.encode()).hexdigest())
+
+    result = b.apply_bootstrap(
+        dry_run=True,
+        runner=_remote_runner(owner_body=owner_body, target=target),
+    )
+
+    assert result["status"] == "READY"
+    assert result["effect_started"] is False
+    assert destination.read_bytes() == predecessor
+    assert not b.REPOSITORY_MIRROR.exists()
 
 
 def test_apply_is_exact_atomic_and_replay_idempotent(monkeypatch, tmp_path):
