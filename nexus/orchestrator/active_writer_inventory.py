@@ -445,7 +445,7 @@ class ActiveWriterInventoryCollector:
             controller_root=ctrl_root,
             expected_revision=expected_revision,
             source_name="DEV_MCP",
-            required=bool(os.getenv("NEXUS_DEV_MCP_OPERATION_ROOT")),
+            required=True,
         )
         if err is not None:
             return err
@@ -465,7 +465,7 @@ class ActiveWriterInventoryCollector:
             controller_root=ctrl_root,
             expected_revision=expected_revision,
             source_name="RDC",
-            required=bool(os.getenv("NEXUS_RDC_OPERATION_ROOT")),
+            required=True,
         )
         if err is not None:
             return err
@@ -474,8 +474,7 @@ class ActiveWriterInventoryCollector:
         # 4. External Workers (Codex, Cline, OpenCode, Grok)
         scanned_sources.append("EXTERNAL_WORKERS")
         ext_root = self._resolve_external_worker_root()
-        ext_required = bool(os.getenv("NEXUS_EXTERNAL_WORKER_OPERATION_ROOT"))
-        if ext_required and not ext_root.exists():
+        if not ext_root.exists():
             return ActiveWriterInventoryResult(
                 active_writers=[],
                 complete=False,
@@ -495,7 +494,7 @@ class ActiveWriterInventoryCollector:
                 controller_root=ctrl_root,
                 expected_revision=expected_revision,
                 source_name=f"EXTERNAL_{provider.upper()}",
-                required=ext_required and (ext_root / provider).exists(),
+                required=False,
             )
             if err is not None:
                 return err
@@ -511,7 +510,7 @@ class ActiveWriterInventoryCollector:
             controller_root=ctrl_root,
             expected_revision=expected_revision,
             source_name="AGY",
-            required=bool(os.getenv("NEXUS_AGY_OPERATION_ROOT")),
+            required=True,
         )
         if err is not None:
             return err
