@@ -16,6 +16,7 @@ import nexus.services.live_execution_provenance as provenance_module
 from nexus.services.agy_operation_journal import AgyOperationJournal
 from nexus.services.direct_operation_journal import DirectOperationJournal
 from nexus.services.live_execution_provenance import (
+    EXECUTION_LANE_DIRECT_CANONICAL,
     EXECUTION_LANE_DIRECT_DELEGATED,
     EXECUTION_LANE_UNKNOWN,
     EXECUTION_STATE_ACTIVE,
@@ -23,7 +24,10 @@ from nexus.services.live_execution_provenance import (
     EXECUTION_STATE_STALE,
     EXECUTION_STATE_UNKNOWN,
     PRODUCER_SCHEMA_AGY_OPERATION_V1,
+    PRODUCER_SCHEMA_DEV_MCP_V1,
     PRODUCER_SCHEMA_EXTERNAL_WORKER_V1,
+    PRODUCER_SCHEMA_RDC_V1,
+    TRANSPORT_KIND_DEV_MCP,
     TRANSPORT_KIND_LOCAL_RUNNER,
     TRANSPORT_KIND_RDC,
     LiveExecutionProvenance,
@@ -550,3 +554,324 @@ def test_runtime_env_mutation_cannot_rebind_canonical_producer_root(tmp_path: Pa
     )
     with pytest.raises(ProvenanceContractError, match="canonical producer root"):
         read_operation_journal_evidence(journal, "codexop_" + "c" * 32)
+
+
+def test_canonical_dev_mcp_journal_reader_can_produce_live_provenance(tmp_path: Path):
+    mcp_root = (tmp_path / "dev-mcp").resolve()
+    provenance_module._CANONICAL_DEV_MCP_OPERATION_ROOT = mcp_root
+    journal = DirectOperationJournal(
+        mcp_root,
+        schema=PRODUCER_SCHEMA_DEV_MCP_V1,
+        operation_prefix="devmcpop_",
+    )
+    op_id = journal.new_operation_id()
+    journal.create(
+        operation_id=op_id,
+        attempt_id="attempt-mcp-1",
+        cwd=str(tmp_path),
+        provider="openai",
+        model="gpt-4o",
+        effort="high",
+        prompt_sha256="mcp1234",
+        runtime_revision="rev-mcp",
+        initial_fields={
+            "repo_root": "James3014/Nexus-new",
+            "task_id": "task-mcp-1",
+        },
+    )
+    journal.update(
+        op_id,
+        status="RUNNING",
+        phase="RUNNING",
+        host_id="host-m5",
+        provider_session_id="session-mcp-1",
+        pid=9001,
+        observed_provider="openai",
+        observed_model="chatgpt-direct",
+        last_heartbeat_at=_iso_now(),
+    )
+    evidence = read_operation_journal_evidence(journal, op_id)
+    assert evidence.record["schema"] == PRODUCER_SCHEMA_DEV_MCP_V1
+    assert evidence.transport_kind == TRANSPORT_KIND_DEV_MCP
+
+    context = {
+        "repository": "James3014/Nexus-new",
+        "task_id": "task-mcp-1",
+        "attempt_id": "attempt-mcp-1",
+        "operation_id": op_id,
+        "execution_lane": EXECUTION_LANE_DIRECT_CANONICAL,
+        "worker": "main-gpt",
+        "provider": "openai",
+        "model": "gpt-4o",
+    }
+    result = build_live_execution_provenance(context, evidence)
+    assert result.execution_state == EXECUTION_STATE_ACTIVE
+    assert result.execution_lane == EXECUTION_LANE_DIRECT_CANONICAL
+    assert result.transport_kind == TRANSPORT_KIND_DEV_MCP
+    assert result.task_id == "task-mcp-1"
+    assert result.attempt_id == "attempt-mcp-1"
+    assert result.operation_id == op_id
+    assert result.host_id == "host-m5"
+    assert result.session_id == "session-mcp-1"
+    assert result.pid == 9001
+    assert result.requested_provider == "openai"
+    assert result.requested_model == "gpt-4o"
+    assert result.observed_provider == "openai"
+    assert result.observed_model == "chatgpt-direct"
+    assert evidence.source_ref in result.evidence_refs
+
+
+def test_canonical_rdc_journal_reader_can_produce_live_provenance(tmp_path: Path):
+    rdc_root = (tmp_path / "rdc").resolve()
+    provenance_module._CANONICAL_RDC_OPERATION_ROOT = rdc_root
+    journal = DirectOperationJournal(
+        rdc_root,
+        schema=PRODUCER_SCHEMA_RDC_V1,
+        operation_prefix="rdcop_",
+    )
+    op_id = journal.new_operation_id()
+    journal.create(
+        operation_id=op_id,
+        attempt_id="attempt-rdc-1",
+        cwd=str(tmp_path),
+        provider="remote",
+        model="rdc-worker",
+        effort="default",
+        prompt_sha256="rdc1234",
+        runtime_revision="rev-rdc",
+        initial_fields={
+            "repo_root": "James3014/Nexus-new",
+            "task_id": "task-rdc-1",
+        },
+    )
+    journal.update(
+        op_id,
+        status="RUNNING",
+        phase="RUNNING",
+        host_id="host-rdc-node",
+        provider_session_id="session-rdc-1",
+        pid=9002,
+        observed_provider="remote-desktop",
+        observed_model="desktop-commander",
+        last_heartbeat_at=_iso_now(),
+    )
+    evidence = read_operation_journal_evidence(journal, op_id)
+    assert evidence.record["schema"] == PRODUCER_SCHEMA_RDC_V1
+    assert evidence.transport_kind == TRANSPORT_KIND_RDC
+
+    context = {
+        "repository": "James3014/Nexus-new",
+        "task_id": "task-rdc-1",
+        "attempt_id": "attempt-rdc-1",
+        "operation_id": op_id,
+        "execution_lane": EXECUTION_LANE_DIRECT_DELEGATED,
+        "worker": "rdc-delegated",
+        "provider": "remote",
+        "model": "rdc-worker",
+    }
+    result = build_live_execution_provenance(context, evidence)
+    assert result.execution_state == EXECUTION_STATE_ACTIVE
+    assert result.execution_lane == EXECUTION_LANE_DIRECT_DELEGATED
+    assert result.transport_kind == TRANSPORT_KIND_RDC
+    assert result.task_id == "task-rdc-1"
+    assert result.attempt_id == "attempt-rdc-1"
+    assert result.operation_id == op_id
+    assert result.host_id == "host-rdc-node"
+    assert result.session_id == "session-rdc-1"
+    assert result.pid == 9002
+    assert result.requested_provider == "remote"
+    assert result.requested_model == "rdc-worker"
+    assert result.observed_provider == "remote-desktop"
+    assert result.observed_model == "desktop-commander"
+    assert evidence.source_ref in result.evidence_refs
+
+
+def test_concurrent_direct_canonical_and_rdc_delegated_readback_in_view(tmp_path: Path):
+    mcp_root = (tmp_path / "dev-mcp").resolve()
+    rdc_root = (tmp_path / "rdc").resolve()
+    provenance_module._CANONICAL_DEV_MCP_OPERATION_ROOT = mcp_root
+    provenance_module._CANONICAL_RDC_OPERATION_ROOT = rdc_root
+
+    # Producer 1: Direct Main GPT via Dev MCP
+    mcp_journal = DirectOperationJournal(
+        mcp_root,
+        schema=PRODUCER_SCHEMA_DEV_MCP_V1,
+        operation_prefix="devmcpop_",
+    )
+    mcp_op_id = mcp_journal.new_operation_id()
+    mcp_journal.create(
+        operation_id=mcp_op_id,
+        attempt_id="attempt-direct-1",
+        cwd=str(tmp_path),
+        provider="openai",
+        model="gpt-4o",
+        effort="high",
+        prompt_sha256="mcp1",
+        runtime_revision="rev-mcp",
+        initial_fields={"repo_root": "James3014/Nexus-new", "task_id": "task-direct-1"},
+    )
+    mcp_journal.update(
+        mcp_op_id,
+        status="RUNNING",
+        phase="RUNNING",
+        host_id="host-main",
+        provider_session_id="session-direct",
+        pid=1001,
+        observed_provider="openai",
+        observed_model="gpt-4o",
+        last_heartbeat_at=_iso_now(),
+    )
+
+    # Producer 2: RDC Delegated Worker
+    rdc_journal = DirectOperationJournal(
+        rdc_root,
+        schema=PRODUCER_SCHEMA_RDC_V1,
+        operation_prefix="rdcop_",
+    )
+    rdc_op_id = rdc_journal.new_operation_id()
+    rdc_journal.create(
+        operation_id=rdc_op_id,
+        attempt_id="attempt-delegated-1",
+        cwd=str(tmp_path),
+        provider="remote",
+        model="rdc-worker",
+        effort="default",
+        prompt_sha256="rdc1",
+        runtime_revision="rev-rdc",
+        initial_fields={"repo_root": "James3014/Nexus-new", "task_id": "task-delegated-1"},
+    )
+    rdc_journal.update(
+        rdc_op_id,
+        status="RUNNING",
+        phase="RUNNING",
+        host_id="host-rdc",
+        provider_session_id="session-rdc",
+        pid=1002,
+        observed_provider="remote-desktop",
+        observed_model="desktop-commander",
+        last_heartbeat_at=_iso_now(),
+    )
+
+    # Read back through owning producer adapters
+    mcp_evidence = read_operation_journal_evidence(mcp_journal, mcp_op_id)
+    rdc_evidence = read_operation_journal_evidence(rdc_journal, rdc_op_id)
+
+    mcp_context = {
+        "repository": "James3014/Nexus-new",
+        "task_id": "task-direct-1",
+        "attempt_id": "attempt-direct-1",
+        "operation_id": mcp_op_id,
+        "execution_lane": EXECUTION_LANE_DIRECT_CANONICAL,
+        "worker": "main-gpt",
+        "provider": "openai",
+        "model": "gpt-4o",
+    }
+    rdc_context = {
+        "repository": "James3014/Nexus-new",
+        "task_id": "task-delegated-1",
+        "attempt_id": "attempt-delegated-1",
+        "operation_id": rdc_op_id,
+        "execution_lane": EXECUTION_LANE_DIRECT_DELEGATED,
+        "worker": "rdc-worker",
+        "provider": "remote",
+        "model": "rdc-worker",
+    }
+
+    mcp_prov = build_live_execution_provenance(mcp_context, mcp_evidence)
+    rdc_prov = build_live_execution_provenance(rdc_context, rdc_evidence)
+
+    # Ingest into unified observational view
+    view = LiveExecutionProvenanceView()
+    view.ingest(mcp_prov)
+    view.ingest(rdc_prov)
+
+    # Both records are distinct and accessible concurrently
+    direct_readback = view.get("James3014/Nexus-new", "task-direct-1", "attempt-direct-1")
+    assert direct_readback is not None
+    assert direct_readback.execution_lane == EXECUTION_LANE_DIRECT_CANONICAL
+    assert direct_readback.transport_kind == TRANSPORT_KIND_DEV_MCP
+
+    delegated_readback = view.get("James3014/Nexus-new", "task-delegated-1", "attempt-delegated-1")
+    assert delegated_readback is not None
+    assert delegated_readback.execution_lane == EXECUTION_LANE_DIRECT_DELEGATED
+    assert delegated_readback.transport_kind == TRANSPORT_KIND_RDC
+
+    all_live = view.list_live(repository="James3014/Nexus-new")
+    assert len(all_live) == 2
+
+    direct_only = view.list_live(execution_lane=EXECUTION_LANE_DIRECT_CANONICAL)
+    assert len(direct_only) == 1
+    assert direct_only[0].task_id == "task-direct-1"
+
+    delegated_only = view.list_live(execution_lane=EXECUTION_LANE_DIRECT_DELEGATED)
+    assert len(delegated_only) == 1
+    assert delegated_only[0].task_id == "task-delegated-1"
+
+
+def test_rdc_cannot_serve_as_execution_authority_lane(tmp_path: Path):
+    rdc_root = (tmp_path / "rdc").resolve()
+    provenance_module._CANONICAL_RDC_OPERATION_ROOT = rdc_root
+    journal = DirectOperationJournal(
+        rdc_root,
+        schema=PRODUCER_SCHEMA_RDC_V1,
+        operation_prefix="rdcop_",
+    )
+    op_id = journal.new_operation_id()
+    journal.create(
+        operation_id=op_id,
+        attempt_id="attempt-rdc-lane",
+        cwd=str(tmp_path),
+        provider="remote",
+        model="rdc-worker",
+        effort="default",
+        prompt_sha256="rdc",
+        runtime_revision="rev-rdc",
+        initial_fields={"repo_root": "James3014/Nexus-new", "task_id": "task-rdc-lane"},
+    )
+    journal.update(
+        op_id,
+        status="RUNNING",
+        phase="RUNNING",
+        host_id="host-rdc",
+        provider_session_id="session-rdc",
+        pid=123,
+        last_heartbeat_at=_iso_now(),
+    )
+    evidence = read_operation_journal_evidence(journal, op_id)
+
+    # Attempting to declare RDC as an execution lane fails closed
+    context = {
+        "repository": "James3014/Nexus-new",
+        "task_id": "task-rdc-lane",
+        "attempt_id": "attempt-rdc-lane",
+        "operation_id": op_id,
+        "execution_lane": "RDC",
+    }
+    result = build_live_execution_provenance(context, evidence)
+    assert result.execution_state == EXECUTION_STATE_UNKNOWN
+    assert result.phase == "MISSING_OR_UNRECOGNIZED_EXECUTION_LANE"
+
+
+def test_canonical_dev_mcp_and_rdc_at_noncanonical_roots_are_rejected(tmp_path: Path):
+    provenance_module._CANONICAL_DEV_MCP_OPERATION_ROOT = (tmp_path / "canonical-mcp").resolve()
+    provenance_module._CANONICAL_RDC_OPERATION_ROOT = (tmp_path / "canonical-rdc").resolve()
+
+    bad_mcp = DirectOperationJournal(
+        tmp_path / "attacker-mcp",
+        schema=PRODUCER_SCHEMA_DEV_MCP_V1,
+        operation_prefix="devmcpop_",
+    )
+    with pytest.raises(
+        ProvenanceContractError, match="Dev MCP journal is not bound to its canonical producer root"
+    ):
+        read_operation_journal_evidence(bad_mcp, "devmcpop_" + "a" * 32)
+
+    bad_rdc = DirectOperationJournal(
+        tmp_path / "attacker-rdc",
+        schema=PRODUCER_SCHEMA_RDC_V1,
+        operation_prefix="rdcop_",
+    )
+    with pytest.raises(
+        ProvenanceContractError, match="RDC journal is not bound to its canonical producer root"
+    ):
+        read_operation_journal_evidence(bad_rdc, "rdcop_" + "b" * 32)
