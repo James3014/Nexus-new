@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Durable packet-mode reviewer wrapper over the canonical Nexus Agy dispatcher."""
+
 from __future__ import annotations
 
 import argparse
@@ -38,11 +39,11 @@ from nexus.services.agy_reviewer_profiles import (  # noqa: E402
     resolve_reviewer_launch_profile,
 )
 from nexus.services.agy_reviewer_runtime import (  # noqa: E402
-    AgyReviewError,
     DEFAULT_COMPACT_PACKET_MAX_BYTES,
     PACKET_MODE_COMPACT,
     PACKET_MODE_FULL,
     REVIEW_PROFILE_VERSION,
+    AgyReviewError,
     atomic_private_json,
     atomic_private_text,
     build_review_packet,
@@ -195,9 +196,7 @@ def _current_projection(
         else:
             record = journal.update(
                 operation_id,
-                review_state=(
-                    "TERMINAL" if receipt["subject_stable"] else "STALE_SUBJECT"
-                ),
+                review_state=("TERMINAL" if receipt["subject_stable"] else "STALE_SUBJECT"),
                 review_verdict=receipt["verdict"],
                 review_applicable=receipt["review_applicable"],
                 subject_stable=receipt["subject_stable"],
@@ -331,9 +330,7 @@ def launch_review(args: argparse.Namespace) -> dict[str, Any]:
             provider="agy",
             model=profile.model,
             effort=args.effort,
-            prompt_sha256=hashlib.sha256(
-                build_review_prompt(packet).encode("utf-8")
-            ).hexdigest(),
+            prompt_sha256=hashlib.sha256(build_review_prompt(packet).encode("utf-8")).hexdigest(),
             runtime_revision=None,
             initial_fields={
                 **_binding_fields(packet),
