@@ -30,6 +30,11 @@ def test_launcher_uses_full_active_account_home_and_cleans_ephemeral_copy(tmp_pa
     )
     (profile / "profile-marker.txt").write_text("active-profile", encoding="utf-8")
 
+    # Negative identity control: the owner HOME contains a conflicting .gemini
+    # identity. The launcher must still copy the canonical account snapshot HOME.
+    (original_home / ".gemini").mkdir(parents=True, exist_ok=True)
+    (original_home / ".gemini" / "auth.json").write_text("stale-owner-auth", encoding="utf-8")
+
     stale = manager_root.parent / "live-home"
     (stale / ".gemini").mkdir(parents=True)
     (stale / "profile-marker.txt").write_text("stale-live-home", encoding="utf-8")
@@ -73,11 +78,22 @@ if len(sys.argv) >= 2 and sys.argv[1] == "agy":
         "hcom_dir": os.environ.get("HCOM_DIR"),
         "profile_marker": (home / "profile-marker.txt").read_text(),
         "auth_present": (home / ".gemini" / "auth.json").is_file(),
+        "auth_value": (home / ".gemini" / "auth.json").read_text(),
         "keychain_present": (home / "Library" / "Keychains" / "agy.keychain-db").is_file(),
         "stale_marker": (home / "stale-marker.txt").exists(),
         "sensitive_present": any(
             key in os.environ
-            for key in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY")
+            for key in (
+                "GEMINI_API_KEY",
+                "GOOGLE_API_KEY",
+                "GOOGLE_GENAI_API_KEY",
+                "GH_TOKEN",
+                "GITHUB_TOKEN",
+                "GH_ENTERPRISE_TOKEN",
+                "GITHUB_ENTERPRISE_TOKEN",
+                "GITHUB_PAT",
+                "GITHUB_ACTIONS_TOKEN",
+            )
         ),
     }
     pathlib.Path(os.environ["HCOM_TEST_RECORD"]).write_text(json.dumps(payload))
@@ -100,6 +116,12 @@ raise SystemExit(2)
         "GEMINI_API_KEY": "must-not-leak",
         "GOOGLE_API_KEY": "must-not-leak",
         "GOOGLE_GENAI_API_KEY": "must-not-leak",
+        "GH_TOKEN": "must-not-leak",
+        "GITHUB_TOKEN": "must-not-leak",
+        "GH_ENTERPRISE_TOKEN": "must-not-leak",
+        "GITHUB_ENTERPRISE_TOKEN": "must-not-leak",
+        "GITHUB_PAT": "must-not-leak",
+        "GITHUB_ACTIONS_TOKEN": "must-not-leak",
     })
 
     proc = subprocess.run(
@@ -115,6 +137,7 @@ raise SystemExit(2)
     assert payload["args"] == ["--model", "gpt-oss-120b-medium"]
     assert payload["profile_marker"] == "active-profile"
     assert payload["auth_present"] is True
+    assert payload["auth_value"] == "active-auth"
     assert payload["keychain_present"] is True
     assert payload["sensitive_present"] is False
     assert payload["gemini_home"] == payload["home"]
