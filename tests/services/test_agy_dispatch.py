@@ -1410,3 +1410,267 @@ def test_pre_provider_wrapper_exception_is_not_outcome_unknown(
     assert record["failure_kind"] == "WRAPPER_EXCEPTION_PRE_PROVIDER:RuntimeError"
     assert record["reconciliation"]["result"] == "WRAPPER_EXCEPTION_BEFORE_PROVIDER"
     assert record["reconciliation"]["retry_permitted"] is False
+
+
+def test_unsupported_effort_for_claude_opus_fails_before_claim(tmp_path: Path) -> None:
+    coordinator = _WriteScopeCoordinator(tmp_path / "home")
+    events: list[dict[str, object]] = []
+
+    code = dispatch.dispatch_run(
+        prompt="run model",
+        cwd=str(tmp_path),
+        mode="plan",
+        model="claude-opus-4-6",
+        effort="low",
+        coordinator=coordinator,
+        operation_hook=events.append,
+    )
+
+    assert code == 64
+    assert coordinator.acquire_count == 0
+    assert any(
+        e.get("failure_kind")
+        == "DISPATCH_MODEL_CONTRACT_REJECTED:UNSUPPORTED_EFFORT_FOR_MODEL:claude-opus-4-6:low"
+        and e.get("provider_effect") is False
+        for e in events
+    )
+
+
+def test_provider_exit_invalid_model_selection_classified_as_model_contract_rejected(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+    events: list[dict[str, object]] = []
+
+    code = dispatch.dispatch_run(
+        prompt="run model",
+        cwd=str(tmp_path),
+        mode="plan",
+        model="claude-opus-4-6",
+        coordinator=coordinator,
+        run_agy_fn=lambda **_kwargs: (
+            1,
+            "",
+            'error: invalid model selection (--model "claude-opus-4-6" --effort "low"): --effort is not supported for model "claude-opus-4-6"\n',
+            False,
+            50,
+        ),
+        operation_hook=events.append,
+    )
+
+    assert code == 1
+    assert any(e.get("failure_kind") == "DISPATCH_MODEL_CONTRACT_REJECTED" for e in events)
+    assert coordinator.acquire_count == 1
+    assert coordinator.claim.released is True
+
+
+def test_headless_tool_permission_denial_classified_as_failure(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    target = work / "file.txt"
+    coordinator = _WriteScopeCoordinator(home)
+    events: list[dict[str, object]] = []
+
+    code = dispatch.dispatch_run(
+        prompt="make edit",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(target)],
+        coordinator=coordinator,
+        run_agy_fn=lambda **_kwargs: (
+            0,
+            "",
+            'jetski: no output produced — a tool required the "command" permission that headless mode cannot prompt for, so it was auto-denied.\n',
+            False,
+            100,
+        ),
+        operation_hook=events.append,
+    )
+
+    assert code == 1
+    assert any(e.get("failure_kind") == "HEADLESS_TOOL_PERMISSION_DENIED" for e in events)
+    assert coordinator.acquire_count == 1
+    assert coordinator.claim.released is True
+
+
+def test_run_agy_timeline_and_baseline_effects(tmp_path: Path, monkeypatch) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "-C", str(work), "init"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(work), "config", "user.email", "test@test.com"], check=True)
+    subprocess.run(["git", "-C", str(work), "config", "user.name", "Test"], check=True)
+    (work / "tracked.txt").write_text("initial", encoding="utf-8")
+    subprocess.run(["git", "-C", str(work), "add", "tracked.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(work), "commit", "-m", "init"], check=True, capture_output=True
+    )
+
+    # Create pre-existing dirty file in worktree (donor change)
+    (work / "pre_existing_dirty.txt").write_text("dirty before launch", encoding="utf-8")
+
+    # Create fake agy script
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_agy = bin_dir / "agy"
+    script = """#!/usr/bin/env python3
+import sys, time, os
+from pathlib import Path
+
+# Write stderr diagnostics first
+sys.stderr.write("[DEBUG] Bootstrap initializing...\\n")
+sys.stderr.flush()
+time.sleep(0.1)
+
+# Write stdout model stream
+sys.stdout.write("Model output streaming line 1\\n")
+sys.stdout.flush()
+time.sleep(0.1)
+
+# Modify a new file
+cwd = Path(os.environ.get("AGY_TEST_CWD", "."))
+(cwd / "new_effect.txt").write_text("created by agy\\n", encoding="utf-8")
+time.sleep(0.1)
+sys.exit(0)
+"""
+    fake_agy.write_text(script, encoding="utf-8")
+    fake_agy.chmod(0o755)
+
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("AGY_TEST_CWD", str(work))
+
+    events: list[dict[str, object]] = []
+    code, out, err, timed_out, wall_ms = dispatch.run_agy(
+        env=os.environ.copy(),
+        prompt="hello",
+        cwd=str(work),
+        mode="accept-edits",
+        model="gemini-3.8-flash-high",
+        effort=None,
+        timeout=10,
+        operation_hook=events.append,
+    )
+
+    assert code == 0
+    assert "Model output streaming line 1" in out
+    assert "[DEBUG] Bootstrap initializing..." in err
+
+    # Verify first_stream_activity_at and first_effect_at were recorded
+    stream_events = [e for e in events if "first_stream_activity_at" in e]
+    assert len(stream_events) >= 1
+
+    effect_events = [e for e in events if "first_effect_at" in e]
+    assert len(effect_events) >= 1
+    assert "time_to_first_effect_ms" in effect_events[0]
+
+    # Verify process state transitions
+    running_events = [e for e in events if e.get("provider_process_state") == "RUNNING"]
+    assert len(running_events) >= 1
+    exited_events = [e for e in events if e.get("provider_process_state") == "EXITED"]
+    assert len(exited_events) >= 1
+
+
+def test_independent_quota_after_effect_never_rotates(tmp_path):
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    home = tmp_path / "home"
+    home.mkdir()
+
+    class Coordinator(_WriteScopeCoordinator):
+        rotation_count = 0
+
+        def rotate_claim(self, **kwargs):
+            self.rotation_count += 1
+            raise RuntimeError("must not rotate after source effect")
+
+    coordinator = Coordinator(home)
+    calls = []
+    events = []
+
+    def runner(**kwargs):
+        calls.append(True)
+        (work / "changed.txt").write_text("partial effect")
+        return 1, "", "RESOURCE_EXHAUSTED: quota exhausted", False, 10
+
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(work / "changed.txt")],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+    assert code != 0
+    assert coordinator.rotation_count == 0
+    assert len(calls) == 1
+    classified = [e for e in events if e.get("phase") == "CLASSIFYING_FAILURE"][-1]
+    assert classified["failure_kind"] == "PROVIDER_QUOTA_EXHAUSTED_AFTER_EFFECT"
+    assert classified["provider_effect"] is True
+    assert classified["reconciliation_required"] is True
+
+
+def test_independent_headless_denial_only_in_provider_log_is_failure(tmp_path, monkeypatch):
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    binary = tmp_path / "agy"
+    binary.write_text(
+        "#!" + sys.executable + "\nimport sys\nfrom pathlib import Path\n"
+        "p = Path(sys.argv[sys.argv.index('--log-file') + 1])\n"
+        "p.write_text('Print mode: soft-denying tool confirmation RunCommand at step 2\\n')\n"
+    )
+    binary.chmod(0o700)
+    monkeypatch.setattr(dispatch.shutil, "which", lambda name: str(binary))
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(tmp_path / "agy.log"))
+    events = []
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(work / "changed.txt")],
+        coordinator=_WriteScopeCoordinator(home),
+        operation_hook=events.append,
+    )
+    assert code != 0
+    assert any(e.get("failure_kind") == "HEADLESS_TOOL_PERMISSION_DENIED" for e in events)
+
+
+def test_independent_baseline_failure_stays_unknown(tmp_path, monkeypatch):
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    (work / "donor.txt").write_text("not this provider")
+    binary = tmp_path / "agy"
+    binary.write_text("#!" + sys.executable + "\nimport time\ntime.sleep(0.15)\n")
+    binary.chmod(0o700)
+    monkeypatch.setattr(dispatch.shutil, "which", lambda name: str(binary))
+    original = dispatch.direct_operation_journal.capture_source_baseline
+    calls = []
+
+    def fail_first(cwd):
+        calls.append(True)
+        if len(calls) == 1:
+            raise OSError("baseline unreadable")
+        return original(cwd)
+
+    monkeypatch.setattr(dispatch.direct_operation_journal, "capture_source_baseline", fail_first)
+    events = []
+    dispatch.run_agy(
+        env=os.environ.copy(),
+        prompt="test",
+        cwd=str(work),
+        mode="plan",
+        model=None,
+        effort=None,
+        timeout=1,
+        operation_hook=events.append,
+    )
+    assert not any(e.get("first_effect_at") for e in events)
+    assert any(e.get("effect_observation_error") for e in events)

@@ -45,6 +45,14 @@ PUBLIC_OPERATION_KEYS = (
     "created_at",
     "started_at",
     "last_heartbeat_at",
+    "dispatcher_heartbeat_at",
+    "provider_pid",
+    "provider_process_state",
+    "provider_started_at",
+    "provider_stream_last_activity_at",
+    "first_stream_activity_at",
+    "first_effect_at",
+    "time_to_first_effect_ms",
     "last_output_at",
     "finished_at",
     "attempts",
@@ -437,6 +445,14 @@ class DirectOperationJournal:
             "created_at": now,
             "started_at": None,
             "last_heartbeat_at": None,
+            "dispatcher_heartbeat_at": None,
+            "provider_pid": None,
+            "provider_process_state": "IDLE",
+            "provider_started_at": None,
+            "provider_stream_last_activity_at": None,
+            "first_stream_activity_at": None,
+            "first_effect_at": None,
+            "time_to_first_effect_ms": None,
             "last_output_at": None,
             "finished_at": None,
             "attempts": 0,
@@ -520,6 +536,7 @@ class DirectOperationJournal:
             "phase": "STARTING",
             "started_at": now,
             "last_heartbeat_at": now,
+            "dispatcher_heartbeat_at": now,
         }
         if pid is not None:
             changes["pid"] = int(pid)
@@ -534,7 +551,10 @@ class DirectOperationJournal:
         **changes: Any,
     ) -> dict[str, Any]:
         now = utc_now()
-        payload: dict[str, Any] = {"last_heartbeat_at": now}
+        payload: dict[str, Any] = {
+            "last_heartbeat_at": now,
+            "dispatcher_heartbeat_at": now,
+        }
         if output_observed:
             payload["last_output_at"] = now
         if phase is not None:
@@ -554,11 +574,13 @@ class DirectOperationJournal:
     ) -> dict[str, Any]:
         if status not in TERMINAL_STATES:
             raise DirectOperationJournalError("TERMINAL_STATUS_REQUIRED")
+        now = utc_now()
         payload: dict[str, Any] = {
             "status": status,
             "phase": "TERMINAL",
-            "finished_at": utc_now(),
-            "last_heartbeat_at": utc_now(),
+            "finished_at": now,
+            "last_heartbeat_at": now,
+            "dispatcher_heartbeat_at": now,
             "exit_code": exit_code,
             "failure_kind": failure_kind,
         }
@@ -616,6 +638,13 @@ class DirectOperationJournal:
             except ValueError:
                 heartbeat_age = None
 
+        extra_changes: dict[str, Any] = {}
+        provider_pid = record.get("provider_pid")
+        if isinstance(provider_pid, int) and provider_pid > 0:
+            extra_changes["provider_process_state"] = (
+                "RUNNING" if _process_alive(provider_pid) else "EXITED"
+            )
+
         if not pid_alive:
             return self.mark_terminal(
                 operation_id,
@@ -630,6 +659,7 @@ class DirectOperationJournal:
                     "heartbeat_age_seconds": heartbeat_age,
                     "retry_permitted": False,
                 },
+                **extra_changes,
             )
 
         result = (
@@ -646,6 +676,7 @@ class DirectOperationJournal:
                 "heartbeat_age_seconds": heartbeat_age,
                 "retry_permitted": False,
             },
+            **extra_changes,
         )
 
 

@@ -272,6 +272,48 @@ def test_review_metadata_flows_through_agy_facade_and_public_view(
     assert "private_review_secret" not in public
 
 
+def test_timeline_fields_project_through_public_view(tmp_path: Path) -> None:
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id, _ = _create(journal, tmp_path)
+
+    now = "2026-10-03T12:00:00+00:00"
+    journal.update(
+        operation_id,
+        provider_started_at=now,
+        first_stream_activity_at=now,
+        provider_stream_last_activity_at=now,
+        first_effect_at=now,
+        time_to_first_effect_ms=1234,
+        provider_pid=12345,
+        provider_process_state="RUNNING",
+    )
+
+    record = journal.read(operation_id)
+    public = public_operation_view(record)
+
+    assert public["provider_started_at"] == now
+    assert public["first_stream_activity_at"] == now
+    assert public["provider_stream_last_activity_at"] == now
+    assert public["first_effect_at"] == now
+    assert public["time_to_first_effect_ms"] == 1234
+    assert public["provider_pid"] == 12345
+    assert public["provider_process_state"] == "RUNNING"
+
+
+def test_reconcile_checks_real_provider_pid_liveness(tmp_path: Path) -> None:
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id, _ = _create(journal, tmp_path)
+    journal.update(
+        operation_id,
+        provider_pid=999_999_999,
+        provider_process_state="RUNNING",
+    )
+
+    reconciled = journal.reconcile(operation_id)
+
+    assert reconciled["provider_process_state"] == "EXITED"
+
+
 def _git(root: Path, *args: str) -> str:
     proc = subprocess.run(
         ["git", *args],

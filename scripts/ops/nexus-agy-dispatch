@@ -89,6 +89,7 @@ AgyOperationJournalError = _agy_operation_journal.AgyOperationJournalError
 public_operation_view = _agy_operation_journal.public_operation_view
 new_operation_id = _agy_operation_journal.new_operation_id
 new_attempt_id = _agy_operation_journal.new_attempt_id
+direct_operation_journal = import_module("nexus.services.direct_operation_journal")
 
 OPERATION_ROOT = Path(
     os.getenv(
@@ -107,7 +108,7 @@ QUOTA_SNAPSHOT_PATH = Path(
 
 DEFAULT_QUOTA_MAX_AGE_SECONDS = 300.0
 DEFAULT_QUOTA_FAMILY_BLOCK_SECONDS = 300.0
-DEFAULT_QUOTA_PREFLIGHT_TIMEOUT_SECONDS = 12
+DEFAULT_QUOTA_PREFLIGHT_TIMEOUT_SECONDS = 8
 DEFAULT_MAX_ACCOUNT_FAILOVERS = 16
 MIN_DRAIN_HORIZON_SECONDS = 60.0
 
@@ -358,21 +359,25 @@ def _refresh_quota_snapshot_for_account(
     account_name: str,
     *,
     timeout: int = DEFAULT_QUOTA_PREFLIGHT_TIMEOUT_SECONDS,
+    on_phase_hook: Any = None,
 ) -> dict:
     command = _quota_refresh_binary()
     if not command:
         return _load_quota_snapshot()
+    if on_phase_hook:
+        on_phase_hook(phase="QUOTA_PREFLIGHT")
     try:
         subprocess.run(
             [command, account_name, "--timeout", str(max(1, timeout))],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
-            timeout=max(10, timeout) + 5,
+            timeout=max(1, timeout),
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
-        pass
+        if on_phase_hook:
+            on_phase_hook(phase="QUOTA_PREFLIGHT_TIMEOUT")
     return _load_quota_snapshot()
 
 
@@ -611,6 +616,9 @@ _PERMISSION_FAILURE_MARKERS = (
     "permission denied for ",
     "tool execution permission block",
     "blocked by the active security/deny rules",
+    "soft-denying tool confirmation",
+    "headless mode cannot prompt for",
+    "auto-denied",
 )
 
 
@@ -625,8 +633,19 @@ def classify_failure(
     if timed_out:
         return AccountFailureKind.TIMEOUT
     text = (stdout + "\n" + stderr).lower()
+    if _has_permission_failure_signal(text):
+        return AccountFailureKind.PERMISSION_OR_SCOPE_ERROR
     if _has_quota_failure_signal(stderr):
         return AccountFailureKind.QUOTA_EXHAUSTED
+    if (
+        "invalid model selection" in text
+        or "not supported for model" in text
+        or "unknown model" in text
+        or "unrecognized model" in text
+        or "model not found" in text
+        or "--effort is not supported" in text
+    ):
+        return AccountFailureKind.MODEL_OR_TASK_ERROR
     if any(k in text for k in ("429", "rate limit", "ratelimit")):
         return AccountFailureKind.RATE_LIMITED
     if any(
@@ -683,7 +702,8 @@ def _parse_agy_attestation(
 
     resolved_models: list[str] = []
     for match in _AGY_ALIAS_RESOLUTION_RE.finditer(text):
-        if requested_model is None or match.group("alias") == requested_model:
+        alias = match.group("alias")
+        if requested_model is None or alias == requested_model:
             resolved_models.append(match.group("resolved"))
     if not resolved_models and requested_model:
         for match in _AGY_RESOLVING_MODEL_RE.finditer(text):
@@ -714,6 +734,7 @@ def run_agy(
     model: str | None,
     effort: str | None,
     timeout: int,
+    operation_hook: Any = None,
 ):
     agy = shutil.which("agy")
     if not agy:
@@ -741,6 +762,18 @@ def run_agy(
         argv += ["--effort", effort]
     argv += ["--print", prompt]
 
+    baseline_worktree_state = None
+    try:
+        baseline_worktree_state = direct_operation_journal.capture_source_baseline(cwd)
+        if baseline_worktree_state is None:
+            raise RuntimeError("SOURCE_BASELINE_UNAVAILABLE")
+    except Exception as exc:
+        if operation_hook:
+            _operation_hook(
+                operation_hook,
+                effect_observation_error=f"BASELINE_CAPTURE_FAILED:{type(exc).__name__}",
+            )
+
     started = time.monotonic()
     process = subprocess.Popen(
         argv,
@@ -751,11 +784,45 @@ def run_agy(
         text=True,
         bufsize=1,
     )
+    if operation_hook:
+        _operation_hook(
+            operation_hook,
+            phase="PROVIDER_RUNNING",
+            provider_pid=process.pid,
+            provider_process_state="RUNNING",
+            provider_started_at=_agy_operation_journal.utc_now(),
+        )
+
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
     quota_failure = threading.Event()
+    first_stream_seen = threading.Event()
+    first_effect_seen = threading.Event()
 
-    def _drain(stream, sink: list[str], *, detect_quota: bool = False) -> None:
+    def _drain_stdout(stream, sink: list[str]) -> None:
+        if stream is None:
+            return
+        for line in iter(stream.readline, ""):
+            sink.append(line)
+            if not line.strip():
+                continue
+            now_iso = _agy_operation_journal.utc_now()
+            if not first_stream_seen.is_set():
+                first_stream_seen.set()
+                if operation_hook:
+                    _operation_hook(
+                        operation_hook,
+                        first_stream_activity_at=now_iso,
+                        provider_stream_last_activity_at=now_iso,
+                    )
+            elif operation_hook:
+                _operation_hook(
+                    operation_hook,
+                    provider_stream_last_activity_at=now_iso,
+                )
+        stream.close()
+
+    def _drain_stderr(stream, sink: list[str], *, detect_quota: bool = False) -> None:
         if stream is None:
             return
         for line in iter(stream.readline, ""):
@@ -765,12 +832,12 @@ def run_agy(
         stream.close()
 
     stdout_thread = threading.Thread(
-        target=_drain,
+        target=_drain_stdout,
         args=(process.stdout, stdout_lines),
         daemon=True,
     )
     stderr_thread = threading.Thread(
-        target=_drain,
+        target=_drain_stderr,
         args=(process.stderr, stderr_lines),
         kwargs={"detect_quota": True},
         daemon=True,
@@ -782,6 +849,35 @@ def run_agy(
     quota_terminated = False
     deadline = started + max(1, timeout) + 10
     while process.poll() is None:
+        if baseline_worktree_state is not None and not first_effect_seen.is_set():
+            try:
+                changed = direct_operation_journal.observed_changed_paths_since(
+                    cwd, baseline_worktree_state
+                )
+                if changed is None:
+                    baseline_worktree_state = None
+                    if operation_hook:
+                        _operation_hook(
+                            operation_hook,
+                            effect_observation_error="EFFECT_OBSERVATION_UNAVAILABLE",
+                        )
+                elif changed:
+                    first_effect_seen.set()
+                    now_effect_iso = _agy_operation_journal.utc_now()
+                    effect_wall_ms = int((time.monotonic() - started) * 1000)
+                    if operation_hook:
+                        _operation_hook(
+                            operation_hook,
+                            first_effect_at=now_effect_iso,
+                            time_to_first_effect_ms=effect_wall_ms,
+                        )
+            except Exception as exc:
+                baseline_worktree_state = None
+                if operation_hook:
+                    _operation_hook(
+                        operation_hook,
+                        effect_observation_error=f"EFFECT_OBSERVATION_FAILED:{type(exc).__name__}",
+                    )
         if quota_failure.wait(0.05):
             quota_terminated = True
             process.terminate()
@@ -807,7 +903,47 @@ def run_agy(
     agy_print_timed_out = (
         "[agy] print timeout after" in stderr_lower and "turn in progress" in stderr_lower
     )
+
+    # A short-lived provider can mutate the worktree and exit between polling
+    # intervals. Perform one final source-delta readback before projecting EXITED
+    # so time-to-first-effect does not silently miss that physical change.
+    if baseline_worktree_state is not None and not first_effect_seen.is_set():
+        try:
+            changed = direct_operation_journal.observed_changed_paths_since(
+                cwd, baseline_worktree_state
+            )
+            if changed is None:
+                baseline_worktree_state = None
+                if operation_hook:
+                    _operation_hook(
+                        operation_hook,
+                        effect_observation_error="EFFECT_OBSERVATION_UNAVAILABLE",
+                    )
+            elif changed:
+                first_effect_seen.set()
+                now_effect_iso = _agy_operation_journal.utc_now()
+                effect_wall_ms = int((time.monotonic() - started) * 1000)
+                if operation_hook:
+                    _operation_hook(
+                        operation_hook,
+                        first_effect_at=now_effect_iso,
+                        time_to_first_effect_ms=effect_wall_ms,
+                    )
+        except Exception as exc:
+            baseline_worktree_state = None
+            if operation_hook:
+                _operation_hook(
+                    operation_hook,
+                    effect_observation_error=f"EFFECT_OBSERVATION_FAILED:{type(exc).__name__}",
+                )
+
     wall_ms = int((time.monotonic() - started) * 1000)
+
+    if operation_hook:
+        _operation_hook(
+            operation_hook,
+            provider_process_state="EXITED",
+        )
 
     if timed_out:
         return None, out, err, True, wall_ms
@@ -990,6 +1126,7 @@ def dispatch_run(
     coordinator: CrossProcessLeaseCoordinator | None = None,
     run_agy_fn: Any = None,
     operation_hook: Any = None,
+    admission: dict[str, Any] | None = None,
 ) -> int:
     user_allow = list(allow or [])
     try:
@@ -1001,21 +1138,103 @@ def dispatch_run(
         )
     except ValueError as exc:
         failure_kind = str(exc)
+        contract_failure = f"DISPATCH_CONTRACT_REJECTED:{failure_kind}"
         _operation_hook(
             operation_hook,
             phase="CONTRACT_REJECTED",
             attempts=0,
             rotations=0,
-            failure_kind=failure_kind,
+            failure_kind=contract_failure,
+            provider_effect=False,
         )
         emit_meta({
             "status": "invalid_contract",
             "attempts": 0,
             "rotations": 0,
-            "failure_kind": failure_kind,
+            "failure_kind": contract_failure,
+            "provider_effect": False,
             "wall_ms": 0,
         })
         return 64
+
+    if effort is not None and effort not in ("low", "medium", "high"):
+        effort_failure = f"DISPATCH_CONTRACT_REJECTED:INVALID_EFFORT:{effort}"
+        _operation_hook(
+            operation_hook,
+            phase="CONTRACT_REJECTED",
+            attempts=0,
+            rotations=0,
+            failure_kind=effort_failure,
+            provider_effect=False,
+        )
+        emit_meta({
+            "status": "invalid_contract",
+            "attempts": 0,
+            "rotations": 0,
+            "failure_kind": effort_failure,
+            "provider_effect": False,
+            "wall_ms": 0,
+        })
+        return 64
+
+    if model is not None:
+        stripped_model = model.strip()
+        if not stripped_model:
+            model_failure = "DISPATCH_MODEL_REJECTED:EMPTY_MODEL"
+        elif not re.fullmatch(r"[a-zA-Z0-9_.:-]+", stripped_model):
+            model_failure = f"DISPATCH_MODEL_REJECTED:INVALID_MODEL_SYNTAX:{model}"
+        elif _model_family(stripped_model) == "unknown":
+            model_failure = f"DISPATCH_MODEL_REJECTED:UNSUPPORTED_MODEL_FAMILY:{model}"
+        elif (
+            stripped_model in ("claude-opus-4-6", "claude-3-opus", "claude-opus")
+            and effort is not None
+        ):
+            model_failure = (
+                f"DISPATCH_MODEL_CONTRACT_REJECTED:UNSUPPORTED_EFFORT_FOR_MODEL:{model}:{effort}"
+            )
+        else:
+            model_failure = None
+        if model_failure:
+            _operation_hook(
+                operation_hook,
+                phase="MODEL_REJECTED",
+                attempts=0,
+                rotations=0,
+                failure_kind=model_failure,
+                provider_effect=False,
+            )
+            emit_meta({
+                "status": "invalid_model",
+                "attempts": 0,
+                "rotations": 0,
+                "failure_kind": model_failure,
+                "provider_effect": False,
+                "wall_ms": 0,
+            })
+            return 64
+
+    if admission is not None:
+        decision = admission.get("overall_decision") or admission.get("decision")
+        if decision != "ALLOW":
+            reason = str(admission.get("reason") or decision or "DISPATCH_ADMISSION_REJECTED")
+            admission_failure = f"DISPATCH_ADMISSION_REJECTED:{reason}"
+            _operation_hook(
+                operation_hook,
+                phase="ADMISSION_REJECTED",
+                attempts=0,
+                rotations=0,
+                failure_kind=admission_failure,
+                provider_effect=False,
+            )
+            emit_meta({
+                "status": "admission_rejected",
+                "attempts": 0,
+                "rotations": 0,
+                "failure_kind": admission_failure,
+                "provider_effect": False,
+                "wall_ms": 0,
+            })
+            return 64
 
     if coordinator is None:
         if not MANAGER.is_file() or not MANAGER_ROOT.is_dir():
@@ -1036,6 +1255,37 @@ def dispatch_run(
     quota_snapshot, availability_state = _apply_dynamic_availability(model)
     model_family = str(availability_state["family"])
     scoped_model_family = model_family if model_family in {"gemini", "claude_gpt"} else None
+
+    usable_candidates = (
+        list(availability_state.get("preferred", []))
+        + list(availability_state.get("reserve", []))
+        + list(availability_state.get("fallback", []))
+    )
+    blocked_candidates = list(availability_state.get("blocked", []))
+    if (
+        availability_state.get("snapshot_fresh")
+        and len(usable_candidates) == 0
+        and len(blocked_candidates) > 0
+        and scoped_model_family is not None
+    ):
+        _operation_hook(
+            operation_hook,
+            phase="QUOTA_PREFLIGHT_EXHAUSTED",
+            attempts=0,
+            rotations=0,
+            failure_kind="PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT",
+            provider_effect=False,
+        )
+        emit_meta({
+            "status": "failed",
+            "attempts": 0,
+            "rotations": 0,
+            "failure_kind": "PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT",
+            "provider_effect": False,
+            "wall_ms": 0,
+        })
+        return 75
+
     consumer_id = "desktop-" + uuid.uuid4().hex
     exclude_hashes: set[str] = set()
 
@@ -1053,6 +1303,7 @@ def dispatch_run(
             "attempts": 0,
             "rotations": 0,
             "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
+            "provider_effect": False,
             "wall_ms": 0,
         })
         return 75
@@ -1062,6 +1313,7 @@ def dispatch_run(
             "attempts": 0,
             "rotations": 0,
             "failure_kind": "ACCOUNT_UNAVAILABLE",
+            "provider_effect": False,
             "wall_ms": 0,
         })
         return 75
@@ -1173,6 +1425,16 @@ def dispatch_run(
                 lease_id_hash=claim.lease_id_hash,
             )
             env = dict(claim.lease.execution_env)
+            attempt_baseline = None
+            try:
+                attempt_baseline = direct_operation_journal.capture_source_baseline(cwd)
+                if attempt_baseline is None:
+                    raise RuntimeError("SOURCE_BASELINE_UNAVAILABLE")
+            except Exception as exc:
+                _operation_hook(
+                    operation_hook,
+                    effect_observation_error=f"ATTEMPT_BASELINE_CAPTURE_FAILED:{type(exc).__name__}",
+                )
             permission_token = None
             try:
                 allow_rules = list(user_allow)
@@ -1199,21 +1461,42 @@ def dispatch_run(
                         allow_unsafe_legacy=allow_unsafe_legacy,
                         replace_allow_deny=replace_allow_deny,
                     )
-                code, out, err, timed_out, wall_ms = runner(
-                    env=env,
-                    prompt=prompt,
-                    cwd=cwd,
-                    mode=mode,
-                    model=model,
-                    effort=effort,
-                    timeout=max(1, timeout),
-                )
+                runner_kwargs = {
+                    "env": env,
+                    "prompt": prompt,
+                    "cwd": cwd,
+                    "mode": mode,
+                    "model": model,
+                    "effort": effort,
+                    "timeout": max(1, timeout),
+                }
+                if runner is run_agy or (
+                    hasattr(runner, "__code__") and "operation_hook" in runner.__code__.co_varnames
+                ):
+                    runner_kwargs["operation_hook"] = operation_hook
+                code, out, err, timed_out, wall_ms = runner(**runner_kwargs)
             finally:
                 restore_temp_permissions(permission_token)
             total_wall_ms += wall_ms
 
-            permission_blocked = mode == "accept-edits" and _has_permission_failure_signal(
-                out + "\n" + err
+            provider_log_text = ""
+            provider_log_path = env.get("NEXUS_AGY_ATTESTATION_LOG") or os.getenv(
+                "NEXUS_AGY_ATTESTATION_LOG"
+            )
+            if provider_log_path:
+                try:
+                    provider_log_text = (
+                        Path(provider_log_path)
+                        .expanduser()
+                        .read_text(encoding="utf-8", errors="replace")
+                    )
+                except OSError:
+                    provider_log_text = ""
+            combined_output = out + "\n" + err + "\n" + provider_log_text
+            permission_blocked = (
+                (mode == "accept-edits" and _has_permission_failure_signal(combined_output))
+                or "headless mode cannot prompt for" in combined_output.lower()
+                or "soft-denying tool confirmation" in combined_output.lower()
             )
             if code == 0 and not timed_out and not permission_blocked:
                 sys.stdout.write(out)
@@ -1236,6 +1519,39 @@ def dispatch_run(
                 else classify_failure(code, out, err, timed_out)
             )
             last_kind = kind.value
+            provider_effect_observed: bool | None = False
+            reconciliation_required = False
+            if permission_blocked and (
+                "headless mode" in combined_output.lower()
+                or "soft-denying" in combined_output.lower()
+                or "auto-denied" in combined_output.lower()
+            ):
+                last_kind = "HEADLESS_TOOL_PERMISSION_DENIED"
+            elif kind == AccountFailureKind.MODEL_OR_TASK_ERROR:
+                last_kind = "DISPATCH_MODEL_CONTRACT_REJECTED"
+            elif kind == AccountFailureKind.QUOTA_EXHAUSTED:
+                changed_paths = None
+                if attempt_baseline is not None:
+                    try:
+                        changed_paths = direct_operation_journal.observed_changed_paths_since(
+                            cwd, attempt_baseline
+                        )
+                    except Exception as exc:
+                        _operation_hook(
+                            operation_hook,
+                            effect_observation_error=f"ATTEMPT_EFFECT_OBSERVATION_FAILED:{type(exc).__name__}",
+                        )
+                if changed_paths:
+                    last_kind = "PROVIDER_QUOTA_EXHAUSTED_AFTER_EFFECT"
+                    provider_effect_observed = True
+                    reconciliation_required = True
+                elif changed_paths == []:
+                    last_kind = "PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT"
+                    provider_effect_observed = False
+                else:
+                    last_kind = "PROVIDER_QUOTA_EXHAUSTED_UNKNOWN_EFFECT"
+                    provider_effect_observed = None
+                    reconciliation_required = True
             _operation_hook(
                 operation_hook,
                 phase="CLASSIFYING_FAILURE",
@@ -1245,7 +1561,28 @@ def dispatch_run(
                 timed_out=bool(timed_out),
                 account_alias_hash=claim.account_alias_hash,
                 lease_id_hash=claim.lease_id_hash,
+                provider_effect=provider_effect_observed,
+                reconciliation_required=reconciliation_required,
             )
+
+            if reconciliation_required:
+                if out:
+                    sys.stdout.write(out)
+                if err:
+                    sys.stderr.write(err)
+                emit_meta({
+                    "status": "failed",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": last_kind,
+                    "provider_effect": provider_effect_observed,
+                    "reconciliation_required": True,
+                    "account_alias_hash": claim.account_alias_hash,
+                    "lease_id_hash": claim.lease_id_hash,
+                    "parallel_slot": True,
+                    "wall_ms": total_wall_ms,
+                })
+                return code if isinstance(code, int) and code != 0 else 1
 
             if not is_agy_rotation_eligible(kind):
                 if out:
@@ -1257,6 +1594,7 @@ def dispatch_run(
                     "attempts": attempts,
                     "rotations": rotations,
                     "failure_kind": last_kind,
+                    "provider_effect": False,
                     "account_alias_hash": claim.account_alias_hash,
                     "lease_id_hash": claim.lease_id_hash,
                     "parallel_slot": True,
@@ -1479,7 +1817,6 @@ def _spawn_background_operation(
     return journal.bind_pid(operation_id, proc.pid)
 
 
-
 def _supervisor_terminal_guard(func):
     """Cover background-supervisor startup and provider execution with durable terminalization."""
 
@@ -1530,6 +1867,22 @@ def _supervisor_terminal_guard(func):
                     "result": unknown_result if provider_effect_possible else known_result,
                     "retry_permitted": False,
                 },
+                provider_pid=record.get("provider_pid"),
+                provider_process_state=(
+                    (
+                        "RUNNING"
+                        if direct_operation_journal._process_alive(record.get("provider_pid"))
+                        else "EXITED"
+                    )
+                    if isinstance(record.get("provider_pid"), int)
+                    and record.get("provider_pid") > 0
+                    else record.get("provider_process_state", "IDLE")
+                ),
+                provider_started_at=record.get("provider_started_at"),
+                provider_stream_last_activity_at=record.get("provider_stream_last_activity_at"),
+                first_stream_activity_at=record.get("first_stream_activity_at"),
+                first_effect_at=record.get("first_effect_at"),
+                time_to_first_effect_ms=record.get("time_to_first_effect_ms"),
                 **attestation,
             )
 
@@ -1602,6 +1955,13 @@ def _run_background_operation(
         "lease_id_hash": None,
         "failure_kind": None,
         "timed_out": False,
+        "provider_pid": None,
+        "provider_process_state": "IDLE",
+        "provider_started_at": None,
+        "provider_stream_last_activity_at": None,
+        "first_stream_activity_at": None,
+        "first_effect_at": None,
+        "time_to_first_effect_ms": None,
     }
     state_lock = threading.Lock()
 
@@ -1614,6 +1974,13 @@ def _run_background_operation(
             account_alias_hash=snapshot.get("account_alias_hash"),
             lease_id_hash=snapshot.get("lease_id_hash"),
             failure_kind=snapshot.get("failure_kind"),
+            provider_pid=snapshot.get("provider_pid"),
+            provider_process_state=snapshot.get("provider_process_state") or "IDLE",
+            provider_started_at=snapshot.get("provider_started_at"),
+            provider_stream_last_activity_at=snapshot.get("provider_stream_last_activity_at"),
+            first_stream_activity_at=snapshot.get("first_stream_activity_at"),
+            first_effect_at=snapshot.get("first_effect_at"),
+            time_to_first_effect_ms=snapshot.get("time_to_first_effect_ms"),
         )
 
     def on_event(event: dict[str, Any]) -> None:
@@ -1691,6 +2058,22 @@ def _run_background_operation(
             account_alias_hash=snapshot.get("account_alias_hash"),
             lease_id_hash=snapshot.get("lease_id_hash"),
             reconciliation=reconciliation,
+            provider_pid=snapshot.get("provider_pid"),
+            provider_process_state=(
+                (
+                    "RUNNING"
+                    if direct_operation_journal._process_alive(snapshot.get("provider_pid"))
+                    else "EXITED"
+                )
+                if isinstance(snapshot.get("provider_pid"), int)
+                and snapshot.get("provider_pid") > 0
+                else (snapshot.get("provider_process_state") or "IDLE")
+            ),
+            provider_started_at=snapshot.get("provider_started_at"),
+            provider_stream_last_activity_at=snapshot.get("provider_stream_last_activity_at"),
+            first_stream_activity_at=snapshot.get("first_stream_activity_at"),
+            first_effect_at=snapshot.get("first_effect_at"),
+            time_to_first_effect_ms=snapshot.get("time_to_first_effect_ms"),
             **attestation,
         )
         return int(exit_code or 0)
@@ -1701,6 +2084,7 @@ def _run_background_operation(
             attestation_log_path,
             requested_model=model,
         )
+        snap = locals().get("snapshot") or {}
         journal.mark_terminal(
             operation_id,
             status="OUTCOME_UNKNOWN",
@@ -1712,6 +2096,21 @@ def _run_background_operation(
                 "result": "WRAPPER_EXCEPTION_WITH_UNKNOWN_PROVIDER_EFFECT",
                 "retry_permitted": False,
             },
+            provider_pid=snap.get("provider_pid"),
+            provider_process_state=(
+                (
+                    "RUNNING"
+                    if direct_operation_journal._process_alive(snap.get("provider_pid"))
+                    else "EXITED"
+                )
+                if isinstance(snap.get("provider_pid"), int) and snap.get("provider_pid") > 0
+                else (snap.get("provider_process_state") or "IDLE")
+            ),
+            provider_started_at=snap.get("provider_started_at"),
+            provider_stream_last_activity_at=snap.get("provider_stream_last_activity_at"),
+            first_stream_activity_at=snap.get("first_stream_activity_at"),
+            first_effect_at=snap.get("first_effect_at"),
+            time_to_first_effect_ms=snap.get("time_to_first_effect_ms"),
             **attestation,
         )
         raise

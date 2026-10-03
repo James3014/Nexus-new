@@ -79,3 +79,194 @@ def test_installer_deploys_exact_canonical_bytes(tmp_path: Path) -> None:
     assert mode & stat.S_IXUSR
     assert mode & stat.S_IXGRP
     assert mode & stat.S_IXOTH
+
+
+def test_merge_snapshot_preserves_prior_known_freshness_on_failure(tmp_path: Path) -> None:
+    snapshot = tmp_path / "quota.json"
+    snapshot.write_text(
+        json.dumps({
+            "checked_at": "2026-10-01T00:00:00+00:00",
+            "accounts": [
+                {
+                    "account": "acct1",
+                    "ok": True,
+                    "checked_at": "2026-10-01T00:00:00+00:00",
+                    "groups": {
+                        "Gemini Models": {"weekly": {"status": "known", "remaining_pct": 80.0}}
+                    },
+                }
+            ],
+        }),
+        encoding="utf-8",
+    )
+
+    payload = quota.merge_snapshot(
+        snapshot_path=snapshot,
+        current_names={"acct1"},
+        refreshed_rows=[
+            {
+                "account": "acct1",
+                "ok": False,
+                "error": "deadline_exceeded",
+                "checked_at": "2026-10-03T00:00:00+00:00",
+            }
+        ],
+        partial=True,
+        checked_at="2026-10-03T00:00:00+00:00",
+    )
+
+    assert len(payload["accounts"]) == 1
+    acct = payload["accounts"][0]
+    assert acct["account"] == "acct1"
+    assert acct["ok"] is True
+    assert acct["checked_at"] == "2026-10-01T00:00:00+00:00"
+    assert acct["groups"]["Gemini Models"]["weekly"]["remaining_pct"] == 80.0
+
+
+def test_merge_snapshot_retains_failed_accounts_without_silent_removal(tmp_path: Path) -> None:
+    snapshot = tmp_path / "quota.json"
+    payload = quota.merge_snapshot(
+        snapshot_path=snapshot,
+        current_names={"new_acct"},
+        refreshed_rows=[
+            {
+                "account": "new_acct",
+                "ok": False,
+                "error": "timeout",
+                "checked_at": "2026-10-03T00:00:00+00:00",
+            }
+        ],
+        partial=True,
+        checked_at="2026-10-03T00:00:00+00:00",
+    )
+
+    assert len(payload["accounts"]) == 1
+    assert payload["accounts"][0]["account"] == "new_acct"
+    assert payload["accounts"][0]["ok"] is False
+    assert payload["accounts"][0]["error"] == "timeout"
+
+
+def test_quota_main_bounds_total_timeout_and_emits_progress(tmp_path: Path, monkeypatch) -> None:
+    pool_root = tmp_path / "pool"
+    accounts_dir = pool_root / "accounts"
+    accounts_dir.mkdir(parents=True)
+    (accounts_dir / "acct1").mkdir()
+    (accounts_dir / "acct2").mkdir()
+
+    snapshot_path = tmp_path / "snapshot.json"
+    monkeypatch.setenv("NEXUS_AGY_ACCOUNT_POOL_ROOT", str(pool_root))
+    monkeypatch.setenv("NEXUS_AGY_QUOTA_SNAPSHOT", str(snapshot_path))
+
+    progress_events: list[dict[str, object]] = []
+
+    def fake_query(
+        account_home, account_name, email, agy_binary, timeout, checked_at, on_progress=None
+    ):
+        return {
+            "account": account_name,
+            "email": email,
+            "ok": True,
+            "groups": {},
+            "checked_at": checked_at,
+        }
+
+    monkeypatch.setattr(quota, "query_account", fake_query)
+
+    rc = quota.main(["--timeout", "15"], on_progress=progress_events.append)
+    assert rc == 0
+    event_types = [e.get("phase") for e in progress_events]
+    assert "STARTING" in event_types
+    assert "FINISHED" in event_types
+
+    start_event = next(e for e in progress_events if e.get("phase") == "STARTING")
+    assert start_event.get("total_timeout") == 15.0
+
+
+def test_quota_main_deadline_exceeded_marks_remaining_accounts(tmp_path: Path, monkeypatch) -> None:
+    pool_root = tmp_path / "pool"
+    accounts_dir = pool_root / "accounts"
+    accounts_dir.mkdir(parents=True)
+    (accounts_dir / "acct1").mkdir()
+    (accounts_dir / "acct2").mkdir()
+
+    snapshot_path = tmp_path / "snapshot.json"
+    monkeypatch.setenv("NEXUS_AGY_ACCOUNT_POOL_ROOT", str(pool_root))
+    monkeypatch.setenv("NEXUS_AGY_QUOTA_SNAPSHOT", str(snapshot_path))
+
+    # Give a tiny total-timeout and make the first query take time to exceed the deadline
+    import time
+
+    def slow_query(
+        account_home, account_name, email, agy_binary, timeout, checked_at, on_progress=None
+    ):
+        time.sleep(0.05)
+        return {
+            "account": account_name,
+            "email": email,
+            "ok": True,
+            "groups": {},
+            "checked_at": checked_at,
+        }
+
+    monkeypatch.setattr(quota, "query_account", slow_query)
+
+    progress_events: list[dict[str, object]] = []
+    rc = quota.main(
+        ["acct1", "acct2", "--timeout", "10", "--total-timeout", "0.01"],
+        on_progress=progress_events.append,
+    )
+    assert rc == 2
+    event_types = [e.get("phase") for e in progress_events]
+    assert "DEADLINE_EXCEEDED" in event_types
+
+    payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    acct2_row = next(a for a in payload["accounts"] if a["account"] == "acct2")
+    assert acct2_row["ok"] is False
+    assert acct2_row["error"] == "deadline_exceeded"
+
+
+def test_independent_real_query_obeys_fractional_total_deadline(tmp_path, monkeypatch):
+    import sys
+    import time
+
+    pool = tmp_path / "pool"
+    (pool / "accounts" / "one").mkdir(parents=True)
+    executable = tmp_path / "fake-agy"
+    executable.write_text(
+        "#!" + sys.executable + "\nimport time\ntime.sleep(0.8)\n"
+        "print('Gemini Models Weekly Limit Remaining 80%')\n"
+    )
+    executable.chmod(0o700)
+    snapshot = tmp_path / "snapshot.json"
+    monkeypatch.setenv("NEXUS_AGY_ACCOUNT_POOL_ROOT", str(pool))
+    monkeypatch.setenv("NEXUS_AGY_QUOTA_SNAPSHOT", str(snapshot))
+    monkeypatch.setenv("NEXUS_AGY_BINARY", str(executable))
+    start = time.monotonic()
+    result = quota.main(["--timeout", "15", "--total-timeout", "0.1"])
+    elapsed = time.monotonic() - start
+    assert result == 2
+    assert elapsed < 0.5, f"deadline ignored: {elapsed:.3f}s"
+    assert json.loads(snapshot.read_text())["accounts"][0]["ok"] is False
+
+
+def test_independent_failed_refresh_keeps_old_time_and_latest_failure(tmp_path):
+    old = "2000-01-01T00:00:00+00:00"
+    new = "2026-10-03T00:00:00+00:00"
+    snapshot = tmp_path / "snapshot.json"
+    snapshot.write_text(
+        json.dumps({
+            "checked_at": old,
+            "accounts": [{"account": "legacy", "ok": True, "groups": {"Gemini Models": {}}}],
+        })
+    )
+    result = quota.merge_snapshot(
+        snapshot_path=snapshot,
+        current_names={"legacy"},
+        partial=True,
+        refreshed_rows=[{"account": "legacy", "ok": False, "error": "timeout", "checked_at": new}],
+        checked_at=new,
+    )
+    row = result["accounts"][0]
+    assert row["ok"] is True
+    assert row["checked_at"] == old
+    assert row["last_refresh"] == {"ok": False, "error": "timeout", "checked_at": new}
