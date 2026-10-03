@@ -309,7 +309,9 @@ def test_detect_worktree_physical_effects_isolates_pre_existing_changes(tmp_path
     subprocess.run(["git", "-C", str(work), "config", "user.name", "Test"], check=True)
     (work / "initial.txt").write_text("v1", encoding="utf-8")
     subprocess.run(["git", "-C", str(work), "add", "initial.txt"], check=True)
-    subprocess.run(["git", "-C", str(work), "commit", "-m", "init"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(work), "commit", "-m", "init"], check=True, capture_output=True
+    )
 
     # Pre-existing change
     (work / "donor_change.txt").write_text("existing dirty", encoding="utf-8")

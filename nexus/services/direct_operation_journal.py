@@ -509,7 +509,9 @@ class DirectOperationJournal:
         extra_changes: dict[str, Any] = {}
         provider_pid = record.get("provider_pid")
         if isinstance(provider_pid, int) and provider_pid > 0:
-            extra_changes["provider_process_state"] = "RUNNING" if _process_alive(provider_pid) else "EXITED"
+            extra_changes["provider_process_state"] = (
+                "RUNNING" if _process_alive(provider_pid) else "EXITED"
+            )
 
         if not pid_alive:
             return self.mark_terminal(

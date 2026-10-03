@@ -1429,7 +1429,8 @@ def test_unsupported_effort_for_claude_opus_fails_before_claim(tmp_path: Path) -
     assert code == 64
     assert coordinator.acquire_count == 0
     assert any(
-        e.get("failure_kind") == "DISPATCH_MODEL_CONTRACT_REJECTED:UNSUPPORTED_EFFORT_FOR_MODEL:claude-opus-4-6:low"
+        e.get("failure_kind")
+        == "DISPATCH_MODEL_CONTRACT_REJECTED:UNSUPPORTED_EFFORT_FOR_MODEL:claude-opus-4-6:low"
         and e.get("provider_effect") is False
         for e in events
     )
@@ -1460,10 +1461,7 @@ def test_provider_exit_invalid_model_selection_classified_as_model_contract_reje
     )
 
     assert code == 1
-    assert any(
-        e.get("failure_kind") == "DISPATCH_MODEL_CONTRACT_REJECTED"
-        for e in events
-    )
+    assert any(e.get("failure_kind") == "DISPATCH_MODEL_CONTRACT_REJECTED" for e in events)
     assert coordinator.acquire_count == 1
     assert coordinator.claim.released is True
 
@@ -1494,10 +1492,7 @@ def test_headless_tool_permission_denial_classified_as_failure(tmp_path: Path) -
     )
 
     assert code == 1
-    assert any(
-        e.get("failure_kind") == "HEADLESS_TOOL_PERMISSION_DENIED"
-        for e in events
-    )
+    assert any(e.get("failure_kind") == "HEADLESS_TOOL_PERMISSION_DENIED" for e in events)
     assert coordinator.acquire_count == 1
     assert coordinator.claim.released is True
 
@@ -1506,11 +1501,15 @@ def test_run_agy_timeline_and_baseline_effects(tmp_path: Path, monkeypatch) -> N
     work = tmp_path / "work"
     work.mkdir()
     subprocess.run(["git", "-C", str(work), "init"], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(work), "config", "user.email", "test@test.com"], check=True)
+    subprocess.run(
+        ["git", "-C", str(work), "config", "user.email", "test@test.com"], check=True
+    )
     subprocess.run(["git", "-C", str(work), "config", "user.name", "Test"], check=True)
     (work / "tracked.txt").write_text("initial", encoding="utf-8")
     subprocess.run(["git", "-C", str(work), "add", "tracked.txt"], check=True)
-    subprocess.run(["git", "-C", str(work), "commit", "-m", "init"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(work), "commit", "-m", "init"], check=True, capture_output=True
+    )
 
     # Create pre-existing dirty file in worktree (donor change)
     (work / "pre_existing_dirty.txt").write_text("dirty before launch", encoding="utf-8")
@@ -1600,9 +1599,13 @@ def test_independent_quota_after_effect_never_rotates(tmp_path):
         return 1, "", "RESOURCE_EXHAUSTED: quota exhausted", False, 10
 
     code = dispatch.dispatch_run(
-        prompt="edit", cwd=str(work), mode="accept-edits",
-        write_paths=[str(work / "changed.txt")], coordinator=coordinator,
-        run_agy_fn=runner, operation_hook=events.append,
+        prompt="edit",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(work / "changed.txt")],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
     )
     assert code != 0
     assert coordinator.rotation_count == 0
@@ -1613,7 +1616,9 @@ def test_independent_quota_after_effect_never_rotates(tmp_path):
     assert classified["reconciliation_required"] is True
 
 
-def test_independent_headless_denial_only_in_provider_log_is_failure(tmp_path, monkeypatch):
+def test_independent_headless_denial_only_in_provider_log_is_failure(
+    tmp_path, monkeypatch
+):
     work = tmp_path / "repo"
     work.mkdir()
     subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
@@ -1630,9 +1635,12 @@ def test_independent_headless_denial_only_in_provider_log_is_failure(tmp_path, m
     monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(tmp_path / "agy.log"))
     events = []
     code = dispatch.dispatch_run(
-        prompt="edit", cwd=str(work), mode="accept-edits",
+        prompt="edit",
+        cwd=str(work),
+        mode="accept-edits",
         write_paths=[str(work / "changed.txt")],
-        coordinator=_WriteScopeCoordinator(home), operation_hook=events.append,
+        coordinator=_WriteScopeCoordinator(home),
+        operation_hook=events.append,
     )
     assert code != 0
     assert any(e.get("failure_kind") == "HEADLESS_TOOL_PERMISSION_DENIED" for e in events)
@@ -1656,9 +1664,19 @@ def test_independent_baseline_failure_stays_unknown(tmp_path, monkeypatch):
             raise OSError("baseline unreadable")
         return original(cwd)
 
-    monkeypatch.setattr(dispatch.direct_operation_journal, "snapshot_worktree_physical_state", fail_first)
+    monkeypatch.setattr(
+        dispatch.direct_operation_journal, "snapshot_worktree_physical_state", fail_first
+    )
     events = []
-    dispatch.run_agy(env=os.environ.copy(), prompt="test", cwd=str(work), mode="plan",
-                     model=None, effort=None, timeout=1, operation_hook=events.append)
+    dispatch.run_agy(
+        env=os.environ.copy(),
+        prompt="test",
+        cwd=str(work),
+        mode="plan",
+        model=None,
+        effort=None,
+        timeout=1,
+        operation_hook=events.append,
+    )
     assert not any(e.get("first_effect_at") for e in events)
     assert any(e.get("effect_observation_error") for e in events)

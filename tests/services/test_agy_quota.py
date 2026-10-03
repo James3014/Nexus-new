@@ -103,12 +103,14 @@ def test_merge_snapshot_preserves_prior_known_freshness_on_failure(tmp_path: Pat
     payload = quota.merge_snapshot(
         snapshot_path=snapshot,
         current_names={"acct1"},
-        refreshed_rows=[{
-            "account": "acct1",
-            "ok": False,
-            "error": "deadline_exceeded",
-            "checked_at": "2026-10-03T00:00:00+00:00",
-        }],
+        refreshed_rows=[
+            {
+                "account": "acct1",
+                "ok": False,
+                "error": "deadline_exceeded",
+                "checked_at": "2026-10-03T00:00:00+00:00",
+            }
+        ],
         partial=True,
         checked_at="2026-10-03T00:00:00+00:00",
     )
@@ -126,12 +128,14 @@ def test_merge_snapshot_retains_failed_accounts_without_silent_removal(tmp_path:
     payload = quota.merge_snapshot(
         snapshot_path=snapshot,
         current_names={"new_acct"},
-        refreshed_rows=[{
-            "account": "new_acct",
-            "ok": False,
-            "error": "timeout",
-            "checked_at": "2026-10-03T00:00:00+00:00",
-        }],
+        refreshed_rows=[
+            {
+                "account": "new_acct",
+                "ok": False,
+                "error": "timeout",
+                "checked_at": "2026-10-03T00:00:00+00:00",
+            }
+        ],
         partial=True,
         checked_at="2026-10-03T00:00:00+00:00",
     )
@@ -155,7 +159,9 @@ def test_quota_main_bounds_total_timeout_and_emits_progress(tmp_path: Path, monk
 
     progress_events: list[dict[str, object]] = []
 
-    def fake_query(account_home, account_name, email, agy_binary, timeout, checked_at, on_progress=None):
+    def fake_query(
+        account_home, account_name, email, agy_binary, timeout, checked_at, on_progress=None
+    ):
         return {
             "account": account_name,
             "email": email,
@@ -189,7 +195,10 @@ def test_quota_main_deadline_exceeded_marks_remaining_accounts(tmp_path: Path, m
 
     # Give a tiny total-timeout and make the first query take time to exceed the deadline
     import time
-    def slow_query(account_home, account_name, email, agy_binary, timeout, checked_at, on_progress=None):
+
+    def slow_query(
+        account_home, account_name, email, agy_binary, timeout, checked_at, on_progress=None
+    ):
         time.sleep(0.05)
         return {
             "account": account_name,
@@ -244,12 +253,19 @@ def test_independent_failed_refresh_keeps_old_time_and_latest_failure(tmp_path):
     old = "2000-01-01T00:00:00+00:00"
     new = "2026-10-03T00:00:00+00:00"
     snapshot = tmp_path / "snapshot.json"
-    snapshot.write_text(json.dumps({"checked_at": old, "accounts": [
-        {"account": "legacy", "ok": True, "groups": {"Gemini Models": {}}}
-    ]}))
+    snapshot.write_text(
+        json.dumps({
+            "checked_at": old,
+            "accounts": [{"account": "legacy", "ok": True, "groups": {"Gemini Models": {}}}],
+        })
+    )
     result = quota.merge_snapshot(
-        snapshot_path=snapshot, current_names={"legacy"}, partial=True,
-        refreshed_rows=[{"account": "legacy", "ok": False, "error": "timeout", "checked_at": new}],
+        snapshot_path=snapshot,
+        current_names={"legacy"},
+        partial=True,
+        refreshed_rows=[
+            {"account": "legacy", "ok": False, "error": "timeout", "checked_at": new}
+        ],
         checked_at=new,
     )
     row = result["accounts"][0]
