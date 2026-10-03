@@ -8,6 +8,8 @@ import stat
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from nexus.services import workflow_doctor as doctor
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -360,3 +362,56 @@ def test_operation_projection_exposes_bounded_review_identity(tmp_path: Path) ->
     assert projected["review_verdict"] == "ACCEPT"
     assert projected["review_applicable"] is True
     assert "private_review_secret" not in projected
+
+
+# ---------------------------------------------------------------------------
+# resolve_workflow_repo_root
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_repo_root_omitted_uses_canonical_not_cwd(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When repo_root is omitted the canonical root, not cwd, is the candidate."""
+    monkeypatch.chdir(tmp_path)  # cwd is now an unrelated tmp dir
+    monkeypatch.setattr(doctor, "CANONICAL_SOURCE_ROOT", ROOT)
+
+    result = doctor.resolve_workflow_repo_root(None, None)
+
+    assert result == ROOT.expanduser().resolve()
+    assert result != tmp_path
+
+
+def test_resolve_repo_root_explicit_with_mismatched_repository_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Explicit repo_root + non-matching repository raises RuntimeError (fails closed)."""
+
+    def _fake_resolve(*, expected_repository: str, canonical_root: Path | None) -> Path:
+        raise RuntimeError("RDC_REPO_ROOT_REMOTE_MISMATCH")
+
+    monkeypatch.setattr(doctor, "resolve_rdc_repo_root", _fake_resolve)
+
+    with pytest.raises(RuntimeError, match="RDC_REPO_ROOT_REMOTE_MISMATCH"):
+        doctor.resolve_workflow_repo_root(str(tmp_path), "owner/other-repo")
+
+
+def test_resolve_repo_root_omitted_repository_preserves_canonical_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Omitted repository preserves canonical root without inventing a slug."""
+    monkeypatch.setattr(doctor, "CANONICAL_SOURCE_ROOT", ROOT)
+
+    result = doctor.resolve_workflow_repo_root(None, None)
+
+    # Must resolve to the canonical root, not to some fabricated path.
+    assert result == ROOT.expanduser().resolve()
+
+
+def test_build_parser_repo_root_default_is_none() -> None:
+    """--repo-root default must be None so cwd is never silently injected."""
+    parser = doctor.build_parser()
+    args = parser.parse_args([])
+    assert args.repo_root is None
