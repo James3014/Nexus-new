@@ -44,6 +44,14 @@ PUBLIC_OPERATION_KEYS = (
     "created_at",
     "started_at",
     "last_heartbeat_at",
+    "dispatcher_heartbeat_at",
+    "provider_pid",
+    "provider_process_state",
+    "provider_started_at",
+    "provider_stream_last_activity_at",
+    "first_stream_activity_at",
+    "first_effect_at",
+    "time_to_first_effect_ms",
     "last_output_at",
     "finished_at",
     "attempts",
@@ -175,7 +183,9 @@ def observed_changed_paths(cwd: str) -> list[str]:
         check=False,
     )
     if proc.returncode != 0:
-        return []
+        raise RuntimeError(
+            f"git status failed with exit code {proc.returncode}: {proc.stderr.decode('utf-8', errors='replace')}"
+        )
     paths: set[str] = set()
     for raw in proc.stdout.split(b"\0"):
         if not raw:
@@ -188,6 +198,52 @@ def observed_changed_paths(cwd: str) -> list[str]:
             if path:
                 paths.add(path)
     return sorted(paths)
+
+
+def snapshot_worktree_physical_state(cwd: str) -> dict[str, tuple[str, int, int]]:
+    proc = subprocess.run(
+        ["git", "-C", cwd, "status", "--porcelain=v1", "-z"],
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"git status failed with exit code {proc.returncode}: {proc.stderr.decode('utf-8', errors='replace')}"
+        )
+    state: dict[str, tuple[str, int, int]] = {}
+    cwd_path = Path(cwd)
+    for raw in proc.stdout.split(b"\0"):
+        if not raw:
+            continue
+        text = raw.decode("utf-8", errors="replace")
+        if len(text) >= 4:
+            status_code = text[:2]
+            path = text[3:]
+            if " -> " in path:
+                path = path.split(" -> ", 1)[1]
+            if path:
+                target = cwd_path / path
+                try:
+                    st = target.stat()
+                    state[path] = (status_code, st.st_mtime_ns, st.st_size)
+                except OSError:
+                    state[path] = (status_code, 0, 0)
+    return state
+
+
+def detect_worktree_physical_effects(
+    cwd: str,
+    baseline: dict[str, tuple[str, int, int]],
+) -> list[str]:
+    current = snapshot_worktree_physical_state(cwd)
+    new_or_modified: set[str] = set()
+    for path, meta in current.items():
+        if baseline.get(path) != meta:
+            new_or_modified.add(path)
+    for path in baseline:
+        if path not in current:
+            new_or_modified.add(path)
+    return sorted(new_or_modified)
 
 
 class DirectOperationJournal:
@@ -274,6 +330,14 @@ class DirectOperationJournal:
             "created_at": now,
             "started_at": None,
             "last_heartbeat_at": None,
+            "dispatcher_heartbeat_at": None,
+            "provider_pid": None,
+            "provider_process_state": "IDLE",
+            "provider_started_at": None,
+            "provider_stream_last_activity_at": None,
+            "first_stream_activity_at": None,
+            "first_effect_at": None,
+            "time_to_first_effect_ms": None,
             "last_output_at": None,
             "finished_at": None,
             "attempts": 0,
@@ -351,6 +415,7 @@ class DirectOperationJournal:
             "phase": "STARTING",
             "started_at": now,
             "last_heartbeat_at": now,
+            "dispatcher_heartbeat_at": now,
         }
         if pid is not None:
             changes["pid"] = int(pid)
@@ -365,7 +430,10 @@ class DirectOperationJournal:
         **changes: Any,
     ) -> dict[str, Any]:
         now = utc_now()
-        payload: dict[str, Any] = {"last_heartbeat_at": now}
+        payload: dict[str, Any] = {
+            "last_heartbeat_at": now,
+            "dispatcher_heartbeat_at": now,
+        }
         if output_observed:
             payload["last_output_at"] = now
         if phase is not None:
@@ -385,16 +453,21 @@ class DirectOperationJournal:
     ) -> dict[str, Any]:
         if status not in TERMINAL_STATES:
             raise DirectOperationJournalError("TERMINAL_STATUS_REQUIRED")
+        now = utc_now()
         payload: dict[str, Any] = {
             "status": status,
             "phase": "TERMINAL",
-            "finished_at": utc_now(),
-            "last_heartbeat_at": utc_now(),
+            "finished_at": now,
+            "last_heartbeat_at": now,
+            "dispatcher_heartbeat_at": now,
             "exit_code": exit_code,
             "failure_kind": failure_kind,
         }
-        if cwd:
-            payload["observed_changed_paths"] = observed_changed_paths(cwd)
+        if cwd and "observed_changed_paths" not in changes:
+            try:
+                payload["observed_changed_paths"] = observed_changed_paths(cwd)
+            except Exception:
+                payload["observed_changed_paths"] = None
         payload.update(changes)
         return self.update(operation_id, **payload)
 
@@ -420,6 +493,11 @@ class DirectOperationJournal:
             except ValueError:
                 heartbeat_age = None
 
+        extra_changes: dict[str, Any] = {}
+        provider_pid = record.get("provider_pid")
+        if isinstance(provider_pid, int) and provider_pid > 0:
+            extra_changes["provider_process_state"] = "RUNNING" if _process_alive(provider_pid) else "EXITED"
+
         if not pid_alive:
             return self.mark_terminal(
                 operation_id,
@@ -434,6 +512,7 @@ class DirectOperationJournal:
                     "heartbeat_age_seconds": heartbeat_age,
                     "retry_permitted": False,
                 },
+                **extra_changes,
             )
 
         result = (
@@ -450,6 +529,7 @@ class DirectOperationJournal:
                 "heartbeat_age_seconds": heartbeat_age,
                 "retry_permitted": False,
             },
+            **extra_changes,
         )
 
 
