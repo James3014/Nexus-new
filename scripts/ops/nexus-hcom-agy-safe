@@ -86,6 +86,26 @@ def _configure_keychain(session_home: Path) -> None:
             raise SafeLauncherError(f"AGY_KEYCHAIN_CONFIG_FAILED:{command[1]}")
 
 
+def _reject_sensitive_hcom_env(hcom_dir: Path) -> None:
+    env_file = hcom_dir / "env"
+    if not env_file.is_file():
+        return
+    try:
+        content = env_file.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise SafeLauncherError("HCOM_ENV_UNREADABLE") from exc
+    forbidden = set(SENSITIVE_API_KEYS)
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        raw_value = value.strip()
+        if key in forbidden and raw_value not in {"", "''", '""'}:
+            raise SafeLauncherError(f"HCOM_ENV_FORBIDDEN_KEY:{key}")
+
+
 def _harden_hcom(hcom: Path, hcom_dir: Path, original_home: Path) -> None:
     hcom_dir.mkdir(parents=True, exist_ok=True)
     try:
@@ -161,6 +181,7 @@ def main(argv: list[str] | None = None) -> int:
     if not manager.is_file():
         raise SafeLauncherError("AGY_MANAGER_NOT_FOUND")
 
+    _reject_sensitive_hcom_env(hcom_dir)
     _active, profile = _manager_active_profile(manager, manager_root)
     state_root.mkdir(parents=True, exist_ok=True)
     state_root.chmod(0o700)

@@ -102,6 +102,13 @@ raise SystemExit(2)
 """,
     )
 
+    hcom_dir = original_home / ".hcom"
+    hcom_dir.mkdir()
+    (hcom_dir / "env").write_text(
+        "GEMINI_MODEL=gemini-safe-model\nGITHUB_TOKEN=\n",
+        encoding="utf-8",
+    )
+
     state_root = original_home / ".local" / "state" / "hcom-agy-safe"
     env = os.environ.copy()
     env.update({
@@ -177,3 +184,37 @@ def test_launcher_rejects_detached_hcom_launch_modes_before_creating_home(
         assert proc.returncode == 2
         assert "DETACHED_LAUNCH_DISABLED:" in proc.stderr
         assert not (tmp_path / ".local" / "state" / "hcom-agy-safe").exists()
+
+
+def test_launcher_rejects_sensitive_hcom_passthrough_before_account_copy(tmp_path: Path) -> None:
+    original_home = tmp_path / "owner-home"
+    hcom_dir = original_home / ".hcom"
+    hcom_dir.mkdir(parents=True)
+    (hcom_dir / "env").write_text(
+        "GEMINI_MODEL=allowed\nGITHUB_TOKEN=must-not-reenter\n",
+        encoding="utf-8",
+    )
+
+    manager = tmp_path / "agy-cli-manager"
+    _write_executable(manager, "#!/bin/sh\nexit 99\n")
+    hcom = tmp_path / "hcom"
+    _write_executable(hcom, "#!/bin/sh\nexit 99\n")
+
+    env = os.environ.copy()
+    env.update({
+        "HOME": str(original_home),
+        "NEXUS_AGY_MANAGER": str(manager),
+        "NEXUS_AGY_MANAGER_ROOT": str(tmp_path / "runtime"),
+        "NEXUS_HCOM_BIN": str(hcom),
+    })
+    proc = subprocess.run(
+        [sys.executable, str(LAUNCHER)],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 2
+    assert "HCOM_ENV_FORBIDDEN_KEY:GITHUB_TOKEN" in proc.stderr
+    assert not (original_home / ".local" / "state" / "hcom-agy-safe").exists()
