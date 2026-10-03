@@ -55,11 +55,13 @@ def _write_fake_manager(
     version: str = "0.2.1",
     module_integrity: str = "VERIFIED",
 ) -> None:
-    payload = json.dumps({
+    payload = json.dumps(
+        {
         "version": version,
         "archive_sha256": MANAGER_SHA,
         "module_integrity": module_integrity,
-    })
+        }
+    )
     path.write_text(f"#!/bin/sh\nprintf '%s\\n' '{payload}'\n", encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
@@ -70,6 +72,7 @@ def _make_source_repo(tmp_path: Path) -> Path:
     _git(repo, "init")
     _git(repo, "config", "user.email", "host-sync-test@example.invalid")
     _git(repo, "config", "user.name", "Host Sync Test")
+    _git(repo, "remote", "add", "origin", "https://github.com/James3014/Nexus-new.git")
 
     for source, relative in [
         (HOST_SYNC, "scripts/ops/nexus-host-sync"),
@@ -144,6 +147,7 @@ def _invoke(
     *,
     revision: str | None = None,
     desired_bundle: str | None = None,
+    canonical_source_root: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     quota_target = dispatch_target.parent / "nexus-agy-quota"
     workflow_doctor_target = dispatch_target.parent / "nexus-workflow-doctor"
@@ -177,11 +181,48 @@ def _invoke(
             revision,
             "--source-repo",
             str(source_repo),
-            "--no-fetch",
         ]
+        if command == "sync":
+            argv += [
+                "--canonical-source-root",
+                str(canonical_source_root or source_repo),
+            ]
+        argv += ["--no-fetch"]
     elif command in {"status", "verify"} and desired_bundle:
         argv += ["--desired-bundle-sha256", desired_bundle]
     return _run(argv, cwd=ROOT)
+
+
+def test_workflow_doctor_manifest_requires_canonical_source_root(tmp_path: Path) -> None:
+    source_repo = _make_source_repo(tmp_path)
+    manifest_path = source_repo / "scripts/ops/nexus-host-runtime-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["runtime_files"] = [
+        entry
+        for entry in manifest["runtime_files"]
+        if entry["path"] != "nexus/orchestrator/canonical_source_root.py"
+    ]
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    _git(source_repo, "add", "scripts/ops/nexus-host-runtime-manifest.json")
+    _git(source_repo, "commit", "-m", "omit workflow doctor dependency")
+    revision = _git(source_repo, "rev-parse", "HEAD")
+
+    manager_python = tmp_path / "manager-python"
+    _write_fake_manager(manager_python)
+    proc = _invoke(
+        source_repo,
+        tmp_path / "runtime",
+        manager_python,
+        tmp_path / "bin" / "nexus-agy-dispatch",
+        tmp_path / "bin" / "nexus-host-sync",
+        "desired",
+        revision=revision,
+    )
+
+    assert proc.returncode == 2
+    payload = json.loads(proc.stdout)
+    assert payload["state"] == "ERROR"
+    assert payload["error"] == "HOST_MANIFEST_REQUIRED_RUNTIME_PATH_MISSING"
 
 
 def test_sync_materializes_exact_generation_and_entrypoints(tmp_path: Path) -> None:
@@ -212,6 +253,10 @@ def test_sync_materializes_exact_generation_and_entrypoints(tmp_path: Path) -> N
     assert payload["components"]["agy_dispatch"]["status"] == "VERIFIED"
     assert payload["components"]["agy_quota"]["status"] == "VERIFIED"
     assert payload["components"]["workflow_doctor"]["status"] == "VERIFIED"
+    assert payload["components"]["workflow_source_binding"]["status"] == "VERIFIED"
+    assert payload["components"]["workflow_source_binding"]["repo_root"] == str(
+        source_repo.resolve()
+    )
     assert payload["components"]["external_worker_dispatch"]["status"] == "VERIFIED"
     assert payload["components"]["grok_accounts"]["status"] == "VERIFIED"
     assert payload["components"]["agy_account_manager"]["status"] == "VERIFIED"
@@ -238,6 +283,20 @@ def test_sync_materializes_exact_generation_and_entrypoints(tmp_path: Path) -> N
     assert (snapshot / "scripts/ops/nexus-agy-review").stat().st_mode & stat.S_IXUSR
     assert (snapshot / "scripts/ops/nexus-agy-review-canary").stat().st_mode & stat.S_IXUSR
 
+    doctor_env = dict(os.environ)
+    doctor_env["NEXUS_HOST_RUNTIME_ROOT"] = str(runtime_root)
+    doctor_env["NEXUS_WORKFLOW_DOCTOR_SNAPSHOT"] = str(snapshot)
+    doctor_help = subprocess.run(
+        [str(dispatch_target.parent / "nexus-workflow-doctor"), "--help"],
+        cwd=tmp_path,
+        env=doctor_env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert doctor_help.returncode == 0, doctor_help.stderr + doctor_help.stdout
+    assert "--repo-root" in doctor_help.stdout
+
     receipt = json.loads((runtime_root / "releases" / bundle / "host-generation.json").read_text())
     assert receipt["source_revision"] == revision
     assert receipt["bundle_sha256"] == bundle
@@ -258,6 +317,68 @@ def test_sync_materializes_exact_generation_and_entrypoints(tmp_path: Path) -> N
     )
     assert verify.returncode == 0
     assert json.loads(verify.stdout)["state"] == "ALIGNED"
+
+
+def test_status_detects_missing_workflow_source_binding(tmp_path: Path) -> None:
+    source_repo = _make_source_repo(tmp_path)
+    revision = _git(source_repo, "rev-parse", "HEAD")
+    runtime_root = tmp_path / "runtime"
+    manager_python = tmp_path / "manager-python"
+    dispatch_target = tmp_path / "bin" / "nexus-agy-dispatch"
+    sync_target = tmp_path / "bin" / "nexus-host-sync"
+    _write_fake_manager(manager_python)
+
+    sync = _invoke(
+        source_repo,
+        runtime_root,
+        manager_python,
+        dispatch_target,
+        sync_target,
+        "sync",
+        revision=revision,
+    )
+    assert sync.returncode == 0
+    (runtime_root / "source-binding.json").unlink()
+
+    status = _invoke(
+        source_repo,
+        runtime_root,
+        manager_python,
+        dispatch_target,
+        sync_target,
+        "status",
+    )
+    assert status.returncode == 2
+    payload = json.loads(status.stdout)
+    assert payload["state"] == "DEPENDENCY_DRIFT"
+    assert payload["components"]["workflow_source_binding"]["status"] == "MISSING"
+
+
+def test_sync_rejects_wrong_canonical_source_remote(tmp_path: Path) -> None:
+    source_repo = _make_source_repo(tmp_path)
+    revision = _git(source_repo, "rev-parse", "HEAD")
+    wrong_root = tmp_path / "wrong-root"
+    wrong_root.mkdir()
+    _git(wrong_root, "init")
+    _git(wrong_root, "remote", "add", "origin", "https://github.com/Other/Repo.git")
+
+    manager_python = tmp_path / "manager-python"
+    _write_fake_manager(manager_python)
+    proc = _invoke(
+        source_repo,
+        tmp_path / "runtime",
+        manager_python,
+        tmp_path / "bin" / "nexus-agy-dispatch",
+        tmp_path / "bin" / "nexus-host-sync",
+        "sync",
+        revision=revision,
+        canonical_source_root=wrong_root,
+    )
+
+    assert proc.returncode == 2
+    payload = json.loads(proc.stdout)
+    assert payload["state"] == "ERROR"
+    assert payload["error"] == "CANONICAL_SOURCE_ROOT_REMOTE_MISMATCH"
 
 
 def test_second_generation_and_rollback_are_atomic_and_reversible(tmp_path: Path) -> None:
@@ -471,7 +592,8 @@ def test_launchd_installer_writes_periodic_reconcile_job_without_loading(
     plist = home / "Library" / "LaunchAgents" / "com.nexus.host-sync.plist"
     state_dir = home / ".local" / "state" / "nexus-host-sync"
     env = dict(os.environ)
-    env.update({
+    env.update(
+        {
         "HOME": str(home),
         "NEXUS_HOST_REPO_ROOT": str(ROOT),
         "NEXUS_HOST_SYNC_BIN": str(home / ".local/bin/nexus-host-sync"),
@@ -479,7 +601,8 @@ def test_launchd_installer_writes_periodic_reconcile_job_without_loading(
         "NEXUS_HOST_SYNC_PLIST": str(plist),
         "NEXUS_HOST_SYNC_STATE_DIR": str(state_dir),
         "NEXUS_HOST_SYNC_LAUNCHD_LOAD": "0",
-    })
+        }
+    )
 
     proc = subprocess.run(
         ["bash", str(LAUNCHD_INSTALLER)],
@@ -502,6 +625,8 @@ def test_launchd_installer_writes_periodic_reconcile_job_without_loading(
         "main",
         "--source-repo",
         str(home / ".cache/nexus-host-sync/Nexus-new.git"),
+        "--canonical-source-root",
+        str(ROOT),
     ]
 
 
@@ -537,10 +662,12 @@ def test_manager_venv_symlink_identity_is_preserved(tmp_path: Path) -> None:
 def test_bootstrap_installer_deploys_exact_host_sync_bytes(tmp_path: Path) -> None:
     target = tmp_path / "bin" / "nexus-host-sync"
     env = dict(os.environ)
-    env.update({
+    env.update(
+        {
         "NEXUS_HOST_REPO_ROOT": str(ROOT),
         "NEXUS_HOST_SYNC_TARGET": str(target),
-    })
+        }
+    )
 
     proc = subprocess.run(
         ["bash", str(BOOTSTRAP_INSTALLER)],

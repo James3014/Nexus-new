@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -18,9 +19,49 @@ def _snapshot() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _has_repo_root_arg(argv: list[str]) -> bool:
+    return any(arg == "--repo-root" or arg.startswith("--repo-root=") for arg in argv)
+
+
+def _bound_repo_root(snapshot: Path) -> Path | None:
+    configured = os.getenv("NEXUS_WORKFLOW_DOCTOR_REPO_ROOT", "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+
+    runtime_root = Path(
+        os.getenv(
+            "NEXUS_HOST_RUNTIME_ROOT",
+            str(Path.home() / ".local/share/nexus-host-runtime"),
+        )
+    ).expanduser()
+    binding_path = runtime_root / "source-binding.json"
+    if binding_path.is_file():
+        try:
+            payload = json.loads(binding_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SystemExit("NEXUS_WORKFLOW_DOCTOR_SOURCE_BINDING_UNREADABLE") from exc
+        if payload.get("schema") != "nexus.host_source_binding.v1":
+            raise SystemExit("NEXUS_WORKFLOW_DOCTOR_SOURCE_BINDING_SCHEMA_MISMATCH")
+        if str(payload.get("repository") or "").lower() != "james3014/nexus-new":
+            raise SystemExit("NEXUS_WORKFLOW_DOCTOR_SOURCE_BINDING_REPOSITORY_MISMATCH")
+        raw_root = payload.get("repo_root")
+        if not isinstance(raw_root, str) or not raw_root:
+            raise SystemExit("NEXUS_WORKFLOW_DOCTOR_SOURCE_BINDING_ROOT_MISSING")
+        return Path(raw_root).expanduser().resolve()
+
+    current_snapshot = runtime_root / "current" / "snapshot"
+    if current_snapshot.is_dir() and snapshot.resolve() == current_snapshot.resolve():
+        raise SystemExit("NEXUS_WORKFLOW_DOCTOR_SOURCE_BINDING_MISSING")
+    return None
+
+
 SNAPSHOT = _snapshot()
 if not SNAPSHOT.is_dir():
     raise SystemExit("NEXUS_WORKFLOW_DOCTOR_SNAPSHOT_MISSING")
+if not _has_repo_root_arg(sys.argv[1:]):
+    bound_repo_root = _bound_repo_root(SNAPSHOT)
+    if bound_repo_root is not None:
+        sys.argv[1:1] = ["--repo-root", str(bound_repo_root)]
 sys.path.insert(0, str(SNAPSHOT))
 
 from nexus.services.workflow_doctor import main  # noqa: E402,I001

@@ -61,6 +61,14 @@ def _normalize_github_identity(value: str, *, allow_plain: bool = False) -> str:
     raise RuntimeError(f"RDC_REPO_ROOT_IDENTITY_INVALID: {value!r}")
 
 
+def _same_physical_directory(left: Path, right: Path) -> bool:
+    """Return True when two path spellings identify the same physical directory."""
+    try:
+        return os.path.samefile(left, right)
+    except OSError:
+        return False
+
+
 def resolve_canonical_source_root(
     env: Optional[Mapping[str, str]] = None,
     *,
@@ -83,7 +91,7 @@ def resolve_canonical_source_root(
         raise RuntimeError("NEXUS_CANONICAL_SOURCE_ROOT_NOT_DIRECTORY")
 
     loaded_source_root = (source_root or Path(__file__).resolve().parents[2]).resolve()
-    if resolved != loaded_source_root:
+    if not _same_physical_directory(resolved, loaded_source_root):
         raise RuntimeError("NEXUS_CANONICAL_SOURCE_ROOT_SOURCE_MISMATCH")
 
     try:
@@ -99,7 +107,7 @@ def resolve_canonical_source_root(
         raise RuntimeError("NEXUS_CANONICAL_SOURCE_ROOT_NOT_GIT_WORKTREE") from exc
     if git_root.returncode != 0 or not git_root.stdout.strip():
         raise RuntimeError("NEXUS_CANONICAL_SOURCE_ROOT_NOT_GIT_WORKTREE")
-    if Path(git_root.stdout.strip()).resolve() != resolved:
+    if not _same_physical_directory(Path(git_root.stdout.strip()), resolved):
         raise RuntimeError("NEXUS_CANONICAL_SOURCE_ROOT_NOT_GIT_WORKTREE")
     return resolved
 
@@ -161,7 +169,7 @@ def resolve_rdc_repo_root(
 
     if git_top.returncode != 0 or not git_top.stdout.strip():
         raise RuntimeError("RDC_REPO_ROOT_NOT_GIT_REPO")
-    if Path(git_top.stdout.strip()).resolve() != resolved:
+    if not _same_physical_directory(Path(git_top.stdout.strip()), resolved):
         raise RuntimeError("RDC_REPO_ROOT_NOT_GIT_REPO")
 
     # Read the origin remote URL.
