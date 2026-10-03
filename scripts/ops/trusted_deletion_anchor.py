@@ -46,7 +46,7 @@ TRUSTED_EXTERNAL_RUNTIME_PACKAGES: tuple[tuple[str, str, str, str], ...] = (
         "nexus-runtime",
         "nexus_runtime",
         "https://github.com/James3014/nexus-runtime.git",
-        "d65e3ea7628a07bd73dee461750392bcdf85c3ac",
+        "8f16c41f8a1838248901393274c853af4dca7f9b",
     ),
 )
 UV_VERSION = "uv 0.9.2"
@@ -127,8 +127,8 @@ TRUSTED_PR1288_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, s
     (
         "40012ce8452131f446fce0feb8f508f050a8b0dc875837eac1b623007e7388b8",
         "33543bf4216e10131b08c30951d65bed92ab98bb39e0e9fdde417bdf68a189c0",
-        "d8cd2968572556d0451ec10663287350faff1b28f31d4bc0e3c363003b4712f6",
-        "625a4aed3149386d95f74fe24c6a8da5589502b2abe4aba349eed05678314fb7",
+        "2fce493ab2843794c1d44665fa68e8292c321fb937e04918795b39b124a99c4e",
+        "1defe6b2b7251fd060fb3613bbb9875ec38b4c6ea4dbd8febc36dcb10d1724f1",
     ),
 )
 REQUIRED_EVIDENCE_KEYS = {
