@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import signal
@@ -37,7 +38,7 @@ def _run(argv: list[str], *, env: dict[str, str] | None = None) -> subprocess.Co
     return proc
 
 
-def _manager_active_profile(manager: Path, manager_root: Path) -> tuple[str, Path]:
+def _manager_active_profile(manager: Path, manager_root: Path) -> tuple[str, Path, Path]:
     _run([str(manager), "--root", str(manager_root), "ensure-active", "--json"])
     active = _run([str(manager), "--root", str(manager_root), "current"]).stdout.strip()
     if not active or active == "-" or "/" in active or active in {".", ".."}:
@@ -46,7 +47,23 @@ def _manager_active_profile(manager: Path, manager_root: Path) -> tuple[str, Pat
     profile = (accounts_root / active).resolve()
     if profile.parent != accounts_root or not (profile / ".gemini").is_dir():
         raise SafeLauncherError("AGY_ACTIVE_PROFILE_MISSING")
-    return active, profile
+
+    try:
+        status = json.loads(
+            _run([str(manager), "--root", str(manager_root), "status", "--json"]).stdout
+        )
+    except json.JSONDecodeError as exc:
+        raise SafeLauncherError("AGY_MANAGER_STATUS_INVALID") from exc
+    if status.get("active") != active:
+        raise SafeLauncherError("AGY_ACTIVE_ACCOUNT_DRIFT")
+    raw_live_dir = status.get("live_dir")
+    if not isinstance(raw_live_dir, str) or not raw_live_dir:
+        raise SafeLauncherError("AGY_LIVE_DIR_MISSING")
+    live_dir = Path(raw_live_dir).expanduser().resolve()
+    if live_dir.name != ".gemini" or not live_dir.is_dir():
+        raise SafeLauncherError("AGY_LIVE_DIR_INVALID")
+    live_home = live_dir.parent.resolve()
+    return active, profile, live_home
 
 
 def _copy_profile(profile: Path, session_home: Path) -> None:
@@ -55,6 +72,69 @@ def _copy_profile(profile: Path, session_home: Path) -> None:
 
     shutil.copytree(profile, session_home, dirs_exist_ok=True, symlinks=True, ignore=ignore)
     session_home.chmod(0o700)
+
+
+def _project_interactive_state(live_home: Path, session_home: Path) -> None:
+    live_onboarding = live_home / ".gemini" / "antigravity-cli" / "cache" / "onboarding.json"
+    session_onboarding = session_home / ".gemini" / "antigravity-cli" / "cache" / "onboarding.json"
+    if live_onboarding.is_file():
+        try:
+            live_payload = json.loads(live_onboarding.read_text(encoding="utf-8"))
+            session_payload = (
+                json.loads(session_onboarding.read_text(encoding="utf-8"))
+                if session_onboarding.is_file()
+                else {}
+            )
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SafeLauncherError("AGY_ONBOARDING_STATE_INVALID") from exc
+        if not isinstance(live_payload, dict) or not isinstance(session_payload, dict):
+            raise SafeLauncherError("AGY_ONBOARDING_STATE_INVALID")
+        for key in (
+            "onboardingComplete",
+            "consumerOnboardingComplete",
+            "enterpriseOnboardingComplete",
+        ):
+            value = live_payload.get(key)
+            if isinstance(value, bool):
+                session_payload[key] = value
+        session_onboarding.parent.mkdir(parents=True, exist_ok=True)
+        session_onboarding.write_text(
+            json.dumps(session_payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    live_settings = live_home / ".gemini" / "antigravity-cli" / "settings.json"
+    if not live_settings.is_file():
+        return
+    try:
+        live_payload = json.loads(live_settings.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SafeLauncherError("AGY_INTERACTIVE_SETTINGS_INVALID") from exc
+    if not isinstance(live_payload, dict):
+        raise SafeLauncherError("AGY_INTERACTIVE_SETTINGS_INVALID")
+    color_scheme = live_payload.get("colorScheme")
+    if not isinstance(color_scheme, str) or not color_scheme or len(color_scheme) > 64:
+        return
+    if any(ord(char) < 32 for char in color_scheme):
+        raise SafeLauncherError("AGY_COLOR_SCHEME_INVALID")
+
+    session_settings = session_home / ".gemini" / "antigravity-cli" / "settings.json"
+    try:
+        session_payload = (
+            json.loads(session_settings.read_text(encoding="utf-8"))
+            if session_settings.is_file()
+            else {}
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SafeLauncherError("AGY_INTERACTIVE_SETTINGS_INVALID") from exc
+    if not isinstance(session_payload, dict):
+        raise SafeLauncherError("AGY_INTERACTIVE_SETTINGS_INVALID")
+    session_payload["colorScheme"] = color_scheme
+    session_settings.parent.mkdir(parents=True, exist_ok=True)
+    session_settings.write_text(
+        json.dumps(session_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _configure_keychain(session_home: Path) -> None:
@@ -182,7 +262,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SafeLauncherError("AGY_MANAGER_NOT_FOUND")
 
     _reject_sensitive_hcom_env(hcom_dir)
-    _active, profile = _manager_active_profile(manager, manager_root)
+    _active, profile, live_home = _manager_active_profile(manager, manager_root)
     state_root.mkdir(parents=True, exist_ok=True)
     state_root.chmod(0o700)
     session_home = Path(tempfile.mkdtemp(prefix="session.", dir=str(state_root))).resolve()
@@ -198,6 +278,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         _copy_profile(profile, session_home)
+        _project_interactive_state(live_home, session_home)
         _configure_keychain(session_home)
         _harden_hcom(hcom, hcom_dir, original_home)
         env = _launch_env(session_home, hcom_dir)
