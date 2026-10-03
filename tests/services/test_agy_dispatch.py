@@ -22,6 +22,7 @@ INSTALLER_PATH = ROOT / "scripts" / "ops" / "install_nexus_agy_dispatch.sh"
 
 os.environ["NEXUS_AGY_SNAPSHOT"] = str(ROOT)
 dispatch = SourceFileLoader("nexus_agy_dispatch_canonical", str(DISPATCH_PATH)).load_module()
+from nexus.services.direct_operation_journal import _process_alive
 
 
 def _window(remaining: float, *, reset_at: str | None = None) -> dict:
@@ -1189,6 +1190,179 @@ def test_sigterm_during_dispatch_persists_supervisor_signal_outcome(
     assert record["failure_kind"] == "SUPERVISOR_SIGNAL:SIGTERM"
     assert record["reconciliation"]["result"] == "SUPERVISOR_SIGNAL_WITH_UNKNOWN_PROVIDER_EFFECT"
     assert record["reconciliation"]["retry_permitted"] is False
+
+
+_PROVIDER_CHILD_SCRIPT = textwrap.dedent("""\
+    import os
+    import subprocess
+    import sys
+    import time
+    from importlib.machinery import SourceFileLoader
+    from pathlib import Path
+
+    dispatch_path = sys.argv[1]
+    op_root = Path(sys.argv[2])
+    operation_id = sys.argv[3]
+    ready_file = Path(sys.argv[4])
+    child_pid_file = Path(sys.argv[5])
+    snapshot_root = sys.argv[6]
+
+    os.environ["NEXUS_AGY_SNAPSHOT"] = snapshot_root
+    dispatch = SourceFileLoader(
+        "nexus_agy_dispatch_canonical", dispatch_path
+    ).load_module()
+
+    journal = dispatch.AgyOperationJournal(op_root)
+    prompt_path = journal.prompt_path(operation_id)
+    dispatch._write_private_prompt(prompt_path, "sigterm child reaping probe")
+
+    log_path = str(journal.operation_dir(operation_id) / "agy.log")
+
+    def fake_run_agy(**kwargs):
+        sub = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)", log_path])
+        child_pid_file.write_text(str(sub.pid))
+        ready_file.touch()
+        sub.wait()
+        return 0, "", "", False, 100
+
+    def fake_dispatch_run(**kwargs):
+        kwargs["operation_hook"]({
+            "phase": "EXECUTING",
+            "attempts": 1,
+            "rotations": 0,
+        })
+        return fake_run_agy(**kwargs)
+
+    dispatch.dispatch_run = fake_dispatch_run
+
+    try:
+        dispatch._run_background_operation(
+            operation_id=operation_id,
+            prompt_file=str(prompt_path),
+            cwd=str(op_root),
+            mode="plan",
+            model="gemini-test",
+            effort="medium",
+            timeout=30,
+            max_calls=1,
+            pool_wait_timeout=1.0,
+            allow=[],
+            deny=[],
+            temp_command_permissions=False,
+            operation_root=op_root,
+            heartbeat_interval=0.01,
+        )
+    except BaseException:
+        pass
+""")
+
+
+def test_sigterm_to_supervisor_reaps_owned_provider_child(
+    tmp_path: Path,
+) -> None:
+    """Supervisor receiving SIGTERM must reap its owned provider child process."""
+    op_root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(op_root)
+    operation_id = dispatch.new_operation_id()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+
+    ready_file = tmp_path / "ready"
+    child_pid_file = tmp_path / "child.pid"
+    script_file = tmp_path / "provider_child.py"
+    script_file.write_text(_PROVIDER_CHILD_SCRIPT, encoding="utf-8")
+
+    child = subprocess.Popen(
+        [
+            sys.executable,
+            str(script_file),
+            str(DISPATCH_PATH),
+            str(op_root),
+            operation_id,
+            str(ready_file),
+            str(child_pid_file),
+            str(ROOT),
+        ],
+        cwd=str(tmp_path),
+    )
+
+    deadline = time.monotonic() + 20.0
+    while not ready_file.exists() or not child_pid_file.exists():
+        if time.monotonic() > deadline:
+            child.kill()
+            child.wait()
+            raise TimeoutError("provider child never signalled readiness")
+        time.sleep(0.05)
+
+    provider_pid = int(child_pid_file.read_text().strip())
+    assert _process_alive(provider_pid), "Provider child must be running initially"
+
+    try:
+        os.kill(child.pid, signal.SIGTERM)
+        child.wait(timeout=10)
+
+        assert not _process_alive(provider_pid), (
+            f"Provider child {provider_pid} is still alive after supervisor SIGTERM!"
+        )
+
+        record = journal.read(operation_id)
+        assert record["status"] == "OUTCOME_UNKNOWN"
+        reconciliation = record.get("reconciliation") or {}
+        assert reconciliation.get("provider_alive_after") is False
+    finally:
+        if _process_alive(provider_pid):
+            try:
+                os.kill(provider_pid, signal.SIGKILL)
+            except OSError:
+                pass
+
+
+def test_dispatch_run_retains_lease_when_provider_cannot_be_killed(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """When provider child remains alive after execution error, lease must not be released."""
+    home = tmp_path / "home"
+    home.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+
+    def stubborn_runner(*, operation_hook=None, **_kwargs):
+        if operation_hook:
+            operation_hook(provider_pid=12345)
+        return 1, "", "error", False, 10
+
+    orig_alive = dispatch._agy_operation_journal._process_alive
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_process_alive",
+        lambda pid: True if pid == 12345 else orig_alive(pid),
+    )
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_stop_process",
+        lambda pid, **kwargs: False,
+    )
+
+    code = dispatch.dispatch_run(
+        prompt="stubborn run",
+        cwd=str(tmp_path),
+        mode="plan",
+        coordinator=coordinator,
+        run_agy_fn=stubborn_runner,
+    )
+
+    assert code != 0
+    assert coordinator.claim.released is False, "Lease must NOT be released while provider child is running!"
+
+
 
 
 # ---------------------------------------------------------------------------

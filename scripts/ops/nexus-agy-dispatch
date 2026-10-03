@@ -714,6 +714,7 @@ def run_agy(
     model: str | None,
     effort: str | None,
     timeout: int,
+    operation_hook: Any = None,
 ):
     agy = shutil.which("agy")
     if not agy:
@@ -750,7 +751,23 @@ def run_agy(
         stderr=subprocess.PIPE,
         text=True,
         bufsize=1,
+        start_new_session=True,
     )
+    if operation_hook is not None:
+        try:
+            pgid = None
+            try:
+                pgid = os.getpgid(process.pid)
+            except OSError:
+                pass
+            _operation_hook(
+                operation_hook,
+                provider_pid=process.pid,
+                provider_pgid=pgid,
+            )
+        except Exception:
+            pass
+
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
     quota_failure = threading.Event()
@@ -781,23 +798,30 @@ def run_agy(
     timed_out = False
     quota_terminated = False
     deadline = started + max(1, timeout) + 10
-    while process.poll() is None:
-        if quota_failure.wait(0.05):
-            quota_terminated = True
-            process.terminate()
-            break
-        if time.monotonic() >= deadline:
-            timed_out = True
-            process.terminate()
-            break
-        time.sleep(0.05)
+    try:
+        while process.poll() is None:
+            if quota_failure.wait(0.05):
+                quota_terminated = True
+                process.terminate()
+                break
+            if time.monotonic() >= deadline:
+                timed_out = True
+                process.terminate()
+                break
+            time.sleep(0.05)
 
-    if process.poll() is None:
-        try:
-            process.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=2)
+        if process.poll() is None:
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2)
+    finally:
+        if process.poll() is None:
+            try:
+                _agy_operation_journal._stop_process(process.pid, grace_seconds=2.0)
+            except Exception:
+                pass
 
     stdout_thread.join(timeout=2)
     stderr_thread.join(timeout=2)
@@ -1073,9 +1097,21 @@ def dispatch_run(
     max_failovers = _max_account_failovers()
     last_kind = None
     total_wall_ms = 0
+    active_provider_pid: int | None = None
+    active_provider_pgid: int | None = None
+
+    def _inner_operation_hook(event: dict[str, Any] | None = None, **kwargs: Any) -> None:
+        nonlocal active_provider_pid, active_provider_pgid
+        merged = dict(event or {})
+        merged.update(kwargs)
+        if "provider_pid" in merged and isinstance(merged["provider_pid"], int):
+            active_provider_pid = merged["provider_pid"]
+        if "provider_pgid" in merged and isinstance(merged["provider_pgid"], int):
+            active_provider_pgid = merged["provider_pgid"]
+        _operation_hook(operation_hook, **merged)
 
     _operation_hook(
-        operation_hook,
+        _inner_operation_hook,
         phase="ACCOUNT_LEASED",
         account_alias_hash=claim.account_alias_hash,
         lease_id_hash=claim.lease_id_hash,
@@ -1199,15 +1235,25 @@ def dispatch_run(
                         allow_unsafe_legacy=allow_unsafe_legacy,
                         replace_allow_deny=replace_allow_deny,
                     )
-                code, out, err, timed_out, wall_ms = runner(
-                    env=env,
-                    prompt=prompt,
-                    cwd=cwd,
-                    mode=mode,
-                    model=model,
-                    effort=effort,
-                    timeout=max(1, timeout),
-                )
+                runner_kwargs: dict[str, Any] = {
+                    "env": env,
+                    "prompt": prompt,
+                    "cwd": cwd,
+                    "mode": mode,
+                    "model": model,
+                    "effort": effort,
+                    "timeout": max(1, timeout),
+                }
+                try:
+                    import inspect
+                    sig = inspect.signature(runner)
+                    if "operation_hook" in sig.parameters or any(
+                        p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+                    ):
+                        runner_kwargs["operation_hook"] = _inner_operation_hook
+                except Exception:
+                    pass
+                code, out, err, timed_out, wall_ms = runner(**runner_kwargs)
             finally:
                 restore_temp_permissions(permission_token)
             total_wall_ms += wall_ms
@@ -1374,7 +1420,13 @@ def dispatch_run(
                 })
                 return 75
     finally:
-        if claim is not None:
+        if active_provider_pid is not None and _agy_operation_journal._process_alive(active_provider_pid):
+            _agy_operation_journal._stop_process(active_provider_pid, grace_seconds=2.0)
+        provider_still_running = (
+            active_provider_pid is not None
+            and _agy_operation_journal._process_alive(active_provider_pid)
+        )
+        if claim is not None and not provider_still_running:
             try:
                 claim.release()
             except Exception:
@@ -1517,21 +1569,53 @@ def _supervisor_terminal_guard(func):
                 attestation_log_path,
                 requested_model=model,
             )
-            journal.mark_terminal(
+            had_before, alive_after, unverified = _agy_operation_journal._stop_operation_processes(
                 operation_id,
-                status="OUTCOME_UNKNOWN" if provider_effect_possible else "FAILED",
-                exit_code=record.get("exit_code"),
-                failure_kind=(
-                    unknown_failure_kind if provider_effect_possible else known_failure_kind
-                ),
-                cwd=cwd,
-                reconciliation={
-                    "at": _agy_operation_journal.utc_now(),
-                    "result": unknown_result if provider_effect_possible else known_result,
-                    "retry_permitted": False,
-                },
-                **attestation,
+                journal.operation_dir(operation_id),
+                pid=record.get("pid"),
+                provider_pid=record.get("provider_pid"),
+                provider_pgid=record.get("provider_pgid"),
+                supervisor_pid=os.getpid(),
+                grace_seconds=2.0,
             )
+            had_before = had_before or bool(record.get("provider_pid")) or provider_effect_possible
+
+            if alive_after:
+                journal.mark_terminal(
+                    operation_id,
+                    status="OUTCOME_UNKNOWN",
+                    exit_code=record.get("exit_code"),
+                    failure_kind=unknown_failure_kind,
+                    cwd=cwd,
+                    phase="RECONCILE_REQUIRED",
+                    reconciliation={
+                        "at": _agy_operation_journal.utc_now(),
+                        "result": "SUPERVISOR_SIGNAL_ORPHAN_PROVIDER_STILL_RUNNING",
+                        "provider_alive_before": had_before,
+                        "provider_alive_after": True,
+                        "retry_permitted": False,
+                    },
+                    **attestation,
+                )
+            else:
+                journal.mark_terminal(
+                    operation_id,
+                    status="OUTCOME_UNKNOWN" if provider_effect_possible else "FAILED",
+                    exit_code=record.get("exit_code"),
+                    failure_kind=(
+                        unknown_failure_kind if provider_effect_possible else known_failure_kind
+                    ),
+                    cwd=cwd,
+                    phase="TERMINAL",
+                    reconciliation={
+                        "at": _agy_operation_journal.utc_now(),
+                        "result": unknown_result if provider_effect_possible else known_result,
+                        "provider_alive_before": had_before,
+                        "provider_alive_after": False,
+                        "retry_permitted": False,
+                    },
+                    **attestation,
+                )
 
         try:
             signal.signal(signal.SIGTERM, _signal_handler)
@@ -1602,6 +1686,8 @@ def _run_background_operation(
         "lease_id_hash": None,
         "failure_kind": None,
         "timed_out": False,
+        "provider_pid": None,
+        "provider_pgid": None,
     }
     state_lock = threading.Lock()
 
@@ -1614,6 +1700,8 @@ def _run_background_operation(
             account_alias_hash=snapshot.get("account_alias_hash"),
             lease_id_hash=snapshot.get("lease_id_hash"),
             failure_kind=snapshot.get("failure_kind"),
+            provider_pid=snapshot.get("provider_pid"),
+            provider_pgid=snapshot.get("provider_pgid"),
         )
 
     def on_event(event: dict[str, Any]) -> None:
@@ -1690,6 +1778,8 @@ def _run_background_operation(
             rotations=int(snapshot.get("rotations") or 0),
             account_alias_hash=snapshot.get("account_alias_hash"),
             lease_id_hash=snapshot.get("lease_id_hash"),
+            provider_pid=snapshot.get("provider_pid"),
+            provider_pgid=snapshot.get("provider_pgid"),
             reconciliation=reconciliation,
             **attestation,
         )

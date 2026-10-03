@@ -466,3 +466,56 @@ def test_source_baseline_is_secret_free_and_not_public(tmp_path: Path) -> None:
     assert record["source_attribution_state"] == "BASELINE_CAPTURED"
     assert "source_baseline" not in public
     assert public["source_baseline_sha256"] == record["source_baseline_sha256"]
+
+
+def test_reconcile_dead_wrapper_with_live_provider_pid_terminates_exact_child(
+    tmp_path: Path,
+) -> None:
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id, _ = _create(journal, tmp_path)
+    marker = str(journal.operation_dir(operation_id) / "agy.log")
+
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)", marker],
+    )
+    try:
+        journal.mark_started(operation_id, pid=999_999_998)
+        journal.update(operation_id, provider_pid=child.pid)
+
+        result = journal.reconcile(operation_id)
+
+        assert result["status"] == "OUTCOME_UNKNOWN"
+        assert result["reconciliation"]["result"] == "ORPHAN_PROVIDER_TERMINATED"
+        assert result["reconciliation"]["provider_alive_before"] is True
+        assert result["reconciliation"]["provider_alive_after"] is False
+        assert not _process_group_alive(child.pid)
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+
+
+def test_reconcile_dead_wrapper_with_reused_provider_pid_does_not_kill_unverified_process(
+    tmp_path: Path,
+) -> None:
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id, _ = _create(journal, tmp_path)
+
+    unrelated = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)", "unrelated_payload"],
+    )
+    try:
+        journal.mark_started(operation_id, pid=999_999_998)
+        journal.update(operation_id, provider_pid=unrelated.pid)
+
+        result = journal.reconcile(operation_id)
+
+        assert result["status"] == "RUNNING"
+        assert result["phase"] == "RECONCILE_REQUIRED"
+        assert result["reconciliation"]["result"] == "ORPHAN_PROCESS_GROUP_UNVERIFIED"
+        assert result["reconciliation"]["retry_permitted"] is False
+        assert unrelated.poll() is None, "Unrelated process must not be killed"
+    finally:
+        unrelated.kill()
+        unrelated.wait()
+
