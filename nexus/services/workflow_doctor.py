@@ -310,15 +310,13 @@ def _collect_pr(
     required = []
     for name in sorted(required_names):
         row = latest.get(name)
-        required.append(
-            {
-                "name": name,
-                "policy_role": "REQUIRED_GATE",
-                "status": row.get("status") if row else "missing",
-                "conclusion": row.get("conclusion") if row else None,
-                "details_url": row.get("details_url") if row else None,
-            }
-        )
+        required.append({
+            "name": name,
+            "policy_role": "REQUIRED_GATE",
+            "status": row.get("status") if row else "missing",
+            "conclusion": row.get("conclusion") if row else None,
+            "details_url": row.get("details_url") if row else None,
+        })
 
     advisory, unknown = [], []
     for name, row in sorted(latest.items()):
@@ -458,15 +456,13 @@ def _collect_quota_snapshot(home: Path) -> dict[str, Any]:
         for row in rows:
             if not isinstance(row, dict) or not isinstance(row.get("account"), str):
                 continue
-            accounts.append(
-                {
-                    "account": row.get("account"),
-                    "ok": row.get("ok"),
-                    "checked_at": row.get("checked_at"),
-                    "error": row.get("error"),
-                    "groups": row.get("groups", {}),
-                }
-            )
+            accounts.append({
+                "account": row.get("account"),
+                "ok": row.get("ok"),
+                "checked_at": row.get("checked_at"),
+                "error": row.get("error"),
+                "groups": row.get("groups", {}),
+            })
     return {
         "status": "OBSERVED",
         "path": str(path),
@@ -915,18 +911,16 @@ def render_text(payload: dict[str, Any]) -> str:
     pr = payload.get("pr", {})
     operation = payload.get("operation", {})
     gate = payload.get("next_gate", {})
-    return "\n".join(
-        [
-            f"resume={payload.get('resume_disposition')} next={gate.get('code')}",
-            f"source head={source.get('head')} github_main={source.get('github_main')} dirty={source.get('dirty')}",
-            f"runtime state={runtime.get('state')} installed={runtime.get('installed_revision')}",
-            f"quota status={(payload.get('quota') or {}).get('status')} accounts={(payload.get('quota') or {}).get('account_count')}",
-            f"issue={task.get('issue_number')} state={task.get('state')}",
-            f"pr={pr.get('pr_number')} state={pr.get('state')} head={pr.get('head_sha')}",
-            f"required_gates={len(payload.get('required_gates') or [])} advisory={len(payload.get('advisory_observers') or [])}",
-            f"active_operations={len(operation.get('active') or [])} active_leases={len((payload.get('leases') or {}).get('active') or [])}",
-        ]
-    )
+    return "\n".join([
+        f"resume={payload.get('resume_disposition')} next={gate.get('code')}",
+        f"source head={source.get('head')} github_main={source.get('github_main')} dirty={source.get('dirty')}",
+        f"runtime state={runtime.get('state')} installed={runtime.get('installed_revision')}",
+        f"quota status={(payload.get('quota') or {}).get('status')} accounts={(payload.get('quota') or {}).get('account_count')}",
+        f"issue={task.get('issue_number')} state={task.get('state')}",
+        f"pr={pr.get('pr_number')} state={pr.get('state')} head={pr.get('head_sha')}",
+        f"required_gates={len(payload.get('required_gates') or [])} advisory={len(payload.get('advisory_observers') or [])}",
+        f"active_operations={len(operation.get('active') or [])} active_leases={len((payload.get('leases') or {}).get('active') or [])}",
+    ])
 
 
 def build_parser() -> argparse.ArgumentParser:
