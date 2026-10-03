@@ -1574,3 +1574,91 @@ sys.exit(0)
     assert len(running_events) >= 1
     exited_events = [e for e in events if e.get("provider_process_state") == "EXITED"]
     assert len(exited_events) >= 1
+
+
+def test_independent_quota_after_effect_never_rotates(tmp_path):
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    home = tmp_path / "home"
+    home.mkdir()
+
+    class Coordinator(_WriteScopeCoordinator):
+        rotation_count = 0
+
+        def rotate_claim(self, **kwargs):
+            self.rotation_count += 1
+            raise RuntimeError("must not rotate after source effect")
+
+    coordinator = Coordinator(home)
+    calls = []
+    events = []
+
+    def runner(**kwargs):
+        calls.append(True)
+        (work / "changed.txt").write_text("partial effect")
+        return 1, "", "RESOURCE_EXHAUSTED: quota exhausted", False, 10
+
+    code = dispatch.dispatch_run(
+        prompt="edit", cwd=str(work), mode="accept-edits",
+        write_paths=[str(work / "changed.txt")], coordinator=coordinator,
+        run_agy_fn=runner, operation_hook=events.append,
+    )
+    assert code != 0
+    assert coordinator.rotation_count == 0
+    assert len(calls) == 1
+    classified = [e for e in events if e.get("phase") == "CLASSIFYING_FAILURE"][-1]
+    assert classified["failure_kind"] == "PROVIDER_QUOTA_EXHAUSTED_AFTER_EFFECT"
+    assert classified["provider_effect"] is True
+    assert classified["reconciliation_required"] is True
+
+
+def test_independent_headless_denial_only_in_provider_log_is_failure(tmp_path, monkeypatch):
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    binary = tmp_path / "agy"
+    binary.write_text(
+        "#!" + sys.executable + "\nimport sys\nfrom pathlib import Path\n"
+        "p = Path(sys.argv[sys.argv.index('--log-file') + 1])\n"
+        "p.write_text('Print mode: soft-denying tool confirmation RunCommand at step 2\\n')\n"
+    )
+    binary.chmod(0o700)
+    monkeypatch.setattr(dispatch.shutil, "which", lambda name: str(binary))
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(tmp_path / "agy.log"))
+    events = []
+    code = dispatch.dispatch_run(
+        prompt="edit", cwd=str(work), mode="accept-edits",
+        write_paths=[str(work / "changed.txt")],
+        coordinator=_WriteScopeCoordinator(home), operation_hook=events.append,
+    )
+    assert code != 0
+    assert any(e.get("failure_kind") == "HEADLESS_TOOL_PERMISSION_DENIED" for e in events)
+
+
+def test_independent_baseline_failure_stays_unknown(tmp_path, monkeypatch):
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    (work / "donor.txt").write_text("not this provider")
+    binary = tmp_path / "agy"
+    binary.write_text("#!" + sys.executable + "\nimport time\ntime.sleep(0.15)\n")
+    binary.chmod(0o700)
+    monkeypatch.setattr(dispatch.shutil, "which", lambda name: str(binary))
+    original = dispatch.direct_operation_journal.snapshot_worktree_physical_state
+    calls = []
+
+    def fail_first(cwd):
+        calls.append(True)
+        if len(calls) == 1:
+            raise OSError("baseline unreadable")
+        return original(cwd)
+
+    monkeypatch.setattr(dispatch.direct_operation_journal, "snapshot_worktree_physical_state", fail_first)
+    events = []
+    dispatch.run_agy(env=os.environ.copy(), prompt="test", cwd=str(work), mode="plan",
+                     model=None, effort=None, timeout=1, operation_hook=events.append)
+    assert not any(e.get("first_effect_at") for e in events)
+    assert any(e.get("effect_observation_error") for e in events)

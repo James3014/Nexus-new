@@ -763,10 +763,15 @@ def run_agy(
         argv += ["--effort", effort]
     argv += ["--print", prompt]
 
+    baseline_worktree_state = None
     try:
         baseline_worktree_state = direct_operation_journal.snapshot_worktree_physical_state(cwd)
-    except Exception:
-        baseline_worktree_state = {}
+    except Exception as exc:
+        if operation_hook:
+            _operation_hook(
+                operation_hook,
+                effect_observation_error=f"BASELINE_CAPTURE_FAILED:{type(exc).__name__}",
+            )
 
     started = time.monotonic()
     process = subprocess.Popen(
@@ -843,7 +848,7 @@ def run_agy(
     quota_terminated = False
     deadline = started + max(1, timeout) + 10
     while process.poll() is None:
-        if not first_effect_seen.is_set():
+        if baseline_worktree_state is not None and not first_effect_seen.is_set():
             try:
                 changed = direct_operation_journal.detect_worktree_physical_effects(
                     cwd, baseline_worktree_state
@@ -858,8 +863,13 @@ def run_agy(
                             first_effect_at=now_effect_iso,
                             time_to_first_effect_ms=effect_wall_ms,
                         )
-            except Exception:
-                pass
+            except Exception as exc:
+                baseline_worktree_state = None
+                if operation_hook:
+                    _operation_hook(
+                        operation_hook,
+                        effect_observation_error=f"EFFECT_OBSERVATION_FAILED:{type(exc).__name__}",
+                    )
         if quota_failure.wait(0.05):
             quota_terminated = True
             process.terminate()
@@ -1368,6 +1378,14 @@ def dispatch_run(
                 lease_id_hash=claim.lease_id_hash,
             )
             env = dict(claim.lease.execution_env)
+            attempt_baseline = None
+            try:
+                attempt_baseline = direct_operation_journal.snapshot_worktree_physical_state(cwd)
+            except Exception as exc:
+                _operation_hook(
+                    operation_hook,
+                    effect_observation_error=f"ATTEMPT_BASELINE_CAPTURE_FAILED:{type(exc).__name__}",
+                )
             permission_token = None
             try:
                 allow_rules = list(user_allow)
@@ -1410,7 +1428,16 @@ def dispatch_run(
                 restore_temp_permissions(permission_token)
             total_wall_ms += wall_ms
 
-            combined_output = out + "\n" + err
+            provider_log_text = ""
+            provider_log_path = env.get("NEXUS_AGY_ATTESTATION_LOG") or os.getenv("NEXUS_AGY_ATTESTATION_LOG")
+            if provider_log_path:
+                try:
+                    provider_log_text = Path(provider_log_path).expanduser().read_text(
+                        encoding="utf-8", errors="replace"
+                    )
+                except OSError:
+                    provider_log_text = ""
+            combined_output = out + "\n" + err + "\n" + provider_log_text
             permission_blocked = (
                 (mode == "accept-edits" and _has_permission_failure_signal(combined_output))
                 or "headless mode cannot prompt for" in combined_output.lower()
@@ -1437,6 +1464,8 @@ def dispatch_run(
                 else classify_failure(code, out, err, timed_out)
             )
             last_kind = kind.value
+            provider_effect_observed: bool | None = False
+            reconciliation_required = False
             if permission_blocked and (
                 "headless mode" in combined_output.lower()
                 or "soft-denying" in combined_output.lower()
@@ -1446,16 +1475,28 @@ def dispatch_run(
             elif kind == AccountFailureKind.MODEL_OR_TASK_ERROR:
                 last_kind = "DISPATCH_MODEL_CONTRACT_REJECTED"
             elif kind == AccountFailureKind.QUOTA_EXHAUSTED:
-                try:
-                    changed_paths = direct_operation_journal.observed_changed_paths(cwd)
-                except Exception:
-                    changed_paths = None
-                if changed_paths is not None and len(changed_paths) > 0:
+                changed_paths = None
+                if attempt_baseline is not None:
+                    try:
+                        changed_paths = direct_operation_journal.detect_worktree_physical_effects(
+                            cwd, attempt_baseline
+                        )
+                    except Exception as exc:
+                        _operation_hook(
+                            operation_hook,
+                            effect_observation_error=f"ATTEMPT_EFFECT_OBSERVATION_FAILED:{type(exc).__name__}",
+                        )
+                if changed_paths:
                     last_kind = "PROVIDER_QUOTA_EXHAUSTED_AFTER_EFFECT"
-                elif changed_paths is not None and len(changed_paths) == 0:
+                    provider_effect_observed = True
+                    reconciliation_required = True
+                elif changed_paths == []:
                     last_kind = "PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT"
+                    provider_effect_observed = False
                 else:
                     last_kind = "PROVIDER_QUOTA_EXHAUSTED_UNKNOWN_EFFECT"
+                    provider_effect_observed = None
+                    reconciliation_required = True
             _operation_hook(
                 operation_hook,
                 phase="CLASSIFYING_FAILURE",
@@ -1465,7 +1506,28 @@ def dispatch_run(
                 timed_out=bool(timed_out),
                 account_alias_hash=claim.account_alias_hash,
                 lease_id_hash=claim.lease_id_hash,
+                provider_effect=provider_effect_observed,
+                reconciliation_required=reconciliation_required,
             )
+
+            if reconciliation_required:
+                if out:
+                    sys.stdout.write(out)
+                if err:
+                    sys.stderr.write(err)
+                emit_meta({
+                    "status": "failed",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": last_kind,
+                    "provider_effect": provider_effect_observed,
+                    "reconciliation_required": True,
+                    "account_alias_hash": claim.account_alias_hash,
+                    "lease_id_hash": claim.lease_id_hash,
+                    "parallel_slot": True,
+                    "wall_ms": total_wall_ms,
+                })
+                return code if isinstance(code, int) and code != 0 else 1
 
             if not is_agy_rotation_eligible(kind):
                 if out:

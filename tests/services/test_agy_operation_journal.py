@@ -338,3 +338,46 @@ def test_reconcile_checks_real_provider_pid_liveness(tmp_path: Path) -> None:
 
     reconciled = journal.reconcile(operation_id)
     assert reconciled["provider_process_state"] == "EXITED"
+
+
+def test_independent_effect_fingerprint_detects_same_size_restored_mtime(tmp_path):
+    from nexus.services import direct_operation_journal as doj
+
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    target = work / "donor.txt"
+    target.write_text("old")
+    before = target.stat()
+    baseline = doj.snapshot_worktree_physical_state(str(work))
+    target.write_text("new")
+    os.utime(target, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert doj.detect_worktree_physical_effects(str(work), baseline) == ["donor.txt"]
+
+
+def test_independent_effect_fingerprint_expands_untracked_directory(tmp_path):
+    from nexus.services import direct_operation_journal as doj
+
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    folder = work / "new-dir"
+    folder.mkdir()
+    target = folder / "file.txt"
+    target.write_text("old")
+    before = folder.stat()
+    baseline = doj.snapshot_worktree_physical_state(str(work))
+    target.write_text("different")
+    os.utime(folder, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert doj.detect_worktree_physical_effects(str(work), baseline) == ["new-dir/file.txt"]
+
+
+def test_independent_literal_arrow_filename_is_not_rename_syntax(tmp_path):
+    from nexus.services import direct_operation_journal as doj
+
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    name = "literal -> name.txt"
+    (work / name).write_text("test")
+    assert doj.observed_changed_paths(str(work)) == [name]

@@ -131,7 +131,7 @@ def query_account(
     account_name: str,
     email: str | None,
     agy_binary: str,
-    timeout: int,
+    timeout: float,
     checked_at: str,
     on_progress: Any = None,
 ) -> dict[str, Any]:
@@ -152,7 +152,7 @@ def query_account(
             env=env,
             capture_output=True,
             text=True,
-            timeout=max(10, timeout),
+            timeout=max(0.001, float(timeout)),
             check=False,
         )
     except subprocess.TimeoutExpired:
@@ -208,11 +208,14 @@ def merge_snapshot(
     checked_at: str,
 ) -> dict[str, Any]:
     merged: dict[str, dict[str, Any]] = {}
+    prior_checked_at: str | None = None
     if snapshot_path.is_file():
         try:
             prior = json.loads(snapshot_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             prior = {}
+        if isinstance(prior, dict) and isinstance(prior.get("checked_at"), str):
+            prior_checked_at = prior["checked_at"]
         rows = prior.get("accounts") if isinstance(prior, dict) else None
         if isinstance(rows, list):
             for row in rows:
@@ -221,13 +224,25 @@ def merge_snapshot(
                     and isinstance(row.get("account"), str)
                     and row["account"] in current_names
                 ):
-                    merged[row["account"]] = row
+                    preserved = dict(row)
+                    if "checked_at" not in preserved and prior_checked_at is not None:
+                        preserved["checked_at"] = prior_checked_at
+                    merged[row["account"]] = preserved
 
     for row in refreshed_rows:
         name = row.get("account")
-        if isinstance(name, str):
-            if row.get("ok") is True or name not in merged or not merged[name].get("ok"):
-                merged[name] = row
+        if not isinstance(name, str):
+            continue
+        if row.get("ok") is True or name not in merged or not merged[name].get("ok"):
+            merged[name] = row
+            continue
+        prior_row = dict(merged[name])
+        prior_row["last_refresh"] = {
+            "ok": False,
+            "error": row.get("error"),
+            "checked_at": row.get("checked_at", checked_at),
+        }
+        merged[name] = prior_row
 
     all_names = current_names | {
         r["account"] for r in refreshed_rows if isinstance(r.get("account"), str)
@@ -331,7 +346,7 @@ def main(argv: list[str] | None = None, *, on_progress: Any = None) -> int:
                     "checked_at": checked_at,
                 })
                 continue
-            effective_timeout = max(1, min(args.timeout, int(remaining)))
+            effective_timeout = min(float(args.timeout), max(0.001, remaining))
         else:
             effective_timeout = args.timeout
 

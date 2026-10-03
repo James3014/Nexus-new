@@ -214,3 +214,45 @@ def test_quota_main_deadline_exceeded_marks_remaining_accounts(tmp_path: Path, m
     acct2_row = next(a for a in payload["accounts"] if a["account"] == "acct2")
     assert acct2_row["ok"] is False
     assert acct2_row["error"] == "deadline_exceeded"
+
+
+def test_independent_real_query_obeys_fractional_total_deadline(tmp_path, monkeypatch):
+    import sys
+    import time
+
+    pool = tmp_path / "pool"
+    (pool / "accounts" / "one").mkdir(parents=True)
+    executable = tmp_path / "fake-agy"
+    executable.write_text(
+        "#!" + sys.executable + "\nimport time\ntime.sleep(0.8)\n"
+        "print('Gemini Models Weekly Limit Remaining 80%')\n"
+    )
+    executable.chmod(0o700)
+    snapshot = tmp_path / "snapshot.json"
+    monkeypatch.setenv("NEXUS_AGY_ACCOUNT_POOL_ROOT", str(pool))
+    monkeypatch.setenv("NEXUS_AGY_QUOTA_SNAPSHOT", str(snapshot))
+    monkeypatch.setenv("NEXUS_AGY_BINARY", str(executable))
+    start = time.monotonic()
+    result = quota.main(["--timeout", "15", "--total-timeout", "0.1"])
+    elapsed = time.monotonic() - start
+    assert result == 2
+    assert elapsed < 0.5, f"deadline ignored: {elapsed:.3f}s"
+    assert json.loads(snapshot.read_text())["accounts"][0]["ok"] is False
+
+
+def test_independent_failed_refresh_keeps_old_time_and_latest_failure(tmp_path):
+    old = "2000-01-01T00:00:00+00:00"
+    new = "2026-10-03T00:00:00+00:00"
+    snapshot = tmp_path / "snapshot.json"
+    snapshot.write_text(json.dumps({"checked_at": old, "accounts": [
+        {"account": "legacy", "ok": True, "groups": {"Gemini Models": {}}}
+    ]}))
+    result = quota.merge_snapshot(
+        snapshot_path=snapshot, current_names={"legacy"}, partial=True,
+        refreshed_rows=[{"account": "legacy", "ok": False, "error": "timeout", "checked_at": new}],
+        checked_at=new,
+    )
+    row = result["accounts"][0]
+    assert row["ok"] is True
+    assert row["checked_at"] == old
+    assert row["last_refresh"] == {"ok": False, "error": "timeout", "checked_at": new}

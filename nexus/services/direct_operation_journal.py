@@ -8,6 +8,7 @@ acceptance, merge, release, or production authority.
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 import socket
@@ -176,64 +177,76 @@ def _git_identity(cwd: str) -> tuple[str | None, str | None]:
     return repo_root, head.stdout.strip() if head.returncode == 0 else None
 
 
+def _porcelain_status_entries(cwd: str) -> list[tuple[str, str]]:
+    proc = subprocess.run(
+        ["git", "-C", cwd, "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"git status failed with exit code {proc.returncode}: {proc.stderr.decode('utf-8', errors='replace')}"
+        )
+    tokens = proc.stdout.split(b"\0")
+    entries: list[tuple[str, str]] = []
+    index = 0
+    while index < len(tokens):
+        raw = tokens[index]
+        index += 1
+        if not raw:
+            continue
+        text = raw.decode("utf-8", errors="replace")
+        if len(text) < 4:
+            continue
+        status_code = text[:2]
+        path = text[3:]
+        if path:
+            entries.append((status_code, path))
+        if "R" in status_code or "C" in status_code:
+            if index < len(tokens) and tokens[index]:
+                index += 1
+    return entries
+
+
 def observed_changed_paths(cwd: str) -> list[str]:
-    proc = subprocess.run(
-        ["git", "-C", cwd, "status", "--porcelain=v1", "-z"],
-        capture_output=True,
-        check=False,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"git status failed with exit code {proc.returncode}: {proc.stderr.decode('utf-8', errors='replace')}"
-        )
-    paths: set[str] = set()
-    for raw in proc.stdout.split(b"\0"):
-        if not raw:
-            continue
-        text = raw.decode("utf-8", errors="replace")
-        if len(text) >= 4:
-            path = text[3:]
-            if " -> " in path:
-                path = path.split(" -> ", 1)[1]
-            if path:
-                paths.add(path)
-    return sorted(paths)
+    return sorted({path for _, path in _porcelain_status_entries(cwd)})
 
 
-def snapshot_worktree_physical_state(cwd: str) -> dict[str, tuple[str, int, int]]:
-    proc = subprocess.run(
-        ["git", "-C", cwd, "status", "--porcelain=v1", "-z"],
-        capture_output=True,
-        check=False,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"git status failed with exit code {proc.returncode}: {proc.stderr.decode('utf-8', errors='replace')}"
-        )
-    state: dict[str, tuple[str, int, int]] = {}
+def _path_fingerprint(target: Path) -> tuple[int, int, str]:
+    try:
+        st = target.lstat()
+    except OSError:
+        return (0, 0, "MISSING")
+    digest = hashlib.sha256()
+    if target.is_symlink():
+        try:
+            digest.update(os.readlink(target).encode("utf-8", errors="surrogateescape"))
+        except OSError:
+            return (st.st_mtime_ns, st.st_size, "UNREADABLE")
+    elif target.is_file():
+        try:
+            with target.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        except OSError:
+            return (st.st_mtime_ns, st.st_size, "UNREADABLE")
+    else:
+        digest.update(f"mode:{st.st_mode}".encode("ascii"))
+    return (st.st_mtime_ns, st.st_size, digest.hexdigest())
+
+
+def snapshot_worktree_physical_state(cwd: str) -> dict[str, tuple[str, int, int, str]]:
+    state: dict[str, tuple[str, int, int, str]] = {}
     cwd_path = Path(cwd)
-    for raw in proc.stdout.split(b"\0"):
-        if not raw:
-            continue
-        text = raw.decode("utf-8", errors="replace")
-        if len(text) >= 4:
-            status_code = text[:2]
-            path = text[3:]
-            if " -> " in path:
-                path = path.split(" -> ", 1)[1]
-            if path:
-                target = cwd_path / path
-                try:
-                    st = target.stat()
-                    state[path] = (status_code, st.st_mtime_ns, st.st_size)
-                except OSError:
-                    state[path] = (status_code, 0, 0)
+    for status_code, path in _porcelain_status_entries(cwd):
+        mtime_ns, size, digest = _path_fingerprint(cwd_path / path)
+        state[path] = (status_code, mtime_ns, size, digest)
     return state
 
 
 def detect_worktree_physical_effects(
     cwd: str,
-    baseline: dict[str, tuple[str, int, int]],
+    baseline: dict[str, tuple[str, int, int, str]],
 ) -> list[str]:
     current = snapshot_worktree_physical_state(cwd)
     new_or_modified: set[str] = set()
