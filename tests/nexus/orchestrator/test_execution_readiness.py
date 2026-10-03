@@ -1448,9 +1448,7 @@ class TestCorrectiveFalseGreenControls:
             observation,
         )
         assert result.status is ExecutionReadinessStatus.BLOCKED
-        assert result.blocker_code is (
-            ExecutionReadinessBlockerCode.EXTERNAL_REPOSITORY_SUBJECT
-        )
+        assert result.blocker_code is ExecutionReadinessBlockerCode.EXTERNAL_REPOSITORY_SUBJECT
 
     @pytest.mark.parametrize(
         "remote, expected",
