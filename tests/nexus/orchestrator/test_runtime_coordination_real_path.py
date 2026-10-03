@@ -220,6 +220,96 @@ def test_runtime_bridge_installs_ambient_core_preparation_port(tmp_path, monkeyp
     assert isinstance(captured["args"][-1], bridge._Preparation)
 
 
+def test_runtime_bridge_binds_observation_model_call_gate_when_supported(tmp_path, monkeypatch):
+    captured = {}
+
+    class FakeCoordinator:
+        def __init__(
+            self,
+            state,
+            contract,
+            worker,
+            target,
+            processes,
+            finalization,
+            preparation=None,
+            model_call_gate=None,
+        ):
+            captured["args"] = (
+                state,
+                contract,
+                worker,
+                target,
+                processes,
+                finalization,
+                preparation,
+            )
+            captured["model_call_gate"] = model_call_gate
+
+    monkeypatch.setattr(bridge, "ExecutionCoordinator", FakeCoordinator)
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", ephemeral=True, auto_reconcile=False
+    )
+
+    coordinator = bridge.RuntimeCoordinationBridge(service)._coordinator("task", "attempt")
+
+    assert isinstance(coordinator, FakeCoordinator)
+    assert len(captured["args"]) == 7
+    assert isinstance(captured["args"][-1], bridge._Preparation)
+    gate = captured["model_call_gate"]
+    assert isinstance(gate, bridge._WorkerInvocationModelCallGate)
+    verdict = gate.resolve_model_call_need(
+        {
+            "provider": "codex",
+            "model": "frontier-model",
+            "deterministic_candidates": [{"candidate_id": "must-not-be-promoted"}],
+        },
+        seam="WORKER_INVOCATION",
+    )
+    assert verdict == {
+        "resolution": "MODEL_NEEDED",
+        "reason": "worker_invocation_path_already_selected",
+        "resolver_id": "nexus-new.worker-invocation-model-path.v1",
+        "seam": "WORKER_INVOCATION",
+    }
+
+
+def test_runtime_bridge_preserves_legacy_constructor_without_model_call_gate(tmp_path, monkeypatch):
+    captured = {}
+
+    class LegacyCoordinator:
+        def __init__(
+            self,
+            state,
+            contract,
+            worker,
+            target,
+            processes,
+            finalization,
+            preparation=None,
+        ):
+            captured["args"] = (
+                state,
+                contract,
+                worker,
+                target,
+                processes,
+                finalization,
+                preparation,
+            )
+
+    monkeypatch.setattr(bridge, "ExecutionCoordinator", LegacyCoordinator)
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", ephemeral=True, auto_reconcile=False
+    )
+
+    coordinator = bridge.RuntimeCoordinationBridge(service)._coordinator("task", "attempt")
+
+    assert isinstance(coordinator, LegacyCoordinator)
+    assert len(captured["args"]) == 7
+    assert isinstance(captured["args"][-1], bridge._Preparation)
+
+
 def test_ambient_core_required_path_fails_closed_without_control_port(tmp_path):
     service = SelfHostedTaskService(
         state_dir=tmp_path / "state", ephemeral=True, auto_reconcile=False
