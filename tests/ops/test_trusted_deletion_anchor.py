@@ -381,6 +381,62 @@ def test_pr1288_dependency_snapshot_transition_allows_only_exact_binding(monkeyp
         )
 
 
+def test_pr1375_dependency_snapshot_transition_is_exact_and_separate() -> None:
+    assert trusted_anchor.TRUSTED_PR1375_DEPENDENCY_SNAPSHOT_TRANSITION == (
+        1375,
+        (
+            "40012ce8452131f446fce0feb8f508f050a8b0dc875837eac1b623007e7388b8",
+            "33543bf4216e10131b08c30951d65bed92ab98bb39e0e9fdde417bdf68a189c0",
+            "2fce493ab2843794c1d44665fa68e8292c321fb937e04918795b39b124a99c4e",
+            "1defe6b2b7251fd060fb3613bbb9875ec38b4c6ea4dbd8febc36dcb10d1724f1",
+        ),
+    )
+
+
+def test_pr1375_dependency_snapshot_transition_allows_only_exact_binding(monkeypatch) -> None:
+    values = [b"trusted pyproject\n", b"trusted lock\n", b"head pyproject\n", b"head lock\n"]
+    hashes = trusted_anchor.TRUSTED_PR1375_DEPENDENCY_SNAPSHOT_TRANSITION[1]
+    original_sha = trusted_anchor._sha
+    digest_by_value = dict(zip(values, hashes, strict=True))
+    monkeypatch.setattr(
+        trusted_anchor,
+        "_sha",
+        lambda value: digest_by_value.get(value, original_sha(value)),
+    )
+
+    trusted_anchor._validate_trusted_dependency_contract(
+        values[0],
+        values[2],
+        values[1],
+        values[3],
+        pull_request_number=1375,
+        head_product_init_is_regular=True,
+    )
+
+    for index in range(4):
+        tampered = list(values)
+        tampered[index] += b"tampered"
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                tampered[0],
+                tampered[2],
+                tampered[1],
+                tampered[3],
+                pull_request_number=1375,
+                head_product_init_is_regular=True,
+            )
+
+    with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+        trusted_anchor._validate_trusted_dependency_contract(
+            values[0],
+            values[2],
+            values[1],
+            values[3],
+            pull_request_number=1376,
+            head_product_init_is_regular=True,
+        )
+
+
 def _pr910_snapshot_fixture(monkeypatch):
     values = [b"trusted pyproject\n", b"trusted lock\n", b"head pyproject\n", b"head lock\n"]
     hashes = trusted_anchor.TRUSTED_PR910_DEPENDENCY_SNAPSHOT_TRANSITION[1]
