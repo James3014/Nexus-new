@@ -253,9 +253,9 @@ class AgyOperationJournal(DirectOperationJournal):
             raise AgyOperationJournalError("EFFECT_RESOLUTION_PROCESS_STATE_INVALID")
         if not isinstance(payload.get("resolved_at"), str) or not payload["resolved_at"]:
             raise AgyOperationJournalError("EFFECT_RESOLUTION_TIMESTAMP_INVALID")
-        expected_hash = _canonical_sha256(
-            {key: value for key, value in payload.items() if key != "resolution_sha256"}
-        )
+        expected_hash = _canonical_sha256({
+            key: value for key, value in payload.items() if key != "resolution_sha256"
+        })
         if payload.get("resolution_sha256") != expected_hash:
             raise AgyOperationJournalError("EFFECT_RESOLUTION_HASH_MISMATCH")
         return dict(payload)
@@ -388,16 +388,14 @@ class AgyOperationJournal(DirectOperationJournal):
         if not group_alive:
             if status == "OUTCOME_UNKNOWN":
                 reconciliation = dict(record.get("reconciliation") or {})
-                reconciliation.update(
-                    {
-                        "at": utc_now(),
-                        "result": reconciliation.get("result") or "OUTCOME_UNKNOWN",
-                        "pid_alive": False,
-                        "provider_alive_before": False,
-                        "provider_alive_after": False,
-                        "retry_permitted": False,
-                    }
-                )
+                reconciliation.update({
+                    "at": utc_now(),
+                    "result": reconciliation.get("result") or "OUTCOME_UNKNOWN",
+                    "pid_alive": False,
+                    "provider_alive_before": False,
+                    "provider_alive_after": False,
+                    "retry_permitted": False,
+                })
                 return self.update(
                     operation_id,
                     phase="TERMINAL",
@@ -408,12 +406,10 @@ class AgyOperationJournal(DirectOperationJournal):
                 heartbeat_stale_seconds=heartbeat_stale_seconds,
             )
             reconciliation = dict(result.get("reconciliation") or {})
-            reconciliation.update(
-                {
-                    "provider_alive_before": False,
-                    "provider_alive_after": False,
-                }
-            )
+            reconciliation.update({
+                "provider_alive_before": False,
+                "provider_alive_after": False,
+            })
             return self.update(operation_id, reconciliation=reconciliation)
 
         assert isinstance(wrapper_pid, int)
