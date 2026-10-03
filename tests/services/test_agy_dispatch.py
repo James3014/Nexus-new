@@ -707,6 +707,65 @@ def test_run_agy_passes_operation_local_attestation_log(tmp_path: Path, monkeypa
     assert log.parent.is_dir()
 
 
+def test_run_agy_quota_cleanup_stops_provider_process_group(tmp_path: Path, monkeypatch) -> None:
+    from io import StringIO
+
+    stopped_groups: list[int] = []
+    process_ref: dict[str, object] = {}
+
+    class FakeProcess:
+        pid = 4242
+
+        def __init__(self, argv, **kwargs):
+            self.stdout = StringIO("")
+            self.stderr = StringIO("quota exceeded\n")
+            self.returncode = None
+            process_ref["process"] = self
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = -15
+
+        def kill(self):
+            self.returncode = -9
+
+    def stop_group(pgid: int, **_kwargs) -> bool:
+        stopped_groups.append(pgid)
+        process = process_ref["process"]
+        process.returncode = -15
+        return True
+
+    monkeypatch.setattr(dispatch.shutil, "which", lambda name: "/tmp/fake-agy")
+    monkeypatch.setattr(dispatch.subprocess, "Popen", FakeProcess)
+    monkeypatch.setattr(dispatch.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(dispatch._agy_operation_journal, "_stop_process_group", stop_group)
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_process_group_alive",
+        lambda pgid: False,
+    )
+
+    code, _out, err, timed_out, _ = dispatch.run_agy(
+        env={"HOME": str(tmp_path)},
+        prompt="quota group cleanup",
+        cwd=str(tmp_path),
+        mode="plan",
+        model=None,
+        effort=None,
+        timeout=30,
+    )
+
+    assert code == -15
+    assert "quota exceeded" in err
+    assert timed_out is False
+    assert stopped_groups == [4242]
+
+
 def test_cleanup_reconciled_lease_removes_only_exact_stale_receipt(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -1363,6 +1422,50 @@ def test_dispatch_run_retains_lease_when_provider_cannot_be_killed(
     assert coordinator.claim.released is False, "Lease must NOT be released while provider child is running!"
 
 
+def test_dispatch_run_retains_lease_when_provider_group_survives_leader(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A dead provider leader must not release the lease while its process group survives."""
+    home = tmp_path / "home"
+    home.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+
+    def orphaned_group_runner(*, operation_hook=None, **_kwargs):
+        if operation_hook:
+            operation_hook(provider_pid=12345, provider_pgid=54321)
+        return 1, "", "error", False, 10
+
+    orig_alive = dispatch._agy_operation_journal._process_alive
+    orig_group_alive = dispatch._agy_operation_journal._process_group_alive
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_process_alive",
+        lambda pid: False if pid == 12345 else orig_alive(pid),
+    )
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_process_group_alive",
+        lambda pgid: True if pgid == 54321 else orig_group_alive(pgid),
+    )
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_stop_process_group",
+        lambda pgid, **kwargs: False,
+    )
+
+    code = dispatch.dispatch_run(
+        prompt="orphaned group run",
+        cwd=str(tmp_path),
+        mode="plan",
+        coordinator=coordinator,
+        run_agy_fn=orphaned_group_runner,
+    )
+
+    assert code != 0
+    assert coordinator.claim.released is False, (
+        "Lease must NOT be released while the provider process group is still running!"
+    )
 
 
 # ---------------------------------------------------------------------------

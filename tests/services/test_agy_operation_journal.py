@@ -518,4 +518,3 @@ def test_reconcile_dead_wrapper_with_reused_provider_pid_does_not_kill_unverifie
     finally:
         unrelated.kill()
         unrelated.wait()
-

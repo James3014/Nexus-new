@@ -753,17 +753,19 @@ def run_agy(
         bufsize=1,
         start_new_session=True,
     )
+    provider_pid = getattr(process, "pid", None)
+    provider_pgid: int | None = None
+    if isinstance(provider_pid, int) and provider_pid > 0:
+        try:
+            provider_pgid = os.getpgid(provider_pid)
+        except OSError:
+            pass
     if operation_hook is not None:
         try:
-            pgid = None
-            try:
-                pgid = os.getpgid(process.pid)
-            except OSError:
-                pass
             _operation_hook(
                 operation_hook,
-                provider_pid=process.pid,
-                provider_pgid=pgid,
+                provider_pid=provider_pid,
+                provider_pgid=provider_pgid,
             )
         except Exception:
             pass
@@ -802,11 +804,23 @@ def run_agy(
         while process.poll() is None:
             if quota_failure.wait(0.05):
                 quota_terminated = True
-                process.terminate()
+                if provider_pgid is not None:
+                    _agy_operation_journal._stop_process_group(
+                        provider_pgid,
+                        grace_seconds=2.0,
+                    )
+                else:
+                    process.terminate()
                 break
             if time.monotonic() >= deadline:
                 timed_out = True
-                process.terminate()
+                if provider_pgid is not None:
+                    _agy_operation_journal._stop_process_group(
+                        provider_pgid,
+                        grace_seconds=2.0,
+                    )
+                else:
+                    process.terminate()
                 break
             time.sleep(0.05)
 
@@ -814,9 +828,26 @@ def run_agy(
             try:
                 process.wait(timeout=2)
             except subprocess.TimeoutExpired:
-                process.kill()
+                if provider_pgid is not None:
+                    _agy_operation_journal._stop_process_group(
+                        provider_pgid,
+                        grace_seconds=2.0,
+                    )
+                else:
+                    process.kill()
                 process.wait(timeout=2)
     finally:
+        if (
+            provider_pgid is not None
+            and _agy_operation_journal._process_group_alive(provider_pgid)
+        ):
+            try:
+                _agy_operation_journal._stop_process_group(
+                    provider_pgid,
+                    grace_seconds=2.0,
+                )
+            except Exception:
+                pass
         if process.poll() is None:
             try:
                 _agy_operation_journal._stop_process(process.pid, grace_seconds=2.0)
@@ -1420,11 +1451,22 @@ def dispatch_run(
                 })
                 return 75
     finally:
+        if (
+            active_provider_pgid is not None
+            and _agy_operation_journal._process_group_alive(active_provider_pgid)
+        ):
+            _agy_operation_journal._stop_process_group(
+                active_provider_pgid,
+                grace_seconds=2.0,
+            )
         if active_provider_pid is not None and _agy_operation_journal._process_alive(active_provider_pid):
             _agy_operation_journal._stop_process(active_provider_pid, grace_seconds=2.0)
         provider_still_running = (
             active_provider_pid is not None
             and _agy_operation_journal._process_alive(active_provider_pid)
+        ) or (
+            active_provider_pgid is not None
+            and _agy_operation_journal._process_group_alive(active_provider_pgid)
         )
         if claim is not None and not provider_still_running:
             try:
