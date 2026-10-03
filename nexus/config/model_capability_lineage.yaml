@@ -288,7 +288,7 @@ lineages:
         state_preservation: same_session_continuation
         resource_envelope:
           slots: 1
-          max_memory_percent: 43
+          observed_memory_free_percent_after_t01: 43
           observed_swap_mb: 10742.44
         realm: local_m5
         description: "Occamy 1.0 Q4_K_M official model via OpenCode 1.18.32 serve and llama.cpp 32K context"
