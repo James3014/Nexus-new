@@ -647,11 +647,11 @@ def test_occamy_lineage_seed_shape() -> None:
         ("local", "occamy-1.0", "primary"),
         ("local", "occamy-1.0-q4", "alias"),
     }
-    assert lineage.stable_floor == "L0.5"
-    assert lineage.current_frontier == "L1"
-    assert lineage.conditional_ceiling == "L1"
-    assert lineage.experimental_ceiling == "L2"
-    assert lineage.frontier_experimental is True
+    assert lineage.stable_floor == "L0"
+    assert lineage.current_frontier == "L0"
+    assert lineage.conditional_ceiling == "L0"
+    assert lineage.experimental_ceiling == "L0"
+    assert lineage.frontier_experimental is False
     assert len(lineage.execution_configurations) == 2
 
     by_id = {c.config_id: c for c in lineage.execution_configurations}
@@ -705,6 +705,11 @@ def test_occamy_lineage_seed_shape() -> None:
 def test_qwen27b_lineage_seed_shape() -> None:
     registry = _registry()
     lineage = registry.resolve_by_lineage_id("qwen-3.8-27b")
+    assert lineage.stable_floor == "L0"
+    assert lineage.current_frontier == "L0"
+    assert lineage.conditional_ceiling == "L0"
+    assert lineage.experimental_ceiling == "L0"
+    assert lineage.frontier_experimental is False
     identities = {(i.provider, i.model) for i in lineage.execution_identities}
     assert identities == {("tensorfold", "Vontra/Qwen3.8-27B-MLX-4bit")}
     assert len(lineage.execution_configurations) == 1
@@ -1012,6 +1017,18 @@ def test_multi_phase_qualification_requires_phase_for_exact_resolution(tmp_path:
     )
     assert hidden.disposition is QualificationDisposition.WATCH
     assert hidden.phase is EvidencePhase.INDEPENDENT_HIDDEN_PROBE
+
+
+def test_local_role_evidence_does_not_invent_global_semantic_tiers() -> None:
+    registry = _registry()
+    for lineage_id in ("occamy-1.0", "qwen-3.8-27b"):
+        lineage = registry.resolve_by_lineage_id(lineage_id)
+        assert lineage.stable_floor == "L0"
+        assert lineage.current_frontier == "L0"
+        assert lineage.conditional_ceiling == "L0"
+        assert lineage.experimental_ceiling == "L0"
+        assert all(ref.tier is None for ref in lineage.role_evidence)
+        assert all(record.tier is None for record in lineage.evidence)
 
 
 def test_parameter_count_not_used_as_capability_identity() -> None:
