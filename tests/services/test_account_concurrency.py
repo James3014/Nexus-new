@@ -11,6 +11,7 @@ import fcntl
 import json
 import os
 import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -766,6 +767,29 @@ class TestAccountConcurrencyModel(unittest.TestCase):
         mgr = self._create_manager([acc1, acc2])
         coord = self._create_coordinator(mgr)
 
+        # dispatch_run fail-closes when it cannot prove whether quota exhaustion
+        # happened before or after a source effect. Give this rotation test a
+        # real, clean Git workspace so pre-effect is physically observable.
+        # Keep Agy HOME directories outside that worktree so temporary
+        # permission files are not mistaken for repository effects.
+        worktree = Path(self.test_dir) / "repo_p"
+        worktree.mkdir()
+        subprocess.run(["git", "-C", str(worktree), "init", "-q"], check=True)
+        subprocess.run(
+            ["git", "-C", str(worktree), "config", "user.email", "test@example.invalid"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(worktree), "config", "user.name", "Nexus Test"],
+            check=True,
+        )
+        (worktree / "seed.txt").write_text("seed\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(worktree), "add", "seed.txt"], check=True)
+        subprocess.run(
+            ["git", "-C", str(worktree), "commit", "-q", "-m", "seed"],
+            check=True,
+        )
+
         first_home: list[str] = []
         retired_hashes: list[str] = []
         perms_restored_before_retire: list[bool] = []
@@ -794,7 +818,7 @@ class TestAccountConcurrencyModel(unittest.TestCase):
 
         code = dispatch_module.dispatch_run(
             prompt="test prompt permission lifecycle",
-            cwd=self.test_dir,
+            cwd=str(worktree),
             max_calls=2,
             temp_command_permissions=True,
             coordinator=coord,
