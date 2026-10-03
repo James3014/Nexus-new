@@ -26,7 +26,10 @@ from typing import Any
 STATUS_SCHEMA = "nexus.host_sync_status.v1"
 GENERATION_SCHEMA = "nexus.host_generation.v1"
 MANIFEST_SCHEMA = "nexus.host_runtime_manifest.v1"
+SOURCE_BINDING_SCHEMA = "nexus.host_source_binding.v1"
 REMOTE_DEFAULT = "https://github.com/James3014/Nexus-new.git"
+EXPECTED_REPOSITORY = "james3014/nexus-new"
+SOURCE_BINDING_FILE = "source-binding.json"
 MANIFEST_PATH = "scripts/ops/nexus-host-runtime-manifest.json"
 REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -86,6 +89,93 @@ def _source_repo_ready(source_repo: Path) -> bool:
     return proc.returncode == 0
 
 
+def _github_repository_identity(remote: str) -> str:
+    value = remote.strip().rstrip("/")
+    patterns = (
+        r"^https://github\.com/([^/]+)/([^/]+?)(?:\.git)?$",
+        r"^git@github\.com:([^/]+)/([^/]+?)(?:\.git)?$",
+        r"^ssh://git@github\.com/([^/]+)/([^/]+?)(?:\.git)?$",
+    )
+    for pattern in patterns:
+        match = re.fullmatch(pattern, value, flags=re.IGNORECASE)
+        if match:
+            return f"{match.group(1).lower()}/{match.group(2).lower()}"
+    raise HostSyncError("CANONICAL_SOURCE_ROOT_REMOTE_INVALID")
+
+
+def _validate_canonical_source_root(root: Path) -> tuple[Path, str]:
+    try:
+        resolved = root.expanduser().resolve(strict=True)
+    except OSError as exc:
+        raise HostSyncError("CANONICAL_SOURCE_ROOT_MISSING") from exc
+    if not resolved.is_dir():
+        raise HostSyncError("CANONICAL_SOURCE_ROOT_NOT_DIRECTORY")
+
+    top = _run(["git", "-C", str(resolved), "rev-parse", "--show-toplevel"]).stdout.strip()
+    if not top:
+        raise HostSyncError("CANONICAL_SOURCE_ROOT_NOT_GIT_WORKTREE")
+    try:
+        same_root = os.path.samefile(top, resolved)
+    except OSError as exc:
+        raise HostSyncError("CANONICAL_SOURCE_ROOT_NOT_GIT_WORKTREE") from exc
+    if not same_root:
+        raise HostSyncError("CANONICAL_SOURCE_ROOT_NOT_GIT_WORKTREE")
+
+    remote = _run(["git", "-C", str(resolved), "remote", "get-url", "origin"]).stdout.strip()
+    if _github_repository_identity(remote) != EXPECTED_REPOSITORY:
+        raise HostSyncError("CANONICAL_SOURCE_ROOT_REMOTE_MISMATCH")
+    return resolved, remote
+
+
+def _source_binding_path(runtime_root: Path) -> Path:
+    return runtime_root / SOURCE_BINDING_FILE
+
+
+def _write_source_binding(runtime_root: Path, root: Path) -> dict[str, Any]:
+    resolved, remote = _validate_canonical_source_root(root)
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema": SOURCE_BINDING_SCHEMA,
+        "repository": EXPECTED_REPOSITORY,
+        "repo_root": str(resolved),
+        "origin_remote": remote,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    target = _source_binding_path(runtime_root)
+    tmp = runtime_root / f".{SOURCE_BINDING_FILE}.tmp.{os.getpid()}"
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(tmp, target)
+    return payload
+
+
+def _read_source_binding(runtime_root: Path) -> dict[str, Any]:
+    path = _source_binding_path(runtime_root)
+    if not path.is_file():
+        return {"status": "MISSING", "path": str(path)}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"status": "DRIFT", "path": str(path), "error": "SOURCE_BINDING_UNREADABLE"}
+    if payload.get("schema") != SOURCE_BINDING_SCHEMA:
+        return {"status": "DRIFT", "path": str(path), "error": "SOURCE_BINDING_SCHEMA_MISMATCH"}
+    if str(payload.get("repository") or "").lower() != EXPECTED_REPOSITORY:
+        return {"status": "DRIFT", "path": str(path), "error": "SOURCE_BINDING_REPOSITORY_MISMATCH"}
+    raw_root = payload.get("repo_root")
+    if not isinstance(raw_root, str) or not raw_root:
+        return {"status": "DRIFT", "path": str(path), "error": "SOURCE_BINDING_ROOT_MISSING"}
+    try:
+        resolved, remote = _validate_canonical_source_root(Path(raw_root))
+    except HostSyncError as exc:
+        return {"status": "DRIFT", "path": str(path), "error": str(exc)}
+    return {
+        "status": "VERIFIED",
+        "path": str(path),
+        "repository": EXPECTED_REPOSITORY,
+        "repo_root": str(resolved),
+        "origin_remote": remote,
+    }
+
+
 def _ensure_source_repo(
     source_repo: Path,
     *,
@@ -106,15 +196,17 @@ def _ensure_source_repo(
             or not re.fullmatch(r"[A-Za-z0-9._/-]+", remote_ref)
         ):
             raise HostSyncError("REMOTE_REF_INVALID")
-        _run([
-            "git",
-            "-C",
-            str(source_repo),
-            "fetch",
-            "--prune",
-            "origin",
-            f"refs/heads/{remote_ref}:refs/remotes/origin/{remote_ref}",
-        ])
+        _run(
+            [
+                "git",
+                "-C",
+                str(source_repo),
+                "fetch",
+                "--prune",
+                "origin",
+                f"refs/heads/{remote_ref}:refs/remotes/origin/{remote_ref}",
+            ]
+        )
 
 
 def _require_revision(source_repo: Path, revision: str) -> str:
@@ -132,13 +224,15 @@ def _require_revision(source_repo: Path, revision: str) -> str:
 
 
 def _resolve_remote_ref(source_repo: Path, remote_ref: str) -> str:
-    value = _run([
-        "git",
-        "-C",
-        str(source_repo),
-        "rev-parse",
-        f"refs/remotes/origin/{remote_ref}",
-    ]).stdout.strip()
+    value = _run(
+        [
+            "git",
+            "-C",
+            str(source_repo),
+            "rev-parse",
+            f"refs/remotes/origin/{remote_ref}",
+        ]
+    ).stdout.strip()
     return _require_revision(source_repo, value)
 
 
@@ -196,20 +290,24 @@ def _parse_manifest(data: bytes) -> dict[str, Any]:
     if isinstance(components, dict) and isinstance(
         components.get("external_worker_dispatch"), dict
     ):
-        required.update({
-            "scripts/ops/nexus-external-worker-dispatch",
-            "scripts/ops/install_nexus_external_worker_dispatch.sh",
-            "nexus/services/direct_operation_journal.py",
-            "nexus/services/external_worker_runtime.py",
-        })
+        required.update(
+            {
+                "scripts/ops/nexus-external-worker-dispatch",
+                "scripts/ops/install_nexus_external_worker_dispatch.sh",
+                "nexus/services/direct_operation_journal.py",
+                "nexus/services/external_worker_runtime.py",
+            }
+        )
     if isinstance(components, dict) and isinstance(components.get("workflow_doctor"), dict):
-        required.update({
-            "scripts/ops/nexus-workflow-doctor",
-            "scripts/ops/install_nexus_workflow_doctor.sh",
-            "nexus/services/workflow_doctor.py",
-            "nexus/services/direct_operation_journal.py",
-            "nexus/orchestrator/canonical_source_root.py",
-        })
+        required.update(
+            {
+                "scripts/ops/nexus-workflow-doctor",
+                "scripts/ops/install_nexus_workflow_doctor.sh",
+                "nexus/services/workflow_doctor.py",
+                "nexus/services/direct_operation_journal.py",
+                "nexus/orchestrator/canonical_source_root.py",
+            }
+        )
     if isinstance(components, dict) and isinstance(components.get("grok_accounts"), dict):
         required.add("scripts/ops/nexus-grok-accounts")
     if not required.issubset(seen):
@@ -394,43 +492,51 @@ def _materialize_snapshot(
 def _install_dispatch(snapshot: Path, target: Path) -> None:
     installer = snapshot / "scripts" / "ops" / "install_nexus_agy_dispatch.sh"
     env = os.environ.copy()
-    env.update({
-        "NEXUS_AGY_REPO_ROOT": str(snapshot),
-        "NEXUS_AGY_SNAPSHOT": str(snapshot),
-        "NEXUS_AGY_DISPATCH_TARGET": str(target),
-    })
+    env.update(
+        {
+            "NEXUS_AGY_REPO_ROOT": str(snapshot),
+            "NEXUS_AGY_SNAPSHOT": str(snapshot),
+            "NEXUS_AGY_DISPATCH_TARGET": str(target),
+        }
+    )
     _run(["bash", str(installer)], cwd=snapshot, env=env)
 
 
 def _install_quota(snapshot: Path, target: Path) -> None:
     installer = snapshot / "scripts" / "ops" / "install_nexus_agy_quota.sh"
     env = os.environ.copy()
-    env.update({
-        "NEXUS_AGY_REPO_ROOT": str(snapshot),
-        "NEXUS_AGY_QUOTA_TARGET": str(target),
-    })
+    env.update(
+        {
+            "NEXUS_AGY_REPO_ROOT": str(snapshot),
+            "NEXUS_AGY_QUOTA_TARGET": str(target),
+        }
+    )
     _run(["bash", str(installer)], cwd=snapshot, env=env)
 
 
 def _install_workflow_doctor(snapshot: Path, target: Path) -> None:
     installer = snapshot / "scripts" / "ops" / "install_nexus_workflow_doctor.sh"
     env = os.environ.copy()
-    env.update({
-        "NEXUS_WORKFLOW_DOCTOR_REPO_ROOT": str(snapshot),
-        "NEXUS_WORKFLOW_DOCTOR_SNAPSHOT": str(snapshot),
-        "NEXUS_WORKFLOW_DOCTOR_TARGET": str(target),
-    })
+    env.update(
+        {
+            "NEXUS_WORKFLOW_DOCTOR_REPO_ROOT": str(snapshot),
+            "NEXUS_WORKFLOW_DOCTOR_SNAPSHOT": str(snapshot),
+            "NEXUS_WORKFLOW_DOCTOR_TARGET": str(target),
+        }
+    )
     _run(["bash", str(installer)], cwd=snapshot, env=env)
 
 
 def _install_external_worker_dispatch(snapshot: Path, target: Path) -> None:
     installer = snapshot / "scripts" / "ops" / "install_nexus_external_worker_dispatch.sh"
     env = os.environ.copy()
-    env.update({
-        "NEXUS_EXTERNAL_WORKER_REPO_ROOT": str(snapshot),
-        "NEXUS_EXTERNAL_WORKER_SNAPSHOT": str(snapshot),
-        "NEXUS_EXTERNAL_WORKER_DISPATCH_TARGET": str(target),
-    })
+    env.update(
+        {
+            "NEXUS_EXTERNAL_WORKER_REPO_ROOT": str(snapshot),
+            "NEXUS_EXTERNAL_WORKER_SNAPSHOT": str(snapshot),
+            "NEXUS_EXTERNAL_WORKER_DISPATCH_TARGET": str(target),
+        }
+    )
     _run(["bash", str(installer)], cwd=snapshot, env=env)
 
 
@@ -781,6 +887,7 @@ def _status(
             "sha256": actual_workflow_doctor_sha,
             "entrypoint": str(workflow_doctor_target),
         }
+        payload["components"]["workflow_source_binding"] = _read_source_binding(runtime_root)
 
     sync_ok = _same_target(
         sync_target,
@@ -1027,6 +1134,10 @@ def main(argv: list[str] | None = None) -> int:
                 str(Path.home() / ".cache/nexus-host-sync/Nexus-new.git"),
             ),
         )
+        cmd.add_argument(
+            "--canonical-source-root",
+            default=os.getenv("NEXUS_HOST_REPO_ROOT") or None,
+        )
         cmd.add_argument("--remote-url", default=REMOTE_DEFAULT)
         cmd.add_argument("--no-fetch", action="store_true")
 
@@ -1087,15 +1198,20 @@ def main(argv: list[str] | None = None) -> int:
                 fetch=not args.no_fetch,
             )
             if args.command == "desired":
-                _emit({
-                    "schema": STATUS_SCHEMA,
-                    "host": socket.gethostname(),
-                    "state": "DESIRED_RESOLVED",
-                    "desired_revision": revision,
-                    "desired_bundle_sha256": bundle_sha,
-                    "track_ref": args.track_ref or "main",
-                })
+                _emit(
+                    {
+                        "schema": STATUS_SCHEMA,
+                        "host": socket.gethostname(),
+                        "state": "DESIRED_RESOLVED",
+                        "desired_revision": revision,
+                        "desired_bundle_sha256": bundle_sha,
+                        "track_ref": args.track_ref or "main",
+                    }
+                )
                 return 0
+
+            if args.canonical_source_root:
+                _write_source_binding(runtime_root, Path(args.canonical_source_root))
 
             current_status = _status(
                 runtime_root=runtime_root,
@@ -1189,12 +1305,14 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if payload["state"] == "INSTALLED" else 2
 
     except HostSyncError as exc:
-        _emit({
-            "schema": STATUS_SCHEMA,
-            "host": socket.gethostname(),
-            "state": "ERROR",
-            "error": str(exc),
-        })
+        _emit(
+            {
+                "schema": STATUS_SCHEMA,
+                "host": socket.gethostname(),
+                "state": "ERROR",
+                "error": str(exc),
+            }
+        )
         return 2
     return 2
 

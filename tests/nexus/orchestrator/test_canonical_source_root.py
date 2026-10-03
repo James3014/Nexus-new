@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -207,3 +208,26 @@ def test_rdc_repo_root_defaults_to_canonical_source_root(tmp_path: Path):
     except RuntimeError as exc:
         # Acceptable: remote mismatch in fork/CI, but NOT a missing/git error
         assert "REMOTE_MISMATCH" in str(exc) or "REMOTE_UNREADABLE" in str(exc)
+
+
+def test_rdc_repo_root_uses_physical_identity_not_textual_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Git top-level spelling may differ while identifying the same directory."""
+    repo = tmp_path / "Repo"
+    repo.mkdir()
+    calls = iter([
+        subprocess.CompletedProcess(["git"], 0, stdout=str(tmp_path / "repo") + "\n", stderr=""),
+        subprocess.CompletedProcess(
+            ["git"], 0, stdout="https://github.com/James3014/Nexus-new.git\n", stderr=""
+        ),
+    ])
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: next(calls))
+    monkeypatch.setattr(os.path, "samefile", lambda left, right: True)
+
+    result = resolve_rdc_repo_root(
+        expected_repository="James3014/Nexus-new",
+        canonical_root=repo,
+    )
+
+    assert result == repo.resolve()
