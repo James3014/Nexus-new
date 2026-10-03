@@ -88,21 +88,19 @@ raise SystemExit(2)
 
     state_root = original_home / ".local" / "state" / "hcom-agy-safe"
     env = os.environ.copy()
-    env.update(
-        {
-            "HOME": str(original_home),
-            "PATH": f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
-            "NEXUS_AGY_MANAGER": str(manager),
-            "NEXUS_AGY_MANAGER_ROOT": str(manager_root),
-            "NEXUS_HCOM_AGY_STATE_ROOT": str(state_root),
-            "NEXUS_HCOM_BIN": str(hcom),
-            "HCOM_TEST_RECORD": str(record_path),
-            "HCOM_TEST_CONFIG_LOG": str(config_log),
-            "GEMINI_API_KEY": "must-not-leak",
-            "GOOGLE_API_KEY": "must-not-leak",
-            "GOOGLE_GENAI_API_KEY": "must-not-leak",
-        }
-    )
+    env.update({
+        "HOME": str(original_home),
+        "PATH": f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
+        "NEXUS_AGY_MANAGER": str(manager),
+        "NEXUS_AGY_MANAGER_ROOT": str(manager_root),
+        "NEXUS_HCOM_AGY_STATE_ROOT": str(state_root),
+        "NEXUS_HCOM_BIN": str(hcom),
+        "HCOM_TEST_RECORD": str(record_path),
+        "HCOM_TEST_CONFIG_LOG": str(config_log),
+        "GEMINI_API_KEY": "must-not-leak",
+        "GOOGLE_API_KEY": "must-not-leak",
+        "GOOGLE_GENAI_API_KEY": "must-not-leak",
+    })
 
     proc = subprocess.run(
         [sys.executable, str(LAUNCHER), "--model", "gpt-oss-120b-medium"],

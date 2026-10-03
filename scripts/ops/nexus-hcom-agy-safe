@@ -39,11 +39,7 @@ def _manager_active_profile(manager: Path, manager_root: Path) -> tuple[str, Pat
 
 def _copy_profile(profile: Path, session_home: Path) -> None:
     def ignore(_path: str, names: list[str]) -> set[str]:
-        return {
-            name
-            for name in names
-            if name in EXCLUDED_DIR_NAMES or name in EXCLUDED_FILE_NAMES
-        }
+        return {name for name in names if name in EXCLUDED_DIR_NAMES or name in EXCLUDED_FILE_NAMES}
 
     shutil.copytree(profile, session_home, dirs_exist_ok=True, symlinks=True, ignore=ignore)
     session_home.chmod(0o700)
@@ -107,24 +103,36 @@ def main(argv: list[str] | None = None) -> int:
         raise SafeLauncherError("HEADLESS_DISABLED_EPHEMERAL_HOME_LIFETIME")
 
     original_home = Path(os.environ.get("HOME", str(Path.home()))).expanduser().resolve()
-    manager = Path(
-        os.environ.get(
-            "NEXUS_AGY_MANAGER",
-            str(original_home / ".nexus/agy-account-pool/bin/agy-cli-manager"),
+    manager = (
+        Path(
+            os.environ.get(
+                "NEXUS_AGY_MANAGER",
+                str(original_home / ".nexus/agy-account-pool/bin/agy-cli-manager"),
+            )
         )
-    ).expanduser().resolve()
-    manager_root = Path(
-        os.environ.get(
-            "NEXUS_AGY_MANAGER_ROOT",
-            str(original_home / ".nexus/agy-account-pool/runtime"),
+        .expanduser()
+        .resolve()
+    )
+    manager_root = (
+        Path(
+            os.environ.get(
+                "NEXUS_AGY_MANAGER_ROOT",
+                str(original_home / ".nexus/agy-account-pool/runtime"),
+            )
         )
-    ).expanduser().resolve()
-    state_root = Path(
-        os.environ.get(
-            "NEXUS_HCOM_AGY_STATE_ROOT",
-            str(original_home / ".local/state/hcom-agy-safe"),
+        .expanduser()
+        .resolve()
+    )
+    state_root = (
+        Path(
+            os.environ.get(
+                "NEXUS_HCOM_AGY_STATE_ROOT",
+                str(original_home / ".local/state/hcom-agy-safe"),
+            )
         )
-    ).expanduser().resolve()
+        .expanduser()
+        .resolve()
+    )
     hcom_dir = Path(os.environ.get("HCOM_DIR", str(original_home / ".hcom"))).expanduser().resolve()
     hcom_raw = os.environ.get("NEXUS_HCOM_BIN") or shutil.which("hcom")
     if not hcom_raw:
