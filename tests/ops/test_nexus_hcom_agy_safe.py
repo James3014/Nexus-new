@@ -134,7 +134,7 @@ raise SystemExit(2)
 
     assert proc.returncode == 0, proc.stderr
     payload = json.loads(record_path.read_text(encoding="utf-8"))
-    assert payload["args"] == ["--model", "gpt-oss-120b-medium"]
+    assert payload["args"] == ["--terminal", "here", "--model", "gpt-oss-120b-medium"]
     assert payload["profile_marker"] == "active-profile"
     assert payload["auth_present"] is True
     assert payload["auth_value"] == "active-auth"
@@ -155,16 +155,25 @@ raise SystemExit(2)
     ]
 
 
-def test_launcher_rejects_headless_before_creating_ephemeral_home(tmp_path: Path) -> None:
-    env = os.environ.copy()
-    env["HOME"] = str(tmp_path)
-    proc = subprocess.run(
-        [sys.executable, str(LAUNCHER), "--headless"],
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert proc.returncode == 2
-    assert "HEADLESS_DISABLED_EPHEMERAL_HOME_LIFETIME" in proc.stderr
-    assert not (tmp_path / ".local" / "state" / "hcom-agy-safe").exists()
+def test_launcher_rejects_detached_hcom_launch_modes_before_creating_home(
+    tmp_path: Path,
+) -> None:
+    for forwarded_args in (
+        ["--headless"],
+        ["--terminal", "iterm"],
+        ["--terminal=iterm"],
+        ["--device", "other-mac"],
+        ["--device=other-mac"],
+    ):
+        env = os.environ.copy()
+        env["HOME"] = str(tmp_path)
+        proc = subprocess.run(
+            [sys.executable, str(LAUNCHER), *forwarded_args],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert proc.returncode == 2
+        assert "DETACHED_LAUNCH_DISABLED:" in proc.stderr
+        assert not (tmp_path / ".local" / "state" / "hcom-agy-safe").exists()

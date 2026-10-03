@@ -111,8 +111,16 @@ def _launch_env(session_home: Path, hcom_dir: Path) -> dict[str, str]:
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    if "--headless" in args:
-        raise SafeLauncherError("HEADLESS_DISABLED_EPHEMERAL_HOME_LIFETIME")
+    for arg in args:
+        if (
+            arg == "--headless"
+            or arg.startswith("--headless=")
+            or arg == "--terminal"
+            or arg.startswith("--terminal=")
+            or arg == "--device"
+            or arg.startswith("--device=")
+        ):
+            raise SafeLauncherError(f"DETACHED_LAUNCH_DISABLED:{arg}")
 
     original_home = Path(os.environ.get("HOME", str(Path.home()))).expanduser().resolve()
     manager = (
@@ -175,7 +183,9 @@ def main(argv: list[str] | None = None) -> int:
         for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
             previous_handlers[signum] = signal.getsignal(signum)
             signal.signal(signum, forward)
-        child = subprocess.Popen([str(hcom), "agy", *args], env=env, text=True)
+        child = subprocess.Popen(
+            [str(hcom), "agy", "--terminal", "here", *args], env=env, text=True
+        )
         return int(child.wait())
     finally:
         for signum, handler in previous_handlers.items():
