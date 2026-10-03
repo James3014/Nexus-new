@@ -220,9 +220,7 @@ def test_runtime_bridge_installs_ambient_core_preparation_port(tmp_path, monkeyp
     assert isinstance(captured["args"][-1], bridge._Preparation)
 
 
-def test_runtime_bridge_binds_observation_model_call_gate_when_supported(
-    tmp_path, monkeypatch
-):
+def test_runtime_bridge_binds_observation_model_call_gate_when_supported(tmp_path, monkeypatch):
     captured = {}
 
     class FakeCoordinator:
@@ -276,9 +274,7 @@ def test_runtime_bridge_binds_observation_model_call_gate_when_supported(
     }
 
 
-def test_runtime_bridge_preserves_legacy_constructor_without_model_call_gate(
-    tmp_path, monkeypatch
-):
+def test_runtime_bridge_preserves_legacy_constructor_without_model_call_gate(tmp_path, monkeypatch):
     captured = {}
 
     class LegacyCoordinator:
