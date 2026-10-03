@@ -742,6 +742,26 @@ class TestCanonicalRouting:
             CanonicalNextAction.BIND_EXACT_DESIRED_SOURCE_IDENTITY
         )
 
+    def test_external_repository_routes_to_nexus_core_without_gateway_rebind(self) -> None:
+        overrides = {
+            ExecutionReadinessPlane.SOURCE: (
+                _block(
+                    ExecutionReadinessPlane.SOURCE,
+                    ExecutionReadinessBlockerCode.EXTERNAL_REPOSITORY_SUBJECT,
+                    "source_requested_repository=skidiy/frontend.vue",
+                ),
+            ),
+        }
+        result = _evaluate(_request(), overrides)
+        assert result.primary_blocker is not None
+        assert result.primary_blocker.code is (
+            ExecutionReadinessBlockerCode.EXTERNAL_REPOSITORY_SUBJECT
+        )
+        assert result.primary_blocker.next_action is (
+            CanonicalNextAction.ROUTE_TO_NEXUS_CORE_EXTERNAL_VERIFICATION
+        )
+        assert "Nexus Core" in result.primary_blocker.message
+
     def test_gateway_block_routes_to_526_rebind_reload(self) -> None:
         overrides = {
             ExecutionReadinessPlane.GATEWAY: (
@@ -1428,7 +1448,7 @@ class TestCorrectiveFalseGreenControls:
             observation,
         )
         assert result.status is ExecutionReadinessStatus.BLOCKED
-        assert result.blocker_code is ExecutionReadinessBlockerCode.SOURCE_REALM_MISMATCH
+        assert result.blocker_code is ExecutionReadinessBlockerCode.EXTERNAL_REPOSITORY_SUBJECT
 
     @pytest.mark.parametrize(
         "remote, expected",
