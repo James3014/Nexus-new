@@ -920,6 +920,101 @@ def test_truthful_provenance_preserved_for_local_models() -> None:
                 assert q.provenance != "DURABLE_REPOSITORY_RECEIPT"
 
 
+
+def test_config_id_conflicting_exact_criteria_fail_closed() -> None:
+    registry = _registry()
+    with pytest.raises(LineageResolutionError, match="conflicts with supplied exact criteria"):
+        registry.resolve_configuration(
+            config_id="occamy-1.0-q4-opencode-llama32k",
+            model="occamy-1.0",
+        )
+    with pytest.raises(LineageResolutionError, match="conflicts with supplied exact criteria"):
+        registry.resolve_configuration(
+            config_id="occamy-1.0-q4-opencode-llama32k",
+            scaffold="nexus_selective_shadow",
+        )
+
+
+def test_evidence_bundle_config_id_rejects_same_lineage_wrong_model() -> None:
+    with pytest.raises(LineageResolutionError, match="conflicts with supplied exact criteria"):
+        _planner().evidence_bundle(
+            config_id="occamy-1.0-q4-opencode-llama32k",
+            model="occamy-1.0",
+        )
+
+
+def test_execution_configuration_model_must_be_registered_lineage_identity(tmp_path: Path) -> None:
+    data = _minimal_lineage_yaml()
+    data["lineages"]["lineage-a"]["execution_configurations"] = [
+        {"config_id": "cfg-foreign-model", "model": "not-a-lineage-identity"}
+    ]
+    bad = tmp_path / "bad-config-model.yaml"
+    bad.write_text(yaml.dump(data), encoding="utf-8")
+    with pytest.raises(LineageValidationError, match="not a registered execution identity"):
+        ModelCapabilityLineageRegistry(bad).load()
+
+
+def test_duplicate_task_family_phase_qualification_rejected(tmp_path: Path) -> None:
+    data = _minimal_lineage_yaml()
+    data["lineages"]["lineage-a"]["execution_configurations"] = [
+        {
+            "config_id": "cfg-duplicate-phase",
+            "model": "m-a",
+            "qualifications": [
+                {
+                    "task_family": "bounded_code_repair",
+                    "disposition": "PASS",
+                    "phase": "FIRST_PASS",
+                },
+                {
+                    "task_family": "bounded_code_repair",
+                    "disposition": "WATCH",
+                    "phase": "FIRST_PASS",
+                },
+            ],
+        }
+    ]
+    bad = tmp_path / "bad-duplicate-phase.yaml"
+    bad.write_text(yaml.dump(data), encoding="utf-8")
+    with pytest.raises(LineageValidationError, match="duplicate qualification"):
+        ModelCapabilityLineageRegistry(bad).load()
+
+
+def test_multi_phase_qualification_requires_phase_for_exact_resolution(tmp_path: Path) -> None:
+    data = _minimal_lineage_yaml()
+    data["lineages"]["lineage-a"]["execution_configurations"] = [
+        {
+            "config_id": "cfg-multi-phase",
+            "model": "m-a",
+            "qualifications": [
+                {
+                    "task_family": "bounded_code_repair",
+                    "disposition": "PASS",
+                    "phase": "FIRST_PASS",
+                },
+                {
+                    "task_family": "bounded_code_repair",
+                    "disposition": "WATCH",
+                    "phase": "INDEPENDENT_HIDDEN_PROBE",
+                },
+            ],
+        }
+    ]
+    path = tmp_path / "multi-phase.yaml"
+    path.write_text(yaml.dump(data), encoding="utf-8")
+    registry = ModelCapabilityLineageRegistry(path)
+    with pytest.raises(LineageResolutionError, match="Ambiguous qualification"):
+        registry.resolve_execution_qualification("cfg-multi-phase", "bounded_code_repair")
+
+    _, hidden = registry.resolve_execution_qualification(
+        "cfg-multi-phase",
+        "bounded_code_repair",
+        EvidencePhase.INDEPENDENT_HIDDEN_PROBE,
+    )
+    assert hidden.disposition is QualificationDisposition.WATCH
+    assert hidden.phase is EvidencePhase.INDEPENDENT_HIDDEN_PROBE
+
+
 def test_parameter_count_not_used_as_capability_identity() -> None:
     registry = _registry()
     occamy = registry.resolve_by_lineage_id("occamy-1.0")
