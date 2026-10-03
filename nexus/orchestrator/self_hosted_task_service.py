@@ -4158,6 +4158,8 @@ class SelfHostedTaskService:
         package_request = dict(request)
         package_request["task_id"] = task_id
         package_request["attempt_id"] = attempt_id
+        package_request["workspace_revision"] = workspace_revision
+        package_request["task_statement"] = task_statement
         package_request["planner_output"] = planner
         package_request["canonical_dispatch_envelope"] = dict(envelope)
         package = build_worker_context_package(package_request)
