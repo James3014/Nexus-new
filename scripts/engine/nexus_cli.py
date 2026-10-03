@@ -383,10 +383,14 @@ else:
         operation_id: str | None,
     ) -> None:
         """Project canonical workflow evidence without taking workflow authority."""
-        from nexus.services.workflow_doctor import collect_workflow_doctor, render_text
+        from nexus.services.workflow_doctor import (
+            collect_workflow_doctor,
+            render_text,
+            resolve_workflow_repo_root,
+        )
 
         payload = collect_workflow_doctor(
-            repo_root=Path(repo_root or os.getcwd()),
+            repo_root=resolve_workflow_repo_root(repo_root, repository),
             repository=repository,
             issue_number=issue_number,
             pr_number=pr_number,

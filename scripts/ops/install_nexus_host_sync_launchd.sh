@@ -26,9 +26,9 @@ PY
 
 mkdir -p "$(dirname "$PLIST")" "$STATE_DIR"
 TMP="$PLIST.tmp.$$"
-python3 - "$TMP" "$SYNC_BIN" "$SOURCE_REPO" "$STATE_DIR" "$TRACK_REF" "$INTERVAL" <<'PY'
+python3 - "$TMP" "$SYNC_BIN" "$SOURCE_REPO" "$REPO_ROOT" "$STATE_DIR" "$TRACK_REF" "$INTERVAL" <<'PY'
 import plistlib, sys
-out, sync_bin, source_repo, state_dir, track_ref, interval = sys.argv[1:]
+out, sync_bin, source_repo, repo_root, state_dir, track_ref, interval = sys.argv[1:]
 payload = {
     "Label": "com.nexus.host-sync",
     "ProgramArguments": [
@@ -38,6 +38,8 @@ payload = {
         track_ref,
         "--source-repo",
         source_repo,
+        "--canonical-source-root",
+        repo_root,
     ],
     "RunAtLoad": True,
     "StartInterval": int(interval),
