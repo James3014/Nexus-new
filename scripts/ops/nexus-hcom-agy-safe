@@ -9,7 +9,19 @@ import sys
 import tempfile
 from pathlib import Path
 
-SENSITIVE_API_KEYS = ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY")
+GITHUB_CREDENTIAL_KEYS = (
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GH_ENTERPRISE_TOKEN",
+    "GITHUB_ENTERPRISE_TOKEN",
+    "GITHUB_PAT",
+    "GITHUB_ACTIONS_TOKEN",
+)
+SENSITIVE_API_KEYS = (
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GOOGLE_GENAI_API_KEY",
+) + GITHUB_CREDENTIAL_KEYS
 EXCLUDED_DIR_NAMES = {"conversations", "brain", "log"}
 EXCLUDED_FILE_NAMES = {"history.jsonl", "conversation_summaries.db"}
 
