@@ -41,6 +41,26 @@ Desktop Commander has not been proven equivalent to DevSpace governed execution,
 durable operation replay, exact restart reconciliation, or effect receipts. Do
 not make those claims from this profile.
 
+## Grok credential host-affinity
+
+Grok account-pool authority remains machine-local. The pool records one stable,
+non-secret host binding and rejects account inventory/lease use when the current
+host does not match that binding.
+
+Host runtime synchronization is software/configuration synchronization only.
+`nexus-host-sync` may move code and immutable runtime snapshots; it must not move
+Grok OAuth/session/profile bytes, mutable Grok lease state, or credential-pool
+host ownership.
+
+Supported multi-host behavior is therefore limited to either:
+
+1. execute Grok work on the host that owns the credential pool; or
+2. explicitly provision distinct, non-overlapping Grok accounts on another host.
+
+Copying one authenticated account set to two hosts does not create a distributed
+lease. Shared-account cross-host execution remains forbidden until a separately
+accepted cross-host lease/fencing authority exists.
+
 ## Chat On Steroids boundary
 
 Chat On Steroids is the GPT Web peer runtime candidate for analysis, research,
