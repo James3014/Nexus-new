@@ -216,16 +216,12 @@ def test_rdc_repo_root_uses_physical_identity_not_textual_path(
     """Git top-level spelling may differ while identifying the same directory."""
     repo = tmp_path / "Repo"
     repo.mkdir()
-    calls = iter(
-        [
-            subprocess.CompletedProcess(
-                ["git"], 0, stdout=str(tmp_path / "repo") + "\n", stderr=""
-            ),
-            subprocess.CompletedProcess(
-                ["git"], 0, stdout="https://github.com/James3014/Nexus-new.git\n", stderr=""
-            ),
-        ]
-    )
+    calls = iter([
+        subprocess.CompletedProcess(["git"], 0, stdout=str(tmp_path / "repo") + "\n", stderr=""),
+        subprocess.CompletedProcess(
+            ["git"], 0, stdout="https://github.com/James3014/Nexus-new.git\n", stderr=""
+        ),
+    ])
     monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: next(calls))
     monkeypatch.setattr(os.path, "samefile", lambda left, right: True)
 
