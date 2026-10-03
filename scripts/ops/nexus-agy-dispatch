@@ -130,6 +130,7 @@ _QUOTA_ACCOUNT_PHASES = frozenset({
 })
 _QUOTA_PROGRESS_PREFIX = "NEXUS_AGY_QUOTA "
 _QUOTA_PROGRESS_MAX_LINE = 8192
+_EFFECT_OBSERVATION_INTERVAL_SECONDS = 0.5
 
 
 def _model_family(model: str | None) -> str:
@@ -475,7 +476,10 @@ def _read_quota_progress(
     on_phase_hook: Any,
 ) -> None:
     while True:
-        line = stream.readline(_QUOTA_PROGRESS_MAX_LINE + 1)
+        try:
+            line = stream.readline(_QUOTA_PROGRESS_MAX_LINE + 1)
+        except (OSError, ValueError):
+            return
         if not line:
             return
         if len(line) > _QUOTA_PROGRESS_MAX_LINE:
@@ -512,6 +516,17 @@ def _refresh_quota_snapshot_for_account(
     if not command:
         return _load_quota_snapshot()
     timeout_seconds = max(1, int(timeout))
+    deadline = time.monotonic() + timeout_seconds
+    finalize_headroom = min(1.0, max(0.5, timeout_seconds * 0.25))
+    child_total_timeout = max(0.001, timeout_seconds - finalize_headroom)
+    configured_total_timeout = os.getenv("NEXUS_AGY_QUOTA_TOTAL_TIMEOUT")
+    if configured_total_timeout:
+        try:
+            child_total_timeout = min(child_total_timeout, float(configured_total_timeout))
+        except ValueError:
+            pass
+    child_env = os.environ.copy()
+    child_env["NEXUS_AGY_QUOTA_TOTAL_TIMEOUT"] = format(child_total_timeout, ".6g")
     try:
         proc = subprocess.Popen(
             [command, account_name, "--timeout", str(timeout_seconds)],
@@ -519,6 +534,7 @@ def _refresh_quota_snapshot_for_account(
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
+            env=child_env,
         )
     except OSError:
         _notify_quota_progress(
@@ -542,7 +558,7 @@ def _refresh_quota_snapshot_for_account(
     )
     reader.start()
     try:
-        proc.wait(timeout=timeout_seconds)
+        proc.wait(timeout=max(0.0, deadline - time.monotonic()))
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()
@@ -552,7 +568,7 @@ def _refresh_quota_snapshot_for_account(
             account_alias_hash=account_alias_hash,
         )
     finally:
-        reader.join(timeout=1.0)
+        reader.join(timeout=max(0.0, deadline - time.monotonic()))
         if proc.stderr and not proc.stderr.closed:
             proc.stderr.close()
     return _load_quota_snapshot()
@@ -1066,8 +1082,15 @@ def run_agy(
     timed_out = False
     quota_terminated = False
     deadline = started + max(1, timeout) + 10
+    next_effect_observation_at = started
     while process.poll() is None:
-        if baseline_worktree_state is not None and not first_effect_seen.is_set():
+        now = time.monotonic()
+        if (
+            baseline_worktree_state is not None
+            and not first_effect_seen.is_set()
+            and now >= next_effect_observation_at
+        ):
+            next_effect_observation_at = now + _EFFECT_OBSERVATION_INTERVAL_SECONDS
             try:
                 changed = direct_operation_journal.observed_changed_paths_since(
                     cwd, baseline_worktree_state
@@ -1743,31 +1766,46 @@ def dispatch_run(
             last_kind = kind.value
             provider_effect_observed: bool | None = False
             reconciliation_required = False
+            attempt_changed_paths = None
+            if permission_blocked or kind == AccountFailureKind.QUOTA_EXHAUSTED:
+                if attempt_baseline is not None:
+                    try:
+                        attempt_changed_paths = (
+                            direct_operation_journal.observed_changed_paths_since(
+                                cwd, attempt_baseline
+                            )
+                        )
+                    except Exception as exc:
+                        _operation_hook(
+                            operation_hook,
+                            effect_observation_error=(
+                                f"ATTEMPT_EFFECT_OBSERVATION_FAILED:{type(exc).__name__}"
+                            ),
+                        )
+
             if permission_blocked and (
                 "headless mode" in combined_output.lower()
                 or "soft-denying" in combined_output.lower()
                 or "auto-denied" in combined_output.lower()
             ):
                 last_kind = "HEADLESS_TOOL_PERMISSION_DENIED"
+            if permission_blocked:
+                if attempt_changed_paths:
+                    provider_effect_observed = True
+                    reconciliation_required = True
+                elif attempt_changed_paths == []:
+                    provider_effect_observed = False
+                else:
+                    provider_effect_observed = None
+                    reconciliation_required = True
             elif kind == AccountFailureKind.MODEL_OR_TASK_ERROR:
                 last_kind = "DISPATCH_MODEL_CONTRACT_REJECTED"
             elif kind == AccountFailureKind.QUOTA_EXHAUSTED:
-                changed_paths = None
-                if attempt_baseline is not None:
-                    try:
-                        changed_paths = direct_operation_journal.observed_changed_paths_since(
-                            cwd, attempt_baseline
-                        )
-                    except Exception as exc:
-                        _operation_hook(
-                            operation_hook,
-                            effect_observation_error=f"ATTEMPT_EFFECT_OBSERVATION_FAILED:{type(exc).__name__}",
-                        )
-                if changed_paths:
+                if attempt_changed_paths:
                     last_kind = "PROVIDER_QUOTA_EXHAUSTED_AFTER_EFFECT"
                     provider_effect_observed = True
                     reconciliation_required = True
-                elif changed_paths == []:
+                elif attempt_changed_paths == []:
                     last_kind = "PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT"
                     provider_effect_observed = False
                 else:

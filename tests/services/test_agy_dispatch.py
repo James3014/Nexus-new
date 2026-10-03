@@ -779,6 +779,87 @@ def test_quota_child_timeout_is_bounded_and_does_not_claim_provider_outcome_unkn
         os.kill(child_pid, 0)
 
 
+def test_quota_deadline_keeps_finalize_headroom_for_partial_snapshot(
+    tmp_path: Path, monkeypatch
+) -> None:
+    command = tmp_path / "deadline-quota-command"
+    snapshot_path = tmp_path / "partial-snapshot.json"
+    budget_path = tmp_path / "child-total-budget.txt"
+    command.write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env python3
+            import json
+            import os
+            import sys
+            import time
+            from pathlib import Path
+
+            def emit(phase, **details):
+                event = {
+                    "phase": phase,
+                    "timestamp": "2026-10-04T12:00:00+00:00",
+                    **details,
+                }
+                sys.stderr.write("NEXUS_AGY_QUOTA " + json.dumps(event) + "\\n")
+                sys.stderr.flush()
+
+            timeout = float(os.environ["NEXUS_AGY_QUOTA_TOTAL_TIMEOUT"])
+            Path(os.environ["QUOTA_CHILD_BUDGET_PATH"]).write_text(str(timeout))
+            started = time.monotonic()
+            while time.monotonic() - started < timeout:
+                time.sleep(0.005)
+            emit("DEADLINE_EXCEEDED", account=sys.argv[1])
+            time.sleep(0.1)
+            payload = {
+                "checked_at": "2026-10-04T12:00:00+00:00",
+                "partial": True,
+                "accounts": [{"account": sys.argv[1], "ok": False}],
+            }
+            snapshot = Path(os.environ["QUOTA_PARTIAL_SNAPSHOT_PATH"])
+            snapshot.write_text(json.dumps(payload), encoding="utf-8")
+            emit("SAVING_SNAPSHOT", snapshot_path=str(snapshot))
+            emit("FINISHED", total=1, ok=0)
+            """
+        ),
+        encoding="utf-8",
+    )
+    command.chmod(0o755)
+    monkeypatch.setenv("QUOTA_CHILD_BUDGET_PATH", str(budget_path))
+    monkeypatch.setenv("QUOTA_PARTIAL_SNAPSHOT_PATH", str(snapshot_path))
+    monkeypatch.setenv("NEXUS_AGY_QUOTA_TOTAL_TIMEOUT", "2.9")
+    monkeypatch.setattr(dispatch, "_quota_refresh_binary", lambda: str(command))
+    monkeypatch.setattr(
+        dispatch,
+        "_load_quota_snapshot",
+        lambda *_args: json.loads(snapshot_path.read_text(encoding="utf-8")),
+    )
+    events: list[dict[str, object]] = []
+    started = time.monotonic()
+
+    snapshot = dispatch._refresh_quota_snapshot_for_account(
+        "private-account-id",
+        timeout=3,
+        account_alias_hash="012345abcdef",
+        on_phase_hook=lambda **event: events.append(event),
+    )
+    elapsed = time.monotonic() - started
+
+    child_budget = float(budget_path.read_text(encoding="utf-8"))
+    phases = [
+        event["quota_preflight_progress"]["phase"]
+        for event in events
+        if "quota_preflight_progress" in event
+    ]
+    assert 0 < child_budget < 3
+    assert child_budget == pytest.approx(2.25)
+    assert elapsed < 3
+    assert snapshot["partial"] is True
+    assert "DEADLINE_EXCEEDED" in phases
+    assert "SAVING_SNAPSHOT" in phases
+    assert "FINISHED" in phases
+
+
 def test_background_spawn_returns_durable_operation_identity(tmp_path: Path, monkeypatch) -> None:
     class FakeProcess:
         pid = 424242
@@ -1932,6 +2013,157 @@ def test_independent_headless_denial_only_in_provider_log_is_failure(tmp_path, m
     )
     assert code != 0
     assert any(e.get("failure_kind") == "HEADLESS_TOOL_PERMISSION_DENIED" for e in events)
+
+
+def test_headless_permission_failure_after_physical_effect_requires_reconciliation(
+    tmp_path: Path,
+) -> None:
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    target = work / "partial-effect.txt"
+
+    class Coordinator(_WriteScopeCoordinator):
+        rotation_count = 0
+
+        def rotate_claim(self, **kwargs):
+            self.rotation_count += 1
+            raise AssertionError("permission failure after an effect must not rotate")
+
+    coordinator = Coordinator(home)
+    events: list[dict[str, object]] = []
+
+    def runner(**_kwargs):
+        target.write_text("provider already changed source", encoding="utf-8")
+        return (
+            0,
+            "",
+            "tool permission denied: headless mode cannot prompt for confirmation\n",
+            False,
+            10,
+        )
+
+    code = dispatch.dispatch_run(
+        prompt="edit then permission denial",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(target)],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+
+    classified = [event for event in events if event.get("phase") == "CLASSIFYING_FAILURE"][-1]
+    assert code == 1
+    assert target.read_text(encoding="utf-8") == "provider already changed source"
+    assert classified["failure_kind"] == "HEADLESS_TOOL_PERMISSION_DENIED"
+    assert classified["provider_effect"] is True
+    assert classified["reconciliation_required"] is True
+    assert coordinator.rotation_count == 0
+
+
+def test_run_agy_throttles_effect_scans_for_a_long_provider(tmp_path: Path, monkeypatch) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "-C", str(work), "init"], check=True, capture_output=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_agy = bin_dir / "agy"
+    fake_agy.write_text(
+        "#!" + sys.executable + "\nimport time\ntime.sleep(1.05)\n",
+        encoding="utf-8",
+    )
+    fake_agy.chmod(0o700)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
+
+    original_observe = dispatch.direct_operation_journal.observed_changed_paths_since
+    scan_times: list[float] = []
+
+    def count_observations(cwd: str, baseline: dict[str, object]):
+        scan_times.append(time.monotonic())
+        return original_observe(cwd, baseline)
+
+    monkeypatch.setattr(
+        dispatch.direct_operation_journal,
+        "observed_changed_paths_since",
+        count_observations,
+    )
+    code, _out, _err, _timed_out, _wall_ms = dispatch.run_agy(
+        env=os.environ.copy(),
+        prompt="wait without a source edit",
+        cwd=str(work),
+        mode="plan",
+        model=None,
+        effort=None,
+        timeout=5,
+    )
+
+    assert code == 0
+    assert 3 <= len(scan_times) <= 4
+    assert all(
+        later - earlier >= 0.4 for earlier, later in zip(scan_times, scan_times[1:3], strict=False)
+    )
+
+
+def test_run_agy_final_readback_captures_short_lived_effect_after_first_empty_scan(
+    tmp_path: Path, monkeypatch
+) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "-C", str(work), "init"], check=True, capture_output=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_agy = bin_dir / "agy"
+    fake_agy.write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env python3
+            import os
+            import time
+            from pathlib import Path
+
+            time.sleep(0.1)
+            Path(os.environ["AGY_SHORT_EFFECT_PATH"]).write_text("short effect")
+            """
+        ),
+        encoding="utf-8",
+    )
+    fake_agy.chmod(0o700)
+    effect = work / "short-lived.txt"
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("AGY_SHORT_EFFECT_PATH", str(effect))
+    original_observe = dispatch.direct_operation_journal.observed_changed_paths_since
+    scan_times: list[float] = []
+
+    def force_first_empty_scan(cwd: str, baseline: dict[str, object]):
+        scan_times.append(time.monotonic())
+        if len(scan_times) == 1:
+            return []
+        return original_observe(cwd, baseline)
+
+    monkeypatch.setattr(
+        dispatch.direct_operation_journal,
+        "observed_changed_paths_since",
+        force_first_empty_scan,
+    )
+    events: list[dict[str, object]] = []
+    code, _out, _err, _timed_out, _wall_ms = dispatch.run_agy(
+        env=os.environ.copy(),
+        prompt="make a short-lived source edit",
+        cwd=str(work),
+        mode="plan",
+        model=None,
+        effort=None,
+        timeout=5,
+        operation_hook=events.append,
+    )
+
+    assert code == 0
+    assert effect.is_file()
+    assert len(scan_times) == 2
+    assert any(event.get("first_effect_at") for event in events)
 
 
 def test_independent_baseline_failure_stays_unknown(tmp_path, monkeypatch):
