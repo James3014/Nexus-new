@@ -655,6 +655,7 @@ class ModelCapabilityLineageRegistry:
             )
 
         qualifications: list[ExecutionConfigQualification] = []
+        qualification_keys: set[tuple[str, EvidencePhase]] = set()
         for q_entry in qualifications_raw:
             if not isinstance(q_entry, Mapping):
                 raise LineageValidationError(
@@ -667,6 +668,13 @@ class ModelCapabilityLineageRegistry:
                 )
             disposition = _parse_disposition(q_entry.get("disposition"))
             phase = _parse_phase(q_entry.get("phase"))
+            qualification_key = (task_family, phase)
+            if qualification_key in qualification_keys:
+                raise LineageValidationError(
+                    f"Execution configuration '{config_id}' has duplicate qualification "
+                    f"for task family '{task_family}' and phase '{phase.value}'"
+                )
+            qualification_keys.add(qualification_key)
             provenance = str(q_entry.get("provenance") or "").strip()
             if provenance and provenance not in PROVENANCE_VALUES:
                 raise LineageValidationError(
@@ -909,7 +917,13 @@ class ModelCapabilityLineageRegistry:
                         f"'{identity_index[key]}' and '{lineage.lineage_id}'"
                     )
                 identity_index[key] = lineage.lineage_id
+            identity_models = {identity.model for identity in lineage.execution_identities}
             for cfg in lineage.execution_configurations:
+                if cfg.model not in identity_models:
+                    raise LineageValidationError(
+                        f"Execution configuration '{cfg.config_id}' model '{cfg.model}' is not "
+                        f"a registered execution identity of lineage '{lineage.lineage_id}'"
+                    )
                 if cfg.config_id in config_index:
                     raise LineageValidationError(
                         f"Duplicate execution configuration config_id '{cfg.config_id}' registered in both "
@@ -1075,9 +1089,22 @@ class ModelCapabilityLineageRegistry:
         self._ensure_loaded()
         if config_id:
             lineage, config = self.get_execution_configuration(config_id)
-            if lineage_id and lineage.lineage_id != lineage_id:
+            mismatches: dict[str, tuple[Any, Any]] = {}
+            if lineage_id is not None and lineage.lineage_id != lineage_id:
+                mismatches["lineage_id"] = (lineage.lineage_id, lineage_id)
+            if model is not None and config.model != model:
+                mismatches["model"] = (config.model, model)
+            if quant is not None and config.quant != quant:
+                mismatches["quant"] = (config.quant, quant)
+            if runtime is not None and config.runtime != runtime:
+                mismatches["runtime"] = (config.runtime, runtime)
+            if context_limit is not None and config.context_limit != context_limit:
+                mismatches["context_limit"] = (config.context_limit, context_limit)
+            if scaffold is not None and config.scaffold != scaffold:
+                mismatches["scaffold"] = (config.scaffold, scaffold)
+            if mismatches:
                 raise LineageResolutionError(
-                    f"Configuration '{config_id}' belongs to lineage '{lineage.lineage_id}', not '{lineage_id}'"
+                    f"Configuration '{config_id}' conflicts with supplied exact criteria: {mismatches}"
                 )
             return lineage, config
 
@@ -1134,22 +1161,41 @@ class ModelCapabilityLineageRegistry:
         return candidates[0]
 
     def resolve_execution_qualification(
-        self, config_id: str, task_family: str
+        self,
+        config_id: str,
+        task_family: str,
+        phase: EvidencePhase | str | None = None,
     ) -> tuple[ExecutionConfiguration, ExecutionConfigQualification]:
-        """Resolve qualification for a configuration and task family. Unknown config fails closed."""
+        """Resolve one role/phase qualification. Ambiguous multi-phase queries fail closed."""
         clean_task = str(task_family or "").strip()
         if not clean_task:
             raise LineageResolutionError(
                 "task_family is required to resolve execution qualification"
             )
+        phase_filter: EvidencePhase | None = None
+        if phase is not None:
+            phase_filter = phase if isinstance(phase, EvidencePhase) else _parse_phase(phase)
+
         _, config = self.get_execution_configuration(config_id)
-        for qual in config.qualifications:
-            if qual.task_family == clean_task:
-                return config, qual
+        matches = [
+            qual
+            for qual in config.qualifications
+            if qual.task_family == clean_task
+            and (phase_filter is None or qual.phase is phase_filter)
+        ]
+        if len(matches) > 1:
+            phases = [qual.phase.value for qual in matches]
+            raise LineageResolutionError(
+                f"Ambiguous qualification for configuration '{config_id}' and task family "
+                f"'{clean_task}': matched phases {phases}; specify phase"
+            )
+        if matches:
+            return config, matches[0]
+
         return config, ExecutionConfigQualification(
             task_family=clean_task,
             disposition=QualificationDisposition.NOT_EVALUATED,
-            phase=EvidencePhase.FIRST_PASS,
+            phase=phase_filter or EvidencePhase.FIRST_PASS,
             summary=f"Task family '{clean_task}' is NOT_EVALUATED for configuration '{config_id}'",
         )
 
@@ -1686,19 +1732,20 @@ class CalibrationPlanner:
         selected_config: ExecutionConfiguration | None = None
         if config_id:
             clean_config = str(config_id or "").strip()
-            lineage, selected_config = self._registry.get_execution_configuration(clean_config)
-            if lineage_id and lineage.lineage_id != lineage_id:
-                raise LineageResolutionError(
-                    f"Configuration '{config_id}' belongs to lineage '{lineage.lineage_id}', not '{lineage_id}'"
-                )
-            if provider and model:
+            lineage, selected_config = self._registry.resolve_configuration(
+                config_id=clean_config,
+                lineage_id=lineage_id,
+                model=model,
+            )
+            if provider is not None:
                 has_identity = any(
-                    i.provider == provider and i.model == model
+                    i.provider == provider and i.model == selected_config.model
                     for i in lineage.execution_identities
                 )
                 if not has_identity:
                     raise LineageResolutionError(
-                        f"Configuration '{config_id}' lineage does not match execution identity {provider}/{model}"
+                        f"Configuration '{config_id}' does not match execution provider "
+                        f"'{provider}' for exact model '{selected_config.model}'"
                     )
         else:
             lineage = self._registry.resolve(lineage_id=lineage_id, provider=provider, model=model)
