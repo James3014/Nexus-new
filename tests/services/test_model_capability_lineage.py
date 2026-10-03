@@ -920,7 +920,6 @@ def test_truthful_provenance_preserved_for_local_models() -> None:
                 assert q.provenance != "DURABLE_REPOSITORY_RECEIPT"
 
 
-
 def test_config_id_conflicting_exact_criteria_fail_closed() -> None:
     registry = _registry()
     with pytest.raises(LineageResolutionError, match="conflicts with supplied exact criteria"):
