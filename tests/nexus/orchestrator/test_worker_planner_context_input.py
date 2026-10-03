@@ -14,6 +14,7 @@ def _fixture(tmp_path):
     envelope = {
         "task_id": task_id,
         "attempt_id": attempt_id,
+        "workspace_revision": "t" * 40,
         "planner_decision_hash": "d" * 64,
         "planner_plan_hash": "p" * 64,
         "worker_id": "worker-1",
@@ -23,6 +24,7 @@ def _fixture(tmp_path):
     request = {
         "task_id": task_id,
         "attempt_id": attempt_id,
+        "workspace_revision": "t" * 40,
         "what": "bounded worker context",
         "planner_output": {
             "decision_hash": "d" * 64,
@@ -98,7 +100,6 @@ def test_worker_context_materialization_claims_persists_and_reuses_bundle(tmp_pa
             }
         },
         selected_capabilities=["memory"],
-        source_hash="s" * 64,
     )
 
     monkeypatch.setattr(
@@ -571,7 +572,6 @@ def _complete_worker_context(tmp_path, monkeypatch):
             }
         },
         selected_capabilities=["memory"],
-        source_hash="s" * 64,
     )
     calls = {"materialize": 0}
     monkeypatch.setattr(

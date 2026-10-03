@@ -77,6 +77,13 @@ def _atomic_symlink(target: Path, link: Path) -> None:
     os.replace(tmp, link)
 
 
+def _hcom_agy_target() -> Path:
+    raw = os.getenv("NEXUS_HCOM_AGY_TARGET")
+    if raw:
+        return Path(os.path.abspath(os.path.expanduser(raw)))
+    return Path.home() / ".local/bin/hcom-agy-safe"
+
+
 def _source_repo_ready(source_repo: Path) -> bool:
     if not source_repo.exists():
         return False
@@ -789,6 +796,19 @@ def _activate(
     elif grok_accounts_target.is_symlink():
         grok_accounts_target.unlink()
 
+    hcom_agy_target = _hcom_agy_target()
+    hcom_agy_source = release / "snapshot" / "scripts" / "ops" / "nexus-hcom-agy-safe"
+    if _manifest_has_component(release_manifest, "hcom_agy_safe"):
+        if not hcom_agy_source.is_file():
+            raise HostSyncError(f"RELEASE_HCOM_AGY_SAFE_MISSING:{hcom_agy_source}")
+        _backup_entrypoint(hcom_agy_target, runtime_root)
+        _atomic_symlink(
+            current / "snapshot" / "scripts" / "ops" / "nexus-hcom-agy-safe",
+            hcom_agy_target,
+        )
+    elif hcom_agy_target.is_symlink():
+        hcom_agy_target.unlink()
+
 
 def _same_target(link: Path, expected: Path) -> bool:
     if not link.is_symlink():
@@ -908,6 +928,19 @@ def _status(
             "status": "VERIFIED" if grok_accounts_ok else "DRIFT",
             "sha256": _sha256(grok_accounts_source) if grok_accounts_source.is_file() else None,
             "entrypoint": str(grok_accounts_target),
+        }
+
+    if _manifest_has_component(manifest, "hcom_agy_safe"):
+        hcom_agy_source = release / "snapshot" / "scripts" / "ops" / "nexus-hcom-agy-safe"
+        hcom_agy_target = _hcom_agy_target()
+        hcom_agy_ok = hcom_agy_source.is_file() and _same_target(
+            hcom_agy_target,
+            current / "snapshot" / "scripts" / "ops" / "nexus-hcom-agy-safe",
+        )
+        payload["components"]["hcom_agy_safe"] = {
+            "status": "VERIFIED" if hcom_agy_ok else "DRIFT",
+            "sha256": _sha256(hcom_agy_source) if hcom_agy_source.is_file() else None,
+            "entrypoint": str(hcom_agy_target),
         }
 
     if _manifest_has_component(manifest, "external_worker_dispatch"):
