@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import socket
 import subprocess
@@ -12,6 +11,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from nexus.orchestrator.canonical_source_root import (
+    CANONICAL_SOURCE_ROOT,
+    resolve_rdc_repo_root,
+)
 from nexus.services.direct_operation_journal import (
     ACTIVE_STATES,
     TERMINAL_STATES,
@@ -31,6 +34,44 @@ CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 
 class WorkflowDoctorError(RuntimeError):
     """The doctor could not build a trustworthy minimum projection."""
+
+
+def resolve_workflow_repo_root(
+    repo_root: str | Path | None,
+    repository: str | None,
+) -> Path:
+    """Return the validated repo root for workflow doctor operations.
+
+    Parameters
+    ----------
+    repo_root:
+        Explicit path supplied by the caller, or ``None``.  When ``None``,
+        ``CANONICAL_SOURCE_ROOT`` is used as the candidate — ``os.getcwd()``
+        is never a fallback.
+    repository:
+        Optional GitHub ``OWNER/REPO`` identity.  When supplied the candidate
+        is validated against the repository's origin remote via
+        ``resolve_rdc_repo_root``.  When omitted the candidate is returned
+        as-is without inventing a repository slug.
+
+    Returns
+    -------
+    Path
+        The resolved, optionally validated repository root.
+
+    Raises
+    ------
+    RuntimeError
+        Propagated from ``resolve_rdc_repo_root`` when the remote identity
+        does not match *repository* or the path is not a valid git repo.
+    """
+    candidate: Path = Path(repo_root) if repo_root is not None else CANONICAL_SOURCE_ROOT
+    if repository is not None:
+        return resolve_rdc_repo_root(
+            expected_repository=repository,
+            canonical_root=candidate,
+        )
+    return candidate.expanduser().resolve()
 
 
 def utc_now() -> str:
@@ -884,7 +925,7 @@ def render_text(payload: dict[str, Any]) -> str:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", default=os.getcwd())
+    parser.add_argument("--repo-root", default=None)
     parser.add_argument("--repository")
     parser.add_argument("--issue", dest="issue_number", type=int)
     parser.add_argument("--pr", dest="pr_number", type=int)
@@ -895,8 +936,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    resolved_root = resolve_workflow_repo_root(args.repo_root, args.repository)
     payload = collect_workflow_doctor(
-        repo_root=Path(args.repo_root),
+        repo_root=resolved_root,
         repository=args.repository,
         issue_number=args.issue_number,
         pr_number=args.pr_number,
