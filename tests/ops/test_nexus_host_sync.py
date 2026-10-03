@@ -24,6 +24,7 @@ AGY_REVIEWER_PROFILES = ROOT / "nexus" / "services" / "agy_reviewer_profiles.py"
 AGY_REVIEWER_CANARY = ROOT / "nexus" / "services" / "agy_reviewer_canary.py"
 WORKFLOW_DOCTOR = ROOT / "scripts" / "ops" / "nexus-workflow-doctor"
 WORKFLOW_DOCTOR_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_workflow_doctor.sh"
+CANONICAL_SOURCE_ROOT = ROOT / "nexus" / "orchestrator" / "canonical_source_root.py"
 EXTERNAL_DISPATCH = ROOT / "scripts" / "ops" / "nexus-external-worker-dispatch"
 EXTERNAL_DISPATCH_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_external_worker_dispatch.sh"
 GROK_ACCOUNTS = ROOT / "scripts" / "ops" / "nexus-grok-accounts"
@@ -109,6 +110,10 @@ def _make_source_repo(tmp_path: Path) -> Path:
         (
             ROOT / "nexus/services/workflow_doctor.py",
             "nexus/services/workflow_doctor.py",
+        ),
+        (
+            CANONICAL_SOURCE_ROOT,
+            "nexus/orchestrator/canonical_source_root.py",
         ),
         (
             ROOT / "nexus/services/external_worker_runtime.py",
@@ -226,6 +231,7 @@ def test_sync_materializes_exact_generation_and_entrypoints(tmp_path: Path) -> N
         (AGY_REVIEWER_RUNTIME, "nexus/services/agy_reviewer_runtime.py"),
         (AGY_REVIEWER_PROFILES, "nexus/services/agy_reviewer_profiles.py"),
         (AGY_REVIEWER_CANARY, "nexus/services/agy_reviewer_canary.py"),
+        (CANONICAL_SOURCE_ROOT, "nexus/orchestrator/canonical_source_root.py"),
     ]:
         deployed = snapshot / relative
         assert deployed.read_bytes() == source.read_bytes()
@@ -664,3 +670,40 @@ def test_sync_repairs_incomplete_bootstrap_generation_via_verified_legacy_fallba
     assert "external_worker_dispatch" not in rollback_payload["components"]
     assert not external_target.exists()
     assert not external_target.is_symlink()
+
+
+def test_manifest_missing_canonical_source_root_fails_closed(tmp_path: Path) -> None:
+    source_repo = _make_source_repo(tmp_path)
+    manifest_path = source_repo / "scripts/ops/nexus-host-runtime-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["runtime_files"] = [
+        entry
+        for entry in manifest["runtime_files"]
+        if entry.get("path") != "nexus/orchestrator/canonical_source_root.py"
+    ]
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    _git(source_repo, "add", "scripts/ops/nexus-host-runtime-manifest.json")
+    _git(source_repo, "commit", "-m", "remove canonical_source_root from manifest")
+    revision = _git(source_repo, "rev-parse", "HEAD")
+
+    runtime_root = tmp_path / "runtime"
+    manager_python = tmp_path / "manager-python"
+    dispatch_target = tmp_path / "bin" / "nexus-agy-dispatch"
+    sync_target = tmp_path / "bin" / "nexus-host-sync"
+    _write_fake_manager(manager_python)
+
+    proc = _invoke(
+        source_repo,
+        runtime_root,
+        manager_python,
+        dispatch_target,
+        sync_target,
+        "sync",
+        revision=revision,
+    )
+
+    assert proc.returncode == 2
+    payload = json.loads(proc.stdout)
+    assert payload["state"] == "ERROR"
+    assert payload["error"] == "HOST_MANIFEST_REQUIRED_RUNTIME_PATH_MISSING"
+    assert not (runtime_root / "current").exists()

@@ -208,6 +208,7 @@ def _parse_manifest(data: bytes) -> dict[str, Any]:
             "scripts/ops/install_nexus_workflow_doctor.sh",
             "nexus/services/workflow_doctor.py",
             "nexus/services/direct_operation_journal.py",
+            "nexus/orchestrator/canonical_source_root.py",
         })
     if isinstance(components, dict) and isinstance(components.get("grok_accounts"), dict):
         required.add("scripts/ops/nexus-grok-accounts")
