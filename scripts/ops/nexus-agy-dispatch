@@ -597,6 +597,18 @@ def _has_quota_failure_signal(text: str) -> bool:
     return any(marker in lowered for marker in _QUOTA_FAILURE_MARKERS)
 
 
+_PERMISSION_FAILURE_MARKERS = (
+    "permission denied for ",
+    "tool execution permission block",
+    "blocked by the active security/deny rules",
+)
+
+
+def _has_permission_failure_signal(text: str) -> bool:
+    lowered = text.lower()
+    return any(marker in lowered for marker in _PERMISSION_FAILURE_MARKERS)
+
+
 def classify_failure(
     returncode: int | None, stdout: str, stderr: str, timed_out: bool
 ) -> AccountFailureKind:
@@ -846,6 +858,7 @@ def install_temp_permissions(
     allow_rules: list[str],
     deny_rules: list[str] | None = None,
     allow_unsafe_legacy: bool = False,
+    replace_allow_deny: bool = False,
 ):
     home = str(env.get("HOME") or "").strip()
     if not home:
@@ -856,9 +869,18 @@ def install_temp_permissions(
         data = json.loads(original.decode("utf-8")) if original else {}
     except Exception as exc:
         raise RuntimeError(f"LEASE_SETTINGS_INVALID:{exc}") from exc
-    perms = data.setdefault("permissions", {})
-    allow = list(perms.get("allow") or [])
-    deny = list(perms.get("deny") or [])
+    existing_perms = data.get("permissions")
+    if existing_perms is None:
+        existing_perms = {}
+    if not isinstance(existing_perms, dict):
+        raise RuntimeError("LEASE_SETTINGS_INVALID:permissions must be an object")
+    perms = dict(existing_perms)
+    if replace_allow_deny:
+        allow: list[str] = []
+        deny: list[str] = []
+    else:
+        allow = list(perms.get("allow") or [])
+        deny = list(perms.get("deny") or [])
     for rule in allow_rules:
         if not allow_unsafe_legacy and rule in _UNSAFE_PERMISSION_RULES:
             raise RuntimeError(f"UNSAFE_PERMISSION_RULE:{rule}")
@@ -869,6 +891,7 @@ def install_temp_permissions(
             deny.append(rule)
     perms["allow"] = allow
     perms["deny"] = deny
+    data["permissions"] = perms
     settings.parent.mkdir(parents=True, exist_ok=True)
     settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return settings, original
@@ -1146,10 +1169,16 @@ def dispatch_run(
                 for rule in projected_write_rules:
                     if rule not in allow_rules:
                         allow_rules.append(rule)
+                replace_allow_deny = mode == "accept-edits"
+                if replace_allow_deny:
+                    bounded_read_rule = f"read_file({Path(cwd).expanduser().resolve()}/**)"
+                    if bounded_read_rule not in allow_rules:
+                        allow_rules.append(bounded_read_rule)
                 deny_rules: list[str] = list(deny or [])
                 allow_unsafe_legacy = False
                 if temp_command_permissions:
-                    allow_rules.append("command(*)")
+                    if "command(*)" not in allow_rules:
+                        allow_rules.append("command(*)")
                     deny_rules.extend(TEMP_COMMAND_DENY)
                     allow_unsafe_legacy = True
                 if allow_rules or deny_rules:
@@ -1158,6 +1187,7 @@ def dispatch_run(
                         allow_rules=allow_rules,
                         deny_rules=deny_rules,
                         allow_unsafe_legacy=allow_unsafe_legacy,
+                        replace_allow_deny=replace_allow_deny,
                     )
                 code, out, err, timed_out, wall_ms = runner(
                     env=env,
@@ -1172,7 +1202,10 @@ def dispatch_run(
                 restore_temp_permissions(permission_token)
             total_wall_ms += wall_ms
 
-            if code == 0 and not timed_out:
+            permission_blocked = mode == "accept-edits" and _has_permission_failure_signal(
+                out + "\n" + err
+            )
+            if code == 0 and not timed_out and not permission_blocked:
                 sys.stdout.write(out)
                 if err:
                     sys.stderr.write(err)
@@ -1187,7 +1220,11 @@ def dispatch_run(
                 })
                 return 0
 
-            kind = classify_failure(code, out, err, timed_out)
+            kind = (
+                AccountFailureKind.PERMISSION_OR_SCOPE_ERROR
+                if permission_blocked
+                else classify_failure(code, out, err, timed_out)
+            )
             last_kind = kind.value
             _operation_hook(
                 operation_hook,
