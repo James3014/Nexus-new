@@ -9,6 +9,7 @@ import stat
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 from datetime import datetime, timezone
 from importlib.machinery import SourceFileLoader
@@ -500,6 +501,284 @@ def test_background_timeout_is_persisted_as_outcome_unknown(tmp_path: Path, monk
     assert not prompt_path.exists()
 
 
+def test_quota_progress_is_durable_while_child_runs_and_identity_safe(
+    tmp_path: Path, monkeypatch
+) -> None:
+    operation_root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(operation_root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "quota progress probe")
+
+    command = tmp_path / "fake-quota-command"
+    command.write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env python3
+            import json
+            import os
+            import sys
+            import time
+            from pathlib import Path
+
+            running = Path(os.environ["QUOTA_RUNNING_MARKER"])
+            release = Path(os.environ["QUOTA_RELEASE_MARKER"])
+            finished = Path(os.environ["QUOTA_FINISHED_MARKER"])
+            print("provider diagnostic credential=provider-secret", file=sys.stderr)
+            sys.stderr.write("NEXUS_AGY_QUOTA {malformed json}\\n")
+            sys.stderr.write(
+                "NEXUS_AGY_QUOTA "
+                + json.dumps({"phase": "UNRECOGNIZED", "token": "unknown-secret"})
+                + "\\n"
+            )
+            running.write_text("running", encoding="utf-8")
+            sys.stderr.write(
+                "NEXUS_AGY_QUOTA "
+                + json.dumps({
+                    "phase": "QUERYING_ACCOUNT",
+                    "timestamp": "2026-10-04T12:00:00+00:00",
+                    "account": sys.argv[1],
+                    "email": "private@example.test",
+                    "credential": "must-not-persist",
+                    "timeout": 4,
+                    "arbitrary_provider_log": "do-not-store",
+                })
+                + "\\n"
+            )
+            sys.stderr.flush()
+            while not release.exists():
+                time.sleep(0.01)
+            sys.stderr.write(
+                "NEXUS_AGY_QUOTA "
+                + json.dumps({
+                    "phase": "ACCOUNT_RESULT",
+                    "account": sys.argv[1],
+                    "ok": False,
+                    "error": "api_key=should-not-persist",
+                })
+                + "\\n"
+            )
+            sys.stderr.flush()
+            print(json.dumps({"machine_result": "preserved-on-stdout"}))
+            finished.write_text("finished", encoding="utf-8")
+            """
+        ),
+        encoding="utf-8",
+    )
+    command.chmod(0o755)
+    running_marker = tmp_path / "quota-running"
+    release_marker = tmp_path / "quota-release"
+    finished_marker = tmp_path / "quota-finished"
+    monkeypatch.setenv("QUOTA_RUNNING_MARKER", str(running_marker))
+    monkeypatch.setenv("QUOTA_RELEASE_MARKER", str(release_marker))
+    monkeypatch.setenv("QUOTA_FINISHED_MARKER", str(finished_marker))
+    monkeypatch.setattr(dispatch, "_quota_refresh_binary", lambda: str(command))
+    monkeypatch.setattr(dispatch, "_load_quota_snapshot", lambda *_args: {})
+    monkeypatch.setattr(dispatch, "_runtime_revision", lambda: "b" * 40)
+
+    account_alias_hash = "012345abcdef"
+
+    def fake_dispatch_run(**kwargs):
+        operation_hook = kwargs["operation_hook"]
+        operation_hook({
+            "phase": "ACCOUNT_LEASED",
+            "account_alias_hash": account_alias_hash,
+            "provider_started_at": None,
+            "first_effect_at": None,
+        })
+        dispatch._refresh_quota_snapshot_for_account(
+            "private-account-id",
+            timeout=4,
+            account_alias_hash=account_alias_hash,
+            on_phase_hook=lambda **event: operation_hook(event),
+        )
+        return 1
+
+    monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
+    observed: dict[str, object] = {}
+
+    def observe_durable_progress() -> None:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            record = journal.read(operation_id)
+            progress = record.get("quota_preflight_progress")
+            if isinstance(progress, dict) and progress.get("phase") == "QUERYING_ACCOUNT":
+                observed["record"] = record
+                observed["raw_record"] = journal.record_path(operation_id).read_text(
+                    encoding="utf-8"
+                )
+                observed["child_was_running"] = running_marker.is_file()
+                observed["child_was_finished"] = finished_marker.exists()
+                release_marker.touch()
+                return
+            time.sleep(0.01)
+        observed["error"] = "quota child did not durably report QUERYING_ACCOUNT"
+        release_marker.touch()
+
+    observer = threading.Thread(target=observe_durable_progress, daemon=True)
+    observer.start()
+    code = dispatch._run_background_operation(
+        operation_id=operation_id,
+        prompt_file=str(prompt_path),
+        cwd=str(tmp_path),
+        mode="plan",
+        model="gemini-test",
+        effort="medium",
+        timeout=30,
+        max_calls=1,
+        pool_wait_timeout=1.0,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=operation_root,
+        heartbeat_interval=60,
+    )
+    observer.join(timeout=5)
+    assert not observer.is_alive()
+    assert "error" not in observed, observed.get("error")
+
+    record = observed["record"]
+    progress = record["quota_preflight_progress"]
+    assert observed["child_was_running"] is True
+    assert observed["child_was_finished"] is False
+    assert record["status"] == "RUNNING"
+    assert record["phase"] == "ACCOUNT_LEASED"
+    assert progress["account_alias_hash"] == account_alias_hash
+    assert progress["timeout_seconds"] == 4.0
+    assert record["provider_started_at"] is None
+    assert record["first_effect_at"] is None
+    raw_record = observed["raw_record"]
+    for secret in (
+        "private-account-id",
+        "private@example.test",
+        "provider-secret",
+        "must-not-persist",
+        "unknown-secret",
+        "do-not-store",
+    ):
+        assert secret not in raw_record
+
+    assert code == 1
+    terminal = journal.read(operation_id)
+    assert terminal["status"] == "FAILED"
+    assert terminal["provider_started_at"] is None
+    assert terminal["first_effect_at"] is None
+    assert terminal["quota_preflight_progress"]["phase"] == "ACCOUNT_RESULT"
+    terminal_raw = journal.record_path(operation_id).read_text(encoding="utf-8")
+    assert "api_key=should-not-persist" not in terminal_raw
+
+
+def test_quota_child_timeout_is_bounded_and_does_not_claim_provider_outcome_unknown(
+    tmp_path: Path, monkeypatch
+) -> None:
+    operation_root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(operation_root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "quota timeout probe")
+
+    child_pid_path = tmp_path / "quota-child.pid"
+    command = tmp_path / "stalled-quota-command"
+    command.write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env python3
+            import json
+            import os
+            import sys
+            import time
+            from pathlib import Path
+
+            Path(os.environ["QUOTA_CHILD_PID_PATH"]).write_text(str(os.getpid()))
+            sys.stderr.write(
+                "NEXUS_AGY_QUOTA "
+                + json.dumps({
+                    "phase": "QUERYING_ACCOUNT",
+                    "timestamp": "2026-10-04T12:00:00+00:00",
+                    "account": sys.argv[1],
+                })
+                + "\\n"
+            )
+            sys.stderr.flush()
+            while True:
+                time.sleep(0.1)
+            """
+        ),
+        encoding="utf-8",
+    )
+    command.chmod(0o755)
+    monkeypatch.setenv("QUOTA_CHILD_PID_PATH", str(child_pid_path))
+    monkeypatch.setattr(dispatch, "_quota_refresh_binary", lambda: str(command))
+    monkeypatch.setattr(dispatch, "_load_quota_snapshot", lambda *_args: {})
+    monkeypatch.setattr(dispatch, "_runtime_revision", lambda: "b" * 40)
+    account_alias_hash = "012345abcdef"
+
+    def fake_dispatch_run(**kwargs):
+        operation_hook = kwargs["operation_hook"]
+        operation_hook({"phase": "ACCOUNT_LEASED", "account_alias_hash": account_alias_hash})
+        dispatch._refresh_quota_snapshot_for_account(
+            "private-account-id",
+            timeout=1,
+            account_alias_hash=account_alias_hash,
+            on_phase_hook=lambda **event: operation_hook(event),
+        )
+        return 1
+
+    monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
+    code = dispatch._run_background_operation(
+        operation_id=operation_id,
+        prompt_file=str(prompt_path),
+        cwd=str(tmp_path),
+        mode="plan",
+        model="gemini-test",
+        effort="medium",
+        timeout=30,
+        max_calls=1,
+        pool_wait_timeout=1.0,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=operation_root,
+        heartbeat_interval=60,
+    )
+
+    child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+    record = journal.read(operation_id)
+    assert code == 1
+    assert record["status"] == "FAILED"
+    assert record["phase"] == "TERMINAL"
+    assert record["reconciliation"] is None
+    assert record["provider_started_at"] is None
+    assert record["first_effect_at"] is None
+    assert record["quota_preflight_progress"] == {
+        "phase": "TIMED_OUT",
+        "error_kind": "TIMEOUT",
+        "account_alias_hash": account_alias_hash,
+    }
+    with pytest.raises(ProcessLookupError):
+        os.kill(child_pid, 0)
+
+
 def test_background_spawn_returns_durable_operation_identity(tmp_path: Path, monkeypatch) -> None:
     class FakeProcess:
         pid = 424242
@@ -619,6 +898,7 @@ def test_background_terminal_receipt_persists_agy_attestation(tmp_path: Path, mo
             "\n".join([
                 'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
                 "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
+                "W1003 18:22:34.269070     491 rules.go:545] Rule file /repo/AGENTS.md truncated by 706 bytes (original 24638 bytes, limit 24000 bytes)",
             ])
             + "\n",
             encoding="utf-8",
@@ -655,6 +935,18 @@ def test_background_terminal_receipt_persists_agy_attestation(tmp_path: Path, mo
     assert record["observed_provider"] == "agy"
     assert record["observed_model"] == "gemini-3.8-flash-low"
     assert record["provider_session_id"] == "f67d38d4-f220-4bc0-a216-cef594235952"
+    assert record["input_delivery_state"] == "TRUNCATED"
+    assert record["input_delivery_source"] == "AGY_LOG"
+    assert record["input_delivery_truncations"] == [
+        {
+            "file_name": "AGENTS.md",
+            "original_bytes": 24638,
+            "limit_bytes": 24000,
+            "truncated_bytes": 706,
+        }
+    ]
+    assert record["status"] == "COMPLETED"
+    assert record["failure_kind"] is None
     assert "NEXUS_AGY_ATTESTATION_LOG" not in os.environ
 
 
@@ -1651,7 +1943,7 @@ def test_independent_baseline_failure_stays_unknown(tmp_path, monkeypatch):
     binary.write_text("#!" + sys.executable + "\nimport time\ntime.sleep(0.15)\n")
     binary.chmod(0o700)
     monkeypatch.setattr(dispatch.shutil, "which", lambda name: str(binary))
-    original = dispatch.direct_operation_journal.snapshot_worktree_physical_state
+    original = dispatch.direct_operation_journal.capture_source_baseline
     calls = []
 
     def fail_first(cwd):
@@ -1660,9 +1952,7 @@ def test_independent_baseline_failure_stays_unknown(tmp_path, monkeypatch):
             raise OSError("baseline unreadable")
         return original(cwd)
 
-    monkeypatch.setattr(
-        dispatch.direct_operation_journal, "snapshot_worktree_physical_state", fail_first
-    )
+    monkeypatch.setattr(dispatch.direct_operation_journal, "capture_source_baseline", fail_first)
     events = []
     dispatch.run_agy(
         env=os.environ.copy(),

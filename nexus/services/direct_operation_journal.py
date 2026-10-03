@@ -69,6 +69,12 @@ PUBLIC_OPERATION_KEYS = (
     "failure_kind",
     "exit_code",
     "observed_changed_paths",
+    "source_baseline_sha256",
+    "source_attribution_state",
+    "input_delivery_state",
+    "input_delivery_source",
+    "input_delivery_truncations",
+    "quota_preflight_progress",
     "reconciliation",
     "stdout_path",
     "stderr_path",
@@ -177,86 +183,179 @@ def _git_identity(cwd: str) -> tuple[str | None, str | None]:
     return repo_root, head.stdout.strip() if head.returncode == 0 else None
 
 
-def _porcelain_status_entries(cwd: str) -> list[tuple[str, str]]:
+SOURCE_BASELINE_SCHEMA = "nexus.source_baseline.v1"
+
+
+def _safe_repo_relative_path(value: str) -> str | None:
+    path = Path(value)
+    if not value or path.is_absolute() or ".." in path.parts:
+        return None
+    return value
+
+
+def _path_fingerprint(root: Path, relative: str) -> dict[str, str] | None:
+    safe = _safe_repo_relative_path(relative)
+    if safe is None:
+        return None
+    target = root / safe
+    try:
+        if target.is_symlink():
+            payload = os.fsencode(os.readlink(target))
+            return {"kind": "symlink", "sha256": hashlib.sha256(payload).hexdigest()}
+        if not target.exists():
+            return {"kind": "missing", "sha256": hashlib.sha256(b"missing").hexdigest()}
+        if target.is_file():
+            digest = hashlib.sha256()
+            with target.open("rb") as fh:
+                while True:
+                    chunk = fh.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+            return {"kind": "file", "sha256": digest.hexdigest()}
+        if target.is_dir():
+            return {"kind": "directory", "sha256": hashlib.sha256(b"directory").hexdigest()}
+    except OSError:
+        return None
+    return None
+
+
+def _status_entries(cwd: str) -> dict[str, dict[str, str]] | None:
+    root_text, _head = _git_identity(cwd)
+    if not root_text:
+        return None
+    root = Path(root_text)
     proc = subprocess.run(
-        ["git", "-C", cwd, "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+        [
+            "git",
+            "-C",
+            cwd,
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+        ],
         capture_output=True,
         check=False,
     )
     if proc.returncode != 0:
-        raise RuntimeError(
-            f"git status failed with exit code {proc.returncode}: {proc.stderr.decode('utf-8', errors='replace')}"
-        )
-    tokens = proc.stdout.split(b"\0")
-    entries: list[tuple[str, str]] = []
+        return None
+
+    records = proc.stdout.split(b"\0")
+    entries: dict[str, dict[str, str]] = {}
     index = 0
-    while index < len(tokens):
-        raw = tokens[index]
+    while index < len(records):
+        raw = records[index]
         index += 1
         if not raw:
             continue
-        text = raw.decode("utf-8", errors="replace")
-        if len(text) < 4:
-            continue
-        status_code = text[:2]
-        path = text[3:]
-        if path:
-            entries.append((status_code, path))
-        if "R" in status_code or "C" in status_code:
-            if index < len(tokens) and tokens[index]:
-                index += 1
-    return entries
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+        if len(text) < 4 or text[2] != " ":
+            return None
+        status = text[:2]
+        path = _safe_repo_relative_path(text[3:])
+        if path is None:
+            return None
+        fingerprint = _path_fingerprint(root, path)
+        if fingerprint is None:
+            return None
+        entries[path] = {"status": status, **fingerprint}
+
+        if status[0] in {"R", "C"} or status[1] in {"R", "C"}:
+            if index >= len(records) or not records[index]:
+                return None
+            try:
+                source_path = records[index].decode("utf-8")
+            except UnicodeDecodeError:
+                return None
+            index += 1
+            source_path = _safe_repo_relative_path(source_path)
+            if source_path is None:
+                return None
+            source_fingerprint = _path_fingerprint(root, source_path)
+            if source_fingerprint is None:
+                return None
+            entries[source_path] = {"status": "OR", **source_fingerprint}
+    return dict(sorted(entries.items()))
+
+
+def capture_source_baseline(cwd: str) -> dict[str, Any] | None:
+    entries = _status_entries(cwd)
+    if entries is None:
+        return None
+    return {"schema": SOURCE_BASELINE_SCHEMA, "entries": entries}
+
+
+def _valid_source_baseline(baseline: object) -> bool:
+    if not isinstance(baseline, dict):
+        return False
+    if set(baseline) != {"schema", "entries"}:
+        return False
+    if baseline.get("schema") != SOURCE_BASELINE_SCHEMA:
+        return False
+    entries = baseline.get("entries")
+    if not isinstance(entries, dict):
+        return False
+    for path, entry in entries.items():
+        if not isinstance(path, str) or _safe_repo_relative_path(path) != path:
+            return False
+        if not isinstance(entry, dict) or set(entry) != {"status", "kind", "sha256"}:
+            return False
+        status = entry.get("status")
+        kind = entry.get("kind")
+        digest = entry.get("sha256")
+        if not isinstance(status, str) or len(status) != 2:
+            return False
+        if kind not in {"file", "symlink", "missing", "directory"}:
+            return False
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(ch not in "0123456789abcdef" for ch in digest)
+        ):
+            return False
+    return True
+
+
+def source_baseline_sha256(baseline: object) -> str | None:
+    if not _valid_source_baseline(baseline):
+        return None
+    assert isinstance(baseline, dict)
+    encoded = json.dumps(
+        baseline,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def observed_changed_paths_since(cwd: str, baseline: object) -> list[str] | None:
+    if source_baseline_sha256(baseline) is None:
+        return None
+    assert isinstance(baseline, dict)
+    baseline_entries = baseline.get("entries")
+    if not isinstance(baseline_entries, dict):
+        return None
+    current = capture_source_baseline(cwd)
+    if current is None:
+        return None
+    current_entries = current["entries"]
+    return sorted(
+        path
+        for path in set(baseline_entries) | set(current_entries)
+        if baseline_entries.get(path) != current_entries.get(path)
+    )
 
 
 def observed_changed_paths(cwd: str) -> list[str]:
-    return sorted({path for _, path in _porcelain_status_entries(cwd)})
-
-
-def _path_fingerprint(target: Path) -> tuple[int, int, str]:
-    try:
-        st = target.lstat()
-    except OSError:
-        return (0, 0, "MISSING")
-    digest = hashlib.sha256()
-    if target.is_symlink():
-        try:
-            digest.update(os.readlink(target).encode("utf-8", errors="surrogateescape"))
-        except OSError:
-            return (st.st_mtime_ns, st.st_size, "UNREADABLE")
-    elif target.is_file():
-        try:
-            with target.open("rb") as handle:
-                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                    digest.update(chunk)
-        except OSError:
-            return (st.st_mtime_ns, st.st_size, "UNREADABLE")
-    else:
-        digest.update(f"mode:{st.st_mode}".encode("ascii"))
-    return (st.st_mtime_ns, st.st_size, digest.hexdigest())
-
-
-def snapshot_worktree_physical_state(cwd: str) -> dict[str, tuple[str, int, int, str]]:
-    state: dict[str, tuple[str, int, int, str]] = {}
-    cwd_path = Path(cwd)
-    for status_code, path in _porcelain_status_entries(cwd):
-        mtime_ns, size, digest = _path_fingerprint(cwd_path / path)
-        state[path] = (status_code, mtime_ns, size, digest)
-    return state
-
-
-def detect_worktree_physical_effects(
-    cwd: str,
-    baseline: dict[str, tuple[str, int, int, str]],
-) -> list[str]:
-    current = snapshot_worktree_physical_state(cwd)
-    new_or_modified: set[str] = set()
-    for path, meta in current.items():
-        if baseline.get(path) != meta:
-            new_or_modified.add(path)
-    for path in baseline:
-        if path not in current:
-            new_or_modified.add(path)
-    return sorted(new_or_modified)
+    snapshot = capture_source_baseline(cwd)
+    if snapshot is None:
+        return []
+    return sorted(snapshot["entries"])
 
 
 class DirectOperationJournal:
@@ -318,11 +417,18 @@ class DirectOperationJournal:
     ) -> dict[str, Any]:
         operation_id = self._validate_operation_id(operation_id)
         op_dir = self.operation_dir(operation_id)
+        if op_dir.exists():
+            raise DirectOperationJournalError("OPERATION_ALREADY_EXISTS")
+        repo_root, base_head = _git_identity(cwd)
+        source_baseline = capture_source_baseline(cwd) if repo_root else None
+        source_baseline_hash = source_baseline_sha256(source_baseline)
+        source_attribution_state = (
+            "BASELINE_CAPTURED" if source_baseline_hash is not None else "UNAVAILABLE"
+        )
         try:
             op_dir.mkdir(parents=True, mode=0o700, exist_ok=False)
         except FileExistsError as exc:
             raise DirectOperationJournalError("OPERATION_ALREADY_EXISTS") from exc
-        repo_root, base_head = _git_identity(cwd)
         now = utc_now()
         record: dict[str, Any] = {
             "schema": self.schema,
@@ -367,6 +473,13 @@ class DirectOperationJournal:
             "failure_kind": None,
             "exit_code": None,
             "observed_changed_paths": [],
+            "source_baseline": source_baseline,
+            "source_baseline_sha256": source_baseline_hash,
+            "source_attribution_state": source_attribution_state,
+            "input_delivery_state": "UNKNOWN",
+            "input_delivery_source": None,
+            "input_delivery_truncations": [],
+            "quota_preflight_progress": None,
             "reconciliation": None,
             "stdout_path": str(self.stdout_path(operation_id)),
             "stderr_path": str(self.stderr_path(operation_id)),
@@ -377,6 +490,9 @@ class DirectOperationJournal:
                 "operation_id",
                 "attempt_id",
                 "prompt_sha256",
+                "source_baseline",
+                "source_baseline_sha256",
+                "source_attribution_state",
                 "stdout_path",
                 "stderr_path",
             }
@@ -476,11 +592,35 @@ class DirectOperationJournal:
             "exit_code": exit_code,
             "failure_kind": failure_kind,
         }
-        if cwd and "observed_changed_paths" not in changes:
+        if cwd:
+            record = self.read(operation_id)
+            baseline = record.get("source_baseline")
+            baseline_hash = record.get("source_baseline_sha256")
+            valid_baseline_hash = source_baseline_sha256(baseline)
+            record_root = record.get("repo_root")
+            current_root, _current_head = _git_identity(cwd)
             try:
-                payload["observed_changed_paths"] = observed_changed_paths(cwd)
-            except Exception:
-                payload["observed_changed_paths"] = None
+                same_root = bool(
+                    isinstance(record_root, str)
+                    and isinstance(current_root, str)
+                    and os.path.samefile(record_root, current_root)
+                )
+            except OSError:
+                same_root = False
+            if (
+                same_root
+                and isinstance(baseline_hash, str)
+                and valid_baseline_hash == baseline_hash
+            ):
+                delta = observed_changed_paths_since(cwd, baseline)
+            else:
+                delta = None
+            if delta is None:
+                payload["observed_changed_paths"] = []
+                payload["source_attribution_state"] = "UNAVAILABLE"
+            else:
+                payload["observed_changed_paths"] = delta
+                payload["source_attribution_state"] = "ATTRIBUTED"
         payload.update(changes)
         return self.update(operation_id, **payload)
 

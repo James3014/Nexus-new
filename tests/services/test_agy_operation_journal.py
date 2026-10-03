@@ -11,6 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from nexus.services import direct_operation_journal as direct_journal
 from nexus.services.agy_operation_journal import (
     AgyOperationJournal,
     new_attempt_id,
@@ -297,41 +298,32 @@ def test_timeline_fields_project_through_public_view(tmp_path: Path) -> None:
     assert public["time_to_first_effect_ms"] == 1234
     assert public["provider_pid"] == 12345
     assert public["provider_process_state"] == "RUNNING"
+    assert public["input_delivery_state"] == "UNKNOWN"
+    assert public["input_delivery_source"] is None
+    assert public["input_delivery_truncations"] == []
 
 
-def test_detect_worktree_physical_effects_isolates_pre_existing_changes(tmp_path: Path) -> None:
-    from nexus.services import direct_operation_journal as doj
+def test_physical_effect_is_recorded_when_tool_event_count_is_zero(tmp_path: Path) -> None:
+    root = _make_source_repo(tmp_path)
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id = _create_source_operation(journal, root)
+    (root / "provider-effect.txt").write_text("effect\n", encoding="utf-8")
 
-    work = tmp_path / "work"
-    work.mkdir()
-    subprocess.run(["git", "-C", str(work), "init"], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(work), "config", "user.email", "test@test.com"], check=True)
-    subprocess.run(["git", "-C", str(work), "config", "user.name", "Test"], check=True)
-    (work / "initial.txt").write_text("v1", encoding="utf-8")
-    subprocess.run(["git", "-C", str(work), "add", "initial.txt"], check=True)
-    subprocess.run(
-        ["git", "-C", str(work), "commit", "-m", "init"], check=True, capture_output=True
+    record = journal.mark_terminal(
+        operation_id,
+        status="COMPLETED",
+        exit_code=0,
+        cwd=str(root),
     )
 
-    # Pre-existing change
-    (work / "donor_change.txt").write_text("existing dirty", encoding="utf-8")
-
-    baseline = doj.snapshot_worktree_physical_state(str(work))
-    assert "donor_change.txt" in baseline
-
-    # If nothing changes, effects should be empty
-    assert doj.detect_worktree_physical_effects(str(work), baseline) == []
-
-    # New file added
-    (work / "new_change.txt").write_text("new", encoding="utf-8")
-    assert doj.detect_worktree_physical_effects(str(work), baseline) == ["new_change.txt"]
+    assert record["tool_event_count"] == 0
+    assert record["observed_changed_paths"] == ["provider-effect.txt"]
+    assert record["source_attribution_state"] == "ATTRIBUTED"
 
 
 def test_reconcile_checks_real_provider_pid_liveness(tmp_path: Path) -> None:
     journal = AgyOperationJournal(tmp_path / "journal")
     operation_id, _ = _create(journal, tmp_path)
-
-    # Dead PID
     journal.update(
         operation_id,
         provider_pid=999_999_999,
@@ -339,47 +331,201 @@ def test_reconcile_checks_real_provider_pid_liveness(tmp_path: Path) -> None:
     )
 
     reconciled = journal.reconcile(operation_id)
+
     assert reconciled["provider_process_state"] == "EXITED"
 
 
-def test_independent_effect_fingerprint_detects_same_size_restored_mtime(tmp_path):
-    from nexus.services import direct_operation_journal as doj
-
-    work = tmp_path / "repo"
-    work.mkdir()
-    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
-    target = work / "donor.txt"
-    target.write_text("old")
-    before = target.stat()
-    baseline = doj.snapshot_worktree_physical_state(str(work))
-    target.write_text("new")
-    os.utime(target, ns=(before.st_atime_ns, before.st_mtime_ns))
-    assert doj.detect_worktree_physical_effects(str(work), baseline) == ["donor.txt"]
+def _git(root: Path, *args: str) -> str:
+    proc = subprocess.run(
+        ["git", *args],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+    return proc.stdout.strip()
 
 
-def test_independent_effect_fingerprint_expands_untracked_directory(tmp_path):
-    from nexus.services import direct_operation_journal as doj
-
-    work = tmp_path / "repo"
-    work.mkdir()
-    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
-    folder = work / "new-dir"
-    folder.mkdir()
-    target = folder / "file.txt"
-    target.write_text("old")
-    before = folder.stat()
-    baseline = doj.snapshot_worktree_physical_state(str(work))
-    target.write_text("different")
-    os.utime(folder, ns=(before.st_atime_ns, before.st_mtime_ns))
-    assert doj.detect_worktree_physical_effects(str(work), baseline) == ["new-dir/file.txt"]
+def _make_source_repo(tmp_path: Path) -> Path:
+    root = tmp_path / "source-repo"
+    root.mkdir()
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "attribution@example.invalid")
+    _git(root, "config", "user.name", "Attribution Test")
+    (root / "tracked.txt").write_text("base\n", encoding="utf-8")
+    _git(root, "add", "tracked.txt")
+    _git(root, "commit", "-q", "-m", "base")
+    return root
 
 
-def test_independent_literal_arrow_filename_is_not_rename_syntax(tmp_path):
-    from nexus.services import direct_operation_journal as doj
+def _create_source_operation(journal: AgyOperationJournal, root: Path) -> str:
+    operation_id = new_operation_id()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=new_attempt_id(),
+        cwd=str(root),
+        provider="agy",
+        model="gemini-test",
+        effort="low",
+        prompt_sha256=hashlib.sha256(b"attribution prompt").hexdigest(),
+        runtime_revision="b" * 40,
+    )
+    return operation_id
 
-    work = tmp_path / "repo"
-    work.mkdir()
-    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
-    name = "literal -> name.txt"
-    (work / name).write_text("test")
-    assert doj.observed_changed_paths(str(work)) == [name]
+
+def test_dirty_unchanged_is_not_attributed(tmp_path: Path) -> None:
+    root = _make_source_repo(tmp_path)
+    tracked = root / "tracked.txt"
+    tracked.write_text("dirty-before\n", encoding="utf-8")
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id = _create_source_operation(journal, root)
+
+    record = journal.mark_terminal(
+        operation_id,
+        status="COMPLETED",
+        exit_code=0,
+        cwd=str(root),
+    )
+
+    assert record["observed_changed_paths"] == []
+    assert record["source_attribution_state"] == "ATTRIBUTED"
+    assert record["source_baseline_sha256"]
+    assert "source_baseline" not in direct_journal.public_operation_view(record)
+
+
+def test_dirty_changed_again_is_attributed(tmp_path: Path) -> None:
+    root = _make_source_repo(tmp_path)
+    tracked = root / "tracked.txt"
+    tracked.write_text("dirty-before\n", encoding="utf-8")
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id = _create_source_operation(journal, root)
+    tracked.write_text("dirty-after\n", encoding="utf-8")
+
+    record = journal.mark_terminal(
+        operation_id,
+        status="COMPLETED",
+        exit_code=0,
+        cwd=str(root),
+    )
+
+    assert record["observed_changed_paths"] == ["tracked.txt"]
+
+
+def test_untracked_unchanged_and_changed_are_distinguished(tmp_path: Path) -> None:
+    root = _make_source_repo(tmp_path)
+    nested = root / "new" / "evidence.txt"
+    nested.parent.mkdir()
+    nested.write_text("before\n", encoding="utf-8")
+    journal = AgyOperationJournal(tmp_path / "journal")
+
+    unchanged_id = _create_source_operation(journal, root)
+    unchanged = journal.mark_terminal(
+        unchanged_id,
+        status="COMPLETED",
+        exit_code=0,
+        cwd=str(root),
+    )
+    assert unchanged["observed_changed_paths"] == []
+
+    changed_id = _create_source_operation(journal, root)
+    nested.write_text("after\n", encoding="utf-8")
+    changed = journal.mark_terminal(
+        changed_id,
+        status="COMPLETED",
+        exit_code=0,
+        cwd=str(root),
+    )
+    assert changed["observed_changed_paths"] == ["new/evidence.txt"]
+
+
+def test_clean_to_changed_and_deleted_paths_are_attributed(tmp_path: Path) -> None:
+    root = _make_source_repo(tmp_path)
+    journal = AgyOperationJournal(tmp_path / "journal")
+    changed_id = _create_source_operation(journal, root)
+    (root / "tracked.txt").write_text("after\n", encoding="utf-8")
+    changed = journal.mark_terminal(
+        changed_id,
+        status="COMPLETED",
+        exit_code=0,
+        cwd=str(root),
+    )
+    assert changed["observed_changed_paths"] == ["tracked.txt"]
+
+    _git(root, "checkout", "--", "tracked.txt")
+    deleted_id = _create_source_operation(journal, root)
+    (root / "tracked.txt").unlink()
+    deleted = journal.mark_terminal(
+        deleted_id,
+        status="COMPLETED",
+        exit_code=0,
+        cwd=str(root),
+    )
+    assert deleted["observed_changed_paths"] == ["tracked.txt"]
+
+
+def test_missing_source_baseline_fails_closed_for_attribution(tmp_path: Path) -> None:
+    root = _make_source_repo(tmp_path)
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id = _create_source_operation(journal, root)
+    journal.update(
+        operation_id,
+        source_baseline=None,
+        source_baseline_sha256=None,
+        source_attribution_state="UNAVAILABLE",
+    )
+    (root / "tracked.txt").write_text("changed\n", encoding="utf-8")
+
+    record = journal.mark_terminal(
+        operation_id,
+        status="COMPLETED",
+        exit_code=0,
+        cwd=str(root),
+    )
+
+    assert record["observed_changed_paths"] == []
+    assert record["source_attribution_state"] == "UNAVAILABLE"
+
+
+def test_malformed_source_baseline_fails_closed(tmp_path: Path) -> None:
+    root = _make_source_repo(tmp_path)
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id = _create_source_operation(journal, root)
+    malformed = {
+        "schema": direct_journal.SOURCE_BASELINE_SCHEMA,
+        "entries": {"tracked.txt": {"status": " M", "kind": "file", "sha256": "bad"}},
+    }
+    journal.update(
+        operation_id,
+        source_baseline=malformed,
+        source_baseline_sha256="0" * 64,
+        source_attribution_state="BASELINE_CAPTURED",
+    )
+    (root / "tracked.txt").write_text("changed\n", encoding="utf-8")
+
+    record = journal.mark_terminal(
+        operation_id,
+        status="COMPLETED",
+        exit_code=0,
+        cwd=str(root),
+    )
+
+    assert record["observed_changed_paths"] == []
+    assert record["source_attribution_state"] == "UNAVAILABLE"
+
+
+def test_source_baseline_is_secret_free_and_not_public(tmp_path: Path) -> None:
+    root = _make_source_repo(tmp_path)
+    (root / "tracked.txt").write_text("private-dirty-content\n", encoding="utf-8")
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id = _create_source_operation(journal, root)
+
+    record = journal.read(operation_id)
+    raw = journal.record_path(operation_id).read_text(encoding="utf-8")
+    public = direct_journal.public_operation_view(record)
+
+    assert "private-dirty-content" not in raw
+    assert record["source_baseline_sha256"]
+    assert record["source_attribution_state"] == "BASELINE_CAPTURED"
+    assert "source_baseline" not in public
+    assert public["source_baseline_sha256"] == record["source_baseline_sha256"]

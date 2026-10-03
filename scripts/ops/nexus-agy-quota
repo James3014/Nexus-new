@@ -42,6 +42,7 @@ def emit_progress(
             pass
     return event
 
+
 USAGE_LINE = re.compile(
     r"^(?P<group>.+?)\s+"
     r"(?P<window>Weekly Limit Remaining|Five Hour Limit Remaining)\s+"
@@ -163,7 +164,13 @@ def query_account(
             "error": "timeout",
             "checked_at": checked_at,
         }
-        emit_progress("ACCOUNT_RESULT", account=account_name, ok=False, error="timeout", on_progress=on_progress)
+        emit_progress(
+            "ACCOUNT_RESULT",
+            account=account_name,
+            ok=False,
+            error="timeout",
+            on_progress=on_progress,
+        )
         return result
 
     output = "\n".join(part for part in (proc.stdout, proc.stderr) if part).strip()
@@ -175,7 +182,13 @@ def query_account(
             "error": f"exit_{proc.returncode}",
             "checked_at": checked_at,
         }
-        emit_progress("ACCOUNT_RESULT", account=account_name, ok=False, error=result["error"], on_progress=on_progress)
+        emit_progress(
+            "ACCOUNT_RESULT",
+            account=account_name,
+            ok=False,
+            error=result["error"],
+            on_progress=on_progress,
+        )
         return result
     groups = parse_usage(output)
     if not groups:
@@ -186,7 +199,13 @@ def query_account(
             "error": "usage_unparseable",
             "checked_at": checked_at,
         }
-        emit_progress("ACCOUNT_RESULT", account=account_name, ok=False, error="usage_unparseable", on_progress=on_progress)
+        emit_progress(
+            "ACCOUNT_RESULT",
+            account=account_name,
+            ok=False,
+            error="usage_unparseable",
+            on_progress=on_progress,
+        )
         return result
     result = {
         "account": account_name,
@@ -267,7 +286,9 @@ def main(argv: list[str] | None = None, *, on_progress: Any = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("accounts", nargs="*")
     parser.add_argument("--timeout", type=int, default=30)
-    parser.add_argument("--total-timeout", "--deadline", dest="total_timeout", type=float, default=None)
+    parser.add_argument(
+        "--total-timeout", "--deadline", dest="total_timeout", type=float, default=None
+    )
     args = parser.parse_args(argv)
 
     checked_at = datetime.now(timezone.utc).isoformat()

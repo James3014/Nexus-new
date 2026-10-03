@@ -15,6 +15,7 @@ import sys
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 from importlib import import_module
 from pathlib import Path
 from typing import Any, Optional
@@ -111,7 +112,24 @@ DEFAULT_QUOTA_FAMILY_BLOCK_SECONDS = 300.0
 DEFAULT_QUOTA_PREFLIGHT_TIMEOUT_SECONDS = 8
 DEFAULT_MAX_ACCOUNT_FAILOVERS = 16
 MIN_DRAIN_HORIZON_SECONDS = 60.0
-
+_QUOTA_PROGRESS_PHASES = frozenset({
+    "STARTING",
+    "ACCOUNTS_DIR_MISSING",
+    "ACCOUNT_UNKNOWN",
+    "QUERYING_ACCOUNT",
+    "ACCOUNT_RESULT",
+    "DEADLINE_EXCEEDED",
+    "SAVING_SNAPSHOT",
+    "FINISHED",
+})
+_QUOTA_ACCOUNT_PHASES = frozenset({
+    "ACCOUNT_UNKNOWN",
+    "QUERYING_ACCOUNT",
+    "ACCOUNT_RESULT",
+    "DEADLINE_EXCEEDED",
+})
+_QUOTA_PROGRESS_PREFIX = "NEXUS_AGY_QUOTA "
+_QUOTA_PROGRESS_MAX_LINE = 8192
 
 
 def _model_family(model: str | None) -> str:
@@ -356,29 +374,187 @@ def _quota_refresh_binary() -> str | None:
     return str(sibling) if sibling.is_file() else None
 
 
+def _quota_error_kind(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    if value == "timeout":
+        return "TIMEOUT"
+    if value == "deadline_exceeded":
+        return "DEADLINE_EXCEEDED"
+    if value == "unknown_account":
+        return "UNKNOWN_ACCOUNT"
+    if value == "usage_unparseable":
+        return "USAGE_UNPARSEABLE"
+    if value.startswith("accounts_dir_missing:"):
+        return "ACCOUNTS_DIR_MISSING"
+    if value.startswith("AGY_ACCOUNT_POOL_ACCOUNTS_MISSING:"):
+        return "ACCOUNTS_DIR_MISSING"
+    if re.fullmatch(r"exit_[0-9]{1,3}", value):
+        return "COMMAND_FAILED"
+    return "OTHER"
+
+
+def _quota_progress_projection(
+    event: object,
+    *,
+    account_name: str,
+    account_alias_hash: str | None,
+) -> dict[str, Any] | None:
+    """Project one quota CLI event into a small, identity-safe journal value."""
+    if not isinstance(event, dict):
+        return None
+    phase = event.get("phase")
+    if not isinstance(phase, str) or phase not in _QUOTA_PROGRESS_PHASES:
+        return None
+
+    projected: dict[str, Any] = {"phase": phase}
+    timestamp = event.get("timestamp")
+    if isinstance(timestamp, str) and len(timestamp) <= 64:
+        try:
+            parsed_timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except ValueError:
+            parsed_timestamp = None
+        if parsed_timestamp is not None and parsed_timestamp.tzinfo is not None:
+            projected["timestamp"] = parsed_timestamp.astimezone(timezone.utc).isoformat()
+
+    if isinstance(account_alias_hash, str) and re.fullmatch(r"[0-9a-f]{12}", account_alias_hash):
+        projected["account_alias_hash"] = account_alias_hash
+
+    if phase in _QUOTA_ACCOUNT_PHASES:
+        observed_account = event.get("account")
+        if observed_account is not None and observed_account != account_name:
+            return None
+
+    for source_key, target_key in (
+        ("timeout", "timeout_seconds"),
+        ("total_timeout", "total_timeout_seconds"),
+    ):
+        value = event.get(source_key)
+        if (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and 0 < float(value) <= 3600
+        ):
+            projected[target_key] = float(value)
+
+    for source_key, target_key in (("total", "account_count"), ("ok", "ok_count")):
+        value = event.get(source_key)
+        if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 10000:
+            projected[target_key] = value
+
+    if isinstance(event.get("ok"), bool):
+        projected["ok"] = event["ok"]
+    error_kind = _quota_error_kind(event.get("error"))
+    if error_kind is not None:
+        projected["error_kind"] = error_kind
+    return projected
+
+
+def _notify_quota_progress(
+    on_phase_hook: Any,
+    progress: dict[str, Any],
+    *,
+    account_alias_hash: str | None = None,
+) -> None:
+    if not callable(on_phase_hook):
+        return
+    if isinstance(account_alias_hash, str) and re.fullmatch(r"[0-9a-f]{12}", account_alias_hash):
+        progress = {**progress, "account_alias_hash": account_alias_hash}
+    try:
+        on_phase_hook(quota_preflight_progress=progress)
+    except Exception:
+        # Quota progress is diagnostic and must not change dispatch behavior.
+        pass
+
+
+def _read_quota_progress(
+    stream: Any,
+    *,
+    account_name: str,
+    account_alias_hash: str | None,
+    on_phase_hook: Any,
+) -> None:
+    while True:
+        line = stream.readline(_QUOTA_PROGRESS_MAX_LINE + 1)
+        if not line:
+            return
+        if len(line) > _QUOTA_PROGRESS_MAX_LINE:
+            while line and not line.endswith("\n"):
+                line = stream.readline(_QUOTA_PROGRESS_MAX_LINE + 1)
+            continue
+        if not line.endswith("\n"):
+            continue
+        line = line.rstrip("\r\n")
+        if not line.startswith(_QUOTA_PROGRESS_PREFIX):
+            continue
+        try:
+            raw_event = json.loads(line[len(_QUOTA_PROGRESS_PREFIX) :])
+        except (json.JSONDecodeError, TypeError):
+            continue
+        progress = _quota_progress_projection(
+            raw_event,
+            account_name=account_name,
+            account_alias_hash=account_alias_hash,
+        )
+        if progress is None:
+            continue
+        _notify_quota_progress(on_phase_hook, progress)
+
+
 def _refresh_quota_snapshot_for_account(
     account_name: str,
     *,
     timeout: int = DEFAULT_QUOTA_PREFLIGHT_TIMEOUT_SECONDS,
     on_phase_hook: Any = None,
+    account_alias_hash: str | None = None,
 ) -> dict:
     command = _quota_refresh_binary()
     if not command:
         return _load_quota_snapshot()
-    if on_phase_hook:
-        on_phase_hook(phase="QUOTA_PREFLIGHT")
+    timeout_seconds = max(1, int(timeout))
     try:
-        subprocess.run(
-            [command, account_name, "--timeout", str(max(1, timeout))],
+        proc = subprocess.Popen(
+            [command, account_name, "--timeout", str(timeout_seconds)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
-            timeout=max(1, timeout),
-            check=False,
+            bufsize=1,
         )
-    except (OSError, subprocess.TimeoutExpired):
-        if on_phase_hook:
-            on_phase_hook(phase="QUOTA_PREFLIGHT_TIMEOUT")
+    except OSError:
+        _notify_quota_progress(
+            on_phase_hook,
+            {"phase": "START_FAILED", "error_kind": "COMMAND_START_FAILED"},
+            account_alias_hash=account_alias_hash,
+        )
+        return _load_quota_snapshot()
+
+    assert proc.stderr is not None
+    reader = threading.Thread(
+        target=_read_quota_progress,
+        kwargs={
+            "stream": proc.stderr,
+            "account_name": account_name,
+            "account_alias_hash": account_alias_hash,
+            "on_phase_hook": on_phase_hook,
+        },
+        name="agy-quota-progress",
+        daemon=True,
+    )
+    reader.start()
+    try:
+        proc.wait(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        _notify_quota_progress(
+            on_phase_hook,
+            {"phase": "TIMED_OUT", "error_kind": "TIMEOUT"},
+            account_alias_hash=account_alias_hash,
+        )
+    finally:
+        reader.join(timeout=1.0)
+        if proc.stderr and not proc.stderr.closed:
+            proc.stderr.close()
     return _load_quota_snapshot()
 
 
@@ -684,6 +860,42 @@ _AGY_ALIAS_RESOLUTION_RE = re.compile(
 )
 _AGY_RESOLVING_MODEL_RE = re.compile(r"Resolving model (?P<resolved>[^\s]+)")
 _AGY_CONVERSATION_RE = re.compile(r"Created conversation (?P<conversation>[0-9a-fA-F-]{36})")
+_AGY_INSTRUCTION_TRUNCATION_RE = re.compile(
+    r"(?m)^\S+\s+\S+\s+\d+\s+rules\.go:\d+\]\s+"
+    r"Rule file (?P<path>.+?) truncated by (?P<truncated>\d{1,12}) bytes "
+    r"\(original (?P<original>\d{1,12}) bytes, limit (?P<limit>\d{1,12}) bytes\)",
+    re.IGNORECASE,
+)
+
+
+def _parse_input_delivery(text: str) -> dict[str, Any]:
+    """Return only positive provider-log evidence of truncated input files."""
+    truncations: list[dict[str, Any]] = []
+    seen: set[tuple[str, int, int, int]] = set()
+    for match in _AGY_INSTRUCTION_TRUNCATION_RE.finditer(text):
+        file_name = Path(match.group("path").strip()).name
+        observation = (
+            file_name,
+            int(match.group("original")),
+            int(match.group("limit")),
+            int(match.group("truncated")),
+        )
+        if observation in seen:
+            continue
+        seen.add(observation)
+        truncations.append({
+            "file_name": file_name,
+            "original_bytes": observation[1],
+            "limit_bytes": observation[2],
+            "truncated_bytes": observation[3],
+        })
+    if not truncations:
+        return {}
+    return {
+        "input_delivery_state": "TRUNCATED",
+        "input_delivery_source": "AGY_LOG",
+        "input_delivery_truncations": truncations,
+    }
 
 
 def _parse_agy_attestation(
@@ -699,7 +911,10 @@ def _parse_agy_attestation(
             "observed_provider": None,
             "observed_model": None,
             "provider_session_id": None,
+            **_parse_input_delivery(""),
         }
+
+    input_delivery = _parse_input_delivery(text)
 
     resolved_models: list[str] = []
     for match in _AGY_ALIAS_RESOLUTION_RE.finditer(text):
@@ -718,11 +933,13 @@ def _parse_agy_attestation(
             "observed_provider": None,
             "observed_model": None,
             "provider_session_id": None,
+            **input_delivery,
         }
     return {
         "observed_provider": "agy",
         "observed_model": resolved_models[-1],
         "provider_session_id": conversations[-1],
+        **input_delivery,
     }
 
 
@@ -765,7 +982,9 @@ def run_agy(
 
     baseline_worktree_state = None
     try:
-        baseline_worktree_state = direct_operation_journal.snapshot_worktree_physical_state(cwd)
+        baseline_worktree_state = direct_operation_journal.capture_source_baseline(cwd)
+        if baseline_worktree_state is None:
+            raise RuntimeError("SOURCE_BASELINE_UNAVAILABLE")
     except Exception as exc:
         if operation_hook:
             _operation_hook(
@@ -850,10 +1069,17 @@ def run_agy(
     while process.poll() is None:
         if baseline_worktree_state is not None and not first_effect_seen.is_set():
             try:
-                changed = direct_operation_journal.detect_worktree_physical_effects(
+                changed = direct_operation_journal.observed_changed_paths_since(
                     cwd, baseline_worktree_state
                 )
-                if changed:
+                if changed is None:
+                    baseline_worktree_state = None
+                    if operation_hook:
+                        _operation_hook(
+                            operation_hook,
+                            effect_observation_error="EFFECT_OBSERVATION_UNAVAILABLE",
+                        )
+                elif changed:
                     first_effect_seen.set()
                     now_effect_iso = _agy_operation_journal.utc_now()
                     effect_wall_ms = int((time.monotonic() - started) * 1000)
@@ -895,6 +1121,40 @@ def run_agy(
     agy_print_timed_out = (
         "[agy] print timeout after" in stderr_lower and "turn in progress" in stderr_lower
     )
+
+    # A short-lived provider can mutate the worktree and exit between polling
+    # intervals. Perform one final source-delta readback before projecting EXITED
+    # so time-to-first-effect does not silently miss that physical change.
+    if baseline_worktree_state is not None and not first_effect_seen.is_set():
+        try:
+            changed = direct_operation_journal.observed_changed_paths_since(
+                cwd, baseline_worktree_state
+            )
+            if changed is None:
+                baseline_worktree_state = None
+                if operation_hook:
+                    _operation_hook(
+                        operation_hook,
+                        effect_observation_error="EFFECT_OBSERVATION_UNAVAILABLE",
+                    )
+            elif changed:
+                first_effect_seen.set()
+                now_effect_iso = _agy_operation_journal.utc_now()
+                effect_wall_ms = int((time.monotonic() - started) * 1000)
+                if operation_hook:
+                    _operation_hook(
+                        operation_hook,
+                        first_effect_at=now_effect_iso,
+                        time_to_first_effect_ms=effect_wall_ms,
+                    )
+        except Exception as exc:
+            baseline_worktree_state = None
+            if operation_hook:
+                _operation_hook(
+                    operation_hook,
+                    effect_observation_error=f"EFFECT_OBSERVATION_FAILED:{type(exc).__name__}",
+                )
+
     wall_ms = int((time.monotonic() - started) * 1000)
 
     if operation_hook:
@@ -1143,8 +1403,13 @@ def dispatch_run(
             model_failure = f"DISPATCH_MODEL_REJECTED:INVALID_MODEL_SYNTAX:{model}"
         elif _model_family(stripped_model) == "unknown":
             model_failure = f"DISPATCH_MODEL_REJECTED:UNSUPPORTED_MODEL_FAMILY:{model}"
-        elif stripped_model in ("claude-opus-4-6", "claude-3-opus", "claude-opus") and effort is not None:
-            model_failure = f"DISPATCH_MODEL_CONTRACT_REJECTED:UNSUPPORTED_EFFORT_FOR_MODEL:{model}:{effort}"
+        elif (
+            stripped_model in ("claude-opus-4-6", "claude-3-opus", "claude-opus")
+            and effort is not None
+        ):
+            model_failure = (
+                f"DISPATCH_MODEL_CONTRACT_REJECTED:UNSUPPORTED_EFFORT_FOR_MODEL:{model}:{effort}"
+            )
         else:
             model_failure = None
         if model_failure:
@@ -1297,7 +1562,11 @@ def dispatch_run(
                     model_family=scoped_model_family,
                 )
                 if not evidence_fresh:
-                    quota_snapshot = _refresh_quota_snapshot_for_account(claim.internal_id)
+                    quota_snapshot = _refresh_quota_snapshot_for_account(
+                        claim.internal_id,
+                        on_phase_hook=lambda **event: _operation_hook(operation_hook, **event),
+                        account_alias_hash=claim.account_alias_hash,
+                    )
                     availability_state = _dynamic_availability_state(model, quota_snapshot)
                     _publish_dynamic_availability(availability_state)
                     quota_state, reset_ts, evidence_fresh = _account_family_quota_state(
@@ -1380,7 +1649,9 @@ def dispatch_run(
             env = dict(claim.lease.execution_env)
             attempt_baseline = None
             try:
-                attempt_baseline = direct_operation_journal.snapshot_worktree_physical_state(cwd)
+                attempt_baseline = direct_operation_journal.capture_source_baseline(cwd)
+                if attempt_baseline is None:
+                    raise RuntimeError("SOURCE_BASELINE_UNAVAILABLE")
             except Exception as exc:
                 _operation_hook(
                     operation_hook,
@@ -1421,7 +1692,9 @@ def dispatch_run(
                     "effort": effort,
                     "timeout": max(1, timeout),
                 }
-                if runner is run_agy or (hasattr(runner, "__code__") and "operation_hook" in runner.__code__.co_varnames):
+                if runner is run_agy or (
+                    hasattr(runner, "__code__") and "operation_hook" in runner.__code__.co_varnames
+                ):
                     runner_kwargs["operation_hook"] = operation_hook
                 code, out, err, timed_out, wall_ms = runner(**runner_kwargs)
             finally:
@@ -1429,11 +1702,15 @@ def dispatch_run(
             total_wall_ms += wall_ms
 
             provider_log_text = ""
-            provider_log_path = env.get("NEXUS_AGY_ATTESTATION_LOG") or os.getenv("NEXUS_AGY_ATTESTATION_LOG")
+            provider_log_path = env.get("NEXUS_AGY_ATTESTATION_LOG") or os.getenv(
+                "NEXUS_AGY_ATTESTATION_LOG"
+            )
             if provider_log_path:
                 try:
-                    provider_log_text = Path(provider_log_path).expanduser().read_text(
-                        encoding="utf-8", errors="replace"
+                    provider_log_text = (
+                        Path(provider_log_path)
+                        .expanduser()
+                        .read_text(encoding="utf-8", errors="replace")
                     )
                 except OSError:
                     provider_log_text = ""
@@ -1478,7 +1755,7 @@ def dispatch_run(
                 changed_paths = None
                 if attempt_baseline is not None:
                     try:
-                        changed_paths = direct_operation_journal.detect_worktree_physical_effects(
+                        changed_paths = direct_operation_journal.observed_changed_paths_since(
                             cwd, attempt_baseline
                         )
                     except Exception as exc:
@@ -1762,7 +2039,6 @@ def _spawn_background_operation(
     return journal.bind_pid(operation_id, proc.pid)
 
 
-
 def _supervisor_terminal_guard(func):
     """Cover background-supervisor startup and provider execution with durable terminalization."""
 
@@ -1815,8 +2091,13 @@ def _supervisor_terminal_guard(func):
                 },
                 provider_pid=record.get("provider_pid"),
                 provider_process_state=(
-                    ("RUNNING" if _process_alive(record.get("provider_pid")) else "EXITED")
-                    if isinstance(record.get("provider_pid"), int) and record.get("provider_pid") > 0
+                    (
+                        "RUNNING"
+                        if direct_operation_journal._process_alive(record.get("provider_pid"))
+                        else "EXITED"
+                    )
+                    if isinstance(record.get("provider_pid"), int)
+                    and record.get("provider_pid") > 0
                     else record.get("provider_process_state", "IDLE")
                 ),
                 provider_started_at=record.get("provider_started_at"),
@@ -1903,6 +2184,7 @@ def _run_background_operation(
         "first_stream_activity_at": None,
         "first_effect_at": None,
         "time_to_first_effect_ms": None,
+        "quota_preflight_progress": None,
     }
     state_lock = threading.Lock()
 
@@ -1922,6 +2204,7 @@ def _run_background_operation(
             first_stream_activity_at=snapshot.get("first_stream_activity_at"),
             first_effect_at=snapshot.get("first_effect_at"),
             time_to_first_effect_ms=snapshot.get("time_to_first_effect_ms"),
+            quota_preflight_progress=snapshot.get("quota_preflight_progress"),
         )
 
     def on_event(event: dict[str, Any]) -> None:
@@ -2001,8 +2284,13 @@ def _run_background_operation(
             reconciliation=reconciliation,
             provider_pid=snapshot.get("provider_pid"),
             provider_process_state=(
-                ("RUNNING" if _process_alive(snapshot.get("provider_pid")) else "EXITED")
-                if isinstance(snapshot.get("provider_pid"), int) and snapshot.get("provider_pid") > 0
+                (
+                    "RUNNING"
+                    if direct_operation_journal._process_alive(snapshot.get("provider_pid"))
+                    else "EXITED"
+                )
+                if isinstance(snapshot.get("provider_pid"), int)
+                and snapshot.get("provider_pid") > 0
                 else (snapshot.get("provider_process_state") or "IDLE")
             ),
             provider_started_at=snapshot.get("provider_started_at"),
@@ -2034,7 +2322,11 @@ def _run_background_operation(
             },
             provider_pid=snap.get("provider_pid"),
             provider_process_state=(
-                ("RUNNING" if _process_alive(snap.get("provider_pid")) else "EXITED")
+                (
+                    "RUNNING"
+                    if direct_operation_journal._process_alive(snap.get("provider_pid"))
+                    else "EXITED"
+                )
                 if isinstance(snap.get("provider_pid"), int) and snap.get("provider_pid") > 0
                 else (snap.get("provider_process_state") or "IDLE")
             ),

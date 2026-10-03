@@ -120,7 +120,7 @@ def test_stale_quota_refresh_skips_blocked_account_before_worker(monkeypatch) ->
     )
     refreshed: list[str] = []
 
-    def refresh(account_name: str):
+    def refresh(account_name: str, **_kwargs):
         refreshed.append(account_name)
         if account_name == "stale-blocked":
             checked_at = datetime.now(timezone.utc).isoformat()
