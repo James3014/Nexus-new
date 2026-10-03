@@ -1501,9 +1501,7 @@ def test_run_agy_timeline_and_baseline_effects(tmp_path: Path, monkeypatch) -> N
     work = tmp_path / "work"
     work.mkdir()
     subprocess.run(["git", "-C", str(work), "init"], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(work), "config", "user.email", "test@test.com"], check=True
-    )
+    subprocess.run(["git", "-C", str(work), "config", "user.email", "test@test.com"], check=True)
     subprocess.run(["git", "-C", str(work), "config", "user.name", "Test"], check=True)
     (work / "tracked.txt").write_text("initial", encoding="utf-8")
     subprocess.run(["git", "-C", str(work), "add", "tracked.txt"], check=True)
@@ -1616,9 +1614,7 @@ def test_independent_quota_after_effect_never_rotates(tmp_path):
     assert classified["reconciliation_required"] is True
 
 
-def test_independent_headless_denial_only_in_provider_log_is_failure(
-    tmp_path, monkeypatch
-):
+def test_independent_headless_denial_only_in_provider_log_is_failure(tmp_path, monkeypatch):
     work = tmp_path / "repo"
     work.mkdir()
     subprocess.run(["git", "init", str(work)], check=True, capture_output=True)

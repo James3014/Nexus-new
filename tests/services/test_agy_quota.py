@@ -263,9 +263,7 @@ def test_independent_failed_refresh_keeps_old_time_and_latest_failure(tmp_path):
         snapshot_path=snapshot,
         current_names={"legacy"},
         partial=True,
-        refreshed_rows=[
-            {"account": "legacy", "ok": False, "error": "timeout", "checked_at": new}
-        ],
+        refreshed_rows=[{"account": "legacy", "ok": False, "error": "timeout", "checked_at": new}],
         checked_at=new,
     )
     row = result["accounts"][0]
