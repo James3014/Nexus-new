@@ -5,11 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from nexus.engine.capability_contracts import CapabilityPlan
 from nexus.engine.capability_planner import default_capability_nodes
 from nexus.services.capability_evidence_bundle import (
     assert_same_baseline,
     build_capability_evidence_bundle,
+    build_source_hash_subject,
     compute_bundle_hash,
     record_consumption,
     verify_capability_evidence_bundle,
@@ -505,12 +508,28 @@ def test_p2_verify_blocks_tamper_and_immutable_alone_insufficient() -> None:
             },
         },
         selected_capabilities=["codeintel", "memory"],
-        source_hash="src-aaa",
     )
-    ok = verify_capability_evidence_bundle(bundle)
+    subject = build_source_hash_subject("r1", "seal me")
+    ok = verify_capability_evidence_bundle(bundle, source_hash_subject=subject)
     assert ok["ok"] is True
     assert ok["immutable_alone_insufficient"] is True
     assert bundle["bundle_hash"] == compute_bundle_hash(bundle)
+    assert ok["source_hash_verified"] is True
+    assert bundle["source_hash_kind"] == "workspace_revision_task_statement_v1"
+    assert "task_statement" not in bundle
+
+    with pytest.raises(ValueError, match="source_hash_does_not_match"):
+        build_capability_evidence_bundle(
+            task_id="t-seal",
+            workspace_revision="r1",
+            task_statement="seal me",
+            plan_payload={"selected_capabilities": []},
+            plan_hash="plan-seal",
+            planner_decision_id="plan-seal",
+            capability_results={},
+            selected_capabilities=[],
+            source_hash="0" * 64,
+        )
 
     # immutable alone is not proof
     bare = {"immutable": True, "schema": bundle["schema"]}
