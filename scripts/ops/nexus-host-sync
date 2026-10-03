@@ -198,13 +198,13 @@ def _ensure_source_repo(
             raise HostSyncError("REMOTE_REF_INVALID")
         _run(
             [
-            "git",
-            "-C",
-            str(source_repo),
-            "fetch",
-            "--prune",
-            "origin",
-            f"refs/heads/{remote_ref}:refs/remotes/origin/{remote_ref}",
+                "git",
+                "-C",
+                str(source_repo),
+                "fetch",
+                "--prune",
+                "origin",
+                f"refs/heads/{remote_ref}:refs/remotes/origin/{remote_ref}",
             ]
         )
 
@@ -226,11 +226,11 @@ def _require_revision(source_repo: Path, revision: str) -> str:
 def _resolve_remote_ref(source_repo: Path, remote_ref: str) -> str:
     value = _run(
         [
-        "git",
-        "-C",
-        str(source_repo),
-        "rev-parse",
-        f"refs/remotes/origin/{remote_ref}",
+            "git",
+            "-C",
+            str(source_repo),
+            "rev-parse",
+            f"refs/remotes/origin/{remote_ref}",
         ]
     ).stdout.strip()
     return _require_revision(source_repo, value)
@@ -292,20 +292,20 @@ def _parse_manifest(data: bytes) -> dict[str, Any]:
     ):
         required.update(
             {
-            "scripts/ops/nexus-external-worker-dispatch",
-            "scripts/ops/install_nexus_external_worker_dispatch.sh",
-            "nexus/services/direct_operation_journal.py",
-            "nexus/services/external_worker_runtime.py",
+                "scripts/ops/nexus-external-worker-dispatch",
+                "scripts/ops/install_nexus_external_worker_dispatch.sh",
+                "nexus/services/direct_operation_journal.py",
+                "nexus/services/external_worker_runtime.py",
             }
         )
     if isinstance(components, dict) and isinstance(components.get("workflow_doctor"), dict):
         required.update(
             {
-            "scripts/ops/nexus-workflow-doctor",
-            "scripts/ops/install_nexus_workflow_doctor.sh",
-            "nexus/services/workflow_doctor.py",
-            "nexus/services/direct_operation_journal.py",
-            "nexus/orchestrator/canonical_source_root.py",
+                "scripts/ops/nexus-workflow-doctor",
+                "scripts/ops/install_nexus_workflow_doctor.sh",
+                "nexus/services/workflow_doctor.py",
+                "nexus/services/direct_operation_journal.py",
+                "nexus/orchestrator/canonical_source_root.py",
             }
         )
     if isinstance(components, dict) and isinstance(components.get("grok_accounts"), dict):
@@ -494,9 +494,9 @@ def _install_dispatch(snapshot: Path, target: Path) -> None:
     env = os.environ.copy()
     env.update(
         {
-        "NEXUS_AGY_REPO_ROOT": str(snapshot),
-        "NEXUS_AGY_SNAPSHOT": str(snapshot),
-        "NEXUS_AGY_DISPATCH_TARGET": str(target),
+            "NEXUS_AGY_REPO_ROOT": str(snapshot),
+            "NEXUS_AGY_SNAPSHOT": str(snapshot),
+            "NEXUS_AGY_DISPATCH_TARGET": str(target),
         }
     )
     _run(["bash", str(installer)], cwd=snapshot, env=env)
@@ -507,8 +507,8 @@ def _install_quota(snapshot: Path, target: Path) -> None:
     env = os.environ.copy()
     env.update(
         {
-        "NEXUS_AGY_REPO_ROOT": str(snapshot),
-        "NEXUS_AGY_QUOTA_TARGET": str(target),
+            "NEXUS_AGY_REPO_ROOT": str(snapshot),
+            "NEXUS_AGY_QUOTA_TARGET": str(target),
         }
     )
     _run(["bash", str(installer)], cwd=snapshot, env=env)
@@ -519,9 +519,9 @@ def _install_workflow_doctor(snapshot: Path, target: Path) -> None:
     env = os.environ.copy()
     env.update(
         {
-        "NEXUS_WORKFLOW_DOCTOR_REPO_ROOT": str(snapshot),
-        "NEXUS_WORKFLOW_DOCTOR_SNAPSHOT": str(snapshot),
-        "NEXUS_WORKFLOW_DOCTOR_TARGET": str(target),
+            "NEXUS_WORKFLOW_DOCTOR_REPO_ROOT": str(snapshot),
+            "NEXUS_WORKFLOW_DOCTOR_SNAPSHOT": str(snapshot),
+            "NEXUS_WORKFLOW_DOCTOR_TARGET": str(target),
         }
     )
     _run(["bash", str(installer)], cwd=snapshot, env=env)
@@ -532,9 +532,9 @@ def _install_external_worker_dispatch(snapshot: Path, target: Path) -> None:
     env = os.environ.copy()
     env.update(
         {
-        "NEXUS_EXTERNAL_WORKER_REPO_ROOT": str(snapshot),
-        "NEXUS_EXTERNAL_WORKER_SNAPSHOT": str(snapshot),
-        "NEXUS_EXTERNAL_WORKER_DISPATCH_TARGET": str(target),
+            "NEXUS_EXTERNAL_WORKER_REPO_ROOT": str(snapshot),
+            "NEXUS_EXTERNAL_WORKER_SNAPSHOT": str(snapshot),
+            "NEXUS_EXTERNAL_WORKER_DISPATCH_TARGET": str(target),
         }
     )
     _run(["bash", str(installer)], cwd=snapshot, env=env)
@@ -1200,12 +1200,12 @@ def main(argv: list[str] | None = None) -> int:
             if args.command == "desired":
                 _emit(
                     {
-                    "schema": STATUS_SCHEMA,
-                    "host": socket.gethostname(),
-                    "state": "DESIRED_RESOLVED",
-                    "desired_revision": revision,
-                    "desired_bundle_sha256": bundle_sha,
-                    "track_ref": args.track_ref or "main",
+                        "schema": STATUS_SCHEMA,
+                        "host": socket.gethostname(),
+                        "state": "DESIRED_RESOLVED",
+                        "desired_revision": revision,
+                        "desired_bundle_sha256": bundle_sha,
+                        "track_ref": args.track_ref or "main",
                     }
                 )
                 return 0
@@ -1307,10 +1307,10 @@ def main(argv: list[str] | None = None) -> int:
     except HostSyncError as exc:
         _emit(
             {
-            "schema": STATUS_SCHEMA,
-            "host": socket.gethostname(),
-            "state": "ERROR",
-            "error": str(exc),
+                "schema": STATUS_SCHEMA,
+                "host": socket.gethostname(),
+                "state": "ERROR",
+                "error": str(exc),
             }
         )
         return 2

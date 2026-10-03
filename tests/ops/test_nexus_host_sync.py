@@ -57,9 +57,9 @@ def _write_fake_manager(
 ) -> None:
     payload = json.dumps(
         {
-        "version": version,
-        "archive_sha256": MANAGER_SHA,
-        "module_integrity": module_integrity,
+            "version": version,
+            "archive_sha256": MANAGER_SHA,
+            "module_integrity": module_integrity,
         }
     )
     path.write_text(f"#!/bin/sh\nprintf '%s\\n' '{payload}'\n", encoding="utf-8")
@@ -594,13 +594,13 @@ def test_launchd_installer_writes_periodic_reconcile_job_without_loading(
     env = dict(os.environ)
     env.update(
         {
-        "HOME": str(home),
-        "NEXUS_HOST_REPO_ROOT": str(ROOT),
-        "NEXUS_HOST_SYNC_BIN": str(home / ".local/bin/nexus-host-sync"),
-        "NEXUS_HOST_SOURCE_REPO": str(home / ".cache/nexus-host-sync/Nexus-new.git"),
-        "NEXUS_HOST_SYNC_PLIST": str(plist),
-        "NEXUS_HOST_SYNC_STATE_DIR": str(state_dir),
-        "NEXUS_HOST_SYNC_LAUNCHD_LOAD": "0",
+            "HOME": str(home),
+            "NEXUS_HOST_REPO_ROOT": str(ROOT),
+            "NEXUS_HOST_SYNC_BIN": str(home / ".local/bin/nexus-host-sync"),
+            "NEXUS_HOST_SOURCE_REPO": str(home / ".cache/nexus-host-sync/Nexus-new.git"),
+            "NEXUS_HOST_SYNC_PLIST": str(plist),
+            "NEXUS_HOST_SYNC_STATE_DIR": str(state_dir),
+            "NEXUS_HOST_SYNC_LAUNCHD_LOAD": "0",
         }
     )
 
@@ -664,8 +664,8 @@ def test_bootstrap_installer_deploys_exact_host_sync_bytes(tmp_path: Path) -> No
     env = dict(os.environ)
     env.update(
         {
-        "NEXUS_HOST_REPO_ROOT": str(ROOT),
-        "NEXUS_HOST_SYNC_TARGET": str(target),
+            "NEXUS_HOST_REPO_ROOT": str(ROOT),
+            "NEXUS_HOST_SYNC_TARGET": str(target),
         }
     )
 
