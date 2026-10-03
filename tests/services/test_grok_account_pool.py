@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from nexus.services.external_account_pool import AccountFailureKind
+from nexus.services.external_worker_runtime import GrokAccountAdapter
 from nexus.services.grok_account_pool import (
     GrokAccountPoolError,
     GrokAccountPoolExhaustedError,
@@ -30,6 +31,7 @@ def _state(root: Path, homes: list[Path]) -> None:
         json.dumps({"accounts": accounts, "active_alias": "acct-0", "updated_at": 0.0}),
         encoding="utf-8",
     )
+    GrokAccountPoolManager(root).bind_host(confirm_existing_pool=True)
 
 
 def test_existing_state_schema_is_upgraded_with_cross_process_lease(tmp_path: Path) -> None:
@@ -205,3 +207,99 @@ def test_failure_classifier(text: str, expected: AccountFailureKind) -> None:
 
 def test_timeout_precedes_quota_for_no_blind_retry() -> None:
     assert classify_grok_failure("quota exhausted", timed_out=True) is AccountFailureKind.TIMEOUT
+
+
+def test_legacy_existing_pool_requires_explicit_host_binding_confirmation(tmp_path: Path) -> None:
+    root = tmp_path / "pool"
+    home = tmp_path / "a"
+    root.mkdir(parents=True)
+    home.mkdir()
+    (root / "state.json").write_text(
+        json.dumps({
+            "accounts": {
+                "acct-0": {
+                    "home_path": str(home),
+                    "enabled": True,
+                    "cooldown_until": 0.0,
+                    "last_failure_reason": "",
+                    "last_failure_timestamp": 0.0,
+                }
+            },
+            "leases": {},
+            "updated_at": 0.0,
+        }),
+        encoding="utf-8",
+    )
+    manager = GrokAccountPoolManager(root, host_identity="owner-host")
+
+    with pytest.raises(GrokAccountPoolError, match="HOST_UNBOUND"):
+        manager.local_accounts()
+    with pytest.raises(GrokAccountPoolError, match="CONFIRMATION_REQUIRED"):
+        manager.bind_host()
+
+    binding = manager.bind_host(confirm_existing_pool=True)
+    assert binding.status == "BOUND"
+    assert binding.matches is True
+    assert len(manager.local_accounts()) == 1
+
+
+def test_copied_pool_fails_closed_on_wrong_host_before_lease(tmp_path: Path) -> None:
+    root = tmp_path / "pool"
+    home = tmp_path / "a"
+    home.mkdir(mode=0o700)
+    owner = GrokAccountPoolManager(root, host_identity="owner-host")
+    owner.register_local_profile(alias="acct-0", home_path=home)
+
+    copied = GrokAccountPoolManager(root, host_identity="other-host")
+    binding = copied.host_binding()
+    assert binding.status == "HOST_MISMATCH"
+    assert binding.matches is False
+    assert binding.owner_host_id_hash != binding.current_host_id_hash
+
+    with pytest.raises(GrokAccountPoolError, match="HOST_MISMATCH"):
+        copied.local_accounts()
+    with pytest.raises(GrokAccountPoolError, match="HOST_MISMATCH"):
+        copied.acquire("consumer")
+
+
+def test_host_binding_stores_only_non_secret_hash(tmp_path: Path) -> None:
+    root = tmp_path / "pool"
+    manager = GrokAccountPoolManager(root, host_identity="physical-machine-secret-source")
+    binding = manager.bind_host()
+
+    state = json.loads((root / "state.json").read_text())
+    raw = json.dumps(state)
+    assert binding.status == "BOUND"
+    assert len(binding.owner_host_id_hash or "") == 64
+    assert "physical-machine-secret-source" not in raw
+    assert state["host_binding"]["schema"] == "nexus.grok_pool_host_binding.v1"
+
+
+def test_worker_account_adapter_fails_on_wrong_host_before_provider_binding(tmp_path: Path) -> None:
+    root = tmp_path / "pool"
+    home = tmp_path / "a"
+    home.mkdir(mode=0o700)
+    owner = GrokAccountPoolManager(root, host_identity="owner-host")
+    owner.register_local_profile(alias="acct-0", home_path=home)
+
+    adapter = GrokAccountAdapter()
+    adapter.manager = GrokAccountPoolManager(root, host_identity="other-host")
+
+    with pytest.raises(GrokAccountPoolError, match="HOST_MISMATCH"):
+        adapter.acquire("grokop_" + "a" * 32)
+    assert adapter._leases == {}
+
+
+def test_wrong_host_nonrotation_failure_still_fails_closed(tmp_path: Path) -> None:
+    root = tmp_path / "pool"
+    home = tmp_path / "a"
+    home.mkdir(mode=0o700)
+    owner = GrokAccountPoolManager(root, host_identity="owner-host")
+    owner.register_local_profile(alias="acct-0", home_path=home)
+    lease = owner.acquire("consumer")
+
+    copied = GrokAccountPoolManager(root, host_identity="other-host")
+    with pytest.raises(GrokAccountPoolError, match="HOST_MISMATCH"):
+        copied.report_failure(lease, AccountFailureKind.TIMEOUT)
+
+    owner.release(lease)
