@@ -19,7 +19,7 @@ of restarting from L1.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping
@@ -104,6 +104,19 @@ class EvidencePhase(str, Enum):
     FIRST_PASS = "FIRST_PASS"
     INDEPENDENT_HIDDEN_PROBE = "INDEPENDENT_HIDDEN_PROBE"
     VERIFIER_GUIDED_REPAIR = "VERIFIER_GUIDED_REPAIR"
+    PROTOCOL_TOOL_LOOP_QUALIFICATION = "PROTOCOL_TOOL_LOOP_QUALIFICATION"
+    RESOURCE_CONTEXT_QUALIFICATION = "RESOURCE_CONTEXT_QUALIFICATION"
+    SYSTEM_DECISION_DELTA = "SYSTEM_DECISION_DELTA"
+
+
+class QualificationDisposition(str, Enum):
+    """Qualification disposition for an exact execution configuration in a role."""
+
+    PASS = "PASS"
+    WATCH = "WATCH"
+    STACK_UNQUALIFIED = "STACK_UNQUALIFIED"
+    NOT_EVALUATED = "NOT_EVALUATED"
+    FAIL = "FAIL"
 
 
 class EvidenceScope(str, Enum):
@@ -309,6 +322,94 @@ class KnownFailureFamily:
 
 
 @dataclass(frozen=True)
+class ExecutionConfigQualification:
+    """One role/task-family qualification record for an execution configuration."""
+
+    task_family: str
+    disposition: QualificationDisposition
+    phase: EvidencePhase
+    score: str | None = None
+    evidence_ref: str = ""
+    provenance: str = ""
+    date: str | None = None
+    failure_families: tuple[str, ...] = ()
+    is_semantic_failure: bool = False
+    false_safe_count: int | None = None
+    online_escalation_ratio: str | None = None
+    decision_delta: str | None = None
+    runtime_admission: bool = False
+    summary: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "task_family": self.task_family,
+            "disposition": self.disposition.value,
+            "phase": self.phase.value,
+            "score": self.score,
+            "evidence_ref": self.evidence_ref,
+            "provenance": self.provenance,
+            "date": self.date,
+            "failure_families": list(self.failure_families),
+            "is_semantic_failure": self.is_semantic_failure,
+            "false_safe_count": self.false_safe_count,
+            "online_escalation_ratio": self.online_escalation_ratio,
+            "decision_delta": self.decision_delta,
+            "runtime_admission": self.runtime_admission,
+            "summary": self.summary,
+        }
+
+
+@dataclass(frozen=True)
+class ExecutionConfiguration:
+    """An exact execution configuration envelope under a semantic lineage."""
+
+    config_id: str
+    model: str
+    quant: str = ""
+    package: str = ""
+    model_digest: str | None = None
+    drafter: str | None = None
+    runtime: str = ""
+    runtime_build: str = ""
+    context_limit: int | None = None
+    prompt_template_mode: str = ""
+    scaffold: str = ""
+    agent_loop: str = ""
+    transport: str = ""
+    tool_surface: str = ""
+    write_mode: str = ""
+    state_preservation: str = ""
+    resource_envelope: Mapping[str, Any] = field(default_factory=dict)
+    realm: str = ""
+    qualifications: tuple[ExecutionConfigQualification, ...] = ()
+    description: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "config_id": self.config_id,
+            "model": self.model,
+            "model_digest": self.model_digest,
+            "drafter": self.drafter,
+            "quant": self.quant,
+            "package": self.package,
+            "runtime": self.runtime,
+            "runtime_build": self.runtime_build,
+            "context_limit": self.context_limit,
+            "prompt_template_mode": self.prompt_template_mode,
+            "scaffold": self.scaffold,
+            "agent_loop": self.agent_loop,
+            "transport": self.transport,
+            "tool_surface": self.tool_surface,
+            "write_mode": self.write_mode,
+            "state_preservation": self.state_preservation,
+            "resource_envelope": dict(self.resource_envelope),
+            "realm": self.realm,
+            "description": self.description,
+            "qualifications": [q.to_dict() for q in self.qualifications],
+        }
+
+
+@dataclass(frozen=True)
 class CapabilityLineage:
     """One semantic capability lineage (calibration evidence only)."""
 
@@ -326,6 +427,7 @@ class CapabilityLineage:
     known_failure_families: tuple[KnownFailureFamily, ...] = ()
     evidence: tuple[LineageEvidence, ...] = ()
     workforce_authority_refs: tuple[WorkforceAuthorityRef, ...] = ()
+    execution_configurations: tuple[ExecutionConfiguration, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -343,6 +445,7 @@ class CapabilityLineage:
             "known_failure_families": [family.to_dict() for family in self.known_failure_families],
             "evidence": [record.to_dict() for record in self.evidence],
             "workforce_authority_refs": [ref.to_dict() for ref in self.workforce_authority_refs],
+            "execution_configurations": [cfg.to_dict() for cfg in self.execution_configurations],
             "admission_authority": ADMISSION_AUTHORITY_DISCLAIMER,
         }
 
@@ -453,6 +556,13 @@ def _parse_phase(value: Any) -> EvidencePhase:
         raise LineageValidationError(f"Invalid evidence phase: {value}") from exc
 
 
+def _parse_disposition(value: Any) -> QualificationDisposition:
+    try:
+        return QualificationDisposition(str(value).strip().upper())
+    except ValueError as exc:
+        raise LineageValidationError(f"Invalid qualification disposition: {value}") from exc
+
+
 def _parse_scope(value: Any) -> EvidenceScope:
     try:
         return EvidenceScope(str(value).strip().upper())
@@ -505,6 +615,7 @@ class ModelCapabilityLineageRegistry:
         self._workforce_loader = workforce_loader or WorkforcePolicyLoader()
         self._lineages: dict[str, CapabilityLineage] = {}
         self._identity_index: dict[tuple[str, str], str] = {}
+        self._config_index: dict[str, tuple[str, ExecutionConfiguration]] = {}
         self._loaded = False
 
     def _parse_execution_identity(
@@ -521,6 +632,112 @@ class ModelCapabilityLineageRegistry:
             model=model,
             identity_kind=str(raw.get("identity_kind") or "primary").strip() or "primary",
             transport=str(raw.get("transport") or "").strip(),
+        )
+
+    def _parse_execution_configuration(
+        self, raw: Mapping[str, Any], lineage_id: str
+    ) -> ExecutionConfiguration:
+        config_id = str(raw.get("config_id") or "").strip()
+        if not config_id:
+            raise LineageValidationError(
+                f"Lineage '{lineage_id}' has an execution configuration missing config_id"
+            )
+        model = str(raw.get("model") or "").strip()
+        if not model:
+            raise LineageValidationError(
+                f"Execution configuration '{config_id}' in lineage '{lineage_id}' is missing model"
+            )
+
+        qualifications_raw = raw.get("qualifications") or []
+        if not isinstance(qualifications_raw, list):
+            raise LineageValidationError(
+                f"Execution configuration '{config_id}' qualifications must be a list"
+            )
+
+        qualifications: list[ExecutionConfigQualification] = []
+        for q_entry in qualifications_raw:
+            if not isinstance(q_entry, Mapping):
+                raise LineageValidationError(
+                    f"Execution configuration '{config_id}' qualification entries must be objects"
+                )
+            task_family = str(q_entry.get("task_family") or "").strip()
+            if not task_family:
+                raise LineageValidationError(
+                    f"Execution configuration '{config_id}' qualification missing task_family"
+                )
+            disposition = _parse_disposition(q_entry.get("disposition"))
+            phase = _parse_phase(q_entry.get("phase"))
+            provenance = str(q_entry.get("provenance") or "").strip()
+            if provenance and provenance not in PROVENANCE_VALUES:
+                raise LineageValidationError(
+                    f"Execution configuration '{config_id}' qualification has unknown provenance: '{provenance}'"
+                )
+            is_semantic_failure = bool(q_entry.get("is_semantic_failure", False))
+            if disposition is QualificationDisposition.STACK_UNQUALIFIED and is_semantic_failure:
+                raise LineageValidationError(
+                    f"Execution configuration '{config_id}' for task family '{task_family}' is "
+                    "STACK_UNQUALIFIED but marked as semantic failure; stack/protocol limits are not semantic FAIL"
+                )
+            runtime_admission = bool(q_entry.get("runtime_admission", False))
+            if runtime_admission:
+                raise LineageValidationError(
+                    f"Execution configuration '{config_id}' qualification cannot grant runtime admission"
+                )
+
+            failure_families_raw = q_entry.get("failure_families") or []
+            failure_families = tuple(str(f).strip() for f in failure_families_raw if str(f).strip())
+
+            false_safe_raw = q_entry.get("false_safe_count")
+            false_safe_count = int(false_safe_raw) if false_safe_raw is not None else None
+
+            qualifications.append(
+                ExecutionConfigQualification(
+                    task_family=task_family,
+                    disposition=disposition,
+                    phase=phase,
+                    score=str(q_entry.get("score") or "").strip() or None,
+                    evidence_ref=str(q_entry.get("evidence_ref") or "").strip(),
+                    provenance=provenance,
+                    date=str(q_entry.get("date") or "").strip() or None,
+                    failure_families=failure_families,
+                    is_semantic_failure=is_semantic_failure,
+                    false_safe_count=false_safe_count,
+                    online_escalation_ratio=(
+                        str(q_entry.get("online_escalation_ratio") or "").strip() or None
+                    ),
+                    decision_delta=str(q_entry.get("decision_delta") or "").strip() or None,
+                    runtime_admission=runtime_admission,
+                    summary=str(q_entry.get("summary") or "").strip(),
+                )
+            )
+
+        context_limit_raw = raw.get("context_limit")
+        context_limit = int(context_limit_raw) if context_limit_raw is not None else None
+
+        resource_raw = raw.get("resource_envelope") or {}
+        resource_envelope = dict(resource_raw) if isinstance(resource_raw, Mapping) else {}
+
+        return ExecutionConfiguration(
+            config_id=config_id,
+            model=model,
+            quant=str(raw.get("quant") or "").strip(),
+            package=str(raw.get("package") or "").strip(),
+            model_digest=str(raw.get("model_digest") or "").strip() or None,
+            drafter=str(raw.get("drafter") or "").strip() or None,
+            runtime=str(raw.get("runtime") or "").strip(),
+            runtime_build=str(raw.get("runtime_build") or "").strip(),
+            context_limit=context_limit,
+            prompt_template_mode=str(raw.get("prompt_template_mode") or "").strip(),
+            scaffold=str(raw.get("scaffold") or "").strip(),
+            agent_loop=str(raw.get("agent_loop") or "").strip(),
+            transport=str(raw.get("transport") or "").strip(),
+            tool_surface=str(raw.get("tool_surface") or "").strip(),
+            write_mode=str(raw.get("write_mode") or "").strip(),
+            state_preservation=str(raw.get("state_preservation") or "").strip(),
+            resource_envelope=resource_envelope,
+            realm=str(raw.get("realm") or "").strip(),
+            qualifications=tuple(qualifications),
+            description=str(raw.get("description") or "").strip(),
         )
 
     def _parse_lineage(self, raw: Mapping[str, Any]) -> CapabilityLineage:
@@ -627,6 +844,11 @@ class ModelCapabilityLineageRegistry:
             known_failure_families=failure_families,
             evidence=tuple(evidence),
             workforce_authority_refs=workforce_authority_refs,
+            execution_configurations=tuple(
+                self._parse_execution_configuration(cfg_entry, lineage_id)
+                for cfg_entry in (raw.get("execution_configurations") or [])
+                if isinstance(cfg_entry, Mapping)
+            ),
         )
 
     def load(self) -> dict[str, CapabilityLineage]:
@@ -634,7 +856,7 @@ class ModelCapabilityLineageRegistry:
 
         Raises LineageValidationError when the file is missing, the schema is
         wrong, or the registry is internally inconsistent (duplicate
-        lineage_id or duplicate execution identity).
+        lineage_id, duplicate execution identity, or duplicate config_id).
         """
         if not self.lineage_path.is_file():
             raise LineageValidationError(f"Lineage registry file not found: {self.lineage_path}")
@@ -672,6 +894,7 @@ class ModelCapabilityLineageRegistry:
 
         lineages: dict[str, CapabilityLineage] = {}
         identity_index: dict[tuple[str, str], str] = {}
+        config_index: dict[str, tuple[str, ExecutionConfiguration]] = {}
         for raw in lineages_raw.values():
             if not isinstance(raw, Mapping):
                 raise LineageValidationError("Each lineage record must be a YAML object")
@@ -686,6 +909,13 @@ class ModelCapabilityLineageRegistry:
                         f"'{identity_index[key]}' and '{lineage.lineage_id}'"
                     )
                 identity_index[key] = lineage.lineage_id
+            for cfg in lineage.execution_configurations:
+                if cfg.config_id in config_index:
+                    raise LineageValidationError(
+                        f"Duplicate execution configuration config_id '{cfg.config_id}' registered in both "
+                        f"'{config_index[cfg.config_id][0]}' and '{lineage.lineage_id}'"
+                    )
+                config_index[cfg.config_id] = (lineage.lineage_id, cfg)
             lineages[lineage.lineage_id] = lineage
 
         for lineage in lineages.values():
@@ -693,6 +923,7 @@ class ModelCapabilityLineageRegistry:
 
         self._lineages = lineages
         self._identity_index = identity_index
+        self._config_index = config_index
         self._loaded = True
         return lineages
 
@@ -803,6 +1034,124 @@ class ModelCapabilityLineageRegistry:
     def known_failure_families(self, lineage_id: str) -> tuple[KnownFailureFamily, ...]:
         """Return the known failure families for one lineage (always queryable)."""
         return self.resolve_by_lineage_id(lineage_id).known_failure_families
+
+    def execution_configurations(
+        self, lineage_id: str | None = None
+    ) -> tuple[ExecutionConfiguration, ...]:
+        """Return execution configurations, optionally filtered by lineage_id."""
+        self._ensure_loaded()
+        if lineage_id:
+            lineage = self.resolve_by_lineage_id(lineage_id)
+            return lineage.execution_configurations
+        configs: list[ExecutionConfiguration] = []
+        for lineage in self._lineages.values():
+            configs.extend(lineage.execution_configurations)
+        return tuple(configs)
+
+    def get_execution_configuration(
+        self, config_id: str
+    ) -> tuple[CapabilityLineage, ExecutionConfiguration]:
+        """Look up an exact execution configuration by config_id. Unknown fails closed."""
+        self._ensure_loaded()
+        clean_id = str(config_id or "").strip()
+        entry = self._config_index.get(clean_id)
+        if entry is None:
+            raise LineageResolutionError(f"Unknown execution configuration identity: {config_id}")
+        lineage_id, config = entry
+        return self._lineages[lineage_id], config
+
+    def resolve_configuration(
+        self,
+        *,
+        config_id: str | None = None,
+        lineage_id: str | None = None,
+        model: str | None = None,
+        quant: str | None = None,
+        runtime: str | None = None,
+        context_limit: int | None = None,
+        scaffold: str | None = None,
+    ) -> tuple[CapabilityLineage, ExecutionConfiguration]:
+        """Resolve an exact execution configuration. Unknown or ambiguous fails closed."""
+        self._ensure_loaded()
+        if config_id:
+            lineage, config = self.get_execution_configuration(config_id)
+            if lineage_id and lineage.lineage_id != lineage_id:
+                raise LineageResolutionError(
+                    f"Configuration '{config_id}' belongs to lineage '{lineage.lineage_id}', not '{lineage_id}'"
+                )
+            return lineage, config
+
+        has_criteria = any(
+            v is not None for v in (lineage_id, model, quant, runtime, context_limit, scaffold)
+        )
+        if not has_criteria:
+            raise LineageResolutionError(
+                "resolve_configuration requires config_id or discriminating parameters"
+            )
+
+        candidates: list[tuple[CapabilityLineage, ExecutionConfiguration]] = []
+        target_lineages = (
+            [self.resolve_by_lineage_id(lineage_id)]
+            if lineage_id
+            else list(self._lineages.values())
+        )
+        for lineage in target_lineages:
+            for cfg in lineage.execution_configurations:
+                if model and cfg.model != model:
+                    continue
+                if quant and cfg.quant != quant:
+                    continue
+                if runtime and cfg.runtime != runtime:
+                    continue
+                if context_limit is not None and cfg.context_limit != context_limit:
+                    continue
+                if scaffold and cfg.scaffold != scaffold:
+                    continue
+                candidates.append((lineage, cfg))
+
+        if not candidates:
+            criteria = {
+                k: v
+                for k, v in [
+                    ("lineage_id", lineage_id),
+                    ("model", model),
+                    ("quant", quant),
+                    ("runtime", runtime),
+                    ("context_limit", context_limit),
+                    ("scaffold", scaffold),
+                ]
+                if v is not None
+            }
+            raise LineageResolutionError(
+                f"No registered execution configuration matches criteria: {criteria}"
+            )
+        if len(candidates) > 1:
+            matched_ids = [cfg.config_id for _, cfg in candidates]
+            raise LineageResolutionError(
+                f"Ambiguous execution configuration: matched {len(candidates)} configurations "
+                f"{matched_ids}; exact configuration identity required"
+            )
+        return candidates[0]
+
+    def resolve_execution_qualification(
+        self, config_id: str, task_family: str
+    ) -> tuple[ExecutionConfiguration, ExecutionConfigQualification]:
+        """Resolve qualification for a configuration and task family. Unknown config fails closed."""
+        clean_task = str(task_family or "").strip()
+        if not clean_task:
+            raise LineageResolutionError(
+                "task_family is required to resolve execution qualification"
+            )
+        _, config = self.get_execution_configuration(config_id)
+        for qual in config.qualifications:
+            if qual.task_family == clean_task:
+                return config, qual
+        return config, ExecutionConfigQualification(
+            task_family=clean_task,
+            disposition=QualificationDisposition.NOT_EVALUATED,
+            phase=EvidencePhase.FIRST_PASS,
+            summary=f"Task family '{clean_task}' is NOT_EVALUATED for configuration '{config_id}'",
+        )
 
 
 def _declaration_from_change_kind(
@@ -1331,10 +1680,30 @@ class CalibrationPlanner:
         lineage_id: str | None = None,
         provider: str | None = None,
         model: str | None = None,
+        config_id: str | None = None,
     ) -> dict[str, Any]:
-        """Read-only evidence bundle for one resolved lineage."""
-        lineage = self._registry.resolve(lineage_id=lineage_id, provider=provider, model=model)
-        return {
+        """Read-only evidence bundle for one resolved lineage or execution configuration."""
+        selected_config: ExecutionConfiguration | None = None
+        if config_id:
+            clean_config = str(config_id or "").strip()
+            lineage, selected_config = self._registry.get_execution_configuration(clean_config)
+            if lineage_id and lineage.lineage_id != lineage_id:
+                raise LineageResolutionError(
+                    f"Configuration '{config_id}' belongs to lineage '{lineage.lineage_id}', not '{lineage_id}'"
+                )
+            if provider and model:
+                has_identity = any(
+                    i.provider == provider and i.model == model
+                    for i in lineage.execution_identities
+                )
+                if not has_identity:
+                    raise LineageResolutionError(
+                        f"Configuration '{config_id}' lineage does not match execution identity {provider}/{model}"
+                    )
+        else:
+            lineage = self._registry.resolve(lineage_id=lineage_id, provider=provider, model=model)
+
+        bundle: dict[str, Any] = {
             "schema": CALIBRATION_EVIDENCE_SCHEMA,
             "lineage_id": lineage.lineage_id,
             "canonical_family": lineage.canonical_family,
@@ -1348,6 +1717,7 @@ class CalibrationPlanner:
             "experimental_ceiling": lineage.experimental_ceiling,
             "role_evidence": [ref.to_dict() for ref in lineage.role_evidence],
             "evidence": [record.to_dict() for record in lineage.evidence],
+            "execution_configurations": [cfg.to_dict() for cfg in lineage.execution_configurations],
             "known_failure_families": [
                 family.to_dict() for family in lineage.known_failure_families
             ],
@@ -1356,3 +1726,6 @@ class CalibrationPlanner:
             "admission_authority": ADMISSION_AUTHORITY_SEPARATE,
             "disclaimer": ADMISSION_AUTHORITY_DISCLAIMER,
         }
+        if selected_config is not None:
+            bundle["selected_configuration"] = selected_config.to_dict()
+        return bundle

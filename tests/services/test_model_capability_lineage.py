@@ -15,9 +15,12 @@ from nexus.services.model_capability_lineage import (
     CalibrationPlanner,
     ChangeClass,
     EvidencePhase,
+    ExecutionConfigQualification,
+    ExecutionConfiguration,
     LineageResolutionError,
     LineageValidationError,
     ModelCapabilityLineageRegistry,
+    QualificationDisposition,
     TrialKind,
     classify_change,
     tiers_strictly_below,
@@ -64,7 +67,12 @@ def _minimal_lineage_yaml(*, admission_authority: bool = False) -> dict:
 def test_registry_loads_seeded_lineages() -> None:
     registry = _registry()
     lineages = registry.lineages()
-    assert set(lineages) == {"deepseek-v4-flash", "gemini-3.7-flash-medium"}
+    assert set(lineages) == {
+        "deepseek-v4-flash",
+        "gemini-3.7-flash-medium",
+        "occamy-1.0",
+        "qwen-3.8-27b",
+    }
 
 
 def test_deepseek_lineage_seed_shape() -> None:
@@ -629,3 +637,301 @@ def test_plan_serializes_to_machine_readable_dict() -> None:
         assert key in data
     assert isinstance(data["required_trials"], list)
     assert isinstance(data["admission_authority"], str)
+
+
+def test_occamy_lineage_seed_shape() -> None:
+    registry = _registry()
+    lineage = registry.resolve_by_lineage_id("occamy-1.0")
+    identities = {(i.provider, i.model, i.identity_kind) for i in lineage.execution_identities}
+    assert identities == {
+        ("local", "occamy-1.0", "primary"),
+        ("local", "occamy-1.0-q4", "alias"),
+    }
+    assert lineage.stable_floor == "L0.5"
+    assert lineage.current_frontier == "L1"
+    assert lineage.conditional_ceiling == "L1"
+    assert lineage.experimental_ceiling == "L2"
+    assert lineage.frontier_experimental is True
+    assert len(lineage.execution_configurations) == 2
+
+    by_id = {c.config_id: c for c in lineage.execution_configurations}
+    assert "occamy-1.0-q4-opencode-llama32k" in by_id
+    assert "occamy-1.0-q4-typed-decision-selective-shadow" in by_id
+
+    agent_cfg = by_id["occamy-1.0-q4-opencode-llama32k"]
+    assert isinstance(agent_cfg, ExecutionConfiguration)
+    assert agent_cfg.model == "occamy-1.0-q4"
+    assert agent_cfg.quant == "Q4_K_M"
+    assert agent_cfg.package == "GGUF"
+    assert agent_cfg.runtime == "llama.cpp"
+    assert "build10964" in agent_cfg.runtime_build
+    assert agent_cfg.context_limit == 32768
+    assert agent_cfg.scaffold == "opencode_serve"
+    assert agent_cfg.tool_surface == "opencode_builtin_tools"
+    assert agent_cfg.write_mode == "workspace_edit"
+    assert agent_cfg.state_preservation == "same_session_continuation"
+    assert (
+        agent_cfg.model_digest == "ffb25f763ff9c27f5f4e2adcdef399c5654f9f840fdac33dffe7035ba8266a87"
+    )
+
+    agent_quals = {q.task_family: q for q in agent_cfg.qualifications}
+    assert isinstance(agent_quals["short_tool_use"], ExecutionConfigQualification)
+    assert agent_quals["short_tool_use"].disposition is QualificationDisposition.PASS
+    assert agent_quals["short_tool_use"].score == "PASS"
+    assert agent_quals["short_tool_use"].phase is EvidencePhase.PROTOCOL_TOOL_LOOP_QUALIFICATION
+
+    long_qual = agent_quals["long_repo_episode"]
+    assert long_qual.disposition is QualificationDisposition.STACK_UNQUALIFIED
+    assert long_qual.score == "0/2_STOPPED_BY_GATE"
+    assert long_qual.is_semantic_failure is False
+    assert long_qual.runtime_admission is False
+    assert set(long_qual.failure_families) == {
+        "session_startup_readiness",
+        "context_state_overflow_54902_gt_32768",
+    }
+
+    decision_cfg = by_id["occamy-1.0-q4-typed-decision-selective-shadow"]
+    assert decision_cfg.scaffold == "nexus_selective_shadow"
+    assert decision_cfg.write_mode == "read_only"
+    decision_quals = {q.task_family: q for q in decision_cfg.qualifications}
+    dec_qual = decision_quals["bounded_decision"]
+    assert dec_qual.disposition is QualificationDisposition.WATCH
+    assert dec_qual.score == "30/30"
+    assert dec_qual.false_safe_count == 0
+    assert dec_qual.decision_delta == "UNPROVEN"
+    assert dec_qual.runtime_admission is False
+
+
+def test_qwen27b_lineage_seed_shape() -> None:
+    registry = _registry()
+    lineage = registry.resolve_by_lineage_id("qwen-3.8-27b")
+    identities = {(i.provider, i.model) for i in lineage.execution_identities}
+    assert identities == {("tensorfold", "Vontra/Qwen3.8-27B-MLX-4bit")}
+    assert len(lineage.execution_configurations) == 1
+
+    cfg = lineage.execution_configurations[0]
+    assert cfg.config_id == "qwen3.8-27b-mlx4bit-tensorfold-drafted"
+    assert cfg.model == "Vontra/Qwen3.8-27B-MLX-4bit"
+    assert cfg.model_digest == "70ae7fac63274ff2eac54152031433374cb80f2f"
+    assert "DFlash2" in str(cfg.drafter)
+    assert cfg.runtime == "tensorfold"
+    assert cfg.context_limit == 32768
+    assert cfg.scaffold == "tensorfold_server"
+    assert cfg.write_mode == "read_only"
+
+    quals = {q.task_family: q for q in cfg.qualifications}
+    assist_qual = quals["semantic_assist"]
+    assert assist_qual.disposition is QualificationDisposition.WATCH
+    assert assist_qual.score == "4 ACCEPTABLE + 1 CORRECT_ABSTAIN"
+    assert assist_qual.false_safe_count == 0
+    assert assist_qual.online_escalation_ratio == "4/5"
+    assert assist_qual.decision_delta == "UNPROVEN"
+    assert assist_qual.runtime_admission is False
+
+
+def test_negative_control_short_tool_pass_does_not_promote_long_repo() -> None:
+    registry = _registry()
+    _, short_qual = registry.resolve_execution_qualification(
+        "occamy-1.0-q4-opencode-llama32k", "short_tool_use"
+    )
+    _, long_qual = registry.resolve_execution_qualification(
+        "occamy-1.0-q4-opencode-llama32k", "long_repo_episode"
+    )
+    assert short_qual.disposition is QualificationDisposition.PASS
+    assert long_qual.disposition is QualificationDisposition.STACK_UNQUALIFIED
+    assert short_qual.disposition != long_qual.disposition
+
+
+def test_negative_control_stack_unqualified_is_not_semantic_fail() -> None:
+    registry = _registry()
+    _, long_qual = registry.resolve_execution_qualification(
+        "occamy-1.0-q4-opencode-llama32k", "long_repo_episode"
+    )
+    assert long_qual.disposition is QualificationDisposition.STACK_UNQUALIFIED
+    assert long_qual.is_semantic_failure is False
+    assert long_qual.disposition is not QualificationDisposition.FAIL
+    assert "54902_gt_32768" in str(long_qual.failure_families)
+
+
+def test_negative_control_watch_does_not_promote_workforce_admission() -> None:
+    registry = _registry()
+    _, qual = registry.resolve_execution_qualification(
+        "qwen3.8-27b-mlx4bit-tensorfold-drafted", "semantic_assist"
+    )
+    assert qual.disposition is QualificationDisposition.WATCH
+    assert qual.runtime_admission is False
+
+    loader = WorkforcePolicyLoader()
+    snapshot = loader.load()
+    req = WorkforceAdmissionRequest(
+        provider="tensorfold",
+        model="Vontra/Qwen3.8-27B-MLX-4bit",
+        role="semantic_assist",
+        autonomy="L1",
+        context="nexus_bounded",
+        route_authorized=True,
+    )
+    decision = loader.admit(req, snapshot)
+    assert decision.decision is AdmissionDecision.BLOCK
+    assert any("Unknown worker" in r for r in decision.decision_reasons)
+
+
+def test_negative_control_not_evaluated_does_not_become_pass() -> None:
+    registry = _registry()
+    _, qual = registry.resolve_execution_qualification(
+        "occamy-1.0-q4-opencode-llama32k", "bounded_code_repair"
+    )
+    assert qual.disposition is QualificationDisposition.NOT_EVALUATED
+    assert qual.disposition is not QualificationDisposition.PASS
+
+
+def test_negative_control_semantic_lineage_equivalence_does_not_imply_configuration_equivalence() -> (
+    None
+):
+    registry = _registry()
+    lineage = registry.resolve_by_lineage_id("occamy-1.0")
+    by_id = {c.config_id: c for c in lineage.execution_configurations}
+    c1 = by_id["occamy-1.0-q4-opencode-llama32k"]
+    c2 = by_id["occamy-1.0-q4-typed-decision-selective-shadow"]
+
+    assert c1.config_id != c2.config_id
+    assert c1.scaffold != c2.scaffold
+    assert c1.write_mode != c2.write_mode
+    assert c1.state_preservation != c2.state_preservation
+    assert {q.task_family for q in c1.qualifications} != {q.task_family for q in c2.qualifications}
+
+
+def test_negative_control_execution_configuration_qualification_cannot_grant_admission(
+    tmp_path: Path,
+) -> None:
+    data = _minimal_lineage_yaml()
+    data["lineages"]["lineage-a"]["execution_configurations"] = [
+        {
+            "config_id": "cfg-invalid-admission",
+            "model": "m-a",
+            "qualifications": [
+                {
+                    "task_family": "short_tool_use",
+                    "disposition": "PASS",
+                    "phase": "FIRST_PASS",
+                    "runtime_admission": True,
+                }
+            ],
+        }
+    ]
+    bad = tmp_path / "bad-admission.yaml"
+    bad.write_text(yaml.dump(data), encoding="utf-8")
+    with pytest.raises(LineageValidationError, match="cannot grant runtime admission"):
+        ModelCapabilityLineageRegistry(bad).load()
+
+
+def test_negative_control_stack_unqualified_cannot_be_marked_semantic_failure(
+    tmp_path: Path,
+) -> None:
+    data = _minimal_lineage_yaml()
+    data["lineages"]["lineage-a"]["execution_configurations"] = [
+        {
+            "config_id": "cfg-invalid-stack-fail",
+            "model": "m-a",
+            "qualifications": [
+                {
+                    "task_family": "long_repo_episode",
+                    "disposition": "STACK_UNQUALIFIED",
+                    "phase": "RESOURCE_CONTEXT_QUALIFICATION",
+                    "is_semantic_failure": True,
+                }
+            ],
+        }
+    ]
+    bad = tmp_path / "bad-stack-fail.yaml"
+    bad.write_text(yaml.dump(data), encoding="utf-8")
+    with pytest.raises(LineageValidationError, match="stack/protocol limits are not semantic FAIL"):
+        ModelCapabilityLineageRegistry(bad).load()
+
+
+def test_unknown_and_ambiguous_configuration_identity_fails_closed() -> None:
+    registry = _registry()
+    with pytest.raises(LineageResolutionError, match="Unknown execution configuration identity"):
+        registry.get_execution_configuration("non-existent-cfg")
+
+    with pytest.raises(LineageResolutionError, match="Ambiguous execution configuration"):
+        registry.resolve_configuration(model="occamy-1.0-q4")
+
+    with pytest.raises(
+        LineageResolutionError, match="requires config_id or discriminating parameters"
+    ):
+        registry.resolve_configuration()
+
+    with pytest.raises(
+        LineageResolutionError, match="No registered execution configuration matches criteria"
+    ):
+        registry.resolve_configuration(model="non-existent-model")
+
+
+def test_resolve_configuration_exact_match() -> None:
+    registry = _registry()
+    lineage, cfg = registry.resolve_configuration(config_id="occamy-1.0-q4-opencode-llama32k")
+    assert lineage.lineage_id == "occamy-1.0"
+    assert cfg.config_id == "occamy-1.0-q4-opencode-llama32k"
+
+    lineage2, cfg2 = registry.resolve_configuration(
+        model="occamy-1.0-q4", scaffold="opencode_serve"
+    )
+    assert cfg2.config_id == "occamy-1.0-q4-opencode-llama32k"
+
+
+def test_read_only_evidence_bundle_exposes_configuration_without_provider_call(
+    monkeypatch,
+) -> None:
+    def _fail(*args, **kwargs):
+        raise AssertionError("calibration queries must never spawn a subprocess")
+
+    monkeypatch.setattr(subprocess, "Popen", _fail)
+    monkeypatch.setattr(subprocess, "run", _fail)
+
+    bundle = _planner().evidence_bundle(config_id="occamy-1.0-q4-opencode-llama32k")
+    assert bundle["selected_configuration"]["config_id"] == "occamy-1.0-q4-opencode-llama32k"
+    assert len(bundle["execution_configurations"]) >= 2
+    assert bundle["admission_authority"] == ADMISSION_AUTHORITY_SEPARATE
+
+
+def test_duplicate_config_id_rejected(tmp_path: Path) -> None:
+    data = _minimal_lineage_yaml()
+    data["lineages"]["lineage-a"]["execution_configurations"] = [
+        {"config_id": "dup-id", "model": "m-a"},
+        {"config_id": "dup-id", "model": "m-a"},
+    ]
+    bad = tmp_path / "bad-dup-config.yaml"
+    bad.write_text(yaml.dump(data), encoding="utf-8")
+    with pytest.raises(LineageValidationError, match="Duplicate execution configuration config_id"):
+        ModelCapabilityLineageRegistry(bad).load()
+
+
+def test_truthful_provenance_preserved_for_local_models() -> None:
+    registry = _registry()
+    for lineage_id in ("occamy-1.0", "qwen-3.8-27b"):
+        lineage = registry.resolve_by_lineage_id(lineage_id)
+        for record in lineage.evidence:
+            assert record.provenance == "EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK"
+            assert record.provenance != "DURABLE_REPOSITORY_RECEIPT"
+        for cfg in lineage.execution_configurations:
+            for q in cfg.qualifications:
+                assert q.provenance == "EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK"
+                assert q.provenance != "DURABLE_REPOSITORY_RECEIPT"
+
+
+def test_parameter_count_not_used_as_capability_identity() -> None:
+    registry = _registry()
+    occamy = registry.resolve_by_lineage_id("occamy-1.0")
+    by_id = {c.config_id: c for c in occamy.execution_configurations}
+    c_agent = by_id["occamy-1.0-q4-opencode-llama32k"]
+    c_decision = by_id["occamy-1.0-q4-typed-decision-selective-shadow"]
+
+    # Both share the same base model and quantization
+    assert c_agent.model == c_decision.model
+    assert c_agent.quant == c_decision.quant
+    # Capability identity is distinguished by runtime + scaffold + tool surface + state preservation
+    assert c_agent.runtime_build != c_decision.runtime_build
+    assert c_agent.scaffold != c_decision.scaffold
+    assert c_agent.tool_surface != c_decision.tool_surface
+    assert c_agent.state_preservation != c_decision.state_preservation
