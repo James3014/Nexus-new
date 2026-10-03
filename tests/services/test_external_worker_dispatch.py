@@ -270,8 +270,12 @@ def test_background_grok_rotates_once_with_same_operation_id(
         encoding="utf-8",
     )
     monkeypatch.setenv("NEXUS_GROK_ACCOUNT_POOL_ROOT", str(pool_root))
-    from nexus.services.grok_account_pool import set_grok_account_pool_manager
+    from nexus.services.grok_account_pool import (
+        GrokAccountPoolManager,
+        set_grok_account_pool_manager,
+    )
 
+    GrokAccountPoolManager(pool_root).bind_host(confirm_existing_pool=True)
     set_grok_account_pool_manager(None)
     root = tmp_path / "ops"
     record = dispatch._spawn_background(
