@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import functools
 import hashlib
 import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -16,6 +18,14 @@ import uuid
 from importlib import import_module
 from pathlib import Path
 from typing import Any, Optional
+
+
+class _SupervisorSignalError(BaseException):
+    """Raised by the supervisor signal handler to enter the terminalization path."""
+
+    def __init__(self, signum: int) -> None:
+        self.signum = signum
+        super().__init__(signum)
 
 
 def _default_snapshot() -> Path:
@@ -1469,6 +1479,89 @@ def _spawn_background_operation(
     return journal.bind_pid(operation_id, proc.pid)
 
 
+
+def _supervisor_terminal_guard(func):
+    """Cover background-supervisor startup and provider execution with durable terminalization."""
+
+    @functools.wraps(func)
+    def guarded(*args, **kwargs):
+        operation_id = str(kwargs["operation_id"])
+        operation_root = Path(kwargs["operation_root"])
+        cwd = str(kwargs["cwd"])
+        model = kwargs.get("model")
+        journal = AgyOperationJournal(operation_root)
+        attestation_log_path = journal.operation_dir(operation_id) / "agy.log"
+        prior_sigterm = signal.getsignal(signal.SIGTERM)
+        prior_sigint = signal.getsignal(signal.SIGINT)
+
+        def _signal_handler(signum: int, _frame: Any) -> None:
+            raise _SupervisorSignalError(signum)
+
+        def _terminalize_if_needed(
+            *,
+            unknown_failure_kind: str,
+            known_failure_kind: str,
+            unknown_result: str,
+            known_result: str,
+        ) -> None:
+            record = journal.read(operation_id)
+            phase = str(record.get("phase") or "QUEUED")
+            if phase == "TERMINAL":
+                return
+            provider_effect_possible = phase not in {
+                "QUEUED",
+                "STARTING",
+                "ACCOUNT_LEASED",
+            }
+            attestation = _parse_agy_attestation(
+                attestation_log_path,
+                requested_model=model,
+            )
+            journal.mark_terminal(
+                operation_id,
+                status="OUTCOME_UNKNOWN" if provider_effect_possible else "FAILED",
+                exit_code=record.get("exit_code"),
+                failure_kind=(
+                    unknown_failure_kind if provider_effect_possible else known_failure_kind
+                ),
+                cwd=cwd,
+                reconciliation={
+                    "at": _agy_operation_journal.utc_now(),
+                    "result": unknown_result if provider_effect_possible else known_result,
+                    "retry_permitted": False,
+                },
+                **attestation,
+            )
+
+        try:
+            signal.signal(signal.SIGTERM, _signal_handler)
+            signal.signal(signal.SIGINT, _signal_handler)
+            return func(*args, **kwargs)
+        except _SupervisorSignalError as sig_exc:
+            sig_name = signal.Signals(sig_exc.signum).name
+            _terminalize_if_needed(
+                unknown_failure_kind=f"SUPERVISOR_SIGNAL:{sig_name}",
+                known_failure_kind=f"SUPERVISOR_SIGNAL_PRE_PROVIDER:{sig_name}",
+                unknown_result="SUPERVISOR_SIGNAL_WITH_UNKNOWN_PROVIDER_EFFECT",
+                known_result="SUPERVISOR_SIGNAL_BEFORE_PROVIDER",
+            )
+            raise
+        except BaseException as exc:
+            _terminalize_if_needed(
+                unknown_failure_kind=f"WRAPPER_EXCEPTION:{type(exc).__name__}",
+                known_failure_kind=f"WRAPPER_EXCEPTION_PRE_PROVIDER:{type(exc).__name__}",
+                unknown_result="WRAPPER_EXCEPTION_WITH_UNKNOWN_PROVIDER_EFFECT",
+                known_result="WRAPPER_EXCEPTION_BEFORE_PROVIDER",
+            )
+            raise
+        finally:
+            signal.signal(signal.SIGTERM, prior_sigterm)
+            signal.signal(signal.SIGINT, prior_sigint)
+
+    return guarded
+
+
+@_supervisor_terminal_guard
 def _run_background_operation(
     *,
     operation_id: str,
@@ -1601,6 +1694,8 @@ def _run_background_operation(
             **attestation,
         )
         return int(exit_code or 0)
+    except _SupervisorSignalError:
+        raise
     except BaseException as exc:
         attestation = _parse_agy_attestation(
             attestation_log_path,
