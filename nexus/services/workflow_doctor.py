@@ -524,6 +524,12 @@ def _operation_path(home: Path, operation_id: str) -> Path | None:
         return (
             home / ".local/state/nexus-agy-operations/operations" / operation_id / "operation.json"
         )
+    if operation_id.startswith("devmcpop_"):
+        return home / ".local/state/nexus-dev-mcp/operations" / operation_id / "operation.json"
+    if operation_id.startswith("rdcop_"):
+        return (
+            home / ".local/state/nexus-rdc-operations/operations" / operation_id / "operation.json"
+        )
     for prefix, provider in _EXTERNAL_PREFIXES.items():
         if operation_id.startswith(prefix):
             return (
@@ -561,7 +567,11 @@ def _collect_operations(
             if selected is None:
                 selected_error = "OPERATION_NOT_FOUND_OR_INVALID"
 
-    roots = [home / ".local/state/nexus-agy-operations/operations"]
+    roots = [
+        home / ".local/state/nexus-agy-operations/operations",
+        home / ".local/state/nexus-dev-mcp/operations",
+        home / ".local/state/nexus-rdc-operations/operations",
+    ]
     external_root = home / ".local/state/nexus-external-worker"
     if external_root.is_dir():
         roots.extend(path / "operations" for path in external_root.iterdir() if path.is_dir())
