@@ -131,6 +131,18 @@ TRUSTED_PR1288_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, s
         "1defe6b2b7251fd060fb3613bbb9875ec38b4c6ea4dbd8febc36dcb10d1724f1",
     ),
 )
+# Exact one-use, four-way binding for Owner-approved PR #1375 (Issue #456
+# canonical compatibility Runtime pin adoption).
+TRUSTED_PR1375_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1375,
+    (
+        "40012ce8452131f446fce0feb8f508f050a8b0dc875837eac1b623007e7388b8",
+        "33543bf4216e10131b08c30951d65bed92ab98bb39e0e9fdde417bdf68a189c0",
+        "2fce493ab2843794c1d44665fa68e8292c321fb937e04918795b39b124a99c4e",
+        "1defe6b2b7251fd060fb3613bbb9875ec38b4c6ea4dbd8febc36dcb10d1724f1",
+    ),
+)
+
 REQUIRED_EVIDENCE_KEYS = {
     "schema_version",
     "status",
@@ -210,6 +222,7 @@ def _validate_trusted_dependency_contract(
         TRUSTED_PR960_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR1013_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR1288_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1375_DEPENDENCY_SNAPSHOT_TRANSITION,
     )
     for authorized_transition_record in authorized_transition_records:
         if authorized_transition_record is None:
