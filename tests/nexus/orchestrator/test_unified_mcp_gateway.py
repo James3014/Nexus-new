@@ -4221,6 +4221,30 @@ def test_execution_readiness_source_identity_mismatch_fails_closed(readiness_env
     assert statuses["GATEWAY_PLANE"] == "UNPROVEN"
 
 
+def test_execution_readiness_external_repository_routes_to_core_without_gateway_rebind(
+    readiness_env,
+):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    payload = _call_readiness(
+        gateway,
+        {
+            "repository_owner": "skidiy",
+            "repository_name": "frontend.vue",
+        },
+    )
+    assert payload["outcome"] == "BLOCKED"
+    blocker = payload["primary_blocker"]
+    assert blocker["code"] == "EXTERNAL_REPOSITORY_SUBJECT"
+    assert blocker["plane"] == "SOURCE_PLANE"
+    assert blocker["next_action"] == "ROUTE_TO_NEXUS_CORE_EXTERNAL_VERIFICATION"
+    assert "Nexus Core" in blocker["message"]
+    assert "BIND_EXACT_DESIRED_SOURCE_IDENTITY" not in json.dumps(blocker)
+    statuses = _status_map(payload)
+    assert statuses["GOVERNANCE_PLANE"] == "PASSED"
+    assert statuses["SOURCE_PLANE"] == "BLOCKED"
+    assert statuses["GATEWAY_PLANE"] == "UNPROVEN"
+
+
 def test_execution_readiness_missing_physical_source_fails_closed(readiness_env, monkeypatch):
     import nexus.orchestrator.unified_mcp_gateway as gateway_module
 

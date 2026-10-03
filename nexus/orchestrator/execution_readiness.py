@@ -65,6 +65,9 @@ _BLOCKER_NEXT_ACTION: dict[ExecutionReadinessBlockerCode, CanonicalNextAction] =
     ExecutionReadinessBlockerCode.SOURCE_REALM_MISMATCH: (
         CanonicalNextAction.BIND_EXACT_DESIRED_SOURCE_IDENTITY
     ),
+    ExecutionReadinessBlockerCode.EXTERNAL_REPOSITORY_SUBJECT: (
+        CanonicalNextAction.ROUTE_TO_NEXUS_CORE_EXTERNAL_VERIFICATION
+    ),
     ExecutionReadinessBlockerCode.GATEWAY_REBIND_REQUIRED: (
         CanonicalNextAction.ROUTE_TO_ISSUE_526_GATEWAY_REBIND_RELOAD
     ),
@@ -105,6 +108,11 @@ _BLOCKER_MESSAGE: dict[ExecutionReadinessBlockerCode, str] = {
     ),
     ExecutionReadinessBlockerCode.SOURCE_REALM_MISMATCH: (
         "observed source realm identity does not match the intended source identity"
+    ),
+    ExecutionReadinessBlockerCode.EXTERNAL_REPOSITORY_SUBJECT: (
+        "requested repository is not the Gateway source realm; route the exact external Git "
+        "subject to the standalone Nexus Core verification surface instead of rebinding the "
+        "Gateway source"
     ),
     ExecutionReadinessBlockerCode.GATEWAY_REBIND_REQUIRED: (
         "route gateway rebinding to the issue #526 canonical rebind/reload primitive; "
@@ -294,7 +302,7 @@ def evaluate_source_binding(
         return PlaneObservation(
             plane=ExecutionReadinessPlane.SOURCE,
             status=ExecutionReadinessStatus.BLOCKED,
-            blocker_code=ExecutionReadinessBlockerCode.SOURCE_REALM_MISMATCH,
+            blocker_code=ExecutionReadinessBlockerCode.EXTERNAL_REPOSITORY_SUBJECT,
             evidence_identities=evidence,
         )
     if (
