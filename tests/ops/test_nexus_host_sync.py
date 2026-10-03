@@ -28,15 +28,22 @@ CANONICAL_SOURCE_ROOT = ROOT / "nexus" / "orchestrator" / "canonical_source_root
 EXTERNAL_DISPATCH = ROOT / "scripts" / "ops" / "nexus-external-worker-dispatch"
 EXTERNAL_DISPATCH_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_external_worker_dispatch.sh"
 GROK_ACCOUNTS = ROOT / "scripts" / "ops" / "nexus-grok-accounts"
+HCOM_AGY_SAFE = ROOT / "scripts" / "ops" / "nexus-hcom-agy-safe"
 MANAGER_SHA = "4c0e326fc72ea98f9d6d80957055a4e8a2d7387f681dea903f2a072942d2e31c"
 LAUNCHD_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_host_sync_launchd.sh"
 BOOTSTRAP_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_host_sync.sh"
 
 
-def _run(argv: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+def _run(
+    argv: list[str],
+    *,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         argv,
         cwd=cwd,
+        env=env,
         capture_output=True,
         text=True,
         check=False,
@@ -91,6 +98,7 @@ def _make_source_repo(tmp_path: Path) -> Path:
         ),
         (EXTERNAL_DISPATCH, "scripts/ops/nexus-external-worker-dispatch"),
         (GROK_ACCOUNTS, "scripts/ops/nexus-grok-accounts"),
+        (HCOM_AGY_SAFE, "scripts/ops/nexus-hcom-agy-safe"),
         (
             EXTERNAL_DISPATCH_INSTALLER,
             "scripts/ops/install_nexus_external_worker_dispatch.sh",
@@ -188,7 +196,9 @@ def _invoke(
         argv += ["--no-fetch"]
     elif command in {"status", "verify"} and desired_bundle:
         argv += ["--desired-bundle-sha256", desired_bundle]
-    return _run(argv, cwd=ROOT)
+    env = os.environ.copy()
+    env["NEXUS_HCOM_AGY_TARGET"] = str(dispatch_target.parent / "hcom-agy-safe")
+    return _run(argv, cwd=ROOT, env=env)
 
 
 def test_workflow_doctor_manifest_requires_canonical_source_root(tmp_path: Path) -> None:
@@ -258,6 +268,10 @@ def test_sync_materializes_exact_generation_and_entrypoints(tmp_path: Path) -> N
     assert payload["components"]["external_worker_dispatch"]["status"] == "VERIFIED"
     assert payload["components"]["grok_accounts"]["status"] == "VERIFIED"
     assert payload["components"]["agy_account_manager"]["status"] == "VERIFIED"
+    assert payload["components"]["hcom_agy_safe"]["status"] == "VERIFIED"
+    hcom_target = dispatch_target.parent / "hcom-agy-safe"
+    assert hcom_target.is_symlink()
+    assert hcom_target.resolve().read_bytes() == HCOM_AGY_SAFE.read_bytes()
     assert dispatch_target.is_symlink()
     assert (dispatch_target.parent / "nexus-agy-quota").is_symlink()
     assert (dispatch_target.parent / "nexus-workflow-doctor").is_symlink()
