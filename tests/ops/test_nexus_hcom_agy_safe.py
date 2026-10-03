@@ -30,6 +30,11 @@ def test_launcher_uses_full_active_account_home_and_cleans_ephemeral_copy(tmp_pa
     )
     (profile / "profile-marker.txt").write_text("active-profile", encoding="utf-8")
 
+    # Negative identity control: the owner HOME contains a conflicting .gemini
+    # identity. The launcher must still copy the canonical account snapshot HOME.
+    (original_home / ".gemini").mkdir(parents=True, exist_ok=True)
+    (original_home / ".gemini" / "auth.json").write_text("stale-owner-auth", encoding="utf-8")
+
     stale = manager_root.parent / "live-home"
     (stale / ".gemini").mkdir(parents=True)
     (stale / "profile-marker.txt").write_text("stale-live-home", encoding="utf-8")
@@ -73,17 +78,35 @@ if len(sys.argv) >= 2 and sys.argv[1] == "agy":
         "hcom_dir": os.environ.get("HCOM_DIR"),
         "profile_marker": (home / "profile-marker.txt").read_text(),
         "auth_present": (home / ".gemini" / "auth.json").is_file(),
+        "auth_value": (home / ".gemini" / "auth.json").read_text(),
         "keychain_present": (home / "Library" / "Keychains" / "agy.keychain-db").is_file(),
         "stale_marker": (home / "stale-marker.txt").exists(),
         "sensitive_present": any(
             key in os.environ
-            for key in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY")
+            for key in (
+                "GEMINI_API_KEY",
+                "GOOGLE_API_KEY",
+                "GOOGLE_GENAI_API_KEY",
+                "GH_TOKEN",
+                "GITHUB_TOKEN",
+                "GH_ENTERPRISE_TOKEN",
+                "GITHUB_ENTERPRISE_TOKEN",
+                "GITHUB_PAT",
+                "GITHUB_ACTIONS_TOKEN",
+            )
         ),
     }
     pathlib.Path(os.environ["HCOM_TEST_RECORD"]).write_text(json.dumps(payload))
     raise SystemExit(0)
 raise SystemExit(2)
 """,
+    )
+
+    hcom_dir = original_home / ".hcom"
+    hcom_dir.mkdir()
+    (hcom_dir / "env").write_text(
+        "GEMINI_MODEL=gemini-safe-model\nGITHUB_TOKEN=\n",
+        encoding="utf-8",
     )
 
     state_root = original_home / ".local" / "state" / "hcom-agy-safe"
@@ -100,6 +123,12 @@ raise SystemExit(2)
         "GEMINI_API_KEY": "must-not-leak",
         "GOOGLE_API_KEY": "must-not-leak",
         "GOOGLE_GENAI_API_KEY": "must-not-leak",
+        "GH_TOKEN": "must-not-leak",
+        "GITHUB_TOKEN": "must-not-leak",
+        "GH_ENTERPRISE_TOKEN": "must-not-leak",
+        "GITHUB_ENTERPRISE_TOKEN": "must-not-leak",
+        "GITHUB_PAT": "must-not-leak",
+        "GITHUB_ACTIONS_TOKEN": "must-not-leak",
     })
 
     proc = subprocess.run(
@@ -112,9 +141,10 @@ raise SystemExit(2)
 
     assert proc.returncode == 0, proc.stderr
     payload = json.loads(record_path.read_text(encoding="utf-8"))
-    assert payload["args"] == ["--model", "gpt-oss-120b-medium"]
+    assert payload["args"] == ["--terminal", "here", "--model", "gpt-oss-120b-medium"]
     assert payload["profile_marker"] == "active-profile"
     assert payload["auth_present"] is True
+    assert payload["auth_value"] == "active-auth"
     assert payload["keychain_present"] is True
     assert payload["sensitive_present"] is False
     assert payload["gemini_home"] == payload["home"]
@@ -132,16 +162,59 @@ raise SystemExit(2)
     ]
 
 
-def test_launcher_rejects_headless_before_creating_ephemeral_home(tmp_path: Path) -> None:
+def test_launcher_rejects_headless_before_creating_ephemeral_home(
+    tmp_path: Path,
+) -> None:
+    for forwarded_args in (
+        ["--headless"],
+        ["--terminal", "iterm"],
+        ["--terminal=iterm"],
+        ["--device", "other-mac"],
+        ["--device=other-mac"],
+    ):
+        env = os.environ.copy()
+        env["HOME"] = str(tmp_path)
+        proc = subprocess.run(
+            [sys.executable, str(LAUNCHER), *forwarded_args],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert proc.returncode == 2
+        assert "DETACHED_LAUNCH_DISABLED:" in proc.stderr
+        assert not (tmp_path / ".local" / "state" / "hcom-agy-safe").exists()
+
+
+def test_launcher_rejects_sensitive_hcom_passthrough_before_account_copy(tmp_path: Path) -> None:
+    original_home = tmp_path / "owner-home"
+    hcom_dir = original_home / ".hcom"
+    hcom_dir.mkdir(parents=True)
+    (hcom_dir / "env").write_text(
+        "GEMINI_MODEL=allowed\nGITHUB_TOKEN=must-not-reenter\n",
+        encoding="utf-8",
+    )
+
+    manager = tmp_path / "agy-cli-manager"
+    _write_executable(manager, "#!/bin/sh\nexit 99\n")
+    hcom = tmp_path / "hcom"
+    _write_executable(hcom, "#!/bin/sh\nexit 99\n")
+
     env = os.environ.copy()
-    env["HOME"] = str(tmp_path)
+    env.update({
+        "HOME": str(original_home),
+        "NEXUS_AGY_MANAGER": str(manager),
+        "NEXUS_AGY_MANAGER_ROOT": str(tmp_path / "runtime"),
+        "NEXUS_HCOM_BIN": str(hcom),
+    })
     proc = subprocess.run(
-        [sys.executable, str(LAUNCHER), "--headless"],
+        [sys.executable, str(LAUNCHER)],
         env=env,
         capture_output=True,
         text=True,
         check=False,
     )
+
     assert proc.returncode == 2
-    assert "HEADLESS_DISABLED_EPHEMERAL_HOME_LIFETIME" in proc.stderr
-    assert not (tmp_path / ".local" / "state" / "hcom-agy-safe").exists()
+    assert "HCOM_ENV_FORBIDDEN_KEY:GITHUB_TOKEN" in proc.stderr
+    assert not (original_home / ".local" / "state" / "hcom-agy-safe").exists()
