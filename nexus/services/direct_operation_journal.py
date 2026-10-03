@@ -8,6 +8,7 @@ acceptance, merge, release, or production authority.
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 import socket
@@ -60,6 +61,8 @@ PUBLIC_OPERATION_KEYS = (
     "failure_kind",
     "exit_code",
     "observed_changed_paths",
+    "source_baseline_sha256",
+    "source_attribution_state",
     "reconciliation",
     "stdout_path",
     "stderr_path",
@@ -168,26 +171,179 @@ def _git_identity(cwd: str) -> tuple[str | None, str | None]:
     return repo_root, head.stdout.strip() if head.returncode == 0 else None
 
 
-def observed_changed_paths(cwd: str) -> list[str]:
+SOURCE_BASELINE_SCHEMA = "nexus.source_baseline.v1"
+
+
+def _safe_repo_relative_path(value: str) -> str | None:
+    path = Path(value)
+    if not value or path.is_absolute() or ".." in path.parts:
+        return None
+    return value
+
+
+def _path_fingerprint(root: Path, relative: str) -> dict[str, str] | None:
+    safe = _safe_repo_relative_path(relative)
+    if safe is None:
+        return None
+    target = root / safe
+    try:
+        if target.is_symlink():
+            payload = os.fsencode(os.readlink(target))
+            return {"kind": "symlink", "sha256": hashlib.sha256(payload).hexdigest()}
+        if not target.exists():
+            return {"kind": "missing", "sha256": hashlib.sha256(b"missing").hexdigest()}
+        if target.is_file():
+            digest = hashlib.sha256()
+            with target.open("rb") as fh:
+                while True:
+                    chunk = fh.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+            return {"kind": "file", "sha256": digest.hexdigest()}
+        if target.is_dir():
+            return {"kind": "directory", "sha256": hashlib.sha256(b"directory").hexdigest()}
+    except OSError:
+        return None
+    return None
+
+
+def _status_entries(cwd: str) -> dict[str, dict[str, str]] | None:
+    root_text, _head = _git_identity(cwd)
+    if not root_text:
+        return None
+    root = Path(root_text)
     proc = subprocess.run(
-        ["git", "-C", cwd, "status", "--porcelain=v1", "-z"],
+        [
+            "git",
+            "-C",
+            cwd,
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+        ],
         capture_output=True,
         check=False,
     )
     if proc.returncode != 0:
-        return []
-    paths: set[str] = set()
-    for raw in proc.stdout.split(b"\0"):
+        return None
+
+    records = proc.stdout.split(b"\0")
+    entries: dict[str, dict[str, str]] = {}
+    index = 0
+    while index < len(records):
+        raw = records[index]
+        index += 1
         if not raw:
             continue
-        text = raw.decode("utf-8", errors="replace")
-        if len(text) >= 4:
-            path = text[3:]
-            if " -> " in path:
-                path = path.split(" -> ", 1)[1]
-            if path:
-                paths.add(path)
-    return sorted(paths)
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+        if len(text) < 4 or text[2] != " ":
+            return None
+        status = text[:2]
+        path = _safe_repo_relative_path(text[3:])
+        if path is None:
+            return None
+        fingerprint = _path_fingerprint(root, path)
+        if fingerprint is None:
+            return None
+        entries[path] = {"status": status, **fingerprint}
+
+        if status[0] in {"R", "C"} or status[1] in {"R", "C"}:
+            if index >= len(records) or not records[index]:
+                return None
+            try:
+                source_path = records[index].decode("utf-8")
+            except UnicodeDecodeError:
+                return None
+            index += 1
+            source_path = _safe_repo_relative_path(source_path)
+            if source_path is None:
+                return None
+            source_fingerprint = _path_fingerprint(root, source_path)
+            if source_fingerprint is None:
+                return None
+            entries[source_path] = {"status": "OR", **source_fingerprint}
+    return dict(sorted(entries.items()))
+
+
+def capture_source_baseline(cwd: str) -> dict[str, Any] | None:
+    entries = _status_entries(cwd)
+    if entries is None:
+        return None
+    return {"schema": SOURCE_BASELINE_SCHEMA, "entries": entries}
+
+
+def _valid_source_baseline(baseline: object) -> bool:
+    if not isinstance(baseline, dict):
+        return False
+    if set(baseline) != {"schema", "entries"}:
+        return False
+    if baseline.get("schema") != SOURCE_BASELINE_SCHEMA:
+        return False
+    entries = baseline.get("entries")
+    if not isinstance(entries, dict):
+        return False
+    for path, entry in entries.items():
+        if not isinstance(path, str) or _safe_repo_relative_path(path) != path:
+            return False
+        if not isinstance(entry, dict) or set(entry) != {"status", "kind", "sha256"}:
+            return False
+        status = entry.get("status")
+        kind = entry.get("kind")
+        digest = entry.get("sha256")
+        if not isinstance(status, str) or len(status) != 2:
+            return False
+        if kind not in {"file", "symlink", "missing", "directory"}:
+            return False
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(ch not in "0123456789abcdef" for ch in digest)
+        ):
+            return False
+    return True
+
+
+def source_baseline_sha256(baseline: object) -> str | None:
+    if not _valid_source_baseline(baseline):
+        return None
+    assert isinstance(baseline, dict)
+    encoded = json.dumps(
+        baseline,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def observed_changed_paths_since(cwd: str, baseline: object) -> list[str] | None:
+    if source_baseline_sha256(baseline) is None:
+        return None
+    assert isinstance(baseline, dict)
+    baseline_entries = baseline.get("entries")
+    if not isinstance(baseline_entries, dict):
+        return None
+    current = capture_source_baseline(cwd)
+    if current is None:
+        return None
+    current_entries = current["entries"]
+    return sorted(
+        path
+        for path in set(baseline_entries) | set(current_entries)
+        if baseline_entries.get(path) != current_entries.get(path)
+    )
+
+
+def observed_changed_paths(cwd: str) -> list[str]:
+    snapshot = capture_source_baseline(cwd)
+    if snapshot is None:
+        return []
+    return sorted(snapshot["entries"])
 
 
 class DirectOperationJournal:
@@ -249,11 +405,18 @@ class DirectOperationJournal:
     ) -> dict[str, Any]:
         operation_id = self._validate_operation_id(operation_id)
         op_dir = self.operation_dir(operation_id)
+        if op_dir.exists():
+            raise DirectOperationJournalError("OPERATION_ALREADY_EXISTS")
+        repo_root, base_head = _git_identity(cwd)
+        source_baseline = capture_source_baseline(cwd) if repo_root else None
+        source_baseline_hash = source_baseline_sha256(source_baseline)
+        source_attribution_state = (
+            "BASELINE_CAPTURED" if source_baseline_hash is not None else "UNAVAILABLE"
+        )
         try:
             op_dir.mkdir(parents=True, mode=0o700, exist_ok=False)
         except FileExistsError as exc:
             raise DirectOperationJournalError("OPERATION_ALREADY_EXISTS") from exc
-        repo_root, base_head = _git_identity(cwd)
         now = utc_now()
         record: dict[str, Any] = {
             "schema": self.schema,
@@ -290,6 +453,9 @@ class DirectOperationJournal:
             "failure_kind": None,
             "exit_code": None,
             "observed_changed_paths": [],
+            "source_baseline": source_baseline,
+            "source_baseline_sha256": source_baseline_hash,
+            "source_attribution_state": source_attribution_state,
             "reconciliation": None,
             "stdout_path": str(self.stdout_path(operation_id)),
             "stderr_path": str(self.stderr_path(operation_id)),
@@ -300,6 +466,9 @@ class DirectOperationJournal:
                 "operation_id",
                 "attempt_id",
                 "prompt_sha256",
+                "source_baseline",
+                "source_baseline_sha256",
+                "source_attribution_state",
                 "stdout_path",
                 "stderr_path",
             }
@@ -394,7 +563,34 @@ class DirectOperationJournal:
             "failure_kind": failure_kind,
         }
         if cwd:
-            payload["observed_changed_paths"] = observed_changed_paths(cwd)
+            record = self.read(operation_id)
+            baseline = record.get("source_baseline")
+            baseline_hash = record.get("source_baseline_sha256")
+            valid_baseline_hash = source_baseline_sha256(baseline)
+            record_root = record.get("repo_root")
+            current_root, _current_head = _git_identity(cwd)
+            try:
+                same_root = bool(
+                    isinstance(record_root, str)
+                    and isinstance(current_root, str)
+                    and os.path.samefile(record_root, current_root)
+                )
+            except OSError:
+                same_root = False
+            if (
+                same_root
+                and isinstance(baseline_hash, str)
+                and valid_baseline_hash == baseline_hash
+            ):
+                delta = observed_changed_paths_since(cwd, baseline)
+            else:
+                delta = None
+            if delta is None:
+                payload["observed_changed_paths"] = []
+                payload["source_attribution_state"] = "UNAVAILABLE"
+            else:
+                payload["observed_changed_paths"] = delta
+                payload["source_attribution_state"] = "ATTRIBUTED"
         payload.update(changes)
         return self.update(operation_id, **payload)
 
