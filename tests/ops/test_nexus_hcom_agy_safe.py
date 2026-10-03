@@ -162,7 +162,7 @@ raise SystemExit(2)
     ]
 
 
-def test_launcher_rejects_detached_hcom_launch_modes_before_creating_home(
+def test_launcher_rejects_headless_before_creating_ephemeral_home(
     tmp_path: Path,
 ) -> None:
     for forwarded_args in (
