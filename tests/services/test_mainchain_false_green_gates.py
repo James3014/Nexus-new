@@ -143,8 +143,8 @@ def test_p0_tampered_seal_blocks_local_and_online(monkeypatch) -> None:
 
     real_verify = ceb._verify_evidence_bundle
 
-    def _fail_verify(bundle):  # type: ignore[no-untyped-def]
-        v = real_verify(bundle)
+    def _fail_verify(bundle, **kwargs):  # type: ignore[no-untyped-def]
+        v = real_verify(bundle, **kwargs)
         if v.get("ok"):
             return {
                 **v,
@@ -231,7 +231,6 @@ def test_p0_empty_evidence_ids_not_consumed() -> None:
             }
         },
         selected_capabilities=["codeintel"],
-        source_hash="src",
     )
     rec = record_consumption(
         bundle=bundle,

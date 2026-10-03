@@ -1515,7 +1515,7 @@ def test_evidence_seal_failure_preserves_admitted_online_authority_without_invok
     monkeypatch.setattr(
         evidence_bundle_module,
         "_verify_evidence_bundle",
-        lambda _bundle: {"ok": False, "blockers": ["forced_seal_failure"]},
+        lambda _bundle, **_kwargs: {"ok": False, "blockers": ["forced_seal_failure"]},
     )
     from nexus.services import runtime_compat
     monkeypatch.setattr(sys.modules[__name__], "UnifiedRuntime", runtime_compat.build_host_runtime_exports().UnifiedRuntime)
