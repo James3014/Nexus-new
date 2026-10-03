@@ -4,13 +4,9 @@ Scope: all coding agents.
 
 ## RepoLearn activation
 
-- RepoLearn: `ENABLED`.
-- Canonical source: `James3014/repo-learning`.
-- Capability: `repo-learning`.
-- Expected contract: `g5-learning-control-loop-v3` / `8fa154f05bb3a5a1652d8a0b8388e718ce685257a2da26e2121c2ce52a9855ac`.
-- Mode: `guided`.
-- If RepoLearn or its learning-state backend is unavailable, continue normal engineering without weakening this repository's authority or verification requirements.
-- This pointer activates/references canonical RepoLearn only; it does not redefine trigger, assessment, mastery, persistence, or cue-fading policy.
+- RepoLearn: `ENABLED`; source `James3014/repo-learning`; mode `guided`.
+- Contract: `g5-learning-control-loop-v3` / `8fa154f05bb3a5a1652d8a0b8388e718ce685257a2da26e2121c2ce52a9855ac`.
+- If unavailable, continue normally without weakening authority.
 
 ## Authority bootstrap
 
@@ -21,203 +17,90 @@ Scope: all coding agents.
   bounded `DIRECT_DELEGATED` milestone through an approved non-Nexus control
   plane, without a Task Card or Nexus lifecycle state solely because a worker is
   delegated.
-- Governed authority: the active Git-tracked Task Card under
-  `tasks/<campaign-id>/`.
+- Governed authority: the active Git-tracked Task Card under `tasks/<campaign-id>/`.
 - `MUSE_PROTO.md` is response/domain overlay, never mutation authority.
 
 For new work, read `docs/governance/current_operating_mode.yaml` before
 choosing an execution lane. Within the file's declared scope, its default lane
 selection applies unless the work crosses a listed governed-escalation boundary
 or the Owner explicitly selects a different lane. Existing active work keeps its
-current execution contract until completion; it does not switch lanes mid-task.
+current execution contract; no mid-task lane switch.
 If the operating-mode file is missing, invalid, or ambiguous, fail closed to an
 explicit current Owner lane decision rather than guessing.
 
 The operating mode selects only the engineering execution lane. It cannot select
 or override a `CapabilityPlanner` route/capability, worker/model eligibility,
-verification, approval, integration, release, or production authority. Lane
-governs authorization, not correctness: source behavior, tests, and required
-verifiers remain authoritative.
+verification, approval, integration, release, or production authority.
 
 ### Current self-hosting stabilization semantics
 
-`mode: BOOTSTRAP` in `docs/governance/current_operating_mode.yaml` means Nexus is
-still in self-hosting stabilization. G10 or any later governed canary proves a
-governed path can work; it does not by itself change the repository default
-execution lane. While this mode remains active, eligible bounded Nexus work may
-continue to use `DIRECT_CANONICAL` or `DIRECT_DELEGATED` under their existing
-scope, safety, verification, and governed-escalation boundaries. Governed work
-and representative `NEXUS_GOVERNED` pilots remain valid, but are not mandatory
-for every bounded Nexus change solely because G10 completed.
-
-Nexus execution lanes and execution transports are distinct concepts.
-`DIRECT_CANONICAL`, `DIRECT_DELEGATED`, and `GOVERNED` define authority and
-verification requirements; a host tool or external control plane does not choose
-or widen that authority. Owner-approved transports may include direct host tools
-such as Desktop Commander or bounded external worker planes such as DevSpace,
-but transport identity is not Nexus route, approval, completion, merge, release,
-or production authority. Once one attempt has entered governed authority, missing, stale, expired,
+`mode: BOOTSTRAP` means self-hosting stabilization; G10 alone does not change the default
+execution lane. Transports never choose or widen lane authority. Once one attempt has entered governed authority, missing, stale, expired,
 unavailable, or failed authority or transport must never silently downgrade that attempt
-to direct authority. It must block, rebind, reconcile, or start a separately
-Owner-authorized recovery/direct attempt with a new authority identity.
-
+to direct authority; block, rebind, reconcile, or start a separately
+Owner-authorized recovery attempt with a new identity.
 `NEXUS_GOVERNANCE_DEFAULT_READY` is an Owner-only transition decision. It is not
-inferred from G10, tests, an agent, a Task Card, CI, or runtime state. Before the
-Owner declares it, evidence should cover representative real governed tasks;
-continuation, timeout, reconcile, and restart paths; Nexus self-modification
-without routine authority recursion; sufficiently stable Task Card, grant,
-admission, and execution contracts; common work no longer requiring routine
-direct bypass; and a proven direct recovery path for restoring the governance
-plane. After that declaration, a separate policy change may make governed
-execution the default and narrow direct authority. Until then, narrowly typed
-Owner-approved bootstrap or environment capabilities remain compatible with the
-current stabilization policy when they preserve the active lane and its scope,
-verification, and claim ceilings. Historical DevSpace `OWNER_DIRECT` helpers
-such as `workspace_clone` and `dependency_sync` are examples of such transport
-capabilities, not required Nexus authority primitives.
+inferred from G10, tests, an agent, a Task Card, CI, or runtime state.
 
 ## Repository collaboration authority (GitHub)
 
-- The collaboration repository is `James3014/Nexus-new`; default and
-  collaboration branch is `main`.
-- G12 Fast Start advisory-cache gate: before any GitHub Issue implementation source/test body reads, primary Codex/coordinator must consult #549 as `ADVISORY_CACHE_ONLY`. `BLOCKED`, `HOST_REBIND_REQUIRED`, `NEEDS_DECISION`, and `EVIDENCE_BLOCKED` require fresh metadata-only rebind and must not read diff, patch, or implementation bodies; if still non-ready, stop. `READY_CANDIDATE` is not authority; fresh Issue/dependencies/main/host and normal gates remain required. Missing, stale, malformed, hash-invalid, wrong-authority, or contradictory cache fails closed to normal authoritative discovery. Fast Start consumers are read-only for #549/product Issues; see `docs/agents/TASK_EXECUTION_CONTRACT.md`.
+- Repository `James3014/Nexus-new`; collaboration branch `main`. Never merge runtime history into `main` to align SHAs.
+- G12 Fast Start advisory-cache gate: before any GitHub Issue implementation source/test body reads, consult #549 as `ADVISORY_CACHE_ONLY`. `BLOCKED`, `HOST_REBIND_REQUIRED`, `NEEDS_DECISION`, `EVIDENCE_BLOCKED` need fresh metadata-only rebind and must not read diff, patch, or implementation bodies; if still non-ready, stop. `READY_CANDIDATE` is not authority; fresh Issue/dependencies/main/host and normal gates remain required. Missing, stale, malformed, or contradictory cache fails closed to normal authoritative discovery. Fast Start consumers are read-only for #549/product Issues; see `docs/agents/TASK_EXECUTION_CONTRACT.md`. Cache/metadata never replaces source/test evidence or canonical authority.
 - **Project-entry invariant (#842):** on the first explicit Nexus/project-bound
   action for a repository + Issue, the primary coordinator MUST call
-  `nexus_project_entry` before any Nexus-governed effectful action. This applies
-  regardless of phrasing (`continue ... #N`, `處理 #N`, `幫我修 #N`, or an
-  equivalent issue-bound follow-up); keyword choice is not an authorization
-  signal. The Project Entry result is pre-execution evidence only.
+  `nexus_project_entry` before any Nexus-governed effectful action, regardless of
+  phrasing (`continue ... #N`, `處理 #N`, `幫我修 #N`). Result is pre-execution evidence only.
 - If Project Entry is not `READY_TO_EXECUTE`, surface its single canonical
-  blocker and next action and STOP the governed effect path. Do not jump directly
-  to `nexus_task_card_create`, worker/Candidate mutation, alternate shell/CLI
-  transport, carrier pairing, copied authority material, or handwritten
-  standing-grant diagnosis. Recovery/rebind remains owned by the blocker’s
-  existing canonical owner (#806 break-glass or #526 Gateway rebind as applicable).
+  blocker and STOP governed effects. Do not jump directly
+  to `nexus_task_card_create` or worker/Candidate mutation; recovery stays with #806 or #526.
 - A Project Entry `READY_TO_EXECUTE` result is pre-execution evidence, not proof
-  that the next governed authority/effect action exists on the caller's bound MCP
-  surface. Before the first `GOVERNED` effect, prove the exact next required
-  public action is present on that bound surface. For Task Card bootstrap without
-  a current valid standing grant, `nexus_owner_standing_grant_issue` must be
-  present before `nexus_task_card_create` is attempted.
-- If a required next action is absent, classify a host/action-surface binding gap
-  and STOP before the effect. Do not convert the missing action into repeated
-  `OWNER_AUTHORITY_REQUIRED:RECEIPT_MISSING` retries, CLI probing, carrier pairing,
-  copied authority material, or broad manual debugging. Surface convergence is a
-  transport precondition and grants no authority by itself.
+  the next action exists on the bound surface. Before the first `GOVERNED` effect,
+  prove it is present; `nexus_owner_standing_grant_issue` must be present
+  before `nexus_task_card_create` is attempted. If absent, classify a host/action-surface binding gap and STOP before the
+  effect (no `OWNER_AUTHORITY_REQUIRED:RECEIPT_MISSING` retries). Surface convergence is a transport precondition and grants no authority.
 - Switching repository or Issue invalidates the prior Project Entry binding for
   governed effects and requires a fresh `nexus_project_entry` call. Direct lanes
-  remain governed by their existing lane rules; this invariant must not fabricate
-  a Task Card merely because an Issue was opened.
+  remain governed by their existing lane rules.
 - A Ready GitHub Issue is a worker-neutral bounded collaboration contract; it
-  does not select local lifecycle. Draft, triage, and unready Issues grant no
-  mutation. An eligible governed worker implements on an issue-specific branch
-  such as `codex/issue-<number>-<slug>`, pushes only that branch, and opens a PR
-  to `main`. Provider/model names are not normative ownership identities.
-- Issue claim metadata is explicit and fail-closed: `claim_intent`,
-  `claim_enforcement_state`, and `claim_mode`; `PROJECTION_ONLY` or `UNKNOWN`
-  enforcement resolves to `MANUAL_DISPATCH`. assignees, labels, comments, Project fields, branch names, and worker prose are projections and cannot
-  authorize autonomous mutation.
+  does not select local lifecycle. An eligible governed worker implements on an
+  issue branch, pushes only it, and opens a PR to `main`. Provider/model names
+  are not ownership identities.
+- Claim metadata: `claim_intent`, `claim_enforcement_state`,
+  `claim_mode`; `PROJECTION_ONLY` or `UNKNOWN` resolves to `MANUAL_DISPATCH`. assignees, labels, comments, Project fields, branch names, and worker prose cannot authorize mutation.
 - No agent direct-pushes, force-pushes, or deletes `main`; delegated workers
-  never approve or merge their Candidate. Merge follows lane, not repository.
+  never approve or merge their Candidate; only the primary coordinator merges. Merge follows lane, not repository.
   DIRECT uses `git_merge_pull_request` after current Owner confirmation and all
   exact gates; no Task Card, third-party approval, acceptance receipt/hash,
   standing grant, or completion loop is required. GOVERNED retains independent
   acceptance, machine provenance, `GITHUB_MERGE` grant, and completion loop.
-- Never merge runtime history into GitHub `main` to align SHAs; synchronize only
-  reviewed deltas without secrets or generated/runtime state.
-- Owner may give primary coordinator a non-transferable standing grant for
-  bounded Ready Issues in one durable coordination scope. Canonical receipt
-  binds grant/Goal, parties, repo/scope, actions, validity, revocation; chat/provider
-  IDs are transport only. It grants no delegated-worker merge authority.
-- Under that standing grant, the primary coordinator may create/commit a missing
-  Task Card/INDEX only when the Issue is Ready, paths and claim ceiling are
-  frozen, gates pass, and `AUTO_CHAIN=false`; workers cannot create, widen, or
-  self-authorize cards.
-- Every coordinator merge requires a fresh SHA-bound repository/PR/head/base/diff,
-  current `main`, resolved blockers, successful required checks, readable branch
-  protection, scope/deletion, current Owner confirmation, and expected-head/CAS.
-  Drift or unknown evidence fails closed. Governed merge additionally requires
-  Issue/card, independent acceptance, machine provenance, and current grant;
+- A non-transferable Owner standing grant for bounded Ready Issues in one durable scope grants no delegated-worker merge authority;
+  it may create a missing Task Card only for a Ready Issue with frozen paths and `AUTO_CHAIN=false`.
+- Every coordinator merge requires fresh SHA-bound PR/head/base/diff, current
+  `main`, successful checks, branch protection, current Owner confirmation, and
+  expected-head/CAS; drift fails closed. Governed merge also requires
+  independent acceptance, machine provenance, and current grant;
   `MERGE_INTENT` is evidence, not authority.
-- `DIRECT_CANONICAL` and `DIRECT_DELEGATED` protected merges use the existing
-  expected-head/CAS action `git_merge_pull_request`, not the governed completion
-  loop. In `DIRECT_DELEGATED`, the coordinator distinct from the worker inspects
-  the physical diff and reruns the verifier; no third reviewer is required.
 - **Main-movement decision invariant:** exact-base movement invalidates the current
   merge attempt by default; it does **not** by itself invalidate the Candidate,
-  PR, source head/tree/diff, or previously verified semantic evidence. Before
-  rebasing, recreating a branch/PR, force-updating a PR head, re-accepting a
-  Candidate, or rerunning the full verifier/CI set solely because `main` moved,
-  the coordinator MUST apply the existing #441 main-movement requalification
-  semantics to the exact old/new main SHA+tree, unchanged Candidate head/tree/
-  diff/path identity, and exact changed-main paths.
-- If every relevant dimension is `REUSE_UNAFFECTED` / irrelevant movement, keep
-  the same Candidate, PR, and PR head; refresh current `main`/base evidence and
-  rerun only checks whose exact required subject changed. Do not create a new PR
-  generation merely to refresh the base SHA.
-- `RECHECK_AFFECTED` means rerun only the named affected semantic/test/transport
-  dimensions plus any GitHub-required check that truthfully binds to a new exact
-  integration subject. A required check may never be copied to a different head.
-- A new integration head, rebase/update-branch, Candidate re-verification, or new
-  PR generation is allowed only when the requalification proves semantic overlap,
-  Candidate identity change, authority/governance drift, an exact-subject platform
-  requirement, or `IMPACT_UNKNOWN`/conflict that cannot safely reuse the prior
-  subject. `base != current main` alone is never sufficient evidence.
-- For `GOVERNED`, `github_complete_pull_request` already owns the bounded repeated
-  main-drift loop when exposed. For DIRECT, `git_merge_pull_request` remains the
-  final physical CAS sink only after the coordinator has completed the decision
-  above. If the bound action surface cannot obtain the required requalification
-  evidence, stop with a transport/evidence capability gap instead of mechanically
-  rebuilding the PR.
-- Starting with PR #1061, every new protected-merge PR carries exactly one
-  machine-readable `nexus.merge_lane_binding.v1` block in the PR body. Genuine
-  direct work uses `OWNER_INLINE` or a Task Card that already declares that
-  direct lane and needs no governed acceptance/rebind. A tracked Task Card whose
-  exact base/head bytes still declare `GOVERNED` cannot reach the direct sink
-  merely through caller prose or an execution-lane argument: the binding must
-  contain one exact `nexus.owner_execution_lane_rebind.v1` record for the Issue,
-  task, attempt, Task Card path/hash, PR, current PR head, old/new lane, Owner,
-  and explicit Owner confirmation. The default-branch
-  `Trusted verifier (default branch)` executes
-  `scripts/ops/trusted_merge_lane_gate.py` against the exact PR event and exact
-  base/head Task Card bytes. Missing/duplicate/malformed binding, changed card,
-  stale/moved head, wrong Issue/task/attempt/PR/lane, or hash tamper blocks the
-  required check before `git_merge_pull_request`. A valid rebind supersedes only
-  the old lane requirement; normal direct verification and current merge-time
-  Owner confirmation remain required.
-- Governed protected-merge completion after independent acceptance uses the live
-  host action `github_complete_pull_request` when that action is present on the
-  bound MCP surface. It runs `run_github_completion_loop()`, consumes
-  `requalify_main_movement()`, reruns required checks on the exact current
-  integration subject, and delegates physical merge to existing expected-head/CAS
-  (`git_merge_pull_request`). It does not mint acceptance, standing-grant, or
-  merge authority, and is not a second merge controller. If the action is absent,
-  fall back to the existing coordinator expected-head/CAS path.
-- The live `NEXUS_CANONICAL_SOURCE_ROOT` for that action must be a clean checkout
-  of current GitHub `main` that contains
-  `nexus/orchestrator/github_completion_loop.py`. A dirty or stale checkout that
-  lacks the caller fails closed.
-- The coordinator handles ordinary implementation, rebind, retry, and evidence
-  autonomously. It asks again only for contract widening/change, weaker
+  PR, or verified evidence. Before rebasing or recreating a PR solely because
+  `main` moved, the coordinator MUST apply #441 requalification to exact changed-main paths.
+  If every dimension is `REUSE_UNAFFECTED`, keep the same Candidate and PR head.
+  `RECHECK_AFFECTED` reruns only affected dimensions; a new integration head needs
+  semantic overlap, authority drift, or `IMPACT_UNKNOWN`.
+  `base != current main` alone is never sufficient evidence. Without
+  requalification evidence, stop with a transport/evidence capability gap.
+- From PR #1061, protected-merge PRs carry `nexus.merge_lane_binding.v1`;
+  a `GOVERNED` card needs `nexus.owner_execution_lane_rebind.v1` to reach the
+  direct sink. `Trusted verifier (default branch)` runs
+  `scripts/ops/trusted_merge_lane_gate.py`.
+- `github_complete_pull_request` mints no authority; it is not a second merge controller.
+- The coordinator asks the Owner again only for contract widening, weaker
   security, a new irreversible external effect, or release/production claims.
-- After merge, read back `main`, record merge/head/check evidence, reconcile the
-  Issue/card, then start downstream work. This never implies local lifecycle,
-  runtime, release, or production truth.
-- Delegated GitHub work consumes its card; it uses local lifecycle only when
-  Owner-selected or producing a local Target/runtime/lifecycle outcome.
 
 ## Repository baseline
 
-- Before mutation record root, branch, HEAD, dirty state, and worktree topology:
-  `git rev-parse --show-toplevel`, `git branch --show-current`,
-  `git status --short --branch`, and `git worktree list --porcelain`.
-- Preserve unrelated dirty state. Never reset, stash, clean, overwrite, or
-  absorb ambiguous changes; use an authorized isolated worktree/Target when
-  isolation is required.
-- Local runtime root `/Users/jameschen/Workspace/nexus`; runtime/integration
-  branch `nexus/integration/main`; query HEAD at task start. Retired
-  `/Users/jameschen/Workspace/nexus-worktrees` is not an entry point. GitHub
-  collaboration uses the current clone and Ready-Issue branch.
+- Before mutation record root, branch, HEAD, dirty state, and worktree topology
+  (`git rev-parse --show-toplevel`, `git worktree list --porcelain`). Preserve unrelated dirty state.
 
 ## Governance boundary
 
@@ -225,156 +108,81 @@ capabilities, not required Nexus authority primitives.
   and release are distinct stages. A GitHub PR Candidate is an Issue-branch
   commit; a local lifecycle Candidate is receipt-bound Target output. Neither
   supplies authority to the other.
-- A delegated worker may implement, test, commit, push an authorized issue
-  branch, and open a PR, but cannot approve or merge its own Candidate. In a
-  direct lane, only the primary coordinator may merge after direct verification
-  and current Owner-confirmed exact-head/CAS. For governed Goals,
-  a separate designated integration action may perform only the exact
-  standing-grant-authorized merge after independent acceptance and fresh
-  merge-gate verification. The primary coordinator acting under a valid, exact
-  standing grant is that separate integration action; a delegated
-  implementer or reviewer is not.
-- GitHub review/merge does not silently perform Nexus lifecycle approval or
-  runtime integration. Local Nexus runtime actions keep their existing formal
-  authority and evidence requirements until a separate migration changes them.
 
 ## Safety and completion
 
-- Do not hand-edit lifecycle JSON or protected control-plane state. Use formal
-  APIs/CLI/service surfaces. Direct merge requires current Owner confirmation,
-  exact verification, branch protection, and expected-head/CAS; governed merge
-  additionally requires a valid covered standing grant. No lane bypasses checks.
-- Completion requires behavioral evidence, structural conformance, and the
-  applicable request- or card-defined verifier. A report or green subset is not
-  solve truth.
-- A local or delegated model produces implementation/candidate evidence only; it
-  cannot approve, promote, integrate, merge, claim production readiness, or
-  clean unrelated state.
-- If the self-hosting/controller identity contract is itself under repair and
-  cannot bind a clean trustworthy execution identity, stop that path and use
-  the bounded external bootstrap procedure in
+- Do not hand-edit lifecycle JSON or protected control-plane state.
+- Completion requires behavioral evidence and applicable verifier; report changed files/evidence; green subset is not solve truth.
+- Models give candidate evidence only; cannot approve, merge, certify production.
+- If the self-hosting/controller identity contract is itself under repair, stop
+  that path and use the bounded external bootstrap procedure in
   `docs/governance/rollback_runbook.md`; it creates no second authority and
   never implies approval, integration, push, reload, or activation.
-- Governed workers may commit only their scoped card changes. Approval,
-  integration, push, cleanup, and production/public claims remain separate
-  authorities.
 - `REVISE` permits bounded correction; `RECOVERABLE_BLOCK` preserves retry;
   `HARD_BLOCK` pauses affected mutation. Reviewer block/card omission is not
-  terminal `REJECTED`; only an authorized decision-maker may reject.
+  `REJECTED`; only an authorized decision-maker may reject.
 
 ## Execution lanes
 
 ### DIRECT_CANONICAL
 
 Owner -> primary agent -> one bounded direct change in the canonical checkout.
-Eligible direct work does not require a Task Card, campaign, lifecycle state,
-Target, Candidate, approval, or promotion receipt and does not delegate
-implementation. Record the baseline, keep the diff scoped, run relevant checks
-plus `git diff --check`, and report changed files/evidence.
+Eligible direct work needs no Task Card, lifecycle state, or Candidate.
+Keep the diff scoped; run checks plus `git diff --check`.
 
-`AUTHORITY_PRESERVING_EVIDENCE_WRITEBACK` is a semantic-authority classification
-inside the existing `DIRECT_CANONICAL` boundary, not a fourth execution lane and
-not a substitute for the Owner-selected lane. For a future additive
-provenance/evidence writeback or non-authoritative descriptive correction to stay
-direct, current Owner authorization, bound source/task/attempt/provenance
-identity, append-only evidence semantics, zero deletion/historical rewrite/receipt
-mutation/authority transition, and bounded verification obligations must all be
-explicitly proven. A governed receipt is not required solely for this direct
-classification. Autonomy, roles/capabilities, Workforce admission,
-provider/model/worker authority, default route, semantic authority lineage,
-parser/verifier and independent-review requirements, forbidden/protected-ref
-actions, claim ceilings, `CapabilityPlanner`, lifecycle, Candidate, approval,
-integration, merge, release, security, migration/schema, production-data,
-production, and public-claim authority must all be explicitly unchanged.
-Filename, protected-path status, line-count, model quality, or a tiny diff never
-establish that result. Any changed, missing, malformed, contradictory, unknown,
-or otherwise unprovable authority dimension fails closed to
-`GOVERNED_REQUIRED`. The classifier never returns `DIRECT_DELEGATED`, does not
-approve a diff or authorize a protected effect, and applies only to future
-classifications after this contract is integrated into `main`; it cannot
-retroactively relabel historical writebacks or the prior governed #401 attempt.
+`AUTHORITY_PRESERVING_EVIDENCE_WRITEBACK` is a semantic authority classification
+inside `DIRECT_CANONICAL`, not a fourth execution lane. A future additive
+evidence writeback stays direct only if Owner authorization and append-only
+semantics are proven and autonomy, provider/model/worker authority, default
+route, `CapabilityPlanner`, parser/verifier, claim, security,
+migration/schema, and production-data authority are unchanged. Filename or
+line-count never establish that. Any changed, missing, malformed, contradictory,
+unknown, or unprovable dimension fails closed to `GOVERNED_REQUIRED`. It never
+returns `DIRECT_DELEGATED`, approves nothing, and applies only to future
+classifications after integration into `main`, with no retroactive effect.
 
 Direct work becomes governed when it crosses an `escalate_to_governed_when`
-boundary in `current_operating_mode.yaml`: route, Workforce, lifecycle,
-authentication/security, migration/schema, production-data, release,
-production, external irreversible/public effect, break-glass, non-PR protected
-ref, or explicit Owner `GOVERNED`. Repository identity and Nexus
-self-modification alone do not select the lane; delegation alone does not
+boundary in `current_operating_mode.yaml` (route, Workforce, lifecycle,
+security, schema, production, release, irreversible external effect,
+break-glass, non-PR protected ref, or explicit Owner `GOVERNED`). delegation alone does not
 escalate an otherwise eligible `DIRECT_DELEGATED` task.
 
 ### DIRECT_DELEGATED
 
-Owner -> primary coordinator -> approved non-Nexus control plane -> exactly
-one bounded external worker -> independent coordinator verification -> optional
-exact Owner-confirmed protected PR merge -> STOP.
-
-The external control plane is intentionally transport-neutral. DevSpace may be
-used when selected, but it is not required by the lane. A direct host tool such
-as Desktop Commander is not itself a delegated worker plane; when the primary
-coordinator uses such a tool directly, the work remains `DIRECT_CANONICAL`
-unless a separate bounded worker is actually delegated.
+Owner -> primary coordinator -> approved non-Nexus control plane -> one
+bounded external worker -> independent verification -> optional exact
+Owner-confirmed protected PR merge -> STOP.
 
 No Nexus Task Card, Nexus lifecycle, CapabilityPlanner routing, Nexus Workforce
 Admission, or Candidate lifecycle is required solely for this lane. The worker
-cannot approve, integrate, merge, push protected refs, clean unrelated state,
-release, make production/public claims, or act as its own required independent
-verifier. `AUTO_CHAIN=false`. The primary coordinator independently inspects the
-physical diff and reruns the applicable verifier; this satisfies direct
-verification without a third reviewer. Worker PASS is implementation evidence
-only. The coordinator may then use `git_merge_pull_request` only after all
-direct merge gates pass. Timeout/disconnect reconciles the same worker/session and
-filesystem/Git/provider state before retry. Fail closed with
-`DIRECT_DELEGATED_BLOCKED` when work exceeds these boundaries; do not silently
-create a Task Card or switch to Nexus.
-
-Eligibility, identity binding, isolation, retry, and escalation are defined in
-`docs/agents/TASK_EXECUTION_CONTRACT.md`. Nexus Workforce Admission versus
-non-Nexus external identity binding is defined in
+cannot approve, merge, push protected refs, or verify itself.
+`AUTO_CHAIN=false`. The primary coordinator independently inspects the
+physical diff and reruns the applicable verifier; worker PASS is implementation
+evidence only. Fail closed with `DIRECT_DELEGATED_BLOCKED` beyond these boundaries. Details: `docs/agents/TASK_EXECUTION_CONTRACT.md`,
 `docs/agents/WORKFORCE_EXECUTION_OVERLAY.md`.
 
 ### GOVERNED
 
-Use when work requires Nexus lifecycle/Candidate authority, crosses one of the
-high-risk authority/effect boundaries listed above, or the Owner explicitly
-selects `GOVERNED`. An ordinary exact Owner-confirmed protected PR merge is not
-by itself a governed escalation. Load `docs/agents/TASK_EXECUTION_CONTRACT.md`
-plus the active card. A Task Card binds scope/evidence; it never substitutes for
-program correctness.
+Use when work requires Nexus lifecycle/Candidate authority, crosses a high-risk
+boundary above, or the Owner selects `GOVERNED`. An exact
+Owner-confirmed protected PR merge is not by itself a governed escalation. Load
+`docs/agents/TASK_EXECUTION_CONTRACT.md` plus the active card; a Task Card never
+replaces program correctness.
 
 ## Conditional load map
 
-Load the smallest authoritative surface that matches the task:
-
-- Owner-authorized bounded `DIRECT_CANONICAL`: this file plus nearest nested
-  authority; no Task Card/lifecycle state required.
-- `DIRECT_DELEGATED`: this file plus
-  `docs/agents/TASK_EXECUTION_CONTRACT.md` and, for worker/execution identity,
-  `docs/agents/WORKFORCE_EXECUTION_OVERLAY.md`.
-- Governed mutation: `docs/agents/TASK_EXECUTION_CONTRACT.md` plus active card.
-- Nexus model/provider selection, delegation, or routing: compact machine Workforce
-  Admission receipt first; load the full policy/YAML only for policy changes,
-  onboarding/calibration, promotion/demotion, admission audit, or an authority
-  dispute. See `docs/agents/WORKFORCE_EXECUTION_OVERLAY.md`.
-- Claim/release/benchmark/audit/verifier work:
-  `docs/agents/CLAIM_AND_RECEIPT_OVERLAY.md`.
-- Novel repeatable failure with a prevention rule:
-  `docs/agents/LEARNING_WRITEBACK_OVERLAY.md`.
-- LocalHeal or another nested subsystem: read its nearest nested `AGENTS.md`.
-- OpenWiki is `derived_non_authoritative` navigation only; source, tests, or
-  bound runtime evidence verify claims.
+- Nexus model/provider selection, delegation, or routing: compact Workforce
+  Admission receipt first; full policy/YAML only for policy changes,
+  onboarding, audit, or an authority dispute. See `docs/agents/WORKFORCE_EXECUTION_OVERLAY.md`.
+- Claim/release/benchmark/audit/verifier work: `docs/agents/CLAIM_AND_RECEIPT_OVERLAY.md`.
+- Novel repeatable failure with a prevention rule: `docs/agents/LEARNING_WRITEBACK_OVERLAY.md`.
 
 ## Authority invariants
 
-- `CapabilityPlanner` is the sole route and capability-selection authority.
-  `HybridRouteDecision` is a Planner-derived decision contract/projection, not a
-  second selector/router/planner; overlays and policy files cannot create one.
-- Workforce admission constrains worker eligibility only; it does not select a
-  route/capability or authorize self-approval.
+- `CapabilityPlanner` is the sole route and capability-selection authority;
+  `HybridRouteDecision` is a derived projection, not a router.
+- Workforce admission constrains worker eligibility only; it selects no
+  route/capability and authorizes no self-approval.
 - Missing verifier artifact/status or source hash fails claim gates closed.
-
-## Response and tool discipline
-
-- Follow `MUSE_PROTO.md` for response/domain tags.
-- Prefer direct tools and concise evidence; do not narrate calls.
-- On degenerate/repetitive output, stop mutation, preserve last verified state,
-  and report `retry_required=true`.
+- Follow `MUSE_PROTO.md` for response tags. On degenerate output, stop
+  mutation and report `retry_required=true`.
