@@ -1461,6 +1461,7 @@ def test_pytest_execution_does_not_fail_fast_after_baseline_failure(monkeypatch,
                 stderr="",
             )
         assert "-x" not in command
+        assert "--timeout=120" in command
         junit_path.write_text('<testsuite tests="1" failures="0"/>', encoding="utf-8")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
