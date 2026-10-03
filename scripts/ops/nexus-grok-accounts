@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Machine-local Grok account onboarding, inventory, and health operator."""
+"""Machine-local Grok account onboarding, inventory, health, and host ownership.
+
+Host-affinity policy: host-sync synchronizes software/configuration only. Grok
+OAuth profiles, credential bytes, mutable leases, and pool ownership remain on
+the credential-owning host. A second host must use a distinct account set unless
+a separately accepted cross-host lease authority is introduced.
+"""
 
 from __future__ import annotations
 
@@ -24,9 +30,7 @@ def _default_snapshot() -> Path:
     return Path.home() / ".local/share/nexus-grok-accounts/Nexus-new"
 
 
-SNAPSHOT = Path(
-    os.getenv("NEXUS_GROK_ACCOUNTS_SNAPSHOT", str(_default_snapshot()))
-)
+SNAPSHOT = Path(os.getenv("NEXUS_GROK_ACCOUNTS_SNAPSHOT", str(_default_snapshot())))
 if not SNAPSHOT.is_dir():
     raise SystemExit("NEXUS_GROK_ACCOUNTS_SNAPSHOT_MISSING")
 sys.path.insert(0, str(SNAPSHOT))
@@ -130,6 +134,31 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def _binding_payload(manager: GrokAccountPoolManager) -> dict[str, Any]:
+    binding = manager.host_binding()
+    return {
+        "schema": "nexus.grok_pool_host_binding.v1",
+        "status": binding.status,
+        "owner_host_id_hash": binding.owner_host_id_hash,
+        "current_host_id_hash": binding.current_host_id_hash,
+        "matches": binding.matches,
+        "policy": "HOST_AFFINE",
+    }
+
+
+def cmd_host(args: argparse.Namespace) -> int:
+    payload = _binding_payload(_manager())
+    _emit(payload, as_json=args.json)
+    return 0 if payload["status"] == "BOUND" else 2
+
+
+def cmd_bind_host(args: argparse.Namespace) -> int:
+    manager = _manager()
+    manager.bind_host(confirm_existing_pool=args.confirm_existing_pool)
+    _emit(_binding_payload(manager), as_json=args.json)
+    return 0
+
+
 def cmd_health(args: argparse.Namespace) -> int:
     rows: list[dict[str, Any]] = []
     failed = False
@@ -200,23 +229,16 @@ def _run_login(
     assert proc.stdout is not None
     for line in proc.stdout:
         captured.append(line)
-        visible = (
-            line
-            if show_identity
-            else SIGNED_IN_RE.sub("Signed in as [redacted]", line)
-        )
+        visible = line if show_identity else SIGNED_IN_RE.sub("Signed in as [redacted]", line)
         print(visible, end="", flush=True)
     return proc.wait(), "".join(captured)
 
 
 def cmd_onboard(args: argparse.Namespace) -> int:
     manager = _manager()
+    manager.local_accounts()
     alias = args.alias or _next_alias(manager)
-    profile = (
-        Path(args.profile_home).expanduser()
-        if args.profile_home
-        else _profile_root() / alias
-    )
+    profile = Path(args.profile_home).expanduser() if args.profile_home else _profile_root() / alias
     if not profile.is_absolute():
         raise GrokAccountPoolError("GROK_PROFILE_HOME_INVALID")
     if profile.exists() and any(profile.iterdir()) and not args.reuse_profile:
@@ -245,7 +267,9 @@ def cmd_onboard(args: argparse.Namespace) -> int:
 
     match = SIGNED_IN_RE.search(login_output)
     provider_identity = match.group(1) if match else None
-    display_label = provider_identity or (args.display_label.strip() if args.display_label else None)
+    display_label = provider_identity or (
+        args.display_label.strip() if args.display_label else None
+    )
     account = manager.register_local_profile(
         alias=alias,
         home_path=profile,
@@ -264,13 +288,33 @@ def cmd_onboard(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Multi-host policy:\n"
+            "  host-sync moves Nexus software/configuration only; it never moves Grok OAuth "
+            "profiles or mutable leases.\n"
+            "  Run Grok on the credential-owning host, or provision a distinct non-overlapping "
+            "account set on another host.\n"
+            "  Cross-host shared-account leasing requires a separately accepted authority."
+        ),
+    )
     parser.add_argument(
         "--grok-bin",
         default=os.getenv("NEXUS_GROK_BIN", "grok"),
         help="Grok CLI executable.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
+
+    host = sub.add_parser("host")
+    host.add_argument("--json", action="store_true")
+    host.set_defaults(func=cmd_host)
+
+    bind_host = sub.add_parser("bind-host")
+    bind_host.add_argument("--confirm-existing-pool", action="store_true")
+    bind_host.add_argument("--json", action="store_true")
+    bind_host.set_defaults(func=cmd_bind_host)
 
     list_cmd = sub.add_parser("list")
     list_cmd.add_argument("--show-identities", action="store_true")
