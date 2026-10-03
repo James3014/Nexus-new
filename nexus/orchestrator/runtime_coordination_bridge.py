@@ -307,6 +307,27 @@ class _Finalization:
         self.service._finalize_runtime_failure(task_id, attempt_id, error)
 
 
+class _WorkerInvocationModelCallGate:
+    """Observation-only binding for an already-selected worker invocation.
+
+    The bridge is downstream of CapabilityPlanner/worker selection.  It therefore
+    has no authority to reinterpret routing, provider/model choice, or fabricate
+    bounded candidates.  Its only truthful verdict at this seam is to preserve
+    the existing model path.
+    """
+
+    resolver_id = "nexus-new.worker-invocation-model-path.v1"
+
+    def resolve_model_call_need(self, structured_state, *, seam):
+        del structured_state
+        return {
+            "resolution": "MODEL_NEEDED",
+            "reason": "worker_invocation_path_already_selected",
+            "resolver_id": self.resolver_id,
+            "seam": str(seam),
+        }
+
+
 class RuntimeCoordinationBridge:
     def __init__(self, service):
         self.service = service
@@ -331,6 +352,11 @@ class RuntimeCoordinationBridge:
         )
         if "preparation" in sig.parameters or len(sig.parameters) > 7 or has_var_positional:
             args.append(_Preparation(self.service))
+        if "model_call_gate" in sig.parameters:
+            return ExecutionCoordinator(
+                *args,
+                model_call_gate=_WorkerInvocationModelCallGate(),
+            )
         return ExecutionCoordinator(*args)
 
     def _ensure_preparation_compat(self, task_id, attempt_id, *, request=None):

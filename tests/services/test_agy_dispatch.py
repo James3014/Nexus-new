@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import stat
 import subprocess
+import sys
+import textwrap
+import time
 from datetime import datetime, timezone
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 DISPATCH_PATH = ROOT / "scripts" / "ops" / "nexus-agy-dispatch"
@@ -859,6 +865,111 @@ def test_accept_edits_projects_bounded_write_scope_and_restores(
     assert coordinator.claim.released is True
 
 
+def test_accept_edits_replaces_stale_wildcard_policy_and_restores_exact_bytes(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    target = work / "target.py"
+    coordinator = _WriteScopeCoordinator(home)
+    settings = home / ".gemini" / "antigravity-cli" / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    original = (
+        '{\n  "profile": "keep-me",\n  "permissions": {\n'
+        '    "allow": ["read_file(*)", "write_file(/stale)", "command(*)"],\n'
+        '    "deny": ["command(*)", "read_file(*)", "write_file(*)"],\n'
+        '    "ask": ["custom(*)"]\n  }\n}\n'
+    ).encode("utf-8")
+    settings.write_bytes(original)
+
+    def runner(**_kwargs):
+        data = json.loads(settings.read_text(encoding="utf-8"))
+        permissions = data["permissions"]
+        assert data["profile"] == "keep-me"
+        assert permissions["ask"] == ["custom(*)"]
+        assert f"write_file({target})" in permissions["allow"]
+        assert f"read_file({work.resolve()}/**)" in permissions["allow"]
+        assert "command(*)" in permissions["allow"]
+        assert "read_file(*)" not in permissions["allow"]
+        assert "write_file(/stale)" not in permissions["allow"]
+        assert "command(*)" not in permissions["deny"]
+        assert "read_file(*)" not in permissions["deny"]
+        assert "write_file(*)" not in permissions["deny"]
+        for rule in dispatch.TEMP_COMMAND_DENY:
+            assert rule in permissions["deny"]
+        return 0, "ok", "", False, 1
+
+    code = dispatch.dispatch_run(
+        prompt="bounded edit",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(target)],
+        temp_command_permissions=True,
+        coordinator=coordinator,
+        run_agy_fn=runner,
+    )
+
+    assert code == 0
+    assert settings.read_bytes() == original
+    assert coordinator.claim.released is True
+
+
+def test_accept_edits_permission_refusal_exit_zero_is_failure(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    target = work / "target.py"
+    coordinator = _WriteScopeCoordinator(home)
+    events: list[dict[str, object]] = []
+
+    code = dispatch.dispatch_run(
+        prompt="bounded edit",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(target)],
+        temp_command_permissions=True,
+        coordinator=coordinator,
+        run_agy_fn=lambda **_kwargs: (
+            0,
+            "Permission denied for read_file(/repo/target.py)",
+            "",
+            False,
+            1,
+        ),
+        operation_hook=events.append,
+    )
+
+    assert code == 1
+    assert any(event.get("failure_kind") == "PERMISSION_OR_SCOPE_ERROR" for event in events)
+    assert coordinator.claim.released is True
+
+
+def test_plan_text_with_permission_words_can_still_complete(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+
+    code = dispatch.dispatch_run(
+        prompt="explain a permission error",
+        cwd=str(tmp_path),
+        mode="plan",
+        coordinator=coordinator,
+        run_agy_fn=lambda **_kwargs: (
+            0,
+            "The phrase permission denied for read_file is documentation here.",
+            "",
+            False,
+            1,
+        ),
+    )
+
+    assert code == 0
+    assert coordinator.claim.released is True
+
+
 def test_accept_edits_rejects_write_path_outside_cwd_before_claim(
     tmp_path: Path,
 ) -> None:
@@ -959,3 +1070,343 @@ def test_operation_run_rebinds_current_runtime_revision(
     assert code == 1
     assert record["runtime_revision"] == "b" * 40
     assert record["status"] == "OUTCOME_UNKNOWN"
+
+
+# ---------------------------------------------------------------------------
+# SIGTERM terminalization regression — real subprocess, no monkeypatch signal
+# ---------------------------------------------------------------------------
+
+_CHILD_SCRIPT = textwrap.dedent("""\
+    import os
+    import sys
+    import time
+    from importlib.machinery import SourceFileLoader
+    from pathlib import Path
+
+    dispatch_path = sys.argv[1]
+    op_root = Path(sys.argv[2])
+    operation_id = sys.argv[3]
+    ready_file = Path(sys.argv[4])
+    snapshot_root = sys.argv[5]
+
+    os.environ["NEXUS_AGY_SNAPSHOT"] = snapshot_root
+    dispatch = SourceFileLoader(
+        "nexus_agy_dispatch_canonical", dispatch_path
+    ).load_module()
+
+    journal = dispatch.AgyOperationJournal(op_root)
+    prompt_path = journal.prompt_path(operation_id)
+    dispatch._write_private_prompt(prompt_path, "sigterm probe")
+
+    def fake_dispatch_run(**kwargs):
+        # Mark the provider call as effect-capable before signalling readiness.
+        kwargs["operation_hook"]({
+            "phase": "EXECUTING",
+            "attempts": 1,
+            "rotations": 0,
+        })
+        ready_file.touch()
+        while True:
+            time.sleep(0.05)
+
+    dispatch.dispatch_run = fake_dispatch_run
+
+    try:
+        dispatch._run_background_operation(
+            operation_id=operation_id,
+            prompt_file=str(prompt_path),
+            cwd=str(op_root),
+            mode="plan",
+            model="gemini-test",
+            effort="medium",
+            timeout=30,
+            max_calls=1,
+            pool_wait_timeout=1.0,
+            allow=[],
+            deny=[],
+            temp_command_permissions=False,
+            operation_root=op_root,
+            heartbeat_interval=0.01,
+        )
+    except BaseException:
+        pass
+""")
+
+
+def test_sigterm_during_dispatch_persists_supervisor_signal_outcome(
+    tmp_path: Path,
+) -> None:
+    """Real subprocess receives SIGTERM mid-dispatch; durable record must reflect it."""
+    op_root = tmp_path / "ops"
+    # Pre-create the operation in the *parent* process so the child can use it.
+    journal = dispatch.AgyOperationJournal(op_root)
+    operation_id = dispatch.new_operation_id()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+
+    ready_file = tmp_path / "ready"
+    script_file = tmp_path / "child.py"
+    script_file.write_text(_CHILD_SCRIPT, encoding="utf-8")
+
+    child = subprocess.Popen(
+        [
+            sys.executable,
+            str(script_file),
+            str(DISPATCH_PATH),
+            str(op_root),
+            operation_id,
+            str(ready_file),
+            str(ROOT),
+        ],
+        cwd=str(tmp_path),
+    )
+
+    # Wait for the child to enter the fake dispatch (readiness sentinel).
+    deadline = time.monotonic() + 20.0
+    while not ready_file.exists():
+        if time.monotonic() > deadline:
+            child.kill()
+            child.wait()
+            raise TimeoutError("child never signalled readiness")
+        time.sleep(0.05)
+
+    # Send SIGTERM and wait for the child to exit.
+    os.kill(child.pid, signal.SIGTERM)
+    child.wait(timeout=10)
+
+    record = journal.read(operation_id)
+    assert record["status"] == "OUTCOME_UNKNOWN"
+    assert record["phase"] == "TERMINAL"
+    assert record["finished_at"] is not None
+    assert record["failure_kind"] == "SUPERVISOR_SIGNAL:SIGTERM"
+    assert record["reconciliation"]["result"] == "SUPERVISOR_SIGNAL_WITH_UNKNOWN_PROVIDER_EFFECT"
+    assert record["reconciliation"]["retry_permitted"] is False
+
+
+# ---------------------------------------------------------------------------
+# Unit test: _run_background_operation restores prior SIGTERM/SIGINT handlers
+# ---------------------------------------------------------------------------
+
+
+def test_run_background_operation_restores_signal_handlers_after_normal_completion(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Signal handlers installed by _run_background_operation are restored on exit."""
+    root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="low",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "handler restore probe")
+
+    # Record the handlers that were in place *before* calling _run_background_operation.
+    sentinel_term = signal.getsignal(signal.SIGTERM)
+    sentinel_int = signal.getsignal(signal.SIGINT)
+
+    captured_during: dict[str, object] = {}
+
+    def recording_dispatch_run(**kwargs):
+        captured_during["term"] = signal.getsignal(signal.SIGTERM)
+        captured_during["int"] = signal.getsignal(signal.SIGINT)
+        return 0
+
+    monkeypatch.setattr(dispatch, "dispatch_run", recording_dispatch_run)
+
+    dispatch._run_background_operation(
+        operation_id=operation_id,
+        prompt_file=str(prompt_path),
+        cwd=str(tmp_path),
+        mode="plan",
+        model="gemini-test",
+        effort="low",
+        timeout=30,
+        max_calls=1,
+        pool_wait_timeout=1.0,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=root,
+        heartbeat_interval=0.01,
+    )
+
+    # Handlers active during dispatch must differ from the originals (they were replaced).
+    assert captured_during["term"] is not sentinel_term
+    assert captured_during["int"] is not sentinel_int
+
+    # After return, the original handlers must be restored exactly.
+    assert signal.getsignal(signal.SIGTERM) is sentinel_term
+    assert signal.getsignal(signal.SIGINT) is sentinel_int
+
+
+_STARTUP_CHILD_SCRIPT = textwrap.dedent("""\
+    import os
+    import sys
+    import time
+    from importlib.machinery import SourceFileLoader
+    from pathlib import Path
+
+    dispatch_path = sys.argv[1]
+    op_root = Path(sys.argv[2])
+    operation_id = sys.argv[3]
+    ready_file = Path(sys.argv[4])
+    snapshot_root = sys.argv[5]
+
+    os.environ["NEXUS_AGY_SNAPSHOT"] = snapshot_root
+    dispatch = SourceFileLoader(
+        "nexus_agy_dispatch_startup_probe", dispatch_path
+    ).load_module()
+    journal = dispatch.AgyOperationJournal(op_root)
+    prompt_path = journal.prompt_path(operation_id)
+    dispatch._write_private_prompt(prompt_path, "startup sigterm probe")
+
+    def slow_runtime_revision():
+        ready_file.touch()
+        while True:
+            time.sleep(0.05)
+
+    dispatch._runtime_revision = slow_runtime_revision
+    dispatch.dispatch_run = lambda **kwargs: 0
+
+    try:
+        dispatch._run_background_operation(
+            operation_id=operation_id,
+            prompt_file=str(prompt_path),
+            cwd=str(op_root),
+            mode="plan",
+            model="gemini-test",
+            effort=None,
+            timeout=30,
+            max_calls=1,
+            pool_wait_timeout=1.0,
+            allow=[],
+            deny=[],
+            temp_command_permissions=False,
+            operation_root=op_root,
+            heartbeat_interval=0.01,
+        )
+    except BaseException:
+        pass
+""")
+
+
+def test_sigterm_during_startup_persists_supervisor_signal_outcome(
+    tmp_path: Path,
+) -> None:
+    """SIGTERM during startup must terminalize before provider dispatch begins."""
+    op_root = tmp_path / "startup-ops"
+    journal = dispatch.AgyOperationJournal(op_root)
+    operation_id = dispatch.new_operation_id()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort=None,
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+
+    ready_file = tmp_path / "startup-ready"
+    script_file = tmp_path / "startup-child.py"
+    script_file.write_text(_STARTUP_CHILD_SCRIPT, encoding="utf-8")
+    child = subprocess.Popen(
+        [
+            sys.executable,
+            str(script_file),
+            str(DISPATCH_PATH),
+            str(op_root),
+            operation_id,
+            str(ready_file),
+            str(ROOT),
+        ],
+        cwd=str(tmp_path),
+    )
+
+    deadline = time.monotonic() + 20.0
+    while not ready_file.exists():
+        if time.monotonic() > deadline:
+            child.kill()
+            child.wait()
+            raise TimeoutError("startup child never signalled readiness")
+        time.sleep(0.05)
+
+    os.kill(child.pid, signal.SIGTERM)
+    child.wait(timeout=10)
+
+    record = journal.read(operation_id)
+    assert record["status"] == "FAILED"
+    assert record["phase"] == "TERMINAL"
+    assert record["finished_at"] is not None
+    assert record["failure_kind"] == "SUPERVISOR_SIGNAL_PRE_PROVIDER:SIGTERM"
+    assert record["reconciliation"]["result"] == "SUPERVISOR_SIGNAL_BEFORE_PROVIDER"
+    assert record["reconciliation"]["retry_permitted"] is False
+
+
+def test_pre_provider_wrapper_exception_is_not_outcome_unknown(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    root = tmp_path / "wrapper-error-ops"
+    journal = dispatch.AgyOperationJournal(root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort=None,
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "wrapper exception probe")
+
+    def fail_runtime_revision():
+        raise RuntimeError("runtime revision unavailable")
+
+    monkeypatch.setattr(dispatch, "_runtime_revision", fail_runtime_revision)
+
+    with pytest.raises(RuntimeError, match="runtime revision unavailable"):
+        dispatch._run_background_operation(
+            operation_id=operation_id,
+            prompt_file=str(prompt_path),
+            cwd=str(tmp_path),
+            mode="plan",
+            model="gemini-test",
+            effort=None,
+            timeout=30,
+            max_calls=1,
+            pool_wait_timeout=1.0,
+            allow=[],
+            deny=[],
+            temp_command_permissions=False,
+            operation_root=root,
+            heartbeat_interval=0.01,
+        )
+
+    record = journal.read(operation_id)
+    assert record["status"] == "FAILED"
+    assert record["phase"] == "TERMINAL"
+    assert record["failure_kind"] == "WRAPPER_EXCEPTION_PRE_PROVIDER:RuntimeError"
+    assert record["reconciliation"]["result"] == "WRAPPER_EXCEPTION_BEFORE_PROVIDER"
+    assert record["reconciliation"]["retry_permitted"] is False

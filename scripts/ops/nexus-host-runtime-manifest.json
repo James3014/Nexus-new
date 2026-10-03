@@ -8,6 +8,10 @@
       "mode": "0755"
     },
     {
+      "path": "scripts/ops/nexus-hcom-agy-safe",
+      "mode": "0755"
+    },
+    {
       "path": "scripts/ops/nexus-agy-quota",
       "mode": "0755"
     },
@@ -94,6 +98,10 @@
     {
       "path": "nexus/services/workflow_doctor.py",
       "mode": "0644"
+    },
+    {
+      "path": "nexus/orchestrator/canonical_source_root.py",
+      "mode": "0644"
     }
   ],
   "components": {
@@ -120,6 +128,9 @@
     },
     "grok_accounts": {
       "source_path": "scripts/ops/nexus-grok-accounts"
+    },
+    "hcom_agy_safe": {
+      "source_path": "scripts/ops/nexus-hcom-agy-safe"
     }
   }
 }
