@@ -500,6 +500,23 @@ def _activation_evidence(config: dict[str, Any]) -> dict[str, Any]:
         raise HermesLaunchdError("ACTIVATION_EVIDENCE_NOT_PASS")
     if int(evidence.get("elapsed_seconds") or 0) < MIN_SOAK_SECONDS:
         raise HermesLaunchdError("ACTIVATION_EVIDENCE_TOO_SHORT")
+    receipt_index = evidence.get("receipt_index")
+    if not isinstance(receipt_index, list) or not receipt_index:
+        raise HermesLaunchdError("ACTIVATION_RECEIPT_INDEX_MISSING")
+    observed_index_hash = _sha256_bytes(_canonical_bytes(receipt_index))
+    if observed_index_hash != evidence.get("receipt_index_sha256"):
+        raise HermesLaunchdError("ACTIVATION_RECEIPT_INDEX_HASH_MISMATCH")
+    for row in receipt_index:
+        if not isinstance(row, dict) or not row.get("path") or not row.get("sha256"):
+            raise HermesLaunchdError("ACTIVATION_RECEIPT_INDEX_ROW_INVALID")
+        receipt_path = _expand(str(row["path"]))
+        if not receipt_path.is_file():
+            raise HermesLaunchdError(f"ACTIVATION_RECEIPT_MISSING:{receipt_path}")
+        observed_sha = _sha256_file(receipt_path)
+        if observed_sha != row.get("sha256"):
+            raise HermesLaunchdError(
+                f"ACTIVATION_RECEIPT_HASH_MISMATCH:{receipt_path}:{observed_sha}:{row.get('sha256')}"
+            )
     runtime = _host_runtime(config)
     if evidence.get("runtime_revision") != runtime.get("installed_revision"):
         raise HermesLaunchdError("ACTIVATION_RUNTIME_REVISION_MISMATCH")

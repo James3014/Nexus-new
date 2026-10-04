@@ -69,7 +69,7 @@ An unexpected Homebrew binary change fails closed until the config is deliberate
 9. all controller states have `effects_started=0`;
 10. the installed runtime at acceptance time is still the exact same revision/bundle.
 
-Tight-loop cycles cannot satisfy the elapsed gate.
+Tight-loop cycles cannot satisfy the elapsed gate. Activation also re-hashes the accepted soak state/cycle receipt index; any post-acceptance receipt byte drift fails closed.
 
 ## Staged install
 

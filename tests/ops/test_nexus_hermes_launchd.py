@@ -271,6 +271,26 @@ def test_accept_soak_writes_exact_runtime_evidence_after_six_hours(tmp_path, mon
     assert output.is_file()
 
 
+def test_activation_rejects_tampered_indexed_soak_receipt(tmp_path, monkeypatch):
+    _, config, _ = _config(tmp_path, monkeypatch)
+    soak = tmp_path / "soak"
+    output = Path(config["activation_evidence_path"])
+    _write_soak(soak, runtime_revision="a" * 40, runtime_bundle="b" * 64, hours=6.1)
+    monkeypatch.setattr(
+        MOD,
+        "_host_runtime",
+        lambda _config: {
+            "installed_revision": "a" * 40,
+            "installed_bundle_sha256": "b" * 64,
+        },
+    )
+    MOD._accept_soak(config, soak, output, 6.0)
+    cycle = soak / "cycles" / "cycle-00002.json"
+    cycle.write_text(cycle.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    with pytest.raises(MOD.HermesLaunchdError, match="ACTIVATION_RECEIPT_HASH_MISMATCH"):
+        MOD._activation_evidence(config)
+
+
 def test_staged_tick_reuses_stable_observe_controller_identity(tmp_path, monkeypatch):
     _, config, _ = _config(tmp_path, monkeypatch)
     monkeypatch.setattr(
