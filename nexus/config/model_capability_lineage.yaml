@@ -218,6 +218,8 @@ lineages:
       - "positive capability claims live only on the bound execution configuration + task family"
       - "G0 real tool loop and same-session continuation qualified"
       - "exact 32K long-repo G1 stack unqualified due to session startup readiness and context overflow"
+      - "R10 64K/Q8-KV/16K-output/auto-compaction/Core exact configuration completed the six-task run with 0 material protocol/state failures, 0 context overflow, 0 false completion, and 0 authority escape"
+      - "R10 semantic full-agent threshold failed at 3/6 < 4/6; disposition WATCH / NOT_ADMITTED; no hidden holdout"
     role_evidence:
       - ref: calibration:external/occamy-1.0/g0-tool-loop
         phase: PROTOCOL_TOOL_LOOP_QUALIFICATION
@@ -266,6 +268,7 @@ lineages:
     evidence_notes:
       - "capability evidence provenance is EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK; no invented repository receipts"
       - "calibration evidence carries no workforce admission or routing authority"
+      - "R10 exact-configuration evidence is a DURABLE_REPOSITORY_RECEIPT from James3014/Nexus-new#1364 comment 5979409555"
     execution_configurations:
       - config_id: occamy-1.0-q4-opencode-llama32k
         model: occamy-1.0-q4
@@ -310,6 +313,84 @@ lineages:
               - session_startup_readiness
               - context_state_overflow_54902_gt_32768
             summary: "exact 32K long-repo G1 stack = STACK_UNQUALIFIED; failure family contains session startup/readiness and 54,902 > 32,768 context overflow; NOT semantic 0/6; no runtime admission"
+      - config_id: occamy-1.0-q4-opencode-llama64k-r10
+        model: occamy-1.0-q4
+        model_digest: "ffb25f763ff9c27f5f4e2adcdef399c5654f9f840fdac33dffe7035ba8266a87"
+        quant: Q4_K_M
+        package: GGUF
+        runtime: llama.cpp
+        runtime_build: "0.4.1 build 10964 commit b29c606e2"
+        context_limit: 65536
+        prompt_template_mode: opencode_native_deepseek_reasoning
+        scaffold: opencode_serve
+        agent_loop: opencode_http_api
+        transport: http_loopback
+        tool_surface: opencode_builtin_tools
+        write_mode: workspace_edit
+        state_preservation: same_session_auto_compaction
+        resource_envelope:
+          slots: 1
+          kv_cache_k: q8_0
+          kv_cache_v: q8_0
+          output_limit: 16384
+          auto_compaction: "auto+prune reserved=18000"
+          completion_hygiene: true
+          nexus_core_revision: "795432345413fe9c5c677ac51abfa47d8dccfb11"
+          local_only: true
+          online_rescue_calls: 0
+          model_load_seconds: 1.4167871475219727
+          observed_memory_free_percent_after_load: 55
+        realm: local_m5
+        description: "Occamy 1.0 Q4_K_M R10 via OpenCode 1.18.32, llama.cpp 64K context, Q8 KV, 16K output, auto-compaction, completion hygiene, and canonical Nexus Core governance"
+        qualifications:
+          - task_family: long_repo_episode
+            phase: RESOURCE_CONTEXT_QUALIFICATION
+            disposition: PASS
+            score: "6/6_PROTOCOL_CONTEXT_CLEAN"
+            runtime_admission: false
+            evidence_ref: "github:James3014/Nexus-new#1364:comment-5979409555"
+            provenance: DURABLE_REPOSITORY_RECEIPT
+            date: '2026-10-04'
+            summary: "R10 completed all six scored tasks with material protocol/state failures = 0, context overflow = 0, false completion = 0, authority escape = 0; completion hygiene + canonical Nexus Core path exercised; Local-only / Online rescue = 0"
+          - task_family: long_repo_episode
+            phase: FIRST_PASS
+            disposition: WATCH
+            score: "3/6 (threshold >=4/6 FAILED)"
+            is_semantic_failure: true
+            runtime_admission: false
+            evidence_ref: "github:James3014/Nexus-new#1364:comment-5979409555"
+            provenance: DURABLE_REPOSITORY_RECEIPT
+            date: '2026-10-04'
+            failure_families:
+              - semantic_public_contract_miss
+              - no_candidate_changes_core_no_changes
+              - non_discriminating_regression_test
+            summary: "R10 semantic full-agent threshold failed: 3/6 accepted < required 4/6; accepted T01 bug_repair, T02 regression_test, T04 regression_test; rejected T03 semantic/public-contract miss, T05 no candidate changes / Core NO_CHANGES, T06 non-discriminating regression test; WATCH / NOT_ADMITTED; no hidden holdout"
+          - task_family: bug_repair
+            phase: FIRST_PASS
+            disposition: WATCH
+            score: "1/3"
+            is_semantic_failure: true
+            runtime_admission: false
+            evidence_ref: "github:James3014/Nexus-new#1364:comment-5979409555"
+            provenance: DURABLE_REPOSITORY_RECEIPT
+            date: '2026-10-04'
+            failure_families:
+              - semantic_public_contract_miss
+              - no_candidate_changes_core_no_changes
+            summary: "R10 bug_repair tasks: T01 ACCEPTED; T03 REJECTED with explicit semantic/public-contract failures; T05 REJECTED after analysis ended without candidate changes / Core NO_CHANGES"
+          - task_family: regression_test
+            phase: FIRST_PASS
+            disposition: WATCH
+            score: "2/3"
+            is_semantic_failure: true
+            runtime_admission: false
+            evidence_ref: "github:James3014/Nexus-new#1364:comment-5979409555"
+            provenance: DURABLE_REPOSITORY_RECEIPT
+            date: '2026-10-04'
+            failure_families:
+              - non_discriminating_regression_test
+            summary: "R10 regression_test tasks: T02 ACCEPTED; T04 ACCEPTED; T06 REJECTED because the added regression test was non-discriminating"
       - config_id: occamy-1.0-q4-typed-decision-selective-shadow
         model: occamy-1.0-q4
         model_digest: "ffb25f763ff9c27f5f4e2adcdef399c5654f9f840fdac33dffe7035ba8266a87"
