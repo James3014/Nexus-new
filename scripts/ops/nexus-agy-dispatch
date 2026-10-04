@@ -1432,6 +1432,309 @@ def _project_write_permissions(
     return projected
 
 
+_WORKTREE_GITFILE_RE = re.compile(r"^gitdir:\s*(.+)$", re.MULTILINE)
+
+# ---------------------------------------------------------------------------
+# Linked-worktree detection and standalone-clone fallback
+# ---------------------------------------------------------------------------
+
+
+def _run_git(*args: str, cwd: str) -> tuple[int, str]:
+    """Run a git command, return (returncode, stdout). Never raises."""
+    try:
+        result = subprocess.run(
+            ["git"] + list(args),
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        return result.returncode, result.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return 1, ""
+
+
+def _is_linked_worktree(cwd: str) -> bool:
+    """Return True when *cwd* is a linked Git worktree (not a standalone clone).
+
+    Detection uses deterministic Git metadata only — no Agy logs:
+
+    1. The .git entry is a plain file (gitfile) rather than a directory, which
+       is the canonical marker for a linked worktree checkout.
+    2. The common config referenced via that gitfile contains
+       extensions.worktreeConfig, which is the specific setting that triggers
+       the Agy 1.2.16 watcher rejection.
+
+    A standalone clone always has a real .git *directory*.  When either
+    condition cannot be read (missing git, non-git directory) this function
+    returns False so normal flow is unaffected.
+    """
+    try:
+        git_path = Path(cwd) / ".git"
+        if not git_path.exists():
+            # May still be a git repo via parent discovery, but check via git
+            rc, toplevel = _run_git("rev-parse", "--show-toplevel", cwd=cwd)
+            if rc != 0:
+                return False
+            git_path = Path(toplevel) / ".git"
+            if not git_path.exists():
+                return False
+
+        # A regular file at .git is the gitfile pointer used by linked worktrees.
+        if not git_path.is_file():
+            return False  # real .git directory — standalone clone
+
+        # Read the gitfile to find the per-worktree git dir.
+        try:
+            gitfile_content = git_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return False
+        match = _WORKTREE_GITFILE_RE.search(gitfile_content)
+        if not match:
+            return False
+        worktree_git_dir = Path(match.group(1).strip()).expanduser()
+        if not worktree_git_dir.is_absolute():
+            worktree_git_dir = (Path(cwd) / worktree_git_dir).resolve()
+
+        # The common config lives at <worktrees_dir>/../../config which is the
+        # main repository's config.  Walk up from the per-worktree git dir.
+        # Layout: <main-git-dir>/worktrees/<name>/  -> gitdir points here
+        # Common config: <main-git-dir>/config
+        common_config_path = worktree_git_dir.parent.parent / "config"
+        if not common_config_path.is_file():
+            # Non-standard layout: still a gitfile → still a linked worktree.
+            return True
+
+        try:
+            config_text = common_config_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return True  # gitfile confirmed linked worktree even without config read
+
+        # Presence of extensions.worktreeConfig in any case is the trigger.
+        if re.search(r"worktreeConfig\s*=\s*true", config_text, re.IGNORECASE):
+            return True
+        # Even without worktreeConfig, a gitfile-linked worktree is still
+        # incompatible with the Agy watcher: return True for any gitfile.
+        return True
+
+    except Exception:
+        return False
+
+
+def _git_remote_url(cwd: str) -> str | None:
+    """Return the 'origin' remote URL for the repo at *cwd*, or None."""
+    rc, url = _run_git("remote", "get-url", "origin", cwd=cwd)
+    if rc == 0 and url:
+        return url
+    return None
+
+
+def _git_head_sha(cwd: str) -> str | None:
+    """Return the full HEAD commit SHA for the repo at *cwd*, or None."""
+    rc, sha = _run_git("rev-parse", "HEAD", cwd=cwd)
+    if rc == 0 and sha and len(sha) >= 40:
+        return sha
+    return None
+
+
+def _git_is_dirty(cwd: str) -> bool:
+    """Return True when the working tree or index has uncommitted changes."""
+    rc, output = _run_git("status", "--porcelain", cwd=cwd)
+    if rc != 0:
+        return True  # fail closed
+    return bool(output.strip())
+
+
+def _git_real_dot_git(cwd: str) -> bool:
+    """Return True when .git is a real directory (not a gitfile)."""
+    git_path = Path(cwd) / ".git"
+    if git_path.is_dir():
+        return True
+    # Also accept repos that were initialized without a top-level .git (rare)
+    if git_path.is_file():
+        return False
+    return False
+
+
+class WorktreeFallbackError(ValueError):
+    """Raised when a standalone-clone fallback cannot be established safely."""
+
+
+def _validate_standalone_clone(
+    *,
+    clone_path: str,
+    expected_remote: str,
+    expected_sha: str,
+) -> None:
+    """Validate that an *existing* directory is a safe, exact standalone clone.
+
+    Raises WorktreeFallbackError with a deterministic tag on any mismatch.
+    """
+    clone_dir = Path(clone_path)
+    if not clone_dir.is_dir():
+        raise WorktreeFallbackError(f"FALLBACK_CLONE_NOT_A_DIR:{clone_path}")
+
+    # Must have a real .git directory (not a gitfile-linked worktree).
+    if not _git_real_dot_git(clone_path):
+        raise WorktreeFallbackError(f"FALLBACK_CLONE_IS_LINKED_WORKTREE:{clone_path}")
+
+    # Remote must match exactly.
+    actual_remote = _git_remote_url(clone_path)
+    if actual_remote != expected_remote:
+        raise WorktreeFallbackError(
+            f"FALLBACK_CLONE_REMOTE_MISMATCH:expected={expected_remote!r} actual={actual_remote!r}"
+        )
+
+    # HEAD SHA must match exactly.
+    actual_sha = _git_head_sha(clone_path)
+    if actual_sha != expected_sha:
+        raise WorktreeFallbackError(
+            f"FALLBACK_CLONE_BASE_MISMATCH:expected={expected_sha!r} actual={actual_sha!r}"
+        )
+
+    # Clone must be clean (no uncommitted changes).
+    if _git_is_dirty(clone_path):
+        raise WorktreeFallbackError(f"FALLBACK_CLONE_DIRTY:{clone_path}")
+
+
+def _prepare_standalone_clone_fallback(
+    *,
+    source_cwd: str,
+    fallback_path: str,
+) -> str:
+    """Create or validate a standalone clone and return the clone path as cwd.
+
+    Behaviour:
+    - If *fallback_path* does not exist: create a fresh ``git clone`` from the
+      source origin at the source HEAD revision with no shared object store and
+      no worktree metadata.
+    - If *fallback_path* exists and is already an exact, clean standalone clone
+      of the same origin/HEAD: reuse it without modification.
+    - Any other state (non-empty non-repo dir, wrong remote, wrong base, dirty,
+      linked worktree) raises WorktreeFallbackError — fail closed.
+
+    Raises WorktreeFallbackError on any unresolvable condition.
+    Returns the resolved absolute path string of the standalone clone.
+    """
+    source_remote = _git_remote_url(source_cwd)
+    if not source_remote:
+        raise WorktreeFallbackError(
+            f"FALLBACK_SOURCE_NO_REMOTE:cannot read origin from {source_cwd!r}"
+        )
+
+    source_sha = _git_head_sha(source_cwd)
+    if not source_sha:
+        raise WorktreeFallbackError(f"FALLBACK_SOURCE_NO_HEAD:cannot read HEAD from {source_cwd!r}")
+    if _git_is_dirty(source_cwd):
+        raise WorktreeFallbackError(
+            "FALLBACK_SOURCE_DIRTY:explicit fallback cannot discard uncommitted source state"
+        )
+
+    source_dir = Path(source_cwd).expanduser().resolve()
+    clone_dir = Path(fallback_path).expanduser().resolve()
+    try:
+        clone_dir.relative_to(source_dir)
+    except ValueError:
+        pass
+    else:
+        raise WorktreeFallbackError(
+            "FALLBACK_CLONE_INSIDE_SOURCE:standalone target must be outside source worktree"
+        )
+    clone_path = str(clone_dir)
+
+    if clone_dir.exists():
+        # Must be a directory; non-directory is an ambiguous collision.
+        if not clone_dir.is_dir():
+            raise WorktreeFallbackError(f"FALLBACK_CLONE_PATH_COLLISION_NOT_DIR:{clone_path}")
+
+        contents = list(clone_dir.iterdir())
+        if not contents:
+            # Empty directory: treat as new destination (will be populated below).
+            clone_dir.rmdir()  # remove so git clone can create it
+        else:
+            # Non-empty: validate as existing clone.
+            _validate_standalone_clone(
+                clone_path=clone_path,
+                expected_remote=source_remote,
+                expected_sha=source_sha,
+            )
+            return clone_path
+
+    # Create a fresh standalone clone from the local source checkout.  --no-local
+    # forces independent object storage instead of hardlinks/shared worktree metadata.
+    # The externally visible origin is restored to the source repository remote after
+    # cloning, and checkout is pinned to the exact source SHA.
+    clone_dir.parent.mkdir(parents=True, exist_ok=True)
+    rc, _out = _run_git(
+        "clone",
+        "--no-local",
+        source_cwd,
+        clone_path,
+        cwd=str(clone_dir.parent),
+    )
+    if rc != 0:
+        raise WorktreeFallbackError(
+            f"FALLBACK_CLONE_FAILED:git clone exited {rc} for {source_cwd!r}"
+        )
+
+    rc, _out = _run_git("remote", "set-url", "origin", source_remote, cwd=clone_path)
+    if rc != 0:
+        raise WorktreeFallbackError("FALLBACK_CLONE_REMOTE_SET_FAILED")
+
+    # Checkout the exact base SHA (detached HEAD for isolation).
+    rc, _out = _run_git("checkout", "--detach", source_sha, cwd=clone_path)
+    if rc != 0:
+        # Try without --detach (older git fallback).
+        rc2, _out2 = _run_git("checkout", source_sha, cwd=clone_path)
+        if rc2 != 0:
+            raise WorktreeFallbackError(
+                f"FALLBACK_CLONE_CHECKOUT_FAILED:cannot checkout {source_sha!r}"
+            )
+
+    # Final validation: confirm identity and cleanliness.
+    _validate_standalone_clone(
+        clone_path=clone_path,
+        expected_remote=source_remote,
+        expected_sha=source_sha,
+    )
+    return clone_path
+
+
+def _resolve_cwd_for_dispatch(
+    *,
+    requested_cwd: str,
+    fallback_clone_path: str | None,
+) -> str:
+    """Return the effective cwd for dispatch, applying fallback logic.
+
+    - If *fallback_clone_path* is None and the requested cwd is a linked
+      worktree, raise WorktreeFallbackError with WORKTREE_NO_FALLBACK_REQUESTED
+      so the caller can surface a clear diagnostic.
+    - If *fallback_clone_path* is provided, prepare/validate the standalone
+      clone and return its path regardless of whether the source is a linked
+      worktree (explicit opt-in).
+    - If *fallback_clone_path* is None and the requested cwd is a normal
+      standalone repo (or non-git directory), return *requested_cwd* unchanged.
+    """
+    if fallback_clone_path is not None:
+        return _prepare_standalone_clone_fallback(
+            source_cwd=requested_cwd,
+            fallback_path=fallback_clone_path,
+        )
+
+    if _is_linked_worktree(requested_cwd):
+        raise WorktreeFallbackError(
+            "WORKTREE_NO_FALLBACK_REQUESTED:"
+            "The requested --cwd is a linked Git worktree which is incompatible "
+            "with the Agy watcher. Re-run with --fallback-clone <path> to provide "
+            "an explicit standalone clone target."
+        )
+
+    return requested_cwd
+
+
 def dispatch_run(
     *,
     prompt: str,
@@ -2636,6 +2939,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--prompt", dest="prompt_flag", help="Prompt text")
     ap.add_argument("--prompt-file")
     ap.add_argument("--cwd", default=os.getcwd())
+    ap.add_argument(
+        "--fallback-clone",
+        help=(
+            "Explicit standalone clone target for linked-worktree Agy compatibility; "
+            "the clone becomes the actual operation cwd/repo_root"
+        ),
+    )
     ap.add_argument("--mode", choices=("plan", "accept-edits"), default="accept-edits")
     ap.add_argument("--model")
     ap.add_argument("--effort", choices=("low", "medium", "high"))
@@ -2688,6 +2998,20 @@ def main(argv: list[str] | None = None) -> int:
     cwd = str(Path(args.cwd).expanduser().resolve())
     if not Path(cwd).is_dir():
         raise SystemExit("INVALID_CWD")
+
+    # The internal --operation-run already receives the effective execution root
+    # persisted by the parent launcher.  Only a new external dispatch may resolve
+    # an explicit linked-worktree -> standalone-clone fallback.
+    if not args.operation_run:
+        try:
+            cwd = _resolve_cwd_for_dispatch(
+                requested_cwd=cwd,
+                fallback_clone_path=args.fallback_clone,
+            )
+        except WorktreeFallbackError as exc:
+            raise SystemExit(str(exc)) from exc
+    elif args.fallback_clone:
+        raise SystemExit("FALLBACK_CLONE_NOT_ALLOWED_FOR_OPERATION_RUN")
 
     prompt_text = args.prompt_flag if args.prompt_flag is not None else args.prompt
     if args.prompt_file:

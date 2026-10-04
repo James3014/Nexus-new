@@ -1785,6 +1785,253 @@ def test_pre_provider_wrapper_exception_is_not_outcome_unknown(
     assert record["reconciliation"]["retry_permitted"] is False
 
 
+# ---------------------------------------------------------------------------
+# Issue #1342: explicit standalone-clone fallback for linked worktrees
+# ---------------------------------------------------------------------------
+
+
+def _fallback_git(root: Path, *args: str) -> str:
+    proc = subprocess.run(
+        ["git", *args],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+    return proc.stdout.strip()
+
+
+def _make_fallback_fixture(tmp_path: Path) -> tuple[Path, Path, str]:
+    source = tmp_path / "source"
+    source.mkdir()
+    _fallback_git(source, "init", "-q")
+    _fallback_git(source, "config", "user.email", "issue1342@example.invalid")
+    _fallback_git(source, "config", "user.name", "Issue 1342")
+    (source / "tracked.txt").write_text("one\n", encoding="utf-8")
+    _fallback_git(source, "add", "tracked.txt")
+    _fallback_git(source, "commit", "-q", "-m", "base")
+    (source / "tracked.txt").write_text("two\n", encoding="utf-8")
+    _fallback_git(source, "add", "tracked.txt")
+    _fallback_git(source, "commit", "-q", "-m", "head")
+    _fallback_git(
+        source,
+        "remote",
+        "add",
+        "origin",
+        "https://github.com/James3014/Nexus-new.git",
+    )
+    linked = tmp_path / "linked"
+    _fallback_git(source, "worktree", "add", "-q", "-b", "linked-test", str(linked), "HEAD")
+    return source, linked, _fallback_git(linked, "rev-parse", "HEAD")
+
+
+def test_linked_worktree_detection_does_not_flag_standalone_repo(tmp_path: Path) -> None:
+    source, linked, _sha = _make_fallback_fixture(tmp_path)
+
+    assert dispatch._is_linked_worktree(str(linked)) is True
+    assert dispatch._is_linked_worktree(str(source)) is False
+
+
+def test_linked_worktree_without_explicit_fallback_fails_closed(tmp_path: Path) -> None:
+    _source, linked, _sha = _make_fallback_fixture(tmp_path)
+
+    with pytest.raises(dispatch.WorktreeFallbackError, match="WORKTREE_NO_FALLBACK_REQUESTED"):
+        dispatch._resolve_cwd_for_dispatch(
+            requested_cwd=str(linked),
+            fallback_clone_path=None,
+        )
+
+
+def test_explicit_fallback_creates_exact_independent_clone(tmp_path: Path) -> None:
+    source, linked, sha = _make_fallback_fixture(tmp_path)
+    target = tmp_path / "fallback"
+
+    resolved = Path(
+        dispatch._resolve_cwd_for_dispatch(
+            requested_cwd=str(linked),
+            fallback_clone_path=str(target),
+        )
+    )
+
+    assert resolved == target.resolve()
+    assert (resolved / ".git").is_dir()
+    assert _fallback_git(resolved, "rev-parse", "HEAD") == sha
+    assert _fallback_git(resolved, "remote", "get-url", "origin") == (
+        "https://github.com/James3014/Nexus-new.git"
+    )
+    assert _fallback_git(resolved, "status", "--porcelain") == ""
+    assert (
+        Path(_fallback_git(resolved, "rev-parse", "--git-common-dir")).resolve()
+        != (source / ".git").resolve()
+    )
+    assert (linked / "tracked.txt").read_text(encoding="utf-8") == "two\n"
+
+
+def test_exact_clean_fallback_clone_can_be_reused(tmp_path: Path) -> None:
+    _source, linked, _sha = _make_fallback_fixture(tmp_path)
+    target = tmp_path / "fallback"
+    first = dispatch._prepare_standalone_clone_fallback(
+        source_cwd=str(linked),
+        fallback_path=str(target),
+    )
+    marker = target / ".git" / "issue1342-marker"
+    marker.write_text("same clone\n", encoding="utf-8")
+
+    second = dispatch._prepare_standalone_clone_fallback(
+        source_cwd=str(linked),
+        fallback_path=str(target),
+    )
+
+    assert first == second
+    assert marker.read_text(encoding="utf-8") == "same clone\n"
+
+
+def test_dirty_existing_fallback_clone_is_rejected(tmp_path: Path) -> None:
+    _source, linked, _sha = _make_fallback_fixture(tmp_path)
+    target = tmp_path / "fallback"
+    dispatch._prepare_standalone_clone_fallback(
+        source_cwd=str(linked),
+        fallback_path=str(target),
+    )
+    (target / "tracked.txt").write_text("dirty\n", encoding="utf-8")
+
+    with pytest.raises(dispatch.WorktreeFallbackError, match="FALLBACK_CLONE_DIRTY"):
+        dispatch._prepare_standalone_clone_fallback(
+            source_cwd=str(linked),
+            fallback_path=str(target),
+        )
+
+
+def test_wrong_remote_existing_fallback_clone_is_rejected(tmp_path: Path) -> None:
+    _source, linked, _sha = _make_fallback_fixture(tmp_path)
+    target = tmp_path / "fallback"
+    dispatch._prepare_standalone_clone_fallback(
+        source_cwd=str(linked),
+        fallback_path=str(target),
+    )
+    _fallback_git(target, "remote", "set-url", "origin", "https://example.invalid/other.git")
+
+    with pytest.raises(dispatch.WorktreeFallbackError, match="FALLBACK_CLONE_REMOTE_MISMATCH"):
+        dispatch._prepare_standalone_clone_fallback(
+            source_cwd=str(linked),
+            fallback_path=str(target),
+        )
+
+
+def test_wrong_base_existing_fallback_clone_is_rejected(tmp_path: Path) -> None:
+    _source, linked, _sha = _make_fallback_fixture(tmp_path)
+    target = tmp_path / "fallback"
+    dispatch._prepare_standalone_clone_fallback(
+        source_cwd=str(linked),
+        fallback_path=str(target),
+    )
+    _fallback_git(target, "checkout", "-q", "HEAD~1")
+
+    with pytest.raises(dispatch.WorktreeFallbackError, match="FALLBACK_CLONE_BASE_MISMATCH"):
+        dispatch._prepare_standalone_clone_fallback(
+            source_cwd=str(linked),
+            fallback_path=str(target),
+        )
+
+
+def test_fallback_path_collision_file_is_rejected(tmp_path: Path) -> None:
+    _source, linked, _sha = _make_fallback_fixture(tmp_path)
+    target = tmp_path / "fallback"
+    target.write_text("collision\n", encoding="utf-8")
+
+    with pytest.raises(
+        dispatch.WorktreeFallbackError,
+        match="FALLBACK_CLONE_PATH_COLLISION_NOT_DIR",
+    ):
+        dispatch._prepare_standalone_clone_fallback(
+            source_cwd=str(linked),
+            fallback_path=str(target),
+        )
+
+
+def test_normal_repo_without_fallback_keeps_original_cwd(tmp_path: Path) -> None:
+    source, _linked, _sha = _make_fallback_fixture(tmp_path)
+
+    assert dispatch._resolve_cwd_for_dispatch(
+        requested_cwd=str(source),
+        fallback_clone_path=None,
+    ) == str(source)
+
+
+def test_write_scope_projects_against_effective_fallback_clone(tmp_path: Path) -> None:
+    _source, linked, _sha = _make_fallback_fixture(tmp_path)
+    target = tmp_path / "fallback"
+    effective = dispatch._resolve_cwd_for_dispatch(
+        requested_cwd=str(linked),
+        fallback_clone_path=str(target),
+    )
+
+    rules = dispatch._project_write_permissions(
+        cwd=effective,
+        mode="accept-edits",
+        write_paths=["scripts/ops/nexus-agy-dispatch"],
+        allow_rules=[],
+    )
+
+    assert rules == [f"write_file({target.resolve() / 'scripts/ops/nexus-agy-dispatch'})"]
+    assert str(linked) not in rules[0]
+
+
+def test_background_main_binds_operation_to_effective_clone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _source, linked, _sha = _make_fallback_fixture(tmp_path)
+    target = tmp_path / "fallback"
+    captured: dict[str, object] = {}
+
+    def fake_spawn(**kwargs):
+        captured.update(kwargs)
+        return {"operation_id": "agyop_" + ("a" * 32)}
+
+    monkeypatch.setattr(dispatch, "_spawn_background_operation", fake_spawn)
+    monkeypatch.setattr(dispatch, "_print_operation", lambda record: None)
+
+    rc = dispatch.main([
+        "--background",
+        "--cwd",
+        str(linked),
+        "--fallback-clone",
+        str(target),
+        "--prompt",
+        "bounded fallback test",
+        "--write-path",
+        "scripts/ops/nexus-agy-dispatch",
+        "--operation-root",
+        str(tmp_path / "operations"),
+    ])
+
+    assert rc == 0
+    assert Path(str(captured["cwd"])) == target.resolve()
+    assert captured["write_paths"] == ["scripts/ops/nexus-agy-dispatch"]
+
+
+def test_dirty_linked_source_is_rejected_before_fallback_clone(tmp_path: Path) -> None:
+    _source, linked, _sha = _make_fallback_fixture(tmp_path)
+    (linked / "tracked.txt").write_text("dirty source\n", encoding="utf-8")
+
+    with pytest.raises(dispatch.WorktreeFallbackError, match="FALLBACK_SOURCE_DIRTY"):
+        dispatch._prepare_standalone_clone_fallback(
+            source_cwd=str(linked),
+            fallback_path=str(tmp_path / "fallback"),
+        )
+
+
+def test_fallback_clone_inside_source_is_rejected(tmp_path: Path) -> None:
+    _source, linked, _sha = _make_fallback_fixture(tmp_path)
+
+    with pytest.raises(dispatch.WorktreeFallbackError, match="FALLBACK_CLONE_INSIDE_SOURCE"):
+        dispatch._prepare_standalone_clone_fallback(
+            source_cwd=str(linked),
+            fallback_path=str(linked / ".fallback-clone"),
+        )
+
+
 def test_unsupported_effort_for_claude_opus_fails_before_claim(tmp_path: Path) -> None:
     coordinator = _WriteScopeCoordinator(tmp_path / "home")
     events: list[dict[str, object]] = []
