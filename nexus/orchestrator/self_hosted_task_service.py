@@ -4293,6 +4293,180 @@ class SelfHostedTaskService:
             candidate_commit_allowed=verified.verified,
         )
 
+    def _record_track1_verified_outcome(
+        self,
+        *,
+        contract,
+        lease,
+        state: Mapping[str, Any],
+        candidate,
+        verified: VerifiedCandidateReceipt,
+        execution: WorkerExecutionReceipt,
+    ) -> dict[str, Any]:
+        """Mirror one natural self-hosted Candidate into Track-1 research evidence.
+
+        This is telemetry only. It reuses the existing candidate-evidence and
+        trajectory contracts and never changes selection, verification,
+        acceptance, routing, or admission. Failures are returned as bounded
+        metadata so the caller can preserve runtime behavior.
+        """
+        from nexus.research.clm_system_one.research_evidence_root import (
+            explicit_research_evidence_root_configured,
+        )
+
+        if not explicit_research_evidence_root_configured():
+            return {"status": "SKIPPED", "reason": "shared_evidence_root_not_configured"}
+
+        provider = str(getattr(execution, "provider", "") or "")
+        attempt_id = str(state.get("attempt_id") or "")
+        if not provider or not attempt_id:
+            return {"status": "SKIPPED", "reason": "trajectory_identity_missing"}
+
+        try:
+            from nexus.research.clm_system_one.candidate_evidence_collector import (
+                collect_candidate_group,
+            )
+            from nexus.research.clm_system_one.trajectory_continuity import (
+                bind_trajectory_outcome,
+                refresh_registered_experiment,
+                resolve_research_evidence_root,
+                self_hosted_worker_trajectory_id,
+            )
+
+            repo_root = str(
+                getattr(contract, "controller_repo_root", "")
+                or getattr(contract, "target_repo_root", "")
+            )
+            evidence_root = resolve_research_evidence_root(repo_root)
+            trajectory_id = self_hosted_worker_trajectory_id(
+                task_id=str(contract.task_id),
+                attempt_id=attempt_id,
+                provider=provider,
+            )
+            source_revision = str(
+                getattr(contract, "target_base_revision", "")
+                or getattr(contract, "controller_revision", "")
+            )
+            diff_proc = subprocess.run(
+                ["git", "diff", "--binary", "--no-ext-diff", source_revision, "--"],
+                cwd=str(lease.target_worktree),
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+            )
+            tracked_diff = diff_proc.stdout if diff_proc.returncode in {0, 1} else ""
+            candidate_payload = json.dumps(
+                {
+                    "schema": "nexus.self_hosted_candidate_payload.v1",
+                    "tracked_diff": tracked_diff,
+                    "tracked_diff_sha256": str(getattr(candidate, "tracked_diff_sha256", "") or ""),
+                    "untracked_content_hashes": dict(
+                        getattr(candidate, "untracked_content_hashes", {}) or {}
+                    ),
+                    "changed_files": list(getattr(candidate, "changed_files", ()) or ()),
+                    "untracked_files": list(getattr(candidate, "untracked_files", ()) or ()),
+                    "deleted_files": list(getattr(candidate, "deleted_files", ()) or ()),
+                    "candidate_state_hash": str(
+                        getattr(candidate, "candidate_state_hash", "") or ""
+                    ),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            )
+
+            verifier_rows = list(getattr(verified, "verifier_evidence", ()) or ())
+            gate_results = []
+            for item in verifier_rows:
+                command = str(getattr(item, "command", "") or "")
+                passed = (
+                    str(getattr(item, "status", "") or "") == "COMPLETED"
+                    and getattr(item, "exit_code", None) == 0
+                )
+                gate_results.append(
+                    {
+                        "cmd_sha256": hashlib.sha256(command.encode("utf-8")).hexdigest(),
+                        "passed": bool(passed),
+                    }
+                )
+
+            verifier_status = "PASS" if bool(verified.verified) else "FAIL"
+            aggregate_matches = bool(gate_results) and (
+                all(row["passed"] for row in gate_results) == bool(verified.verified)
+            )
+            label_quality = "MECHANICAL_GATE" if aggregate_matches else "TRACE_ONLY"
+            candidate_id = f"{contract.task_id}#self-hosted-{attempt_id}"
+            dispatch_envelope = state.get("canonical_dispatch_envelope")
+            dispatch_envelope = (
+                dispatch_envelope if isinstance(dispatch_envelope, Mapping) else {}
+            )
+            selected_model = str(
+                state.get("selected_model") or dispatch_envelope.get("model") or ""
+            )
+            collection = collect_candidate_group(
+                repo_root=repo_root,
+                task_id=str(contract.task_id),
+                attempt_id=attempt_id,
+                collector_source="self_hosted_worker",
+                source_revision=source_revision,
+                contract_identity=contract.model_dump(mode="json"),
+                verifier_identity={
+                    "kind": "candidate_verifier",
+                    "commands": list(getattr(contract, "verifier_commands", ()) or ()),
+                },
+                candidates=[
+                    {
+                        "candidate_id": candidate_id,
+                        "candidate_model": selected_model,
+                        "candidate_source": provider,
+                        "candidate_payload": candidate_payload,
+                        "candidate_state_hash": str(
+                            getattr(candidate, "candidate_state_hash", "") or ""
+                        ),
+                        "verifier_status": verifier_status,
+                        "label_quality": label_quality,
+                        "verifier_evidence": {"gate_results": gate_results},
+                        "failure_reason_codes": list(verified.failure_reasons or ()),
+                        "selected": bool(verified.verified),
+                    }
+                ],
+                winner_id=candidate_id if verified.verified else "",
+            )
+            result = {
+                "status": collection.status,
+                "eligible_count": collection.eligible_count,
+                "trajectory_id": trajectory_id,
+                "group_sha256": collection.group_sha256,
+                "outcome_bound": False,
+            }
+            if collection.eligible_count == 1 and collection.row_refs:
+                bind_trajectory_outcome(
+                    evidence_root=evidence_root,
+                    trajectory_id=trajectory_id,
+                    candidate_evidence_ref=collection.row_refs[0],
+                )
+                refresh = refresh_registered_experiment(
+                    repo_root=Path(__file__).resolve().parents[2],
+                    candidate_evidence_root=evidence_root,
+                )
+                result.update(
+                    outcome_bound=True,
+                    readiness=(refresh.get("readiness") or {}).get("disposition"),
+                    checkpoint_status=(refresh.get("checkpoint") or {}).get("status"),
+                    checkpoint_sha256=(refresh.get("checkpoint") or {}).get(
+                        "checkpoint_sha256"
+                    ),
+                )
+            else:
+                result["reason"] = "strong_verifier_truth_unavailable"
+            return result
+        except Exception as exc:
+            return {
+                "status": "ERROR",
+                "error_type": type(exc).__name__,
+            }
+
     def _finalize_runtime_candidate(
         self, contract, request, lease, state, attempts, update, *, execution, status
     ):
@@ -4336,6 +4510,14 @@ class SelfHostedTaskService:
         if latest_execution is None:
             raise RuntimeError("worker execution receipt is missing for attempt resolution")
         resolution = resolve_attempt(latest_execution, candidate, verified)
+        self._record_track1_verified_outcome(
+            contract=contract,
+            lease=lease,
+            state=self._read_state(task_id) or state,
+            candidate=candidate,
+            verified=verified,
+            execution=latest_execution,
+        )
 
         update(
             "VERIFIED",
