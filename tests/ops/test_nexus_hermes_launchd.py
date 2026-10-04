@@ -181,6 +181,39 @@ def test_activate_rejects_unmanaged_live_model_endpoint(tmp_path, monkeypatch):
     assert not any(call[0] == "bootstrap" for call in runner.calls)
 
 
+def test_activate_rolls_back_both_labels_when_controller_bootstrap_fails(tmp_path, monkeypatch):
+    config_path, config, _ = _config(tmp_path, monkeypatch)
+    runner = FakeLaunchctl()
+    MOD._write_plists(config_path, config)
+    monkeypatch.setattr(
+        MOD,
+        "_activation_evidence",
+        lambda _config: {"schema": MOD.ACTIVATION_SCHEMA, "status": "PASS"},
+    )
+
+    def endpoint_health(_config, timeout=3.0):
+        if MOD.DEFAULT_MODEL_LABEL not in runner.loaded:
+            raise MOD.HermesLaunchdError("MODEL_ENDPOINT_UNAVAILABLE:test")
+        return {"status": "HEALTHY", "models": [config["model_id"]]}
+
+    monkeypatch.setattr(MOD, "_endpoint_health", endpoint_health)
+
+    def bootstrap(label, plist_path, *, runner):
+        del plist_path
+        if label == MOD.DEFAULT_CONTROLLER_LABEL:
+            raise MOD.HermesLaunchdError("CONTROLLER_BOOTSTRAP_TEST_FAILURE")
+        runner.loaded.add(label)
+
+    monkeypatch.setattr(MOD, "_bootstrap", bootstrap)
+
+    with pytest.raises(MOD.HermesLaunchdError, match="CONTROLLER_BOOTSTRAP_TEST_FAILURE"):
+        MOD._activate(config_path, config, runner=runner)
+
+    assert runner.loaded == set()
+    assert runner.disabled[MOD.DEFAULT_CONTROLLER_LABEL] is True
+    assert runner.disabled[MOD.DEFAULT_MODEL_LABEL] is True
+
+
 def _write_soak(
     root: Path,
     *,

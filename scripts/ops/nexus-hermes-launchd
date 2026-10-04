@@ -627,29 +627,37 @@ def _activate(
         else:
             raise HermesLaunchdError("MODEL_ENDPOINT_ALREADY_LIVE_OUTSIDE_LAUNCHD")
 
-    _set_disabled(model_label, False, runner=runner)
-    _bootstrap(model_label, model_plist, runner=runner)
-    deadline = time.monotonic() + 180
-    while True:
-        try:
-            model_health = _endpoint_health(config, timeout=3.0)
-            break
-        except HermesLaunchdError:
-            if time.monotonic() >= deadline:
-                _set_disabled(model_label, True, runner=runner)
-                _bootout_if_loaded(model_label, runner=runner)
-                raise HermesLaunchdError("MODEL_LAUNCHD_HEALTH_TIMEOUT")
-            time.sleep(2)
+    try:
+        _set_disabled(model_label, False, runner=runner)
+        _bootstrap(model_label, model_plist, runner=runner)
+        deadline = time.monotonic() + 180
+        while True:
+            try:
+                model_health = _endpoint_health(config, timeout=3.0)
+                break
+            except HermesLaunchdError:
+                if time.monotonic() >= deadline:
+                    raise HermesLaunchdError("MODEL_LAUNCHD_HEALTH_TIMEOUT")
+                time.sleep(2)
 
-    _set_disabled(controller_label, False, runner=runner)
-    _bootstrap(controller_label, controller_plist, runner=runner)
-    return {
-        "status": "ACTIVATED",
-        "activation_evidence": evidence,
-        "model_health": model_health,
-        "model": _launch_status(model_label, runner=runner),
-        "controller": _launch_status(controller_label, runner=runner),
-    }
+        _set_disabled(controller_label, False, runner=runner)
+        _bootstrap(controller_label, controller_plist, runner=runner)
+        return {
+            "status": "ACTIVATED",
+            "activation_evidence": evidence,
+            "model_health": model_health,
+            "model": _launch_status(model_label, runner=runner),
+            "controller": _launch_status(controller_label, runner=runner),
+        }
+    except Exception:
+        # Activation is transactional at the local-service boundary. A partial
+        # bootstrap must never leave either label enabled or running.
+        for label in (controller_label, model_label):
+            try:
+                _bootout_if_loaded(label, runner=runner)
+            finally:
+                _set_disabled(label, True, runner=runner)
+        raise
 
 
 def _disable(
