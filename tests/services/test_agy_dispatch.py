@@ -3076,3 +3076,133 @@ def test_wrapper_exception_keeps_operation_nonterminal_when_provider_is_unresolv
     assert record["reconciliation"]["result"] == "WRAPPER_EXCEPTION_ORPHAN_PROVIDER_UNVERIFIED"
     assert record["reconciliation"]["provider_alive_after"] is True
     assert record["reconciliation"]["retry_permitted"] is False
+
+
+def _make_no_effect_finalization_repo(tmp_path: Path) -> Path:
+    root = tmp_path / "source-repo"
+    root.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+    (root / "tracked.txt").write_text("before\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "base"], cwd=root, check=True)
+    return root
+
+
+def _create_outcome_unknown_source_operation(
+    journal,
+    source_root: Path,
+) -> str:
+    operation_id = dispatch.new_operation_id()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(source_root),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="a" * 64,
+        runtime_revision="b" * 40,
+    )
+    journal.mark_started(operation_id, pid=999_999_998)
+    journal.update(
+        operation_id,
+        account_alias_hash="acct-finalize",
+        lease_id_hash="lease-finalize",
+    )
+    journal.mark_terminal(
+        operation_id,
+        status="OUTCOME_UNKNOWN",
+        exit_code=None,
+        failure_kind="TIMEOUT",
+        cwd=str(source_root),
+        reconciliation={
+            "result": "PROVIDER_TURN_MAY_STILL_BE_RUNNING",
+            "provider_alive_after": False,
+            "retry_permitted": False,
+        },
+    )
+    return operation_id
+
+
+def test_finalize_no_effect_releases_only_source_retry_fence(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source_root = _make_no_effect_finalization_repo(tmp_path)
+    journal = dispatch.AgyOperationJournal(tmp_path / "operations")
+    operation_id = _create_outcome_unknown_source_operation(journal, source_root)
+    monkeypatch.setattr(dispatch, "LEASES_DIR", tmp_path / "leases")
+
+    finalized = dispatch._finalize_no_effect_operation(journal, operation_id)
+
+    assert finalized["status"] == "FAILED"
+    assert finalized["failure_kind"] == "TIMEOUT"
+    reconciliation = finalized["reconciliation"]
+    assert reconciliation["result"] == "SOURCE_NO_DURABLE_EFFECT_PROVEN"
+    assert reconciliation["reconciliation_scope"] == "SOURCE_ONLY"
+    assert reconciliation["retry_permitted"] is True
+    assert reconciliation["lease_cleanup"]["result"] == "ALREADY_ABSENT"
+    assert reconciliation["source_proof"]["proof_scope"] == "SOURCE_STATE_ONLY"
+    assert reconciliation["source_proof"]["observed_changed_paths"] == []
+
+    replay = dispatch._finalize_no_effect_operation(journal, operation_id)
+    assert replay == finalized
+
+
+def test_finalize_no_effect_fails_closed_when_lease_identity_conflicts(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source_root = _make_no_effect_finalization_repo(tmp_path)
+    journal = dispatch.AgyOperationJournal(tmp_path / "operations")
+    operation_id = _create_outcome_unknown_source_operation(journal, source_root)
+    leases = tmp_path / "leases"
+    leases.mkdir()
+    monkeypatch.setattr(dispatch, "LEASES_DIR", leases)
+    (leases / "acct-finalize.receipt.json").write_text(
+        json.dumps({
+            "account_alias_hash": "acct-finalize",
+            "lease_id_hash": "different-lease",
+            "pid": 999_999_998,
+        }),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        dispatch.AgyOperationJournalError,
+        match="NO_EFFECT_LEASE_NOT_SAFE",
+    ):
+        dispatch._finalize_no_effect_operation(journal, operation_id)
+
+    blocked = journal.read(operation_id)
+    assert blocked["status"] == "OUTCOME_UNKNOWN"
+    assert blocked["reconciliation"]["retry_permitted"] is False
+
+
+def test_finalize_no_effect_cli_projects_receipt(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    source_root = _make_no_effect_finalization_repo(tmp_path)
+    operation_root = tmp_path / "operations"
+    journal = dispatch.AgyOperationJournal(operation_root)
+    operation_id = _create_outcome_unknown_source_operation(journal, source_root)
+    monkeypatch.setattr(dispatch, "LEASES_DIR", tmp_path / "leases")
+
+    assert (
+        dispatch.main([
+            "--finalize-no-effect",
+            operation_id,
+            "--operation-root",
+            str(operation_root),
+        ])
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "FAILED"
+    assert payload["reconciliation"]["result"] == "SOURCE_NO_DURABLE_EFFECT_PROVEN"
+    assert payload["reconciliation"]["retry_permitted"] is True

@@ -626,6 +626,73 @@ class DirectOperationJournal:
         payload.update(changes)
         return self.update(operation_id, **payload)
 
+    def prove_source_state_unchanged(self, operation_id: str) -> dict[str, Any]:
+        """Prove only that the repository source state still equals the captured baseline.
+
+        This is intentionally narrower than proving the provider had no external
+        effects. It is suitable only for releasing a source-mutation retry fence.
+        """
+        record = self.read(operation_id)
+        if record.get("status") != "OUTCOME_UNKNOWN":
+            raise DirectOperationJournalError("SOURCE_PROOF_REQUIRES_OUTCOME_UNKNOWN")
+        if record.get("source_attribution_state") != "ATTRIBUTED":
+            raise DirectOperationJournalError("SOURCE_ATTRIBUTION_UNAVAILABLE")
+        if record.get("effect_observation_error"):
+            raise DirectOperationJournalError("SOURCE_EFFECT_OBSERVATION_UNRELIABLE")
+        if record.get("first_effect_at") is not None:
+            raise DirectOperationJournalError("SOURCE_EFFECT_PREVIOUSLY_OBSERVED")
+        observed = record.get("observed_changed_paths")
+        if observed != []:
+            raise DirectOperationJournalError("SOURCE_STATE_CHANGED")
+
+        baseline = record.get("source_baseline")
+        baseline_hash = record.get("source_baseline_sha256")
+        valid_baseline_hash = source_baseline_sha256(baseline)
+        if (
+            not isinstance(baseline_hash, str)
+            or valid_baseline_hash is None
+            or valid_baseline_hash != baseline_hash
+        ):
+            raise DirectOperationJournalError("SOURCE_BASELINE_UNAVAILABLE")
+
+        cwd = record.get("cwd")
+        record_root = record.get("repo_root")
+        base_head = record.get("base_head")
+        if (
+            not isinstance(cwd, str)
+            or not cwd
+            or not isinstance(record_root, str)
+            or not record_root
+            or not isinstance(base_head, str)
+            or not base_head
+        ):
+            raise DirectOperationJournalError("SOURCE_IDENTITY_UNAVAILABLE")
+
+        current_root, current_head = _git_identity(cwd)
+        try:
+            same_root = bool(
+                isinstance(current_root, str) and os.path.samefile(record_root, current_root)
+            )
+        except OSError:
+            same_root = False
+        if not same_root or current_head != base_head:
+            raise DirectOperationJournalError("SOURCE_IDENTITY_CHANGED")
+
+        delta = observed_changed_paths_since(cwd, baseline)
+        if delta is None:
+            raise DirectOperationJournalError("SOURCE_STATE_UNAVAILABLE")
+        if delta:
+            raise DirectOperationJournalError("SOURCE_STATE_CHANGED")
+
+        return {
+            "proof_scope": "SOURCE_STATE_ONLY",
+            "repo_root": record_root,
+            "base_head": base_head,
+            "source_baseline_sha256": baseline_hash,
+            "observed_changed_paths": [],
+            "first_effect_at": None,
+        }
+
     def reconcile(
         self,
         operation_id: str,
