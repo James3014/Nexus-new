@@ -79,8 +79,9 @@ def _config(tmp_path: Path, monkeypatch, *, target_mode: str = "observe"):
     controller = tmp_path / "nexus-hermes-continuation-controller"
     guard = tmp_path / "nexus-hermes-controller-guard"
     doctor = tmp_path / "nexus-workflow-doctor"
+    agy_dispatch = tmp_path / "nexus-agy-dispatch"
     host_sync = tmp_path / "nexus-host-sync"
-    for path in (controller, guard, doctor, host_sync):
+    for path in (controller, guard, doctor, agy_dispatch, host_sync):
         path.write_text("#!/bin/sh\n")
         path.chmod(0o755)
     repo_root = tmp_path / "repo"
@@ -95,6 +96,7 @@ def _config(tmp_path: Path, monkeypatch, *, target_mode: str = "observe"):
         "controller_path": str(controller),
         "guard_path": str(guard),
         "doctor_path": str(doctor),
+        "agy_dispatch_path": str(agy_dispatch),
         "host_sync_path": str(host_sync),
         "model_endpoint": "http://127.0.0.1:8000/v1/models",
         "model_binary": str(model_binary),
@@ -307,6 +309,12 @@ def test_second_tick_is_noop_while_service_lock_is_held(tmp_path, monkeypatch):
 
 def test_staged_tick_reuses_stable_observe_controller_identity(tmp_path, monkeypatch):
     _, config, _ = _config(tmp_path, monkeypatch)
+    resolved_paths = {
+        "workflow_doctor": str(Path(config["doctor_path"]).resolve()),
+        "agy_dispatch": str(Path(config["agy_dispatch_path"]).resolve()),
+        "hermes_controller_guard": str(Path(config["guard_path"]).resolve()),
+        "hermes_continuation_controller": str(Path(config["controller_path"]).resolve()),
+    }
     monkeypatch.setattr(
         MOD,
         "_host_runtime",
@@ -314,6 +322,7 @@ def test_staged_tick_reuses_stable_observe_controller_identity(tmp_path, monkeyp
             "state": "ALIGNED",
             "installed_revision": "a" * 40,
             "installed_bundle_sha256": "b" * 64,
+            "resolved_paths": resolved_paths,
         },
     )
     monkeypatch.setattr(
@@ -331,24 +340,44 @@ def test_staged_tick_reuses_stable_observe_controller_identity(tmp_path, monkeyp
             "effect_intent": None,
         },
     )
+    doctor_paths = []
     monkeypatch.setattr(
         MOD,
         "_doctor",
-        lambda _config, _target, _operation_id: {
-            "schema": "nexus.workflow_doctor.v1",
-            "claim_ceiling": "READ_ONLY_WORKFLOW_OBSERVATION",
-            "resume_disposition": "SAFE",
-            "next_gate": {"code": "CONTINUE_BOUNDED_ISSUE_WORK"},
-            "operation": {"active": []},
-            "leases": {"active": []},
-        },
+        lambda _config, _target, _operation_id, *, doctor_path=None: (
+            doctor_paths.append(doctor_path)
+            or {
+                "schema": "nexus.workflow_doctor.v1",
+                "claim_ceiling": "READ_ONLY_WORKFLOW_OBSERVATION",
+                "resume_disposition": "SAFE",
+                "next_gate": {"code": "CONTINUE_BOUNDED_ISSUE_WORK"},
+                "operation": {"active": []},
+                "leases": {"active": []},
+            }
+        ),
     )
 
-    calls: list[str] = []
+    original_load_target = MOD._load_target
+    target_loads = []
+
+    def tracked_load_target(load_config):
+        target_loads.append(1)
+        return original_load_target(load_config)
+
+    monkeypatch.setattr(MOD, "_load_target", tracked_load_target)
+    calls = []
 
     def fake_run(argv, *, cwd=None, timeout=60, env=None):
         run_id = argv[argv.index("--run-id") + 1]
-        calls.append(run_id)
+        policy_path = argv[argv.index("--policy") + 1]
+        calls.append({
+            "run_id": run_id,
+            "controller_path": argv[0],
+            "policy_path": policy_path,
+            "doctor_path": env["NEXUS_WORKFLOW_DOCTOR_BIN"],
+            "guard_path": env["NEXUS_HERMES_GUARD_BIN"],
+            "agy_dispatch_path": env["NEXUS_AGY_DISPATCH_BIN"],
+        })
         return subprocess.CompletedProcess(
             argv, 0, json.dumps({"outcome": "OBSERVED_ONLY"}) + "\n", ""
         )
@@ -357,7 +386,85 @@ def test_staged_tick_reuses_stable_observe_controller_identity(tmp_path, monkeyp
     first = MOD._tick(tmp_path / "service.json", config, allow_staged=True)
     second = MOD._tick(tmp_path / "service.json", config, allow_staged=True)
     assert first["controller_run_id"] == second["controller_run_id"]
-    assert calls == [first["controller_run_id"], first["controller_run_id"]]
+    assert [call["run_id"] for call in calls] == [
+        first["controller_run_id"],
+        first["controller_run_id"],
+    ]
+    assert len(target_loads) == 2
+    expected_policy = str(
+        Path(json.loads(Path(config["target_path"]).read_text())["policy_path"]).resolve()
+    )
+    for call in calls:
+        assert call["controller_path"] == resolved_paths["hermes_continuation_controller"]
+        assert call["policy_path"] == expected_policy
+        assert call["doctor_path"] == resolved_paths["workflow_doctor"]
+        assert call["guard_path"] == resolved_paths["hermes_controller_guard"]
+        assert call["agy_dispatch_path"] == resolved_paths["agy_dispatch"]
+    assert doctor_paths == [
+        resolved_paths["workflow_doctor"],
+        resolved_paths["workflow_doctor"],
+    ]
     state = MOD._load_state(config)
     assert state["epoch"] == 1
     assert state["epoch_status"] == "ACTIVE"
+
+
+def _runtime_verify_payload(config, *, revision="a" * 40, bundle="b" * 64):
+    def row(path_key):
+        path = Path(config[path_key]).resolve()
+        return {
+            "status": "VERIFIED",
+            "entrypoint": str(path),
+            "sha256": MOD._sha256_file(path),
+        }
+
+    return {
+        "state": "ALIGNED",
+        "installed_revision": revision,
+        "installed_bundle_sha256": bundle,
+        "components": {
+            "host_sync": {"status": "VERIFIED", "entrypoint": config["host_sync_path"]},
+            "workflow_doctor": row("doctor_path"),
+            "agy_dispatch": row("agy_dispatch_path"),
+            "hermes_controller_guard": row("guard_path"),
+            "hermes_continuation_controller": row("controller_path"),
+            "hermes_launchd": {"status": "VERIFIED", "entrypoint": "nexus-hermes-launchd"},
+        },
+    }
+
+
+def test_host_runtime_rejects_generation_change_during_pin(tmp_path, monkeypatch):
+    _, config, _ = _config(tmp_path, monkeypatch)
+    desired = {
+        "desired_revision": "a" * 40,
+        "desired_bundle_sha256": "b" * 64,
+    }
+    first = _runtime_verify_payload(config)
+    second = _runtime_verify_payload(config, revision="c" * 40, bundle="d" * 64)
+    responses = iter([
+        subprocess.CompletedProcess(["host-sync", "desired"], 0, json.dumps(desired), ""),
+        subprocess.CompletedProcess(["host-sync", "verify"], 0, json.dumps(first), ""),
+        subprocess.CompletedProcess(["host-sync", "verify"], 0, json.dumps(second), ""),
+    ])
+    monkeypatch.setattr(MOD, "_run", lambda *args, **kwargs: next(responses))
+    with pytest.raises(MOD.HermesLaunchdError, match="HOST_RUNTIME_CHANGED_DURING_PIN"):
+        MOD._host_runtime(config)
+
+
+def test_host_runtime_rejects_component_sha_mismatch(tmp_path, monkeypatch):
+    _, config, _ = _config(tmp_path, monkeypatch)
+    desired = {
+        "desired_revision": "a" * 40,
+        "desired_bundle_sha256": "b" * 64,
+    }
+    verify = _runtime_verify_payload(config)
+    verify["components"]["workflow_doctor"]["sha256"] = "0" * 64
+    responses = iter([
+        subprocess.CompletedProcess(["host-sync", "desired"], 0, json.dumps(desired), ""),
+        subprocess.CompletedProcess(["host-sync", "verify"], 0, json.dumps(verify), ""),
+    ])
+    monkeypatch.setattr(MOD, "_run", lambda *args, **kwargs: next(responses))
+    with pytest.raises(
+        MOD.HermesLaunchdError, match="HOST_COMPONENT_PIN_SHA_MISMATCH:workflow_doctor"
+    ):
+        MOD._host_runtime(config)

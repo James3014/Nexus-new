@@ -95,6 +95,8 @@ Repeated launchd ticks reuse that identity while the epoch is active. Therefore 
 
 Changing the target while an epoch is active fails closed.
 
+Each tick also pins one immutable Nexus host-runtime generation. After current-main verification, the service resolves the controller, workflow doctor, Hermes guard, Agy dispatcher, and policy to their exact real paths and validates component hashes. It re-verifies the runtime identity after pinning; if host-sync changes the installed revision or bundle during that window, the tick fails closed with `HOST_RUNTIME_CHANGED_DURING_PIN`. The controller subprocess and its post-effect doctor readback use only those pinned paths, so one tick cannot mix bytes from two runtime generations.
+
 ## Model takeover rule
 
 Activation refuses to bootstrap the model launchd service when the configured endpoint is already healthy but the model label is not loaded. This prevents silently taking over an unmanaged/manual Splash process.

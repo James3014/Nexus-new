@@ -98,6 +98,7 @@ def _load_config(path: Path) -> dict[str, Any]:
         "controller_path",
         "guard_path",
         "doctor_path",
+        "agy_dispatch_path",
         "host_sync_path",
         "model_endpoint",
         "model_binary",
@@ -133,7 +134,13 @@ def _load_target(config: dict[str, Any]) -> tuple[Path, dict[str, Any]]:
         raise HermesLaunchdError(
             f"TARGET_POLICY_SHA_MISMATCH:{observed_policy_sha}:{target.get('policy_sha256')}"
         )
+    target = dict(target)
+    target["_policy_path_resolved"] = str(policy_path)
     return path, target
+
+
+def _target_identity(target: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in target.items() if not key.startswith("_")}
 
 
 def _state_root(config: dict[str, Any]) -> Path:
@@ -398,6 +405,8 @@ def _endpoint_health(config: dict[str, Any], *, timeout: float = 3.0) -> dict[st
 
 
 def _host_runtime(config: dict[str, Any]) -> dict[str, Any]:
+    # Resolve host-sync once so this runtime check itself cannot cross a
+    # generation boundary if ~/.local/bin is repointed concurrently.
     host_sync = str(_expand(str(config["host_sync_path"])))
     desired_result = _run([host_sync, "desired", "--track-ref", "main"], timeout=60)
     if desired_result.returncode != 0:
@@ -408,40 +417,71 @@ def _host_runtime(config: dict[str, Any]) -> dict[str, Any]:
     bundle = desired.get("desired_bundle_sha256")
     if not isinstance(bundle, str) or not bundle:
         raise HermesLaunchdError("HOST_DESIRED_BUNDLE_MISSING")
-    verify_result = _run(
-        [host_sync, "verify", "--desired-bundle-sha256", bundle],
-        timeout=30,
-    )
-    if verify_result.returncode != 0:
-        raise HermesLaunchdError(
-            f"HOST_VERIFY_FAILED:{verify_result.stderr.strip() or verify_result.stdout.strip()}"
+
+    def verify_runtime() -> dict[str, Any]:
+        result = _run(
+            [host_sync, "verify", "--desired-bundle-sha256", bundle],
+            timeout=30,
         )
-    verify = json.loads(verify_result.stdout)
-    if verify.get("state") != "ALIGNED":
-        raise HermesLaunchdError(f"HOST_RUNTIME_NOT_ALIGNED:{verify.get('state')}")
+        if result.returncode != 0:
+            raise HermesLaunchdError(
+                f"HOST_VERIFY_FAILED:{result.stderr.strip() or result.stdout.strip()}"
+            )
+        payload = json.loads(result.stdout)
+        if payload.get("state") != "ALIGNED":
+            raise HermesLaunchdError(f"HOST_RUNTIME_NOT_ALIGNED:{payload.get('state')}")
+        return payload
+
+    verify = verify_runtime()
     components = verify.get("components") or {}
-    for name in (
+    required_components = (
+        "host_sync",
+        "workflow_doctor",
+        "agy_dispatch",
         "hermes_controller_guard",
         "hermes_continuation_controller",
         "hermes_launchd",
-    ):
+    )
+    for name in required_components:
         row = components.get(name)
         if not isinstance(row, dict) or row.get("status") != "VERIFIED":
             raise HermesLaunchdError(f"HOST_COMPONENT_NOT_VERIFIED:{name}")
+
+    path_bindings = {
+        "workflow_doctor": _expand(str(config["doctor_path"])),
+        "agy_dispatch": _expand(str(config["agy_dispatch_path"])),
+        "hermes_controller_guard": _expand(str(config["guard_path"])),
+        "hermes_continuation_controller": _expand(str(config["controller_path"])),
+    }
+    resolved_paths: dict[str, str] = {"host_sync": host_sync}
+    for name, path in path_bindings.items():
+        if not path.is_file():
+            raise HermesLaunchdError(f"HOST_COMPONENT_PATH_MISSING:{name}:{path}")
+        expected_sha = (components.get(name) or {}).get("sha256")
+        observed_sha = _sha256_file(path)
+        if expected_sha and observed_sha != expected_sha:
+            raise HermesLaunchdError(
+                f"HOST_COMPONENT_PIN_SHA_MISMATCH:{name}:{observed_sha}:{expected_sha}"
+            )
+        resolved_paths[name] = str(path)
+
+    # Re-read the runtime identity after resolving immutable entrypoints. If
+    # host-sync switched current generations during binding, fail this tick;
+    # the next tick can bind the new generation cleanly.
+    verify_after = verify_runtime()
+    if verify_after.get("installed_revision") != verify.get(
+        "installed_revision"
+    ) or verify_after.get("installed_bundle_sha256") != verify.get("installed_bundle_sha256"):
+        raise HermesLaunchdError("HOST_RUNTIME_CHANGED_DURING_PIN")
+
     return {
         "state": verify.get("state"),
         "installed_revision": verify.get("installed_revision"),
         "installed_bundle_sha256": verify.get("installed_bundle_sha256"),
         "desired_revision": desired.get("desired_revision"),
         "desired_bundle_sha256": bundle,
-        "components": {
-            name: components.get(name)
-            for name in (
-                "hermes_controller_guard",
-                "hermes_continuation_controller",
-                "hermes_launchd",
-            )
-        },
+        "components": {name: components.get(name) for name in required_components},
+        "resolved_paths": resolved_paths,
     }
 
 
@@ -449,9 +489,11 @@ def _doctor(
     config: dict[str, Any],
     target: dict[str, Any],
     operation_id: str | None,
+    *,
+    doctor_path: str | None = None,
 ) -> dict[str, Any]:
     argv = [
-        str(_expand(str(config["doctor_path"]))),
+        doctor_path or str(_expand(str(config["doctor_path"]))),
         "--json",
         "--repo-root",
         str(_expand(str(target["repo_root"]))),
@@ -664,16 +706,15 @@ def _tick_locked(
     config_path: Path, config: dict[str, Any], *, allow_staged: bool
 ) -> dict[str, Any]:
     if allow_staged:
-        _, target = _load_target(config)
+        target_path, target = _load_target(config)
         if target.get("mode") != "observe":
             raise HermesLaunchdError("STAGED_CANARY_REQUIRES_OBSERVE_TARGET")
     else:
         _activation_evidence(config)
-        _, target = _load_target(config)
+        target_path, target = _load_target(config)
 
     runtime = _host_runtime(config)
     model = _endpoint_health(config)
-    target_path, target = _load_target(config)
     if not bool(target.get("enabled", True)):
         return {
             "status": "NOOP_TARGET_DISABLED",
@@ -681,7 +722,7 @@ def _tick_locked(
             "model_health": model,
         }
 
-    target_hash = _sha256_bytes(_canonical_bytes(target))
+    target_hash = _sha256_bytes(_canonical_bytes(_target_identity(target)))
     state = _load_state(config)
     prior_hash = state.get("target_sha256")
     prior_status = state.get("epoch_status")
@@ -707,13 +748,15 @@ def _tick_locked(
     _save_state(config, state)
 
     receipt_dir = _state_root(config) / "controller-receipts"
+    runtime_paths = runtime["resolved_paths"]
+    repo_root = _expand(str(target["repo_root"]))
     argv = [
-        str(_expand(str(config["controller_path"]))),
+        str(runtime_paths["hermes_continuation_controller"]),
         "run",
         "--policy",
-        str(_expand(str(target["policy_path"]))),
+        str(target["_policy_path_resolved"]),
         "--repo-root",
-        str(_expand(str(target["repo_root"]))),
+        str(repo_root),
         "--repository",
         str(target["repository"]),
         "--mode",
@@ -730,7 +773,18 @@ def _tick_locked(
     if target.get("pr") is not None:
         argv += ["--pr", str(int(target["pr"]))]
 
-    result = _run(argv, cwd=_expand(str(target["repo_root"])), timeout=300)
+    controller_env = os.environ.copy()
+    controller_env.update({
+        "NEXUS_WORKFLOW_DOCTOR_BIN": str(runtime_paths["workflow_doctor"]),
+        "NEXUS_HERMES_GUARD_BIN": str(runtime_paths["hermes_controller_guard"]),
+        "NEXUS_AGY_DISPATCH_BIN": str(runtime_paths["agy_dispatch"]),
+    })
+    result = _run(
+        argv,
+        cwd=repo_root,
+        timeout=300,
+        env=controller_env,
+    )
     stdout_payload = _parse_last_json(result.stdout)
     controller_state = _controller_state(config, run_id)
     intent = controller_state.get("effect_intent")
@@ -741,7 +795,12 @@ def _tick_locked(
         raise HermesLaunchdError("BLOCK_UNBOUND_EFFECT_INTENT")
 
     operation_id = controller_state.get("operation_id")
-    doctor = _doctor(config, target, str(operation_id) if operation_id else None)
+    doctor = _doctor(
+        config,
+        target,
+        str(operation_id) if operation_id else None,
+        doctor_path=str(runtime_paths["workflow_doctor"]),
+    )
     active_ops = len((doctor.get("operation") or {}).get("active") or [])
     active_leases = len((doctor.get("leases") or {}).get("active") or [])
     disposition = doctor.get("resume_disposition")
