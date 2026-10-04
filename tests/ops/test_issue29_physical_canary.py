@@ -46,7 +46,10 @@ def test_vap_freeze_is_deterministic_and_hash_bound():
     assert len(vap1["packet_hash"]) == 64
     assert vap1["packet_content"]["task_id"] == "task-1"
     assert vap1["packet_content"]["source_revision"] == "rev-123"
-    assert "Z" in vap1["packet_content"]["frozen_timestamp"] or "+00:00" in vap1["packet_content"]["frozen_timestamp"]
+    assert (
+        "Z" in vap1["packet_content"]["frozen_timestamp"]
+        or "+00:00" in vap1["packet_content"]["frozen_timestamp"]
+    )
 
 
 def test_world_c_verifier_tamper_detection_fail_closed():
@@ -57,7 +60,9 @@ def test_world_c_verifier_tamper_detection_fail_closed():
         source_revision="rev-123",
     )
     frozen_hash = vap["packet_hash"]
-    online_output_pass = f"VAP_CONSUMED:{frozen_hash}\ndef parse_kv(s: str) -> dict:\n    return {{}}"
+    online_output_pass = (
+        f"VAP_CONSUMED:{frozen_hash}\ndef parse_kv(s: str) -> dict:\n    return {{}}"
+    )
 
     # Positive case: exact hash match and causal implementation present
     res_pass = verify_world_c_consumption(
@@ -122,6 +127,7 @@ def test_run_canary_flow_with_simulated_tamper(monkeypatch, tmp_path):
 
     def mock_gemini(prompt, api_key, **kwargs):
         import re
+
         m = re.search(r"\[VAP_PACKET_HASH:([a-f0-9]+)\]", prompt)
         packet_hash = m.group(1) if m else "nohash"
         return {
@@ -133,8 +139,14 @@ def test_run_canary_flow_with_simulated_tamper(monkeypatch, tmp_path):
             "call_count": 1,
         }
 
-    with patch("scripts.ops.canary_issue29_physical_local_online.call_physical_ollama", return_value=mock_local):
-        with patch("scripts.ops.canary_issue29_physical_local_online.call_physical_gemini", side_effect=mock_gemini):
+    with patch(
+        "scripts.ops.canary_issue29_physical_local_online.call_physical_ollama",
+        return_value=mock_local,
+    ):
+        with patch(
+            "scripts.ops.canary_issue29_physical_local_online.call_physical_gemini",
+            side_effect=mock_gemini,
+        ):
             # Test tamper run
             receipt_tamper = run_physical_canary(
                 allow_physical=True,

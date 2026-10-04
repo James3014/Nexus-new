@@ -89,15 +89,7 @@ def call_physical_gemini(
     timeout_sec: float = 60.0,
 ) -> dict[str, Any]:
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-    payload = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": prompt}
-                ]
-            }
-        ]
-    }
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
     req_bytes = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url,
@@ -222,11 +214,15 @@ def run_physical_canary(
     output_receipt_path: str | Path | None = None,
 ) -> dict[str, Any]:
     if not allow_physical and os.environ.get("NEXUS_CANARY_ALLOW_PHYSICAL") != "1":
-        raise RuntimeError("physical_canary_not_authorized: must set --allow-physical or NEXUS_CANARY_ALLOW_PHYSICAL=1")
+        raise RuntimeError(
+            "physical_canary_not_authorized: must set --allow-physical or NEXUS_CANARY_ALLOW_PHYSICAL=1"
+        )
 
     gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not gemini_key:
-        raise RuntimeError("GEMINI_API_KEY_missing: environment variable is required for physical Online execution")
+        raise RuntimeError(
+            "GEMINI_API_KEY_missing: environment variable is required for physical Online execution"
+        )
 
     source_rev = get_current_git_revision()
 
@@ -334,8 +330,14 @@ def run_physical_canary(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Issue #29 Physical Canary Runner")
-    parser.add_argument("--allow-physical", action="store_true", help="Authorize physical LLM network calls")
-    parser.add_argument("--simulate-tamper", action="store_true", help="Simulate tamper to test fail-closed behavior")
+    parser.add_argument(
+        "--allow-physical", action="store_true", help="Authorize physical LLM network calls"
+    )
+    parser.add_argument(
+        "--simulate-tamper",
+        action="store_true",
+        help="Simulate tamper to test fail-closed behavior",
+    )
     parser.add_argument("--output-receipt", type=str, default="", help="Path to save receipt JSON")
     args = parser.parse_args()
 
