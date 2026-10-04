@@ -3108,6 +3108,7 @@ def dispatch_run(
                 phase="EXECUTING",
                 attempts=attempts,
                 rotations=rotations,
+                failure_kind=None,
                 account_alias_hash=claim.account_alias_hash,
                 lease_id_hash=claim.lease_id_hash,
             )

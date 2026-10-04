@@ -2885,6 +2885,123 @@ def test_independent_quota_after_effect_never_rotates(tmp_path):
     assert classified["reconciliation_required"] is True
 
 
+def test_rotation_success_clears_recovered_failure_kind(tmp_path: Path) -> None:
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    home = tmp_path / "home"
+    home.mkdir()
+
+    class Coordinator(_WriteScopeCoordinator):
+        def __init__(self, root: Path) -> None:
+            super().__init__(root)
+            self.rotated_claim = _WriteScopeClaim(root)
+            self.rotated_claim.account_alias_hash = "write-scope-2"
+            self.rotated_claim.lease_id_hash = "lease-write-2"
+            self.rotated_claim.internal_id = "write-scope-account-2"
+            self.rotation_count = 0
+
+        def rotate_claim(self, **kwargs):
+            self.rotation_count += 1
+            kwargs["current_claim"].release()
+            return self.rotated_claim
+
+    coordinator = Coordinator(home)
+    calls = 0
+    events: list[dict[str, object]] = []
+
+    def runner(**_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return 1, "", "RESOURCE_EXHAUSTED: quota exhausted", False, 10
+        return 0, "ok", "", False, 10
+
+    code = dispatch.dispatch_run(
+        prompt="rotate then succeed",
+        cwd=str(work),
+        mode="plan",
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+
+    classified = [event for event in events if event.get("phase") == "CLASSIFYING_FAILURE"]
+    executing = [event for event in events if event.get("phase") == "EXECUTING"]
+    folded: dict[str, object] = {}
+    for event in events:
+        folded.update(event)
+
+    assert code == 0
+    assert calls == 2
+    assert coordinator.rotation_count == 1
+    assert len(classified) == 1
+    assert classified[0]["failure_kind"] == "PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT"
+    assert len(executing) == 2
+    assert executing[1]["failure_kind"] is None
+    assert folded["attempts"] == 2
+    assert folded["rotations"] == 1
+    assert folded["failure_kind"] is None
+
+
+def test_rotation_second_failure_projects_terminal_failure_kind(tmp_path: Path) -> None:
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    home = tmp_path / "home"
+    home.mkdir()
+
+    class Coordinator(_WriteScopeCoordinator):
+        def __init__(self, root: Path) -> None:
+            super().__init__(root)
+            self.rotated_claim = _WriteScopeClaim(root)
+            self.rotated_claim.account_alias_hash = "write-scope-2"
+            self.rotated_claim.lease_id_hash = "lease-write-2"
+            self.rotated_claim.internal_id = "write-scope-account-2"
+            self.rotation_count = 0
+
+        def rotate_claim(self, **kwargs):
+            self.rotation_count += 1
+            kwargs["current_claim"].release()
+            return self.rotated_claim
+
+    coordinator = Coordinator(home)
+    calls = 0
+    events: list[dict[str, object]] = []
+
+    def runner(**_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return 1, "", "RESOURCE_EXHAUSTED: quota exhausted", False, 10
+        return 2, "", "syntax failure", False, 10
+
+    code = dispatch.dispatch_run(
+        prompt="rotate then fail",
+        cwd=str(work),
+        mode="plan",
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+
+    classified = [event for event in events if event.get("phase") == "CLASSIFYING_FAILURE"]
+    folded: dict[str, object] = {}
+    for event in events:
+        folded.update(event)
+
+    assert code == 2
+    assert calls == 2
+    assert coordinator.rotation_count == 1
+    assert [event["failure_kind"] for event in classified] == [
+        "PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT",
+        "SYNTAX_OR_IMPLEMENTATION_ERROR",
+    ]
+    assert folded["attempts"] == 2
+    assert folded["rotations"] == 1
+    assert folded["failure_kind"] == "SYNTAX_OR_IMPLEMENTATION_ERROR"
+
+
 def test_independent_headless_denial_only_in_provider_log_is_failure(tmp_path, monkeypatch):
     work = tmp_path / "repo"
     work.mkdir()
