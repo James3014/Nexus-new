@@ -29,7 +29,7 @@
 schema: nexus.model_capability_lineage.v1
 status: current
 owner: James Chen
-last_updated: '2026-08-15'
+last_updated: '2026-10-04'
 role: calibration_evidence_only
 admission_authority: false
 route_authority: none
@@ -193,3 +193,228 @@ lineages:
     evidence_notes:
       - "capability evidence provenance is OWNER_DECISION; no invented hashes or repository paths"
       - "conditional_ceiling L3 means L4 evidence is experimental and non-admitted"
+  occamy-1.0:
+    lineage_id: occamy-1.0
+    canonical_family: occamy-1.0
+    description: >-
+      Occamy 1.0 semantic capability lineage for local execution. Calibration
+      evidence only; never Workforce Admission authority.
+    execution_identities:
+      - provider: local
+        model: occamy-1.0
+        identity_kind: primary
+        transport: local_runner
+      - provider: local
+        model: occamy-1.0-q4
+        identity_kind: alias
+        transport: llama_cpp
+    stable_floor: L0
+    current_frontier: L0
+    conditional_ceiling: L0
+    experimental_ceiling: L0
+    frontier_experimental: false
+    experimental_notes:
+      - "global semantic autonomy tier is intentionally not inferred from role-specific exact-configuration evidence"
+      - "positive capability claims live only on the bound execution configuration + task family"
+      - "G0 real tool loop and same-session continuation qualified"
+      - "exact 32K long-repo G1 stack unqualified due to session startup readiness and context overflow"
+    role_evidence:
+      - ref: calibration:external/occamy-1.0/g0-tool-loop
+        phase: PROTOCOL_TOOL_LOOP_QUALIFICATION
+        scope: IDENTITY_OR_TRANSPORT
+        provenance: EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK
+        date: '2026-10-03'
+      - ref: calibration:external/occamy-1.0/selective-holdout-30
+        phase: SYSTEM_DECISION_DELTA
+        scope: SEMANTIC
+        provenance: EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK
+        date: '2026-10-03'
+    known_failure_families:
+      - family: session_startup_readiness
+        ref: calibration:known-failure-family/session_startup_readiness
+        status: open
+      - family: context_state_overflow_54902_gt_32768
+        ref: calibration:known-failure-family/context_state_overflow_54902_gt_32768
+        status: open
+    evidence:
+      - id: occamy-1.0-g0-tool-loop-pass
+        phase: PROTOCOL_TOOL_LOOP_QUALIFICATION
+        scope: IDENTITY_OR_TRANSPORT
+        status: PASS
+        provenance: EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK
+        date: '2026-10-03'
+        digest: null
+        note: "G0 real tool loop and same-session continuation pass"
+      - id: occamy-1.0-g1-stack-unqualified
+        phase: RESOURCE_CONTEXT_QUALIFICATION
+        scope: IDENTITY_OR_TRANSPORT
+        status: STACK_UNQUALIFIED
+        provenance: EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK
+        date: '2026-10-03'
+        digest: null
+        note: "exact 32K stack unqualified for long repo episode (session readiness + 54,902 > 32,768 context overflow); NOT semantic 0/6"
+      - id: occamy-1.0-selective-holdout-30
+        phase: SYSTEM_DECISION_DELTA
+        scope: SEMANTIC
+        status: PASS
+        score: "30/30"
+        provenance: EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK
+        date: '2026-10-03'
+        digest: null
+        note: "exact selective holdout 30/30, material false-safe 0, natural safe addressable residual ~2%, WATCH / no active routing"
+    workforce_authority_refs: []
+    evidence_notes:
+      - "capability evidence provenance is EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK; no invented repository receipts"
+      - "calibration evidence carries no workforce admission or routing authority"
+    execution_configurations:
+      - config_id: occamy-1.0-q4-opencode-llama32k
+        model: occamy-1.0-q4
+        model_digest: "ffb25f763ff9c27f5f4e2adcdef399c5654f9f840fdac33dffe7035ba8266a87"
+        quant: Q4_K_M
+        package: GGUF
+        runtime: llama.cpp
+        runtime_build: "0.4.1 build10964 / b29c606e2"
+        context_limit: 32768
+        prompt_template_mode: opencode_native
+        scaffold: opencode_serve
+        agent_loop: opencode_http_api
+        transport: http
+        tool_surface: opencode_builtin_tools
+        write_mode: workspace_edit
+        state_preservation: same_session_continuation
+        resource_envelope:
+          slots: 1
+          observed_memory_free_percent_after_t01: 43
+          observed_swap_mb: 10742.44
+        realm: local_m5
+        description: "Occamy 1.0 Q4_K_M official model via OpenCode 1.18.32 serve and llama.cpp 32K context"
+        qualifications:
+          - task_family: short_tool_use
+            phase: PROTOCOL_TOOL_LOOP_QUALIFICATION
+            disposition: PASS
+            score: "PASS"
+            evidence_ref: "nexus-1364-g0-tool-loop"
+            provenance: EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK
+            date: '2026-10-03'
+            summary: "short real tool loop = PASS, same-session continuation = PASS"
+          - task_family: long_repo_episode
+            phase: RESOURCE_CONTEXT_QUALIFICATION
+            disposition: STACK_UNQUALIFIED
+            score: "0/2_STOPPED_BY_GATE"
+            is_semantic_failure: false
+            runtime_admission: false
+            evidence_ref: "nexus-1364-g1-smoke-closeout"
+            provenance: EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK
+            date: '2026-10-03'
+            failure_families:
+              - session_startup_readiness
+              - context_state_overflow_54902_gt_32768
+            summary: "exact 32K long-repo G1 stack = STACK_UNQUALIFIED; failure family contains session startup/readiness and 54,902 > 32,768 context overflow; NOT semantic 0/6; no runtime admission"
+      - config_id: occamy-1.0-q4-typed-decision-selective-shadow
+        model: occamy-1.0-q4
+        model_digest: "ffb25f763ff9c27f5f4e2adcdef399c5654f9f840fdac33dffe7035ba8266a87"
+        quant: Q4_K_M
+        package: GGUF
+        runtime: llama.cpp
+        runtime_build: "0.4.1"
+        context_limit: 32768
+        prompt_template_mode: typed_decision_prompt_v1
+        scaffold: nexus_selective_shadow
+        agent_loop: stateless_single_turn
+        transport: direct_inference
+        tool_surface: none
+        write_mode: read_only
+        state_preservation: stateless
+        resource_envelope:
+          slots: 1
+        realm: local_m5
+        description: "Occamy 1.0 Q4_K_M typed decision selective shadow harness"
+        qualifications:
+          - task_family: bounded_decision
+            phase: SYSTEM_DECISION_DELTA
+            disposition: WATCH
+            score: "30/30"
+            false_safe_count: 0
+            decision_delta: UNPROVEN
+            runtime_admission: false
+            evidence_ref: "nexus-1354-selective-holdout"
+            provenance: EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK
+            date: '2026-10-03'
+            summary: "fresh selective holdout = 30/30, material false-safe = 0, natural safe addressable residual ~2%, disposition = WATCH / no active routing"
+  qwen-3.8-27b:
+    lineage_id: qwen-3.8-27b
+    canonical_family: qwen-3.8-27b
+    description: >-
+      Qwen 3.8 27B semantic capability lineage for local execution. Calibration
+      evidence only; never Workforce Admission authority.
+    execution_identities:
+      - provider: tensorfold
+        model: Vontra/Qwen3.8-27B-MLX-4bit
+        identity_kind: primary
+        transport: http_loopback
+    stable_floor: L0
+    current_frontier: L0
+    conditional_ceiling: L0
+    experimental_ceiling: L0
+    frontier_experimental: false
+    experimental_notes:
+      - "global semantic autonomy tier is intentionally not inferred from role-specific exact-configuration evidence"
+      - "positive capability claims live only on the bound execution configuration + task family"
+      - "TensorFold C-semantic shadow quality/safety PASS (4 ACCEPTABLE + 1 CORRECT_ABSTAIN, material false-safe 0)"
+      - "Online escalation 4/5; system/economic decision delta UNPROVEN; disposition WATCH"
+    role_evidence:
+      - ref: calibration:external/qwen-3.8-27b/tensorfold-g2-disposition
+        phase: SYSTEM_DECISION_DELTA
+        scope: SEMANTIC
+        provenance: EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK
+        date: '2026-10-02'
+    known_failure_families: []
+    evidence:
+      - id: qwen-27b-tensorfold-c-semantic-pass
+        phase: SYSTEM_DECISION_DELTA
+        scope: SEMANTIC
+        status: PASS
+        score: "4 ACCEPTABLE + 1 CORRECT_ABSTAIN"
+        provenance: EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK
+        date: '2026-10-02'
+        digest: null
+        note: "quality/safety PASS; Online escalation 4/5; system/economic decision delta UNPROVEN; disposition WATCH"
+    workforce_authority_refs: []
+    evidence_notes:
+      - "capability evidence provenance is EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK; no invented repository receipts"
+      - "calibration evidence carries no workforce admission or routing authority"
+    execution_configurations:
+      - config_id: qwen3.8-27b-mlx4bit-tensorfold-drafted
+        model: Vontra/Qwen3.8-27B-MLX-4bit
+        model_digest: "70ae7fac63274ff2eac54152031433374cb80f2f"
+        drafter: "z-lab/Qwen3.8-27B-DFlash2@50307d4c4cde6860d4eee73e2547cd786fe8e8a4"
+        quant: 4bit
+        package: MLX
+        runtime: tensorfold
+        runtime_build: "v0.6.0 (c4646171139ee8a3c38103eaa1699dad226ec12b) / mlx 0.32.3 / python 3.11.16"
+        context_limit: 32768
+        prompt_template_mode: qwen_chat_no_thinking_for_smoke
+        scaffold: tensorfold_server
+        agent_loop: c_semantic_shadow_harness
+        transport: http_loopback
+        tool_surface: required_tool_schema
+        write_mode: read_only
+        state_preservation: stateless
+        resource_envelope:
+          resident_weights_bytes: 19650000000
+          peak_memory_bytes: 21086590650
+        realm: mac_mini_m5_pro
+        description: "Qwen 3.8 27B MLX-4bit with DFlash2 speculative drafter on TensorFold v0.6.0 loopback"
+        qualifications:
+          - task_family: semantic_assist
+            phase: SYSTEM_DECISION_DELTA
+            disposition: WATCH
+            score: "4 ACCEPTABLE + 1 CORRECT_ABSTAIN"
+            false_safe_count: 0
+            online_escalation_ratio: "4/5"
+            decision_delta: UNPROVEN
+            runtime_admission: false
+            evidence_ref: "G2_FINAL_DISPOSITION.json#f4b51c09d4463f036b9db1a4fa14e009ca27bfbfd6aa9744cbd74438fdbf81c5"
+            provenance: EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK
+            date: '2026-10-02'
+            summary: "quality/safety PASS (4 ACCEPTABLE + 1 CORRECT_ABSTAIN), material false-safe = 0, Online escalation = 4/5, system/economic decision delta = UNPROVEN, disposition = WATCH"

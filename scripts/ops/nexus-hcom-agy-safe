@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+GITHUB_CREDENTIAL_KEYS = (
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GH_ENTERPRISE_TOKEN",
+    "GITHUB_ENTERPRISE_TOKEN",
+    "GITHUB_PAT",
+    "GITHUB_ACTIONS_TOKEN",
+)
+SENSITIVE_API_KEYS = (
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GOOGLE_GENAI_API_KEY",
+) + GITHUB_CREDENTIAL_KEYS
+EXCLUDED_DIR_NAMES = {"conversations", "brain", "log"}
+EXCLUDED_FILE_NAMES = {"history.jsonl", "conversation_summaries.db"}
+
+
+class SafeLauncherError(RuntimeError):
+    pass
+
+
+def _run(argv: list[str], *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    proc = subprocess.run(argv, env=env, capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        raise SafeLauncherError(f"COMMAND_FAILED:{Path(argv[0]).name}:{proc.returncode}")
+    return proc
+
+
+def _manager_active_profile(manager: Path, manager_root: Path) -> tuple[str, Path]:
+    _run([str(manager), "--root", str(manager_root), "ensure-active", "--json"])
+    active = _run([str(manager), "--root", str(manager_root), "current"]).stdout.strip()
+    if not active or active == "-" or "/" in active or active in {".", ".."}:
+        raise SafeLauncherError("AGY_ACTIVE_ACCOUNT_INVALID")
+    accounts_root = (manager_root / "accounts").resolve()
+    profile = (accounts_root / active).resolve()
+    if profile.parent != accounts_root or not (profile / ".gemini").is_dir():
+        raise SafeLauncherError("AGY_ACTIVE_PROFILE_MISSING")
+    return active, profile
+
+
+def _copy_profile(profile: Path, session_home: Path) -> None:
+    def ignore(_path: str, names: list[str]) -> set[str]:
+        return {name for name in names if name in EXCLUDED_DIR_NAMES or name in EXCLUDED_FILE_NAMES}
+
+    shutil.copytree(profile, session_home, dirs_exist_ok=True, symlinks=True, ignore=ignore)
+    session_home.chmod(0o700)
+
+
+def _configure_keychain(session_home: Path) -> None:
+    if sys.platform != "darwin":
+        return
+    security = shutil.which("security")
+    if not security:
+        raise SafeLauncherError("AGY_KEYCHAIN_SECURITY_TOOL_MISSING")
+    keychain = session_home / "Library" / "Keychains" / "agy.keychain-db"
+    if not keychain.is_file():
+        raise SafeLauncherError("AGY_KEYCHAIN_MISSING")
+    env = dict(os.environ)
+    env["HOME"] = str(session_home)
+    commands = [
+        [security, "unlock-keychain", "-p", "", str(keychain)],
+        [security, "set-keychain-settings", str(keychain)],
+        [security, "default-keychain", "-s", str(keychain)],
+        [security, "list-keychains", "-s", str(keychain), "/Library/Keychains/System.keychain"],
+    ]
+    for command in commands:
+        proc = subprocess.run(
+            command,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if proc.returncode != 0:
+            raise SafeLauncherError(f"AGY_KEYCHAIN_CONFIG_FAILED:{command[1]}")
+
+
+def _reject_sensitive_hcom_env(hcom_dir: Path) -> None:
+    env_file = hcom_dir / "env"
+    if not env_file.is_file():
+        return
+    try:
+        content = env_file.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise SafeLauncherError("HCOM_ENV_UNREADABLE") from exc
+    forbidden = set(SENSITIVE_API_KEYS)
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        raw_value = value.strip()
+        if key in forbidden and raw_value not in {"", "''", '""'}:
+            raise SafeLauncherError(f"HCOM_ENV_FORBIDDEN_KEY:{key}")
+
+
+def _harden_hcom(hcom: Path, hcom_dir: Path, original_home: Path) -> None:
+    hcom_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        hcom_dir.chmod(0o700)
+    except OSError:
+        pass
+    env = dict(os.environ)
+    env["HOME"] = str(original_home)
+    env["HCOM_DIR"] = str(hcom_dir)
+    for key in ("auto_approve", "auto_trust_workspace", "relay_enabled"):
+        _run([str(hcom), "config", key, "0"], env=env)
+
+
+def _launch_env(session_home: Path, hcom_dir: Path) -> dict[str, str]:
+    env = dict(os.environ)
+    env["HOME"] = str(session_home)
+    env["GEMINI_CLI_HOME"] = str(session_home)
+    env["HCOM_DIR"] = str(hcom_dir)
+    for key in SENSITIVE_API_KEYS:
+        env.pop(key, None)
+    return env
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    for arg in args:
+        if (
+            arg == "--headless"
+            or arg.startswith("--headless=")
+            or arg == "--terminal"
+            or arg.startswith("--terminal=")
+            or arg == "--device"
+            or arg.startswith("--device=")
+        ):
+            raise SafeLauncherError(f"DETACHED_LAUNCH_DISABLED:{arg}")
+
+    original_home = Path(os.environ.get("HOME", str(Path.home()))).expanduser().resolve()
+    manager = (
+        Path(
+            os.environ.get(
+                "NEXUS_AGY_MANAGER",
+                str(original_home / ".nexus/agy-account-pool/bin/agy-cli-manager"),
+            )
+        )
+        .expanduser()
+        .resolve()
+    )
+    manager_root = (
+        Path(
+            os.environ.get(
+                "NEXUS_AGY_MANAGER_ROOT",
+                str(original_home / ".nexus/agy-account-pool/runtime"),
+            )
+        )
+        .expanduser()
+        .resolve()
+    )
+    state_root = (
+        Path(
+            os.environ.get(
+                "NEXUS_HCOM_AGY_STATE_ROOT",
+                str(original_home / ".local/state/hcom-agy-safe"),
+            )
+        )
+        .expanduser()
+        .resolve()
+    )
+    hcom_dir = Path(os.environ.get("HCOM_DIR", str(original_home / ".hcom"))).expanduser().resolve()
+    hcom_raw = os.environ.get("NEXUS_HCOM_BIN") or shutil.which("hcom")
+    if not hcom_raw:
+        raise SafeLauncherError("HCOM_NOT_FOUND")
+    hcom = Path(hcom_raw).expanduser().resolve()
+    if not manager.is_file():
+        raise SafeLauncherError("AGY_MANAGER_NOT_FOUND")
+
+    _reject_sensitive_hcom_env(hcom_dir)
+    _active, profile = _manager_active_profile(manager, manager_root)
+    state_root.mkdir(parents=True, exist_ok=True)
+    state_root.chmod(0o700)
+    session_home = Path(tempfile.mkdtemp(prefix="session.", dir=str(state_root))).resolve()
+    child: subprocess.Popen[str] | None = None
+    previous_handlers: dict[int, object] = {}
+
+    def forward(signum: int, _frame: object) -> None:
+        if child is not None and child.poll() is None:
+            try:
+                child.send_signal(signum)
+            except ProcessLookupError:
+                pass
+
+    try:
+        _copy_profile(profile, session_home)
+        _configure_keychain(session_home)
+        _harden_hcom(hcom, hcom_dir, original_home)
+        env = _launch_env(session_home, hcom_dir)
+        for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            previous_handlers[signum] = signal.getsignal(signum)
+            signal.signal(signum, forward)
+        child = subprocess.Popen(
+            [str(hcom), "agy", "--terminal", "here", *args], env=env, text=True
+        )
+        return int(child.wait())
+    finally:
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
+        shutil.rmtree(session_home, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except SafeLauncherError as exc:
+        print(f"hcom-agy-safe: {exc}", file=sys.stderr)
+        raise SystemExit(2)

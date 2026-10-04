@@ -143,8 +143,8 @@ def test_p0_tampered_seal_blocks_local_and_online(monkeypatch) -> None:
 
     real_verify = ceb._verify_evidence_bundle
 
-    def _fail_verify(bundle):  # type: ignore[no-untyped-def]
-        v = real_verify(bundle)
+    def _fail_verify(bundle, **kwargs):  # type: ignore[no-untyped-def]
+        v = real_verify(bundle, **kwargs)
         if v.get("ok"):
             return {
                 **v,
@@ -231,7 +231,6 @@ def test_p0_empty_evidence_ids_not_consumed() -> None:
             }
         },
         selected_capabilities=["codeintel"],
-        source_hash="src",
     )
     rec = record_consumption(
         bundle=bundle,
@@ -2044,7 +2043,6 @@ def test_bundle_carries_bounded_consumer_payload() -> None:
         planner_decision_id="pd",
         capability_results={"codeintel": stage},
         selected_capabilities=["codeintel"],
-        source_hash=VALID_SOURCE_HASH,
     )
     entry = bundle["entries"][0]
     assert entry.get("has_consumer_payload") is True
@@ -2110,7 +2108,6 @@ def test_id_only_entry_is_not_payload_consumed() -> None:
             }
         },
         selected_capabilities=["codeintel"],
-        source_hash=VALID_SOURCE_HASH,
     )
     entry = next(e for e in bundle["entries"] if e["name"] == "codeintel")
     # No usable outcome/payload fields ⇒ no consumer_payload
@@ -2155,7 +2152,6 @@ def test_failed_entry_payload_not_forwarded() -> None:
             }
         },
         selected_capabilities=["repair_loop"],
-        source_hash=VALID_SOURCE_HASH,
     )
     entry = bundle["entries"][0]
     assert entry.get("success") is False
@@ -2206,7 +2202,6 @@ def test_local_prompt_contains_codeintel_memory_belief_payload(tmp_path: Path) -
         planner_decision_id=f"pd-{task_id}",
         capability_results=results,
         selected_capabilities=list(results.keys()),
-        source_hash=VALID_SOURCE_HASH,
     )
     req = _local_assist_request(tmp_path, task_id)
     snap = dict(req.planner_snapshot)

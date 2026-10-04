@@ -8,6 +8,10 @@
       "mode": "0755"
     },
     {
+      "path": "scripts/ops/nexus-hcom-agy-safe",
+      "mode": "0755"
+    },
+    {
       "path": "scripts/ops/nexus-agy-quota",
       "mode": "0755"
     },
@@ -124,6 +128,9 @@
     },
     "grok_accounts": {
       "source_path": "scripts/ops/nexus-grok-accounts"
+    },
+    "hcom_agy_safe": {
+      "source_path": "scripts/ops/nexus-hcom-agy-safe"
     }
   }
 }

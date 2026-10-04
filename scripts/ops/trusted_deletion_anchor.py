@@ -46,7 +46,7 @@ TRUSTED_EXTERNAL_RUNTIME_PACKAGES: tuple[tuple[str, str, str, str], ...] = (
         "nexus-runtime",
         "nexus_runtime",
         "https://github.com/James3014/nexus-runtime.git",
-        "d65e3ea7628a07bd73dee461750392bcdf85c3ac",
+        "0fbe9522cfa6fb178e328381486a18877808fa79",
     ),
 )
 UV_VERSION = "uv 0.9.2"
@@ -127,10 +127,33 @@ TRUSTED_PR1288_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, s
     (
         "40012ce8452131f446fce0feb8f508f050a8b0dc875837eac1b623007e7388b8",
         "33543bf4216e10131b08c30951d65bed92ab98bb39e0e9fdde417bdf68a189c0",
-        "d8cd2968572556d0451ec10663287350faff1b28f31d4bc0e3c363003b4712f6",
-        "625a4aed3149386d95f74fe24c6a8da5589502b2abe4aba349eed05678314fb7",
+        "2fce493ab2843794c1d44665fa68e8292c321fb937e04918795b39b124a99c4e",
+        "1defe6b2b7251fd060fb3613bbb9875ec38b4c6ea4dbd8febc36dcb10d1724f1",
     ),
 )
+# Exact one-use, four-way binding for Owner-approved PR #1375 (Issue #456
+# canonical compatibility Runtime pin adoption).
+TRUSTED_PR1375_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1375,
+    (
+        "40012ce8452131f446fce0feb8f508f050a8b0dc875837eac1b623007e7388b8",
+        "33543bf4216e10131b08c30951d65bed92ab98bb39e0e9fdde417bdf68a189c0",
+        "2fce493ab2843794c1d44665fa68e8292c321fb937e04918795b39b124a99c4e",
+        "1defe6b2b7251fd060fb3613bbb9875ec38b4c6ea4dbd8febc36dcb10d1724f1",
+    ),
+)
+# Exact one-use, four-way binding for Owner-approved PR #1380 (Issue #456
+# final strict typed source-hash Runtime pin adoption).
+TRUSTED_PR1380_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1380,
+    (
+        "2fce493ab2843794c1d44665fa68e8292c321fb937e04918795b39b124a99c4e",
+        "1defe6b2b7251fd060fb3613bbb9875ec38b4c6ea4dbd8febc36dcb10d1724f1",
+        "0ff95ecbe90a66299ff40bc411ddd1045d978d43726729b454e5c1acf8d4a160",
+        "6068e086cbdf1e08723520a339269033346ff5a7553d87008cc8e9f1f22260b4",
+    ),
+)
+
 REQUIRED_EVIDENCE_KEYS = {
     "schema_version",
     "status",
@@ -210,6 +233,8 @@ def _validate_trusted_dependency_contract(
         TRUSTED_PR960_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR1013_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR1288_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1375_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1380_DEPENDENCY_SNAPSHOT_TRANSITION,
     )
     for authorized_transition_record in authorized_transition_records:
         if authorized_transition_record is None:
