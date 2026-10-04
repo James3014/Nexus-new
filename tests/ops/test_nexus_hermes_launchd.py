@@ -112,6 +112,7 @@ def _config(tmp_path: Path, monkeypatch, *, target_mode: str = "observe"):
         "repo_root": str(repo_root),
         "issue": 1397,
         "policy_path": str(policy),
+        "policy_sha256": MOD._sha256_file(policy),
         "mode": target_mode,
         "max_cycles": 3,
     }

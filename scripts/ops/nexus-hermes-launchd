@@ -121,9 +121,17 @@ def _load_target(config: dict[str, Any]) -> tuple[Path, dict[str, Any]]:
     target = _load_object(path, schema=TARGET_SCHEMA)
     if target.get("mode") not in {"observe", "execute"}:
         raise HermesLaunchdError("TARGET_MODE_INVALID")
-    for key in ("repository", "repo_root", "policy_path", "mode"):
+    for key in ("repository", "repo_root", "policy_path", "policy_sha256", "mode"):
         if not target.get(key):
             raise HermesLaunchdError(f"TARGET_FIELD_MISSING:{key}")
+    policy_path = _expand(str(target["policy_path"]))
+    if not policy_path.is_file():
+        raise HermesLaunchdError(f"TARGET_POLICY_MISSING:{policy_path}")
+    observed_policy_sha = _sha256_file(policy_path)
+    if observed_policy_sha != target.get("policy_sha256"):
+        raise HermesLaunchdError(
+            f"TARGET_POLICY_SHA_MISMATCH:{observed_policy_sha}:{target.get('policy_sha256')}"
+        )
     return path, target
 
 

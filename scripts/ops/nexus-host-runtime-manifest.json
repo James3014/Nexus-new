@@ -114,6 +114,10 @@
     {
       "path": "scripts/ops/nexus-hermes-launchd",
       "mode": "0755"
+    },
+    {
+      "path": "scripts/ops/nexus-hermes-soak-observe-policy.json",
+      "mode": "0644"
     }
   ],
   "components": {

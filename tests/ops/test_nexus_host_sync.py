@@ -32,6 +32,7 @@ HCOM_AGY_SAFE = ROOT / "scripts" / "ops" / "nexus-hcom-agy-safe"
 HERMES_CONTROLLER_GUARD = ROOT / "scripts" / "ops" / "nexus-hermes-controller-guard"
 HERMES_CONTINUATION_CONTROLLER = ROOT / "scripts" / "ops" / "nexus-hermes-continuation-controller"
 HERMES_LAUNCHD = ROOT / "scripts" / "ops" / "nexus-hermes-launchd"
+HERMES_OBSERVE_POLICY = ROOT / "scripts" / "ops" / "nexus-hermes-soak-observe-policy.json"
 HERMES_LAUNCHD = ROOT / "scripts" / "ops" / "nexus-hermes-launchd"
 MANAGER_SHA = "4c0e326fc72ea98f9d6d80957055a4e8a2d7387f681dea903f2a072942d2e31c"
 LAUNCHD_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_host_sync_launchd.sh"
@@ -112,6 +113,7 @@ def _make_source_repo(tmp_path: Path) -> Path:
             "scripts/ops/nexus-hermes-continuation-controller",
         ),
         (HERMES_LAUNCHD, "scripts/ops/nexus-hermes-launchd"),
+        (HERMES_OBSERVE_POLICY, "scripts/ops/nexus-hermes-soak-observe-policy.json"),
         (HERMES_LAUNCHD, "scripts/ops/nexus-hermes-launchd"),
         (
             EXTERNAL_DISPATCH_INSTALLER,

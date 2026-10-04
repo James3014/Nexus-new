@@ -21,7 +21,7 @@ Wave E is split deliberately:
 - `com.nexus.hermes-local-model`
 - `com.nexus.hermes-controller`
 
-It does not select work. The controller service reads one explicit durable target file. No target means no work; an explicit `enabled=false` target is a no-op.
+It does not select work. The controller service reads one explicit durable target file. The target binds both `policy_path` and `policy_sha256`; a missing or byte-drifted policy fails closed. An explicit `enabled=false` target is a no-op.
 
 The workflow authority chain remains:
 
