@@ -220,9 +220,7 @@ def _invoke(
     env["NEXUS_HERMES_CONTINUATION_CONTROLLER_TARGET"] = str(
         dispatch_target.parent / "nexus-hermes-continuation-controller"
     )
-    env["NEXUS_HERMES_LAUNCHD_TARGET"] = str(
-        dispatch_target.parent / "nexus-hermes-launchd"
-    )
+    env["NEXUS_HERMES_LAUNCHD_TARGET"] = str(dispatch_target.parent / "nexus-hermes-launchd")
     return _run(argv, cwd=ROOT, env=env)
 
 
