@@ -2856,8 +2856,22 @@ class UnifiedMCPGateway:
             return {}, None
         try:
             executable = resolve_registered_provider_executable(provider)
-        except ValueError:
-            return metadata, None
+        except ValueError as exc:
+            if provider != "agy" or str(exc) != "provider_binary_not_found":
+                return metadata, None
+            candidate = Path.home() / ".local/bin/agy"
+            if not candidate.is_file() or not os.access(candidate, os.X_OK):
+                return metadata, None
+            fallback_env = dict(os.environ)
+            fallback_env["NEXUS_AGY_BIN"] = str(candidate)
+            fallback_env["NEXUS_AGY_EXECUTABLE"] = str(candidate)
+            try:
+                executable = resolve_registered_provider_executable(
+                    provider,
+                    environ=fallback_env,
+                )
+            except ValueError:
+                return metadata, None
         return metadata, str(Path(executable).resolve())
 
     def _provider_preflight(self, arguments: Mapping[str, Any]) -> dict[str, Any]:

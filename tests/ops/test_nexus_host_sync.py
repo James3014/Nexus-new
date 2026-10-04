@@ -29,6 +29,8 @@ EXTERNAL_DISPATCH = ROOT / "scripts" / "ops" / "nexus-external-worker-dispatch"
 EXTERNAL_DISPATCH_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_external_worker_dispatch.sh"
 GROK_ACCOUNTS = ROOT / "scripts" / "ops" / "nexus-grok-accounts"
 HCOM_AGY_SAFE = ROOT / "scripts" / "ops" / "nexus-hcom-agy-safe"
+HERMES_CONTROLLER_GUARD = ROOT / "scripts" / "ops" / "nexus-hermes-controller-guard"
+HERMES_CONTINUATION_CONTROLLER = ROOT / "scripts" / "ops" / "nexus-hermes-continuation-controller"
 MANAGER_SHA = "4c0e326fc72ea98f9d6d80957055a4e8a2d7387f681dea903f2a072942d2e31c"
 LAUNCHD_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_host_sync_launchd.sh"
 BOOTSTRAP_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_host_sync.sh"
@@ -99,6 +101,14 @@ def _make_source_repo(tmp_path: Path) -> Path:
         (EXTERNAL_DISPATCH, "scripts/ops/nexus-external-worker-dispatch"),
         (GROK_ACCOUNTS, "scripts/ops/nexus-grok-accounts"),
         (HCOM_AGY_SAFE, "scripts/ops/nexus-hcom-agy-safe"),
+        (
+            HERMES_CONTROLLER_GUARD,
+            "scripts/ops/nexus-hermes-controller-guard",
+        ),
+        (
+            HERMES_CONTINUATION_CONTROLLER,
+            "scripts/ops/nexus-hermes-continuation-controller",
+        ),
         (
             EXTERNAL_DISPATCH_INSTALLER,
             "scripts/ops/install_nexus_external_worker_dispatch.sh",
@@ -198,6 +208,12 @@ def _invoke(
         argv += ["--desired-bundle-sha256", desired_bundle]
     env = os.environ.copy()
     env["NEXUS_HCOM_AGY_TARGET"] = str(dispatch_target.parent / "hcom-agy-safe")
+    env["NEXUS_HERMES_CONTROLLER_GUARD_TARGET"] = str(
+        dispatch_target.parent / "nexus-hermes-controller-guard"
+    )
+    env["NEXUS_HERMES_CONTINUATION_CONTROLLER_TARGET"] = str(
+        dispatch_target.parent / "nexus-hermes-continuation-controller"
+    )
     return _run(argv, cwd=ROOT, env=env)
 
 
@@ -269,9 +285,20 @@ def test_sync_materializes_exact_generation_and_entrypoints(tmp_path: Path) -> N
     assert payload["components"]["grok_accounts"]["status"] == "VERIFIED"
     assert payload["components"]["agy_account_manager"]["status"] == "VERIFIED"
     assert payload["components"]["hcom_agy_safe"]["status"] == "VERIFIED"
+    assert payload["components"]["hermes_controller_guard"]["status"] == "VERIFIED"
+    assert payload["components"]["hermes_continuation_controller"]["status"] == "VERIFIED"
     hcom_target = dispatch_target.parent / "hcom-agy-safe"
     assert hcom_target.is_symlink()
     assert hcom_target.resolve().read_bytes() == HCOM_AGY_SAFE.read_bytes()
+    hermes_guard_target = dispatch_target.parent / "nexus-hermes-controller-guard"
+    hermes_controller_target = dispatch_target.parent / "nexus-hermes-continuation-controller"
+    assert hermes_guard_target.is_symlink()
+    assert hermes_guard_target.resolve().read_bytes() == HERMES_CONTROLLER_GUARD.read_bytes()
+    assert hermes_controller_target.is_symlink()
+    assert (
+        hermes_controller_target.resolve().read_bytes()
+        == HERMES_CONTINUATION_CONTROLLER.read_bytes()
+    )
     assert dispatch_target.is_symlink()
     assert (dispatch_target.parent / "nexus-agy-quota").is_symlink()
     assert (dispatch_target.parent / "nexus-workflow-doctor").is_symlink()
@@ -842,3 +869,89 @@ def test_manifest_missing_canonical_source_root_fails_closed(tmp_path: Path) -> 
     assert payload["state"] == "ERROR"
     assert payload["error"] == "HOST_MANIFEST_REQUIRED_RUNTIME_PATH_MISSING"
     assert not (runtime_root / "current").exists()
+
+
+def test_hermes_runtime_components_rollback_to_generation_without_entrypoints(
+    tmp_path: Path,
+) -> None:
+    source_repo = _make_source_repo(tmp_path)
+    manifest_path = source_repo / "scripts/ops/nexus-host-runtime-manifest.json"
+    current_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    legacy_manifest = json.loads(json.dumps(current_manifest))
+    legacy_manifest["runtime_files"] = [
+        entry
+        for entry in legacy_manifest["runtime_files"]
+        if entry["path"]
+        not in {
+            "scripts/ops/nexus-hermes-controller-guard",
+            "scripts/ops/nexus-hermes-continuation-controller",
+        }
+    ]
+    legacy_manifest["components"].pop("hermes_controller_guard", None)
+    legacy_manifest["components"].pop("hermes_continuation_controller", None)
+    manifest_path.write_text(json.dumps(legacy_manifest, indent=2) + "\n", encoding="utf-8")
+    _git(source_repo, "add", "scripts/ops/nexus-host-runtime-manifest.json")
+    _git(source_repo, "commit", "-m", "legacy generation without Hermes runtime")
+    legacy_revision = _git(source_repo, "rev-parse", "HEAD")
+
+    runtime_root = tmp_path / "runtime"
+    manager_python = tmp_path / "manager-python"
+    dispatch_target = tmp_path / "bin" / "nexus-agy-dispatch"
+    sync_target = tmp_path / "bin" / "nexus-host-sync"
+    hermes_guard_target = dispatch_target.parent / "nexus-hermes-controller-guard"
+    hermes_controller_target = dispatch_target.parent / "nexus-hermes-continuation-controller"
+    _write_fake_manager(manager_python)
+
+    legacy = _invoke(
+        source_repo,
+        runtime_root,
+        manager_python,
+        dispatch_target,
+        sync_target,
+        "sync",
+        revision=legacy_revision,
+    )
+    assert legacy.returncode == 0, legacy.stderr + legacy.stdout
+    assert not hermes_guard_target.exists()
+    assert not hermes_guard_target.is_symlink()
+    assert not hermes_controller_target.exists()
+    assert not hermes_controller_target.is_symlink()
+
+    manifest_path.write_text(json.dumps(current_manifest, indent=2) + "\n", encoding="utf-8")
+    _git(source_repo, "add", "scripts/ops/nexus-host-runtime-manifest.json")
+    _git(source_repo, "commit", "-m", "Hermes runtime generation")
+    hermes_revision = _git(source_repo, "rev-parse", "HEAD")
+
+    upgraded = _invoke(
+        source_repo,
+        runtime_root,
+        manager_python,
+        dispatch_target,
+        sync_target,
+        "sync",
+        revision=hermes_revision,
+    )
+    assert upgraded.returncode == 0, upgraded.stderr + upgraded.stdout
+    upgraded_payload = json.loads(upgraded.stdout)
+    assert upgraded_payload["components"]["hermes_controller_guard"]["status"] == "VERIFIED"
+    assert upgraded_payload["components"]["hermes_continuation_controller"]["status"] == "VERIFIED"
+    assert hermes_guard_target.is_symlink()
+    assert hermes_controller_target.is_symlink()
+
+    rollback = _invoke(
+        source_repo,
+        runtime_root,
+        manager_python,
+        dispatch_target,
+        sync_target,
+        "rollback",
+    )
+    assert rollback.returncode == 0, rollback.stderr + rollback.stdout
+    rollback_payload = json.loads(rollback.stdout)
+    assert "hermes_controller_guard" not in rollback_payload["components"]
+    assert "hermes_continuation_controller" not in rollback_payload["components"]
+    assert not hermes_guard_target.exists()
+    assert not hermes_guard_target.is_symlink()
+    assert not hermes_controller_target.exists()
+    assert not hermes_controller_target.is_symlink()
