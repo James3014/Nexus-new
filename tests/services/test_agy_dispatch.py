@@ -404,11 +404,13 @@ def test_stale_snapshot_uses_bounded_family_failure_ttl() -> None:
 def test_installer_deploys_exact_canonical_bytes(tmp_path: Path) -> None:
     target = tmp_path / "nexus-agy-dispatch"
     env = os.environ.copy()
-    env.update({
-        "NEXUS_AGY_REPO_ROOT": str(ROOT),
-        "NEXUS_AGY_SNAPSHOT": str(ROOT),
-        "NEXUS_AGY_DISPATCH_TARGET": str(target),
-    })
+    env.update(
+        {
+            "NEXUS_AGY_REPO_ROOT": str(ROOT),
+            "NEXUS_AGY_SNAPSHOT": str(ROOT),
+            "NEXUS_AGY_DISPATCH_TARGET": str(target),
+        }
+    )
 
     proc = subprocess.run(
         ["bash", str(INSTALLER_PATH)],
@@ -461,15 +463,17 @@ def test_background_timeout_is_persisted_as_outcome_unknown(tmp_path: Path, monk
     dispatch._write_private_prompt(prompt_path, "long task")
 
     def fake_dispatch_run(**kwargs):
-        kwargs["operation_hook"]({
-            "phase": "CLASSIFYING_FAILURE",
-            "attempts": 1,
-            "rotations": 0,
-            "failure_kind": "TIMEOUT",
-            "timed_out": True,
-            "account_alias_hash": "acct",
-            "lease_id_hash": "lease",
-        })
+        kwargs["operation_hook"](
+            {
+                "phase": "CLASSIFYING_FAILURE",
+                "attempts": 1,
+                "rotations": 0,
+                "failure_kind": "TIMEOUT",
+                "timed_out": True,
+                "account_alias_hash": "acct",
+                "lease_id_hash": "lease",
+            }
+        )
         return 1
 
     monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
@@ -547,11 +551,13 @@ def test_background_spawn_returns_durable_operation_identity(tmp_path: Path, mon
 def test_parse_agy_attestation_binds_resolved_model_and_conversation(tmp_path: Path) -> None:
     log = tmp_path / "agy.log"
     log.write_text(
-        "\n".join([
-            'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
-            "I0000 model_resolver.go:93] Resolving model gemini-3.8-flash-low",
-            "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
-        ])
+        "\n".join(
+            [
+                'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
+                "I0000 model_resolver.go:93] Resolving model gemini-3.8-flash-low",
+                "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
+            ]
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -565,10 +571,12 @@ def test_parse_agy_attestation_binds_resolved_model_and_conversation(tmp_path: P
 def test_parse_agy_attestation_fails_closed_without_matching_witnesses(tmp_path: Path) -> None:
     log = tmp_path / "agy.log"
     log.write_text(
-        "\n".join([
-            'I0000 model_resolver.go:116] model alias "gemini-other" resolved to "gemini-other-low"',
-            "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
-        ])
+        "\n".join(
+            [
+                'I0000 model_resolver.go:116] model alias "gemini-other" resolved to "gemini-other-low"',
+                "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
+            ]
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -582,12 +590,14 @@ def test_parse_agy_attestation_fails_closed_without_matching_witnesses(tmp_path:
 def test_parse_agy_attestation_uses_last_matching_attempt(tmp_path: Path) -> None:
     log = tmp_path / "agy.log"
     log.write_text(
-        "\n".join([
-            'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
-            "I0000 server.go:1239] Created conversation 11111111-1111-1111-1111-111111111111",
-            'I0001 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low-v2"',
-            "I0001 server.go:1239] Created conversation 22222222-2222-2222-2222-222222222222",
-        ])
+        "\n".join(
+            [
+                'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
+                "I0000 server.go:1239] Created conversation 11111111-1111-1111-1111-111111111111",
+                'I0001 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low-v2"',
+                "I0001 server.go:1239] Created conversation 22222222-2222-2222-2222-222222222222",
+            ]
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -616,20 +626,24 @@ def test_background_terminal_receipt_persists_agy_attestation(tmp_path: Path, mo
     def fake_dispatch_run(**kwargs):
         log = Path(os.environ["NEXUS_AGY_ATTESTATION_LOG"])
         log.write_text(
-            "\n".join([
-                'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
-                "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
-            ])
+            "\n".join(
+                [
+                    'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
+                    "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
+                ]
+            )
             + "\n",
             encoding="utf-8",
         )
-        kwargs["operation_hook"]({
-            "phase": "EXECUTING",
-            "attempts": 1,
-            "rotations": 0,
-            "account_alias_hash": "acct",
-            "lease_id_hash": "lease",
-        })
+        kwargs["operation_hook"](
+            {
+                "phase": "EXECUTING",
+                "attempts": 1,
+                "rotations": 0,
+                "account_alias_hash": "acct",
+                "lease_id_hash": "lease",
+            }
+        )
         return 0
 
     monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
@@ -775,13 +789,15 @@ def test_cleanup_reconciled_lease_removes_only_exact_stale_receipt(
     lease_hash = "b" * 12
     receipt = leases / f"{alias_hash}.receipt.json"
     receipt.write_text(
-        json.dumps({
-            "account_alias_hash": alias_hash,
-            "lease_id_hash": lease_hash,
-            "consumer_id": "agy-operation",
-            "claimed_at": 1.0,
-            "pid": 4242,
-        })
+        json.dumps(
+            {
+                "account_alias_hash": alias_hash,
+                "lease_id_hash": lease_hash,
+                "consumer_id": "agy-operation",
+                "claimed_at": 1.0,
+                "pid": 4242,
+            }
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -1095,15 +1111,17 @@ def test_operation_run_rebinds_current_runtime_revision(
     monkeypatch.setattr(dispatch, "_runtime_revision", lambda: "b" * 40)
 
     def fake_dispatch_run(**kwargs):
-        kwargs["operation_hook"]({
-            "phase": "CLASSIFYING_FAILURE",
-            "attempts": 1,
-            "rotations": 0,
-            "failure_kind": "TIMEOUT",
-            "timed_out": True,
-            "account_alias_hash": "acct",
-            "lease_id_hash": "lease",
-        })
+        kwargs["operation_hook"](
+            {
+                "phase": "CLASSIFYING_FAILURE",
+                "attempts": 1,
+                "rotations": 0,
+                "failure_kind": "TIMEOUT",
+                "timed_out": True,
+                "account_alias_hash": "acct",
+                "lease_id_hash": "lease",
+            }
+        )
         return 1
 
     monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
@@ -1469,6 +1487,261 @@ def test_dispatch_run_retains_lease_when_provider_group_survives_leader(
     assert coordinator.claim.released is False, (
         "Lease must NOT be released while the provider process group is still running!"
     )
+
+
+def test_background_operation_stays_nonterminal_while_provider_group_survives(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "surviving process group probe")
+    monkeypatch.setattr(dispatch, "_runtime_revision", lambda: "a" * 40)
+
+    def fake_dispatch_run(**kwargs):
+        kwargs["operation_hook"](
+            {
+                "phase": "CLASSIFYING_FAILURE",
+                "attempts": 1,
+                "rotations": 0,
+                "failure_kind": "PROVIDER_ERROR",
+                "provider_pid": 12345,
+                "provider_pgid": 54321,
+            }
+        )
+        return 1
+
+    monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
+    orig_alive = dispatch._agy_operation_journal._process_alive
+    orig_group_alive = dispatch._agy_operation_journal._process_group_alive
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_process_alive",
+        lambda pid: False if pid == 12345 else orig_alive(pid),
+    )
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_process_group_alive",
+        lambda pgid: True if pgid == 54321 else orig_group_alive(pgid),
+    )
+
+    code = dispatch._run_background_operation(
+        operation_id=operation_id,
+        prompt_file=str(prompt_path),
+        cwd=str(tmp_path),
+        mode="plan",
+        model="gemini-test",
+        effort="medium",
+        timeout=30,
+        max_calls=1,
+        pool_wait_timeout=1.0,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=root,
+        heartbeat_interval=0.01,
+    )
+
+    record = journal.read(operation_id)
+    assert code == 1
+    assert record["status"] == "RUNNING"
+    assert record["phase"] == "RECONCILE_REQUIRED"
+    assert record["finished_at"] is None
+    assert record["reconciliation"]["result"] == "PROVIDER_PROCESS_STILL_RUNNING_AFTER_DISPATCH"
+    assert record["reconciliation"]["provider_alive_after"] is True
+    assert record["reconciliation"]["retry_permitted"] is False
+
+
+def test_dispatch_run_does_not_signal_from_bare_provider_pid_or_pgid(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+
+    def stale_identity_runner(*, operation_hook=None, **_kwargs):
+        if operation_hook:
+            operation_hook(provider_pid=12345, provider_pgid=54321)
+        return 1, "", "error", False, 10
+
+    orig_alive = dispatch._agy_operation_journal._process_alive
+    orig_group_alive = dispatch._agy_operation_journal._process_group_alive
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_process_alive",
+        lambda pid: True if pid == 12345 else orig_alive(pid),
+    )
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_process_group_alive",
+        lambda pgid: True if pgid == 54321 else orig_group_alive(pgid),
+    )
+
+    def forbidden_signal(*_args, **_kwargs):
+        raise AssertionError("dispatch_run must not signal from bare numeric process identity")
+
+    monkeypatch.setattr(dispatch._agy_operation_journal, "_stop_process", forbidden_signal)
+    monkeypatch.setattr(dispatch._agy_operation_journal, "_stop_process_group", forbidden_signal)
+
+    code = dispatch.dispatch_run(
+        prompt="stale identity run",
+        cwd=str(tmp_path),
+        mode="plan",
+        coordinator=coordinator,
+        run_agy_fn=stale_identity_runner,
+    )
+
+    assert code != 0
+    assert coordinator.claim.released is False
+
+
+def test_signal_guard_keeps_operation_nonterminal_when_provider_is_unresolved(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "unresolved provider probe")
+    monkeypatch.setattr(dispatch, "_runtime_revision", lambda: "a" * 40)
+
+    def interrupted_dispatch(**kwargs):
+        kwargs["operation_hook"](
+            {
+                "phase": "EXECUTING",
+                "attempts": 1,
+                "rotations": 0,
+                "provider_pid": 12345,
+                "provider_pgid": 12345,
+            }
+        )
+        raise dispatch._SupervisorSignalError(signal.SIGTERM)
+
+    monkeypatch.setattr(dispatch, "dispatch_run", interrupted_dispatch)
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_stop_operation_processes",
+        lambda *_args, **_kwargs: (True, True, True),
+    )
+
+    with pytest.raises(dispatch._SupervisorSignalError):
+        dispatch._run_background_operation(
+            operation_id=operation_id,
+            prompt_file=str(prompt_path),
+            cwd=str(tmp_path),
+            mode="plan",
+            model="gemini-test",
+            effort="medium",
+            timeout=30,
+            max_calls=1,
+            pool_wait_timeout=1.0,
+            allow=[],
+            deny=[],
+            temp_command_permissions=False,
+            operation_root=root,
+            heartbeat_interval=0.01,
+        )
+
+    record = journal.read(operation_id)
+    assert record["status"] == "RUNNING"
+    assert record["phase"] == "RECONCILE_REQUIRED"
+    assert record["finished_at"] is None
+    assert record["failure_kind"] == "SUPERVISOR_SIGNAL:SIGTERM"
+    assert record["reconciliation"]["result"] == "SUPERVISOR_SIGNAL_ORPHAN_PROVIDER_UNVERIFIED"
+    assert record["reconciliation"]["provider_alive_after"] is True
+    assert record["reconciliation"]["retry_permitted"] is False
+
+
+def test_wrapper_exception_keeps_operation_nonterminal_when_provider_is_unresolved(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "wrapper exception probe")
+    monkeypatch.setattr(dispatch, "_runtime_revision", lambda: "a" * 40)
+
+    def exploding_dispatch(**kwargs):
+        kwargs["operation_hook"](
+            {
+                "phase": "EXECUTING",
+                "attempts": 1,
+                "rotations": 0,
+                "provider_pid": 12345,
+                "provider_pgid": 12345,
+            }
+        )
+        raise RuntimeError("provider wrapper exploded")
+
+    monkeypatch.setattr(dispatch, "dispatch_run", exploding_dispatch)
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_stop_operation_processes",
+        lambda *_args, **_kwargs: (True, True, True),
+    )
+
+    with pytest.raises(RuntimeError, match="provider wrapper exploded"):
+        dispatch._run_background_operation(
+            operation_id=operation_id,
+            prompt_file=str(prompt_path),
+            cwd=str(tmp_path),
+            mode="plan",
+            model="gemini-test",
+            effort="medium",
+            timeout=30,
+            max_calls=1,
+            pool_wait_timeout=1.0,
+            allow=[],
+            deny=[],
+            temp_command_permissions=False,
+            operation_root=root,
+            heartbeat_interval=0.01,
+        )
+
+    record = journal.read(operation_id)
+    assert record["status"] == "RUNNING"
+    assert record["phase"] == "RECONCILE_REQUIRED"
+    assert record["finished_at"] is None
+    assert record["failure_kind"] == "WRAPPER_EXCEPTION:RuntimeError"
+    assert record["reconciliation"]["result"] == "WRAPPER_EXCEPTION_ORPHAN_PROVIDER_UNVERIFIED"
+    assert record["reconciliation"]["provider_alive_after"] is True
+    assert record["reconciliation"]["retry_permitted"] is False
 
 
 # ---------------------------------------------------------------------------

@@ -510,17 +510,19 @@ def _dynamic_availability_state(
     preferred_names = set(ordered_preferred)
     reserve_names = set(ordered_reserve) - preferred_names
 
-    result.update({
-        "preferred": ordered_preferred,
-        "reserve": [name for name in ordered_reserve if name in reserve_names],
-        "fallback": [
-            name
-            for name in ordered_fallback
-            if name not in preferred_names and name not in reserve_names
-        ],
-        "blocked": sorted(set(blocked)),
-        "unknown": sorted(set(unknown)),
-    })
+    result.update(
+        {
+            "preferred": ordered_preferred,
+            "reserve": [name for name in ordered_reserve if name in reserve_names],
+            "fallback": [
+                name
+                for name in ordered_fallback
+                if name not in preferred_names and name not in reserve_names
+            ],
+            "blocked": sorted(set(blocked)),
+            "unknown": sorted(set(unknown)),
+        }
+    )
     return result
 
 
@@ -837,10 +839,7 @@ def run_agy(
                     process.kill()
                 process.wait(timeout=2)
     finally:
-        if (
-            provider_pgid is not None
-            and _agy_operation_journal._process_group_alive(provider_pgid)
-        ):
+        if provider_pgid is not None and _agy_operation_journal._process_group_alive(provider_pgid):
             try:
                 _agy_operation_journal._stop_process_group(
                     provider_pgid,
@@ -1063,13 +1062,15 @@ def dispatch_run(
             rotations=0,
             failure_kind=failure_kind,
         )
-        emit_meta({
-            "status": "invalid_contract",
-            "attempts": 0,
-            "rotations": 0,
-            "failure_kind": failure_kind,
-            "wall_ms": 0,
-        })
+        emit_meta(
+            {
+                "status": "invalid_contract",
+                "attempts": 0,
+                "rotations": 0,
+                "failure_kind": failure_kind,
+                "wall_ms": 0,
+            }
+        )
         return 64
 
     if coordinator is None:
@@ -1103,22 +1104,26 @@ def dispatch_run(
             model_family=scoped_model_family,
         )
     except AgyAccountPoolBusyError:
-        emit_meta({
-            "status": "pool_busy",
-            "attempts": 0,
-            "rotations": 0,
-            "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
-            "wall_ms": 0,
-        })
+        emit_meta(
+            {
+                "status": "pool_busy",
+                "attempts": 0,
+                "rotations": 0,
+                "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
+                "wall_ms": 0,
+            }
+        )
         return 75
     except AgyAccountPoolExhaustedError:
-        emit_meta({
-            "status": "pool_exhausted",
-            "attempts": 0,
-            "rotations": 0,
-            "failure_kind": "ACCOUNT_UNAVAILABLE",
-            "wall_ms": 0,
-        })
+        emit_meta(
+            {
+                "status": "pool_exhausted",
+                "attempts": 0,
+                "rotations": 0,
+                "failure_kind": "ACCOUNT_UNAVAILABLE",
+                "wall_ms": 0,
+            }
+        )
         return 75
 
     attempts = 0
@@ -1180,16 +1185,18 @@ def dispatch_run(
                             model_family=scoped_model_family,
                             unavailable_until=unavailable_until,
                         )
-                        emit_meta({
-                            "status": "failed",
-                            "attempts": attempts,
-                            "rotations": rotations,
-                            "failure_kind": "ACCOUNT_FAILOVER_LIMIT",
-                            "account_alias_hash": claim.account_alias_hash,
-                            "lease_id_hash": claim.lease_id_hash,
-                            "parallel_slot": True,
-                            "wall_ms": total_wall_ms,
-                        })
+                        emit_meta(
+                            {
+                                "status": "failed",
+                                "attempts": attempts,
+                                "rotations": rotations,
+                                "failure_kind": "ACCOUNT_FAILOVER_LIMIT",
+                                "account_alias_hash": claim.account_alias_hash,
+                                "lease_id_hash": claim.lease_id_hash,
+                                "parallel_slot": True,
+                                "wall_ms": total_wall_ms,
+                            }
+                        )
                         return 75
                     try:
                         claim = coordinator.rotate_claim(
@@ -1212,22 +1219,26 @@ def dispatch_run(
                         )
                         continue
                     except AgyAccountPoolBusyError:
-                        emit_meta({
-                            "status": "pool_busy",
-                            "attempts": attempts,
-                            "rotations": rotations,
-                            "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
-                            "wall_ms": total_wall_ms,
-                        })
+                        emit_meta(
+                            {
+                                "status": "pool_busy",
+                                "attempts": attempts,
+                                "rotations": rotations,
+                                "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
+                                "wall_ms": total_wall_ms,
+                            }
+                        )
                         return 75
                     except AgyAccountPoolExhaustedError:
-                        emit_meta({
-                            "status": "pool_exhausted",
-                            "attempts": attempts,
-                            "rotations": rotations,
-                            "failure_kind": "QUOTA_EXHAUSTED",
-                            "wall_ms": total_wall_ms,
-                        })
+                        emit_meta(
+                            {
+                                "status": "pool_exhausted",
+                                "attempts": attempts,
+                                "rotations": rotations,
+                                "failure_kind": "QUOTA_EXHAUSTED",
+                                "wall_ms": total_wall_ms,
+                            }
+                        )
                         return 75
 
             attempts += 1
@@ -1277,6 +1288,7 @@ def dispatch_run(
                 }
                 try:
                     import inspect
+
                     sig = inspect.signature(runner)
                     if "operation_hook" in sig.parameters or any(
                         p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
@@ -1296,15 +1308,17 @@ def dispatch_run(
                 sys.stdout.write(out)
                 if err:
                     sys.stderr.write(err)
-                emit_meta({
-                    "status": "completed",
-                    "attempts": attempts,
-                    "rotations": rotations,
-                    "account_alias_hash": claim.account_alias_hash,
-                    "lease_id_hash": claim.lease_id_hash,
-                    "parallel_slot": True,
-                    "wall_ms": total_wall_ms,
-                })
+                emit_meta(
+                    {
+                        "status": "completed",
+                        "attempts": attempts,
+                        "rotations": rotations,
+                        "account_alias_hash": claim.account_alias_hash,
+                        "lease_id_hash": claim.lease_id_hash,
+                        "parallel_slot": True,
+                        "wall_ms": total_wall_ms,
+                    }
+                )
                 return 0
 
             kind = (
@@ -1329,16 +1343,18 @@ def dispatch_run(
                     sys.stdout.write(out)
                 if err:
                     sys.stderr.write(err)
-                emit_meta({
-                    "status": "failed",
-                    "attempts": attempts,
-                    "rotations": rotations,
-                    "failure_kind": last_kind,
-                    "account_alias_hash": claim.account_alias_hash,
-                    "lease_id_hash": claim.lease_id_hash,
-                    "parallel_slot": True,
-                    "wall_ms": total_wall_ms,
-                })
+                emit_meta(
+                    {
+                        "status": "failed",
+                        "attempts": attempts,
+                        "rotations": rotations,
+                        "failure_kind": last_kind,
+                        "account_alias_hash": claim.account_alias_hash,
+                        "lease_id_hash": claim.lease_id_hash,
+                        "parallel_slot": True,
+                        "wall_ms": total_wall_ms,
+                    }
+                )
                 return code if isinstance(code, int) and code != 0 else 1
 
             family_unavailable_until = None
@@ -1370,16 +1386,18 @@ def dispatch_run(
                     sys.stdout.write(out)
                 if err:
                     sys.stderr.write(err)
-                emit_meta({
-                    "status": "failed",
-                    "attempts": attempts,
-                    "rotations": rotations,
-                    "failure_kind": last_kind,
-                    "account_alias_hash": claim.account_alias_hash,
-                    "lease_id_hash": claim.lease_id_hash,
-                    "parallel_slot": True,
-                    "wall_ms": total_wall_ms,
-                })
+                emit_meta(
+                    {
+                        "status": "failed",
+                        "attempts": attempts,
+                        "rotations": rotations,
+                        "failure_kind": last_kind,
+                        "account_alias_hash": claim.account_alias_hash,
+                        "lease_id_hash": claim.lease_id_hash,
+                        "parallel_slot": True,
+                        "wall_ms": total_wall_ms,
+                    }
+                )
                 return code if isinstance(code, int) and code != 0 else 1
 
             if rotations >= max_failovers:
@@ -1392,16 +1410,18 @@ def dispatch_run(
                     )
                 except Exception:
                     pass
-                emit_meta({
-                    "status": "failed",
-                    "attempts": attempts,
-                    "rotations": rotations,
-                    "failure_kind": "ACCOUNT_FAILOVER_LIMIT",
-                    "account_alias_hash": claim.account_alias_hash,
-                    "lease_id_hash": claim.lease_id_hash,
-                    "parallel_slot": True,
-                    "wall_ms": total_wall_ms,
-                })
+                emit_meta(
+                    {
+                        "status": "failed",
+                        "attempts": attempts,
+                        "rotations": rotations,
+                        "failure_kind": "ACCOUNT_FAILOVER_LIMIT",
+                        "account_alias_hash": claim.account_alias_hash,
+                        "lease_id_hash": claim.lease_id_hash,
+                        "parallel_slot": True,
+                        "wall_ms": total_wall_ms,
+                    }
+                )
                 return 75
 
             # Rotation eligible: rotate claim
@@ -1424,43 +1444,44 @@ def dispatch_run(
                     lease_id_hash=claim.lease_id_hash,
                 )
             except AgyAccountPoolBusyError:
-                emit_meta({
-                    "status": "pool_busy",
-                    "attempts": attempts,
-                    "rotations": rotations,
-                    "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
-                    "wall_ms": total_wall_ms,
-                })
+                emit_meta(
+                    {
+                        "status": "pool_busy",
+                        "attempts": attempts,
+                        "rotations": rotations,
+                        "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
+                        "wall_ms": total_wall_ms,
+                    }
+                )
                 return 75
             except AgyAccountPoolExhaustedError:
-                emit_meta({
-                    "status": "pool_exhausted",
-                    "attempts": attempts,
-                    "rotations": rotations,
-                    "failure_kind": last_kind,
-                    "wall_ms": total_wall_ms,
-                })
+                emit_meta(
+                    {
+                        "status": "pool_exhausted",
+                        "attempts": attempts,
+                        "rotations": rotations,
+                        "failure_kind": last_kind,
+                        "wall_ms": total_wall_ms,
+                    }
+                )
                 return 75
             except Exception:
-                emit_meta({
-                    "status": "failed",
-                    "attempts": attempts,
-                    "rotations": rotations,
-                    "failure_kind": last_kind,
-                    "wall_ms": total_wall_ms,
-                })
+                emit_meta(
+                    {
+                        "status": "failed",
+                        "attempts": attempts,
+                        "rotations": rotations,
+                        "failure_kind": last_kind,
+                        "wall_ms": total_wall_ms,
+                    }
+                )
                 return 75
     finally:
-        if (
-            active_provider_pgid is not None
-            and _agy_operation_journal._process_group_alive(active_provider_pgid)
-        ):
-            _agy_operation_journal._stop_process_group(
-                active_provider_pgid,
-                grace_seconds=2.0,
-            )
-        if active_provider_pid is not None and _agy_operation_journal._process_alive(active_provider_pid):
-            _agy_operation_journal._stop_process(active_provider_pid, grace_seconds=2.0)
+        # This layer only has observed numeric process identity, not a live
+        # ownership handle. Never signal by bare PID/PGID here: a stale value
+        # may already belong to an unrelated process. The owning run_agy()
+        # frame performs bounded child cleanup; dispatch_run only decides
+        # whether the account lease is safe to release.
         provider_still_running = (
             active_provider_pid is not None
             and _agy_operation_journal._process_alive(active_provider_pid)
@@ -1573,7 +1594,6 @@ def _spawn_background_operation(
     return journal.bind_pid(operation_id, proc.pid)
 
 
-
 def _supervisor_terminal_guard(func):
     """Cover background-supervisor startup and provider execution with durable terminalization."""
 
@@ -1597,6 +1617,8 @@ def _supervisor_terminal_guard(func):
             known_failure_kind: str,
             unknown_result: str,
             known_result: str,
+            unresolved_running_result: str,
+            unresolved_unverified_result: str,
         ) -> None:
             record = journal.read(operation_id)
             phase = str(record.get("phase") or "QUEUED")
@@ -1623,16 +1645,17 @@ def _supervisor_terminal_guard(func):
             had_before = had_before or bool(record.get("provider_pid")) or provider_effect_possible
 
             if alive_after:
-                journal.mark_terminal(
+                journal.update(
                     operation_id,
-                    status="OUTCOME_UNKNOWN",
-                    exit_code=record.get("exit_code"),
-                    failure_kind=unknown_failure_kind,
-                    cwd=cwd,
                     phase="RECONCILE_REQUIRED",
+                    failure_kind=unknown_failure_kind,
                     reconciliation={
                         "at": _agy_operation_journal.utc_now(),
-                        "result": "SUPERVISOR_SIGNAL_ORPHAN_PROVIDER_STILL_RUNNING",
+                        "result": (
+                            unresolved_unverified_result
+                            if unverified
+                            else unresolved_running_result
+                        ),
                         "provider_alive_before": had_before,
                         "provider_alive_after": True,
                         "retry_permitted": False,
@@ -1670,6 +1693,8 @@ def _supervisor_terminal_guard(func):
                 known_failure_kind=f"SUPERVISOR_SIGNAL_PRE_PROVIDER:{sig_name}",
                 unknown_result="SUPERVISOR_SIGNAL_WITH_UNKNOWN_PROVIDER_EFFECT",
                 known_result="SUPERVISOR_SIGNAL_BEFORE_PROVIDER",
+                unresolved_running_result="SUPERVISOR_SIGNAL_ORPHAN_PROVIDER_STILL_RUNNING",
+                unresolved_unverified_result="SUPERVISOR_SIGNAL_ORPHAN_PROVIDER_UNVERIFIED",
             )
             raise
         except BaseException as exc:
@@ -1678,6 +1703,8 @@ def _supervisor_terminal_guard(func):
                 known_failure_kind=f"WRAPPER_EXCEPTION_PRE_PROVIDER:{type(exc).__name__}",
                 unknown_result="WRAPPER_EXCEPTION_WITH_UNKNOWN_PROVIDER_EFFECT",
                 known_result="WRAPPER_EXCEPTION_BEFORE_PROVIDER",
+                unresolved_running_result="WRAPPER_EXCEPTION_ORPHAN_PROVIDER_STILL_RUNNING",
+                unresolved_unverified_result="WRAPPER_EXCEPTION_ORPHAN_PROVIDER_UNVERIFIED",
             )
             raise
         finally:
@@ -1791,6 +1818,38 @@ def _run_background_operation(
         with state_lock:
             snapshot = dict(state)
         failure_kind = snapshot.get("failure_kind")
+        provider_pid = snapshot.get("provider_pid")
+        provider_pgid = snapshot.get("provider_pgid")
+        provider_alive = _agy_operation_journal._process_alive(provider_pid)
+        provider_group_alive = _agy_operation_journal._process_group_alive(provider_pgid)
+
+        if provider_alive or provider_group_alive:
+            attestation = _parse_agy_attestation(
+                attestation_log_path,
+                requested_model=model,
+            )
+            unresolved_failure = failure_kind or "PROVIDER_PROCESS_STILL_RUNNING_AFTER_DISPATCH"
+            journal.update(
+                operation_id,
+                phase="RECONCILE_REQUIRED",
+                failure_kind=unresolved_failure,
+                attempts=int(snapshot.get("attempts") or 0),
+                rotations=int(snapshot.get("rotations") or 0),
+                account_alias_hash=snapshot.get("account_alias_hash"),
+                lease_id_hash=snapshot.get("lease_id_hash"),
+                provider_pid=provider_pid,
+                provider_pgid=provider_pgid,
+                reconciliation={
+                    "at": _agy_operation_journal.utc_now(),
+                    "result": "PROVIDER_PROCESS_STILL_RUNNING_AFTER_DISPATCH",
+                    "provider_alive_before": True,
+                    "provider_alive_after": True,
+                    "retry_permitted": False,
+                },
+                **attestation,
+            )
+            return int(exit_code if exit_code not in (None, 0) else 1)
+
         timed_out = bool(snapshot.get("timed_out")) or failure_kind == "TIMEOUT"
         if timed_out:
             terminal_status = "OUTCOME_UNKNOWN"
@@ -1828,24 +1887,9 @@ def _run_background_operation(
         return int(exit_code or 0)
     except _SupervisorSignalError:
         raise
-    except BaseException as exc:
-        attestation = _parse_agy_attestation(
-            attestation_log_path,
-            requested_model=model,
-        )
-        journal.mark_terminal(
-            operation_id,
-            status="OUTCOME_UNKNOWN",
-            exit_code=exit_code,
-            failure_kind=f"WRAPPER_EXCEPTION:{type(exc).__name__}",
-            cwd=cwd,
-            reconciliation={
-                "at": _agy_operation_journal.utc_now(),
-                "result": "WRAPPER_EXCEPTION_WITH_UNKNOWN_PROVIDER_EFFECT",
-                "retry_permitted": False,
-            },
-            **attestation,
-        )
+    except BaseException:
+        # The outer supervisor guard owns cleanup + terminalization. Writing a
+        # terminal record here would make the guard skip child reconciliation.
         raise
     finally:
         if prior_attestation_log is None:

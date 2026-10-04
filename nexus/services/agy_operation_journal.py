@@ -291,18 +291,52 @@ def _stop_operation_processes(
 
     had_alive_before = bool(verified_pids) or bool(unverified_alive_pids)
 
+    provider_group_verified = (
+        isinstance(provider_pgid, int)
+        and provider_pgid > 1
+        and _group_has_operation_marker(provider_pgid, marker, operation_id=operation_id)
+    )
+    wrapper_group_verified = (
+        isinstance(pid, int)
+        and pid > 1
+        and pid != current_pid
+        and pid != supervisor_pid
+        and _group_has_operation_marker(pid, marker, operation_id=operation_id)
+    )
+
+    # Preserve the ownership witness while the marked leader is still present.
+    # Killing the leader first can erase the only marker and strand owned
+    # grandchildren as an unverifiable group.
+    if provider_group_verified:
+        _stop_process_group(provider_pgid, grace_seconds=grace_seconds)
+    if wrapper_group_verified:
+        _stop_process_group(pid, grace_seconds=grace_seconds)
+
     for p in sorted(verified_pids):
-        _stop_process(p, grace_seconds=grace_seconds)
+        if _process_alive(p):
+            _stop_process(p, grace_seconds=grace_seconds)
 
-    if isinstance(provider_pgid, int) and provider_pgid > 1:
-        if _group_has_operation_marker(provider_pgid, marker, operation_id=operation_id):
-            _stop_process_group(provider_pgid, grace_seconds=grace_seconds)
-    if isinstance(pid, int) and pid > 1 and pid != current_pid and pid != supervisor_pid:
-        if _group_has_operation_marker(pid, marker, operation_id=operation_id):
-            _stop_process_group(pid, grace_seconds=grace_seconds)
+    residual_unverified = {p for p in unverified_alive_pids if _process_alive(p)}
+    residual_verified = {p for p in verified_pids if _process_alive(p)}
+    provider_group_alive = (
+        isinstance(provider_pgid, int) and provider_pgid > 1 and _process_group_alive(provider_pgid)
+    )
+    wrapper_group_alive = (
+        isinstance(pid, int)
+        and pid > 1
+        and pid != current_pid
+        and pid != supervisor_pid
+        and _process_group_alive(pid)
+    )
 
-    alive_after = any(_process_alive(p) for p in verified_pids) or bool(unverified_alive_pids)
-    has_unverified_conflict = bool(unverified_alive_pids)
+    alive_after = bool(
+        residual_verified or residual_unverified or provider_group_alive or wrapper_group_alive
+    )
+    has_unverified_conflict = bool(residual_unverified)
+    if provider_group_alive and not provider_group_verified:
+        has_unverified_conflict = True
+    if wrapper_group_alive and not wrapper_group_verified:
+        has_unverified_conflict = True
     return had_alive_before, alive_after, has_unverified_conflict
 
 
@@ -384,14 +418,16 @@ class AgyOperationJournal(DirectOperationJournal):
         if not provider_alive and not group_alive:
             if status == "OUTCOME_UNKNOWN":
                 reconciliation = dict(record.get("reconciliation") or {})
-                reconciliation.update({
-                    "at": utc_now(),
-                    "result": reconciliation.get("result") or "OUTCOME_UNKNOWN",
-                    "pid_alive": False,
-                    "provider_alive_before": False,
-                    "provider_alive_after": False,
-                    "retry_permitted": False,
-                })
+                reconciliation.update(
+                    {
+                        "at": utc_now(),
+                        "result": reconciliation.get("result") or "OUTCOME_UNKNOWN",
+                        "pid_alive": False,
+                        "provider_alive_before": False,
+                        "provider_alive_after": False,
+                        "retry_permitted": False,
+                    }
+                )
                 return self.update(
                     operation_id,
                     phase="TERMINAL",
@@ -402,10 +438,12 @@ class AgyOperationJournal(DirectOperationJournal):
                 heartbeat_stale_seconds=heartbeat_stale_seconds,
             )
             reconciliation = dict(result.get("reconciliation") or {})
-            reconciliation.update({
-                "provider_alive_before": False,
-                "provider_alive_after": False,
-            })
+            reconciliation.update(
+                {
+                    "provider_alive_before": False,
+                    "provider_alive_after": False,
+                }
+            )
             return self.update(operation_id, reconciliation=reconciliation)
 
         op_dir = self.operation_dir(operation_id)
