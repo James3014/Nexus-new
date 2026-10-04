@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import os
 import subprocess
@@ -165,6 +166,10 @@ class _Worker:
 
     def invoke(self, provider, contract, lease, **kwargs):
         task_id = getattr(contract, "task_id", None)
+        state = {}
+        attempt_id = ""
+        trajectory_root = None
+        trajectory_ref = None
         if task_id:
             state = self.service._read_state(task_id) or {}
             attempt_id = str(state.get("attempt_id") or "")
@@ -177,7 +182,124 @@ class _Worker:
                     contract, request, lease, state, task_id=task_id, attempt_id=attempt_id
                 )
                 self.service._mutate_state(task_id, lambda s: s.update({"host_preparation": prep}))
-        return self.service.worker_registry.invoke(provider, contract, lease, **kwargs)
+
+            # Passive Track-1 trajectory capture for the already-selected worker.
+            # Correlation is derived from task/attempt/provider, so this sidecar
+            # never mutates lifecycle state. Any telemetry failure is fail-open.
+            try:
+                from nexus.research.clm_system_one.research_evidence_root import (
+                    explicit_research_evidence_root_configured,
+                )
+
+                if not explicit_research_evidence_root_configured():
+                    raise RuntimeError("shared Track-1 evidence root is not configured")
+
+                from nexus.research.clm_system_one.trajectory_continuity import (
+                    bind_trajectory_step_result,
+                    resolve_research_evidence_root,
+                    seal_trajectory_step,
+                    self_hosted_worker_trajectory_id,
+                )
+
+                repo_root = str(
+                    getattr(contract, "controller_repo_root", "")
+                    or getattr(contract, "target_repo_root", "")
+                )
+                source_revision = str(
+                    getattr(contract, "target_base_revision", "")
+                    or getattr(contract, "controller_revision", "")
+                )
+                trajectory_root = resolve_research_evidence_root(repo_root)
+                prompt = str(kwargs.get("prompt") or "")
+                envelope = state.get("canonical_dispatch_envelope")
+                envelope = envelope if isinstance(envelope, Mapping) else {}
+                selected_model = str(
+                    kwargs.get("model")
+                    or state.get("selected_model")
+                    or envelope.get("model")
+                    or ""
+                )
+                trajectory_id = self_hosted_worker_trajectory_id(
+                    task_id=str(task_id),
+                    attempt_id=attempt_id,
+                    provider=str(provider),
+                )
+                trajectory_ref = seal_trajectory_step(
+                    evidence_root=trajectory_root,
+                    task_id=str(task_id),
+                    trajectory_id=trajectory_id,
+                    attempt_id=attempt_id,
+                    candidate_id=None,
+                    step_index=0,
+                    source_revision=source_revision,
+                    base_source_revision=source_revision,
+                    pre_action_state={
+                        "task_objective": str(getattr(contract, "objective", "") or ""),
+                        "target_base_revision": source_revision,
+                        "allowed_files": list(getattr(contract, "allowed_files", ()) or ()),
+                        "verifier_command_sha256": [
+                            hashlib.sha256(str(command).encode("utf-8")).hexdigest()
+                            for command in (getattr(contract, "verifier_commands", ()) or ())
+                        ],
+                        "provider": str(provider),
+                        "model": selected_model,
+                    },
+                    action_type="self_hosted_worker_invoke",
+                    action_payload={
+                        "provider": str(provider),
+                        "model": selected_model,
+                        "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+                        "prompt_chars": len(prompt),
+                        "target_worktree_sha256": hashlib.sha256(
+                            str(getattr(lease, "target_worktree", "")).encode("utf-8")
+                        ).hexdigest(),
+                    },
+                )
+            except Exception:
+                trajectory_root = None
+                trajectory_ref = None
+
+        try:
+            receipt = self.service.worker_registry.invoke(provider, contract, lease, **kwargs)
+        except Exception as exc:
+            if trajectory_root is not None and trajectory_ref is not None:
+                try:
+                    bind_trajectory_step_result(
+                        evidence_root=trajectory_root,
+                        step_ref=trajectory_ref,
+                        action_result={
+                            "response_type": "Exception",
+                            "exception_type": type(exc).__name__,
+                            "provider": str(provider),
+                        },
+                    )
+                except Exception:
+                    pass
+            raise
+
+        if trajectory_root is not None and trajectory_ref is not None:
+            try:
+                bind_trajectory_step_result(
+                    evidence_root=trajectory_root,
+                    step_ref=trajectory_ref,
+                    action_result={
+                        "provider": str(getattr(receipt, "provider", provider) or provider),
+                        "worker_status": str(getattr(receipt, "worker_status", "") or ""),
+                        "outcome": str(getattr(receipt, "outcome", "") or ""),
+                        "exit_code": getattr(receipt, "exit_code", None),
+                        "stdout_sha256": str(getattr(receipt, "stdout_sha256", "") or ""),
+                        "stderr_sha256": str(getattr(receipt, "stderr_sha256", "") or ""),
+                        "wall_time_ms": int(getattr(receipt, "wall_time_ms", 0) or 0),
+                        "provider_calls": int(getattr(receipt, "provider_calls", 0) or 0),
+                        "provider_attempt_count": int(
+                            getattr(receipt, "provider_attempt_count", 0) or 0
+                        ),
+                        "evidence_complete": bool(getattr(receipt, "evidence_complete", False)),
+                    },
+                )
+            except Exception:
+                pass
+        return receipt
 
 
 class _Target:
