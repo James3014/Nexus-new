@@ -648,6 +648,8 @@ def _quota_progress_projection(
         value = event.get(source_key)
         if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 10000:
             projected[target_key] = value
+    if "ok_count" in projected:
+        projected["ok_count_semantics"] = "successful_quota_queries"
 
     if isinstance(event.get("ok"), bool):
         projected["ok"] = event["ok"]
@@ -819,6 +821,47 @@ def _account_family_quota_state(
         state, reset_ts = _family_quota_state(groups, group_name, now_ts=current)
         return state, reset_ts, True
     return "unknown", None, False
+
+
+def _quota_preflight_decision(
+    *,
+    account_alias_hash: str,
+    model_family: str,
+    quota_state: str,
+    evidence_fresh: bool,
+    probe_state: str,
+    dispatch_decision: str,
+) -> dict[str, str]:
+    """Separate quota-query health from the policy decision for one claimed account."""
+    evidence_state = (
+        "KNOWN_BLOCKED"
+        if evidence_fresh and quota_state == "blocked"
+        else "KNOWN_ELIGIBLE"
+        if evidence_fresh and quota_state in {"five_hour", "weekly"}
+        else "UNKNOWN"
+    )
+    return {
+        "account_alias_hash": account_alias_hash,
+        "model_family": model_family,
+        "evidence_state": evidence_state,
+        "quota_window_state": quota_state,
+        "probe_state": probe_state,
+        "dispatch_decision": dispatch_decision,
+    }
+
+
+def _selected_snapshot_probe_state(snapshot: dict, account_name: str) -> str:
+    rows = snapshot.get("accounts") if isinstance(snapshot, dict) else None
+    if not isinstance(rows, list):
+        return "NOT_RUN"
+    for row in rows:
+        if isinstance(row, dict) and row.get("account") == account_name:
+            if row.get("ok") is True:
+                return "CACHED_SUCCEEDED"
+            if row.get("ok") is False:
+                return "CACHED_FAILED"
+            return "CACHED_UNKNOWN"
+    return "NOT_RUN"
 
 
 def _dynamic_availability_state(
@@ -3093,6 +3136,9 @@ def dispatch_run(
 
     try:
         while True:
+            quota_probe = {
+                "state": _selected_snapshot_probe_state(quota_snapshot, claim.internal_id)
+            }
             if scoped_model_family is not None:
                 quota_state, reset_ts, evidence_fresh = _account_family_quota_state(
                     quota_snapshot,
@@ -3100,9 +3146,24 @@ def dispatch_run(
                     model_family=scoped_model_family,
                 )
                 if not evidence_fresh:
+                    quota_probe["state"] = "UNKNOWN"
+
+                    def on_quota_progress(**event: Any) -> None:
+                        progress = event.get("quota_preflight_progress")
+                        if isinstance(progress, dict):
+                            if progress.get("phase") == "ACCOUNT_RESULT":
+                                quota_probe["state"] = (
+                                    "SUCCEEDED" if progress.get("ok") is True else "FAILED"
+                                )
+                            elif progress.get("phase") == "TIMED_OUT":
+                                quota_probe["state"] = "TIMED_OUT"
+                            elif progress.get("phase") == "START_FAILED":
+                                quota_probe["state"] = "START_FAILED"
+                        _operation_hook(operation_hook, **event)
+
                     quota_snapshot = _refresh_quota_snapshot_for_account(
                         claim.internal_id,
-                        on_phase_hook=lambda **event: _operation_hook(operation_hook, **event),
+                        on_phase_hook=on_quota_progress,
                         account_alias_hash=claim.account_alias_hash,
                     )
                     availability_state = _dynamic_availability_state(model, quota_snapshot)
@@ -3113,6 +3174,21 @@ def dispatch_run(
                         model_family=scoped_model_family,
                     )
                 if evidence_fresh and quota_state == "blocked":
+                    _operation_hook(
+                        operation_hook,
+                        quota_preflight_decision=_quota_preflight_decision(
+                            account_alias_hash=claim.account_alias_hash,
+                            model_family=scoped_model_family,
+                            quota_state=quota_state,
+                            evidence_fresh=evidence_fresh,
+                            probe_state=quota_probe["state"],
+                            dispatch_decision=(
+                                "BLOCK_KNOWN_QUOTA"
+                                if rotations >= max_failovers
+                                else "ROTATE_KNOWN_QUOTA"
+                            ),
+                        ),
+                    )
                     unavailable_until = (
                         reset_ts
                         if reset_ts is not None and reset_ts > time.time()
@@ -3206,6 +3282,33 @@ def dispatch_run(
                         "quota_state": quota_state,
                         "account_alias_hash": claim.account_alias_hash,
                     },
+                )
+                _operation_hook(
+                    operation_hook,
+                    quota_preflight_decision=_quota_preflight_decision(
+                        account_alias_hash=claim.account_alias_hash,
+                        model_family=scoped_model_family,
+                        quota_state=quota_state,
+                        evidence_fresh=evidence_fresh,
+                        probe_state=quota_probe["state"],
+                        dispatch_decision=(
+                            "ALLOW_KNOWN_ELIGIBLE"
+                            if evidence_fresh and quota_state in {"five_hour", "weekly"}
+                            else "ALLOW_UNKNOWN_QUOTA"
+                        ),
+                    ),
+                )
+            else:
+                _operation_hook(
+                    operation_hook,
+                    quota_preflight_decision=_quota_preflight_decision(
+                        account_alias_hash=claim.account_alias_hash,
+                        model_family=model_family,
+                        quota_state="not_applicable",
+                        evidence_fresh=False,
+                        probe_state="NOT_RUN",
+                        dispatch_decision="ALLOW_NO_QUOTA_FAMILY",
+                    ),
                 )
 
             attempts += 1
@@ -3956,6 +4059,7 @@ def _run_background_operation(
         "tool_event_count": 0,
         "provider_session_id": None,
         "quota_preflight_progress": None,
+        "quota_preflight_decision": None,
         "permission_profile_sha256": None,
         "permission_profile_kind": None,
         "effective_permissions": None,
@@ -3985,6 +4089,7 @@ def _run_background_operation(
             tool_event_count=int(snapshot.get("tool_event_count") or 0),
             provider_session_id=snapshot.get("provider_session_id"),
             quota_preflight_progress=snapshot.get("quota_preflight_progress"),
+            quota_preflight_decision=snapshot.get("quota_preflight_decision"),
             permission_profile_sha256=snapshot.get("permission_profile_sha256"),
             permission_profile_kind=snapshot.get("permission_profile_kind"),
             effective_permissions=snapshot.get("effective_permissions"),
