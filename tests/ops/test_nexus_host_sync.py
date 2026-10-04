@@ -30,9 +30,7 @@ EXTERNAL_DISPATCH_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_external
 GROK_ACCOUNTS = ROOT / "scripts" / "ops" / "nexus-grok-accounts"
 HCOM_AGY_SAFE = ROOT / "scripts" / "ops" / "nexus-hcom-agy-safe"
 HERMES_CONTROLLER_GUARD = ROOT / "scripts" / "ops" / "nexus-hermes-controller-guard"
-HERMES_CONTINUATION_CONTROLLER = (
-    ROOT / "scripts" / "ops" / "nexus-hermes-continuation-controller"
-)
+HERMES_CONTINUATION_CONTROLLER = ROOT / "scripts" / "ops" / "nexus-hermes-continuation-controller"
 MANAGER_SHA = "4c0e326fc72ea98f9d6d80957055a4e8a2d7387f681dea903f2a072942d2e31c"
 LAUNCHD_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_host_sync_launchd.sh"
 BOOTSTRAP_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_host_sync.sh"
@@ -937,10 +935,7 @@ def test_hermes_runtime_components_rollback_to_generation_without_entrypoints(
     assert upgraded.returncode == 0, upgraded.stderr + upgraded.stdout
     upgraded_payload = json.loads(upgraded.stdout)
     assert upgraded_payload["components"]["hermes_controller_guard"]["status"] == "VERIFIED"
-    assert (
-        upgraded_payload["components"]["hermes_continuation_controller"]["status"]
-        == "VERIFIED"
-    )
+    assert upgraded_payload["components"]["hermes_continuation_controller"]["status"] == "VERIFIED"
     assert hermes_guard_target.is_symlink()
     assert hermes_controller_target.is_symlink()
 
