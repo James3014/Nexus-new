@@ -106,6 +106,9 @@ PUBLIC_OPERATION_KEYS = (
     "review_receipt_path",
     "review_receipt_sha256",
     "review_failure_kind",
+    "permission_profile_sha256",
+    "permission_profile_kind",
+    "effective_permissions",
 )
 
 
@@ -483,6 +486,9 @@ class DirectOperationJournal:
             "input_delivery_truncations": [],
             "quota_preflight_progress": None,
             "reconciliation": None,
+            "permission_profile_sha256": None,
+            "permission_profile_kind": None,
+            "effective_permissions": None,
             "stdout_path": str(self.stdout_path(operation_id)),
             "stderr_path": str(self.stderr_path(operation_id)),
         }
