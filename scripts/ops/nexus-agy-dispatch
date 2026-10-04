@@ -1772,9 +1772,11 @@ def _parse_hcom_args(raw: str | None) -> list[str]:
         raise ValueError("HCOM_ARGS_JSON_INVALID")
     for item in value:
         lowered = item.strip().lower()
-        if lowered in FORBIDDEN_HCOM_COLLAB_FLAGS or lowered.startswith(
-            ("--detach=", "--daemon=", "--background=")
-        ):
+        if lowered in FORBIDDEN_HCOM_COLLAB_FLAGS or lowered.startswith((
+            "--detach=",
+            "--daemon=",
+            "--background=",
+        )):
             raise ValueError(f"HCOM_COLLAB_FORBIDDEN_FLAG:{item}")
     return list(value)
 
@@ -1798,9 +1800,11 @@ def dispatch_hcom_collab(
     """
     for item in hcom_args:
         lowered = item.strip().lower()
-        if lowered in FORBIDDEN_HCOM_COLLAB_FLAGS or lowered.startswith(
-            ("--detach=", "--daemon=", "--background=")
-        ):
+        if lowered in FORBIDDEN_HCOM_COLLAB_FLAGS or lowered.startswith((
+            "--detach=",
+            "--daemon=",
+            "--background=",
+        )):
             raise ValueError(f"HCOM_COLLAB_FORBIDDEN_FLAG:{item}")
 
     if coordinator is None:

@@ -683,8 +683,7 @@ def _derive_next_gate(
     selected = operation.get("selected")
     active = operation.get("active") or []
     if isinstance(selected, dict) and (
-        selected.get("status") == "OUTCOME_UNKNOWN"
-        or selected.get("phase") == "RECONCILE_REQUIRED"
+        selected.get("status") == "OUTCOME_UNKNOWN" or selected.get("phase") == "RECONCILE_REQUIRED"
     ):
         return "RECONCILE", {
             "code": "RECONCILE_OPERATION",
@@ -701,9 +700,7 @@ def _derive_next_gate(
             "code": "RECONCILE_OPERATION",
             "reason": "At least one durable operation requires reconciliation before continuing.",
             "operation_ids": [
-                str(row["operation_id"])
-                for row in reconcile_active
-                if row.get("operation_id")
+                str(row["operation_id"]) for row in reconcile_active if row.get("operation_id")
             ],
         }
     if operation.get("requested_id") and selected is None:
