@@ -370,6 +370,20 @@ def _supervision_mode(has_step_oracle: bool) -> str:
 # ---------------------------------------------------------------------------
 
 
+def self_hosted_worker_trajectory_id(*, task_id: str, attempt_id: str, provider: str) -> str:
+    """Return the deterministic passive trajectory identity for one provider attempt."""
+
+    values = [
+        str(task_id or "").strip(),
+        str(attempt_id or "").strip(),
+        str(provider or "").strip(),
+    ]
+    if not all(values):
+        raise ValueError("task/attempt/provider identity is required")
+    payload = "\0".join(values).encode("utf-8")
+    return "self-hosted-" + hashlib.sha256(payload).hexdigest()
+
+
 def seal_trajectory_step(
     *,
     evidence_root: str | Path,

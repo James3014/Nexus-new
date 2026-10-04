@@ -1017,15 +1017,61 @@ def run_agy(
         stderr=subprocess.PIPE,
         text=True,
         bufsize=1,
+        start_new_session=True,
     )
+    provider_pid = getattr(process, "pid", None)
+    provider_pgid: int | None = (
+        provider_pid if isinstance(provider_pid, int) and provider_pid > 0 else None
+    )
+    if provider_pgid is not None:
+        try:
+            provider_pgid = os.getpgid(provider_pid)
+        except OSError:
+            # start_new_session=True establishes a fresh session/process group
+            # whose PGID is the child PID. Preserve that deterministic identity
+            # even if a very short-lived child exits before getpgid() readback.
+            provider_pgid = provider_pid
     if operation_hook:
-        _operation_hook(
-            operation_hook,
-            phase="PROVIDER_RUNNING",
-            provider_pid=process.pid,
-            provider_process_state="RUNNING",
-            provider_started_at=_agy_operation_journal.utc_now(),
-        )
+        try:
+            _operation_hook(
+                operation_hook,
+                phase="PROVIDER_RUNNING",
+                provider_pid=provider_pid,
+                provider_pgid=provider_pgid,
+                provider_process_state="RUNNING",
+                provider_started_at=_agy_operation_journal.utc_now(),
+            )
+        except Exception as hook_exc:
+            # A provider whose durable physical identity cannot be persisted
+            # must not continue. This frame still owns the live Popen/session,
+            # so bounded cleanup is authorized without trusting a later PID.
+            if provider_pgid is not None:
+                try:
+                    _agy_operation_journal._stop_process_group(
+                        provider_pgid,
+                        grace_seconds=2.0,
+                    )
+                except Exception:
+                    pass
+            if process.poll() is None and isinstance(provider_pid, int):
+                try:
+                    _agy_operation_journal._stop_process(
+                        provider_pid,
+                        grace_seconds=2.0,
+                    )
+                except Exception:
+                    pass
+            provider_alive = isinstance(
+                provider_pid, int
+            ) and _agy_operation_journal._process_alive(provider_pid)
+            group_alive = provider_pgid is not None and _agy_operation_journal._process_group_alive(
+                provider_pgid
+            )
+            if provider_alive or group_alive:
+                raise RuntimeError(
+                    "PROVIDER_IDENTITY_PERSIST_FAILED_CLEANUP_UNVERIFIED"
+                ) from hook_exc
+            raise
 
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
@@ -1083,58 +1129,94 @@ def run_agy(
     quota_terminated = False
     deadline = started + max(1, timeout) + 10
     next_effect_observation_at = started
-    while process.poll() is None:
-        now = time.monotonic()
-        if (
-            baseline_worktree_state is not None
-            and not first_effect_seen.is_set()
-            and now >= next_effect_observation_at
-        ):
-            next_effect_observation_at = now + _EFFECT_OBSERVATION_INTERVAL_SECONDS
-            try:
-                changed = direct_operation_journal.observed_changed_paths_since(
-                    cwd, baseline_worktree_state
-                )
-                if changed is None:
+    try:
+        while process.poll() is None:
+            now = time.monotonic()
+            if (
+                baseline_worktree_state is not None
+                and not first_effect_seen.is_set()
+                and now >= next_effect_observation_at
+            ):
+                next_effect_observation_at = now + _EFFECT_OBSERVATION_INTERVAL_SECONDS
+                try:
+                    changed = direct_operation_journal.observed_changed_paths_since(
+                        cwd, baseline_worktree_state
+                    )
+                    if changed is None:
+                        baseline_worktree_state = None
+                        if operation_hook:
+                            _operation_hook(
+                                operation_hook,
+                                effect_observation_error="EFFECT_OBSERVATION_UNAVAILABLE",
+                            )
+                    elif changed:
+                        first_effect_seen.set()
+                        now_effect_iso = _agy_operation_journal.utc_now()
+                        effect_wall_ms = int((time.monotonic() - started) * 1000)
+                        if operation_hook:
+                            _operation_hook(
+                                operation_hook,
+                                first_effect_at=now_effect_iso,
+                                time_to_first_effect_ms=effect_wall_ms,
+                            )
+                except Exception as exc:
                     baseline_worktree_state = None
                     if operation_hook:
                         _operation_hook(
                             operation_hook,
-                            effect_observation_error="EFFECT_OBSERVATION_UNAVAILABLE",
+                            effect_observation_error=f"EFFECT_OBSERVATION_FAILED:{type(exc).__name__}",
                         )
-                elif changed:
-                    first_effect_seen.set()
-                    now_effect_iso = _agy_operation_journal.utc_now()
-                    effect_wall_ms = int((time.monotonic() - started) * 1000)
-                    if operation_hook:
-                        _operation_hook(
-                            operation_hook,
-                            first_effect_at=now_effect_iso,
-                            time_to_first_effect_ms=effect_wall_ms,
-                        )
-            except Exception as exc:
-                baseline_worktree_state = None
-                if operation_hook:
-                    _operation_hook(
-                        operation_hook,
-                        effect_observation_error=f"EFFECT_OBSERVATION_FAILED:{type(exc).__name__}",
+            if quota_failure.wait(0.05):
+                quota_terminated = True
+                if provider_pgid is not None:
+                    _agy_operation_journal._stop_process_group(
+                        provider_pgid,
+                        grace_seconds=2.0,
                     )
-        if quota_failure.wait(0.05):
-            quota_terminated = True
-            process.terminate()
-            break
-        if time.monotonic() >= deadline:
-            timed_out = True
-            process.terminate()
-            break
-        time.sleep(0.05)
+                else:
+                    process.terminate()
+                break
+            if time.monotonic() >= deadline:
+                timed_out = True
+                if provider_pgid is not None:
+                    _agy_operation_journal._stop_process_group(
+                        provider_pgid,
+                        grace_seconds=2.0,
+                    )
+                else:
+                    process.terminate()
+                break
+            time.sleep(0.05)
 
-    if process.poll() is None:
-        try:
-            process.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=2)
+        if process.poll() is None:
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                if provider_pgid is not None:
+                    _agy_operation_journal._stop_process_group(
+                        provider_pgid,
+                        grace_seconds=2.0,
+                    )
+                else:
+                    process.kill()
+                process.wait(timeout=2)
+    finally:
+        if provider_pgid is not None and _agy_operation_journal._process_group_alive(provider_pgid):
+            try:
+                _agy_operation_journal._stop_process_group(
+                    provider_pgid,
+                    grace_seconds=2.0,
+                )
+            except Exception:
+                pass
+        if process.poll() is None and isinstance(provider_pid, int):
+            try:
+                _agy_operation_journal._stop_process(
+                    provider_pid,
+                    grace_seconds=2.0,
+                )
+            except Exception:
+                pass
 
     stdout_thread.join(timeout=2)
     stderr_thread.join(timeout=2)
@@ -1348,6 +1430,630 @@ def _project_write_permissions(
     if not projected:
         raise ValueError("AGY_WRITE_SCOPE_REQUIRED")
     return projected
+
+
+_WORKTREE_GITFILE_RE = re.compile(r"^gitdir:\s*(.+)$", re.MULTILINE)
+
+# ---------------------------------------------------------------------------
+# Linked-worktree detection and standalone-clone fallback
+# ---------------------------------------------------------------------------
+
+
+def _run_git(*args: str, cwd: str) -> tuple[int, str]:
+    """Run a git command, return (returncode, stdout). Never raises."""
+    try:
+        result = subprocess.run(
+            ["git"] + list(args),
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        return result.returncode, result.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return 1, ""
+
+
+def _is_linked_worktree(cwd: str) -> bool:
+    """Return True when *cwd* is a linked Git worktree (not a standalone clone).
+
+    Detection uses deterministic Git metadata only — no Agy logs:
+
+    1. The .git entry is a plain file (gitfile) rather than a directory, which
+       is the canonical marker for a linked worktree checkout.
+    2. The common config referenced via that gitfile contains
+       extensions.worktreeConfig, which is the specific setting that triggers
+       the Agy 1.2.16 watcher rejection.
+
+    A standalone clone always has a real .git *directory*.  When either
+    condition cannot be read (missing git, non-git directory) this function
+    returns False so normal flow is unaffected.
+    """
+    try:
+        git_path = Path(cwd) / ".git"
+        if not git_path.exists():
+            # May still be a git repo via parent discovery, but check via git
+            rc, toplevel = _run_git("rev-parse", "--show-toplevel", cwd=cwd)
+            if rc != 0:
+                return False
+            git_path = Path(toplevel) / ".git"
+            if not git_path.exists():
+                return False
+
+        # A regular file at .git is the gitfile pointer used by linked worktrees.
+        if not git_path.is_file():
+            return False  # real .git directory — standalone clone
+
+        # Read the gitfile to find the per-worktree git dir.
+        try:
+            gitfile_content = git_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return False
+        match = _WORKTREE_GITFILE_RE.search(gitfile_content)
+        if not match:
+            return False
+        worktree_git_dir = Path(match.group(1).strip()).expanduser()
+        if not worktree_git_dir.is_absolute():
+            worktree_git_dir = (Path(cwd) / worktree_git_dir).resolve()
+
+        # The common config lives at <worktrees_dir>/../../config which is the
+        # main repository's config.  Walk up from the per-worktree git dir.
+        # Layout: <main-git-dir>/worktrees/<name>/  -> gitdir points here
+        # Common config: <main-git-dir>/config
+        common_config_path = worktree_git_dir.parent.parent / "config"
+        if not common_config_path.is_file():
+            # Non-standard layout: still a gitfile → still a linked worktree.
+            return True
+
+        try:
+            config_text = common_config_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return True  # gitfile confirmed linked worktree even without config read
+
+        # Presence of extensions.worktreeConfig in any case is the trigger.
+        if re.search(r"worktreeConfig\s*=\s*true", config_text, re.IGNORECASE):
+            return True
+        # Even without worktreeConfig, a gitfile-linked worktree is still
+        # incompatible with the Agy watcher: return True for any gitfile.
+        return True
+
+    except Exception:
+        return False
+
+
+def _git_remote_url(cwd: str) -> str | None:
+    """Return the 'origin' remote URL for the repo at *cwd*, or None."""
+    rc, url = _run_git("remote", "get-url", "origin", cwd=cwd)
+    if rc == 0 and url:
+        return url
+    return None
+
+
+def _git_head_sha(cwd: str) -> str | None:
+    """Return the full HEAD commit SHA for the repo at *cwd*, or None."""
+    rc, sha = _run_git("rev-parse", "HEAD", cwd=cwd)
+    if rc == 0 and sha and len(sha) >= 40:
+        return sha
+    return None
+
+
+def _git_is_dirty(cwd: str) -> bool:
+    """Return True when the working tree or index has uncommitted changes."""
+    rc, output = _run_git("status", "--porcelain", cwd=cwd)
+    if rc != 0:
+        return True  # fail closed
+    return bool(output.strip())
+
+
+def _git_real_dot_git(cwd: str) -> bool:
+    """Return True when .git is a real directory (not a gitfile)."""
+    git_path = Path(cwd) / ".git"
+    if git_path.is_dir():
+        return True
+    # Also accept repos that were initialized without a top-level .git (rare)
+    if git_path.is_file():
+        return False
+    return False
+
+
+class WorktreeFallbackError(ValueError):
+    """Raised when a standalone-clone fallback cannot be established safely."""
+
+
+def _validate_standalone_clone(
+    *,
+    clone_path: str,
+    expected_remote: str,
+    expected_sha: str,
+) -> None:
+    """Validate that an *existing* directory is a safe, exact standalone clone.
+
+    Raises WorktreeFallbackError with a deterministic tag on any mismatch.
+    """
+    clone_dir = Path(clone_path)
+    if not clone_dir.is_dir():
+        raise WorktreeFallbackError(f"FALLBACK_CLONE_NOT_A_DIR:{clone_path}")
+
+    # Must have a real .git directory (not a gitfile-linked worktree).
+    if not _git_real_dot_git(clone_path):
+        raise WorktreeFallbackError(f"FALLBACK_CLONE_IS_LINKED_WORKTREE:{clone_path}")
+
+    # Remote must match exactly.
+    actual_remote = _git_remote_url(clone_path)
+    if actual_remote != expected_remote:
+        raise WorktreeFallbackError(
+            f"FALLBACK_CLONE_REMOTE_MISMATCH:expected={expected_remote!r} actual={actual_remote!r}"
+        )
+
+    # HEAD SHA must match exactly.
+    actual_sha = _git_head_sha(clone_path)
+    if actual_sha != expected_sha:
+        raise WorktreeFallbackError(
+            f"FALLBACK_CLONE_BASE_MISMATCH:expected={expected_sha!r} actual={actual_sha!r}"
+        )
+
+    # Clone must be clean (no uncommitted changes).
+    if _git_is_dirty(clone_path):
+        raise WorktreeFallbackError(f"FALLBACK_CLONE_DIRTY:{clone_path}")
+
+
+def _prepare_standalone_clone_fallback(
+    *,
+    source_cwd: str,
+    fallback_path: str,
+) -> str:
+    """Create or validate a standalone clone and return the clone path as cwd.
+
+    Behaviour:
+    - If *fallback_path* does not exist: create a fresh ``git clone`` from the
+      source origin at the source HEAD revision with no shared object store and
+      no worktree metadata.
+    - If *fallback_path* exists and is already an exact, clean standalone clone
+      of the same origin/HEAD: reuse it without modification.
+    - Any other state (non-empty non-repo dir, wrong remote, wrong base, dirty,
+      linked worktree) raises WorktreeFallbackError — fail closed.
+
+    Raises WorktreeFallbackError on any unresolvable condition.
+    Returns the resolved absolute path string of the standalone clone.
+    """
+    source_remote = _git_remote_url(source_cwd)
+    if not source_remote:
+        raise WorktreeFallbackError(
+            f"FALLBACK_SOURCE_NO_REMOTE:cannot read origin from {source_cwd!r}"
+        )
+
+    source_sha = _git_head_sha(source_cwd)
+    if not source_sha:
+        raise WorktreeFallbackError(f"FALLBACK_SOURCE_NO_HEAD:cannot read HEAD from {source_cwd!r}")
+    if _git_is_dirty(source_cwd):
+        raise WorktreeFallbackError(
+            "FALLBACK_SOURCE_DIRTY:explicit fallback cannot discard uncommitted source state"
+        )
+
+    source_dir = Path(source_cwd).expanduser().resolve()
+    clone_dir = Path(fallback_path).expanduser().resolve()
+    try:
+        clone_dir.relative_to(source_dir)
+    except ValueError:
+        pass
+    else:
+        raise WorktreeFallbackError(
+            "FALLBACK_CLONE_INSIDE_SOURCE:standalone target must be outside source worktree"
+        )
+    clone_path = str(clone_dir)
+
+    if clone_dir.exists():
+        # Must be a directory; non-directory is an ambiguous collision.
+        if not clone_dir.is_dir():
+            raise WorktreeFallbackError(f"FALLBACK_CLONE_PATH_COLLISION_NOT_DIR:{clone_path}")
+
+        contents = list(clone_dir.iterdir())
+        if not contents:
+            # Empty directory: treat as new destination (will be populated below).
+            clone_dir.rmdir()  # remove so git clone can create it
+        else:
+            # Non-empty: validate as existing clone.
+            _validate_standalone_clone(
+                clone_path=clone_path,
+                expected_remote=source_remote,
+                expected_sha=source_sha,
+            )
+            return clone_path
+
+    # Create a fresh standalone clone from the local source checkout.  --no-local
+    # forces independent object storage instead of hardlinks/shared worktree metadata.
+    # The externally visible origin is restored to the source repository remote after
+    # cloning, and checkout is pinned to the exact source SHA.
+    clone_dir.parent.mkdir(parents=True, exist_ok=True)
+    rc, _out = _run_git(
+        "clone",
+        "--no-local",
+        source_cwd,
+        clone_path,
+        cwd=str(clone_dir.parent),
+    )
+    if rc != 0:
+        raise WorktreeFallbackError(
+            f"FALLBACK_CLONE_FAILED:git clone exited {rc} for {source_cwd!r}"
+        )
+
+    rc, _out = _run_git("remote", "set-url", "origin", source_remote, cwd=clone_path)
+    if rc != 0:
+        raise WorktreeFallbackError("FALLBACK_CLONE_REMOTE_SET_FAILED")
+
+    # Checkout the exact base SHA (detached HEAD for isolation).
+    rc, _out = _run_git("checkout", "--detach", source_sha, cwd=clone_path)
+    if rc != 0:
+        # Try without --detach (older git fallback).
+        rc2, _out2 = _run_git("checkout", source_sha, cwd=clone_path)
+        if rc2 != 0:
+            raise WorktreeFallbackError(
+                f"FALLBACK_CLONE_CHECKOUT_FAILED:cannot checkout {source_sha!r}"
+            )
+
+    # Final validation: confirm identity and cleanliness.
+    _validate_standalone_clone(
+        clone_path=clone_path,
+        expected_remote=source_remote,
+        expected_sha=source_sha,
+    )
+    return clone_path
+
+
+def _resolve_cwd_for_dispatch(
+    *,
+    requested_cwd: str,
+    fallback_clone_path: str | None,
+) -> str:
+    """Return the effective cwd for dispatch, applying fallback logic.
+
+    - If *fallback_clone_path* is None and the requested cwd is a linked
+      worktree, raise WorktreeFallbackError with WORKTREE_NO_FALLBACK_REQUESTED
+      so the caller can surface a clear diagnostic.
+    - If *fallback_clone_path* is provided, prepare/validate the standalone
+      clone and return its path regardless of whether the source is a linked
+      worktree (explicit opt-in).
+    - If *fallback_clone_path* is None and the requested cwd is a normal
+      standalone repo (or non-git directory), return *requested_cwd* unchanged.
+    """
+    if fallback_clone_path is not None:
+        return _prepare_standalone_clone_fallback(
+            source_cwd=requested_cwd,
+            fallback_path=fallback_clone_path,
+        )
+
+    if _is_linked_worktree(requested_cwd):
+        raise WorktreeFallbackError(
+            "WORKTREE_NO_FALLBACK_REQUESTED:"
+            "The requested --cwd is a linked Git worktree which is incompatible "
+            "with the Agy watcher. Re-run with --fallback-clone <path> to provide "
+            "an explicit standalone clone target."
+        )
+
+    return requested_cwd
+
+
+def _resolve_hcom_agy_safe() -> Path:
+    override = os.environ.get("NEXUS_HCOM_AGY_SAFE_BIN")
+    if override:
+        path = Path(override).expanduser().resolve()
+        if path.is_file() and os.access(path, os.X_OK):
+            return path
+        raise RuntimeError("NEXUS_HCOM_AGY_SAFE_BIN_INVALID")
+    bundled = Path(__file__).with_name("nexus-hcom-agy-safe")
+    if bundled.is_file() and os.access(bundled, os.X_OK):
+        return bundled
+    resolved = shutil.which("hcom-agy-safe")
+    if resolved:
+        return Path(resolved).resolve()
+    raise RuntimeError("HCOM_AGY_SAFE_NOT_FOUND")
+
+
+FORBIDDEN_HCOM_COLLAB_FLAGS = {
+    "--detach",
+    "--daemon",
+    "-d",
+    "--background",
+    "--headless",
+    "--no-terminal",
+}
+
+
+def _parse_hcom_args(raw: str | None) -> list[str]:
+    if raw is None or not raw.strip():
+        return []
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("HCOM_ARGS_JSON_INVALID") from exc
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError("HCOM_ARGS_JSON_INVALID")
+    for item in value:
+        lowered = item.strip().lower()
+        if lowered in FORBIDDEN_HCOM_COLLAB_FLAGS or lowered.startswith((
+            "--detach=",
+            "--daemon=",
+            "--background=",
+        )):
+            raise ValueError(f"HCOM_COLLAB_FORBIDDEN_FLAG:{item}")
+    return list(value)
+
+
+def dispatch_hcom_collab(
+    *,
+    cwd: str,
+    hcom_args: list[str],
+    model: str | None,
+    pool_wait_timeout: float = 15.0,
+    coordinator: CrossProcessLeaseCoordinator | None = None,
+    popen_factory: Any = subprocess.Popen,
+    launcher_path: Path | None = None,
+    operation_hook: Any = None,
+) -> int:
+    """Run one foreground hcom/Agy session under the canonical pool claim.
+
+    Account selection and admission stay in nexus-agy-dispatch.  The launcher
+    receives only the exact admitted account snapshot and an inherited
+    per-account flock descriptor; it never chooses or rotates accounts itself.
+    """
+    for item in hcom_args:
+        lowered = item.strip().lower()
+        if lowered in FORBIDDEN_HCOM_COLLAB_FLAGS or lowered.startswith((
+            "--detach=",
+            "--daemon=",
+            "--background=",
+        )):
+            raise ValueError(f"HCOM_COLLAB_FORBIDDEN_FLAG:{item}")
+
+    if coordinator is None:
+        if not MANAGER.is_file() or not MANAGER_ROOT.is_dir():
+            raise RuntimeError("AGY_ACCOUNT_POOL_RUNTIME_MISSING")
+        pool = AgyAccountPoolManager(
+            manager_path=str(MANAGER),
+            manager_root=str(MANAGER_ROOT),
+            use_real_manager=True,
+        )
+        coordinator = CrossProcessLeaseCoordinator(
+            manager=pool,
+            allocator_lock_path=ALLOCATOR_LOCK_PATH,
+            leases_dir=LEASES_DIR,
+        )
+
+    quota_snapshot, availability_state = _apply_dynamic_availability(model)
+    model_family = str(availability_state["family"])
+    scoped_model_family = model_family if model_family in {"gemini", "claude_gpt"} else None
+    consumer_id = "hcom-" + uuid.uuid4().hex
+    exclude_hashes: set[str] = set()
+    claim: AccountLeaseClaim | None = None
+    child: Any = None
+
+    try:
+        while True:
+            try:
+                claim = coordinator.acquire_claim(
+                    consumer_id=consumer_id,
+                    exclude_hashes=exclude_hashes,
+                    wait_timeout=pool_wait_timeout,
+                    model_family=scoped_model_family,
+                )
+            except AgyAccountPoolBusyError:
+                emit_meta({
+                    "status": "pool_busy",
+                    "attempts": 0,
+                    "rotations": len(exclude_hashes),
+                    "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
+                    "wall_ms": 0,
+                })
+                return 75
+            except AgyAccountPoolExhaustedError:
+                emit_meta({
+                    "status": "pool_exhausted",
+                    "attempts": 0,
+                    "rotations": len(exclude_hashes),
+                    "failure_kind": "ACCOUNT_UNAVAILABLE",
+                    "wall_ms": 0,
+                })
+                return 75
+            if scoped_model_family is None:
+                break
+            quota_state, reset_ts, evidence_fresh = _account_family_quota_state(
+                quota_snapshot,
+                account_name=claim.internal_id,
+                model_family=scoped_model_family,
+            )
+            if not evidence_fresh:
+                quota_snapshot = _refresh_quota_snapshot_for_account(claim.internal_id)
+                quota_state, reset_ts, evidence_fresh = _account_family_quota_state(
+                    quota_snapshot,
+                    account_name=claim.internal_id,
+                    model_family=scoped_model_family,
+                )
+            if not (evidence_fresh and quota_state == "blocked"):
+                break
+            unavailable_until = (
+                reset_ts
+                if reset_ts is not None and reset_ts > time.time()
+                else time.time() + DEFAULT_QUOTA_FAMILY_BLOCK_SECONDS
+            )
+            failed_hash = claim.account_alias_hash
+            coordinator.retire_failed_claim(
+                claim,
+                AccountFailureKind.QUOTA_EXHAUSTED,
+                model_family=scoped_model_family,
+                unavailable_until=unavailable_until,
+            )
+            claim = None
+            exclude_hashes.add(failed_hash)
+
+        assert claim is not None
+        _operation_hook(
+            operation_hook,
+            phase="ACCOUNT_LEASED",
+            attempts=1,
+            rotations=len(exclude_hashes),
+            account_alias_hash=claim.account_alias_hash,
+            lease_id_hash=claim.lease_id_hash,
+        )
+        profile_home = str(claim.lease.execution_env.get("HOME") or "").strip()
+        if not profile_home:
+            raise RuntimeError("LEASE_HOME_MISSING")
+        profile = Path(profile_home).expanduser().resolve()
+        accounts_root = (MANAGER_ROOT / "accounts").resolve()
+        if profile != (accounts_root / claim.internal_id).resolve():
+            raise RuntimeError("LEASE_PROFILE_IDENTITY_MISMATCH")
+
+        lock_obj = claim.lock_file_obj
+        if lock_obj is None:
+            raise RuntimeError("LEASE_LOCK_MISSING")
+        lease_fd = int(lock_obj.fileno())
+        os.set_inheritable(lease_fd, True)
+
+        launcher = (
+            launcher_path.resolve() if launcher_path is not None else _resolve_hcom_agy_safe()
+        )
+        env = dict(os.environ)
+        sensitive_keys = getattr(_agy_account_pool, "SENSITIVE_API_KEYS", None)
+        if sensitive_keys is None:
+            raise RuntimeError("SENSITIVE_API_KEYS_CONFIG_MISSING")
+        for key in sensitive_keys:
+            env.pop(key, None)
+        env.update({
+            "NEXUS_HCOM_AGY_LEASE_ACCOUNT": claim.internal_id,
+            "NEXUS_HCOM_AGY_PROFILE_HOME": str(profile),
+            "NEXUS_HCOM_AGY_LEASE_FD": str(lease_fd),
+            "NEXUS_HCOM_AGY_LEASE_ID_HASH": claim.lease_id_hash,
+            "NEXUS_HCOM_AGY_ACCOUNT_ALIAS_HASH": claim.account_alias_hash,
+        })
+        _operation_hook(
+            operation_hook,
+            phase="EXECUTING",
+            attempts=1,
+            rotations=len(exclude_hashes),
+            account_alias_hash=claim.account_alias_hash,
+            lease_id_hash=claim.lease_id_hash,
+        )
+        child = popen_factory(
+            [str(launcher), *hcom_args],
+            cwd=cwd,
+            env=env,
+            pass_fds=(lease_fd,),
+        )
+        child_pid = getattr(child, "pid", None)
+        _operation_hook(
+            operation_hook,
+            phase="EXECUTING",
+            attempts=1,
+            rotations=len(exclude_hashes),
+            account_alias_hash=claim.account_alias_hash,
+            lease_id_hash=claim.lease_id_hash,
+            provider_pid=child_pid,
+        )
+        code = int(child.wait())
+        claim.release()
+        claim = None
+        return code
+    except BaseException:
+        if claim is not None:
+            child_alive = child is not None and child.poll() is None
+            if child_alive:
+                claim.abandon_parent_reference()
+            else:
+                claim.release()
+            claim = None
+        raise
+    finally:
+        if claim is not None:
+            claim.release()
+
+
+def _run_foreground_hcom_operation(
+    *,
+    cwd: str,
+    hcom_args: list[str],
+    model: str | None,
+    pool_wait_timeout: float,
+    operation_root: Path,
+) -> int:
+    journal = AgyOperationJournal(operation_root)
+    operation_id = new_operation_id()
+    attempt_id = new_attempt_id()
+    args_sha256 = hashlib.sha256(
+        json.dumps(hcom_args, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=attempt_id,
+        cwd=cwd,
+        provider="agy",
+        model=model,
+        effort=None,
+        prompt_sha256=args_sha256,
+        runtime_revision=_runtime_revision(),
+        initial_fields={"mode": "hcom_collab", "hcom_args_sha256": args_sha256},
+    )
+    journal.mark_started(operation_id, pid=os.getpid())
+    journal.update(operation_id, phase="STARTING")
+    emit_meta({
+        "status": "hcom_collab_started",
+        "operation_id": operation_id,
+        "attempt_id": attempt_id,
+    })
+
+    def on_event(event: dict[str, Any]) -> None:
+        journal.heartbeat(
+            operation_id,
+            phase=str(event.get("phase") or "RUNNING"),
+            attempts=int(event.get("attempts") or 0),
+            rotations=int(event.get("rotations") or 0),
+            account_alias_hash=event.get("account_alias_hash"),
+            lease_id_hash=event.get("lease_id_hash"),
+            failure_kind=event.get("failure_kind"),
+        )
+        if event.get("provider_pid"):
+            journal.update(operation_id, provider_pid=int(event["provider_pid"]))
+
+    try:
+        code = dispatch_hcom_collab(
+            cwd=cwd,
+            hcom_args=hcom_args,
+            model=model,
+            pool_wait_timeout=pool_wait_timeout,
+            operation_hook=on_event,
+        )
+    except BaseException as exc:
+        record = journal.read(operation_id)
+        if record.get("phase") != "TERMINAL":
+            provider_effect_possible = str(record.get("phase") or "") == "EXECUTING"
+            journal.mark_terminal(
+                operation_id,
+                status="OUTCOME_UNKNOWN" if provider_effect_possible else "FAILED",
+                exit_code=None,
+                failure_kind=f"HCOM_COLLAB_PARENT_ABORT:{type(exc).__name__}",
+                cwd=cwd,
+                reconciliation={
+                    "at": _agy_operation_journal.utc_now(),
+                    "result": (
+                        "HCOM_COLLAB_TERMINALITY_UNPROVEN"
+                        if provider_effect_possible
+                        else "HCOM_COLLAB_ABORT_BEFORE_PROVIDER"
+                    ),
+                    "retry_permitted": False,
+                },
+            )
+        raise
+
+    terminal_status = "COMPLETED" if code == 0 else "FAILED"
+    journal.mark_terminal(
+        operation_id,
+        status=terminal_status,
+        exit_code=code,
+        failure_kind=None if code == 0 else "HCOM_COLLAB_EXIT_NONZERO",
+        cwd=cwd,
+        reconciliation=None,
+    )
+    return code
 
 
 def dispatch_run(
@@ -1566,6 +2272,18 @@ def dispatch_run(
     max_failovers = _max_account_failovers()
     last_kind = None
     total_wall_ms = 0
+    active_provider_pid: int | None = None
+    active_provider_pgid: int | None = None
+
+    def _inner_operation_hook(event: dict[str, Any] | None = None, **kwargs: Any) -> None:
+        nonlocal active_provider_pid, active_provider_pgid
+        merged = dict(event or {})
+        merged.update(kwargs)
+        if isinstance(merged.get("provider_pid"), int):
+            active_provider_pid = merged["provider_pid"]
+        if isinstance(merged.get("provider_pgid"), int):
+            active_provider_pgid = merged["provider_pgid"]
+        _operation_hook(operation_hook, **merged)
 
     _operation_hook(
         operation_hook,
@@ -1686,12 +2404,14 @@ def dispatch_run(
                 for rule in projected_write_rules:
                     if rule not in allow_rules:
                         allow_rules.append(rule)
-                replace_allow_deny = mode == "accept-edits"
-                if replace_allow_deny:
+                deny_rules: list[str] = list(deny or [])
+                replace_allow_deny = bool(
+                    mode == "accept-edits" or allow_rules or deny_rules or temp_command_permissions
+                )
+                if mode == "accept-edits":
                     bounded_read_rule = f"read_file({Path(cwd).expanduser().resolve()}/**)"
                     if bounded_read_rule not in allow_rules:
                         allow_rules.append(bounded_read_rule)
-                deny_rules: list[str] = list(deny or [])
                 allow_unsafe_legacy = False
                 if temp_command_permissions:
                     if "command(*)" not in allow_rules:
@@ -1718,7 +2438,7 @@ def dispatch_run(
                 if runner is run_agy or (
                     hasattr(runner, "__code__") and "operation_hook" in runner.__code__.co_varnames
                 ):
-                    runner_kwargs["operation_hook"] = operation_hook
+                    runner_kwargs["operation_hook"] = _inner_operation_hook
                 code, out, err, timed_out, wall_ms = runner(**runner_kwargs)
             finally:
                 restore_temp_permissions(permission_token)
@@ -1737,12 +2457,23 @@ def dispatch_run(
                     )
                 except OSError:
                     provider_log_text = ""
-            combined_output = out + "\n" + err + "\n" + provider_log_text
-            permission_blocked = (
-                (mode == "accept-edits" and _has_permission_failure_signal(combined_output))
-                or "headless mode cannot prompt for" in combined_output.lower()
-                or "soft-denying tool confirmation" in combined_output.lower()
+            provider_log_lower = provider_log_text.lower()
+            provider_headless_denial = (
+                "print mode: soft-denying tool confirmation" in provider_log_lower
+                or "headless mode cannot prompt for" in provider_log_lower
+                or "auto-denied" in provider_log_lower
             )
+            semantic_output = out + "\n" + err
+            semantic_output_lower = semantic_output.lower()
+            semantic_permission_refusal = mode == "accept-edits" and _has_permission_failure_signal(
+                semantic_output
+            )
+            semantic_headless_denial = mode == "accept-edits" and (
+                "headless mode cannot prompt for" in semantic_output_lower
+                or "soft-denying tool confirmation" in semantic_output_lower
+                or "auto-denied" in semantic_output_lower
+            )
+            permission_blocked = provider_headless_denial or semantic_permission_refusal
             if code == 0 and not timed_out and not permission_blocked:
                 sys.stdout.write(out)
                 if err:
@@ -1783,11 +2514,7 @@ def dispatch_run(
                             ),
                         )
 
-            if permission_blocked and (
-                "headless mode" in combined_output.lower()
-                or "soft-denying" in combined_output.lower()
-                or "auto-denied" in combined_output.lower()
-            ):
+            if permission_blocked and (provider_headless_denial or semantic_headless_denial):
                 last_kind = "HEADLESS_TOOL_PERMISSION_DENIED"
             if permission_blocked:
                 if attempt_changed_paths:
@@ -1972,7 +2699,16 @@ def dispatch_run(
                 })
                 return 75
     finally:
-        if claim is not None:
+        # Numeric PID/PGID observations can retain the lease, but they do not
+        # authorize signalling after the owning Popen frame has returned.
+        provider_still_running = (
+            active_provider_pid is not None
+            and _agy_operation_journal._process_alive(active_provider_pid)
+        ) or (
+            active_provider_pgid is not None
+            and _agy_operation_journal._process_group_alive(active_provider_pgid)
+        )
+        if claim is not None and not provider_still_running:
             try:
                 claim.release()
             except Exception:
@@ -2100,6 +2836,8 @@ def _supervisor_terminal_guard(func):
             known_failure_kind: str,
             unknown_result: str,
             known_result: str,
+            unresolved_running_result: str,
+            unresolved_unverified_result: str,
         ) -> None:
             record = journal.read(operation_id)
             phase = str(record.get("phase") or "QUEUED")
@@ -2114,37 +2852,75 @@ def _supervisor_terminal_guard(func):
                 attestation_log_path,
                 requested_model=model,
             )
-            journal.mark_terminal(
+            had_before, alive_after, unverified = _agy_operation_journal._stop_operation_processes(
                 operation_id,
-                status="OUTCOME_UNKNOWN" if provider_effect_possible else "FAILED",
-                exit_code=record.get("exit_code"),
-                failure_kind=(
-                    unknown_failure_kind if provider_effect_possible else known_failure_kind
-                ),
-                cwd=cwd,
-                reconciliation={
-                    "at": _agy_operation_journal.utc_now(),
-                    "result": unknown_result if provider_effect_possible else known_result,
-                    "retry_permitted": False,
-                },
+                journal.operation_dir(operation_id),
+                pid=record.get("pid"),
                 provider_pid=record.get("provider_pid"),
-                provider_process_state=(
-                    (
-                        "RUNNING"
-                        if direct_operation_journal._process_alive(record.get("provider_pid"))
-                        else "EXITED"
-                    )
-                    if isinstance(record.get("provider_pid"), int)
-                    and record.get("provider_pid") > 0
-                    else record.get("provider_process_state", "IDLE")
-                ),
-                provider_started_at=record.get("provider_started_at"),
-                provider_stream_last_activity_at=record.get("provider_stream_last_activity_at"),
-                first_stream_activity_at=record.get("first_stream_activity_at"),
-                first_effect_at=record.get("first_effect_at"),
-                time_to_first_effect_ms=record.get("time_to_first_effect_ms"),
-                **attestation,
+                provider_pgid=record.get("provider_pgid"),
+                supervisor_pid=os.getpid(),
+                grace_seconds=2.0,
             )
+            had_before = had_before or bool(record.get("provider_pid")) or provider_effect_possible
+            provider_state = (
+                "RUNNING"
+                if alive_after
+                else (
+                    "EXITED"
+                    if record.get("provider_pid")
+                    else record.get("provider_process_state", "IDLE")
+                )
+            )
+            telemetry = {
+                "provider_pid": record.get("provider_pid"),
+                "provider_pgid": record.get("provider_pgid"),
+                "provider_process_state": provider_state,
+                "provider_started_at": record.get("provider_started_at"),
+                "provider_stream_last_activity_at": record.get("provider_stream_last_activity_at"),
+                "first_stream_activity_at": record.get("first_stream_activity_at"),
+                "first_effect_at": record.get("first_effect_at"),
+                "time_to_first_effect_ms": record.get("time_to_first_effect_ms"),
+            }
+
+            if alive_after:
+                journal.update(
+                    operation_id,
+                    status="RUNNING",
+                    phase="RECONCILE_REQUIRED",
+                    failure_kind=unknown_failure_kind,
+                    reconciliation={
+                        "at": _agy_operation_journal.utc_now(),
+                        "result": (
+                            unresolved_unverified_result
+                            if unverified
+                            else unresolved_running_result
+                        ),
+                        "provider_alive_before": had_before,
+                        "provider_alive_after": True,
+                        "retry_permitted": False,
+                    },
+                    **telemetry,
+                    **attestation,
+                )
+            else:
+                journal.mark_terminal(
+                    operation_id,
+                    status="OUTCOME_UNKNOWN" if provider_effect_possible else "FAILED",
+                    exit_code=record.get("exit_code"),
+                    failure_kind=(
+                        unknown_failure_kind if provider_effect_possible else known_failure_kind
+                    ),
+                    cwd=cwd,
+                    reconciliation={
+                        "at": _agy_operation_journal.utc_now(),
+                        "result": unknown_result if provider_effect_possible else known_result,
+                        "provider_alive_before": had_before,
+                        "provider_alive_after": False,
+                        "retry_permitted": False,
+                    },
+                    **telemetry,
+                    **attestation,
+                )
 
         try:
             signal.signal(signal.SIGTERM, _signal_handler)
@@ -2157,6 +2933,8 @@ def _supervisor_terminal_guard(func):
                 known_failure_kind=f"SUPERVISOR_SIGNAL_PRE_PROVIDER:{sig_name}",
                 unknown_result="SUPERVISOR_SIGNAL_WITH_UNKNOWN_PROVIDER_EFFECT",
                 known_result="SUPERVISOR_SIGNAL_BEFORE_PROVIDER",
+                unresolved_running_result="SUPERVISOR_SIGNAL_ORPHAN_PROVIDER_STILL_RUNNING",
+                unresolved_unverified_result="SUPERVISOR_SIGNAL_ORPHAN_PROVIDER_UNVERIFIED",
             )
             raise
         except BaseException as exc:
@@ -2165,6 +2943,8 @@ def _supervisor_terminal_guard(func):
                 known_failure_kind=f"WRAPPER_EXCEPTION_PRE_PROVIDER:{type(exc).__name__}",
                 unknown_result="WRAPPER_EXCEPTION_WITH_UNKNOWN_PROVIDER_EFFECT",
                 known_result="WRAPPER_EXCEPTION_BEFORE_PROVIDER",
+                unresolved_running_result="WRAPPER_EXCEPTION_ORPHAN_PROVIDER_STILL_RUNNING",
+                unresolved_unverified_result="WRAPPER_EXCEPTION_ORPHAN_PROVIDER_UNVERIFIED",
             )
             raise
         finally:
@@ -2216,6 +2996,7 @@ def _run_background_operation(
         "failure_kind": None,
         "timed_out": False,
         "provider_pid": None,
+        "provider_pgid": None,
         "provider_process_state": "IDLE",
         "provider_started_at": None,
         "provider_stream_last_activity_at": None,
@@ -2236,6 +3017,7 @@ def _run_background_operation(
             lease_id_hash=snapshot.get("lease_id_hash"),
             failure_kind=snapshot.get("failure_kind"),
             provider_pid=snapshot.get("provider_pid"),
+            provider_pgid=snapshot.get("provider_pgid"),
             provider_process_state=snapshot.get("provider_process_state") or "IDLE",
             provider_started_at=snapshot.get("provider_started_at"),
             provider_stream_last_activity_at=snapshot.get("provider_stream_last_activity_at"),
@@ -2290,6 +3072,45 @@ def _run_background_operation(
         with state_lock:
             snapshot = dict(state)
         failure_kind = snapshot.get("failure_kind")
+        provider_pid = snapshot.get("provider_pid")
+        provider_pgid = snapshot.get("provider_pgid")
+        provider_alive = _agy_operation_journal._process_alive(provider_pid)
+        provider_group_alive = _agy_operation_journal._process_group_alive(provider_pgid)
+
+        if provider_alive or provider_group_alive:
+            attestation = _parse_agy_attestation(
+                attestation_log_path,
+                requested_model=model,
+            )
+            unresolved_failure = failure_kind or "PROVIDER_PROCESS_STILL_RUNNING_AFTER_DISPATCH"
+            journal.update(
+                operation_id,
+                status="RUNNING",
+                phase="RECONCILE_REQUIRED",
+                failure_kind=unresolved_failure,
+                attempts=int(snapshot.get("attempts") or 0),
+                rotations=int(snapshot.get("rotations") or 0),
+                account_alias_hash=snapshot.get("account_alias_hash"),
+                lease_id_hash=snapshot.get("lease_id_hash"),
+                provider_pid=provider_pid,
+                provider_pgid=provider_pgid,
+                provider_process_state="RUNNING",
+                provider_started_at=snapshot.get("provider_started_at"),
+                provider_stream_last_activity_at=snapshot.get("provider_stream_last_activity_at"),
+                first_stream_activity_at=snapshot.get("first_stream_activity_at"),
+                first_effect_at=snapshot.get("first_effect_at"),
+                time_to_first_effect_ms=snapshot.get("time_to_first_effect_ms"),
+                reconciliation={
+                    "at": _agy_operation_journal.utc_now(),
+                    "result": "PROVIDER_PROCESS_STILL_RUNNING_AFTER_DISPATCH",
+                    "provider_alive_before": True,
+                    "provider_alive_after": True,
+                    "retry_permitted": False,
+                },
+                **attestation,
+            )
+            return int(exit_code if exit_code not in (None, 0) else 1)
+
         timed_out = bool(snapshot.get("timed_out")) or failure_kind == "TIMEOUT"
         if timed_out:
             terminal_status = "OUTCOME_UNKNOWN"
@@ -2321,6 +3142,7 @@ def _run_background_operation(
             lease_id_hash=snapshot.get("lease_id_hash"),
             reconciliation=reconciliation,
             provider_pid=snapshot.get("provider_pid"),
+            provider_pgid=snapshot.get("provider_pgid"),
             provider_process_state=(
                 (
                     "RUNNING"
@@ -2341,40 +3163,9 @@ def _run_background_operation(
         return int(exit_code or 0)
     except _SupervisorSignalError:
         raise
-    except BaseException as exc:
-        attestation = _parse_agy_attestation(
-            attestation_log_path,
-            requested_model=model,
-        )
-        snap = locals().get("snapshot") or {}
-        journal.mark_terminal(
-            operation_id,
-            status="OUTCOME_UNKNOWN",
-            exit_code=exit_code,
-            failure_kind=f"WRAPPER_EXCEPTION:{type(exc).__name__}",
-            cwd=cwd,
-            reconciliation={
-                "at": _agy_operation_journal.utc_now(),
-                "result": "WRAPPER_EXCEPTION_WITH_UNKNOWN_PROVIDER_EFFECT",
-                "retry_permitted": False,
-            },
-            provider_pid=snap.get("provider_pid"),
-            provider_process_state=(
-                (
-                    "RUNNING"
-                    if direct_operation_journal._process_alive(snap.get("provider_pid"))
-                    else "EXITED"
-                )
-                if isinstance(snap.get("provider_pid"), int) and snap.get("provider_pid") > 0
-                else (snap.get("provider_process_state") or "IDLE")
-            ),
-            provider_started_at=snap.get("provider_started_at"),
-            provider_stream_last_activity_at=snap.get("provider_stream_last_activity_at"),
-            first_stream_activity_at=snap.get("first_stream_activity_at"),
-            first_effect_at=snap.get("first_effect_at"),
-            time_to_first_effect_ms=snap.get("time_to_first_effect_ms"),
-            **attestation,
-        )
+    except BaseException:
+        # The outer supervisor guard owns cleanup + terminalization. Writing a
+        # terminal record here would make the guard skip child reconciliation.
         raise
     finally:
         if prior_attestation_log is None:
@@ -2466,6 +3257,61 @@ def _reconcile_operation(
     return journal.update(operation_id, reconciliation=reconciliation)
 
 
+_SAFE_NO_EFFECT_LEASE_RESULTS = frozenset({
+    "ALREADY_ABSENT",
+    "LEASE_RECEIPT_REMOVED",
+})
+
+
+def _finalize_no_effect_operation(
+    journal: AgyOperationJournal,
+    operation_id: str,
+) -> dict[str, Any]:
+    existing = journal.read(operation_id)
+    existing_reconciliation = existing.get("reconciliation")
+    if (
+        existing.get("status") == "FAILED"
+        and isinstance(existing_reconciliation, dict)
+        and existing_reconciliation.get("result") == "SOURCE_NO_DURABLE_EFFECT_PROVEN"
+        and existing_reconciliation.get("reconciliation_scope") == "SOURCE_ONLY"
+        and existing_reconciliation.get("retry_permitted") is True
+    ):
+        return existing
+
+    record = _reconcile_operation(journal, operation_id)
+    if record.get("status") != "OUTCOME_UNKNOWN":
+        raise AgyOperationJournalError("NO_EFFECT_FINALIZATION_REQUIRES_OUTCOME_UNKNOWN")
+
+    reconciliation = dict(record.get("reconciliation") or {})
+    if reconciliation.get("pid_alive") is not False:
+        raise AgyOperationJournalError("NO_EFFECT_PROCESS_TRUTH_UNBOUNDED")
+    if reconciliation.get("provider_alive_after") is not False:
+        raise AgyOperationJournalError("NO_EFFECT_PROVIDER_TRUTH_UNBOUNDED")
+
+    lease_cleanup = reconciliation.get("lease_cleanup")
+    lease_result = lease_cleanup.get("result") if isinstance(lease_cleanup, dict) else None
+    if lease_result not in _SAFE_NO_EFFECT_LEASE_RESULTS:
+        raise AgyOperationJournalError(f"NO_EFFECT_LEASE_NOT_SAFE:{lease_result or 'UNKNOWN'}")
+
+    source_proof = journal.prove_source_state_unchanged(operation_id)
+    reconciliation.update({
+        "at": _agy_operation_journal.utc_now(),
+        "result": "SOURCE_NO_DURABLE_EFFECT_PROVEN",
+        "reconciliation_scope": "SOURCE_ONLY",
+        "retry_permitted": True,
+        "source_proof": source_proof,
+        "lease_cleanup": lease_cleanup,
+    })
+    return journal.mark_terminal(
+        operation_id,
+        status="FAILED",
+        exit_code=record.get("exit_code"),
+        failure_kind=record.get("failure_kind"),
+        cwd=record.get("cwd"),
+        reconciliation=reconciliation,
+    )
+
+
 def _print_operation(record: dict[str, Any]) -> None:
     print(json.dumps(public_operation_view(record), indent=2, sort_keys=True))
 
@@ -2478,6 +3324,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--prompt", dest="prompt_flag", help="Prompt text")
     ap.add_argument("--prompt-file")
     ap.add_argument("--cwd", default=os.getcwd())
+    ap.add_argument(
+        "--fallback-clone",
+        help=(
+            "Explicit standalone clone target for linked-worktree Agy compatibility; "
+            "the clone becomes the actual operation cwd/repo_root"
+        ),
+    )
     ap.add_argument("--mode", choices=("plan", "accept-edits"), default="accept-edits")
     ap.add_argument("--model")
     ap.add_argument("--effort", choices=("low", "medium", "high"))
@@ -2512,6 +3365,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--status", metavar="OPERATION_ID")
     ap.add_argument("--reconcile", metavar="OPERATION_ID")
+    ap.add_argument("--hcom-collab", action="store_true")
+    ap.add_argument("--hcom-args-json", default="[]", help=argparse.SUPPRESS)
+    ap.add_argument(
+        "--finalize-no-effect",
+        metavar="OPERATION_ID",
+        help=(
+            "Fail closed unless one OUTCOME_UNKNOWN operation proves source-state "
+            "equivalence, terminal process truth, and safe lease cleanup; on success "
+            "record a source-scoped retry-safe FAILED reconciliation receipt"
+        ),
+    )
     ap.add_argument("--operation-root", default=str(OPERATION_ROOT), help=argparse.SUPPRESS)
     ap.add_argument("--operation-run", metavar="OPERATION_ID", help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
@@ -2527,9 +3391,42 @@ def main(argv: list[str] | None = None) -> int:
         _print_operation(_reconcile_operation(journal, args.reconcile))
         return 0
 
+    if args.finalize_no_effect:
+        _print_operation(_finalize_no_effect_operation(journal, args.finalize_no_effect))
+        return 0
+
     cwd = str(Path(args.cwd).expanduser().resolve())
     if not Path(cwd).is_dir():
         raise SystemExit("INVALID_CWD")
+
+    if args.hcom_collab:
+        if args.background or args.operation_run:
+            raise SystemExit("HCOM_COLLAB_FOREGROUND_ONLY")
+        try:
+            hcom_args = _parse_hcom_args(args.hcom_args_json)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+        return _run_foreground_hcom_operation(
+            cwd=cwd,
+            hcom_args=hcom_args,
+            model=args.model,
+            pool_wait_timeout=args.pool_wait_timeout,
+            operation_root=operation_root,
+        )
+
+    # The internal --operation-run already receives the effective execution root
+    # persisted by the parent launcher.  Only a new external dispatch may resolve
+    # an explicit linked-worktree -> standalone-clone fallback.
+    if not args.operation_run:
+        try:
+            cwd = _resolve_cwd_for_dispatch(
+                requested_cwd=cwd,
+                fallback_clone_path=args.fallback_clone,
+            )
+        except WorktreeFallbackError as exc:
+            raise SystemExit(str(exc)) from exc
+    elif args.fallback_clone:
+        raise SystemExit("FALLBACK_CLONE_NOT_ALLOWED_FOR_OPERATION_RUN")
 
     prompt_text = args.prompt_flag if args.prompt_flag is not None else args.prompt
     if args.prompt_file:

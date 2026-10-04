@@ -1289,6 +1289,48 @@ def test_accept_edits_replaces_stale_wildcard_policy_and_restores_exact_bytes(
     assert coordinator.claim.released is True
 
 
+def test_plan_explicit_deny_replaces_stale_allow_policy_and_restores_exact_bytes(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+    settings = home / ".gemini" / "antigravity-cli" / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    original = (
+        '{\n  "profile": "keep-me",\n  "permissions": {\n'
+        '    "allow": ["read_file(/stale/**)", "write_file(/stale/file.py)", "command(*)"],\n'
+        '    "deny": ["command(git push)"],\n'
+        '    "ask": ["custom(*)"]\n  }\n}\n'
+    ).encode("utf-8")
+    settings.write_bytes(original)
+    explicit_deny = ["command(*)", "read_file(*)", "write_file(*)"]
+
+    def runner(**_kwargs):
+        data = json.loads(settings.read_text(encoding="utf-8"))
+        permissions = data["permissions"]
+        assert data["profile"] == "keep-me"
+        assert permissions["ask"] == ["custom(*)"]
+        assert permissions["allow"] == []
+        assert permissions["deny"] == explicit_deny
+        return 0, "ok", "", False, 1
+
+    code = dispatch.dispatch_run(
+        prompt="no-tools packet",
+        cwd=str(work),
+        mode="plan",
+        deny=explicit_deny,
+        coordinator=coordinator,
+        run_agy_fn=runner,
+    )
+
+    assert code == 0
+    assert settings.read_bytes() == original
+    assert coordinator.claim.released is True
+
+
 def test_accept_edits_permission_refusal_exit_zero_is_failure(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -1333,6 +1375,31 @@ def test_plan_text_with_permission_words_can_still_complete(tmp_path: Path) -> N
         run_agy_fn=lambda **_kwargs: (
             0,
             "The phrase permission denied for read_file is documentation here.",
+            "",
+            False,
+            1,
+        ),
+    )
+
+    assert code == 0
+    assert coordinator.claim.released is True
+
+
+def test_plan_stdout_quoting_headless_denial_marker_can_still_complete(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+
+    code = dispatch.dispatch_run(
+        prompt="review prior permission evidence",
+        cwd=str(tmp_path),
+        mode="plan",
+        coordinator=coordinator,
+        run_agy_fn=lambda **_kwargs: (
+            0,
+            'Prior log quoted: Print mode: soft-denying tool confirmation "ViewFile" at step 8.',
             "",
             False,
             1,
@@ -1785,6 +1852,253 @@ def test_pre_provider_wrapper_exception_is_not_outcome_unknown(
     assert record["reconciliation"]["retry_permitted"] is False
 
 
+# ---------------------------------------------------------------------------
+# Issue #1342: explicit standalone-clone fallback for linked worktrees
+# ---------------------------------------------------------------------------
+
+
+def _fallback_git(root: Path, *args: str) -> str:
+    proc = subprocess.run(
+        ["git", *args],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+    return proc.stdout.strip()
+
+
+def _make_fallback_fixture(tmp_path: Path) -> tuple[Path, Path, str]:
+    source = tmp_path / "source"
+    source.mkdir()
+    _fallback_git(source, "init", "-q")
+    _fallback_git(source, "config", "user.email", "issue1342@example.invalid")
+    _fallback_git(source, "config", "user.name", "Issue 1342")
+    (source / "tracked.txt").write_text("one\n", encoding="utf-8")
+    _fallback_git(source, "add", "tracked.txt")
+    _fallback_git(source, "commit", "-q", "-m", "base")
+    (source / "tracked.txt").write_text("two\n", encoding="utf-8")
+    _fallback_git(source, "add", "tracked.txt")
+    _fallback_git(source, "commit", "-q", "-m", "head")
+    _fallback_git(
+        source,
+        "remote",
+        "add",
+        "origin",
+        "https://github.com/James3014/Nexus-new.git",
+    )
+    linked = tmp_path / "linked"
+    _fallback_git(source, "worktree", "add", "-q", "-b", "linked-test", str(linked), "HEAD")
+    return source, linked, _fallback_git(linked, "rev-parse", "HEAD")
+
+
+def test_linked_worktree_detection_does_not_flag_standalone_repo(tmp_path: Path) -> None:
+    source, linked, _sha = _make_fallback_fixture(tmp_path)
+
+    assert dispatch._is_linked_worktree(str(linked)) is True
+    assert dispatch._is_linked_worktree(str(source)) is False
+
+
+def test_linked_worktree_without_explicit_fallback_fails_closed(tmp_path: Path) -> None:
+    _source, linked, _sha = _make_fallback_fixture(tmp_path)
+
+    with pytest.raises(dispatch.WorktreeFallbackError, match="WORKTREE_NO_FALLBACK_REQUESTED"):
+        dispatch._resolve_cwd_for_dispatch(
+            requested_cwd=str(linked),
+            fallback_clone_path=None,
+        )
+
+
+def test_explicit_fallback_creates_exact_independent_clone(tmp_path: Path) -> None:
+    source, linked, sha = _make_fallback_fixture(tmp_path)
+    target = tmp_path / "fallback"
+
+    resolved = Path(
+        dispatch._resolve_cwd_for_dispatch(
+            requested_cwd=str(linked),
+            fallback_clone_path=str(target),
+        )
+    )
+
+    assert resolved == target.resolve()
+    assert (resolved / ".git").is_dir()
+    assert _fallback_git(resolved, "rev-parse", "HEAD") == sha
+    assert _fallback_git(resolved, "remote", "get-url", "origin") == (
+        "https://github.com/James3014/Nexus-new.git"
+    )
+    assert _fallback_git(resolved, "status", "--porcelain") == ""
+    assert (
+        Path(_fallback_git(resolved, "rev-parse", "--git-common-dir")).resolve()
+        != (source / ".git").resolve()
+    )
+    assert (linked / "tracked.txt").read_text(encoding="utf-8") == "two\n"
+
+
+def test_exact_clean_fallback_clone_can_be_reused(tmp_path: Path) -> None:
+    _source, linked, _sha = _make_fallback_fixture(tmp_path)
+    target = tmp_path / "fallback"
+    first = dispatch._prepare_standalone_clone_fallback(
+        source_cwd=str(linked),
+        fallback_path=str(target),
+    )
+    marker = target / ".git" / "issue1342-marker"
+    marker.write_text("same clone\n", encoding="utf-8")
+
+    second = dispatch._prepare_standalone_clone_fallback(
+        source_cwd=str(linked),
+        fallback_path=str(target),
+    )
+
+    assert first == second
+    assert marker.read_text(encoding="utf-8") == "same clone\n"
+
+
+def test_dirty_existing_fallback_clone_is_rejected(tmp_path: Path) -> None:
+    _source, linked, _sha = _make_fallback_fixture(tmp_path)
+    target = tmp_path / "fallback"
+    dispatch._prepare_standalone_clone_fallback(
+        source_cwd=str(linked),
+        fallback_path=str(target),
+    )
+    (target / "tracked.txt").write_text("dirty\n", encoding="utf-8")
+
+    with pytest.raises(dispatch.WorktreeFallbackError, match="FALLBACK_CLONE_DIRTY"):
+        dispatch._prepare_standalone_clone_fallback(
+            source_cwd=str(linked),
+            fallback_path=str(target),
+        )
+
+
+def test_wrong_remote_existing_fallback_clone_is_rejected(tmp_path: Path) -> None:
+    _source, linked, _sha = _make_fallback_fixture(tmp_path)
+    target = tmp_path / "fallback"
+    dispatch._prepare_standalone_clone_fallback(
+        source_cwd=str(linked),
+        fallback_path=str(target),
+    )
+    _fallback_git(target, "remote", "set-url", "origin", "https://example.invalid/other.git")
+
+    with pytest.raises(dispatch.WorktreeFallbackError, match="FALLBACK_CLONE_REMOTE_MISMATCH"):
+        dispatch._prepare_standalone_clone_fallback(
+            source_cwd=str(linked),
+            fallback_path=str(target),
+        )
+
+
+def test_wrong_base_existing_fallback_clone_is_rejected(tmp_path: Path) -> None:
+    _source, linked, _sha = _make_fallback_fixture(tmp_path)
+    target = tmp_path / "fallback"
+    dispatch._prepare_standalone_clone_fallback(
+        source_cwd=str(linked),
+        fallback_path=str(target),
+    )
+    _fallback_git(target, "checkout", "-q", "HEAD~1")
+
+    with pytest.raises(dispatch.WorktreeFallbackError, match="FALLBACK_CLONE_BASE_MISMATCH"):
+        dispatch._prepare_standalone_clone_fallback(
+            source_cwd=str(linked),
+            fallback_path=str(target),
+        )
+
+
+def test_fallback_path_collision_file_is_rejected(tmp_path: Path) -> None:
+    _source, linked, _sha = _make_fallback_fixture(tmp_path)
+    target = tmp_path / "fallback"
+    target.write_text("collision\n", encoding="utf-8")
+
+    with pytest.raises(
+        dispatch.WorktreeFallbackError,
+        match="FALLBACK_CLONE_PATH_COLLISION_NOT_DIR",
+    ):
+        dispatch._prepare_standalone_clone_fallback(
+            source_cwd=str(linked),
+            fallback_path=str(target),
+        )
+
+
+def test_normal_repo_without_fallback_keeps_original_cwd(tmp_path: Path) -> None:
+    source, _linked, _sha = _make_fallback_fixture(tmp_path)
+
+    assert dispatch._resolve_cwd_for_dispatch(
+        requested_cwd=str(source),
+        fallback_clone_path=None,
+    ) == str(source)
+
+
+def test_write_scope_projects_against_effective_fallback_clone(tmp_path: Path) -> None:
+    _source, linked, _sha = _make_fallback_fixture(tmp_path)
+    target = tmp_path / "fallback"
+    effective = dispatch._resolve_cwd_for_dispatch(
+        requested_cwd=str(linked),
+        fallback_clone_path=str(target),
+    )
+
+    rules = dispatch._project_write_permissions(
+        cwd=effective,
+        mode="accept-edits",
+        write_paths=["scripts/ops/nexus-agy-dispatch"],
+        allow_rules=[],
+    )
+
+    assert rules == [f"write_file({target.resolve() / 'scripts/ops/nexus-agy-dispatch'})"]
+    assert str(linked) not in rules[0]
+
+
+def test_background_main_binds_operation_to_effective_clone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _source, linked, _sha = _make_fallback_fixture(tmp_path)
+    target = tmp_path / "fallback"
+    captured: dict[str, object] = {}
+
+    def fake_spawn(**kwargs):
+        captured.update(kwargs)
+        return {"operation_id": "agyop_" + ("a" * 32)}
+
+    monkeypatch.setattr(dispatch, "_spawn_background_operation", fake_spawn)
+    monkeypatch.setattr(dispatch, "_print_operation", lambda record: None)
+
+    rc = dispatch.main([
+        "--background",
+        "--cwd",
+        str(linked),
+        "--fallback-clone",
+        str(target),
+        "--prompt",
+        "bounded fallback test",
+        "--write-path",
+        "scripts/ops/nexus-agy-dispatch",
+        "--operation-root",
+        str(tmp_path / "operations"),
+    ])
+
+    assert rc == 0
+    assert Path(str(captured["cwd"])) == target.resolve()
+    assert captured["write_paths"] == ["scripts/ops/nexus-agy-dispatch"]
+
+
+def test_dirty_linked_source_is_rejected_before_fallback_clone(tmp_path: Path) -> None:
+    _source, linked, _sha = _make_fallback_fixture(tmp_path)
+    (linked / "tracked.txt").write_text("dirty source\n", encoding="utf-8")
+
+    with pytest.raises(dispatch.WorktreeFallbackError, match="FALLBACK_SOURCE_DIRTY"):
+        dispatch._prepare_standalone_clone_fallback(
+            source_cwd=str(linked),
+            fallback_path=str(tmp_path / "fallback"),
+        )
+
+
+def test_fallback_clone_inside_source_is_rejected(tmp_path: Path) -> None:
+    _source, linked, _sha = _make_fallback_fixture(tmp_path)
+
+    with pytest.raises(dispatch.WorktreeFallbackError, match="FALLBACK_CLONE_INSIDE_SOURCE"):
+        dispatch._prepare_standalone_clone_fallback(
+            source_cwd=str(linked),
+            fallback_path=str(linked / ".fallback-clone"),
+        )
+
+
 def test_unsupported_effort_for_claude_opus_fails_before_claim(tmp_path: Path) -> None:
     coordinator = _WriteScopeCoordinator(tmp_path / "home")
     events: list[dict[str, object]] = []
@@ -2196,3 +2510,699 @@ def test_independent_baseline_failure_stays_unknown(tmp_path, monkeypatch):
     )
     assert not any(e.get("first_effect_at") for e in events)
     assert any(e.get("effect_observation_error") for e in events)
+
+
+def test_run_agy_quota_cleanup_stops_provider_process_group(tmp_path: Path, monkeypatch) -> None:
+    from io import StringIO
+
+    stopped_groups: list[int] = []
+    process_ref: dict[str, object] = {}
+
+    class FakeProcess:
+        pid = 4242
+
+        def __init__(self, argv, **kwargs):
+            self.stdout = StringIO("")
+            self.stderr = StringIO("quota exceeded\n")
+            self.returncode = None
+            process_ref["process"] = self
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = -15
+
+        def kill(self):
+            self.returncode = -9
+
+    def stop_group(pgid: int, **_kwargs) -> bool:
+        stopped_groups.append(pgid)
+        process = process_ref["process"]
+        process.returncode = -15
+        return True
+
+    monkeypatch.setattr(dispatch.shutil, "which", lambda name: "/tmp/fake-agy")
+    monkeypatch.setattr(dispatch.subprocess, "Popen", FakeProcess)
+    monkeypatch.setattr(dispatch.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(dispatch._agy_operation_journal, "_stop_process_group", stop_group)
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_process_group_alive",
+        lambda pgid: False,
+    )
+
+    code, _out, err, timed_out, _ = dispatch.run_agy(
+        env={"HOME": str(tmp_path)},
+        prompt="quota group cleanup",
+        cwd=str(tmp_path),
+        mode="plan",
+        model=None,
+        effort=None,
+        timeout=30,
+    )
+
+    assert code == -15
+    assert "quota exceeded" in err
+    assert timed_out is False
+    assert stopped_groups == [4242]
+
+
+_PROVIDER_CHILD_SCRIPT = textwrap.dedent("""\
+    import os
+    import subprocess
+    import sys
+    import time
+    from importlib.machinery import SourceFileLoader
+    from pathlib import Path
+
+    dispatch_path = sys.argv[1]
+    op_root = Path(sys.argv[2])
+    operation_id = sys.argv[3]
+    ready_file = Path(sys.argv[4])
+    child_pid_file = Path(sys.argv[5])
+    snapshot_root = sys.argv[6]
+
+    os.environ["NEXUS_AGY_SNAPSHOT"] = snapshot_root
+    dispatch = SourceFileLoader(
+        "nexus_agy_dispatch_canonical", dispatch_path
+    ).load_module()
+
+    journal = dispatch.AgyOperationJournal(op_root)
+    prompt_path = journal.prompt_path(operation_id)
+    dispatch._write_private_prompt(prompt_path, "sigterm child reaping probe")
+
+    log_path = str(journal.operation_dir(operation_id) / "agy.log")
+
+    def fake_run_agy(**kwargs):
+        sub = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)", log_path])
+        child_pid_file.write_text(str(sub.pid))
+        ready_file.touch()
+        sub.wait()
+        return 0, "", "", False, 100
+
+    def fake_dispatch_run(**kwargs):
+        kwargs["operation_hook"]({
+            "phase": "EXECUTING",
+            "attempts": 1,
+            "rotations": 0,
+        })
+        return fake_run_agy(**kwargs)
+
+    dispatch.dispatch_run = fake_dispatch_run
+
+    try:
+        dispatch._run_background_operation(
+            operation_id=operation_id,
+            prompt_file=str(prompt_path),
+            cwd=str(op_root),
+            mode="plan",
+            model="gemini-test",
+            effort="medium",
+            timeout=30,
+            max_calls=1,
+            pool_wait_timeout=1.0,
+            allow=[],
+            deny=[],
+            temp_command_permissions=False,
+            operation_root=op_root,
+            heartbeat_interval=0.01,
+        )
+    except BaseException:
+        pass
+""")
+
+
+def test_sigterm_to_supervisor_reaps_owned_provider_child(
+    tmp_path: Path,
+) -> None:
+    """Supervisor receiving SIGTERM must reap its owned provider child process."""
+    op_root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(op_root)
+    operation_id = dispatch.new_operation_id()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+
+    ready_file = tmp_path / "ready"
+    child_pid_file = tmp_path / "child.pid"
+    script_file = tmp_path / "provider_child.py"
+    script_file.write_text(_PROVIDER_CHILD_SCRIPT, encoding="utf-8")
+
+    child = subprocess.Popen(
+        [
+            sys.executable,
+            str(script_file),
+            str(DISPATCH_PATH),
+            str(op_root),
+            operation_id,
+            str(ready_file),
+            str(child_pid_file),
+            str(ROOT),
+        ],
+        cwd=str(tmp_path),
+    )
+
+    deadline = time.monotonic() + 20.0
+    while not ready_file.exists() or not child_pid_file.exists():
+        if time.monotonic() > deadline:
+            child.kill()
+            child.wait()
+            raise TimeoutError("provider child never signalled readiness")
+        time.sleep(0.05)
+
+    provider_pid = int(child_pid_file.read_text().strip())
+    assert dispatch._agy_operation_journal._process_alive(provider_pid), (
+        "Provider child must be running initially"
+    )
+
+    try:
+        os.kill(child.pid, signal.SIGTERM)
+        child.wait(timeout=10)
+
+        assert not dispatch._agy_operation_journal._process_alive(provider_pid), (
+            f"Provider child {provider_pid} is still alive after supervisor SIGTERM!"
+        )
+
+        record = journal.read(operation_id)
+        assert record["status"] == "OUTCOME_UNKNOWN"
+        reconciliation = record.get("reconciliation") or {}
+        assert reconciliation.get("provider_alive_after") is False
+    finally:
+        if dispatch._agy_operation_journal._process_alive(provider_pid):
+            try:
+                os.kill(provider_pid, signal.SIGKILL)
+            except OSError:
+                pass
+
+
+def test_dispatch_run_retains_lease_when_provider_cannot_be_killed(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """When provider child remains alive after execution error, lease must not be released."""
+    home = tmp_path / "home"
+    home.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+
+    def stubborn_runner(*, operation_hook=None, **_kwargs):
+        if operation_hook:
+            operation_hook(provider_pid=12345)
+        return 1, "", "error", False, 10
+
+    orig_alive = dispatch._agy_operation_journal._process_alive
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_process_alive",
+        lambda pid: True if pid == 12345 else orig_alive(pid),
+    )
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_stop_process",
+        lambda pid, **kwargs: False,
+    )
+
+    code = dispatch.dispatch_run(
+        prompt="stubborn run",
+        cwd=str(tmp_path),
+        mode="plan",
+        coordinator=coordinator,
+        run_agy_fn=stubborn_runner,
+    )
+
+    assert code != 0
+    assert coordinator.claim.released is False, (
+        "Lease must NOT be released while provider child is running!"
+    )
+
+
+def test_dispatch_run_retains_lease_when_provider_group_survives_leader(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A dead provider leader must not release the lease while its process group survives."""
+    home = tmp_path / "home"
+    home.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+
+    def orphaned_group_runner(*, operation_hook=None, **_kwargs):
+        if operation_hook:
+            operation_hook(provider_pid=12345, provider_pgid=54321)
+        return 1, "", "error", False, 10
+
+    orig_alive = dispatch._agy_operation_journal._process_alive
+    orig_group_alive = dispatch._agy_operation_journal._process_group_alive
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_process_alive",
+        lambda pid: False if pid == 12345 else orig_alive(pid),
+    )
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_process_group_alive",
+        lambda pgid: True if pgid == 54321 else orig_group_alive(pgid),
+    )
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_stop_process_group",
+        lambda pgid, **kwargs: False,
+    )
+
+    code = dispatch.dispatch_run(
+        prompt="orphaned group run",
+        cwd=str(tmp_path),
+        mode="plan",
+        coordinator=coordinator,
+        run_agy_fn=orphaned_group_runner,
+    )
+
+    assert code != 0
+    assert coordinator.claim.released is False, (
+        "Lease must NOT be released while the provider process group is still running!"
+    )
+
+
+def test_run_agy_aborts_process_group_when_durable_identity_hook_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    fake_agy = tmp_path / "fake-agy"
+    fake_agy.write_text("#!/bin/sh\nsleep 60\n", encoding="utf-8")
+    fake_agy.chmod(0o755)
+    monkeypatch.setattr(dispatch.shutil, "which", lambda _name: str(fake_agy))
+
+    observed: dict[str, int | None] = {}
+
+    def failing_hook(event: dict[str, object]) -> None:
+        observed.update(event)
+        if isinstance(event.get("provider_pid"), int):
+            raise RuntimeError("journal identity write failed")
+
+    with pytest.raises(RuntimeError, match="journal identity write failed"):
+        dispatch.run_agy(
+            env=os.environ.copy(),
+            prompt="identity persistence probe",
+            cwd=str(tmp_path),
+            mode="plan",
+            model=None,
+            effort=None,
+            timeout=30,
+            operation_hook=failing_hook,
+        )
+
+    provider_pid = observed.get("provider_pid")
+    provider_pgid = observed.get("provider_pgid")
+    assert isinstance(provider_pid, int)
+    assert isinstance(provider_pgid, int)
+    assert provider_pgid == provider_pid
+    assert not dispatch._agy_operation_journal._process_alive(provider_pid)
+    assert not dispatch._agy_operation_journal._process_group_alive(provider_pgid)
+
+
+def test_background_operation_stays_nonterminal_while_provider_group_survives(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "surviving process group probe")
+    monkeypatch.setattr(dispatch, "_runtime_revision", lambda: "a" * 40)
+
+    def fake_dispatch_run(**kwargs):
+        kwargs["operation_hook"]({
+            "phase": "CLASSIFYING_FAILURE",
+            "attempts": 1,
+            "rotations": 0,
+            "failure_kind": "PROVIDER_ERROR",
+            "provider_pid": 12345,
+            "provider_pgid": 54321,
+        })
+        return 1
+
+    monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
+    orig_alive = dispatch._agy_operation_journal._process_alive
+    orig_group_alive = dispatch._agy_operation_journal._process_group_alive
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_process_alive",
+        lambda pid: False if pid == 12345 else orig_alive(pid),
+    )
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_process_group_alive",
+        lambda pgid: True if pgid == 54321 else orig_group_alive(pgid),
+    )
+
+    code = dispatch._run_background_operation(
+        operation_id=operation_id,
+        prompt_file=str(prompt_path),
+        cwd=str(tmp_path),
+        mode="plan",
+        model="gemini-test",
+        effort="medium",
+        timeout=30,
+        max_calls=1,
+        pool_wait_timeout=1.0,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=root,
+        heartbeat_interval=0.01,
+    )
+
+    record = journal.read(operation_id)
+    assert code == 1
+    assert record["status"] == "RUNNING"
+    assert record["phase"] == "RECONCILE_REQUIRED"
+    assert record["finished_at"] is None
+    assert record["reconciliation"]["result"] == "PROVIDER_PROCESS_STILL_RUNNING_AFTER_DISPATCH"
+    assert record["reconciliation"]["provider_alive_after"] is True
+    assert record["reconciliation"]["retry_permitted"] is False
+
+
+def test_dispatch_run_does_not_signal_from_bare_provider_pid_or_pgid(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+
+    def stale_identity_runner(*, operation_hook=None, **_kwargs):
+        if operation_hook:
+            operation_hook(provider_pid=12345, provider_pgid=54321)
+        return 1, "", "error", False, 10
+
+    orig_alive = dispatch._agy_operation_journal._process_alive
+    orig_group_alive = dispatch._agy_operation_journal._process_group_alive
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_process_alive",
+        lambda pid: True if pid == 12345 else orig_alive(pid),
+    )
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_process_group_alive",
+        lambda pgid: True if pgid == 54321 else orig_group_alive(pgid),
+    )
+
+    def forbidden_signal(*_args, **_kwargs):
+        raise AssertionError("dispatch_run must not signal from bare numeric process identity")
+
+    monkeypatch.setattr(dispatch._agy_operation_journal, "_stop_process", forbidden_signal)
+    monkeypatch.setattr(dispatch._agy_operation_journal, "_stop_process_group", forbidden_signal)
+
+    code = dispatch.dispatch_run(
+        prompt="stale identity run",
+        cwd=str(tmp_path),
+        mode="plan",
+        coordinator=coordinator,
+        run_agy_fn=stale_identity_runner,
+    )
+
+    assert code != 0
+    assert coordinator.claim.released is False
+
+
+def test_signal_guard_keeps_operation_nonterminal_when_provider_is_unresolved(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "unresolved provider probe")
+    monkeypatch.setattr(dispatch, "_runtime_revision", lambda: "a" * 40)
+
+    def interrupted_dispatch(**kwargs):
+        kwargs["operation_hook"]({
+            "phase": "EXECUTING",
+            "attempts": 1,
+            "rotations": 0,
+            "provider_pid": 12345,
+            "provider_pgid": 12345,
+        })
+        raise dispatch._SupervisorSignalError(signal.SIGTERM)
+
+    monkeypatch.setattr(dispatch, "dispatch_run", interrupted_dispatch)
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_stop_operation_processes",
+        lambda *_args, **_kwargs: (True, True, True),
+    )
+
+    with pytest.raises(dispatch._SupervisorSignalError):
+        dispatch._run_background_operation(
+            operation_id=operation_id,
+            prompt_file=str(prompt_path),
+            cwd=str(tmp_path),
+            mode="plan",
+            model="gemini-test",
+            effort="medium",
+            timeout=30,
+            max_calls=1,
+            pool_wait_timeout=1.0,
+            allow=[],
+            deny=[],
+            temp_command_permissions=False,
+            operation_root=root,
+            heartbeat_interval=0.01,
+        )
+
+    record = journal.read(operation_id)
+    assert record["status"] == "RUNNING"
+    assert record["phase"] == "RECONCILE_REQUIRED"
+    assert record["finished_at"] is None
+    assert record["failure_kind"] == "SUPERVISOR_SIGNAL:SIGTERM"
+    assert record["reconciliation"]["result"] == "SUPERVISOR_SIGNAL_ORPHAN_PROVIDER_UNVERIFIED"
+    assert record["reconciliation"]["provider_alive_after"] is True
+    assert record["reconciliation"]["retry_permitted"] is False
+
+
+def test_wrapper_exception_keeps_operation_nonterminal_when_provider_is_unresolved(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "wrapper exception probe")
+    monkeypatch.setattr(dispatch, "_runtime_revision", lambda: "a" * 40)
+
+    def exploding_dispatch(**kwargs):
+        kwargs["operation_hook"]({
+            "phase": "EXECUTING",
+            "attempts": 1,
+            "rotations": 0,
+            "provider_pid": 12345,
+            "provider_pgid": 12345,
+        })
+        raise RuntimeError("provider wrapper exploded")
+
+    monkeypatch.setattr(dispatch, "dispatch_run", exploding_dispatch)
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_stop_operation_processes",
+        lambda *_args, **_kwargs: (True, True, True),
+    )
+
+    with pytest.raises(RuntimeError, match="provider wrapper exploded"):
+        dispatch._run_background_operation(
+            operation_id=operation_id,
+            prompt_file=str(prompt_path),
+            cwd=str(tmp_path),
+            mode="plan",
+            model="gemini-test",
+            effort="medium",
+            timeout=30,
+            max_calls=1,
+            pool_wait_timeout=1.0,
+            allow=[],
+            deny=[],
+            temp_command_permissions=False,
+            operation_root=root,
+            heartbeat_interval=0.01,
+        )
+
+    record = journal.read(operation_id)
+    assert record["status"] == "RUNNING"
+    assert record["phase"] == "RECONCILE_REQUIRED"
+    assert record["finished_at"] is None
+    assert record["failure_kind"] == "WRAPPER_EXCEPTION:RuntimeError"
+    assert record["reconciliation"]["result"] == "WRAPPER_EXCEPTION_ORPHAN_PROVIDER_UNVERIFIED"
+    assert record["reconciliation"]["provider_alive_after"] is True
+    assert record["reconciliation"]["retry_permitted"] is False
+
+
+def _make_no_effect_finalization_repo(tmp_path: Path) -> Path:
+    root = tmp_path / "source-repo"
+    root.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+    (root / "tracked.txt").write_text("before\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "base"], cwd=root, check=True)
+    return root
+
+
+def _create_outcome_unknown_source_operation(
+    journal,
+    source_root: Path,
+) -> str:
+    operation_id = dispatch.new_operation_id()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(source_root),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="a" * 64,
+        runtime_revision="b" * 40,
+    )
+    journal.mark_started(operation_id, pid=999_999_998)
+    journal.update(
+        operation_id,
+        account_alias_hash="acct-finalize",
+        lease_id_hash="lease-finalize",
+    )
+    journal.mark_terminal(
+        operation_id,
+        status="OUTCOME_UNKNOWN",
+        exit_code=None,
+        failure_kind="TIMEOUT",
+        cwd=str(source_root),
+        reconciliation={
+            "result": "PROVIDER_TURN_MAY_STILL_BE_RUNNING",
+            "provider_alive_after": False,
+            "retry_permitted": False,
+        },
+    )
+    return operation_id
+
+
+def test_finalize_no_effect_releases_only_source_retry_fence(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source_root = _make_no_effect_finalization_repo(tmp_path)
+    journal = dispatch.AgyOperationJournal(tmp_path / "operations")
+    operation_id = _create_outcome_unknown_source_operation(journal, source_root)
+    monkeypatch.setattr(dispatch, "LEASES_DIR", tmp_path / "leases")
+
+    finalized = dispatch._finalize_no_effect_operation(journal, operation_id)
+
+    assert finalized["status"] == "FAILED"
+    assert finalized["failure_kind"] == "TIMEOUT"
+    reconciliation = finalized["reconciliation"]
+    assert reconciliation["result"] == "SOURCE_NO_DURABLE_EFFECT_PROVEN"
+    assert reconciliation["reconciliation_scope"] == "SOURCE_ONLY"
+    assert reconciliation["retry_permitted"] is True
+    assert reconciliation["lease_cleanup"]["result"] == "ALREADY_ABSENT"
+    assert reconciliation["source_proof"]["proof_scope"] == "SOURCE_STATE_ONLY"
+    assert reconciliation["source_proof"]["observed_changed_paths"] == []
+
+    replay = dispatch._finalize_no_effect_operation(journal, operation_id)
+    assert replay == finalized
+
+
+def test_finalize_no_effect_fails_closed_when_lease_identity_conflicts(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source_root = _make_no_effect_finalization_repo(tmp_path)
+    journal = dispatch.AgyOperationJournal(tmp_path / "operations")
+    operation_id = _create_outcome_unknown_source_operation(journal, source_root)
+    leases = tmp_path / "leases"
+    leases.mkdir()
+    monkeypatch.setattr(dispatch, "LEASES_DIR", leases)
+    (leases / "acct-finalize.receipt.json").write_text(
+        json.dumps({
+            "account_alias_hash": "acct-finalize",
+            "lease_id_hash": "different-lease",
+            "pid": 999_999_998,
+        }),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        dispatch.AgyOperationJournalError,
+        match="NO_EFFECT_LEASE_NOT_SAFE",
+    ):
+        dispatch._finalize_no_effect_operation(journal, operation_id)
+
+    blocked = journal.read(operation_id)
+    assert blocked["status"] == "OUTCOME_UNKNOWN"
+    assert blocked["reconciliation"]["retry_permitted"] is False
+
+
+def test_finalize_no_effect_cli_projects_receipt(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    source_root = _make_no_effect_finalization_repo(tmp_path)
+    operation_root = tmp_path / "operations"
+    journal = dispatch.AgyOperationJournal(operation_root)
+    operation_id = _create_outcome_unknown_source_operation(journal, source_root)
+    monkeypatch.setattr(dispatch, "LEASES_DIR", tmp_path / "leases")
+
+    assert (
+        dispatch.main([
+            "--finalize-no-effect",
+            operation_id,
+            "--operation-root",
+            str(operation_root),
+        ])
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "FAILED"
+    assert payload["reconciliation"]["result"] == "SOURCE_NO_DURABLE_EFFECT_PROVEN"
+    assert payload["reconciliation"]["retry_permitted"] is True

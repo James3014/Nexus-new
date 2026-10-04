@@ -65,32 +65,97 @@ def _process_alive(pid: object) -> bool:
         return False
     except PermissionError:
         return True
+    proc = subprocess.run(
+        ["ps", "-p", str(pid), "-o", "stat="],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode == 0:
+        stat = proc.stdout.strip()
+        if stat.startswith("Z"):
+            return False
     return True
 
 
-def _process_group_rows(pgid: object) -> list[tuple[str, str]]:
-    if not isinstance(pgid, int) or pgid <= 0:
+def _process_command(pid: object) -> str | None:
+    if not isinstance(pid, int) or pid <= 0:
+        return None
+    proc = subprocess.run(
+        ["ps", "-ww", "-p", str(pid), "-o", "command="],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
+
+
+def _pid_has_operation_marker(pid: int, marker: str, operation_id: str | None = None) -> bool:
+    cmd = _process_command(pid)
+    if not cmd:
+        return False
+    if marker in cmd:
+        return True
+    if operation_id and f"{operation_id}/agy.log" in cmd:
+        return True
+    return False
+
+
+def _child_pids_of(parent_pid: int) -> list[int]:
+    if not isinstance(parent_pid, int) or parent_pid <= 0:
         return []
     proc = subprocess.run(
-        ["ps", "axww", "-o", "pgid=,stat=,command="],
+        ["ps", "axww", "-o", "pid=,ppid="],
         capture_output=True,
         text=True,
         check=False,
     )
     if proc.returncode != 0:
         return []
-    rows: list[tuple[str, str]] = []
+    children: list[int] = []
     for line in proc.stdout.splitlines():
-        parts = line.strip().split(None, 2)
-        if len(parts) != 3:
+        parts = line.strip().split()
+        if len(parts) >= 2:
+            try:
+                p_pid = int(parts[0])
+                p_ppid = int(parts[1])
+                if p_ppid == parent_pid:
+                    children.append(p_pid)
+            except ValueError:
+                continue
+    return children
+
+
+def _process_group_process_rows(pgid: object) -> list[tuple[int, str, str]]:
+    if not isinstance(pgid, int) or pgid <= 0:
+        return []
+    proc = subprocess.run(
+        ["ps", "axww", "-o", "pgid=,pid=,stat=,command="],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return []
+    rows: list[tuple[int, str, str]] = []
+    for line in proc.stdout.splitlines():
+        parts = line.strip().split(None, 3)
+        if len(parts) != 4:
             continue
         try:
             row_pgid = int(parts[0])
+            row_pid = int(parts[1])
         except ValueError:
             continue
         if row_pgid == pgid:
-            rows.append((parts[1], parts[2]))
+            rows.append((row_pid, parts[2], parts[3]))
     return rows
+
+
+def _process_group_rows(pgid: object) -> list[tuple[str, str]]:
+    return [(stat, command) for _pid, stat, command in _process_group_process_rows(pgid)]
 
 
 def _process_group_alive(pgid: object) -> bool:
@@ -108,8 +173,62 @@ def _process_group_alive(pgid: object) -> bool:
     return True
 
 
-def _group_has_operation_marker(pgid: int, marker: str) -> bool:
-    return any(marker in command for _stat, command in _process_group_rows(pgid))
+def _group_has_operation_marker(pgid: int, marker: str, operation_id: str | None = None) -> bool:
+    for _stat, command in _process_group_rows(pgid):
+        if marker in command:
+            return True
+        if operation_id and f"{operation_id}/agy.log" in command:
+            return True
+    return False
+
+
+def _stop_process(pid: int, *, grace_seconds: float = 2.0) -> bool:
+    try:
+        r_pid, _ = os.waitpid(pid, os.WNOHANG)
+        if r_pid == pid:
+            return True
+    except (ChildProcessError, OSError):
+        pass
+    if not _process_alive(pid):
+        return True
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        return False
+
+    deadline = time.monotonic() + max(0.1, grace_seconds)
+    while time.monotonic() < deadline:
+        try:
+            r_pid, _ = os.waitpid(pid, os.WNOHANG)
+            if r_pid == pid:
+                return True
+        except (ChildProcessError, OSError):
+            pass
+        if not _process_alive(pid):
+            return True
+        time.sleep(0.05)
+
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        return False
+
+    deadline = time.monotonic() + max(0.1, grace_seconds)
+    while time.monotonic() < deadline:
+        try:
+            r_pid, _ = os.waitpid(pid, os.WNOHANG)
+            if r_pid == pid:
+                return True
+        except (ChildProcessError, OSError):
+            pass
+        if not _process_alive(pid):
+            return True
+        time.sleep(0.05)
+    return not _process_alive(pid)
 
 
 def _stop_process_group(pgid: int, *, grace_seconds: float = 2.0) -> bool:
@@ -139,6 +258,106 @@ def _stop_process_group(pgid: int, *, grace_seconds: float = 2.0) -> bool:
             return True
         time.sleep(0.05)
     return not _process_group_alive(pgid)
+
+
+def _stop_operation_processes(
+    operation_id: str,
+    op_dir: Path,
+    *,
+    pid: int | None = None,
+    provider_pid: int | None = None,
+    provider_pgid: int | None = None,
+    supervisor_pid: int | None = None,
+    grace_seconds: float = 2.0,
+) -> tuple[bool, bool, bool]:
+    current_pid = os.getpid()
+    marker = str(op_dir / "agy.log")
+    candidate_pids: set[int] = set()
+    group_or_recorded_pids: set[int] = set()
+    if isinstance(provider_pid, int) and provider_pid > 1:
+        candidate_pids.add(provider_pid)
+        group_or_recorded_pids.add(provider_pid)
+    if isinstance(provider_pgid, int) and provider_pgid > 1:
+        for row_pid, _stat, _cmd in _process_group_process_rows(provider_pgid):
+            if row_pid > 1:
+                candidate_pids.add(row_pid)
+                group_or_recorded_pids.add(row_pid)
+    if isinstance(pid, int) and pid > 1 and pid != current_pid and pid != supervisor_pid:
+        for row_pid, _stat, _cmd in _process_group_process_rows(pid):
+            if row_pid > 1:
+                candidate_pids.add(row_pid)
+                group_or_recorded_pids.add(row_pid)
+    if isinstance(supervisor_pid, int) and supervisor_pid > 1:
+        for child_pid in _child_pids_of(supervisor_pid):
+            if child_pid > 1:
+                candidate_pids.add(child_pid)
+
+    candidate_pids.discard(current_pid)
+    group_or_recorded_pids.discard(current_pid)
+    if supervisor_pid is not None:
+        candidate_pids.discard(supervisor_pid)
+        group_or_recorded_pids.discard(supervisor_pid)
+
+    verified_pids: set[int] = set()
+    unverified_alive_pids: set[int] = set()
+
+    for c_pid in candidate_pids:
+        if not _process_alive(c_pid):
+            continue
+        if _pid_has_operation_marker(c_pid, marker, operation_id=operation_id):
+            verified_pids.add(c_pid)
+        elif c_pid in group_or_recorded_pids:
+            unverified_alive_pids.add(c_pid)
+
+    had_alive_before = bool(verified_pids) or bool(unverified_alive_pids)
+
+    provider_group_verified = (
+        isinstance(provider_pgid, int)
+        and provider_pgid > 1
+        and _group_has_operation_marker(provider_pgid, marker, operation_id=operation_id)
+    )
+    wrapper_group_verified = (
+        isinstance(pid, int)
+        and pid > 1
+        and pid != current_pid
+        and pid != supervisor_pid
+        and _group_has_operation_marker(pid, marker, operation_id=operation_id)
+    )
+
+    # Preserve the ownership witness while the marked leader is still present.
+    # Killing the leader first can erase the only marker and strand owned
+    # grandchildren as an unverifiable group.
+    if provider_group_verified and isinstance(provider_pgid, int):
+        _stop_process_group(provider_pgid, grace_seconds=grace_seconds)
+    if wrapper_group_verified and isinstance(pid, int):
+        _stop_process_group(pid, grace_seconds=grace_seconds)
+
+    for p in sorted(verified_pids):
+        if _process_alive(p):
+            _stop_process(p, grace_seconds=grace_seconds)
+
+    residual_unverified = {p for p in unverified_alive_pids if _process_alive(p)}
+    residual_verified = {p for p in verified_pids if _process_alive(p)}
+    provider_group_alive = (
+        isinstance(provider_pgid, int) and provider_pgid > 1 and _process_group_alive(provider_pgid)
+    )
+    wrapper_group_alive = (
+        isinstance(pid, int)
+        and pid > 1
+        and pid != current_pid
+        and pid != supervisor_pid
+        and _process_group_alive(pid)
+    )
+
+    alive_after = bool(
+        residual_verified or residual_unverified or provider_group_alive or wrapper_group_alive
+    )
+    has_unverified_conflict = bool(residual_unverified)
+    if provider_group_alive and not provider_group_verified:
+        has_unverified_conflict = True
+    if wrapper_group_alive and not wrapper_group_verified:
+        has_unverified_conflict = True
+    return had_alive_before, alive_after, has_unverified_conflict
 
 
 class AgyOperationJournal(DirectOperationJournal):
@@ -364,7 +583,9 @@ class AgyOperationJournal(DirectOperationJournal):
 
         wrapper_pid = record.get("pid")
         wrapper_alive = _process_alive(wrapper_pid)
-        group_alive = _process_group_alive(wrapper_pid)
+        provider_pid = record.get("provider_pid")
+        provider_pgid = record.get("provider_pgid")
+        provider_alive = _process_alive(provider_pid)
 
         if wrapper_alive:
             if status == "OUTCOME_UNKNOWN":
@@ -385,7 +606,11 @@ class AgyOperationJournal(DirectOperationJournal):
                 heartbeat_stale_seconds=heartbeat_stale_seconds,
             )
 
-        if not group_alive:
+        group_alive = _process_group_alive(provider_pgid) if provider_pgid else False
+        if not group_alive and wrapper_pid:
+            group_alive = _process_group_alive(wrapper_pid)
+
+        if not provider_alive and not group_alive:
             if status == "OUTCOME_UNKNOWN":
                 reconciliation = dict(record.get("reconciliation") or {})
                 reconciliation.update({
@@ -412,9 +637,17 @@ class AgyOperationJournal(DirectOperationJournal):
             })
             return self.update(operation_id, reconciliation=reconciliation)
 
-        assert isinstance(wrapper_pid, int)
-        marker = str(self.operation_dir(operation_id) / "agy.log")
-        if not _group_has_operation_marker(wrapper_pid, marker):
+        op_dir = self.operation_dir(operation_id)
+        had_before, alive_after, unverified = _stop_operation_processes(
+            operation_id,
+            op_dir,
+            pid=wrapper_pid,
+            provider_pid=provider_pid,
+            provider_pgid=provider_pgid,
+            grace_seconds=2.0,
+        )
+
+        if unverified:
             return self.update(
                 operation_id,
                 phase="RECONCILE_REQUIRED",
@@ -428,8 +661,7 @@ class AgyOperationJournal(DirectOperationJournal):
                 },
             )
 
-        stopped = _stop_process_group(wrapper_pid)
-        if not stopped:
+        if alive_after:
             return self.update(
                 operation_id,
                 phase="RECONCILE_REQUIRED",

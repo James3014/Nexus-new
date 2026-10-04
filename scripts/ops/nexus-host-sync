@@ -84,6 +84,27 @@ def _hcom_agy_target() -> Path:
     return Path.home() / ".local/bin/hcom-agy-safe"
 
 
+def _hermes_guard_target() -> Path:
+    raw = os.getenv("NEXUS_HERMES_CONTROLLER_GUARD_TARGET")
+    if raw:
+        return Path(os.path.abspath(os.path.expanduser(raw)))
+    return Path.home() / ".local/bin/nexus-hermes-controller-guard"
+
+
+def _hermes_controller_target() -> Path:
+    raw = os.getenv("NEXUS_HERMES_CONTINUATION_CONTROLLER_TARGET")
+    if raw:
+        return Path(os.path.abspath(os.path.expanduser(raw)))
+    return Path.home() / ".local/bin/nexus-hermes-continuation-controller"
+
+
+def _hermes_launchd_target() -> Path:
+    raw = os.getenv("NEXUS_HERMES_LAUNCHD_TARGET")
+    if raw:
+        return Path(os.path.abspath(os.path.expanduser(raw)))
+    return Path.home() / ".local/bin/nexus-hermes-launchd"
+
+
 def _source_repo_ready(source_repo: Path) -> bool:
     if not source_repo.exists():
         return False
@@ -317,6 +338,16 @@ def _parse_manifest(data: bytes) -> dict[str, Any]:
         )
     if isinstance(components, dict) and isinstance(components.get("grok_accounts"), dict):
         required.add("scripts/ops/nexus-grok-accounts")
+    if isinstance(components, dict) and isinstance(
+        components.get("hermes_controller_guard"), dict
+    ):
+        required.add("scripts/ops/nexus-hermes-controller-guard")
+    if isinstance(components, dict) and isinstance(
+        components.get("hermes_continuation_controller"), dict
+    ):
+        required.add("scripts/ops/nexus-hermes-continuation-controller")
+    if isinstance(components, dict) and isinstance(components.get("hermes_launchd"), dict):
+        required.add("scripts/ops/nexus-hermes-launchd")
     if not required.issubset(seen):
         raise HostSyncError("HOST_MANIFEST_REQUIRED_RUNTIME_PATH_MISSING")
     return manifest
@@ -809,6 +840,34 @@ def _activate(
     elif hcom_agy_target.is_symlink():
         hcom_agy_target.unlink()
 
+    for component_name, relative_path, target in (
+        (
+            "hermes_controller_guard",
+            "scripts/ops/nexus-hermes-controller-guard",
+            _hermes_guard_target(),
+        ),
+        (
+            "hermes_continuation_controller",
+            "scripts/ops/nexus-hermes-continuation-controller",
+            _hermes_controller_target(),
+        ),
+        (
+            "hermes_launchd",
+            "scripts/ops/nexus-hermes-launchd",
+            _hermes_launchd_target(),
+        ),
+    ):
+        source = release / "snapshot" / relative_path
+        if _manifest_has_component(release_manifest, component_name):
+            if not source.is_file():
+                raise HostSyncError(
+                    f"RELEASE_SOURCE_ENTRYPOINT_MISSING:{component_name}:{source}"
+                )
+            _backup_entrypoint(target, runtime_root)
+            _atomic_symlink(current / "snapshot" / relative_path, target)
+        elif target.is_symlink():
+            target.unlink()
+
 
 def _same_target(link: Path, expected: Path) -> bool:
     if not link.is_symlink():
@@ -942,6 +1001,35 @@ def _status(
             "sha256": _sha256(hcom_agy_source) if hcom_agy_source.is_file() else None,
             "entrypoint": str(hcom_agy_target),
         }
+
+    for component_name, relative_path, target in (
+        (
+            "hermes_controller_guard",
+            "scripts/ops/nexus-hermes-controller-guard",
+            _hermes_guard_target(),
+        ),
+        (
+            "hermes_continuation_controller",
+            "scripts/ops/nexus-hermes-continuation-controller",
+            _hermes_controller_target(),
+        ),
+        (
+            "hermes_launchd",
+            "scripts/ops/nexus-hermes-launchd",
+            _hermes_launchd_target(),
+        ),
+    ):
+        if _manifest_has_component(manifest, component_name):
+            source = release / "snapshot" / relative_path
+            ok = source.is_file() and _same_target(
+                target,
+                current / "snapshot" / relative_path,
+            )
+            payload["components"][component_name] = {
+                "status": "VERIFIED" if ok else "DRIFT",
+                "sha256": _sha256(source) if source.is_file() else None,
+                "entrypoint": str(target),
+            }
 
     if _manifest_has_component(manifest, "external_worker_dispatch"):
         external_dispatch = release / "bin" / "nexus-external-worker-dispatch"

@@ -111,6 +111,27 @@ class AccountLeaseClaim:
         except Exception:
             pass
 
+    def abandon_parent_reference(self) -> None:
+        """Drop only this process' lock reference while preserving durable lease evidence.
+
+        Used when a collaborative child inherited the per-account flock and the
+        dispatcher can no longer prove a clean child terminal state.  Do not
+        unlink the receipt, explicitly unlock, or release the manager lease:
+        the inherited descriptor keeps the collision lock alive, and the
+        receipt keeps the account fail-closed after the last inherited
+        descriptor eventually closes until explicit reconciliation.
+        """
+        if self.released:
+            return
+        self.released = True
+        lock_obj = self.lock_file_obj
+        self.lock_file_obj = None
+        if lock_obj is not None:
+            try:
+                lock_obj.close()
+            except OSError:
+                pass
+
     def __enter__(self) -> AccountLeaseClaim:
         return self
 
@@ -1168,6 +1189,19 @@ class CrossProcessLeaseCoordinator:
 
                             assert lock_obj is not None
 
+                            # A lock-free account with a surviving receipt is not
+                            # proven reusable.  This is the crash/lost-ack seam:
+                            # a prior dispatcher may have died while its child
+                            # held the inherited lock, then the child exited
+                            # later.  Never overwrite that unresolved receipt;
+                            # explicit reconciliation must remove it first.
+                            if receipt_path.exists():
+                                try:
+                                    lock_obj.close()
+                                except OSError:
+                                    pass
+                                continue
+
                             # Atomically claimed per-account lock
                             lease = pool.acquire(
                                 consumer_id, preferred_account_id=candidate.internal_id
@@ -1177,11 +1211,13 @@ class CrossProcessLeaseCoordinator:
                             lease_id_hash = hashlib.sha256(
                                 lease.lease_id.encode("utf-8")
                             ).hexdigest()[:12]
+                            now_ts = time.time()
                             receipt_data = {
                                 "account_alias_hash": candidate.alias_hash,
                                 "lease_id_hash": lease_id_hash,
                                 "consumer_id": consumer_id,
-                                "claimed_at": time.time(),
+                                "claimed_at": now_ts,
+                                "acquired_at": now_ts,
                                 "pid": os.getpid(),
                             }
                             receipt_path.write_text(
