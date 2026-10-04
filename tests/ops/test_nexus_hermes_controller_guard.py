@@ -54,13 +54,11 @@ def test_escalation_is_deterministic_and_advisory():
     assert local["decision"] == "LOCAL_CONTINUE"
     assert local["escalate"] is False
 
-    escalated = MOD.escalation_decision(
-        {
-            "same_gate_failures": 2,
-            "evidence_conflict": True,
-            "authority_boundary_change": False,
-        }
-    )
+    escalated = MOD.escalation_decision({
+        "same_gate_failures": 2,
+        "evidence_conflict": True,
+        "authority_boundary_change": False,
+    })
     assert escalated["decision"] == "ASK_FRONTIER_ADVISER"
     assert escalated["authority"] == "ADVISORY_ONLY"
     assert "REPEATED_GATE_FAILURE" in escalated["reasons"]
@@ -68,14 +66,16 @@ def test_escalation_is_deterministic_and_advisory():
 
 
 def test_multi_cause_requires_exhausted_falsification():
-    not_yet = MOD.escalation_decision(
-        {"plausible_root_causes": 3, "bounded_falsification_exhausted": False}
-    )
+    not_yet = MOD.escalation_decision({
+        "plausible_root_causes": 3,
+        "bounded_falsification_exhausted": False,
+    })
     assert not_yet["decision"] == "LOCAL_CONTINUE"
 
-    ready = MOD.escalation_decision(
-        {"plausible_root_causes": 2, "bounded_falsification_exhausted": True}
-    )
+    ready = MOD.escalation_decision({
+        "plausible_root_causes": 2,
+        "bounded_falsification_exhausted": True,
+    })
     assert ready["decision"] == "ASK_FRONTIER_ADVISER"
 
 
