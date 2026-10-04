@@ -15,9 +15,33 @@ import os
 import re
 import shutil
 import subprocess
+import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+
+def emit_progress(
+    phase: str,
+    *,
+    on_progress: Any = None,
+    **details: Any,
+) -> dict[str, Any]:
+    event = {
+        "phase": phase,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        **details,
+    }
+    sys.stderr.write(f"NEXUS_AGY_QUOTA {json.dumps(event, sort_keys=True)}\n")
+    sys.stderr.flush()
+    if callable(on_progress):
+        try:
+            on_progress(event)
+        except Exception:
+            pass
+    return event
+
 
 USAGE_LINE = re.compile(
     r"^(?P<group>.+?)\s+"
@@ -108,11 +132,20 @@ def query_account(
     account_name: str,
     email: str | None,
     agy_binary: str,
-    timeout: int,
+    timeout: float,
     checked_at: str,
+    on_progress: Any = None,
 ) -> dict[str, Any]:
+    emit_progress(
+        "QUERYING_ACCOUNT",
+        account=account_name,
+        email=email,
+        timeout=timeout,
+        on_progress=on_progress,
+    )
     env = os.environ.copy()
     env["HOME"] = str(account_home)
+    result: dict[str, Any]
     try:
         proc = subprocess.run(
             [agy_binary, "-p", "/usage"],
@@ -120,43 +153,69 @@ def query_account(
             env=env,
             capture_output=True,
             text=True,
-            timeout=max(10, timeout),
+            timeout=max(0.001, float(timeout)),
             check=False,
         )
     except subprocess.TimeoutExpired:
-        return {
+        result = {
             "account": account_name,
             "email": email,
             "ok": False,
             "error": "timeout",
             "checked_at": checked_at,
         }
+        emit_progress(
+            "ACCOUNT_RESULT",
+            account=account_name,
+            ok=False,
+            error="timeout",
+            on_progress=on_progress,
+        )
+        return result
 
     output = "\n".join(part for part in (proc.stdout, proc.stderr) if part).strip()
     if proc.returncode != 0:
-        return {
+        result = {
             "account": account_name,
             "email": email,
             "ok": False,
             "error": f"exit_{proc.returncode}",
             "checked_at": checked_at,
         }
+        emit_progress(
+            "ACCOUNT_RESULT",
+            account=account_name,
+            ok=False,
+            error=result["error"],
+            on_progress=on_progress,
+        )
+        return result
     groups = parse_usage(output)
     if not groups:
-        return {
+        result = {
             "account": account_name,
             "email": email,
             "ok": False,
             "error": "usage_unparseable",
             "checked_at": checked_at,
         }
-    return {
+        emit_progress(
+            "ACCOUNT_RESULT",
+            account=account_name,
+            ok=False,
+            error="usage_unparseable",
+            on_progress=on_progress,
+        )
+        return result
+    result = {
         "account": account_name,
         "email": email,
         "ok": True,
         "groups": groups,
         "checked_at": checked_at,
     }
+    emit_progress("ACCOUNT_RESULT", account=account_name, ok=True, on_progress=on_progress)
+    return result
 
 
 def merge_snapshot(
@@ -168,11 +227,14 @@ def merge_snapshot(
     checked_at: str,
 ) -> dict[str, Any]:
     merged: dict[str, dict[str, Any]] = {}
-    if partial and snapshot_path.is_file():
+    prior_checked_at: str | None = None
+    if snapshot_path.is_file():
         try:
             prior = json.loads(snapshot_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             prior = {}
+        if isinstance(prior, dict) and isinstance(prior.get("checked_at"), str):
+            prior_checked_at = prior["checked_at"]
         rows = prior.get("accounts") if isinstance(prior, dict) else None
         if isinstance(rows, list):
             for row in rows:
@@ -181,16 +243,32 @@ def merge_snapshot(
                     and isinstance(row.get("account"), str)
                     and row["account"] in current_names
                 ):
-                    merged[row["account"]] = row
+                    preserved = dict(row)
+                    if "checked_at" not in preserved and prior_checked_at is not None:
+                        preserved["checked_at"] = prior_checked_at
+                    merged[row["account"]] = preserved
 
     for row in refreshed_rows:
         name = row.get("account")
-        if isinstance(name, str) and name in current_names:
+        if not isinstance(name, str):
+            continue
+        if row.get("ok") is True or name not in merged or not merged[name].get("ok"):
             merged[name] = row
+            continue
+        prior_row = dict(merged[name])
+        prior_row["last_refresh"] = {
+            "ok": False,
+            "error": row.get("error"),
+            "checked_at": row.get("checked_at", checked_at),
+        }
+        merged[name] = prior_row
 
+    all_names = current_names | {
+        r["account"] for r in refreshed_rows if isinstance(r.get("account"), str)
+    }
     return {
         "checked_at": checked_at,
-        "accounts": [merged[name] for name in sorted(merged) if name in current_names],
+        "accounts": [merged[name] for name in sorted(merged) if name in all_names],
     }
 
 
@@ -204,38 +282,108 @@ def write_snapshot(snapshot_path: Path, payload: dict[str, Any]) -> None:
     os.replace(tmp, snapshot_path)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, on_progress: Any = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("accounts", nargs="*")
     parser.add_argument("--timeout", type=int, default=30)
+    parser.add_argument(
+        "--total-timeout", "--deadline", dest="total_timeout", type=float, default=None
+    )
     args = parser.parse_args(argv)
+
+    checked_at = datetime.now(timezone.utc).isoformat()
+    total_timeout = args.total_timeout
+    if total_timeout is None:
+        raw_env = os.getenv("NEXUS_AGY_QUOTA_TOTAL_TIMEOUT")
+        if raw_env:
+            try:
+                total_timeout = float(raw_env)
+            except ValueError:
+                pass
+    if total_timeout is None:
+        total_timeout = float(args.timeout)
+    deadline_monotonic = time.monotonic() + total_timeout
+
+    emit_progress(
+        "STARTING",
+        accounts=args.accounts,
+        timeout=args.timeout,
+        total_timeout=total_timeout,
+        on_progress=on_progress,
+    )
 
     pool_root = _pool_root()
     accounts_dir = pool_root / "accounts"
     if not accounts_dir.is_dir():
-        raise SystemExit(f"AGY_ACCOUNT_POOL_ACCOUNTS_MISSING:{accounts_dir}")
+        emit_progress(
+            "ACCOUNTS_DIR_MISSING",
+            path=str(accounts_dir),
+            on_progress=on_progress,
+        )
+        payload = {
+            "checked_at": checked_at,
+            "accounts": [
+                {
+                    "account": name,
+                    "email": None,
+                    "ok": False,
+                    "error": f"accounts_dir_missing:{accounts_dir}",
+                    "checked_at": checked_at,
+                }
+                for name in (args.accounts or [])
+            ],
+            "error": f"AGY_ACCOUNT_POOL_ACCOUNTS_MISSING:{accounts_dir}",
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 2
 
     all_homes = {path.name: path for path in accounts_dir.iterdir() if path.is_dir()}
     requested = args.accounts or sorted(all_homes)
-    unknown = [name for name in requested if name not in all_homes]
-    if unknown:
-        raise SystemExit("AGY_ACCOUNT_UNKNOWN:" + ",".join(unknown))
-
     state = _state(pool_root)
-    checked_at = datetime.now(timezone.utc).isoformat()
     agy_binary = _agy_binary()
-    rows = [
-        query_account(
+
+    rows: list[dict[str, Any]] = []
+    for name in requested:
+        if name not in all_homes:
+            emit_progress("ACCOUNT_UNKNOWN", account=name, on_progress=on_progress)
+            rows.append({
+                "account": name,
+                "email": _account_email(state, name),
+                "ok": False,
+                "error": "unknown_account",
+                "checked_at": checked_at,
+            })
+            continue
+
+        if deadline_monotonic is not None:
+            remaining = deadline_monotonic - time.monotonic()
+            if remaining <= 0:
+                emit_progress("DEADLINE_EXCEEDED", account=name, on_progress=on_progress)
+                rows.append({
+                    "account": name,
+                    "email": _account_email(state, name),
+                    "ok": False,
+                    "error": "deadline_exceeded",
+                    "checked_at": checked_at,
+                })
+                continue
+            effective_timeout = min(float(args.timeout), max(0.001, remaining))
+        else:
+            effective_timeout = args.timeout
+
+        res = query_account(
             account_home=all_homes[name],
             account_name=name,
             email=_account_email(state, name),
             agy_binary=agy_binary,
-            timeout=args.timeout,
+            timeout=effective_timeout,
             checked_at=checked_at,
+            on_progress=on_progress,
         )
-        for name in requested
-    ]
+        rows.append(res)
+
     snapshot_path = _snapshot_path()
+    emit_progress("SAVING_SNAPSHOT", snapshot_path=str(snapshot_path), on_progress=on_progress)
     payload = merge_snapshot(
         snapshot_path=snapshot_path,
         current_names=set(all_homes),
@@ -244,6 +392,12 @@ def main(argv: list[str] | None = None) -> int:
         checked_at=checked_at,
     )
     write_snapshot(snapshot_path, payload)
+    emit_progress(
+        "FINISHED",
+        total=len(rows),
+        ok=sum(1 for r in rows if r.get("ok") is True),
+        on_progress=on_progress,
+    )
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0 if all(row.get("ok") is True for row in rows) else 2
 

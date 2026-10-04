@@ -9,6 +9,7 @@ import stat
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 from datetime import datetime, timezone
 from importlib.machinery import SourceFileLoader
@@ -500,6 +501,365 @@ def test_background_timeout_is_persisted_as_outcome_unknown(tmp_path: Path, monk
     assert not prompt_path.exists()
 
 
+def test_quota_progress_is_durable_while_child_runs_and_identity_safe(
+    tmp_path: Path, monkeypatch
+) -> None:
+    operation_root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(operation_root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "quota progress probe")
+
+    command = tmp_path / "fake-quota-command"
+    command.write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env python3
+            import json
+            import os
+            import sys
+            import time
+            from pathlib import Path
+
+            running = Path(os.environ["QUOTA_RUNNING_MARKER"])
+            release = Path(os.environ["QUOTA_RELEASE_MARKER"])
+            finished = Path(os.environ["QUOTA_FINISHED_MARKER"])
+            print("provider diagnostic credential=provider-secret", file=sys.stderr)
+            sys.stderr.write("NEXUS_AGY_QUOTA {malformed json}\\n")
+            sys.stderr.write(
+                "NEXUS_AGY_QUOTA "
+                + json.dumps({"phase": "UNRECOGNIZED", "token": "unknown-secret"})
+                + "\\n"
+            )
+            running.write_text("running", encoding="utf-8")
+            sys.stderr.write(
+                "NEXUS_AGY_QUOTA "
+                + json.dumps({
+                    "phase": "QUERYING_ACCOUNT",
+                    "timestamp": "2026-10-04T12:00:00+00:00",
+                    "account": sys.argv[1],
+                    "email": "private@example.test",
+                    "credential": "must-not-persist",
+                    "timeout": 4,
+                    "arbitrary_provider_log": "do-not-store",
+                })
+                + "\\n"
+            )
+            sys.stderr.flush()
+            while not release.exists():
+                time.sleep(0.01)
+            sys.stderr.write(
+                "NEXUS_AGY_QUOTA "
+                + json.dumps({
+                    "phase": "ACCOUNT_RESULT",
+                    "account": sys.argv[1],
+                    "ok": False,
+                    "error": "api_key=should-not-persist",
+                })
+                + "\\n"
+            )
+            sys.stderr.flush()
+            print(json.dumps({"machine_result": "preserved-on-stdout"}))
+            finished.write_text("finished", encoding="utf-8")
+            """
+        ),
+        encoding="utf-8",
+    )
+    command.chmod(0o755)
+    running_marker = tmp_path / "quota-running"
+    release_marker = tmp_path / "quota-release"
+    finished_marker = tmp_path / "quota-finished"
+    monkeypatch.setenv("QUOTA_RUNNING_MARKER", str(running_marker))
+    monkeypatch.setenv("QUOTA_RELEASE_MARKER", str(release_marker))
+    monkeypatch.setenv("QUOTA_FINISHED_MARKER", str(finished_marker))
+    monkeypatch.setattr(dispatch, "_quota_refresh_binary", lambda: str(command))
+    monkeypatch.setattr(dispatch, "_load_quota_snapshot", lambda *_args: {})
+    monkeypatch.setattr(dispatch, "_runtime_revision", lambda: "b" * 40)
+
+    account_alias_hash = "012345abcdef"
+
+    def fake_dispatch_run(**kwargs):
+        operation_hook = kwargs["operation_hook"]
+        operation_hook({
+            "phase": "ACCOUNT_LEASED",
+            "account_alias_hash": account_alias_hash,
+            "provider_started_at": None,
+            "first_effect_at": None,
+        })
+        dispatch._refresh_quota_snapshot_for_account(
+            "private-account-id",
+            timeout=4,
+            account_alias_hash=account_alias_hash,
+            on_phase_hook=lambda **event: operation_hook(event),
+        )
+        return 1
+
+    monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
+    observed: dict[str, object] = {}
+
+    def observe_durable_progress() -> None:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            record = journal.read(operation_id)
+            progress = record.get("quota_preflight_progress")
+            if isinstance(progress, dict) and progress.get("phase") == "QUERYING_ACCOUNT":
+                observed["record"] = record
+                observed["raw_record"] = journal.record_path(operation_id).read_text(
+                    encoding="utf-8"
+                )
+                observed["child_was_running"] = running_marker.is_file()
+                observed["child_was_finished"] = finished_marker.exists()
+                release_marker.touch()
+                return
+            time.sleep(0.01)
+        observed["error"] = "quota child did not durably report QUERYING_ACCOUNT"
+        release_marker.touch()
+
+    observer = threading.Thread(target=observe_durable_progress, daemon=True)
+    observer.start()
+    code = dispatch._run_background_operation(
+        operation_id=operation_id,
+        prompt_file=str(prompt_path),
+        cwd=str(tmp_path),
+        mode="plan",
+        model="gemini-test",
+        effort="medium",
+        timeout=30,
+        max_calls=1,
+        pool_wait_timeout=1.0,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=operation_root,
+        heartbeat_interval=60,
+    )
+    observer.join(timeout=5)
+    assert not observer.is_alive()
+    assert "error" not in observed, observed.get("error")
+
+    record = observed["record"]
+    progress = record["quota_preflight_progress"]
+    assert observed["child_was_running"] is True
+    assert observed["child_was_finished"] is False
+    assert record["status"] == "RUNNING"
+    assert record["phase"] == "ACCOUNT_LEASED"
+    assert progress["account_alias_hash"] == account_alias_hash
+    assert progress["timeout_seconds"] == 4.0
+    assert record["provider_started_at"] is None
+    assert record["first_effect_at"] is None
+    raw_record = observed["raw_record"]
+    for secret in (
+        "private-account-id",
+        "private@example.test",
+        "provider-secret",
+        "must-not-persist",
+        "unknown-secret",
+        "do-not-store",
+    ):
+        assert secret not in raw_record
+
+    assert code == 1
+    terminal = journal.read(operation_id)
+    assert terminal["status"] == "FAILED"
+    assert terminal["provider_started_at"] is None
+    assert terminal["first_effect_at"] is None
+    assert terminal["quota_preflight_progress"]["phase"] == "ACCOUNT_RESULT"
+    terminal_raw = journal.record_path(operation_id).read_text(encoding="utf-8")
+    assert "api_key=should-not-persist" not in terminal_raw
+
+
+def test_quota_child_timeout_is_bounded_and_does_not_claim_provider_outcome_unknown(
+    tmp_path: Path, monkeypatch
+) -> None:
+    operation_root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(operation_root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "quota timeout probe")
+
+    child_pid_path = tmp_path / "quota-child.pid"
+    command = tmp_path / "stalled-quota-command"
+    command.write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env python3
+            import json
+            import os
+            import sys
+            import time
+            from pathlib import Path
+
+            Path(os.environ["QUOTA_CHILD_PID_PATH"]).write_text(str(os.getpid()))
+            sys.stderr.write(
+                "NEXUS_AGY_QUOTA "
+                + json.dumps({
+                    "phase": "QUERYING_ACCOUNT",
+                    "timestamp": "2026-10-04T12:00:00+00:00",
+                    "account": sys.argv[1],
+                })
+                + "\\n"
+            )
+            sys.stderr.flush()
+            while True:
+                time.sleep(0.1)
+            """
+        ),
+        encoding="utf-8",
+    )
+    command.chmod(0o755)
+    monkeypatch.setenv("QUOTA_CHILD_PID_PATH", str(child_pid_path))
+    monkeypatch.setattr(dispatch, "_quota_refresh_binary", lambda: str(command))
+    monkeypatch.setattr(dispatch, "_load_quota_snapshot", lambda *_args: {})
+    monkeypatch.setattr(dispatch, "_runtime_revision", lambda: "b" * 40)
+    account_alias_hash = "012345abcdef"
+
+    def fake_dispatch_run(**kwargs):
+        operation_hook = kwargs["operation_hook"]
+        operation_hook({"phase": "ACCOUNT_LEASED", "account_alias_hash": account_alias_hash})
+        dispatch._refresh_quota_snapshot_for_account(
+            "private-account-id",
+            timeout=1,
+            account_alias_hash=account_alias_hash,
+            on_phase_hook=lambda **event: operation_hook(event),
+        )
+        return 1
+
+    monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
+    code = dispatch._run_background_operation(
+        operation_id=operation_id,
+        prompt_file=str(prompt_path),
+        cwd=str(tmp_path),
+        mode="plan",
+        model="gemini-test",
+        effort="medium",
+        timeout=30,
+        max_calls=1,
+        pool_wait_timeout=1.0,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=operation_root,
+        heartbeat_interval=60,
+    )
+
+    child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+    record = journal.read(operation_id)
+    assert code == 1
+    assert record["status"] == "FAILED"
+    assert record["phase"] == "TERMINAL"
+    assert record["reconciliation"] is None
+    assert record["provider_started_at"] is None
+    assert record["first_effect_at"] is None
+    assert record["quota_preflight_progress"] == {
+        "phase": "TIMED_OUT",
+        "error_kind": "TIMEOUT",
+        "account_alias_hash": account_alias_hash,
+    }
+    with pytest.raises(ProcessLookupError):
+        os.kill(child_pid, 0)
+
+
+def test_quota_deadline_keeps_finalize_headroom_for_partial_snapshot(
+    tmp_path: Path, monkeypatch
+) -> None:
+    command = tmp_path / "deadline-quota-command"
+    snapshot_path = tmp_path / "partial-snapshot.json"
+    budget_path = tmp_path / "child-total-budget.txt"
+    command.write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env python3
+            import json
+            import os
+            import sys
+            import time
+            from pathlib import Path
+
+            def emit(phase, **details):
+                event = {
+                    "phase": phase,
+                    "timestamp": "2026-10-04T12:00:00+00:00",
+                    **details,
+                }
+                sys.stderr.write("NEXUS_AGY_QUOTA " + json.dumps(event) + "\\n")
+                sys.stderr.flush()
+
+            timeout = float(os.environ["NEXUS_AGY_QUOTA_TOTAL_TIMEOUT"])
+            Path(os.environ["QUOTA_CHILD_BUDGET_PATH"]).write_text(str(timeout))
+            started = time.monotonic()
+            while time.monotonic() - started < timeout:
+                time.sleep(0.005)
+            emit("DEADLINE_EXCEEDED", account=sys.argv[1])
+            time.sleep(0.1)
+            payload = {
+                "checked_at": "2026-10-04T12:00:00+00:00",
+                "partial": True,
+                "accounts": [{"account": sys.argv[1], "ok": False}],
+            }
+            snapshot = Path(os.environ["QUOTA_PARTIAL_SNAPSHOT_PATH"])
+            snapshot.write_text(json.dumps(payload), encoding="utf-8")
+            emit("SAVING_SNAPSHOT", snapshot_path=str(snapshot))
+            emit("FINISHED", total=1, ok=0)
+            """
+        ),
+        encoding="utf-8",
+    )
+    command.chmod(0o755)
+    monkeypatch.setenv("QUOTA_CHILD_BUDGET_PATH", str(budget_path))
+    monkeypatch.setenv("QUOTA_PARTIAL_SNAPSHOT_PATH", str(snapshot_path))
+    monkeypatch.setenv("NEXUS_AGY_QUOTA_TOTAL_TIMEOUT", "2.9")
+    monkeypatch.setattr(dispatch, "_quota_refresh_binary", lambda: str(command))
+    monkeypatch.setattr(
+        dispatch,
+        "_load_quota_snapshot",
+        lambda *_args: json.loads(snapshot_path.read_text(encoding="utf-8")),
+    )
+    events: list[dict[str, object]] = []
+    started = time.monotonic()
+
+    snapshot = dispatch._refresh_quota_snapshot_for_account(
+        "private-account-id",
+        timeout=3,
+        account_alias_hash="012345abcdef",
+        on_phase_hook=lambda **event: events.append(event),
+    )
+    elapsed = time.monotonic() - started
+
+    child_budget = float(budget_path.read_text(encoding="utf-8"))
+    phases = [
+        event["quota_preflight_progress"]["phase"]
+        for event in events
+        if "quota_preflight_progress" in event
+    ]
+    assert 0 < child_budget < 3
+    assert child_budget == pytest.approx(2.25)
+    assert elapsed < 3
+    assert snapshot["partial"] is True
+    assert "DEADLINE_EXCEEDED" in phases
+    assert "SAVING_SNAPSHOT" in phases
+    assert "FINISHED" in phases
+
+
 def test_background_spawn_returns_durable_operation_identity(tmp_path: Path, monkeypatch) -> None:
     class FakeProcess:
         pid = 424242
@@ -619,6 +979,7 @@ def test_background_terminal_receipt_persists_agy_attestation(tmp_path: Path, mo
             "\n".join([
                 'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
                 "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
+                "W1003 18:22:34.269070     491 rules.go:545] Rule file /repo/AGENTS.md truncated by 706 bytes (original 24638 bytes, limit 24000 bytes)",
             ])
             + "\n",
             encoding="utf-8",
@@ -655,6 +1016,18 @@ def test_background_terminal_receipt_persists_agy_attestation(tmp_path: Path, mo
     assert record["observed_provider"] == "agy"
     assert record["observed_model"] == "gemini-3.8-flash-low"
     assert record["provider_session_id"] == "f67d38d4-f220-4bc0-a216-cef594235952"
+    assert record["input_delivery_state"] == "TRUNCATED"
+    assert record["input_delivery_source"] == "AGY_LOG"
+    assert record["input_delivery_truncations"] == [
+        {
+            "file_name": "AGENTS.md",
+            "original_bytes": 24638,
+            "limit_bytes": 24000,
+            "truncated_bytes": 706,
+        }
+    ]
+    assert record["status"] == "COMPLETED"
+    assert record["failure_kind"] is None
     assert "NEXUS_AGY_ATTESTATION_LOG" not in os.environ
 
 
@@ -1410,3 +1783,416 @@ def test_pre_provider_wrapper_exception_is_not_outcome_unknown(
     assert record["failure_kind"] == "WRAPPER_EXCEPTION_PRE_PROVIDER:RuntimeError"
     assert record["reconciliation"]["result"] == "WRAPPER_EXCEPTION_BEFORE_PROVIDER"
     assert record["reconciliation"]["retry_permitted"] is False
+
+
+def test_unsupported_effort_for_claude_opus_fails_before_claim(tmp_path: Path) -> None:
+    coordinator = _WriteScopeCoordinator(tmp_path / "home")
+    events: list[dict[str, object]] = []
+
+    code = dispatch.dispatch_run(
+        prompt="run model",
+        cwd=str(tmp_path),
+        mode="plan",
+        model="claude-opus-4-6",
+        effort="low",
+        coordinator=coordinator,
+        operation_hook=events.append,
+    )
+
+    assert code == 64
+    assert coordinator.acquire_count == 0
+    assert any(
+        e.get("failure_kind")
+        == "DISPATCH_MODEL_CONTRACT_REJECTED:UNSUPPORTED_EFFORT_FOR_MODEL:claude-opus-4-6:low"
+        and e.get("provider_effect") is False
+        for e in events
+    )
+
+
+def test_provider_exit_invalid_model_selection_classified_as_model_contract_rejected(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+    events: list[dict[str, object]] = []
+
+    code = dispatch.dispatch_run(
+        prompt="run model",
+        cwd=str(tmp_path),
+        mode="plan",
+        model="claude-opus-4-6",
+        coordinator=coordinator,
+        run_agy_fn=lambda **_kwargs: (
+            1,
+            "",
+            'error: invalid model selection (--model "claude-opus-4-6" --effort "low"): --effort is not supported for model "claude-opus-4-6"\n',
+            False,
+            50,
+        ),
+        operation_hook=events.append,
+    )
+
+    assert code == 1
+    assert any(e.get("failure_kind") == "DISPATCH_MODEL_CONTRACT_REJECTED" for e in events)
+    assert coordinator.acquire_count == 1
+    assert coordinator.claim.released is True
+
+
+def test_headless_tool_permission_denial_classified_as_failure(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    target = work / "file.txt"
+    coordinator = _WriteScopeCoordinator(home)
+    events: list[dict[str, object]] = []
+
+    code = dispatch.dispatch_run(
+        prompt="make edit",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(target)],
+        coordinator=coordinator,
+        run_agy_fn=lambda **_kwargs: (
+            0,
+            "",
+            'jetski: no output produced — a tool required the "command" permission that headless mode cannot prompt for, so it was auto-denied.\n',
+            False,
+            100,
+        ),
+        operation_hook=events.append,
+    )
+
+    assert code == 1
+    assert any(e.get("failure_kind") == "HEADLESS_TOOL_PERMISSION_DENIED" for e in events)
+    assert coordinator.acquire_count == 1
+    assert coordinator.claim.released is True
+
+
+def test_run_agy_timeline_and_baseline_effects(tmp_path: Path, monkeypatch) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "-C", str(work), "init"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(work), "config", "user.email", "test@test.com"], check=True)
+    subprocess.run(["git", "-C", str(work), "config", "user.name", "Test"], check=True)
+    (work / "tracked.txt").write_text("initial", encoding="utf-8")
+    subprocess.run(["git", "-C", str(work), "add", "tracked.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(work), "commit", "-m", "init"], check=True, capture_output=True
+    )
+
+    # Create pre-existing dirty file in worktree (donor change)
+    (work / "pre_existing_dirty.txt").write_text("dirty before launch", encoding="utf-8")
+
+    # Create fake agy script
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_agy = bin_dir / "agy"
+    script = """#!/usr/bin/env python3
+import sys, time, os
+from pathlib import Path
+
+# Write stderr diagnostics first
+sys.stderr.write("[DEBUG] Bootstrap initializing...\\n")
+sys.stderr.flush()
+time.sleep(0.1)
+
+# Write stdout model stream
+sys.stdout.write("Model output streaming line 1\\n")
+sys.stdout.flush()
+time.sleep(0.1)
+
+# Modify a new file
+cwd = Path(os.environ.get("AGY_TEST_CWD", "."))
+(cwd / "new_effect.txt").write_text("created by agy\\n", encoding="utf-8")
+time.sleep(0.1)
+sys.exit(0)
+"""
+    fake_agy.write_text(script, encoding="utf-8")
+    fake_agy.chmod(0o755)
+
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("AGY_TEST_CWD", str(work))
+
+    events: list[dict[str, object]] = []
+    code, out, err, timed_out, wall_ms = dispatch.run_agy(
+        env=os.environ.copy(),
+        prompt="hello",
+        cwd=str(work),
+        mode="accept-edits",
+        model="gemini-3.8-flash-high",
+        effort=None,
+        timeout=10,
+        operation_hook=events.append,
+    )
+
+    assert code == 0
+    assert "Model output streaming line 1" in out
+    assert "[DEBUG] Bootstrap initializing..." in err
+
+    # Verify first_stream_activity_at and first_effect_at were recorded
+    stream_events = [e for e in events if "first_stream_activity_at" in e]
+    assert len(stream_events) >= 1
+
+    effect_events = [e for e in events if "first_effect_at" in e]
+    assert len(effect_events) >= 1
+    assert "time_to_first_effect_ms" in effect_events[0]
+
+    # Verify process state transitions
+    running_events = [e for e in events if e.get("provider_process_state") == "RUNNING"]
+    assert len(running_events) >= 1
+    exited_events = [e for e in events if e.get("provider_process_state") == "EXITED"]
+    assert len(exited_events) >= 1
+
+
+def test_independent_quota_after_effect_never_rotates(tmp_path):
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    home = tmp_path / "home"
+    home.mkdir()
+
+    class Coordinator(_WriteScopeCoordinator):
+        rotation_count = 0
+
+        def rotate_claim(self, **kwargs):
+            self.rotation_count += 1
+            raise RuntimeError("must not rotate after source effect")
+
+    coordinator = Coordinator(home)
+    calls = []
+    events = []
+
+    def runner(**kwargs):
+        calls.append(True)
+        (work / "changed.txt").write_text("partial effect")
+        return 1, "", "RESOURCE_EXHAUSTED: quota exhausted", False, 10
+
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(work / "changed.txt")],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+    assert code != 0
+    assert coordinator.rotation_count == 0
+    assert len(calls) == 1
+    classified = [e for e in events if e.get("phase") == "CLASSIFYING_FAILURE"][-1]
+    assert classified["failure_kind"] == "PROVIDER_QUOTA_EXHAUSTED_AFTER_EFFECT"
+    assert classified["provider_effect"] is True
+    assert classified["reconciliation_required"] is True
+
+
+def test_independent_headless_denial_only_in_provider_log_is_failure(tmp_path, monkeypatch):
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    binary = tmp_path / "agy"
+    binary.write_text(
+        "#!" + sys.executable + "\nimport sys\nfrom pathlib import Path\n"
+        "p = Path(sys.argv[sys.argv.index('--log-file') + 1])\n"
+        "p.write_text('Print mode: soft-denying tool confirmation RunCommand at step 2\\n')\n"
+    )
+    binary.chmod(0o700)
+    monkeypatch.setattr(dispatch.shutil, "which", lambda name: str(binary))
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(tmp_path / "agy.log"))
+    events = []
+    code = dispatch.dispatch_run(
+        prompt="edit",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(work / "changed.txt")],
+        coordinator=_WriteScopeCoordinator(home),
+        operation_hook=events.append,
+    )
+    assert code != 0
+    assert any(e.get("failure_kind") == "HEADLESS_TOOL_PERMISSION_DENIED" for e in events)
+
+
+def test_headless_permission_failure_after_physical_effect_requires_reconciliation(
+    tmp_path: Path,
+) -> None:
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    target = work / "partial-effect.txt"
+
+    class Coordinator(_WriteScopeCoordinator):
+        rotation_count = 0
+
+        def rotate_claim(self, **kwargs):
+            self.rotation_count += 1
+            raise AssertionError("permission failure after an effect must not rotate")
+
+    coordinator = Coordinator(home)
+    events: list[dict[str, object]] = []
+
+    def runner(**_kwargs):
+        target.write_text("provider already changed source", encoding="utf-8")
+        return (
+            0,
+            "",
+            "tool permission denied: headless mode cannot prompt for confirmation\n",
+            False,
+            10,
+        )
+
+    code = dispatch.dispatch_run(
+        prompt="edit then permission denial",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(target)],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+
+    classified = [event for event in events if event.get("phase") == "CLASSIFYING_FAILURE"][-1]
+    assert code == 1
+    assert target.read_text(encoding="utf-8") == "provider already changed source"
+    assert classified["failure_kind"] == "HEADLESS_TOOL_PERMISSION_DENIED"
+    assert classified["provider_effect"] is True
+    assert classified["reconciliation_required"] is True
+    assert coordinator.rotation_count == 0
+
+
+def test_run_agy_throttles_effect_scans_for_a_long_provider(tmp_path: Path, monkeypatch) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "-C", str(work), "init"], check=True, capture_output=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_agy = bin_dir / "agy"
+    fake_agy.write_text(
+        "#!" + sys.executable + "\nimport time\ntime.sleep(1.05)\n",
+        encoding="utf-8",
+    )
+    fake_agy.chmod(0o700)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
+
+    original_observe = dispatch.direct_operation_journal.observed_changed_paths_since
+    scan_times: list[float] = []
+
+    def count_observations(cwd: str, baseline: dict[str, object]):
+        scan_times.append(time.monotonic())
+        return original_observe(cwd, baseline)
+
+    monkeypatch.setattr(
+        dispatch.direct_operation_journal,
+        "observed_changed_paths_since",
+        count_observations,
+    )
+    code, _out, _err, _timed_out, _wall_ms = dispatch.run_agy(
+        env=os.environ.copy(),
+        prompt="wait without a source edit",
+        cwd=str(work),
+        mode="plan",
+        model=None,
+        effort=None,
+        timeout=5,
+    )
+
+    assert code == 0
+    assert len(scan_times) >= 3
+    assert all(later - earlier >= 0.4 for earlier, later in zip(scan_times[:-2], scan_times[1:-1]))
+
+
+def test_run_agy_final_readback_captures_short_lived_effect_after_first_empty_scan(
+    tmp_path: Path, monkeypatch
+) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "-C", str(work), "init"], check=True, capture_output=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_agy = bin_dir / "agy"
+    fake_agy.write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env python3
+            import os
+            import time
+            from pathlib import Path
+
+            time.sleep(0.1)
+            Path(os.environ["AGY_SHORT_EFFECT_PATH"]).write_text("short effect")
+            """
+        ),
+        encoding="utf-8",
+    )
+    fake_agy.chmod(0o700)
+    effect = work / "short-lived.txt"
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("AGY_SHORT_EFFECT_PATH", str(effect))
+    original_observe = dispatch.direct_operation_journal.observed_changed_paths_since
+    scan_times: list[float] = []
+
+    def force_first_empty_scan(cwd: str, baseline: dict[str, object]):
+        scan_times.append(time.monotonic())
+        if len(scan_times) == 1:
+            return []
+        return original_observe(cwd, baseline)
+
+    monkeypatch.setattr(
+        dispatch.direct_operation_journal,
+        "observed_changed_paths_since",
+        force_first_empty_scan,
+    )
+    events: list[dict[str, object]] = []
+    code, _out, _err, _timed_out, _wall_ms = dispatch.run_agy(
+        env=os.environ.copy(),
+        prompt="make a short-lived source edit",
+        cwd=str(work),
+        mode="plan",
+        model=None,
+        effort=None,
+        timeout=5,
+        operation_hook=events.append,
+    )
+
+    assert code == 0
+    assert effect.is_file()
+    assert len(scan_times) == 2
+    assert any(event.get("first_effect_at") for event in events)
+
+
+def test_independent_baseline_failure_stays_unknown(tmp_path, monkeypatch):
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    (work / "donor.txt").write_text("not this provider")
+    binary = tmp_path / "agy"
+    binary.write_text("#!" + sys.executable + "\nimport time\ntime.sleep(0.15)\n")
+    binary.chmod(0o700)
+    monkeypatch.setattr(dispatch.shutil, "which", lambda name: str(binary))
+    original = dispatch.direct_operation_journal.capture_source_baseline
+    calls = []
+
+    def fail_first(cwd):
+        calls.append(True)
+        if len(calls) == 1:
+            raise OSError("baseline unreadable")
+        return original(cwd)
+
+    monkeypatch.setattr(dispatch.direct_operation_journal, "capture_source_baseline", fail_first)
+    events = []
+    dispatch.run_agy(
+        env=os.environ.copy(),
+        prompt="test",
+        cwd=str(work),
+        mode="plan",
+        model=None,
+        effort=None,
+        timeout=1,
+        operation_hook=events.append,
+    )
+    assert not any(e.get("first_effect_at") for e in events)
+    assert any(e.get("effect_observation_error") for e in events)
