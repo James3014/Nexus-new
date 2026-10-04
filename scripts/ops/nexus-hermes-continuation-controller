@@ -1,0 +1,793 @@
+#!/usr/bin/env python3
+"""Bounded Hermes/local continuation controller for Nexus.
+
+This is orchestration glue, not a new authority. It composes the canonical
+workflow doctor, deterministic Hermes guard, local Hermes advisory reasoning,
+and nexus-agy-dispatch. It never grants acceptance, merge, release, routing,
+lease, or production authority.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import subprocess
+import tempfile
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+POLICY_SCHEMA = "nexus.hermes_controller_policy.v1"
+RECEIPT_SCHEMA = "nexus.hermes_controller_cycle_receipt.v1"
+FRONTIER_RECEIPT_SCHEMA = "nexus.hermes_frontier_adviser_receipt.v1"
+STATE_SCHEMA = "nexus.hermes_controller_state.v1"
+CLAIM_CEILING = "CONTINUATION_ORCHESTRATION_ONLY_NO_ACCEPTANCE_MERGE_RELEASE"
+ALLOWED_HANDLER_KINDS = {"LOCAL_HERMES_THEN_AGY_PLAN"}
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _canonical_bytes(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _digest(value: Any) -> str:
+    return hashlib.sha256(_canonical_bytes(value)).hexdigest()
+
+
+def _load_json(path: Path) -> dict[str, Any]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"{path} must contain a JSON object")
+    return value
+
+
+def _atomic_json(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", dir=path.parent, delete=False
+    ) as handle:
+        json.dump(value, handle, ensure_ascii=False, sort_keys=True, indent=2)
+        handle.write("\n")
+        temp = Path(handle.name)
+    os.replace(temp, path)
+
+
+def _run(
+    argv: list[str],
+    *,
+    cwd: Path | None = None,
+    timeout: int | None = None,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        argv,
+        cwd=str(cwd) if cwd else None,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env=env,
+        check=False,
+    )
+
+
+def _bin(env_key: str, default: str) -> str:
+    return os.environ.get(env_key, default)
+
+
+def _doctor(
+    *,
+    repo_root: Path,
+    repository: str,
+    issue: int | None,
+    pr: int | None,
+    operation_id: str | None,
+) -> dict[str, Any]:
+    argv = [
+        _bin("NEXUS_WORKFLOW_DOCTOR_BIN", str(Path.home() / ".local/bin/nexus-workflow-doctor")),
+        "--json",
+        "--repo-root",
+        str(repo_root),
+        "--repository",
+        repository,
+    ]
+    if issue is not None:
+        argv += ["--issue", str(issue)]
+    if pr is not None:
+        argv += ["--pr", str(pr)]
+    if operation_id:
+        argv += ["--operation-id", operation_id]
+    result = _run(argv, cwd=repo_root, timeout=30)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"workflow doctor failed: {result.stderr.strip() or result.stdout.strip()}"
+        )
+    value = json.loads(result.stdout)
+    if not isinstance(value, dict):
+        raise RuntimeError("workflow doctor returned a non-object")
+    return value
+
+
+def _guard_doctor(doctor: dict[str, Any]) -> dict[str, Any]:
+    with tempfile.TemporaryDirectory(prefix="nexus-hermes-guard-") as tmp:
+        source = Path(tmp) / "doctor.json"
+        source.write_text(json.dumps(doctor), encoding="utf-8")
+        result = _run(
+            [
+                _bin(
+                    "NEXUS_HERMES_GUARD_BIN",
+                    str(Path.home() / ".local/bin/nexus-hermes-controller-guard"),
+                ),
+                "doctor",
+                "--input",
+                str(source),
+            ],
+            timeout=15,
+        )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Hermes guard emitted invalid JSON: {result.stdout!r}") from exc
+    if result.returncode not in {0, 2, 3}:
+        raise RuntimeError(f"Hermes guard failed unexpectedly: {result.stderr.strip()}")
+    if not isinstance(payload, dict):
+        raise RuntimeError("Hermes guard returned a non-object")
+    return payload
+
+
+def _guard_escalate(signal: dict[str, Any]) -> dict[str, Any]:
+    with tempfile.TemporaryDirectory(prefix="nexus-hermes-escalate-") as tmp:
+        source = Path(tmp) / "signal.json"
+        source.write_text(json.dumps(signal), encoding="utf-8")
+        result = _run(
+            [
+                _bin(
+                    "NEXUS_HERMES_GUARD_BIN",
+                    str(Path.home() / ".local/bin/nexus-hermes-controller-guard"),
+                ),
+                "escalate",
+                "--input",
+                str(source),
+            ],
+            timeout=15,
+        )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"escalation guard failed: {result.stderr.strip() or result.stdout.strip()}"
+        )
+    payload = json.loads(result.stdout)
+    if not isinstance(payload, dict):
+        raise RuntimeError("escalation guard returned a non-object")
+    return payload
+
+
+def _load_policy(path: Path) -> dict[str, Any]:
+    value = _load_json(path)
+    if value.get("schema") != POLICY_SCHEMA:
+        raise ValueError("POLICY_SCHEMA_MISMATCH")
+    handlers = value.get("handlers")
+    if not isinstance(handlers, dict):
+        raise ValueError("POLICY_HANDLERS_MISSING")
+    for gate, handler in handlers.items():
+        if not isinstance(gate, str) or not gate:
+            raise ValueError("POLICY_GATE_INVALID")
+        if not isinstance(handler, dict) or handler.get("kind") not in ALLOWED_HANDLER_KINDS:
+            raise ValueError(f"POLICY_HANDLER_INVALID:{gate}")
+    return value
+
+
+def _resolve_policy_path(policy_path: Path, raw: str) -> Path:
+    path = Path(raw)
+    return path if path.is_absolute() else (policy_path.parent / path).resolve()
+
+
+def _state_dir(receipt_dir: Path, run_id: str) -> Path:
+    return receipt_dir / run_id
+
+
+def _load_state(receipt_dir: Path, run_id: str) -> dict[str, Any]:
+    path = _state_dir(receipt_dir, run_id) / "state.json"
+    if not path.exists():
+        return {
+            "schema": STATE_SCHEMA,
+            "run_id": run_id,
+            "last_cycle": 0,
+            "operation_id": None,
+            "effect_intent": None,
+            "effects_started": 0,
+            "updated_at": _now(),
+        }
+    value = _load_json(path)
+    if value.get("schema") != STATE_SCHEMA or value.get("run_id") != run_id:
+        raise ValueError("CONTROLLER_STATE_IDENTITY_MISMATCH")
+    return value
+
+
+def _save_state(receipt_dir: Path, state: dict[str, Any]) -> None:
+    state["updated_at"] = _now()
+    _atomic_json(_state_dir(receipt_dir, state["run_id"]) / "state.json", state)
+
+
+def _write_receipt(
+    receipt_dir: Path,
+    run_id: str,
+    cycle: int,
+    body: dict[str, Any],
+    *,
+    prefix: str = "cycle",
+) -> Path:
+    receipt = {
+        "schema": RECEIPT_SCHEMA if prefix == "cycle" else FRONTIER_RECEIPT_SCHEMA,
+        "claim_ceiling": CLAIM_CEILING,
+        "run_id": run_id,
+        "cycle": cycle,
+        "observed_at": _now(),
+        **body,
+    }
+    receipt["receipt_hash"] = _digest(receipt)
+    path = _state_dir(receipt_dir, run_id) / f"{prefix}-{cycle:04d}.json"
+    _atomic_json(path, receipt)
+    return path
+
+
+def _hermes_local(prompt: str, *, cwd: Path) -> subprocess.CompletedProcess[str]:
+    return _run(
+        [
+            _bin("HERMES_BIN", str(Path.home() / ".local/bin/hermes")),
+            "--safe-mode",
+            "--reasoning",
+            "none",
+            "-z",
+            prompt,
+        ],
+        cwd=cwd,
+        timeout=180,
+    )
+
+
+def _hermes_frontier(
+    prompt: str,
+    *,
+    cwd: Path,
+    provider: str,
+    model: str,
+) -> subprocess.CompletedProcess[str]:
+    return _run(
+        [
+            _bin("HERMES_BIN", str(Path.home() / ".local/bin/hermes")),
+            "--safe-mode",
+            "--provider",
+            provider,
+            "--model",
+            model,
+            "--reasoning",
+            "none",
+            "-z",
+            prompt,
+        ],
+        cwd=cwd,
+        timeout=180,
+    )
+
+
+def _agy_dispatch_plan(
+    *,
+    prompt: str,
+    cwd: Path,
+    timeout: int,
+    max_calls: int,
+) -> dict[str, Any]:
+    result = _run(
+        [
+            _bin("NEXUS_AGY_DISPATCH_BIN", str(Path.home() / ".local/bin/nexus-agy-dispatch")),
+            "--prompt",
+            prompt,
+            "--cwd",
+            str(cwd),
+            "--mode",
+            "plan",
+            "--max-calls",
+            str(max_calls),
+            "--timeout",
+            str(timeout),
+            "--background",
+        ],
+        cwd=cwd,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Agy dispatch failed before durable operation binding: {result.stderr.strip() or result.stdout.strip()}"
+        )
+    payload = json.loads(result.stdout)
+    if not isinstance(payload, dict) or not payload.get("operation_id"):
+        raise RuntimeError("Agy dispatch did not return operation_id")
+    return payload
+
+
+def _agy_reconcile(operation_id: str, *, cwd: Path) -> dict[str, Any]:
+    result = _run(
+        [
+            _bin("NEXUS_AGY_DISPATCH_BIN", str(Path.home() / ".local/bin/nexus-agy-dispatch")),
+            "--reconcile",
+            operation_id,
+        ],
+        cwd=cwd,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Agy reconcile failed: {result.stderr.strip() or result.stdout.strip()}"
+        )
+    payload = json.loads(result.stdout)
+    if not isinstance(payload, dict):
+        raise RuntimeError("Agy reconcile returned non-object")
+    return payload
+
+
+def _handler_local_then_agy(
+    *,
+    handler: dict[str, Any],
+    policy_path: Path,
+    state: dict[str, Any],
+    receipt_dir: Path,
+    run_id: str,
+    cycle: int,
+) -> dict[str, Any]:
+    if int(state.get("effects_started", 0)) >= 1:
+        return {"outcome": "EFFECT_BUDGET_EXHAUSTED", "effect_started": False}
+
+    cwd = _resolve_policy_path(policy_path, str(handler["cwd"]))
+    local_prompt_path = _resolve_policy_path(policy_path, str(handler["local_prompt_file"]))
+    local_prompt = local_prompt_path.read_text(encoding="utf-8")
+    local = _hermes_local(local_prompt, cwd=cwd)
+    if local.returncode != 0:
+        return {
+            "outcome": "LOCAL_HERMES_FAILED",
+            "effect_started": False,
+            "returncode": local.returncode,
+            "stderr": local.stderr[-4000:],
+        }
+
+    local_advisory = local.stdout.strip()
+    agy_prefix = str(handler.get("agy_prompt_prefix") or "")
+    agy_prompt = f"{agy_prefix}\n\nLOCAL_HERMES_ADVISORY (non-authoritative):\n{local_advisory}\n"
+    intent = {
+        "kind": "AGY_DISPATCH_PLAN",
+        "cycle": cycle,
+        "prompt_sha256": hashlib.sha256(agy_prompt.encode("utf-8")).hexdigest(),
+        "cwd": str(cwd),
+        "created_at": _now(),
+    }
+
+    # Persist intent before the at-least-once external effect. If the process
+    # dies before operation_id is bound, restart fails closed instead of replaying.
+    state["effect_intent"] = intent
+    _save_state(receipt_dir, state)
+
+    payload = _agy_dispatch_plan(
+        prompt=agy_prompt,
+        cwd=cwd,
+        timeout=int(handler.get("timeout", 90)),
+        max_calls=int(handler.get("max_calls", 1)),
+    )
+    operation_id = str(payload["operation_id"])
+    state["operation_id"] = operation_id
+    state["effects_started"] = int(state.get("effects_started", 0)) + 1
+    state["effect_intent"] = {**intent, "operation_id": operation_id, "bound_at": _now()}
+    _save_state(receipt_dir, state)
+    return {
+        "outcome": "AGY_OPERATION_STARTED",
+        "effect_started": True,
+        "operation_id": operation_id,
+        "source_attribution_state": payload.get("source_attribution_state"),
+        "base_head": payload.get("base_head"),
+        "local_advisory_sha256": hashlib.sha256(local_advisory.encode("utf-8")).hexdigest(),
+    }
+
+
+def run_controller(args: argparse.Namespace) -> int:
+    repo_root = Path(args.repo_root).resolve()
+    policy_path = Path(args.policy).resolve()
+    receipt_dir = Path(args.receipt_dir).resolve()
+    policy = _load_policy(policy_path)
+    run_id = (
+        args.run_id
+        or f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
+    )
+    state = _load_state(receipt_dir, run_id)
+
+    # Crash-consistency fence: never replay an external effect whose dispatch
+    # acknowledgement was lost before an operation_id could be persisted.
+    intent = state.get("effect_intent")
+    if isinstance(intent, dict) and intent and not intent.get("operation_id"):
+        cycle = int(state.get("last_cycle", 0)) + 1
+        _write_receipt(
+            receipt_dir,
+            run_id,
+            cycle,
+            {
+                "outcome": "BLOCK_UNBOUND_EFFECT_INTENT",
+                "effect_intent": intent,
+                "action": "RECONCILE_CANONICAL_OPERATION_JOURNAL_BEFORE_ANY_RETRY",
+            },
+        )
+        state["last_cycle"] = cycle
+        _save_state(receipt_dir, state)
+        print(
+            json.dumps({"run_id": run_id, "outcome": "BLOCK_UNBOUND_EFFECT_INTENT"}, sort_keys=True)
+        )
+        return 5
+
+    operation_id = args.operation_id or state.get("operation_id")
+    max_cycles = max(1, int(args.max_cycles))
+
+    for _ in range(max_cycles):
+        cycle = int(state.get("last_cycle", 0)) + 1
+        doctor = _doctor(
+            repo_root=repo_root,
+            repository=args.repository,
+            issue=args.issue,
+            pr=args.pr,
+            operation_id=operation_id,
+        )
+        guard = _guard_doctor(doctor)
+        disposition = doctor.get("resume_disposition")
+        next_gate = (doctor.get("next_gate") or {}).get("code")
+
+        base = {
+            "repository": args.repository,
+            "repo_root": str(repo_root),
+            "issue": args.issue,
+            "pr": args.pr,
+            "operation_id": operation_id,
+            "mode": args.mode,
+            "doctor_disposition": disposition,
+            "next_gate": next_gate,
+            "guard": guard,
+        }
+
+        if args.mode == "observe":
+            _write_receipt(receipt_dir, run_id, cycle, {**base, "outcome": "OBSERVED_ONLY"})
+            state["last_cycle"] = cycle
+            _save_state(receipt_dir, state)
+            print(
+                json.dumps(
+                    {"run_id": run_id, "outcome": "OBSERVED_ONLY", "next_gate": next_gate},
+                    sort_keys=True,
+                )
+            )
+            return 0
+
+        if guard.get("decision") in {"BLOCK", "BLOCK_UNKNOWN", "WAIT"}:
+            outcome = {
+                "BLOCK": "STOP_BLOCKED",
+                "BLOCK_UNKNOWN": "STOP_UNKNOWN",
+                "WAIT": "STOP_WAIT",
+            }[str(guard.get("decision"))]
+            _write_receipt(receipt_dir, run_id, cycle, {**base, "outcome": outcome})
+            state["last_cycle"] = cycle
+            _save_state(receipt_dir, state)
+            print(
+                json.dumps(
+                    {"run_id": run_id, "outcome": outcome, "next_gate": next_gate}, sort_keys=True
+                )
+            )
+            return 0 if outcome == "STOP_WAIT" else 4
+
+        if guard.get("decision") == "RECONCILE_EXISTING_EFFECT":
+            requested = (doctor.get("next_gate") or {}).get("operation_id")
+            if next_gate != "RECONCILE_OPERATION" or not requested or requested != operation_id:
+                _write_receipt(
+                    receipt_dir,
+                    run_id,
+                    cycle,
+                    {**base, "outcome": "STOP_RECONCILE_REQUIRES_EXACT_OPERATION"},
+                )
+                state["last_cycle"] = cycle
+                _save_state(receipt_dir, state)
+                print(
+                    json.dumps(
+                        {"run_id": run_id, "outcome": "STOP_RECONCILE_REQUIRES_EXACT_OPERATION"},
+                        sort_keys=True,
+                    )
+                )
+                return 4
+            reconciled = _agy_reconcile(operation_id, cwd=repo_root)
+            # Readback is mandatory, but do not retry or replace if still unknown.
+            after = _doctor(
+                repo_root=repo_root,
+                repository=args.repository,
+                issue=args.issue,
+                pr=args.pr,
+                operation_id=operation_id,
+            )
+            after_guard = _guard_doctor(after)
+            _write_receipt(
+                receipt_dir,
+                run_id,
+                cycle,
+                {
+                    **base,
+                    "outcome": "RECONCILED_EXACT_OPERATION",
+                    "reconciliation": reconciled,
+                    "post_effect_readback": {
+                        "doctor_disposition": after.get("resume_disposition"),
+                        "next_gate": (after.get("next_gate") or {}).get("code"),
+                        "guard": after_guard,
+                    },
+                },
+            )
+            state["last_cycle"] = cycle
+            _save_state(receipt_dir, state)
+            if (
+                after.get("resume_disposition") == "RECONCILE"
+                or after_guard.get("decision") == "RECONCILE_EXISTING_EFFECT"
+            ):
+                print(
+                    json.dumps(
+                        {
+                            "run_id": run_id,
+                            "outcome": "RECONCILED_STILL_UNKNOWN",
+                            "operation_id": operation_id,
+                        },
+                        sort_keys=True,
+                    )
+                )
+                return 6
+            continue
+
+        if guard.get("decision") == "NOOP_TERMINAL":
+            _write_receipt(receipt_dir, run_id, cycle, {**base, "outcome": "TERMINAL_NOOP"})
+            state["last_cycle"] = cycle
+            _save_state(receipt_dir, state)
+            print(json.dumps({"run_id": run_id, "outcome": "TERMINAL_NOOP"}, sort_keys=True))
+            return 0
+
+        if guard.get("decision") != "CONTINUE_EXACT_NEXT_GATE":
+            _write_receipt(
+                receipt_dir, run_id, cycle, {**base, "outcome": "STOP_UNSUPPORTED_GUARD_DECISION"}
+            )
+            state["last_cycle"] = cycle
+            _save_state(receipt_dir, state)
+            return 4
+
+        handler = (policy.get("handlers") or {}).get(next_gate)
+        if not isinstance(handler, dict):
+            _write_receipt(
+                receipt_dir,
+                run_id,
+                cycle,
+                {**base, "outcome": "STOP_NO_EXPLICIT_HANDLER"},
+            )
+            state["last_cycle"] = cycle
+            _save_state(receipt_dir, state)
+            print(
+                json.dumps(
+                    {
+                        "run_id": run_id,
+                        "outcome": "STOP_NO_EXPLICIT_HANDLER",
+                        "next_gate": next_gate,
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 4
+
+        kind = handler.get("kind")
+        if kind == "LOCAL_HERMES_THEN_AGY_PLAN":
+            result = _handler_local_then_agy(
+                handler=handler,
+                policy_path=policy_path,
+                state=state,
+                receipt_dir=receipt_dir,
+                run_id=run_id,
+                cycle=cycle,
+            )
+        else:  # defensive; policy loader already rejects this.
+            result = {"outcome": "STOP_UNSUPPORTED_HANDLER", "effect_started": False}
+
+        if not result.get("effect_started"):
+            _write_receipt(receipt_dir, run_id, cycle, {**base, "handler_kind": kind, **result})
+            state["last_cycle"] = cycle
+            _save_state(receipt_dir, state)
+            print(json.dumps({"run_id": run_id, **result}, sort_keys=True))
+            return 4
+
+        operation_id = str(result["operation_id"])
+        # Mandatory post-effect readback. It may be WAIT, RECONCILE, or terminal.
+        after = _doctor(
+            repo_root=repo_root,
+            repository=args.repository,
+            issue=args.issue,
+            pr=args.pr,
+            operation_id=operation_id,
+        )
+        after_guard = _guard_doctor(after)
+        _write_receipt(
+            receipt_dir,
+            run_id,
+            cycle,
+            {
+                **base,
+                "handler_kind": kind,
+                **result,
+                "post_effect_readback": {
+                    "doctor_disposition": after.get("resume_disposition"),
+                    "next_gate": (after.get("next_gate") or {}).get("code"),
+                    "guard": after_guard,
+                },
+            },
+        )
+        state["last_cycle"] = cycle
+        _save_state(receipt_dir, state)
+        if after_guard.get("decision") == "RECONCILE_EXISTING_EFFECT":
+            # Next loop may reconcile this exact operation; never redispatch.
+            if cycle >= max_cycles:
+                print(
+                    json.dumps(
+                        {
+                            "run_id": run_id,
+                            "outcome": "EFFECT_STARTED_RECONCILE_REQUIRED",
+                            "operation_id": operation_id,
+                        },
+                        sort_keys=True,
+                    )
+                )
+                return 6
+            continue
+        if after_guard.get("decision") == "WAIT":
+            print(
+                json.dumps(
+                    {
+                        "run_id": run_id,
+                        "outcome": "EFFECT_STARTED_WAIT",
+                        "operation_id": operation_id,
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0
+
+        # One external-effect budget per controller run protects boundedness.
+        print(
+            json.dumps(
+                {
+                    "run_id": run_id,
+                    "outcome": "EFFECT_STARTED_AND_READ_BACK",
+                    "operation_id": operation_id,
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    print(json.dumps({"run_id": run_id, "outcome": "MAX_CYCLES_REACHED"}, sort_keys=True))
+    return 0
+
+
+def run_frontier(args: argparse.Namespace) -> int:
+    signal = _load_json(Path(args.signal_file))
+    decision = _guard_escalate(signal)
+    run_id = (
+        args.run_id
+        or f"frontier-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
+    )
+    receipt_dir = Path(args.receipt_dir).resolve()
+
+    if decision.get("decision") != "ASK_FRONTIER_ADVISER":
+        _write_receipt(
+            receipt_dir,
+            run_id,
+            1,
+            {
+                "outcome": "LOCAL_CONTINUE_NO_FRONTIER_CALL",
+                "escalation": decision,
+            },
+            prefix="frontier",
+        )
+        print(
+            json.dumps(
+                {"run_id": run_id, "outcome": "LOCAL_CONTINUE_NO_FRONTIER_CALL"}, sort_keys=True
+            )
+        )
+        return 0
+
+    question = Path(args.question_file).read_text(encoding="utf-8")
+    prompt = (
+        "You are a frontier adviser inside a governed Nexus workflow. "
+        "Your output is advisory only. Do not claim authority, mutate state, "
+        "or instruct blind retries.\n\n"
+        f"ESCALATION_REASONS={json.dumps(decision.get('reasons') or [])}\n\n"
+        f"QUESTION:\n{question}"
+    )
+    result = _hermes_frontier(
+        prompt,
+        cwd=Path(args.cwd).resolve(),
+        provider=args.provider,
+        model=args.model,
+    )
+    outcome = "FRONTIER_ADVICE_RECEIVED" if result.returncode == 0 else "FRONTIER_TRANSPORT_FAILED"
+    _write_receipt(
+        receipt_dir,
+        run_id,
+        1,
+        {
+            "outcome": outcome,
+            "escalation": decision,
+            "provider": args.provider,
+            "model": args.model,
+            "returncode": result.returncode,
+            "advice": result.stdout.strip() if result.returncode == 0 else None,
+            "stderr": result.stderr[-4000:] if result.returncode != 0 else "",
+            "authority": "ADVISORY_ONLY",
+        },
+        prefix="frontier",
+    )
+    print(json.dumps({"run_id": run_id, "outcome": outcome}, sort_keys=True))
+    return 0 if result.returncode == 0 else 7
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    run = sub.add_parser("run")
+    run.add_argument("--policy", required=True)
+    run.add_argument("--repo-root", required=True)
+    run.add_argument("--repository", default="James3014/Nexus-new")
+    run.add_argument("--issue", type=int)
+    run.add_argument("--pr", type=int)
+    run.add_argument("--operation-id")
+    run.add_argument("--mode", choices=["observe", "execute"], default="observe")
+    run.add_argument("--receipt-dir", required=True)
+    run.add_argument("--run-id")
+    run.add_argument("--max-cycles", type=int, default=3)
+
+    frontier = sub.add_parser("frontier")
+    frontier.add_argument("--signal-file", required=True)
+    frontier.add_argument("--question-file", required=True)
+    frontier.add_argument("--cwd", required=True)
+    frontier.add_argument("--receipt-dir", required=True)
+    frontier.add_argument("--run-id")
+    frontier.add_argument("--provider", default="copilot")
+    frontier.add_argument("--model", default="gpt-4.1")
+
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    try:
+        if args.command == "run":
+            return run_controller(args)
+        return run_frontier(args)
+    except (
+        OSError,
+        ValueError,
+        RuntimeError,
+        json.JSONDecodeError,
+        subprocess.TimeoutExpired,
+    ) as exc:
+        print(
+            json.dumps(
+                {"outcome": "CONTROLLER_ERROR", "error": type(exc).__name__, "detail": str(exc)},
+                sort_keys=True,
+            )
+        )
+        return 8
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
