@@ -1065,6 +1065,57 @@ class TestAccountConcurrencyModel(unittest.TestCase):
         self.assertTrue(claim.released)
         self.assertFalse(coord.is_quarantined(acc.alias_hash))
 
+    def test_w_abandoned_parent_reference_and_surviving_receipt_fails_closed(self):
+        acc = AgyAccount(alias="abandon_acc", home_dir=f"{self.test_dir}/abandon_acc")
+        mgr = self._create_manager([acc])
+        coord = self._create_coordinator(mgr, timeout=0.1)
+        claim = coord.acquire_claim("worker-collab")
+        inherited_fd = os.dup(claim.lock_file_obj.fileno())
+        receipt_path = claim.receipt_path
+        try:
+            # Parent abandons reference while child holds inherited_fd
+            claim.abandon_parent_reference()
+            self.assertTrue(claim.released)
+            self.assertTrue(receipt_path.exists())
+
+            # Attempting to acquire by another worker fails because flock is held
+            with self.assertRaises(AgyAccountPoolBusyError):
+                coord.acquire_claim("worker-dispatcher", wait_timeout=0.1)
+        finally:
+            # Child terminates, closing inherited_fd
+            os.close(inherited_fd)
+
+        # Even after child process exits and flock is unlocked, the surviving receipt fails closed!
+        self.assertTrue(receipt_path.exists())
+        with self.assertRaises(AgyAccountPoolBusyError):
+            coord.acquire_claim("worker-dispatcher-2", wait_timeout=0.1)
+
+    def test_x_collaborative_and_dispatcher_coexistence_and_mutual_exclusion(self):
+        acc_a = AgyAccount(alias="acc_a", home_dir=f"{self.test_dir}/acc_a")
+        acc_b = AgyAccount(alias="acc_b", home_dir=f"{self.test_dir}/acc_b")
+        mgr = self._create_manager([acc_a, acc_b])
+        coord = self._create_coordinator(mgr, timeout=0.5)
+
+        # 1. Collaborative acquires account A
+        collab_claim = coord.acquire_claim("hcom_collab:1001:canary", wait_timeout=0.5)
+        held_alias = collab_claim.internal_id
+
+        # 2. Dispatcher acquires concurrently -> must receive account B, not account A
+        dispatch_claim = coord.acquire_claim("dispatcher:2002:gov", wait_timeout=0.5)
+        self.assertNotEqual(dispatch_claim.internal_id, held_alias)
+
+        # 3. Third claim cannot be acquired (pool busy)
+        with self.assertRaises(AgyAccountPoolBusyError):
+            coord.acquire_claim("worker-third", wait_timeout=0.1)
+
+        # 4. Release collaborative lease -> third claim can now acquire that released account
+        collab_claim.release()
+        third_claim = coord.acquire_claim("worker-third", wait_timeout=0.5)
+        self.assertEqual(third_claim.internal_id, held_alias)
+
+        third_claim.release()
+        dispatch_claim.release()
+
 
 if __name__ == "__main__":
     unittest.main()

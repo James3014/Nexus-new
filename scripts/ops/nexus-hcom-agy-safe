@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import signal
@@ -35,6 +36,64 @@ def _run(argv: list[str], *, env: dict[str, str] | None = None) -> subprocess.Co
     if proc.returncode != 0:
         raise SafeLauncherError(f"COMMAND_FAILED:{Path(argv[0]).name}:{proc.returncode}")
     return proc
+
+
+def _forwarded_model(args: list[str]) -> str | None:
+    for index, arg in enumerate(args):
+        if arg == "--model" and index + 1 < len(args):
+            return args[index + 1]
+        if arg.startswith("--model="):
+            value = arg.split("=", 1)[1].strip()
+            return value or None
+    return None
+
+
+def _bound_profile(manager_root: Path) -> tuple[str, Path, int]:
+    account = os.environ.get("NEXUS_HCOM_AGY_LEASE_ACCOUNT", "").strip()
+    profile_raw = os.environ.get("NEXUS_HCOM_AGY_PROFILE_HOME", "").strip()
+    lease_fd_raw = os.environ.get("NEXUS_HCOM_AGY_LEASE_FD", "").strip()
+    lease_id_hash = os.environ.get("NEXUS_HCOM_AGY_LEASE_ID_HASH", "").strip()
+    if not account or not profile_raw or not lease_fd_raw or not lease_id_hash:
+        raise SafeLauncherError("LEASE_BINDING_REQUIRED")
+    if "/" in account or account in {".", ".."}:
+        raise SafeLauncherError("LEASE_ACCOUNT_INVALID")
+
+    accounts_root = (manager_root / "accounts").resolve()
+    expected = (accounts_root / account).resolve()
+    profile = Path(profile_raw).expanduser().resolve()
+    if profile != expected or profile.parent != accounts_root or not (profile / ".gemini").is_dir():
+        raise SafeLauncherError("LEASE_PROFILE_MISMATCH")
+
+    try:
+        lease_fd = int(lease_fd_raw)
+        if lease_fd <= 2:
+            raise ValueError
+        os.fstat(lease_fd)
+    except (OSError, ValueError) as exc:
+        raise SafeLauncherError("LEASE_FD_INVALID") from exc
+    return account, profile, lease_fd
+
+
+def _delegate_to_dispatcher(args: list[str]) -> int:
+    dispatcher_raw = os.environ.get("NEXUS_AGY_DISPATCH_BIN") or shutil.which("nexus-agy-dispatch")
+    if not dispatcher_raw:
+        bundled = Path(__file__).with_name("nexus-agy-dispatch")
+        if bundled.is_file():
+            dispatcher_raw = str(bundled)
+    if not dispatcher_raw:
+        raise SafeLauncherError("AGY_DISPATCHER_NOT_FOUND")
+    command = [
+        str(Path(dispatcher_raw).expanduser().resolve()),
+        "--hcom-collab",
+        "--cwd",
+        str(Path.cwd().resolve()),
+        "--hcom-args-json",
+        json.dumps(args, separators=(",", ":")),
+    ]
+    model = _forwarded_model(args)
+    if model:
+        command += ["--model", model]
+    return int(subprocess.run(command, check=False).returncode)
 
 
 def _manager_active_profile(manager: Path, manager_root: Path) -> tuple[str, Path]:
@@ -174,6 +233,10 @@ def main(argv: list[str] | None = None) -> int:
         .resolve()
     )
     hcom_dir = Path(os.environ.get("HCOM_DIR", str(original_home / ".hcom"))).expanduser().resolve()
+    _reject_sensitive_hcom_env(hcom_dir)
+    if not os.environ.get("NEXUS_HCOM_AGY_LEASE_ACCOUNT", "").strip():
+        return _delegate_to_dispatcher(args)
+
     hcom_raw = os.environ.get("NEXUS_HCOM_BIN") or shutil.which("hcom")
     if not hcom_raw:
         raise SafeLauncherError("HCOM_NOT_FOUND")
@@ -181,8 +244,7 @@ def main(argv: list[str] | None = None) -> int:
     if not manager.is_file():
         raise SafeLauncherError("AGY_MANAGER_NOT_FOUND")
 
-    _reject_sensitive_hcom_env(hcom_dir)
-    _active, profile = _manager_active_profile(manager, manager_root)
+    _account, profile, lease_fd = _bound_profile(manager_root)
     state_root.mkdir(parents=True, exist_ok=True)
     state_root.chmod(0o700)
     session_home = Path(tempfile.mkdtemp(prefix="session.", dir=str(state_root))).resolve()
@@ -205,7 +267,10 @@ def main(argv: list[str] | None = None) -> int:
             previous_handlers[signum] = signal.getsignal(signum)
             signal.signal(signum, forward)
         child = subprocess.Popen(
-            [str(hcom), "agy", "--terminal", "here", *args], env=env, text=True
+            [str(hcom), "agy", "--terminal", "here", *args],
+            env=env,
+            text=True,
+            pass_fds=(lease_fd,),
         )
         return int(child.wait())
     finally:

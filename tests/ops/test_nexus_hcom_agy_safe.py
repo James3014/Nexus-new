@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import fcntl
+import importlib.machinery
+import importlib.util
 import json
 import os
 import stat
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -80,6 +84,7 @@ if len(sys.argv) >= 2 and sys.argv[1] == "agy":
         "auth_present": (home / ".gemini" / "auth.json").is_file(),
         "auth_value": (home / ".gemini" / "auth.json").read_text(),
         "keychain_present": (home / "Library" / "Keychains" / "agy.keychain-db").is_file(),
+        "lease_fd_open": bool(os.fstat(int(os.environ["NEXUS_HCOM_AGY_LEASE_FD"]))),
         "stale_marker": (home / "stale-marker.txt").exists(),
         "sensitive_present": any(
             key in os.environ
@@ -129,15 +134,23 @@ raise SystemExit(2)
         "GITHUB_ENTERPRISE_TOKEN": "must-not-leak",
         "GITHUB_PAT": "must-not-leak",
         "GITHUB_ACTIONS_TOKEN": "must-not-leak",
+        "NEXUS_HCOM_AGY_LEASE_ACCOUNT": "google-active",
+        "NEXUS_HCOM_AGY_PROFILE_HOME": str(profile),
+        "NEXUS_HCOM_AGY_LEASE_ID_HASH": "lease-hash",
     })
 
-    proc = subprocess.run(
-        [sys.executable, str(LAUNCHER), "--model", "gpt-oss-120b-medium"],
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    lease_path = tmp_path / "lease.lock"
+    with lease_path.open("a+") as lease_fh:
+        lease_fd = lease_fh.fileno()
+        env["NEXUS_HCOM_AGY_LEASE_FD"] = str(lease_fd)
+        proc = subprocess.run(
+            [sys.executable, str(LAUNCHER), "--model", "gpt-oss-120b-medium"],
+            env=env,
+            pass_fds=(lease_fd,),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
 
     assert proc.returncode == 0, proc.stderr
     payload = json.loads(record_path.read_text(encoding="utf-8"))
@@ -146,6 +159,7 @@ raise SystemExit(2)
     assert payload["auth_present"] is True
     assert payload["auth_value"] == "active-auth"
     assert payload["keychain_present"] is True
+    assert payload["lease_fd_open"] is True
     assert payload["sensitive_present"] is False
     assert payload["gemini_home"] == payload["home"]
     assert payload["hcom_dir"] == str((original_home / ".hcom").resolve())
@@ -218,3 +232,532 @@ def test_launcher_rejects_sensitive_hcom_passthrough_before_account_copy(tmp_pat
     assert proc.returncode == 2
     assert "HCOM_ENV_FORBIDDEN_KEY:GITHUB_TOKEN" in proc.stderr
     assert not (original_home / ".local" / "state" / "hcom-agy-safe").exists()
+
+
+def test_unleased_launcher_delegates_to_canonical_dispatcher(tmp_path: Path) -> None:
+    original_home = tmp_path / "owner-home"
+    original_home.mkdir()
+    dispatcher_record = tmp_path / "dispatcher.json"
+    dispatcher = tmp_path / "nexus-agy-dispatch"
+    _write_executable(
+        dispatcher,
+        """#!/usr/bin/env python3
+import json, os, pathlib, sys
+pathlib.Path(os.environ["DISPATCHER_RECORD"]).write_text(json.dumps(sys.argv[1:]))
+raise SystemExit(0)
+""",
+    )
+    env = os.environ.copy()
+    env.update({
+        "HOME": str(original_home),
+        "NEXUS_AGY_DISPATCH_BIN": str(dispatcher),
+        "DISPATCHER_RECORD": str(dispatcher_record),
+    })
+    proc = subprocess.run(
+        [sys.executable, str(LAUNCHER), "--model", "gemini-3.8-flash-high"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    argv = json.loads(dispatcher_record.read_text(encoding="utf-8"))
+    assert argv[:3] == ["--hcom-collab", "--cwd", str(tmp_path.resolve())]
+    assert "--hcom-args-json" in argv
+    forwarded = json.loads(argv[argv.index("--hcom-args-json") + 1])
+    assert forwarded == ["--model", "gemini-3.8-flash-high"]
+    assert argv[-2:] == ["--model", "gemini-3.8-flash-high"]
+
+
+def test_stale_lock_free_receipt_fails_closed(tmp_path: Path) -> None:
+    from nexus.services.agy_account_pool import (
+        AgyAccount,
+        AgyAccountPoolBusyError,
+        AgyAccountPoolManager,
+        CrossProcessLeaseCoordinator,
+    )
+
+    home = tmp_path / "account-home"
+    home.mkdir()
+    manager = AgyAccountPoolManager(
+        accounts=[AgyAccount(alias="google-a", home_dir=str(home))],
+        use_real_manager=False,
+    )
+    leases = tmp_path / "leases"
+    coordinator = CrossProcessLeaseCoordinator(
+        manager=manager,
+        allocator_lock_path=tmp_path / "allocator.lock",
+        leases_dir=leases,
+        default_wait_timeout=0,
+    )
+    alias_hash = manager._accounts[0].alias_hash
+    leases.mkdir()
+    receipt = leases / f"{alias_hash}.receipt.json"
+    receipt.write_text('{"unresolved": true}\n', encoding="utf-8")
+
+    try:
+        coordinator.acquire_claim("consumer-new", wait_timeout=0)
+    except AgyAccountPoolBusyError:
+        pass
+    else:
+        raise AssertionError("stale receipt must block account reuse")
+    assert receipt.read_text(encoding="utf-8") == '{"unresolved": true}\n'
+
+
+def test_abandoned_parent_reference_keeps_inherited_flock_and_receipt(tmp_path: Path) -> None:
+    from nexus.services.agy_account_pool import (
+        AgyAccount,
+        AgyAccountPoolManager,
+        CrossProcessLeaseCoordinator,
+    )
+
+    home = tmp_path / "account-home"
+    home.mkdir()
+    manager = AgyAccountPoolManager(
+        accounts=[AgyAccount(alias="google-a", home_dir=str(home))],
+        use_real_manager=False,
+    )
+    coordinator = CrossProcessLeaseCoordinator(
+        manager=manager,
+        allocator_lock_path=tmp_path / "allocator.lock",
+        leases_dir=tmp_path / "leases",
+    )
+    claim = coordinator.acquire_claim("consumer-a")
+    inherited_fd = os.dup(claim.lock_file_obj.fileno())
+    receipt = claim.receipt_path
+    try:
+        claim.abandon_parent_reference()
+        assert receipt.exists()
+        contender = claim.lock_path.open("a+")
+        try:
+            try:
+                fcntl.flock(contender.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                pass
+            else:
+                raise AssertionError("inherited descriptor must keep the account flock held")
+        finally:
+            contender.close()
+    finally:
+        os.close(inherited_fd)
+    assert receipt.exists()
+
+
+def _load_dispatch_module(monkeypatch) -> types.ModuleType:
+    monkeypatch.setenv("NEXUS_AGY_SNAPSHOT", str(ROOT))
+    path = ROOT / "scripts" / "ops" / "nexus-agy-dispatch"
+    loader = importlib.machinery.SourceFileLoader("nexus_agy_dispatch_phase_a_test", str(path))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+class _FakeClaim:
+    def __init__(self, profile: Path, lock_fh, alias_hash="alias-hash", internal_id=None) -> None:
+        self.internal_id = internal_id or profile.name
+        self.account_alias_hash = alias_hash
+        self.lease_id_hash = "lease-hash"
+        self.lease = types.SimpleNamespace(execution_env={"HOME": str(profile)})
+        self.lock_file_obj = lock_fh
+        self.lock_path = profile.parent.parent / "leases" / f"{alias_hash}.lock"
+        self.receipt_path = profile.parent.parent / "leases" / f"{alias_hash}.receipt.json"
+        self.released = False
+        self.abandoned = False
+
+    def release(self) -> None:
+        self.released = True
+        if self.receipt_path.exists():
+            try:
+                self.receipt_path.unlink()
+            except OSError:
+                pass
+
+    def abandon_parent_reference(self) -> None:
+        self.abandoned = True
+
+
+class _FakeCoordinator:
+    def __init__(self, claim: _FakeClaim) -> None:
+        self.claim = claim
+        self.calls = []
+
+    def acquire_claim(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.claim
+
+
+def test_dispatcher_binds_exact_claim_to_hcom_child_and_releases_cleanly(
+    tmp_path: Path, monkeypatch
+) -> None:
+    module = _load_dispatch_module(monkeypatch)
+    manager_root = tmp_path / "runtime"
+    profile = manager_root / "accounts" / "google-a"
+    profile.mkdir(parents=True)
+    module.MANAGER_ROOT = manager_root
+    monkeypatch.setattr(
+        module,
+        "_apply_dynamic_availability",
+        lambda _model: ({}, {"family": "other"}),
+    )
+
+    launcher = tmp_path / "hcom-agy-safe"
+    launcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    launcher.chmod(0o755)
+    lock_fh = (tmp_path / "lease.lock").open("a+")
+    claim = _FakeClaim(profile, lock_fh)
+    coordinator = _FakeCoordinator(claim)
+    captured = {}
+
+    class Child:
+        def __init__(self):
+            self.pid = 42424
+
+        def wait(self):
+            return 0
+
+        def poll(self):
+            return 0
+
+    def fake_popen(argv, **kwargs):
+        captured["argv"] = argv
+        captured.update(kwargs)
+        return Child()
+
+    try:
+        code = module.dispatch_hcom_collab(
+            cwd=str(tmp_path),
+            hcom_args=["--model", "gemini-3.8-flash-high"],
+            model="gemini-3.8-flash-high",
+            coordinator=coordinator,
+            popen_factory=fake_popen,
+            launcher_path=launcher,
+        )
+    finally:
+        lock_fh.close()
+
+    assert code == 0
+    assert claim.released is True
+    assert claim.abandoned is False
+    assert captured["env"]["NEXUS_HCOM_AGY_LEASE_ACCOUNT"] == "google-a"
+    assert captured["env"]["NEXUS_HCOM_AGY_PROFILE_HOME"] == str(profile.resolve())
+    assert captured["env"]["NEXUS_HCOM_AGY_LEASE_ID_HASH"] == "lease-hash"
+    assert captured["pass_fds"]
+
+
+def test_dispatcher_abandons_parent_reference_when_live_child_terminality_is_unknown(
+    tmp_path: Path, monkeypatch
+) -> None:
+    module = _load_dispatch_module(monkeypatch)
+    manager_root = tmp_path / "runtime"
+    profile = manager_root / "accounts" / "google-a"
+    profile.mkdir(parents=True)
+    module.MANAGER_ROOT = manager_root
+    monkeypatch.setattr(
+        module,
+        "_apply_dynamic_availability",
+        lambda _model: ({}, {"family": "other"}),
+    )
+
+    launcher = tmp_path / "hcom-agy-safe"
+    launcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    launcher.chmod(0o755)
+    lock_fh = (tmp_path / "lease.lock").open("a+")
+    claim = _FakeClaim(profile, lock_fh)
+    coordinator = _FakeCoordinator(claim)
+
+    class Child:
+        def __init__(self):
+            self.pid = 42425
+
+        def wait(self):
+            raise KeyboardInterrupt
+
+        def poll(self):
+            return None
+
+    try:
+        try:
+            module.dispatch_hcom_collab(
+                cwd=str(tmp_path),
+                hcom_args=[],
+                model=None,
+                coordinator=coordinator,
+                popen_factory=lambda *_args, **_kwargs: Child(),
+                launcher_path=launcher,
+            )
+        except KeyboardInterrupt:
+            pass
+        else:
+            raise AssertionError("expected simulated parent interruption")
+    finally:
+        lock_fh.close()
+
+    assert claim.abandoned is True
+    assert claim.released is False
+
+
+def test_dispatcher_pool_busy_returns_canonical_75_without_launch(
+    tmp_path: Path, monkeypatch
+) -> None:
+    module = _load_dispatch_module(monkeypatch)
+    monkeypatch.setattr(
+        module,
+        "_apply_dynamic_availability",
+        lambda _model: ({}, {"family": "other"}),
+    )
+
+    class BusyCoordinator:
+        def acquire_claim(self, **_kwargs):
+            raise module.AgyAccountPoolBusyError("busy")
+
+    code = module.dispatch_hcom_collab(
+        cwd=str(tmp_path),
+        hcom_args=[],
+        model=None,
+        coordinator=BusyCoordinator(),
+        popen_factory=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("child must not launch")
+        ),
+        launcher_path=tmp_path / "unused-launcher",
+    )
+    assert code == 75
+
+
+def test_foreground_collaborative_operation_journals_clean_completion(
+    tmp_path: Path, monkeypatch
+) -> None:
+    module = _load_dispatch_module(monkeypatch)
+    operation_root = tmp_path / "operations"
+
+    def fake_dispatch(**kwargs):
+        hook = kwargs["operation_hook"]
+        hook({
+            "phase": "ACCOUNT_LEASED",
+            "attempts": 1,
+            "rotations": 0,
+            "account_alias_hash": "alias-hash",
+            "lease_id_hash": "lease-hash",
+        })
+        hook({
+            "phase": "EXECUTING",
+            "attempts": 1,
+            "rotations": 0,
+            "account_alias_hash": "alias-hash",
+            "lease_id_hash": "lease-hash",
+            "provider_pid": 5555,
+        })
+        return 0
+
+    monkeypatch.setattr(module, "dispatch_hcom_collab", fake_dispatch)
+    code = module._run_foreground_hcom_operation(
+        cwd=str(tmp_path),
+        hcom_args=["--model", "gemini-3.8-flash-high"],
+        model="gemini-3.8-flash-high",
+        pool_wait_timeout=1,
+        operation_root=operation_root,
+    )
+    assert code == 0
+    operation_ids = [path.name for path in (operation_root / "operations").iterdir()]
+    assert len(operation_ids) == 1
+    record = module.AgyOperationJournal(operation_root).read(operation_ids[0])
+    assert record["status"] == "COMPLETED"
+    assert record["phase"] == "TERMINAL"
+    assert record["account_alias_hash"] == "alias-hash"
+    assert record["lease_id_hash"] == "lease-hash"
+    assert record["provider_pid"] == 5555
+
+
+def test_foreground_collaborative_operation_marks_preprovider_abort_failed(
+    tmp_path: Path, monkeypatch
+) -> None:
+    module = _load_dispatch_module(monkeypatch)
+    operation_root = tmp_path / "operations"
+
+    def fail_before_provider(**_kwargs):
+        raise RuntimeError("pre-provider")
+
+    monkeypatch.setattr(module, "dispatch_hcom_collab", fail_before_provider)
+    try:
+        module._run_foreground_hcom_operation(
+            cwd=str(tmp_path),
+            hcom_args=[],
+            model=None,
+            pool_wait_timeout=1,
+            operation_root=operation_root,
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "pre-provider"
+    else:
+        raise AssertionError("expected pre-provider failure")
+
+    operation_ids = [path.name for path in (operation_root / "operations").iterdir()]
+    assert len(operation_ids) == 1
+    record = module.AgyOperationJournal(operation_root).read(operation_ids[0])
+    assert record["status"] == "FAILED"
+    assert record["reconciliation"]["result"] == "HCOM_COLLAB_ABORT_BEFORE_PROVIDER"
+    assert record["reconciliation"]["retry_permitted"] is False
+
+
+def test_collaborative_and_dispatcher_bidirectional_mutual_exclusion(tmp_path: Path) -> None:
+    """Prove collaborative A holding account A blocks dispatcher from A, and vice-versa."""
+    from nexus.services.agy_account_pool import (
+        AgyAccount,
+        AgyAccountPoolBusyError,
+        AgyAccountPoolManager,
+        CrossProcessLeaseCoordinator,
+    )
+
+    home_a = tmp_path / "account-a"
+    home_a.mkdir()
+    manager = AgyAccountPoolManager(
+        accounts=[AgyAccount(alias="google-a", home_dir=str(home_a))],
+        use_real_manager=False,
+    )
+    leases = tmp_path / "leases"
+    coordinator = CrossProcessLeaseCoordinator(
+        manager=manager,
+        allocator_lock_path=tmp_path / "allocator.lock",
+        leases_dir=leases,
+        default_wait_timeout=0.1,
+    )
+
+    # Leg 1: collaborative holds account A -> dispatcher cannot claim A
+    collab_claim = coordinator.acquire_claim("hcom_collab:1234:abc", wait_timeout=0.1)
+    assert collab_claim.internal_id == "google-a"
+    try:
+        coordinator.acquire_claim("dispatcher-consumer", wait_timeout=0.1)
+    except AgyAccountPoolBusyError:
+        pass
+    else:
+        raise AssertionError("dispatcher must be blocked when collaborative holds account A")
+    collab_claim.release()
+
+    # Leg 2: dispatcher holds account A -> collaborative cannot claim A
+    dispatch_claim = coordinator.acquire_claim("dispatcher-consumer", wait_timeout=0.1)
+    assert dispatch_claim.internal_id == "google-a"
+    try:
+        coordinator.acquire_claim("hcom_collab:5678:def", wait_timeout=0.1)
+    except AgyAccountPoolBusyError:
+        pass
+    else:
+        raise AssertionError("collaborative must be blocked when dispatcher holds account A")
+    dispatch_claim.release()
+
+
+def test_collaborative_and_dispatcher_distinct_account_parallelism(tmp_path: Path) -> None:
+    """Prove collaborative holding account A permits dispatcher to select eligible B."""
+    from nexus.services.agy_account_pool import (
+        AgyAccount,
+        AgyAccountPoolManager,
+        CrossProcessLeaseCoordinator,
+    )
+
+    home_a = tmp_path / "account-a"
+    home_a.mkdir()
+    home_b = tmp_path / "account-b"
+    home_b.mkdir()
+    manager = AgyAccountPoolManager(
+        accounts=[
+            AgyAccount(alias="google-a", home_dir=str(home_a)),
+            AgyAccount(alias="google-b", home_dir=str(home_b)),
+        ],
+        use_real_manager=False,
+    )
+    leases = tmp_path / "leases"
+    coordinator = CrossProcessLeaseCoordinator(
+        manager=manager,
+        allocator_lock_path=tmp_path / "allocator.lock",
+        leases_dir=leases,
+        default_wait_timeout=0.5,
+    )
+
+    # Collaborative acquires account A
+    collab_claim = coordinator.acquire_claim("hcom_collab:1234:abc", wait_timeout=0.5)
+    assert collab_claim.internal_id in {"google-a", "google-b"}
+    held_id = collab_claim.internal_id
+    expected_other = "google-b" if held_id == "google-a" else "google-a"
+
+    # Dispatcher acquires parallel claim -> must receive distinct eligible account B
+    dispatch_claim = coordinator.acquire_claim("dispatcher-consumer", wait_timeout=0.5)
+    assert dispatch_claim.internal_id == expected_other
+    assert dispatch_claim.internal_id != collab_claim.internal_id
+
+    # Clean release of both
+    dispatch_claim.release()
+    collab_claim.release()
+
+
+def test_hcom_registry_disappearance_with_surviving_agy_process_requires_reconcile(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """hcom list == [] does NOT prove Agy absence.
+
+    When metadata is reset/lost while provider process survives, reconciliation
+    must return RECONCILE_REQUIRED, not free/absent, and must preserve the lease.
+    """
+    module = _load_dispatch_module(monkeypatch)
+    op_root = tmp_path / "operations"
+    journal = module.AgyOperationJournal(op_root)
+    op_id = module.new_operation_id()
+    journal.create(
+        operation_id=op_id,
+        attempt_id=module.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-3.8-flash-high",
+        effort=None,
+        prompt_sha256="dummy",
+        runtime_revision="rev1",
+        initial_fields={
+            "mode": "hcom_collab",
+            "account_alias_hash": "alias-a",
+            "lease_id_hash": "lease-a",
+        },
+    )
+    parent_pid = 999999
+    surviving_pid = 888888
+    journal.mark_started(op_id, pid=parent_pid)
+
+    # Create dummy leases dir and receipt for account alias-a
+    leases_dir = tmp_path / "leases"
+    leases_dir.mkdir(parents=True)
+    module.LEASES_DIR = leases_dir
+    receipt_file = leases_dir / "alias-a.receipt.json"
+    receipt_file.write_text(
+        json.dumps({
+            "account_alias_hash": "alias-a",
+            "lease_id_hash": "lease-a",
+            "pid": parent_pid,
+        }),
+        encoding="utf-8",
+    )
+    lock_file = leases_dir / "alias-a.lock"
+    lock_file.touch()
+
+    # Simulate surviving child process while parent is dead
+    journal.update(op_id, provider_pid=surviving_pid, phase="EXECUTING")
+
+    # Simulate hcom registry loss: hcom list returns empty []
+    # Even with hcom list == [], reconcile MUST NOT declare FREE
+    monkeypatch.setattr(
+        module._agy_operation_journal,
+        "_process_alive",
+        lambda p: p == surviving_pid,
+    )
+    monkeypatch.setattr(
+        module._agy_operation_journal,
+        "_stop_operation_processes",
+        lambda *a, **k: (True, True, False),
+    )
+
+    # Reconcile operation
+    rec = module._reconcile_operation(journal, op_id)
+    assert rec["phase"] == "RECONCILE_REQUIRED"
+    assert rec["reconciliation"]["provider_alive_after"] is True
+    assert rec["reconciliation"]["retry_permitted"] is False
+    assert rec["reconciliation"]["lease_cleanup"]["result"] == "NOT_SAFE_TO_CLEAN"
+    # Lease receipt must be preserved!
+    assert receipt_file.exists()
