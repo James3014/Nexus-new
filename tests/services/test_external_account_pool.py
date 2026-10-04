@@ -121,6 +121,7 @@ def test_rotation_eligible_failure_kinds(failure_kind: AccountFailureKind) -> No
         AccountFailureKind.PERMISSION_OR_SCOPE_ERROR,
         AccountFailureKind.PROVIDER_STALLED,
         AccountFailureKind.PROVIDER_STREAM_NO_PROGRESS,
+        AccountFailureKind.PRE_EFFECT_TOOL_THRASH,
         AccountFailureKind.UNKNOWN,
     ],
 )

@@ -894,6 +894,8 @@ def test_background_spawn_returns_durable_operation_identity(tmp_path: Path, mon
         write_paths=[str(tmp_path / "target.txt")],
         provider_stall_seconds=17.0,
         stream_no_progress_seconds=29.0,
+        pre_effect_max_seconds=41.0,
+        pre_effect_max_tool_events=13,
     )
 
     assert record["status"] == "QUEUED"
@@ -904,10 +906,14 @@ def test_background_spawn_returns_durable_operation_identity(tmp_path: Path, mon
     assert "--operation-run" in captured["argv"]
     assert captured["argv"][captured["argv"].index("--provider-stall-seconds") + 1] == "17.0"
     assert captured["argv"][captured["argv"].index("--stream-no-progress-seconds") + 1] == "29.0"
+    assert captured["argv"][captured["argv"].index("--pre-effect-max-seconds") + 1] == "41.0"
+    assert captured["argv"][captured["argv"].index("--pre-effect-max-tool-events") + 1] == "13"
     assert record["liveness_policy"] == {
         "coding_progress_required": True,
         "provider_stall_seconds": 17.0,
         "stream_no_progress_seconds": 29.0,
+        "pre_effect_max_seconds": 41.0,
+        "pre_effect_max_tool_events": 13,
     }
     assert captured["kwargs"]["start_new_session"] is True
     prompt_path = root / "operations" / record["operation_id"] / ".prompt"
@@ -2454,6 +2460,182 @@ def test_run_agy_tool_activity_resets_stream_no_progress_watchdog(
     assert tool_events[-1]["tool_event_count"] == 1
     assert tool_events[-1]["first_tool_activity_at"]
     assert tool_events[-1]["last_progress_activity_at"]
+
+
+def test_run_agy_pre_effect_tool_event_budget_classifies_thrash(
+    tmp_path: Path, monkeypatch
+) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "-C", str(work), "init"], check=True, capture_output=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_agy = bin_dir / "agy"
+    session_id = "22222222-3333-4444-5555-666666666666"
+    fake_agy.write_text(
+        "#!"
+        + sys.executable
+        + "\nimport json, os, sys, time\n"
+        + "from pathlib import Path\n"
+        + f"session = {session_id!r}\n"
+        + "log = Path(sys.argv[sys.argv.index('--log-file') + 1])\n"
+        + "log.write_text('I server.go:1263] Created conversation ' + session + '\\n'"
+        + " + 'I http_helpers.go:315] URL: https://example/v1internal:streamGenerateContent?alt=sse\\n')\n"
+        + "transcript = Path(os.environ['HOME']) / '.gemini' / 'antigravity-cli' / 'brain' / session / '.system_generated' / 'logs' / 'transcript_full.jsonl'\n"
+        + "transcript.parent.mkdir(parents=True, exist_ok=True)\n"
+        + "transcript.write_text(json.dumps({'source':'MODEL','type':'PLANNER_RESPONSE','tool_calls':[{'name':'view_file','args':{}},{'name':'run_command','args':{}},{'name':'view_file','args':{}}]}) + '\\n')\n"
+        + "time.sleep(2)\n",
+        encoding="utf-8",
+    )
+    fake_agy.chmod(0o700)
+    log = tmp_path / "agy.log"
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(log))
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+
+    events: list[dict[str, object]] = []
+    code, _out, err, timed_out, _wall_ms = dispatch.run_agy(
+        env=env,
+        prompt="bounded coding",
+        cwd=str(work),
+        mode="accept-edits",
+        model=None,
+        effort=None,
+        timeout=5,
+        operation_hook=events.append,
+        expect_coding_progress=True,
+        provider_stall_seconds=0.5,
+        stream_no_progress_seconds=5,
+        pre_effect_max_seconds=5,
+        pre_effect_max_tool_events=3,
+    )
+
+    assert code != 0
+    assert timed_out is False
+    assert "NEXUS_AGY_NON_PROGRESS:PRE_EFFECT_TOOL_THRASH" in err
+    assert any(event.get("tool_event_count") == 3 for event in events)
+    assert not any(event.get("first_effect_at") for event in events)
+    assert (
+        dispatch.classify_failure(code, "", err, timed_out)
+        == dispatch.AccountFailureKind.PRE_EFFECT_TOOL_THRASH
+    )
+
+
+def test_run_agy_pre_effect_time_budget_classifies_thrash(tmp_path: Path, monkeypatch) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "-C", str(work), "init"], check=True, capture_output=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_agy = bin_dir / "agy"
+    session_id = "33333333-4444-5555-6666-777777777777"
+    fake_agy.write_text(
+        "#!"
+        + sys.executable
+        + "\nimport json, os, sys, time\n"
+        + "from pathlib import Path\n"
+        + f"session = {session_id!r}\n"
+        + "log = Path(sys.argv[sys.argv.index('--log-file') + 1])\n"
+        + "log.write_text('I server.go:1263] Created conversation ' + session + '\\n'"
+        + " + 'I http_helpers.go:315] URL: https://example/v1internal:streamGenerateContent?alt=sse\\n')\n"
+        + "transcript = Path(os.environ['HOME']) / '.gemini' / 'antigravity-cli' / 'brain' / session / '.system_generated' / 'logs' / 'transcript_full.jsonl'\n"
+        + "transcript.parent.mkdir(parents=True, exist_ok=True)\n"
+        + "transcript.write_text(json.dumps({'source':'MODEL','type':'PLANNER_RESPONSE','tool_calls':[{'name':'view_file','args':{}}]}) + '\\n')\n"
+        + "time.sleep(2)\n",
+        encoding="utf-8",
+    )
+    fake_agy.chmod(0o700)
+    log = tmp_path / "agy.log"
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(log))
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+
+    code, _out, err, timed_out, _wall_ms = dispatch.run_agy(
+        env=env,
+        prompt="bounded coding",
+        cwd=str(work),
+        mode="accept-edits",
+        model=None,
+        effort=None,
+        timeout=5,
+        expect_coding_progress=True,
+        provider_stall_seconds=0.5,
+        stream_no_progress_seconds=5,
+        pre_effect_max_seconds=0.15,
+        pre_effect_max_tool_events=100,
+    )
+
+    assert code != 0
+    assert timed_out is False
+    assert "NEXUS_AGY_NON_PROGRESS:PRE_EFFECT_TOOL_THRASH" in err
+
+
+def test_run_agy_source_effect_before_pre_effect_budget_prevents_false_positive(
+    tmp_path: Path, monkeypatch
+) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "-C", str(work), "init"], check=True, capture_output=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    effect = work / "effect.txt"
+    fake_agy = bin_dir / "agy"
+    session_id = "44444444-5555-6666-7777-888888888888"
+    fake_agy.write_text(
+        "#!"
+        + sys.executable
+        + "\nimport json, os, sys, time\n"
+        + "from pathlib import Path\n"
+        + f"session = {session_id!r}\n"
+        + "log = Path(sys.argv[sys.argv.index('--log-file') + 1])\n"
+        + "log.write_text('I server.go:1263] Created conversation ' + session + '\\n'"
+        + " + 'I http_helpers.go:315] URL: https://example/v1internal:streamGenerateContent?alt=sse\\n')\n"
+        + "transcript = Path(os.environ['HOME']) / '.gemini' / 'antigravity-cli' / 'brain' / session / '.system_generated' / 'logs' / 'transcript_full.jsonl'\n"
+        + "transcript.parent.mkdir(parents=True, exist_ok=True)\n"
+        + "transcript.write_text(json.dumps({'source':'MODEL','type':'PLANNER_RESPONSE','tool_calls':[{'name':'write_file','args':{}}]}) + '\\n')\n"
+        + "time.sleep(0.1)\n"
+        + "Path(os.environ['AGY_EFFECT_PATH']).write_text('effect')\n"
+        + "time.sleep(0.3)\n",
+        encoding="utf-8",
+    )
+    fake_agy.chmod(0o700)
+    log = tmp_path / "agy.log"
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(log))
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env["AGY_EFFECT_PATH"] = str(effect)
+
+    events: list[dict[str, object]] = []
+    code, _out, err, timed_out, _wall_ms = dispatch.run_agy(
+        env=env,
+        prompt="write once",
+        cwd=str(work),
+        mode="accept-edits",
+        model=None,
+        effort=None,
+        timeout=5,
+        operation_hook=events.append,
+        expect_coding_progress=True,
+        provider_stall_seconds=0.5,
+        stream_no_progress_seconds=5,
+        pre_effect_max_seconds=0.2,
+        pre_effect_max_tool_events=100,
+    )
+
+    assert code == 0
+    assert timed_out is False
+    assert effect.read_text(encoding="utf-8") == "effect"
+    assert "NEXUS_AGY_NON_PROGRESS:PRE_EFFECT_TOOL_THRASH" not in err
+    assert any(event.get("first_effect_at") for event in events)
 
 
 def test_run_agy_drains_previous_transcript_before_session_switch(
