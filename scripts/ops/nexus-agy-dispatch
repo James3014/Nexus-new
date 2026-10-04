@@ -1260,6 +1260,30 @@ def run_agy(
         if operation_hook:
             _operation_hook(operation_hook, **payload)
 
+    def _advance_provider_sessions(
+        sessions: list[str],
+        *,
+        observed_at: float,
+    ) -> None:
+        nonlocal provider_session_id, transcript_path, transcript_offset
+        for session_id in sessions:
+            if session_id == provider_session_id:
+                continue
+            if transcript_path is not None:
+                transcript_offset, prior_tool_events = _read_new_tool_activity(
+                    transcript_path,
+                    offset=transcript_offset,
+                )
+                _record_tool_events(prior_tool_events, observed_at=observed_at)
+            provider_session_id = session_id
+            transcript_path = _agy_transcript_path(env, provider_session_id)
+            transcript_offset = 0
+            if operation_hook:
+                _operation_hook(
+                    operation_hook,
+                    provider_session_id=provider_session_id,
+                )
+
     def _drain_stdout(stream, sink: list[str]) -> None:
         nonlocal first_stream_monotonic
         if stream is None:
@@ -1326,22 +1350,7 @@ def run_agy(
                     offset=provider_log_offset,
                 )
                 if new_sessions:
-                    latest_session = new_sessions[-1]
-                    if latest_session != provider_session_id:
-                        if transcript_path is not None:
-                            transcript_offset, prior_tool_events = _read_new_tool_activity(
-                                transcript_path,
-                                offset=transcript_offset,
-                            )
-                            _record_tool_events(prior_tool_events, observed_at=now)
-                        provider_session_id = latest_session
-                        transcript_path = _agy_transcript_path(env, provider_session_id)
-                        transcript_offset = 0
-                        if operation_hook:
-                            _operation_hook(
-                                operation_hook,
-                                provider_session_id=provider_session_id,
-                            )
+                    _advance_provider_sessions(new_sessions, observed_at=now)
                 if stream_events:
                     now_iso = _agy_operation_journal.utc_now()
                     if first_stream_monotonic is None:
@@ -1535,22 +1544,10 @@ def run_agy(
         offset=provider_log_offset,
     )
     if final_sessions:
-        latest_session = final_sessions[-1]
-        if latest_session != provider_session_id:
-            if transcript_path is not None:
-                transcript_offset, prior_tool_events = _read_new_tool_activity(
-                    transcript_path,
-                    offset=transcript_offset,
-                )
-                _record_tool_events(prior_tool_events, observed_at=time.monotonic())
-            provider_session_id = latest_session
-            transcript_path = _agy_transcript_path(env, provider_session_id)
-            transcript_offset = 0
-            if operation_hook:
-                _operation_hook(
-                    operation_hook,
-                    provider_session_id=provider_session_id,
-                )
+        _advance_provider_sessions(
+            final_sessions,
+            observed_at=time.monotonic(),
+        )
     if final_stream_events:
         now_iso = _agy_operation_journal.utc_now()
         if first_stream_monotonic is None:

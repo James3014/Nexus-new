@@ -2483,13 +2483,12 @@ def test_run_agy_drains_previous_transcript_before_session_switch(
         + "first_t.parent.mkdir(parents=True, exist_ok=True)\n"
         + "second_t.parent.mkdir(parents=True, exist_ok=True)\n"
         + "first_t.write_text(json.dumps({'source':'USER','type':'USER_INPUT'}) + '\\n')\n"
+        + "with first_t.open('a') as fh: fh.write(json.dumps({'source':'MODEL','type':'PLANNER_RESPONSE','tool_calls':[{'name':'run_command','args':{}}]}) + '\\n')\n"
         + "second_t.write_text('')\n"
         + "log.write_text('I server.go:1263] Created conversation ' + first + '\\n'"
-        + " + 'I http_helpers.go:315] URL: https://example/v1internal:streamGenerateContent?alt=sse\\n')\n"
-        + "time.sleep(0.12)\n"
-        + "with first_t.open('a') as fh: fh.write(json.dumps({'source':'MODEL','type':'PLANNER_RESPONSE','tool_calls':[{'name':'run_command','args':{}}]}) + '\\n')\n"
-        + "with log.open('a') as fh: fh.write('I server.go:1263] Created conversation ' + second + '\\n')\n"
-        + "time.sleep(0.15)\n",
+        + " + 'I http_helpers.go:315] URL: https://example/v1internal:streamGenerateContent?alt=sse\\n'"
+        + " + 'I server.go:1263] Created conversation ' + second + '\\n')\n"
+        + "time.sleep(0.2)\n",
         encoding="utf-8",
     )
     fake_agy.chmod(0o700)
