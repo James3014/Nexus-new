@@ -1289,6 +1289,48 @@ def test_accept_edits_replaces_stale_wildcard_policy_and_restores_exact_bytes(
     assert coordinator.claim.released is True
 
 
+def test_plan_explicit_deny_replaces_stale_allow_policy_and_restores_exact_bytes(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+    settings = home / ".gemini" / "antigravity-cli" / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    original = (
+        '{\n  "profile": "keep-me",\n  "permissions": {\n'
+        '    "allow": ["read_file(/stale/**)", "write_file(/stale/file.py)", "command(*)"],\n'
+        '    "deny": ["command(git push)"],\n'
+        '    "ask": ["custom(*)"]\n  }\n}\n'
+    ).encode("utf-8")
+    settings.write_bytes(original)
+    explicit_deny = ["command(*)", "read_file(*)", "write_file(*)"]
+
+    def runner(**_kwargs):
+        data = json.loads(settings.read_text(encoding="utf-8"))
+        permissions = data["permissions"]
+        assert data["profile"] == "keep-me"
+        assert permissions["ask"] == ["custom(*)"]
+        assert permissions["allow"] == []
+        assert permissions["deny"] == explicit_deny
+        return 0, "ok", "", False, 1
+
+    code = dispatch.dispatch_run(
+        prompt="no-tools packet",
+        cwd=str(work),
+        mode="plan",
+        deny=explicit_deny,
+        coordinator=coordinator,
+        run_agy_fn=runner,
+    )
+
+    assert code == 0
+    assert settings.read_bytes() == original
+    assert coordinator.claim.released is True
+
+
 def test_accept_edits_permission_refusal_exit_zero_is_failure(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -1333,6 +1375,31 @@ def test_plan_text_with_permission_words_can_still_complete(tmp_path: Path) -> N
         run_agy_fn=lambda **_kwargs: (
             0,
             "The phrase permission denied for read_file is documentation here.",
+            "",
+            False,
+            1,
+        ),
+    )
+
+    assert code == 0
+    assert coordinator.claim.released is True
+
+
+def test_plan_stdout_quoting_headless_denial_marker_can_still_complete(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+
+    code = dispatch.dispatch_run(
+        prompt="review prior permission evidence",
+        cwd=str(tmp_path),
+        mode="plan",
+        coordinator=coordinator,
+        run_agy_fn=lambda **_kwargs: (
+            0,
+            'Prior log quoted: Print mode: soft-denying tool confirmation "ViewFile" at step 8.',
             "",
             False,
             1,
