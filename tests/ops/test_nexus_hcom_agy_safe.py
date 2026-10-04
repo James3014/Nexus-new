@@ -35,9 +35,25 @@ def test_launcher_uses_full_active_account_home_and_cleans_ephemeral_copy(tmp_pa
     (original_home / ".gemini").mkdir(parents=True, exist_ok=True)
     (original_home / ".gemini" / "auth.json").write_text("stale-owner-auth", encoding="utf-8")
 
-    stale = manager_root.parent / "live-home"
-    (stale / ".gemini").mkdir(parents=True)
-    (stale / "profile-marker.txt").write_text("stale-live-home", encoding="utf-8")
+    live_home = manager_root.parent / "live-home"
+    (live_home / ".gemini" / "antigravity-cli" / "cache").mkdir(parents=True)
+    (live_home / ".gemini" / "antigravity-cli" / "cache" / "onboarding.json").write_text(
+        json.dumps({
+            "onboardingComplete": True,
+            "consumerOnboardingComplete": True,
+            "enterpriseOnboardingComplete": False,
+        }),
+        encoding="utf-8",
+    )
+    (live_home / ".gemini" / "antigravity-cli" / "settings.json").write_text(
+        json.dumps({
+            "colorScheme": "tokyo night",
+            "trustedWorkspaces": ["/must-not-copy"],
+        }),
+        encoding="utf-8",
+    )
+    (live_home / ".gemini" / "auth.json").write_text("wrong-live-auth", encoding="utf-8")
+    (live_home / "profile-marker.txt").write_text("stale-live-home", encoding="utf-8")
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -50,6 +66,10 @@ if "ensure-active" in sys.argv:
     print(json.dumps({"active": "google-active"}))
 elif "current" in sys.argv:
     print("google-active")
+elif "status" in sys.argv:
+    from pathlib import Path
+    live_dir = Path(__file__).parents[1] / "owner-home" / ".nexus" / "agy-account-pool" / "live-home" / ".gemini"
+    print(json.dumps({"active": "google-active", "live_dir": str(live_dir)}))
 else:
     raise SystemExit(2)
 """,
@@ -81,6 +101,12 @@ if len(sys.argv) >= 2 and sys.argv[1] == "agy":
         "auth_value": (home / ".gemini" / "auth.json").read_text(),
         "keychain_present": (home / "Library" / "Keychains" / "agy.keychain-db").is_file(),
         "stale_marker": (home / "stale-marker.txt").exists(),
+        "onboarding": json.loads(
+            (home / ".gemini" / "antigravity-cli" / "cache" / "onboarding.json").read_text()
+        ),
+        "interactive_settings": json.loads(
+            (home / ".gemini" / "antigravity-cli" / "settings.json").read_text()
+        ),
         "sensitive_present": any(
             key in os.environ
             for key in (
@@ -146,6 +172,12 @@ raise SystemExit(2)
     assert payload["auth_present"] is True
     assert payload["auth_value"] == "active-auth"
     assert payload["keychain_present"] is True
+    assert payload["onboarding"] == {
+        "consumerOnboardingComplete": True,
+        "enterpriseOnboardingComplete": False,
+        "onboardingComplete": True,
+    }
+    assert payload["interactive_settings"] == {"colorScheme": "tokyo night"}
     assert payload["sensitive_present"] is False
     assert payload["gemini_home"] == payload["home"]
     assert payload["hcom_dir"] == str((original_home / ".hcom").resolve())
