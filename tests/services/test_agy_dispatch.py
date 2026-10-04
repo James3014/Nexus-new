@@ -2443,3 +2443,569 @@ def test_independent_baseline_failure_stays_unknown(tmp_path, monkeypatch):
     )
     assert not any(e.get("first_effect_at") for e in events)
     assert any(e.get("effect_observation_error") for e in events)
+
+
+def test_run_agy_quota_cleanup_stops_provider_process_group(tmp_path: Path, monkeypatch) -> None:
+    from io import StringIO
+
+    stopped_groups: list[int] = []
+    process_ref: dict[str, object] = {}
+
+    class FakeProcess:
+        pid = 4242
+
+        def __init__(self, argv, **kwargs):
+            self.stdout = StringIO("")
+            self.stderr = StringIO("quota exceeded\n")
+            self.returncode = None
+            process_ref["process"] = self
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = -15
+
+        def kill(self):
+            self.returncode = -9
+
+    def stop_group(pgid: int, **_kwargs) -> bool:
+        stopped_groups.append(pgid)
+        process = process_ref["process"]
+        process.returncode = -15
+        return True
+
+    monkeypatch.setattr(dispatch.shutil, "which", lambda name: "/tmp/fake-agy")
+    monkeypatch.setattr(dispatch.subprocess, "Popen", FakeProcess)
+    monkeypatch.setattr(dispatch.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(dispatch._agy_operation_journal, "_stop_process_group", stop_group)
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_process_group_alive",
+        lambda pgid: False,
+    )
+
+    code, _out, err, timed_out, _ = dispatch.run_agy(
+        env={"HOME": str(tmp_path)},
+        prompt="quota group cleanup",
+        cwd=str(tmp_path),
+        mode="plan",
+        model=None,
+        effort=None,
+        timeout=30,
+    )
+
+    assert code == -15
+    assert "quota exceeded" in err
+    assert timed_out is False
+    assert stopped_groups == [4242]
+
+
+_PROVIDER_CHILD_SCRIPT = textwrap.dedent("""\
+    import os
+    import subprocess
+    import sys
+    import time
+    from importlib.machinery import SourceFileLoader
+    from pathlib import Path
+
+    dispatch_path = sys.argv[1]
+    op_root = Path(sys.argv[2])
+    operation_id = sys.argv[3]
+    ready_file = Path(sys.argv[4])
+    child_pid_file = Path(sys.argv[5])
+    snapshot_root = sys.argv[6]
+
+    os.environ["NEXUS_AGY_SNAPSHOT"] = snapshot_root
+    dispatch = SourceFileLoader(
+        "nexus_agy_dispatch_canonical", dispatch_path
+    ).load_module()
+
+    journal = dispatch.AgyOperationJournal(op_root)
+    prompt_path = journal.prompt_path(operation_id)
+    dispatch._write_private_prompt(prompt_path, "sigterm child reaping probe")
+
+    log_path = str(journal.operation_dir(operation_id) / "agy.log")
+
+    def fake_run_agy(**kwargs):
+        sub = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)", log_path])
+        child_pid_file.write_text(str(sub.pid))
+        ready_file.touch()
+        sub.wait()
+        return 0, "", "", False, 100
+
+    def fake_dispatch_run(**kwargs):
+        kwargs["operation_hook"]({
+            "phase": "EXECUTING",
+            "attempts": 1,
+            "rotations": 0,
+        })
+        return fake_run_agy(**kwargs)
+
+    dispatch.dispatch_run = fake_dispatch_run
+
+    try:
+        dispatch._run_background_operation(
+            operation_id=operation_id,
+            prompt_file=str(prompt_path),
+            cwd=str(op_root),
+            mode="plan",
+            model="gemini-test",
+            effort="medium",
+            timeout=30,
+            max_calls=1,
+            pool_wait_timeout=1.0,
+            allow=[],
+            deny=[],
+            temp_command_permissions=False,
+            operation_root=op_root,
+            heartbeat_interval=0.01,
+        )
+    except BaseException:
+        pass
+""")
+
+
+def test_sigterm_to_supervisor_reaps_owned_provider_child(
+    tmp_path: Path,
+) -> None:
+    """Supervisor receiving SIGTERM must reap its owned provider child process."""
+    op_root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(op_root)
+    operation_id = dispatch.new_operation_id()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+
+    ready_file = tmp_path / "ready"
+    child_pid_file = tmp_path / "child.pid"
+    script_file = tmp_path / "provider_child.py"
+    script_file.write_text(_PROVIDER_CHILD_SCRIPT, encoding="utf-8")
+
+    child = subprocess.Popen(
+        [
+            sys.executable,
+            str(script_file),
+            str(DISPATCH_PATH),
+            str(op_root),
+            operation_id,
+            str(ready_file),
+            str(child_pid_file),
+            str(ROOT),
+        ],
+        cwd=str(tmp_path),
+    )
+
+    deadline = time.monotonic() + 20.0
+    while not ready_file.exists() or not child_pid_file.exists():
+        if time.monotonic() > deadline:
+            child.kill()
+            child.wait()
+            raise TimeoutError("provider child never signalled readiness")
+        time.sleep(0.05)
+
+    provider_pid = int(child_pid_file.read_text().strip())
+    assert dispatch._agy_operation_journal._process_alive(provider_pid), (
+        "Provider child must be running initially"
+    )
+
+    try:
+        os.kill(child.pid, signal.SIGTERM)
+        child.wait(timeout=10)
+
+        assert not dispatch._agy_operation_journal._process_alive(provider_pid), (
+            f"Provider child {provider_pid} is still alive after supervisor SIGTERM!"
+        )
+
+        record = journal.read(operation_id)
+        assert record["status"] == "OUTCOME_UNKNOWN"
+        reconciliation = record.get("reconciliation") or {}
+        assert reconciliation.get("provider_alive_after") is False
+    finally:
+        if dispatch._agy_operation_journal._process_alive(provider_pid):
+            try:
+                os.kill(provider_pid, signal.SIGKILL)
+            except OSError:
+                pass
+
+
+def test_dispatch_run_retains_lease_when_provider_cannot_be_killed(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """When provider child remains alive after execution error, lease must not be released."""
+    home = tmp_path / "home"
+    home.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+
+    def stubborn_runner(*, operation_hook=None, **_kwargs):
+        if operation_hook:
+            operation_hook(provider_pid=12345)
+        return 1, "", "error", False, 10
+
+    orig_alive = dispatch._agy_operation_journal._process_alive
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_process_alive",
+        lambda pid: True if pid == 12345 else orig_alive(pid),
+    )
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_stop_process",
+        lambda pid, **kwargs: False,
+    )
+
+    code = dispatch.dispatch_run(
+        prompt="stubborn run",
+        cwd=str(tmp_path),
+        mode="plan",
+        coordinator=coordinator,
+        run_agy_fn=stubborn_runner,
+    )
+
+    assert code != 0
+    assert coordinator.claim.released is False, (
+        "Lease must NOT be released while provider child is running!"
+    )
+
+
+def test_dispatch_run_retains_lease_when_provider_group_survives_leader(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A dead provider leader must not release the lease while its process group survives."""
+    home = tmp_path / "home"
+    home.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+
+    def orphaned_group_runner(*, operation_hook=None, **_kwargs):
+        if operation_hook:
+            operation_hook(provider_pid=12345, provider_pgid=54321)
+        return 1, "", "error", False, 10
+
+    orig_alive = dispatch._agy_operation_journal._process_alive
+    orig_group_alive = dispatch._agy_operation_journal._process_group_alive
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_process_alive",
+        lambda pid: False if pid == 12345 else orig_alive(pid),
+    )
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_process_group_alive",
+        lambda pgid: True if pgid == 54321 else orig_group_alive(pgid),
+    )
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_stop_process_group",
+        lambda pgid, **kwargs: False,
+    )
+
+    code = dispatch.dispatch_run(
+        prompt="orphaned group run",
+        cwd=str(tmp_path),
+        mode="plan",
+        coordinator=coordinator,
+        run_agy_fn=orphaned_group_runner,
+    )
+
+    assert code != 0
+    assert coordinator.claim.released is False, (
+        "Lease must NOT be released while the provider process group is still running!"
+    )
+
+
+def test_run_agy_aborts_process_group_when_durable_identity_hook_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    fake_agy = tmp_path / "fake-agy"
+    fake_agy.write_text("#!/bin/sh\nsleep 60\n", encoding="utf-8")
+    fake_agy.chmod(0o755)
+    monkeypatch.setattr(dispatch.shutil, "which", lambda _name: str(fake_agy))
+
+    observed: dict[str, int | None] = {}
+
+    def failing_hook(event: dict[str, object]) -> None:
+        observed.update(event)
+        if isinstance(event.get("provider_pid"), int):
+            raise RuntimeError("journal identity write failed")
+
+    with pytest.raises(RuntimeError, match="journal identity write failed"):
+        dispatch.run_agy(
+            env=os.environ.copy(),
+            prompt="identity persistence probe",
+            cwd=str(tmp_path),
+            mode="plan",
+            model=None,
+            effort=None,
+            timeout=30,
+            operation_hook=failing_hook,
+        )
+
+    provider_pid = observed.get("provider_pid")
+    provider_pgid = observed.get("provider_pgid")
+    assert isinstance(provider_pid, int)
+    assert isinstance(provider_pgid, int)
+    assert provider_pgid == provider_pid
+    assert not dispatch._agy_operation_journal._process_alive(provider_pid)
+    assert not dispatch._agy_operation_journal._process_group_alive(provider_pgid)
+
+
+def test_background_operation_stays_nonterminal_while_provider_group_survives(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "surviving process group probe")
+    monkeypatch.setattr(dispatch, "_runtime_revision", lambda: "a" * 40)
+
+    def fake_dispatch_run(**kwargs):
+        kwargs["operation_hook"]({
+            "phase": "CLASSIFYING_FAILURE",
+            "attempts": 1,
+            "rotations": 0,
+            "failure_kind": "PROVIDER_ERROR",
+            "provider_pid": 12345,
+            "provider_pgid": 54321,
+        })
+        return 1
+
+    monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
+    orig_alive = dispatch._agy_operation_journal._process_alive
+    orig_group_alive = dispatch._agy_operation_journal._process_group_alive
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_process_alive",
+        lambda pid: False if pid == 12345 else orig_alive(pid),
+    )
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_process_group_alive",
+        lambda pgid: True if pgid == 54321 else orig_group_alive(pgid),
+    )
+
+    code = dispatch._run_background_operation(
+        operation_id=operation_id,
+        prompt_file=str(prompt_path),
+        cwd=str(tmp_path),
+        mode="plan",
+        model="gemini-test",
+        effort="medium",
+        timeout=30,
+        max_calls=1,
+        pool_wait_timeout=1.0,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=root,
+        heartbeat_interval=0.01,
+    )
+
+    record = journal.read(operation_id)
+    assert code == 1
+    assert record["status"] == "RUNNING"
+    assert record["phase"] == "RECONCILE_REQUIRED"
+    assert record["finished_at"] is None
+    assert record["reconciliation"]["result"] == "PROVIDER_PROCESS_STILL_RUNNING_AFTER_DISPATCH"
+    assert record["reconciliation"]["provider_alive_after"] is True
+    assert record["reconciliation"]["retry_permitted"] is False
+
+
+def test_dispatch_run_does_not_signal_from_bare_provider_pid_or_pgid(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+
+    def stale_identity_runner(*, operation_hook=None, **_kwargs):
+        if operation_hook:
+            operation_hook(provider_pid=12345, provider_pgid=54321)
+        return 1, "", "error", False, 10
+
+    orig_alive = dispatch._agy_operation_journal._process_alive
+    orig_group_alive = dispatch._agy_operation_journal._process_group_alive
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_process_alive",
+        lambda pid: True if pid == 12345 else orig_alive(pid),
+    )
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_process_group_alive",
+        lambda pgid: True if pgid == 54321 else orig_group_alive(pgid),
+    )
+
+    def forbidden_signal(*_args, **_kwargs):
+        raise AssertionError("dispatch_run must not signal from bare numeric process identity")
+
+    monkeypatch.setattr(dispatch._agy_operation_journal, "_stop_process", forbidden_signal)
+    monkeypatch.setattr(dispatch._agy_operation_journal, "_stop_process_group", forbidden_signal)
+
+    code = dispatch.dispatch_run(
+        prompt="stale identity run",
+        cwd=str(tmp_path),
+        mode="plan",
+        coordinator=coordinator,
+        run_agy_fn=stale_identity_runner,
+    )
+
+    assert code != 0
+    assert coordinator.claim.released is False
+
+
+def test_signal_guard_keeps_operation_nonterminal_when_provider_is_unresolved(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "unresolved provider probe")
+    monkeypatch.setattr(dispatch, "_runtime_revision", lambda: "a" * 40)
+
+    def interrupted_dispatch(**kwargs):
+        kwargs["operation_hook"]({
+            "phase": "EXECUTING",
+            "attempts": 1,
+            "rotations": 0,
+            "provider_pid": 12345,
+            "provider_pgid": 12345,
+        })
+        raise dispatch._SupervisorSignalError(signal.SIGTERM)
+
+    monkeypatch.setattr(dispatch, "dispatch_run", interrupted_dispatch)
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_stop_operation_processes",
+        lambda *_args, **_kwargs: (True, True, True),
+    )
+
+    with pytest.raises(dispatch._SupervisorSignalError):
+        dispatch._run_background_operation(
+            operation_id=operation_id,
+            prompt_file=str(prompt_path),
+            cwd=str(tmp_path),
+            mode="plan",
+            model="gemini-test",
+            effort="medium",
+            timeout=30,
+            max_calls=1,
+            pool_wait_timeout=1.0,
+            allow=[],
+            deny=[],
+            temp_command_permissions=False,
+            operation_root=root,
+            heartbeat_interval=0.01,
+        )
+
+    record = journal.read(operation_id)
+    assert record["status"] == "RUNNING"
+    assert record["phase"] == "RECONCILE_REQUIRED"
+    assert record["finished_at"] is None
+    assert record["failure_kind"] == "SUPERVISOR_SIGNAL:SIGTERM"
+    assert record["reconciliation"]["result"] == "SUPERVISOR_SIGNAL_ORPHAN_PROVIDER_UNVERIFIED"
+    assert record["reconciliation"]["provider_alive_after"] is True
+    assert record["reconciliation"]["retry_permitted"] is False
+
+
+def test_wrapper_exception_keeps_operation_nonterminal_when_provider_is_unresolved(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "wrapper exception probe")
+    monkeypatch.setattr(dispatch, "_runtime_revision", lambda: "a" * 40)
+
+    def exploding_dispatch(**kwargs):
+        kwargs["operation_hook"]({
+            "phase": "EXECUTING",
+            "attempts": 1,
+            "rotations": 0,
+            "provider_pid": 12345,
+            "provider_pgid": 12345,
+        })
+        raise RuntimeError("provider wrapper exploded")
+
+    monkeypatch.setattr(dispatch, "dispatch_run", exploding_dispatch)
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal,
+        "_stop_operation_processes",
+        lambda *_args, **_kwargs: (True, True, True),
+    )
+
+    with pytest.raises(RuntimeError, match="provider wrapper exploded"):
+        dispatch._run_background_operation(
+            operation_id=operation_id,
+            prompt_file=str(prompt_path),
+            cwd=str(tmp_path),
+            mode="plan",
+            model="gemini-test",
+            effort="medium",
+            timeout=30,
+            max_calls=1,
+            pool_wait_timeout=1.0,
+            allow=[],
+            deny=[],
+            temp_command_permissions=False,
+            operation_root=root,
+            heartbeat_interval=0.01,
+        )
+
+    record = journal.read(operation_id)
+    assert record["status"] == "RUNNING"
+    assert record["phase"] == "RECONCILE_REQUIRED"
+    assert record["finished_at"] is None
+    assert record["failure_kind"] == "WRAPPER_EXCEPTION:RuntimeError"
+    assert record["reconciliation"]["result"] == "WRAPPER_EXCEPTION_ORPHAN_PROVIDER_UNVERIFIED"
+    assert record["reconciliation"]["provider_alive_after"] is True
+    assert record["reconciliation"]["retry_permitted"] is False

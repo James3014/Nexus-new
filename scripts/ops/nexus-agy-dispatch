@@ -1017,15 +1017,61 @@ def run_agy(
         stderr=subprocess.PIPE,
         text=True,
         bufsize=1,
+        start_new_session=True,
     )
+    provider_pid = getattr(process, "pid", None)
+    provider_pgid: int | None = (
+        provider_pid if isinstance(provider_pid, int) and provider_pid > 0 else None
+    )
+    if provider_pgid is not None:
+        try:
+            provider_pgid = os.getpgid(provider_pid)
+        except OSError:
+            # start_new_session=True establishes a fresh session/process group
+            # whose PGID is the child PID. Preserve that deterministic identity
+            # even if a very short-lived child exits before getpgid() readback.
+            provider_pgid = provider_pid
     if operation_hook:
-        _operation_hook(
-            operation_hook,
-            phase="PROVIDER_RUNNING",
-            provider_pid=process.pid,
-            provider_process_state="RUNNING",
-            provider_started_at=_agy_operation_journal.utc_now(),
-        )
+        try:
+            _operation_hook(
+                operation_hook,
+                phase="PROVIDER_RUNNING",
+                provider_pid=provider_pid,
+                provider_pgid=provider_pgid,
+                provider_process_state="RUNNING",
+                provider_started_at=_agy_operation_journal.utc_now(),
+            )
+        except Exception as hook_exc:
+            # A provider whose durable physical identity cannot be persisted
+            # must not continue. This frame still owns the live Popen/session,
+            # so bounded cleanup is authorized without trusting a later PID.
+            if provider_pgid is not None:
+                try:
+                    _agy_operation_journal._stop_process_group(
+                        provider_pgid,
+                        grace_seconds=2.0,
+                    )
+                except Exception:
+                    pass
+            if process.poll() is None and isinstance(provider_pid, int):
+                try:
+                    _agy_operation_journal._stop_process(
+                        provider_pid,
+                        grace_seconds=2.0,
+                    )
+                except Exception:
+                    pass
+            provider_alive = isinstance(
+                provider_pid, int
+            ) and _agy_operation_journal._process_alive(provider_pid)
+            group_alive = provider_pgid is not None and _agy_operation_journal._process_group_alive(
+                provider_pgid
+            )
+            if provider_alive or group_alive:
+                raise RuntimeError(
+                    "PROVIDER_IDENTITY_PERSIST_FAILED_CLEANUP_UNVERIFIED"
+                ) from hook_exc
+            raise
 
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
@@ -1083,58 +1129,94 @@ def run_agy(
     quota_terminated = False
     deadline = started + max(1, timeout) + 10
     next_effect_observation_at = started
-    while process.poll() is None:
-        now = time.monotonic()
-        if (
-            baseline_worktree_state is not None
-            and not first_effect_seen.is_set()
-            and now >= next_effect_observation_at
-        ):
-            next_effect_observation_at = now + _EFFECT_OBSERVATION_INTERVAL_SECONDS
-            try:
-                changed = direct_operation_journal.observed_changed_paths_since(
-                    cwd, baseline_worktree_state
-                )
-                if changed is None:
+    try:
+        while process.poll() is None:
+            now = time.monotonic()
+            if (
+                baseline_worktree_state is not None
+                and not first_effect_seen.is_set()
+                and now >= next_effect_observation_at
+            ):
+                next_effect_observation_at = now + _EFFECT_OBSERVATION_INTERVAL_SECONDS
+                try:
+                    changed = direct_operation_journal.observed_changed_paths_since(
+                        cwd, baseline_worktree_state
+                    )
+                    if changed is None:
+                        baseline_worktree_state = None
+                        if operation_hook:
+                            _operation_hook(
+                                operation_hook,
+                                effect_observation_error="EFFECT_OBSERVATION_UNAVAILABLE",
+                            )
+                    elif changed:
+                        first_effect_seen.set()
+                        now_effect_iso = _agy_operation_journal.utc_now()
+                        effect_wall_ms = int((time.monotonic() - started) * 1000)
+                        if operation_hook:
+                            _operation_hook(
+                                operation_hook,
+                                first_effect_at=now_effect_iso,
+                                time_to_first_effect_ms=effect_wall_ms,
+                            )
+                except Exception as exc:
                     baseline_worktree_state = None
                     if operation_hook:
                         _operation_hook(
                             operation_hook,
-                            effect_observation_error="EFFECT_OBSERVATION_UNAVAILABLE",
+                            effect_observation_error=f"EFFECT_OBSERVATION_FAILED:{type(exc).__name__}",
                         )
-                elif changed:
-                    first_effect_seen.set()
-                    now_effect_iso = _agy_operation_journal.utc_now()
-                    effect_wall_ms = int((time.monotonic() - started) * 1000)
-                    if operation_hook:
-                        _operation_hook(
-                            operation_hook,
-                            first_effect_at=now_effect_iso,
-                            time_to_first_effect_ms=effect_wall_ms,
-                        )
-            except Exception as exc:
-                baseline_worktree_state = None
-                if operation_hook:
-                    _operation_hook(
-                        operation_hook,
-                        effect_observation_error=f"EFFECT_OBSERVATION_FAILED:{type(exc).__name__}",
+            if quota_failure.wait(0.05):
+                quota_terminated = True
+                if provider_pgid is not None:
+                    _agy_operation_journal._stop_process_group(
+                        provider_pgid,
+                        grace_seconds=2.0,
                     )
-        if quota_failure.wait(0.05):
-            quota_terminated = True
-            process.terminate()
-            break
-        if time.monotonic() >= deadline:
-            timed_out = True
-            process.terminate()
-            break
-        time.sleep(0.05)
+                else:
+                    process.terminate()
+                break
+            if time.monotonic() >= deadline:
+                timed_out = True
+                if provider_pgid is not None:
+                    _agy_operation_journal._stop_process_group(
+                        provider_pgid,
+                        grace_seconds=2.0,
+                    )
+                else:
+                    process.terminate()
+                break
+            time.sleep(0.05)
 
-    if process.poll() is None:
-        try:
-            process.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=2)
+        if process.poll() is None:
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                if provider_pgid is not None:
+                    _agy_operation_journal._stop_process_group(
+                        provider_pgid,
+                        grace_seconds=2.0,
+                    )
+                else:
+                    process.kill()
+                process.wait(timeout=2)
+    finally:
+        if provider_pgid is not None and _agy_operation_journal._process_group_alive(provider_pgid):
+            try:
+                _agy_operation_journal._stop_process_group(
+                    provider_pgid,
+                    grace_seconds=2.0,
+                )
+            except Exception:
+                pass
+        if process.poll() is None and isinstance(provider_pid, int):
+            try:
+                _agy_operation_journal._stop_process(
+                    provider_pid,
+                    grace_seconds=2.0,
+                )
+            except Exception:
+                pass
 
     stdout_thread.join(timeout=2)
     stderr_thread.join(timeout=2)
@@ -1869,6 +1951,18 @@ def dispatch_run(
     max_failovers = _max_account_failovers()
     last_kind = None
     total_wall_ms = 0
+    active_provider_pid: int | None = None
+    active_provider_pgid: int | None = None
+
+    def _inner_operation_hook(event: dict[str, Any] | None = None, **kwargs: Any) -> None:
+        nonlocal active_provider_pid, active_provider_pgid
+        merged = dict(event or {})
+        merged.update(kwargs)
+        if isinstance(merged.get("provider_pid"), int):
+            active_provider_pid = merged["provider_pid"]
+        if isinstance(merged.get("provider_pgid"), int):
+            active_provider_pgid = merged["provider_pgid"]
+        _operation_hook(operation_hook, **merged)
 
     _operation_hook(
         operation_hook,
@@ -2021,7 +2115,7 @@ def dispatch_run(
                 if runner is run_agy or (
                     hasattr(runner, "__code__") and "operation_hook" in runner.__code__.co_varnames
                 ):
-                    runner_kwargs["operation_hook"] = operation_hook
+                    runner_kwargs["operation_hook"] = _inner_operation_hook
                 code, out, err, timed_out, wall_ms = runner(**runner_kwargs)
             finally:
                 restore_temp_permissions(permission_token)
@@ -2275,7 +2369,16 @@ def dispatch_run(
                 })
                 return 75
     finally:
-        if claim is not None:
+        # Numeric PID/PGID observations can retain the lease, but they do not
+        # authorize signalling after the owning Popen frame has returned.
+        provider_still_running = (
+            active_provider_pid is not None
+            and _agy_operation_journal._process_alive(active_provider_pid)
+        ) or (
+            active_provider_pgid is not None
+            and _agy_operation_journal._process_group_alive(active_provider_pgid)
+        )
+        if claim is not None and not provider_still_running:
             try:
                 claim.release()
             except Exception:
@@ -2403,6 +2506,8 @@ def _supervisor_terminal_guard(func):
             known_failure_kind: str,
             unknown_result: str,
             known_result: str,
+            unresolved_running_result: str,
+            unresolved_unverified_result: str,
         ) -> None:
             record = journal.read(operation_id)
             phase = str(record.get("phase") or "QUEUED")
@@ -2417,37 +2522,75 @@ def _supervisor_terminal_guard(func):
                 attestation_log_path,
                 requested_model=model,
             )
-            journal.mark_terminal(
+            had_before, alive_after, unverified = _agy_operation_journal._stop_operation_processes(
                 operation_id,
-                status="OUTCOME_UNKNOWN" if provider_effect_possible else "FAILED",
-                exit_code=record.get("exit_code"),
-                failure_kind=(
-                    unknown_failure_kind if provider_effect_possible else known_failure_kind
-                ),
-                cwd=cwd,
-                reconciliation={
-                    "at": _agy_operation_journal.utc_now(),
-                    "result": unknown_result if provider_effect_possible else known_result,
-                    "retry_permitted": False,
-                },
+                journal.operation_dir(operation_id),
+                pid=record.get("pid"),
                 provider_pid=record.get("provider_pid"),
-                provider_process_state=(
-                    (
-                        "RUNNING"
-                        if direct_operation_journal._process_alive(record.get("provider_pid"))
-                        else "EXITED"
-                    )
-                    if isinstance(record.get("provider_pid"), int)
-                    and record.get("provider_pid") > 0
-                    else record.get("provider_process_state", "IDLE")
-                ),
-                provider_started_at=record.get("provider_started_at"),
-                provider_stream_last_activity_at=record.get("provider_stream_last_activity_at"),
-                first_stream_activity_at=record.get("first_stream_activity_at"),
-                first_effect_at=record.get("first_effect_at"),
-                time_to_first_effect_ms=record.get("time_to_first_effect_ms"),
-                **attestation,
+                provider_pgid=record.get("provider_pgid"),
+                supervisor_pid=os.getpid(),
+                grace_seconds=2.0,
             )
+            had_before = had_before or bool(record.get("provider_pid")) or provider_effect_possible
+            provider_state = (
+                "RUNNING"
+                if alive_after
+                else (
+                    "EXITED"
+                    if record.get("provider_pid")
+                    else record.get("provider_process_state", "IDLE")
+                )
+            )
+            telemetry = {
+                "provider_pid": record.get("provider_pid"),
+                "provider_pgid": record.get("provider_pgid"),
+                "provider_process_state": provider_state,
+                "provider_started_at": record.get("provider_started_at"),
+                "provider_stream_last_activity_at": record.get("provider_stream_last_activity_at"),
+                "first_stream_activity_at": record.get("first_stream_activity_at"),
+                "first_effect_at": record.get("first_effect_at"),
+                "time_to_first_effect_ms": record.get("time_to_first_effect_ms"),
+            }
+
+            if alive_after:
+                journal.update(
+                    operation_id,
+                    status="RUNNING",
+                    phase="RECONCILE_REQUIRED",
+                    failure_kind=unknown_failure_kind,
+                    reconciliation={
+                        "at": _agy_operation_journal.utc_now(),
+                        "result": (
+                            unresolved_unverified_result
+                            if unverified
+                            else unresolved_running_result
+                        ),
+                        "provider_alive_before": had_before,
+                        "provider_alive_after": True,
+                        "retry_permitted": False,
+                    },
+                    **telemetry,
+                    **attestation,
+                )
+            else:
+                journal.mark_terminal(
+                    operation_id,
+                    status="OUTCOME_UNKNOWN" if provider_effect_possible else "FAILED",
+                    exit_code=record.get("exit_code"),
+                    failure_kind=(
+                        unknown_failure_kind if provider_effect_possible else known_failure_kind
+                    ),
+                    cwd=cwd,
+                    reconciliation={
+                        "at": _agy_operation_journal.utc_now(),
+                        "result": unknown_result if provider_effect_possible else known_result,
+                        "provider_alive_before": had_before,
+                        "provider_alive_after": False,
+                        "retry_permitted": False,
+                    },
+                    **telemetry,
+                    **attestation,
+                )
 
         try:
             signal.signal(signal.SIGTERM, _signal_handler)
@@ -2460,6 +2603,8 @@ def _supervisor_terminal_guard(func):
                 known_failure_kind=f"SUPERVISOR_SIGNAL_PRE_PROVIDER:{sig_name}",
                 unknown_result="SUPERVISOR_SIGNAL_WITH_UNKNOWN_PROVIDER_EFFECT",
                 known_result="SUPERVISOR_SIGNAL_BEFORE_PROVIDER",
+                unresolved_running_result="SUPERVISOR_SIGNAL_ORPHAN_PROVIDER_STILL_RUNNING",
+                unresolved_unverified_result="SUPERVISOR_SIGNAL_ORPHAN_PROVIDER_UNVERIFIED",
             )
             raise
         except BaseException as exc:
@@ -2468,6 +2613,8 @@ def _supervisor_terminal_guard(func):
                 known_failure_kind=f"WRAPPER_EXCEPTION_PRE_PROVIDER:{type(exc).__name__}",
                 unknown_result="WRAPPER_EXCEPTION_WITH_UNKNOWN_PROVIDER_EFFECT",
                 known_result="WRAPPER_EXCEPTION_BEFORE_PROVIDER",
+                unresolved_running_result="WRAPPER_EXCEPTION_ORPHAN_PROVIDER_STILL_RUNNING",
+                unresolved_unverified_result="WRAPPER_EXCEPTION_ORPHAN_PROVIDER_UNVERIFIED",
             )
             raise
         finally:
@@ -2519,6 +2666,7 @@ def _run_background_operation(
         "failure_kind": None,
         "timed_out": False,
         "provider_pid": None,
+        "provider_pgid": None,
         "provider_process_state": "IDLE",
         "provider_started_at": None,
         "provider_stream_last_activity_at": None,
@@ -2539,6 +2687,7 @@ def _run_background_operation(
             lease_id_hash=snapshot.get("lease_id_hash"),
             failure_kind=snapshot.get("failure_kind"),
             provider_pid=snapshot.get("provider_pid"),
+            provider_pgid=snapshot.get("provider_pgid"),
             provider_process_state=snapshot.get("provider_process_state") or "IDLE",
             provider_started_at=snapshot.get("provider_started_at"),
             provider_stream_last_activity_at=snapshot.get("provider_stream_last_activity_at"),
@@ -2593,6 +2742,45 @@ def _run_background_operation(
         with state_lock:
             snapshot = dict(state)
         failure_kind = snapshot.get("failure_kind")
+        provider_pid = snapshot.get("provider_pid")
+        provider_pgid = snapshot.get("provider_pgid")
+        provider_alive = _agy_operation_journal._process_alive(provider_pid)
+        provider_group_alive = _agy_operation_journal._process_group_alive(provider_pgid)
+
+        if provider_alive or provider_group_alive:
+            attestation = _parse_agy_attestation(
+                attestation_log_path,
+                requested_model=model,
+            )
+            unresolved_failure = failure_kind or "PROVIDER_PROCESS_STILL_RUNNING_AFTER_DISPATCH"
+            journal.update(
+                operation_id,
+                status="RUNNING",
+                phase="RECONCILE_REQUIRED",
+                failure_kind=unresolved_failure,
+                attempts=int(snapshot.get("attempts") or 0),
+                rotations=int(snapshot.get("rotations") or 0),
+                account_alias_hash=snapshot.get("account_alias_hash"),
+                lease_id_hash=snapshot.get("lease_id_hash"),
+                provider_pid=provider_pid,
+                provider_pgid=provider_pgid,
+                provider_process_state="RUNNING",
+                provider_started_at=snapshot.get("provider_started_at"),
+                provider_stream_last_activity_at=snapshot.get("provider_stream_last_activity_at"),
+                first_stream_activity_at=snapshot.get("first_stream_activity_at"),
+                first_effect_at=snapshot.get("first_effect_at"),
+                time_to_first_effect_ms=snapshot.get("time_to_first_effect_ms"),
+                reconciliation={
+                    "at": _agy_operation_journal.utc_now(),
+                    "result": "PROVIDER_PROCESS_STILL_RUNNING_AFTER_DISPATCH",
+                    "provider_alive_before": True,
+                    "provider_alive_after": True,
+                    "retry_permitted": False,
+                },
+                **attestation,
+            )
+            return int(exit_code if exit_code not in (None, 0) else 1)
+
         timed_out = bool(snapshot.get("timed_out")) or failure_kind == "TIMEOUT"
         if timed_out:
             terminal_status = "OUTCOME_UNKNOWN"
@@ -2624,6 +2812,7 @@ def _run_background_operation(
             lease_id_hash=snapshot.get("lease_id_hash"),
             reconciliation=reconciliation,
             provider_pid=snapshot.get("provider_pid"),
+            provider_pgid=snapshot.get("provider_pgid"),
             provider_process_state=(
                 (
                     "RUNNING"
@@ -2644,40 +2833,9 @@ def _run_background_operation(
         return int(exit_code or 0)
     except _SupervisorSignalError:
         raise
-    except BaseException as exc:
-        attestation = _parse_agy_attestation(
-            attestation_log_path,
-            requested_model=model,
-        )
-        snap = locals().get("snapshot") or {}
-        journal.mark_terminal(
-            operation_id,
-            status="OUTCOME_UNKNOWN",
-            exit_code=exit_code,
-            failure_kind=f"WRAPPER_EXCEPTION:{type(exc).__name__}",
-            cwd=cwd,
-            reconciliation={
-                "at": _agy_operation_journal.utc_now(),
-                "result": "WRAPPER_EXCEPTION_WITH_UNKNOWN_PROVIDER_EFFECT",
-                "retry_permitted": False,
-            },
-            provider_pid=snap.get("provider_pid"),
-            provider_process_state=(
-                (
-                    "RUNNING"
-                    if direct_operation_journal._process_alive(snap.get("provider_pid"))
-                    else "EXITED"
-                )
-                if isinstance(snap.get("provider_pid"), int) and snap.get("provider_pid") > 0
-                else (snap.get("provider_process_state") or "IDLE")
-            ),
-            provider_started_at=snap.get("provider_started_at"),
-            provider_stream_last_activity_at=snap.get("provider_stream_last_activity_at"),
-            first_stream_activity_at=snap.get("first_stream_activity_at"),
-            first_effect_at=snap.get("first_effect_at"),
-            time_to_first_effect_ms=snap.get("time_to_first_effect_ms"),
-            **attestation,
-        )
+    except BaseException:
+        # The outer supervisor guard owns cleanup + terminalization. Writing a
+        # terminal record here would make the guard skip child reconciliation.
         raise
     finally:
         if prior_attestation_log is None:
