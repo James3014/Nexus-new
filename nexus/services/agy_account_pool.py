@@ -1211,12 +1211,13 @@ class CrossProcessLeaseCoordinator:
                             lease_id_hash = hashlib.sha256(
                                 lease.lease_id.encode("utf-8")
                             ).hexdigest()[:12]
+                            now_ts = time.time()
                             receipt_data = {
                                 "account_alias_hash": candidate.alias_hash,
                                 "lease_id_hash": lease_id_hash,
                                 "consumer_id": consumer_id,
-                                "claimed_at": time.time(),
-                                "acquired_at": time.time(),
+                                "claimed_at": now_ts,
+                                "acquired_at": now_ts,
                                 "pid": os.getpid(),
                             }
                             receipt_path.write_text(
