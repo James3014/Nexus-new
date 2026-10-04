@@ -756,12 +756,17 @@ def run_agy(
         start_new_session=True,
     )
     provider_pid = getattr(process, "pid", None)
-    provider_pgid: int | None = None
-    if isinstance(provider_pid, int) and provider_pid > 0:
+    provider_pgid: int | None = (
+        provider_pid if isinstance(provider_pid, int) and provider_pid > 0 else None
+    )
+    if provider_pgid is not None:
         try:
             provider_pgid = os.getpgid(provider_pid)
         except OSError:
-            pass
+            # start_new_session=True establishes a fresh session/process group
+            # whose PGID is the child PID. Preserve that deterministic identity
+            # even if a very short-lived child exits before getpgid() readback.
+            provider_pgid = provider_pid
     if operation_hook is not None:
         try:
             _operation_hook(
@@ -769,8 +774,37 @@ def run_agy(
                 provider_pid=provider_pid,
                 provider_pgid=provider_pgid,
             )
-        except Exception:
-            pass
+        except Exception as hook_exc:
+            # A provider without durable physical identity must never continue.
+            # At this point we still own the live Popen/session directly, so
+            # bounded cleanup is authorized without relying on a stale PID.
+            if provider_pgid is not None:
+                try:
+                    _agy_operation_journal._stop_process_group(
+                        provider_pgid,
+                        grace_seconds=2.0,
+                    )
+                except Exception:
+                    pass
+            if process.poll() is None and isinstance(provider_pid, int):
+                try:
+                    _agy_operation_journal._stop_process(
+                        provider_pid,
+                        grace_seconds=2.0,
+                    )
+                except Exception:
+                    pass
+            provider_alive = isinstance(
+                provider_pid, int
+            ) and _agy_operation_journal._process_alive(provider_pid)
+            group_alive = provider_pgid is not None and _agy_operation_journal._process_group_alive(
+                provider_pgid
+            )
+            if provider_alive or group_alive:
+                raise RuntimeError(
+                    "PROVIDER_IDENTITY_PERSIST_FAILED_CLEANUP_UNVERIFIED"
+                ) from hook_exc
+            raise
 
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []

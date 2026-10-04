@@ -1471,6 +1471,42 @@ def test_dispatch_run_retains_lease_when_provider_group_survives_leader(
     )
 
 
+def test_run_agy_aborts_process_group_when_durable_identity_hook_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    fake_agy = tmp_path / "fake-agy"
+    fake_agy.write_text("#!/bin/sh\nsleep 60\n", encoding="utf-8")
+    fake_agy.chmod(0o755)
+    monkeypatch.setattr(dispatch.shutil, "which", lambda _name: str(fake_agy))
+
+    observed: dict[str, int | None] = {}
+
+    def failing_hook(event: dict[str, int | None]) -> None:
+        observed.update(event)
+        raise RuntimeError("journal identity write failed")
+
+    with pytest.raises(RuntimeError, match="journal identity write failed"):
+        dispatch.run_agy(
+            env=os.environ.copy(),
+            prompt="identity persistence probe",
+            cwd=str(tmp_path),
+            mode="plan",
+            model=None,
+            effort=None,
+            timeout=30,
+            operation_hook=failing_hook,
+        )
+
+    provider_pid = observed.get("provider_pid")
+    provider_pgid = observed.get("provider_pgid")
+    assert isinstance(provider_pid, int)
+    assert isinstance(provider_pgid, int)
+    assert provider_pgid == provider_pid
+    assert not dispatch._agy_operation_journal._process_alive(provider_pid)
+    assert not dispatch._agy_operation_journal._process_group_alive(provider_pgid)
+
+
 def test_background_operation_stays_nonterminal_while_provider_group_survives(
     tmp_path: Path,
     monkeypatch,
