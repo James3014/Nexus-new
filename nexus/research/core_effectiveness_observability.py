@@ -241,14 +241,10 @@ def from_devspace_core_session_readback(
     session_binding = session.get("binding")
     session_core = session_binding.get("core") if isinstance(session_binding, Mapping) else None
     bound_profile = (
-        session_core.get("verification_profile")
-        if isinstance(session_core, Mapping)
-        else None
+        session_core.get("verification_profile") if isinstance(session_core, Mapping) else None
     )
     bound_profile_hash = (
-        bound_profile.get("profile_hash")
-        if isinstance(bound_profile, Mapping)
-        else None
+        bound_profile.get("profile_hash") if isinstance(bound_profile, Mapping) else None
     )
     observed_profile_hash = observation.get("profileHash")
     if (

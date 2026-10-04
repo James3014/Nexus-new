@@ -214,7 +214,9 @@ def test_identity_gap_requires_explicit_missingness() -> None:
         ])
 
 
-def test_devspace_readback_projects_candidate_core_missingness_and_independent_terminal_together() -> None:
+def test_devspace_readback_projects_candidate_core_missingness_and_independent_terminal_together() -> (
+    None
+):
     profile_hash = "sha256:26aaa763d00ecb7d18b9c14ff4291998ed1aaa0af43b81d617799648d3922487"
     entry = {
         "session": {
@@ -304,7 +306,10 @@ def test_devspace_readback_projects_candidate_core_missingness_and_independent_t
     assert row["terminal_evidence_id"] == "wave4-independent-terminal-verifier-20261004"
     assert row["terminal_candidate_head"] == row["candidate_head"]
     assert row["terminal_outcome"] == "CANARY_TERMINAL_CHECKS_PASS"
-    assert row["missingness"]["core_verdict"] == "Core acquisition runtime binding is incomplete or mismatched."
+    assert (
+        row["missingness"]["core_verdict"]
+        == "Core acquisition runtime binding is incomplete or mismatched."
+    )
 
     report = build_g0_coverage_report([row])
 
@@ -328,9 +333,15 @@ def test_devspace_readback_projects_candidate_core_missingness_and_independent_t
         "missingnessDetail": None,
     })
     terminal_fields = (
-        "baseline_result", "terminal_outcome", "t_baseline_detection",
-        "t_terminal_result", "verifier_runtime_ms", "duplicate_verifier_runtime_ms",
-        "reviewer_calls", "manual_interventions", "attempts_to_green",
+        "baseline_result",
+        "terminal_outcome",
+        "t_baseline_detection",
+        "t_terminal_result",
+        "verifier_runtime_ms",
+        "duplicate_verifier_runtime_ms",
+        "reviewer_calls",
+        "manual_interventions",
+        "attempts_to_green",
     )
     complete = from_devspace_core_session_readback(
         repository="James3014/devspace",
