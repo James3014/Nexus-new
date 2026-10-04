@@ -184,6 +184,12 @@ def _load_policy(path: Path) -> dict[str, Any]:
             raise ValueError("POLICY_GATE_INVALID")
         if not isinstance(handler, dict) or handler.get("kind") not in ALLOWED_HANDLER_KINDS:
             raise ValueError(f"POLICY_HANDLER_INVALID:{gate}")
+        for field in ("agy_allow_rules", "agy_deny_rules"):
+            rules = handler.get(field, [])
+            if not isinstance(rules, list) or any(
+                not isinstance(rule, str) or not rule.strip() for rule in rules
+            ):
+                raise ValueError(f"POLICY_PERMISSION_RULES_INVALID:{gate}:{field}")
     return value
 
 
@@ -287,22 +293,29 @@ def _agy_dispatch_plan(
     cwd: Path,
     timeout: int,
     max_calls: int,
+    allow_rules: list[str] | None = None,
+    deny_rules: list[str] | None = None,
 ) -> dict[str, Any]:
+    argv = [
+        _bin("NEXUS_AGY_DISPATCH_BIN", str(Path.home() / ".local/bin/nexus-agy-dispatch")),
+        "--prompt",
+        prompt,
+        "--cwd",
+        str(cwd),
+        "--mode",
+        "plan",
+        "--max-calls",
+        str(max_calls),
+        "--timeout",
+        str(timeout),
+        "--background",
+    ]
+    for rule in allow_rules or []:
+        argv += ["--allow", rule]
+    for rule in deny_rules or []:
+        argv += ["--deny", rule]
     result = _run(
-        [
-            _bin("NEXUS_AGY_DISPATCH_BIN", str(Path.home() / ".local/bin/nexus-agy-dispatch")),
-            "--prompt",
-            prompt,
-            "--cwd",
-            str(cwd),
-            "--mode",
-            "plan",
-            "--max-calls",
-            str(max_calls),
-            "--timeout",
-            str(timeout),
-            "--background",
-        ],
+        argv,
         cwd=cwd,
         timeout=30,
     )
@@ -363,10 +376,14 @@ def _handler_local_then_agy(
     local_advisory = local.stdout.strip()
     agy_prefix = str(handler.get("agy_prompt_prefix") or "")
     agy_prompt = f"{agy_prefix}\n\nLOCAL_HERMES_ADVISORY (non-authoritative):\n{local_advisory}\n"
+    allow_rules = list(handler.get("agy_allow_rules") or [])
+    deny_rules = list(handler.get("agy_deny_rules") or [])
+    permission_profile_sha256 = _digest({"allow": allow_rules, "deny": deny_rules})
     intent = {
         "kind": "AGY_DISPATCH_PLAN",
         "cycle": cycle,
         "prompt_sha256": hashlib.sha256(agy_prompt.encode("utf-8")).hexdigest(),
+        "permission_profile_sha256": permission_profile_sha256,
         "cwd": str(cwd),
         "created_at": _now(),
     }
@@ -381,6 +398,8 @@ def _handler_local_then_agy(
         cwd=cwd,
         timeout=int(handler.get("timeout", 90)),
         max_calls=int(handler.get("max_calls", 1)),
+        allow_rules=allow_rules,
+        deny_rules=deny_rules,
     )
     operation_id = str(payload["operation_id"])
     state["operation_id"] = operation_id
@@ -393,6 +412,7 @@ def _handler_local_then_agy(
         "operation_id": operation_id,
         "source_attribution_state": payload.get("source_attribution_state"),
         "base_head": payload.get("base_head"),
+        "permission_profile_sha256": permission_profile_sha256,
         "local_advisory_sha256": hashlib.sha256(local_advisory.encode("utf-8")).hexdigest(),
     }
 

@@ -337,3 +337,108 @@ def test_effect_cycle_receipt_contains_post_effect_readback(tmp_path, monkeypatc
     receipt = json.loads((tmp_path / "receipts/run-test/cycle-0001.json").read_text())
     assert receipt["post_effect_readback"]["doctor_disposition"] == "WAIT"
     assert receipt["post_effect_readback"]["guard"]["decision"] == "WAIT"
+
+
+def test_policy_rejects_invalid_agy_permission_rules(tmp_path):
+    policy = _policy(tmp_path)
+    value = json.loads(policy.read_text())
+    value["handlers"]["CONTINUE_BOUNDED_ISSUE_WORK"]["agy_allow_rules"] = "read_url(*)"
+    policy.write_text(json.dumps(value))
+    try:
+        MOD._load_policy(policy)
+    except ValueError as exc:
+        assert str(exc).startswith("POLICY_PERMISSION_RULES_INVALID:")
+    else:
+        raise AssertionError("invalid permission rules must fail closed")
+
+
+def test_agy_dispatch_plan_projects_explicit_readonly_permission_profile(tmp_path, monkeypatch):
+    captured = {}
+
+    def fake_run(argv, *, cwd=None, timeout=None, env=None):
+        captured["argv"] = argv
+        captured["cwd"] = cwd
+        captured["timeout"] = timeout
+        return subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout=json.dumps({"operation_id": "agyop_permissions"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(MOD, "_run", fake_run)
+    allow = [
+        f"read_file({tmp_path.resolve()}/**)",
+        "read_url(https://github.com/James3014/Nexus-new/issues/1140)",
+    ]
+    deny = ["write_file(*)", "command(*)"]
+    payload = MOD._agy_dispatch_plan(
+        prompt="read-only research",
+        cwd=tmp_path,
+        timeout=45,
+        max_calls=2,
+        allow_rules=allow,
+        deny_rules=deny,
+    )
+    assert payload["operation_id"] == "agyop_permissions"
+    argv = captured["argv"]
+    assert argv.count("--allow") == len(allow)
+    assert argv.count("--deny") == len(deny)
+    for rule in allow:
+        index = argv.index("--allow", argv.index(rule) - 1)
+        assert argv[index + 1] == rule
+    for rule in deny:
+        index = argv.index("--deny", argv.index(rule) - 1)
+        assert argv[index + 1] == rule
+    assert "--background" in argv
+
+
+def test_handler_binds_permission_profile_hash_before_dispatch(tmp_path, monkeypatch):
+    policy_path = _policy(tmp_path)
+    value = json.loads(policy_path.read_text())
+    handler = value["handlers"]["CONTINUE_BOUNDED_ISSUE_WORK"]
+    handler["agy_allow_rules"] = [
+        f"read_file({tmp_path.resolve()}/**)",
+        "read_url(https://github.com/James3014/Nexus-new/issues/1140)",
+    ]
+    handler["agy_deny_rules"] = ["write_file(*)", "command(*)"]
+    policy_path.write_text(json.dumps(value))
+    handler = MOD._load_policy(policy_path)["handlers"]["CONTINUE_BOUNDED_ISSUE_WORK"]
+    state = MOD._load_state(tmp_path / "receipts", "permission-handler")
+
+    monkeypatch.setattr(
+        MOD,
+        "_hermes_local",
+        lambda prompt, cwd: subprocess.CompletedProcess(
+            ["hermes"], 0, stdout="LOCAL_ADVICE\n", stderr=""
+        ),
+    )
+    observed = {}
+
+    def fake_dispatch(**kwargs):
+        observed.update(kwargs)
+        persisted = json.loads((tmp_path / "receipts/permission-handler/state.json").read_text())
+        observed["intent"] = persisted["effect_intent"]
+        return {
+            "operation_id": "agyop_permission_handler",
+            "source_attribution_state": "ATTRIBUTED",
+            "base_head": "d" * 40,
+        }
+
+    monkeypatch.setattr(MOD, "_agy_dispatch_plan", fake_dispatch)
+    result = MOD._handler_local_then_agy(
+        handler=handler,
+        policy_path=policy_path,
+        state=state,
+        receipt_dir=tmp_path / "receipts",
+        run_id="permission-handler",
+        cycle=1,
+    )
+    expected_profile = MOD._digest({
+        "allow": handler["agy_allow_rules"],
+        "deny": handler["agy_deny_rules"],
+    })
+    assert observed["allow_rules"] == handler["agy_allow_rules"]
+    assert observed["deny_rules"] == handler["agy_deny_rules"]
+    assert observed["intent"]["permission_profile_sha256"] == expected_profile
+    assert result["permission_profile_sha256"] == expected_profile
