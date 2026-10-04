@@ -257,6 +257,19 @@ def from_devspace_core_session_readback(
         and observed_profile_hash != bound_profile_hash
     ):
         raise ObservabilityContractError("core_observation_profile_hash_mismatch")
+    if observation.get("acquisitionStatus") == "VERDICT_RECORDED":
+        if observation.get("coreInvoked") is not True:
+            raise ObservabilityContractError("core_verdict_without_invocation")
+        if not _present(observed_profile_hash) or not _present(bound_profile_hash):
+            raise ObservabilityContractError("core_verdict_without_bound_profile")
+        if not _present(observation.get("coreVerdict")):
+            raise ObservabilityContractError("core_verdict_record_missing")
+        if not _present(observation.get("coreReason")):
+            raise ObservabilityContractError("core_reason_record_missing")
+        if not _present(observation.get("receiptHash")):
+            raise ObservabilityContractError("core_receipt_record_missing")
+        if _timestamp(observation.get("tCoreDetection")) is None:
+            raise ObservabilityContractError("core_detection_timestamp_invalid")
 
     row = from_devspace_core_session(
         repository=repository,

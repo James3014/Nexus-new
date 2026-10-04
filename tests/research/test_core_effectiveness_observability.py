@@ -349,6 +349,18 @@ def test_devspace_readback_projects_candidate_core_missingness_and_independent_t
     assert complete["missingness"] == {}
     assert build_g0_coverage_report([complete])["adjudication_complete_count"] == 1
 
+    complete_entry["coreAcquisitionObservation"]["coreInvoked"] = False
+    with pytest.raises(ObservabilityContractError, match="core_verdict_without_invocation"):
+        from_devspace_core_session_readback(
+            repository="James3014/devspace",
+            work_item_id="wave4-invalid-verdict",
+            attempt_index=1,
+            task_family="synthetic_capture_canary",
+            risk_class="low",
+            execution_lane="DIRECT_CANONICAL",
+            census_entry=complete_entry,
+        )
+
 
 def test_devspace_readback_rejects_candidate_or_terminal_identity_drift() -> None:
     entry = {
