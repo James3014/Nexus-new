@@ -418,16 +418,14 @@ class AgyOperationJournal(DirectOperationJournal):
         if not provider_alive and not group_alive:
             if status == "OUTCOME_UNKNOWN":
                 reconciliation = dict(record.get("reconciliation") or {})
-                reconciliation.update(
-                    {
-                        "at": utc_now(),
-                        "result": reconciliation.get("result") or "OUTCOME_UNKNOWN",
-                        "pid_alive": False,
-                        "provider_alive_before": False,
-                        "provider_alive_after": False,
-                        "retry_permitted": False,
-                    }
-                )
+                reconciliation.update({
+                    "at": utc_now(),
+                    "result": reconciliation.get("result") or "OUTCOME_UNKNOWN",
+                    "pid_alive": False,
+                    "provider_alive_before": False,
+                    "provider_alive_after": False,
+                    "retry_permitted": False,
+                })
                 return self.update(
                     operation_id,
                     phase="TERMINAL",
@@ -438,12 +436,10 @@ class AgyOperationJournal(DirectOperationJournal):
                 heartbeat_stale_seconds=heartbeat_stale_seconds,
             )
             reconciliation = dict(result.get("reconciliation") or {})
-            reconciliation.update(
-                {
-                    "provider_alive_before": False,
-                    "provider_alive_after": False,
-                }
-            )
+            reconciliation.update({
+                "provider_alive_before": False,
+                "provider_alive_after": False,
+            })
             return self.update(operation_id, reconciliation=reconciliation)
 
         op_dir = self.operation_dir(operation_id)
