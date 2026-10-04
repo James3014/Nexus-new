@@ -102,6 +102,14 @@
     {
       "path": "nexus/orchestrator/canonical_source_root.py",
       "mode": "0644"
+    },
+    {
+      "path": "scripts/ops/nexus-hermes-controller-guard",
+      "mode": "0755"
+    },
+    {
+      "path": "scripts/ops/nexus-hermes-continuation-controller",
+      "mode": "0755"
     }
   ],
   "components": {
@@ -131,6 +139,12 @@
     },
     "hcom_agy_safe": {
       "source_path": "scripts/ops/nexus-hcom-agy-safe"
+    },
+    "hermes_controller_guard": {
+      "source_path": "scripts/ops/nexus-hermes-controller-guard"
+    },
+    "hermes_continuation_controller": {
+      "source_path": "scripts/ops/nexus-hermes-continuation-controller"
     }
   }
 }

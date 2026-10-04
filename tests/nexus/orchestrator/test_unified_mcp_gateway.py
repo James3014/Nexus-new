@@ -2201,6 +2201,104 @@ def test_gateway_provider_executable_uses_shared_registered_resolver(monkeypatch
     assert executable == "/bin/echo"
 
 
+def test_gateway_provider_executable_binds_canonical_user_local_agy_when_path_is_restricted(monkeypatch, tmp_path):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    candidate = tmp_path / ".local/bin/agy"
+    candidate.parent.mkdir(parents=True)
+    candidate.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    candidate.chmod(0o755)
+    monkeypatch.setattr(gateway_module.Path, "home", classmethod(lambda cls: tmp_path))
+    calls = []
+
+    def resolve(provider, **kwargs):
+        calls.append(kwargs.get("environ"))
+        if len(calls) == 1:
+            raise ValueError("provider_binary_not_found")
+        assert provider == "agy"
+        assert kwargs["environ"]["NEXUS_AGY_BIN"] == str(candidate)
+        assert kwargs["environ"]["NEXUS_AGY_EXECUTABLE"] == str(candidate)
+        return str(candidate)
+
+    monkeypatch.setattr(gateway_module, "resolve_registered_provider_executable", resolve)
+    gateway = UnifiedMCPGateway(service=FakeService())
+
+    metadata, executable = gateway._provider_executable("agy")
+
+    assert metadata["binary_env"] == "NEXUS_AGY_BIN"
+    assert executable == str(candidate.resolve())
+    assert len(calls) == 2
+
+
+def test_gateway_provider_executable_preserves_agy_alias_drift_failure(monkeypatch, tmp_path):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    candidate = tmp_path / ".local/bin/agy"
+    candidate.parent.mkdir(parents=True)
+    candidate.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    candidate.chmod(0o755)
+    monkeypatch.setattr(gateway_module.Path, "home", classmethod(lambda cls: tmp_path))
+    calls = []
+
+    def resolve(provider, **kwargs):
+        calls.append((provider, kwargs))
+        raise ValueError("provider_executable_alias_mismatch")
+
+    monkeypatch.setattr(gateway_module, "resolve_registered_provider_executable", resolve)
+    gateway = UnifiedMCPGateway(service=FakeService())
+
+    _, executable = gateway._provider_executable("agy")
+
+    assert executable is None
+    assert len(calls) == 1
+
+
+def test_gateway_provider_executable_requires_executable_canonical_agy(monkeypatch, tmp_path):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    candidate = tmp_path / ".local/bin/agy"
+    candidate.parent.mkdir(parents=True)
+    candidate.write_text("not executable\n", encoding="utf-8")
+    candidate.chmod(0o644)
+    monkeypatch.setattr(gateway_module.Path, "home", classmethod(lambda cls: tmp_path))
+    calls = []
+
+    def resolve(provider, **kwargs):
+        calls.append((provider, kwargs))
+        raise ValueError("provider_binary_not_found")
+
+    monkeypatch.setattr(gateway_module, "resolve_registered_provider_executable", resolve)
+    gateway = UnifiedMCPGateway(service=FakeService())
+
+    _, executable = gateway._provider_executable("agy")
+
+    assert executable is None
+    assert len(calls) == 1
+
+
+def test_gateway_provider_executable_does_not_fallback_for_unrelated_provider(monkeypatch, tmp_path):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    candidate = tmp_path / ".local/bin/agy"
+    candidate.parent.mkdir(parents=True)
+    candidate.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    candidate.chmod(0o755)
+    monkeypatch.setattr(gateway_module.Path, "home", classmethod(lambda cls: tmp_path))
+    calls = []
+
+    def resolve(provider, **kwargs):
+        calls.append((provider, kwargs))
+        raise ValueError("provider_binary_not_found")
+
+    monkeypatch.setattr(gateway_module, "resolve_registered_provider_executable", resolve)
+    gateway = UnifiedMCPGateway(service=FakeService())
+
+    _, executable = gateway._provider_executable("codex")
+
+    assert executable is None
+    assert len(calls) == 1
+
+
 def test_task_card_create_is_owner_confirmed_non_overwriting_and_hashed(monkeypatch, tmp_path):
     import nexus.orchestrator.unified_mcp_gateway as gateway_module
 
