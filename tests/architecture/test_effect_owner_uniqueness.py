@@ -136,6 +136,7 @@ NON_GATEWAY_LAUNCHCTL_WRITERS = frozenset({
     "scripts/ops/learn_refresh_launchd.py:install",
     "scripts/ops/learn_refresh_launchd.py:status",
     "scripts/ops/learn_refresh_launchd.py:uninstall",
+    "scripts/ops/nexus-hermes-launchd:_launchctl",
 })
 
 DECLARED = (

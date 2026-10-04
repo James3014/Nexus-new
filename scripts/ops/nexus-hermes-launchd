@@ -1,0 +1,912 @@
+#!/usr/bin/env python3
+"""Stage and supervise the Nexus Hermes local controller on macOS launchd.
+
+This manager owns only the local launchd service lifecycle for the Hermes
+controller and its local Splash model process. It does not own workflow routing,
+Agy leases, completion, merge, release, or production truth.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import plistlib
+import re
+import subprocess
+import tempfile
+import time
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable
+
+CONFIG_SCHEMA = "nexus.hermes_launchd_config.v1"
+TARGET_SCHEMA = "nexus.hermes_service_target.v1"
+STATE_SCHEMA = "nexus.hermes_launchd_state.v1"
+ACTIVATION_SCHEMA = "nexus.hermes_elapsed_soak_acceptance.v1"
+CLAIM_CEILING = "LOCAL_SERVICE_LIFECYCLE_ONLY_NO_WORKFLOW_ACCEPTANCE_MERGE_RELEASE"
+DEFAULT_CONTROLLER_LABEL = "com.nexus.hermes-controller"
+DEFAULT_MODEL_LABEL = "com.nexus.hermes-local-model"
+MIN_SOAK_SECONDS = 6 * 60 * 60
+NOT_FOUND = "Could not find service"
+
+
+class HermesLaunchdError(RuntimeError):
+    pass
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _canonical_bytes(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _atomic_json(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", dir=path.parent, delete=False
+    ) as handle:
+        json.dump(value, handle, ensure_ascii=False, sort_keys=True, indent=2)
+        handle.write("\n")
+        temp = Path(handle.name)
+    os.replace(temp, path)
+
+
+def _load_object(path: Path, *, schema: str | None = None) -> dict[str, Any]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise HermesLaunchdError(f"JSON_OBJECT_REQUIRED:{path}")
+    if schema and value.get("schema") != schema:
+        raise HermesLaunchdError(f"SCHEMA_MISMATCH:{path}:{value.get('schema')}")
+    return value
+
+
+def _expand(raw: str) -> Path:
+    return Path(os.path.expandvars(os.path.expanduser(raw))).resolve()
+
+
+def _load_config(path: Path) -> dict[str, Any]:
+    config = _load_object(path, schema=CONFIG_SCHEMA)
+    required = (
+        "state_root",
+        "target_path",
+        "activation_evidence_path",
+        "controller_path",
+        "guard_path",
+        "doctor_path",
+        "host_sync_path",
+        "model_endpoint",
+        "model_binary",
+        "model_binary_sha256",
+        "model_id",
+        "model_context",
+        "model_port",
+        "start_interval_seconds",
+    )
+    for key in required:
+        if key not in config:
+            raise HermesLaunchdError(f"CONFIG_FIELD_MISSING:{key}")
+    if int(config["start_interval_seconds"]) < 30:
+        raise HermesLaunchdError("START_INTERVAL_TOO_SMALL")
+    if int(config["model_context"]) < 65536:
+        raise HermesLaunchdError("MODEL_CONTEXT_BELOW_HERMES_MINIMUM")
+    return config
+
+
+def _load_target(config: dict[str, Any]) -> tuple[Path, dict[str, Any]]:
+    path = _expand(str(config["target_path"]))
+    target = _load_object(path, schema=TARGET_SCHEMA)
+    if target.get("mode") not in {"observe", "execute"}:
+        raise HermesLaunchdError("TARGET_MODE_INVALID")
+    for key in ("repository", "repo_root", "policy_path", "mode"):
+        if not target.get(key):
+            raise HermesLaunchdError(f"TARGET_FIELD_MISSING:{key}")
+    return path, target
+
+
+def _state_root(config: dict[str, Any]) -> Path:
+    return _expand(str(config["state_root"]))
+
+
+def _state_path(config: dict[str, Any]) -> Path:
+    return _state_root(config) / "service-state.json"
+
+
+def _load_state(config: dict[str, Any]) -> dict[str, Any]:
+    path = _state_path(config)
+    if not path.exists():
+        return {
+            "schema": STATE_SCHEMA,
+            "claim_ceiling": CLAIM_CEILING,
+            "target_sha256": None,
+            "epoch": 0,
+            "controller_run_id": None,
+            "epoch_status": "IDLE",
+            "last_tick_started_at": None,
+            "last_tick_finished_at": None,
+            "last_outcome": None,
+        }
+    return _load_object(path, schema=STATE_SCHEMA)
+
+
+def _save_state(config: dict[str, Any], state: dict[str, Any]) -> None:
+    _atomic_json(_state_path(config), state)
+
+
+def _run(
+    argv: list[str],
+    *,
+    cwd: Path | None = None,
+    timeout: int = 60,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        argv,
+        cwd=str(cwd) if cwd else None,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env=env,
+        check=False,
+    )
+
+
+def _launchctl(
+    *args: str,
+    timeout: int = 20,
+) -> subprocess.CompletedProcess[str]:
+    return _run(["launchctl", *args], timeout=timeout)
+
+
+def _launch_status(
+    label: str,
+    *,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = _launchctl,
+) -> dict[str, Any]:
+    domain = f"gui/{os.getuid()}"
+    result = runner("print", f"{domain}/{label}")
+    combined = (result.stdout or "") + (result.stderr or "")
+    if result.returncode != 0:
+        if NOT_FOUND in combined:
+            return {
+                "loaded": False,
+                "state": "UNLOADED",
+                "pid": None,
+                "last_exit_code": None,
+            }
+        raise HermesLaunchdError(f"LAUNCHCTL_PRINT_FAILED:{label}:{combined.strip()}")
+
+    def match(pattern: str) -> str | None:
+        found = re.search(pattern, result.stdout or "", re.MULTILINE)
+        return found.group(1) if found else None
+
+    pid_raw = match(r"^\s*pid\s*=\s*(\d+)")
+    exit_raw = match(r"^\s*last exit code\s*=\s*(.+?)\s*$")
+    return {
+        "loaded": True,
+        "state": match(r"^\s*state\s*=\s*(\S+)") or "UNKNOWN",
+        "pid": int(pid_raw) if pid_raw else None,
+        "last_exit_code": exit_raw,
+    }
+
+
+def _disabled_status(
+    label: str,
+    *,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = _launchctl,
+) -> bool | None:
+    domain = f"gui/{os.getuid()}"
+    result = runner("print-disabled", domain)
+    if result.returncode != 0:
+        raise HermesLaunchdError(
+            f"LAUNCHCTL_PRINT_DISABLED_FAILED:{label}:{(result.stderr or '').strip()}"
+        )
+    match = re.search(rf'"{re.escape(label)}"\s*=>\s*(true|false)', result.stdout or "")
+    if not match:
+        return None
+    return match.group(1) == "true"
+
+
+def _bootout_if_loaded(
+    label: str,
+    *,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = _launchctl,
+) -> None:
+    status = _launch_status(label, runner=runner)
+    if not status["loaded"]:
+        return
+    domain = f"gui/{os.getuid()}"
+    result = runner("bootout", f"{domain}/{label}")
+    if result.returncode != 0:
+        raise HermesLaunchdError(
+            f"LAUNCHCTL_BOOTOUT_FAILED:{label}:{(result.stderr or result.stdout).strip()}"
+        )
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if not _launch_status(label, runner=runner)["loaded"]:
+            return
+        time.sleep(0.25)
+    raise HermesLaunchdError(f"LAUNCHCTL_BOOTOUT_TIMEOUT:{label}")
+
+
+def _set_disabled(
+    label: str,
+    disabled: bool,
+    *,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = _launchctl,
+) -> None:
+    domain = f"gui/{os.getuid()}"
+    verb = "disable" if disabled else "enable"
+    result = runner(verb, f"{domain}/{label}")
+    if result.returncode != 0:
+        raise HermesLaunchdError(
+            f"LAUNCHCTL_{verb.upper()}_FAILED:{label}:{(result.stderr or result.stdout).strip()}"
+        )
+
+
+def _plist_paths(config: dict[str, Any]) -> tuple[Path, Path]:
+    root = Path.home() / "Library" / "LaunchAgents"
+    controller = root / f"{config.get('controller_label', DEFAULT_CONTROLLER_LABEL)}.plist"
+    model = root / f"{config.get('model_label', DEFAULT_MODEL_LABEL)}.plist"
+    return controller, model
+
+
+def _service_binary() -> str:
+    return os.getenv(
+        "NEXUS_HERMES_LAUNCHD_TARGET",
+        str(Path.home() / ".local/bin/nexus-hermes-launchd"),
+    )
+
+
+def _plist_payloads(
+    config_path: Path, config: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    state_root = _state_root(config)
+    logs = state_root / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    controller_label = str(config.get("controller_label", DEFAULT_CONTROLLER_LABEL))
+    model_label = str(config.get("model_label", DEFAULT_MODEL_LABEL))
+    controller_payload = {
+        "Label": controller_label,
+        "ProgramArguments": [
+            _service_binary(),
+            "tick",
+            "--config",
+            str(config_path),
+        ],
+        "RunAtLoad": True,
+        "StartInterval": int(config["start_interval_seconds"]),
+        "ProcessType": "Background",
+        "ThrottleInterval": 30,
+        "StandardOutPath": str(logs / "controller.stdout.log"),
+        "StandardErrorPath": str(logs / "controller.stderr.log"),
+        "EnvironmentVariables": {
+            "HOME": str(Path.home()),
+            "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+            "PYTHONDONTWRITEBYTECODE": "1",
+        },
+    }
+    model_payload = {
+        "Label": model_label,
+        "ProgramArguments": [
+            str(_expand(str(config["model_binary"]))),
+            "serve",
+            "--model",
+            str(config["model_id"]),
+            "--port",
+            str(int(config["model_port"])),
+            "--max-context",
+            str(int(config["model_context"])),
+            "--default-reasoning-effort",
+            "none",
+            "--no-webui",
+        ],
+        "RunAtLoad": True,
+        "KeepAlive": True,
+        "ProcessType": "Background",
+        "ThrottleInterval": 30,
+        "StandardOutPath": str(logs / "model.stdout.log"),
+        "StandardErrorPath": str(logs / "model.stderr.log"),
+        "EnvironmentVariables": {
+            "HOME": str(Path.home()),
+            "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+            "PYTHONDONTWRITEBYTECODE": "1",
+        },
+    }
+    return controller_payload, model_payload
+
+
+def _write_plists(config_path: Path, config: dict[str, Any]) -> tuple[Path, Path]:
+    controller_path, model_path = _plist_paths(config)
+    controller_path.parent.mkdir(parents=True, exist_ok=True)
+    controller_payload, model_payload = _plist_payloads(config_path, config)
+    for path, payload in ((controller_path, controller_payload), (model_path, model_payload)):
+        data = plistlib.dumps(payload, fmt=plistlib.FMT_XML, sort_keys=False)
+        path.write_bytes(data)
+        path.chmod(0o600)
+    return controller_path, model_path
+
+
+def _verify_model_binary(config: dict[str, Any]) -> dict[str, Any]:
+    path = _expand(str(config["model_binary"]))
+    if not path.is_file():
+        raise HermesLaunchdError(f"MODEL_BINARY_MISSING:{path}")
+    observed = _sha256_file(path)
+    expected = str(config["model_binary_sha256"])
+    if observed != expected:
+        raise HermesLaunchdError(f"MODEL_BINARY_SHA_MISMATCH:{observed}:{expected}")
+    return {"path": str(path), "sha256": observed}
+
+
+def _endpoint_health(config: dict[str, Any], *, timeout: float = 3.0) -> dict[str, Any]:
+    endpoint = str(config["model_endpoint"])
+    try:
+        with urllib.request.urlopen(endpoint, timeout=timeout) as response:
+            raw = response.read()
+            status = int(getattr(response, "status", 200))
+    except (OSError, urllib.error.URLError) as exc:
+        raise HermesLaunchdError(f"MODEL_ENDPOINT_UNAVAILABLE:{type(exc).__name__}") from exc
+    if status != 200:
+        raise HermesLaunchdError(f"MODEL_ENDPOINT_HTTP_{status}")
+    payload = json.loads(raw.decode("utf-8"))
+    if not isinstance(payload, dict):
+        raise HermesLaunchdError("MODEL_ENDPOINT_NOT_OBJECT")
+    models = payload.get("data") or payload.get("models")
+    if not isinstance(models, list):
+        raise HermesLaunchdError("MODEL_ENDPOINT_MODELS_MISSING")
+    names = []
+    for item in models:
+        if isinstance(item, dict):
+            value = item.get("id") or item.get("name")
+            if isinstance(value, str):
+                names.append(value)
+    if str(config["model_id"]) not in names:
+        raise HermesLaunchdError(f"MODEL_ID_NOT_SERVED:{config['model_id']}")
+    return {"status": "HEALTHY", "models": names, "endpoint": endpoint}
+
+
+def _host_runtime(config: dict[str, Any]) -> dict[str, Any]:
+    host_sync = str(_expand(str(config["host_sync_path"])))
+    desired_result = _run([host_sync, "desired", "--track-ref", "main"], timeout=60)
+    if desired_result.returncode != 0:
+        raise HermesLaunchdError(
+            f"HOST_DESIRED_FAILED:{desired_result.stderr.strip() or desired_result.stdout.strip()}"
+        )
+    desired = json.loads(desired_result.stdout)
+    bundle = desired.get("desired_bundle_sha256")
+    if not isinstance(bundle, str) or not bundle:
+        raise HermesLaunchdError("HOST_DESIRED_BUNDLE_MISSING")
+    verify_result = _run(
+        [host_sync, "verify", "--desired-bundle-sha256", bundle],
+        timeout=30,
+    )
+    if verify_result.returncode != 0:
+        raise HermesLaunchdError(
+            f"HOST_VERIFY_FAILED:{verify_result.stderr.strip() or verify_result.stdout.strip()}"
+        )
+    verify = json.loads(verify_result.stdout)
+    if verify.get("state") != "ALIGNED":
+        raise HermesLaunchdError(f"HOST_RUNTIME_NOT_ALIGNED:{verify.get('state')}")
+    components = verify.get("components") or {}
+    for name in (
+        "hermes_controller_guard",
+        "hermes_continuation_controller",
+        "hermes_launchd",
+    ):
+        row = components.get(name)
+        if not isinstance(row, dict) or row.get("status") != "VERIFIED":
+            raise HermesLaunchdError(f"HOST_COMPONENT_NOT_VERIFIED:{name}")
+    return {
+        "state": verify.get("state"),
+        "installed_revision": verify.get("installed_revision"),
+        "installed_bundle_sha256": verify.get("installed_bundle_sha256"),
+        "desired_revision": desired.get("desired_revision"),
+        "desired_bundle_sha256": bundle,
+        "components": {
+            name: components.get(name)
+            for name in (
+                "hermes_controller_guard",
+                "hermes_continuation_controller",
+                "hermes_launchd",
+            )
+        },
+    }
+
+
+def _doctor(
+    config: dict[str, Any],
+    target: dict[str, Any],
+    operation_id: str | None,
+) -> dict[str, Any]:
+    argv = [
+        str(_expand(str(config["doctor_path"]))),
+        "--json",
+        "--repo-root",
+        str(_expand(str(target["repo_root"]))),
+        "--repository",
+        str(target["repository"]),
+    ]
+    if target.get("issue") is not None:
+        argv += ["--issue", str(int(target["issue"]))]
+    if target.get("pr") is not None:
+        argv += ["--pr", str(int(target["pr"]))]
+    if operation_id:
+        argv += ["--operation-id", operation_id]
+    result = _run(argv, cwd=_expand(str(target["repo_root"])), timeout=30)
+    if result.returncode != 0:
+        raise HermesLaunchdError(f"DOCTOR_FAILED:{result.stderr.strip() or result.stdout.strip()}")
+    payload = json.loads(result.stdout)
+    if payload.get("schema") != "nexus.workflow_doctor.v1":
+        raise HermesLaunchdError("DOCTOR_SCHEMA_MISMATCH")
+    if payload.get("claim_ceiling") != "READ_ONLY_WORKFLOW_OBSERVATION":
+        raise HermesLaunchdError("DOCTOR_CLAIM_CEILING_MISMATCH")
+    return payload
+
+
+def _controller_state(config: dict[str, Any], run_id: str) -> dict[str, Any]:
+    path = _state_root(config) / "controller-receipts" / run_id / "state.json"
+    if not path.exists():
+        return {}
+    return _load_object(path)
+
+
+def _parse_last_json(stdout: str) -> dict[str, Any]:
+    lines = [line.strip() for line in stdout.splitlines() if line.strip()]
+    if not lines:
+        raise HermesLaunchdError("CONTROLLER_STDOUT_EMPTY")
+    payload = json.loads(lines[-1])
+    if not isinstance(payload, dict):
+        raise HermesLaunchdError("CONTROLLER_STDOUT_NOT_OBJECT")
+    return payload
+
+
+def _activation_evidence(config: dict[str, Any]) -> dict[str, Any]:
+    path = _expand(str(config["activation_evidence_path"]))
+    if not path.is_file():
+        raise HermesLaunchdError(f"ACTIVATION_EVIDENCE_MISSING:{path}")
+    evidence = _load_object(path, schema=ACTIVATION_SCHEMA)
+    if evidence.get("status") != "PASS":
+        raise HermesLaunchdError("ACTIVATION_EVIDENCE_NOT_PASS")
+    if int(evidence.get("elapsed_seconds") or 0) < MIN_SOAK_SECONDS:
+        raise HermesLaunchdError("ACTIVATION_EVIDENCE_TOO_SHORT")
+    runtime = _host_runtime(config)
+    if evidence.get("runtime_revision") != runtime.get("installed_revision"):
+        raise HermesLaunchdError("ACTIVATION_RUNTIME_REVISION_MISMATCH")
+    if evidence.get("runtime_bundle_sha256") != runtime.get("installed_bundle_sha256"):
+        raise HermesLaunchdError("ACTIVATION_RUNTIME_BUNDLE_MISMATCH")
+    return evidence
+
+
+def _stage(
+    config_path: Path,
+    config: dict[str, Any],
+    *,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = _launchctl,
+) -> dict[str, Any]:
+    _verify_model_binary(config)
+    controller_label = str(config.get("controller_label", DEFAULT_CONTROLLER_LABEL))
+    model_label = str(config.get("model_label", DEFAULT_MODEL_LABEL))
+    for label in (controller_label, model_label):
+        _bootout_if_loaded(label, runner=runner)
+        _set_disabled(label, True, runner=runner)
+    controller_plist, model_plist = _write_plists(config_path, config)
+    return {
+        "status": "STAGED_DISABLED",
+        "controller_plist": str(controller_plist),
+        "model_plist": str(model_plist),
+        "controller": _launch_status(controller_label, runner=runner),
+        "model": _launch_status(model_label, runner=runner),
+    }
+
+
+def _bootstrap(
+    label: str,
+    plist_path: Path,
+    *,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = _launchctl,
+) -> None:
+    domain = f"gui/{os.getuid()}"
+    result = runner("bootstrap", domain, str(plist_path))
+    if result.returncode != 0:
+        raise HermesLaunchdError(
+            f"LAUNCHCTL_BOOTSTRAP_FAILED:{label}:{(result.stderr or result.stdout).strip()}"
+        )
+
+
+def _activate(
+    config_path: Path,
+    config: dict[str, Any],
+    *,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = _launchctl,
+) -> dict[str, Any]:
+    evidence = _activation_evidence(config)
+    controller_label = str(config.get("controller_label", DEFAULT_CONTROLLER_LABEL))
+    model_label = str(config.get("model_label", DEFAULT_MODEL_LABEL))
+    controller_plist, model_plist = _plist_paths(config)
+    if not controller_plist.is_file() or not model_plist.is_file():
+        raise HermesLaunchdError("SERVICE_NOT_STAGED")
+
+    model_status = _launch_status(model_label, runner=runner)
+    if not model_status["loaded"]:
+        try:
+            _endpoint_health(config)
+        except HermesLaunchdError as exc:
+            if not str(exc).startswith("MODEL_ENDPOINT_UNAVAILABLE"):
+                raise
+        else:
+            raise HermesLaunchdError("MODEL_ENDPOINT_ALREADY_LIVE_OUTSIDE_LAUNCHD")
+
+    _set_disabled(model_label, False, runner=runner)
+    _bootstrap(model_label, model_plist, runner=runner)
+    deadline = time.monotonic() + 180
+    while True:
+        try:
+            model_health = _endpoint_health(config, timeout=3.0)
+            break
+        except HermesLaunchdError:
+            if time.monotonic() >= deadline:
+                _set_disabled(model_label, True, runner=runner)
+                _bootout_if_loaded(model_label, runner=runner)
+                raise HermesLaunchdError("MODEL_LAUNCHD_HEALTH_TIMEOUT")
+            time.sleep(2)
+
+    _set_disabled(controller_label, False, runner=runner)
+    _bootstrap(controller_label, controller_plist, runner=runner)
+    return {
+        "status": "ACTIVATED",
+        "activation_evidence": evidence,
+        "model_health": model_health,
+        "model": _launch_status(model_label, runner=runner),
+        "controller": _launch_status(controller_label, runner=runner),
+    }
+
+
+def _disable(
+    config: dict[str, Any],
+    *,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = _launchctl,
+) -> dict[str, Any]:
+    controller_label = str(config.get("controller_label", DEFAULT_CONTROLLER_LABEL))
+    model_label = str(config.get("model_label", DEFAULT_MODEL_LABEL))
+    for label in (controller_label, model_label):
+        _bootout_if_loaded(label, runner=runner)
+        _set_disabled(label, True, runner=runner)
+    return {
+        "status": "DISABLED",
+        "controller": _launch_status(controller_label, runner=runner),
+        "model": _launch_status(model_label, runner=runner),
+    }
+
+
+def _status(config_path: Path, config: dict[str, Any]) -> dict[str, Any]:
+    controller_label = str(config.get("controller_label", DEFAULT_CONTROLLER_LABEL))
+    model_label = str(config.get("model_label", DEFAULT_MODEL_LABEL))
+    controller_plist, model_plist = _plist_paths(config)
+    payload: dict[str, Any] = {
+        "schema": "nexus.hermes_launchd_status.v1",
+        "claim_ceiling": CLAIM_CEILING,
+        "config_path": str(config_path),
+        "controller_plist": str(controller_plist),
+        "model_plist": str(model_plist),
+        "controller_plist_present": controller_plist.is_file(),
+        "model_plist_present": model_plist.is_file(),
+        "controller": _launch_status(controller_label),
+        "model": _launch_status(model_label),
+        "controller_disabled": _disabled_status(controller_label),
+        "model_disabled": _disabled_status(model_label),
+        "state": _load_state(config),
+    }
+    try:
+        payload["host_runtime"] = _host_runtime(config)
+    except Exception as exc:
+        payload["host_runtime_error"] = f"{type(exc).__name__}:{exc}"
+    try:
+        payload["model_health"] = _endpoint_health(config)
+    except Exception as exc:
+        payload["model_health_error"] = f"{type(exc).__name__}:{exc}"
+    try:
+        payload["model_binary"] = _verify_model_binary(config)
+    except Exception as exc:
+        payload["model_binary_error"] = f"{type(exc).__name__}:{exc}"
+    return payload
+
+
+def _tick(config_path: Path, config: dict[str, Any], *, allow_staged: bool) -> dict[str, Any]:
+    if allow_staged:
+        _, target = _load_target(config)
+        if target.get("mode") != "observe":
+            raise HermesLaunchdError("STAGED_CANARY_REQUIRES_OBSERVE_TARGET")
+    else:
+        _activation_evidence(config)
+        _, target = _load_target(config)
+
+    runtime = _host_runtime(config)
+    model = _endpoint_health(config)
+    target_path, target = _load_target(config)
+    if not bool(target.get("enabled", True)):
+        return {
+            "status": "NOOP_TARGET_DISABLED",
+            "host_runtime": runtime,
+            "model_health": model,
+        }
+
+    target_hash = _sha256_bytes(_canonical_bytes(target))
+    state = _load_state(config)
+    prior_hash = state.get("target_sha256")
+    prior_status = state.get("epoch_status")
+    if prior_hash not in (None, target_hash) and prior_status not in {"IDLE", "COMPLETE"}:
+        raise HermesLaunchdError("TARGET_CHANGED_WITH_ACTIVE_EPOCH")
+
+    if (
+        prior_hash != target_hash
+        or prior_status in {"IDLE", "COMPLETE"}
+        or not state.get("controller_run_id")
+    ):
+        epoch = int(state.get("epoch") or 0) + 1
+        state.update({
+            "target_sha256": target_hash,
+            "epoch": epoch,
+            "controller_run_id": f"hermes-service-{target_hash[:12]}-e{epoch:06d}",
+            "epoch_status": "ACTIVE",
+        })
+        _save_state(config, state)
+
+    run_id = str(state["controller_run_id"])
+    state["last_tick_started_at"] = _now()
+    _save_state(config, state)
+
+    receipt_dir = _state_root(config) / "controller-receipts"
+    argv = [
+        str(_expand(str(config["controller_path"]))),
+        "run",
+        "--policy",
+        str(_expand(str(target["policy_path"]))),
+        "--repo-root",
+        str(_expand(str(target["repo_root"]))),
+        "--repository",
+        str(target["repository"]),
+        "--mode",
+        str(target["mode"]),
+        "--receipt-dir",
+        str(receipt_dir),
+        "--run-id",
+        run_id,
+        "--max-cycles",
+        str(int(target.get("max_cycles", 3))),
+    ]
+    if target.get("issue") is not None:
+        argv += ["--issue", str(int(target["issue"]))]
+    if target.get("pr") is not None:
+        argv += ["--pr", str(int(target["pr"]))]
+
+    result = _run(argv, cwd=_expand(str(target["repo_root"])), timeout=300)
+    stdout_payload = _parse_last_json(result.stdout)
+    controller_state = _controller_state(config, run_id)
+    intent = controller_state.get("effect_intent")
+    if isinstance(intent, dict) and intent and not intent.get("operation_id"):
+        state["last_outcome"] = "BLOCK_UNBOUND_EFFECT_INTENT"
+        state["last_tick_finished_at"] = _now()
+        _save_state(config, state)
+        raise HermesLaunchdError("BLOCK_UNBOUND_EFFECT_INTENT")
+
+    operation_id = controller_state.get("operation_id")
+    doctor = _doctor(config, target, str(operation_id) if operation_id else None)
+    active_ops = len((doctor.get("operation") or {}).get("active") or [])
+    active_leases = len((doctor.get("leases") or {}).get("active") or [])
+    disposition = doctor.get("resume_disposition")
+
+    if result.returncode != 0:
+        state["last_outcome"] = (
+            f"CONTROLLER_EXIT_{result.returncode}:{stdout_payload.get('outcome')}"
+        )
+        state["last_tick_finished_at"] = _now()
+        _save_state(config, state)
+        raise HermesLaunchdError(state["last_outcome"])
+
+    if (
+        target.get("mode") == "execute"
+        and int(controller_state.get("effects_started") or 0) >= 1
+        and operation_id
+        and disposition == "SAFE"
+        and active_ops == 0
+        and active_leases == 0
+    ):
+        state["epoch_status"] = "COMPLETE"
+
+    state["last_outcome"] = stdout_payload.get("outcome")
+    state["last_tick_finished_at"] = _now()
+    _save_state(config, state)
+    return {
+        "status": "TICK_COMPLETE",
+        "controller_run_id": run_id,
+        "controller_outcome": stdout_payload.get("outcome"),
+        "controller_state": {
+            "effects_started": controller_state.get("effects_started"),
+            "operation_id": operation_id,
+            "effect_intent": intent,
+        },
+        "doctor_disposition": disposition,
+        "next_gate": (doctor.get("next_gate") or {}).get("code"),
+        "active_operations": active_ops,
+        "active_leases": active_leases,
+        "host_runtime": runtime,
+        "model_health": model,
+        "target_path": str(target_path),
+        "target_sha256": target_hash,
+        "epoch_status": state.get("epoch_status"),
+    }
+
+
+def _accept_soak(
+    config: dict[str, Any], soak_state: Path, output: Path, min_hours: float
+) -> dict[str, Any]:
+    state = _load_object(soak_state / "state.json", schema="nexus.hermes_soak_state.v1")
+    if state.get("failed") is not False or state.get("in_progress_cycle") is not None:
+        raise HermesLaunchdError("SOAK_STATE_NOT_TERMINAL_PASS")
+    cycle_paths = sorted((soak_state / "cycles").glob("cycle-*.json"))
+    if len(cycle_paths) < 2:
+        raise HermesLaunchdError("SOAK_REQUIRES_AT_LEAST_TWO_CYCLES")
+    if int(state.get("completed_cycles") or 0) != len(cycle_paths):
+        raise HermesLaunchdError("SOAK_COMPLETED_CYCLE_COUNT_MISMATCH")
+    cycles = [_load_object(path, schema="nexus.hermes_soak_cycle.v1") for path in cycle_paths]
+    if any(cycle.get("run_id") != state.get("run_id") for cycle in cycles):
+        raise HermesLaunchdError("SOAK_RUN_ID_MISMATCH")
+    if any(cycle.get("outcome") != "PASS" for cycle in cycles):
+        raise HermesLaunchdError("SOAK_CYCLE_NOT_PASS")
+    if any(cycle.get("mode") != "observe" for cycle in cycles):
+        raise HermesLaunchdError("SOAK_MUST_BE_OBSERVE_ONLY")
+    first = datetime.fromisoformat(str(cycles[0]["started_at"]).replace("Z", "+00:00"))
+    last = datetime.fromisoformat(str(cycles[-1]["finished_at"]).replace("Z", "+00:00"))
+    elapsed = int((last - first).total_seconds())
+    required = max(MIN_SOAK_SECONDS, int(min_hours * 3600))
+    if elapsed < required:
+        raise HermesLaunchdError(f"SOAK_ELAPSED_TOO_SHORT:{elapsed}:{required}")
+    runtime = _host_runtime(config)
+    for cycle in cycles:
+        host = cycle.get("host_runtime") or {}
+        if host.get("installed_revision") != runtime.get("installed_revision"):
+            raise HermesLaunchdError("SOAK_RUNTIME_REVISION_MISMATCH")
+        if host.get("installed_bundle_sha256") != runtime.get("installed_bundle_sha256"):
+            raise HermesLaunchdError("SOAK_RUNTIME_BUNDLE_MISMATCH")
+        if cycle.get("doctor_disposition") != "SAFE":
+            raise HermesLaunchdError("SOAK_DOCTOR_NOT_SAFE")
+        if (cycle.get("local_model") or {}).get("status") != "HEALTHY":
+            raise HermesLaunchdError("SOAK_MODEL_NOT_HEALTHY")
+    effect_states = []
+    for path in sorted((soak_state / "controller-receipts").glob("*/state.json")):
+        value = _load_object(path)
+        effect_states.append(int(value.get("effects_started") or 0))
+    if any(value != 0 for value in effect_states):
+        raise HermesLaunchdError("SOAK_OBSERVE_EFFECT_DETECTED")
+
+    receipt_index = [
+        {
+            "path": str(path),
+            "sha256": _sha256_file(path),
+        }
+        for path in [soak_state / "state.json", *cycle_paths]
+    ]
+    evidence = {
+        "schema": ACTIVATION_SCHEMA,
+        "claim_ceiling": "WAVE_E_ACTIVATION_PREREQUISITE_ONLY",
+        "status": "PASS",
+        "soak_run_id": state.get("run_id"),
+        "completed_cycles": state.get("completed_cycles"),
+        "first_started_at": cycles[0]["started_at"],
+        "last_finished_at": cycles[-1]["finished_at"],
+        "elapsed_seconds": elapsed,
+        "minimum_required_seconds": required,
+        "runtime_revision": runtime.get("installed_revision"),
+        "runtime_bundle_sha256": runtime.get("installed_bundle_sha256"),
+        "source_state_dir": str(soak_state),
+        "receipt_index": receipt_index,
+        "receipt_index_sha256": _sha256_bytes(_canonical_bytes(receipt_index)),
+        "accepted_at": _now(),
+    }
+    _atomic_json(output, evidence)
+    return evidence
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    for name in ("stage", "status", "activate", "disable", "uninstall"):
+        child = sub.add_parser(name)
+        child.add_argument("--config", required=True)
+
+    tick = sub.add_parser("tick")
+    tick.add_argument("--config", required=True)
+    tick.add_argument("--allow-staged", action="store_true")
+
+    accept = sub.add_parser("accept-soak")
+    accept.add_argument("--config", required=True)
+    accept.add_argument("--soak-state", required=True)
+    accept.add_argument("--output")
+    accept.add_argument("--min-hours", type=float, default=6.0)
+
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    try:
+        config_path = _expand(args.config)
+        config = _load_config(config_path)
+        if args.command == "stage":
+            payload = _stage(config_path, config)
+        elif args.command == "status":
+            payload = _status(config_path, config)
+        elif args.command == "activate":
+            payload = _activate(config_path, config)
+        elif args.command == "disable":
+            payload = _disable(config)
+        elif args.command == "uninstall":
+            payload = _disable(config)
+            controller_plist, model_plist = _plist_paths(config)
+            controller_plist.unlink(missing_ok=True)
+            model_plist.unlink(missing_ok=True)
+            payload["status"] = "UNINSTALLED"
+        elif args.command == "tick":
+            payload = _tick(config_path, config, allow_staged=bool(args.allow_staged))
+        elif args.command == "accept-soak":
+            output = (
+                _expand(args.output)
+                if args.output
+                else _expand(str(config["activation_evidence_path"]))
+            )
+            payload = _accept_soak(
+                config,
+                _expand(args.soak_state),
+                output,
+                float(args.min_hours),
+            )
+        else:
+            raise HermesLaunchdError("UNKNOWN_COMMAND")
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return 0
+    except (
+        HermesLaunchdError,
+        OSError,
+        ValueError,
+        json.JSONDecodeError,
+        subprocess.TimeoutExpired,
+    ) as exc:
+        print(
+            json.dumps(
+                {
+                    "status": "ERROR",
+                    "error": type(exc).__name__,
+                    "detail": str(exc),
+                },
+                sort_keys=True,
+            )
+        )
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

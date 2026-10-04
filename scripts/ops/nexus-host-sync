@@ -98,6 +98,13 @@ def _hermes_controller_target() -> Path:
     return Path.home() / ".local/bin/nexus-hermes-continuation-controller"
 
 
+def _hermes_launchd_target() -> Path:
+    raw = os.getenv("NEXUS_HERMES_LAUNCHD_TARGET")
+    if raw:
+        return Path(os.path.abspath(os.path.expanduser(raw)))
+    return Path.home() / ".local/bin/nexus-hermes-launchd"
+
+
 def _source_repo_ready(source_repo: Path) -> bool:
     if not source_repo.exists():
         return False
@@ -339,6 +346,8 @@ def _parse_manifest(data: bytes) -> dict[str, Any]:
         components.get("hermes_continuation_controller"), dict
     ):
         required.add("scripts/ops/nexus-hermes-continuation-controller")
+    if isinstance(components, dict) and isinstance(components.get("hermes_launchd"), dict):
+        required.add("scripts/ops/nexus-hermes-launchd")
     if not required.issubset(seen):
         raise HostSyncError("HOST_MANIFEST_REQUIRED_RUNTIME_PATH_MISSING")
     return manifest
@@ -842,6 +851,11 @@ def _activate(
             "scripts/ops/nexus-hermes-continuation-controller",
             _hermes_controller_target(),
         ),
+        (
+            "hermes_launchd",
+            "scripts/ops/nexus-hermes-launchd",
+            _hermes_launchd_target(),
+        ),
     ):
         source = release / "snapshot" / relative_path
         if _manifest_has_component(release_manifest, component_name):
@@ -998,6 +1012,11 @@ def _status(
             "hermes_continuation_controller",
             "scripts/ops/nexus-hermes-continuation-controller",
             _hermes_controller_target(),
+        ),
+        (
+            "hermes_launchd",
+            "scripts/ops/nexus-hermes-launchd",
+            _hermes_launchd_target(),
         ),
     ):
         if _manifest_has_component(manifest, component_name):
