@@ -110,6 +110,14 @@
     {
       "path": "scripts/ops/nexus-hermes-continuation-controller",
       "mode": "0755"
+    },
+    {
+      "path": "scripts/ops/nexus-hermes-launchd",
+      "mode": "0755"
+    },
+    {
+      "path": "scripts/ops/nexus-hermes-soak-observe-policy.json",
+      "mode": "0644"
     }
   ],
   "components": {
@@ -145,6 +153,9 @@
     },
     "hermes_continuation_controller": {
       "source_path": "scripts/ops/nexus-hermes-continuation-controller"
+    },
+    "hermes_launchd": {
+      "source_path": "scripts/ops/nexus-hermes-launchd"
     }
   }
 }
