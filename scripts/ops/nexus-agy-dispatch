@@ -1751,6 +1751,16 @@ def _resolve_hcom_agy_safe() -> Path:
     raise RuntimeError("HCOM_AGY_SAFE_NOT_FOUND")
 
 
+FORBIDDEN_HCOM_COLLAB_FLAGS = {
+    "--detach",
+    "--daemon",
+    "-d",
+    "--background",
+    "--headless",
+    "--no-terminal",
+}
+
+
 def _parse_hcom_args(raw: str | None) -> list[str]:
     if raw is None or not raw.strip():
         return []
@@ -1760,6 +1770,12 @@ def _parse_hcom_args(raw: str | None) -> list[str]:
         raise ValueError("HCOM_ARGS_JSON_INVALID") from exc
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise ValueError("HCOM_ARGS_JSON_INVALID")
+    for item in value:
+        lowered = item.strip().lower()
+        if lowered in FORBIDDEN_HCOM_COLLAB_FLAGS or lowered.startswith(
+            ("--detach=", "--daemon=", "--background=")
+        ):
+            raise ValueError(f"HCOM_COLLAB_FORBIDDEN_FLAG:{item}")
     return list(value)
 
 
@@ -1780,6 +1796,12 @@ def dispatch_hcom_collab(
     receives only the exact admitted account snapshot and an inherited
     per-account flock descriptor; it never chooses or rotates accounts itself.
     """
+    for item in hcom_args:
+        lowered = item.strip().lower()
+        if lowered in FORBIDDEN_HCOM_COLLAB_FLAGS or lowered.startswith(
+            ("--detach=", "--daemon=", "--background=")
+        ):
+            raise ValueError(f"HCOM_COLLAB_FORBIDDEN_FLAG:{item}")
 
     if coordinator is None:
         if not MANAGER.is_file() or not MANAGER_ROOT.is_dir():
@@ -1888,7 +1910,10 @@ def dispatch_hcom_collab(
             launcher_path.resolve() if launcher_path is not None else _resolve_hcom_agy_safe()
         )
         env = dict(os.environ)
-        for key in getattr(_agy_account_pool, "SENSITIVE_API_KEYS", ()):
+        sensitive_keys = getattr(_agy_account_pool, "SENSITIVE_API_KEYS", None)
+        if sensitive_keys is None:
+            raise RuntimeError("SENSITIVE_API_KEYS_CONFIG_MISSING")
+        for key in sensitive_keys:
             env.pop(key, None)
         env.update({
             "NEXUS_HCOM_AGY_LEASE_ACCOUNT": claim.internal_id,

@@ -12,6 +12,9 @@ import subprocess
 import sys
 import types
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 LAUNCHER = ROOT / "scripts" / "ops" / "nexus-hcom-agy-safe"
@@ -758,6 +761,150 @@ def test_hcom_registry_disappearance_with_surviving_agy_process_requires_reconci
     assert rec["phase"] == "RECONCILE_REQUIRED"
     assert rec["reconciliation"]["provider_alive_after"] is True
     assert rec["reconciliation"]["retry_permitted"] is False
-    assert rec["reconciliation"]["lease_cleanup"]["result"] == "NOT_SAFE_TO_CLEAN"
+    assert rec["reconciliation"].get("lease_cleanup", {}).get("result") == "NOT_SAFE_TO_CLEAN"
     # Lease receipt must be preserved!
     assert receipt_file.exists()
+
+
+def test_foreground_collaborative_operation_journals_failure_on_nonzero_child_exit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When child exits non-zero, journal records FAILED and lease receipt is cleanly released."""
+    module = _load_dispatch_module(monkeypatch)
+    leases = tmp_path / "leases"
+    home_a = tmp_path / "accounts" / "google-a"
+    home_a.mkdir(parents=True)
+    (home_a / ".gemini").mkdir()
+
+    class FakeClaim:
+        internal_id = "google-a"
+        account_alias_hash = "alias-a"
+        lease_id_hash = "lease-a"
+        released = False
+
+        def __init__(self, lock_obj: Any) -> None:
+            self.lock_file_obj = lock_obj
+            self.lease = type("Lease", (), {"execution_env": {"HOME": str(home_a)}})()
+
+        def release(self) -> None:
+            self.released = True
+            if self.lock_file_obj is not None:
+                self.lock_file_obj.close()
+                self.lock_file_obj = None
+
+        def abandon_parent_reference(self) -> None:
+            pass
+
+    lock_file = tmp_path / "google-a.lock"
+    lock_obj = lock_file.open("w")
+    fake_claim = FakeClaim(lock_obj)
+
+    class FakeCoordinator:
+        def acquire_claim(self, *args: Any, **kwargs: Any) -> Any:
+            return fake_claim
+
+    operation_root = tmp_path / "ops"
+    launcher_file = tmp_path / "fake-launcher"
+    launcher_file.write_text("#!/bin/sh\nexit 42\n")
+    launcher_file.chmod(0o755)
+
+    class FakeChild:
+        pid = 99991
+
+        def wait(self) -> int:
+            return 42
+
+        def poll(self) -> int:
+            return 42
+
+    monkeypatch.setattr(module, "MANAGER_ROOT", tmp_path)
+    monkeypatch.setattr(module, "LEASES_DIR", leases)
+
+    # 1. Verify dispatch_hcom_collab returns child exit code and releases claim
+    code = module.dispatch_hcom_collab(
+        cwd=str(tmp_path),
+        hcom_args=["--fast"],
+        model=None,
+        pool_wait_timeout=1.0,
+        coordinator=FakeCoordinator(),
+        popen_factory=lambda *a, **k: FakeChild(),
+        launcher_path=launcher_file,
+    )
+    assert code == 42
+    assert fake_claim.released is True
+
+    # 2. Verify _run_foreground_hcom_operation journals failure when child exits non-zero
+    monkeypatch.setattr(module, "dispatch_hcom_collab", lambda **kw: 42)
+    code2 = module._run_foreground_hcom_operation(
+        cwd=str(tmp_path),
+        hcom_args=["--fast"],
+        model=None,
+        pool_wait_timeout=1.0,
+        operation_root=operation_root,
+    )
+    assert code2 == 42
+    operation_ids = [path.name for path in (operation_root / "operations").iterdir()]
+    assert len(operation_ids) == 1
+    record = module.AgyOperationJournal(operation_root).read(operation_ids[0])
+    assert record["status"] == "FAILED"
+    assert record["exit_code"] == 42
+    assert record["failure_kind"] == "HCOM_COLLAB_EXIT_NONZERO"
+
+
+def test_dispatch_hcom_collab_rejects_forbidden_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_parse_hcom_args and dispatch_hcom_collab strictly reject headless/detached flags."""
+    module = _load_dispatch_module(monkeypatch)
+
+    # Rejection in _parse_hcom_args
+    for flag in ["--headless", "--no-terminal", "--detach", "--daemon", "-d", "--background"]:
+        with pytest.raises(ValueError, match="HCOM_COLLAB_FORBIDDEN_FLAG"):
+            module._parse_hcom_args(json.dumps([flag]))
+
+    # Rejection in dispatch_hcom_collab
+    with pytest.raises(ValueError, match="HCOM_COLLAB_FORBIDDEN_FLAG"):
+        module.dispatch_hcom_collab(
+            cwd="/tmp",
+            hcom_args=["--headless"],
+            model=None,
+        )
+
+
+def test_dispatch_hcom_collab_fails_closed_if_sensitive_api_keys_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fails closed with RuntimeError if SENSITIVE_API_KEYS is missing from pool module."""
+    module = _load_dispatch_module(monkeypatch)
+    home_a = tmp_path / "accounts" / "google-a"
+    home_a.mkdir(parents=True)
+
+    class FakeClaim:
+        internal_id = "google-a"
+        account_alias_hash = "alias-a"
+        lease_id_hash = "lease-a"
+
+        def __init__(self, lock_obj: Any) -> None:
+            self.lock_file_obj = lock_obj
+            self.lease = type("Lease", (), {"execution_env": {"HOME": str(home_a)}})()
+
+        def release(self) -> None:
+            pass
+
+    lock_file = tmp_path / "google-a.lock"
+    lock_obj = lock_file.open("w")
+    fake_claim = FakeClaim(lock_obj)
+
+    class FakeCoordinator:
+        def acquire_claim(self, *args: Any, **kwargs: Any) -> Any:
+            return fake_claim
+
+    monkeypatch.setattr(module, "MANAGER_ROOT", tmp_path)
+    monkeypatch.delattr(module._agy_account_pool, "SENSITIVE_API_KEYS", raising=False)
+    with pytest.raises(RuntimeError, match="SENSITIVE_API_KEYS_CONFIG_MISSING"):
+        module.dispatch_hcom_collab(
+            cwd=str(tmp_path),
+            hcom_args=[],
+            model=None,
+            coordinator=FakeCoordinator(),
+        )
