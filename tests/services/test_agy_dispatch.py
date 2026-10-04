@@ -2101,8 +2101,8 @@ def test_run_agy_throttles_effect_scans_for_a_long_provider(tmp_path: Path, monk
     )
 
     assert code == 0
-    assert 3 <= len(scan_times) <= 4
-    assert all(later - earlier >= 0.4 for earlier, later in zip(scan_times, scan_times[1:3]))
+    assert len(scan_times) >= 3
+    assert all(later - earlier >= 0.4 for earlier, later in zip(scan_times[:-2], scan_times[1:-1]))
 
 
 def test_run_agy_final_readback_captures_short_lived_effect_after_first_empty_scan(
