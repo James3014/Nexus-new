@@ -24,6 +24,9 @@ Prevent false-completion of Agy coding dispatches where the worker lacks necessa
    - Classify all provider/model textual permission refusals or tool-denials during `accept-edits` as `PERMISSION_OR_SCOPE_ERROR` with non-zero exit code, never allowing false `COMPLETED / exit 0`.
 5. Durable evidence projection:
    - Record `permission_profile_sha256`, `permission_profile_kind`, and effective permission summary in `operation.json` so controllers and workflow doctor can verify permission health.
+6. Explicit security constants:
+   - `TEMP_COMMAND_DENY`: `command(git push)`, `command(git reset --hard)`, `command(git clean)`, `command(gh)`, `command(curl)`, `command(wget)`, `command(ssh)`, `command(scp)`, `command(rsync)`.
+   - `_UNSAFE_PERMISSION_RULES`: `command(*)`, `read_file(*)`, `write_file(*)`, `read_file(/)`, `write_file(/)`.
 
 ## Allowed Files
 

@@ -3488,3 +3488,67 @@ def test_background_terminal_receipt_persists_permission_profile(
         "allow": ["read_file(/tmp/**)", "write_file(/tmp/file.py)"],
         "deny": ["command(git push)"],
     }
+
+
+def test_plan_mode_no_tool_packet_completes_cleanly(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+    events: list[dict[str, object]] = []
+
+    code = dispatch.dispatch_run(
+        prompt="analyze architecture without tools",
+        cwd=str(work),
+        mode="plan",
+        deny=["command(*)", "write_file(*)"],
+        coordinator=coordinator,
+        run_agy_fn=lambda **_kwargs: (
+            0,
+            "Analysis complete. No mutations requested.",
+            "",
+            False,
+            1,
+        ),
+        operation_hook=events.append,
+    )
+
+    assert code == 0
+    assert coordinator.acquire_count == 1
+    assert coordinator.claim.released is True
+    profile_events = [e for e in events if e.get("permission_profile_kind") == "NO_TOOL_PACKET"]
+    assert len(profile_events) >= 1
+    assert not any(event.get("failure_kind") for event in events)
+
+
+def test_plan_mode_text_mentioning_permission_denied_in_model_response_completes_cleanly(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+    events: list[dict[str, object]] = []
+
+    code = dispatch.dispatch_run(
+        prompt="explain permission denied errors",
+        cwd=str(work),
+        mode="plan",
+        coordinator=coordinator,
+        run_agy_fn=lambda **_kwargs: (
+            0,
+            "When a user encounters permission denied, it typically means permissions are missing.",
+            "",
+            False,
+            1,
+        ),
+        operation_hook=events.append,
+    )
+
+    assert code == 0
+    assert coordinator.acquire_count == 1
+    assert not any(event.get("failure_kind") for event in events)
