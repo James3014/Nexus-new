@@ -2083,12 +2083,14 @@ def dispatch_run(
                 for rule in projected_write_rules:
                     if rule not in allow_rules:
                         allow_rules.append(rule)
-                replace_allow_deny = mode == "accept-edits"
-                if replace_allow_deny:
+                deny_rules: list[str] = list(deny or [])
+                replace_allow_deny = bool(
+                    mode == "accept-edits" or allow_rules or deny_rules or temp_command_permissions
+                )
+                if mode == "accept-edits":
                     bounded_read_rule = f"read_file({Path(cwd).expanduser().resolve()}/**)"
                     if bounded_read_rule not in allow_rules:
                         allow_rules.append(bounded_read_rule)
-                deny_rules: list[str] = list(deny or [])
                 allow_unsafe_legacy = False
                 if temp_command_permissions:
                     if "command(*)" not in allow_rules:
@@ -2134,12 +2136,23 @@ def dispatch_run(
                     )
                 except OSError:
                     provider_log_text = ""
-            combined_output = out + "\n" + err + "\n" + provider_log_text
-            permission_blocked = (
-                (mode == "accept-edits" and _has_permission_failure_signal(combined_output))
-                or "headless mode cannot prompt for" in combined_output.lower()
-                or "soft-denying tool confirmation" in combined_output.lower()
+            provider_log_lower = provider_log_text.lower()
+            provider_headless_denial = (
+                "print mode: soft-denying tool confirmation" in provider_log_lower
+                or "headless mode cannot prompt for" in provider_log_lower
+                or "auto-denied" in provider_log_lower
             )
+            semantic_output = out + "\n" + err
+            semantic_output_lower = semantic_output.lower()
+            semantic_permission_refusal = mode == "accept-edits" and _has_permission_failure_signal(
+                semantic_output
+            )
+            semantic_headless_denial = mode == "accept-edits" and (
+                "headless mode cannot prompt for" in semantic_output_lower
+                or "soft-denying tool confirmation" in semantic_output_lower
+                or "auto-denied" in semantic_output_lower
+            )
+            permission_blocked = provider_headless_denial or semantic_permission_refusal
             if code == 0 and not timed_out and not permission_blocked:
                 sys.stdout.write(out)
                 if err:
@@ -2180,11 +2193,7 @@ def dispatch_run(
                             ),
                         )
 
-            if permission_blocked and (
-                "headless mode" in combined_output.lower()
-                or "soft-denying" in combined_output.lower()
-                or "auto-denied" in combined_output.lower()
-            ):
+            if permission_blocked and (provider_headless_denial or semantic_headless_denial):
                 last_kind = "HEADLESS_TOOL_PERMISSION_DENIED"
             if permission_blocked:
                 if attempt_changed_paths:
