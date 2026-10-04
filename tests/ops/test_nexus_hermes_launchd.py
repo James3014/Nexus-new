@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fcntl
 import importlib.util
 import json
 import plistlib
@@ -289,6 +290,19 @@ def test_activation_rejects_tampered_indexed_soak_receipt(tmp_path, monkeypatch)
     cycle.write_text(cycle.read_text(encoding="utf-8") + "\n", encoding="utf-8")
     with pytest.raises(MOD.HermesLaunchdError, match="ACTIVATION_RECEIPT_HASH_MISMATCH"):
         MOD._activation_evidence(config)
+
+
+def test_second_tick_is_noop_while_service_lock_is_held(tmp_path, monkeypatch):
+    config_path, config, _ = _config(tmp_path, monkeypatch)
+    state_root = Path(config["state_root"])
+    state_root.mkdir(parents=True, exist_ok=True)
+    lock_path = state_root / "tick.lock"
+    with lock_path.open("a+", encoding="utf-8") as lock_handle:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = MOD._tick(config_path, config, allow_staged=True)
+        assert result["status"] == "NOOP_TICK_ALREADY_RUNNING"
+        assert result["lock_path"] == str(lock_path)
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
 
 
 def test_staged_tick_reuses_stable_observe_controller_identity(tmp_path, monkeypatch):

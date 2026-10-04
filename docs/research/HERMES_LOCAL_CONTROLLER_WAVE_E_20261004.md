@@ -91,7 +91,7 @@ For each explicit target hash, the service allocates a stable controller run ide
 
 `hermes-service-<target-hash>-e<epoch>`
 
-Repeated launchd ticks reuse that identity while the epoch is active. Therefore controller-level effect intent, operation ID, effect budget, and no-blind-retry state survive fresh process invocations.
+Repeated launchd ticks reuse that identity while the epoch is active. Therefore controller-level effect intent, operation ID, effect budget, and no-blind-retry state survive fresh process invocations. An OS-level nonblocking `flock` on the service state root guarantees only one tick enters the controller path at a time; concurrent/manual ticks return `NOOP_TICK_ALREADY_RUNNING`.
 
 Changing the target while an epoch is active fails closed.
 

@@ -9,6 +9,7 @@ Agy leases, completion, merge, release, or production truth.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -659,7 +660,9 @@ def _status(config_path: Path, config: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def _tick(config_path: Path, config: dict[str, Any], *, allow_staged: bool) -> dict[str, Any]:
+def _tick_locked(
+    config_path: Path, config: dict[str, Any], *, allow_staged: bool
+) -> dict[str, Any]:
     if allow_staged:
         _, target = _load_target(config)
         if target.get("mode") != "observe":
@@ -783,6 +786,24 @@ def _tick(config_path: Path, config: dict[str, Any], *, allow_staged: bool) -> d
         "target_sha256": target_hash,
         "epoch_status": state.get("epoch_status"),
     }
+
+
+def _tick(config_path: Path, config: dict[str, Any], *, allow_staged: bool) -> dict[str, Any]:
+    state_root = _state_root(config)
+    state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    lock_path = state_root / "tick.lock"
+    with lock_path.open("a+", encoding="utf-8") as lock_handle:
+        try:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return {
+                "status": "NOOP_TICK_ALREADY_RUNNING",
+                "lock_path": str(lock_path),
+            }
+        try:
+            return _tick_locked(config_path, config, allow_staged=allow_staged)
+        finally:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
 
 
 def _accept_soak(
