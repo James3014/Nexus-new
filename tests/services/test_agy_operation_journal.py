@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from nexus.services import agy_operation_journal as agy_journal
 from nexus.services import direct_operation_journal as direct_journal
 from nexus.services.agy_operation_journal import (
@@ -513,6 +515,86 @@ def test_malformed_source_baseline_fails_closed(tmp_path: Path) -> None:
 
     assert record["observed_changed_paths"] == []
     assert record["source_attribution_state"] == "UNAVAILABLE"
+
+
+def test_source_state_unchanged_proof_is_exact_and_source_scoped(tmp_path: Path) -> None:
+    root = _make_source_repo(tmp_path)
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id = _create_source_operation(journal, root)
+    journal.mark_terminal(
+        operation_id,
+        status="OUTCOME_UNKNOWN",
+        exit_code=None,
+        failure_kind="TIMEOUT",
+        cwd=str(root),
+        reconciliation={
+            "result": "PROVIDER_TURN_MAY_STILL_BE_RUNNING",
+            "provider_alive_after": False,
+            "retry_permitted": False,
+        },
+    )
+
+    proof = journal.prove_source_state_unchanged(operation_id)
+
+    assert proof["proof_scope"] == "SOURCE_STATE_ONLY"
+    assert proof["base_head"] == _git(root, "rev-parse", "HEAD")
+    assert proof["source_baseline_sha256"]
+    assert proof["observed_changed_paths"] == []
+    assert proof["first_effect_at"] is None
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    [
+        ("dirty", "SOURCE_STATE_CHANGED"),
+        ("observed-effect", "SOURCE_EFFECT_PREVIOUSLY_OBSERVED"),
+        ("missing-baseline", "SOURCE_BASELINE_UNAVAILABLE"),
+        ("attribution-unavailable", "SOURCE_ATTRIBUTION_UNAVAILABLE"),
+        ("observation-error", "SOURCE_EFFECT_OBSERVATION_UNRELIABLE"),
+        ("head-changed", "SOURCE_IDENTITY_CHANGED"),
+    ],
+)
+def test_source_state_unchanged_proof_fails_closed(
+    tmp_path: Path,
+    mutation: str,
+    expected: str,
+) -> None:
+    root = _make_source_repo(tmp_path)
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id = _create_source_operation(journal, root)
+    journal.mark_terminal(
+        operation_id,
+        status="OUTCOME_UNKNOWN",
+        exit_code=None,
+        failure_kind="TIMEOUT",
+        cwd=str(root),
+        reconciliation={
+            "result": "PROVIDER_TURN_MAY_STILL_BE_RUNNING",
+            "provider_alive_after": False,
+            "retry_permitted": False,
+        },
+    )
+    if mutation == "dirty":
+        (root / "tracked.txt").write_text("changed\n", encoding="utf-8")
+    elif mutation == "observed-effect":
+        journal.update(operation_id, first_effect_at=direct_journal.utc_now())
+    elif mutation == "missing-baseline":
+        journal.update(
+            operation_id,
+            source_baseline=None,
+            source_baseline_sha256=None,
+        )
+    elif mutation == "attribution-unavailable":
+        journal.update(operation_id, source_attribution_state="UNAVAILABLE")
+    elif mutation == "observation-error":
+        journal.update(operation_id, effect_observation_error="EFFECT_OBSERVATION_UNAVAILABLE")
+    elif mutation == "head-changed":
+        (root / "later.txt").write_text("later\n", encoding="utf-8")
+        _git(root, "add", "later.txt")
+        _git(root, "commit", "-m", "later")
+
+    with pytest.raises(direct_journal.DirectOperationJournalError, match=expected):
+        journal.prove_source_state_unchanged(operation_id)
 
 
 def test_source_baseline_is_secret_free_and_not_public(tmp_path: Path) -> None:
