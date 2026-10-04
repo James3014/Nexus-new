@@ -2951,8 +2951,7 @@ def _finalize_no_effect_operation(
     if (
         existing.get("status") == "FAILED"
         and isinstance(existing_reconciliation, dict)
-        and existing_reconciliation.get("result")
-        == "SOURCE_NO_DURABLE_EFFECT_PROVEN"
+        and existing_reconciliation.get("result") == "SOURCE_NO_DURABLE_EFFECT_PROVEN"
         and existing_reconciliation.get("reconciliation_scope") == "SOURCE_ONLY"
         and existing_reconciliation.get("retry_permitted") is True
     ):
@@ -2960,9 +2959,7 @@ def _finalize_no_effect_operation(
 
     record = _reconcile_operation(journal, operation_id)
     if record.get("status") != "OUTCOME_UNKNOWN":
-        raise AgyOperationJournalError(
-            "NO_EFFECT_FINALIZATION_REQUIRES_OUTCOME_UNKNOWN"
-        )
+        raise AgyOperationJournalError("NO_EFFECT_FINALIZATION_REQUIRES_OUTCOME_UNKNOWN")
 
     reconciliation = dict(record.get("reconciliation") or {})
     if reconciliation.get("pid_alive") is not False:
@@ -2971,15 +2968,9 @@ def _finalize_no_effect_operation(
         raise AgyOperationJournalError("NO_EFFECT_PROVIDER_TRUTH_UNBOUNDED")
 
     lease_cleanup = reconciliation.get("lease_cleanup")
-    lease_result = (
-        lease_cleanup.get("result")
-        if isinstance(lease_cleanup, dict)
-        else None
-    )
+    lease_result = lease_cleanup.get("result") if isinstance(lease_cleanup, dict) else None
     if lease_result not in _SAFE_NO_EFFECT_LEASE_RESULTS:
-        raise AgyOperationJournalError(
-            f"NO_EFFECT_LEASE_NOT_SAFE:{lease_result or 'UNKNOWN'}"
-        )
+        raise AgyOperationJournalError(f"NO_EFFECT_LEASE_NOT_SAFE:{lease_result or 'UNKNOWN'}")
 
     source_proof = journal.prove_source_state_unchanged(operation_id)
     reconciliation.update({
@@ -3078,9 +3069,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.finalize_no_effect:
-        _print_operation(
-            _finalize_no_effect_operation(journal, args.finalize_no_effect)
-        )
+        _print_operation(_finalize_no_effect_operation(journal, args.finalize_no_effect))
         return 0
 
     cwd = str(Path(args.cwd).expanduser().resolve())

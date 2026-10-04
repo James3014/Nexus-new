@@ -3192,12 +3192,15 @@ def test_finalize_no_effect_cli_projects_receipt(
     operation_id = _create_outcome_unknown_source_operation(journal, source_root)
     monkeypatch.setattr(dispatch, "LEASES_DIR", tmp_path / "leases")
 
-    assert dispatch.main([
-        "--finalize-no-effect",
-        operation_id,
-        "--operation-root",
-        str(operation_root),
-    ]) == 0
+    assert (
+        dispatch.main([
+            "--finalize-no-effect",
+            operation_id,
+            "--operation-root",
+            str(operation_root),
+        ])
+        == 0
+    )
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "FAILED"

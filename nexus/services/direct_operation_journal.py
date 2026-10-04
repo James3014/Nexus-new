@@ -634,19 +634,13 @@ class DirectOperationJournal:
         """
         record = self.read(operation_id)
         if record.get("status") != "OUTCOME_UNKNOWN":
-            raise DirectOperationJournalError(
-                "SOURCE_PROOF_REQUIRES_OUTCOME_UNKNOWN"
-            )
+            raise DirectOperationJournalError("SOURCE_PROOF_REQUIRES_OUTCOME_UNKNOWN")
         if record.get("source_attribution_state") != "ATTRIBUTED":
             raise DirectOperationJournalError("SOURCE_ATTRIBUTION_UNAVAILABLE")
         if record.get("effect_observation_error"):
-            raise DirectOperationJournalError(
-                "SOURCE_EFFECT_OBSERVATION_UNRELIABLE"
-            )
+            raise DirectOperationJournalError("SOURCE_EFFECT_OBSERVATION_UNRELIABLE")
         if record.get("first_effect_at") is not None:
-            raise DirectOperationJournalError(
-                "SOURCE_EFFECT_PREVIOUSLY_OBSERVED"
-            )
+            raise DirectOperationJournalError("SOURCE_EFFECT_PREVIOUSLY_OBSERVED")
         observed = record.get("observed_changed_paths")
         if observed != []:
             raise DirectOperationJournalError("SOURCE_STATE_CHANGED")
@@ -677,8 +671,7 @@ class DirectOperationJournal:
         current_root, current_head = _git_identity(cwd)
         try:
             same_root = bool(
-                isinstance(current_root, str)
-                and os.path.samefile(record_root, current_root)
+                isinstance(current_root, str) and os.path.samefile(record_root, current_root)
             )
         except OSError:
             same_root = False
