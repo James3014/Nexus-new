@@ -228,6 +228,33 @@ def test_outcome_unknown_operation_requires_reconcile() -> None:
     assert gate["code"] == "RECONCILE_OPERATION"
 
 
+def test_source_no_effect_reconciled_failure_releases_reconcile_gate() -> None:
+    operation = _no_operation()
+    operation["requested_id"] = "agyop_" + "2" * 32
+    operation["selected"] = {
+        "operation_id": operation["requested_id"],
+        "status": "FAILED",
+        "reconciliation": {
+            "result": "SOURCE_NO_DURABLE_EFFECT_PROVEN",
+            "reconciliation_scope": "SOURCE_ONLY",
+            "retry_permitted": True,
+        },
+    }
+
+    disposition, gate = doctor._derive_next_gate(
+        source=_base_source(),
+        runtime=_base_runtime(),
+        task={"status": "OBSERVED", "state": "open", "issue_number": 1274},
+        operation=operation,
+        pr={"status": "NOT_REQUESTED", "pr_number": None},
+        required_gates=[],
+        leases=_no_leases(),
+    )
+
+    assert disposition == "SAFE"
+    assert gate["code"] == "CONTINUE_BOUNDED_ISSUE_WORK"
+
+
 def test_quota_snapshot_projection_omits_email(tmp_path: Path) -> None:
     home = tmp_path
     path = home / ".nexus/agy-account-pool/quota-snapshot.json"

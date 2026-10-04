@@ -2936,6 +2936,70 @@ def _reconcile_operation(
     return journal.update(operation_id, reconciliation=reconciliation)
 
 
+_SAFE_NO_EFFECT_LEASE_RESULTS = frozenset({
+    "ALREADY_ABSENT",
+    "LEASE_RECEIPT_REMOVED",
+})
+
+
+def _finalize_no_effect_operation(
+    journal: AgyOperationJournal,
+    operation_id: str,
+) -> dict[str, Any]:
+    existing = journal.read(operation_id)
+    existing_reconciliation = existing.get("reconciliation")
+    if (
+        existing.get("status") == "FAILED"
+        and isinstance(existing_reconciliation, dict)
+        and existing_reconciliation.get("result")
+        == "SOURCE_NO_DURABLE_EFFECT_PROVEN"
+        and existing_reconciliation.get("reconciliation_scope") == "SOURCE_ONLY"
+        and existing_reconciliation.get("retry_permitted") is True
+    ):
+        return existing
+
+    record = _reconcile_operation(journal, operation_id)
+    if record.get("status") != "OUTCOME_UNKNOWN":
+        raise AgyOperationJournalError(
+            "NO_EFFECT_FINALIZATION_REQUIRES_OUTCOME_UNKNOWN"
+        )
+
+    reconciliation = dict(record.get("reconciliation") or {})
+    if reconciliation.get("pid_alive") is not False:
+        raise AgyOperationJournalError("NO_EFFECT_PROCESS_TRUTH_UNBOUNDED")
+    if reconciliation.get("provider_alive_after") is not False:
+        raise AgyOperationJournalError("NO_EFFECT_PROVIDER_TRUTH_UNBOUNDED")
+
+    lease_cleanup = reconciliation.get("lease_cleanup")
+    lease_result = (
+        lease_cleanup.get("result")
+        if isinstance(lease_cleanup, dict)
+        else None
+    )
+    if lease_result not in _SAFE_NO_EFFECT_LEASE_RESULTS:
+        raise AgyOperationJournalError(
+            f"NO_EFFECT_LEASE_NOT_SAFE:{lease_result or 'UNKNOWN'}"
+        )
+
+    source_proof = journal.prove_source_state_unchanged(operation_id)
+    reconciliation.update({
+        "at": _agy_operation_journal.utc_now(),
+        "result": "SOURCE_NO_DURABLE_EFFECT_PROVEN",
+        "reconciliation_scope": "SOURCE_ONLY",
+        "retry_permitted": True,
+        "source_proof": source_proof,
+        "lease_cleanup": lease_cleanup,
+    })
+    return journal.mark_terminal(
+        operation_id,
+        status="FAILED",
+        exit_code=record.get("exit_code"),
+        failure_kind=record.get("failure_kind"),
+        cwd=record.get("cwd"),
+        reconciliation=reconciliation,
+    )
+
+
 def _print_operation(record: dict[str, Any]) -> None:
     print(json.dumps(public_operation_view(record), indent=2, sort_keys=True))
 
@@ -2989,6 +3053,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--status", metavar="OPERATION_ID")
     ap.add_argument("--reconcile", metavar="OPERATION_ID")
+    ap.add_argument(
+        "--finalize-no-effect",
+        metavar="OPERATION_ID",
+        help=(
+            "Fail closed unless one OUTCOME_UNKNOWN operation proves source-state "
+            "equivalence, terminal process truth, and safe lease cleanup; on success "
+            "record a source-scoped retry-safe FAILED reconciliation receipt"
+        ),
+    )
     ap.add_argument("--operation-root", default=str(OPERATION_ROOT), help=argparse.SUPPRESS)
     ap.add_argument("--operation-run", metavar="OPERATION_ID", help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
@@ -3002,6 +3075,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.reconcile:
         _print_operation(_reconcile_operation(journal, args.reconcile))
+        return 0
+
+    if args.finalize_no_effect:
+        _print_operation(
+            _finalize_no_effect_operation(journal, args.finalize_no_effect)
+        )
         return 0
 
     cwd = str(Path(args.cwd).expanduser().resolve())
