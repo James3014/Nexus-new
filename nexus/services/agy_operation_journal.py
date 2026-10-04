@@ -307,9 +307,9 @@ def _stop_operation_processes(
     # Preserve the ownership witness while the marked leader is still present.
     # Killing the leader first can erase the only marker and strand owned
     # grandchildren as an unverifiable group.
-    if provider_group_verified:
+    if provider_group_verified and isinstance(provider_pgid, int):
         _stop_process_group(provider_pgid, grace_seconds=grace_seconds)
-    if wrapper_group_verified:
+    if wrapper_group_verified and isinstance(pid, int):
         _stop_process_group(pid, grace_seconds=grace_seconds)
 
     for p in sorted(verified_pids):
