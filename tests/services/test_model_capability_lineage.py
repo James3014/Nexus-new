@@ -652,11 +652,10 @@ def test_occamy_lineage_seed_shape() -> None:
     assert lineage.conditional_ceiling == "L0"
     assert lineage.experimental_ceiling == "L0"
     assert lineage.frontier_experimental is False
-    assert len(lineage.execution_configurations) == 3
+    assert len(lineage.execution_configurations) == 2
 
     by_id = {c.config_id: c for c in lineage.execution_configurations}
     assert "occamy-1.0-q4-opencode-llama32k" in by_id
-    assert "occamy-1.0-q4-opencode-llama64k-r10" in by_id
     assert "occamy-1.0-q4-typed-decision-selective-shadow" in by_id
 
     agent_cfg = by_id["occamy-1.0-q4-opencode-llama32k"]
@@ -691,55 +690,6 @@ def test_occamy_lineage_seed_shape() -> None:
         "context_state_overflow_54902_gt_32768",
     }
 
-    r10_cfg = by_id["occamy-1.0-q4-opencode-llama64k-r10"]
-    assert r10_cfg.model == "occamy-1.0-q4"
-    assert r10_cfg.quant == "Q4_K_M"
-    assert r10_cfg.runtime == "llama.cpp"
-    assert "build 10964" in r10_cfg.runtime_build
-    assert r10_cfg.context_limit == 65536
-    assert r10_cfg.scaffold == "opencode_serve"
-    assert r10_cfg.transport == "http_loopback"
-    assert r10_cfg.state_preservation == "same_session_auto_compaction"
-    assert r10_cfg.resource_envelope["kv_cache_k"] == "q8_0"
-    assert r10_cfg.resource_envelope["kv_cache_v"] == "q8_0"
-    assert r10_cfg.resource_envelope["output_limit"] == 16384
-    assert r10_cfg.resource_envelope["online_rescue_calls"] == 0
-
-    r10_resource = next(
-        q
-        for q in r10_cfg.qualifications
-        if q.task_family == "long_repo_episode"
-        and q.phase is EvidencePhase.RESOURCE_CONTEXT_QUALIFICATION
-    )
-    r10_semantic = next(
-        q
-        for q in r10_cfg.qualifications
-        if q.task_family == "long_repo_episode" and q.phase is EvidencePhase.FIRST_PASS
-    )
-    assert r10_resource.disposition is QualificationDisposition.PASS
-    assert r10_resource.score == "6/6_PROTOCOL_CONTEXT_CLEAN"
-    assert r10_resource.runtime_admission is False
-    assert r10_semantic.disposition is QualificationDisposition.WATCH
-    assert r10_semantic.score == "3/6 (threshold >=4/6 FAILED)"
-    assert r10_semantic.is_semantic_failure is True
-    assert r10_semantic.runtime_admission is False
-    assert r10_semantic.provenance == "DURABLE_REPOSITORY_RECEIPT"
-    assert "5979409555" in r10_semantic.evidence_ref
-    assert set(r10_semantic.failure_families) == {
-        "semantic_public_contract_miss",
-        "no_candidate_changes_core_no_changes",
-        "non_discriminating_regression_test",
-    }
-
-    r10_bug = next(q for q in r10_cfg.qualifications if q.task_family == "bug_repair")
-    r10_regression = next(q for q in r10_cfg.qualifications if q.task_family == "regression_test")
-    assert r10_bug.disposition is QualificationDisposition.WATCH
-    assert r10_bug.score == "1/3"
-    assert r10_bug.runtime_admission is False
-    assert r10_regression.disposition is QualificationDisposition.WATCH
-    assert r10_regression.score == "2/3"
-    assert r10_regression.runtime_admission is False
-
     decision_cfg = by_id["occamy-1.0-q4-typed-decision-selective-shadow"]
     assert decision_cfg.scaffold == "nexus_selective_shadow"
     assert decision_cfg.write_mode == "read_only"
@@ -750,51 +700,6 @@ def test_occamy_lineage_seed_shape() -> None:
     assert dec_qual.false_safe_count == 0
     assert dec_qual.decision_delta == "UNPROVEN"
     assert dec_qual.runtime_admission is False
-
-
-def test_occamy_r10_64k_preserves_32k_history_and_phase_separation() -> None:
-    registry = _registry()
-
-    _, old_long = registry.resolve_execution_qualification(
-        "occamy-1.0-q4-opencode-llama32k",
-        "long_repo_episode",
-        phase=EvidencePhase.RESOURCE_CONTEXT_QUALIFICATION,
-    )
-    assert old_long.disposition is QualificationDisposition.STACK_UNQUALIFIED
-    assert old_long.is_semantic_failure is False
-
-    with pytest.raises(LineageResolutionError, match="Ambiguous qualification"):
-        registry.resolve_execution_qualification(
-            "occamy-1.0-q4-opencode-llama64k-r10", "long_repo_episode"
-        )
-
-    _, infra = registry.resolve_execution_qualification(
-        "occamy-1.0-q4-opencode-llama64k-r10",
-        "long_repo_episode",
-        phase=EvidencePhase.RESOURCE_CONTEXT_QUALIFICATION,
-    )
-    _, semantic = registry.resolve_execution_qualification(
-        "occamy-1.0-q4-opencode-llama64k-r10",
-        "long_repo_episode",
-        phase=EvidencePhase.FIRST_PASS,
-    )
-    assert infra.disposition is QualificationDisposition.PASS
-    assert semantic.disposition is QualificationDisposition.WATCH
-    assert semantic.disposition is not QualificationDisposition.PASS
-    assert semantic.runtime_admission is False
-    assert "3/6" in semantic.score
-    assert "WATCH / NOT_ADMITTED" in semantic.summary
-
-
-def test_occamy_r10_watch_does_not_change_workforce_or_route_authority() -> None:
-    registry = _registry()
-    lineage, cfg = registry.get_execution_configuration("occamy-1.0-q4-opencode-llama64k-r10")
-    assert lineage.lineage_id == "occamy-1.0"
-    assert cfg.model == "occamy-1.0-q4"
-    assert all(q.runtime_admission is False for q in cfg.qualifications)
-    raw = yaml.safe_load(LINEAGE_PATH.read_text(encoding="utf-8"))
-    assert raw["admission_authority"] is False
-    assert raw["route_authority"] == "none"
 
 
 def test_qwen27b_lineage_seed_shape() -> None:
@@ -974,17 +879,10 @@ def test_resolve_configuration_exact_match() -> None:
     assert lineage.lineage_id == "occamy-1.0"
     assert cfg.config_id == "occamy-1.0-q4-opencode-llama32k"
 
-    with pytest.raises(LineageResolutionError, match="Ambiguous execution configuration"):
-        registry.resolve_configuration(model="occamy-1.0-q4", scaffold="opencode_serve")
-
-    _, old_cfg = registry.resolve_configuration(
-        model="occamy-1.0-q4", scaffold="opencode_serve", context_limit=32768
+    lineage2, cfg2 = registry.resolve_configuration(
+        model="occamy-1.0-q4", scaffold="opencode_serve"
     )
-    _, r10_cfg = registry.resolve_configuration(
-        model="occamy-1.0-q4", scaffold="opencode_serve", context_limit=65536
-    )
-    assert old_cfg.config_id == "occamy-1.0-q4-opencode-llama32k"
-    assert r10_cfg.config_id == "occamy-1.0-q4-opencode-llama64k-r10"
+    assert cfg2.config_id == "occamy-1.0-q4-opencode-llama32k"
 
 
 def test_read_only_evidence_bundle_exposes_configuration_without_provider_call(
@@ -1023,12 +921,8 @@ def test_truthful_provenance_preserved_for_local_models() -> None:
             assert record.provenance != "DURABLE_REPOSITORY_RECEIPT"
         for cfg in lineage.execution_configurations:
             for q in cfg.qualifications:
-                if cfg.config_id == "occamy-1.0-q4-opencode-llama64k-r10":
-                    assert q.provenance == "DURABLE_REPOSITORY_RECEIPT"
-                    assert "5979409555" in q.evidence_ref
-                else:
-                    assert q.provenance == "EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK"
-                    assert q.provenance != "DURABLE_REPOSITORY_RECEIPT"
+                assert q.provenance == "EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK"
+                assert q.provenance != "DURABLE_REPOSITORY_RECEIPT"
 
 
 def test_config_id_conflicting_exact_criteria_fail_closed() -> None:
