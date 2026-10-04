@@ -442,3 +442,44 @@ def test_build_parser_repo_root_default_is_none() -> None:
     parser = doctor.build_parser()
     args = parser.parse_args([])
     assert args.repo_root is None
+
+
+def test_workflow_doctor_reconcile_required_operation_projects_reconcile_gate() -> None:
+    """An operation in RECONCILE_REQUIRED triggers RECONCILE gate instead of WAIT or SAFE."""
+    op = _no_operation()
+    op["active"] = [
+        {"operation_id": "agyop_123", "phase": "RECONCILE_REQUIRED", "status": "RUNNING"}
+    ]
+    disposition, next_action = doctor._derive_next_gate(
+        source=_base_source(),
+        runtime=_base_runtime(),
+        task={"status": "OBSERVED", "state": "open", "issue_number": 1373},
+        operation=op,
+        pr={"status": "NONE", "pr_number": None},
+        required_gates=[],
+        leases=_no_leases(),
+    )
+    assert disposition == "RECONCILE"
+    assert next_action["code"] == "RECONCILE_OPERATION"
+    assert "agyop_123" in next_action["operation_ids"]
+
+
+def test_workflow_doctor_collects_claimed_at_and_consumer_id(tmp_path: Path) -> None:
+    """_collect_leases accurately reads claimed_at and consumer_id from receipt."""
+    leases_dir = tmp_path / ".nexus" / "agy-account-pool" / "leases"
+    leases_dir.mkdir(parents=True)
+    receipt_data = {
+        "account_alias_hash": "alias123",
+        "lease_id_hash": "lease456",
+        "consumer_id": "hcom_collab:1234:abc",
+        "pid": 5678,
+        "claimed_at": 1728000000.0,
+    }
+    (leases_dir / "alias123.receipt.json").write_text(json.dumps(receipt_data), encoding="utf-8")
+    collected = doctor._collect_leases(tmp_path)
+    assert len(collected["active"]) == 1
+    item = collected["active"][0]
+    assert item["account_alias_hash"] == "alias123"
+    assert item["lease_id_hash"] == "lease456"
+    assert item["consumer_id"] == "hcom_collab:1234:abc"
+    assert item["claimed_at"] == 1728000000.0

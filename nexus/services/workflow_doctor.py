@@ -614,7 +614,15 @@ def _collect_leases(home: Path) -> dict[str, Any]:
         return {"root": str(root), "active": [], "family_unavailable": [], "quarantined": []}
     active = [
         _marker_view(
-            path, ("account_alias_hash", "lease_id_hash", "consumer_id", "pid", "acquired_at")
+            path,
+            (
+                "account_alias_hash",
+                "lease_id_hash",
+                "consumer_id",
+                "pid",
+                "acquired_at",
+                "claimed_at",
+            ),
         )
         for path in sorted(root.glob("*.receipt.json"))
     ]
@@ -674,11 +682,26 @@ def _derive_next_gate(
 
     selected = operation.get("selected")
     active = operation.get("active") or []
-    if isinstance(selected, dict) and selected.get("status") == "OUTCOME_UNKNOWN":
+    if isinstance(selected, dict) and (
+        selected.get("status") == "OUTCOME_UNKNOWN" or selected.get("phase") == "RECONCILE_REQUIRED"
+    ):
         return "RECONCILE", {
             "code": "RECONCILE_OPERATION",
-            "reason": "Requested operation has outcome-unknown state; do not replay blindly.",
+            "reason": "Requested operation has outcome-unknown or reconcile-required state; do not replay blindly.",
             "operation_id": selected.get("operation_id"),
+        }
+    reconcile_active = [
+        row
+        for row in active
+        if row.get("status") == "OUTCOME_UNKNOWN" or row.get("phase") == "RECONCILE_REQUIRED"
+    ]
+    if reconcile_active:
+        return "RECONCILE", {
+            "code": "RECONCILE_OPERATION",
+            "reason": "At least one durable operation requires reconciliation before continuing.",
+            "operation_ids": [
+                str(row["operation_id"]) for row in reconcile_active if row.get("operation_id")
+            ],
         }
     if operation.get("requested_id") and selected is None:
         return "BLOCKED", {

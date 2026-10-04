@@ -1735,6 +1735,327 @@ def _resolve_cwd_for_dispatch(
     return requested_cwd
 
 
+def _resolve_hcom_agy_safe() -> Path:
+    override = os.environ.get("NEXUS_HCOM_AGY_SAFE_BIN")
+    if override:
+        path = Path(override).expanduser().resolve()
+        if path.is_file() and os.access(path, os.X_OK):
+            return path
+        raise RuntimeError("NEXUS_HCOM_AGY_SAFE_BIN_INVALID")
+    bundled = Path(__file__).with_name("nexus-hcom-agy-safe")
+    if bundled.is_file() and os.access(bundled, os.X_OK):
+        return bundled
+    resolved = shutil.which("hcom-agy-safe")
+    if resolved:
+        return Path(resolved).resolve()
+    raise RuntimeError("HCOM_AGY_SAFE_NOT_FOUND")
+
+
+FORBIDDEN_HCOM_COLLAB_FLAGS = {
+    "--detach",
+    "--daemon",
+    "-d",
+    "--background",
+    "--headless",
+    "--no-terminal",
+}
+
+
+def _parse_hcom_args(raw: str | None) -> list[str]:
+    if raw is None or not raw.strip():
+        return []
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("HCOM_ARGS_JSON_INVALID") from exc
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError("HCOM_ARGS_JSON_INVALID")
+    for item in value:
+        lowered = item.strip().lower()
+        if lowered in FORBIDDEN_HCOM_COLLAB_FLAGS or lowered.startswith((
+            "--detach=",
+            "--daemon=",
+            "--background=",
+        )):
+            raise ValueError(f"HCOM_COLLAB_FORBIDDEN_FLAG:{item}")
+    return list(value)
+
+
+def dispatch_hcom_collab(
+    *,
+    cwd: str,
+    hcom_args: list[str],
+    model: str | None,
+    pool_wait_timeout: float = 15.0,
+    coordinator: CrossProcessLeaseCoordinator | None = None,
+    popen_factory: Any = subprocess.Popen,
+    launcher_path: Path | None = None,
+    operation_hook: Any = None,
+) -> int:
+    """Run one foreground hcom/Agy session under the canonical pool claim.
+
+    Account selection and admission stay in nexus-agy-dispatch.  The launcher
+    receives only the exact admitted account snapshot and an inherited
+    per-account flock descriptor; it never chooses or rotates accounts itself.
+    """
+    for item in hcom_args:
+        lowered = item.strip().lower()
+        if lowered in FORBIDDEN_HCOM_COLLAB_FLAGS or lowered.startswith((
+            "--detach=",
+            "--daemon=",
+            "--background=",
+        )):
+            raise ValueError(f"HCOM_COLLAB_FORBIDDEN_FLAG:{item}")
+
+    if coordinator is None:
+        if not MANAGER.is_file() or not MANAGER_ROOT.is_dir():
+            raise RuntimeError("AGY_ACCOUNT_POOL_RUNTIME_MISSING")
+        pool = AgyAccountPoolManager(
+            manager_path=str(MANAGER),
+            manager_root=str(MANAGER_ROOT),
+            use_real_manager=True,
+        )
+        coordinator = CrossProcessLeaseCoordinator(
+            manager=pool,
+            allocator_lock_path=ALLOCATOR_LOCK_PATH,
+            leases_dir=LEASES_DIR,
+        )
+
+    quota_snapshot, availability_state = _apply_dynamic_availability(model)
+    model_family = str(availability_state["family"])
+    scoped_model_family = model_family if model_family in {"gemini", "claude_gpt"} else None
+    consumer_id = "hcom-" + uuid.uuid4().hex
+    exclude_hashes: set[str] = set()
+    claim: AccountLeaseClaim | None = None
+    child: Any = None
+
+    try:
+        while True:
+            try:
+                claim = coordinator.acquire_claim(
+                    consumer_id=consumer_id,
+                    exclude_hashes=exclude_hashes,
+                    wait_timeout=pool_wait_timeout,
+                    model_family=scoped_model_family,
+                )
+            except AgyAccountPoolBusyError:
+                emit_meta({
+                    "status": "pool_busy",
+                    "attempts": 0,
+                    "rotations": len(exclude_hashes),
+                    "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
+                    "wall_ms": 0,
+                })
+                return 75
+            except AgyAccountPoolExhaustedError:
+                emit_meta({
+                    "status": "pool_exhausted",
+                    "attempts": 0,
+                    "rotations": len(exclude_hashes),
+                    "failure_kind": "ACCOUNT_UNAVAILABLE",
+                    "wall_ms": 0,
+                })
+                return 75
+            if scoped_model_family is None:
+                break
+            quota_state, reset_ts, evidence_fresh = _account_family_quota_state(
+                quota_snapshot,
+                account_name=claim.internal_id,
+                model_family=scoped_model_family,
+            )
+            if not evidence_fresh:
+                quota_snapshot = _refresh_quota_snapshot_for_account(claim.internal_id)
+                quota_state, reset_ts, evidence_fresh = _account_family_quota_state(
+                    quota_snapshot,
+                    account_name=claim.internal_id,
+                    model_family=scoped_model_family,
+                )
+            if not (evidence_fresh and quota_state == "blocked"):
+                break
+            unavailable_until = (
+                reset_ts
+                if reset_ts is not None and reset_ts > time.time()
+                else time.time() + DEFAULT_QUOTA_FAMILY_BLOCK_SECONDS
+            )
+            failed_hash = claim.account_alias_hash
+            coordinator.retire_failed_claim(
+                claim,
+                AccountFailureKind.QUOTA_EXHAUSTED,
+                model_family=scoped_model_family,
+                unavailable_until=unavailable_until,
+            )
+            claim = None
+            exclude_hashes.add(failed_hash)
+
+        assert claim is not None
+        _operation_hook(
+            operation_hook,
+            phase="ACCOUNT_LEASED",
+            attempts=1,
+            rotations=len(exclude_hashes),
+            account_alias_hash=claim.account_alias_hash,
+            lease_id_hash=claim.lease_id_hash,
+        )
+        profile_home = str(claim.lease.execution_env.get("HOME") or "").strip()
+        if not profile_home:
+            raise RuntimeError("LEASE_HOME_MISSING")
+        profile = Path(profile_home).expanduser().resolve()
+        accounts_root = (MANAGER_ROOT / "accounts").resolve()
+        if profile != (accounts_root / claim.internal_id).resolve():
+            raise RuntimeError("LEASE_PROFILE_IDENTITY_MISMATCH")
+
+        lock_obj = claim.lock_file_obj
+        if lock_obj is None:
+            raise RuntimeError("LEASE_LOCK_MISSING")
+        lease_fd = int(lock_obj.fileno())
+        os.set_inheritable(lease_fd, True)
+
+        launcher = (
+            launcher_path.resolve() if launcher_path is not None else _resolve_hcom_agy_safe()
+        )
+        env = dict(os.environ)
+        sensitive_keys = getattr(_agy_account_pool, "SENSITIVE_API_KEYS", None)
+        if sensitive_keys is None:
+            raise RuntimeError("SENSITIVE_API_KEYS_CONFIG_MISSING")
+        for key in sensitive_keys:
+            env.pop(key, None)
+        env.update({
+            "NEXUS_HCOM_AGY_LEASE_ACCOUNT": claim.internal_id,
+            "NEXUS_HCOM_AGY_PROFILE_HOME": str(profile),
+            "NEXUS_HCOM_AGY_LEASE_FD": str(lease_fd),
+            "NEXUS_HCOM_AGY_LEASE_ID_HASH": claim.lease_id_hash,
+            "NEXUS_HCOM_AGY_ACCOUNT_ALIAS_HASH": claim.account_alias_hash,
+        })
+        _operation_hook(
+            operation_hook,
+            phase="EXECUTING",
+            attempts=1,
+            rotations=len(exclude_hashes),
+            account_alias_hash=claim.account_alias_hash,
+            lease_id_hash=claim.lease_id_hash,
+        )
+        child = popen_factory(
+            [str(launcher), *hcom_args],
+            cwd=cwd,
+            env=env,
+            pass_fds=(lease_fd,),
+        )
+        child_pid = getattr(child, "pid", None)
+        _operation_hook(
+            operation_hook,
+            phase="EXECUTING",
+            attempts=1,
+            rotations=len(exclude_hashes),
+            account_alias_hash=claim.account_alias_hash,
+            lease_id_hash=claim.lease_id_hash,
+            provider_pid=child_pid,
+        )
+        code = int(child.wait())
+        claim.release()
+        claim = None
+        return code
+    except BaseException:
+        if claim is not None:
+            child_alive = child is not None and child.poll() is None
+            if child_alive:
+                claim.abandon_parent_reference()
+            else:
+                claim.release()
+            claim = None
+        raise
+    finally:
+        if claim is not None:
+            claim.release()
+
+
+def _run_foreground_hcom_operation(
+    *,
+    cwd: str,
+    hcom_args: list[str],
+    model: str | None,
+    pool_wait_timeout: float,
+    operation_root: Path,
+) -> int:
+    journal = AgyOperationJournal(operation_root)
+    operation_id = new_operation_id()
+    attempt_id = new_attempt_id()
+    args_sha256 = hashlib.sha256(
+        json.dumps(hcom_args, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=attempt_id,
+        cwd=cwd,
+        provider="agy",
+        model=model,
+        effort=None,
+        prompt_sha256=args_sha256,
+        runtime_revision=_runtime_revision(),
+        initial_fields={"mode": "hcom_collab", "hcom_args_sha256": args_sha256},
+    )
+    journal.mark_started(operation_id, pid=os.getpid())
+    journal.update(operation_id, phase="STARTING")
+    emit_meta({
+        "status": "hcom_collab_started",
+        "operation_id": operation_id,
+        "attempt_id": attempt_id,
+    })
+
+    def on_event(event: dict[str, Any]) -> None:
+        journal.heartbeat(
+            operation_id,
+            phase=str(event.get("phase") or "RUNNING"),
+            attempts=int(event.get("attempts") or 0),
+            rotations=int(event.get("rotations") or 0),
+            account_alias_hash=event.get("account_alias_hash"),
+            lease_id_hash=event.get("lease_id_hash"),
+            failure_kind=event.get("failure_kind"),
+        )
+        if event.get("provider_pid"):
+            journal.update(operation_id, provider_pid=int(event["provider_pid"]))
+
+    try:
+        code = dispatch_hcom_collab(
+            cwd=cwd,
+            hcom_args=hcom_args,
+            model=model,
+            pool_wait_timeout=pool_wait_timeout,
+            operation_hook=on_event,
+        )
+    except BaseException as exc:
+        record = journal.read(operation_id)
+        if record.get("phase") != "TERMINAL":
+            provider_effect_possible = str(record.get("phase") or "") == "EXECUTING"
+            journal.mark_terminal(
+                operation_id,
+                status="OUTCOME_UNKNOWN" if provider_effect_possible else "FAILED",
+                exit_code=None,
+                failure_kind=f"HCOM_COLLAB_PARENT_ABORT:{type(exc).__name__}",
+                cwd=cwd,
+                reconciliation={
+                    "at": _agy_operation_journal.utc_now(),
+                    "result": (
+                        "HCOM_COLLAB_TERMINALITY_UNPROVEN"
+                        if provider_effect_possible
+                        else "HCOM_COLLAB_ABORT_BEFORE_PROVIDER"
+                    ),
+                    "retry_permitted": False,
+                },
+            )
+        raise
+
+    terminal_status = "COMPLETED" if code == 0 else "FAILED"
+    journal.mark_terminal(
+        operation_id,
+        status=terminal_status,
+        exit_code=code,
+        failure_kind=None if code == 0 else "HCOM_COLLAB_EXIT_NONZERO",
+        cwd=cwd,
+        reconciliation=None,
+    )
+    return code
+
+
 def dispatch_run(
     *,
     prompt: str,
@@ -3044,6 +3365,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--status", metavar="OPERATION_ID")
     ap.add_argument("--reconcile", metavar="OPERATION_ID")
+    ap.add_argument("--hcom-collab", action="store_true")
+    ap.add_argument("--hcom-args-json", default="[]", help=argparse.SUPPRESS)
     ap.add_argument(
         "--finalize-no-effect",
         metavar="OPERATION_ID",
@@ -3075,6 +3398,21 @@ def main(argv: list[str] | None = None) -> int:
     cwd = str(Path(args.cwd).expanduser().resolve())
     if not Path(cwd).is_dir():
         raise SystemExit("INVALID_CWD")
+
+    if args.hcom_collab:
+        if args.background or args.operation_run:
+            raise SystemExit("HCOM_COLLAB_FOREGROUND_ONLY")
+        try:
+            hcom_args = _parse_hcom_args(args.hcom_args_json)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+        return _run_foreground_hcom_operation(
+            cwd=cwd,
+            hcom_args=hcom_args,
+            model=args.model,
+            pool_wait_timeout=args.pool_wait_timeout,
+            operation_root=operation_root,
+        )
 
     # The internal --operation-run already receives the effective execution root
     # persisted by the parent launcher.  Only a new external dispatch may resolve
