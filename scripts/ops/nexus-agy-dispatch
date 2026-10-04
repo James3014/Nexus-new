@@ -1243,6 +1243,23 @@ def run_agy(
     first_tool_activity_at: str | None = None
     last_coding_progress_monotonic: float | None = None
 
+    def _record_tool_events(count: int, *, observed_at: float) -> None:
+        nonlocal tool_event_count, first_tool_activity_at, last_coding_progress_monotonic
+        if count <= 0:
+            return
+        tool_event_count += count
+        last_coding_progress_monotonic = observed_at
+        now_iso = _agy_operation_journal.utc_now()
+        payload: dict[str, Any] = {
+            "tool_event_count": tool_event_count,
+            "last_progress_activity_at": now_iso,
+        }
+        if first_tool_activity_at is None:
+            first_tool_activity_at = now_iso
+            payload["first_tool_activity_at"] = first_tool_activity_at
+        if operation_hook:
+            _operation_hook(operation_hook, **payload)
+
     def _drain_stdout(stream, sink: list[str]) -> None:
         nonlocal first_stream_monotonic
         if stream is None:
@@ -1311,6 +1328,12 @@ def run_agy(
                 if new_sessions:
                     latest_session = new_sessions[-1]
                     if latest_session != provider_session_id:
+                        if transcript_path is not None:
+                            transcript_offset, prior_tool_events = _read_new_tool_activity(
+                                transcript_path,
+                                offset=transcript_offset,
+                            )
+                            _record_tool_events(prior_tool_events, observed_at=now)
                         provider_session_id = latest_session
                         transcript_path = _agy_transcript_path(env, provider_session_id)
                         transcript_offset = 0
@@ -1342,19 +1365,7 @@ def run_agy(
                     transcript_path,
                     offset=transcript_offset,
                 )
-                if new_tool_events:
-                    tool_event_count += new_tool_events
-                    last_coding_progress_monotonic = now
-                    now_iso = _agy_operation_journal.utc_now()
-                    payload: dict[str, Any] = {
-                        "tool_event_count": tool_event_count,
-                        "last_progress_activity_at": now_iso,
-                    }
-                    if first_tool_activity_at is None:
-                        first_tool_activity_at = now_iso
-                        payload["first_tool_activity_at"] = first_tool_activity_at
-                    if operation_hook:
-                        _operation_hook(operation_hook, **payload)
+                _record_tool_events(new_tool_events, observed_at=now)
 
             if expect_coding_progress and not first_effect_seen.is_set():
                 if (
@@ -1364,10 +1375,13 @@ def run_agy(
                 ):
                     non_progress_failure = "PROVIDER_STALLED"
                 elif first_stream_monotonic is not None:
-                    progress_anchor = (
-                        last_coding_progress_monotonic
-                        if last_coding_progress_monotonic is not None
-                        else first_stream_monotonic
+                    progress_anchor = max(
+                        first_stream_monotonic,
+                        (
+                            last_coding_progress_monotonic
+                            if last_coding_progress_monotonic is not None
+                            else first_stream_monotonic
+                        ),
                     )
                     if now - progress_anchor >= resolved_stream_no_progress_seconds:
                         non_progress_failure = "PROVIDER_STREAM_NO_PROGRESS"
@@ -1523,6 +1537,12 @@ def run_agy(
     if final_sessions:
         latest_session = final_sessions[-1]
         if latest_session != provider_session_id:
+            if transcript_path is not None:
+                transcript_offset, prior_tool_events = _read_new_tool_activity(
+                    transcript_path,
+                    offset=transcript_offset,
+                )
+                _record_tool_events(prior_tool_events, observed_at=time.monotonic())
             provider_session_id = latest_session
             transcript_path = _agy_transcript_path(env, provider_session_id)
             transcript_offset = 0
@@ -1553,18 +1573,7 @@ def run_agy(
             transcript_path,
             offset=transcript_offset,
         )
-        if final_tool_events:
-            tool_event_count += final_tool_events
-            now_iso = _agy_operation_journal.utc_now()
-            payload: dict[str, Any] = {
-                "tool_event_count": tool_event_count,
-                "last_progress_activity_at": now_iso,
-            }
-            if first_tool_activity_at is None:
-                first_tool_activity_at = now_iso
-                payload["first_tool_activity_at"] = first_tool_activity_at
-            if operation_hook:
-                _operation_hook(operation_hook, **payload)
+        _record_tool_events(final_tool_events, observed_at=time.monotonic())
 
     # A short-lived provider can mutate the worktree and exit between polling
     # intervals. Perform one final source-delta readback before projecting EXITED

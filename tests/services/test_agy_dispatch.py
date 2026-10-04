@@ -2456,6 +2456,68 @@ def test_run_agy_tool_activity_resets_stream_no_progress_watchdog(
     assert tool_events[-1]["last_progress_activity_at"]
 
 
+def test_run_agy_drains_previous_transcript_before_session_switch(
+    tmp_path: Path, monkeypatch
+) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "-C", str(work), "init"], check=True, capture_output=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_agy = bin_dir / "agy"
+    first_session = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    second_session = "11111111-2222-3333-4444-555555555555"
+    fake_agy.write_text(
+        "#!"
+        + sys.executable
+        + "\nimport json, os, sys, time\n"
+        + "from pathlib import Path\n"
+        + f"first = {first_session!r}\n"
+        + f"second = {second_session!r}\n"
+        + "log = Path(sys.argv[sys.argv.index('--log-file') + 1])\n"
+        + "root = Path(os.environ['HOME']) / '.gemini' / 'antigravity-cli' / 'brain'\n"
+        + "first_t = root / first / '.system_generated' / 'logs' / 'transcript_full.jsonl'\n"
+        + "second_t = root / second / '.system_generated' / 'logs' / 'transcript_full.jsonl'\n"
+        + "first_t.parent.mkdir(parents=True, exist_ok=True)\n"
+        + "second_t.parent.mkdir(parents=True, exist_ok=True)\n"
+        + "first_t.write_text(json.dumps({'source':'USER','type':'USER_INPUT'}) + '\\n')\n"
+        + "second_t.write_text('')\n"
+        + "log.write_text('I server.go:1263] Created conversation ' + first + '\\n'"
+        + " + 'I http_helpers.go:315] URL: https://example/v1internal:streamGenerateContent?alt=sse\\n')\n"
+        + "time.sleep(0.12)\n"
+        + "with first_t.open('a') as fh: fh.write(json.dumps({'source':'MODEL','type':'PLANNER_RESPONSE','tool_calls':[{'name':'run_command','args':{}}]}) + '\\n')\n"
+        + "with log.open('a') as fh: fh.write('I server.go:1263] Created conversation ' + second + '\\n')\n"
+        + "time.sleep(0.15)\n",
+        encoding="utf-8",
+    )
+    fake_agy.chmod(0o700)
+    log = tmp_path / "agy.log"
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(log))
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+
+    events: list[dict[str, object]] = []
+    code, _out, _err, _timed_out, _wall_ms = dispatch.run_agy(
+        env=env,
+        prompt="session switch",
+        cwd=str(work),
+        mode="plan",
+        model=None,
+        effort=None,
+        timeout=5,
+        operation_hook=events.append,
+    )
+
+    assert code == 0
+    tool_events = [event for event in events if event.get("tool_event_count")]
+    assert tool_events
+    assert tool_events[-1]["tool_event_count"] == 1
+    assert any(event.get("provider_session_id") == second_session for event in events)
+
+
 def test_run_agy_watchdog_boundary_rechecks_source_effect(tmp_path: Path, monkeypatch) -> None:
     work = tmp_path / "work"
     work.mkdir()
