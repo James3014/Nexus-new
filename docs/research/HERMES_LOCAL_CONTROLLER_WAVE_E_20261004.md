@@ -1,8 +1,8 @@
 # Hermes Local Controller Wave E — Staged 24x7 Activation
 
-Date: 2026-10-04  
-Owner issue: #1397  
-Predecessors: #1386 / #1392 / #1395  
+Date: 2026-10-04
+Owner issue: #1397
+Predecessors: #1386 / #1392 / #1395
 Claim ceiling: `LOCAL_SERVICE_LIFECYCLE_ONLY_NO_WORKFLOW_ACCEPTANCE_MERGE_RELEASE`
 
 ## Goal
