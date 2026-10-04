@@ -121,11 +121,16 @@ def test_rotation_eligible_failure_kinds(failure_kind: AccountFailureKind) -> No
         AccountFailureKind.PERMISSION_OR_SCOPE_ERROR,
         AccountFailureKind.PROVIDER_STALLED,
         AccountFailureKind.PROVIDER_STREAM_NO_PROGRESS,
+        AccountFailureKind.PRE_EFFECT_TOOL_THRASH,
         AccountFailureKind.UNKNOWN,
     ],
 )
 def test_non_rotation_failure_kinds(failure_kind: AccountFailureKind) -> None:
     assert is_rotation_eligible(failure_kind) is False
+
+
+def test_pre_effect_tool_thrash_is_non_rotation_eligible() -> None:
+    assert is_rotation_eligible(AccountFailureKind.PRE_EFFECT_TOOL_THRASH) is False
 
 
 def test_eligible_failure_rotates_only_failed_binding() -> None:
