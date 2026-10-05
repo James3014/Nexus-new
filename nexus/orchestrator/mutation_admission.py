@@ -21,7 +21,7 @@ SCHEMA = "nexus.mutation_admission.v1"
 BINDING_SCHEMA = "nexus.mutation_admission_binding.v1"
 _ALLOWED_LANES = frozenset({"DIRECT_CANONICAL", "DIRECT_DELEGATED", "GOVERNED"})
 _ALLOWED_AUTHORITY = frozenset({"OWNER_INLINE", "TRACKED_TASK_CARD"})
-_CANONICAL_REPOSITORIES = frozenset(
+CANONICAL_REPOSITORIES = frozenset(
     {
         "James3014/devspace",
         "James3014/Nexus-new",
@@ -76,7 +76,7 @@ def _parse_time(value: object, field: str) -> datetime:
 
 def _validate_repo(value: str) -> str:
     repository = str(value).strip()
-    if repository not in _CANONICAL_REPOSITORIES:
+    if repository not in CANONICAL_REPOSITORIES:
         raise MutationAdmissionError("REPOSITORY_NOT_CANONICAL")
     return repository
 
