@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import socket
@@ -85,6 +86,7 @@ def _run(
     cwd: Path | None = None,
     runner: CommandRunner = subprocess.run,
     timeout: float = 10.0,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return runner(
         list(argv),
@@ -93,6 +95,7 @@ def _run(
         text=True,
         check=False,
         timeout=timeout,
+        env=env,
     )
 
 
@@ -102,9 +105,10 @@ def _json_command(
     cwd: Path | None = None,
     runner: CommandRunner = subprocess.run,
     timeout: float = 10.0,
+    env: dict[str, str] | None = None,
 ) -> tuple[Any | None, str | None]:
     try:
-        proc = _run(argv, cwd=cwd, runner=runner, timeout=timeout)
+        proc = _run(argv, cwd=cwd, runner=runner, timeout=timeout, env=env)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return None, f"{type(exc).__name__}:{exc}"
     if proc.returncode != 0:
@@ -1076,11 +1080,15 @@ def _collect_core_verification(
         argv.extend(["--changed-path", str(path)])
     for path in subject["deleted_paths"]:
         argv.extend(["--deleted-path", str(path)])
+    core_env = dict(os.environ)
+    core_env.pop("PYTHONPATH", None)
+    core_env.pop("PYTHONHOME", None)
     observed, error = _json_command(
         argv,
         cwd=repo_root,
         runner=runner,
         timeout=20.0,
+        env=core_env,
     )
     if not isinstance(observed, dict):
         return {

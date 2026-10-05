@@ -980,6 +980,7 @@ def test_collect_core_verification_delegates_applicability_to_core_cli(
 
     def fake_runner(argv, **kwargs):
         captured["argv"] = list(argv)
+        captured["env"] = dict(kwargs.get("env") or {})
         return subprocess.CompletedProcess(
             argv,
             0,
@@ -1017,6 +1018,10 @@ def test_collect_core_verification_delegates_applicability_to_core_cli(
     assert argv[:2] == [str(executable), "evidence-check"]
     assert argv[argv.index("--head-tree") + 1] == "d" * 40
     assert argv[argv.index("--changed-path") + 1] == "nexus/services/workflow_doctor.py"
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert "PYTHONPATH" not in env
+    assert "PYTHONHOME" not in env
 
 
 def test_collect_core_verification_latest_invalid_receipt_blocks_older_valid_receipt(
