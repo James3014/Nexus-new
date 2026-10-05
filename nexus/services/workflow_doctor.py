@@ -18,8 +18,12 @@ from nexus.orchestrator.canonical_source_root import (
 from nexus.services.direct_operation_journal import (
     ACTIVE_STATES,
     TERMINAL_STATES,
+    process_alive,
     public_operation_view,
 )
+
+_process_alive = process_alive
+
 
 SCHEMA = "nexus.workflow_doctor.v1"
 RESUME_DISPOSITIONS = frozenset({"SAFE", "RECONCILE", "WAIT", "BLOCKED"})
@@ -687,7 +691,9 @@ def _derive_next_gate(
     selected = operation.get("selected")
     active = operation.get("active") or []
     if isinstance(selected, dict) and (
-        selected.get("status") == "OUTCOME_UNKNOWN" or selected.get("phase") == "RECONCILE_REQUIRED"
+        selected.get("status") == "OUTCOME_UNKNOWN"
+        or selected.get("phase") == "RECONCILE_REQUIRED"
+        or (isinstance(selected.get("pid"), int) and not _process_alive(selected.get("pid")))
     ):
         return "RECONCILE", {
             "code": "RECONCILE_OPERATION",
@@ -697,7 +703,9 @@ def _derive_next_gate(
     reconcile_active = [
         row
         for row in active
-        if row.get("status") == "OUTCOME_UNKNOWN" or row.get("phase") == "RECONCILE_REQUIRED"
+        if row.get("status") == "OUTCOME_UNKNOWN"
+        or row.get("phase") == "RECONCILE_REQUIRED"
+        or (isinstance(row.get("pid"), int) and not _process_alive(row.get("pid")))
     ]
     if reconcile_active:
         return "RECONCILE", {

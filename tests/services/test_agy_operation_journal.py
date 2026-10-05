@@ -735,3 +735,112 @@ def test_stop_operation_processes_kills_verified_group_before_leader_marker_disa
 
     assert result == (True, False, False)
     assert calls == ["group"]
+
+
+def test_direct_journal_reconcile_keeps_operation_running_when_provider_is_alive(
+    tmp_path: Path,
+) -> None:
+    journal = direct_journal.DirectOperationJournal(
+        tmp_path / "journal",
+        schema="nexus.direct_operation.v1",
+        operation_prefix="testop_",
+    )
+    operation_id = direct_journal.new_operation_id("testop_")
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=direct_journal.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    journal.mark_started(operation_id, pid=999_999_998)
+
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        journal.update(operation_id, provider_pid=child.pid)
+        result = journal.reconcile(operation_id)
+
+        assert result["status"] == "RUNNING"
+        assert result["phase"] == "RECONCILE_REQUIRED"
+        assert result["finished_at"] is None
+        assert result["reconciliation"]["result"] == "PROVIDER_PROCESS_STILL_RUNNING"
+        assert result["reconciliation"]["pid_alive"] is False
+        assert result["reconciliation"]["provider_alive_after"] is True
+        assert result["reconciliation"]["retry_permitted"] is False
+    finally:
+        child.kill()
+        child.wait()
+
+
+def test_reconcile_discovers_unrecorded_provider_by_marker_and_terminates(
+    tmp_path: Path,
+) -> None:
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id, _ = _create(journal, tmp_path)
+    marker = str(journal.operation_dir(operation_id) / "agy.log")
+
+    child = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import sys, time; time.sleep(30)",
+            "--log-file",
+            marker,
+        ],
+        start_new_session=True,
+    )
+    try:
+        journal.mark_started(operation_id, pid=999_999_998)
+        # Note: provider_pid is intentionally NOT recorded prior to reconcile.
+        # Verify that _find_operation_process explicitly discovers child by marker:
+        found_pid, found_pgid = agy_journal._find_operation_process(marker, operation_id)
+        assert found_pid == child.pid
+        assert found_pgid is not None
+
+        result = journal.reconcile(operation_id)
+
+        assert result["status"] == "OUTCOME_UNKNOWN"
+        assert result["reconciliation"]["result"] == "ORPHAN_PROVIDER_TERMINATED"
+        assert result["reconciliation"]["provider_alive_before"] is True
+        assert result["reconciliation"]["provider_alive_after"] is False
+        assert result["provider_pid"] == child.pid
+        assert result["provider_pgid"] == found_pgid
+        assert not agy_journal._process_alive(child.pid)
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+
+
+def test_reconcile_leaves_operation_running_when_discovered_provider_cannot_be_stopped(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id, _ = _create(journal, tmp_path)
+    marker = str(journal.operation_dir(operation_id) / "agy.log")
+
+    monkeypatch.setattr(
+        agy_journal,
+        "_find_operation_process",
+        lambda m, operation_id=None: (88888, 88888) if marker in m else (None, None),
+    )
+    monkeypatch.setattr(
+        agy_journal,
+        "_stop_operation_processes",
+        lambda *args, **kwargs: (True, True, False),
+    )
+    monkeypatch.setattr(agy_journal, "_process_alive", lambda pid: pid == 88888)
+    monkeypatch.setattr(agy_journal, "_process_group_alive", lambda pgid: pgid == 88888)
+
+    journal.mark_started(operation_id, pid=999_999_998)
+    result = journal.reconcile(operation_id)
+
+    assert result["status"] == "RUNNING"
+    assert result["phase"] == "RECONCILE_REQUIRED"
+    assert result["reconciliation"]["result"] == "ORPHAN_PROVIDER_STILL_RUNNING"
+    assert result["reconciliation"]["provider_alive_after"] is True
+    assert result["reconciliation"]["retry_permitted"] is False

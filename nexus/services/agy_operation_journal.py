@@ -15,6 +15,7 @@ from nexus.services.direct_operation_journal import (
     TERMINAL_STATES,
     DirectOperationJournal,
     DirectOperationJournalError,
+    process_alive,
 )
 from nexus.services.direct_operation_journal import (
     new_attempt_id as new_attempt_id,
@@ -56,26 +57,7 @@ def new_operation_id() -> str:
     return _new_operation_id(_OPERATION_PREFIX)
 
 
-def _process_alive(pid: object) -> bool:
-    if not isinstance(pid, int) or pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    proc = subprocess.run(
-        ["ps", "-p", str(pid), "-o", "stat="],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if proc.returncode == 0:
-        stat = proc.stdout.strip()
-        if stat.startswith("Z"):
-            return False
-    return True
+_process_alive = process_alive
 
 
 def _process_command(pid: object) -> str | None:
@@ -101,6 +83,42 @@ def _pid_has_operation_marker(pid: int, marker: str, operation_id: str | None = 
     if operation_id and f"{operation_id}/agy.log" in cmd:
         return True
     return False
+
+
+def _find_operation_process(
+    marker: str, operation_id: str | None = None
+) -> tuple[int | None, int | None]:
+    current_pid = os.getpid()
+    parent_pid = os.getppid()
+    try:
+        current_pgrp = os.getpgrp()
+    except OSError:
+        current_pgrp = None
+    proc = subprocess.run(
+        ["ps", "axww", "-o", "pid=,pgid=,command="],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return None, None
+    for line in proc.stdout.splitlines():
+        parts = line.strip().split(None, 2)
+        if len(parts) != 3:
+            continue
+        try:
+            row_pid = int(parts[0])
+            row_pgid = int(parts[1])
+        except ValueError:
+            continue
+        if row_pid in (current_pid, parent_pid) or row_pid <= 1:
+            continue
+        command = parts[2]
+        if marker in command or (operation_id and f"{operation_id}/agy.log" in command):
+            if _process_alive(row_pid):
+                effective_pgid = row_pgid if row_pgid != current_pgrp and row_pgid > 1 else None
+                return row_pid, effective_pgid
+    return None, None
 
 
 def _child_pids_of(parent_pid: int) -> list[int]:
@@ -291,6 +309,18 @@ def _stop_operation_processes(
         for child_pid in _child_pids_of(supervisor_pid):
             if child_pid > 1:
                 candidate_pids.add(child_pid)
+
+    if not candidate_pids:
+        disc_pid, disc_pgid = _find_operation_process(marker, operation_id=operation_id)
+        if disc_pid is not None:
+            candidate_pids.add(disc_pid)
+            group_or_recorded_pids.add(disc_pid)
+            if disc_pgid is not None:
+                provider_pgid = disc_pgid
+                for row_pid, _stat, _cmd in _process_group_process_rows(disc_pgid):
+                    if row_pid > 1:
+                        candidate_pids.add(row_pid)
+                        group_or_recorded_pids.add(row_pid)
 
     candidate_pids.discard(current_pid)
     group_or_recorded_pids.discard(current_pid)
@@ -606,6 +636,21 @@ class AgyOperationJournal(DirectOperationJournal):
                 heartbeat_stale_seconds=heartbeat_stale_seconds,
             )
 
+        op_dir = self.operation_dir(operation_id)
+        marker = str(op_dir / "agy.log")
+        if not provider_alive:
+            disc_pid, disc_pgid = _find_operation_process(marker, operation_id=operation_id)
+            if disc_pid is not None:
+                provider_pid = disc_pid
+                provider_pgid = disc_pgid
+                provider_alive = True
+                record = self.update(
+                    operation_id,
+                    provider_pid=provider_pid,
+                    provider_pgid=provider_pgid,
+                    provider_process_state="RUNNING",
+                )
+
         group_alive = _process_group_alive(provider_pgid) if provider_pgid else False
         if not group_alive and wrapper_pid:
             group_alive = _process_group_alive(wrapper_pid)
@@ -637,7 +682,6 @@ class AgyOperationJournal(DirectOperationJournal):
             })
             return self.update(operation_id, reconciliation=reconciliation)
 
-        op_dir = self.operation_dir(operation_id)
         had_before, alive_after, unverified = _stop_operation_processes(
             operation_id,
             op_dir,
