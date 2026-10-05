@@ -74,6 +74,49 @@ def _parse_time(value: object, field: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def _validate_authority_reference(
+    value: object,
+    *,
+    operation_id: str,
+    repository: str,
+    base_sha: str,
+    execution_lane: str,
+    allowed_paths: tuple[str, ...] | list[str],
+    issue_number: int | None,
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise MutationAdmissionError("DIRECT_OWNER_AUTHORITY_REQUIRED")
+    reference = dict(value)
+    if (
+        reference.get("schema") != "nexus.standing_grant_effect_authorization.v1"
+        or reference.get("mutation_authorized") is not True
+        or reference.get("owner_id") != "James3014"
+        or reference.get("action") != "TASK_SUBMIT"
+    ):
+        raise MutationAdmissionError("DIRECT_OWNER_AUTHORITY_INVALID")
+    for field in ("grant_receipt_hash", "effect_hash", "authorization_hash", "standing_grant_key"):
+        if not _SHA64.fullmatch(str(reference.get(field) or "")):
+            raise MutationAdmissionError("DIRECT_OWNER_AUTHORITY_INVALID")
+    effect = reference.get("effect")
+    expected_effect = {
+        "operation_id": operation_id,
+        "target_repository": repository,
+        "base_sha": base_sha,
+        "execution_lane": execution_lane,
+        "allowed_paths": list(allowed_paths),
+        "issue_number": issue_number,
+    }
+    if not isinstance(effect, Mapping) or dict(effect) != expected_effect:
+        raise MutationAdmissionError("DIRECT_OWNER_AUTHORITY_MISMATCH")
+    if reference["effect_hash"] != canonical_hash(effect):
+        raise MutationAdmissionError("DIRECT_OWNER_AUTHORITY_MISMATCH")
+    authorization_payload = dict(reference)
+    supplied_authorization_hash = str(authorization_payload.pop("authorization_hash"))
+    if supplied_authorization_hash != canonical_hash(authorization_payload):
+        raise MutationAdmissionError("DIRECT_OWNER_AUTHORITY_MISMATCH")
+    return reference
+
+
 def _validate_repo(value: str) -> str:
     repository = str(value).strip()
     if repository not in CANONICAL_REPOSITORIES:
@@ -161,20 +204,45 @@ def validate_receipt(
     authority = str(value.get("authority_kind") or "")
     if lane not in _ALLOWED_LANES or authority not in _ALLOWED_AUTHORITY:
         raise MutationAdmissionError("ADMISSION_AUTHORITY_INVALID")
-    if lane == "GOVERNED":
-        if authority != "TRACKED_TASK_CARD":
-            raise MutationAdmissionError("GOVERNED_TASK_CARD_REQUIRED")
-        if not value.get("task_card_path") or not _SHA64.fullmatch(str(value.get("task_card_hash") or "")):
-            raise MutationAdmissionError("GOVERNED_TASK_CARD_REQUIRED")
-    else:
-        if authority != "OWNER_INLINE" or value.get("owner_confirmation") is not True:
-            raise MutationAdmissionError("DIRECT_OWNER_CONFIRMATION_REQUIRED")
-    _validate_scope(list(value.get("allowed_paths") or []))
+    scope = _validate_scope(list(value.get("allowed_paths") or []))
     issue_number = value.get("issue_number")
     if issue_number is not None and (
         not isinstance(issue_number, int) or isinstance(issue_number, bool) or issue_number < 1
     ):
         raise MutationAdmissionError("ISSUE_NUMBER_INVALID")
+    if lane == "GOVERNED":
+        task_id = str(value.get("task_id") or "")
+        attempt_id = str(value.get("attempt_id") or "")
+        governance_source_head = str(value.get("governance_source_head") or "")
+        if (
+            authority != "TRACKED_TASK_CARD"
+            or issue_number is None
+            or not _OPERATION.fullmatch(task_id)
+            or not _OPERATION.fullmatch(attempt_id)
+            or not value.get("task_card_path")
+            or not _SHA64.fullmatch(str(value.get("task_card_hash") or ""))
+            or not _SHA40.fullmatch(governance_source_head)
+        ):
+            raise MutationAdmissionError("GOVERNED_TASK_CARD_REQUIRED")
+        if value.get("authority_reference") is not None:
+            raise MutationAdmissionError("GOVERNED_OWNER_AUTHORITY_INVALID")
+    else:
+        if authority != "OWNER_INLINE":
+            raise MutationAdmissionError("DIRECT_OWNER_AUTHORITY_REQUIRED")
+        _validate_authority_reference(
+            value.get("authority_reference"),
+            operation_id=operation_id,
+            repository=str(value.get("repository") or ""),
+            base_sha=str(value.get("base_sha") or ""),
+            execution_lane=lane,
+            allowed_paths=scope,
+            issue_number=issue_number,
+        )
+        if any(
+            value.get(field) is not None
+            for field in ("task_id", "attempt_id", "task_card_path", "task_card_hash", "governance_source_head")
+        ):
+            raise MutationAdmissionError("DIRECT_TASK_CARD_INVALID")
     issued = _parse_time(value.get("issued_at"), "issued_at")
     expires = _parse_time(value.get("expires_at"), "expires_at")
     if expires <= issued:
@@ -242,10 +310,13 @@ class MutationAdmissionStore:
         execution_lane: str,
         authority_kind: str,
         allowed_paths: list[str] | tuple[str, ...],
-        owner_confirmation: bool,
+        authority_reference: Mapping[str, Any] | None = None,
         issue_number: int | None = None,
+        task_id: str | None = None,
+        attempt_id: str | None = None,
         task_card_path: str | None = None,
         task_card_hash: str | None = None,
+        governance_source_head: str | None = None,
         ttl_minutes: int = 10080,
         runtime_identity: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -271,19 +342,49 @@ class MutationAdmissionStore:
             or not 5 <= ttl_minutes <= 43200
         ):
             raise MutationAdmissionError("TTL_MINUTES_INVALID")
+        normalized_task_id = str(task_id).strip() if task_id is not None else None
+        normalized_attempt_id = str(attempt_id).strip() if attempt_id is not None else None
+        normalized_governance_head = (
+            str(governance_source_head).strip() if governance_source_head is not None else None
+        )
         if lane == "GOVERNED":
             if (
                 authority != "TRACKED_TASK_CARD"
+                or issue_number is None
+                or not normalized_task_id
+                or not _OPERATION.fullmatch(normalized_task_id)
+                or not normalized_attempt_id
+                or not _OPERATION.fullmatch(normalized_attempt_id)
                 or not task_card_path
                 or not _SHA64.fullmatch(str(task_card_hash or ""))
+                or not normalized_governance_head
+                or not _SHA40.fullmatch(normalized_governance_head)
             ):
                 raise MutationAdmissionError("GOVERNED_TASK_CARD_REQUIRED")
-            if owner_confirmation:
-                raise MutationAdmissionError("GOVERNED_OWNER_INLINE_INVALID")
+            if authority_reference is not None:
+                raise MutationAdmissionError("GOVERNED_OWNER_AUTHORITY_INVALID")
         else:
-            if authority != "OWNER_INLINE" or owner_confirmation is not True:
-                raise MutationAdmissionError("DIRECT_OWNER_CONFIRMATION_REQUIRED")
-            if task_card_path is not None or task_card_hash is not None:
+            if authority != "OWNER_INLINE":
+                raise MutationAdmissionError("DIRECT_OWNER_AUTHORITY_REQUIRED")
+            _validate_authority_reference(
+                authority_reference,
+                operation_id=operation_id,
+                repository=repository,
+                base_sha=str(base_sha),
+                execution_lane=lane,
+                allowed_paths=scope,
+                issue_number=issue_number,
+            )
+            if any(
+                value is not None
+                for value in (
+                    normalized_task_id,
+                    normalized_attempt_id,
+                    task_card_path,
+                    task_card_hash,
+                    normalized_governance_head,
+                )
+            ):
                 raise MutationAdmissionError("DIRECT_TASK_CARD_INVALID")
 
         request = {
@@ -293,10 +394,12 @@ class MutationAdmissionStore:
             "execution_lane": lane,
             "authority_kind": authority,
             "allowed_paths": list(scope),
-            "owner_confirmation": bool(owner_confirmation),
             "issue_number": issue_number,
+            "task_id": normalized_task_id,
+            "attempt_id": normalized_attempt_id,
             "task_card_path": task_card_path,
             "task_card_hash": task_card_hash,
+            "governance_source_head": normalized_governance_head,
             "ttl_minutes": ttl_minutes,
         }
         request_hash = canonical_hash(request)
@@ -324,6 +427,9 @@ class MutationAdmissionStore:
             "issued_at": _iso(issued),
             "expires_at": _iso(issued + timedelta(minutes=ttl_minutes)),
             "runtime_identity": dict(runtime_identity or {}),
+            "authority_reference": (
+                dict(authority_reference) if authority_reference is not None else None
+            ),
             "request_hash": request_hash,
             "receipt_hash": "",
         }
