@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import socket
 import subprocess
 from datetime import datetime, timezone
@@ -884,6 +885,194 @@ _COMPLETION_LAYERS = (
 )
 
 
+_CORE_RECEIPT_VALIDATION_CODE = r'''
+import json
+import sys
+from pathlib import Path
+from product.clients.local_golden_path import validate_verification_receipt
+
+receipt_path = Path(sys.argv[1])
+repo_root = Path(sys.argv[2])
+validation = validate_verification_receipt(receipt_path, repo=repo_root)
+payload = json.loads(receipt_path.read_text(encoding="utf-8"))
+core_response = payload.get("core_response")
+verification = core_response.get("verification") if isinstance(core_response, dict) else None
+outcome = payload.get("outcome")
+product = payload.get("product")
+print(json.dumps({
+    "validation": validation,
+    "kind": payload.get("kind"),
+    "schema_version": payload.get("schema_version"),
+    "receipt_hash": payload.get("receipt_hash"),
+    "timestamp": payload.get("timestamp"),
+    "source_revision": payload.get("source_revision"),
+    "source_tree": payload.get("source_tree"),
+    "target_revision": payload.get("target_revision"),
+    "target_tree": payload.get("target_tree"),
+    "product_name": product.get("name") if isinstance(product, dict) else None,
+    "product_version": product.get("version") if isinstance(product, dict) else None,
+    "outcome": outcome if isinstance(outcome, dict) else None,
+    "core_verification": verification if isinstance(verification, dict) else None,
+}, sort_keys=True))
+'''.strip()
+
+
+def _completion_subject_revision(
+    *,
+    source: dict[str, Any],
+    operation: dict[str, Any],
+    pr: dict[str, Any],
+) -> str | None:
+    selected = operation.get("selected")
+    if not isinstance(selected, dict):
+        selected = operation.get("latest_terminal")
+    if not isinstance(selected, dict):
+        selected = None
+    pr_head = pr.get("head_sha") if pr.get("status") == "OBSERVED" else None
+    merged = pr.get("merged") is True or bool(pr.get("merged_at"))
+    merge_revision = pr.get("merge_commit_sha") or pr_head
+    review_head = selected.get("review_candidate_head") if selected else None
+    subject = (
+        merge_revision
+        if merged and merge_revision
+        else pr_head or source.get("head") or review_head
+    )
+    return str(subject) if isinstance(subject, str) and subject else None
+
+
+def _resolve_nexus_certify_python(home: Path) -> Path | None:
+    executable = home / ".local/bin/nexus-certify"
+    if not executable.exists():
+        found = shutil.which("nexus-certify")
+        executable = Path(found) if found else executable
+    try:
+        resolved = executable.resolve(strict=True)
+        with resolved.open("r", encoding="utf-8") as handle:
+            first_line = handle.readline().strip()
+    except (OSError, UnicodeError):
+        return None
+    if not first_line.startswith("#!"):
+        return None
+    interpreter = Path(first_line[2:].strip())
+    return interpreter if interpreter.is_absolute() and interpreter.is_file() else None
+
+
+def _collect_core_verification(
+    repo_root: Path,
+    *,
+    home: Path,
+    subject_revision: str | None,
+    runner: CommandRunner,
+) -> dict[str, Any]:
+    """Observe canonical Core receipt truth without reimplementing Core verification."""
+    receipts_root = repo_root / ".nexus-core" / "receipts"
+    try:
+        receipts = sorted(
+            (path for path in receipts_root.glob("*.json") if path.is_file()),
+            key=lambda path: path.name,
+            reverse=True,
+        )
+    except OSError as exc:
+        return {"status": "UNKNOWN", "error": f"CORE_RECEIPT_SCAN_FAILED:{exc}"}
+    if not receipts:
+        return {
+            "status": "UNAVAILABLE",
+            "error": "CORE_VERIFICATION_RECEIPT_NOT_FOUND",
+        }
+    if not subject_revision:
+        return {
+            "status": "UNKNOWN",
+            "receipt_path": str(receipts[0]),
+            "error": "CORE_VERIFICATION_SUBJECT_UNAVAILABLE",
+        }
+
+    core_python = _resolve_nexus_certify_python(home)
+    if core_python is None:
+        return {
+            "status": "UNAVAILABLE",
+            "receipt_path": str(receipts[0]),
+            "error": "NEXUS_CERTIFY_VALIDATOR_UNAVAILABLE",
+        }
+
+    observed, error = _json_command(
+        [
+            str(core_python),
+            "-I",
+            "-c",
+            _CORE_RECEIPT_VALIDATION_CODE,
+            str(receipts[0]),
+            str(repo_root),
+        ],
+        cwd=repo_root,
+        runner=runner,
+        timeout=20.0,
+    )
+    if not isinstance(observed, dict):
+        return {
+            "status": "UNKNOWN",
+            "receipt_path": str(receipts[0]),
+            "validator_python": str(core_python),
+            "error": error or "CORE_RECEIPT_VALIDATION_FAILED",
+        }
+
+    validation = observed.get("validation")
+    validation_valid = bool(isinstance(validation, dict) and validation.get("valid") is True)
+    core_verification = observed.get("core_verification")
+    outcome = observed.get("outcome")
+    subject_tree = _git_value(
+        repo_root,
+        "rev-parse",
+        f"{subject_revision}^{{tree}}",
+        runner=runner,
+    )
+    exact_subject = bool(
+        subject_tree
+        and observed.get("target_revision") == f"git-tree:{subject_tree}"
+        and observed.get("target_tree") == f"git-tree:{subject_tree}"
+    )
+    core_verified = bool(
+        isinstance(core_verification, dict)
+        and core_verification.get("status") == "VERIFIED"
+        and core_verification.get("integrity") == "VALID"
+        and isinstance(outcome, dict)
+        and outcome.get("status") == "VERIFIED"
+        and outcome.get("transport_error") is False
+    )
+    return {
+        "status": "OBSERVED",
+        "receipt_path": str(receipts[0]),
+        "validator_python": str(core_python),
+        "validator": "product.clients.local_golden_path.validate_verification_receipt",
+        "validation_valid": validation_valid,
+        "validation_reason_codes": (
+            list(validation.get("reason_codes") or []) if isinstance(validation, dict) else []
+        ),
+        "receipt_hash": observed.get("receipt_hash"),
+        "timestamp": observed.get("timestamp"),
+        "product_name": observed.get("product_name"),
+        "product_version": observed.get("product_version"),
+        "source_revision": observed.get("source_revision"),
+        "source_tree": observed.get("source_tree"),
+        "target_revision": observed.get("target_revision"),
+        "target_tree": observed.get("target_tree"),
+        "core_status": (
+            core_verification.get("status") if isinstance(core_verification, dict) else None
+        ),
+        "core_integrity": (
+            core_verification.get("integrity") if isinstance(core_verification, dict) else None
+        ),
+        "core_reason_codes": (
+            list(core_verification.get("reason_codes") or [])
+            if isinstance(core_verification, dict)
+            else []
+        ),
+        "exact_subject": exact_subject,
+        "subject_revision": subject_revision,
+        "subject_tree": f"git-tree:{subject_tree}" if subject_tree else None,
+        "current_verified": bool(validation_valid and exact_subject and core_verified),
+    }
+
+
 def _completion_row(
     layer: str,
     *,
@@ -916,6 +1105,7 @@ def _project_completion_matrix(
     operation: dict[str, Any],
     pr: dict[str, Any],
     required_gates: list[dict[str, Any]],
+    core_verification: dict[str, Any],
     observed_at: str,
 ) -> dict[str, Any]:
     """Project current delivery evidence without minting completion authority."""
@@ -929,10 +1119,8 @@ def _project_completion_matrix(
     merged = pr.get("merged") is True or bool(pr.get("merged_at"))
     merge_revision = pr.get("merge_commit_sha") or pr_head
     review_head = selected.get("review_candidate_head") if selected else None
-    subject_revision = (
-        merge_revision
-        if merged and merge_revision
-        else pr_head or source.get("head") or review_head
+    subject_revision = _completion_subject_revision(
+        source=source, operation=operation, pr=pr
     )
 
     rows: list[dict[str, Any]] = []
@@ -987,27 +1175,45 @@ def _project_completion_matrix(
         and row.get("conclusion") in {"success", "neutral", "skipped"}
         for row in required_gates
     )
-    source_verification_pass = bool(
-        pr_head
-        and pr.get("gate_policy_state") == "OBSERVED"
-        and not pr.get("check_observation_error")
-        and required_success
-    )
+    source_verification_pass = core_verification.get("current_verified") is True
+    if source_verification_pass:
+        source_verification_gap = None
+    elif core_verification.get("status") == "UNAVAILABLE":
+        source_verification_gap = "CORE_VERIFICATION_EVIDENCE_NOT_OBSERVED"
+    elif core_verification.get("validation_valid") is False:
+        source_verification_gap = "CORE_VERIFICATION_RECEIPT_INVALID"
+    elif core_verification.get("exact_subject") is False:
+        source_verification_gap = "CORE_VERIFICATION_SUBJECT_NOT_CURRENT"
+    else:
+        source_verification_gap = "CORE_VERIFICATION_NOT_VERIFIED"
     rows.append(
         _completion_row(
             "Source verification",
             status="PASS" if source_verification_pass else "UNKNOWN",
-            source="github_required_checks" if pr_head else "workflow_doctor",
-            revision=str(pr_head) if pr_head else subject_revision,
+            source=(
+                "nexus_core"
+                if core_verification.get("status") == "OBSERVED"
+                else "workflow_doctor"
+            ),
+            revision=subject_revision,
             observed_at=observed_at,
             freshness="CURRENT" if source_verification_pass else "UNKNOWN",
             evidence={
+                "core_receipt_path": core_verification.get("receipt_path"),
+                "core_receipt_hash": core_verification.get("receipt_hash"),
+                "core_product_version": core_verification.get("product_version"),
+                "core_status": core_verification.get("core_status"),
+                "core_integrity": core_verification.get("core_integrity"),
+                "core_validation_valid": core_verification.get("validation_valid"),
+                "core_exact_subject": core_verification.get("exact_subject"),
+                "core_validation_reason_codes": core_verification.get(
+                    "validation_reason_codes", []
+                ),
                 "required_gate_count": len(required_gates),
+                "merge_gate_required_success": required_success,
                 "gate_policy_state": pr.get("gate_policy_state"),
             },
-            gap=(
-                None if source_verification_pass else "CURRENT_EXACT_HEAD_VERIFICATION_NOT_PROVEN"
-            ),
+            gap=source_verification_gap,
         )
     )
 
@@ -1227,6 +1433,15 @@ def collect_workflow_doctor(
         repo_root=repo_root,
     )
     leases = _collect_leases(home)
+    subject_revision = _completion_subject_revision(
+        source=source, operation=operation, pr=pr
+    )
+    core_verification = _collect_core_verification(
+        repo_root,
+        home=home,
+        subject_revision=subject_revision,
+        runner=runner,
+    )
     disposition, next_gate = _derive_next_gate(
         source=source,
         runtime=runtime,
@@ -1242,6 +1457,7 @@ def collect_workflow_doctor(
         operation=operation,
         pr=pr,
         required_gates=required,
+        core_verification=core_verification,
         observed_at=generated_at,
     )
     if disposition not in RESUME_DISPOSITIONS:
@@ -1254,6 +1470,7 @@ def collect_workflow_doctor(
         "operation": operation,
         "source": source,
         "runtime": runtime,
+        "core_verification": core_verification,
         "quota": quota,
         "pr": pr,
         "required_gates": required,
@@ -1270,6 +1487,7 @@ def collect_workflow_doctor(
 def render_text(payload: dict[str, Any]) -> str:
     source = payload.get("source", {})
     runtime = payload.get("runtime", {})
+    core = payload.get("core_verification", {})
     task = payload.get("task", {})
     pr = payload.get("pr", {})
     operation = payload.get("operation", {})
@@ -1278,6 +1496,7 @@ def render_text(payload: dict[str, Any]) -> str:
         f"resume={payload.get('resume_disposition')} next={gate.get('code')}",
         f"source head={source.get('head')} github_main={source.get('github_main')} dirty={source.get('dirty')}",
         f"runtime state={runtime.get('state')} installed={runtime.get('installed_revision')}",
+        f"core status={core.get('core_status')} current_verified={core.get('current_verified')}",
         f"quota status={(payload.get('quota') or {}).get('status')} accounts={(payload.get('quota') or {}).get('account_count')}",
         f"issue={task.get('issue_number')} state={task.get('state')}",
         f"pr={pr.get('pr_number')} state={pr.get('state')} head={pr.get('head_sha')}",

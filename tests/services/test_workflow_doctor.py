@@ -511,6 +511,8 @@ def _collect_with_observations(
     operation: dict | None = None,
     pr: dict | None = None,
     task: dict | None = None,
+    required_gates: list[dict] | None = None,
+    core_verification: dict | None = None,
 ) -> dict:
     """Exercise collect_workflow_doctor through producer-shaped read-only observations."""
     repository = "James3014/Nexus-new"
@@ -534,6 +536,19 @@ def _collect_with_observations(
         "state": "open",
         "issue_number": 1436,
     }
+    required_gates = list(required_gates or [])
+    core_verification = core_verification or {
+        "status": "OBSERVED",
+        "validation_valid": True,
+        "validation_reason_codes": [],
+        "receipt_path": "/tmp/core-receipt.json",
+        "receipt_hash": "sha256:" + "1" * 64,
+        "product_version": "0.1.1",
+        "core_status": "VERIFIED",
+        "core_integrity": "VALID",
+        "exact_subject": True,
+        "current_verified": True,
+    }
 
     monkeypatch.setattr(
         doctor,
@@ -544,7 +559,7 @@ def _collect_with_observations(
     monkeypatch.setattr(
         doctor,
         "_collect_pr",
-        lambda *args, **kwargs: (dict(pr), [], [], []),
+        lambda *args, **kwargs: (dict(pr), list(required_gates), [], []),
     )
     monkeypatch.setattr(doctor, "_collect_runtime", lambda *args, **kwargs: dict(runtime))
     monkeypatch.setattr(
@@ -558,6 +573,11 @@ def _collect_with_observations(
         lambda *args, **kwargs: dict(operation),
     )
     monkeypatch.setattr(doctor, "_collect_leases", lambda *args, **kwargs: _no_leases())
+    monkeypatch.setattr(
+        doctor,
+        "_collect_core_verification",
+        lambda *args, **kwargs: dict(core_verification),
+    )
 
     return doctor.collect_workflow_doctor(
         repo_root=tmp_path,
@@ -817,3 +837,218 @@ def test_pre_gate_review_cannot_project_independent_acceptance_pass(
     assert acceptance["status"] != "PASS"
     assert acceptance["source"] == "direct_operation_review"
     assert acceptance["gap"] == "INDEPENDENT_ACCEPTANCE_AUTHORITY_NOT_OBSERVED"
+
+
+# ---------------------------------------------------------------------------
+# Issue #1443: canonical Nexus Core completion-truth wiring
+# ---------------------------------------------------------------------------
+
+
+def test_source_verification_projects_exact_core_truth(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    payload = _collect_with_observations(monkeypatch, tmp_path)
+    source_verification = _completion_layers(payload)["Source verification"]
+
+    assert source_verification["status"] == "PASS"
+    assert source_verification["source"] == "nexus_core"
+    assert source_verification["freshness"] == "CURRENT"
+    assert source_verification["evidence"]["core_status"] == "VERIFIED"
+
+
+def test_source_verification_does_not_use_github_gates_as_core_truth(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        pr={
+            "status": "OBSERVED",
+            "state": "open",
+            "draft": False,
+            "merged": False,
+            "pr_number": 1444,
+            "head_sha": "b" * 40,
+            "base_sha": "b" * 40,
+            "gate_policy_state": "OBSERVED",
+            "check_observation_error": None,
+            "mergeable": True,
+        },
+        required_gates=[
+            {
+                "name": "Exact-base impact gate",
+                "status": "completed",
+                "conclusion": "success",
+            }
+        ],
+        core_verification={
+            "status": "UNAVAILABLE",
+            "error": "CORE_VERIFICATION_RECEIPT_NOT_FOUND",
+        },
+    )
+    source_verification = _completion_layers(payload)["Source verification"]
+
+    assert source_verification["status"] == "UNKNOWN"
+    assert source_verification["gap"] == "CORE_VERIFICATION_EVIDENCE_NOT_OBSERVED"
+    assert source_verification["evidence"]["merge_gate_required_success"] is True
+
+
+def test_source_verification_rejects_stale_core_subject(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        core_verification={
+            "status": "OBSERVED",
+            "validation_valid": True,
+            "validation_reason_codes": [],
+            "core_status": "VERIFIED",
+            "core_integrity": "VALID",
+            "exact_subject": False,
+            "current_verified": False,
+        },
+    )
+    source_verification = _completion_layers(payload)["Source verification"]
+
+    assert source_verification["status"] == "UNKNOWN"
+    assert source_verification["gap"] == "CORE_VERIFICATION_SUBJECT_NOT_CURRENT"
+
+
+def test_source_verification_rejects_invalid_core_receipt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        core_verification={
+            "status": "OBSERVED",
+            "validation_valid": False,
+            "validation_reason_codes": ["RECEIPT_HASH_MISMATCH"],
+            "core_status": "VERIFIED",
+            "core_integrity": "VALID",
+            "exact_subject": True,
+            "current_verified": False,
+        },
+    )
+    source_verification = _completion_layers(payload)["Source verification"]
+
+    assert source_verification["status"] == "UNKNOWN"
+    assert source_verification["gap"] == "CORE_VERIFICATION_RECEIPT_INVALID"
+    assert source_verification["evidence"]["core_validation_reason_codes"] == [
+        "RECEIPT_HASH_MISMATCH"
+    ]
+
+
+def test_collect_core_verification_delegates_validation_to_core_environment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    receipt_dir = tmp_path / ".nexus-core" / "receipts"
+    receipt_dir.mkdir(parents=True)
+    receipt = receipt_dir / "20261005T000000Z-current.json"
+    receipt.write_text("{}", encoding="utf-8")
+    core_python = tmp_path / "core-python"
+    core_python.write_text("", encoding="utf-8")
+    subject = "b" * 40
+    subject_tree = "c" * 40
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(doctor, "_resolve_nexus_certify_python", lambda home: core_python)
+
+    def fake_json_command(argv, **kwargs):
+        captured["argv"] = argv
+        return (
+            {
+                "validation": {"valid": True, "reason_codes": []},
+                "receipt_hash": "sha256:" + "1" * 64,
+                "product_name": "nexus-core",
+                "product_version": "0.1.1",
+                "source_revision": "git-commit:" + "a" * 40,
+                "source_tree": "git-tree:" + "a" * 40,
+                "target_revision": f"git-tree:{subject_tree}",
+                "target_tree": f"git-tree:{subject_tree}",
+                "outcome": {
+                    "status": "VERIFIED",
+                    "reason_codes": [],
+                    "transport_error": False,
+                },
+                "core_verification": {
+                    "status": "VERIFIED",
+                    "integrity": "VALID",
+                    "reason_codes": [],
+                },
+            },
+            None,
+        )
+
+    monkeypatch.setattr(doctor, "_json_command", fake_json_command)
+    monkeypatch.setattr(
+        doctor,
+        "_git_value",
+        lambda *args, **kwargs: subject_tree,
+    )
+
+    observed = doctor._collect_core_verification(
+        tmp_path, home=tmp_path, subject_revision=subject, runner=subprocess.run
+    )
+
+    assert observed["current_verified"] is True
+    assert observed["validation_valid"] is True
+    assert observed["exact_subject"] is True
+    argv = captured["argv"]
+    assert isinstance(argv, list)
+    assert argv[:3] == [str(core_python), "-I", "-c"]
+    assert "validate_verification_receipt" in argv[3]
+
+
+def test_collect_core_verification_latest_invalid_receipt_blocks_older_valid_receipt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    receipt_dir = tmp_path / ".nexus-core" / "receipts"
+    receipt_dir.mkdir(parents=True)
+    (receipt_dir / "20261005T000000Z-old-valid.json").write_text("{}", encoding="utf-8")
+    latest = receipt_dir / "20261005T010000Z-new-invalid.json"
+    latest.write_text("{}", encoding="utf-8")
+    core_python = tmp_path / "core-python"
+    core_python.write_text("", encoding="utf-8")
+    subject = "b" * 40
+    subject_tree = "c" * 40
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(doctor, "_resolve_nexus_certify_python", lambda home: core_python)
+
+    def fake_json_command(argv, **kwargs):
+        captured["receipt"] = argv[-2]
+        return (
+            {
+                "validation": {
+                    "valid": False,
+                    "reason_codes": ["RECEIPT_HASH_MISMATCH"],
+                },
+                "source_revision": "git-commit:" + "a" * 40,
+                "target_revision": f"git-tree:{subject_tree}",
+                "target_tree": f"git-tree:{subject_tree}",
+                "outcome": {
+                    "status": "VERIFIED",
+                    "reason_codes": [],
+                    "transport_error": False,
+                },
+                "core_verification": {
+                    "status": "VERIFIED",
+                    "integrity": "VALID",
+                    "reason_codes": [],
+                },
+            },
+            None,
+        )
+
+    monkeypatch.setattr(doctor, "_json_command", fake_json_command)
+    monkeypatch.setattr(doctor, "_git_value", lambda *args, **kwargs: subject_tree)
+
+    observed = doctor._collect_core_verification(
+        tmp_path, home=tmp_path, subject_revision=subject, runner=subprocess.run
+    )
+
+    assert captured["receipt"] == str(latest)
+    assert observed["current_verified"] is False
+    assert observed["validation_reason_codes"] == ["RECEIPT_HASH_MISMATCH"]
