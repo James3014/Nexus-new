@@ -458,7 +458,10 @@ def test_relevance_paths_are_part_of_the_frozen_generation_identity():
         dependent_paths=("nexus/services/local_assist_service.py",),
     )
     second = _policy(
-        dependent_paths=("nexus/services/local_assist_service.py", "nexus/engine/canonical_task_seam.py"),
+        dependent_paths=(
+            "nexus/services/local_assist_service.py",
+            "nexus/engine/canonical_task_seam.py",
+        ),
     )
 
     assert first.generation_id != second.generation_id

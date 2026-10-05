@@ -132,9 +132,7 @@ class GatewayRelevancePolicy(BaseModel):
     @field_validator("dependent_paths")
     @classmethod
     def _dependent_paths(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        normalized = tuple(
-            dict.fromkeys(_repo_path(path, "DEPENDENT_PATH") for path in value)
-        )
+        normalized = tuple(dict.fromkeys(_repo_path(path, "DEPENDENT_PATH") for path in value))
         if not normalized:
             raise ValueError("DEPENDENT_PATHS_REQUIRED")
         if len(normalized) > 256:
@@ -164,9 +162,7 @@ class UpstreamChangeScope(BaseModel):
     @field_validator("changed_paths")
     @classmethod
     def _changed_paths(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        normalized = tuple(
-            dict.fromkeys(_repo_path(path, "CHANGED_PATH") for path in value)
-        )
+        normalized = tuple(dict.fromkeys(_repo_path(path, "CHANGED_PATH") for path in value))
         if len(normalized) > 600:
             raise ValueError("CHANGED_PATHS_LIMIT_EXCEEDED")
         return normalized
@@ -268,8 +264,7 @@ class GatewayConvergenceObservation(BaseModel):
         if (
             self.upstream_change_scope is not None
             and self.observed_upstream_main_head is not None
-            and self.upstream_change_scope.head_commit
-            != self.observed_upstream_main_head
+            and self.upstream_change_scope.head_commit != self.observed_upstream_main_head
         ):
             raise ValueError("CHANGE_SCOPE_HEAD_MUST_MATCH_OBSERVED_UPSTREAM")
         return self
