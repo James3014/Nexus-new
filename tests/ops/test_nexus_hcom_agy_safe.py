@@ -7,6 +7,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import signal
 import stat
 import subprocess
 import sys
@@ -119,30 +120,28 @@ raise SystemExit(2)
 
     state_root = original_home / ".local" / "state" / "hcom-agy-safe"
     env = os.environ.copy()
-    env.update(
-        {
-            "HOME": str(original_home),
-            "PATH": f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
-            "NEXUS_AGY_MANAGER": str(manager),
-            "NEXUS_AGY_MANAGER_ROOT": str(manager_root),
-            "NEXUS_HCOM_AGY_STATE_ROOT": str(state_root),
-            "NEXUS_HCOM_BIN": str(hcom),
-            "HCOM_TEST_RECORD": str(record_path),
-            "HCOM_TEST_CONFIG_LOG": str(config_log),
-            "GEMINI_API_KEY": "must-not-leak",
-            "GOOGLE_API_KEY": "must-not-leak",
-            "GOOGLE_GENAI_API_KEY": "must-not-leak",
-            "GH_TOKEN": "must-not-leak",
-            "GITHUB_TOKEN": "must-not-leak",
-            "GH_ENTERPRISE_TOKEN": "must-not-leak",
-            "GITHUB_ENTERPRISE_TOKEN": "must-not-leak",
-            "GITHUB_PAT": "must-not-leak",
-            "GITHUB_ACTIONS_TOKEN": "must-not-leak",
-            "NEXUS_HCOM_AGY_LEASE_ACCOUNT": "google-active",
-            "NEXUS_HCOM_AGY_PROFILE_HOME": str(profile),
-            "NEXUS_HCOM_AGY_LEASE_ID_HASH": "lease-hash",
-        }
-    )
+    env.update({
+        "HOME": str(original_home),
+        "PATH": f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
+        "NEXUS_AGY_MANAGER": str(manager),
+        "NEXUS_AGY_MANAGER_ROOT": str(manager_root),
+        "NEXUS_HCOM_AGY_STATE_ROOT": str(state_root),
+        "NEXUS_HCOM_BIN": str(hcom),
+        "HCOM_TEST_RECORD": str(record_path),
+        "HCOM_TEST_CONFIG_LOG": str(config_log),
+        "GEMINI_API_KEY": "must-not-leak",
+        "GOOGLE_API_KEY": "must-not-leak",
+        "GOOGLE_GENAI_API_KEY": "must-not-leak",
+        "GH_TOKEN": "must-not-leak",
+        "GITHUB_TOKEN": "must-not-leak",
+        "GH_ENTERPRISE_TOKEN": "must-not-leak",
+        "GITHUB_ENTERPRISE_TOKEN": "must-not-leak",
+        "GITHUB_PAT": "must-not-leak",
+        "GITHUB_ACTIONS_TOKEN": "must-not-leak",
+        "NEXUS_HCOM_AGY_LEASE_ACCOUNT": "google-active",
+        "NEXUS_HCOM_AGY_PROFILE_HOME": str(profile),
+        "NEXUS_HCOM_AGY_LEASE_ID_HASH": "lease-hash",
+    })
 
     lease_path = tmp_path / "lease.lock"
     status_read_fd, status_write_fd = os.pipe()
@@ -237,14 +236,12 @@ def test_launcher_rejects_sensitive_hcom_passthrough_before_account_copy(tmp_pat
     _write_executable(hcom, "#!/bin/sh\nexit 99\n")
 
     env = os.environ.copy()
-    env.update(
-        {
-            "HOME": str(original_home),
-            "NEXUS_AGY_MANAGER": str(manager),
-            "NEXUS_AGY_MANAGER_ROOT": str(tmp_path / "runtime"),
-            "NEXUS_HCOM_BIN": str(hcom),
-        }
-    )
+    env.update({
+        "HOME": str(original_home),
+        "NEXUS_AGY_MANAGER": str(manager),
+        "NEXUS_AGY_MANAGER_ROOT": str(tmp_path / "runtime"),
+        "NEXUS_HCOM_BIN": str(hcom),
+    })
     proc = subprocess.run(
         [sys.executable, str(LAUNCHER)],
         env=env,
@@ -272,13 +269,11 @@ raise SystemExit(0)
 """,
     )
     env = os.environ.copy()
-    env.update(
-        {
-            "HOME": str(original_home),
-            "NEXUS_AGY_DISPATCH_BIN": str(dispatcher),
-            "DISPATCHER_RECORD": str(dispatcher_record),
-        }
-    )
+    env.update({
+        "HOME": str(original_home),
+        "NEXUS_AGY_DISPATCH_BIN": str(dispatcher),
+        "DISPATCHER_RECORD": str(dispatcher_record),
+    })
     proc = subprocess.run(
         [sys.executable, str(LAUNCHER), "--model", "gemini-3.8-flash-high"],
         cwd=tmp_path,
@@ -458,9 +453,7 @@ def test_dispatcher_binds_exact_claim_to_hcom_child_and_releases_cleanly(
         )
         os.write(
             status_fd,
-            (
-                json.dumps({"event": "provider_terminal", "pid": 51515, "exit_code": 0}) + "\n"
-            ).encode(),
+            (json.dumps({"event": "provider_terminal", "pid": 51515, "exit_code": 0}) + "\n").encode(),
         )
         return Child()
 
@@ -575,25 +568,21 @@ def test_foreground_collaborative_operation_journals_clean_completion(
 
     def fake_dispatch(**kwargs):
         hook = kwargs["operation_hook"]
-        hook(
-            {
-                "phase": "ACCOUNT_LEASED",
-                "attempts": 1,
-                "rotations": 0,
-                "account_alias_hash": "alias-hash",
-                "lease_id_hash": "lease-hash",
-            }
-        )
-        hook(
-            {
-                "phase": "EXECUTING",
-                "attempts": 1,
-                "rotations": 0,
-                "account_alias_hash": "alias-hash",
-                "lease_id_hash": "lease-hash",
-                "provider_pid": 5555,
-            }
-        )
+        hook({
+            "phase": "ACCOUNT_LEASED",
+            "attempts": 1,
+            "rotations": 0,
+            "account_alias_hash": "alias-hash",
+            "lease_id_hash": "lease-hash",
+        })
+        hook({
+            "phase": "EXECUTING",
+            "attempts": 1,
+            "rotations": 0,
+            "account_alias_hash": "alias-hash",
+            "lease_id_hash": "lease-hash",
+            "provider_pid": 5555,
+        })
         return 0
 
     monkeypatch.setattr(module, "dispatch_hcom_collab", fake_dispatch)
@@ -772,13 +761,11 @@ def test_hcom_registry_disappearance_with_surviving_agy_process_requires_reconci
     module.LEASES_DIR = leases_dir
     receipt_file = leases_dir / "alias-a.receipt.json"
     receipt_file.write_text(
-        json.dumps(
-            {
-                "account_alias_hash": "alias-a",
-                "lease_id_hash": "lease-a",
-                "pid": parent_pid,
-            }
-        ),
+        json.dumps({
+            "account_alias_hash": "alias-a",
+            "lease_id_hash": "lease-a",
+            "pid": parent_pid,
+        }),
         encoding="utf-8",
     )
     lock_file = leases_dir / "alias-a.lock"
@@ -875,18 +862,9 @@ def test_launcher_crash_with_surviving_provider_preserves_receipt_and_blocks_reu
         coordinator.acquire_claim("dispatcher-after-launcher-crash", wait_timeout=0.1)
 
     try:
-        os.kill(provider_pid, 15)
+        os.kill(provider_pid, signal.SIGTERM)
     except ProcessLookupError:
         pass
-    for _ in range(50):
-        try:
-            os.kill(provider_pid, 0)
-        except ProcessLookupError:
-            break
-        import time
-
-        time.sleep(0.02)
-
     assert receipt_files[0].exists()
     with pytest.raises(AgyAccountPoolBusyError):
         coordinator.acquire_claim("dispatcher-after-provider-exit", wait_timeout=0.1)
@@ -899,17 +877,15 @@ def test_foreground_collaborative_terminality_gap_is_outcome_unknown(
     operation_root = tmp_path / "operations"
 
     def ambiguous_dispatch(**kwargs):
-        kwargs["operation_hook"](
-            {
-                "phase": "EXECUTING",
-                "attempts": 1,
-                "rotations": 0,
-                "account_alias_hash": "alias-a",
-                "lease_id_hash": "lease-a",
-                "provider_pid": 42426,
-                "failure_kind": "HCOM_COLLAB_TERMINALITY_UNPROVEN",
-            }
-        )
+        kwargs["operation_hook"]({
+            "phase": "EXECUTING",
+            "attempts": 1,
+            "rotations": 0,
+            "account_alias_hash": "alias-a",
+            "lease_id_hash": "lease-a",
+            "provider_pid": 42426,
+            "failure_kind": "HCOM_COLLAB_TERMINALITY_UNPROVEN",
+        })
         raise RuntimeError("HCOM_COLLAB_TERMINALITY_UNPROVEN")
 
     monkeypatch.setattr(module, "dispatch_hcom_collab", ambiguous_dispatch)
