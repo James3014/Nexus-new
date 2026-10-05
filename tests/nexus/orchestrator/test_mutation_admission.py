@@ -109,7 +109,7 @@ def test_operation_id_cannot_widen_scope(
     ):
         gateway._call_tool(
             "nexus_mutation_admit",
-            _direct_args(allowed_paths=["**"]),
+            _direct_args(allowed_paths=["docs/**"]),
         )
 
 
