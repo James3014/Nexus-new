@@ -6,11 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from nexus.orchestrator.mutation_admission import (
-    MutationAdmissionError,
-    MutationAdmissionStore,
-    pr_binding_block,
-)
+from nexus.orchestrator.mutation_admission import MutationAdmissionStore, pr_binding_block
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 from nexus.orchestrator.unified_mcp_gateway import GatewayInputError, UnifiedMCPGateway
 from scripts.ops.nexus_mutation_integration_gate import evaluate
@@ -97,9 +93,7 @@ def test_gateway_admission_rejects_stale_default_branch(
         gateway._call_tool("nexus_mutation_admit", _direct_args())
 
 
-def test_operation_id_cannot_widen_scope(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_operation_id_cannot_widen_scope(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     gateway = _gateway(tmp_path, monkeypatch)
     gateway._call_tool("nexus_mutation_admit", _direct_args())
 
