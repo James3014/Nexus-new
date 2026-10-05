@@ -485,7 +485,6 @@ def test_workflow_doctor_collects_claimed_at_and_consumer_id(tmp_path: Path) -> 
     assert item["claimed_at"] == 1728000000.0
 
 
-
 # ---------------------------------------------------------------------------
 # Issue #1436 Wave 1 RED contract: false-completion projection
 # ---------------------------------------------------------------------------
