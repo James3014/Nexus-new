@@ -74,6 +74,27 @@ def _bound_profile(manager_root: Path) -> tuple[str, Path, int]:
     return account, profile, lease_fd
 
 
+def _bound_status_fd() -> int:
+    raw = os.environ.get("NEXUS_HCOM_AGY_STATUS_FD", "").strip()
+    try:
+        fd = int(raw)
+        if fd <= 2:
+            raise ValueError
+        os.fstat(fd)
+    except (OSError, ValueError) as exc:
+        raise SafeLauncherError("COLLAB_STATUS_FD_INVALID") from exc
+    return fd
+
+
+def _emit_collab_status(fd: int, payload: dict[str, object]) -> None:
+    data = (json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8")
+    while data:
+        written = os.write(fd, data)
+        if written <= 0:
+            raise SafeLauncherError("COLLAB_STATUS_WRITE_FAILED")
+        data = data[written:]
+
+
 def _delegate_to_dispatcher(args: list[str]) -> int:
     dispatcher_raw = os.environ.get("NEXUS_AGY_DISPATCH_BIN") or shutil.which("nexus-agy-dispatch")
     if not dispatcher_raw:
@@ -245,6 +266,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SafeLauncherError("AGY_MANAGER_NOT_FOUND")
 
     _account, profile, lease_fd = _bound_profile(manager_root)
+    status_fd = _bound_status_fd()
     state_root.mkdir(parents=True, exist_ok=True)
     state_root.chmod(0o700)
     session_home = Path(tempfile.mkdtemp(prefix="session.", dir=str(state_root))).resolve()
@@ -263,6 +285,7 @@ def main(argv: list[str] | None = None) -> int:
         _configure_keychain(session_home)
         _harden_hcom(hcom, hcom_dir, original_home)
         env = _launch_env(session_home, hcom_dir)
+        env.pop("NEXUS_HCOM_AGY_STATUS_FD", None)
         for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
             previous_handlers[signum] = signal.getsignal(signum)
             signal.signal(signum, forward)
@@ -272,10 +295,20 @@ def main(argv: list[str] | None = None) -> int:
             text=True,
             pass_fds=(lease_fd,),
         )
-        return int(child.wait())
+        _emit_collab_status(status_fd, {"event": "provider_started", "pid": child.pid})
+        code = int(child.wait())
+        _emit_collab_status(
+            status_fd,
+            {"event": "provider_terminal", "pid": child.pid, "exit_code": code},
+        )
+        return code
     finally:
         for signum, handler in previous_handlers.items():
             signal.signal(signum, handler)
+        try:
+            os.close(status_fd)
+        except OSError:
+            pass
         shutil.rmtree(session_home, ignore_errors=True)
 
 

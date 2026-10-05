@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import select
 import shutil
 import signal
 import subprocess
@@ -1781,6 +1782,32 @@ def _parse_hcom_args(raw: str | None) -> list[str]:
     return list(value)
 
 
+def _decode_hcom_collab_status(line: str, expected_event: str) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(line)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("event") != expected_event:
+        return None
+    pid = payload.get("pid")
+    if not isinstance(pid, int) or pid <= 0:
+        return None
+    if expected_event == "provider_terminal":
+        exit_code = payload.get("exit_code")
+        if not isinstance(exit_code, int):
+            return None
+    return payload
+
+
+def _read_hcom_collab_started(status_stream: Any, launcher: Any) -> dict[str, Any] | None:
+    while True:
+        readable, _, _ = select.select([status_stream], [], [], 0.1)
+        if readable:
+            return _decode_hcom_collab_status(status_stream.readline(), "provider_started")
+        if launcher.poll() is not None:
+            return _decode_hcom_collab_status(status_stream.readline(), "provider_started")
+
+
 def dispatch_hcom_collab(
     *,
     cwd: str,
@@ -1828,6 +1855,9 @@ def dispatch_hcom_collab(
     exclude_hashes: set[str] = set()
     claim: AccountLeaseClaim | None = None
     child: Any = None
+    status_read_fd: int | None = None
+    status_write_fd: int | None = None
+    status_stream: Any = None
 
     try:
         while True:
@@ -1928,19 +1958,56 @@ def dispatch_hcom_collab(
         })
         _operation_hook(
             operation_hook,
-            phase="EXECUTING",
+            phase="LAUNCHING",
             attempts=1,
             rotations=len(exclude_hashes),
             account_alias_hash=claim.account_alias_hash,
             lease_id_hash=claim.lease_id_hash,
         )
+        status_read_fd, status_write_fd = os.pipe()
+        os.set_inheritable(status_write_fd, True)
+        env["NEXUS_HCOM_AGY_STATUS_FD"] = str(status_write_fd)
         child = popen_factory(
             [str(launcher), *hcom_args],
             cwd=cwd,
             env=env,
-            pass_fds=(lease_fd,),
+            pass_fds=(lease_fd, status_write_fd),
         )
-        child_pid = getattr(child, "pid", None)
+        os.close(status_write_fd)
+        status_write_fd = None
+        status_stream = os.fdopen(status_read_fd, "r", encoding="utf-8", errors="replace")
+        status_read_fd = None
+
+        started = _read_hcom_collab_started(status_stream, child)
+        if started is not None:
+            _operation_hook(
+                operation_hook,
+                phase="EXECUTING",
+                attempts=1,
+                rotations=len(exclude_hashes),
+                account_alias_hash=claim.account_alias_hash,
+                lease_id_hash=claim.lease_id_hash,
+                provider_pid=int(started["pid"]),
+            )
+
+        code = int(child.wait())
+        terminal = (
+            _decode_hcom_collab_status(status_stream.readline(), "provider_terminal")
+            if started is not None
+            else None
+        )
+        clean_terminal = (
+            started is not None
+            and terminal is not None
+            and terminal.get("pid") == started.get("pid")
+            and terminal.get("exit_code") == code
+            and code == 0
+        )
+        if clean_terminal:
+            claim.release()
+            claim = None
+            return code
+
         _operation_hook(
             operation_hook,
             phase="EXECUTING",
@@ -1948,12 +2015,12 @@ def dispatch_hcom_collab(
             rotations=len(exclude_hashes),
             account_alias_hash=claim.account_alias_hash,
             lease_id_hash=claim.lease_id_hash,
-            provider_pid=child_pid,
+            provider_pid=int(started["pid"]) if started is not None else None,
+            failure_kind="HCOM_COLLAB_TERMINALITY_UNPROVEN",
         )
-        code = int(child.wait())
-        claim.release()
+        claim.abandon_parent_reference()
         claim = None
-        return code
+        raise RuntimeError("HCOM_COLLAB_TERMINALITY_UNPROVEN")
     except BaseException:
         if claim is not None:
             child_alive = child is not None and child.poll() is None
@@ -1964,6 +2031,18 @@ def dispatch_hcom_collab(
             claim = None
         raise
     finally:
+        if status_stream is not None:
+            status_stream.close()
+        if status_read_fd is not None:
+            try:
+                os.close(status_read_fd)
+            except OSError:
+                pass
+        if status_write_fd is not None:
+            try:
+                os.close(status_write_fd)
+            except OSError:
+                pass
         if claim is not None:
             claim.release()
 
