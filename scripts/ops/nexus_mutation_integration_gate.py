@@ -12,7 +12,6 @@ import argparse
 import json
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 from nexus.orchestrator.mutation_admission import (
@@ -83,16 +82,14 @@ def evaluate(
         blockers.append("PR_HEAD_SHA_MISMATCH")
     changed = [
         line.strip()
-        for line in _git(repo_root, "diff", "--name-only", f"{base_sha}...{head_sha}", "--").splitlines()
+        for line in _git(
+            repo_root, "diff", "--name-only", f"{base_sha}...{head_sha}", "--"
+        ).splitlines()
         if line.strip()
     ]
     if not changed:
         blockers.append("EMPTY_CHANGESET")
-    escapes = [
-        path
-        for path in changed
-        if not path_is_allowed(path, receipt["allowed_paths"])
-    ]
+    escapes = [path for path in changed if not path_is_allowed(path, receipt["allowed_paths"])]
     if escapes:
         blockers.append("ADMISSION_SCOPE_ESCAPE")
     return {
