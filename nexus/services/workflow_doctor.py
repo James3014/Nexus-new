@@ -1000,9 +1000,11 @@ def _project_completion_matrix(
                 "required_gate_count": len(required_gates),
                 "gate_policy_state": pr.get("gate_policy_state"),
             },
-            gap=None
-            if source_verification_pass
-            else "CURRENT_EXACT_HEAD_VERIFICATION_NOT_PROVEN",
+            gap=(
+                None
+                if source_verification_pass
+                else "CURRENT_EXACT_HEAD_VERIFICATION_NOT_PROVEN"
+            ),
         )
     )
 
