@@ -36,6 +36,35 @@ _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _SHA64 = re.compile(r"^[0-9a-f]{64}$")
 _OPERATION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 _ADMISSION = re.compile(r"^admission-[0-9a-f]{32}$")
+_RECEIPT_FIELDS = frozenset({
+    "schema",
+    "admission_id",
+    "operation_id",
+    "repository",
+    "base_sha",
+    "execution_lane",
+    "authority_kind",
+    "allowed_paths",
+    "issue_number",
+    "task_id",
+    "attempt_id",
+    "task_card_path",
+    "task_card_hash",
+    "governance_source_head",
+    "ttl_minutes",
+    "issued_at",
+    "expires_at",
+    "runtime_identity",
+    "authority_reference",
+    "request_hash",
+    "receipt_hash",
+})
+_RECEIPT_PROJECTION_FIELDS = frozenset({
+    "duplicate",
+    "status",
+    "pr_binding",
+    "pr_binding_block",
+})
 
 
 class MutationAdmissionError(RuntimeError):
@@ -50,9 +79,20 @@ def canonical_hash(value: Mapping[str, Any]) -> str:
     ).hexdigest()
 
 
-def _receipt_hash(payload: Mapping[str, Any]) -> str:
+def _persisted_receipt(payload: Mapping[str, Any]) -> dict[str, Any]:
     value = dict(payload)
-    value.pop("receipt_hash", None)
+    unknown = set(value) - _RECEIPT_FIELDS - _RECEIPT_PROJECTION_FIELDS
+    if unknown:
+        raise MutationAdmissionError("ADMISSION_RECEIPT_FIELDS_INVALID")
+    missing = _RECEIPT_FIELDS - set(value)
+    if missing:
+        raise MutationAdmissionError("ADMISSION_RECEIPT_FIELDS_INVALID")
+    return {field: value[field] for field in _RECEIPT_FIELDS}
+
+
+def _receipt_hash(payload: Mapping[str, Any]) -> str:
+    value = _persisted_receipt(payload)
+    value.pop("receipt_hash")
     return canonical_hash(value)
 
 
@@ -184,7 +224,7 @@ def validate_receipt(
     now: datetime | None = None,
     expected_receipt_hash: str | None = None,
 ) -> dict[str, Any]:
-    value = dict(payload)
+    value = _persisted_receipt(payload)
     if value.get("schema") != SCHEMA:
         raise MutationAdmissionError("ADMISSION_SCHEMA_INVALID")
     if not _ADMISSION.fullmatch(str(value.get("admission_id") or "")):
