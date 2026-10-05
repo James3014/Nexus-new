@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from nexus.research.hybrid_replication_live import (
+    CANONICAL_AGY_EXECUTION_GENERATION,
     EXACT_AGY_MODEL,
     FROZEN_RECEIPT_SHA256S,
     _c_prompt,
@@ -760,8 +761,8 @@ def test_agy_identity_preflight_passes_new_generation(
         expected_agy_dispatch_sha256=canonical,
         requested_provider="agy",
         requested_model=EXACT_AGY_MODEL,
-        execution_generation="AGY_GEMINI_3_8_FLASH_MEDIUM_V1",
-        previous_execution_generation="CODEX_GPT_5_6_LUNA_V1",
+        execution_generation=CANONICAL_AGY_EXECUTION_GENERATION,
+        previous_execution_generation="AGY_GEMINI_3_8_FLASH_MEDIUM_V1",
         jev_requested_model="jev-latest",
         jev_resolved_model="jev-1.13.0",
         expected_jev_resolved_model="jev-1.13.0",
@@ -793,8 +794,8 @@ def test_agy_identity_preflight_rejects_model_or_transport_drift(
         expected_agy_dispatch_sha256=canonical,
         requested_provider="agy",
         requested_model="gemini-3.8-flash-high",
-        execution_generation="AGY_GEMINI_3_8_FLASH_MEDIUM_V1",
-        previous_execution_generation="CODEX_GPT_5_6_LUNA_V1",
+        execution_generation=CANONICAL_AGY_EXECUTION_GENERATION,
+        previous_execution_generation="AGY_GEMINI_3_8_FLASH_MEDIUM_V1",
         jev_requested_model="jev-latest",
         jev_resolved_model="jev-1.13.0",
         expected_jev_resolved_model="jev-1.13.0",
