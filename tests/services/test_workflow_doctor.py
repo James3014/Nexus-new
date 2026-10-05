@@ -627,10 +627,11 @@ def test_completion_projection_rejects_pass_bound_to_previous_candidate_revision
     )
     layers = _completion_layers(payload)
 
-    source_verification = layers["Source verification"]
-    assert source_verification["status"] != "PASS"
-    assert source_verification["revision"] == "b" * 40
-    assert source_verification.get("gap")
+    acceptance = layers["Independent acceptance"]
+    assert acceptance["status"] != "PASS"
+    assert acceptance["revision"] == "a" * 40
+    assert acceptance["freshness"] == "STALE"
+    assert acceptance["gap"] == "REVIEW_SUBJECT_NOT_CURRENT"
 
 
 def test_pre_gate_review_cannot_project_independent_acceptance_pass(
