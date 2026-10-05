@@ -18,6 +18,7 @@
 | tasks/trajectory-verifier-wave1-runtime-20260930/01-source-acceptance-evidence.json | tests/contracts/test_gateway_deployment_contract.py, tests/ops/test_mcp_gateway_durable.py | active | high | trajectory_verifier_wave1_source_acceptance_contract |
 | tasks/trajectory-verifier-wave1-runtime-20260930/02-derived-recovery-request.json | tests/contracts/test_gateway_deployment_contract.py, tests/ops/test_mcp_gateway_durable.py | active | high | trajectory_verifier_wave1_recovery_request_contract |
 | .gitignore | tests/ops/test_repository_secret_hygiene.py, tests/ops/test_select_tests.py | active | high | repository_secret_hygiene_contract |
+| .nexus-core/config.toml | tests/ops/test_select_tests.py, tests/ops/test_pr_impact_gate.py | active | high | nexus_core_completion_config_contract |
 | .agents/skills | tests/ops/test_skill_file_contract.py, tests/learning/test_skill_catalog.py, tests/learning/test_skill_schema.py, tests/ops/test_ci_gate_report_trust_audit.py | active | high | skill_artifact_contract_and_catalog_governance |
 | .github/actions | tests/product/test_client_conformance.py | active | high | action_contract |
 | nexus/events | tests/events, tests/core/test_event_bus.py, tests/architecture/test_boundaries_v4.py | active | high | event_store_and_transport_contract |
@@ -117,6 +118,7 @@
 | scripts/ops/build_test_impact_index.py | tests/ops/test_build_test_impact_index.py | active | medium | jit_index |
 | scripts/ops/test_changed.sh | tests/ops/test_select_tests.py | active | medium | jit_entrypoint |
 | scripts/ops | tests/ops | active | medium | ops_tooling |
+| scripts/ci/nexus-core-verify.sh | tests/ops/test_select_tests.py, tests/ops/test_pr_impact_gate.py | active | high | nexus_core_completion_ci_entrypoint_contract |
 | scripts/bench/capability_ab_runner.py | tests/benchmark/test_capability_ab_runner.py::test_run_with_nexus_subprocess_preserves_executor_receipts_without_llm, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_accepts_causal_runtime_mount, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_rejects_quarantined_mount | active | high | benchmark_contract |
 | scripts/bench/fixture_materialization.py | tests/benchmark/test_fixture_materialization.py | active | high | external_fixture_materialization_contract |
 | scripts/bench/public_lane_contract.py | tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_accepts_causal_runtime_mount, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_rejects_quarantined_mount | active | high | benchmark_contract |

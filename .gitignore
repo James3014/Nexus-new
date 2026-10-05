@@ -126,3 +126,7 @@ artifacts/external_sources/
 !nexus/benchmarks/
 !nexus/benchmarks/replay_dashboard.py
 !tests/fixtures/s2t_memory_sidecar/**/*.log
+
+# Nexus Core local evidence/bindings
+.nexus-core/receipts/
+.nexus-core/issues/
