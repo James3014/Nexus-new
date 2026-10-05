@@ -483,3 +483,337 @@ def test_workflow_doctor_collects_claimed_at_and_consumer_id(tmp_path: Path) -> 
     assert item["lease_id_hash"] == "lease456"
     assert item["consumer_id"] == "hcom_collab:1234:abc"
     assert item["claimed_at"] == 1728000000.0
+
+
+# ---------------------------------------------------------------------------
+# Issue #1436 Wave 1 RED contract: false-completion projection
+# ---------------------------------------------------------------------------
+
+
+def _completion_layers(payload: dict) -> dict[str, dict]:
+    """Return completion rows without freezing the final public wrapper name."""
+    matrix = payload.get("completion_matrix") or payload.get("completion")
+    assert matrix is not None, (
+        "Issue #1436 requires a current read-only completion projection; "
+        "workflow doctor currently exposes no completion-layer view"
+    )
+    rows = matrix.get("layers") if isinstance(matrix, dict) else matrix
+    assert isinstance(rows, list), "completion projection must expose independent layer rows"
+    return {str(row["layer"]): row for row in rows}
+
+
+def _collect_with_observations(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    source: dict | None = None,
+    runtime: dict | None = None,
+    operation: dict | None = None,
+    pr: dict | None = None,
+    task: dict | None = None,
+) -> dict:
+    """Exercise collect_workflow_doctor through producer-shaped read-only observations."""
+    repository = "James3014/Nexus-new"
+    source = source or {
+        "status": "OBSERVED",
+        "repository": repository,
+        "github_main": "b" * 40,
+        "head": "b" * 40,
+        "head_is_github_main": True,
+    }
+    runtime = runtime or {
+        "status": "OBSERVED",
+        "state": "INSTALLED",
+        "installed_revision": "b" * 40,
+        "components": {},
+    }
+    operation = operation or _no_operation()
+    pr = pr or {"status": "NOT_REQUESTED", "pr_number": None}
+    task = task or {
+        "status": "OBSERVED",
+        "state": "open",
+        "issue_number": 1436,
+    }
+
+    monkeypatch.setattr(
+        doctor,
+        "_collect_source",
+        lambda *args, **kwargs: (dict(source), repository),
+    )
+    monkeypatch.setattr(doctor, "_collect_task", lambda *args, **kwargs: dict(task))
+    monkeypatch.setattr(
+        doctor,
+        "_collect_pr",
+        lambda *args, **kwargs: (dict(pr), [], [], []),
+    )
+    monkeypatch.setattr(doctor, "_collect_runtime", lambda *args, **kwargs: dict(runtime))
+    monkeypatch.setattr(
+        doctor,
+        "_collect_quota_snapshot",
+        lambda *args, **kwargs: {"status": "UNAVAILABLE", "accounts": []},
+    )
+    monkeypatch.setattr(
+        doctor,
+        "_collect_operations",
+        lambda *args, **kwargs: dict(operation),
+    )
+    monkeypatch.setattr(doctor, "_collect_leases", lambda *args, **kwargs: _no_leases())
+
+    return doctor.collect_workflow_doctor(
+        repo_root=tmp_path,
+        repository=repository,
+        issue_number=1436,
+        pr_number=pr.get("pr_number"),
+        home=tmp_path,
+    )
+
+
+def test_completion_projection_keeps_merged_integration_separate_from_runtime_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """PR integration evidence must not make runtime/native-entrypoint evidence green."""
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        runtime={
+            "status": "UNAVAILABLE",
+            "error": "NEXUS_HOST_SYNC_NOT_FOUND",
+            "components": {},
+        },
+        pr={
+            "status": "OBSERVED",
+            "state": "closed",
+            "merged": True,
+            "pr_number": 1437,
+            "head_sha": "b" * 40,
+            "merge_commit_sha": "b" * 40,
+        },
+    )
+
+    layers = _completion_layers(payload)
+
+    assert payload["completion_matrix"]["claim_ceiling"] == (
+        "READ_ONLY_PROJECTION_NO_COMPLETION_AUTHORITY"
+    )
+    assert layers["Integration"]["status"] == "PASS"
+    assert layers["Runtime"]["status"] != "PASS"
+    assert layers["Native / real entrypoint"]["status"] != "PASS"
+
+
+def test_completion_projection_closed_unmerged_pr_does_not_pass_integration(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A terminal PR without merge evidence must not count as integration PASS."""
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        pr={
+            "status": "OBSERVED",
+            "state": "closed",
+            "merged": False,
+            "merged_at": None,
+            "pr_number": 1437,
+            "head_sha": "b" * 40,
+            "merge_commit_sha": None,
+        },
+    )
+
+    integration = _completion_layers(payload)["Integration"]
+
+    assert integration["status"] != "PASS"
+    assert integration["gap"] == "MERGED_INTEGRATION_NOT_PROVEN"
+
+
+def test_completion_projection_does_not_reuse_main_runtime_for_open_pr_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Runtime aligned to main A must not satisfy open Candidate B."""
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        source={
+            "status": "OBSERVED",
+            "repository": "James3014/Nexus-new",
+            "github_main": "a" * 40,
+            "head": "b" * 40,
+            "head_is_github_main": False,
+        },
+        runtime={
+            "status": "OBSERVED",
+            "state": "INSTALLED",
+            "installed_revision": "a" * 40,
+            "components": {
+                "host_sync": {"status": "VERIFIED"},
+                "workflow_doctor": {"status": "VERIFIED"},
+            },
+        },
+        pr={
+            "status": "OBSERVED",
+            "state": "open",
+            "merged": False,
+            "pr_number": 1437,
+            "head_sha": "b" * 40,
+            "base_sha": "a" * 40,
+        },
+    )
+
+    layers = _completion_layers(payload)
+
+    assert layers["Install/package"]["status"] != "PASS"
+    assert layers["Runtime"]["status"] != "PASS"
+    assert layers["Install/package"]["revision"] == "a" * 40
+    assert layers["Install/package"]["gap"] == "CURRENT_INSTALL_BINDING_NOT_PROVEN"
+
+
+def test_completion_projection_accepts_runtime_bound_to_open_pr_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Exact installed Candidate B is valid runtime evidence even before merge."""
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        source={
+            "status": "OBSERVED",
+            "repository": "James3014/Nexus-new",
+            "github_main": "a" * 40,
+            "head": "b" * 40,
+            "head_is_github_main": False,
+        },
+        runtime={
+            "status": "OBSERVED",
+            "state": "INSTALLED",
+            "installed_revision": "b" * 40,
+            "components": {
+                "host_sync": {"status": "VERIFIED"},
+                "workflow_doctor": {"status": "VERIFIED"},
+            },
+        },
+        pr={
+            "status": "OBSERVED",
+            "state": "open",
+            "merged": False,
+            "pr_number": 1437,
+            "head_sha": "b" * 40,
+            "base_sha": "a" * 40,
+        },
+    )
+
+    layers = _completion_layers(payload)
+
+    assert layers["Install/package"]["status"] == "PASS"
+    assert layers["Runtime"]["status"] == "PASS"
+    assert layers["Install/package"]["revision"] == "b" * 40
+
+
+def test_completion_projection_binds_post_merge_runtime_to_merge_revision(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Merged PR runtime evidence binds to the integrated merge revision."""
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        source={
+            "status": "OBSERVED",
+            "repository": "James3014/Nexus-new",
+            "github_main": "c" * 40,
+            "head": "c" * 40,
+            "head_is_github_main": True,
+        },
+        runtime={
+            "status": "OBSERVED",
+            "state": "INSTALLED",
+            "installed_revision": "c" * 40,
+            "components": {
+                "host_sync": {"status": "VERIFIED"},
+                "workflow_doctor": {"status": "VERIFIED"},
+            },
+        },
+        pr={
+            "status": "OBSERVED",
+            "state": "closed",
+            "merged": True,
+            "merged_at": "2026-10-05T05:00:00Z",
+            "pr_number": 1437,
+            "head_sha": "b" * 40,
+            "merge_commit_sha": "c" * 40,
+        },
+    )
+
+    layers = _completion_layers(payload)
+
+    assert layers["Integration"]["status"] == "PASS"
+    assert layers["Integration"]["revision"] == "c" * 40
+    assert layers["Install/package"]["status"] == "PASS"
+    assert layers["Runtime"]["status"] == "PASS"
+    assert layers["Install/package"]["evidence"]["subject_revision"] == "c" * 40
+
+
+def test_completion_projection_rejects_pass_bound_to_previous_candidate_revision(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A PASS for Candidate A must not silently satisfy changed Candidate B."""
+    operation = _no_operation()
+    operation["selected"] = {
+        "operation_id": "agyop_" + "1" * 32,
+        "status": "COMPLETED",
+        "phase": "TERMINAL",
+        "review_candidate_head": "a" * 40,
+        "candidate_digest": "c" * 64,
+        "current_candidate_digest": "d" * 64,
+        "review_state": "TERMINAL",
+        "review_verdict": "ACCEPT",
+        "review_applicable": False,
+        "subject_stable": False,
+    }
+
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        operation=operation,
+    )
+    layers = _completion_layers(payload)
+
+    acceptance = layers["Independent acceptance"]
+    assert acceptance["status"] != "PASS"
+    assert acceptance["revision"] == "a" * 40
+    assert acceptance["freshness"] == "STALE"
+    assert acceptance["gap"] == "REVIEW_SUBJECT_NOT_CURRENT"
+
+
+def test_pre_gate_review_cannot_project_independent_acceptance_pass(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A review-only PRE-GATE may not mint post-Candidate acceptance truth."""
+    operation = _no_operation()
+    operation["selected"] = {
+        "operation_id": "agyop_" + "2" * 32,
+        "status": "COMPLETED",
+        "phase": "TERMINAL",
+        "review_effect_id": "e" * 64,
+        "review_candidate_head": "b" * 40,
+        "candidate_digest": "d" * 64,
+        "current_candidate_digest": "d" * 64,
+        "review_state": "TERMINAL",
+        "review_verdict": "ACCEPT",
+        "review_applicable": True,
+        "subject_stable": True,
+    }
+
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        operation=operation,
+    )
+    layers = _completion_layers(payload)
+
+    acceptance = layers["Independent acceptance"]
+    assert acceptance["status"] != "PASS"
+    assert acceptance["source"] == "direct_operation_review"
+    assert acceptance["gap"] == "INDEPENDENT_ACCEPTANCE_AUTHORITY_NOT_OBSERVED"
