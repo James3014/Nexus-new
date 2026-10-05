@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from nexus.orchestrator.mutation_admission import (
+    MutationAdmissionError,
     MutationAdmissionStore,
     canonical_hash,
     pr_binding_block,
@@ -329,6 +330,19 @@ def _admission(
         authority_reference=_authority_reference(effect),
         issue_number=1429,
     )
+
+
+def test_receipt_projection_does_not_change_identity_and_unknown_fields_fail_closed(
+    tmp_path: Path,
+) -> None:
+    receipt = _admission(tmp_path / "state", base="a" * 40)
+
+    block = pr_binding_block(receipt)
+    assert receipt["receipt_hash"] in block
+
+    forged = {**receipt, "forged_authority": "caller-controlled"}
+    with pytest.raises(MutationAdmissionError, match="ADMISSION_RECEIPT_FIELDS_INVALID"):
+        pr_binding_block(forged)
 
 
 def test_integration_gate_accepts_exact_bound_scope(
