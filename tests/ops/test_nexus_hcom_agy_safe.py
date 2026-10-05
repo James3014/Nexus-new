@@ -453,7 +453,9 @@ def test_dispatcher_binds_exact_claim_to_hcom_child_and_releases_cleanly(
         )
         os.write(
             status_fd,
-            (\n                json.dumps({"event": "provider_terminal", "pid": 51515, "exit_code": 0}) + "\n"\n            ).encode(),
+            (
+                json.dumps({"event": "provider_terminal", "pid": 51515, "exit_code": 0}) + "\n"
+            ).encode(),
         )
         return Child()
 
