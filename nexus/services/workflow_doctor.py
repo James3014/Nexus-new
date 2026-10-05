@@ -928,7 +928,7 @@ def _project_completion_matrix(
 
     pr_head = pr.get("head_sha") if pr.get("status") == "OBSERVED" else None
     review_head = selected.get("review_candidate_head") if selected else None
-    subject_revision = pr_head or review_head or source.get("head")
+    subject_revision = pr_head or source.get("head") or review_head
 
     rows: list[dict[str, Any]] = []
 
