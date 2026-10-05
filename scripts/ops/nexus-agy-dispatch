@@ -82,6 +82,8 @@ is_agy_rotation_eligible = _agy_account_pool.is_agy_rotation_eligible
 
 _external_account_pool = import_module("nexus.services.external_account_pool")
 AccountFailureKind = _external_account_pool.AccountFailureKind
+is_account_failover_failure = _external_account_pool.is_account_failover_failure
+ACCOUNT_FAILOVER_FAILURES = _external_account_pool.ACCOUNT_FAILOVER_FAILURES
 
 
 _agy_operation_journal = import_module("nexus.services.agy_operation_journal")
@@ -2844,6 +2846,9 @@ def dispatch_run(
                     last_kind = "PROVIDER_QUOTA_EXHAUSTED_UNKNOWN_EFFECT"
                     provider_effect_observed = None
                     reconciliation_required = True
+            elif attempt_changed_paths:
+                provider_effect_observed = True
+                reconciliation_required = True
             _operation_hook(
                 operation_hook,
                 phase="CLASSIFYING_FAILURE",
@@ -2907,10 +2912,10 @@ def dispatch_run(
                     failure_kind=kind,
                 )
 
-            if kind != AccountFailureKind.QUOTA_EXHAUSTED:
+            if not is_account_failover_failure(kind):
                 work_failures += 1
 
-            if kind != AccountFailureKind.QUOTA_EXHAUSTED and work_failures >= work_budget:
+            if not is_account_failover_failure(kind) and work_failures >= work_budget:
                 # Real work failure budget is independent from account-selection
                 # failover. Retire the current failed scope without acquiring
                 # another account when the model-work budget is exhausted.
@@ -2931,6 +2936,8 @@ def dispatch_run(
                     "status": "failed",
                     "attempts": attempts,
                     "rotations": rotations,
+                    "work_failures": work_failures,
+                    "work_budget": work_budget,
                     "failure_kind": last_kind,
                     "account_alias_hash": claim.account_alias_hash,
                     "lease_id_hash": claim.lease_id_hash,
@@ -2955,6 +2962,8 @@ def dispatch_run(
                     "status": "failed",
                     "attempts": attempts,
                     "rotations": rotations,
+                    "work_failures": work_failures,
+                    "work_budget": work_budget,
                     "failure_kind": "ACCOUNT_FAILOVER_LIMIT",
                     "account_alias_hash": claim.account_alias_hash,
                     "lease_id_hash": claim.lease_id_hash,
@@ -2981,6 +2990,7 @@ def dispatch_run(
                     phase="ACCOUNT_ROTATED",
                     attempts=attempts,
                     rotations=rotations,
+                    failure_kind=last_kind,
                     account_alias_hash=claim.account_alias_hash,
                     lease_id_hash=claim.lease_id_hash,
                 )
