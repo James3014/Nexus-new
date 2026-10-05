@@ -1781,6 +1781,34 @@ def _parse_hcom_args(raw: str | None) -> list[str]:
     return list(value)
 
 
+def _decode_hcom_collab_status(
+    line: str,
+    *,
+    account_alias_hash: str,
+    lease_id_hash: str,
+) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(line)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("schema") != "nexus.hcom_collab_status.v1":
+        return None
+    if (
+        payload.get("account_alias_hash") != account_alias_hash
+        or payload.get("lease_id_hash") != lease_id_hash
+    ):
+        return None
+    event = payload.get("event")
+    if event == "pre_provider_failed":
+        return payload
+    pid = payload.get("pid")
+    if event not in {"provider_started", "provider_terminal"} or not isinstance(pid, int) or pid <= 0:
+        return None
+    if event == "provider_terminal" and not isinstance(payload.get("exit_code"), int):
+        return None
+    return payload
+
+
 def dispatch_hcom_collab(
     *,
     cwd: str,
@@ -1828,6 +1856,9 @@ def dispatch_hcom_collab(
     exclude_hashes: set[str] = set()
     claim: AccountLeaseClaim | None = None
     child: Any = None
+    status_read_fd: int | None = None
+    status_write_fd: int | None = None
+    status_stream: Any = None
 
     try:
         while True:
@@ -1919,51 +1950,109 @@ def dispatch_hcom_collab(
             raise RuntimeError("SENSITIVE_API_KEYS_CONFIG_MISSING")
         for key in sensitive_keys:
             env.pop(key, None)
+        status_read_fd, status_write_fd = os.pipe()
+        os.set_inheritable(status_write_fd, True)
         env.update({
             "NEXUS_HCOM_AGY_LEASE_ACCOUNT": claim.internal_id,
             "NEXUS_HCOM_AGY_PROFILE_HOME": str(profile),
             "NEXUS_HCOM_AGY_LEASE_FD": str(lease_fd),
             "NEXUS_HCOM_AGY_LEASE_ID_HASH": claim.lease_id_hash,
             "NEXUS_HCOM_AGY_ACCOUNT_ALIAS_HASH": claim.account_alias_hash,
+            "NEXUS_HCOM_AGY_STATUS_FD": str(status_write_fd),
         })
-        _operation_hook(
-            operation_hook,
-            phase="EXECUTING",
-            attempts=1,
-            rotations=len(exclude_hashes),
-            account_alias_hash=claim.account_alias_hash,
-            lease_id_hash=claim.lease_id_hash,
-        )
         child = popen_factory(
             [str(launcher), *hcom_args],
             cwd=cwd,
             env=env,
-            pass_fds=(lease_fd,),
+            pass_fds=(lease_fd, status_write_fd),
         )
-        child_pid = getattr(child, "pid", None)
         _operation_hook(
             operation_hook,
-            phase="EXECUTING",
+            phase="LAUNCHING",
             attempts=1,
             rotations=len(exclude_hashes),
             account_alias_hash=claim.account_alias_hash,
             lease_id_hash=claim.lease_id_hash,
-            provider_pid=child_pid,
         )
+        os.close(status_write_fd)
+        status_write_fd = None
+        status_stream = os.fdopen(status_read_fd, "r", encoding="utf-8", errors="replace")
+        status_read_fd = None
+
+        first = _decode_hcom_collab_status(
+            status_stream.readline(),
+            account_alias_hash=claim.account_alias_hash,
+            lease_id_hash=claim.lease_id_hash,
+        )
+        provider_started = first is not None and first.get("event") == "provider_started"
+        pre_provider_failed = first is not None and first.get("event") == "pre_provider_failed"
+        if provider_started:
+            _operation_hook(
+                operation_hook,
+                phase="EXECUTING",
+                attempts=1,
+                rotations=len(exclude_hashes),
+                account_alias_hash=claim.account_alias_hash,
+                lease_id_hash=claim.lease_id_hash,
+                provider_pid=int(first["pid"]),
+            )
+
         code = int(child.wait())
-        claim.release()
+        terminal = (
+            _decode_hcom_collab_status(
+                status_stream.readline(),
+                account_alias_hash=claim.account_alias_hash,
+                lease_id_hash=claim.lease_id_hash,
+            )
+            if provider_started
+            else None
+        )
+        clean_terminal = (
+            provider_started
+            and terminal is not None
+            and terminal.get("event") == "provider_terminal"
+            and terminal.get("pid") == first.get("pid")
+            and terminal.get("exit_code") == code
+        )
+        if clean_terminal or pre_provider_failed:
+            claim.release()
+            claim = None
+            return code
+
+        _operation_hook(
+            operation_hook,
+            phase="EXECUTING" if provider_started else "LAUNCHING",
+            attempts=1,
+            rotations=len(exclude_hashes),
+            account_alias_hash=claim.account_alias_hash,
+            lease_id_hash=claim.lease_id_hash,
+            provider_pid=int(first["pid"]) if provider_started else None,
+            failure_kind="HCOM_COLLAB_TERMINALITY_UNPROVEN",
+        )
+        claim.abandon_parent_reference()
         claim = None
-        return code
+        raise RuntimeError("HCOM_COLLAB_TERMINALITY_UNPROVEN")
     except BaseException:
         if claim is not None:
-            child_alive = child is not None and child.poll() is None
-            if child_alive:
+            if child is not None:
                 claim.abandon_parent_reference()
             else:
                 claim.release()
             claim = None
         raise
     finally:
+        if status_stream is not None:
+            status_stream.close()
+        if status_read_fd is not None:
+            try:
+                os.close(status_read_fd)
+            except OSError:
+                pass
+        if status_write_fd is not None:
+            try:
+                os.close(status_write_fd)
+            except OSError:
+                pass
         if claim is not None:
             claim.release()
 
@@ -2025,7 +2114,10 @@ def _run_foreground_hcom_operation(
     except BaseException as exc:
         record = journal.read(operation_id)
         if record.get("phase") != "TERMINAL":
-            provider_effect_possible = str(record.get("phase") or "") == "EXECUTING"
+            provider_effect_possible = str(record.get("phase") or "") in {
+                "LAUNCHING",
+                "EXECUTING",
+            }
             journal.mark_terminal(
                 operation_id,
                 status="OUTCOME_UNKNOWN" if provider_effect_possible else "FAILED",
@@ -3184,6 +3276,14 @@ def _cleanup_reconciled_lease(record: dict[str, Any]) -> dict[str, Any]:
     ):
         return {"result": "NOT_SAFE_TO_CLEAN"}
 
+    provider_pid = record.get("provider_pid")
+    if (
+        record.get("mode") == "hcom_collab"
+        and record.get("status") == "OUTCOME_UNKNOWN"
+        and (not isinstance(provider_pid, int) or provider_pid <= 0)
+    ):
+        return {"result": "COLLAB_PROVIDER_IDENTITY_UNPROVEN_PRESERVED"}
+
     alias_hash = record.get("account_alias_hash")
     lease_id_hash = record.get("lease_id_hash")
     owner_pid = record.get("pid")
@@ -3254,6 +3354,17 @@ def _reconcile_operation(
     lease_cleanup = _cleanup_reconciled_lease(record)
     reconciliation = dict(record.get("reconciliation") or {})
     reconciliation["lease_cleanup"] = lease_cleanup
+    if lease_cleanup.get("result") == "COLLAB_PROVIDER_IDENTITY_UNPROVEN_PRESERVED":
+        reconciliation.update({
+            "result": "HCOM_COLLAB_PROVIDER_IDENTITY_UNPROVEN",
+            "provider_alive_after": None,
+            "retry_permitted": False,
+        })
+        return journal.update(
+            operation_id,
+            phase="RECONCILE_REQUIRED",
+            reconciliation=reconciliation,
+        )
     return journal.update(operation_id, reconciliation=reconciliation)
 
 
