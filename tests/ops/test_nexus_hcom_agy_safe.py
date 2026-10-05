@@ -532,7 +532,6 @@ def test_dispatcher_abandons_parent_reference_when_live_child_terminality_is_unk
     assert claim.released is False
 
 
-
 def test_launcher_crash_with_surviving_provider_preserves_receipt_and_blocks_reuse(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -790,6 +789,41 @@ def test_foreground_collaborative_operation_marks_preprovider_abort_failed(
     assert record["reconciliation"]["retry_permitted"] is False
 
 
+def test_foreground_collaborative_launching_gap_is_outcome_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_dispatch_module(monkeypatch)
+    operation_root = tmp_path / "operations"
+
+    def ambiguous_before_provider_identity(**kwargs: Any) -> int:
+        kwargs["operation_hook"]({
+            "phase": "LAUNCHING",
+            "attempts": 1,
+            "rotations": 0,
+            "account_alias_hash": "alias-a",
+            "lease_id_hash": "lease-a",
+            "failure_kind": "HCOM_COLLAB_TERMINALITY_UNPROVEN",
+        })
+        raise RuntimeError("HCOM_COLLAB_TERMINALITY_UNPROVEN")
+
+    monkeypatch.setattr(module, "dispatch_hcom_collab", ambiguous_before_provider_identity)
+    with pytest.raises(RuntimeError, match="HCOM_COLLAB_TERMINALITY_UNPROVEN"):
+        module._run_foreground_hcom_operation(
+            cwd=str(tmp_path),
+            hcom_args=[],
+            model=None,
+            pool_wait_timeout=1,
+            operation_root=operation_root,
+        )
+
+    operation_ids = [path.name for path in (operation_root / "operations").iterdir()]
+    assert len(operation_ids) == 1
+    record = module.AgyOperationJournal(operation_root).read(operation_ids[0])
+    assert record["status"] == "OUTCOME_UNKNOWN"
+    assert record["reconciliation"]["result"] == "HCOM_COLLAB_TERMINALITY_UNPROVEN"
+    assert record["reconciliation"]["retry_permitted"] is False
+
+
 def test_collaborative_and_dispatcher_bidirectional_mutual_exclusion(tmp_path: Path) -> None:
     """Prove collaborative A holding account A blocks dispatcher from A, and vice-versa."""
     from nexus.services.agy_account_pool import (
@@ -1021,10 +1055,7 @@ def test_foreground_collaborative_operation_journals_failure_on_nonzero_child_ex
         )
         os.write(
             status_fd,
-            (
-                json.dumps({**base, "event": "provider_terminal", "exit_code": 42})
-                + "\n"
-            ).encode(),
+            (json.dumps({**base, "event": "provider_terminal", "exit_code": 42}) + "\n").encode(),
         )
         return FakeChild()
 
