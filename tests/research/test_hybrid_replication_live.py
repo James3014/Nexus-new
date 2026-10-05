@@ -455,6 +455,15 @@ def test_outcome_unknown_and_timeout_rejected(
     assert receipt["status"] == "MISSING_OR_CORRUPT_JOURNAL"
     assert receipt["valid"] is False
 
+    # Pre-journal launch failures must stay distinguishable from journal corruption.
+    receipt = evaluate_agy_receipt(
+        None,
+        dispatch_path=dispatch_file,
+        error_reason="SPAWN_FAILED:WORKTREE_NO_FALLBACK_REQUESTED",
+    )
+    assert receipt["status"] == "SPAWN_FAILED"
+    assert receipt["valid"] is False
+
 
 def test_poll_agy_operation_handles_terminal_timeout_and_corrupt(tmp_path: Path) -> None:
     op_json = tmp_path / "operation.json"
@@ -539,6 +548,15 @@ def test_c_shadow_worktree_cleanup_always_performed(
     rev = _init_test_git_repo(repo_dir)
 
     def failing_dispatch(**kwargs: object) -> tuple:
+        source = Path(str(kwargs["cwd"]))
+        assert (source / ".git").is_dir()
+        assert subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=source,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip() == rev
         raise RuntimeError("dispatcher crashed unexpectedly")
 
     monkeypatch.setattr(
