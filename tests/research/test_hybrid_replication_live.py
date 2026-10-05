@@ -12,6 +12,7 @@ from nexus.research.hybrid_replication_live import (
     EXACT_AGY_MODEL,
     FROZEN_RECEIPT_SHA256S,
     _c_prompt,
+    _load_binding,
     _run_agy_b_fallback,
     _run_agy_candidate,
     _valid_probability_distribution,
@@ -744,6 +745,52 @@ def test_run_frozen_stack_b_fallback_uses_agy(
     assert outcome.raw_result.failures == ()
 
 
+def test_load_binding_accepts_current_canonical_agy_generation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    binding_path = tmp_path / "LIVE_BINDING.json"
+    binding_path.write_text(
+        json.dumps({
+            "schema": "nexus.hybrid_replication.live_binding.v1",
+            "activation_state": "AUTOMATIC_CAPTURE_READY",
+            "frozen_receipts": {},
+            "d0": {
+                "implementation_path": "/tmp/d0_impl.py",
+                "implementation_sha256": "cca215a2de82996c072f958159541a93d58b1482af3430d93f537c58ddafa2f9",
+                "freeze_path": "/tmp/D0_V2_FROZEN.json",
+                "freeze_sha256": "f04fdeea8ddb8cbaa2216aa783a7fe510da7c2f8625f50763a0d59d5e2234eee",
+            },
+            "strong_online": {
+                "provider": "agy",
+                "requested_model": EXACT_AGY_MODEL,
+                "execution_generation": CANONICAL_AGY_EXECUTION_GENERATION,
+            },
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "nexus.research.hybrid_replication_live._frozen_receipt_hashes",
+        lambda payload: (FROZEN_RECEIPT_SHA256S, FROZEN_RECEIPT_SHA256S),
+    )
+    monkeypatch.setattr(
+        "nexus.research.hybrid_replication_live._sha256_file",
+        lambda path: (
+            "cca215a2de82996c072f958159541a93d58b1482af3430d93f537c58ddafa2f9"
+            if str(path).endswith("d0_impl.py")
+            else "f04fdeea8ddb8cbaa2216aa783a7fe510da7c2f8625f50763a0d59d5e2234eee"
+        ),
+    )
+    monkeypatch.setattr(
+        "nexus.research.hybrid_replication_live.resolve_canonical_agy_dispatch_path",
+        lambda payload: Path("/tmp/nexus-agy-dispatch"),
+    )
+
+    loaded = _load_binding(binding_path)
+
+    assert loaded["strong_online"]["execution_generation"] == CANONICAL_AGY_EXECUTION_GENERATION
+
+
 def test_agy_identity_preflight_passes_new_generation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -762,7 +809,7 @@ def test_agy_identity_preflight_passes_new_generation(
         requested_provider="agy",
         requested_model=EXACT_AGY_MODEL,
         execution_generation=CANONICAL_AGY_EXECUTION_GENERATION,
-        previous_execution_generation="AGY_GEMINI_3_8_FLASH_MEDIUM_V2",
+        previous_execution_generation="AGY_GEMINI_3_8_FLASH_MEDIUM_V3",
         jev_requested_model="jev-latest",
         jev_resolved_model="jev-1.13.0",
         expected_jev_resolved_model="jev-1.13.0",
@@ -795,7 +842,7 @@ def test_agy_identity_preflight_rejects_model_or_transport_drift(
         requested_provider="agy",
         requested_model="gemini-3.8-flash-high",
         execution_generation=CANONICAL_AGY_EXECUTION_GENERATION,
-        previous_execution_generation="AGY_GEMINI_3_8_FLASH_MEDIUM_V2",
+        previous_execution_generation="AGY_GEMINI_3_8_FLASH_MEDIUM_V3",
         jev_requested_model="jev-latest",
         jev_resolved_model="jev-1.13.0",
         expected_jev_resolved_model="jev-1.13.0",
