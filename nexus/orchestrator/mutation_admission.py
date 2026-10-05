@@ -132,12 +132,7 @@ def _validate_scope(values: list[str] | tuple[str, ...]) -> tuple[str, ...]:
         token = str(raw).strip()
         directory = token.endswith("/**")
         base = token[:-3] if directory else token
-        if (
-            not base
-            or base.startswith("/")
-            or "\\" in base
-            or any(ch in base for ch in "*?[]")
-        ):
+        if not base or base.startswith("/") or "\\" in base or any(ch in base for ch in "*?[]"):
             raise MutationAdmissionError("ALLOWED_PATH_INVALID")
         path = PurePosixPath(base)
         if ".." in path.parts or ".git" in path.parts or path.as_posix() != base:
@@ -240,7 +235,13 @@ def validate_receipt(
         )
         if any(
             value.get(field) is not None
-            for field in ("task_id", "attempt_id", "task_card_path", "task_card_hash", "governance_source_head")
+            for field in (
+                "task_id",
+                "attempt_id",
+                "task_card_path",
+                "task_card_hash",
+                "governance_source_head",
+            )
         ):
             raise MutationAdmissionError("DIRECT_TASK_CARD_INVALID")
     issued = _parse_time(value.get("issued_at"), "issued_at")
@@ -331,9 +332,7 @@ class MutationAdmissionStore:
             raise MutationAdmissionError("ADMISSION_AUTHORITY_INVALID")
         scope = _validate_scope(allowed_paths)
         if issue_number is not None and (
-            not isinstance(issue_number, int)
-            or isinstance(issue_number, bool)
-            or issue_number < 1
+            not isinstance(issue_number, int) or isinstance(issue_number, bool) or issue_number < 1
         ):
             raise MutationAdmissionError("ISSUE_NUMBER_INVALID")
         if (
