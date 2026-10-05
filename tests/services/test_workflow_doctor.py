@@ -709,6 +709,50 @@ def test_completion_projection_accepts_runtime_bound_to_open_pr_candidate(
     assert layers["Install/package"]["revision"] == "b" * 40
 
 
+def test_completion_projection_binds_post_merge_runtime_to_merge_revision(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Merged PR runtime evidence binds to the integrated merge revision."""
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        source={
+            "status": "OBSERVED",
+            "repository": "James3014/Nexus-new",
+            "github_main": "c" * 40,
+            "head": "c" * 40,
+            "head_is_github_main": True,
+        },
+        runtime={
+            "status": "OBSERVED",
+            "state": "INSTALLED",
+            "installed_revision": "c" * 40,
+            "components": {
+                "host_sync": {"status": "VERIFIED"},
+                "workflow_doctor": {"status": "VERIFIED"},
+            },
+        },
+        pr={
+            "status": "OBSERVED",
+            "state": "closed",
+            "merged": True,
+            "merged_at": "2026-10-05T05:00:00Z",
+            "pr_number": 1437,
+            "head_sha": "b" * 40,
+            "merge_commit_sha": "c" * 40,
+        },
+    )
+
+    layers = _completion_layers(payload)
+
+    assert layers["Integration"]["status"] == "PASS"
+    assert layers["Integration"]["revision"] == "c" * 40
+    assert layers["Install/package"]["status"] == "PASS"
+    assert layers["Runtime"]["status"] == "PASS"
+    assert layers["Install/package"]["evidence"]["subject_revision"] == "c" * 40
+
+
 def test_completion_projection_rejects_pass_bound_to_previous_candidate_revision(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
