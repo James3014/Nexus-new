@@ -1001,9 +1001,7 @@ def _project_completion_matrix(
                 "gate_policy_state": pr.get("gate_policy_state"),
             },
             gap=(
-                None
-                if source_verification_pass
-                else "CURRENT_EXACT_HEAD_VERIFICATION_NOT_PROVEN"
+                None if source_verification_pass else "CURRENT_EXACT_HEAD_VERIFICATION_NOT_PROVEN"
             ),
         )
     )
