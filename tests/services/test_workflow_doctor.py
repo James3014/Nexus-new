@@ -626,6 +626,89 @@ def test_completion_projection_closed_unmerged_pr_does_not_pass_integration(
     assert integration["gap"] == "MERGED_INTEGRATION_NOT_PROVEN"
 
 
+def test_completion_projection_does_not_reuse_main_runtime_for_open_pr_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Runtime aligned to main A must not satisfy open Candidate B."""
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        source={
+            "status": "OBSERVED",
+            "repository": "James3014/Nexus-new",
+            "github_main": "a" * 40,
+            "head": "b" * 40,
+            "head_is_github_main": False,
+        },
+        runtime={
+            "status": "OBSERVED",
+            "state": "INSTALLED",
+            "installed_revision": "a" * 40,
+            "components": {
+                "host_sync": {"status": "VERIFIED"},
+                "workflow_doctor": {"status": "VERIFIED"},
+            },
+        },
+        pr={
+            "status": "OBSERVED",
+            "state": "open",
+            "merged": False,
+            "pr_number": 1437,
+            "head_sha": "b" * 40,
+            "base_sha": "a" * 40,
+        },
+    )
+
+    layers = _completion_layers(payload)
+
+    assert layers["Install/package"]["status"] != "PASS"
+    assert layers["Runtime"]["status"] != "PASS"
+    assert layers["Install/package"]["revision"] == "a" * 40
+    assert layers["Install/package"]["gap"] == "CURRENT_INSTALL_BINDING_NOT_PROVEN"
+
+
+def test_completion_projection_accepts_runtime_bound_to_open_pr_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Exact installed Candidate B is valid runtime evidence even before merge."""
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        source={
+            "status": "OBSERVED",
+            "repository": "James3014/Nexus-new",
+            "github_main": "a" * 40,
+            "head": "b" * 40,
+            "head_is_github_main": False,
+        },
+        runtime={
+            "status": "OBSERVED",
+            "state": "INSTALLED",
+            "installed_revision": "b" * 40,
+            "components": {
+                "host_sync": {"status": "VERIFIED"},
+                "workflow_doctor": {"status": "VERIFIED"},
+            },
+        },
+        pr={
+            "status": "OBSERVED",
+            "state": "open",
+            "merged": False,
+            "pr_number": 1437,
+            "head_sha": "b" * 40,
+            "base_sha": "a" * 40,
+        },
+    )
+
+    layers = _completion_layers(payload)
+
+    assert layers["Install/package"]["status"] == "PASS"
+    assert layers["Runtime"]["status"] == "PASS"
+    assert layers["Install/package"]["revision"] == "b" * 40
+
+
 def test_completion_projection_rejects_pass_bound_to_previous_candidate_revision(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
