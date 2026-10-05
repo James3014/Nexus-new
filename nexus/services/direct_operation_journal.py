@@ -56,6 +56,7 @@ PUBLIC_OPERATION_KEYS = (
     "time_to_first_effect_ms",
     "last_output_at",
     "finished_at",
+    "reconciled_at",
     "attempts",
     "rotations",
     "account_alias_hash",
@@ -536,6 +537,7 @@ class DirectOperationJournal:
             "time_to_first_effect_ms": None,
             "last_output_at": None,
             "finished_at": None,
+            "reconciled_at": None,
             "attempts": 0,
             "rotations": 0,
             "account_alias_hash": None,
@@ -817,7 +819,10 @@ class DirectOperationJournal:
             except ValueError:
                 heartbeat_age = None
 
-        extra_changes: dict[str, Any] = {}
+        reconciled_now = utc_now()
+        extra_changes: dict[str, Any] = {
+            "reconciled_at": reconciled_now,
+        }
         provider_pid = record.get("provider_pid")
         provider_alive = (
             _process_alive(provider_pid)
@@ -834,7 +839,7 @@ class DirectOperationJournal:
                     status="RUNNING",
                     phase="RECONCILE_REQUIRED",
                     reconciliation={
-                        "at": utc_now(),
+                        "at": reconciled_now,
                         "result": "PROVIDER_PROCESS_STILL_RUNNING",
                         "pid_alive": False,
                         "provider_alive_before": True,
@@ -851,7 +856,7 @@ class DirectOperationJournal:
                 failure_kind="PROCESS_NOT_RUNNING_WITHOUT_TERMINAL_RECEIPT",
                 cwd=record.get("cwd"),
                 reconciliation={
-                    "at": utc_now(),
+                    "at": reconciled_now,
                     "result": "OUTCOME_UNKNOWN",
                     "pid_alive": False,
                     "heartbeat_age_seconds": heartbeat_age,
@@ -868,7 +873,7 @@ class DirectOperationJournal:
         return self.update(
             operation_id,
             reconciliation={
-                "at": utc_now(),
+                "at": reconciled_now,
                 "result": result,
                 "pid_alive": True,
                 "heartbeat_age_seconds": heartbeat_age,

@@ -844,3 +844,19 @@ def test_reconcile_leaves_operation_running_when_discovered_provider_cannot_be_s
     assert result["reconciliation"]["result"] == "ORPHAN_PROVIDER_STILL_RUNNING"
     assert result["reconciliation"]["provider_alive_after"] is True
     assert result["reconciliation"]["retry_permitted"] is False
+
+
+def test_reconcile_records_reconciled_at(tmp_path: Path) -> None:
+    journal = AgyOperationJournal(tmp_path / "journal")
+    operation_id, _ = _create(journal, tmp_path)
+    record = journal.read(operation_id)
+    assert record["reconciled_at"] is None
+
+    journal.mark_started(operation_id, pid=999_999_999)
+    result = journal.reconcile(operation_id)
+    assert result["reconciled_at"] is not None
+    assert result["reconciliation"]["at"] == result["reconciled_at"]
+    assert result["status"] == "OUTCOME_UNKNOWN"
+
+    view = direct_journal.public_operation_view(result)
+    assert view["reconciled_at"] == result["reconciled_at"]
