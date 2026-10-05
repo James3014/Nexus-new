@@ -159,7 +159,7 @@ def _atomic_json_write(path: Path, payload: dict[str, Any]) -> None:
             pass
 
 
-def _process_alive(pid: object) -> bool:
+def process_alive(pid: object) -> bool:
     if not isinstance(pid, int) or pid <= 0:
         return False
     try:
@@ -168,7 +168,20 @@ def _process_alive(pid: object) -> bool:
         return False
     except PermissionError:
         return True
+    proc = subprocess.run(
+        ["ps", "-p", str(pid), "-o", "stat="],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode == 0:
+        stat = proc.stdout.strip()
+        if stat.startswith("Z"):
+            return False
     return True
+
+
+_process_alive = process_alive
 
 
 def _git_identity(cwd: str) -> tuple[str | None, str | None]:
@@ -806,12 +819,31 @@ class DirectOperationJournal:
 
         extra_changes: dict[str, Any] = {}
         provider_pid = record.get("provider_pid")
+        provider_alive = (
+            _process_alive(provider_pid)
+            if isinstance(provider_pid, int) and provider_pid > 0
+            else False
+        )
         if isinstance(provider_pid, int) and provider_pid > 0:
-            extra_changes["provider_process_state"] = (
-                "RUNNING" if _process_alive(provider_pid) else "EXITED"
-            )
+            extra_changes["provider_process_state"] = "RUNNING" if provider_alive else "EXITED"
 
         if not pid_alive:
+            if provider_alive:
+                return self.update(
+                    operation_id,
+                    status="RUNNING",
+                    phase="RECONCILE_REQUIRED",
+                    reconciliation={
+                        "at": utc_now(),
+                        "result": "PROVIDER_PROCESS_STILL_RUNNING",
+                        "pid_alive": False,
+                        "provider_alive_before": True,
+                        "provider_alive_after": True,
+                        "heartbeat_age_seconds": heartbeat_age,
+                        "retry_permitted": False,
+                    },
+                    **extra_changes,
+                )
             return self.mark_terminal(
                 operation_id,
                 status="OUTCOME_UNKNOWN",

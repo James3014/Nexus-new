@@ -464,6 +464,31 @@ def test_workflow_doctor_reconcile_required_operation_projects_reconcile_gate() 
     assert "agyop_123" in next_action["operation_ids"]
 
 
+def test_workflow_doctor_dead_wrapper_pid_projects_reconcile_gate() -> None:
+    """An active operation whose wrapper PID is dead triggers RECONCILE gate instead of WAIT."""
+    op = _no_operation()
+    op["active"] = [
+        {
+            "operation_id": "agyop_dead_wrapper",
+            "phase": "PROVIDER_RUNNING",
+            "status": "RUNNING",
+            "pid": 999_999_998,
+        }
+    ]
+    disposition, next_action = doctor._derive_next_gate(
+        source=_base_source(),
+        runtime=_base_runtime(),
+        task={"status": "OBSERVED", "state": "open", "issue_number": 1274},
+        operation=op,
+        pr={"status": "NONE", "pr_number": None},
+        required_gates=[],
+        leases=_no_leases(),
+    )
+    assert disposition == "RECONCILE"
+    assert next_action["code"] == "RECONCILE_OPERATION"
+    assert "agyop_dead_wrapper" in next_action["operation_ids"]
+
+
 def test_workflow_doctor_collects_claimed_at_and_consumer_id(tmp_path: Path) -> None:
     """_collect_leases accurately reads claimed_at and consumer_id from receipt."""
     leases_dir = tmp_path / ".nexus" / "agy-account-pool" / "leases"
