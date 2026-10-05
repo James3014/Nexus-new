@@ -940,29 +940,19 @@ def test_source_verification_rejects_invalid_core_receipt(
     ]
 
 
-def test_collect_core_verification_delegates_validation_to_core_environment(
+def test_collect_core_verification_delegates_validation_to_core_cli(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     receipt_dir = tmp_path / ".nexus-core" / "receipts"
     receipt_dir.mkdir(parents=True)
     receipt = receipt_dir / "20261005T000000Z-current.json"
-    receipt.write_text("{}", encoding="utf-8")
-    core_python = tmp_path / "core-python"
-    core_python.write_text("", encoding="utf-8")
     subject = "b" * 40
     subject_tree = "c" * 40
-    captured: dict[str, object] = {}
-
-    monkeypatch.setattr(doctor, "_resolve_nexus_certify_python", lambda home: core_python)
-
-    def fake_json_command(argv, **kwargs):
-        captured["argv"] = argv
-        return (
+    receipt.write_text(
+        json.dumps(
             {
-                "validation": {"valid": True, "reason_codes": []},
                 "receipt_hash": "sha256:" + "1" * 64,
-                "product_name": "nexus-core",
-                "product_version": "0.1.1",
+                "product": {"name": "nexus-core", "version": "0.1.2"},
                 "source_revision": "git-commit:" + "a" * 40,
                 "source_tree": "git-tree:" + "a" * 40,
                 "target_revision": f"git-tree:{subject_tree}",
@@ -972,24 +962,32 @@ def test_collect_core_verification_delegates_validation_to_core_environment(
                     "reason_codes": [],
                     "transport_error": False,
                 },
-                "core_verification": {
-                    "status": "VERIFIED",
-                    "integrity": "VALID",
-                    "reason_codes": [],
+                "core_response": {
+                    "verification": {
+                        "status": "VERIFIED",
+                        "integrity": "VALID",
+                        "reason_codes": [],
+                    }
                 },
-            },
-            None,
+            }
+        ),
+        encoding="utf-8",
+    )
+    executable = tmp_path / "nexus-certify"
+    executable.write_text("", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(doctor, "_resolve_nexus_certify_executable", lambda home: executable)
+    monkeypatch.setattr(doctor, "_git_value", lambda *args, **kwargs: subject_tree)
+
+    def fake_runner(argv, **kwargs):
+        captured["argv"] = argv
+        return subprocess.CompletedProcess(
+            argv, 0, stdout='{"reason_codes": [], "valid": true}\n', stderr=""
         )
 
-    monkeypatch.setattr(doctor, "_json_command", fake_json_command)
-    monkeypatch.setattr(
-        doctor,
-        "_git_value",
-        lambda *args, **kwargs: subject_tree,
-    )
-
     observed = doctor._collect_core_verification(
-        tmp_path, home=tmp_path, subject_revision=subject, runner=subprocess.run
+        tmp_path, home=tmp_path, subject_revision=subject, runner=fake_runner
     )
 
     assert observed["current_verified"] is True
@@ -997,8 +995,8 @@ def test_collect_core_verification_delegates_validation_to_core_environment(
     assert observed["exact_subject"] is True
     argv = captured["argv"]
     assert isinstance(argv, list)
-    assert argv[:3] == [str(core_python), "-I", "-c"]
-    assert "validate_verification_receipt" in argv[3]
+    assert argv[:2] == [str(executable), "receipt-check"]
+    assert argv[-2:] == ["--repo", str(tmp_path)]
 
 
 def test_collect_core_verification_latest_invalid_receipt_blocks_older_valid_receipt(
@@ -1009,44 +1007,24 @@ def test_collect_core_verification_latest_invalid_receipt_blocks_older_valid_rec
     (receipt_dir / "20261005T000000Z-old-valid.json").write_text("{}", encoding="utf-8")
     latest = receipt_dir / "20261005T010000Z-new-invalid.json"
     latest.write_text("{}", encoding="utf-8")
-    core_python = tmp_path / "core-python"
-    core_python.write_text("", encoding="utf-8")
-    subject = "b" * 40
-    subject_tree = "c" * 40
+    executable = tmp_path / "nexus-certify"
+    executable.write_text("", encoding="utf-8")
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(doctor, "_resolve_nexus_certify_python", lambda home: core_python)
+    monkeypatch.setattr(doctor, "_resolve_nexus_certify_executable", lambda home: executable)
+    monkeypatch.setattr(doctor, "_git_value", lambda *args, **kwargs: "c" * 40)
 
-    def fake_json_command(argv, **kwargs):
-        captured["receipt"] = argv[-2]
-        return (
-            {
-                "validation": {
-                    "valid": False,
-                    "reason_codes": ["RECEIPT_HASH_MISMATCH"],
-                },
-                "source_revision": "git-commit:" + "a" * 40,
-                "target_revision": f"git-tree:{subject_tree}",
-                "target_tree": f"git-tree:{subject_tree}",
-                "outcome": {
-                    "status": "VERIFIED",
-                    "reason_codes": [],
-                    "transport_error": False,
-                },
-                "core_verification": {
-                    "status": "VERIFIED",
-                    "integrity": "VALID",
-                    "reason_codes": [],
-                },
-            },
-            None,
+    def fake_runner(argv, **kwargs):
+        captured["receipt"] = argv[argv.index("--receipt") + 1]
+        return subprocess.CompletedProcess(
+            argv,
+            1,
+            stdout='{"reason_codes": ["RECEIPT_HASH_MISMATCH"], "valid": false}\n',
+            stderr="",
         )
 
-    monkeypatch.setattr(doctor, "_json_command", fake_json_command)
-    monkeypatch.setattr(doctor, "_git_value", lambda *args, **kwargs: subject_tree)
-
     observed = doctor._collect_core_verification(
-        tmp_path, home=tmp_path, subject_revision=subject, runner=subprocess.run
+        tmp_path, home=tmp_path, subject_revision="b" * 40, runner=fake_runner
     )
 
     assert captured["receipt"] == str(latest)

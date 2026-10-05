@@ -885,38 +885,6 @@ _COMPLETION_LAYERS = (
 )
 
 
-_CORE_RECEIPT_VALIDATION_CODE = r'''
-import json
-import sys
-from pathlib import Path
-from product.clients.local_golden_path import validate_verification_receipt
-
-receipt_path = Path(sys.argv[1])
-repo_root = Path(sys.argv[2])
-validation = validate_verification_receipt(receipt_path, repo=repo_root)
-payload = json.loads(receipt_path.read_text(encoding="utf-8"))
-core_response = payload.get("core_response")
-verification = core_response.get("verification") if isinstance(core_response, dict) else None
-outcome = payload.get("outcome")
-product = payload.get("product")
-print(json.dumps({
-    "validation": validation,
-    "kind": payload.get("kind"),
-    "schema_version": payload.get("schema_version"),
-    "receipt_hash": payload.get("receipt_hash"),
-    "timestamp": payload.get("timestamp"),
-    "source_revision": payload.get("source_revision"),
-    "source_tree": payload.get("source_tree"),
-    "target_revision": payload.get("target_revision"),
-    "target_tree": payload.get("target_tree"),
-    "product_name": product.get("name") if isinstance(product, dict) else None,
-    "product_version": product.get("version") if isinstance(product, dict) else None,
-    "outcome": outcome if isinstance(outcome, dict) else None,
-    "core_verification": verification if isinstance(verification, dict) else None,
-}, sort_keys=True))
-'''.strip()
-
-
 def _completion_subject_revision(
     *,
     source: dict[str, Any],
@@ -940,21 +908,16 @@ def _completion_subject_revision(
     return str(subject) if isinstance(subject, str) and subject else None
 
 
-def _resolve_nexus_certify_python(home: Path) -> Path | None:
+def _resolve_nexus_certify_executable(home: Path) -> Path | None:
     executable = home / ".local/bin/nexus-certify"
     if not executable.exists():
         found = shutil.which("nexus-certify")
         executable = Path(found) if found else executable
     try:
         resolved = executable.resolve(strict=True)
-        with resolved.open("r", encoding="utf-8") as handle:
-            first_line = handle.readline().strip()
-    except (OSError, UnicodeError):
+    except OSError:
         return None
-    if not first_line.startswith("#!"):
-        return None
-    interpreter = Path(first_line[2:].strip())
-    return interpreter if interpreter.is_absolute() and interpreter.is_file() else None
+    return resolved if resolved.is_file() else None
 
 
 def _collect_core_verification(
@@ -964,7 +927,7 @@ def _collect_core_verification(
     subject_revision: str | None,
     runner: CommandRunner,
 ) -> dict[str, Any]:
-    """Observe canonical Core receipt truth without reimplementing Core verification."""
+    """Observe Core receipt truth through the public nexus-certify receipt-check surface."""
     receipts_root = repo_root / ".nexus-core" / "receipts"
     try:
         receipts = sorted(
@@ -979,46 +942,91 @@ def _collect_core_verification(
             "status": "UNAVAILABLE",
             "error": "CORE_VERIFICATION_RECEIPT_NOT_FOUND",
         }
+    receipt = receipts[0]
     if not subject_revision:
         return {
             "status": "UNKNOWN",
-            "receipt_path": str(receipts[0]),
+            "receipt_path": str(receipt),
             "error": "CORE_VERIFICATION_SUBJECT_UNAVAILABLE",
         }
 
-    core_python = _resolve_nexus_certify_python(home)
-    if core_python is None:
+    executable = _resolve_nexus_certify_executable(home)
+    if executable is None:
         return {
             "status": "UNAVAILABLE",
-            "receipt_path": str(receipts[0]),
+            "receipt_path": str(receipt),
             "error": "NEXUS_CERTIFY_VALIDATOR_UNAVAILABLE",
         }
 
-    observed, error = _json_command(
-        [
-            str(core_python),
-            "-I",
-            "-c",
-            _CORE_RECEIPT_VALIDATION_CODE,
-            str(receipts[0]),
-            str(repo_root),
-        ],
-        cwd=repo_root,
-        runner=runner,
-        timeout=20.0,
-    )
-    if not isinstance(observed, dict):
+    try:
+        proc = _run(
+            [
+                str(executable),
+                "receipt-check",
+                "--receipt",
+                str(receipt),
+                "--repo",
+                str(repo_root),
+            ],
+            cwd=repo_root,
+            runner=runner,
+            timeout=20.0,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
         return {
             "status": "UNKNOWN",
-            "receipt_path": str(receipts[0]),
-            "validator_python": str(core_python),
-            "error": error or "CORE_RECEIPT_VALIDATION_FAILED",
+            "receipt_path": str(receipt),
+            "validator_executable": str(executable),
+            "error": f"CORE_RECEIPT_VALIDATION_FAILED:{type(exc).__name__}:{exc}",
         }
 
-    validation = observed.get("validation")
-    validation_valid = bool(isinstance(validation, dict) and validation.get("valid") is True)
-    core_verification = observed.get("core_verification")
+    validation: dict[str, Any] | None = None
+    if proc.stdout.strip():
+        try:
+            parsed = json.loads(proc.stdout)
+            if isinstance(parsed, dict):
+                validation = parsed
+        except json.JSONDecodeError:
+            validation = None
+    validation_valid = bool(
+        proc.returncode == 0
+        and isinstance(validation, dict)
+        and validation.get("valid") is True
+    )
+    validation_reason_codes = (
+        list(validation.get("reason_codes") or [])
+        if isinstance(validation, dict)
+        else ["CORE_RECEIPT_CHECK_OUTPUT_INVALID"]
+    )
+
+    try:
+        observed = json.loads(receipt.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {
+            "status": "OBSERVED",
+            "receipt_path": str(receipt),
+            "validator_executable": str(executable),
+            "validation_valid": False,
+            "validation_reason_codes": ["MALFORMED_RECEIPT"],
+            "error": f"CORE_RECEIPT_READ_FAILED:{exc}",
+            "current_verified": False,
+        }
+    if not isinstance(observed, dict):
+        return {
+            "status": "OBSERVED",
+            "receipt_path": str(receipt),
+            "validator_executable": str(executable),
+            "validation_valid": False,
+            "validation_reason_codes": ["MALFORMED_RECEIPT"],
+            "current_verified": False,
+        }
+
+    core_response = observed.get("core_response")
+    core_verification = (
+        core_response.get("verification") if isinstance(core_response, dict) else None
+    )
     outcome = observed.get("outcome")
+    product = observed.get("product")
     subject_tree = _git_value(
         repo_root,
         "rev-parse",
@@ -1040,17 +1048,15 @@ def _collect_core_verification(
     )
     return {
         "status": "OBSERVED",
-        "receipt_path": str(receipts[0]),
-        "validator_python": str(core_python),
-        "validator": "product.clients.local_golden_path.validate_verification_receipt",
+        "receipt_path": str(receipt),
+        "validator_executable": str(executable),
+        "validator": "nexus-certify receipt-check",
         "validation_valid": validation_valid,
-        "validation_reason_codes": (
-            list(validation.get("reason_codes") or []) if isinstance(validation, dict) else []
-        ),
+        "validation_reason_codes": validation_reason_codes,
         "receipt_hash": observed.get("receipt_hash"),
         "timestamp": observed.get("timestamp"),
-        "product_name": observed.get("product_name"),
-        "product_version": observed.get("product_version"),
+        "product_name": product.get("name") if isinstance(product, dict) else None,
+        "product_version": product.get("version") if isinstance(product, dict) else None,
         "source_revision": observed.get("source_revision"),
         "source_tree": observed.get("source_tree"),
         "target_revision": observed.get("target_revision"),
