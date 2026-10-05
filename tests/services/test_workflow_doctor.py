@@ -593,6 +593,9 @@ def test_completion_projection_keeps_merged_integration_separate_from_runtime_un
 
     layers = _completion_layers(payload)
 
+    assert payload["completion_matrix"]["claim_ceiling"] == (
+        "READ_ONLY_PROJECTION_NO_COMPLETION_AUTHORITY"
+    )
     assert layers["Integration"]["status"] == "PASS"
     assert layers["Runtime"]["status"] != "PASS"
     assert layers["Native / real entrypoint"]["status"] != "PASS"
@@ -608,9 +611,13 @@ def test_completion_projection_rejects_pass_bound_to_previous_candidate_revision
         "operation_id": "agyop_" + "1" * 32,
         "status": "COMPLETED",
         "phase": "TERMINAL",
-        "candidate_revision": "b" * 40,
-        "verification_revision": "a" * 40,
-        "verification_status": "PASS",
+        "review_candidate_head": "a" * 40,
+        "candidate_digest": "c" * 64,
+        "current_candidate_digest": "d" * 64,
+        "review_state": "TERMINAL",
+        "review_verdict": "ACCEPT",
+        "review_applicable": False,
+        "subject_stable": False,
     }
 
     payload = _collect_with_observations(
@@ -636,10 +643,14 @@ def test_pre_gate_review_cannot_project_independent_acceptance_pass(
         "operation_id": "agyop_" + "2" * 32,
         "status": "COMPLETED",
         "phase": "TERMINAL",
-        "candidate_revision": "b" * 40,
-        "pre_gate_status": "PASS",
+        "review_effect_id": "e" * 64,
+        "review_candidate_head": "b" * 40,
+        "candidate_digest": "d" * 64,
+        "current_candidate_digest": "d" * 64,
+        "review_state": "TERMINAL",
+        "review_verdict": "ACCEPT",
         "review_applicable": True,
-        "review_verdict": None,
+        "subject_stable": True,
     }
 
     payload = _collect_with_observations(
@@ -651,4 +662,5 @@ def test_pre_gate_review_cannot_project_independent_acceptance_pass(
 
     acceptance = layers["Independent acceptance"]
     assert acceptance["status"] != "PASS"
-    assert acceptance.get("gap")
+    assert acceptance["source"] == "direct_operation_review"
+    assert acceptance["gap"] == "INDEPENDENT_ACCEPTANCE_AUTHORITY_NOT_OBSERVED"
