@@ -35,7 +35,7 @@ class AccountFailureKind(str, Enum):
     UNKNOWN = "UNKNOWN"
 
 
-_ROTATION_ELIGIBLE_FAILURES = frozenset({
+ACCOUNT_FAILOVER_FAILURES = frozenset({
     AccountFailureKind.AUTH_OR_SESSION_INVALID,
     AccountFailureKind.TOKEN_EXPIRED,
     AccountFailureKind.TOKEN_REFRESH_FAILED,
@@ -44,11 +44,16 @@ _ROTATION_ELIGIBLE_FAILURES = frozenset({
     AccountFailureKind.ACCOUNT_UNAVAILABLE,
     AccountFailureKind.ACCOUNT_DISABLED,
 })
+_ROTATION_ELIGIBLE_FAILURES = ACCOUNT_FAILOVER_FAILURES
+
+
+def is_account_failover_failure(failure_kind: AccountFailureKind) -> bool:
+    """Return whether a failure is an account-selection/failover failure rather than a model-work failure."""
+    return failure_kind in ACCOUNT_FAILOVER_FAILURES
 
 
 def is_rotation_eligible(failure_kind: AccountFailureKind) -> bool:
     """Return whether a structured provider failure may rotate an account."""
-
     return failure_kind in _ROTATION_ELIGIBLE_FAILURES
 
 
