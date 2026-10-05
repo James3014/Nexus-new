@@ -71,6 +71,8 @@ def test_registry_loads_seeded_lineages() -> None:
         "deepseek-v4-flash",
         "gemini-3.7-flash-medium",
         "occamy-1.0",
+        "qwen-3.6-35b-a3b",
+        "qwen3-coder-30b-a3b",
         "qwen-3.8-27b",
     }
 
@@ -806,8 +808,11 @@ def test_qwen27b_lineage_seed_shape() -> None:
     assert lineage.experimental_ceiling == "L0"
     assert lineage.frontier_experimental is False
     identities = {(i.provider, i.model) for i in lineage.execution_identities}
-    assert identities == {("tensorfold", "Vontra/Qwen3.8-27B-MLX-4bit")}
-    assert len(lineage.execution_configurations) == 1
+    assert identities == {
+        ("tensorfold", "Vontra/Qwen3.8-27B-MLX-4bit"),
+        ("local", "incoai/Qwen3.8-27B-Splash"),
+    }
+    assert len(lineage.execution_configurations) == 2
 
     cfg = lineage.execution_configurations[0]
     assert cfg.config_id == "qwen3.8-27b-mlx4bit-tensorfold-drafted"
@@ -1016,19 +1021,39 @@ def test_duplicate_config_id_rejected(tmp_path: Path) -> None:
 
 def test_truthful_provenance_preserved_for_local_models() -> None:
     registry = _registry()
+
     for lineage_id in ("occamy-1.0", "qwen-3.8-27b"):
         lineage = registry.resolve_by_lineage_id(lineage_id)
-        for record in lineage.evidence:
-            assert record.provenance == "EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK"
-            assert record.provenance != "DURABLE_REPOSITORY_RECEIPT"
+        evidence_provenance = {record.provenance for record in lineage.evidence}
+        assert evidence_provenance == {
+            "EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK",
+            "DURABLE_REPOSITORY_RECEIPT",
+        }
+
+    occamy = registry.resolve_by_lineage_id("occamy-1.0")
+    for cfg in occamy.execution_configurations:
+        for q in cfg.qualifications:
+            if cfg.config_id == "occamy-1.0-q4-opencode-llama64k-r10":
+                assert q.provenance == "DURABLE_REPOSITORY_RECEIPT"
+                assert "github:James3014/Nexus-new" in q.evidence_ref
+            else:
+                assert q.provenance == "EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK"
+
+    qwen38 = registry.resolve_by_lineage_id("qwen-3.8-27b")
+    for cfg in qwen38.execution_configurations:
+        for q in cfg.qualifications:
+            if cfg.config_id == "qwen3.8-27b-splash-q4-opencode-64k-wave3":
+                assert q.provenance == "DURABLE_REPOSITORY_RECEIPT"
+                assert "5985452976" in q.evidence_ref
+            else:
+                assert q.provenance == "EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK"
+
+    for lineage_id in ("qwen-3.6-35b-a3b", "qwen3-coder-30b-a3b"):
+        lineage = registry.resolve_by_lineage_id(lineage_id)
+        assert lineage.evidence
+        assert all(record.provenance == "DURABLE_REPOSITORY_RECEIPT" for record in lineage.evidence)
         for cfg in lineage.execution_configurations:
-            for q in cfg.qualifications:
-                if cfg.config_id == "occamy-1.0-q4-opencode-llama64k-r10":
-                    assert q.provenance == "DURABLE_REPOSITORY_RECEIPT"
-                    assert "5979409555" in q.evidence_ref
-                else:
-                    assert q.provenance == "EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK"
-                    assert q.provenance != "DURABLE_REPOSITORY_RECEIPT"
+            assert all(q.provenance == "DURABLE_REPOSITORY_RECEIPT" for q in cfg.qualifications)
 
 
 def test_config_id_conflicting_exact_criteria_fail_closed() -> None:
@@ -1152,3 +1177,98 @@ def test_parameter_count_not_used_as_capability_identity() -> None:
     assert c_agent.scaffold != c_decision.scaffold
     assert c_agent.tool_surface != c_decision.tool_surface
     assert c_agent.state_preservation != c_decision.state_preservation
+
+
+def test_wave5_occamy_repairability_evidence_preserves_first_pass() -> None:
+    registry = _registry()
+    _, first = registry.resolve_execution_qualification(
+        "occamy-1.0-q4-opencode-llama64k-r10",
+        "bug_repair",
+        phase=EvidencePhase.FIRST_PASS,
+    )
+    _, repair = registry.resolve_execution_qualification(
+        "occamy-1.0-q4-opencode-llama64k-r10",
+        "bug_repair",
+        phase=EvidencePhase.VERIFIER_GUIDED_REPAIR,
+    )
+    assert first.disposition is QualificationDisposition.WATCH
+    assert first.score == "1/3"
+    assert repair.disposition is QualificationDisposition.WATCH
+    assert repair.score == "0/1 material repair delta; round 2 NOT_SCORED"
+    assert repair.is_semantic_failure is True
+    assert repair.runtime_admission is False
+    assert "5985452976" in repair.evidence_ref
+
+
+def test_wave5_qwen36_phase_separation_and_context_hard_stop() -> None:
+    registry = _registry()
+    lineage = registry.resolve_by_lineage_id("qwen-3.6-35b-a3b")
+    assert lineage.stable_floor == lineage.current_frontier == "L0"
+    assert len(lineage.execution_configurations) == 1
+    cfg = lineage.execution_configurations[0]
+    assert cfg.config_id == "qwen3.6-35b-a3b-splash-opencode-64k-wave4"
+    assert cfg.context_limit == 65536
+    assert cfg.resource_envelope["output_limit"] == 16384
+    quals = {(q.task_family, q.phase): q for q in cfg.qualifications}
+    first = quals[("bug_repair", EvidencePhase.FIRST_PASS)]
+    repair = quals[("bug_repair", EvidencePhase.VERIFIER_GUIDED_REPAIR)]
+    regression = quals[("regression_test", EvidencePhase.FIRST_PASS)]
+    stack = quals[("long_repo_episode", EvidencePhase.RESOURCE_CONTEXT_QUALIFICATION)]
+    assert first.disposition is QualificationDisposition.WATCH
+    assert first.is_semantic_failure is True
+    assert repair.disposition is QualificationDisposition.PASS
+    assert repair.runtime_admission is False
+    assert regression.disposition is QualificationDisposition.WATCH
+    assert stack.disposition is QualificationDisposition.STACK_UNQUALIFIED
+    assert stack.is_semantic_failure is False
+    assert stack.runtime_admission is False
+    assert "context_window_rejection_prompt_plus_max_completion_tokens" in stack.failure_families
+
+
+def test_wave5_qwen3_coder_resource_hard_stop_is_not_semantic_failure() -> None:
+    registry = _registry()
+    lineage = registry.resolve_by_lineage_id("qwen3-coder-30b-a3b")
+    assert lineage.stable_floor == lineage.current_frontier == "L0"
+    cfg = lineage.execution_configurations[0]
+    assert cfg.config_id == "qwen3-coder-30b-a3b-mlx4bit-opencode-32k-wave2"
+    assert cfg.resource_envelope["required_gpu_working_mb"] == 1284.0
+    assert cfg.resource_envelope["available_gpu_working_mb"] == 1035.0
+    qual = cfg.qualifications[0]
+    assert qual.disposition is QualificationDisposition.STACK_UNQUALIFIED
+    assert qual.is_semantic_failure is False
+    assert qual.runtime_admission is False
+
+
+def test_wave5_qwen38_splash_tool_loop_pass_does_not_promote_full_agent_stack() -> None:
+    registry = _registry()
+    lineage = registry.resolve_by_lineage_id("qwen-3.8-27b")
+    by_id = {c.config_id: c for c in lineage.execution_configurations}
+    splash = by_id["qwen3.8-27b-splash-q4-opencode-64k-wave3"]
+    quals = {(q.task_family, q.phase): q for q in splash.qualifications}
+    short = quals[("short_tool_use", EvidencePhase.PROTOCOL_TOOL_LOOP_QUALIFICATION)]
+    long = quals[("long_repo_episode", EvidencePhase.PROTOCOL_TOOL_LOOP_QUALIFICATION)]
+    assert short.disposition is QualificationDisposition.PASS
+    assert long.disposition is QualificationDisposition.STACK_UNQUALIFIED
+    assert long.is_semantic_failure is False
+    assert long.runtime_admission is False
+    assert "agent_loop_no_terminal_text_zero_candidate_delta" in long.failure_families
+
+
+def test_wave5_local_exact_config_evidence_cannot_grant_route_or_admission() -> None:
+    registry = _registry()
+    for lineage_id in (
+        "occamy-1.0",
+        "qwen-3.6-35b-a3b",
+        "qwen3-coder-30b-a3b",
+        "qwen-3.8-27b",
+    ):
+        lineage = registry.resolve_by_lineage_id(lineage_id)
+        assert lineage.stable_floor == lineage.current_frontier == "L0"
+        assert all(
+            q.runtime_admission is False
+            for cfg in lineage.execution_configurations
+            for q in cfg.qualifications
+        )
+    raw = yaml.safe_load(LINEAGE_PATH.read_text(encoding="utf-8"))
+    assert raw["admission_authority"] is False
+    assert raw["route_authority"] == "none"
