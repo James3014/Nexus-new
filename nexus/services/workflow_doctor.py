@@ -1029,10 +1029,17 @@ def _project_completion_matrix(
     alignment = runtime.get("current_main_alignment")
     if not isinstance(alignment, dict):
         alignment = _runtime_main_alignment(runtime, source.get("github_main"))
+    installed_revision = runtime.get("installed_revision")
+    exact_subject_install = bool(subject_revision and installed_revision == subject_revision)
+    content_equivalent_main_install = bool(
+        subject_revision
+        and subject_revision == source.get("github_main")
+        and alignment.get("status") == "ALIGNED"
+    )
     install_pass = bool(
         runtime.get("status") == "OBSERVED"
-        and runtime.get("installed_revision")
-        and alignment.get("status") == "ALIGNED"
+        and installed_revision
+        and (exact_subject_install or content_equivalent_main_install)
     )
     rows.append(
         _completion_row(
@@ -1046,6 +1053,16 @@ def _project_completion_matrix(
                 "state": runtime.get("state"),
                 "alignment": alignment.get("status"),
                 "alignment_basis": alignment.get("basis"),
+                "subject_revision": subject_revision,
+                "binding_basis": (
+                    "EXACT_SUBJECT_REVISION"
+                    if exact_subject_install
+                    else (
+                        "CONTENT_EQUIVALENT_CURRENT_MAIN"
+                        if content_equivalent_main_install
+                        else None
+                    )
+                ),
             },
             gap=None if install_pass else "CURRENT_INSTALL_BINDING_NOT_PROVEN",
         )
