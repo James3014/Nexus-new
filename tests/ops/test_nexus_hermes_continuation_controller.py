@@ -417,9 +417,7 @@ def test_handler_binds_permission_profile_hash_before_dispatch(tmp_path, monkeyp
 
     def fake_dispatch(**kwargs):
         observed.update(kwargs)
-        persisted = json.loads(
-            (tmp_path / "receipts/permission-handler/state.json").read_text()
-        )
+        persisted = json.loads((tmp_path / "receipts/permission-handler/state.json").read_text())
         observed["intent"] = persisted["effect_intent"]
         return {
             "operation_id": "agyop_permission_handler",
