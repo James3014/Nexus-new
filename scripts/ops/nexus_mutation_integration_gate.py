@@ -66,12 +66,25 @@ def evaluate(
     repo_root: Path,
     state_root: Path,
 ) -> dict[str, object]:
-    binding = _parse_binding(pr_body)
-    store = MutationAdmissionStore(state_root)
-    receipt = store.status(
-        binding["admission_id"],
-        expected_receipt_hash=binding["receipt_hash"],
-    )
+    try:
+        binding = _parse_binding(pr_body)
+        store = MutationAdmissionStore(state_root)
+        receipt = store.status(
+            binding["admission_id"],
+            expected_receipt_hash=binding["receipt_hash"],
+        )
+    except MutationAdmissionError as exc:
+        return {
+            "schema": "nexus.mutation_integration_gate.v1",
+            "status": "BLOCK",
+            "repository": repository,
+            "base_sha": base_sha,
+            "head_sha": head_sha,
+            "changed_paths": [],
+            "scope_escape_paths": [],
+            "blockers": [str(exc)],
+        }
+
     blockers: list[str] = []
     if receipt["repository"] != repository:
         blockers.append("ADMISSION_REPOSITORY_MISMATCH")
