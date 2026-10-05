@@ -92,6 +92,11 @@ from nexus.orchestrator.lifecycle_guards import (
     pre_action_guard,
     validate_approval_grant,
 )
+from nexus.orchestrator.mutation_admission import (
+    CANONICAL_REPOSITORIES,
+    MutationAdmissionError,
+    MutationAdmissionStore,
+)
 from nexus.orchestrator.self_hosted_task_service import (
     CANONICAL_SOURCE_ROOT,
     SelfHostedTaskService,
@@ -681,6 +686,98 @@ def observe_github_issue(repository: str, issue_number: int) -> dict[str, Any]:
     return {
         "ok": True,
         "issue": dict(payload),
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def observe_github_repository_default_head(repository: str) -> dict[str, Any]:
+    """Freshly observe one canonical repository default-branch head."""
+
+    if repository not in CANONICAL_REPOSITORIES:
+        return {
+            "ok": False,
+            "blocker": "MUTATION_ADMISSION_REPOSITORY_NOT_CANONICAL",
+            "detail": repository,
+        }
+    github_cli, resolution_error = _resolve_github_cli()
+    if github_cli is None:
+        return {
+            "ok": False,
+            "blocker": "GITHUB_OBSERVER_EXECUTABLE_UNAVAILABLE",
+            "detail": resolution_error or "GitHub CLI executable unavailable",
+        }
+    try:
+        result = subprocess.run(
+            [
+                github_cli,
+                "repo",
+                "view",
+                repository,
+                "--json",
+                "nameWithOwner,defaultBranchRef",
+            ],
+            cwd=CANONICAL_SOURCE_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return {"ok": False, "blocker": "GITHUB_OBSERVER_TIMEOUT", "detail": str(exc)}
+    except OSError as exc:
+        return {
+            "ok": False,
+            "blocker": "GITHUB_OBSERVER_EXECUTABLE_UNAVAILABLE",
+            "detail": str(exc),
+        }
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        lowered = detail.lower()
+        auth_failure = any(
+            marker in lowered
+            for marker in (
+                "auth login",
+                "authentication",
+                "not logged into",
+                "gh_token",
+                "github_token",
+            )
+        )
+        return {
+            "ok": False,
+            "blocker": (
+                "GITHUB_OBSERVER_AUTH_UNAVAILABLE"
+                if auth_failure
+                else "GITHUB_OBSERVER_REQUEST_FAILED"
+            ),
+            "detail": detail,
+        }
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        return {
+            "ok": False,
+            "blocker": "GITHUB_OBSERVER_MALFORMED_RESPONSE",
+            "detail": str(exc),
+        }
+    branch = payload.get("defaultBranchRef") if isinstance(payload, Mapping) else None
+    if (
+        not isinstance(payload, Mapping)
+        or payload.get("nameWithOwner") != repository
+        or not isinstance(branch, Mapping)
+        or not isinstance(branch.get("name"), str)
+        or not _SHA_RE.fullmatch(str(branch.get("oid") or ""))
+    ):
+        return {
+            "ok": False,
+            "blocker": "GITHUB_OBSERVER_MALFORMED_RESPONSE",
+            "detail": "repository/default branch identity mismatch",
+        }
+    return {
+        "ok": True,
+        "repository": repository,
+        "default_branch": str(branch["name"]),
+        "head_sha": str(branch["oid"]),
         "observed_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -1471,6 +1568,7 @@ class UnifiedMCPGateway:
         model_runner: Any = None,
         apply_runner: Any = None,
         github_issue_observer: Any = None,
+        mutation_repository_observer: Any = None,
         upstream_observer: Any = None,
         upstream_cache_ttl_seconds: float = 30.0,
     ):
@@ -1488,6 +1586,14 @@ class UnifiedMCPGateway:
         self._assist_processes: dict[str, subprocess.Popen[str]] = {}
         self._assist_lock = threading.RLock()
         self._github_issue_observer = github_issue_observer or observe_github_issue
+        self._mutation_repository_observer = (
+            mutation_repository_observer or observe_github_repository_default_head
+        )
+        admission_state_root = (
+            getattr(self.service, "state_dir", None)
+            or SelfHostedTaskService.canonical_state_dir()
+        )
+        self._mutation_admissions = MutationAdmissionStore(admission_state_root)
         self._upstream_observer = upstream_observer or _default_observe_upstream_main
         self._upstream_cache_ttl_seconds = float(upstream_cache_ttl_seconds)
         self._upstream_cache: tuple[float, dict[str, Any]] | None = None
@@ -4116,6 +4222,80 @@ class UnifiedMCPGateway:
                 },
             },
             {
+                "name": "nexus_mutation_admit",
+                "description": (
+                    "Issue one durable Nexus-owned, transport-neutral repository mutation admission. "
+                    "This records repo/base/lane/authority/scope only and grants no route, execution, "
+                    "verification, acceptance, merge, release, deployment, or production authority."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "required": [
+                        "operation_id",
+                        "repository",
+                        "base_sha",
+                        "execution_lane",
+                        "authority_kind",
+                        "allowed_paths",
+                    ],
+                    "properties": {
+                        "operation_id": {"type": "string", "maxLength": 128},
+                        "repository": {
+                            "type": "string",
+                            "enum": ["James3014/devspace","James3014/Nexus-new","James3014/nexus-core","James3014/nexus-learning","James3014/nexus-open-swe-runtime","James3014/repository-intelligence-engine","James3014/nexus-runtime","James3014/nexus-opencli-reviewer","James3014/nexus-deployment-lab"],
+                        },
+                        "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "execution_lane": {
+                            "type": "string",
+                            "enum": ["DIRECT_CANONICAL", "DIRECT_DELEGATED", "GOVERNED"],
+                        },
+                        "authority_kind": {
+                            "type": "string",
+                            "enum": ["OWNER_INLINE", "TRACKED_TASK_CARD"],
+                        },
+                        "allowed_paths": {
+                            "type": "array",
+                            "items": {"type": "string", "maxLength": 1024},
+                            "minItems": 1,
+                            "maxItems": 64,
+                        },
+                        "owner_confirmation": {"type": "boolean", "default": False},
+                        "issue_number": {"type": "integer", "minimum": 1},
+                        "task_card_path": {"type": "string", "maxLength": 1024},
+                        "task_card_hash": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$",
+                        },
+                        "ttl_minutes": {
+                            "type": "integer",
+                            "minimum": 5,
+                            "maximum": 43200,
+                            "default": 10080,
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "nexus_mutation_admission_status",
+                "description": (
+                    "Read and revalidate one exact durable Nexus mutation admission receipt. "
+                    "Observe-only; this grants no new mutation or integration authority."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["admission_id", "receipt_hash"],
+                    "properties": {
+                        "admission_id": {"type": "string", "maxLength": 64},
+                        "receipt_hash": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$",
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+            },
+            {
                 "name": "nexus_gateway_convergence",
                 "description": (
                     "Classify one policy-driven desired-vs-loaded Gateway convergence generation. "
@@ -5128,6 +5308,94 @@ class UnifiedMCPGateway:
             "satisfied": result.request_satisfies_certification_fence(),
         }
         return payload
+
+    def _mutation_admit(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        repository = _text(arguments.get("repository"), "repository", max_length=256)
+        operation_id = _text(arguments.get("operation_id"), "operation_id", max_length=128)
+        base_sha = _text(arguments.get("base_sha"), "base_sha", max_length=40)
+        lane = _text(arguments.get("execution_lane"), "execution_lane", max_length=32).upper()
+        authority_kind = _text(arguments.get("authority_kind"), "authority_kind", max_length=32).upper()
+        allowed_paths = [
+            str(path).strip()
+            for path in (arguments.get("allowed_paths") or [])
+            if str(path).strip()
+        ]
+        issue_number = arguments.get("issue_number")
+        task_card_path = arguments.get("task_card_path")
+        task_card_hash = arguments.get("task_card_hash")
+        ttl_minutes = arguments.get("ttl_minutes", 10080)
+        owner_confirmation = arguments.get("owner_confirmation") is True
+
+        observation = self._mutation_repository_observer(repository)
+        if not isinstance(observation, Mapping) or observation.get("ok") is not True:
+            blocker = (
+                observation.get("blocker")
+                if isinstance(observation, Mapping)
+                else "GITHUB_OBSERVER_REQUEST_FAILED"
+            )
+            detail = (
+                observation.get("detail")
+                if isinstance(observation, Mapping)
+                else "repository observation unavailable"
+            )
+            raise GatewayInputError(f"MUTATION_ADMISSION_SOURCE_OBSERVER_FAILED:{blocker}:{detail}")
+        observed_head = str(observation.get("head_sha") or "")
+        if observed_head != base_sha:
+            raise GatewayInputError(
+                f"MUTATION_ADMISSION_BASE_STALE:expected={observed_head}:requested={base_sha}"
+            )
+
+        runtime_identity = {
+            "server_instance_id": SERVER_INSTANCE_ID,
+            "tool_manifest_revision": TOOL_MANIFEST_REVISION,
+            "full_tool_schema_hash": FULL_TOOL_SCHEMA_HASH,
+            "permission_policy_hash": PERMISSION_POLICY_HASH,
+            "gateway_source_head": _git("rev-parse", "HEAD").strip(),
+            "repository_observed_at": observation.get("observed_at"),
+            "default_branch": observation.get("default_branch"),
+        }
+        try:
+            return self._mutation_admissions.admit(
+                operation_id=operation_id,
+                repository=repository,
+                base_sha=base_sha,
+                execution_lane=lane,
+                authority_kind=authority_kind,
+                allowed_paths=allowed_paths,
+                owner_confirmation=owner_confirmation,
+                issue_number=issue_number,
+                task_card_path=(
+                    str(task_card_path).strip()
+                    if task_card_path is not None
+                    else None
+                ),
+                task_card_hash=(
+                    str(task_card_hash).strip()
+                    if task_card_hash is not None
+                    else None
+                ),
+                ttl_minutes=ttl_minutes,
+                runtime_identity=runtime_identity,
+            )
+        except MutationAdmissionError as exc:
+            raise GatewayInputError(str(exc)) from exc
+
+    def _mutation_admission_status(
+        self, arguments: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        admission_id = _text(
+            arguments.get("admission_id"), "admission_id", max_length=64
+        )
+        receipt_hash = _text(
+            arguments.get("receipt_hash"), "receipt_hash", max_length=64
+        )
+        try:
+            return self._mutation_admissions.status(
+                admission_id,
+                expected_receipt_hash=receipt_hash,
+            )
+        except MutationAdmissionError as exc:
+            raise GatewayInputError(str(exc)) from exc
 
     def _project_entry(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         owner = _text(arguments.get("repository_owner"), "repository_owner", max_length=128)
@@ -6420,6 +6688,10 @@ class UnifiedMCPGateway:
             return self._gateway_execution_readiness(arguments)
         if name == "nexus_project_entry":
             return self._project_entry(arguments)
+        if name == "nexus_mutation_admit":
+            return self._mutation_admit(arguments)
+        if name == "nexus_mutation_admission_status":
+            return self._mutation_admission_status(arguments)
         if name == "nexus_workspace_snapshot":
             return self._workspace_snapshot()
         if name == "nexus_read":
