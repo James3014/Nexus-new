@@ -291,9 +291,13 @@ def from_devspace_core_session_readback(
         "t_core_detection": observation.get("tCoreDetection"),
         "core_orchestration_runtime_ms": observation.get("orchestrationRuntimeMs"),
     }
+    verdict_recorded = observation.get("acquisitionStatus") == "VERDICT_RECORDED"
+    if not verdict_recorded:
+        for field in ("core_verdict", "core_reason", "receipt_hash", "t_core_detection"):
+            core_fields[field] = None
     for field, value in core_fields.items():
         if not _present(value):
-            missingness[field] = missing_reason or "Core field not recorded."
+            missingness[field] = missing_reason or "Core verdict was not durably recorded."
 
     row.update({
         "target_revision": candidate_head,

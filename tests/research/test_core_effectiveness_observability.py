@@ -343,6 +343,11 @@ def test_devspace_readback_projects_candidate_core_missingness_and_independent_t
         "manual_interventions",
         "attempts_to_green",
     )
+    independent_terminal = {
+        "evidence_id": "independent-positive-terminal",
+        "candidate_head": row["candidate_head"],
+        **{field: row[field] for field in terminal_fields},
+    }
     complete = from_devspace_core_session_readback(
         repository="James3014/devspace",
         work_item_id="wave4-prospective-positive",
@@ -351,14 +356,50 @@ def test_devspace_readback_projects_candidate_core_missingness_and_independent_t
         risk_class="low",
         execution_lane="DIRECT_CANONICAL",
         census_entry=complete_entry,
-        independent_terminal={
-            "evidence_id": "independent-positive-terminal",
-            "candidate_head": row["candidate_head"],
-            **{field: row[field] for field in terminal_fields},
-        },
+        independent_terminal=independent_terminal,
     )
     assert complete["missingness"] == {}
     assert build_g0_coverage_report([complete])["adjudication_complete_count"] == 1
+
+    contradictory_entry = copy.deepcopy(complete_entry)
+    contradictory_entry["coreAcquisitionObservation"].update({
+        "acquisitionStatus": "MISSINGNESS",
+        "missingnessCode": "CORE_RUNTIME_UNAVAILABLE_OR_MISMATCH",
+        "missingnessDetail": "The durable observation reports missing Core acquisition.",
+    })
+    contradictory = from_devspace_core_session_readback(
+        repository="James3014/devspace",
+        work_item_id="wave4-contradictory-core-observation",
+        attempt_index=1,
+        task_family="synthetic_capture_canary",
+        risk_class="low",
+        execution_lane="DIRECT_CANONICAL",
+        census_entry=contradictory_entry,
+        independent_terminal=independent_terminal,
+    )
+    verdict_fields = (
+        "core_verdict",
+        "core_reason",
+        "receipt_hash",
+        "t_core_detection",
+    )
+    assert contradictory["core_invoked"] is True
+    assert contradictory["core_orchestration_runtime_ms"] == 42
+    assert contradictory["core_verdict"] is None
+    assert contradictory["core_reason"] is None
+    assert contradictory["receipt_hash"] is None
+    assert contradictory["t_core_detection"] is None
+    assert contradictory_entry["coreAcquisitionObservation"]["coreVerdict"] == "VERIFIED"
+    assert contradictory_entry["coreAcquisitionObservation"]["receiptHash"] == (
+        "sha256:" + "d" * 64
+    )
+    assert all(field in contradictory["missingness"] for field in verdict_fields)
+    contradictory_report = build_g0_coverage_report([contradictory])
+    assert contradictory_report["terminal_eligible_count"] == 1
+    assert contradictory_report["adjudication_complete_count"] == 0
+    assert all(
+        contradictory_report["terminal_missing_by_field"][field] == 1 for field in verdict_fields
+    )
 
     complete_entry["coreAcquisitionObservation"]["coreInvoked"] = False
     with pytest.raises(ObservabilityContractError, match="core_verdict_without_invocation"):
