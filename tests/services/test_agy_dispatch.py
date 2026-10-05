@@ -405,13 +405,11 @@ def test_stale_snapshot_uses_bounded_family_failure_ttl() -> None:
 def test_installer_deploys_exact_canonical_bytes(tmp_path: Path) -> None:
     target = tmp_path / "nexus-agy-dispatch"
     env = os.environ.copy()
-    env.update(
-        {
-            "NEXUS_AGY_REPO_ROOT": str(ROOT),
-            "NEXUS_AGY_SNAPSHOT": str(ROOT),
-            "NEXUS_AGY_DISPATCH_TARGET": str(target),
-        }
-    )
+    env.update({
+        "NEXUS_AGY_REPO_ROOT": str(ROOT),
+        "NEXUS_AGY_SNAPSHOT": str(ROOT),
+        "NEXUS_AGY_DISPATCH_TARGET": str(target),
+    })
 
     proc = subprocess.run(
         ["bash", str(INSTALLER_PATH)],
@@ -464,17 +462,15 @@ def test_background_timeout_is_persisted_as_outcome_unknown(tmp_path: Path, monk
     dispatch._write_private_prompt(prompt_path, "long task")
 
     def fake_dispatch_run(**kwargs):
-        kwargs["operation_hook"](
-            {
-                "phase": "CLASSIFYING_FAILURE",
-                "attempts": 1,
-                "rotations": 0,
-                "failure_kind": "TIMEOUT",
-                "timed_out": True,
-                "account_alias_hash": "acct",
-                "lease_id_hash": "lease",
-            }
-        )
+        kwargs["operation_hook"]({
+            "phase": "CLASSIFYING_FAILURE",
+            "attempts": 1,
+            "rotations": 0,
+            "failure_kind": "TIMEOUT",
+            "timed_out": True,
+            "account_alias_hash": "acct",
+            "lease_id_hash": "lease",
+        })
         return 1
 
     monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
@@ -594,14 +590,12 @@ def test_quota_progress_is_durable_while_child_runs_and_identity_safe(
 
     def fake_dispatch_run(**kwargs):
         operation_hook = kwargs["operation_hook"]
-        operation_hook(
-            {
-                "phase": "ACCOUNT_LEASED",
-                "account_alias_hash": account_alias_hash,
-                "provider_started_at": None,
-                "first_effect_at": None,
-            }
-        )
+        operation_hook({
+            "phase": "ACCOUNT_LEASED",
+            "account_alias_hash": account_alias_hash,
+            "provider_started_at": None,
+            "first_effect_at": None,
+        })
         dispatch._refresh_quota_snapshot_for_account(
             "private-account-id",
             timeout=4,
@@ -913,13 +907,11 @@ def test_background_spawn_returns_durable_operation_identity(tmp_path: Path, mon
 def test_parse_agy_attestation_binds_resolved_model_and_conversation(tmp_path: Path) -> None:
     log = tmp_path / "agy.log"
     log.write_text(
-        "\n".join(
-            [
-                'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
-                "I0000 model_resolver.go:93] Resolving model gemini-3.8-flash-low",
-                "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
-            ]
-        )
+        "\n".join([
+            'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
+            "I0000 model_resolver.go:93] Resolving model gemini-3.8-flash-low",
+            "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
+        ])
         + "\n",
         encoding="utf-8",
     )
@@ -933,12 +925,10 @@ def test_parse_agy_attestation_binds_resolved_model_and_conversation(tmp_path: P
 def test_parse_agy_attestation_fails_closed_without_matching_witnesses(tmp_path: Path) -> None:
     log = tmp_path / "agy.log"
     log.write_text(
-        "\n".join(
-            [
-                'I0000 model_resolver.go:116] model alias "gemini-other" resolved to "gemini-other-low"',
-                "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
-            ]
-        )
+        "\n".join([
+            'I0000 model_resolver.go:116] model alias "gemini-other" resolved to "gemini-other-low"',
+            "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
+        ])
         + "\n",
         encoding="utf-8",
     )
@@ -952,14 +942,12 @@ def test_parse_agy_attestation_fails_closed_without_matching_witnesses(tmp_path:
 def test_parse_agy_attestation_uses_last_matching_attempt(tmp_path: Path) -> None:
     log = tmp_path / "agy.log"
     log.write_text(
-        "\n".join(
-            [
-                'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
-                "I0000 server.go:1239] Created conversation 11111111-1111-1111-1111-111111111111",
-                'I0001 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low-v2"',
-                "I0001 server.go:1239] Created conversation 22222222-2222-2222-2222-222222222222",
-            ]
-        )
+        "\n".join([
+            'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
+            "I0000 server.go:1239] Created conversation 11111111-1111-1111-1111-111111111111",
+            'I0001 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low-v2"',
+            "I0001 server.go:1239] Created conversation 22222222-2222-2222-2222-222222222222",
+        ])
         + "\n",
         encoding="utf-8",
     )
@@ -988,25 +976,21 @@ def test_background_terminal_receipt_persists_agy_attestation(tmp_path: Path, mo
     def fake_dispatch_run(**kwargs):
         log = Path(os.environ["NEXUS_AGY_ATTESTATION_LOG"])
         log.write_text(
-            "\n".join(
-                [
-                    'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
-                    "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
-                    "W1003 18:22:34.269070     491 rules.go:545] Rule file /repo/AGENTS.md truncated by 706 bytes (original 24638 bytes, limit 24000 bytes)",
-                ]
-            )
+            "\n".join([
+                'I0000 model_resolver.go:116] model alias "gemini-3.8-flash" resolved to "gemini-3.8-flash-low"',
+                "I0000 server.go:1239] Created conversation f67d38d4-f220-4bc0-a216-cef594235952",
+                "W1003 18:22:34.269070     491 rules.go:545] Rule file /repo/AGENTS.md truncated by 706 bytes (original 24638 bytes, limit 24000 bytes)",
+            ])
             + "\n",
             encoding="utf-8",
         )
-        kwargs["operation_hook"](
-            {
-                "phase": "EXECUTING",
-                "attempts": 1,
-                "rotations": 0,
-                "account_alias_hash": "acct",
-                "lease_id_hash": "lease",
-            }
-        )
+        kwargs["operation_hook"]({
+            "phase": "EXECUTING",
+            "attempts": 1,
+            "rotations": 0,
+            "account_alias_hash": "acct",
+            "lease_id_hash": "lease",
+        })
         return 0
 
     monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
@@ -1105,15 +1089,13 @@ def test_cleanup_reconciled_lease_removes_only_exact_stale_receipt(
     lease_hash = "b" * 12
     receipt = leases / f"{alias_hash}.receipt.json"
     receipt.write_text(
-        json.dumps(
-            {
-                "account_alias_hash": alias_hash,
-                "lease_id_hash": lease_hash,
-                "consumer_id": "agy-operation",
-                "claimed_at": 1.0,
-                "pid": 4242,
-            }
-        )
+        json.dumps({
+            "account_alias_hash": alias_hash,
+            "lease_id_hash": lease_hash,
+            "consumer_id": "agy-operation",
+            "claimed_at": 1.0,
+            "pid": 4242,
+        })
         + "\n",
         encoding="utf-8",
     )
@@ -1494,17 +1476,15 @@ def test_operation_run_rebinds_current_runtime_revision(
     monkeypatch.setattr(dispatch, "_runtime_revision", lambda: "b" * 40)
 
     def fake_dispatch_run(**kwargs):
-        kwargs["operation_hook"](
-            {
-                "phase": "CLASSIFYING_FAILURE",
-                "attempts": 1,
-                "rotations": 0,
-                "failure_kind": "TIMEOUT",
-                "timed_out": True,
-                "account_alias_hash": "acct",
-                "lease_id_hash": "lease",
-            }
-        )
+        kwargs["operation_hook"]({
+            "phase": "CLASSIFYING_FAILURE",
+            "attempts": 1,
+            "rotations": 0,
+            "failure_kind": "TIMEOUT",
+            "timed_out": True,
+            "account_alias_hash": "acct",
+            "lease_id_hash": "lease",
+        })
         return 1
 
     monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
@@ -2079,21 +2059,19 @@ def test_background_main_binds_operation_to_effective_clone(
     monkeypatch.setattr(dispatch, "_spawn_background_operation", fake_spawn)
     monkeypatch.setattr(dispatch, "_print_operation", lambda record: None)
 
-    rc = dispatch.main(
-        [
-            "--background",
-            "--cwd",
-            str(linked),
-            "--fallback-clone",
-            str(target),
-            "--prompt",
-            "bounded fallback test",
-            "--write-path",
-            "scripts/ops/nexus-agy-dispatch",
-            "--operation-root",
-            str(tmp_path / "operations"),
-        ]
-    )
+    rc = dispatch.main([
+        "--background",
+        "--cwd",
+        str(linked),
+        "--fallback-clone",
+        str(target),
+        "--prompt",
+        "bounded fallback test",
+        "--write-path",
+        "scripts/ops/nexus-agy-dispatch",
+        "--operation-root",
+        str(tmp_path / "operations"),
+    ])
 
     assert rc == 0
     assert Path(str(captured["cwd"])) == target.resolve()
@@ -2873,16 +2851,14 @@ def test_background_operation_stays_nonterminal_while_provider_group_survives(
     monkeypatch.setattr(dispatch, "_runtime_revision", lambda: "a" * 40)
 
     def fake_dispatch_run(**kwargs):
-        kwargs["operation_hook"](
-            {
-                "phase": "CLASSIFYING_FAILURE",
-                "attempts": 1,
-                "rotations": 0,
-                "failure_kind": "PROVIDER_ERROR",
-                "provider_pid": 12345,
-                "provider_pgid": 54321,
-            }
-        )
+        kwargs["operation_hook"]({
+            "phase": "CLASSIFYING_FAILURE",
+            "attempts": 1,
+            "rotations": 0,
+            "failure_kind": "PROVIDER_ERROR",
+            "provider_pid": 12345,
+            "provider_pgid": 54321,
+        })
         return 1
 
     monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
@@ -2992,15 +2968,13 @@ def test_signal_guard_keeps_operation_nonterminal_when_provider_is_unresolved(
     monkeypatch.setattr(dispatch, "_runtime_revision", lambda: "a" * 40)
 
     def interrupted_dispatch(**kwargs):
-        kwargs["operation_hook"](
-            {
-                "phase": "EXECUTING",
-                "attempts": 1,
-                "rotations": 0,
-                "provider_pid": 12345,
-                "provider_pgid": 12345,
-            }
-        )
+        kwargs["operation_hook"]({
+            "phase": "EXECUTING",
+            "attempts": 1,
+            "rotations": 0,
+            "provider_pid": 12345,
+            "provider_pgid": 12345,
+        })
         raise dispatch._SupervisorSignalError(signal.SIGTERM)
 
     monkeypatch.setattr(dispatch, "dispatch_run", interrupted_dispatch)
@@ -3060,15 +3034,13 @@ def test_wrapper_exception_keeps_operation_nonterminal_when_provider_is_unresolv
     monkeypatch.setattr(dispatch, "_runtime_revision", lambda: "a" * 40)
 
     def exploding_dispatch(**kwargs):
-        kwargs["operation_hook"](
-            {
-                "phase": "EXECUTING",
-                "attempts": 1,
-                "rotations": 0,
-                "provider_pid": 12345,
-                "provider_pgid": 12345,
-            }
-        )
+        kwargs["operation_hook"]({
+            "phase": "EXECUTING",
+            "attempts": 1,
+            "rotations": 0,
+            "provider_pid": 12345,
+            "provider_pgid": 12345,
+        })
         raise RuntimeError("provider wrapper exploded")
 
     monkeypatch.setattr(dispatch, "dispatch_run", exploding_dispatch)
@@ -3190,13 +3162,11 @@ def test_finalize_no_effect_fails_closed_when_lease_identity_conflicts(
     leases.mkdir()
     monkeypatch.setattr(dispatch, "LEASES_DIR", leases)
     (leases / "acct-finalize.receipt.json").write_text(
-        json.dumps(
-            {
-                "account_alias_hash": "acct-finalize",
-                "lease_id_hash": "different-lease",
-                "pid": 999_999_998,
-            }
-        ),
+        json.dumps({
+            "account_alias_hash": "acct-finalize",
+            "lease_id_hash": "different-lease",
+            "pid": 999_999_998,
+        }),
         encoding="utf-8",
     )
 
@@ -3223,14 +3193,12 @@ def test_finalize_no_effect_cli_projects_receipt(
     monkeypatch.setattr(dispatch, "LEASES_DIR", tmp_path / "leases")
 
     assert (
-        dispatch.main(
-            [
-                "--finalize-no-effect",
-                operation_id,
-                "--operation-root",
-                str(operation_root),
-            ]
-        )
+        dispatch.main([
+            "--finalize-no-effect",
+            operation_id,
+            "--operation-root",
+            str(operation_root),
+        ])
         == 0
     )
 
@@ -3479,21 +3447,19 @@ def test_background_terminal_receipt_persists_permission_profile(
     dispatch._write_private_prompt(prompt_path, "edit probe")
 
     def fake_dispatch_run(**kwargs):
-        kwargs["operation_hook"](
-            {
-                "phase": "EXECUTING",
-                "attempts": 1,
-                "rotations": 0,
-                "account_alias_hash": "acct",
-                "lease_id_hash": "lease",
-                "permission_profile_sha256": "f" * 64,
-                "permission_profile_kind": "CODING_BOUNDED",
-                "effective_permissions": {
-                    "allow": ["read_file(/tmp/**)", "write_file(/tmp/file.py)"],
-                    "deny": ["command(git push)"],
-                },
-            }
-        )
+        kwargs["operation_hook"]({
+            "phase": "EXECUTING",
+            "attempts": 1,
+            "rotations": 0,
+            "account_alias_hash": "acct",
+            "lease_id_hash": "lease",
+            "permission_profile_sha256": "f" * 64,
+            "permission_profile_kind": "CODING_BOUNDED",
+            "effective_permissions": {
+                "allow": ["read_file(/tmp/**)", "write_file(/tmp/file.py)"],
+                "deny": ["command(git push)"],
+            },
+        })
         return 0
 
     monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
@@ -3780,12 +3746,10 @@ def test_canonicalize_agy_model_resolves_claude_opus() -> None:
 def test_parse_agy_attestation_matches_canonical_model(tmp_path: Path) -> None:
     log = tmp_path / "agy.log"
     log.write_text(
-        "\n".join(
-            [
-                'I0000 model_resolver.go:116] model alias "claude-opus-4-6-thinking" resolved to "claude-opus-4-6-thinking"',
-                "I0000 server.go:1239] Created conversation aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-            ]
-        )
+        "\n".join([
+            'I0000 model_resolver.go:116] model alias "claude-opus-4-6-thinking" resolved to "claude-opus-4-6-thinking"',
+            "I0000 server.go:1239] Created conversation aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        ])
         + "\n",
         encoding="utf-8",
     )

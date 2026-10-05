@@ -114,28 +114,24 @@ DEFAULT_QUOTA_FAMILY_BLOCK_SECONDS = 300.0
 DEFAULT_QUOTA_PREFLIGHT_TIMEOUT_SECONDS = 8
 DEFAULT_MAX_ACCOUNT_FAILOVERS = 16
 MIN_DRAIN_HORIZON_SECONDS = 60.0
-_QUOTA_PROGRESS_PHASES = frozenset(
-    {
-        "STARTING",
-        "ACCOUNTS_DIR_MISSING",
-        "ACCOUNT_UNKNOWN",
-        "QUERYING_ACCOUNT",
-        "ACCOUNT_RESULT",
-        "DEADLINE_EXCEEDED",
-        "SAVING_SNAPSHOT",
-        "FINISHED",
-        "PREFLIGHT_ADMITTED",
-        "PREFLIGHT_BLOCKED",
-    }
-)
-_QUOTA_ACCOUNT_PHASES = frozenset(
-    {
-        "ACCOUNT_UNKNOWN",
-        "QUERYING_ACCOUNT",
-        "ACCOUNT_RESULT",
-        "DEADLINE_EXCEEDED",
-    }
-)
+_QUOTA_PROGRESS_PHASES = frozenset({
+    "STARTING",
+    "ACCOUNTS_DIR_MISSING",
+    "ACCOUNT_UNKNOWN",
+    "QUERYING_ACCOUNT",
+    "ACCOUNT_RESULT",
+    "DEADLINE_EXCEEDED",
+    "SAVING_SNAPSHOT",
+    "FINISHED",
+    "PREFLIGHT_ADMITTED",
+    "PREFLIGHT_BLOCKED",
+})
+_QUOTA_ACCOUNT_PHASES = frozenset({
+    "ACCOUNT_UNKNOWN",
+    "QUERYING_ACCOUNT",
+    "ACCOUNT_RESULT",
+    "DEADLINE_EXCEEDED",
+})
 _QUOTA_PROGRESS_PREFIX = "NEXUS_AGY_QUOTA "
 _QUOTA_PROGRESS_MAX_LINE = 8192
 _EFFECT_OBSERVATION_INTERVAL_SECONDS = 0.5
@@ -729,19 +725,17 @@ def _dynamic_availability_state(
     preferred_names = set(ordered_preferred)
     reserve_names = set(ordered_reserve) - preferred_names
 
-    result.update(
-        {
-            "preferred": ordered_preferred,
-            "reserve": [name for name in ordered_reserve if name in reserve_names],
-            "fallback": [
-                name
-                for name in ordered_fallback
-                if name not in preferred_names and name not in reserve_names
-            ],
-            "blocked": sorted(set(blocked)),
-            "unknown": sorted(set(unknown)),
-        }
-    )
+    result.update({
+        "preferred": ordered_preferred,
+        "reserve": [name for name in ordered_reserve if name in reserve_names],
+        "fallback": [
+            name
+            for name in ordered_fallback
+            if name not in preferred_names and name not in reserve_names
+        ],
+        "blocked": sorted(set(blocked)),
+        "unknown": sorted(set(unknown)),
+    })
     return result
 
 
@@ -929,14 +923,12 @@ def _parse_input_delivery(text: str) -> dict[str, Any]:
         if observation in seen:
             continue
         seen.add(observation)
-        truncations.append(
-            {
-                "file_name": file_name,
-                "original_bytes": observation[1],
-                "limit_bytes": observation[2],
-                "truncated_bytes": observation[3],
-            }
-        )
+        truncations.append({
+            "file_name": file_name,
+            "original_bytes": observation[1],
+            "limit_bytes": observation[2],
+            "truncated_bytes": observation[3],
+        })
     if not truncations:
         return {}
     return {
@@ -1976,13 +1968,11 @@ def _parse_hcom_args(raw: str | None) -> list[str]:
         raise ValueError("HCOM_ARGS_JSON_INVALID")
     for item in value:
         lowered = item.strip().lower()
-        if lowered in FORBIDDEN_HCOM_COLLAB_FLAGS or lowered.startswith(
-            (
-                "--detach=",
-                "--daemon=",
-                "--background=",
-            )
-        ):
+        if lowered in FORBIDDEN_HCOM_COLLAB_FLAGS or lowered.startswith((
+            "--detach=",
+            "--daemon=",
+            "--background=",
+        )):
             raise ValueError(f"HCOM_COLLAB_FORBIDDEN_FLAG:{item}")
     return list(value)
 
@@ -2038,13 +2028,11 @@ def dispatch_hcom_collab(
     """
     for item in hcom_args:
         lowered = item.strip().lower()
-        if lowered in FORBIDDEN_HCOM_COLLAB_FLAGS or lowered.startswith(
-            (
-                "--detach=",
-                "--daemon=",
-                "--background=",
-            )
-        ):
+        if lowered in FORBIDDEN_HCOM_COLLAB_FLAGS or lowered.startswith((
+            "--detach=",
+            "--daemon=",
+            "--background=",
+        )):
             raise ValueError(f"HCOM_COLLAB_FORBIDDEN_FLAG:{item}")
 
     if coordinator is None:
@@ -2082,26 +2070,22 @@ def dispatch_hcom_collab(
                     model_family=scoped_model_family,
                 )
             except AgyAccountPoolBusyError:
-                emit_meta(
-                    {
-                        "status": "pool_busy",
-                        "attempts": 0,
-                        "rotations": len(exclude_hashes),
-                        "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
-                        "wall_ms": 0,
-                    }
-                )
+                emit_meta({
+                    "status": "pool_busy",
+                    "attempts": 0,
+                    "rotations": len(exclude_hashes),
+                    "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
+                    "wall_ms": 0,
+                })
                 return 75
             except AgyAccountPoolExhaustedError:
-                emit_meta(
-                    {
-                        "status": "pool_exhausted",
-                        "attempts": 0,
-                        "rotations": len(exclude_hashes),
-                        "failure_kind": "ACCOUNT_UNAVAILABLE",
-                        "wall_ms": 0,
-                    }
-                )
+                emit_meta({
+                    "status": "pool_exhausted",
+                    "attempts": 0,
+                    "rotations": len(exclude_hashes),
+                    "failure_kind": "ACCOUNT_UNAVAILABLE",
+                    "wall_ms": 0,
+                })
                 return 75
             if scoped_model_family is None:
                 break
@@ -2168,16 +2152,14 @@ def dispatch_hcom_collab(
             env.pop(key, None)
         status_read_fd, status_write_fd = os.pipe()
         os.set_inheritable(status_write_fd, True)
-        env.update(
-            {
-                "NEXUS_HCOM_AGY_LEASE_ACCOUNT": claim.internal_id,
-                "NEXUS_HCOM_AGY_PROFILE_HOME": str(profile),
-                "NEXUS_HCOM_AGY_LEASE_FD": str(lease_fd),
-                "NEXUS_HCOM_AGY_LEASE_ID_HASH": claim.lease_id_hash,
-                "NEXUS_HCOM_AGY_ACCOUNT_ALIAS_HASH": claim.account_alias_hash,
-                "NEXUS_HCOM_AGY_STATUS_FD": str(status_write_fd),
-            }
-        )
+        env.update({
+            "NEXUS_HCOM_AGY_LEASE_ACCOUNT": claim.internal_id,
+            "NEXUS_HCOM_AGY_PROFILE_HOME": str(profile),
+            "NEXUS_HCOM_AGY_LEASE_FD": str(lease_fd),
+            "NEXUS_HCOM_AGY_LEASE_ID_HASH": claim.lease_id_hash,
+            "NEXUS_HCOM_AGY_ACCOUNT_ALIAS_HASH": claim.account_alias_hash,
+            "NEXUS_HCOM_AGY_STATUS_FD": str(status_write_fd),
+        })
         child = popen_factory(
             [str(launcher), *hcom_args],
             cwd=cwd,
@@ -2302,13 +2284,11 @@ def _run_foreground_hcom_operation(
     )
     journal.mark_started(operation_id, pid=os.getpid())
     journal.update(operation_id, phase="STARTING")
-    emit_meta(
-        {
-            "status": "hcom_collab_started",
-            "operation_id": operation_id,
-            "attempt_id": attempt_id,
-        }
-    )
+    emit_meta({
+        "status": "hcom_collab_started",
+        "operation_id": operation_id,
+        "attempt_id": attempt_id,
+    })
 
     def on_event(event: dict[str, Any]) -> None:
         journal.heartbeat(
@@ -2413,18 +2393,16 @@ def dispatch_run(
             permission_profile_sha256=None,
             effective_permissions=None,
         )
-        emit_meta(
-            {
-                "status": "invalid_contract",
-                "attempts": 0,
-                "rotations": 0,
-                "failure_kind": contract_failure,
-                "provider_effect": False,
-                "wall_ms": 0,
-                "permission_profile_sha256": None,
-                "permission_profile_kind": "INVALID",
-            }
-        )
+        emit_meta({
+            "status": "invalid_contract",
+            "attempts": 0,
+            "rotations": 0,
+            "failure_kind": contract_failure,
+            "provider_effect": False,
+            "wall_ms": 0,
+            "permission_profile_sha256": None,
+            "permission_profile_kind": "INVALID",
+        })
         return 64
 
     _operation_hook(
@@ -2444,16 +2422,14 @@ def dispatch_run(
             failure_kind=effort_failure,
             provider_effect=False,
         )
-        emit_meta(
-            {
-                "status": "invalid_contract",
-                "attempts": 0,
-                "rotations": 0,
-                "failure_kind": effort_failure,
-                "provider_effect": False,
-                "wall_ms": 0,
-            }
-        )
+        emit_meta({
+            "status": "invalid_contract",
+            "attempts": 0,
+            "rotations": 0,
+            "failure_kind": effort_failure,
+            "provider_effect": False,
+            "wall_ms": 0,
+        })
         return 64
 
     if model is not None:
@@ -2482,16 +2458,14 @@ def dispatch_run(
                 failure_kind=model_failure,
                 provider_effect=False,
             )
-            emit_meta(
-                {
-                    "status": "invalid_model",
-                    "attempts": 0,
-                    "rotations": 0,
-                    "failure_kind": model_failure,
-                    "provider_effect": False,
-                    "wall_ms": 0,
-                }
-            )
+            emit_meta({
+                "status": "invalid_model",
+                "attempts": 0,
+                "rotations": 0,
+                "failure_kind": model_failure,
+                "provider_effect": False,
+                "wall_ms": 0,
+            })
             return 64
 
     if admission is not None:
@@ -2507,16 +2481,14 @@ def dispatch_run(
                 failure_kind=admission_failure,
                 provider_effect=False,
             )
-            emit_meta(
-                {
-                    "status": "admission_rejected",
-                    "attempts": 0,
-                    "rotations": 0,
-                    "failure_kind": admission_failure,
-                    "provider_effect": False,
-                    "wall_ms": 0,
-                }
-            )
+            emit_meta({
+                "status": "admission_rejected",
+                "attempts": 0,
+                "rotations": 0,
+                "failure_kind": admission_failure,
+                "provider_effect": False,
+                "wall_ms": 0,
+            })
             return 64
 
     if coordinator is None:
@@ -2565,16 +2537,14 @@ def dispatch_run(
                 "quota_state": "blocked",
             },
         )
-        emit_meta(
-            {
-                "status": "failed",
-                "attempts": 0,
-                "rotations": 0,
-                "failure_kind": "PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT",
-                "provider_effect": False,
-                "wall_ms": 0,
-            }
-        )
+        emit_meta({
+            "status": "failed",
+            "attempts": 0,
+            "rotations": 0,
+            "failure_kind": "PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT",
+            "provider_effect": False,
+            "wall_ms": 0,
+        })
         return 75
 
     consumer_id = "desktop-" + uuid.uuid4().hex
@@ -2589,28 +2559,24 @@ def dispatch_run(
             model_family=scoped_model_family,
         )
     except AgyAccountPoolBusyError:
-        emit_meta(
-            {
-                "status": "pool_busy",
-                "attempts": 0,
-                "rotations": 0,
-                "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
-                "provider_effect": False,
-                "wall_ms": 0,
-            }
-        )
+        emit_meta({
+            "status": "pool_busy",
+            "attempts": 0,
+            "rotations": 0,
+            "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
+            "provider_effect": False,
+            "wall_ms": 0,
+        })
         return 75
     except AgyAccountPoolExhaustedError:
-        emit_meta(
-            {
-                "status": "pool_exhausted",
-                "attempts": 0,
-                "rotations": 0,
-                "failure_kind": "ACCOUNT_UNAVAILABLE",
-                "provider_effect": False,
-                "wall_ms": 0,
-            }
-        )
+        emit_meta({
+            "status": "pool_exhausted",
+            "attempts": 0,
+            "rotations": 0,
+            "failure_kind": "ACCOUNT_UNAVAILABLE",
+            "provider_effect": False,
+            "wall_ms": 0,
+        })
         return 75
 
     attempts = 0
@@ -2676,18 +2642,16 @@ def dispatch_run(
                             model_family=scoped_model_family,
                             unavailable_until=unavailable_until,
                         )
-                        emit_meta(
-                            {
-                                "status": "failed",
-                                "attempts": attempts,
-                                "rotations": rotations,
-                                "failure_kind": "ACCOUNT_FAILOVER_LIMIT",
-                                "account_alias_hash": claim.account_alias_hash,
-                                "lease_id_hash": claim.lease_id_hash,
-                                "parallel_slot": True,
-                                "wall_ms": total_wall_ms,
-                            }
-                        )
+                        emit_meta({
+                            "status": "failed",
+                            "attempts": attempts,
+                            "rotations": rotations,
+                            "failure_kind": "ACCOUNT_FAILOVER_LIMIT",
+                            "account_alias_hash": claim.account_alias_hash,
+                            "lease_id_hash": claim.lease_id_hash,
+                            "parallel_slot": True,
+                            "wall_ms": total_wall_ms,
+                        })
                         return 75
                     try:
                         claim = coordinator.rotate_claim(
@@ -2717,30 +2681,26 @@ def dispatch_run(
                         )
                         continue
                     except AgyAccountPoolBusyError:
-                        emit_meta(
-                            {
-                                "status": "pool_busy",
-                                "attempts": attempts,
-                                "rotations": rotations,
-                                "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
-                                "wall_ms": total_wall_ms,
-                                "permission_profile_sha256": permission_profile_sha256,
-                                "permission_profile_kind": permission_profile_kind,
-                            }
-                        )
+                        emit_meta({
+                            "status": "pool_busy",
+                            "attempts": attempts,
+                            "rotations": rotations,
+                            "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
+                            "wall_ms": total_wall_ms,
+                            "permission_profile_sha256": permission_profile_sha256,
+                            "permission_profile_kind": permission_profile_kind,
+                        })
                         return 75
                     except AgyAccountPoolExhaustedError:
-                        emit_meta(
-                            {
-                                "status": "pool_exhausted",
-                                "attempts": attempts,
-                                "rotations": rotations,
-                                "failure_kind": "QUOTA_EXHAUSTED",
-                                "wall_ms": total_wall_ms,
-                                "permission_profile_sha256": permission_profile_sha256,
-                                "permission_profile_kind": permission_profile_kind,
-                            }
-                        )
+                        emit_meta({
+                            "status": "pool_exhausted",
+                            "attempts": attempts,
+                            "rotations": rotations,
+                            "failure_kind": "QUOTA_EXHAUSTED",
+                            "wall_ms": total_wall_ms,
+                            "permission_profile_sha256": permission_profile_sha256,
+                            "permission_profile_kind": permission_profile_kind,
+                        })
                         return 75
 
             if scoped_model_family is not None:
@@ -2885,19 +2845,17 @@ def dispatch_run(
                 sys.stdout.write(out)
                 if err:
                     sys.stderr.write(err)
-                emit_meta(
-                    {
-                        "status": "completed",
-                        "attempts": attempts,
-                        "rotations": rotations,
-                        "account_alias_hash": claim.account_alias_hash,
-                        "lease_id_hash": claim.lease_id_hash,
-                        "parallel_slot": True,
-                        "wall_ms": total_wall_ms,
-                        "permission_profile_sha256": permission_profile_sha256,
-                        "permission_profile_kind": permission_profile_kind,
-                    }
-                )
+                emit_meta({
+                    "status": "completed",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "account_alias_hash": claim.account_alias_hash,
+                    "lease_id_hash": claim.lease_id_hash,
+                    "parallel_slot": True,
+                    "wall_ms": total_wall_ms,
+                    "permission_profile_sha256": permission_profile_sha256,
+                    "permission_profile_kind": permission_profile_kind,
+                })
                 return 0
 
             kind = (
@@ -2967,22 +2925,20 @@ def dispatch_run(
                     sys.stdout.write(out)
                 if err:
                     sys.stderr.write(err)
-                emit_meta(
-                    {
-                        "status": "failed",
-                        "attempts": attempts,
-                        "rotations": rotations,
-                        "failure_kind": last_kind,
-                        "provider_effect": provider_effect_observed,
-                        "reconciliation_required": True,
-                        "account_alias_hash": claim.account_alias_hash,
-                        "lease_id_hash": claim.lease_id_hash,
-                        "parallel_slot": True,
-                        "wall_ms": total_wall_ms,
-                        "permission_profile_sha256": permission_profile_sha256,
-                        "permission_profile_kind": permission_profile_kind,
-                    }
-                )
+                emit_meta({
+                    "status": "failed",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": last_kind,
+                    "provider_effect": provider_effect_observed,
+                    "reconciliation_required": True,
+                    "account_alias_hash": claim.account_alias_hash,
+                    "lease_id_hash": claim.lease_id_hash,
+                    "parallel_slot": True,
+                    "wall_ms": total_wall_ms,
+                    "permission_profile_sha256": permission_profile_sha256,
+                    "permission_profile_kind": permission_profile_kind,
+                })
                 return code if isinstance(code, int) and code != 0 else 1
 
             if not is_agy_rotation_eligible(kind):
@@ -2990,21 +2946,19 @@ def dispatch_run(
                     sys.stdout.write(out)
                 if err:
                     sys.stderr.write(err)
-                emit_meta(
-                    {
-                        "status": "failed",
-                        "attempts": attempts,
-                        "rotations": rotations,
-                        "failure_kind": last_kind,
-                        "provider_effect": False,
-                        "account_alias_hash": claim.account_alias_hash,
-                        "lease_id_hash": claim.lease_id_hash,
-                        "parallel_slot": True,
-                        "wall_ms": total_wall_ms,
-                        "permission_profile_sha256": permission_profile_sha256,
-                        "permission_profile_kind": permission_profile_kind,
-                    }
-                )
+                emit_meta({
+                    "status": "failed",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": last_kind,
+                    "provider_effect": False,
+                    "account_alias_hash": claim.account_alias_hash,
+                    "lease_id_hash": claim.lease_id_hash,
+                    "parallel_slot": True,
+                    "wall_ms": total_wall_ms,
+                    "permission_profile_sha256": permission_profile_sha256,
+                    "permission_profile_kind": permission_profile_kind,
+                })
                 return code if isinstance(code, int) and code != 0 else 1
 
             family_unavailable_until = None
@@ -3036,22 +2990,20 @@ def dispatch_run(
                     sys.stdout.write(out)
                 if err:
                     sys.stderr.write(err)
-                emit_meta(
-                    {
-                        "status": "failed",
-                        "attempts": attempts,
-                        "rotations": rotations,
-                        "work_failures": work_failures,
-                        "work_budget": work_budget,
-                        "failure_kind": last_kind,
-                        "account_alias_hash": claim.account_alias_hash,
-                        "lease_id_hash": claim.lease_id_hash,
-                        "parallel_slot": True,
-                        "wall_ms": total_wall_ms,
-                        "permission_profile_sha256": permission_profile_sha256,
-                        "permission_profile_kind": permission_profile_kind,
-                    }
-                )
+                emit_meta({
+                    "status": "failed",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "work_failures": work_failures,
+                    "work_budget": work_budget,
+                    "failure_kind": last_kind,
+                    "account_alias_hash": claim.account_alias_hash,
+                    "lease_id_hash": claim.lease_id_hash,
+                    "parallel_slot": True,
+                    "wall_ms": total_wall_ms,
+                    "permission_profile_sha256": permission_profile_sha256,
+                    "permission_profile_kind": permission_profile_kind,
+                })
                 return code if isinstance(code, int) and code != 0 else 1
 
             if rotations >= max_failovers:
@@ -3064,22 +3016,20 @@ def dispatch_run(
                     )
                 except Exception:
                     pass
-                emit_meta(
-                    {
-                        "status": "failed",
-                        "attempts": attempts,
-                        "rotations": rotations,
-                        "work_failures": work_failures,
-                        "work_budget": work_budget,
-                        "failure_kind": "ACCOUNT_FAILOVER_LIMIT",
-                        "account_alias_hash": claim.account_alias_hash,
-                        "lease_id_hash": claim.lease_id_hash,
-                        "parallel_slot": True,
-                        "wall_ms": total_wall_ms,
-                        "permission_profile_sha256": permission_profile_sha256,
-                        "permission_profile_kind": permission_profile_kind,
-                    }
-                )
+                emit_meta({
+                    "status": "failed",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "work_failures": work_failures,
+                    "work_budget": work_budget,
+                    "failure_kind": "ACCOUNT_FAILOVER_LIMIT",
+                    "account_alias_hash": claim.account_alias_hash,
+                    "lease_id_hash": claim.lease_id_hash,
+                    "parallel_slot": True,
+                    "wall_ms": total_wall_ms,
+                    "permission_profile_sha256": permission_profile_sha256,
+                    "permission_profile_kind": permission_profile_kind,
+                })
                 return 75
 
             # Rotation eligible: rotate claim
@@ -3103,37 +3053,31 @@ def dispatch_run(
                     lease_id_hash=claim.lease_id_hash,
                 )
             except AgyAccountPoolBusyError:
-                emit_meta(
-                    {
-                        "status": "pool_busy",
-                        "attempts": attempts,
-                        "rotations": rotations,
-                        "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
-                        "wall_ms": total_wall_ms,
-                    }
-                )
+                emit_meta({
+                    "status": "pool_busy",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
+                    "wall_ms": total_wall_ms,
+                })
                 return 75
             except AgyAccountPoolExhaustedError:
-                emit_meta(
-                    {
-                        "status": "pool_exhausted",
-                        "attempts": attempts,
-                        "rotations": rotations,
-                        "failure_kind": last_kind,
-                        "wall_ms": total_wall_ms,
-                    }
-                )
+                emit_meta({
+                    "status": "pool_exhausted",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": last_kind,
+                    "wall_ms": total_wall_ms,
+                })
                 return 75
             except Exception:
-                emit_meta(
-                    {
-                        "status": "failed",
-                        "attempts": attempts,
-                        "rotations": rotations,
-                        "failure_kind": last_kind,
-                        "wall_ms": total_wall_ms,
-                    }
-                )
+                emit_meta({
+                    "status": "failed",
+                    "attempts": attempts,
+                    "rotations": rotations,
+                    "failure_kind": last_kind,
+                    "wall_ms": total_wall_ms,
+                })
                 return 75
     finally:
         # Numeric PID/PGID observations can retain the lease, but they do not
@@ -3719,13 +3663,11 @@ def _reconcile_operation(
     reconciliation = dict(record.get("reconciliation") or {})
     reconciliation["lease_cleanup"] = lease_cleanup
     if lease_cleanup.get("result") == "COLLAB_PROVIDER_IDENTITY_UNPROVEN_PRESERVED":
-        reconciliation.update(
-            {
-                "result": "HCOM_COLLAB_PROVIDER_IDENTITY_UNPROVEN",
-                "provider_alive_after": None,
-                "retry_permitted": False,
-            }
-        )
+        reconciliation.update({
+            "result": "HCOM_COLLAB_PROVIDER_IDENTITY_UNPROVEN",
+            "provider_alive_after": None,
+            "retry_permitted": False,
+        })
         return journal.update(
             operation_id,
             phase="RECONCILE_REQUIRED",
@@ -3734,12 +3676,10 @@ def _reconcile_operation(
     return journal.update(operation_id, reconciliation=reconciliation)
 
 
-_SAFE_NO_EFFECT_LEASE_RESULTS = frozenset(
-    {
-        "ALREADY_ABSENT",
-        "LEASE_RECEIPT_REMOVED",
-    }
-)
+_SAFE_NO_EFFECT_LEASE_RESULTS = frozenset({
+    "ALREADY_ABSENT",
+    "LEASE_RECEIPT_REMOVED",
+})
 
 
 def _finalize_no_effect_operation(
@@ -3773,16 +3713,14 @@ def _finalize_no_effect_operation(
         raise AgyOperationJournalError(f"NO_EFFECT_LEASE_NOT_SAFE:{lease_result or 'UNKNOWN'}")
 
     source_proof = journal.prove_source_state_unchanged(operation_id)
-    reconciliation.update(
-        {
-            "at": _agy_operation_journal.utc_now(),
-            "result": "SOURCE_NO_DURABLE_EFFECT_PROVEN",
-            "reconciliation_scope": "SOURCE_ONLY",
-            "retry_permitted": True,
-            "source_proof": source_proof,
-            "lease_cleanup": lease_cleanup,
-        }
-    )
+    reconciliation.update({
+        "at": _agy_operation_journal.utc_now(),
+        "result": "SOURCE_NO_DURABLE_EFFECT_PROVEN",
+        "reconciliation_scope": "SOURCE_ONLY",
+        "retry_permitted": True,
+        "source_proof": source_proof,
+        "lease_cleanup": lease_cleanup,
+    })
     return journal.mark_terminal(
         operation_id,
         status="FAILED",
