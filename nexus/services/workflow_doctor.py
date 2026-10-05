@@ -284,8 +284,10 @@ def _collect_pr(
             [],
         )
 
-    head = pr.get("head") if isinstance(pr.get("head"), dict) else {}
-    base = pr.get("base") if isinstance(pr.get("base"), dict) else {}
+    head_value = pr.get("head")
+    base_value = pr.get("base")
+    head: dict[str, Any] = head_value if isinstance(head_value, dict) else {}
+    base: dict[str, Any] = base_value if isinstance(base_value, dict) else {}
     head_sha = head.get("sha")
     base_ref = base.get("ref") or "main"
     checks_payload, checks_error = _json_command(
@@ -605,7 +607,7 @@ def _marker_view(path: Path, keys: tuple[str, ...]) -> dict[str, Any]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {"path": str(path), "status": "UNREADABLE"}
-    result = {"path": str(path), "status": "OBSERVED"}
+    result: dict[str, Any] = {"path": str(path), "status": "OBSERVED"}
     if isinstance(payload, dict):
         for key in keys:
             if key in payload:
@@ -920,14 +922,99 @@ def _resolve_nexus_certify_executable(home: Path) -> Path | None:
     return resolved if resolved.is_file() else None
 
 
+def _collect_pr_evidence_subject(
+    repository: str | None,
+    pr: dict[str, Any],
+    *,
+    repo_root: Path,
+    runner: CommandRunner,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Collect only the physical PR subject fields required by Core evidence-check."""
+    if not repository or "/" not in repository or pr.get("status") != "OBSERVED":
+        return None, "CORE_PR_SUBJECT_UNAVAILABLE"
+    pr_number = pr.get("pr_number")
+    base_sha = pr.get("base_sha")
+    head_sha = pr.get("head_sha")
+    if not isinstance(pr_number, int) or not isinstance(base_sha, str) or not isinstance(head_sha, str):
+        return None, "CORE_PR_SUBJECT_UNAVAILABLE"
+
+    base_commit, base_error = _json_command(
+        ["gh", "api", f"repos/{repository}/git/commits/{base_sha}"],
+        cwd=repo_root,
+        runner=runner,
+    )
+    head_commit, head_error = _json_command(
+        ["gh", "api", f"repos/{repository}/git/commits/{head_sha}"],
+        cwd=repo_root,
+        runner=runner,
+    )
+    files_payload, files_error = _json_command(
+        [
+            "gh",
+            "api",
+            "--paginate",
+            "--slurp",
+            f"repos/{repository}/pulls/{pr_number}/files?per_page=100",
+        ],
+        cwd=repo_root,
+        runner=runner,
+        timeout=20.0,
+    )
+    if not isinstance(base_commit, dict) or not isinstance(head_commit, dict):
+        return None, base_error or head_error or "CORE_PR_TREE_OBSERVATION_FAILED"
+    base_tree = base_commit.get("tree")
+    head_tree = head_commit.get("tree")
+    base_tree_sha = base_tree.get("sha") if isinstance(base_tree, dict) else None
+    head_tree_sha = head_tree.get("sha") if isinstance(head_tree, dict) else None
+    if not isinstance(base_tree_sha, str) or not isinstance(head_tree_sha, str):
+        return None, "CORE_PR_TREE_OBSERVATION_FAILED"
+
+    file_rows: list[dict[str, Any]] = []
+    if isinstance(files_payload, list):
+        for page in files_payload:
+            if isinstance(page, list):
+                file_rows.extend(row for row in page if isinstance(row, dict))
+            elif isinstance(page, dict):
+                file_rows.append(page)
+    if files_error is not None or not file_rows:
+        return None, files_error or "CORE_PR_PATH_OBSERVATION_FAILED"
+    changed_paths = sorted(
+        str(row["filename"])
+        for row in file_rows
+        if isinstance(row.get("filename"), str) and row["filename"]
+    )
+    deleted_paths = sorted(
+        str(row["filename"])
+        for row in file_rows
+        if row.get("status") == "removed"
+        and isinstance(row.get("filename"), str)
+        and row["filename"]
+    )
+    if not changed_paths:
+        return None, "CORE_PR_PATH_OBSERVATION_FAILED"
+    owner, name = repository.split("/", 1)
+    return {
+        "repository_owner": owner,
+        "repository_name": name,
+        "pr_number": pr_number,
+        "base_sha": base_sha,
+        "head_sha": head_sha,
+        "base_tree": base_tree_sha,
+        "head_tree": head_tree_sha,
+        "changed_paths": changed_paths,
+        "deleted_paths": deleted_paths,
+    }, None
+
+
 def _collect_core_verification(
     repo_root: Path,
     *,
     home: Path,
-    subject_revision: str | None,
+    repository: str | None,
+    pr: dict[str, Any],
     runner: CommandRunner,
 ) -> dict[str, Any]:
-    """Observe Core receipt truth through the public nexus-certify receipt-check surface."""
+    """Observe canonical Core truth through nexus-certify evidence-check only."""
     receipts_root = repo_root / ".nexus-core" / "receipts"
     try:
         receipts = sorted(
@@ -943,139 +1030,92 @@ def _collect_core_verification(
             "error": "CORE_VERIFICATION_RECEIPT_NOT_FOUND",
         }
     receipt = receipts[0]
-    if not subject_revision:
-        return {
-            "status": "UNKNOWN",
-            "receipt_path": str(receipt),
-            "error": "CORE_VERIFICATION_SUBJECT_UNAVAILABLE",
-        }
 
     executable = _resolve_nexus_certify_executable(home)
     if executable is None:
         return {
             "status": "UNAVAILABLE",
             "receipt_path": str(receipt),
-            "error": "NEXUS_CERTIFY_VALIDATOR_UNAVAILABLE",
+            "error": "NEXUS_CERTIFY_EVIDENCE_CHECK_UNAVAILABLE",
         }
-
-    try:
-        proc = _run(
-            [
-                str(executable),
-                "receipt-check",
-                "--receipt",
-                str(receipt),
-                "--repo",
-                str(repo_root),
-            ],
-            cwd=repo_root,
-            runner=runner,
-            timeout=20.0,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    subject, subject_error = _collect_pr_evidence_subject(
+        repository,
+        pr,
+        repo_root=repo_root,
+        runner=runner,
+    )
+    if not isinstance(subject, dict):
         return {
             "status": "UNKNOWN",
             "receipt_path": str(receipt),
             "validator_executable": str(executable),
-            "error": f"CORE_RECEIPT_VALIDATION_FAILED:{type(exc).__name__}:{exc}",
+            "error": subject_error or "CORE_PR_SUBJECT_UNAVAILABLE",
         }
 
-    validation: dict[str, Any] | None = None
-    if proc.stdout.strip():
-        try:
-            parsed = json.loads(proc.stdout)
-            if isinstance(parsed, dict):
-                validation = parsed
-        except json.JSONDecodeError:
-            validation = None
-    validation_valid = bool(
-        proc.returncode == 0
-        and isinstance(validation, dict)
-        and validation.get("valid") is True
+    argv = [
+        str(executable),
+        "evidence-check",
+        "--receipt",
+        str(receipt),
+        "--repository-owner",
+        str(subject["repository_owner"]),
+        "--repository-name",
+        str(subject["repository_name"]),
+        "--pr-number",
+        str(subject["pr_number"]),
+        "--base-sha",
+        str(subject["base_sha"]),
+        "--head-sha",
+        str(subject["head_sha"]),
+        "--base-tree",
+        str(subject["base_tree"]),
+        "--head-tree",
+        str(subject["head_tree"]),
+    ]
+    for path in subject["changed_paths"]:
+        argv.extend(["--changed-path", str(path)])
+    for path in subject["deleted_paths"]:
+        argv.extend(["--deleted-path", str(path)])
+    observed, error = _json_command(
+        argv,
+        cwd=repo_root,
+        runner=runner,
+        timeout=20.0,
     )
-    validation_reason_codes = (
-        list(validation.get("reason_codes") or [])
-        if isinstance(validation, dict)
-        else ["CORE_RECEIPT_CHECK_OUTPUT_INVALID"]
-    )
-
-    try:
-        observed = json.loads(receipt.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        return {
-            "status": "OBSERVED",
-            "receipt_path": str(receipt),
-            "validator_executable": str(executable),
-            "validation_valid": False,
-            "validation_reason_codes": ["MALFORMED_RECEIPT"],
-            "error": f"CORE_RECEIPT_READ_FAILED:{exc}",
-            "current_verified": False,
-        }
     if not isinstance(observed, dict):
         return {
-            "status": "OBSERVED",
+            "status": "UNKNOWN",
             "receipt_path": str(receipt),
             "validator_executable": str(executable),
-            "validation_valid": False,
-            "validation_reason_codes": ["MALFORMED_RECEIPT"],
-            "current_verified": False,
+            "error": error or "CORE_EVIDENCE_CHECK_FAILED",
         }
 
-    core_response = observed.get("core_response")
-    core_verification = (
-        core_response.get("verification") if isinstance(core_response, dict) else None
-    )
-    outcome = observed.get("outcome")
-    product = observed.get("product")
-    subject_tree = _git_value(
-        repo_root,
-        "rev-parse",
-        f"{subject_revision}^{{tree}}",
-        runner=runner,
-    )
-    exact_subject = bool(
-        subject_tree
-        and observed.get("target_revision") == f"git-tree:{subject_tree}"
-        and observed.get("target_tree") == f"git-tree:{subject_tree}"
-    )
-    core_verified = bool(
-        isinstance(core_verification, dict)
-        and core_verification.get("status") == "VERIFIED"
-        and core_verification.get("integrity") == "VALID"
-        and isinstance(outcome, dict)
-        and outcome.get("status") == "VERIFIED"
-        and outcome.get("transport_error") is False
+    receipt_integrity = observed.get("receipt_integrity")
+    applicability = observed.get("evidence_applicability")
+    core_status = observed.get("core_verification")
+    current_verified = bool(
+        receipt_integrity == "VALID"
+        and applicability == "APPLIES"
+        and core_status == "VERIFIED"
     )
     return {
         "status": "OBSERVED",
+        "authority": "James3014/nexus-core",
         "receipt_path": str(receipt),
         "validator_executable": str(executable),
-        "validator": "nexus-certify receipt-check",
-        "validation_valid": validation_valid,
-        "validation_reason_codes": validation_reason_codes,
-        "receipt_hash": observed.get("receipt_hash"),
-        "timestamp": observed.get("timestamp"),
-        "product_name": product.get("name") if isinstance(product, dict) else None,
-        "product_version": product.get("version") if isinstance(product, dict) else None,
-        "source_revision": observed.get("source_revision"),
-        "source_tree": observed.get("source_tree"),
-        "target_revision": observed.get("target_revision"),
-        "target_tree": observed.get("target_tree"),
-        "core_status": (
-            core_verification.get("status") if isinstance(core_verification, dict) else None
-        ),
-        "core_integrity": (
-            core_verification.get("integrity") if isinstance(core_verification, dict) else None
-        ),
-        "core_reason_codes": (
-            list(core_verification.get("reason_codes") or [])
-            if isinstance(core_verification, dict)
-            else []
-        ),
-        "exact_subject": exact_subject,
-        "subject_revision": subject_revision,
-        "subject_tree": f"git-tree:{subject_tree}" if subject_tree else None,
-        "current_verified": bool(validation_valid and exact_subject and core_verified),
+        "validator": "nexus-certify evidence-check",
+        "receipt_integrity": receipt_integrity,
+        "evidence_applicability": applicability,
+        "core_status": core_status,
+        "reason_codes": list(observed.get("reason_codes") or []),
+        "claim_ceiling": list(observed.get("claim_ceiling") or []),
+        "subject_revision": pr.get("head_sha"),
+        "subject_base_revision": pr.get("base_sha"),
+        "subject_base_tree": subject.get("base_tree"),
+        "subject_head_tree": subject.get("head_tree"),
+        "changed_paths": list(subject.get("changed_paths") or []),
+        "deleted_paths": list(subject.get("deleted_paths") or []),
+        "current_verified": current_verified,
     }
 
 
@@ -1182,39 +1222,43 @@ def _project_completion_matrix(
         for row in required_gates
     )
     source_verification_pass = core_verification.get("current_verified") is True
+    applicability = core_verification.get("evidence_applicability")
+    receipt_integrity = core_verification.get("receipt_integrity")
     if source_verification_pass:
         source_verification_gap = None
+        source_verification_freshness = "CURRENT"
     elif core_verification.get("status") == "UNAVAILABLE":
         source_verification_gap = "CORE_VERIFICATION_EVIDENCE_NOT_OBSERVED"
-    elif core_verification.get("validation_valid") is False:
+        source_verification_freshness = "UNKNOWN"
+    elif receipt_integrity == "INVALID" or applicability == "TAMPERED":
         source_verification_gap = "CORE_VERIFICATION_RECEIPT_INVALID"
-    elif core_verification.get("exact_subject") is False:
+        source_verification_freshness = "UNKNOWN"
+    elif applicability in {"STALE_SOURCE", "STALE_TARGET", "SUBJECT_MISMATCH"}:
         source_verification_gap = "CORE_VERIFICATION_SUBJECT_NOT_CURRENT"
+        source_verification_freshness = "STALE"
     else:
         source_verification_gap = "CORE_VERIFICATION_NOT_VERIFIED"
+        source_verification_freshness = "UNKNOWN"
     rows.append(
         _completion_row(
             "Source verification",
             status="PASS" if source_verification_pass else "UNKNOWN",
             source=(
-                "nexus_core"
+                "nexus_core_evidence_check"
                 if core_verification.get("status") == "OBSERVED"
                 else "workflow_doctor"
             ),
             revision=subject_revision,
             observed_at=observed_at,
-            freshness="CURRENT" if source_verification_pass else "UNKNOWN",
+            freshness=source_verification_freshness,
             evidence={
+                "authority": core_verification.get("authority"),
                 "core_receipt_path": core_verification.get("receipt_path"),
-                "core_receipt_hash": core_verification.get("receipt_hash"),
-                "core_product_version": core_verification.get("product_version"),
+                "core_receipt_integrity": core_verification.get("receipt_integrity"),
+                "core_evidence_applicability": core_verification.get("evidence_applicability"),
                 "core_status": core_verification.get("core_status"),
-                "core_integrity": core_verification.get("core_integrity"),
-                "core_validation_valid": core_verification.get("validation_valid"),
-                "core_exact_subject": core_verification.get("exact_subject"),
-                "core_validation_reason_codes": core_verification.get(
-                    "validation_reason_codes", []
-                ),
+                "core_reason_codes": core_verification.get("reason_codes", []),
+                "core_claim_ceiling": core_verification.get("claim_ceiling", []),
                 "required_gate_count": len(required_gates),
                 "merge_gate_required_success": required_success,
                 "gate_policy_state": pr.get("gate_policy_state"),
@@ -1439,13 +1483,11 @@ def collect_workflow_doctor(
         repo_root=repo_root,
     )
     leases = _collect_leases(home)
-    subject_revision = _completion_subject_revision(
-        source=source, operation=operation, pr=pr
-    )
     core_verification = _collect_core_verification(
         repo_root,
         home=home,
-        subject_revision=subject_revision,
+        repository=repository,
+        pr=pr,
         runner=runner,
     )
     disposition, next_gate = _derive_next_gate(

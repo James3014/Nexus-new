@@ -539,14 +539,17 @@ def _collect_with_observations(
     required_gates = list(required_gates or [])
     core_verification = core_verification or {
         "status": "OBSERVED",
-        "validation_valid": True,
-        "validation_reason_codes": [],
+        "authority": "James3014/nexus-core",
         "receipt_path": "/tmp/core-receipt.json",
-        "receipt_hash": "sha256:" + "1" * 64,
-        "product_version": "0.1.1",
+        "receipt_integrity": "VALID",
+        "evidence_applicability": "APPLIES",
         "core_status": "VERIFIED",
-        "core_integrity": "VALID",
-        "exact_subject": True,
+        "reason_codes": [],
+        "claim_ceiling": [
+            "VERIFIED_IS_NOT_MERGE_APPROVAL",
+            "NO_RELEASE_AUTHORITY",
+            "NO_DEPLOYMENT_AUTHORITY",
+        ],
         "current_verified": True,
     }
 
@@ -851,7 +854,7 @@ def test_source_verification_projects_exact_core_truth(
     source_verification = _completion_layers(payload)["Source verification"]
 
     assert source_verification["status"] == "PASS"
-    assert source_verification["source"] == "nexus_core"
+    assert source_verification["source"] == "nexus_core_evidence_check"
     assert source_verification["freshness"] == "CURRENT"
     assert source_verification["evidence"]["core_status"] == "VERIFIED"
 
@@ -901,17 +904,18 @@ def test_source_verification_rejects_stale_core_subject(
         tmp_path,
         core_verification={
             "status": "OBSERVED",
-            "validation_valid": True,
-            "validation_reason_codes": [],
+            "receipt_integrity": "VALID",
+            "evidence_applicability": "STALE_TARGET",
             "core_status": "VERIFIED",
-            "core_integrity": "VALID",
-            "exact_subject": False,
+            "reason_codes": ["RECEIPT_TARGET_DOES_NOT_MATCH_CURRENT_PR"],
+            "claim_ceiling": [],
             "current_verified": False,
         },
     )
     source_verification = _completion_layers(payload)["Source verification"]
 
     assert source_verification["status"] == "UNKNOWN"
+    assert source_verification["freshness"] == "STALE"
     assert source_verification["gap"] == "CORE_VERIFICATION_SUBJECT_NOT_CURRENT"
 
 
@@ -923,11 +927,11 @@ def test_source_verification_rejects_invalid_core_receipt(
         tmp_path,
         core_verification={
             "status": "OBSERVED",
-            "validation_valid": False,
-            "validation_reason_codes": ["RECEIPT_HASH_MISMATCH"],
-            "core_status": "VERIFIED",
-            "core_integrity": "VALID",
-            "exact_subject": True,
+            "receipt_integrity": "INVALID",
+            "evidence_applicability": "TAMPERED",
+            "core_status": "NOT_AVAILABLE",
+            "reason_codes": ["RECEIPT_HASH_MISMATCH"],
+            "claim_ceiling": [],
             "current_verified": False,
         },
     )
@@ -935,68 +939,84 @@ def test_source_verification_rejects_invalid_core_receipt(
 
     assert source_verification["status"] == "UNKNOWN"
     assert source_verification["gap"] == "CORE_VERIFICATION_RECEIPT_INVALID"
-    assert source_verification["evidence"]["core_validation_reason_codes"] == [
-        "RECEIPT_HASH_MISMATCH"
-    ]
+    assert source_verification["evidence"]["core_receipt_integrity"] == "INVALID"
+    assert source_verification["evidence"]["core_reason_codes"] == ["RECEIPT_HASH_MISMATCH"]
 
 
-def test_collect_core_verification_delegates_validation_to_core_cli(
+def test_collect_core_verification_delegates_applicability_to_core_cli(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     receipt_dir = tmp_path / ".nexus-core" / "receipts"
     receipt_dir.mkdir(parents=True)
     receipt = receipt_dir / "20261005T000000Z-current.json"
-    subject = "b" * 40
-    subject_tree = "c" * 40
-    receipt.write_text(
-        json.dumps(
-            {
-                "receipt_hash": "sha256:" + "1" * 64,
-                "product": {"name": "nexus-core", "version": "0.1.2"},
-                "source_revision": "git-commit:" + "a" * 40,
-                "source_tree": "git-tree:" + "a" * 40,
-                "target_revision": f"git-tree:{subject_tree}",
-                "target_tree": f"git-tree:{subject_tree}",
-                "outcome": {
-                    "status": "VERIFIED",
-                    "reason_codes": [],
-                    "transport_error": False,
-                },
-                "core_response": {
-                    "verification": {
-                        "status": "VERIFIED",
-                        "integrity": "VALID",
-                        "reason_codes": [],
-                    }
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
+    receipt.write_text("{}", encoding="utf-8")
     executable = tmp_path / "nexus-certify"
     executable.write_text("", encoding="utf-8")
     captured: dict[str, object] = {}
+    pr = {
+        "status": "OBSERVED",
+        "pr_number": 1444,
+        "base_sha": "a" * 40,
+        "head_sha": "b" * 40,
+    }
+    subject = {
+        "repository_owner": "James3014",
+        "repository_name": "Nexus-new",
+        "pr_number": 1444,
+        "base_sha": "a" * 40,
+        "head_sha": "b" * 40,
+        "base_tree": "c" * 40,
+        "head_tree": "d" * 40,
+        "changed_paths": ["nexus/services/workflow_doctor.py"],
+        "deleted_paths": [],
+    }
 
     monkeypatch.setattr(doctor, "_resolve_nexus_certify_executable", lambda home: executable)
-    monkeypatch.setattr(doctor, "_git_value", lambda *args, **kwargs: subject_tree)
+    monkeypatch.setattr(
+        doctor,
+        "_collect_pr_evidence_subject",
+        lambda *args, **kwargs: (dict(subject), None),
+    )
 
     def fake_runner(argv, **kwargs):
-        captured["argv"] = argv
+        captured["argv"] = list(argv)
         return subprocess.CompletedProcess(
-            argv, 0, stdout='{"reason_codes": [], "valid": true}\n', stderr=""
+            argv,
+            0,
+            stdout=json.dumps(
+                {
+                    "subject": None,
+                    "receipt_integrity": "VALID",
+                    "evidence_applicability": "APPLIES",
+                    "core_verification": "VERIFIED",
+                    "reason_codes": [],
+                    "claim_ceiling": [
+                        "VERIFIED_IS_NOT_MERGE_APPROVAL",
+                        "NO_RELEASE_AUTHORITY",
+                        "NO_DEPLOYMENT_AUTHORITY",
+                    ],
+                }
+            ),
+            stderr="",
         )
 
     observed = doctor._collect_core_verification(
-        tmp_path, home=tmp_path, subject_revision=subject, runner=fake_runner
+        tmp_path,
+        home=tmp_path,
+        repository="James3014/Nexus-new",
+        pr=pr,
+        runner=fake_runner,
     )
 
     assert observed["current_verified"] is True
-    assert observed["validation_valid"] is True
-    assert observed["exact_subject"] is True
+    assert observed["receipt_integrity"] == "VALID"
+    assert observed["evidence_applicability"] == "APPLIES"
+    assert observed["core_status"] == "VERIFIED"
     argv = captured["argv"]
     assert isinstance(argv, list)
-    assert argv[:2] == [str(executable), "receipt-check"]
-    assert argv[-2:] == ["--repo", str(tmp_path)]
+    assert argv[:2] == [str(executable), "evidence-check"]
+    assert argv[argv.index("--head-tree") + 1] == "d" * 40
+    assert argv[argv.index("--changed-path") + 1] == "nexus/services/workflow_doctor.py"
 
 
 def test_collect_core_verification_latest_invalid_receipt_blocks_older_valid_receipt(
@@ -1010,23 +1030,100 @@ def test_collect_core_verification_latest_invalid_receipt_blocks_older_valid_rec
     executable = tmp_path / "nexus-certify"
     executable.write_text("", encoding="utf-8")
     captured: dict[str, object] = {}
+    pr = {
+        "status": "OBSERVED",
+        "pr_number": 1444,
+        "base_sha": "a" * 40,
+        "head_sha": "b" * 40,
+    }
+    subject = {
+        "repository_owner": "James3014",
+        "repository_name": "Nexus-new",
+        "pr_number": 1444,
+        "base_sha": "a" * 40,
+        "head_sha": "b" * 40,
+        "base_tree": "c" * 40,
+        "head_tree": "d" * 40,
+        "changed_paths": ["nexus/services/workflow_doctor.py"],
+        "deleted_paths": [],
+    }
 
     monkeypatch.setattr(doctor, "_resolve_nexus_certify_executable", lambda home: executable)
-    monkeypatch.setattr(doctor, "_git_value", lambda *args, **kwargs: "c" * 40)
+    monkeypatch.setattr(
+        doctor,
+        "_collect_pr_evidence_subject",
+        lambda *args, **kwargs: (dict(subject), None),
+    )
 
     def fake_runner(argv, **kwargs):
         captured["receipt"] = argv[argv.index("--receipt") + 1]
         return subprocess.CompletedProcess(
             argv,
-            1,
-            stdout='{"reason_codes": ["RECEIPT_HASH_MISMATCH"], "valid": false}\n',
+            0,
+            stdout=json.dumps(
+                {
+                    "subject": None,
+                    "receipt_integrity": "INVALID",
+                    "evidence_applicability": "TAMPERED",
+                    "core_verification": "NOT_AVAILABLE",
+                    "reason_codes": ["RECEIPT_HASH_MISMATCH"],
+                    "claim_ceiling": [],
+                }
+            ),
             stderr="",
         )
 
     observed = doctor._collect_core_verification(
-        tmp_path, home=tmp_path, subject_revision="b" * 40, runner=fake_runner
+        tmp_path,
+        home=tmp_path,
+        repository="James3014/Nexus-new",
+        pr=pr,
+        runner=fake_runner,
     )
 
     assert captured["receipt"] == str(latest)
     assert observed["current_verified"] is False
-    assert observed["validation_reason_codes"] == ["RECEIPT_HASH_MISMATCH"]
+    assert observed["receipt_integrity"] == "INVALID"
+    assert observed["reason_codes"] == ["RECEIPT_HASH_MISMATCH"]
+
+
+def test_collect_pr_evidence_subject_flattens_pages_and_preserves_deletions(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    responses = [
+        ({"tree": {"sha": "c" * 40}}, None),
+        ({"tree": {"sha": "d" * 40}}, None),
+        (
+            [
+                [
+                    {"filename": "a.py", "status": "modified"},
+                    {"filename": "gone.py", "status": "removed"},
+                ],
+                [{"filename": "z.py", "status": "added"}],
+            ],
+            None,
+        ),
+    ]
+
+    def fake_json_command(*args, **kwargs):
+        return responses.pop(0)
+
+    monkeypatch.setattr(doctor, "_json_command", fake_json_command)
+    subject, error = doctor._collect_pr_evidence_subject(
+        "James3014/Nexus-new",
+        {
+            "status": "OBSERVED",
+            "pr_number": 1444,
+            "base_sha": "a" * 40,
+            "head_sha": "b" * 40,
+        },
+        repo_root=tmp_path,
+        runner=subprocess.run,
+    )
+
+    assert error is None
+    assert subject is not None
+    assert subject["base_tree"] == "c" * 40
+    assert subject["head_tree"] == "d" * 40
+    assert subject["changed_paths"] == ["a.py", "gone.py", "z.py"]
+    assert subject["deleted_paths"] == ["gone.py"]
