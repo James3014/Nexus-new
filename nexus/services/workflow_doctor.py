@@ -948,8 +948,10 @@ def _project_completion_matrix(
                 },
             )
         )
-    elif selected and selected.get("status") == "COMPLETED" and (
-        selected.get("candidate_digest") or selected.get("observed_changed_paths")
+    elif (
+        selected
+        and selected.get("status") == "COMPLETED"
+        and (selected.get("candidate_digest") or selected.get("observed_changed_paths"))
     ):
         rows.append(
             _completion_row(
