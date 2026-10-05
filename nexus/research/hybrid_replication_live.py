@@ -340,7 +340,7 @@ def _load_binding(path: Path, *, require_activation: bool = True) -> dict[str, A
         if provider == "agy":
             if str(online.get("requested_model") or "") != EXACT_AGY_MODEL:
                 raise ValueError("agy_requested_model_identity_drift")
-            if str(online.get("execution_generation") or "") != "AGY_GEMINI_3_8_FLASH_MEDIUM_V1":
+            if str(online.get("execution_generation") or "") != CANONICAL_AGY_EXECUTION_GENERATION:
                 raise ValueError("agy_execution_generation_identity_drift")
             resolve_canonical_agy_dispatch_path(payload)
         elif provider == "codex" or "codex_executable_sha256" in online:
