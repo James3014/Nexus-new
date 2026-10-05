@@ -816,6 +816,9 @@ _PERMISSION_FAILURE_MARKERS = (
     "headless mode cannot prompt for",
     "auto-denied",
     "denied by permission rules",
+    "now let me restore my changes",
+    "scope violation",
+    "unauthorized write path",
 )
 
 
@@ -1307,6 +1310,16 @@ def _operation_hook(callback: Any, **payload: Any) -> None:
 TEMP_COMMAND_DENY = [
     "command(git push)",
     "command(git reset --hard)",
+    "command(git reset)",
+    "command(git checkout)",
+    "command(git restore)",
+    "command(git stash)",
+    "command(git commit)",
+    "command(git branch)",
+    "command(git merge)",
+    "command(git rebase)",
+    "command(git cherry-pick)",
+    "command(git revert)",
     "command(git clean)",
     "command(gh)",
     "command(curl)",
@@ -2747,7 +2760,28 @@ def dispatch_run(
                 or semantic_headless_denial
                 or semantic_permission_refusal
             )
-            if code == 0 and not timed_out and not permission_blocked:
+            attempt_changed_paths = None
+            if attempt_baseline is not None:
+                try:
+                    attempt_changed_paths = direct_operation_journal.observed_changed_paths_since(
+                        cwd, attempt_baseline
+                    )
+                except Exception as exc:
+                    _operation_hook(
+                        operation_hook,
+                        effect_observation_error=(
+                            f"ATTEMPT_EFFECT_OBSERVATION_FAILED:{type(exc).__name__}"
+                        ),
+                    )
+
+            scope_state, scope_violations = direct_operation_journal.validate_write_scope(
+                repo_root=cwd,
+                write_paths=write_paths,
+                observed_changed_paths=attempt_changed_paths,
+            )
+            scope_blocked = bool(write_paths and scope_state == "VIOLATION_OUT_OF_SCOPE")
+
+            if code == 0 and not timed_out and not permission_blocked and not scope_blocked:
                 sys.stdout.write(out)
                 if err:
                     sys.stderr.write(err)
@@ -2766,32 +2800,28 @@ def dispatch_run(
 
             kind = (
                 AccountFailureKind.PERMISSION_OR_SCOPE_ERROR
-                if permission_blocked
+                if (permission_blocked or scope_blocked)
                 else classify_failure(code, out, err, timed_out)
             )
             last_kind = kind.value
             provider_effect_observed: bool | None = False
             reconciliation_required = False
-            attempt_changed_paths = None
-            if permission_blocked or kind == AccountFailureKind.QUOTA_EXHAUSTED:
-                if attempt_baseline is not None:
-                    try:
-                        attempt_changed_paths = (
-                            direct_operation_journal.observed_changed_paths_since(
-                                cwd, attempt_baseline
-                            )
-                        )
-                    except Exception as exc:
-                        _operation_hook(
-                            operation_hook,
-                            effect_observation_error=(
-                                f"ATTEMPT_EFFECT_OBSERVATION_FAILED:{type(exc).__name__}"
-                            ),
-                        )
 
             if permission_blocked and (provider_headless_denial or semantic_headless_denial):
                 last_kind = "HEADLESS_TOOL_PERMISSION_DENIED"
-            if permission_blocked:
+                if attempt_changed_paths:
+                    provider_effect_observed = True
+                    reconciliation_required = True
+                elif attempt_changed_paths == []:
+                    provider_effect_observed = False
+                else:
+                    provider_effect_observed = None
+                    reconciliation_required = True
+            elif scope_blocked:
+                last_kind = "SCOPE_VIOLATION_UNAUTHORIZED_MUTATION"
+                provider_effect_observed = True
+                reconciliation_required = True
+            elif permission_blocked:
                 if attempt_changed_paths:
                     provider_effect_observed = True
                     reconciliation_required = True
@@ -3422,12 +3452,13 @@ def _run_background_operation(
             attestation_log_path,
             requested_model=model,
         )
-        journal.mark_terminal(
+        terminal_record = journal.mark_terminal(
             operation_id,
             status=terminal_status,
             exit_code=exit_code,
             failure_kind=failure_kind,
             cwd=cwd,
+            write_paths=write_paths,
             attempts=int(snapshot.get("attempts") or 0),
             rotations=int(snapshot.get("rotations") or 0),
             account_alias_hash=snapshot.get("account_alias_hash"),
@@ -3455,6 +3486,11 @@ def _run_background_operation(
             effective_permissions=snapshot.get("effective_permissions"),
             **attestation,
         )
+        if (
+            terminal_record.get("status") == "FAILED"
+            and terminal_record.get("failure_kind") == "SCOPE_VIOLATION_UNAUTHORIZED_MUTATION"
+        ):
+            return 1
         return int(exit_code or 0)
     except _SupervisorSignalError:
         raise
