@@ -601,6 +601,31 @@ def test_completion_projection_keeps_merged_integration_separate_from_runtime_un
     assert layers["Native / real entrypoint"]["status"] != "PASS"
 
 
+def test_completion_projection_closed_unmerged_pr_does_not_pass_integration(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A terminal PR without merge evidence must not count as integration PASS."""
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        pr={
+            "status": "OBSERVED",
+            "state": "closed",
+            "merged": False,
+            "merged_at": None,
+            "pr_number": 1437,
+            "head_sha": "b" * 40,
+            "merge_commit_sha": None,
+        },
+    )
+
+    integration = _completion_layers(payload)["Integration"]
+
+    assert integration["status"] != "PASS"
+    assert integration["gap"] == "MERGED_INTEGRATION_NOT_PROVEN"
+
+
 def test_completion_projection_rejects_pass_bound_to_previous_candidate_revision(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
