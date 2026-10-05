@@ -806,12 +806,19 @@ def _has_quota_failure_signal(text: str) -> bool:
 
 
 _PERMISSION_FAILURE_MARKERS = (
-    "permission denied for ",
+    "permission denied",
+    "operation not permitted",
     "tool execution permission block",
+    "tool permission denied",
+    "blocked by active deny rules",
     "blocked by the active security/deny rules",
     "soft-denying tool confirmation",
     "headless mode cannot prompt for",
     "auto-denied",
+    "denied by permission rules",
+    "now let me restore my changes",
+    "scope violation",
+    "unauthorized write path",
 )
 
 
@@ -1303,6 +1310,16 @@ def _operation_hook(callback: Any, **payload: Any) -> None:
 TEMP_COMMAND_DENY = [
     "command(git push)",
     "command(git reset --hard)",
+    "command(git reset)",
+    "command(git checkout)",
+    "command(git restore)",
+    "command(git stash)",
+    "command(git commit)",
+    "command(git branch)",
+    "command(git merge)",
+    "command(git rebase)",
+    "command(git cherry-pick)",
+    "command(git revert)",
     "command(git clean)",
     "command(gh)",
     "command(curl)",
@@ -1328,6 +1345,8 @@ def install_temp_permissions(
     deny_rules: list[str] | None = None,
     allow_unsafe_legacy: bool = False,
     replace_allow_deny: bool = False,
+    mode: str = "plan",
+    expected_profile_sha256: str | None = None,
 ):
     home = str(env.get("HOME") or "").strip()
     if not home:
@@ -1363,13 +1382,64 @@ def install_temp_permissions(
     data["permissions"] = perms
     settings.parent.mkdir(parents=True, exist_ok=True)
     settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    return settings, original
+
+    # Deterministic permission preflight and readback
+    try:
+        read_text = settings.read_text(encoding="utf-8")
+        read_data = json.loads(read_text)
+    except Exception as exc:
+        raise RuntimeError(f"PERMISSION_PREFLIGHT_READBACK_FAILED:{exc}") from exc
+
+    read_perms = read_data.get("permissions")
+    if not isinstance(read_perms, dict):
+        raise RuntimeError("PERMISSION_PREFLIGHT_READBACK_FAILED:permissions must be an object")
+    read_allow = read_perms.get("allow")
+    read_deny = read_perms.get("deny")
+    if not isinstance(read_allow, list) or not isinstance(read_deny, list):
+        raise RuntimeError("PERMISSION_PREFLIGHT_READBACK_FAILED:allow and deny must be lists")
+
+    missing_allow = [r for r in allow if r not in read_allow]
+    if missing_allow:
+        raise RuntimeError(
+            f"PERMISSION_PREFLIGHT_VERIFICATION_FAILED:missing allow rules:{missing_allow}"
+        )
+    missing_deny = [r for r in deny if r not in read_deny]
+    if missing_deny:
+        raise RuntimeError(
+            f"PERMISSION_PREFLIGHT_VERIFICATION_FAILED:missing deny rules:{missing_deny}"
+        )
+
+    if mode == "accept-edits":
+        if "write_file(*)" in read_deny or "write_file(/)" in read_deny:
+            raise RuntimeError(
+                "PERMISSION_PREFLIGHT_CONTRADICTION:blanket write_file deny in accept-edits"
+            )
+        if "read_file(*)" in read_deny or "read_file(/)" in read_deny:
+            raise RuntimeError(
+                "PERMISSION_PREFLIGHT_CONTRADICTION:blanket read_file deny in accept-edits"
+            )
+        if any(r.startswith("command") for r in read_allow) and "command(*)" in read_deny:
+            raise RuntimeError(
+                "PERMISSION_PREFLIGHT_CONTRADICTION:blanket command deny while command permitted"
+            )
+
+    canonical_perms = {
+        "allow": sorted(list(dict.fromkeys(read_allow))),
+        "deny": sorted(list(dict.fromkeys(read_deny))),
+    }
+    computed_sha256 = permission_profile_digest(canonical_perms)
+    if expected_profile_sha256 and computed_sha256 != expected_profile_sha256:
+        raise RuntimeError(
+            f"PERMISSION_PREFLIGHT_SHA256_MISMATCH:computed={computed_sha256}, expected={expected_profile_sha256}"
+        )
+
+    return settings, original, computed_sha256, canonical_perms
 
 
 def restore_temp_permissions(token) -> None:
     if token is None:
         return
-    settings, original = token
+    settings, original = token[:2]
     if original is None:
         try:
             settings.unlink()
@@ -1430,6 +1500,107 @@ def _project_write_permissions(
     if not projected:
         raise ValueError("AGY_WRITE_SCOPE_REQUIRED")
     return projected
+
+
+def permission_profile_digest(effective_permissions: dict[str, list[str]]) -> str:
+    canonical = {
+        "allow": sorted(list(dict.fromkeys(effective_permissions.get("allow") or []))),
+        "deny": sorted(list(dict.fromkeys(effective_permissions.get("deny") or []))),
+    }
+    raw = json.dumps(canonical, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def build_effective_permission_profile(
+    *,
+    cwd: str,
+    mode: str,
+    write_paths: list[str] | None = None,
+    allow_rules: list[str] | None = None,
+    deny_rules: list[str] | None = None,
+    temp_command_permissions: bool = False,
+) -> tuple[dict[str, list[str]], str, str]:
+    user_allow = list(allow_rules or [])
+    user_deny = list(deny_rules or [])
+
+    for rule in user_allow:
+        if rule in _UNSAFE_PERMISSION_RULES:
+            raise ValueError(f"UNSAFE_PERMISSION_RULE:{rule}")
+
+    effective_allow: list[str] = list(user_allow)
+    effective_deny: list[str] = list(user_deny)
+
+    if mode == "accept-edits":
+        projected_write_rules = _project_write_permissions(
+            cwd=cwd,
+            mode=mode,
+            write_paths=write_paths,
+            allow_rules=user_allow,
+        )
+        for rule in projected_write_rules:
+            if rule not in effective_allow:
+                effective_allow.append(rule)
+
+        resolved_cwd = str(Path(cwd).expanduser().resolve())
+        bounded_read_rule = f"read_file({resolved_cwd}/**)"
+        if bounded_read_rule not in effective_allow:
+            effective_allow.append(bounded_read_rule)
+
+        if temp_command_permissions:
+            if "command(*)" not in effective_allow:
+                effective_allow.append("command(*)")
+            for r in TEMP_COMMAND_DENY:
+                if r not in effective_deny:
+                    effective_deny.append(r)
+
+        kind = "CODING_BOUNDED"
+    else:
+        if temp_command_permissions:
+            if "command(*)" not in effective_allow:
+                effective_allow.append("command(*)")
+            for r in TEMP_COMMAND_DENY:
+                if r not in effective_deny:
+                    effective_deny.append(r)
+
+        if any(r.startswith("read_file") or r.startswith("command") for r in effective_allow):
+            kind = "READ_ONLY_RESEARCH"
+        elif not effective_allow:
+            kind = "NO_TOOL_PACKET"
+        else:
+            kind = "CUSTOM"
+
+    # Anti-blanket-override / contradiction prevention
+    has_command_allow = any(r.startswith("command") for r in effective_allow)
+    if has_command_allow and "command(*)" in effective_deny:
+        raise ValueError(
+            "CONTRADICTORY_PERMISSION_PROFILE:command(*) in deny rules neutralizes command capability"
+        )
+
+    has_read_allow = any(r.startswith("read_file") for r in effective_allow)
+    if has_read_allow and ("read_file(*)" in effective_deny or "read_file(/)" in effective_deny):
+        raise ValueError(
+            "CONTRADICTORY_PERMISSION_PROFILE:read_file(*) in deny rules neutralizes read capability"
+        )
+
+    has_write_allow = any(r.startswith("write_file") for r in effective_allow)
+    if has_write_allow and ("write_file(*)" in effective_deny or "write_file(/)" in effective_deny):
+        raise ValueError(
+            "CONTRADICTORY_PERMISSION_PROFILE:write_file(*) in deny rules neutralizes write capability"
+        )
+
+    common_rules = set(effective_allow).intersection(effective_deny)
+    if common_rules:
+        colliding = sorted(common_rules)[0]
+        raise ValueError(
+            f"CONTRADICTORY_PERMISSION_PROFILE:rule present in both allow and deny:{colliding}"
+        )
+
+    canonical_perms = {
+        "allow": sorted(list(dict.fromkeys(effective_allow))),
+        "deny": sorted(list(dict.fromkeys(effective_deny))),
+    }
+    sha256 = permission_profile_digest(canonical_perms)
+    return canonical_perms, kind, sha256
 
 
 _WORKTREE_GITFILE_RE = re.compile(r"^gitdir:\s*(.+)$", re.MULTILINE)
@@ -2173,11 +2344,15 @@ def dispatch_run(
 ) -> int:
     user_allow = list(allow or [])
     try:
-        projected_write_rules = _project_write_permissions(
-            cwd=cwd,
-            mode=mode,
-            write_paths=write_paths,
-            allow_rules=user_allow,
+        effective_permissions, permission_profile_kind, permission_profile_sha256 = (
+            build_effective_permission_profile(
+                cwd=cwd,
+                mode=mode,
+                write_paths=write_paths,
+                allow_rules=user_allow,
+                deny_rules=deny,
+                temp_command_permissions=temp_command_permissions,
+            )
         )
     except ValueError as exc:
         failure_kind = str(exc)
@@ -2189,6 +2364,9 @@ def dispatch_run(
             rotations=0,
             failure_kind=contract_failure,
             provider_effect=False,
+            permission_profile_kind="INVALID",
+            permission_profile_sha256=None,
+            effective_permissions=None,
         )
         emit_meta({
             "status": "invalid_contract",
@@ -2197,8 +2375,17 @@ def dispatch_run(
             "failure_kind": contract_failure,
             "provider_effect": False,
             "wall_ms": 0,
+            "permission_profile_sha256": None,
+            "permission_profile_kind": "INVALID",
         })
         return 64
+
+    _operation_hook(
+        operation_hook,
+        permission_profile_sha256=permission_profile_sha256,
+        permission_profile_kind=permission_profile_kind,
+        effective_permissions=effective_permissions,
+    )
 
     if effort is not None and effort not in ("low", "medium", "high"):
         effort_failure = f"DISPATCH_CONTRACT_REJECTED:INVALID_EFFORT:{effort}"
@@ -2462,6 +2649,8 @@ def dispatch_run(
                             "rotations": rotations,
                             "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
                             "wall_ms": total_wall_ms,
+                            "permission_profile_sha256": permission_profile_sha256,
+                            "permission_profile_kind": permission_profile_kind,
                         })
                         return 75
                     except AgyAccountPoolExhaustedError:
@@ -2471,6 +2660,8 @@ def dispatch_run(
                             "rotations": rotations,
                             "failure_kind": "QUOTA_EXHAUSTED",
                             "wall_ms": total_wall_ms,
+                            "permission_profile_sha256": permission_profile_sha256,
+                            "permission_profile_kind": permission_profile_kind,
                         })
                         return 75
 
@@ -2496,31 +2687,21 @@ def dispatch_run(
                 )
             permission_token = None
             try:
-                allow_rules = list(user_allow)
-                for rule in projected_write_rules:
-                    if rule not in allow_rules:
-                        allow_rules.append(rule)
-                deny_rules: list[str] = list(deny or [])
+                allow_rules = list(effective_permissions.get("allow") or [])
+                deny_rules = list(effective_permissions.get("deny") or [])
                 replace_allow_deny = bool(
                     mode == "accept-edits" or allow_rules or deny_rules or temp_command_permissions
                 )
-                if mode == "accept-edits":
-                    bounded_read_rule = f"read_file({Path(cwd).expanduser().resolve()}/**)"
-                    if bounded_read_rule not in allow_rules:
-                        allow_rules.append(bounded_read_rule)
-                allow_unsafe_legacy = False
-                if temp_command_permissions:
-                    if "command(*)" not in allow_rules:
-                        allow_rules.append("command(*)")
-                    deny_rules.extend(TEMP_COMMAND_DENY)
-                    allow_unsafe_legacy = True
-                if allow_rules or deny_rules:
+                allow_unsafe_legacy = bool(temp_command_permissions or "command(*)" in allow_rules)
+                if allow_rules or deny_rules or replace_allow_deny:
                     permission_token = install_temp_permissions(
                         env,
                         allow_rules=allow_rules,
                         deny_rules=deny_rules,
                         allow_unsafe_legacy=allow_unsafe_legacy,
                         replace_allow_deny=replace_allow_deny,
+                        mode=mode,
+                        expected_profile_sha256=permission_profile_sha256,
                     )
                 runner_kwargs = {
                     "env": env,
@@ -2556,8 +2737,12 @@ def dispatch_run(
             provider_log_lower = provider_log_text.lower()
             provider_headless_denial = (
                 "print mode: soft-denying tool confirmation" in provider_log_lower
+                or "soft-denying tool confirmation" in provider_log_lower
                 or "headless mode cannot prompt for" in provider_log_lower
                 or "auto-denied" in provider_log_lower
+            )
+            provider_permission_denial = mode == "accept-edits" and _has_permission_failure_signal(
+                provider_log_text
             )
             semantic_output = out + "\n" + err
             semantic_output_lower = semantic_output.lower()
@@ -2569,8 +2754,34 @@ def dispatch_run(
                 or "soft-denying tool confirmation" in semantic_output_lower
                 or "auto-denied" in semantic_output_lower
             )
-            permission_blocked = provider_headless_denial or semantic_permission_refusal
-            if code == 0 and not timed_out and not permission_blocked:
+            permission_blocked = (
+                provider_headless_denial
+                or provider_permission_denial
+                or semantic_headless_denial
+                or semantic_permission_refusal
+            )
+            attempt_changed_paths = None
+            if attempt_baseline is not None:
+                try:
+                    attempt_changed_paths = direct_operation_journal.observed_changed_paths_since(
+                        cwd, attempt_baseline
+                    )
+                except Exception as exc:
+                    _operation_hook(
+                        operation_hook,
+                        effect_observation_error=(
+                            f"ATTEMPT_EFFECT_OBSERVATION_FAILED:{type(exc).__name__}"
+                        ),
+                    )
+
+            scope_state, scope_violations = direct_operation_journal.validate_write_scope(
+                repo_root=cwd,
+                write_paths=write_paths,
+                observed_changed_paths=attempt_changed_paths,
+            )
+            scope_blocked = bool(write_paths and scope_state == "VIOLATION_OUT_OF_SCOPE")
+
+            if code == 0 and not timed_out and not permission_blocked and not scope_blocked:
                 sys.stdout.write(out)
                 if err:
                     sys.stderr.write(err)
@@ -2582,37 +2793,35 @@ def dispatch_run(
                     "lease_id_hash": claim.lease_id_hash,
                     "parallel_slot": True,
                     "wall_ms": total_wall_ms,
+                    "permission_profile_sha256": permission_profile_sha256,
+                    "permission_profile_kind": permission_profile_kind,
                 })
                 return 0
 
             kind = (
                 AccountFailureKind.PERMISSION_OR_SCOPE_ERROR
-                if permission_blocked
+                if (permission_blocked or scope_blocked)
                 else classify_failure(code, out, err, timed_out)
             )
             last_kind = kind.value
             provider_effect_observed: bool | None = False
             reconciliation_required = False
-            attempt_changed_paths = None
-            if permission_blocked or kind == AccountFailureKind.QUOTA_EXHAUSTED:
-                if attempt_baseline is not None:
-                    try:
-                        attempt_changed_paths = (
-                            direct_operation_journal.observed_changed_paths_since(
-                                cwd, attempt_baseline
-                            )
-                        )
-                    except Exception as exc:
-                        _operation_hook(
-                            operation_hook,
-                            effect_observation_error=(
-                                f"ATTEMPT_EFFECT_OBSERVATION_FAILED:{type(exc).__name__}"
-                            ),
-                        )
 
             if permission_blocked and (provider_headless_denial or semantic_headless_denial):
                 last_kind = "HEADLESS_TOOL_PERMISSION_DENIED"
-            if permission_blocked:
+                if attempt_changed_paths:
+                    provider_effect_observed = True
+                    reconciliation_required = True
+                elif attempt_changed_paths == []:
+                    provider_effect_observed = False
+                else:
+                    provider_effect_observed = None
+                    reconciliation_required = True
+            elif scope_blocked:
+                last_kind = "SCOPE_VIOLATION_UNAUTHORIZED_MUTATION"
+                provider_effect_observed = True
+                reconciliation_required = True
+            elif permission_blocked:
                 if attempt_changed_paths:
                     provider_effect_observed = True
                     reconciliation_required = True
@@ -2664,6 +2873,8 @@ def dispatch_run(
                     "lease_id_hash": claim.lease_id_hash,
                     "parallel_slot": True,
                     "wall_ms": total_wall_ms,
+                    "permission_profile_sha256": permission_profile_sha256,
+                    "permission_profile_kind": permission_profile_kind,
                 })
                 return code if isinstance(code, int) and code != 0 else 1
 
@@ -2682,6 +2893,8 @@ def dispatch_run(
                     "lease_id_hash": claim.lease_id_hash,
                     "parallel_slot": True,
                     "wall_ms": total_wall_ms,
+                    "permission_profile_sha256": permission_profile_sha256,
+                    "permission_profile_kind": permission_profile_kind,
                 })
                 return code if isinstance(code, int) and code != 0 else 1
 
@@ -2723,6 +2936,8 @@ def dispatch_run(
                     "lease_id_hash": claim.lease_id_hash,
                     "parallel_slot": True,
                     "wall_ms": total_wall_ms,
+                    "permission_profile_sha256": permission_profile_sha256,
+                    "permission_profile_kind": permission_profile_kind,
                 })
                 return code if isinstance(code, int) and code != 0 else 1
 
@@ -2745,6 +2960,8 @@ def dispatch_run(
                     "lease_id_hash": claim.lease_id_hash,
                     "parallel_slot": True,
                     "wall_ms": total_wall_ms,
+                    "permission_profile_sha256": permission_profile_sha256,
+                    "permission_profile_kind": permission_profile_kind,
                 })
                 return 75
 
@@ -3100,6 +3317,9 @@ def _run_background_operation(
         "first_effect_at": None,
         "time_to_first_effect_ms": None,
         "quota_preflight_progress": None,
+        "permission_profile_sha256": None,
+        "permission_profile_kind": None,
+        "effective_permissions": None,
     }
     state_lock = threading.Lock()
 
@@ -3121,6 +3341,9 @@ def _run_background_operation(
             first_effect_at=snapshot.get("first_effect_at"),
             time_to_first_effect_ms=snapshot.get("time_to_first_effect_ms"),
             quota_preflight_progress=snapshot.get("quota_preflight_progress"),
+            permission_profile_sha256=snapshot.get("permission_profile_sha256"),
+            permission_profile_kind=snapshot.get("permission_profile_kind"),
+            effective_permissions=snapshot.get("effective_permissions"),
         )
 
     def on_event(event: dict[str, Any]) -> None:
@@ -3196,6 +3419,9 @@ def _run_background_operation(
                 first_stream_activity_at=snapshot.get("first_stream_activity_at"),
                 first_effect_at=snapshot.get("first_effect_at"),
                 time_to_first_effect_ms=snapshot.get("time_to_first_effect_ms"),
+                permission_profile_sha256=snapshot.get("permission_profile_sha256"),
+                permission_profile_kind=snapshot.get("permission_profile_kind"),
+                effective_permissions=snapshot.get("effective_permissions"),
                 reconciliation={
                     "at": _agy_operation_journal.utc_now(),
                     "result": "PROVIDER_PROCESS_STILL_RUNNING_AFTER_DISPATCH",
@@ -3226,12 +3452,13 @@ def _run_background_operation(
             attestation_log_path,
             requested_model=model,
         )
-        journal.mark_terminal(
+        terminal_record = journal.mark_terminal(
             operation_id,
             status=terminal_status,
             exit_code=exit_code,
             failure_kind=failure_kind,
             cwd=cwd,
+            write_paths=write_paths,
             attempts=int(snapshot.get("attempts") or 0),
             rotations=int(snapshot.get("rotations") or 0),
             account_alias_hash=snapshot.get("account_alias_hash"),
@@ -3254,8 +3481,16 @@ def _run_background_operation(
             first_stream_activity_at=snapshot.get("first_stream_activity_at"),
             first_effect_at=snapshot.get("first_effect_at"),
             time_to_first_effect_ms=snapshot.get("time_to_first_effect_ms"),
+            permission_profile_sha256=snapshot.get("permission_profile_sha256"),
+            permission_profile_kind=snapshot.get("permission_profile_kind"),
+            effective_permissions=snapshot.get("effective_permissions"),
             **attestation,
         )
+        if (
+            terminal_record.get("status") == "FAILED"
+            and terminal_record.get("failure_kind") == "SCOPE_VIOLATION_UNAUTHORIZED_MUTATION"
+        ):
+            return 1
         return int(exit_code or 0)
     except _SupervisorSignalError:
         raise

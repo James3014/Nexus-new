@@ -3206,3 +3206,530 @@ def test_finalize_no_effect_cli_projects_receipt(
     assert payload["status"] == "FAILED"
     assert payload["reconciliation"]["result"] == "SOURCE_NO_DURABLE_EFFECT_PROVEN"
     assert payload["reconciliation"]["retry_permitted"] is True
+
+
+def test_contradictory_command_permission_fails_closed_before_claim(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    target = work / "file.py"
+    coordinator = _WriteScopeCoordinator(home)
+    events: list[dict[str, object]] = []
+
+    code = dispatch.dispatch_run(
+        prompt="contradictory command permission",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(target)],
+        temp_command_permissions=True,
+        deny=["command(*)"],
+        coordinator=coordinator,
+        run_agy_fn=lambda **_kwargs: (0, "ok", "", False, 1),
+        operation_hook=events.append,
+    )
+
+    assert code == 64
+    assert coordinator.acquire_count == 0
+    assert any(
+        "CONTRADICTORY_PERMISSION_PROFILE:command(*)" in str(event.get("failure_kind"))
+        for event in events
+    )
+
+
+def test_contradictory_write_permission_fails_closed_before_claim(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    target = work / "file.py"
+    coordinator = _WriteScopeCoordinator(home)
+    events: list[dict[str, object]] = []
+
+    code = dispatch.dispatch_run(
+        prompt="contradictory write permission",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(target)],
+        deny=["write_file(*)"],
+        coordinator=coordinator,
+        run_agy_fn=lambda **_kwargs: (0, "ok", "", False, 1),
+        operation_hook=events.append,
+    )
+
+    assert code == 64
+    assert coordinator.acquire_count == 0
+    assert any(
+        "CONTRADICTORY_PERMISSION_PROFILE:write_file(*)" in str(event.get("failure_kind"))
+        for event in events
+    )
+
+
+def test_contradictory_read_permission_fails_closed_before_claim(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    target = work / "file.py"
+    coordinator = _WriteScopeCoordinator(home)
+    events: list[dict[str, object]] = []
+
+    code = dispatch.dispatch_run(
+        prompt="contradictory read permission",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(target)],
+        deny=["read_file(*)"],
+        coordinator=coordinator,
+        run_agy_fn=lambda **_kwargs: (0, "ok", "", False, 1),
+        operation_hook=events.append,
+    )
+
+    assert code == 64
+    assert coordinator.acquire_count == 0
+    assert any(
+        "CONTRADICTORY_PERMISSION_PROFILE:read_file(*)" in str(event.get("failure_kind"))
+        for event in events
+    )
+
+
+def test_contradictory_exact_rule_in_both_allow_and_deny_fails_closed(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    target = work / "file.py"
+    coordinator = _WriteScopeCoordinator(home)
+    events: list[dict[str, object]] = []
+
+    code = dispatch.dispatch_run(
+        prompt="rule in allow and deny",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(target)],
+        allow=["command(ls)"],
+        deny=["command(ls)"],
+        coordinator=coordinator,
+        run_agy_fn=lambda **_kwargs: (0, "ok", "", False, 1),
+        operation_hook=events.append,
+    )
+
+    assert code == 64
+    assert coordinator.acquire_count == 0
+    assert any(
+        "CONTRADICTORY_PERMISSION_PROFILE:rule present in both allow and deny:command(ls)"
+        in str(event.get("failure_kind"))
+        for event in events
+    )
+
+
+def test_permission_profile_preflight_and_journal_projection(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    target = work / "target.py"
+    coordinator = _WriteScopeCoordinator(home)
+    events: list[dict[str, object]] = []
+
+    code = dispatch.dispatch_run(
+        prompt="bounded edit",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(target)],
+        temp_command_permissions=True,
+        coordinator=coordinator,
+        run_agy_fn=lambda **_kwargs: (0, "all good", "", False, 1),
+        operation_hook=events.append,
+    )
+
+    assert code == 0
+    assert coordinator.acquire_count == 1
+    profile_events = [e for e in events if e.get("permission_profile_kind") == "CODING_BOUNDED"]
+    assert len(profile_events) >= 1
+    sha256 = profile_events[0].get("permission_profile_sha256")
+    assert isinstance(sha256, str) and len(sha256) == 64
+    effective_perms = profile_events[0].get("effective_permissions")
+    assert isinstance(effective_perms, dict)
+    assert f"write_file({target.resolve()})" in effective_perms["allow"]
+    assert "command(*)" in effective_perms["allow"]
+    assert "command(git push)" in effective_perms["deny"]
+
+
+def test_permission_profile_preflight_fails_on_tampered_settings(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {"HOME": str(home)}
+
+    with pytest.raises(RuntimeError, match="PERMISSION_PREFLIGHT_CONTRADICTION"):
+        dispatch.install_temp_permissions(
+            env,
+            allow_rules=["read_file(/tmp/**)"],
+            deny_rules=["read_file(*)"],
+            mode="accept-edits",
+        )
+
+
+@pytest.mark.parametrize(
+    "marker,expected_kind",
+    [
+        ("Blocked by active deny rules for read_file(/repo/foo)", "PERMISSION_OR_SCOPE_ERROR"),
+        ("tool execution permission block: denied", "PERMISSION_OR_SCOPE_ERROR"),
+        ("Operation not permitted while accessing file", "PERMISSION_OR_SCOPE_ERROR"),
+        ("blocked by the active security/deny rules", "PERMISSION_OR_SCOPE_ERROR"),
+        (
+            "print mode: soft-denying tool confirmation for command",
+            "HEADLESS_TOOL_PERMISSION_DENIED",
+        ),
+        ("headless mode cannot prompt for confirmation", "HEADLESS_TOOL_PERMISSION_DENIED"),
+        ("auto-denied tool call", "HEADLESS_TOOL_PERMISSION_DENIED"),
+    ],
+)
+def test_accept_edits_semantic_refusal_variants(
+    tmp_path: Path,
+    marker: str,
+    expected_kind: str,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    target = work / "target.py"
+    coordinator = _WriteScopeCoordinator(home)
+    events: list[dict[str, object]] = []
+
+    code = dispatch.dispatch_run(
+        prompt="bounded edit",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(target)],
+        temp_command_permissions=True,
+        coordinator=coordinator,
+        run_agy_fn=lambda **_kwargs: (0, marker, "", False, 1),
+        operation_hook=events.append,
+    )
+
+    assert code == 1
+    assert any(event.get("failure_kind") == expected_kind for event in events)
+    assert coordinator.claim.released is True
+
+
+def test_background_terminal_receipt_persists_permission_profile(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-3.8-flash",
+        effort="low",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "edit probe")
+
+    def fake_dispatch_run(**kwargs):
+        kwargs["operation_hook"]({
+            "phase": "EXECUTING",
+            "attempts": 1,
+            "rotations": 0,
+            "account_alias_hash": "acct",
+            "lease_id_hash": "lease",
+            "permission_profile_sha256": "f" * 64,
+            "permission_profile_kind": "CODING_BOUNDED",
+            "effective_permissions": {
+                "allow": ["read_file(/tmp/**)", "write_file(/tmp/file.py)"],
+                "deny": ["command(git push)"],
+            },
+        })
+        return 0
+
+    monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
+    code = dispatch._run_background_operation(
+        operation_id=operation_id,
+        prompt_file=str(prompt_path),
+        cwd=str(tmp_path),
+        mode="accept-edits",
+        model="gemini-3.8-flash",
+        effort="low",
+        timeout=30,
+        max_calls=1,
+        pool_wait_timeout=1.0,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=root,
+        heartbeat_interval=0.01,
+    )
+    record = journal.read(operation_id)
+    assert code == 0
+    assert record["status"] == "COMPLETED"
+    assert record["permission_profile_kind"] == "CODING_BOUNDED"
+    assert record["permission_profile_sha256"] == "f" * 64
+    assert record["effective_permissions"] == {
+        "allow": ["read_file(/tmp/**)", "write_file(/tmp/file.py)"],
+        "deny": ["command(git push)"],
+    }
+
+
+def test_plan_mode_no_tool_packet_completes_cleanly(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+    events: list[dict[str, object]] = []
+
+    code = dispatch.dispatch_run(
+        prompt="analyze architecture without tools",
+        cwd=str(work),
+        mode="plan",
+        deny=["command(*)", "write_file(*)"],
+        coordinator=coordinator,
+        run_agy_fn=lambda **_kwargs: (
+            0,
+            "Analysis complete. No mutations requested.",
+            "",
+            False,
+            1,
+        ),
+        operation_hook=events.append,
+    )
+
+    assert code == 0
+    assert coordinator.acquire_count == 1
+    assert coordinator.claim.released is True
+    profile_events = [e for e in events if e.get("permission_profile_kind") == "NO_TOOL_PACKET"]
+    assert len(profile_events) >= 1
+    assert not any(event.get("failure_kind") for event in events)
+
+
+def test_plan_mode_text_mentioning_permission_denied_in_model_response_completes_cleanly(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+    events: list[dict[str, object]] = []
+
+    code = dispatch.dispatch_run(
+        prompt="explain permission denied errors",
+        cwd=str(work),
+        mode="plan",
+        coordinator=coordinator,
+        run_agy_fn=lambda **_kwargs: (
+            0,
+            "When a user encounters permission denied, it typically means permissions are missing.",
+            "",
+            False,
+            1,
+        ),
+        operation_hook=events.append,
+    )
+
+    assert code == 0
+    assert coordinator.acquire_count == 1
+    assert not any(event.get("failure_kind") for event in events)
+
+
+def test_temp_command_deny_includes_git_mutation_commands() -> None:
+    expected_mutations = [
+        "command(git checkout)",
+        "command(git restore)",
+        "command(git stash)",
+        "command(git reset)",
+        "command(git commit)",
+        "command(git branch)",
+        "command(git merge)",
+        "command(git rebase)",
+        "command(git cherry-pick)",
+        "command(git revert)",
+        "command(git clean)",
+        "command(git push)",
+        "command(git reset --hard)",
+    ]
+    for cmd in expected_mutations:
+        assert cmd in dispatch.TEMP_COMMAND_DENY
+
+
+def test_read_only_git_commands_not_in_deny() -> None:
+    read_only_cmds = [
+        "command(git diff)",
+        "command(git log)",
+        "command(git status)",
+        "command(git show)",
+        "command(git rev-parse)",
+    ]
+    for cmd in read_only_cmds:
+        assert cmd not in dispatch.TEMP_COMMAND_DENY
+
+
+def test_command_scope_g0_transient_mutation_red_fixture(tmp_path: Path) -> None:
+    """Witness incident G0 reproduction:
+
+    Pre-existing uncommitted dirty file exists outside write scope.
+    The worker edits both the allowed file and the out-of-scope dirty file,
+    attempting to bypass scope or restore changes, exiting with returncode 0.
+    Must fail closed (exit 1), classify as SCOPE_VIOLATION_UNAUTHORIZED_MUTATION,
+    and halt without rotating accounts.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=work, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=work, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=work, check=True)
+
+    base_file = work / "base.txt"
+    base_file.write_text("initial base\n", encoding="utf-8")
+    subprocess.run(["git", "add", "base.txt"], cwd=work, check=True)
+    subprocess.run(["git", "commit", "-qm", "initial"], cwd=work, check=True)
+
+    dirty_sentinel = work / "uncommitted_outside.txt"
+    dirty_sentinel.write_text("pre-existing uncommitted\n", encoding="utf-8")
+
+    target = work / "in_scope_target.txt"
+    target.write_text("before\n", encoding="utf-8")
+
+    coordinator = _WriteScopeCoordinator(home)
+    events: list[dict[str, object]] = []
+
+    def mock_runner(**_kwargs):
+        target.write_text("after modified\n", encoding="utf-8")
+        dirty_sentinel.write_text("mutated by worker\n", encoding="utf-8")
+        return 0, "completed task\nnow let me restore my changes", "", False, 10
+
+    code = dispatch.dispatch_run(
+        prompt="perform bounded edit",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(target)],
+        temp_command_permissions=True,
+        coordinator=coordinator,
+        run_agy_fn=mock_runner,
+        operation_hook=events.append,
+    )
+
+    assert code == 1
+    assert coordinator.acquire_count == 1
+    assert coordinator.claim.released is True
+
+    failure_events = [e for e in events if e.get("phase") == "CLASSIFYING_FAILURE"]
+    assert len(failure_events) >= 1
+    assert failure_events[-1].get("failure_kind") == "SCOPE_VIOLATION_UNAUTHORIZED_MUTATION"
+    assert failure_events[-1].get("reconciliation_required") is True
+
+
+def test_write_scope_clean_completion_verified_in_scope(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=work, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=work, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=work, check=True)
+
+    base_file = work / "base.txt"
+    base_file.write_text("initial base\n", encoding="utf-8")
+    subprocess.run(["git", "add", "base.txt"], cwd=work, check=True)
+    subprocess.run(["git", "commit", "-qm", "initial"], cwd=work, check=True)
+
+    target = work / "target.txt"
+    target.write_text("initial\n", encoding="utf-8")
+
+    coordinator = _WriteScopeCoordinator(home)
+    events: list[dict[str, object]] = []
+
+    def mock_runner(**_kwargs):
+        target.write_text("updated in scope\n", encoding="utf-8")
+        return 0, "edited target successfully", "", False, 5
+
+    code = dispatch.dispatch_run(
+        prompt="edit target",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(target)],
+        temp_command_permissions=True,
+        coordinator=coordinator,
+        run_agy_fn=mock_runner,
+        operation_hook=events.append,
+    )
+
+    assert code == 0
+    assert coordinator.acquire_count == 1
+    assert not any(event.get("failure_kind") for event in events)
+
+
+def test_scope_violation_persisted_in_operation_journal(tmp_path: Path) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=work, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=work, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=work, check=True)
+
+    tracked = work / "tracked.txt"
+    tracked.write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=work, check=True)
+    subprocess.run(["git", "commit", "-qm", "base"], cwd=work, check=True)
+
+    journal = dispatch.AgyOperationJournal(tmp_path / "operations")
+    op_id = dispatch.new_operation_id()
+    journal.create(
+        operation_id=op_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(work),
+        provider="agy",
+        model="claude-sonnet-4-6",
+        effort="medium",
+        prompt_sha256="f" * 64,
+        runtime_revision="c" * 40,
+    )
+    journal.update(op_id, write_paths=["tracked.txt"])
+    journal.mark_started(op_id, pid=os.getpid())
+
+    out_of_scope = work / "unauthorized.txt"
+    out_of_scope.write_text("unauthorized data\n", encoding="utf-8")
+
+    terminal = journal.mark_terminal(
+        op_id,
+        status="COMPLETED",
+        exit_code=0,
+        cwd=str(work),
+    )
+
+    assert terminal["status"] == "FAILED"
+    assert terminal["failure_kind"] == "SCOPE_VIOLATION_UNAUTHORIZED_MUTATION"
+    assert terminal["scope_validation_state"] == "VIOLATION_OUT_OF_SCOPE"
+    assert "unauthorized.txt" in terminal["scope_violations"]
+
+    read_record = journal.read(op_id)
+    assert read_record["status"] == "FAILED"
+    assert read_record["scope_validation_state"] == "VIOLATION_OUT_OF_SCOPE"
+
+    public_view = dispatch.direct_operation_journal.public_operation_view(read_record)
+    assert public_view["write_paths"] == ["tracked.txt"]
+    assert public_view["scope_validation_state"] == "VIOLATION_OUT_OF_SCOPE"
+    assert public_view["scope_violations"] == ["unauthorized.txt"]

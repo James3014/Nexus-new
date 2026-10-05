@@ -106,6 +106,12 @@ PUBLIC_OPERATION_KEYS = (
     "review_receipt_path",
     "review_receipt_sha256",
     "review_failure_kind",
+    "permission_profile_sha256",
+    "permission_profile_kind",
+    "effective_permissions",
+    "write_paths",
+    "scope_validation_state",
+    "scope_violations",
 )
 
 
@@ -359,6 +365,61 @@ def observed_changed_paths(cwd: str) -> list[str]:
     return sorted(snapshot["entries"])
 
 
+def normalize_write_paths(
+    repo_root: str | Path,
+    write_paths: Any,
+) -> list[str]:
+    """Normalize declared write paths to canonical repo-relative paths."""
+    if not write_paths or not isinstance(write_paths, (list, tuple, set)):
+        return []
+    root = Path(repo_root).resolve()
+    normalized: set[str] = set()
+    for raw in write_paths:
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        candidate = Path(raw).expanduser()
+        if not candidate.is_absolute():
+            candidate = root / candidate
+        try:
+            rel = candidate.resolve().relative_to(root)
+            normalized.add(str(rel))
+        except ValueError:
+            normalized.add(str(raw).strip())
+    return sorted(normalized)
+
+
+def _is_path_in_scope(path: str, allowed_paths: set[str]) -> bool:
+    for allowed in allowed_paths:
+        if path == allowed or path.startswith(allowed.rstrip("/") + "/"):
+            return True
+    return False
+
+
+def validate_write_scope(
+    repo_root: str | Path,
+    write_paths: Any,
+    observed_changed_paths: list[str] | None,
+) -> tuple[str, list[str]]:
+    """Validate observed changed paths against declared write paths.
+
+    Returns:
+        (scope_validation_state, scope_violations)
+        Where scope_validation_state is one of:
+        - "UNCONSTRAINED": write_paths is None or empty.
+        - "VERIFIED_IN_SCOPE": all observed paths are within write_paths.
+        - "VIOLATION_OUT_OF_SCOPE": one or more paths are outside write_paths.
+    """
+    if not write_paths:
+        return "UNCONSTRAINED", []
+    if observed_changed_paths is None:
+        return "UNCONSTRAINED", []
+    allowed = set(normalize_write_paths(repo_root, write_paths))
+    violations = [p for p in observed_changed_paths if not _is_path_in_scope(p, allowed)]
+    if violations:
+        return "VIOLATION_OUT_OF_SCOPE", sorted(violations)
+    return "VERIFIED_IN_SCOPE", []
+
+
 class DirectOperationJournal:
     """Filesystem-backed journal for one direct external-worker provider."""
 
@@ -414,6 +475,7 @@ class DirectOperationJournal:
         effort: str | None,
         prompt_sha256: str,
         runtime_revision: str | None,
+        write_paths: list[str] | None = None,
         initial_fields: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         operation_id = self._validate_operation_id(operation_id)
@@ -483,6 +545,12 @@ class DirectOperationJournal:
             "input_delivery_truncations": [],
             "quota_preflight_progress": None,
             "reconciliation": None,
+            "permission_profile_sha256": None,
+            "permission_profile_kind": None,
+            "effective_permissions": None,
+            "write_paths": list(write_paths) if write_paths else [],
+            "scope_validation_state": "UNCONSTRAINED",
+            "scope_violations": [],
             "stdout_path": str(self.stdout_path(operation_id)),
             "stderr_path": str(self.stderr_path(operation_id)),
         }
@@ -530,6 +598,15 @@ class DirectOperationJournal:
                 record = self.read(operation_id)
                 if "status" in changes and changes["status"] not in _ALLOWED_STATES:
                     raise DirectOperationJournalError("OPERATION_STATUS_INVALID")
+                if "write_paths" in changes and changes["write_paths"] is not None:
+                    record_root = record.get("repo_root") or record.get("cwd") or "."
+                    changes["write_paths"] = normalize_write_paths(
+                        record_root, changes["write_paths"]
+                    )
+                    if changes["write_paths"]:
+                        changes.setdefault("scope_validation_state", "PENDING")
+                    else:
+                        changes.setdefault("scope_validation_state", "UNCONSTRAINED")
                 record.update(changes)
                 _atomic_json_write(self.record_path(operation_id), record)
                 return record
@@ -594,6 +671,7 @@ class DirectOperationJournal:
             "exit_code": exit_code,
             "failure_kind": failure_kind,
         }
+        payload.update(changes)
         if cwd:
             record = self.read(operation_id)
             baseline = record.get("source_baseline")
@@ -623,7 +701,18 @@ class DirectOperationJournal:
             else:
                 payload["observed_changed_paths"] = delta
                 payload["source_attribution_state"] = "ATTRIBUTED"
-        payload.update(changes)
+
+            effective_write_paths = payload.get("write_paths", record.get("write_paths"))
+            scope_state, violations = validate_write_scope(
+                repo_root=record_root or cwd,
+                write_paths=effective_write_paths,
+                observed_changed_paths=delta,
+            )
+            payload["scope_validation_state"] = scope_state
+            payload["scope_violations"] = violations
+            if violations and payload.get("status") == "COMPLETED":
+                payload["status"] = "FAILED"
+                payload["failure_kind"] = "SCOPE_VIOLATION_UNAUTHORIZED_MUTATION"
         return self.update(operation_id, **payload)
 
     def prove_source_state_unchanged(self, operation_id: str) -> dict[str, Any]:
