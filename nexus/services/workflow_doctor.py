@@ -358,6 +358,10 @@ def _collect_pr(
             "status": "OBSERVED",
             "state": pr.get("state"),
             "draft": bool(pr.get("draft")),
+            "merged": bool(pr.get("merged")),
+            "merged_at": pr.get("merged_at"),
+            "merge_commit_sha": pr.get("merge_commit_sha"),
+            "updated_at": pr.get("updated_at"),
             "mergeable": pr.get("mergeable"),
             "mergeable_state": pr.get("mergeable_state"),
             "url": pr.get("html_url"),
@@ -867,6 +871,332 @@ def _derive_next_gate(
     }
 
 
+_COMPLETION_LAYERS = (
+    "Implementation",
+    "Source verification",
+    "Integration",
+    "Install/package",
+    "Runtime",
+    "Deployment",
+    "Native / real entrypoint",
+    "Authorization",
+    "Independent acceptance",
+)
+
+
+def _completion_row(
+    layer: str,
+    *,
+    status: str,
+    source: str,
+    revision: str | None,
+    observed_at: str,
+    freshness: str,
+    evidence: dict[str, Any] | None = None,
+    gap: str | None = None,
+) -> dict[str, Any]:
+    if layer not in _COMPLETION_LAYERS:
+        raise WorkflowDoctorError("UNKNOWN_COMPLETION_LAYER")
+    return {
+        "layer": layer,
+        "status": status,
+        "source": source,
+        "revision": revision,
+        "observed_at": observed_at,
+        "freshness": freshness,
+        "evidence": evidence or {},
+        "gap": gap,
+    }
+
+
+def _project_completion_matrix(
+    *,
+    source: dict[str, Any],
+    runtime: dict[str, Any],
+    operation: dict[str, Any],
+    pr: dict[str, Any],
+    required_gates: list[dict[str, Any]],
+    observed_at: str,
+) -> dict[str, Any]:
+    """Project current delivery evidence without minting completion authority."""
+    selected = operation.get("selected")
+    if not isinstance(selected, dict):
+        selected = operation.get("latest_terminal")
+    if not isinstance(selected, dict):
+        selected = None
+
+    pr_head = pr.get("head_sha") if pr.get("status") == "OBSERVED" else None
+    merged = pr.get("merged") is True or bool(pr.get("merged_at"))
+    merge_revision = pr.get("merge_commit_sha") or pr_head
+    review_head = selected.get("review_candidate_head") if selected else None
+    subject_revision = (
+        merge_revision
+        if merged and merge_revision
+        else pr_head or source.get("head") or review_head
+    )
+
+    rows: list[dict[str, Any]] = []
+
+    if pr_head:
+        rows.append(
+            _completion_row(
+                "Implementation",
+                status="PASS",
+                source="github_pr",
+                revision=str(pr_head),
+                observed_at=observed_at,
+                freshness="CURRENT",
+                evidence={
+                    "pr_number": pr.get("pr_number"),
+                    "head_sha": pr_head,
+                    "state": pr.get("state"),
+                },
+            )
+        )
+    elif (
+        selected
+        and selected.get("status") == "COMPLETED"
+        and (selected.get("candidate_digest") or selected.get("observed_changed_paths"))
+    ):
+        rows.append(
+            _completion_row(
+                "Implementation",
+                status="PASS",
+                source="direct_operation",
+                revision=review_head or selected.get("base_head"),
+                observed_at=observed_at,
+                freshness="OBSERVED",
+                evidence={"operation_id": selected.get("operation_id")},
+            )
+        )
+    else:
+        rows.append(
+            _completion_row(
+                "Implementation",
+                status="UNKNOWN",
+                source="workflow_doctor",
+                revision=subject_revision,
+                observed_at=observed_at,
+                freshness="UNKNOWN",
+                gap="CURRENT_IMPLEMENTATION_EVIDENCE_NOT_OBSERVED",
+            )
+        )
+
+    required_success = bool(required_gates) and all(
+        row.get("status") == "completed"
+        and row.get("conclusion") in {"success", "neutral", "skipped"}
+        for row in required_gates
+    )
+    source_verification_pass = bool(
+        pr_head
+        and pr.get("gate_policy_state") == "OBSERVED"
+        and not pr.get("check_observation_error")
+        and required_success
+    )
+    rows.append(
+        _completion_row(
+            "Source verification",
+            status="PASS" if source_verification_pass else "UNKNOWN",
+            source="github_required_checks" if pr_head else "workflow_doctor",
+            revision=str(pr_head) if pr_head else subject_revision,
+            observed_at=observed_at,
+            freshness="CURRENT" if source_verification_pass else "UNKNOWN",
+            evidence={
+                "required_gate_count": len(required_gates),
+                "gate_policy_state": pr.get("gate_policy_state"),
+            },
+            gap=(
+                None if source_verification_pass else "CURRENT_EXACT_HEAD_VERIFICATION_NOT_PROVEN"
+            ),
+        )
+    )
+
+    rows.append(
+        _completion_row(
+            "Integration",
+            status="PASS" if merged and merge_revision else "UNKNOWN",
+            source="github_pr" if pr.get("status") == "OBSERVED" else "workflow_doctor",
+            revision=str(merge_revision) if merge_revision else subject_revision,
+            observed_at=observed_at,
+            freshness="CURRENT"
+            if merged and merge_revision and merge_revision == source.get("github_main")
+            else ("OBSERVED" if merged and merge_revision else "UNKNOWN"),
+            evidence={
+                "pr_number": pr.get("pr_number"),
+                "merged": bool(merged),
+                "merged_at": pr.get("merged_at"),
+            },
+            gap=None if merged and merge_revision else "MERGED_INTEGRATION_NOT_PROVEN",
+        )
+    )
+
+    alignment = runtime.get("current_main_alignment")
+    if not isinstance(alignment, dict):
+        alignment = _runtime_main_alignment(runtime, source.get("github_main"))
+    installed_revision = runtime.get("installed_revision")
+    exact_subject_install = bool(subject_revision and installed_revision == subject_revision)
+    content_equivalent_main_install = bool(
+        subject_revision
+        and subject_revision == source.get("github_main")
+        and alignment.get("status") == "ALIGNED"
+    )
+    install_pass = bool(
+        runtime.get("status") == "OBSERVED"
+        and installed_revision
+        and (exact_subject_install or content_equivalent_main_install)
+    )
+    rows.append(
+        _completion_row(
+            "Install/package",
+            status="PASS" if install_pass else "UNKNOWN",
+            source="nexus_host_sync",
+            revision=runtime.get("installed_revision"),
+            observed_at=observed_at,
+            freshness="CURRENT" if install_pass else "UNKNOWN",
+            evidence={
+                "state": runtime.get("state"),
+                "alignment": alignment.get("status"),
+                "alignment_basis": alignment.get("basis"),
+                "subject_revision": subject_revision,
+                "binding_basis": (
+                    "EXACT_SUBJECT_REVISION"
+                    if exact_subject_install
+                    else (
+                        "CONTENT_EQUIVALENT_CURRENT_MAIN"
+                        if content_equivalent_main_install
+                        else None
+                    )
+                ),
+            },
+            gap=None if install_pass else "CURRENT_INSTALL_BINDING_NOT_PROVEN",
+        )
+    )
+
+    components = runtime.get("components")
+    component_rows = (
+        [row for row in components.values() if isinstance(row, dict)]
+        if isinstance(components, dict)
+        else []
+    )
+    components_verified = bool(component_rows) and all(
+        row.get("status") == "VERIFIED" for row in component_rows
+    )
+    runtime_pass = bool(
+        install_pass
+        and runtime.get("state") not in {"INVALID", "DEPENDENCY_DRIFT", "STALE"}
+        and components_verified
+    )
+    rows.append(
+        _completion_row(
+            "Runtime",
+            status="PASS" if runtime_pass else "UNKNOWN",
+            source="nexus_host_sync",
+            revision=runtime.get("installed_revision"),
+            observed_at=observed_at,
+            freshness="CURRENT" if runtime_pass else "UNKNOWN",
+            evidence={
+                "state": runtime.get("state"),
+                "verified_component_count": sum(
+                    1 for row in component_rows if row.get("status") == "VERIFIED"
+                ),
+                "component_count": len(component_rows),
+            },
+            gap=None if runtime_pass else "CURRENT_RUNTIME_WITNESS_NOT_PROVEN",
+        )
+    )
+
+    rows.append(
+        _completion_row(
+            "Deployment",
+            status="UNKNOWN",
+            source="workflow_doctor",
+            revision=source.get("github_main"),
+            observed_at=observed_at,
+            freshness="UNKNOWN",
+            gap="DEPLOYMENT_EVIDENCE_NOT_PROJECTED",
+        )
+    )
+    rows.append(
+        _completion_row(
+            "Native / real entrypoint",
+            status="UNKNOWN",
+            source="workflow_doctor",
+            revision=subject_revision,
+            observed_at=observed_at,
+            freshness="UNKNOWN",
+            gap="NATIVE_ENTRYPOINT_WITNESS_NOT_PROJECTED",
+        )
+    )
+    rows.append(
+        _completion_row(
+            "Authorization",
+            status="UNKNOWN",
+            source="workflow_doctor",
+            revision=subject_revision,
+            observed_at=observed_at,
+            freshness="UNKNOWN",
+            gap="AUTHORIZATION_AUTHORITY_NOT_PROJECTED",
+        )
+    )
+
+    review_present = bool(
+        selected
+        and any(
+            selected.get(key) is not None
+            for key in (
+                "review_effect_id",
+                "review_state",
+                "review_verdict",
+                "review_candidate_head",
+                "candidate_digest",
+            )
+        )
+    )
+    review_current = bool(
+        review_present
+        and selected
+        and selected.get("subject_stable") is True
+        and selected.get("review_applicable") is True
+        and selected.get("review_candidate_head") == subject_revision
+        and (
+            not selected.get("current_candidate_digest")
+            or selected.get("candidate_digest") == selected.get("current_candidate_digest")
+        )
+    )
+    rows.append(
+        _completion_row(
+            "Independent acceptance",
+            status="UNKNOWN",
+            source="direct_operation_review" if review_present else "workflow_doctor",
+            revision=selected.get("review_candidate_head") if selected else subject_revision,
+            observed_at=observed_at,
+            freshness="CURRENT" if review_current else ("STALE" if review_present else "UNKNOWN"),
+            evidence={
+                "operation_id": selected.get("operation_id") if selected else None,
+                "review_effect_id": selected.get("review_effect_id") if selected else None,
+                "review_verdict": selected.get("review_verdict") if selected else None,
+                "review_applicable": selected.get("review_applicable") if selected else None,
+                "subject_stable": selected.get("subject_stable") if selected else None,
+            },
+            gap=(
+                "INDEPENDENT_ACCEPTANCE_AUTHORITY_NOT_OBSERVED"
+                if review_current
+                else (
+                    "REVIEW_SUBJECT_NOT_CURRENT"
+                    if review_present
+                    else "INDEPENDENT_ACCEPTANCE_EVIDENCE_NOT_OBSERVED"
+                )
+            ),
+        )
+    )
+
+    return {
+        "claim_ceiling": "READ_ONLY_PROJECTION_NO_COMPLETION_AUTHORITY",
+        "subject_revision": subject_revision,
+        "layers": rows,
+    }
+
+
 def collect_workflow_doctor(
     *,
     repo_root: Path,
@@ -877,6 +1207,7 @@ def collect_workflow_doctor(
     home: Path | None = None,
     runner: CommandRunner = subprocess.run,
 ) -> dict[str, Any]:
+    generated_at = utc_now()
     home = (home or Path.home()).expanduser().resolve()
     repo_root = repo_root.expanduser().resolve()
     source, repository = _collect_source(repo_root, repository=repository, runner=runner)
@@ -905,11 +1236,19 @@ def collect_workflow_doctor(
         required_gates=required,
         leases=leases,
     )
+    completion_matrix = _project_completion_matrix(
+        source=source,
+        runtime=runtime,
+        operation=operation,
+        pr=pr,
+        required_gates=required,
+        observed_at=generated_at,
+    )
     if disposition not in RESUME_DISPOSITIONS:
         raise WorkflowDoctorError("INVALID_RESUME_DISPOSITION")
     return {
         "schema": SCHEMA,
-        "generated_at": utc_now(),
+        "generated_at": generated_at,
         "host": socket.gethostname(),
         "task": task,
         "operation": operation,
@@ -921,6 +1260,7 @@ def collect_workflow_doctor(
         "advisory_observers": advisory,
         "unknown_policy_checks": unknown,
         "leases": leases,
+        "completion_matrix": completion_matrix,
         "next_gate": next_gate,
         "resume_disposition": disposition,
         "claim_ceiling": "READ_ONLY_WORKFLOW_OBSERVATION",
