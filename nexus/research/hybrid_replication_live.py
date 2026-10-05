@@ -31,7 +31,8 @@ from nexus.services.direct_operation_journal import TERMINAL_STATES
 
 EXACT_AGY_MODEL = "gemini-3.8-flash-medium"
 CANONICAL_AGY_DISPATCH_NAME = "nexus-agy-dispatch"
-CANONICAL_AGY_DISPATCH_SHA256 = "238979e3e83d3868deba1f53faf73313d0f62379d52894e9ca0ec54bc519d63f"
+CANONICAL_AGY_DISPATCH_SHA256 = "49119374fc4be6d74f8013cfdbded05b86b4aa356099c2519a31c477ad575da6"
+CANONICAL_AGY_EXECUTION_GENERATION = "AGY_GEMINI_3_8_FLASH_MEDIUM_V3"
 AGY_PROVIDER_TERMINAL_GRACE_SECONDS = 30.0
 MAX_AGY_PROVIDER_OUTPUT_BYTES = 5_000_000
 AGY_RAW_RECEIPT_SCHEMA = "nexus.hybrid_replication.agy_live_raw.v1"
@@ -452,7 +453,7 @@ def build_agy_identity_preflight_receipt(
     strong_online_identity_match = (
         requested_provider == "agy"
         and requested_model == EXACT_AGY_MODEL
-        and execution_generation == "AGY_GEMINI_3_8_FLASH_MEDIUM_V1"
+        and execution_generation == CANONICAL_AGY_EXECUTION_GENERATION
     )
     provider_drift = jev_resolved_model != expected_jev_resolved_model
     generation_change = execution_generation != previous_execution_generation
