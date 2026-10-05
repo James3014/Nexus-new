@@ -926,8 +926,14 @@ def _project_completion_matrix(
         selected = None
 
     pr_head = pr.get("head_sha") if pr.get("status") == "OBSERVED" else None
+    merged = pr.get("merged") is True or bool(pr.get("merged_at"))
+    merge_revision = pr.get("merge_commit_sha") or pr_head
     review_head = selected.get("review_candidate_head") if selected else None
-    subject_revision = pr_head or source.get("head") or review_head
+    subject_revision = (
+        merge_revision
+        if merged and merge_revision
+        else pr_head or source.get("head") or review_head
+    )
 
     rows: list[dict[str, Any]] = []
 
@@ -1005,8 +1011,6 @@ def _project_completion_matrix(
         )
     )
 
-    merged = pr.get("merged") is True or bool(pr.get("merged_at"))
-    merge_revision = pr.get("merge_commit_sha") or pr_head
     rows.append(
         _completion_row(
             "Integration",
