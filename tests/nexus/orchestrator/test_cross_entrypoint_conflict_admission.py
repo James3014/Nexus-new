@@ -34,6 +34,10 @@ from nexus.orchestrator.worktree_manager import (
     evaluate_cross_entrypoint_conflict,
     mutation_domains_conflict,
 )
+from nexus.services.agy_operation_journal import (
+    AgyOperationJournal,
+    AgyOperationJournalError,
+)
 from nexus.services.direct_operation_journal import DirectOperationJournal
 from nexus.services.live_execution_provenance import (
     PRODUCER_SCHEMA_AGY_OPERATION_V1,
@@ -996,6 +1000,116 @@ def test_live_outcome_unknown_operation_fails_closed(
     res = manager.readback_conflict_state(cand)
     assert res["disposition"] == CONFLICT_RECONCILE_REQUIRED
     assert "ACTIVE_WRITER_UNRESOLVED_PRIOR_EFFECTS" in res["reason"]
+
+
+def test_live_agy_outcome_unknown_with_confirmed_no_repository_effect_does_not_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repo_path, head_sha = _make_git_repo(tmp_path / "repo")
+    agy_root = tmp_path / "agy"
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_AGY_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_AGY_OPERATION_ROOT",
+        root=agy_root,
+    )
+
+    journal = AgyOperationJournal(agy_root)
+    op_id = journal.new_operation_id()
+    record = journal.create(
+        operation_id=op_id,
+        attempt_id="att-unknown-no-effect",
+        cwd=str(repo_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="abcd" * 16,
+        runtime_revision=head_sha,
+    )
+    journal.mark_terminal(
+        op_id,
+        status="OUTCOME_UNKNOWN",
+        exit_code=None,
+        failure_kind="SUPERVISOR_SIGNAL:SIGTERM",
+        reconciliation={
+            "result": "SUPERVISOR_SIGNAL_WITH_UNKNOWN_PROVIDER_EFFECT",
+            "provider_alive_after": False,
+            "retry_permitted": False,
+        },
+    )
+
+    manager = WorktreeManager(root_dir=str(tmp_path / "targets"), create_root=True)
+    cand = _writer(
+        "task-cand",
+        ["src/other.py"],
+        controller_revision=head_sha,
+        controller_worktree=str(repo_path),
+    )
+
+    blocked = manager.readback_conflict_state(cand)
+    assert blocked["disposition"] == CONFLICT_RECONCILE_REQUIRED
+
+    resolution = journal.resolve_no_repository_effect(
+        op_id,
+        evidence_ref="github:James3014/Nexus-new#1340:comment:5967921844",
+        evidence_sha256="1" * 64,
+    )
+
+    reread = journal.read(op_id)
+    assert reread["status"] == "OUTCOME_UNKNOWN"
+    assert reread["reconciliation"]["retry_permitted"] is False
+    assert resolution["operation_id"] == record["operation_id"]
+    assert resolution["attempt_id"] == record["attempt_id"]
+    assert resolution["disposition"] == "CONFIRMED_NO_REPOSITORY_EFFECT"
+
+    clear = manager.readback_conflict_state(cand)
+    assert clear["disposition"] == CONFLICT_CLEAR
+    assert clear["active_writer_count"] == 0
+
+
+def test_agy_no_effect_resolution_requires_proven_provider_absence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repo_path, head_sha = _make_git_repo(tmp_path / "repo")
+    agy_root = tmp_path / "agy"
+    _bind_canonical_producer_root(
+        monkeypatch,
+        env_name="NEXUS_AGY_OPERATION_ROOT",
+        canonical_attr="_CANONICAL_AGY_OPERATION_ROOT",
+        root=agy_root,
+    )
+    journal = AgyOperationJournal(agy_root)
+    op_id = journal.new_operation_id()
+    journal.create(
+        operation_id=op_id,
+        attempt_id="att-provider-state-unproven",
+        cwd=str(repo_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="abcd" * 16,
+        runtime_revision=head_sha,
+    )
+    journal.mark_terminal(
+        op_id,
+        status="OUTCOME_UNKNOWN",
+        exit_code=None,
+        failure_kind="SUPERVISOR_SIGNAL:SIGTERM",
+        reconciliation={
+            "result": "SUPERVISOR_SIGNAL_WITH_UNKNOWN_PROVIDER_EFFECT",
+            "retry_permitted": False,
+        },
+    )
+
+    with pytest.raises(
+        AgyOperationJournalError,
+        match="EFFECT_RESOLUTION_PROVIDER_STATE_UNPROVEN",
+    ):
+        journal.resolve_no_repository_effect(
+            op_id,
+            evidence_ref="github:James3014/Nexus-new#1340:comment:5967921844",
+            evidence_sha256="1" * 64,
+        )
 
 
 def test_live_terminal_completed_operation_does_not_block(
