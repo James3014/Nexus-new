@@ -706,81 +706,103 @@ def observe_github_repository_default_head(repository: str) -> dict[str, Any]:
             "blocker": "GITHUB_OBSERVER_EXECUTABLE_UNAVAILABLE",
             "detail": resolution_error or "GitHub CLI executable unavailable",
         }
-    try:
-        result = subprocess.run(
-            [
-                github_cli,
-                "repo",
-                "view",
-                repository,
-                "--json",
-                "nameWithOwner,defaultBranchRef",
-            ],
-            cwd=CANONICAL_SOURCE_ROOT,
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
-        return {"ok": False, "blocker": "GITHUB_OBSERVER_TIMEOUT", "detail": str(exc)}
-    except OSError as exc:
-        return {
-            "ok": False,
-            "blocker": "GITHUB_OBSERVER_EXECUTABLE_UNAVAILABLE",
-            "detail": str(exc),
-        }
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout).strip()
-        lowered = detail.lower()
-        auth_failure = any(
-            marker in lowered
-            for marker in (
-                "auth login",
-                "authentication",
-                "not logged into",
-                "gh_token",
-                "github_token",
+
+    def api(path: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        try:
+            result = subprocess.run(
+                [github_cli, "api", path],
+                cwd=CANONICAL_SOURCE_ROOT,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
             )
-        )
-        return {
-            "ok": False,
-            "blocker": (
-                "GITHUB_OBSERVER_AUTH_UNAVAILABLE"
-                if auth_failure
-                else "GITHUB_OBSERVER_REQUEST_FAILED"
-            ),
-            "detail": detail,
-        }
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
+        except subprocess.TimeoutExpired as exc:
+            return None, {
+                "ok": False,
+                "blocker": "GITHUB_OBSERVER_TIMEOUT",
+                "detail": str(exc),
+            }
+        except OSError as exc:
+            return None, {
+                "ok": False,
+                "blocker": "GITHUB_OBSERVER_EXECUTABLE_UNAVAILABLE",
+                "detail": str(exc),
+            }
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip()
+            lowered = detail.lower()
+            auth_failure = any(
+                marker in lowered
+                for marker in (
+                    "auth login",
+                    "authentication",
+                    "not logged into",
+                    "gh_token",
+                    "github_token",
+                )
+            )
+            return None, {
+                "ok": False,
+                "blocker": (
+                    "GITHUB_OBSERVER_AUTH_UNAVAILABLE"
+                    if auth_failure
+                    else "GITHUB_OBSERVER_REQUEST_FAILED"
+                ),
+                "detail": detail,
+            }
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            return None, {
+                "ok": False,
+                "blocker": "GITHUB_OBSERVER_MALFORMED_RESPONSE",
+                "detail": str(exc),
+            }
+        if not isinstance(payload, dict):
+            return None, {
+                "ok": False,
+                "blocker": "GITHUB_OBSERVER_MALFORMED_RESPONSE",
+                "detail": "GitHub response must be an object",
+            }
+        return payload, None
+
+    repo_payload, error = api(f"repos/{repository}")
+    if error is not None:
+        return error
+    assert repo_payload is not None
+    if repo_payload.get("full_name") != repository:
         return {
             "ok": False,
             "blocker": "GITHUB_OBSERVER_MALFORMED_RESPONSE",
-            "detail": str(exc),
+            "detail": "repository identity mismatch",
         }
-    branch = payload.get("defaultBranchRef") if isinstance(payload, Mapping) else None
-    if (
-        not isinstance(payload, Mapping)
-        or payload.get("nameWithOwner") != repository
-        or not isinstance(branch, Mapping)
-        or not isinstance(branch.get("name"), str)
-        or not _SHA_RE.fullmatch(str(branch.get("oid") or ""))
-    ):
+    default_branch = str(repo_payload.get("default_branch") or "").strip()
+    if not default_branch:
         return {
             "ok": False,
             "blocker": "GITHUB_OBSERVER_MALFORMED_RESPONSE",
-            "detail": "repository/default branch identity mismatch",
+            "detail": "default branch missing",
+        }
+    branch_payload, error = api(f"repos/{repository}/branches/{default_branch}")
+    if error is not None:
+        return error
+    assert branch_payload is not None
+    commit = branch_payload.get("commit")
+    head_sha = str(commit.get("sha") or "") if isinstance(commit, Mapping) else ""
+    if branch_payload.get("name") != default_branch or not _SHA_RE.fullmatch(head_sha):
+        return {
+            "ok": False,
+            "blocker": "GITHUB_OBSERVER_MALFORMED_RESPONSE",
+            "detail": "default branch head identity mismatch",
         }
     return {
         "ok": True,
         "repository": repository,
-        "default_branch": str(branch["name"]),
-        "head_sha": str(branch["oid"]),
+        "default_branch": default_branch,
+        "head_sha": head_sha,
         "observed_at": datetime.now(timezone.utc).isoformat(),
     }
-
 
 def _canonical_remote_matches(origin: str, repository: str) -> bool:
     value = str(origin).strip()
