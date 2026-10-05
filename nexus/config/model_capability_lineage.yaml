@@ -29,7 +29,7 @@
 schema: nexus.model_capability_lineage.v1
 status: current
 owner: James Chen
-last_updated: '2026-10-04'
+last_updated: '2026-10-05'
 role: calibration_evidence_only
 admission_authority: false
 route_authority: none
@@ -220,6 +220,7 @@ lineages:
       - "exact 32K long-repo G1 stack unqualified due to session startup readiness and context overflow"
       - "R10 64K/Q8-KV/16K-output/auto-compaction/Core exact configuration completed the six-task run with 0 material protocol/state failures, 0 context overflow, 0 false completion, and 0 authority escape"
       - "R10 semantic full-agent threshold failed at 3/6 < 4/6; disposition WATCH / NOT_ADMITTED; no hidden holdout"
+      - "Wave 3 T03 verifier-guided repair: one valid round produced no material candidate delta and remained rejected; round 2 was interrupted by external resource ownership change and is NOT_SCORED"
     role_evidence:
       - ref: calibration:external/occamy-1.0/g0-tool-loop
         phase: PROTOCOL_TOOL_LOOP_QUALIFICATION
@@ -231,12 +232,20 @@ lineages:
         scope: SEMANTIC
         provenance: EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK
         date: '2026-10-03'
+      - ref: "github:James3014/Nexus-new#1412:comment-5985452976"
+        phase: VERIFIER_GUIDED_REPAIR
+        scope: SEMANTIC
+        provenance: DURABLE_REPOSITORY_RECEIPT
+        date: '2026-10-05'
     known_failure_families:
       - family: session_startup_readiness
         ref: calibration:known-failure-family/session_startup_readiness
         status: open
       - family: context_state_overflow_54902_gt_32768
         ref: calibration:known-failure-family/context_state_overflow_54902_gt_32768
+        status: open
+      - family: verifier_guided_repair_no_material_delta_t03
+        ref: "github:James3014/Nexus-new#1412:comment-5985452976"
         status: open
     evidence:
       - id: occamy-1.0-g0-tool-loop-pass
@@ -264,6 +273,15 @@ lineages:
         date: '2026-10-03'
         digest: null
         note: "exact selective holdout 30/30, material false-safe 0, natural safe addressable residual ~2%, WATCH / no active routing"
+      - id: occamy-1.0-wave3-t03-repairability
+        phase: VERIFIER_GUIDED_REPAIR
+        scope: SEMANTIC
+        status: WATCH
+        score: "0/1 material repair delta; round 2 NOT_SCORED"
+        provenance: DURABLE_REPOSITORY_RECEIPT
+        date: '2026-10-05'
+        digest: "8117e4b242dc1aeffdf16956c0823bb6d686dd6b03a44d949b6fbc655f882f03"
+        note: "T03 round 1 Core VERIFIED but candidate unchanged and objective grader remained 18/21; round 2 interrupted by external resource ownership change and is not semantically scored"
     workforce_authority_refs: []
     evidence_notes:
       - "capability evidence provenance is EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK; no invented repository receipts"
@@ -391,6 +409,18 @@ lineages:
             failure_families:
               - non_discriminating_regression_test
             summary: "R10 regression_test tasks: T02 ACCEPTED; T04 ACCEPTED; T06 REJECTED because the added regression test was non-discriminating"
+          - task_family: bug_repair
+            phase: VERIFIER_GUIDED_REPAIR
+            disposition: WATCH
+            score: "0/1 material repair delta; round 2 NOT_SCORED"
+            is_semantic_failure: true
+            runtime_admission: false
+            evidence_ref: "github:James3014/Nexus-new#1412:comment-5985452976"
+            provenance: DURABLE_REPOSITORY_RECEIPT
+            date: '2026-10-05'
+            failure_families:
+              - verifier_guided_repair_no_material_delta_t03
+            summary: "Wave 3 T03: one valid Behavioral Delta V2 repair round ran 600.41s with Core VERIFIED, no material candidate delta, and the same 3 objective failures; round 2 was interrupted externally and is NOT_SCORED; WATCH / NOT_ADMITTED"
       - config_id: occamy-1.0-q4-typed-decision-selective-shadow
         model: occamy-1.0-q4
         model_digest: "ffb25f763ff9c27f5f4e2adcdef399c5654f9f840fdac33dffe7035ba8266a87"
@@ -422,6 +452,251 @@ lineages:
             provenance: EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK
             date: '2026-10-03'
             summary: "fresh selective holdout = 30/30, material false-safe = 0, natural safe addressable residual ~2%, disposition = WATCH / no active routing"
+  qwen-3.6-35b-a3b:
+    lineage_id: qwen-3.6-35b-a3b
+    canonical_family: qwen-3.6-35b-a3b
+    description: >-
+      Qwen3.6 35B-A3B semantic capability lineage for Local full-agent
+      calibration. Evidence is exact-configuration bounded and never Workforce
+      Admission or route authority.
+    execution_identities:
+      - provider: local
+        model: incoai/Qwen3.6-35B-A3B-Splash
+        identity_kind: primary
+        transport: splash_http_loopback
+    stable_floor: L0
+    current_frontier: L0
+    conditional_ceiling: L0
+    experimental_ceiling: L0
+    frontier_experimental: false
+    experimental_notes:
+      - "global semantic autonomy tier is intentionally not inferred from role-specific exact-configuration evidence"
+      - "Wave 2 T01 FIRST_PASS remained rejected with false completion; one valid Behavioral Delta V2 repair round produced material candidate delta, Core VERIFIED, and objective 12/12 PASS"
+      - "Wave 4 fresh T02 FIRST_PASS passed with Core VERIFIED and objective acceptance"
+      - "Wave 4 T03 stopped before candidate effect on prompt + max_completion_tokens context-window rejection; semantic grader NOT_RUN"
+      - "bounded portfolio disposition is CONDITIONAL/WATCH and NOT_ADMITTED; no six-task governed score or model-vs-model winner was established"
+    role_evidence:
+      - ref: "github:James3014/Nexus-new#1412:comment-5985038345"
+        phase: VERIFIER_GUIDED_REPAIR
+        scope: SEMANTIC
+        provenance: DURABLE_REPOSITORY_RECEIPT
+        date: '2026-10-05'
+      - ref: "github:James3014/Nexus-new#1412:comment-5985600385"
+        phase: FIRST_PASS
+        scope: SEMANTIC
+        provenance: DURABLE_REPOSITORY_RECEIPT
+        date: '2026-10-05'
+      - ref: "github:James3014/Nexus-new#1412:comment-5985600385"
+        phase: RESOURCE_CONTEXT_QUALIFICATION
+        scope: IDENTITY_OR_TRANSPORT
+        provenance: DURABLE_REPOSITORY_RECEIPT
+        date: '2026-10-05'
+    known_failure_families:
+      - family: first_pass_false_completion_t01
+        ref: "github:James3014/Nexus-new#1412:comment-5985038345"
+        status: open
+      - family: context_window_rejection_prompt_plus_max_completion_tokens
+        ref: "github:James3014/Nexus-new#1412:comment-5985600385"
+        status: open
+    evidence:
+      - id: qwen3.6-wave2-t01-first-pass-defect-preserved
+        phase: FIRST_PASS
+        scope: SEMANTIC
+        status: WATCH
+        score: "8/12 + false completion"
+        provenance: DURABLE_REPOSITORY_RECEIPT
+        date: '2026-10-05'
+        digest: "d103b5b09dade76f3fe4e4a986f5110d806b5c1e2531118750ebeaaf3bada701"
+        note: "FIRST_PASS defect remains visible and is not rewritten by later repair success"
+      - id: qwen3.6-wave2-t01-verifier-guided-repair-pass
+        phase: VERIFIER_GUIDED_REPAIR
+        scope: SEMANTIC
+        status: PASS
+        score: "12/12 objective PASS in 1 repair round"
+        provenance: DURABLE_REPOSITORY_RECEIPT
+        date: '2026-10-05'
+        digest: "0be5b8c76de97fddc6b46b8e1728aa6dba86e61dc6b0a6f1adb0e8e4032108fb"
+        note: "material candidate delta; completion hygiene PASS; canonical Nexus Core VERIFIED; Local-only / Online rescue 0"
+      - id: qwen3.6-wave4-t02-first-pass-pass
+        phase: FIRST_PASS
+        scope: SEMANTIC
+        status: PASS
+        score: "1/1 fresh regression-test task"
+        provenance: DURABLE_REPOSITORY_RECEIPT
+        date: '2026-10-05'
+        digest: "5d384ee12ce383ba9681075dd905c0c69df883f2fe308fb346fe3331baf23c1a"
+        note: "T02 FIRST_PASS accepted in 139.28s; Core VERIFIED; objective grader PASS; false completion 0"
+      - id: qwen3.6-wave4-t03-context-hard-stop
+        phase: RESOURCE_CONTEXT_QUALIFICATION
+        scope: IDENTITY_OR_TRANSPORT
+        status: STACK_UNQUALIFIED
+        score: "T03 CONTEXT_WINDOW_HARD_STOP"
+        provenance: DURABLE_REPOSITORY_RECEIPT
+        date: '2026-10-05'
+        digest: "c769dcbce78f4012e614569e8ba4fb3405023f90297706339398b20c0db62d01"
+        note: "prompt and max_completion_tokens exceed the context window; candidate delta 0; Core/grader NOT_RUN; repair not eligible"
+    workforce_authority_refs: []
+    evidence_notes:
+      - "all Wave 2/4 evidence is durable repository evidence from #1412"
+      - "repair PASS is phase-specific and does not erase FIRST_PASS false completion or T03 stack failure"
+      - "calibration evidence carries no workforce admission or routing authority"
+    execution_configurations:
+      - config_id: qwen3.6-35b-a3b-splash-opencode-64k-wave4
+        model: incoai/Qwen3.6-35B-A3B-Splash
+        model_digest: "22aa0f68a76fa8b84245b81eb1606f25aaa002259663f84f361fd7c66f244418"
+        package: Splash
+        runtime: Splash
+        runtime_build: "1.0.2 / Metal"
+        context_limit: 65536
+        prompt_template_mode: opencode_native_reasoning_none
+        scaffold: opencode_serve
+        agent_loop: opencode_http_api
+        transport: http_loopback
+        tool_surface: opencode_builtin_tools
+        write_mode: workspace_edit
+        state_preservation: same_session_auto_compaction
+        resource_envelope:
+          output_limit: 16384
+          auto_compaction: "auto+prune reserved=18000"
+          nexus_core_revision: "795432345413fe9c5c677ac51abfa47d8dccfb11"
+          local_only: true
+          online_rescue_calls: 0
+        realm: mac_mini_m5_pro
+        description: "Qwen3.6 35B-A3B via Splash 1.0.2 and OpenCode 1.18.32, 64K configured context, 16K output, auto-compaction, and canonical Nexus Core governance"
+        qualifications:
+          - task_family: bug_repair
+            phase: FIRST_PASS
+            disposition: WATCH
+            score: "0/1 semantically scored; T03 NOT_SCORED_CONTEXT_HARD_STOP"
+            is_semantic_failure: true
+            runtime_admission: false
+            evidence_ref: "github:James3014/Nexus-new#1412:comment-5985600385"
+            provenance: DURABLE_REPOSITORY_RECEIPT
+            date: '2026-10-05'
+            failure_families:
+              - first_pass_false_completion_t01
+            summary: "T01 FIRST_PASS rejected with false completion and remains preserved; T03 was not semantically scored because the exact stack hit the frozen context-window hard stop"
+          - task_family: bug_repair
+            phase: VERIFIER_GUIDED_REPAIR
+            disposition: PASS
+            score: "T01 12/12 objective PASS in 1 repair round"
+            runtime_admission: false
+            evidence_ref: "github:James3014/Nexus-new#1412:comment-5985038345"
+            provenance: DURABLE_REPOSITORY_RECEIPT
+            date: '2026-10-05'
+            summary: "Behavioral Delta V2 C4 produced material candidate delta with no context rejection, completion hygiene PASS, Core VERIFIED, and objective 12/12 PASS; FIRST_PASS defect remains preserved"
+          - task_family: regression_test
+            phase: FIRST_PASS
+            disposition: WATCH
+            score: "1/1 fresh T02 accepted"
+            runtime_admission: false
+            evidence_ref: "github:James3014/Nexus-new#1412:comment-5985600385"
+            provenance: DURABLE_REPOSITORY_RECEIPT
+            date: '2026-10-05'
+            summary: "fresh Wave 4 T02 FIRST_PASS accepted with Core VERIFIED and objective grader PASS; sample is bounded and does not establish six-task qualification"
+          - task_family: long_repo_episode
+            phase: RESOURCE_CONTEXT_QUALIFICATION
+            disposition: STACK_UNQUALIFIED
+            score: "T03_CONTEXT_WINDOW_HARD_STOP"
+            is_semantic_failure: false
+            runtime_admission: false
+            evidence_ref: "github:James3014/Nexus-new#1412:comment-5985600385"
+            provenance: DURABLE_REPOSITORY_RECEIPT
+            date: '2026-10-05'
+            failure_families:
+              - context_window_rejection_prompt_plus_max_completion_tokens
+            summary: "Wave 4 T03 provider rejected prompt + max_completion_tokens against configured context before candidate effect; Core/grader NOT_RUN; full-six comparison stopped by frozen hard gate; not a semantic FAIL"
+  qwen3-coder-30b-a3b:
+    lineage_id: qwen3-coder-30b-a3b
+    canonical_family: qwen3-coder-30b-a3b
+    description: >-
+      Qwen3-Coder 30B-A3B semantic capability lineage for Local full-agent
+      calibration. The canonical Wave 2 configuration stopped on a resource
+      prerequisite before assistant/tool/candidate effect and was not
+      semantically scored.
+    execution_identities:
+      - provider: local
+        model: mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit
+        identity_kind: primary
+        transport: mlx_serve_http_loopback
+    stable_floor: L0
+    current_frontier: L0
+    conditional_ceiling: L0
+    experimental_ceiling: L0
+    frontier_experimental: false
+    experimental_notes:
+      - "global semantic autonomy tier is intentionally not inferred from role-specific exact-configuration evidence"
+      - "canonical Wave 2 first model request required ~1284 MB GPU working memory with ~1035 MB available; assistant/tool/candidate effect = 0"
+      - "semantic grader NOT_RUN; repair NOT_RUN_BY_GATE; disposition STACK_UNQUALIFIED_RESOURCE / NOT_SEMANTICALLY_SCORED"
+      - "post-terminal 64K duplicate diagnostic is intentionally not promoted into the canonical qualification"
+    role_evidence:
+      - ref: "github:James3014/Nexus-new#1412:comment-5985038345"
+        phase: RESOURCE_CONTEXT_QUALIFICATION
+        scope: IDENTITY_OR_TRANSPORT
+        provenance: DURABLE_REPOSITORY_RECEIPT
+        date: '2026-10-05'
+    known_failure_families:
+      - family: gpu_working_memory_1284mb_gt_1035mb
+        ref: "github:James3014/Nexus-new#1412:comment-5985038345"
+        status: open
+    evidence:
+      - id: qwen3-coder-wave2-resource-hard-stop
+        phase: RESOURCE_CONTEXT_QUALIFICATION
+        scope: IDENTITY_OR_TRANSPORT
+        status: STACK_UNQUALIFIED
+        score: "0/1 stopped before assistant effect"
+        provenance: DURABLE_REPOSITORY_RECEIPT
+        date: '2026-10-05'
+        digest: "1a305173871a89959064485d47a99e9b6398489b413d87dbe884f7f1b5cc8334"
+        note: "5635-token prompt required ~1284 MB GPU working memory but ~1035 MB was available; workspace stayed baseline; semantic grader NOT_RUN"
+    workforce_authority_refs: []
+    evidence_notes:
+      - "canonical Wave 2 exact-stack evidence only; 64K duplicate remains diagnostic and noncanonical"
+      - "STACK_UNQUALIFIED_RESOURCE is not semantic failure and grants no admission"
+      - "calibration evidence carries no workforce admission or routing authority"
+    execution_configurations:
+      - config_id: qwen3-coder-30b-a3b-mlx4bit-opencode-32k-wave2
+        model: mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit
+        model_digest: "6e302ea604ad9ab206367e2c501d1571023e7b6d"
+        quant: 4bit
+        package: MLX
+        runtime: mlx-serve
+        runtime_build: "26.9.5 / MLX 0.32.2"
+        context_limit: 32768
+        prompt_template_mode: opencode_native
+        scaffold: opencode_serve
+        agent_loop: opencode_http_api
+        transport: http_loopback
+        tool_surface: opencode_builtin_tools
+        write_mode: workspace_edit
+        state_preservation: same_session
+        resource_envelope:
+          kv_quant_bits: 8
+          output_limit: 4096
+          prompt_tokens: 5635
+          required_gpu_working_mb: 1284.0
+          available_gpu_working_mb: 1035.0
+          model_size_bytes: 17197118924
+          mtp: false
+          pld: false
+          prefix_cache_entries: 0
+          local_only: true
+          online_rescue_calls: 0
+        realm: mac_mini_m5_pro
+        description: "Qwen3-Coder 30B-A3B Instruct 4bit via mlx-serve 26.9.5 and OpenCode 1.18.32, canonical Wave 2 32K/4K-output identity"
+        qualifications:
+          - task_family: long_repo_episode
+            phase: RESOURCE_CONTEXT_QUALIFICATION
+            disposition: STACK_UNQUALIFIED
+            score: "0/1_STOPPED_BEFORE_ASSISTANT_EFFECT"
+            is_semantic_failure: false
+            runtime_admission: false
+            evidence_ref: "github:James3014/Nexus-new#1412:comment-5985038345"
+            provenance: DURABLE_REPOSITORY_RECEIPT
+            date: '2026-10-05'
+            failure_families:
+              - gpu_working_memory_1284mb_gt_1035mb
+            summary: "canonical Wave 2 first model request failed resource precondition before assistant/tool/candidate effect; semantic grader NOT_RUN and repair NOT_RUN_BY_GATE; not a semantic FAIL"
   qwen-3.8-27b:
     lineage_id: qwen-3.8-27b
     canonical_family: qwen-3.8-27b
@@ -433,6 +708,10 @@ lineages:
         model: Vontra/Qwen3.8-27B-MLX-4bit
         identity_kind: primary
         transport: http_loopback
+      - provider: local
+        model: incoai/Qwen3.8-27B-Splash
+        identity_kind: alias
+        transport: splash_http_loopback
     stable_floor: L0
     current_frontier: L0
     conditional_ceiling: L0
@@ -443,13 +722,22 @@ lineages:
       - "positive capability claims live only on the bound execution configuration + task family"
       - "TensorFold C-semantic shadow quality/safety PASS (4 ACCEPTABLE + 1 CORRECT_ABSTAIN, material false-safe 0)"
       - "Online escalation 4/5; system/economic decision delta UNPROVEN; disposition WATCH"
+      - "Wave 3 Splash/OpenCode tool-loop smoke PASS, but full-agent T01 ended with MODEL_NO_TERMINAL_TEXT, zero candidate delta, Core/grader NOT_RUN, semantic NOT_SCORED"
     role_evidence:
       - ref: calibration:external/qwen-3.8-27b/tensorfold-g2-disposition
         phase: SYSTEM_DECISION_DELTA
         scope: SEMANTIC
         provenance: EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK
         date: '2026-10-02'
-    known_failure_families: []
+      - ref: "github:James3014/Nexus-new#1412:comment-5985452976"
+        phase: PROTOCOL_TOOL_LOOP_QUALIFICATION
+        scope: IDENTITY_OR_TRANSPORT
+        provenance: DURABLE_REPOSITORY_RECEIPT
+        date: '2026-10-05'
+    known_failure_families:
+      - family: agent_loop_no_terminal_text_zero_candidate_delta
+        ref: "github:James3014/Nexus-new#1412:comment-5985452976"
+        status: open
     evidence:
       - id: qwen-27b-tensorfold-c-semantic-pass
         phase: SYSTEM_DECISION_DELTA
@@ -460,9 +748,19 @@ lineages:
         date: '2026-10-02'
         digest: null
         note: "quality/safety PASS; Online escalation 4/5; system/economic decision delta UNPROVEN; disposition WATCH"
+      - id: qwen3.8-wave3-splash-agent-loop-stack-unqualified
+        phase: PROTOCOL_TOOL_LOOP_QUALIFICATION
+        scope: IDENTITY_OR_TRANSPORT
+        status: STACK_UNQUALIFIED
+        score: "tool-loop smoke PASS; full-agent T01 NOT_SCORED"
+        provenance: DURABLE_REPOSITORY_RECEIPT
+        date: '2026-10-05'
+        digest: "00b98c304bdb83637dcf6ab2b7437f21e35bf0a14f4b4f46e6eac9783dc959c3"
+        note: "full-agent T01 ran 600.52s with repeated investigation loop, no terminal assistant text, zero candidate delta, Core/grader NOT_RUN; not a semantic FAIL"
     workforce_authority_refs: []
     evidence_notes:
-      - "capability evidence provenance is EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK; no invented repository receipts"
+      - "TensorFold evidence remains EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK; Wave 3 Splash/OpenCode evidence is DURABLE_REPOSITORY_RECEIPT"
+      - "TensorFold and Splash/OpenCode are distinct exact execution configurations under one semantic lineage and must not inherit each other's qualification"
       - "calibration evidence carries no workforce admission or routing authority"
     execution_configurations:
       - config_id: qwen3.8-27b-mlx4bit-tensorfold-drafted
@@ -499,3 +797,47 @@ lineages:
             provenance: EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK
             date: '2026-10-02'
             summary: "quality/safety PASS (4 ACCEPTABLE + 1 CORRECT_ABSTAIN), material false-safe = 0, Online escalation = 4/5, system/economic decision delta = UNPROVEN, disposition = WATCH"
+      - config_id: qwen3.8-27b-splash-q4-opencode-64k-wave3
+        model: incoai/Qwen3.8-27B-Splash
+        model_digest: "9d27070b71f7142c6b6025f03ac011d70a73cb48"
+        quant: Q4
+        package: Splash
+        runtime: Splash
+        runtime_build: "1.0.2 / Metal"
+        context_limit: 65536
+        prompt_template_mode: opencode_native
+        scaffold: opencode_serve
+        agent_loop: opencode_http_api
+        transport: http_loopback
+        tool_surface: opencode_builtin_tools
+        write_mode: workspace_edit
+        state_preservation: same_session_auto_compaction
+        resource_envelope:
+          output_limit: 16384
+          auto_compaction: "auto+prune reserved=18000"
+          local_only: true
+          online_rescue_calls: 0
+        realm: mac_mini_m5_pro
+        description: "Qwen3.8 27B Q4 via Splash 1.0.2 and OpenCode 1.18.32, 64K configured context, 16K output, auto-compaction; Wave 3 full-agent calibration identity"
+        qualifications:
+          - task_family: short_tool_use
+            phase: PROTOCOL_TOOL_LOOP_QUALIFICATION
+            disposition: PASS
+            score: "PASS"
+            runtime_admission: false
+            evidence_ref: "github:James3014/Nexus-new#1412:comment-5985452976"
+            provenance: DURABLE_REPOSITORY_RECEIPT
+            date: '2026-10-05'
+            summary: "OpenCode native read -> write -> readback tool-loop smoke PASS"
+          - task_family: long_repo_episode
+            phase: PROTOCOL_TOOL_LOOP_QUALIFICATION
+            disposition: STACK_UNQUALIFIED
+            score: "0/1_STOPPED_BY_SAFETY_GATE / semantic NOT_SCORED"
+            is_semantic_failure: false
+            runtime_admission: false
+            evidence_ref: "github:James3014/Nexus-new#1412:comment-5985452976"
+            provenance: DURABLE_REPOSITORY_RECEIPT
+            date: '2026-10-05'
+            failure_families:
+              - agent_loop_no_terminal_text_zero_candidate_delta
+            summary: "Wave 3 T01: tool-loop preflight passed, but full-agent episode ran 600.52s with repeated read/grep/bash investigation, no terminal assistant text, zero candidate delta, Core/grader NOT_RUN, repair 0; STACK_UNQUALIFIED_AGENT_LOOP, not semantic FAIL"
