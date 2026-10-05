@@ -871,7 +871,6 @@ def _derive_next_gate(
     }
 
 
-
 _COMPLETION_LAYERS = (
     "Implementation",
     "Source verification",
