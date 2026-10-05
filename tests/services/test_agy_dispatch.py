@@ -3552,3 +3552,184 @@ def test_plan_mode_text_mentioning_permission_denied_in_model_response_completes
     assert code == 0
     assert coordinator.acquire_count == 1
     assert not any(event.get("failure_kind") for event in events)
+
+
+def test_temp_command_deny_includes_git_mutation_commands() -> None:
+    expected_mutations = [
+        "command(git checkout)",
+        "command(git restore)",
+        "command(git stash)",
+        "command(git reset)",
+        "command(git commit)",
+        "command(git branch)",
+        "command(git merge)",
+        "command(git rebase)",
+        "command(git cherry-pick)",
+        "command(git revert)",
+        "command(git clean)",
+        "command(git push)",
+        "command(git reset --hard)",
+    ]
+    for cmd in expected_mutations:
+        assert cmd in dispatch.TEMP_COMMAND_DENY
+
+
+def test_read_only_git_commands_not_in_deny() -> None:
+    read_only_cmds = [
+        "command(git diff)",
+        "command(git log)",
+        "command(git status)",
+        "command(git show)",
+        "command(git rev-parse)",
+    ]
+    for cmd in read_only_cmds:
+        assert cmd not in dispatch.TEMP_COMMAND_DENY
+
+
+def test_command_scope_g0_transient_mutation_red_fixture(tmp_path: Path) -> None:
+    """Witness incident G0 reproduction:
+
+    Pre-existing uncommitted dirty file exists outside write scope.
+    The worker edits both the allowed file and the out-of-scope dirty file,
+    attempting to bypass scope or restore changes, exiting with returncode 0.
+    Must fail closed (exit 1), classify as SCOPE_VIOLATION_UNAUTHORIZED_MUTATION,
+    and halt without rotating accounts.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=work, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=work, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=work, check=True)
+
+    base_file = work / "base.txt"
+    base_file.write_text("initial base\n", encoding="utf-8")
+    subprocess.run(["git", "add", "base.txt"], cwd=work, check=True)
+    subprocess.run(["git", "commit", "-qm", "initial"], cwd=work, check=True)
+
+    dirty_sentinel = work / "uncommitted_outside.txt"
+    dirty_sentinel.write_text("pre-existing uncommitted\n", encoding="utf-8")
+
+    target = work / "in_scope_target.txt"
+    target.write_text("before\n", encoding="utf-8")
+
+    coordinator = _WriteScopeCoordinator(home)
+    events: list[dict[str, object]] = []
+
+    def mock_runner(**_kwargs):
+        target.write_text("after modified\n", encoding="utf-8")
+        dirty_sentinel.write_text("mutated by worker\n", encoding="utf-8")
+        return 0, "completed task\nnow let me restore my changes", "", False, 10
+
+    code = dispatch.dispatch_run(
+        prompt="perform bounded edit",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(target)],
+        temp_command_permissions=True,
+        coordinator=coordinator,
+        run_agy_fn=mock_runner,
+        operation_hook=events.append,
+    )
+
+    assert code == 1
+    assert coordinator.acquire_count == 1
+    assert coordinator.claim.released is True
+
+    failure_events = [e for e in events if e.get("phase") == "CLASSIFYING_FAILURE"]
+    assert len(failure_events) >= 1
+    assert failure_events[-1].get("failure_kind") == "SCOPE_VIOLATION_UNAUTHORIZED_MUTATION"
+    assert failure_events[-1].get("reconciliation_required") is True
+
+
+def test_write_scope_clean_completion_verified_in_scope(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=work, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=work, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=work, check=True)
+
+    base_file = work / "base.txt"
+    base_file.write_text("initial base\n", encoding="utf-8")
+    subprocess.run(["git", "add", "base.txt"], cwd=work, check=True)
+    subprocess.run(["git", "commit", "-qm", "initial"], cwd=work, check=True)
+
+    target = work / "target.txt"
+    target.write_text("initial\n", encoding="utf-8")
+
+    coordinator = _WriteScopeCoordinator(home)
+    events: list[dict[str, object]] = []
+
+    def mock_runner(**_kwargs):
+        target.write_text("updated in scope\n", encoding="utf-8")
+        return 0, "edited target successfully", "", False, 5
+
+    code = dispatch.dispatch_run(
+        prompt="edit target",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(target)],
+        temp_command_permissions=True,
+        coordinator=coordinator,
+        run_agy_fn=mock_runner,
+        operation_hook=events.append,
+    )
+
+    assert code == 0
+    assert coordinator.acquire_count == 1
+    assert not any(event.get("failure_kind") for event in events)
+
+
+def test_scope_violation_persisted_in_operation_journal(tmp_path: Path) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=work, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=work, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=work, check=True)
+
+    tracked = work / "tracked.txt"
+    tracked.write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=work, check=True)
+    subprocess.run(["git", "commit", "-qm", "base"], cwd=work, check=True)
+
+    journal = dispatch.AgyOperationJournal(tmp_path / "operations")
+    op_id = dispatch.new_operation_id()
+    journal.create(
+        operation_id=op_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(work),
+        provider="agy",
+        model="claude-sonnet-4-6",
+        effort="medium",
+        prompt_sha256="f" * 64,
+        runtime_revision="c" * 40,
+    )
+    journal.update(op_id, write_paths=["tracked.txt"])
+    journal.mark_started(op_id, pid=os.getpid())
+
+    out_of_scope = work / "unauthorized.txt"
+    out_of_scope.write_text("unauthorized data\n", encoding="utf-8")
+
+    terminal = journal.mark_terminal(
+        op_id,
+        status="COMPLETED",
+        exit_code=0,
+        cwd=str(work),
+    )
+
+    assert terminal["status"] == "FAILED"
+    assert terminal["failure_kind"] == "SCOPE_VIOLATION_UNAUTHORIZED_MUTATION"
+    assert terminal["scope_validation_state"] == "VIOLATION_OUT_OF_SCOPE"
+    assert "unauthorized.txt" in terminal["scope_violations"]
+
+    read_record = journal.read(op_id)
+    assert read_record["status"] == "FAILED"
+    assert read_record["scope_validation_state"] == "VIOLATION_OUT_OF_SCOPE"
+
+    public_view = dispatch.direct_operation_journal.public_operation_view(read_record)
+    assert public_view["write_paths"] == ["tracked.txt"]
+    assert public_view["scope_validation_state"] == "VIOLATION_OUT_OF_SCOPE"
+    assert public_view["scope_violations"] == ["unauthorized.txt"]
