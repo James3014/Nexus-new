@@ -92,7 +92,9 @@ def _collab_status_fd(*, required: bool) -> int | None:
     return fd
 
 
-def _emit_collab_status(event: str, *, pid: int | None = None, exit_code: int | None = None) -> None:
+def _emit_collab_status(
+    event: str, *, pid: int | None = None, exit_code: int | None = None
+) -> None:
     fd = _collab_status_fd(required=False)
     account_alias_hash = os.environ.get("NEXUS_HCOM_AGY_ACCOUNT_ALIAS_HASH", "").strip()
     lease_id_hash = os.environ.get("NEXUS_HCOM_AGY_LEASE_ID_HASH", "").strip()

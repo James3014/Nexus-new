@@ -545,7 +545,9 @@ def test_launcher_crash_with_surviving_provider_preserves_receipt_and_blocks_reu
     module.MANAGER_ROOT = manager_root
     leases = tmp_path / "leases"
     module.LEASES_DIR = leases
-    monkeypatch.setattr(module, "_apply_dynamic_availability", lambda _model: ({}, {"family": "other"}))
+    monkeypatch.setattr(
+        module, "_apply_dynamic_availability", lambda _model: ({}, {"family": "other"})
+    )
     manager = AgyAccountPoolManager(
         accounts=[AgyAccount(alias="google-a", home_dir=str(profile))],
         use_real_manager=False,

@@ -1802,7 +1802,11 @@ def _decode_hcom_collab_status(
     if event == "pre_provider_failed":
         return payload
     pid = payload.get("pid")
-    if event not in {"provider_started", "provider_terminal"} or not isinstance(pid, int) or pid <= 0:
+    if (
+        event not in {"provider_started", "provider_terminal"}
+        or not isinstance(pid, int)
+        or pid <= 0
+    ):
         return None
     if event == "provider_terminal" and not isinstance(payload.get("exit_code"), int):
         return None
