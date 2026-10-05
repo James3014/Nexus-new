@@ -21,19 +21,17 @@ SCHEMA = "nexus.mutation_admission.v1"
 BINDING_SCHEMA = "nexus.mutation_admission_binding.v1"
 _ALLOWED_LANES = frozenset({"DIRECT_CANONICAL", "DIRECT_DELEGATED", "GOVERNED"})
 _ALLOWED_AUTHORITY = frozenset({"OWNER_INLINE", "TRACKED_TASK_CARD"})
-CANONICAL_REPOSITORIES = frozenset(
-    {
-        "James3014/devspace",
-        "James3014/Nexus-new",
-        "James3014/nexus-core",
-        "James3014/nexus-learning",
-        "James3014/nexus-open-swe-runtime",
-        "James3014/repository-intelligence-engine",
-        "James3014/nexus-runtime",
-        "James3014/nexus-opencli-reviewer",
-        "James3014/nexus-deployment-lab",
-    }
-)
+CANONICAL_REPOSITORIES = frozenset({
+    "James3014/devspace",
+    "James3014/Nexus-new",
+    "James3014/nexus-core",
+    "James3014/nexus-learning",
+    "James3014/nexus-open-swe-runtime",
+    "James3014/repository-intelligence-engine",
+    "James3014/nexus-runtime",
+    "James3014/nexus-opencli-reviewer",
+    "James3014/nexus-deployment-lab",
+})
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _SHA64 = re.compile(r"^[0-9a-f]{64}$")
 _OPERATION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
@@ -46,7 +44,9 @@ class MutationAdmissionError(RuntimeError):
 
 def canonical_hash(value: Mapping[str, Any]) -> str:
     return hashlib.sha256(
-        json.dumps(dict(value), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        json.dumps(dict(value), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+            "utf-8"
+        )
     ).hexdigest()
 
 
@@ -89,7 +89,12 @@ def _validate_scope(values: list[str] | tuple[str, ...]) -> tuple[str, ...]:
         token = str(raw).strip()
         directory = token.endswith("/**")
         base = token[:-3] if directory else token
-        if not base or base.startswith("/") or "\\" in base or any(ch in base for ch in "*?[]"):
+        if (
+            not base
+            or base.startswith("/")
+            or "\\" in base
+            or any(ch in base for ch in "*?[]")
+        ):
             raise MutationAdmissionError("ALLOWED_PATH_INVALID")
         path = PurePosixPath(base)
         if ".." in path.parts or ".git" in path.parts or path.as_posix() != base:
@@ -166,7 +171,9 @@ def validate_receipt(
             raise MutationAdmissionError("DIRECT_OWNER_CONFIRMATION_REQUIRED")
     _validate_scope(list(value.get("allowed_paths") or []))
     issue_number = value.get("issue_number")
-    if issue_number is not None and (not isinstance(issue_number, int) or isinstance(issue_number, bool) or issue_number < 1):
+    if issue_number is not None and (
+        not isinstance(issue_number, int) or isinstance(issue_number, bool) or issue_number < 1
+    ):
         raise MutationAdmissionError("ISSUE_NUMBER_INVALID")
     issued = _parse_time(value.get("issued_at"), "issued_at")
     expires = _parse_time(value.get("expires_at"), "expires_at")
@@ -252,12 +259,24 @@ class MutationAdmissionStore:
         if lane not in _ALLOWED_LANES or authority not in _ALLOWED_AUTHORITY:
             raise MutationAdmissionError("ADMISSION_AUTHORITY_INVALID")
         scope = _validate_scope(allowed_paths)
-        if issue_number is not None and (not isinstance(issue_number, int) or isinstance(issue_number, bool) or issue_number < 1):
+        if issue_number is not None and (
+            not isinstance(issue_number, int)
+            or isinstance(issue_number, bool)
+            or issue_number < 1
+        ):
             raise MutationAdmissionError("ISSUE_NUMBER_INVALID")
-        if not isinstance(ttl_minutes, int) or isinstance(ttl_minutes, bool) or not 5 <= ttl_minutes <= 43200:
+        if (
+            not isinstance(ttl_minutes, int)
+            or isinstance(ttl_minutes, bool)
+            or not 5 <= ttl_minutes <= 43200
+        ):
             raise MutationAdmissionError("TTL_MINUTES_INVALID")
         if lane == "GOVERNED":
-            if authority != "TRACKED_TASK_CARD" or not task_card_path or not _SHA64.fullmatch(str(task_card_hash or "")):
+            if (
+                authority != "TRACKED_TASK_CARD"
+                or not task_card_path
+                or not _SHA64.fullmatch(str(task_card_hash or ""))
+            ):
                 raise MutationAdmissionError("GOVERNED_TASK_CARD_REQUIRED")
             if owner_confirmation:
                 raise MutationAdmissionError("GOVERNED_OWNER_INLINE_INVALID")
@@ -290,7 +309,12 @@ class MutationAdmissionStore:
             validated = validate_receipt(existing, now=self._now_provider())
             if validated.get("request_hash") != request_hash:
                 raise MutationAdmissionError("OPERATION_ID_REUSED_WITH_DIFFERENT_ADMISSION")
-            return {**validated, "duplicate": True, "pr_binding": pr_binding(validated), "pr_binding_block": pr_binding_block(validated)}
+            return {
+                **validated,
+                "duplicate": True,
+                "pr_binding": pr_binding(validated),
+                "pr_binding_block": pr_binding_block(validated),
+            }
 
         issued = self._now_provider().astimezone(timezone.utc)
         payload: dict[str, Any] = {
@@ -306,7 +330,12 @@ class MutationAdmissionStore:
         payload["receipt_hash"] = _receipt_hash(payload)
         _atomic_json_write(path, payload)
         validated = validate_receipt(payload, now=issued)
-        return {**validated, "duplicate": False, "pr_binding": pr_binding(validated), "pr_binding_block": pr_binding_block(validated)}
+        return {
+            **validated,
+            "duplicate": False,
+            "pr_binding": pr_binding(validated),
+            "pr_binding_block": pr_binding_block(validated),
+        }
 
     def status(
         self,
@@ -326,4 +355,10 @@ class MutationAdmissionStore:
             now=self._now_provider(),
             expected_receipt_hash=expected_receipt_hash,
         )
-        return {**validated, "status": "VALID", "duplicate": False, "pr_binding": pr_binding(validated), "pr_binding_block": pr_binding_block(validated)}
+        return {
+            **validated,
+            "status": "VALID",
+            "duplicate": False,
+            "pr_binding": pr_binding(validated),
+            "pr_binding_block": pr_binding_block(validated),
+        }
