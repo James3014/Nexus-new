@@ -17,9 +17,22 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, StrictStr, field_validator, model_validator
 
 GATEWAY_CONVERGENCE_SCHEMA = "nexus.gateway_convergence.v1"
+GATEWAY_RELEVANCE_SCHEMA = "nexus.gateway_relevance.v1"
 GATEWAY_CONVERGENCE_EFFECT_OWNER = "ISSUE_526_GATEWAY_RECOVERY"
 _SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 _SHA64_RE = re.compile(r"^[0-9a-f]{64}$")
+
+# These paths define the recovery/convergence mechanism itself.  A caller may
+# add dependent execution surfaces but can never remove these mandatory paths.
+GATEWAY_RECOVERY_CRITICAL_PATHS: tuple[str, ...] = (
+    "scripts/ops/mcp_gateway_durable.py",
+    "scripts/ops/nexus_mcp_gateway_http.py",
+    "nexus/contracts/gateway_deployment.py",
+    "nexus/contracts/gateway_convergence.py",
+    "nexus/orchestrator/gateway_convergence.py",
+    "nexus/orchestrator/unified_mcp_gateway.py",
+    "nexus/orchestrator/canonical_source_root.py",
+)
 
 
 def canonical_hash(value: Any) -> str:
@@ -37,6 +50,22 @@ def _sha40(value: str, label: str) -> str:
     if not _SHA40_RE.fullmatch(normalized):
         raise ValueError(f"{label}_MALFORMED")
     return normalized
+
+
+def _repo_path(value: str, label: str) -> str:
+    normalized = value.strip().replace("\\", "/")
+    is_prefix = normalized.endswith("/")
+    candidate = normalized[:-1] if is_prefix else normalized
+    if (
+        not candidate
+        or candidate.startswith("/")
+        or candidate.startswith("./")
+        or "//" in candidate
+        or any(part in {"", ".", ".."} for part in candidate.split("/"))
+        or any(token in candidate for token in ("*", "?", "[", "]"))
+    ):
+        raise ValueError(f"{label}_MALFORMED")
+    return candidate + "/" if is_prefix else candidate
 
 
 class DesiredDeploymentMode(str, Enum):
@@ -89,6 +118,83 @@ class ConvergenceReason(str, Enum):
     EFFECT_TERMINAL_FAILURE = "EFFECT_TERMINAL_FAILURE"
     POSTFLIGHT_OBSERVATION_DRIFT = "POSTFLIGHT_OBSERVATION_DRIFT"
     TRACKED_ACCEPTED_MAIN_MOVED = "TRACKED_ACCEPTED_MAIN_MOVED"
+    TRACKED_ACCEPTED_MAIN_RELEVANT_DRIFT = "TRACKED_ACCEPTED_MAIN_RELEVANT_DRIFT"
+    UPSTREAM_CHANGE_SCOPE_UNKNOWN = "UPSTREAM_CHANGE_SCOPE_UNKNOWN"
+    IRRELEVANT_UPSTREAM_DRIFT = "IRRELEVANT_UPSTREAM_DRIFT"
+
+
+class GatewayRelevancePolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_name: Literal["nexus.gateway_relevance.v1"] = GATEWAY_RELEVANCE_SCHEMA
+    dependent_paths: tuple[StrictStr, ...]
+
+    @field_validator("dependent_paths")
+    @classmethod
+    def _dependent_paths(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = tuple(
+            dict.fromkeys(_repo_path(path, "DEPENDENT_PATH") for path in value)
+        )
+        if not normalized:
+            raise ValueError("DEPENDENT_PATHS_REQUIRED")
+        if len(normalized) > 256:
+            raise ValueError("DEPENDENT_PATHS_LIMIT_EXCEEDED")
+        return normalized
+
+
+class UpstreamChangeScope(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    base_commit: StrictStr
+    head_commit: StrictStr
+    changed_paths: tuple[StrictStr, ...] = ()
+    complete: bool
+    error: StrictStr | None = None
+
+    @field_validator("base_commit")
+    @classmethod
+    def _base_commit(cls, value: str) -> str:
+        return _sha40(value, "CHANGE_SCOPE_BASE_COMMIT")
+
+    @field_validator("head_commit")
+    @classmethod
+    def _head_commit(cls, value: str) -> str:
+        return _sha40(value, "CHANGE_SCOPE_HEAD_COMMIT")
+
+    @field_validator("changed_paths")
+    @classmethod
+    def _changed_paths(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = tuple(
+            dict.fromkeys(_repo_path(path, "CHANGED_PATH") for path in value)
+        )
+        if len(normalized) > 600:
+            raise ValueError("CHANGED_PATHS_LIMIT_EXCEEDED")
+        return normalized
+
+    @model_validator(mode="after")
+    def _completeness(self) -> "UpstreamChangeScope":
+        if self.complete and self.error is not None:
+            raise ValueError("COMPLETE_CHANGE_SCOPE_MUST_NOT_CARRY_ERROR")
+        if not self.complete and not str(self.error or "").strip():
+            raise ValueError("INCOMPLETE_CHANGE_SCOPE_REQUIRES_ERROR")
+        return self
+
+
+class GatewayAcceptanceStopPolicy(BaseModel):
+    """Fixed anti-churn budget for convergence-adjacent acceptance loops."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_name: Literal["nexus.gateway_acceptance_stop_policy.v1"] = (
+        "nexus.gateway_acceptance_stop_policy.v1"
+    )
+    unrelated_main_drift_reruns: Literal[0] = 0
+    deterministic_repair_verification_reruns: Literal[1] = 1
+    model_provider_fresh_attempts: Literal[2] = 2
+    outcome_unknown_action: Literal["RECONCILE_SAME_OPERATION_ONLY"] = (
+        "RECONCILE_SAME_OPERATION_ONLY"
+    )
+    terminal_acceptance_reruns: Literal[0] = 0
 
 
 class DesiredDeploymentPolicy(BaseModel):
@@ -98,6 +204,7 @@ class DesiredDeploymentPolicy(BaseModel):
     mode: DesiredDeploymentMode
     desired_commit: StrictStr
     desired_tree: StrictStr
+    relevance: GatewayRelevancePolicy | None = None
 
     @field_validator("desired_commit")
     @classmethod
@@ -111,12 +218,15 @@ class DesiredDeploymentPolicy(BaseModel):
 
     @property
     def generation_id(self) -> str:
-        return canonical_hash({
+        payload: dict[str, Any] = {
             "schema": self.schema_name,
             "mode": self.mode.value,
             "desired_commit": self.desired_commit,
             "desired_tree": self.desired_tree,
-        })
+        }
+        if self.relevance is not None:
+            payload["relevance"] = self.relevance.model_dump(mode="json")
+        return canonical_hash(payload)
 
 
 class GatewayConvergenceObservation(BaseModel):
@@ -126,6 +236,7 @@ class GatewayConvergenceObservation(BaseModel):
     loaded_tree: StrictStr
     upstream_freshness: UpstreamFreshness
     observed_upstream_main_head: StrictStr | None = None
+    upstream_change_scope: UpstreamChangeScope | None = None
     readiness_state: EvidenceState
     quiescence_state: EvidenceState
     server_instance_id: StrictStr | None = None
@@ -154,6 +265,13 @@ class GatewayConvergenceObservation(BaseModel):
             and self.observed_upstream_main_head is None
         ):
             raise ValueError("KNOWN_UPSTREAM_FRESHNESS_REQUIRES_OBSERVED_HEAD")
+        if (
+            self.upstream_change_scope is not None
+            and self.observed_upstream_main_head is not None
+            and self.upstream_change_scope.head_commit
+            != self.observed_upstream_main_head
+        ):
+            raise ValueError("CHANGE_SCOPE_HEAD_MUST_MATCH_OBSERVED_UPSTREAM")
         return self
 
 
@@ -270,3 +388,6 @@ class GatewayConvergenceResult(BaseModel):
     superseded_target_commit: StrictStr | None = None
     superseded_target_tree: StrictStr | None = None
     next_generation_required: bool = False
+    generation_reused: bool = False
+    matched_relevant_paths: tuple[StrictStr, ...] = ()
+    stop_policy: GatewayAcceptanceStopPolicy = GatewayAcceptanceStopPolicy()

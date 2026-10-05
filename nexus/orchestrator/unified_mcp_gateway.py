@@ -44,6 +44,7 @@ from nexus.contracts.execution_readiness import (
 )
 from nexus.contracts.gateway_convergence import (
     ConvergenceAction,
+    ConvergenceReason,
     GatewayConvergenceRequest,
 )
 from nexus.contracts.lifecycle_action import (
@@ -1516,6 +1517,139 @@ def _default_observe_upstream_main(
         return None, now_iso, f"upstream_observation_error:{exc.__class__.__name__}"
 
 
+def _default_observe_upstream_change_scope(
+    *,
+    base_commit: str,
+    head_commit: str,
+    timeout_seconds: float = 5.0,
+) -> dict[str, Any]:
+    """Observe changed upstream paths without mutating local git state.
+
+    The GitHub compare response is accepted only when the desired generation is
+    an ancestor of the observed upstream head and the file list is demonstrably
+    bounded below GitHub's 300-file compare ceiling.  Anything ambiguous stays
+    incomplete so convergence fails closed instead of guessing relevance.
+    """
+
+    base = str(base_commit or "").strip().lower()
+    head = str(head_commit or "").strip().lower()
+    if not _SHA_RE.fullmatch(base) or not _SHA_RE.fullmatch(head):
+        return {
+            "base_commit": base or "0" * 40,
+            "head_commit": head or "0" * 40,
+            "changed_paths": (),
+            "complete": False,
+            "error": "upstream_compare_identity_malformed",
+        }
+    if base == head:
+        return {
+            "base_commit": base,
+            "head_commit": head,
+            "changed_paths": (),
+            "complete": True,
+            "error": None,
+        }
+
+    github_cli, resolution_error = _resolve_github_cli()
+    if github_cli is None:
+        return {
+            "base_commit": base,
+            "head_commit": head,
+            "changed_paths": (),
+            "complete": False,
+            "error": resolution_error or "github_observer_unavailable",
+        }
+
+    endpoint = (
+        f"repos/{GITHUB_REPOSITORY.repository_id}/compare/{base}...{head}"
+    )
+    try:
+        proc = subprocess.run(
+            [
+                github_cli,
+                "api",
+                endpoint,
+                "--jq",
+                (
+                    "{status:.status,file_count:(.files|length),"
+                    "files:[.files[] | .filename, .previous_filename]"
+                    "|map(select(. != null))}"
+                ),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "base_commit": base,
+            "head_commit": head,
+            "changed_paths": (),
+            "complete": False,
+            "error": f"upstream_compare_timeout:exceeded_{timeout_seconds}s",
+        }
+    except Exception as exc:
+        return {
+            "base_commit": base,
+            "head_commit": head,
+            "changed_paths": (),
+            "complete": False,
+            "error": f"upstream_compare_error:{exc.__class__.__name__}",
+        }
+
+    if proc.returncode != 0:
+        detail = (proc.stderr or "").strip()[:120]
+        return {
+            "base_commit": base,
+            "head_commit": head,
+            "changed_paths": (),
+            "complete": False,
+            "error": f"upstream_compare_failed:{detail or proc.returncode}",
+        }
+    try:
+        payload = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+    status = str(payload.get("status") or "").strip().lower()
+    files = payload.get("files")
+    file_count = payload.get("file_count")
+    if (
+        status not in {"ahead", "identical"}
+        or not isinstance(files, list)
+        or not isinstance(file_count, int)
+    ):
+        return {
+            "base_commit": base,
+            "head_commit": head,
+            "changed_paths": (),
+            "complete": False,
+            "error": f"upstream_compare_unusable:{status or 'missing_status'}",
+        }
+    changed_paths = tuple(
+        dict.fromkeys(
+            str(path).strip()
+            for path in files
+            if isinstance(path, str) and str(path).strip()
+        )
+    )
+    if file_count >= 300:
+        return {
+            "base_commit": base,
+            "head_commit": head,
+            "changed_paths": changed_paths[:600],
+            "complete": False,
+            "error": "upstream_compare_file_limit_reached",
+        }
+    return {
+        "base_commit": base,
+        "head_commit": head,
+        "changed_paths": changed_paths,
+        "complete": True,
+        "error": None,
+    }
+
+
 def _evaluate_freshness(
     *,
     repo_head_at_start: str,
@@ -1592,6 +1726,7 @@ class UnifiedMCPGateway:
         github_issue_observer: Any = None,
         mutation_repository_observer: Any = None,
         upstream_observer: Any = None,
+        upstream_change_observer: Any = None,
         upstream_cache_ttl_seconds: float = 30.0,
     ):
         self.service = service or SelfHostedTaskService()
@@ -1617,6 +1752,9 @@ class UnifiedMCPGateway:
         )
         self._mutation_admissions = MutationAdmissionStore(admission_state_root)
         self._upstream_observer = upstream_observer or _default_observe_upstream_main
+        self._upstream_change_observer = (
+            upstream_change_observer or _default_observe_upstream_change_scope
+        )
         self._upstream_cache_ttl_seconds = float(upstream_cache_ttl_seconds)
         self._upstream_cache: tuple[float, dict[str, Any]] | None = None
         self._upstream_cache_lock = threading.RLock()
@@ -4347,6 +4485,24 @@ class UnifiedMCPGateway:
                                     "type": "string",
                                     "pattern": "^[0-9a-f]{40}$",
                                 },
+                                "relevance": {
+                                    "type": ["object", "null"],
+                                    "required": ["dependent_paths"],
+                                    "properties": {
+                                        "dependent_paths": {
+                                            "type": "array",
+                                            "minItems": 1,
+                                            "maxItems": 256,
+                                            "items": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 512,
+                                            },
+                                            "uniqueItems": True,
+                                        },
+                                    },
+                                    "additionalProperties": False,
+                                },
                             },
                             "additionalProperties": False,
                         },
@@ -5180,13 +5336,51 @@ class UnifiedMCPGateway:
         except RuntimeError as exc:
             raise GatewayInputError("loaded Gateway tree is unavailable") from exc
 
+        upstream_change_scope: Mapping[str, Any] | None = None
+        relevance = policy.get("relevance")
+        observed_upstream_head = status.get("observed_upstream_main_head")
+        desired_commit = policy.get("desired_commit")
+        if (
+            str(policy.get("mode") or "").strip().upper() == "TRACK_ACCEPTED_MAIN"
+            and isinstance(observed_upstream_head, str)
+            and isinstance(desired_commit, str)
+            and observed_upstream_head != desired_commit
+        ):
+            try:
+                observed_scope = self._upstream_change_observer(
+                    base_commit=desired_commit,
+                    head_commit=observed_upstream_head,
+                )
+            except subprocess.TimeoutExpired:
+                observed_scope = {
+                    "base_commit": desired_commit,
+                    "head_commit": observed_upstream_head,
+                    "changed_paths": (),
+                    "complete": False,
+                    "error": "upstream_change_observer_timeout",
+                }
+            except Exception as exc:
+                observed_scope = {
+                    "base_commit": desired_commit,
+                    "head_commit": observed_upstream_head,
+                    "changed_paths": (),
+                    "complete": False,
+                    "error": (
+                        "upstream_change_observer_exception:"
+                        f"{exc.__class__.__name__}"
+                    ),
+                }
+            if isinstance(observed_scope, Mapping):
+                upstream_change_scope = dict(observed_scope)
+
         request_payload: dict[str, Any] = {
             "policy": dict(policy),
             "observation": {
                 "loaded_commit": status.get("repo_head_current"),
                 "loaded_tree": loaded_tree,
                 "upstream_freshness": status.get("upstream_freshness"),
-                "observed_upstream_main_head": status.get("observed_upstream_main_head"),
+                "observed_upstream_main_head": observed_upstream_head,
+                "upstream_change_scope": upstream_change_scope,
                 "readiness_state": readiness_state,
                 "quiescence_state": quiescence_state,
                 "server_instance_id": status.get("server_instance_id"),
@@ -5208,6 +5402,11 @@ class UnifiedMCPGateway:
             ConvergenceAction.COALESCE_PRE_EFFECT_TARGET: "prepare_latest_issue_526_recovery",
             ConvergenceAction.RECONCILE_RECOVERY: "operation_reconcile",
         }[result.action]
+        if result.reason in {
+            ConvergenceReason.TRACKED_ACCEPTED_MAIN_MOVED,
+            ConvergenceReason.TRACKED_ACCEPTED_MAIN_RELEVANT_DRIFT,
+        }:
+            next_action = "prepare_latest_issue_526_recovery"
         payload = result.model_dump(mode="json")
         payload.update(
             {
@@ -5216,6 +5415,12 @@ class UnifiedMCPGateway:
                 "host_effect_performed": False,
                 "observed_gateway_instance_id": status.get("server_instance_id"),
                 "observed_upstream_freshness": status.get("upstream_freshness"),
+                "observed_upstream_change_scope": (
+                    request.observation.upstream_change_scope.model_dump(mode="json")
+                    if request.observation.upstream_change_scope is not None
+                    else None
+                ),
+                "relevance_policy_active": isinstance(relevance, Mapping),
             }
         )
         return payload

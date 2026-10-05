@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from nexus.contracts.gateway_convergence import (
+    GATEWAY_RECOVERY_CRITICAL_PATHS,
     ConvergenceAction,
     ConvergenceReason,
     DesiredDeploymentMode,
@@ -27,6 +28,8 @@ def _result(
     superseded_target_commit: str | None = None,
     superseded_target_tree: str | None = None,
     next_generation_required: bool = False,
+    generation_reused: bool = False,
+    matched_relevant_paths: tuple[str, ...] = (),
 ) -> GatewayConvergenceResult:
     observation = request.observation
     return GatewayConvergenceResult(
@@ -44,6 +47,37 @@ def _result(
         superseded_target_commit=superseded_target_commit,
         superseded_target_tree=superseded_target_tree,
         next_generation_required=next_generation_required,
+        generation_reused=generation_reused,
+        matched_relevant_paths=matched_relevant_paths,
+    )
+
+
+def _matches_path_rule(path: str, rule: str) -> bool:
+    if rule.endswith("/"):
+        return path.startswith(rule)
+    return path == rule
+
+
+def _relevant_changed_paths(request: GatewayConvergenceRequest) -> tuple[str, ...]:
+    policy = request.policy
+    observation = request.observation
+    relevance = policy.relevance
+    scope = observation.upstream_change_scope
+    if (
+        scope is None
+        or not scope.complete
+        or scope.base_commit != policy.desired_commit
+        or scope.head_commit != observation.observed_upstream_main_head
+    ):
+        return ()
+    dependent_paths = relevance.dependent_paths if relevance is not None else ()
+    rules = (*GATEWAY_RECOVERY_CRITICAL_PATHS, *dependent_paths)
+    return tuple(
+        sorted(
+            path
+            for path in scope.changed_paths
+            if any(_matches_path_rule(path, rule) for rule in rules)
+        )
     )
 
 
@@ -136,16 +170,34 @@ def evaluate_gateway_convergence(
             next_generation_required=next_generation,
         )
 
+    irrelevant_upstream_drift = False
     if (
         policy.mode is DesiredDeploymentMode.TRACK_ACCEPTED_MAIN
         and observed.observed_upstream_main_head != policy.desired_commit
     ):
-        return _result(
-            request,
-            action=ConvergenceAction.BLOCKED,
-            reason=ConvergenceReason.TRACKED_ACCEPTED_MAIN_MOVED,
-            next_generation_required=True,
-        )
+        scope = observed.upstream_change_scope
+        if (
+            scope is None
+            or not scope.complete
+            or scope.base_commit != policy.desired_commit
+            or scope.head_commit != observed.observed_upstream_main_head
+        ):
+            return _result(
+                request,
+                action=ConvergenceAction.BLOCKED,
+                reason=ConvergenceReason.UPSTREAM_CHANGE_SCOPE_UNKNOWN,
+                next_generation_required=False,
+            )
+        matched_relevant_paths = _relevant_changed_paths(request)
+        if matched_relevant_paths:
+            return _result(
+                request,
+                action=ConvergenceAction.BLOCKED,
+                reason=ConvergenceReason.TRACKED_ACCEPTED_MAIN_RELEVANT_DRIFT,
+                next_generation_required=True,
+                matched_relevant_paths=matched_relevant_paths,
+            )
+        irrelevant_upstream_drift = True
 
     if (observed.loaded_commit, observed.loaded_tree) == (
         policy.desired_commit,
@@ -157,9 +209,12 @@ def evaluate_gateway_convergence(
             reason=(
                 ConvergenceReason.PINNED_ALREADY_LOADED
                 if policy.mode is DesiredDeploymentMode.PINNED
+                else ConvergenceReason.IRRELEVANT_UPSTREAM_DRIFT
+                if irrelevant_upstream_drift
                 else ConvergenceReason.ALREADY_CONVERGED
             ),
             next_generation_required=False,
+            generation_reused=irrelevant_upstream_drift,
         )
 
     if request.not_before is not None and moment < request.not_before:
@@ -203,6 +258,7 @@ def evaluate_gateway_convergence(
             request_id=effect.request_id,
             idempotency_fence=effect.idempotency_fence,
             next_generation_required=next_generation,
+            generation_reused=irrelevant_upstream_drift,
         )
 
     return _result(
@@ -210,4 +266,5 @@ def evaluate_gateway_convergence(
         action=ConvergenceAction.REQUEST_RECOVERY,
         reason=ConvergenceReason.EXPLICIT_POLICY_REQUIRES_RECOVERY,
         next_generation_required=next_generation,
+        generation_reused=irrelevant_upstream_drift,
     )
