@@ -7,6 +7,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import signal
 import stat
 import subprocess
 import sys
@@ -140,22 +141,36 @@ raise SystemExit(2)
         "NEXUS_HCOM_AGY_LEASE_ACCOUNT": "google-active",
         "NEXUS_HCOM_AGY_PROFILE_HOME": str(profile),
         "NEXUS_HCOM_AGY_LEASE_ID_HASH": "lease-hash",
+        "NEXUS_HCOM_AGY_ACCOUNT_ALIAS_HASH": "alias-hash",
     })
 
     lease_path = tmp_path / "lease.lock"
-    with lease_path.open("a+") as lease_fh:
-        lease_fd = lease_fh.fileno()
-        env["NEXUS_HCOM_AGY_LEASE_FD"] = str(lease_fd)
-        proc = subprocess.run(
-            [sys.executable, str(LAUNCHER), "--model", "gpt-oss-120b-medium"],
-            env=env,
-            pass_fds=(lease_fd,),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+    status_read_fd, status_write_fd = os.pipe()
+    env["NEXUS_HCOM_AGY_STATUS_FD"] = str(status_write_fd)
+    try:
+        with lease_path.open("a+") as lease_fh:
+            lease_fd = lease_fh.fileno()
+            env["NEXUS_HCOM_AGY_LEASE_FD"] = str(lease_fd)
+            proc = subprocess.run(
+                [sys.executable, str(LAUNCHER), "--model", "gpt-oss-120b-medium"],
+                env=env,
+                pass_fds=(lease_fd, status_write_fd),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+    finally:
+        os.close(status_write_fd)
+    with os.fdopen(status_read_fd, "r", encoding="utf-8") as status_stream:
+        status_records = [json.loads(line) for line in status_stream if line.strip()]
 
     assert proc.returncode == 0, proc.stderr
+    assert [record["event"] for record in status_records] == [
+        "provider_started",
+        "provider_terminal",
+    ]
+    assert status_records[0]["pid"] == status_records[1]["pid"]
+    assert status_records[1]["exit_code"] == 0
     payload = json.loads(record_path.read_text(encoding="utf-8"))
     assert payload["args"] == ["--terminal", "here", "--model", "gpt-oss-120b-medium"]
     assert payload["profile_marker"] == "active-profile"
@@ -427,6 +442,24 @@ def test_dispatcher_binds_exact_claim_to_hcom_child_and_releases_cleanly(
     def fake_popen(argv, **kwargs):
         captured["argv"] = argv
         captured.update(kwargs)
+        status_fd = int(kwargs["env"]["NEXUS_HCOM_AGY_STATUS_FD"])
+        base = {
+            "schema": "nexus.hcom_collab_status.v1",
+            "account_alias_hash": "alias-hash",
+            "lease_id_hash": "lease-hash",
+            "pid": 51515,
+        }
+        os.write(
+            status_fd,
+            (json.dumps({**base, "event": "provider_started"}) + "\n").encode(),
+        )
+        os.write(
+            status_fd,
+            (
+                json.dumps({**base, "event": "provider_terminal", "exit_code": 0})
+                + "\n"
+            ).encode(),
+        )
         return Child()
 
     try:
@@ -500,6 +533,162 @@ def test_dispatcher_abandons_parent_reference_when_live_child_terminality_is_unk
 
     assert claim.abandoned is True
     assert claim.released is False
+
+
+
+def test_launcher_crash_with_surviving_provider_preserves_receipt_and_blocks_reuse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_dispatch_module(monkeypatch)
+    from nexus.services.agy_account_pool import (
+        AgyAccount,
+        AgyAccountPoolBusyError,
+        AgyAccountPoolManager,
+        CrossProcessLeaseCoordinator,
+    )
+
+    manager_root = tmp_path / "runtime"
+    profile = manager_root / "accounts" / "google-a"
+    (profile / ".gemini").mkdir(parents=True)
+    module.MANAGER_ROOT = manager_root
+    leases = tmp_path / "leases"
+    module.LEASES_DIR = leases
+    monkeypatch.setattr(
+        module,
+        "_apply_dynamic_availability",
+        lambda _model: ({}, {"family": "other"}),
+    )
+    manager = AgyAccountPoolManager(
+        accounts=[AgyAccount(alias="google-a", home_dir=str(profile))],
+        use_real_manager=False,
+    )
+    coordinator = CrossProcessLeaseCoordinator(
+        manager=manager,
+        allocator_lock_path=tmp_path / "allocator.lock",
+        leases_dir=leases,
+        default_wait_timeout=0.1,
+    )
+
+    pidfile = tmp_path / "provider.pid"
+    launcher = tmp_path / "crashing-launcher.py"
+    launcher.write_text(
+        """#!/usr/bin/env python3
+import json, os, pathlib, subprocess, sys
+lease_fd = int(os.environ["NEXUS_HCOM_AGY_LEASE_FD"])
+status_fd = int(os.environ["NEXUS_HCOM_AGY_STATUS_FD"])
+provider = subprocess.Popen(
+    [sys.executable, "-c", "import time; time.sleep(60)"],
+    pass_fds=(lease_fd,),
+)
+pathlib.Path(os.environ["TEST_PROVIDER_PIDFILE"]).write_text(str(provider.pid))
+payload = {
+    "schema": "nexus.hcom_collab_status.v1",
+    "event": "provider_started",
+    "account_alias_hash": os.environ["NEXUS_HCOM_AGY_ACCOUNT_ALIAS_HASH"],
+    "lease_id_hash": os.environ["NEXUS_HCOM_AGY_LEASE_ID_HASH"],
+    "pid": provider.pid,
+}
+os.write(status_fd, (json.dumps(payload) + "\\n").encode())
+raise SystemExit(42)
+""",
+        encoding="utf-8",
+    )
+    launcher.chmod(0o755)
+    monkeypatch.setenv("TEST_PROVIDER_PIDFILE", str(pidfile))
+    events: list[dict[str, Any]] = []
+
+    with pytest.raises(RuntimeError, match="HCOM_COLLAB_TERMINALITY_UNPROVEN"):
+        module.dispatch_hcom_collab(
+            cwd=str(tmp_path),
+            hcom_args=[],
+            model=None,
+            pool_wait_timeout=0.1,
+            coordinator=coordinator,
+            launcher_path=launcher,
+            operation_hook=events.append,
+        )
+
+    provider_pid = int(pidfile.read_text(encoding="utf-8"))
+    try:
+        os.kill(provider_pid, 0)
+        assert any(event.get("provider_pid") == provider_pid for event in events)
+        receipt_files = list(leases.glob("*.receipt.json"))
+        assert len(receipt_files) == 1
+        with pytest.raises(AgyAccountPoolBusyError):
+            coordinator.acquire_claim(
+                "dispatcher-after-launcher-crash",
+                wait_timeout=0.1,
+            )
+    finally:
+        try:
+            os.kill(provider_pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+
+
+def test_reconcile_preserves_collab_receipt_when_provider_identity_was_never_observed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_dispatch_module(monkeypatch)
+    operation_root = tmp_path / "operations"
+    leases = tmp_path / "leases"
+    leases.mkdir()
+    module.LEASES_DIR = leases
+    journal = module.AgyOperationJournal(operation_root)
+    operation_id = module.new_operation_id()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=module.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model=None,
+        effort=None,
+        prompt_sha256="status-marker-race",
+        runtime_revision="test",
+        initial_fields={
+            "mode": "hcom_collab",
+            "account_alias_hash": "alias-a",
+            "lease_id_hash": "lease-a",
+        },
+    )
+    journal.update(operation_id, pid=999999)
+    journal.mark_terminal(
+        operation_id,
+        status="OUTCOME_UNKNOWN",
+        exit_code=None,
+        failure_kind="HCOM_COLLAB_PARENT_ABORT:RuntimeError",
+        cwd=str(tmp_path),
+        reconciliation={
+            "result": "HCOM_COLLAB_TERMINALITY_UNPROVEN",
+            "retry_permitted": False,
+        },
+    )
+    receipt = leases / "alias-a.receipt.json"
+    receipt.write_text(
+        json.dumps({
+            "account_alias_hash": "alias-a",
+            "lease_id_hash": "lease-a",
+            "pid": 999999,
+        }),
+        encoding="utf-8",
+    )
+    (leases / "alias-a.lock").touch()
+    monkeypatch.setattr(module._agy_operation_journal, "_process_alive", lambda _pid: False)
+    monkeypatch.setattr(
+        module._agy_operation_journal,
+        "_process_group_alive",
+        lambda _pgid: False,
+    )
+
+    record = module._reconcile_operation(journal, operation_id)
+    assert record["phase"] == "RECONCILE_REQUIRED"
+    assert record["reconciliation"]["result"] == "HCOM_COLLAB_PROVIDER_IDENTITY_UNPROVEN"
+    assert (
+        record["reconciliation"]["lease_cleanup"]["result"]
+        == "COLLAB_PROVIDER_IDENTITY_UNPROVEN_PRESERVED"
+    )
+    assert record["reconciliation"]["retry_permitted"] is False
+    assert receipt.exists()
 
 
 def test_dispatcher_pool_busy_returns_canonical_75_without_launch(
@@ -821,6 +1010,27 @@ def test_foreground_collaborative_operation_journals_failure_on_nonzero_child_ex
     monkeypatch.setattr(module, "MANAGER_ROOT", tmp_path)
     monkeypatch.setattr(module, "LEASES_DIR", leases)
 
+    def fake_nonzero_popen(*_args: Any, **kwargs: Any) -> FakeChild:
+        status_fd = int(kwargs["env"]["NEXUS_HCOM_AGY_STATUS_FD"])
+        base = {
+            "schema": "nexus.hcom_collab_status.v1",
+            "account_alias_hash": "alias-a",
+            "lease_id_hash": "lease-a",
+            "pid": 99992,
+        }
+        os.write(
+            status_fd,
+            (json.dumps({**base, "event": "provider_started"}) + "\n").encode(),
+        )
+        os.write(
+            status_fd,
+            (
+                json.dumps({**base, "event": "provider_terminal", "exit_code": 42})
+                + "\n"
+            ).encode(),
+        )
+        return FakeChild()
+
     # 1. Verify dispatch_hcom_collab returns child exit code and releases claim
     code = module.dispatch_hcom_collab(
         cwd=str(tmp_path),
@@ -828,7 +1038,7 @@ def test_foreground_collaborative_operation_journals_failure_on_nonzero_child_ex
         model=None,
         pool_wait_timeout=1.0,
         coordinator=FakeCoordinator(),
-        popen_factory=lambda *a, **k: FakeChild(),
+        popen_factory=fake_nonzero_popen,
         launcher_path=launcher_file,
     )
     assert code == 42
