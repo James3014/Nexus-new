@@ -4281,8 +4281,11 @@ class UnifiedMCPGateway:
                             "minItems": 1,
                             "maxItems": 64,
                         },
-                        "owner_confirmation": {"type": "boolean", "default": False},
+                        "authority_goal_id": {"type": "string", "maxLength": 128},
+                        "authority_coordination_scope_id": {"type": "string", "maxLength": 128},
                         "issue_number": {"type": "integer", "minimum": 1},
+                        "task_id": {"type": "string", "maxLength": 128},
+                        "attempt_id": {"type": "string", "maxLength": 128},
                         "task_card_path": {"type": "string", "maxLength": 1024},
                         "task_card_hash": {
                             "type": "string",
@@ -5331,22 +5334,81 @@ class UnifiedMCPGateway:
         }
         return payload
 
+    @staticmethod
+    def _mutation_task_card_authority(
+        *,
+        issue_number: int,
+        task_id: str,
+        attempt_id: str,
+        task_card_path: str,
+        task_card_hash: str,
+    ) -> dict[str, str]:
+        _safe_relative_path(task_card_path, "task_card_path")
+        if not task_card_path.startswith("tasks/") or not task_card_path.endswith(".md"):
+            raise GatewayInputError("MUTATION_ADMISSION_TASK_CARD_PATH_INVALID")
+        root = CANONICAL_SOURCE_ROOT.resolve()
+        card = (root / task_card_path).resolve()
+        try:
+            relative = card.relative_to(root).as_posix()
+        except ValueError as exc:
+            raise GatewayInputError("MUTATION_ADMISSION_TASK_CARD_PATH_INVALID") from exc
+        if relative != task_card_path or not card.is_file():
+            raise GatewayInputError("MUTATION_ADMISSION_TASK_CARD_NOT_FOUND")
+        try:
+            raw = card.read_bytes()
+            source = raw.decode("utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise GatewayInputError("MUTATION_ADMISSION_TASK_CARD_UNREADABLE") from exc
+        actual_hash = hashlib.sha256(raw).hexdigest()
+        if actual_hash != task_card_hash:
+            raise GatewayInputError("MUTATION_ADMISSION_TASK_CARD_HASH_MISMATCH")
+
+        def field(name: str) -> str:
+            match = re.search(
+                rf"(?m)^{re.escape(name)}:\s*`?([^`\n]+)`?\s*$",
+                source,
+            )
+            return match.group(1).strip() if match else ""
+
+        if field("artifact_authority") != "current" or field("status") != "ACTIVE":
+            raise GatewayInputError("MUTATION_ADMISSION_TASK_CARD_NOT_ACTIVE")
+        if field("task_id") != task_id or field("attempt_id") != attempt_id:
+            raise GatewayInputError("MUTATION_ADMISSION_TASK_CARD_IDENTITY_MISMATCH")
+        issue_marker = f"James3014/Nexus-new#{issue_number}"
+        if issue_marker not in source:
+            raise GatewayInputError("MUTATION_ADMISSION_TASK_CARD_ISSUE_MISMATCH")
+        governance_source_head = _git("rev-parse", "HEAD").strip()
+        if not re.fullmatch(r"[0-9a-f]{40}", governance_source_head):
+            raise GatewayInputError("MUTATION_ADMISSION_GOVERNANCE_SOURCE_INVALID")
+        return {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "task_card_path": task_card_path,
+            "task_card_hash": actual_hash,
+            "governance_source_head": governance_source_head,
+        }
+
     def _mutation_admit(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        if "owner_confirmation" in arguments:
+            raise GatewayInputError("MUTATION_ADMISSION_CALLER_AUTHORITY_FORBIDDEN")
         repository = _text(arguments.get("repository"), "repository", max_length=256)
         operation_id = _text(arguments.get("operation_id"), "operation_id", max_length=128)
         base_sha = _text(arguments.get("base_sha"), "base_sha", max_length=40)
         lane = _text(arguments.get("execution_lane"), "execution_lane", max_length=32).upper()
         authority_kind = _text(arguments.get("authority_kind"), "authority_kind", max_length=32).upper()
-        allowed_paths = [
-            str(path).strip()
-            for path in (arguments.get("allowed_paths") or [])
-            if str(path).strip()
-        ]
+        allowed_paths = list(
+            dict.fromkeys(
+                str(path).strip()
+                for path in (arguments.get("allowed_paths") or [])
+                if str(path).strip()
+            )
+        )
         issue_number = arguments.get("issue_number")
-        task_card_path = arguments.get("task_card_path")
-        task_card_hash = arguments.get("task_card_hash")
+        task_id = str(arguments.get("task_id") or "").strip()
+        attempt_id = str(arguments.get("attempt_id") or "").strip()
+        task_card_path = str(arguments.get("task_card_path") or "").strip()
+        task_card_hash = str(arguments.get("task_card_hash") or "").strip()
         ttl_minutes = arguments.get("ttl_minutes", 10080)
-        owner_confirmation = arguments.get("owner_confirmation") is True
 
         observation = self._mutation_repository_observer(repository)
         if not isinstance(observation, Mapping) or observation.get("ok") is not True:
@@ -5367,6 +5429,48 @@ class UnifiedMCPGateway:
                 f"MUTATION_ADMISSION_BASE_STALE:expected={observed_head}:requested={base_sha}"
             )
 
+        authority_reference: Mapping[str, Any] | None = None
+        governance_binding: dict[str, str] = {}
+        if lane == "GOVERNED":
+            if authority_kind != "TRACKED_TASK_CARD":
+                raise GatewayInputError("GOVERNED_TASK_CARD_REQUIRED")
+            if (
+                not isinstance(issue_number, int)
+                or isinstance(issue_number, bool)
+                or issue_number < 1
+                or not task_id
+                or not attempt_id
+                or not task_card_path
+                or not re.fullmatch(r"[0-9a-f]{64}", task_card_hash)
+            ):
+                raise GatewayInputError("GOVERNED_TASK_CARD_REQUIRED")
+            governance_binding = self._mutation_task_card_authority(
+                issue_number=issue_number,
+                task_id=task_id,
+                attempt_id=attempt_id,
+                task_card_path=task_card_path,
+                task_card_hash=task_card_hash,
+            )
+        else:
+            if authority_kind != "OWNER_INLINE":
+                raise GatewayInputError("DIRECT_OWNER_AUTHORITY_REQUIRED")
+            if any((task_id, attempt_id, task_card_path, task_card_hash)):
+                raise GatewayInputError("DIRECT_TASK_CARD_INVALID")
+            key = self._owner_effect_key(arguments)
+            effect = {
+                "operation_id": operation_id,
+                "target_repository": repository,
+                "base_sha": base_sha,
+                "execution_lane": lane,
+                "allowed_paths": allowed_paths,
+                "issue_number": issue_number,
+            }
+            authority_reference = self._require_owner_effect_authority(
+                AutonomyActionClass.TASK_SUBMIT,
+                effect,
+                key=key,
+            )
+
         runtime_identity = {
             "server_instance_id": SERVER_INSTANCE_ID,
             "tool_manifest_revision": TOOL_MANIFEST_REVISION,
@@ -5384,18 +5488,13 @@ class UnifiedMCPGateway:
                 execution_lane=lane,
                 authority_kind=authority_kind,
                 allowed_paths=allowed_paths,
-                owner_confirmation=owner_confirmation,
+                authority_reference=authority_reference,
                 issue_number=issue_number,
-                task_card_path=(
-                    str(task_card_path).strip()
-                    if task_card_path is not None
-                    else None
-                ),
-                task_card_hash=(
-                    str(task_card_hash).strip()
-                    if task_card_hash is not None
-                    else None
-                ),
+                task_id=governance_binding.get("task_id"),
+                attempt_id=governance_binding.get("attempt_id"),
+                task_card_path=governance_binding.get("task_card_path"),
+                task_card_hash=governance_binding.get("task_card_hash"),
+                governance_source_head=governance_binding.get("governance_source_head"),
                 ttl_minutes=ttl_minutes,
                 runtime_identity=runtime_identity,
             )
