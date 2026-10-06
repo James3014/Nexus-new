@@ -115,6 +115,14 @@ from nexus.orchestrator.standing_grant_store import (
     switch_task_card_authority,
     write_keyed_standing_grant_receipt,
 )
+from nexus.services.agy_account_pool import (
+    AccountLeaseClaim,
+    AgyAccountPoolBusyError,
+    AgyAccountPoolError,
+    AgyAccountPoolExhaustedError,
+    AgyAccountPoolManager,
+    CrossProcessLeaseCoordinator,
+)
 from nexus.services.model_capability_lineage import (
     CHANGE_KIND_VALUES,
     CalibrationPlanner,
@@ -1595,6 +1603,7 @@ class UnifiedMCPGateway:
         mutation_repository_observer: Any = None,
         upstream_observer: Any = None,
         upstream_cache_ttl_seconds: float = 30.0,
+        agy_lease_coordinator: Any = None,
     ):
         self.service = service or SelfHostedTaskService()
         # These kwargs remain accepted for compatibility with older callers,
@@ -1608,7 +1617,13 @@ class UnifiedMCPGateway:
         self._lineage_registry = ModelCapabilityLineageRegistry()
         self._calibration_planner = CalibrationPlanner(self._lineage_registry)
         self._assist_processes: dict[str, subprocess.Popen[str]] = {}
+        self._assist_account_claims: dict[str, AccountLeaseClaim] = {}
         self._assist_lock = threading.RLock()
+        self._agy_lease_coordinator = (
+            agy_lease_coordinator
+            if agy_lease_coordinator is not None
+            else CrossProcessLeaseCoordinator(AgyAccountPoolManager())
+        )
         self._github_issue_observer = github_issue_observer or observe_github_issue
         self._mutation_repository_observer = (
             mutation_repository_observer or observe_github_repository_default_head
@@ -1661,6 +1676,61 @@ class UnifiedMCPGateway:
     @staticmethod
     def _utc_now() -> str:
         return datetime.now(timezone.utc).isoformat()
+
+    @staticmethod
+    def _agy_model_family(model: str) -> str | None:
+        value = str(model or "").strip().lower()
+        if value.startswith("gemini"):
+            return "gemini"
+        if value.startswith("claude") or value.startswith("gpt"):
+            return "claude_gpt"
+        return None
+
+    def _release_assist_account_claim(self, job: dict[str, Any]) -> bool:
+        """Release one model-probe account claim and prove local cleanup.
+
+        The public job stores only opaque hashes.  The raw account identity,
+        HOME and execution environment remain inside the private claim.
+        """
+        if not job.get("account_lease_required"):
+            return True
+        task_id = str(job.get("task_id") or "")
+        state = str(job.get("account_lease_state") or "NOT_ACQUIRED")
+        if state in {"NOT_ACQUIRED", "RELEASED"}:
+            job["account_lease_cleanup"] = True
+            return True
+        with self._assist_lock:
+            claim = self._assist_account_claims.pop(task_id, None)
+        if claim is None:
+            job["account_lease_state"] = "UNKNOWN_REQUIRES_RECONCILE"
+            job["account_lease_cleanup"] = False
+            job["account_lease_cleanup_error"] = "claim_not_present_in_gateway_process"
+            return False
+        try:
+            claim.release()
+        except Exception as exc:
+            job["account_lease_state"] = "UNKNOWN_REQUIRES_RECONCILE"
+            job["account_lease_cleanup"] = False
+            job["account_lease_cleanup_error"] = f"claim_release_failed:{exc.__class__.__name__}"
+            return False
+
+        receipt_exists = claim.receipt_path.exists()
+        lock_obj = claim.lock_file_obj
+        lock_closed = lock_obj is None or bool(getattr(lock_obj, "closed", False))
+        active_lease = False
+        pool = getattr(claim.manager, "_pool", None)
+        active_leases = getattr(pool, "_active_leases", None) if pool is not None else None
+        if isinstance(active_leases, Mapping):
+            active_lease = claim.lease.lease_id in active_leases
+        cleanup_ok = bool(claim.released and not receipt_exists and lock_closed and not active_lease)
+        job["account_lease_cleanup"] = cleanup_ok
+        if cleanup_ok:
+            job["account_lease_state"] = "RELEASED"
+            job.pop("account_lease_cleanup_error", None)
+            return True
+        job["account_lease_state"] = "UNKNOWN_REQUIRES_RECONCILE"
+        job["account_lease_cleanup_error"] = "claim_release_not_proven"
+        return False
 
     @staticmethod
     def _require_owner_effect_authority(
@@ -2452,6 +2522,15 @@ class UnifiedMCPGateway:
             except OSError as exc:
                 job["process_cleanup"] = False
                 job["cleanup_error"] = str(exc)
+        lease_cleanup_ok = self._release_assist_account_claim(job)
+        if not lease_cleanup_ok:
+            job.update({
+                "status": "FAILED",
+                "blocker": "AGY_ACCOUNT_LEASE_CLEANUP_UNCERTAIN",
+                "provider_error": "Agy account lease cleanup could not be proven",
+                "model_response_verified": False,
+                "reconciliation_required": True,
+            })
         with self._assist_lock:
             self._assist_processes.pop(task_id, None)
         evidence = self._write_probe_evidence(job)
@@ -2469,7 +2548,18 @@ class UnifiedMCPGateway:
         status = str(job.get("status") or "UNKNOWN")
         terminal = status in {"COMPLETED", "FAILED", "CANCELLED"}
         reconciliation_required = status == "UNKNOWN_REQUIRES_RECONCILE" or bool(job.get("reconciliation_required"))
-        cleanup_settled = job.get("process_cleanup") is True and not job.get("cleanup_error")
+        lease_cleanup_settled = (
+            not job.get("account_lease_required")
+            or (
+                job.get("account_lease_cleanup") is True
+                and job.get("account_lease_state") in {"NOT_ACQUIRED", "RELEASED"}
+            )
+        )
+        cleanup_settled = (
+            job.get("process_cleanup") is True
+            and not job.get("cleanup_error")
+            and lease_cleanup_settled
+        )
         settled_failure = (
             status in {"FAILED", "CANCELLED"}
             and not reconciliation_required
@@ -2546,6 +2636,11 @@ class UnifiedMCPGateway:
             "filesystem_delta": job.get("filesystem_delta", {"created": [], "removed": [], "changed": []}),
             "process_cleanup": job.get("process_cleanup", False),
             "process_killed": bool(job.get("process_killed", False)),
+            "account_lease_required": bool(job.get("account_lease_required", False)),
+            "account_alias_hash": job.get("account_alias_hash"),
+            "lease_id_hash": job.get("lease_id_hash"),
+            "account_lease_state": job.get("account_lease_state", "NOT_REQUIRED"),
+            "account_lease_cleanup": job.get("account_lease_cleanup"),
             "stream_flush_status": job.get("stream_flush_status", "not_observed"),
             "connector_disconnected_at": job.get("connector_disconnected_at"),
             "reconnected_at": job.get("reconnected_at"),
@@ -2738,11 +2833,17 @@ class UnifiedMCPGateway:
         if job is None:
             raise KeyError(f"unknown task_id: {task_id}")
         if job.get("status") == "UNKNOWN_REQUIRES_RECONCILE":
+            lease_cleanup_ok = self._release_assist_account_claim(job)
             job.update({
                 "status": "CANCELLED",
                 "finished_at": self._utc_now(),
-                "blocker": "ASSIST_PROVIDER_PROCESS_LOST",
+                "blocker": (
+                    "ASSIST_PROVIDER_PROCESS_LOST"
+                    if lease_cleanup_ok
+                    else "AGY_ACCOUNT_LEASE_CLEANUP_REQUIRES_RECONCILE"
+                ),
                 "process_killed": False,
+                "reconciliation_required": not lease_cleanup_ok,
             })
             self._assist_record_stream_artifacts(job)
             self._cleanup_assist_workspace(job)
@@ -2792,6 +2893,17 @@ class UnifiedMCPGateway:
             })
             self._assist_record_stream_artifacts(job)
             self._cleanup_assist_workspace(job)
+            lease_cleanup_ok = (
+                self._release_assist_account_claim(job)
+                if terminated
+                else not job.get("account_lease_required")
+            )
+            if not lease_cleanup_ok:
+                job.update({
+                    "blocker": "AGY_ACCOUNT_LEASE_CLEANUP_REQUIRES_RECONCILE",
+                    "reconciliation_required": True,
+                    "account_lease_cleanup": False,
+                })
             with self._assist_lock:
                 self._assist_processes.pop(task_id, None)
             self._assist_write(job)
@@ -3809,6 +3921,12 @@ class UnifiedMCPGateway:
             "action": action,
             "connector_disconnected_at": None,
             "reconnected_at": None,
+            "account_lease_required": provider == "agy",
+            "account_lease_state": "NOT_ACQUIRED" if provider == "agy" else "NOT_REQUIRED",
+            "account_lease_cleanup": True,
+            "account_alias_hash": None,
+            "lease_id_hash": None,
+            "account_model_family": self._agy_model_family(model) if provider == "agy" else None,
         }
         self._assist_write(job)
         # Re-resolve and re-attest immediately before launch.  This closes the
@@ -3859,16 +3977,103 @@ class UnifiedMCPGateway:
                 "process_cleanup": True,
             })
             return self._assist_response(self._assist_write(job), operation="submit")
-        stdout_handle = stdout_path.open("w", encoding="utf-8")
-        stderr_handle = stderr_path.open("w", encoding="utf-8")
+        provider_env: Optional[dict[str, str]] = None
+        if provider == "agy":
+            try:
+                claim = self._agy_lease_coordinator.acquire_claim(
+                    consumer_id=f"model-probe:{task_id}",
+                    model_family=self._agy_model_family(model),
+                )
+            except AgyAccountPoolBusyError:
+                shutil.rmtree(workspace_root, ignore_errors=True)
+                job.update({
+                    "status": "FAILED",
+                    "finished_at": self._utc_now(),
+                    "blocker": "AGY_ACCOUNT_POOL_BUSY",
+                    "provider_error": "Agy account pool has no unleased healthy account",
+                    "process_cleanup": True,
+                    "account_lease_state": "NOT_ACQUIRED",
+                    "account_lease_cleanup": True,
+                })
+                return self._assist_response(self._assist_write(job), operation="submit")
+            except AgyAccountPoolExhaustedError:
+                shutil.rmtree(workspace_root, ignore_errors=True)
+                job.update({
+                    "status": "FAILED",
+                    "finished_at": self._utc_now(),
+                    "blocker": "AGY_ACCOUNT_POOL_EXHAUSTED",
+                    "provider_error": "Agy account pool has no available healthy account",
+                    "process_cleanup": True,
+                    "account_lease_state": "NOT_ACQUIRED",
+                    "account_lease_cleanup": True,
+                })
+                return self._assist_response(self._assist_write(job), operation="submit")
+            except AgyAccountPoolError:
+                shutil.rmtree(workspace_root, ignore_errors=True)
+                job.update({
+                    "status": "FAILED",
+                    "finished_at": self._utc_now(),
+                    "blocker": "AGY_ACCOUNT_POOL_UNAVAILABLE",
+                    "provider_error": "Agy account pool claim failed",
+                    "process_cleanup": True,
+                    "account_lease_state": "NOT_ACQUIRED",
+                    "account_lease_cleanup": True,
+                })
+                return self._assist_response(self._assist_write(job), operation="submit")
+            provider_env = dict(claim.lease.execution_env)
+            job.update({
+                "account_alias_hash": claim.account_alias_hash,
+                "lease_id_hash": claim.lease_id_hash,
+                "account_lease_state": "ACQUIRED",
+                "account_lease_cleanup": False,
+            })
+            with self._assist_lock:
+                self._assist_account_claims[task_id] = claim
+            try:
+                self._assist_write(job)
+            except Exception:
+                self._release_assist_account_claim(job)
+                shutil.rmtree(workspace_root, ignore_errors=True)
+                raise
+
+        stdout_handle = None
+        stderr_handle = None
         try:
-            process = subprocess.Popen(command, cwd=workspace_root, stdout=stdout_handle, stderr=stderr_handle, text=True, start_new_session=True)
+            stdout_handle = stdout_path.open("w", encoding="utf-8")
+            stderr_handle = stderr_path.open("w", encoding="utf-8")
+            popen_kwargs: dict[str, Any] = {}
+            if provider_env is not None:
+                popen_kwargs["env"] = provider_env
+            process = subprocess.Popen(
+                command,
+                cwd=workspace_root,
+                stdout=stdout_handle,
+                stderr=stderr_handle,
+                text=True,
+                start_new_session=True,
+                **popen_kwargs,
+            )
         except Exception:
-            stdout_handle.close()
-            stderr_handle.close()
+            if stdout_handle is not None:
+                stdout_handle.close()
+            if stderr_handle is not None:
+                stderr_handle.close()
             shutil.rmtree(workspace_root, ignore_errors=True)
-            job.update({"status": "FAILED", "finished_at": self._utc_now(), "blocker": "ASSIST_PROVIDER_FAILED", "provider_error": "provider process could not start"})
+            job.update({
+                "status": "FAILED",
+                "finished_at": self._utc_now(),
+                "blocker": "ASSIST_PROVIDER_FAILED",
+                "provider_error": "provider process could not start",
+                "process_cleanup": True,
+            })
+            if not self._release_assist_account_claim(job):
+                job.update({
+                    "blocker": "AGY_ACCOUNT_LEASE_CLEANUP_UNCERTAIN",
+                    "provider_error": "provider launch failed and Agy lease cleanup could not be proven",
+                    "reconciliation_required": True,
+                })
             return self._assist_response(self._assist_write(job), operation="submit")
+        assert stdout_handle is not None and stderr_handle is not None
         stdout_handle.close()
         stderr_handle.close()
         post_launch_identity_matches = False
@@ -3911,6 +4116,10 @@ class UnifiedMCPGateway:
                     terminated = False
             if terminated:
                 shutil.rmtree(workspace_root, ignore_errors=True)
+                job["process_cleanup"] = True
+                lease_cleanup_ok = self._release_assist_account_claim(job)
+            else:
+                lease_cleanup_ok = not job.get("account_lease_required")
             job.update({
                 "status": "FAILED",
                 "finished_at": self._utc_now(),
@@ -3925,6 +4134,12 @@ class UnifiedMCPGateway:
                 "pid": process.pid,
                 "pgid": process.pid,
             })
+            if terminated and not lease_cleanup_ok:
+                job.update({
+                    "blocker": "AGY_ACCOUNT_LEASE_CLEANUP_UNCERTAIN",
+                    "provider_error": "provider identity drift cleanup did not prove Agy lease release",
+                    "reconciliation_required": True,
+                })
             return self._assist_response(self._assist_write(job), operation="submit")
         job.update({"status": "RUNNING", "pid": process.pid, "pgid": process.pid, "started_at": self._utc_now()})
         with self._assist_lock:
