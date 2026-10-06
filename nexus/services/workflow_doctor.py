@@ -690,23 +690,24 @@ def _derive_next_gate(
 
     selected = operation.get("selected")
     active = operation.get("active") or []
-    if isinstance(selected, dict) and (
-        selected.get("status") == "OUTCOME_UNKNOWN"
-        or selected.get("phase") == "RECONCILE_REQUIRED"
-        or (isinstance(selected.get("pid"), int) and not _process_alive(selected.get("pid")))
-    ):
+
+    def requires_reconciliation(row: dict[str, Any]) -> bool:
+        status = row.get("status")
+        if status == "OUTCOME_UNKNOWN" or row.get("phase") == "RECONCILE_REQUIRED":
+            return True
+        return bool(
+            status in ACTIVE_STATES
+            and isinstance(row.get("pid"), int)
+            and not _process_alive(row.get("pid"))
+        )
+
+    if isinstance(selected, dict) and requires_reconciliation(selected):
         return "RECONCILE", {
             "code": "RECONCILE_OPERATION",
             "reason": "Requested operation has outcome-unknown or reconcile-required state; do not replay blindly.",
             "operation_id": selected.get("operation_id"),
         }
-    reconcile_active = [
-        row
-        for row in active
-        if row.get("status") == "OUTCOME_UNKNOWN"
-        or row.get("phase") == "RECONCILE_REQUIRED"
-        or (isinstance(row.get("pid"), int) and not _process_alive(row.get("pid")))
-    ]
+    reconcile_active = [row for row in active if requires_reconciliation(row)]
     if reconcile_active:
         return "RECONCILE", {
             "code": "RECONCILE_OPERATION",

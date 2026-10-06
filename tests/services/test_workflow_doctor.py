@@ -842,3 +842,67 @@ def test_pre_gate_review_cannot_project_independent_acceptance_pass(
     assert acceptance["status"] != "PASS"
     assert acceptance["source"] == "direct_operation_review"
     assert acceptance["gap"] == "INDEPENDENT_ACCEPTANCE_AUTHORITY_NOT_OBSERVED"
+
+
+def test_completed_terminal_operation_with_dead_wrapper_is_not_reconcile_required(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(doctor, "_process_alive", lambda _pid: False)
+    operation = _no_operation()
+    operation["requested_id"] = "agyop_completed"
+    operation["selected"] = {
+        "operation_id": "agyop_completed",
+        "status": "COMPLETED",
+        "phase": "TERMINAL",
+        "pid": 4242,
+        "provider_process_state": "EXITED",
+        "has_unresolved_external_effect": False,
+    }
+
+    disposition, gate = doctor._derive_next_gate(
+        source=_base_source(),
+        runtime=_base_runtime(),
+        task={"status": "NOT_REQUESTED"},
+        operation=operation,
+        pr={
+            "status": "OBSERVED",
+            "state": "open",
+            "draft": False,
+            "mergeable": True,
+            "base_sha": "a" * 40,
+            "head_sha": "b" * 40,
+            "pr_number": 1274,
+        },
+        required_gates=[],
+        leases=_no_leases(),
+    )
+
+    assert disposition == "SAFE"
+    assert gate["code"] == "EXACT_HEAD_MERGE_GATE"
+
+
+def test_active_operation_with_dead_wrapper_still_requires_reconciliation(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(doctor, "_process_alive", lambda _pid: False)
+    operation = _no_operation()
+    operation["requested_id"] = "agyop_running"
+    operation["selected"] = {
+        "operation_id": "agyop_running",
+        "status": "RUNNING",
+        "phase": "EXECUTING",
+        "pid": 4242,
+    }
+
+    disposition, gate = doctor._derive_next_gate(
+        source=_base_source(),
+        runtime=_base_runtime(),
+        task={"status": "NOT_REQUESTED"},
+        operation=operation,
+        pr={"status": "NOT_REQUESTED", "pr_number": None},
+        required_gates=[],
+        leases=_no_leases(),
+    )
+
+    assert disposition == "RECONCILE"
+    assert gate["code"] == "RECONCILE_OPERATION"
