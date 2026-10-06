@@ -2510,6 +2510,47 @@ def test_unsupported_effort_for_claude_opus_fails_before_claim(tmp_path: Path) -
     )
 
 
+def test_unrecognized_model_family_fails_before_claim_or_provider(tmp_path: Path) -> None:
+    coordinator = _WriteScopeCoordinator(tmp_path / "home")
+    events: list[dict[str, object]] = []
+    provider_calls: list[bool] = []
+
+    def runner(**_kwargs):
+        provider_calls.append(True)
+        raise AssertionError("an unrecognized model family must be rejected before provider start")
+
+    model = "legacy-engine-7"
+    code = dispatch.dispatch_run(
+        prompt="run model",
+        cwd=str(tmp_path),
+        mode="plan",
+        model=model,
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+
+    rejected = [event for event in events if event.get("phase") == "MODEL_REJECTED"]
+    assert code == 64
+    assert coordinator.acquire_count == 0
+    assert provider_calls == []
+    assert rejected == [
+        {
+            "phase": "MODEL_REJECTED",
+            "attempts": 0,
+            "rotations": 0,
+            "failure_kind": f"DISPATCH_MODEL_REJECTED:UNSUPPORTED_MODEL_FAMILY:{model}",
+            "provider_effect": False,
+        }
+    ]
+    assert not any(
+        event.get("provider_started_at")
+        or event.get("provider_pid")
+        or event.get("provider_effect") is True
+        for event in events
+    )
+
+
 def test_provider_exit_invalid_model_selection_classified_as_model_contract_rejected(
     tmp_path: Path,
 ) -> None:
