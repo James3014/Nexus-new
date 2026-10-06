@@ -2188,6 +2188,24 @@ def test_agy_model_probe_decoder_unwraps_success_response_envelope():
     )
 
 
+def test_agy_model_probe_decoder_fails_closed_on_invalid_envelopes():
+    assert UnifiedMCPGateway._decode_model_probe_payload(
+        json.dumps({"status": "SUCCESS", "response": ""}),
+        "agy",
+        "Gemini 3.8 Flash (Medium)",
+    ) == (None, None)
+    assert UnifiedMCPGateway._decode_model_probe_payload(
+        json.dumps({"status": "SUCCESS", "response": "not-json"}),
+        "agy",
+        "Gemini 3.8 Flash (Medium)",
+    ) == (None, None)
+    assert UnifiedMCPGateway._decode_model_probe_payload(
+        json.dumps({"status": "ERROR", "response": json.dumps({"patch": "bad"})}),
+        "agy",
+        "Gemini 3.8 Flash (Medium)",
+    ) == (None, None)
+
+
 def test_model_probe_transport_provenance_rejects_mismatch_and_partial_events():
     forged_cline = _cline_probe_events({"probe": "ok"}, provider="evil")
     assert UnifiedMCPGateway._decode_model_probe_payload(
@@ -2944,10 +2962,13 @@ def test_model_probe_wrong_payload_fails_schema_gate(monkeypatch, tmp_path):
 
 
 def test_agy_model_probe_print_timeout_is_transport_blocker(monkeypatch, tmp_path):
+    captured = {}
+
     class FakePopen:
         pid = 54005
 
         def __init__(self, command, *, stdout, stderr, **kwargs):
+            captured["command"] = list(command)
             self._returncode = 0
             stdout.write(
                 json.dumps(
@@ -3012,6 +3033,8 @@ def test_agy_model_probe_print_timeout_is_transport_blocker(monkeypatch, tmp_pat
             },
         }
     )
+    assert captured["command"][captured["command"].index("--print-timeout") + 1] == "300s"
+
     result = gateway.handle(
         {
             "jsonrpc": "2.0",
@@ -3038,7 +3061,7 @@ def test_agy_high_model_assist_command_omits_contradictory_effort_low():
     assert "--mode" in command and command[command.index("--mode") + 1] == "plan"
     assert command[command.index("--model") + 1] == "gemini-3.6-flash-high"
     assert "--effort" not in command
-    assert command[command.index("--print-timeout") + 1] == "300s"
+    assert command[command.index("--print-timeout") + 1] == "25s"
 
 
 def test_agy_medium_model_not_overridden_by_hardcoded_low():
