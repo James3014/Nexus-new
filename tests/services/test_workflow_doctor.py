@@ -536,6 +536,8 @@ def _collect_with_observations(
     operation: dict | None = None,
     pr: dict | None = None,
     task: dict | None = None,
+    required_gates: list[dict] | None = None,
+    core_verification: dict | None = None,
 ) -> dict:
     """Exercise collect_workflow_doctor through producer-shaped read-only observations."""
     repository = "James3014/Nexus-new"
@@ -559,6 +561,22 @@ def _collect_with_observations(
         "state": "open",
         "issue_number": 1436,
     }
+    required_gates = list(required_gates or [])
+    core_verification = core_verification or {
+        "status": "OBSERVED",
+        "authority": "James3014/nexus-core",
+        "receipt_path": "/tmp/core-receipt.json",
+        "receipt_integrity": "VALID",
+        "evidence_applicability": "APPLIES",
+        "core_status": "VERIFIED",
+        "reason_codes": [],
+        "claim_ceiling": [
+            "VERIFIED_IS_NOT_MERGE_APPROVAL",
+            "NO_RELEASE_AUTHORITY",
+            "NO_DEPLOYMENT_AUTHORITY",
+        ],
+        "current_verified": True,
+    }
 
     monkeypatch.setattr(
         doctor,
@@ -569,7 +587,7 @@ def _collect_with_observations(
     monkeypatch.setattr(
         doctor,
         "_collect_pr",
-        lambda *args, **kwargs: (dict(pr), [], [], []),
+        lambda *args, **kwargs: (dict(pr), list(required_gates), [], []),
     )
     monkeypatch.setattr(doctor, "_collect_runtime", lambda *args, **kwargs: dict(runtime))
     monkeypatch.setattr(
@@ -583,6 +601,11 @@ def _collect_with_observations(
         lambda *args, **kwargs: dict(operation),
     )
     monkeypatch.setattr(doctor, "_collect_leases", lambda *args, **kwargs: _no_leases())
+    monkeypatch.setattr(
+        doctor,
+        "_collect_core_verification",
+        lambda *args, **kwargs: dict(core_verification),
+    )
 
     return doctor.collect_workflow_doctor(
         repo_root=tmp_path,
@@ -842,3 +865,295 @@ def test_pre_gate_review_cannot_project_independent_acceptance_pass(
     assert acceptance["status"] != "PASS"
     assert acceptance["source"] == "direct_operation_review"
     assert acceptance["gap"] == "INDEPENDENT_ACCEPTANCE_AUTHORITY_NOT_OBSERVED"
+
+
+# ---------------------------------------------------------------------------
+# Issue #1443: canonical Nexus Core completion-truth wiring
+# ---------------------------------------------------------------------------
+
+
+def test_source_verification_projects_exact_core_truth(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    payload = _collect_with_observations(monkeypatch, tmp_path)
+    source_verification = _completion_layers(payload)["Source verification"]
+
+    assert source_verification["status"] == "PASS"
+    assert source_verification["source"] == "nexus_core_evidence_check"
+    assert source_verification["freshness"] == "CURRENT"
+    assert source_verification["evidence"]["core_status"] == "VERIFIED"
+
+
+def test_source_verification_does_not_use_github_gates_as_core_truth(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        pr={
+            "status": "OBSERVED",
+            "state": "open",
+            "draft": False,
+            "merged": False,
+            "pr_number": 1444,
+            "head_sha": "b" * 40,
+            "base_sha": "b" * 40,
+            "gate_policy_state": "OBSERVED",
+            "check_observation_error": None,
+            "mergeable": True,
+        },
+        required_gates=[
+            {
+                "name": "Exact-base impact gate",
+                "status": "completed",
+                "conclusion": "success",
+            }
+        ],
+        core_verification={
+            "status": "UNAVAILABLE",
+            "error": "CORE_VERIFICATION_RECEIPT_NOT_FOUND",
+        },
+    )
+    source_verification = _completion_layers(payload)["Source verification"]
+
+    assert source_verification["status"] == "UNKNOWN"
+    assert source_verification["gap"] == "CORE_VERIFICATION_EVIDENCE_NOT_OBSERVED"
+    assert source_verification["evidence"]["merge_gate_required_success"] is True
+
+
+def test_source_verification_rejects_stale_core_subject(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        core_verification={
+            "status": "OBSERVED",
+            "receipt_integrity": "VALID",
+            "evidence_applicability": "STALE_TARGET",
+            "core_status": "VERIFIED",
+            "reason_codes": ["RECEIPT_TARGET_DOES_NOT_MATCH_CURRENT_PR"],
+            "claim_ceiling": [],
+            "current_verified": False,
+        },
+    )
+    source_verification = _completion_layers(payload)["Source verification"]
+
+    assert source_verification["status"] == "UNKNOWN"
+    assert source_verification["freshness"] == "STALE"
+    assert source_verification["gap"] == "CORE_VERIFICATION_SUBJECT_NOT_CURRENT"
+
+
+def test_source_verification_rejects_invalid_core_receipt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        core_verification={
+            "status": "OBSERVED",
+            "receipt_integrity": "INVALID",
+            "evidence_applicability": "TAMPERED",
+            "core_status": "NOT_AVAILABLE",
+            "reason_codes": ["RECEIPT_HASH_MISMATCH"],
+            "claim_ceiling": [],
+            "current_verified": False,
+        },
+    )
+    source_verification = _completion_layers(payload)["Source verification"]
+
+    assert source_verification["status"] == "UNKNOWN"
+    assert source_verification["gap"] == "CORE_VERIFICATION_RECEIPT_INVALID"
+    assert source_verification["evidence"]["core_receipt_integrity"] == "INVALID"
+    assert source_verification["evidence"]["core_reason_codes"] == ["RECEIPT_HASH_MISMATCH"]
+
+
+def test_collect_core_verification_delegates_applicability_to_core_cli(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    receipt_dir = tmp_path / ".nexus-core" / "receipts"
+    receipt_dir.mkdir(parents=True)
+    receipt = receipt_dir / "20261005T000000Z-current.json"
+    receipt.write_text("{}", encoding="utf-8")
+    executable = tmp_path / "nexus-certify"
+    executable.write_text("", encoding="utf-8")
+    captured: dict[str, object] = {}
+    pr = {
+        "status": "OBSERVED",
+        "pr_number": 1444,
+        "base_sha": "a" * 40,
+        "head_sha": "b" * 40,
+    }
+    subject = {
+        "repository_owner": "James3014",
+        "repository_name": "Nexus-new",
+        "pr_number": 1444,
+        "base_sha": "a" * 40,
+        "head_sha": "b" * 40,
+        "base_tree": "c" * 40,
+        "head_tree": "d" * 40,
+        "changed_paths": ["nexus/services/workflow_doctor.py"],
+        "deleted_paths": [],
+    }
+
+    monkeypatch.setattr(doctor, "_resolve_nexus_certify_executable", lambda home: executable)
+    monkeypatch.setattr(
+        doctor,
+        "_collect_pr_evidence_subject",
+        lambda *args, **kwargs: (dict(subject), None),
+    )
+
+    def fake_runner(argv, **kwargs):
+        captured["argv"] = list(argv)
+        captured["env"] = dict(kwargs.get("env") or {})
+        return subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout=json.dumps(
+                {
+                    "subject": None,
+                    "receipt_integrity": "VALID",
+                    "evidence_applicability": "APPLIES",
+                    "core_verification": "VERIFIED",
+                    "reason_codes": [],
+                    "claim_ceiling": [
+                        "VERIFIED_IS_NOT_MERGE_APPROVAL",
+                        "NO_RELEASE_AUTHORITY",
+                        "NO_DEPLOYMENT_AUTHORITY",
+                    ],
+                }
+            ),
+            stderr="",
+        )
+
+    observed = doctor._collect_core_verification(
+        tmp_path,
+        home=tmp_path,
+        repository="James3014/Nexus-new",
+        pr=pr,
+        runner=fake_runner,
+    )
+
+    assert observed["current_verified"] is True
+    assert observed["receipt_integrity"] == "VALID"
+    assert observed["evidence_applicability"] == "APPLIES"
+    assert observed["core_status"] == "VERIFIED"
+    argv = captured["argv"]
+    assert isinstance(argv, list)
+    assert argv[:2] == [str(executable), "evidence-check"]
+    assert argv[argv.index("--head-tree") + 1] == "d" * 40
+    assert argv[argv.index("--changed-path") + 1] == "nexus/services/workflow_doctor.py"
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert "PYTHONPATH" not in env
+    assert "PYTHONHOME" not in env
+
+
+def test_collect_core_verification_latest_invalid_receipt_blocks_older_valid_receipt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    receipt_dir = tmp_path / ".nexus-core" / "receipts"
+    receipt_dir.mkdir(parents=True)
+    (receipt_dir / "20261005T000000Z-old-valid.json").write_text("{}", encoding="utf-8")
+    latest = receipt_dir / "20261005T010000Z-new-invalid.json"
+    latest.write_text("{}", encoding="utf-8")
+    executable = tmp_path / "nexus-certify"
+    executable.write_text("", encoding="utf-8")
+    captured: dict[str, object] = {}
+    pr = {
+        "status": "OBSERVED",
+        "pr_number": 1444,
+        "base_sha": "a" * 40,
+        "head_sha": "b" * 40,
+    }
+    subject = {
+        "repository_owner": "James3014",
+        "repository_name": "Nexus-new",
+        "pr_number": 1444,
+        "base_sha": "a" * 40,
+        "head_sha": "b" * 40,
+        "base_tree": "c" * 40,
+        "head_tree": "d" * 40,
+        "changed_paths": ["nexus/services/workflow_doctor.py"],
+        "deleted_paths": [],
+    }
+
+    monkeypatch.setattr(doctor, "_resolve_nexus_certify_executable", lambda home: executable)
+    monkeypatch.setattr(
+        doctor,
+        "_collect_pr_evidence_subject",
+        lambda *args, **kwargs: (dict(subject), None),
+    )
+
+    def fake_runner(argv, **kwargs):
+        captured["receipt"] = argv[argv.index("--receipt") + 1]
+        return subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout=json.dumps(
+                {
+                    "subject": None,
+                    "receipt_integrity": "INVALID",
+                    "evidence_applicability": "TAMPERED",
+                    "core_verification": "NOT_AVAILABLE",
+                    "reason_codes": ["RECEIPT_HASH_MISMATCH"],
+                    "claim_ceiling": [],
+                }
+            ),
+            stderr="",
+        )
+
+    observed = doctor._collect_core_verification(
+        tmp_path,
+        home=tmp_path,
+        repository="James3014/Nexus-new",
+        pr=pr,
+        runner=fake_runner,
+    )
+
+    assert captured["receipt"] == str(latest)
+    assert observed["current_verified"] is False
+    assert observed["receipt_integrity"] == "INVALID"
+    assert observed["reason_codes"] == ["RECEIPT_HASH_MISMATCH"]
+
+
+def test_collect_pr_evidence_subject_flattens_pages_and_preserves_deletions(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    responses = [
+        ({"tree": {"sha": "c" * 40}}, None),
+        ({"tree": {"sha": "d" * 40}}, None),
+        (
+            [
+                [
+                    {"filename": "a.py", "status": "modified"},
+                    {"filename": "gone.py", "status": "removed"},
+                ],
+                [{"filename": "z.py", "status": "added"}],
+            ],
+            None,
+        ),
+    ]
+
+    def fake_json_command(*args, **kwargs):
+        return responses.pop(0)
+
+    monkeypatch.setattr(doctor, "_json_command", fake_json_command)
+    subject, error = doctor._collect_pr_evidence_subject(
+        "James3014/Nexus-new",
+        {
+            "status": "OBSERVED",
+            "pr_number": 1444,
+            "base_sha": "a" * 40,
+            "head_sha": "b" * 40,
+        },
+        repo_root=tmp_path,
+        runner=subprocess.run,
+    )
+
+    assert error is None
+    assert subject is not None
+    assert subject["base_tree"] == "c" * 40
+    assert subject["head_tree"] == "d" * 40
+    assert subject["changed_paths"] == ["a.py", "gone.py", "z.py"]
+    assert subject["deleted_paths"] == ["gone.py"]

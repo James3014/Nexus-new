@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import shutil
 import socket
 import subprocess
 from datetime import datetime, timezone
@@ -88,6 +90,7 @@ def _run(
     cwd: Path | None = None,
     runner: CommandRunner = subprocess.run,
     timeout: float = 10.0,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return runner(
         list(argv),
@@ -96,6 +99,7 @@ def _run(
         text=True,
         check=False,
         timeout=timeout,
+        env=env,
     )
 
 
@@ -105,9 +109,10 @@ def _json_command(
     cwd: Path | None = None,
     runner: CommandRunner = subprocess.run,
     timeout: float = 10.0,
+    env: dict[str, str] | None = None,
 ) -> tuple[Any | None, str | None]:
     try:
-        proc = _run(argv, cwd=cwd, runner=runner, timeout=timeout)
+        proc = _run(argv, cwd=cwd, runner=runner, timeout=timeout, env=env)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return None, f"{type(exc).__name__}:{exc}"
     if proc.returncode != 0:
@@ -287,8 +292,10 @@ def _collect_pr(
             [],
         )
 
-    head = pr.get("head") if isinstance(pr.get("head"), dict) else {}
-    base = pr.get("base") if isinstance(pr.get("base"), dict) else {}
+    head_value = pr.get("head")
+    base_value = pr.get("base")
+    head: dict[str, Any] = head_value if isinstance(head_value, dict) else {}
+    base: dict[str, Any] = base_value if isinstance(base_value, dict) else {}
     head_sha = head.get("sha")
     base_ref = base.get("ref") or "main"
     checks_payload, checks_error = _json_command(
@@ -608,7 +615,7 @@ def _marker_view(path: Path, keys: tuple[str, ...]) -> dict[str, Any]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {"path": str(path), "status": "UNREADABLE"}
-    result = {"path": str(path), "status": "OBSERVED"}
+    result: dict[str, Any] = {"path": str(path), "status": "OBSERVED"}
     if isinstance(payload, dict):
         for key in keys:
             if key in payload:
@@ -892,6 +899,242 @@ _COMPLETION_LAYERS = (
 )
 
 
+def _completion_subject_revision(
+    *,
+    source: dict[str, Any],
+    operation: dict[str, Any],
+    pr: dict[str, Any],
+) -> str | None:
+    selected = operation.get("selected")
+    if not isinstance(selected, dict):
+        selected = operation.get("latest_terminal")
+    if not isinstance(selected, dict):
+        selected = None
+    pr_head = pr.get("head_sha") if pr.get("status") == "OBSERVED" else None
+    merged = pr.get("merged") is True or bool(pr.get("merged_at"))
+    merge_revision = pr.get("merge_commit_sha") or pr_head
+    review_head = selected.get("review_candidate_head") if selected else None
+    subject = (
+        merge_revision
+        if merged and merge_revision
+        else pr_head or source.get("head") or review_head
+    )
+    return str(subject) if isinstance(subject, str) and subject else None
+
+
+def _resolve_nexus_certify_executable(home: Path) -> Path | None:
+    executable = home / ".local/bin/nexus-certify"
+    if not executable.exists():
+        found = shutil.which("nexus-certify")
+        executable = Path(found) if found else executable
+    try:
+        resolved = executable.resolve(strict=True)
+    except OSError:
+        return None
+    return resolved if resolved.is_file() else None
+
+
+def _collect_pr_evidence_subject(
+    repository: str | None,
+    pr: dict[str, Any],
+    *,
+    repo_root: Path,
+    runner: CommandRunner,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Collect only the physical PR subject fields required by Core evidence-check."""
+    if not repository or "/" not in repository or pr.get("status") != "OBSERVED":
+        return None, "CORE_PR_SUBJECT_UNAVAILABLE"
+    pr_number = pr.get("pr_number")
+    base_sha = pr.get("base_sha")
+    head_sha = pr.get("head_sha")
+    if not isinstance(pr_number, int) or not isinstance(base_sha, str) or not isinstance(head_sha, str):
+        return None, "CORE_PR_SUBJECT_UNAVAILABLE"
+
+    base_commit, base_error = _json_command(
+        ["gh", "api", f"repos/{repository}/git/commits/{base_sha}"],
+        cwd=repo_root,
+        runner=runner,
+    )
+    head_commit, head_error = _json_command(
+        ["gh", "api", f"repos/{repository}/git/commits/{head_sha}"],
+        cwd=repo_root,
+        runner=runner,
+    )
+    files_payload, files_error = _json_command(
+        [
+            "gh",
+            "api",
+            "--paginate",
+            "--slurp",
+            f"repos/{repository}/pulls/{pr_number}/files?per_page=100",
+        ],
+        cwd=repo_root,
+        runner=runner,
+        timeout=20.0,
+    )
+    if not isinstance(base_commit, dict) or not isinstance(head_commit, dict):
+        return None, base_error or head_error or "CORE_PR_TREE_OBSERVATION_FAILED"
+    base_tree = base_commit.get("tree")
+    head_tree = head_commit.get("tree")
+    base_tree_sha = base_tree.get("sha") if isinstance(base_tree, dict) else None
+    head_tree_sha = head_tree.get("sha") if isinstance(head_tree, dict) else None
+    if not isinstance(base_tree_sha, str) or not isinstance(head_tree_sha, str):
+        return None, "CORE_PR_TREE_OBSERVATION_FAILED"
+
+    file_rows: list[dict[str, Any]] = []
+    if isinstance(files_payload, list):
+        for page in files_payload:
+            if isinstance(page, list):
+                file_rows.extend(row for row in page if isinstance(row, dict))
+            elif isinstance(page, dict):
+                file_rows.append(page)
+    if files_error is not None or not file_rows:
+        return None, files_error or "CORE_PR_PATH_OBSERVATION_FAILED"
+    changed_paths = sorted(
+        str(row["filename"])
+        for row in file_rows
+        if isinstance(row.get("filename"), str) and row["filename"]
+    )
+    deleted_paths = sorted(
+        str(row["filename"])
+        for row in file_rows
+        if row.get("status") == "removed"
+        and isinstance(row.get("filename"), str)
+        and row["filename"]
+    )
+    if not changed_paths:
+        return None, "CORE_PR_PATH_OBSERVATION_FAILED"
+    owner, name = repository.split("/", 1)
+    return {
+        "repository_owner": owner,
+        "repository_name": name,
+        "pr_number": pr_number,
+        "base_sha": base_sha,
+        "head_sha": head_sha,
+        "base_tree": base_tree_sha,
+        "head_tree": head_tree_sha,
+        "changed_paths": changed_paths,
+        "deleted_paths": deleted_paths,
+    }, None
+
+
+def _collect_core_verification(
+    repo_root: Path,
+    *,
+    home: Path,
+    repository: str | None,
+    pr: dict[str, Any],
+    runner: CommandRunner,
+) -> dict[str, Any]:
+    """Observe canonical Core truth through nexus-certify evidence-check only."""
+    receipts_root = repo_root / ".nexus-core" / "receipts"
+    try:
+        receipts = sorted(
+            (path for path in receipts_root.glob("*.json") if path.is_file()),
+            key=lambda path: path.name,
+            reverse=True,
+        )
+    except OSError as exc:
+        return {"status": "UNKNOWN", "error": f"CORE_RECEIPT_SCAN_FAILED:{exc}"}
+    if not receipts:
+        return {
+            "status": "UNAVAILABLE",
+            "error": "CORE_VERIFICATION_RECEIPT_NOT_FOUND",
+        }
+    receipt = receipts[0]
+
+    executable = _resolve_nexus_certify_executable(home)
+    if executable is None:
+        return {
+            "status": "UNAVAILABLE",
+            "receipt_path": str(receipt),
+            "error": "NEXUS_CERTIFY_EVIDENCE_CHECK_UNAVAILABLE",
+        }
+    subject, subject_error = _collect_pr_evidence_subject(
+        repository,
+        pr,
+        repo_root=repo_root,
+        runner=runner,
+    )
+    if not isinstance(subject, dict):
+        return {
+            "status": "UNKNOWN",
+            "receipt_path": str(receipt),
+            "validator_executable": str(executable),
+            "error": subject_error or "CORE_PR_SUBJECT_UNAVAILABLE",
+        }
+
+    argv = [
+        str(executable),
+        "evidence-check",
+        "--receipt",
+        str(receipt),
+        "--repository-owner",
+        str(subject["repository_owner"]),
+        "--repository-name",
+        str(subject["repository_name"]),
+        "--pr-number",
+        str(subject["pr_number"]),
+        "--base-sha",
+        str(subject["base_sha"]),
+        "--head-sha",
+        str(subject["head_sha"]),
+        "--base-tree",
+        str(subject["base_tree"]),
+        "--head-tree",
+        str(subject["head_tree"]),
+    ]
+    for path in subject["changed_paths"]:
+        argv.extend(["--changed-path", str(path)])
+    for path in subject["deleted_paths"]:
+        argv.extend(["--deleted-path", str(path)])
+    core_env = dict(os.environ)
+    core_env.pop("PYTHONPATH", None)
+    core_env.pop("PYTHONHOME", None)
+    observed, error = _json_command(
+        argv,
+        cwd=repo_root,
+        runner=runner,
+        timeout=20.0,
+        env=core_env,
+    )
+    if not isinstance(observed, dict):
+        return {
+            "status": "UNKNOWN",
+            "receipt_path": str(receipt),
+            "validator_executable": str(executable),
+            "error": error or "CORE_EVIDENCE_CHECK_FAILED",
+        }
+
+    receipt_integrity = observed.get("receipt_integrity")
+    applicability = observed.get("evidence_applicability")
+    core_status = observed.get("core_verification")
+    current_verified = bool(
+        receipt_integrity == "VALID"
+        and applicability == "APPLIES"
+        and core_status == "VERIFIED"
+    )
+    return {
+        "status": "OBSERVED",
+        "authority": "James3014/nexus-core",
+        "receipt_path": str(receipt),
+        "validator_executable": str(executable),
+        "validator": "nexus-certify evidence-check",
+        "receipt_integrity": receipt_integrity,
+        "evidence_applicability": applicability,
+        "core_status": core_status,
+        "reason_codes": list(observed.get("reason_codes") or []),
+        "claim_ceiling": list(observed.get("claim_ceiling") or []),
+        "subject_revision": pr.get("head_sha"),
+        "subject_base_revision": pr.get("base_sha"),
+        "subject_base_tree": subject.get("base_tree"),
+        "subject_head_tree": subject.get("head_tree"),
+        "changed_paths": list(subject.get("changed_paths") or []),
+        "deleted_paths": list(subject.get("deleted_paths") or []),
+        "current_verified": current_verified,
+    }
+
+
 def _completion_row(
     layer: str,
     *,
@@ -924,6 +1167,7 @@ def _project_completion_matrix(
     operation: dict[str, Any],
     pr: dict[str, Any],
     required_gates: list[dict[str, Any]],
+    core_verification: dict[str, Any],
     observed_at: str,
 ) -> dict[str, Any]:
     """Project current delivery evidence without minting completion authority."""
@@ -937,10 +1181,8 @@ def _project_completion_matrix(
     merged = pr.get("merged") is True or bool(pr.get("merged_at"))
     merge_revision = pr.get("merge_commit_sha") or pr_head
     review_head = selected.get("review_candidate_head") if selected else None
-    subject_revision = (
-        merge_revision
-        if merged and merge_revision
-        else pr_head or source.get("head") or review_head
+    subject_revision = _completion_subject_revision(
+        source=source, operation=operation, pr=pr
     )
 
     rows: list[dict[str, Any]] = []
@@ -995,27 +1237,49 @@ def _project_completion_matrix(
         and row.get("conclusion") in {"success", "neutral", "skipped"}
         for row in required_gates
     )
-    source_verification_pass = bool(
-        pr_head
-        and pr.get("gate_policy_state") == "OBSERVED"
-        and not pr.get("check_observation_error")
-        and required_success
-    )
+    source_verification_pass = core_verification.get("current_verified") is True
+    applicability = core_verification.get("evidence_applicability")
+    receipt_integrity = core_verification.get("receipt_integrity")
+    if source_verification_pass:
+        source_verification_gap = None
+        source_verification_freshness = "CURRENT"
+    elif core_verification.get("status") == "UNAVAILABLE":
+        source_verification_gap = "CORE_VERIFICATION_EVIDENCE_NOT_OBSERVED"
+        source_verification_freshness = "UNKNOWN"
+    elif receipt_integrity == "INVALID" or applicability == "TAMPERED":
+        source_verification_gap = "CORE_VERIFICATION_RECEIPT_INVALID"
+        source_verification_freshness = "UNKNOWN"
+    elif applicability in {"STALE_SOURCE", "STALE_TARGET", "SUBJECT_MISMATCH"}:
+        source_verification_gap = "CORE_VERIFICATION_SUBJECT_NOT_CURRENT"
+        source_verification_freshness = "STALE"
+    else:
+        source_verification_gap = "CORE_VERIFICATION_NOT_VERIFIED"
+        source_verification_freshness = "UNKNOWN"
     rows.append(
         _completion_row(
             "Source verification",
             status="PASS" if source_verification_pass else "UNKNOWN",
-            source="github_required_checks" if pr_head else "workflow_doctor",
-            revision=str(pr_head) if pr_head else subject_revision,
+            source=(
+                "nexus_core_evidence_check"
+                if core_verification.get("status") == "OBSERVED"
+                else "workflow_doctor"
+            ),
+            revision=subject_revision,
             observed_at=observed_at,
-            freshness="CURRENT" if source_verification_pass else "UNKNOWN",
+            freshness=source_verification_freshness,
             evidence={
+                "authority": core_verification.get("authority"),
+                "core_receipt_path": core_verification.get("receipt_path"),
+                "core_receipt_integrity": core_verification.get("receipt_integrity"),
+                "core_evidence_applicability": core_verification.get("evidence_applicability"),
+                "core_status": core_verification.get("core_status"),
+                "core_reason_codes": core_verification.get("reason_codes", []),
+                "core_claim_ceiling": core_verification.get("claim_ceiling", []),
                 "required_gate_count": len(required_gates),
+                "merge_gate_required_success": required_success,
                 "gate_policy_state": pr.get("gate_policy_state"),
             },
-            gap=(
-                None if source_verification_pass else "CURRENT_EXACT_HEAD_VERIFICATION_NOT_PROVEN"
-            ),
+            gap=source_verification_gap,
         )
     )
 
@@ -1235,6 +1499,13 @@ def collect_workflow_doctor(
         repo_root=repo_root,
     )
     leases = _collect_leases(home)
+    core_verification = _collect_core_verification(
+        repo_root,
+        home=home,
+        repository=repository,
+        pr=pr,
+        runner=runner,
+    )
     disposition, next_gate = _derive_next_gate(
         source=source,
         runtime=runtime,
@@ -1250,6 +1521,7 @@ def collect_workflow_doctor(
         operation=operation,
         pr=pr,
         required_gates=required,
+        core_verification=core_verification,
         observed_at=generated_at,
     )
     if disposition not in RESUME_DISPOSITIONS:
@@ -1262,6 +1534,7 @@ def collect_workflow_doctor(
         "operation": operation,
         "source": source,
         "runtime": runtime,
+        "core_verification": core_verification,
         "quota": quota,
         "pr": pr,
         "required_gates": required,
@@ -1278,6 +1551,7 @@ def collect_workflow_doctor(
 def render_text(payload: dict[str, Any]) -> str:
     source = payload.get("source", {})
     runtime = payload.get("runtime", {})
+    core = payload.get("core_verification", {})
     task = payload.get("task", {})
     pr = payload.get("pr", {})
     operation = payload.get("operation", {})
@@ -1286,6 +1560,7 @@ def render_text(payload: dict[str, Any]) -> str:
         f"resume={payload.get('resume_disposition')} next={gate.get('code')}",
         f"source head={source.get('head')} github_main={source.get('github_main')} dirty={source.get('dirty')}",
         f"runtime state={runtime.get('state')} installed={runtime.get('installed_revision')}",
+        f"core status={core.get('core_status')} current_verified={core.get('current_verified')}",
         f"quota status={(payload.get('quota') or {}).get('status')} accounts={(payload.get('quota') or {}).get('account_count')}",
         f"issue={task.get('issue_number')} state={task.get('state')}",
         f"pr={pr.get('pr_number')} state={pr.get('state')} head={pr.get('head_sha')}",
