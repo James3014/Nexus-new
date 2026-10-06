@@ -2101,9 +2101,19 @@ class UnifiedMCPGateway:
     def _decode_model_probe_payload(text: str, provider: str, resolved_model: str) -> tuple[Optional[dict[str, Any]], Optional[str]]:
         """Return only a model-originated JSON payload, never transport metadata."""
 
-        def decode_document(raw: str) -> Optional[dict[str, Any]]:
+        def decode_document(
+            raw: str, *, allow_single_json_fence: bool = False
+        ) -> Optional[dict[str, Any]]:
+            if not isinstance(raw, str):
+                return None
+            candidate = raw.strip()
+            if allow_single_json_fence:
+                if candidate.startswith("```json\n") and candidate.endswith("\n```"):
+                    candidate = candidate[len("```json\n") : -len("\n```")].strip()
+                elif candidate.startswith("```") or candidate.endswith("```"):
+                    return None
             try:
-                value = json.loads(raw.strip())
+                value = json.loads(candidate)
             except (json.JSONDecodeError, TypeError):
                 return None
             return value if isinstance(value, dict) else None
@@ -2127,7 +2137,7 @@ class UnifiedMCPGateway:
             if isinstance(response, Mapping):
                 return dict(response), "agy_json_envelope"
             if isinstance(response, str):
-                payload = decode_document(response)
+                payload = decode_document(response, allow_single_json_fence=True)
                 if payload is not None:
                     return payload, "agy_json_envelope"
             return None, None

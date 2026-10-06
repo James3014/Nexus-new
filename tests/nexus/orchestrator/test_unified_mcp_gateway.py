@@ -2188,6 +2188,43 @@ def test_agy_model_probe_decoder_unwraps_success_response_envelope():
     )
 
 
+def test_agy_model_probe_decoder_unwraps_single_json_fence_inside_success_response():
+    raw = json.dumps(
+        {
+            "conversation_id": "agy-conversation-fenced",
+            "status": "SUCCESS",
+            "response": "```json\n" + json.dumps({"patch": "NO_PATCH"}) + "\n```\n",
+        }
+    )
+    assert UnifiedMCPGateway._decode_model_probe_payload(
+        raw,
+        "agy",
+        "Gemini 3.1 Pro (High)",
+    ) == ({"patch": "NO_PATCH"}, "agy_json_envelope")
+
+
+def test_agy_model_probe_decoder_rejects_prose_or_non_json_fence():
+    responses = (
+        "prefix\n```json\n" + json.dumps({"patch": "NO_PATCH"}) + "\n```",
+        "```json\n" + json.dumps({"patch": "NO_PATCH"}) + "\n```\nsuffix",
+        "```text\n" + json.dumps({"patch": "NO_PATCH"}) + "\n```",
+        "```json\n" + json.dumps({"patch": "NO_PATCH"}),
+    )
+    for response in responses:
+        raw = json.dumps(
+            {
+                "conversation_id": "agy-conversation-invalid-fence",
+                "status": "SUCCESS",
+                "response": response,
+            }
+        )
+        assert UnifiedMCPGateway._decode_model_probe_payload(
+            raw,
+            "agy",
+            "Gemini 3.1 Pro (High)",
+        ) == (None, None)
+
+
 def test_agy_model_probe_decoder_fails_closed_on_invalid_envelopes():
     assert UnifiedMCPGateway._decode_model_probe_payload(
         json.dumps({"status": "SUCCESS", "response": ""}),
