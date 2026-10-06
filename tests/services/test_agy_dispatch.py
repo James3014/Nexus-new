@@ -891,6 +891,9 @@ def test_background_spawn_returns_durable_operation_identity(tmp_path: Path, mon
         deny=[],
         temp_command_permissions=False,
         operation_root=root,
+        write_paths=[str(tmp_path / "target.txt")],
+        provider_stall_seconds=17.0,
+        stream_no_progress_seconds=29.0,
     )
 
     assert record["status"] == "QUEUED"
@@ -899,6 +902,13 @@ def test_background_spawn_returns_durable_operation_identity(tmp_path: Path, mon
     raw = (root / "operations" / record["operation_id"] / "operation.json").read_text()
     assert "do not persist this prompt" not in raw
     assert "--operation-run" in captured["argv"]
+    assert captured["argv"][captured["argv"].index("--provider-stall-seconds") + 1] == "17.0"
+    assert captured["argv"][captured["argv"].index("--stream-no-progress-seconds") + 1] == "29.0"
+    assert record["liveness_policy"] == {
+        "coding_progress_required": True,
+        "provider_stall_seconds": 17.0,
+        "stream_no_progress_seconds": 29.0,
+    }
     assert captured["kwargs"]["start_new_session"] is True
     prompt_path = root / "operations" / record["operation_id"] / ".prompt"
     assert stat.S_IMODE(prompt_path.stat().st_mode) == 0o600
@@ -2258,6 +2268,343 @@ sys.exit(0)
     assert len(running_events) >= 1
     exited_events = [e for e in events if e.get("provider_process_state") == "EXITED"]
     assert len(exited_events) >= 1
+
+
+def test_run_agy_ingests_provider_stream_from_attestation_log(tmp_path: Path, monkeypatch) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "-C", str(work), "init"], check=True, capture_output=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_agy = bin_dir / "agy"
+    fake_agy.write_text(
+        "#!"
+        + sys.executable
+        + "\nimport sys, time\n"
+        + "from pathlib import Path\n"
+        + "log = Path(sys.argv[sys.argv.index('--log-file') + 1])\n"
+        + "log.write_text('I http_helpers.go:315] URL: https://example/v1internal:streamGenerateContent?alt=sse\\n')\n"
+        + "time.sleep(0.2)\n",
+        encoding="utf-8",
+    )
+    fake_agy.chmod(0o700)
+    log = tmp_path / "agy.log"
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(log))
+
+    events: list[dict[str, object]] = []
+    code, _out, _err, _timed_out, _wall_ms = dispatch.run_agy(
+        env=os.environ.copy(),
+        prompt="stream only",
+        cwd=str(work),
+        mode="plan",
+        model=None,
+        effort=None,
+        timeout=5,
+        operation_hook=events.append,
+    )
+
+    assert code == 0
+    assert any(event.get("first_stream_activity_at") for event in events)
+    assert any(event.get("provider_stream_last_activity_at") for event in events)
+
+
+def test_run_agy_coding_watchdog_classifies_provider_stalled(tmp_path: Path, monkeypatch) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "-C", str(work), "init"], check=True, capture_output=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_agy = bin_dir / "agy"
+    fake_agy.write_text(
+        "#!" + sys.executable + "\nimport time\ntime.sleep(2)\n",
+        encoding="utf-8",
+    )
+    fake_agy.chmod(0o700)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("NEXUS_AGY_PROVIDER_STALL_SECONDS", "0.15")
+    monkeypatch.setenv("NEXUS_AGY_STREAM_NO_PROGRESS_SECONDS", "5")
+
+    code, _out, err, timed_out, _wall_ms = dispatch.run_agy(
+        env=os.environ.copy(),
+        prompt="must edit",
+        cwd=str(work),
+        mode="accept-edits",
+        model=None,
+        effort=None,
+        timeout=5,
+        expect_coding_progress=True,
+    )
+
+    assert code != 0
+    assert timed_out is False
+    assert "NEXUS_AGY_NON_PROGRESS:PROVIDER_STALLED" in err
+    assert (
+        dispatch.classify_failure(code, "", err, timed_out)
+        == dispatch.AccountFailureKind.PROVIDER_STALLED
+    )
+
+
+def test_run_agy_coding_watchdog_classifies_stream_without_effect(
+    tmp_path: Path, monkeypatch
+) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "-C", str(work), "init"], check=True, capture_output=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_agy = bin_dir / "agy"
+    fake_agy.write_text(
+        "#!"
+        + sys.executable
+        + "\nimport sys, time\n"
+        + "from pathlib import Path\n"
+        + "log = Path(sys.argv[sys.argv.index('--log-file') + 1])\n"
+        + "log.write_text('I http_helpers.go:315] URL: https://example/v1internal:streamGenerateContent?alt=sse\\n')\n"
+        + "time.sleep(2)\n",
+        encoding="utf-8",
+    )
+    fake_agy.chmod(0o700)
+    log = tmp_path / "agy.log"
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(log))
+    monkeypatch.setenv("NEXUS_AGY_PROVIDER_STALL_SECONDS", "5")
+    monkeypatch.setenv("NEXUS_AGY_STREAM_NO_PROGRESS_SECONDS", "0.15")
+
+    events: list[dict[str, object]] = []
+    code, _out, err, timed_out, _wall_ms = dispatch.run_agy(
+        env=os.environ.copy(),
+        prompt="must edit",
+        cwd=str(work),
+        mode="accept-edits",
+        model=None,
+        effort=None,
+        timeout=5,
+        operation_hook=events.append,
+        expect_coding_progress=True,
+    )
+
+    assert code != 0
+    assert timed_out is False
+    assert "NEXUS_AGY_NON_PROGRESS:PROVIDER_STREAM_NO_PROGRESS" in err
+    assert any(event.get("first_stream_activity_at") for event in events)
+    assert (
+        dispatch.classify_failure(code, "", err, timed_out)
+        == dispatch.AccountFailureKind.PROVIDER_STREAM_NO_PROGRESS
+    )
+
+
+def test_run_agy_tool_activity_resets_stream_no_progress_watchdog(
+    tmp_path: Path, monkeypatch
+) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "-C", str(work), "init"], check=True, capture_output=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_agy = bin_dir / "agy"
+    session_id = "11111111-2222-3333-4444-555555555555"
+    fake_agy.write_text(
+        "#!"
+        + sys.executable
+        + "\nimport json, os, sys, time\n"
+        + "from pathlib import Path\n"
+        + f"session = {session_id!r}\n"
+        + "log = Path(sys.argv[sys.argv.index('--log-file') + 1])\n"
+        + "log.write_text('I server.go:1263] Created conversation ' + session + '\\n'"
+        + " + 'I http_helpers.go:315] URL: https://example/v1internal:streamGenerateContent?alt=sse\\n')\n"
+        + "transcript = Path(os.environ['HOME']) / '.gemini' / 'antigravity-cli' / 'brain' / session / '.system_generated' / 'logs' / 'transcript_full.jsonl'\n"
+        + "transcript.parent.mkdir(parents=True, exist_ok=True)\n"
+        + "time.sleep(0.18)\n"
+        + "transcript.write_text(json.dumps({'source':'MODEL','type':'PLANNER_RESPONSE','tool_calls':[{'name':'view_file','args':{}}]}) + '\\n')\n"
+        + "time.sleep(0.18)\n"
+        + "print('DONE')\n",
+        encoding="utf-8",
+    )
+    fake_agy.chmod(0o700)
+    log = tmp_path / "agy.log"
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(log))
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+
+    events: list[dict[str, object]] = []
+    code, out, err, timed_out, _wall_ms = dispatch.run_agy(
+        env=env,
+        prompt="read and reason",
+        cwd=str(work),
+        mode="accept-edits",
+        model=None,
+        effort=None,
+        timeout=5,
+        operation_hook=events.append,
+        expect_coding_progress=True,
+        provider_stall_seconds=0.5,
+        stream_no_progress_seconds=0.25,
+    )
+
+    assert code == 0
+    assert timed_out is False
+    assert "DONE" in out
+    assert "NEXUS_AGY_NON_PROGRESS" not in err
+    tool_events = [event for event in events if event.get("tool_event_count")]
+    assert tool_events
+    assert tool_events[-1]["tool_event_count"] == 1
+    assert tool_events[-1]["first_tool_activity_at"]
+    assert tool_events[-1]["last_progress_activity_at"]
+
+
+def test_run_agy_drains_previous_transcript_before_session_switch(
+    tmp_path: Path, monkeypatch
+) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "-C", str(work), "init"], check=True, capture_output=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_agy = bin_dir / "agy"
+    first_session = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    second_session = "11111111-2222-3333-4444-555555555555"
+    fake_agy.write_text(
+        "#!"
+        + sys.executable
+        + "\nimport json, os, sys, time\n"
+        + "from pathlib import Path\n"
+        + f"first = {first_session!r}\n"
+        + f"second = {second_session!r}\n"
+        + "log = Path(sys.argv[sys.argv.index('--log-file') + 1])\n"
+        + "root = Path(os.environ['HOME']) / '.gemini' / 'antigravity-cli' / 'brain'\n"
+        + "first_t = root / first / '.system_generated' / 'logs' / 'transcript_full.jsonl'\n"
+        + "second_t = root / second / '.system_generated' / 'logs' / 'transcript_full.jsonl'\n"
+        + "first_t.parent.mkdir(parents=True, exist_ok=True)\n"
+        + "second_t.parent.mkdir(parents=True, exist_ok=True)\n"
+        + "first_t.write_text(json.dumps({'source':'USER','type':'USER_INPUT'}) + '\\n')\n"
+        + "with first_t.open('a') as fh: fh.write(json.dumps({'source':'MODEL','type':'PLANNER_RESPONSE','tool_calls':[{'name':'run_command','args':{}}]}) + '\\n')\n"
+        + "second_t.write_text('')\n"
+        + "log.write_text('I server.go:1263] Created conversation ' + first + '\\n'"
+        + " + 'I http_helpers.go:315] URL: https://example/v1internal:streamGenerateContent?alt=sse\\n'"
+        + " + 'I server.go:1263] Created conversation ' + second + '\\n')\n"
+        + "time.sleep(0.2)\n",
+        encoding="utf-8",
+    )
+    fake_agy.chmod(0o700)
+    log = tmp_path / "agy.log"
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(log))
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+
+    events: list[dict[str, object]] = []
+    code, _out, _err, _timed_out, _wall_ms = dispatch.run_agy(
+        env=env,
+        prompt="session switch",
+        cwd=str(work),
+        mode="plan",
+        model=None,
+        effort=None,
+        timeout=5,
+        operation_hook=events.append,
+    )
+
+    assert code == 0
+    tool_events = [event for event in events if event.get("tool_event_count")]
+    assert tool_events
+    assert tool_events[-1]["tool_event_count"] == 1
+    assert any(event.get("provider_session_id") == second_session for event in events)
+
+
+def test_run_agy_watchdog_boundary_rechecks_source_effect(tmp_path: Path, monkeypatch) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "-C", str(work), "init"], check=True, capture_output=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    effect = work / "effect.txt"
+    fake_agy = bin_dir / "agy"
+    fake_agy.write_text(
+        "#!"
+        + sys.executable
+        + "\nimport os, sys, time\n"
+        + "from pathlib import Path\n"
+        + "log = Path(sys.argv[sys.argv.index('--log-file') + 1])\n"
+        + "log.write_text('I http_helpers.go:315] URL: https://example/v1internal:streamGenerateContent?alt=sse\\n')\n"
+        + "time.sleep(0.16)\n"
+        + "Path(os.environ['AGY_EFFECT_PATH']).write_text('effect')\n"
+        + "time.sleep(0.12)\n",
+        encoding="utf-8",
+    )
+    fake_agy.chmod(0o700)
+    log = tmp_path / "agy.log"
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(log))
+    monkeypatch.setenv("AGY_EFFECT_PATH", str(effect))
+
+    events: list[dict[str, object]] = []
+    code, _out, err, timed_out, _wall_ms = dispatch.run_agy(
+        env=os.environ.copy(),
+        prompt="write once",
+        cwd=str(work),
+        mode="accept-edits",
+        model=None,
+        effort=None,
+        timeout=5,
+        operation_hook=events.append,
+        expect_coding_progress=True,
+        provider_stall_seconds=0.5,
+        stream_no_progress_seconds=0.15,
+    )
+
+    assert code == 0
+    assert timed_out is False
+    assert effect.read_text(encoding="utf-8") == "effect"
+    assert "NEXUS_AGY_NON_PROGRESS" not in err
+    assert any(event.get("first_effect_at") for event in events)
+
+
+def test_run_agy_no_tool_task_is_not_killed_by_coding_watchdog(tmp_path: Path, monkeypatch) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "-C", str(work), "init"], check=True, capture_output=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_agy = bin_dir / "agy"
+    fake_agy.write_text(
+        "#!"
+        + sys.executable
+        + "\nimport sys, time\n"
+        + "from pathlib import Path\n"
+        + "log = Path(sys.argv[sys.argv.index('--log-file') + 1])\n"
+        + "log.write_text('I http_helpers.go:315] URL: https://example/v1internal:streamGenerateContent?alt=sse\\n')\n"
+        + "time.sleep(0.3)\n"
+        + "print('PACKET_OK')\n",
+        encoding="utf-8",
+    )
+    fake_agy.chmod(0o700)
+    log = tmp_path / "agy.log"
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(log))
+    monkeypatch.setenv("NEXUS_AGY_PROVIDER_STALL_SECONDS", "0.1")
+    monkeypatch.setenv("NEXUS_AGY_STREAM_NO_PROGRESS_SECONDS", "0.1")
+
+    code, out, err, timed_out, _wall_ms = dispatch.run_agy(
+        env=os.environ.copy(),
+        prompt="review packet",
+        cwd=str(work),
+        mode="plan",
+        model=None,
+        effort=None,
+        timeout=5,
+        expect_coding_progress=False,
+    )
+
+    assert code == 0
+    assert timed_out is False
+    assert "PACKET_OK" in out
+    assert "NEXUS_AGY_NON_PROGRESS" not in err
 
 
 def test_independent_quota_after_effect_never_rotates(tmp_path):
