@@ -1315,6 +1315,8 @@ def evaluate_agy_receipt(
         status = "UNEXPECTED_TRANSPORT_IDENTITY"
     elif output_oversized:
         status = "OVERSIZED_PROVIDER_OUTPUT_REJECTED"
+    elif error_reason and error_reason.startswith("SPAWN_FAILED:"):
+        status = "SPAWN_FAILED"
     elif error_reason == "MISSING_OR_CORRUPT_JOURNAL" or record is None:
         status = "MISSING_OR_CORRUPT_JOURNAL" if not timed_out else "TIMEOUT"
     elif timed_out:
@@ -1532,6 +1534,19 @@ def _run_agy_dispatch(
     return record, wall, stdout_path, stderr_path, timed_out, err, dispatch_path
 
 
+def _prepare_shadow_checkout(*, repo: Path, revision: str, source: Path) -> None:
+    cloned = _run(
+        ["git", "clone", "--no-local", "--no-checkout", str(repo), str(source)],
+        cwd=repo.parent,
+        timeout=60,
+    )
+    if cloned.returncode != 0:
+        raise RuntimeError(f"shadow_clone_failed:{cloned.stderr.strip()}")
+    checked = _run(["git", "checkout", "--detach", revision], cwd=source, timeout=60)
+    if checked.returncode != 0:
+        raise RuntimeError(f"shadow_checkout_failed:{checked.stderr.strip()}")
+
+
 def _run_agy_b_fallback(
     *,
     repo: Path,
@@ -1545,13 +1560,7 @@ def _run_agy_b_fallback(
     with tempfile.TemporaryDirectory(prefix="nexus-hybrid-replication-b-") as temp:
         root = Path(temp)
         source = root / "source"
-        added = _run(
-            ["git", "worktree", "add", "--detach", str(source), revision],
-            cwd=repo,
-            timeout=60,
-        )
-        if added.returncode != 0:
-            raise RuntimeError(f"shadow_worktree_add_failed:{added.stderr.strip()}")
+        _prepare_shadow_checkout(repo=repo, revision=revision, source=source)
         try:
             record, wall, stdout_path, stderr_path, timed_out, err, dispatch_path = (
                 _run_agy_dispatch(
@@ -1585,12 +1594,9 @@ def _run_agy_b_fallback(
             receipt["repository_mutated"] = mutated
             return receipt, wall
         finally:
-            _run(
-                ["git", "worktree", "remove", "--force", str(source)],
-                cwd=repo,
-                timeout=60,
-            )
-            _run(["git", "worktree", "prune"], cwd=repo, timeout=30)
+            # TemporaryDirectory owns standalone-clone cleanup; no Git worktree
+            # metadata exists to remove or prune.
+            pass
 
 
 def _run_agy_candidate(
@@ -1607,13 +1613,7 @@ def _run_agy_candidate(
     with tempfile.TemporaryDirectory(prefix="nexus-hybrid-replication-c-") as temp:
         root = Path(temp)
         source = root / "source"
-        added = _run(
-            ["git", "worktree", "add", "--detach", str(source), revision],
-            cwd=repo,
-            timeout=60,
-        )
-        if added.returncode != 0:
-            raise RuntimeError(f"shadow_worktree_add_failed:{added.stderr.strip()}")
+        _prepare_shadow_checkout(repo=repo, revision=revision, source=source)
         try:
             record, wall, stdout_path, stderr_path, timed_out, err, dispatch_path = (
                 _run_agy_dispatch(
@@ -1658,12 +1658,9 @@ def _run_agy_candidate(
             receipt.update(sealing)
             return receipt, wall
         finally:
-            _run(
-                ["git", "worktree", "remove", "--force", str(source)],
-                cwd=repo,
-                timeout=60,
-            )
-            _run(["git", "worktree", "prune"], cwd=repo, timeout=30)
+            # TemporaryDirectory owns standalone-clone cleanup; no Git worktree
+            # metadata exists to remove or prune.
+            pass
 
 
 def _complete_token_usage_metrics(
