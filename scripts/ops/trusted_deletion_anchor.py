@@ -961,6 +961,24 @@ def _git(repo: Path, *args: str, binary: bool = False) -> bytes | str:
     return result.stdout if binary else result.stdout.decode().strip()
 
 
+def _canonical_raw_diff(repo: Path, base_sha: str, head_sha: str) -> bytes:
+    """Return a raw diff whose object ids are independent of repository abbrev state."""
+
+    result = _git(
+        repo,
+        "diff",
+        "--raw",
+        "-z",
+        "--no-renames",
+        "--no-abbrev",
+        base_sha,
+        head_sha,
+        binary=True,
+    )
+    assert isinstance(result, bytes)
+    return result
+
+
 def _create_git_bundle(
     repo: Path, output: Path, base_sha: str, head_sha: str, workflow_sha: str
 ) -> bytes:
@@ -1011,8 +1029,7 @@ def _controller(args: argparse.Namespace) -> None:
         tree = _exact_sha(_git(repo, "rev-parse", f"{revision}^{{tree}}"), f"{label}_tree")
         _git(repo, "cat-file", "-e", f"{tree}^{{tree}}")
         trees[label] = tree
-    raw_diff = _git(repo, "diff", "--raw", "-z", "--no-renames", base_sha, head_sha, binary=True)
-    assert isinstance(raw_diff, bytes)
+    raw_diff = _canonical_raw_diff(repo, base_sha, head_sha)
     inventory = _git(repo, "ls-tree", "-r", "--name-only", head_sha, "--", "tests", binary=False)
     assert isinstance(inventory, str)
     selected = [
@@ -1410,15 +1427,10 @@ def _verifier(args: argparse.Namespace) -> None:
                 raise SystemExit(1)
             if _git(git_repo, "rev-parse", f"{ref}^{{commit}}") != revision:
                 raise SystemExit(1)
-        recomputed_diff = _git(
+        recomputed_diff = _canonical_raw_diff(
             git_repo,
-            "diff",
-            "--raw",
-            "-z",
-            "--no-renames",
             manifest["base_sha"],
             manifest["head_sha"],
-            binary=True,
         )
         if recomputed_diff != (bundle / "raw-diff.bin").read_bytes():
             raise SystemExit(1)
