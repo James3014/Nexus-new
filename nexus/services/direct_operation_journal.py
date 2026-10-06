@@ -71,7 +71,6 @@ PUBLIC_OPERATION_KEYS = (
     "tool_event_count",
     "command_sha256",
     "failure_kind",
-    "failure_history",
     "exit_code",
     "observed_changed_paths",
     "source_baseline_sha256",
