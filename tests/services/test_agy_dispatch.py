@@ -4542,6 +4542,7 @@ def test_reconcile_completed_terminal_persists_provider_absence_metadata(
     assert reconciled["reconciliation"]["provider_alive_after"] is False
     assert reconciled["reconciliation"]["lease_cleanup"]["result"] == "ALREADY_ABSENT"
 
+
 def test_normalize_account_hash_and_resolve_known_alias() -> None:
     import hashlib
 
@@ -4749,9 +4750,7 @@ def test_background_spawn_persists_normalized_exclusion_evidence(
     )
 
     assert record["excluded_account_hashes"] == ["fd84db4038d7"]
-    assert dispatch.public_operation_view(record)["excluded_account_hashes"] == [
-        "fd84db4038d7"
-    ]
+    assert dispatch.public_operation_view(record)["excluded_account_hashes"] == ["fd84db4038d7"]
     argv = captured["argv"]
     assert argv[argv.index("--exclude-account") + 1] == "fd84db4038d7"
 
