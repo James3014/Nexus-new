@@ -192,12 +192,14 @@ def build_d2_candidate_packet(
         why = list(evidence.get(path, ()))
         if path in literal_set and "literal_path_in_issue_body" not in why:
             why.insert(0, "literal_path_in_issue_body")
-        catalog.append({
-            "id": f"C{index}",
-            "path": path,
-            "source": "LITERAL_TASK_PATH" if path in literal_set else "D0_V2_FROZEN",
-            "evidence": why[:12],
-        })
+        catalog.append(
+            {
+                "id": f"C{index}",
+                "path": path,
+                "source": "LITERAL_TASK_PATH" if path in literal_set else "D0_V2_FROZEN",
+                "evidence": why[:12],
+            }
+        )
 
     payload = {
         "schema": "nexus.hybrid_replication.d2_live_packet.v1",
@@ -246,12 +248,12 @@ def resolve_ground_truth_payload(
         eligible_prs.append(pr)
 
     issue_number = int(issue.get("number") or 0)
-    changed_files = sorted({
-        str(path) for pr in eligible_prs for path in pr.get("changed_files", ()) if str(path)
-    })
-    check_rows = sorted({
-        (str(name), str(state)) for pr in eligible_prs for name, state in pr.get("checks", ())
-    })
+    changed_files = sorted(
+        {str(path) for pr in eligible_prs for path in pr.get("changed_files", ()) if str(path)}
+    )
+    check_rows = sorted(
+        {(str(name), str(state)) for pr in eligible_prs for name, state in pr.get("checks", ())}
+    )
     refs = [f"issue:{issue_number}:closed@{terminal_at}"]
     for pr in eligible_prs:
         refs.append(f"pr:{int(pr['number'])}@{str(pr.get('merge_commit_sha') or '')}")
@@ -750,23 +752,27 @@ def _jev_request(
             wall = time.perf_counter() - started
             total_wall += wall
             body = exc.read().decode("utf-8", "replace")[:300]
-            attempts.append({
-                "attempt": attempt,
-                "status": f"HTTP_{exc.code}",
-                "latency_ms": wall * 1000,
-                "detail": body,
-            })
+            attempts.append(
+                {
+                    "attempt": attempt,
+                    "status": f"HTTP_{exc.code}",
+                    "latency_ms": wall * 1000,
+                    "detail": body,
+                }
+            )
             if exc.code not in {429, 500, 502, 503, 504}:
                 break
         except Exception as exc:
             wall = time.perf_counter() - started
             total_wall += wall
-            attempts.append({
-                "attempt": attempt,
-                "status": "NETWORK_FAILURE",
-                "latency_ms": wall * 1000,
-                "detail": str(exc)[:300],
-            })
+            attempts.append(
+                {
+                    "attempt": attempt,
+                    "status": "NETWORK_FAILURE",
+                    "latency_ms": wall * 1000,
+                    "detail": str(exc)[:300],
+                }
+            )
 
     if out is None:
         return (
@@ -1047,9 +1053,9 @@ def _run_codex_candidate(
             )
             if tracked.returncode != 0 or untracked.returncode != 0:
                 raise RuntimeError("shadow_candidate_status_failed")
-            changed_files = sorted({
-                item for item in (tracked.stdout + untracked.stdout).split("\0") if item
-            })
+            changed_files = sorted(
+                {item for item in (tracked.stdout + untracked.stdout).split("\0") if item}
+            )
             diff = _run(["git", "diff", "--binary", "HEAD"], cwd=source, timeout=30)
             if diff.returncode != 0:
                 raise RuntimeError("shadow_candidate_diff_failed")
@@ -1075,11 +1081,13 @@ def _run_codex_candidate(
                 untracked_rows.append(row)
 
             commands = _codex_command_strings(cp.stdout)
-            forbidden = sorted({
-                command
-                for command in commands
-                if any(pattern.search(command) for pattern in _FORBIDDEN_SHADOW_COMMANDS)
-            })
+            forbidden = sorted(
+                {
+                    command
+                    for command in commands
+                    if any(pattern.search(command) for pattern in _FORBIDDEN_SHADOW_COMMANDS)
+                }
+            )
             protocol_valid = (
                 cp.returncode == 0 and bool(result) and not forbidden and not oversized_untracked
             )
@@ -1315,6 +1323,8 @@ def evaluate_agy_receipt(
         status = "UNEXPECTED_TRANSPORT_IDENTITY"
     elif output_oversized:
         status = "OVERSIZED_PROVIDER_OUTPUT_REJECTED"
+    elif error_reason and error_reason.startswith("SPAWN_FAILED:"):
+        status = "SPAWN_FAILED"
     elif error_reason == "MISSING_OR_CORRUPT_JOURNAL" or record is None:
         status = "MISSING_OR_CORRUPT_JOURNAL" if not timed_out else "TIMEOUT"
     elif timed_out:
@@ -1532,6 +1542,19 @@ def _run_agy_dispatch(
     return record, wall, stdout_path, stderr_path, timed_out, err, dispatch_path
 
 
+def _prepare_shadow_checkout(*, repo: Path, revision: str, source: Path) -> None:
+    cloned = _run(
+        ["git", "clone", "--no-local", "--no-checkout", str(repo), str(source)],
+        cwd=repo.parent,
+        timeout=60,
+    )
+    if cloned.returncode != 0:
+        raise RuntimeError(f"shadow_clone_failed:{cloned.stderr.strip()}")
+    checked = _run(["git", "checkout", "--detach", revision], cwd=source, timeout=60)
+    if checked.returncode != 0:
+        raise RuntimeError(f"shadow_checkout_failed:{checked.stderr.strip()}")
+
+
 def _run_agy_b_fallback(
     *,
     repo: Path,
@@ -1545,13 +1568,7 @@ def _run_agy_b_fallback(
     with tempfile.TemporaryDirectory(prefix="nexus-hybrid-replication-b-") as temp:
         root = Path(temp)
         source = root / "source"
-        added = _run(
-            ["git", "worktree", "add", "--detach", str(source), revision],
-            cwd=repo,
-            timeout=60,
-        )
-        if added.returncode != 0:
-            raise RuntimeError(f"shadow_worktree_add_failed:{added.stderr.strip()}")
+        _prepare_shadow_checkout(repo=repo, revision=revision, source=source)
         try:
             record, wall, stdout_path, stderr_path, timed_out, err, dispatch_path = (
                 _run_agy_dispatch(
@@ -1585,12 +1602,9 @@ def _run_agy_b_fallback(
             receipt["repository_mutated"] = mutated
             return receipt, wall
         finally:
-            _run(
-                ["git", "worktree", "remove", "--force", str(source)],
-                cwd=repo,
-                timeout=60,
-            )
-            _run(["git", "worktree", "prune"], cwd=repo, timeout=30)
+            # TemporaryDirectory owns standalone-clone cleanup; no Git worktree
+            # metadata exists to remove or prune.
+            pass
 
 
 def _run_agy_candidate(
@@ -1607,13 +1621,7 @@ def _run_agy_candidate(
     with tempfile.TemporaryDirectory(prefix="nexus-hybrid-replication-c-") as temp:
         root = Path(temp)
         source = root / "source"
-        added = _run(
-            ["git", "worktree", "add", "--detach", str(source), revision],
-            cwd=repo,
-            timeout=60,
-        )
-        if added.returncode != 0:
-            raise RuntimeError(f"shadow_worktree_add_failed:{added.stderr.strip()}")
+        _prepare_shadow_checkout(repo=repo, revision=revision, source=source)
         try:
             record, wall, stdout_path, stderr_path, timed_out, err, dispatch_path = (
                 _run_agy_dispatch(
@@ -1658,12 +1666,9 @@ def _run_agy_candidate(
             receipt.update(sealing)
             return receipt, wall
         finally:
-            _run(
-                ["git", "worktree", "remove", "--force", str(source)],
-                cwd=repo,
-                timeout=60,
-            )
-            _run(["git", "worktree", "prune"], cwd=repo, timeout=30)
+            # TemporaryDirectory owns standalone-clone cleanup; no Git worktree
+            # metadata exists to remove or prune.
+            pass
 
 
 def _complete_token_usage_metrics(
@@ -1965,10 +1970,12 @@ def _check_runs_until(
             completed_time = _parse_timestamp(str(item.get("completed_at") or ""))
             if completed_time is None or completed_time > terminal_time:
                 continue
-            rows.append((
-                str(item.get("name") or ""),
-                str(item.get("conclusion") or item.get("status") or ""),
-            ))
+            rows.append(
+                (
+                    str(item.get("name") or ""),
+                    str(item.get("conclusion") or item.get("status") or ""),
+                )
+            )
         if len(batch) < 100:
             return tuple(rows)
     raise RuntimeError("check_runs_pagination_exceeds_bound")
@@ -2022,16 +2029,18 @@ def _resolve_ground_truth_from_state(state: Mapping[str, Any]) -> dict[str, Any]
             continue
         files = _gh_list(f"repos/{repository}/pulls/{number}/files")
         head_sha = str((pr.get("head") or {}).get("sha") or "")
-        merged.append({
-            "number": number,
-            "merge_commit_sha": str(pr.get("merge_commit_sha") or ""),
-            "head_sha": head_sha,
-            "merged_at": merged_at,
-            "changed_files": tuple(
-                str(item.get("filename") or "") for item in files if item.get("filename")
-            ),
-            "checks": _check_runs_until(repository, head_sha, terminal_time),
-        })
+        merged.append(
+            {
+                "number": number,
+                "merge_commit_sha": str(pr.get("merge_commit_sha") or ""),
+                "head_sha": head_sha,
+                "merged_at": merged_at,
+                "changed_files": tuple(
+                    str(item.get("filename") or "") for item in files if item.get("filename")
+                ),
+                "checks": _check_runs_until(repository, head_sha, terminal_time),
+            }
+        )
     return resolve_ground_truth_payload(issue=issue, merged_prs=tuple(merged))
 
 
