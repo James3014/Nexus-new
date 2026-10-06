@@ -188,6 +188,7 @@ PERMISSION_ENFORCEMENT_SHA256_AT_START: str
 # compiler so a hard-coded default can never override the model identity.
 AGY_EFFORT_TIERS: tuple[str, ...] = ("high", "medium", "low")
 AGY_PRINT_TIMEOUT = "25s"
+AGY_MODEL_PROBE_PRINT_TIMEOUT = "300s"
 
 
 def _agy_effort_tier(model: str) -> str:
@@ -206,6 +207,7 @@ def _compile_agy_command(
     prompt: str,
     json_schema: str = "",
     explicit_effort: str = "",
+    print_timeout: str = AGY_PRINT_TIMEOUT,
 ) -> list[str]:
     """Single source of truth for Agy CLI argument compilation.
 
@@ -238,7 +240,7 @@ def _compile_agy_command(
         raise GatewayInputError("agy model requires an explicit effort or an embedded tier suffix")
     if name:
         command.extend(["--model", name])
-    command.extend(["--print-timeout", AGY_PRINT_TIMEOUT, "--prompt", prompt])
+    command.extend(["--print-timeout", print_timeout, "--prompt", prompt])
     return command
 
 
@@ -2024,14 +2026,20 @@ class UnifiedMCPGateway:
         return value
 
     @staticmethod
-    def _assist_command(*, executable: str, provider: str, model: str, prompt: str, explicit_effort: str = "") -> list[str]:
+    def _assist_command(*, executable: str, provider: str, model: str, prompt: str, explicit_effort: str = "", print_timeout: str = "") -> list[str]:
         if provider == "cline":
             selected = model or "glm-5.2"
             if "/" not in selected:
                 selected = f"cline-pass/{selected}"
             return [executable, "--json", "--plan", "--auto-approve", "false", "--thinking", "none", "--timeout", str(CLINE_RUN_TIMEOUT_SECONDS), "--model", selected, prompt]
         if provider == "agy":
-            return _compile_agy_command(executable=executable, model=model, prompt=prompt, explicit_effort=explicit_effort)
+            return _compile_agy_command(
+                executable=executable,
+                model=model,
+                prompt=prompt,
+                explicit_effort=explicit_effort,
+                print_timeout=print_timeout or AGY_PRINT_TIMEOUT,
+            )
         if provider == "gemini":
             return [executable, "--skip-trust", "--approval-mode", "auto_edit", "-m", model, "-p", prompt, "--output-format", "json"]
         if provider == "opencode":
@@ -2086,8 +2094,13 @@ class UnifiedMCPGateway:
         """Return only a model-originated JSON payload, never transport metadata."""
 
         def decode_document(raw: str) -> Optional[dict[str, Any]]:
+            if not isinstance(raw, str):
+                return None
+            candidate = raw.strip()
+            if candidate.startswith("```json\n") and candidate.endswith("\n```"):
+                candidate = candidate[len("```json\n") : -len("\n```")].strip()
             try:
-                value = json.loads(raw.strip())
+                value = json.loads(candidate)
             except (json.JSONDecodeError, TypeError):
                 return None
             return value if isinstance(value, dict) else None
@@ -2104,6 +2117,19 @@ class UnifiedMCPGateway:
             "turn.started",
             "turn.completed",
         }
+        if provider == "agy" and direct is not None:
+            is_envelope = all(key in direct for key in ("conversation_id", "status", "response"))
+            if is_envelope:
+                if str(direct.get("status") or "").upper() != "SUCCESS":
+                    return None, None
+                response = direct.get("response")
+                if not isinstance(response, str) or not response.strip():
+                    return None, None
+                payload = decode_document(response)
+                if payload is None:
+                    return None, None
+                return payload, "agy_success_response"
+
         if provider not in {"cline", "codex"} and direct is not None and direct.get("type") not in transport_types:
             return direct, "direct_json_document"
 
@@ -3691,7 +3717,13 @@ class UnifiedMCPGateway:
         stderr_path = root / f"{job_id}.stderr"
         workspace_root = Path(tempfile.mkdtemp(prefix=f"nexus-probe-{task_id}-", dir="/tmp"))
         probe_prompt = f"{prompt}\nReturn JSON matching this schema exactly: {json.dumps(schema, ensure_ascii=False)}"
-        command = self._assist_command(executable=executable, provider=provider, model=model, prompt=probe_prompt)
+        command = self._assist_command(
+            executable=executable,
+            provider=provider,
+            model=model,
+            prompt=probe_prompt,
+            print_timeout=AGY_MODEL_PROBE_PRINT_TIMEOUT if provider == "agy" else "",
+        )
         job: dict[str, Any] = {
             "schema": "nexus.assisted_provider_job.v1",
             "job_kind": "model_probe",
