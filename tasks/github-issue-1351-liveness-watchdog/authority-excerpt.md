@@ -10,3 +10,27 @@
 - Candidate rebased cleanly onto base revision `1af084e9d7905906e2b19b3cbb3e665628ae3740`.
 - Verified 218 test cases across all dispatch, journal, quota, account pool, and doctor suites passed cleanly.
 - `tool_event_count` confirmed present in `PUBLIC_OPERATION_KEYS` in `nexus/services/direct_operation_journal.py:71`.
+
+```json
+{
+  "schema": "nexus.verification_receipt.v1",
+  "status": "PASS",
+  "test_suite": [
+    "tests/services/test_agy_dispatch.py",
+    "tests/services/test_agy_operation_journal.py",
+    "tests/services/test_external_account_pool.py",
+    "tests/services/test_workflow_doctor.py",
+    "tests/services/test_agy_reviewer_runtime.py",
+    "tests/services/test_agy_review.py"
+  ],
+  "passed": 218,
+  "failed": 0,
+  "duration_seconds": 24.64,
+  "ruff_format_check": "PASS",
+  "ruff_lint_check": "PASS",
+  "py_compile": "PASS",
+  "git_diff_check": "PASS",
+  "verified_at": "2026-10-06T00:28:27Z"
+}
+```
+
