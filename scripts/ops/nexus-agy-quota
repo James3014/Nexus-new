@@ -14,8 +14,10 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -126,6 +128,37 @@ def _account_email(state: dict[str, Any], name: str) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def _stop_usage_process(proc: subprocess.Popen[str], *, grace_seconds: float = 0.5) -> None:
+    """Terminate and reap the exact usage probe process group."""
+
+    if proc.poll() is not None:
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        try:
+            proc.terminate()
+        except ProcessLookupError:
+            pass
+    try:
+        proc.wait(timeout=grace_seconds)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+    try:
+        proc.wait(timeout=grace_seconds)
+    except subprocess.TimeoutExpired:
+        pass
+
+
 def query_account(
     *,
     account_home: Path,
@@ -146,34 +179,58 @@ def query_account(
     env = os.environ.copy()
     env["HOME"] = str(account_home)
     result: dict[str, Any]
-    try:
-        proc = subprocess.run(
-            [agy_binary, "-p", "/usage"],
-            cwd=account_home,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=max(0.001, float(timeout)),
-            check=False,
-        )
-    except subprocess.TimeoutExpired:
-        result = {
-            "account": account_name,
-            "email": email,
-            "ok": False,
-            "error": "timeout",
-            "checked_at": checked_at,
-        }
-        emit_progress(
-            "ACCOUNT_RESULT",
-            account=account_name,
-            ok=False,
-            error="timeout",
-            on_progress=on_progress,
-        )
-        return result
+    proc = subprocess.Popen(
+        [agy_binary, "-p", "/usage"],
+        cwd=account_home,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    prior_sigterm: Any = None
+    sigterm_installed = False
 
-    output = "\n".join(part for part in (proc.stdout, proc.stderr) if part).strip()
+    def _raise_termination(signum: int, _frame: Any) -> None:
+        raise SystemExit(128 + signum)
+
+    try:
+        if threading.current_thread() is threading.main_thread():
+            prior_sigterm = signal.getsignal(signal.SIGTERM)
+            signal.signal(signal.SIGTERM, _raise_termination)
+            sigterm_installed = True
+        try:
+            stdout, stderr = proc.communicate(timeout=max(0.001, float(timeout)))
+        except subprocess.TimeoutExpired:
+            _stop_usage_process(proc)
+            proc.communicate()
+            result = {
+                "account": account_name,
+                "email": email,
+                "ok": False,
+                "error": "timeout",
+                "checked_at": checked_at,
+            }
+            emit_progress(
+                "ACCOUNT_RESULT",
+                account=account_name,
+                ok=False,
+                error="timeout",
+                on_progress=on_progress,
+            )
+            return result
+        except BaseException:
+            _stop_usage_process(proc)
+            try:
+                proc.communicate(timeout=0.5)
+            except subprocess.TimeoutExpired:
+                pass
+            raise
+    finally:
+        if sigterm_installed:
+            signal.signal(signal.SIGTERM, prior_sigterm)
+
+    output = "\n".join(part for part in (stdout, stderr) if part).strip()
     if proc.returncode != 0:
         result = {
             "account": account_name,
