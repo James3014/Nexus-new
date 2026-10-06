@@ -2551,6 +2551,7 @@ def test_agy_model_probe_uses_request_scoped_lease_env_and_releases(monkeypatch,
             self.lease = SimpleNamespace(
                 execution_env={"HOME": "/isolated/agy-account", "PATH": "/usr/bin"}
             )
+            self.lock_file_obj = SimpleNamespace(fileno=lambda: 77)
             self.release_count = 0
 
         def release(self):
@@ -2571,8 +2572,9 @@ def test_agy_model_probe_uses_request_scoped_lease_env_and_releases(monkeypatch,
     class FakePopen:
         pid = 55101
 
-        def __init__(self, command, *, stdout, stderr, env=None, **kwargs):
+        def __init__(self, command, *, stdout, stderr, env=None, pass_fds=(), **kwargs):
             captured["env"] = dict(env or {})
+            captured["pass_fds"] = tuple(pass_fds)
             self._returncode = 0
             stdout.write(
                 json.dumps(
@@ -2612,10 +2614,12 @@ def test_agy_model_probe_uses_request_scoped_lease_env_and_releases(monkeypatch,
     assert submitted["account_alias_hash"] == "abc123def456"
     assert submitted["account_lease_id_hash"] == "fed654cba321"
     assert submitted["account_lease_released"] is False
+    assert "account_lease_owner_pid" not in submitted
     assert captured["consumer_id"] == "model-probe:agy-lease-probe"
     assert captured["wait_timeout"] == 0.0
     assert captured["model_family"] == "gemini"
     assert captured["env"]["HOME"] == "/isolated/agy-account"
+    assert captured["pass_fds"] == (77,)
 
     result = gateway._assist_refresh("agy-lease-probe")
     assert result["status"] == "COMPLETED"
@@ -2633,6 +2637,7 @@ def test_agy_model_probe_launch_failure_releases_request_scoped_lease(monkeypatc
 
         def __init__(self):
             self.lease = SimpleNamespace(execution_env={"HOME": "/isolated/agy-account"})
+            self.lock_file_obj = SimpleNamespace(fileno=lambda: 78)
             self.release_count = 0
 
         def release(self):
@@ -2685,6 +2690,7 @@ def test_agy_model_probe_missing_live_claim_requires_reconciliation(monkeypatch,
 
         def __init__(self):
             self.lease = SimpleNamespace(execution_env={"HOME": "/isolated/agy-account"})
+            self.lock_file_obj = SimpleNamespace(fileno=lambda: 79)
 
         def release(self):
             raise AssertionError("missing in-memory claim must not fabricate release")
@@ -2745,6 +2751,24 @@ def test_agy_model_probe_missing_live_claim_requires_reconciliation(monkeypatch,
     assert result["account_lease_cleanup_status"] == "RECONCILIATION_REQUIRED"
     assert result.get("probe_evidence_hash") is None
     assert not list((tmp_path / "assisted_provider_jobs" / "probe_evidence").glob("*.json"))
+
+
+def test_agy_model_probe_retry_requires_proven_lease_cleanup(tmp_path):
+    service = FakeService()
+    service.state_dir = tmp_path
+    gateway = UnifiedMCPGateway(service=service)
+    gateway._assist_write({
+        "task_id": "agy-retry-lease-uncertain",
+        "job_id": "probe-retry-lease-uncertain",
+        "job_kind": "model_probe",
+        "status": "FAILED",
+        "reconciliation_required": False,
+        "account_lease_id_hash": "fed654cba321",
+        "account_lease_cleanup_status": "RECONCILIATION_REQUIRED",
+        "attempt_history": [],
+    })
+    with pytest.raises(GatewayInputError, match="ASSIST_RETRY_REQUIRES_AGY_LEASE_CLEANUP"):
+        gateway._assist_retry("agy-retry-lease-uncertain")
 
 
 def test_model_probe_feedback_loop_preflight_then_worker_candidate_once(monkeypatch, tmp_path):
@@ -2982,7 +3006,9 @@ def test_unsettled_assisted_failure_remains_actionable(job):
     response = gateway._assist_response({"task_id": "unsettled-assist", **job})
 
     assert response["attention_required"] is True
-    assert response["next_action"] == "nexus_task_retry"
+    assert response["next_action"] == (
+        "nexus_task_reconcile" if job.get("reconciliation_required") else "nexus_task_retry"
+    )
 
 
 def test_unknown_assisted_state_requires_reconciliation():
@@ -3207,6 +3233,90 @@ def test_model_probe_wrong_payload_fails_schema_gate(monkeypatch, tmp_path):
     assert payload["schema_error"].startswith("output_schema_missing:")
 
 
+def test_agy_model_probe_reconcile_preserves_receipt_until_safe_cleanup(monkeypatch, tmp_path):
+    captured = {}
+
+    class FakeCoordinator:
+        result = "LEASE_BUSY_PRESERVED"
+
+        def __init__(self, manager):
+            captured["manager"] = manager
+
+        def reconcile_claim_receipt(self, **kwargs):
+            captured["kwargs"] = kwargs
+            return {"result": self.result}
+
+    service = FakeService()
+    service.state_dir = tmp_path
+    monkeypatch.setattr(
+        "nexus.orchestrator.unified_mcp_gateway.get_account_pool_manager",
+        lambda: "pool-manager",
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.unified_mcp_gateway.CrossProcessLeaseCoordinator",
+        FakeCoordinator,
+    )
+    gateway = UnifiedMCPGateway(service=service)
+    workspace = tmp_path / "lost-workspace"
+    workspace.mkdir()
+    (workspace / "partial.txt").write_text("partial", encoding="utf-8")
+    gateway._assist_write({
+        "task_id": "agy-lost-provider",
+        "job_id": "probe-lost",
+        "job_kind": "model_probe",
+        "status": "UNKNOWN_REQUIRES_RECONCILE",
+        "reconciliation_required": True,
+        "provider": "agy",
+        "model": "gemini-3.7-flash-medium",
+        "pid": 999999,
+        "pgid": 999999,
+        "workspace_mode": "isolated",
+        "workspace_root": str(workspace),
+        "filesystem_before": {},
+        "account_alias_hash": "a" * 12,
+        "account_lease_id_hash": "b" * 12,
+        "account_lease_owner_pid": 12345,
+        "account_lease_released": False,
+        "account_lease_cleanup_status": "RECONCILIATION_REQUIRED",
+        "attempt_history": [],
+    })
+
+    first = gateway._task_reconcile({"task_id": "agy-lost-provider"})
+    assert first["status"] == "UNKNOWN_REQUIRES_RECONCILE"
+    assert first["blocker"] == "ASSIST_ACCOUNT_LEASE_RECONCILIATION_REQUIRED"
+    assert first["next_action"] == "nexus_task_reconcile"
+    assert first["account_lease_released"] is False
+    assert first["account_lease_cleanup_status"] == "RECONCILIATION_REQUIRED"
+    assert workspace.exists()
+    assert captured["kwargs"] == {
+        "account_alias_hash": "a" * 12,
+        "lease_id_hash": "b" * 12,
+        "owner_pid": 12345,
+    }
+
+    FakeCoordinator.result = "LEASE_RECEIPT_REMOVED"
+    second = gateway._task_reconcile({"task_id": "agy-lost-provider"})
+    assert second["status"] == "FAILED"
+    assert second["blocker"] == "ASSIST_PROVIDER_PROCESS_LOST"
+    assert second["next_action"] == "nexus_task_retry"
+    assert second["account_lease_released"] is True
+    assert second["account_lease_cleanup_status"] == "RELEASED"
+    assert not workspace.exists()
+
+
+def test_assisted_retry_rejects_reconciliation_required_state(tmp_path):
+    service = FakeService()
+    service.state_dir = tmp_path
+    gateway = UnifiedMCPGateway(service=service)
+    gateway._assist_write({
+        "task_id": "retry-needs-reconcile",
+        "status": "FAILED",
+        "reconciliation_required": True,
+    })
+    with pytest.raises(GatewayInputError, match="ASSIST_RETRY_REQUIRES_RECONCILIATION"):
+        gateway._assist_retry("retry-needs-reconcile")
+
+
 def test_agy_model_probe_print_timeout_is_transport_blocker(monkeypatch, tmp_path):
     captured = {}
 
@@ -3261,6 +3371,7 @@ def test_agy_model_probe_print_timeout_is_transport_blocker(monkeypatch, tmp_pat
         account_alias_hash="abc123def456",
         lease_id_hash="fed654cba321",
         lease=SimpleNamespace(execution_env={"HOME": "/isolated/agy-timeout"}),
+        lock_file_obj=SimpleNamespace(fileno=lambda: 80),
         release=lambda: None,
     )
     monkeypatch.setattr(gateway, "_acquire_agy_probe_claim", lambda **kwargs: claim)

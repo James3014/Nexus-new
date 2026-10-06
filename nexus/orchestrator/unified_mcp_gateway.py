@@ -2492,7 +2492,7 @@ class UnifiedMCPGateway:
             and job.get("durable_exit_marker") is True
             and not job.get("uncertain_mutation")
         )
-        if status == "UNKNOWN_REQUIRES_RECONCILE":
+        if status == "UNKNOWN_REQUIRES_RECONCILE" or reconciliation_required:
             next_action = "nexus_task_reconcile"
         else:
             result_tool = "nexus_model_probe_result" if str(job.get("job_kind") or "assist") == "model_probe" else "nexus_assist_result"
@@ -2831,6 +2831,13 @@ class UnifiedMCPGateway:
             raise KeyError(f"unknown task_id: {task_id}")
         if job.get("status") not in {"FAILED", "CANCELLED"}:
             raise GatewayInputError("ASSIST_RETRY_REQUIRES_TERMINAL_FAILURE")
+        if job.get("reconciliation_required"):
+            raise GatewayInputError("ASSIST_RETRY_REQUIRES_RECONCILIATION")
+        if (
+            job.get("account_lease_id_hash")
+            and job.get("account_lease_cleanup_status") != "RELEASED"
+        ):
+            raise GatewayInputError("ASSIST_RETRY_REQUIRES_AGY_LEASE_CLEANUP")
 
         action_dict = job.get("action")
         if not isinstance(action_dict, Mapping):
@@ -3957,6 +3964,7 @@ class UnifiedMCPGateway:
             provider_env = dict(account_claim.lease.execution_env)
             job["account_alias_hash"] = account_claim.account_alias_hash
             job["account_lease_id_hash"] = account_claim.lease_id_hash
+            job["account_lease_owner_pid"] = os.getpid()
             job["account_lease_released"] = False
             job["account_lease_cleanup_status"] = "HELD"
             with self._assist_lock:
@@ -3967,6 +3975,11 @@ class UnifiedMCPGateway:
         try:
             stdout_handle = stdout_path.open("w", encoding="utf-8")
             stderr_handle = stderr_path.open("w", encoding="utf-8")
+            pass_fds: tuple[int, ...] = ()
+            if account_claim is not None:
+                if account_claim.lock_file_obj is None:
+                    raise RuntimeError("AGY_ACCOUNT_LEASE_LOCK_MISSING_BEFORE_LAUNCH")
+                pass_fds = (account_claim.lock_file_obj.fileno(),)
             process = subprocess.Popen(
                 command,
                 cwd=workspace_root,
@@ -3975,6 +3988,7 @@ class UnifiedMCPGateway:
                 text=True,
                 start_new_session=True,
                 env=provider_env,
+                pass_fds=pass_fds,
             )
         except Exception:
             if stdout_handle is not None:
@@ -5930,11 +5944,38 @@ class UnifiedMCPGateway:
         assisted = self._assist_read(task_id)
         if assisted is not None:
             current = self._assist_refresh(task_id) or assisted
-            if current.get("status") == "UNKNOWN_REQUIRES_RECONCILE":
+            needs_reconcile = (
+                current.get("status") == "UNKNOWN_REQUIRES_RECONCILE"
+                or bool(current.get("reconciliation_required"))
+            )
+            if needs_reconcile:
+                lease_hash = str(current.get("account_lease_id_hash") or "")
+                if lease_hash and current.get("account_lease_cleanup_status") != "RELEASED":
+                    coordinator = CrossProcessLeaseCoordinator(get_account_pool_manager())
+                    lease_result = coordinator.reconcile_claim_receipt(
+                        account_alias_hash=str(current.get("account_alias_hash") or ""),
+                        lease_id_hash=lease_hash,
+                        owner_pid=int(current.get("account_lease_owner_pid") or 0),
+                    )
+                    current["account_lease_reconciliation_result"] = lease_result.get("result")
+                    if lease_result.get("result") not in {"ALREADY_ABSENT", "LEASE_RECEIPT_REMOVED"}:
+                        current.update({
+                            "status": "UNKNOWN_REQUIRES_RECONCILE",
+                            "blocker": "ASSIST_ACCOUNT_LEASE_RECONCILIATION_REQUIRED",
+                            "reconciliation_required": True,
+                            "account_lease_released": False,
+                            "account_lease_cleanup_status": "RECONCILIATION_REQUIRED",
+                            "last_polled_at": self._utc_now(),
+                        })
+                        current = self._assist_write(current)
+                        return self._assist_response(current, operation="reconcile")
+                    current["account_lease_released"] = True
+                    current["account_lease_cleanup_status"] = "RELEASED"
+
                 # No durable exit marker means the provider outcome is not
-                # recoverable from output alone.  Reconciliation deliberately
-                # converges to a retryable process-loss failure and performs
-                # isolated-workspace cleanup; it never upgrades to success.
+                # recoverable from output alone.  Only after lease cleanup is
+                # proven may reconciliation converge to a retryable failure;
+                # output alone never upgrades the result to success.
                 current.update({
                     "status": "FAILED",
                     "blocker": "ASSIST_PROVIDER_PROCESS_LOST",
