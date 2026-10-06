@@ -3733,3 +3733,96 @@ def test_scope_violation_persisted_in_operation_journal(tmp_path: Path) -> None:
     assert public_view["write_paths"] == ["tracked.txt"]
     assert public_view["scope_validation_state"] == "VIOLATION_OUT_OF_SCOPE"
     assert public_view["scope_violations"] == ["unauthorized.txt"]
+
+
+def test_canonicalize_agy_model_resolves_claude_opus() -> None:
+    assert dispatch.canonicalize_agy_model("claude-opus-4-6") == "claude-opus-4-6-thinking"
+    assert dispatch.canonicalize_agy_model("claude-opus") == "claude-opus-4-6-thinking"
+    assert dispatch.canonicalize_agy_model("claude-3-opus") == "claude-opus-4-6-thinking"
+    assert dispatch.canonicalize_agy_model("gemini-3.8-flash") == "gemini-3.8-flash"
+    assert dispatch.canonicalize_agy_model(None) is None
+
+
+def test_parse_agy_attestation_matches_canonical_model(tmp_path: Path) -> None:
+    log = tmp_path / "agy.log"
+    log.write_text(
+        "\n".join([
+            'I0000 model_resolver.go:116] model alias "claude-opus-4-6-thinking" resolved to "claude-opus-4-6-thinking"',
+            "I0000 server.go:1239] Created conversation aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        ])
+        + "\n",
+        encoding="utf-8",
+    )
+    res = dispatch._parse_agy_attestation(log, requested_model="claude-opus-4-6")
+    assert res["observed_model"] == "claude-opus-4-6-thinking"
+    assert res["provider_session_id"] == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+
+def test_quota_preflight_progress_projects_admission_state(tmp_path: Path, monkeypatch) -> None:
+    op_root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(op_root)
+    op_id = dispatch.new_operation_id()
+    journal.create(
+        operation_id=op_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-3.8-flash",
+        effort="medium",
+        prompt_sha256="abc",
+        runtime_revision="r" * 40,
+    )
+    events: list[dict[str, object]] = []
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    snapshot = {
+        "checked_at": now_iso,
+        "accounts": [
+            {
+                "account": "test-acct",
+                "ok": True,
+                "checked_at": now_iso,
+                "groups": {
+                    "Gemini Models": {
+                        "weekly": {"status": "known", "remaining_pct": 80.0, "reset_at": None}
+                    }
+                },
+            }
+        ],
+    }
+    monkeypatch.setattr(dispatch, "_load_quota_snapshot", lambda: snapshot)
+
+    class FakeClaim:
+        internal_id = "test-acct"
+        account_alias_hash = "abcdef012345"
+        lease_id_hash = "123456abcdef"
+        lease = type("L", (), {"execution_env": {}})()
+
+    class FakeCoordinator:
+        def acquire_claim(self, **kwargs):
+            return FakeClaim()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(dispatch, "run_agy", lambda **kwargs: (0, "ok", "", False, 100))
+
+    code = dispatch.dispatch_run(
+        prompt="hello",
+        cwd=str(tmp_path),
+        mode="plan",
+        model="gemini-3.8-flash",
+        coordinator=FakeCoordinator(),
+        operation_hook=lambda ev: events.append(ev),
+    )
+    assert code == 0
+    admitted = [
+        ev["quota_preflight_progress"]
+        for ev in events
+        if ev.get("quota_preflight_progress", {}).get("phase") == "PREFLIGHT_ADMITTED"
+    ]
+    assert len(admitted) == 1
+    assert admitted[0]["admission_state"] == "KNOWN_ELIGIBLE"
+    assert admitted[0]["probe_state"] == "PROBE_OK"
+    assert admitted[0]["quota_state"] == "weekly"
+    assert admitted[0]["account_alias_hash"] == "abcdef012345"

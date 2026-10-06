@@ -123,6 +123,8 @@ _QUOTA_PROGRESS_PHASES = frozenset({
     "DEADLINE_EXCEEDED",
     "SAVING_SNAPSHOT",
     "FINISHED",
+    "PREFLIGHT_ADMITTED",
+    "PREFLIGHT_BLOCKED",
 })
 _QUOTA_ACCOUNT_PHASES = frozenset({
     "ACCOUNT_UNKNOWN",
@@ -133,6 +135,15 @@ _QUOTA_ACCOUNT_PHASES = frozenset({
 _QUOTA_PROGRESS_PREFIX = "NEXUS_AGY_QUOTA "
 _QUOTA_PROGRESS_MAX_LINE = 8192
 _EFFECT_OBSERVATION_INTERVAL_SECONDS = 0.5
+
+
+def canonicalize_agy_model(model: str | None) -> str | None:
+    if not model:
+        return model
+    stripped = model.strip()
+    if stripped in ("claude-opus-4-6", "claude-3-opus", "claude-opus"):
+        return "claude-opus-4-6-thinking"
+    return stripped
 
 
 def _model_family(model: str | None) -> str:
@@ -450,6 +461,10 @@ def _quota_progress_projection(
     error_kind = _quota_error_kind(event.get("error"))
     if error_kind is not None:
         projected["error_kind"] = error_kind
+    for str_key in ("admission_state", "probe_state", "quota_state"):
+        str_val = event.get(str_key)
+        if isinstance(str_val, str) and 0 < len(str_val) <= 64:
+            projected[str_key] = str_val
     return projected
 
 
@@ -941,15 +956,22 @@ def _parse_agy_attestation(
 
     input_delivery = _parse_input_delivery(text)
 
+    canonical_requested = canonicalize_agy_model(requested_model)
     resolved_models: list[str] = []
     for match in _AGY_ALIAS_RESOLUTION_RE.finditer(text):
         alias = match.group("alias")
-        if requested_model is None or alias == requested_model:
+        if (
+            requested_model is None
+            or alias == requested_model
+            or (canonical_requested and alias == canonical_requested)
+        ):
             resolved_models.append(match.group("resolved"))
     if not resolved_models and requested_model:
         for match in _AGY_RESOLVING_MODEL_RE.finditer(text):
             resolved = match.group("resolved")
-            if resolved == requested_model:
+            if resolved == requested_model or (
+                canonical_requested and resolved == canonical_requested
+            ):
                 resolved_models.append(resolved)
 
     conversations = [match.group("conversation") for match in _AGY_CONVERSATION_RE.finditer(text)]
@@ -999,8 +1021,9 @@ def run_agy(
         log_path = Path(attestation_log).expanduser()
         log_path.parent.mkdir(parents=True, exist_ok=True)
         argv += ["--log-file", str(log_path)]
-    if model:
-        argv += ["--model", model]
+    canonical_model = canonicalize_agy_model(model)
+    if canonical_model:
+        argv += ["--model", canonical_model]
     if effort:
         argv += ["--effort", effort]
     argv += ["--print", prompt]
@@ -2507,6 +2530,12 @@ def dispatch_run(
             rotations=0,
             failure_kind="PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT",
             provider_effect=False,
+            quota_preflight_progress={
+                "phase": "PREFLIGHT_BLOCKED",
+                "admission_state": "KNOWN_BLOCKED",
+                "probe_state": "PROBE_OK",
+                "quota_state": "blocked",
+            },
         )
         emit_meta({
             "status": "failed",
@@ -2642,6 +2671,13 @@ def dispatch_run(
                             failure_kind=AccountFailureKind.QUOTA_EXHAUSTED.value,
                             account_alias_hash=claim.account_alias_hash,
                             lease_id_hash=claim.lease_id_hash,
+                            quota_preflight_progress={
+                                "phase": "PREFLIGHT_BLOCKED",
+                                "admission_state": "KNOWN_BLOCKED",
+                                "probe_state": "PROBE_OK",
+                                "quota_state": "blocked",
+                                "account_alias_hash": claim.account_alias_hash,
+                            },
                         )
                         continue
                     except AgyAccountPoolBusyError:
@@ -2666,6 +2702,28 @@ def dispatch_run(
                             "permission_profile_kind": permission_profile_kind,
                         })
                         return 75
+
+            if scoped_model_family is not None:
+                admission_state = (
+                    "KNOWN_ELIGIBLE"
+                    if evidence_fresh and quota_state in ("five_hour", "weekly")
+                    else "UNVERIFIED_POLICY_ALLOWED"
+                )
+                probe_state = (
+                    "PROBE_OK"
+                    if evidence_fresh
+                    else ("PROBE_STALE" if quota_state == "stale" else "PROBE_UNKNOWN_OR_FAILED")
+                )
+                _operation_hook(
+                    operation_hook,
+                    quota_preflight_progress={
+                        "phase": "PREFLIGHT_ADMITTED",
+                        "admission_state": admission_state,
+                        "probe_state": probe_state,
+                        "quota_state": quota_state,
+                        "account_alias_hash": claim.account_alias_hash,
+                    },
+                )
 
             attempts += 1
             _operation_hook(
@@ -3491,6 +3549,7 @@ def _run_background_operation(
             first_stream_activity_at=snapshot.get("first_stream_activity_at"),
             first_effect_at=snapshot.get("first_effect_at"),
             time_to_first_effect_ms=snapshot.get("time_to_first_effect_ms"),
+            quota_preflight_progress=snapshot.get("quota_preflight_progress"),
             permission_profile_sha256=snapshot.get("permission_profile_sha256"),
             permission_profile_kind=snapshot.get("permission_profile_kind"),
             effective_permissions=snapshot.get("effective_permissions"),
