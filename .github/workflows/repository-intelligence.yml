@@ -29,7 +29,7 @@ jobs:
     steps:
       - name: Collect Repository Intelligence
         id: ri
-        uses: James3014/repository-intelligence-engine@89a04422798d52e04d9142b53f441a87bff7262c
+        uses: James3014/repository-intelligence-engine@60210c2395dc3bb631304db09dd9dd3ba56dacfb
 
       - name: Validate advisory envelope
         shell: bash
