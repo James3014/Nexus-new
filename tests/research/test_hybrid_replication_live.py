@@ -455,6 +455,15 @@ def test_outcome_unknown_and_timeout_rejected(
     assert receipt["status"] == "MISSING_OR_CORRUPT_JOURNAL"
     assert receipt["valid"] is False
 
+    # Pre-journal launch failures must stay distinguishable from journal corruption.
+    receipt = evaluate_agy_receipt(
+        None,
+        dispatch_path=dispatch_file,
+        error_reason="SPAWN_FAILED:WORKTREE_NO_FALLBACK_REQUESTED",
+    )
+    assert receipt["status"] == "SPAWN_FAILED"
+    assert receipt["valid"] is False
+
 
 def test_poll_agy_operation_handles_terminal_timeout_and_corrupt(tmp_path: Path) -> None:
     op_json = tmp_path / "operation.json"
@@ -539,6 +548,18 @@ def test_c_shadow_worktree_cleanup_always_performed(
     rev = _init_test_git_repo(repo_dir)
 
     def failing_dispatch(**kwargs: object) -> tuple:
+        source = Path(str(kwargs["cwd"]))
+        assert (source / ".git").is_dir()
+        assert (
+            subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=source,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            == rev
+        )
         raise RuntimeError("dispatcher crashed unexpectedly")
 
     monkeypatch.setattr(
@@ -809,7 +830,7 @@ def test_agy_identity_preflight_passes_new_generation(
         requested_provider="agy",
         requested_model=EXACT_AGY_MODEL,
         execution_generation=CANONICAL_AGY_EXECUTION_GENERATION,
-        previous_execution_generation="AGY_GEMINI_3_8_FLASH_MEDIUM_V3",
+        previous_execution_generation="AGY_GEMINI_3_8_FLASH_MEDIUM_V4",
         jev_requested_model="jev-latest",
         jev_resolved_model="jev-1.13.0",
         expected_jev_resolved_model="jev-1.13.0",
@@ -842,7 +863,7 @@ def test_agy_identity_preflight_rejects_model_or_transport_drift(
         requested_provider="agy",
         requested_model="gemini-3.8-flash-high",
         execution_generation=CANONICAL_AGY_EXECUTION_GENERATION,
-        previous_execution_generation="AGY_GEMINI_3_8_FLASH_MEDIUM_V3",
+        previous_execution_generation="AGY_GEMINI_3_8_FLASH_MEDIUM_V4",
         jev_requested_model="jev-latest",
         jev_resolved_model="jev-1.13.0",
         expected_jev_resolved_model="jev-1.13.0",
