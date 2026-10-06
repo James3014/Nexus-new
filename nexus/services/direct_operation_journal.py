@@ -113,6 +113,7 @@ PUBLIC_OPERATION_KEYS = (
     "permission_profile_sha256",
     "permission_profile_kind",
     "effective_permissions",
+    "excluded_account_hashes",
     "write_paths",
     "scope_validation_state",
     "scope_violations",
