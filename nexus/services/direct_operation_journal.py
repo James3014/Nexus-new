@@ -113,7 +113,59 @@ PUBLIC_OPERATION_KEYS = (
     "write_paths",
     "scope_validation_state",
     "scope_violations",
+    "predecessor_operation_id",
+    "predecessor_attempt_id",
+    "transition_role",
+    "continuation_role",
+    "evidence_refs",
+    "handoff_hash",
+    "first_pass_receipt_linkage",
+    "has_unresolved_external_effect",
 )
+
+
+def _validate_continuity_fields(record: dict[str, Any]) -> None:
+    """Validate durable continuity metadata without granting continuity authority."""
+    predecessor_operation_id = record.get("predecessor_operation_id")
+    predecessor_attempt_id = record.get("predecessor_attempt_id")
+    if bool(predecessor_operation_id) != bool(predecessor_attempt_id):
+        raise DirectOperationJournalError("CONTINUITY_PREDECESSOR_INCOMPLETE")
+    if predecessor_operation_id is not None:
+        if not isinstance(predecessor_operation_id, str) or not predecessor_operation_id.strip():
+            raise DirectOperationJournalError("CONTINUITY_PREDECESSOR_OPERATION_INVALID")
+        if predecessor_operation_id == record.get("operation_id"):
+            raise DirectOperationJournalError("CONTINUITY_SELF_PREDECESSOR")
+    if predecessor_attempt_id is not None and (
+        not isinstance(predecessor_attempt_id, str) or not predecessor_attempt_id.strip()
+    ):
+        raise DirectOperationJournalError("CONTINUITY_PREDECESSOR_ATTEMPT_INVALID")
+
+    for field_name in ("transition_role", "continuation_role"):
+        value = record.get(field_name)
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise DirectOperationJournalError(f"CONTINUITY_{field_name.upper()}_INVALID")
+
+    evidence_refs = record.get("evidence_refs", [])
+    if not isinstance(evidence_refs, list) or any(
+        not isinstance(ref, str) or not ref.strip() for ref in evidence_refs
+    ):
+        raise DirectOperationJournalError("CONTINUITY_EVIDENCE_REFS_INVALID")
+    if len(evidence_refs) != len(set(evidence_refs)):
+        raise DirectOperationJournalError("CONTINUITY_EVIDENCE_REFS_DUPLICATE")
+
+    for field_name in ("handoff_hash", "first_pass_receipt_linkage"):
+        value = record.get(field_name)
+        if value is None:
+            continue
+        if (
+            not isinstance(value, str)
+            or len(value) != 64
+            or any(ch not in "0123456789abcdef" for ch in value)
+        ):
+            raise DirectOperationJournalError(f"CONTINUITY_{field_name.upper()}_INVALID")
+
+    if not isinstance(record.get("has_unresolved_external_effect", False), bool):
+        raise DirectOperationJournalError("CONTINUITY_EXTERNAL_EFFECT_FLAG_INVALID")
 
 
 class DirectOperationJournalError(RuntimeError):
@@ -502,10 +554,6 @@ class DirectOperationJournal:
         source_attribution_state = (
             "BASELINE_CAPTURED" if source_baseline_hash is not None else "UNAVAILABLE"
         )
-        try:
-            op_dir.mkdir(parents=True, mode=0o700, exist_ok=False)
-        except FileExistsError as exc:
-            raise DirectOperationJournalError("OPERATION_ALREADY_EXISTS") from exc
         now = utc_now()
         record: dict[str, Any] = {
             "schema": self.schema,
@@ -566,6 +614,14 @@ class DirectOperationJournal:
             "write_paths": list(write_paths) if write_paths else [],
             "scope_validation_state": "UNCONSTRAINED",
             "scope_violations": [],
+            "predecessor_operation_id": None,
+            "predecessor_attempt_id": None,
+            "transition_role": None,
+            "continuation_role": None,
+            "evidence_refs": [],
+            "handoff_hash": None,
+            "first_pass_receipt_linkage": None,
+            "has_unresolved_external_effect": False,
             "stdout_path": str(self.stdout_path(operation_id)),
             "stderr_path": str(self.stderr_path(operation_id)),
         }
@@ -584,6 +640,11 @@ class DirectOperationJournal:
             if reserved.intersection(initial_fields):
                 raise DirectOperationJournalError("INITIAL_FIELD_RESERVED")
             record.update(initial_fields)
+        _validate_continuity_fields(record)
+        try:
+            op_dir.mkdir(parents=True, mode=0o700, exist_ok=False)
+        except FileExistsError as exc:
+            raise DirectOperationJournalError("OPERATION_ALREADY_EXISTS") from exc
         _atomic_json_write(self.record_path(operation_id), record)
         return record
 
@@ -622,6 +683,8 @@ class DirectOperationJournal:
                         changes.setdefault("scope_validation_state", "PENDING")
                     else:
                         changes.setdefault("scope_validation_state", "UNCONSTRAINED")
+                candidate_record = {**record, **changes}
+                _validate_continuity_fields(candidate_record)
                 record.update(changes)
                 _atomic_json_write(self.record_path(operation_id), record)
                 return record
