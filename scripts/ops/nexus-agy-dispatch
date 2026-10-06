@@ -2964,7 +2964,8 @@ def dispatch_run(
 
     runner = run_agy_fn if run_agy_fn is not None else run_agy
     quota_snapshot, availability_state = _apply_dynamic_availability(model)
-    model_family = str(availability_state["family"])    scoped_model_family = model_family if model_family in {"gemini", "claude_gpt"} else None
+    model_family = str(availability_state["family"])
+    scoped_model_family = model_family if model_family in {"gemini", "claude_gpt"} else None
 
     usable_candidates = (
         list(availability_state.get("preferred", []))
