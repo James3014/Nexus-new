@@ -462,8 +462,16 @@ def test_controller_joins_terminal_only_after_raw_seal(tmp_path: Path) -> None:
         clock=lambda: "2026-10-01T00:02:00Z",
     )
     result = controller.advance(snapshot.task_key)
-    assert result["phase"] == "GROUND_TRUTH_BOUND"
+    assert result["phase"] == "SCORED"
     assert result["raw_seal"]["raw_sha256"]
+    assert result["ground_truth"]["sha256"]
+    assert result["score"]["sha256"]
+    score_path = tmp_path / "tasks" / "James3014__Nexus-new--1311" / "score.json"
+    score = json.loads(score_path.read_text(encoding="utf-8"))
+    assert score["raw_sha256"] == result["raw_seal"]["raw_sha256"]
+    assert score["ground_truth_sha256"] == result["ground_truth"]["sha256"]
+    assert score["terminal_state"] == "PASS"
+    assert score["route"] == "C"
 
 
 def test_admission_receipt_round_trip_is_bound_to_capture() -> None:

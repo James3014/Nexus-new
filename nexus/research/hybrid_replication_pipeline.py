@@ -722,6 +722,8 @@ class AutomaticReplicationController:
                 state = self.store.load_task(task_key)
         if state is None:
             raise ValueError("task_state_lost")
+        if state.get("phase") == "GROUND_TRUTH_BOUND":
+            state = self.store.score_task(task_key)
         return state
 
 
@@ -902,6 +904,67 @@ class AutomaticReplicationStore:
         )
         state["ground_truth"] = {"sha256": gt_sha, **payload}
         state["phase"] = "GROUND_TRUTH_BOUND"
+        self._write_json(self._state_path(task_key), state)
+        return state
+
+    def score_task(self, task_key: str) -> dict[str, Any]:
+        state = self.load_task(task_key)
+        if state is None:
+            raise ValueError("capture_required_before_score")
+        if state.get("phase") == "SCORED":
+            score = state.get("score") or {}
+            score_path = self._dir(task_key) / str(score.get("path") or "score.json")
+            if not score_path.is_file():
+                raise ValueError("score_receipt_missing")
+            actual_sha = _sha256(score_path.read_bytes())
+            if actual_sha != score.get("sha256"):
+                raise ValueError("score_receipt_hash_mismatch")
+            return state
+        if state.get("phase") != "GROUND_TRUTH_BOUND" or state.get("ground_truth") is None:
+            raise ValueError("ground_truth_required_before_score")
+        if state.get("raw_seal") is None or state.get("route") is None:
+            raise ValueError("raw_route_required_before_score")
+
+        raw_path = self._dir(task_key) / str(state["raw_seal"]["path"])
+        raw_bytes = raw_path.read_bytes()
+        if _sha256(raw_bytes) != state["raw_seal"].get("raw_sha256"):
+            raise ValueError("raw_seal_hash_mismatch")
+        raw = json.loads(raw_bytes)
+        ground_truth = dict(state["ground_truth"])
+        score_payload = {
+            "schema": "nexus.hybrid_replication.task_score.v1",
+            "task_key": task_key,
+            "capture_sha256": state["capture_sha256"],
+            "route": state["route"]["stratum"],
+            "raw_sha256": state["raw_seal"]["raw_sha256"],
+            "ground_truth_sha256": ground_truth["sha256"],
+            "terminal_state": ground_truth["terminal_state"],
+            "terminal_at": ground_truth["terminal_at"],
+            "evidence_refs": list(ground_truth.get("evidence_refs") or []),
+            "economics": {
+                "provider": raw.get("provider"),
+                "requested_model": raw.get("requested_model"),
+                "resolved_model": raw.get("resolved_model"),
+                "model_call_count": raw.get("model_call_count"),
+                "input_tokens": raw.get("input_tokens"),
+                "uncached_input_tokens": raw.get("uncached_input_tokens"),
+                "output_tokens": raw.get("output_tokens"),
+                "wall_time_seconds": raw.get("wall_time_seconds"),
+                "failures": list(raw.get("failures") or []),
+                "retries": raw.get("retries"),
+                "fallbacks": list(raw.get("fallbacks") or []),
+            },
+        }
+        score_path = self._dir(task_key) / "score.json"
+        score_sha = self._write_json(score_path, score_payload, create_only=True)
+        state["score"] = {
+            "schema": score_payload["schema"],
+            "sha256": score_sha,
+            "path": "score.json",
+            "terminal_state": score_payload["terminal_state"],
+            "route": score_payload["route"],
+        }
+        state["phase"] = "SCORED"
         self._write_json(self._state_path(task_key), state)
         return state
 

@@ -230,6 +230,43 @@ def advance_all(
     }
 
 
+def _evaluate_automatic_capture_readiness(
+    *,
+    ingest_report: dict[str, Any],
+    advance_report: dict[str, Any],
+    launchd_loaded: bool,
+    control_phase: str | None,
+) -> dict[str, Any]:
+    blockers: list[str] = []
+    if (
+        int(ingest_report.get("expected_count") or 0) <= 0
+        or int(ingest_report.get("mirrored_count") or 0) <= 0
+    ):
+        blockers.append("NON_VACUOUS_E2E_CONTROL_REQUIRED")
+    if ingest_report.get("missing_capture"):
+        blockers.append("MISSING_CAPTURE")
+    if ingest_report.get("missing_admission"):
+        blockers.append("MISSING_ADMISSION")
+    watchdog = ingest_report.get("watchdog") or {}
+    if watchdog.get("status") != "COMPLETE":
+        blockers.append("WATCHDOG_INCOMPLETE")
+    if advance_report.get("failures"):
+        blockers.append("ADVANCE_FAILURE_PRESENT")
+    if not launchd_loaded:
+        blockers.append("DAEMON_NOT_LOADED")
+    if control_phase != "SCORED":
+        blockers.append("CONTROL_NOT_SCORED")
+    return {
+        "schema": "nexus.hybrid_replication.automatic_capture_readiness.v1",
+        "status": "AUTOMATIC_CAPTURE_READY" if not blockers else "NOT_READY",
+        "blockers": blockers,
+        "expected_count": int(ingest_report.get("expected_count") or 0),
+        "mirrored_count": int(ingest_report.get("mirrored_count") or 0),
+        "control_phase": control_phase,
+        "launchd_loaded": bool(launchd_loaded),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True)
