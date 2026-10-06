@@ -271,6 +271,7 @@ def test_independent_failed_refresh_keeps_old_time_and_latest_failure(tmp_path):
     assert row["checked_at"] == old
     assert row["last_refresh"] == {"ok": False, "error": "timeout", "checked_at": new}
 
+
 def test_query_timeout_reaps_usage_process(tmp_path: Path, monkeypatch) -> None:
     import sys
     import time
