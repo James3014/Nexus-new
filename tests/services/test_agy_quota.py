@@ -371,4 +371,3 @@ def test_wrapper_sigterm_reaps_active_usage_process(tmp_path: Path) -> None:
         if wrapper.poll() is None:
             wrapper.kill()
             wrapper.wait()
-
