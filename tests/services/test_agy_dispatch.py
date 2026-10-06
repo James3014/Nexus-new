@@ -4725,7 +4725,11 @@ def test_background_spawn_persists_normalized_exclusion_evidence(
         captured["kwargs"] = kwargs
         return FakeProcess()
 
-    monkeypatch.setattr(dispatch.subprocess, "Popen", fake_popen)
+    class FakeSubprocess:
+        DEVNULL = dispatch.subprocess.DEVNULL
+        Popen = staticmethod(fake_popen)
+
+    monkeypatch.setattr(dispatch, "subprocess", FakeSubprocess)
     root = tmp_path / "ops"
 
     record = dispatch._spawn_background_operation(
