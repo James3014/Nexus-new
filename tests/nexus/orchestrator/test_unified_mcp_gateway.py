@@ -2087,7 +2087,7 @@ def test_assist_wait_timeout_does_not_cancel_and_explicit_cancel_cleans_workspac
     assert not Path(receipt["workspace_root"]).exists()
 
 
-def test_provider_preflight_defers_model_probe_without_sync_execution(monkeypatch):
+def test_provider_preflight_defers_model_probe_without_sync_execution(monkeypatch, tmp_path):
     monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
 
     def fake_run(command, **kwargs):
@@ -2096,7 +2096,9 @@ def test_provider_preflight_defers_model_probe_without_sync_execution(monkeypatc
         return SimpleNamespace(returncode=0, stdout="cline 1.2.3\n", stderr="")
 
     monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.run", fake_run)
-    gateway = UnifiedMCPGateway(service=FakeService())
+    service = FakeService()
+    service.state_dir = tmp_path
+    gateway = UnifiedMCPGateway(service=service)
     response = gateway.handle({"jsonrpc": "2.0", "id": 703, "method": "tools/call", "params": {"name": "nexus_provider_preflight", "arguments": {"provider": "cline", "model": "glm-5.2", "probe": True}}})
     payload = response["result"]["structuredContent"]
     assert payload["status"] == "VERSION_VERIFIED"
@@ -2536,6 +2538,213 @@ def test_model_probe_isolated_receipt_validates_schema_and_cleans_workspace(monk
     assert payload["filesystem_delta"] == {"created": [], "removed": [], "changed": []}
     assert payload["schema_validation_level"] == "bounded_subset"
     assert payload["tool_policy_enforcement"] == "cline_plan_auto_approve_false_allowlist_not_enforced"
+
+
+def test_agy_model_probe_uses_request_scoped_lease_env_and_releases(monkeypatch, tmp_path):
+    captured = {}
+
+    class FakeClaim:
+        account_alias_hash = "abc123def456"
+        lease_id_hash = "fed654cba321"
+
+        def __init__(self):
+            self.lease = SimpleNamespace(
+                execution_env={"HOME": "/isolated/agy-account", "PATH": "/usr/bin"}
+            )
+            self.release_count = 0
+
+        def release(self):
+            self.release_count += 1
+
+    claim = FakeClaim()
+
+    class FakeCoordinator:
+        def __init__(self, manager):
+            captured["manager"] = manager
+
+        def acquire_claim(self, *, consumer_id, wait_timeout, model_family):
+            captured["consumer_id"] = consumer_id
+            captured["wait_timeout"] = wait_timeout
+            captured["model_family"] = model_family
+            return claim
+
+    class FakePopen:
+        pid = 55101
+
+        def __init__(self, command, *, stdout, stderr, env=None, **kwargs):
+            captured["env"] = dict(env or {})
+            self._returncode = 0
+            stdout.write(
+                json.dumps(
+                    {
+                        "conversation_id": "lease-probe",
+                        "status": "SUCCESS",
+                        "response": json.dumps({"probe": "ok"}),
+                    }
+                )
+            )
+            stdout.flush()
+
+        def poll(self):
+            return self._returncode
+
+    service = FakeService()
+    service.state_dir = tmp_path
+    gateway = UnifiedMCPGateway(service=service)
+    monkeypatch.setattr(gateway, "_provider_executable", lambda provider: ({"default_model": "gemini-3.7-flash-medium"}, "/bin/echo"))
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.get_account_pool_manager", lambda: "pool-manager")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.CrossProcessLeaseCoordinator", FakeCoordinator)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", FakePopen)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    _patch_probe_version(monkeypatch)
+
+    submitted = gateway._model_probe_submit(
+        {
+            "task_id": "agy-lease-probe",
+            "provider": "agy",
+            "model": "gemini-3.7-flash-medium",
+            "prompt": "Return probe JSON",
+            "output_schema": {"type": "object", "required": ["probe"]},
+        }
+    )
+
+    assert submitted["status"] == "RUNNING"
+    assert submitted["account_alias_hash"] == "abc123def456"
+    assert submitted["account_lease_id_hash"] == "fed654cba321"
+    assert submitted["account_lease_released"] is False
+    assert captured["consumer_id"] == "model-probe:agy-lease-probe"
+    assert captured["wait_timeout"] == 0.0
+    assert captured["model_family"] == "gemini"
+    assert captured["env"]["HOME"] == "/isolated/agy-account"
+
+    result = gateway._assist_refresh("agy-lease-probe")
+    assert result["status"] == "COMPLETED"
+    assert result["model_response_verified"] is True
+    assert result["account_lease_released"] is True
+    assert result["account_lease_cleanup_status"] == "RELEASED"
+    assert claim.release_count == 1
+    assert result["filesystem_delta"] == {"created": [], "removed": [], "changed": []}
+
+
+def test_agy_model_probe_launch_failure_releases_request_scoped_lease(monkeypatch, tmp_path):
+    class FakeClaim:
+        account_alias_hash = "abc123def456"
+        lease_id_hash = "fed654cba321"
+
+        def __init__(self):
+            self.lease = SimpleNamespace(execution_env={"HOME": "/isolated/agy-account"})
+            self.release_count = 0
+
+        def release(self):
+            self.release_count += 1
+
+    claim = FakeClaim()
+
+    class FakeCoordinator:
+        def __init__(self, manager):
+            pass
+
+        def acquire_claim(self, **kwargs):
+            return claim
+
+    service = FakeService()
+    service.state_dir = tmp_path
+    gateway = UnifiedMCPGateway(service=service)
+    monkeypatch.setattr(gateway, "_provider_executable", lambda provider: ({"default_model": "gemini-3.7-flash-medium"}, "/bin/echo"))
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.get_account_pool_manager", lambda: "pool-manager")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.CrossProcessLeaseCoordinator", FakeCoordinator)
+    monkeypatch.setattr(
+        "nexus.orchestrator.unified_mcp_gateway.subprocess.Popen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("launch failed")),
+    )
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    _patch_probe_version(monkeypatch)
+
+    result = gateway._model_probe_submit(
+        {
+            "task_id": "agy-lease-launch-failure",
+            "provider": "agy",
+            "model": "gemini-3.7-flash-medium",
+            "prompt": "Return probe JSON",
+            "output_schema": {"type": "object", "required": ["probe"]},
+        }
+    )
+
+    assert result["status"] == "FAILED"
+    assert result["blocker"] == "ASSIST_PROVIDER_FAILED"
+    assert result["account_lease_released"] is True
+    assert result["account_lease_cleanup_status"] == "RELEASED"
+    assert claim.release_count == 1
+    assert gateway._assist_account_claims == {}
+
+
+def test_agy_model_probe_missing_live_claim_requires_reconciliation(monkeypatch, tmp_path):
+    class FakeClaim:
+        account_alias_hash = "abc123def456"
+        lease_id_hash = "fed654cba321"
+
+        def __init__(self):
+            self.lease = SimpleNamespace(execution_env={"HOME": "/isolated/agy-account"})
+
+        def release(self):
+            raise AssertionError("missing in-memory claim must not fabricate release")
+
+    class FakeCoordinator:
+        def __init__(self, manager):
+            pass
+
+        def acquire_claim(self, **kwargs):
+            return FakeClaim()
+
+    class FakePopen:
+        pid = 55102
+
+        def __init__(self, command, *, stdout, stderr, **kwargs):
+            self._returncode = 0
+            stdout.write(
+                json.dumps(
+                    {
+                        "conversation_id": "lost-claim-probe",
+                        "status": "SUCCESS",
+                        "response": json.dumps({"probe": "ok"}),
+                    }
+                )
+            )
+            stdout.flush()
+
+        def poll(self):
+            return self._returncode
+
+    service = FakeService()
+    service.state_dir = tmp_path
+    gateway = UnifiedMCPGateway(service=service)
+    monkeypatch.setattr(gateway, "_provider_executable", lambda provider: ({"default_model": "gemini-3.7-flash-medium"}, "/bin/echo"))
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.get_account_pool_manager", lambda: "pool-manager")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.CrossProcessLeaseCoordinator", FakeCoordinator)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", FakePopen)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    _patch_probe_version(monkeypatch)
+
+    gateway._model_probe_submit(
+        {
+            "task_id": "agy-lost-claim",
+            "provider": "agy",
+            "model": "gemini-3.7-flash-medium",
+            "prompt": "Return probe JSON",
+            "output_schema": {"type": "object", "required": ["probe"]},
+        }
+    )
+    gateway._assist_account_claims.clear()
+
+    result = gateway._assist_refresh("agy-lost-claim")
+    assert result["status"] == "UNKNOWN_REQUIRES_RECONCILE"
+    assert result["blocker"] == "ASSIST_ACCOUNT_LEASE_RECONCILIATION_REQUIRED"
+    assert result["reconciliation_required"] is True
+    assert result["model_response_verified"] is False
+    assert result["account_lease_released"] is False
+    assert result["account_lease_cleanup_status"] == "RECONCILIATION_REQUIRED"
+    assert result.get("probe_evidence_hash") is None
+    assert not list((tmp_path / "assisted_provider_jobs" / "probe_evidence").glob("*.json"))
 
 
 def test_model_probe_feedback_loop_preflight_then_worker_candidate_once(monkeypatch, tmp_path):
@@ -3048,6 +3257,13 @@ def test_agy_model_probe_print_timeout_is_transport_blocker(monkeypatch, tmp_pat
     )
     _patch_probe_version(monkeypatch)
     gateway = UnifiedMCPGateway(service=service)
+    claim = SimpleNamespace(
+        account_alias_hash="abc123def456",
+        lease_id_hash="fed654cba321",
+        lease=SimpleNamespace(execution_env={"HOME": "/isolated/agy-timeout"}),
+        release=lambda: None,
+    )
+    monkeypatch.setattr(gateway, "_acquire_agy_probe_claim", lambda **kwargs: claim)
 
     gateway.handle(
         {
