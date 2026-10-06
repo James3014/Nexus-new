@@ -112,6 +112,10 @@
       "mode": "0755"
     },
     {
+      "path": "scripts/ops/nexus-hermes-core-completion",
+      "mode": "0755"
+    },
+    {
       "path": "scripts/ops/nexus-hermes-launchd",
       "mode": "0755"
     },
@@ -153,6 +157,9 @@
     },
     "hermes_continuation_controller": {
       "source_path": "scripts/ops/nexus-hermes-continuation-controller"
+    },
+    "hermes_core_completion": {
+      "source_path": "scripts/ops/nexus-hermes-core-completion"
     },
     "hermes_launchd": {
       "source_path": "scripts/ops/nexus-hermes-launchd"

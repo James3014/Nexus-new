@@ -98,6 +98,13 @@ def _hermes_controller_target() -> Path:
     return Path.home() / ".local/bin/nexus-hermes-continuation-controller"
 
 
+def _hermes_core_completion_target() -> Path:
+    raw = os.getenv("NEXUS_HERMES_CORE_COMPLETION_TARGET")
+    if raw:
+        return Path(os.path.abspath(os.path.expanduser(raw)))
+    return Path.home() / ".local/bin/nexus-hermes-core-completion"
+
+
 def _hermes_launchd_target() -> Path:
     raw = os.getenv("NEXUS_HERMES_LAUNCHD_TARGET")
     if raw:
@@ -346,6 +353,10 @@ def _parse_manifest(data: bytes) -> dict[str, Any]:
         components.get("hermes_continuation_controller"), dict
     ):
         required.add("scripts/ops/nexus-hermes-continuation-controller")
+    if isinstance(components, dict) and isinstance(
+        components.get("hermes_core_completion"), dict
+    ):
+        required.add("scripts/ops/nexus-hermes-core-completion")
     if isinstance(components, dict) and isinstance(components.get("hermes_launchd"), dict):
         required.add("scripts/ops/nexus-hermes-launchd")
     if not required.issubset(seen):
@@ -852,6 +863,11 @@ def _activate(
             _hermes_controller_target(),
         ),
         (
+            "hermes_core_completion",
+            "scripts/ops/nexus-hermes-core-completion",
+            _hermes_core_completion_target(),
+        ),
+        (
             "hermes_launchd",
             "scripts/ops/nexus-hermes-launchd",
             _hermes_launchd_target(),
@@ -1012,6 +1028,11 @@ def _status(
             "hermes_continuation_controller",
             "scripts/ops/nexus-hermes-continuation-controller",
             _hermes_controller_target(),
+        ),
+        (
+            "hermes_core_completion",
+            "scripts/ops/nexus-hermes-core-completion",
+            _hermes_core_completion_target(),
         ),
         (
             "hermes_launchd",

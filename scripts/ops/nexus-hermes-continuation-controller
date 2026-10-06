@@ -11,12 +11,14 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import subprocess
 import tempfile
 import uuid
 from datetime import datetime, timezone
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +26,7 @@ POLICY_SCHEMA = "nexus.hermes_controller_policy.v1"
 RECEIPT_SCHEMA = "nexus.hermes_controller_cycle_receipt.v1"
 FRONTIER_RECEIPT_SCHEMA = "nexus.hermes_frontier_adviser_receipt.v1"
 STATE_SCHEMA = "nexus.hermes_controller_state.v1"
+CORE_COMPLETION_SCHEMA = "nexus.hermes_core_completion_result.v1"
 CLAIM_CEILING = "CONTINUATION_ORCHESTRATION_ONLY_NO_ACCEPTANCE_MERGE_RELEASE"
 ALLOWED_HANDLER_KINDS = {"LOCAL_HERMES_THEN_AGY_PLAN"}
 
@@ -241,6 +244,175 @@ def _write_receipt(
     return path
 
 
+def _resolve_core_root(configured: str | None, repo_root: Path) -> Path:
+    if configured:
+        return Path(configured).expanduser().resolve()
+    env_root = os.environ.get("NEXUS_CORE_ROOT", "").strip()
+    if env_root:
+        return Path(env_root).expanduser().resolve()
+    local_ref = repo_root / ".reference" / "nexus-core"
+    if local_ref.is_dir():
+        return local_ref.resolve()
+    return Path(".reference/nexus-core").resolve()
+
+
+def _load_core_completion_mod():
+    path = Path(__file__).resolve().parent / "nexus-hermes-core-completion"
+    loader = SourceFileLoader("nexus_hermes_core_completion", str(path))
+    spec = importlib.util.spec_from_loader("nexus_hermes_core_completion", loader)
+    if spec is None:
+        raise RuntimeError("cannot load core completion module")
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+def _core_completion(
+    *,
+    core_root: Path,
+    envelope: dict[str, Any] | None,
+    issue: int | None,
+    run_id: str,
+    operation_id: str | None,
+    source_revision: str | None = None,
+    source_tree: str | None = None,
+    expected_core_commit: str | None = None,
+    expected_core_tree: str | None = None,
+    allowed_paths: list[str] | None = None,
+) -> dict[str, Any]:
+    bin_path = os.environ.get("NEXUS_HERMES_CORE_COMPLETION_BIN")
+    if bin_path and Path(bin_path).is_file():
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as fh:
+            json.dump(envelope, fh)
+            env_path = fh.name
+        try:
+            argv = [
+                bin_path,
+                "evaluate",
+                "--core-root",
+                str(core_root),
+                "--envelope",
+                env_path,
+            ]
+            if issue is not None:
+                argv += ["--expected-issue", str(issue)]
+            if run_id:
+                argv += ["--expected-run-id", run_id]
+            if operation_id:
+                argv += ["--expected-operation-id", operation_id]
+            if source_revision:
+                argv += ["--expected-source-revision", source_revision]
+            if source_tree:
+                argv += ["--expected-source-tree", source_tree]
+            if expected_core_commit:
+                argv += ["--expected-core-commit", expected_core_commit]
+            if expected_core_tree:
+                argv += ["--expected-core-tree", expected_core_tree]
+            if allowed_paths:
+                argv += ["--allowed-paths", *allowed_paths]
+            proc = _run(argv, timeout=30)
+            try:
+                return json.loads(proc.stdout)
+            except json.JSONDecodeError:
+                return {
+                    "claims_verified": False,
+                    "reason_codes": [f"CORE_COMPLETION_BIN_ERROR: {proc.stderr.strip()}"],
+                }
+        finally:
+            try:
+                Path(env_path).unlink()
+            except OSError:
+                pass
+
+    mod = _load_core_completion_mod()
+    return mod.evaluate_core_completion(
+        core_root=core_root,
+        envelope=envelope,
+        expected_issue=issue,
+        expected_run_id=run_id,
+        expected_operation_id=operation_id,
+        expected_source_revision=source_revision,
+        expected_source_tree=source_tree,
+        expected_core_commit=expected_core_commit,
+        expected_core_tree=expected_core_tree,
+        allowed_paths=allowed_paths,
+    )
+
+
+def _resolve_envelope(
+    *,
+    receipt_dir: Path,
+    run_id: str,
+    operation_id: str | None,
+    raw_work_product: str | None,
+) -> dict[str, Any] | None:
+    if raw_work_product:
+        raw_path = Path(raw_work_product)
+        if raw_path.is_file():
+            try:
+                return _load_json(raw_path)
+            except Exception:
+                return None
+        try:
+            val = json.loads(raw_work_product)
+            return val if isinstance(val, dict) else None
+        except json.JSONDecodeError:
+            return None
+
+    candidate_paths = [
+        _state_dir(receipt_dir, run_id) / "work_product.json",
+    ]
+    if operation_id:
+        candidate_paths.append(
+            _state_dir(receipt_dir, run_id) / f"work_product_{operation_id}.json"
+        )
+        candidate_paths.append(
+            Path.home() / ".nexus" / "operations" / operation_id / "work_product.json"
+        )
+
+    for path in candidate_paths:
+        if path.is_file():
+            try:
+                return _load_json(path)
+            except Exception:
+                continue
+    return None
+
+
+def _get_source_revision(repo_root: Path) -> str | None:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD^{commit}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode == 0:
+            val = proc.stdout.strip()
+            if len(val) == 40 and all(c in "0123456789abcdef" for c in val):
+                return val
+    except Exception:
+        pass
+    return None
+
+
+def _get_source_tree(repo_root: Path) -> str | None:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD^{tree}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode == 0:
+            val = proc.stdout.strip()
+            if len(val) == 40 and all(c in "0123456789abcdef" for c in val):
+                return val
+    except Exception:
+        pass
+    return None
+
+
 def _hermes_local(prompt: str, *, cwd: Path) -> subprocess.CompletedProcess[str]:
     return _run(
         [
@@ -401,6 +573,13 @@ def run_controller(args: argparse.Namespace) -> int:
     repo_root = Path(args.repo_root).resolve()
     policy_path = Path(args.policy).resolve()
     receipt_dir = Path(args.receipt_dir).resolve()
+    core_root = _resolve_core_root(getattr(args, "core_root", None), repo_root)
+    raw_work_product = getattr(args, "work_product", None)
+    expected_core_commit = getattr(args, "expected_core_commit", None)
+    expected_core_tree = getattr(args, "expected_core_tree", None)
+    source_revision = getattr(args, "source_revision", None) or _get_source_revision(repo_root)
+    source_tree = getattr(args, "source_tree", None) or _get_source_tree(repo_root)
+    allowed_paths = getattr(args, "allowed_paths", None)
     policy = _load_policy(policy_path)
     run_id = (
         args.run_id
@@ -548,6 +727,86 @@ def run_controller(args: argparse.Namespace) -> int:
                 return 6
             continue
 
+        if operation_id and guard.get("decision") in {"NOOP_TERMINAL", "CONTINUE_EXACT_NEXT_GATE"}:
+            envelope = _resolve_envelope(
+                receipt_dir=receipt_dir,
+                run_id=run_id,
+                operation_id=operation_id,
+                raw_work_product=raw_work_product,
+            )
+            core_res = _core_completion(
+                core_root=core_root,
+                envelope=envelope,
+                issue=args.issue,
+                run_id=run_id,
+                operation_id=operation_id,
+                source_revision=source_revision,
+                source_tree=source_tree,
+                expected_core_commit=expected_core_commit,
+                expected_core_tree=expected_core_tree,
+                allowed_paths=allowed_paths,
+            )
+            if not core_res.get("claims_verified"):
+                _write_receipt(
+                    receipt_dir,
+                    run_id,
+                    cycle,
+                    {
+                        **base,
+                        "outcome": "CORE_COMPLETION_NOT_VERIFIED",
+                        "core_completion": core_res,
+                    },
+                )
+                state["last_cycle"] = cycle
+                state["core_completion"] = core_res
+                _save_state(receipt_dir, state)
+                print(
+                    json.dumps(
+                        {
+                            "run_id": run_id,
+                            "outcome": "CORE_COMPLETION_NOT_VERIFIED",
+                            "operation_id": operation_id,
+                            "next_gate": next_gate,
+                            "core_completion": core_res,
+                        },
+                        sort_keys=True,
+                    )
+                )
+                return 4
+
+            outcome = (
+                "TERMINAL_NOOP"
+                if guard.get("decision") == "NOOP_TERMINAL"
+                else "EXACT_NEXT_GATE_ELIGIBLE"
+            )
+            _write_receipt(
+                receipt_dir,
+                run_id,
+                cycle,
+                {
+                    **base,
+                    "outcome": outcome,
+                    "core_completion": core_res,
+                },
+            )
+            state["last_cycle"] = cycle
+            state["core_completion"] = core_res
+            state["core_completion_verified"] = True
+            _save_state(receipt_dir, state)
+            print(
+                json.dumps(
+                    {
+                        "run_id": run_id,
+                        "outcome": outcome,
+                        "operation_id": operation_id,
+                        "next_gate": next_gate,
+                        "core_completion": core_res,
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0
+
         if guard.get("decision") == "NOOP_TERMINAL":
             _write_receipt(receipt_dir, run_id, cycle, {**base, "outcome": "TERMINAL_NOOP"})
             state["last_cycle"] = cycle
@@ -660,6 +919,98 @@ def run_controller(args: argparse.Namespace) -> int:
             )
             return 0
 
+        if after_guard.get("decision") in {"CONTINUE_EXACT_NEXT_GATE", "NOOP_TERMINAL"}:
+            envelope = _resolve_envelope(
+                receipt_dir=receipt_dir,
+                run_id=run_id,
+                operation_id=operation_id,
+                raw_work_product=raw_work_product,
+            )
+            core_res = _core_completion(
+                core_root=core_root,
+                envelope=envelope,
+                issue=args.issue,
+                run_id=run_id,
+                operation_id=operation_id,
+                source_revision=source_revision,
+                source_tree=source_tree,
+                expected_core_commit=expected_core_commit,
+                expected_core_tree=expected_core_tree,
+                allowed_paths=allowed_paths,
+            )
+            if not core_res.get("claims_verified"):
+                _write_receipt(
+                    receipt_dir,
+                    run_id,
+                    cycle,
+                    {
+                        **base,
+                        "handler_kind": kind,
+                        **result,
+                        "outcome": "CORE_COMPLETION_NOT_VERIFIED",
+                        "core_completion": core_res,
+                        "post_effect_readback": {
+                            "doctor_disposition": after.get("resume_disposition"),
+                            "next_gate": (after.get("next_gate") or {}).get("code"),
+                            "guard": after_guard,
+                        },
+                    },
+                )
+                state["last_cycle"] = cycle
+                state["core_completion"] = core_res
+                _save_state(receipt_dir, state)
+                print(
+                    json.dumps(
+                        {
+                            "run_id": run_id,
+                            "outcome": "CORE_COMPLETION_NOT_VERIFIED",
+                            "operation_id": operation_id,
+                            "core_completion": core_res,
+                        },
+                        sort_keys=True,
+                    )
+                )
+                return 4
+
+            outcome = (
+                "TERMINAL_NOOP"
+                if after_guard.get("decision") == "NOOP_TERMINAL"
+                else "EXACT_NEXT_GATE_ELIGIBLE"
+            )
+            _write_receipt(
+                receipt_dir,
+                run_id,
+                cycle,
+                {
+                    **base,
+                    "handler_kind": kind,
+                    **result,
+                    "outcome": outcome,
+                    "core_completion": core_res,
+                    "post_effect_readback": {
+                        "doctor_disposition": after.get("resume_disposition"),
+                        "next_gate": (after.get("next_gate") or {}).get("code"),
+                        "guard": after_guard,
+                    },
+                },
+            )
+            state["last_cycle"] = cycle
+            state["core_completion"] = core_res
+            state["core_completion_verified"] = True
+            _save_state(receipt_dir, state)
+            print(
+                json.dumps(
+                    {
+                        "run_id": run_id,
+                        "outcome": outcome,
+                        "operation_id": operation_id,
+                        "core_completion": core_res,
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0
+
         # One external-effect budget per controller run protects boundedness.
         print(
             json.dumps(
@@ -754,6 +1105,13 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--receipt-dir", required=True)
     run.add_argument("--run-id")
     run.add_argument("--max-cycles", type=int, default=3)
+    run.add_argument("--core-root")
+    run.add_argument("--expected-core-commit")
+    run.add_argument("--expected-core-tree")
+    run.add_argument("--work-product")
+    run.add_argument("--source-revision")
+    run.add_argument("--source-tree")
+    run.add_argument("--allowed-paths", nargs="*")
 
     frontier = sub.add_parser("frontier")
     frontier.add_argument("--signal-file", required=True)
