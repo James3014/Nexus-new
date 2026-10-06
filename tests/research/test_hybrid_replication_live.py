@@ -13,6 +13,7 @@ from nexus.research.hybrid_replication_live import (
     FROZEN_RECEIPT_SHA256S,
     _c_prompt,
     _load_binding,
+    _prepare_shadow_checkout,
     _run_agy_b_fallback,
     _run_agy_candidate,
     _valid_probability_distribution,
@@ -539,6 +540,64 @@ def test_c_scope_rejection_for_out_of_scope_and_oversized_artifacts(tmp_path: Pa
     sealing_oversized = seal_shadow_candidate(repo_dir, max_file_size=100)
     assert sealing_oversized["scope_valid"] is False
     assert "large.bin" in sealing_oversized["oversized_untracked_files"]
+
+
+def test_shadow_checkout_hydrates_captured_remote_tracking_default_branch(
+    tmp_path: Path,
+) -> None:
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    subprocess.run(["git", "init", "-b", "main"], cwd=upstream, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=upstream, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=upstream, check=True)
+    (upstream / "file.txt").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "add", "file.txt"], cwd=upstream, check=True)
+    subprocess.run(["git", "commit", "-m", "base"], cwd=upstream, check=True, capture_output=True)
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=upstream, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    (upstream / "file.txt").write_text("target\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "commit", "-am", "target"], cwd=upstream, check=True, capture_output=True
+    )
+    target = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=upstream, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "clone", str(upstream), str(repo)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "switch", "-c", "feature", base], cwd=repo, check=True, capture_output=True
+    )
+    subprocess.run(["git", "branch", "-D", "main"], cwd=repo, check=True, capture_output=True)
+    assert (
+        subprocess.run(
+            ["git", "rev-parse", "refs/remotes/origin/main"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        == target
+    )
+
+    shadow = tmp_path / "shadow"
+    _prepare_shadow_checkout(
+        repo=repo,
+        revision=target,
+        source=shadow,
+        default_branch="main",
+    )
+    assert (
+        subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=shadow,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        == target
+    )
 
 
 def test_c_shadow_worktree_cleanup_always_performed(
