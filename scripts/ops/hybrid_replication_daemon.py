@@ -11,6 +11,7 @@ from typing import Any
 from nexus.research.hybrid_replication_pipeline import (
     ADMISSION_MARKER,
     CAPTURE_MARKER,
+    READINESS_CONTROL_DISPOSITION,
     AutomaticReplicationController,
     AutomaticReplicationStore,
     ExternalFrozenStackRunner,
@@ -180,6 +181,7 @@ def advance_all(
     frozen_policy_sha256: str,
     stack_command: str,
     ground_truth_command: str,
+    readiness_control_task_key: str | None = None,
 ) -> dict[str, Any]:
     stack_runner = ExternalFrozenStackRunner(stack_command)
     ground_truth_resolver = ExternalGroundTruthResolver(ground_truth_command)
@@ -204,9 +206,16 @@ def advance_all(
     failures: list[dict[str, Any]] = []
     for state_path in sorted(store.tasks_root.glob("*/state.json")):
         state = json.loads(state_path.read_text(encoding="utf-8"))
-        if state.get("admission_disposition") != "ADMITTED_PRIMARY_FRESH_TASK":
-            continue
         task_key = str(state["task_key"])
+        disposition = state.get("admission_disposition")
+        is_primary = disposition == "ADMITTED_PRIMARY_FRESH_TASK"
+        is_readiness_control = (
+            disposition == READINESS_CONTROL_DISPOSITION
+            and readiness_control_task_key is not None
+            and task_key == readiness_control_task_key
+        )
+        if not (is_primary or is_readiness_control):
+            continue
         before = str(state.get("phase"))
         try:
             after = controller.advance(task_key)
@@ -230,6 +239,92 @@ def advance_all(
     }
 
 
+def _evaluate_automatic_capture_readiness(
+    *,
+    ingest_report: dict[str, Any],
+    advance_report: dict[str, Any],
+    launchd_loaded: bool,
+    control_phase: str | None,
+) -> dict[str, Any]:
+    blockers: list[str] = []
+    if (
+        int(ingest_report.get("expected_count") or 0) <= 0
+        or int(ingest_report.get("mirrored_count") or 0) <= 0
+    ):
+        blockers.append("NON_VACUOUS_E2E_CONTROL_REQUIRED")
+    if ingest_report.get("missing_capture"):
+        blockers.append("MISSING_CAPTURE")
+    if ingest_report.get("missing_admission"):
+        blockers.append("MISSING_ADMISSION")
+    watchdog = ingest_report.get("watchdog") or {}
+    if watchdog.get("status") != "COMPLETE":
+        blockers.append("WATCHDOG_INCOMPLETE")
+    if advance_report.get("failures"):
+        blockers.append("ADVANCE_FAILURE_PRESENT")
+    if not launchd_loaded:
+        blockers.append("DAEMON_NOT_LOADED")
+    if control_phase != "SCORED":
+        blockers.append("CONTROL_NOT_SCORED")
+    return {
+        "schema": "nexus.hybrid_replication.automatic_capture_readiness.v1",
+        "status": "AUTOMATIC_CAPTURE_READY" if not blockers else "NOT_READY",
+        "blockers": blockers,
+        "expected_count": int(ingest_report.get("expected_count") or 0),
+        "mirrored_count": int(ingest_report.get("mirrored_count") or 0),
+        "control_phase": control_phase,
+        "launchd_loaded": bool(launchd_loaded),
+    }
+
+
+def evaluate_readiness_from_store(
+    *,
+    store: AutomaticReplicationStore,
+    ingest_report: dict[str, Any],
+    advance_report: dict[str, Any],
+    control_task_key: str,
+    launchd_label: str,
+    service_observation: dict[str, Any],
+) -> dict[str, Any]:
+    control_state = store.load_task(control_task_key)
+    control_phase = str(control_state.get("phase")) if control_state else None
+    control_score_valid = False
+    control_score_error: str | None = None
+    if control_phase == "SCORED":
+        try:
+            store.score_task(control_task_key)
+            control_score_valid = True
+        except (OSError, ValueError) as exc:
+            control_score_error = f"{type(exc).__name__}:{exc}"
+
+    if service_observation.get("schema") != "nexus.hybrid_replication.service_observation.v1":
+        raise ValueError("service_observation_schema_mismatch")
+    if service_observation.get("label") != launchd_label:
+        raise ValueError("service_observation_label_mismatch")
+    if not isinstance(service_observation.get("loaded"), bool):
+        raise ValueError("service_observation_loaded_required")
+    if not str(service_observation.get("observed_at") or ""):
+        raise ValueError("service_observation_timestamp_required")
+
+    result = _evaluate_automatic_capture_readiness(
+        ingest_report=ingest_report,
+        advance_report=advance_report,
+        launchd_loaded=bool(service_observation["loaded"]),
+        control_phase=control_phase,
+    )
+    blockers = list(result["blockers"])
+    if control_phase == "SCORED" and not control_score_valid:
+        blockers.append("CONTROL_SCORE_INVALID")
+    result["blockers"] = blockers
+    result["status"] = "AUTOMATIC_CAPTURE_READY" if not blockers else "NOT_READY"
+    result["control_task_key"] = control_task_key
+    result["control_score_valid"] = control_score_valid
+    result["control_score_error"] = control_score_error
+    result["launchd_label"] = launchd_label
+    result["service_observation"] = dict(service_observation)
+    result["claim_ceiling"] = "READINESS_CONTROL_ONLY_NOT_PRIMARY_COHORT"
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True)
@@ -238,6 +333,9 @@ def main() -> int:
     parser.add_argument("--stack-command")
     parser.add_argument("--ground-truth-command")
     parser.add_argument("--ingest-only", action="store_true")
+    parser.add_argument("--readiness-control-task-key")
+    parser.add_argument("--launchd-label", default="com.nexus.hybrid-replication")
+    parser.add_argument("--service-observation")
     args = parser.parse_args()
 
     store = AutomaticReplicationStore(Path(args.root))
@@ -259,8 +357,24 @@ def main() -> int:
         frozen_policy_sha256=args.frozen_policy_sha256,
         stack_command=args.stack_command,
         ground_truth_command=args.ground_truth_command,
+        readiness_control_task_key=args.readiness_control_task_key,
     )
     print(json.dumps(advance_report, ensure_ascii=False, sort_keys=True, indent=2))
+    if args.readiness_control_task_key:
+        if not args.service_observation:
+            raise SystemExit("readiness mode requires --service-observation")
+        service_observation = json.loads(Path(args.service_observation).read_text(encoding="utf-8"))
+        readiness_report = evaluate_readiness_from_store(
+            store=store,
+            ingest_report=ingest_report,
+            advance_report=advance_report,
+            control_task_key=args.readiness_control_task_key,
+            launchd_label=args.launchd_label,
+            service_observation=service_observation,
+        )
+        print(json.dumps(readiness_report, ensure_ascii=False, sort_keys=True, indent=2))
+        if readiness_report["status"] != "AUTOMATIC_CAPTURE_READY":
+            return 6
     if advance_report["failures"]:
         return 5
     if ingest_report["missing_capture"]:

@@ -20,6 +20,12 @@ def test_hybrid_replication_capture_workflow_is_event_driven_and_fail_closed() -
     assert "NEXUS_HYBRID_REPLICATION_ACTIVATION_STATE" in text
     assert "NEXUS_HYBRID_REPLICATION_T_AUTO" in text
     assert "NEXUS_HYBRID_REPLICATION_EXCLUSION_SET_SHA256" in text
+    assert "NEXUS_HYBRID_REPLICATION_READINESS_CONTROL_TOKEN" in text
+    assert "NEXUS-HYBRID-REPLICATION-READINESS-CONTROL-V1:" in text
+    assert 'issue_author == repository.split("/", 1)[0]' in text
+    assert 'disposition = "READINESS_CONTROL_EXCLUDED"' in text
+    assert 'admission_activation_state = "READINESS_CONTROL_PENDING"' in text
+    assert "not is_readiness_control" in text
     assert 'activation_state != "AUTOMATIC_CAPTURE_READY"' in text
     assert "activation exclusion-set hash mismatch; admission blocked" in text
     assert "implementation_pr_numbers" in text

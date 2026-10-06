@@ -340,6 +340,15 @@ def _task_key(repository: str, issue_number: int) -> str:
     return f"{repository}#{int(issue_number)}"
 
 
+PRIMARY_ADMISSION_DISPOSITION = "ADMITTED_PRIMARY_FRESH_TASK"
+READINESS_CONTROL_DISPOSITION = "READINESS_CONTROL_EXCLUDED"
+READINESS_CONTROL_ACTIVATION_STATE = "READINESS_CONTROL_PENDING"
+_EXECUTABLE_ADMISSION_DISPOSITIONS = {
+    PRIMARY_ADMISSION_DISPOSITION,
+    READINESS_CONTROL_DISPOSITION,
+}
+
+
 @dataclass(frozen=True)
 class AdmissionReceipt:
     task_key: str
@@ -357,7 +366,10 @@ class AdmissionReceipt:
     schema: str = "nexus.hybrid_replication.admission.v1"
 
     def __post_init__(self) -> None:
-        if self.activation_state != "AUTOMATIC_CAPTURE_READY":
+        if self.disposition == READINESS_CONTROL_DISPOSITION:
+            if self.activation_state != READINESS_CONTROL_ACTIVATION_STATE:
+                raise ValueError("readiness_control_pending_required")
+        elif self.activation_state != "AUTOMATIC_CAPTURE_READY":
             raise ValueError("automatic_capture_ready_required")
         if len(self.exclusion_set_sha256) != 64 or any(
             char not in "0123456789abcdef" for char in self.exclusion_set_sha256
@@ -383,7 +395,10 @@ class AdmissionReceipt:
     ) -> "AdmissionReceipt":
         if not activation_boundary:
             raise ValueError("activation_boundary_required")
-        if activation_state != "AUTOMATIC_CAPTURE_READY":
+        if disposition == READINESS_CONTROL_DISPOSITION:
+            if activation_state != READINESS_CONTROL_ACTIVATION_STATE:
+                raise ValueError("readiness_control_pending_required")
+        elif activation_state != "AUTOMATIC_CAPTURE_READY":
             raise ValueError("automatic_capture_ready_required")
         if len(exclusion_set_sha256) != 64:
             raise ValueError("exclusion_set_sha256_required")
@@ -692,8 +707,10 @@ class AutomaticReplicationController:
         state = self.store.load_task(task_key)
         if state is None:
             raise ValueError("task_capture_missing")
-        if state.get("admission_disposition") != "ADMITTED_PRIMARY_FRESH_TASK":
+        if state.get("admission_disposition") not in _EXECUTABLE_ADMISSION_DISPOSITIONS:
             return state
+        if state.get("phase") == "SCORED":
+            return self.store.score_task(task_key)
         if state.get("phase") == "ADMITTED":
             payload = dict(state["snapshot"])
             snapshot = TaskSnapshot.from_capture_payload(payload)
@@ -722,6 +739,8 @@ class AutomaticReplicationController:
                 state = self.store.load_task(task_key)
         if state is None:
             raise ValueError("task_state_lost")
+        if state.get("phase") == "GROUND_TRUTH_BOUND":
+            state = self.store.score_task(task_key)
         return state
 
 
@@ -772,7 +791,8 @@ class AutomaticReplicationStore:
 
     def capture(self, snapshot: TaskSnapshot, *, admission_disposition: str) -> dict[str, Any]:
         if admission_disposition not in {
-            "ADMITTED_PRIMARY_FRESH_TASK",
+            PRIMARY_ADMISSION_DISPOSITION,
+            READINESS_CONTROL_DISPOSITION,
             "EXPERIMENT_CONTROL_ISSUE",
             "EXCLUDED_PRE_BOUNDARY",
             "CROSS_REPO_SCOPE_GAP",
@@ -794,7 +814,7 @@ class AutomaticReplicationStore:
             ):
                 return existing
             raise ValueError("capture_identity_conflict")
-        if admission_disposition == "ADMITTED_PRIMARY_FRESH_TASK":
+        if admission_disposition in _EXECUTABLE_ADMISSION_DISPOSITIONS:
             phase = "ADMITTED"
         elif admission_disposition == "PRE_AUTOMATION_PROVISIONAL_CAPTURE":
             phase = "CAPTURED_PROVISIONAL"
@@ -835,7 +855,7 @@ class AutomaticReplicationStore:
         state["admitted_at"] = receipt.admitted_at
         state["phase"] = (
             "ADMITTED"
-            if receipt.disposition == "ADMITTED_PRIMARY_FRESH_TASK"
+            if receipt.disposition in _EXECUTABLE_ADMISSION_DISPOSITIONS
             else "CAPTURED_EXCLUDED"
         )
         self._write_json(self._state_path(receipt.task_key), state)
@@ -845,8 +865,8 @@ class AutomaticReplicationStore:
         state = self.load_task(task_key)
         if state is None:
             raise ValueError("capture_required_before_route")
-        if state.get("admission_disposition") != "ADMITTED_PRIMARY_FRESH_TASK":
-            raise ValueError("only_admitted_tasks_may_route")
+        if state.get("admission_disposition") not in _EXECUTABLE_ADMISSION_DISPOSITIONS:
+            raise ValueError("only_executable_admitted_tasks_may_route")
         if state.get("capture_sha256") != route.capture_sha256:
             raise ValueError("route_capture_identity_mismatch")
         existing = state.get("route")
@@ -902,6 +922,83 @@ class AutomaticReplicationStore:
         )
         state["ground_truth"] = {"sha256": gt_sha, **payload}
         state["phase"] = "GROUND_TRUTH_BOUND"
+        self._write_json(self._state_path(task_key), state)
+        return state
+
+    def score_task(self, task_key: str) -> dict[str, Any]:
+        state = self.load_task(task_key)
+        if state is None:
+            raise ValueError("capture_required_before_score")
+        if state.get("phase") == "SCORED":
+            score = state.get("score") or {}
+            score_path = self._dir(task_key) / str(score.get("path") or "score.json")
+            if not score_path.is_file():
+                raise ValueError("score_receipt_missing")
+            actual_sha = _sha256(score_path.read_bytes())
+            if actual_sha != score.get("sha256"):
+                raise ValueError("score_receipt_hash_mismatch")
+            return state
+        if state.get("phase") != "GROUND_TRUTH_BOUND" or state.get("ground_truth") is None:
+            raise ValueError("ground_truth_required_before_score")
+        if state.get("raw_seal") is None or state.get("route") is None:
+            raise ValueError("raw_route_required_before_score")
+
+        raw_path = self._dir(task_key) / str(state["raw_seal"]["path"])
+        raw_bytes = raw_path.read_bytes()
+        if _sha256(raw_bytes) != state["raw_seal"].get("raw_sha256"):
+            raise ValueError("raw_seal_hash_mismatch")
+        raw = json.loads(raw_bytes)
+        ground_truth = dict(state["ground_truth"])
+        ground_truth_path = self._dir(task_key) / "ground_truth.json"
+        ground_truth_bytes = ground_truth_path.read_bytes()
+        if _sha256(ground_truth_bytes) != ground_truth.get("sha256"):
+            raise ValueError("ground_truth_hash_mismatch")
+        score_payload = {
+            "schema": "nexus.hybrid_replication.task_score.v1",
+            "task_key": task_key,
+            "capture_sha256": state["capture_sha256"],
+            "route": state["route"]["stratum"],
+            "raw_sha256": state["raw_seal"]["raw_sha256"],
+            "ground_truth_sha256": ground_truth["sha256"],
+            "terminal_state": ground_truth["terminal_state"],
+            "terminal_at": ground_truth["terminal_at"],
+            "evidence_refs": list(ground_truth.get("evidence_refs") or []),
+            "quality": {
+                "terminal_state": ground_truth["terminal_state"],
+                "evidence_refs": list(ground_truth.get("evidence_refs") or []),
+                "details": dict(ground_truth.get("details") or {}),
+            },
+            "economics": {
+                "provider": raw.get("provider"),
+                "requested_model": raw.get("requested_model"),
+                "resolved_model": raw.get("resolved_model"),
+                "model_call_count": raw.get("model_call_count"),
+                "input_tokens": raw.get("input_tokens"),
+                "uncached_input_tokens": raw.get("uncached_input_tokens"),
+                "output_tokens": raw.get("output_tokens"),
+                "wall_time_seconds": raw.get("wall_time_seconds"),
+                "failures": list(raw.get("failures") or []),
+                "retries": raw.get("retries"),
+                "fallbacks": list(raw.get("fallbacks") or []),
+            },
+        }
+        score_path = self._dir(task_key) / "score.json"
+        expected_score_bytes = _canonical_bytes(score_payload) + b"\n"
+        expected_score_sha = _sha256(expected_score_bytes)
+        if score_path.exists():
+            if score_path.read_bytes() != expected_score_bytes:
+                raise ValueError("score_receipt_conflict")
+            score_sha = expected_score_sha
+        else:
+            score_sha = self._write_json(score_path, score_payload, create_only=True)
+        state["score"] = {
+            "schema": score_payload["schema"],
+            "sha256": score_sha,
+            "path": "score.json",
+            "terminal_state": score_payload["terminal_state"],
+            "route": score_payload["route"],
+        }
+        state["phase"] = "SCORED"
         self._write_json(self._state_path(task_key), state)
         return state
 
