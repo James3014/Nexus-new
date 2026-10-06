@@ -32,7 +32,7 @@ from nexus.services.direct_operation_journal import TERMINAL_STATES
 EXACT_AGY_MODEL = "gemini-3.8-flash-medium"
 CANONICAL_AGY_DISPATCH_NAME = "nexus-agy-dispatch"
 CANONICAL_AGY_DISPATCH_SHA256 = "d2de9f351cc4751a9530f69029378c9a205e330db040211465af5e9989a7243e"
-CANONICAL_AGY_EXECUTION_GENERATION = "AGY_GEMINI_3_8_FLASH_MEDIUM_V5"
+CANONICAL_AGY_EXECUTION_GENERATION = "AGY_GEMINI_3_8_FLASH_MEDIUM_V6"
 AGY_PROVIDER_TERMINAL_GRACE_SECONDS = 30.0
 MAX_AGY_PROVIDER_OUTPUT_BYTES = 5_000_000
 AGY_RAW_RECEIPT_SCHEMA = "nexus.hybrid_replication.agy_live_raw.v1"
@@ -314,13 +314,21 @@ def _frozen_receipt_hashes(
     return actual, declared
 
 
-def _load_binding(path: Path, *, require_activation: bool = True) -> dict[str, Any]:
+def _load_binding(
+    path: Path,
+    *,
+    require_activation: bool = True,
+    readiness_control: bool = False,
+) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("schema") != "nexus.hybrid_replication.live_binding.v1":
         raise ValueError("live_binding_schema_mismatch")
-    if require_activation and payload.get("activation_state") != "AUTOMATIC_CAPTURE_READY":
-        raise ValueError("live_binding_not_activated")
     if require_activation:
+        expected_state = (
+            "READINESS_CONTROL_PENDING" if readiness_control else "AUTOMATIC_CAPTURE_READY"
+        )
+        if payload.get("activation_state") != expected_state:
+            raise ValueError("live_binding_not_activated")
         actual_receipts, declared_receipts = _frozen_receipt_hashes(payload)
         if actual_receipts != FROZEN_RECEIPT_SHA256S:
             raise ValueError("frozen_receipt_physical_identity_drift")
@@ -1534,7 +1542,13 @@ def _run_agy_dispatch(
     return record, wall, stdout_path, stderr_path, timed_out, err, dispatch_path
 
 
-def _prepare_shadow_checkout(*, repo: Path, revision: str, source: Path) -> None:
+def _prepare_shadow_checkout(
+    *,
+    repo: Path,
+    revision: str,
+    source: Path,
+    default_branch: str = "main",
+) -> None:
     cloned = _run(
         ["git", "clone", "--no-local", "--no-checkout", str(repo), str(source)],
         cwd=repo.parent,
@@ -1542,6 +1556,27 @@ def _prepare_shadow_checkout(*, repo: Path, revision: str, source: Path) -> None
     )
     if cloned.returncode != 0:
         raise RuntimeError(f"shadow_clone_failed:{cloned.stderr.strip()}")
+    checked = _run(["git", "checkout", "--detach", revision], cwd=source, timeout=60)
+    if checked.returncode == 0:
+        return
+
+    source_ref = f"refs/remotes/origin/{default_branch}"
+    hydrated_ref = f"refs/remotes/source-origin/{default_branch}"
+    fetched = _run(
+        [
+            "git",
+            "fetch",
+            "--no-tags",
+            str(repo),
+            f"+{source_ref}:{hydrated_ref}",
+        ],
+        cwd=source,
+        timeout=60,
+    )
+    if fetched.returncode != 0:
+        raise RuntimeError(
+            f"shadow_revision_hydration_failed:{source_ref}:{fetched.stderr.strip()}"
+        )
     checked = _run(["git", "checkout", "--detach", revision], cwd=source, timeout=60)
     if checked.returncode != 0:
         raise RuntimeError(f"shadow_checkout_failed:{checked.stderr.strip()}")
@@ -1553,6 +1588,7 @@ def _run_agy_b_fallback(
     revision: str,
     prompt: str,
     binding: Mapping[str, Any],
+    default_branch: str = "main",
     timeout: int = 300,
     poll_timeout: float = 300.0,
     poll_interval: float = 0.05,
@@ -1560,7 +1596,9 @@ def _run_agy_b_fallback(
     with tempfile.TemporaryDirectory(prefix="nexus-hybrid-replication-b-") as temp:
         root = Path(temp)
         source = root / "source"
-        _prepare_shadow_checkout(repo=repo, revision=revision, source=source)
+        _prepare_shadow_checkout(
+            repo=repo, revision=revision, source=source, default_branch=default_branch
+        )
         try:
             record, wall, stdout_path, stderr_path, timed_out, err, dispatch_path = (
                 _run_agy_dispatch(
@@ -1605,6 +1643,7 @@ def _run_agy_candidate(
     revision: str,
     prompt: str,
     binding: Mapping[str, Any],
+    default_branch: str = "main",
     timeout: int = 300,
     poll_timeout: float = 300.0,
     poll_interval: float = 0.05,
@@ -1613,7 +1652,9 @@ def _run_agy_candidate(
     with tempfile.TemporaryDirectory(prefix="nexus-hybrid-replication-c-") as temp:
         root = Path(temp)
         source = root / "source"
-        _prepare_shadow_checkout(repo=repo, revision=revision, source=source)
+        _prepare_shadow_checkout(
+            repo=repo, revision=revision, source=source, default_branch=default_branch
+        )
         try:
             record, wall, stdout_path, stderr_path, timed_out, err, dispatch_path = (
                 _run_agy_dispatch(
@@ -1802,6 +1843,7 @@ def run_frozen_stack(
                     revision=snapshot.pre_implementation_revision,
                     prompt=prompt,
                     binding=binding,
+                    default_branch=snapshot.default_branch,
                 )
                 fallbacks = ("DM1_TO_STRONG_ONLINE",)
             jev_usage = jev_raw.get("usage") or {}
@@ -1874,6 +1916,7 @@ def run_frozen_stack(
         revision=snapshot.pre_implementation_revision,
         prompt=prompt,
         binding=binding,
+        default_branch=snapshot.default_branch,
     )
     usage = strong.get("usage") or {}
     input_tokens, uncached_input_tokens, output_tokens = _complete_token_usage_metrics(usage)
@@ -2137,10 +2180,10 @@ def _identity_preflight_main(binding_path: Path) -> int:
     return 0 if receipt["activation_allowed"] else 5
 
 
-def _stack_main(binding_path: Path) -> int:
+def _stack_main(binding_path: Path, *, readiness_control: bool = False) -> int:
     payload = json.load(sys.stdin)
     snapshot = _snapshot_from_capture_payload(payload)
-    binding = _load_binding(binding_path)
+    binding = _load_binding(binding_path, readiness_control=readiness_control)
     outcome = run_frozen_stack(snapshot, binding=binding)
     print(json.dumps(asdict(outcome), ensure_ascii=False, sort_keys=True))
     return 0
@@ -2162,12 +2205,13 @@ def main() -> int:
     preflight.add_argument("--binding", default=str(DEFAULT_LIVE_BINDING))
     stack = sub.add_parser("stack")
     stack.add_argument("--binding", default=str(DEFAULT_LIVE_BINDING))
+    stack.add_argument("--readiness-control", action="store_true")
     sub.add_parser("ground-truth")
     args = parser.parse_args()
     if args.command == "identity-preflight":
         return _identity_preflight_main(Path(args.binding))
     if args.command == "stack":
-        return _stack_main(Path(args.binding))
+        return _stack_main(Path(args.binding), readiness_control=args.readiness_control)
     return _ground_truth_main()
 
 
