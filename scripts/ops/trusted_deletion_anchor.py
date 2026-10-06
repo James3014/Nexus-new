@@ -47,7 +47,7 @@ TRUSTED_EXTERNAL_RUNTIME_PACKAGES: tuple[tuple[str, str, str, str], ...] = (
         "nexus-runtime",
         "nexus_runtime",
         "https://github.com/James3014/nexus-runtime.git",
-        "0fbe9522cfa6fb178e328381486a18877808fa79",
+        "0a39e52770230a74c5431c0f9cc73a63fb090d8b",
     ),
 )
 UV_VERSION = "uv 0.9.2"
@@ -155,6 +155,17 @@ TRUSTED_PR1380_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, s
         "6068e086cbdf1e08723520a339269033346ff5a7553d87008cc8e9f1f22260b4",
     ),
 )
+# Exact one-use, four-way binding for Owner-approved PR #1507 (Issue #1506
+# Wave 20 bounded reconciliation Runtime pin adoption).
+TRUSTED_PR1507_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1507,
+    (
+        "0ff95ecbe90a66299ff40bc411ddd1045d978d43726729b454e5c1acf8d4a160",
+        "6068e086cbdf1e08723520a339269033346ff5a7553d87008cc8e9f1f22260b4",
+        "10eb27a29cfb60d8cc45e223a68a1221f7f285b04d2b9ab58f1ed2096b11a829",
+        "db1bd37456a5d302c0f508ab5ca193750f9d715985f2dcf5e67743a70e9d2667",
+    ),
+)
 
 REQUIRED_EVIDENCE_KEYS = {
     "schema_version",
@@ -237,6 +248,7 @@ def _validate_trusted_dependency_contract(
         TRUSTED_PR1288_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR1375_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR1380_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1507_DEPENDENCY_SNAPSHOT_TRANSITION,
     )
     for authorized_transition_record in authorized_transition_records:
         if authorized_transition_record is None:
