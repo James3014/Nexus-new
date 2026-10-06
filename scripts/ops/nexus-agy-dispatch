@@ -135,6 +135,131 @@ _QUOTA_ACCOUNT_PHASES = frozenset({
 _QUOTA_PROGRESS_PREFIX = "NEXUS_AGY_QUOTA "
 _QUOTA_PROGRESS_MAX_LINE = 8192
 _EFFECT_OBSERVATION_INTERVAL_SECONDS = 0.5
+DEFAULT_PROVIDER_STALL_SECONDS = 90.0
+DEFAULT_STREAM_NO_PROGRESS_SECONDS = 120.0
+DEFAULT_PRE_EFFECT_MAX_SECONDS = 90.0
+DEFAULT_PRE_EFFECT_MAX_TOOL_EVENTS = 24
+_AGY_STREAM_ACTIVITY_RE = re.compile(r"streamGenerateContent\?alt=sse")
+
+
+def _bounded_positive_seconds(env_name: str, default: float) -> float:
+    raw = os.getenv(env_name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return max(0.1, value)
+
+
+def _provider_stall_seconds() -> float:
+    return _bounded_positive_seconds(
+        "NEXUS_AGY_PROVIDER_STALL_SECONDS",
+        DEFAULT_PROVIDER_STALL_SECONDS,
+    )
+
+
+def _stream_no_progress_seconds() -> float:
+    return _bounded_positive_seconds(
+        "NEXUS_AGY_STREAM_NO_PROGRESS_SECONDS",
+        DEFAULT_STREAM_NO_PROGRESS_SECONDS,
+    )
+
+
+def _bounded_positive_int(env_name: str, default: int) -> int:
+    raw = os.getenv(env_name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(1, value)
+
+
+def _pre_effect_max_seconds() -> float:
+    return _bounded_positive_seconds(
+        "NEXUS_AGY_PRE_EFFECT_MAX_SECONDS",
+        DEFAULT_PRE_EFFECT_MAX_SECONDS,
+    )
+
+
+def _pre_effect_max_tool_events() -> int:
+    return _bounded_positive_int(
+        "NEXUS_AGY_PRE_EFFECT_MAX_TOOL_EVENTS",
+        DEFAULT_PRE_EFFECT_MAX_TOOL_EVENTS,
+    )
+
+
+def _read_new_provider_log_activity(
+    log_path: Path | None,
+    *,
+    offset: int,
+) -> tuple[int, int, list[str]]:
+    if log_path is None:
+        return offset, 0, []
+    try:
+        if log_path.stat().st_size < offset:
+            offset = 0
+        with log_path.open("r", encoding="utf-8", errors="replace") as stream:
+            stream.seek(offset)
+            chunk = stream.read()
+            new_offset = stream.tell()
+    except OSError:
+        return offset, 0, []
+    sessions = [match.group("conversation") for match in _AGY_CONVERSATION_RE.finditer(chunk)]
+    return new_offset, len(_AGY_STREAM_ACTIVITY_RE.findall(chunk)), sessions
+
+
+def _agy_transcript_path(env: dict[str, str], provider_session_id: str | None) -> Path | None:
+    home = str(env.get("HOME") or "").strip()
+    if not home or not provider_session_id:
+        return None
+    return (
+        Path(home)
+        / ".gemini"
+        / "antigravity-cli"
+        / "brain"
+        / provider_session_id
+        / ".system_generated"
+        / "logs"
+        / "transcript_full.jsonl"
+    )
+
+
+def _read_new_tool_activity(
+    transcript_path: Path | None,
+    *,
+    offset: int,
+) -> tuple[int, int]:
+    if transcript_path is None:
+        return offset, 0
+    count = 0
+    try:
+        if transcript_path.stat().st_size < offset:
+            offset = 0
+        with transcript_path.open("r", encoding="utf-8", errors="replace") as stream:
+            stream.seek(offset)
+            while True:
+                line_start = stream.tell()
+                line = stream.readline()
+                if not line:
+                    break
+                if not line.endswith("\n"):
+                    stream.seek(line_start)
+                    break
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                tool_calls = payload.get("tool_calls")
+                if isinstance(tool_calls, list):
+                    count += sum(1 for item in tool_calls if isinstance(item, dict))
+            new_offset = stream.tell()
+    except OSError:
+        return offset, 0
+    return new_offset, count
 
 
 def canonicalize_agy_model(model: str | None) -> str | None:
@@ -890,6 +1015,12 @@ def classify_failure(
         return AccountFailureKind.ACCOUNT_UNAVAILABLE
     if "disabled" in text:
         return AccountFailureKind.ACCOUNT_DISABLED
+    if "nexus_agy_non_progress:pre_effect_tool_thrash" in text:
+        return AccountFailureKind.PRE_EFFECT_TOOL_THRASH
+    if "nexus_agy_non_progress:provider_stream_no_progress" in text:
+        return AccountFailureKind.PROVIDER_STREAM_NO_PROGRESS
+    if "nexus_agy_non_progress:provider_stalled" in text:
+        return AccountFailureKind.PROVIDER_STALLED
     if returncode == 2:
         return AccountFailureKind.SYNTAX_OR_IMPLEMENTATION_ERROR
     return AccountFailureKind.UNKNOWN
@@ -1000,7 +1131,13 @@ def run_agy(
     effort: str | None,
     timeout: int,
     operation_hook: Any = None,
+    expect_coding_progress: bool = False,
+    provider_stall_seconds: float | None = None,
+    stream_no_progress_seconds: float | None = None,
+    pre_effect_max_seconds: float | None = None,
+    pre_effect_max_tool_events: int | None = None,
 ):
+    expect_coding_progress = bool(expect_coding_progress and mode == "accept-edits")
     agy = shutil.which("agy")
     if not agy:
         raise RuntimeError("AGY_BINARY_NOT_FOUND")
@@ -1039,6 +1176,15 @@ def run_agy(
                 operation_hook,
                 effect_observation_error=f"BASELINE_CAPTURE_FAILED:{type(exc).__name__}",
             )
+
+    provider_log_path = Path(attestation_log).expanduser() if attestation_log else None
+    if provider_log_path is not None:
+        try:
+            provider_log_offset = provider_log_path.stat().st_size
+        except OSError:
+            provider_log_offset = 0
+    else:
+        provider_log_offset = 0
 
     started = time.monotonic()
     process = subprocess.Popen(
@@ -1110,8 +1256,81 @@ def run_agy(
     quota_failure = threading.Event()
     first_stream_seen = threading.Event()
     first_effect_seen = threading.Event()
+    first_stream_monotonic: float | None = None
+    non_progress_failure: str | None = None
+    resolved_provider_stall_seconds = (
+        _provider_stall_seconds()
+        if provider_stall_seconds is None
+        else max(0.1, float(provider_stall_seconds))
+    )
+    resolved_stream_no_progress_seconds = (
+        _stream_no_progress_seconds()
+        if stream_no_progress_seconds is None
+        else max(0.1, float(stream_no_progress_seconds))
+    )
+    resolved_pre_effect_max_seconds = (
+        _pre_effect_max_seconds()
+        if pre_effect_max_seconds is None
+        else max(0.1, float(pre_effect_max_seconds))
+    )
+    resolved_pre_effect_max_tool_events = (
+        _pre_effect_max_tool_events()
+        if pre_effect_max_tool_events is None
+        else max(1, int(pre_effect_max_tool_events))
+    )
+    provider_session_id: str | None = None
+    transcript_path: Path | None = None
+    transcript_offset = 0
+    tool_event_count = 0
+    first_tool_activity_at: str | None = None
+    first_tool_monotonic: float | None = None
+    last_coding_progress_monotonic: float | None = None
+
+    def _record_tool_events(count: int, *, observed_at: float) -> None:
+        nonlocal tool_event_count, first_tool_activity_at, first_tool_monotonic
+        nonlocal last_coding_progress_monotonic
+        if count <= 0:
+            return
+        tool_event_count += count
+        last_coding_progress_monotonic = observed_at
+        now_iso = _agy_operation_journal.utc_now()
+        payload: dict[str, Any] = {
+            "tool_event_count": tool_event_count,
+            "last_progress_activity_at": now_iso,
+        }
+        if first_tool_activity_at is None:
+            first_tool_activity_at = now_iso
+            first_tool_monotonic = observed_at
+            payload["first_tool_activity_at"] = first_tool_activity_at
+        if operation_hook:
+            _operation_hook(operation_hook, **payload)
+
+    def _advance_provider_sessions(
+        sessions: list[str],
+        *,
+        observed_at: float,
+    ) -> None:
+        nonlocal provider_session_id, transcript_path, transcript_offset
+        for session_id in sessions:
+            if session_id == provider_session_id:
+                continue
+            if transcript_path is not None:
+                transcript_offset, prior_tool_events = _read_new_tool_activity(
+                    transcript_path,
+                    offset=transcript_offset,
+                )
+                _record_tool_events(prior_tool_events, observed_at=observed_at)
+            provider_session_id = session_id
+            transcript_path = _agy_transcript_path(env, provider_session_id)
+            transcript_offset = 0
+            if operation_hook:
+                _operation_hook(
+                    operation_hook,
+                    provider_session_id=provider_session_id,
+                )
 
     def _drain_stdout(stream, sink: list[str]) -> None:
+        nonlocal first_stream_monotonic
         if stream is None:
             return
         for line in iter(stream.readline, ""):
@@ -1120,6 +1339,7 @@ def run_agy(
                 continue
             now_iso = _agy_operation_journal.utc_now()
             if not first_stream_seen.is_set():
+                first_stream_monotonic = time.monotonic()
                 first_stream_seen.set()
                 if operation_hook:
                     _operation_hook(
@@ -1164,6 +1384,108 @@ def run_agy(
     try:
         while process.poll() is None:
             now = time.monotonic()
+
+            if provider_log_path is not None:
+                (
+                    provider_log_offset,
+                    stream_events,
+                    new_sessions,
+                ) = _read_new_provider_log_activity(
+                    provider_log_path,
+                    offset=provider_log_offset,
+                )
+                if new_sessions:
+                    _advance_provider_sessions(new_sessions, observed_at=now)
+                if stream_events:
+                    now_iso = _agy_operation_journal.utc_now()
+                    if first_stream_monotonic is None:
+                        first_stream_monotonic = now
+                    if not first_stream_seen.is_set():
+                        first_stream_seen.set()
+                        if operation_hook:
+                            _operation_hook(
+                                operation_hook,
+                                first_stream_activity_at=now_iso,
+                                provider_stream_last_activity_at=now_iso,
+                            )
+                    elif operation_hook:
+                        _operation_hook(
+                            operation_hook,
+                            provider_stream_last_activity_at=now_iso,
+                        )
+
+            if transcript_path is not None:
+                transcript_offset, new_tool_events = _read_new_tool_activity(
+                    transcript_path,
+                    offset=transcript_offset,
+                )
+                _record_tool_events(new_tool_events, observed_at=now)
+
+            if expect_coding_progress and not first_effect_seen.is_set():
+                if (
+                    not first_stream_seen.is_set()
+                    and tool_event_count == 0
+                    and now - started >= resolved_provider_stall_seconds
+                ):
+                    non_progress_failure = "PROVIDER_STALLED"
+                elif first_tool_monotonic is not None and (
+                    now - first_tool_monotonic >= resolved_pre_effect_max_seconds
+                    or tool_event_count >= resolved_pre_effect_max_tool_events
+                ):
+                    non_progress_failure = "PRE_EFFECT_TOOL_THRASH"
+                elif first_stream_monotonic is not None:
+                    progress_anchor = max(
+                        first_stream_monotonic,
+                        (
+                            last_coding_progress_monotonic
+                            if last_coding_progress_monotonic is not None
+                            else first_stream_monotonic
+                        ),
+                    )
+                    if now - progress_anchor >= resolved_stream_no_progress_seconds:
+                        non_progress_failure = "PROVIDER_STREAM_NO_PROGRESS"
+                if non_progress_failure is not None:
+                    # Source mutation is the strongest positive progress witness.
+                    # Recheck immediately at the watchdog boundary so an effect
+                    # that lands between regular scans is not misclassified.
+                    if baseline_worktree_state is not None:
+                        try:
+                            changed = direct_operation_journal.observed_changed_paths_since(
+                                cwd, baseline_worktree_state
+                            )
+                        except Exception as exc:
+                            changed = None
+                            baseline_worktree_state = None
+                            if operation_hook:
+                                _operation_hook(
+                                    operation_hook,
+                                    effect_observation_error=(
+                                        f"WATCHDOG_EFFECT_OBSERVATION_FAILED:{type(exc).__name__}"
+                                    ),
+                                )
+                        if changed:
+                            first_effect_seen.set()
+                            non_progress_failure = None
+                            now_effect_iso = _agy_operation_journal.utc_now()
+                            effect_wall_ms = int((time.monotonic() - started) * 1000)
+                            last_coding_progress_monotonic = now
+                            if operation_hook:
+                                _operation_hook(
+                                    operation_hook,
+                                    first_effect_at=now_effect_iso,
+                                    time_to_first_effect_ms=effect_wall_ms,
+                                    last_progress_activity_at=now_effect_iso,
+                                )
+                    if non_progress_failure is not None:
+                        if provider_pgid is not None:
+                            _agy_operation_journal._stop_process_group(
+                                provider_pgid,
+                                grace_seconds=2.0,
+                            )
+                        else:
+                            process.terminate()
+                        break
+
             if (
                 baseline_worktree_state is not None
                 and not first_effect_seen.is_set()
@@ -1190,6 +1512,7 @@ def run_agy(
                                 operation_hook,
                                 first_effect_at=now_effect_iso,
                                 time_to_first_effect_ms=effect_wall_ms,
+                                last_progress_activity_at=now_effect_iso,
                             )
                 except Exception as exc:
                     baseline_worktree_state = None
@@ -1259,6 +1582,46 @@ def run_agy(
         "[agy] print timeout after" in stderr_lower and "turn in progress" in stderr_lower
     )
 
+    # Final provider-metadata readback closes the same short-lived race as the
+    # final source-delta readback below. A provider may write its stream/session
+    # or transcript after the last loop poll and exit immediately afterward.
+    (
+        provider_log_offset,
+        final_stream_events,
+        final_sessions,
+    ) = _read_new_provider_log_activity(
+        provider_log_path,
+        offset=provider_log_offset,
+    )
+    if final_sessions:
+        _advance_provider_sessions(
+            final_sessions,
+            observed_at=time.monotonic(),
+        )
+    if final_stream_events:
+        now_iso = _agy_operation_journal.utc_now()
+        if first_stream_monotonic is None:
+            first_stream_monotonic = time.monotonic()
+        if not first_stream_seen.is_set():
+            first_stream_seen.set()
+            if operation_hook:
+                _operation_hook(
+                    operation_hook,
+                    first_stream_activity_at=now_iso,
+                    provider_stream_last_activity_at=now_iso,
+                )
+        elif operation_hook:
+            _operation_hook(
+                operation_hook,
+                provider_stream_last_activity_at=now_iso,
+            )
+    if transcript_path is not None:
+        transcript_offset, final_tool_events = _read_new_tool_activity(
+            transcript_path,
+            offset=transcript_offset,
+        )
+        _record_tool_events(final_tool_events, observed_at=time.monotonic())
+
     # A short-lived provider can mutate the worktree and exit between polling
     # intervals. Perform one final source-delta readback before projecting EXITED
     # so time-to-first-effect does not silently miss that physical change.
@@ -1283,6 +1646,7 @@ def run_agy(
                         operation_hook,
                         first_effect_at=now_effect_iso,
                         time_to_first_effect_ms=effect_wall_ms,
+                        last_progress_activity_at=now_effect_iso,
                     )
         except Exception as exc:
             baseline_worktree_state = None
@@ -1300,6 +1664,15 @@ def run_agy(
             provider_process_state="EXITED",
         )
 
+    if non_progress_failure is not None:
+        err += f"\nNEXUS_AGY_NON_PROGRESS:{non_progress_failure}\n"
+        return (
+            process.returncode if process.returncode not in (None, 0) else 1,
+            out,
+            err,
+            False,
+            wall_ms,
+        )
     if timed_out:
         return None, out, err, True, wall_ms
     if quota_terminated:
@@ -2366,6 +2739,10 @@ def dispatch_run(
     run_agy_fn: Any = None,
     operation_hook: Any = None,
     admission: dict[str, Any] | None = None,
+    provider_stall_seconds: float | None = None,
+    stream_no_progress_seconds: float | None = None,
+    pre_effect_max_seconds: float | None = None,
+    pre_effect_max_tool_events: int | None = None,
 ) -> int:
     user_allow = list(allow or [])
     try:
@@ -2776,6 +3153,33 @@ def dispatch_run(
                     hasattr(runner, "__code__") and "operation_hook" in runner.__code__.co_varnames
                 ):
                     runner_kwargs["operation_hook"] = _inner_operation_hook
+                if runner is run_agy or (
+                    hasattr(runner, "__code__")
+                    and "expect_coding_progress" in runner.__code__.co_varnames
+                ):
+                    runner_kwargs["expect_coding_progress"] = bool(
+                        mode == "accept-edits" and write_paths
+                    )
+                if runner is run_agy or (
+                    hasattr(runner, "__code__")
+                    and "provider_stall_seconds" in runner.__code__.co_varnames
+                ):
+                    runner_kwargs["provider_stall_seconds"] = provider_stall_seconds
+                if runner is run_agy or (
+                    hasattr(runner, "__code__")
+                    and "stream_no_progress_seconds" in runner.__code__.co_varnames
+                ):
+                    runner_kwargs["stream_no_progress_seconds"] = stream_no_progress_seconds
+                if runner is run_agy or (
+                    hasattr(runner, "__code__")
+                    and "pre_effect_max_seconds" in runner.__code__.co_varnames
+                ):
+                    runner_kwargs["pre_effect_max_seconds"] = pre_effect_max_seconds
+                if runner is run_agy or (
+                    hasattr(runner, "__code__")
+                    and "pre_effect_max_tool_events" in runner.__code__.co_varnames
+                ):
+                    runner_kwargs["pre_effect_max_tool_events"] = pre_effect_max_tool_events
                 code, out, err, timed_out, wall_ms = runner(**runner_kwargs)
             finally:
                 restore_temp_permissions(permission_token)
@@ -3123,10 +3527,35 @@ def _spawn_background_operation(
     temp_command_permissions: bool,
     operation_root: Path,
     write_paths: list[str] | None = None,
+    provider_stall_seconds: float | None = None,
+    stream_no_progress_seconds: float | None = None,
+    pre_effect_max_seconds: float | None = None,
+    pre_effect_max_tool_events: int | None = None,
 ) -> dict[str, Any]:
     journal = AgyOperationJournal(operation_root)
     operation_id = new_operation_id()
     attempt_id = new_attempt_id()
+    coding_progress_required = bool(mode == "accept-edits" and write_paths)
+    resolved_provider_stall_seconds = (
+        _provider_stall_seconds()
+        if provider_stall_seconds is None
+        else max(0.1, float(provider_stall_seconds))
+    )
+    resolved_stream_no_progress_seconds = (
+        _stream_no_progress_seconds()
+        if stream_no_progress_seconds is None
+        else max(0.1, float(stream_no_progress_seconds))
+    )
+    resolved_pre_effect_max_seconds = (
+        _pre_effect_max_seconds()
+        if pre_effect_max_seconds is None
+        else max(0.1, float(pre_effect_max_seconds))
+    )
+    resolved_pre_effect_max_tool_events = (
+        _pre_effect_max_tool_events()
+        if pre_effect_max_tool_events is None
+        else max(1, int(pre_effect_max_tool_events))
+    )
     journal.create(
         operation_id=operation_id,
         attempt_id=attempt_id,
@@ -3136,6 +3565,15 @@ def _spawn_background_operation(
         effort=effort,
         prompt_sha256=hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
         runtime_revision=_runtime_revision(),
+        initial_fields={
+            "liveness_policy": {
+                "coding_progress_required": coding_progress_required,
+                "provider_stall_seconds": resolved_provider_stall_seconds,
+                "stream_no_progress_seconds": resolved_stream_no_progress_seconds,
+                "pre_effect_max_seconds": resolved_pre_effect_max_seconds,
+                "pre_effect_max_tool_events": resolved_pre_effect_max_tool_events,
+            }
+        },
     )
     prompt_path = journal.prompt_path(operation_id)
     _write_private_prompt(prompt_path, prompt)
@@ -3161,6 +3599,14 @@ def _spawn_background_operation(
         str(max_calls),
         "--pool-wait-timeout",
         str(pool_wait_timeout),
+        "--provider-stall-seconds",
+        str(resolved_provider_stall_seconds),
+        "--stream-no-progress-seconds",
+        str(resolved_stream_no_progress_seconds),
+        "--pre-effect-max-seconds",
+        str(resolved_pre_effect_max_seconds),
+        "--pre-effect-max-tool-events",
+        str(resolved_pre_effect_max_tool_events),
     ]
     if model:
         argv += ["--model", model]
@@ -3259,8 +3705,11 @@ def _supervisor_terminal_guard(func):
                 "provider_started_at": record.get("provider_started_at"),
                 "provider_stream_last_activity_at": record.get("provider_stream_last_activity_at"),
                 "first_stream_activity_at": record.get("first_stream_activity_at"),
+                "first_tool_activity_at": record.get("first_tool_activity_at"),
+                "last_progress_activity_at": record.get("last_progress_activity_at"),
                 "first_effect_at": record.get("first_effect_at"),
                 "time_to_first_effect_ms": record.get("time_to_first_effect_ms"),
+                "tool_event_count": int(record.get("tool_event_count") or 0),
             }
 
             if alive_after:
@@ -3353,6 +3802,10 @@ def _run_background_operation(
     operation_root: Path,
     write_paths: list[str] | None = None,
     heartbeat_interval: float = 15.0,
+    provider_stall_seconds: float | None = None,
+    stream_no_progress_seconds: float | None = None,
+    pre_effect_max_seconds: float | None = None,
+    pre_effect_max_tool_events: int | None = None,
 ) -> int:
     journal = AgyOperationJournal(operation_root)
     prompt_path = Path(prompt_file)
@@ -3382,8 +3835,12 @@ def _run_background_operation(
         "provider_started_at": None,
         "provider_stream_last_activity_at": None,
         "first_stream_activity_at": None,
+        "first_tool_activity_at": None,
+        "last_progress_activity_at": None,
         "first_effect_at": None,
         "time_to_first_effect_ms": None,
+        "tool_event_count": 0,
+        "provider_session_id": None,
         "quota_preflight_progress": None,
         "permission_profile_sha256": None,
         "permission_profile_kind": None,
@@ -3406,8 +3863,12 @@ def _run_background_operation(
             provider_started_at=snapshot.get("provider_started_at"),
             provider_stream_last_activity_at=snapshot.get("provider_stream_last_activity_at"),
             first_stream_activity_at=snapshot.get("first_stream_activity_at"),
+            first_tool_activity_at=snapshot.get("first_tool_activity_at"),
+            last_progress_activity_at=snapshot.get("last_progress_activity_at"),
             first_effect_at=snapshot.get("first_effect_at"),
             time_to_first_effect_ms=snapshot.get("time_to_first_effect_ms"),
+            tool_event_count=int(snapshot.get("tool_event_count") or 0),
+            provider_session_id=snapshot.get("provider_session_id"),
             quota_preflight_progress=snapshot.get("quota_preflight_progress"),
             permission_profile_sha256=snapshot.get("permission_profile_sha256"),
             permission_profile_kind=snapshot.get("permission_profile_kind"),
@@ -3455,6 +3916,10 @@ def _run_background_operation(
             write_paths=write_paths,
             temp_command_permissions=temp_command_permissions,
             operation_hook=on_event,
+            provider_stall_seconds=provider_stall_seconds,
+            stream_no_progress_seconds=stream_no_progress_seconds,
+            pre_effect_max_seconds=pre_effect_max_seconds,
+            pre_effect_max_tool_events=pre_effect_max_tool_events,
         )
         with state_lock:
             snapshot = dict(state)
@@ -3485,11 +3950,14 @@ def _run_background_operation(
                 provider_started_at=snapshot.get("provider_started_at"),
                 provider_stream_last_activity_at=snapshot.get("provider_stream_last_activity_at"),
                 first_stream_activity_at=snapshot.get("first_stream_activity_at"),
+                first_tool_activity_at=snapshot.get("first_tool_activity_at"),
+                last_progress_activity_at=snapshot.get("last_progress_activity_at"),
                 first_effect_at=snapshot.get("first_effect_at"),
                 time_to_first_effect_ms=snapshot.get("time_to_first_effect_ms"),
                 permission_profile_sha256=snapshot.get("permission_profile_sha256"),
                 permission_profile_kind=snapshot.get("permission_profile_kind"),
                 effective_permissions=snapshot.get("effective_permissions"),
+                tool_event_count=int(snapshot.get("tool_event_count") or 0),
                 reconciliation={
                     "at": _agy_operation_journal.utc_now(),
                     "result": "PROVIDER_PROCESS_STILL_RUNNING_AFTER_DISPATCH",
@@ -3547,12 +4015,15 @@ def _run_background_operation(
             provider_started_at=snapshot.get("provider_started_at"),
             provider_stream_last_activity_at=snapshot.get("provider_stream_last_activity_at"),
             first_stream_activity_at=snapshot.get("first_stream_activity_at"),
+            first_tool_activity_at=snapshot.get("first_tool_activity_at"),
+            last_progress_activity_at=snapshot.get("last_progress_activity_at"),
             first_effect_at=snapshot.get("first_effect_at"),
             time_to_first_effect_ms=snapshot.get("time_to_first_effect_ms"),
             quota_preflight_progress=snapshot.get("quota_preflight_progress"),
             permission_profile_sha256=snapshot.get("permission_profile_sha256"),
             permission_profile_kind=snapshot.get("permission_profile_kind"),
             effective_permissions=snapshot.get("effective_permissions"),
+            tool_event_count=int(snapshot.get("tool_event_count") or 0),
             **attestation,
         )
         if (
@@ -3778,6 +4249,30 @@ def main(argv: list[str] | None = None) -> int:
         help="Timeout in seconds to wait for an available account slot when the pool is busy",
     )
     ap.add_argument(
+        "--provider-stall-seconds",
+        type=float,
+        default=_provider_stall_seconds(),
+        help="Coding-task provider-start deadline before classifying no provider progress",
+    )
+    ap.add_argument(
+        "--stream-no-progress-seconds",
+        type=float,
+        default=_stream_no_progress_seconds(),
+        help="Coding-task deadline since last tool/source progress after provider stream begins",
+    )
+    ap.add_argument(
+        "--pre-effect-max-seconds",
+        type=float,
+        default=_pre_effect_max_seconds(),
+        help="Mutation-capable task deadline from first tool activity to first source effect",
+    )
+    ap.add_argument(
+        "--pre-effect-max-tool-events",
+        type=int,
+        default=_pre_effect_max_tool_events(),
+        help="Mutation-capable task tool-event budget before first source effect",
+    )
+    ap.add_argument(
         "--background",
         action="store_true",
         help="Start a durable background operation and return its operation_id immediately",
@@ -3873,6 +4368,10 @@ def main(argv: list[str] | None = None) -> int:
             write_paths=args.write_path,
             temp_command_permissions=args.temp_command_permissions,
             operation_root=operation_root,
+            provider_stall_seconds=args.provider_stall_seconds,
+            stream_no_progress_seconds=args.stream_no_progress_seconds,
+            pre_effect_max_seconds=args.pre_effect_max_seconds,
+            pre_effect_max_tool_events=args.pre_effect_max_tool_events,
         )
 
     if args.background:
@@ -3890,6 +4389,10 @@ def main(argv: list[str] | None = None) -> int:
             write_paths=args.write_path,
             temp_command_permissions=args.temp_command_permissions,
             operation_root=operation_root,
+            provider_stall_seconds=args.provider_stall_seconds,
+            stream_no_progress_seconds=args.stream_no_progress_seconds,
+            pre_effect_max_seconds=args.pre_effect_max_seconds,
+            pre_effect_max_tool_events=args.pre_effect_max_tool_events,
         )
         _print_operation(record)
         return 0
@@ -3907,6 +4410,10 @@ def main(argv: list[str] | None = None) -> int:
         deny=args.deny,
         write_paths=args.write_path,
         temp_command_permissions=args.temp_command_permissions,
+        provider_stall_seconds=args.provider_stall_seconds,
+        stream_no_progress_seconds=args.stream_no_progress_seconds,
+        pre_effect_max_seconds=args.pre_effect_max_seconds,
+        pre_effect_max_tool_events=args.pre_effect_max_tool_events,
     )
 
 

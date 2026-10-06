@@ -2087,7 +2087,7 @@ def test_assist_wait_timeout_does_not_cancel_and_explicit_cancel_cleans_workspac
     assert not Path(receipt["workspace_root"]).exists()
 
 
-def test_provider_preflight_defers_model_probe_without_sync_execution(monkeypatch):
+def test_provider_preflight_defers_model_probe_without_sync_execution(monkeypatch, tmp_path):
     monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
 
     def fake_run(command, **kwargs):
@@ -2096,7 +2096,9 @@ def test_provider_preflight_defers_model_probe_without_sync_execution(monkeypatc
         return SimpleNamespace(returncode=0, stdout="cline 1.2.3\n", stderr="")
 
     monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.run", fake_run)
-    gateway = UnifiedMCPGateway(service=FakeService())
+    service = FakeService()
+    service.state_dir = tmp_path
+    gateway = UnifiedMCPGateway(service=service)
     response = gateway.handle({"jsonrpc": "2.0", "id": 703, "method": "tools/call", "params": {"name": "nexus_provider_preflight", "arguments": {"provider": "cline", "model": "glm-5.2", "probe": True}}})
     payload = response["result"]["structuredContent"]
     assert payload["status"] == "VERSION_VERIFIED"
@@ -2169,6 +2171,78 @@ def test_codex_jsonl_agent_message_decoder_extracts_payload():
         {"probe": "ok"},
         "codex_jsonl_sequence",
     )
+
+
+def test_agy_model_probe_decoder_unwraps_success_response_envelope():
+    raw = json.dumps(
+        {
+            "conversation_id": "conv-1",
+            "status": "SUCCESS",
+            "response": json.dumps({"patch": "NO_PATCH"}),
+            "duration_seconds": 21.05,
+            "num_turns": 1,
+            "usage": {"input_tokens": 10, "output_tokens": 5, "thinking_tokens": 3},
+        }
+    )
+    assert UnifiedMCPGateway._decode_model_probe_payload(raw, "agy", "Gemini 3.8 Flash (Medium)") == (
+        {"patch": "NO_PATCH"},
+        "agy_json_envelope",
+    )
+
+
+def test_agy_model_probe_decoder_unwraps_single_json_fence_inside_success_response():
+    raw = json.dumps(
+        {
+            "conversation_id": "agy-conversation-fenced",
+            "status": "SUCCESS",
+            "response": "```json\n" + json.dumps({"patch": "NO_PATCH"}) + "\n```\n",
+        }
+    )
+    assert UnifiedMCPGateway._decode_model_probe_payload(
+        raw,
+        "agy",
+        "Gemini 3.1 Pro (High)",
+    ) == ({"patch": "NO_PATCH"}, "agy_json_envelope")
+
+
+def test_agy_model_probe_decoder_rejects_prose_or_non_json_fence():
+    responses = (
+        "prefix\n```json\n" + json.dumps({"patch": "NO_PATCH"}) + "\n```",
+        "```json\n" + json.dumps({"patch": "NO_PATCH"}) + "\n```\nsuffix",
+        "```text\n" + json.dumps({"patch": "NO_PATCH"}) + "\n```",
+        "```json\n" + json.dumps({"patch": "NO_PATCH"}),
+    )
+    for response in responses:
+        raw = json.dumps(
+            {
+                "conversation_id": "agy-conversation-invalid-fence",
+                "status": "SUCCESS",
+                "response": response,
+            }
+        )
+        assert UnifiedMCPGateway._decode_model_probe_payload(
+            raw,
+            "agy",
+            "Gemini 3.1 Pro (High)",
+        ) == (None, None)
+
+
+def test_agy_model_probe_decoder_fails_closed_on_invalid_envelopes():
+    assert UnifiedMCPGateway._decode_model_probe_payload(
+        json.dumps({"status": "SUCCESS", "response": ""}),
+        "agy",
+        "Gemini 3.8 Flash (Medium)",
+    ) == (None, None)
+    assert UnifiedMCPGateway._decode_model_probe_payload(
+        json.dumps({"status": "SUCCESS", "response": "not-json"}),
+        "agy",
+        "Gemini 3.8 Flash (Medium)",
+    ) == (None, None)
+    assert UnifiedMCPGateway._decode_model_probe_payload(
+        json.dumps({"status": "ERROR", "response": json.dumps({"patch": "bad"})}),
+        "agy",
+        "Gemini 3.8 Flash (Medium)",
+    ) == (None, None)
 
 
 def test_model_probe_transport_provenance_rejects_mismatch_and_partial_events():
@@ -2464,6 +2538,213 @@ def test_model_probe_isolated_receipt_validates_schema_and_cleans_workspace(monk
     assert payload["filesystem_delta"] == {"created": [], "removed": [], "changed": []}
     assert payload["schema_validation_level"] == "bounded_subset"
     assert payload["tool_policy_enforcement"] == "cline_plan_auto_approve_false_allowlist_not_enforced"
+
+
+def test_agy_model_probe_uses_request_scoped_lease_env_and_releases(monkeypatch, tmp_path):
+    captured = {}
+
+    class FakeClaim:
+        account_alias_hash = "abc123def456"
+        lease_id_hash = "fed654cba321"
+
+        def __init__(self):
+            self.lease = SimpleNamespace(
+                execution_env={"HOME": "/isolated/agy-account", "PATH": "/usr/bin"}
+            )
+            self.release_count = 0
+
+        def release(self):
+            self.release_count += 1
+
+    claim = FakeClaim()
+
+    class FakeCoordinator:
+        def __init__(self, manager):
+            captured["manager"] = manager
+
+        def acquire_claim(self, *, consumer_id, wait_timeout, model_family):
+            captured["consumer_id"] = consumer_id
+            captured["wait_timeout"] = wait_timeout
+            captured["model_family"] = model_family
+            return claim
+
+    class FakePopen:
+        pid = 55101
+
+        def __init__(self, command, *, stdout, stderr, env=None, **kwargs):
+            captured["env"] = dict(env or {})
+            self._returncode = 0
+            stdout.write(
+                json.dumps(
+                    {
+                        "conversation_id": "lease-probe",
+                        "status": "SUCCESS",
+                        "response": json.dumps({"probe": "ok"}),
+                    }
+                )
+            )
+            stdout.flush()
+
+        def poll(self):
+            return self._returncode
+
+    service = FakeService()
+    service.state_dir = tmp_path
+    gateway = UnifiedMCPGateway(service=service)
+    monkeypatch.setattr(gateway, "_provider_executable", lambda provider: ({"default_model": "gemini-3.7-flash-medium"}, "/bin/echo"))
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.get_account_pool_manager", lambda: "pool-manager")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.CrossProcessLeaseCoordinator", FakeCoordinator)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", FakePopen)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    _patch_probe_version(monkeypatch)
+
+    submitted = gateway._model_probe_submit(
+        {
+            "task_id": "agy-lease-probe",
+            "provider": "agy",
+            "model": "gemini-3.7-flash-medium",
+            "prompt": "Return probe JSON",
+            "output_schema": {"type": "object", "required": ["probe"]},
+        }
+    )
+
+    assert submitted["status"] == "RUNNING"
+    assert submitted["account_alias_hash"] == "abc123def456"
+    assert submitted["account_lease_id_hash"] == "fed654cba321"
+    assert submitted["account_lease_released"] is False
+    assert captured["consumer_id"] == "model-probe:agy-lease-probe"
+    assert captured["wait_timeout"] == 0.0
+    assert captured["model_family"] == "gemini"
+    assert captured["env"]["HOME"] == "/isolated/agy-account"
+
+    result = gateway._assist_refresh("agy-lease-probe")
+    assert result["status"] == "COMPLETED"
+    assert result["model_response_verified"] is True
+    assert result["account_lease_released"] is True
+    assert result["account_lease_cleanup_status"] == "RELEASED"
+    assert claim.release_count == 1
+    assert result["filesystem_delta"] == {"created": [], "removed": [], "changed": []}
+
+
+def test_agy_model_probe_launch_failure_releases_request_scoped_lease(monkeypatch, tmp_path):
+    class FakeClaim:
+        account_alias_hash = "abc123def456"
+        lease_id_hash = "fed654cba321"
+
+        def __init__(self):
+            self.lease = SimpleNamespace(execution_env={"HOME": "/isolated/agy-account"})
+            self.release_count = 0
+
+        def release(self):
+            self.release_count += 1
+
+    claim = FakeClaim()
+
+    class FakeCoordinator:
+        def __init__(self, manager):
+            pass
+
+        def acquire_claim(self, **kwargs):
+            return claim
+
+    service = FakeService()
+    service.state_dir = tmp_path
+    gateway = UnifiedMCPGateway(service=service)
+    monkeypatch.setattr(gateway, "_provider_executable", lambda provider: ({"default_model": "gemini-3.7-flash-medium"}, "/bin/echo"))
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.get_account_pool_manager", lambda: "pool-manager")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.CrossProcessLeaseCoordinator", FakeCoordinator)
+    monkeypatch.setattr(
+        "nexus.orchestrator.unified_mcp_gateway.subprocess.Popen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("launch failed")),
+    )
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    _patch_probe_version(monkeypatch)
+
+    result = gateway._model_probe_submit(
+        {
+            "task_id": "agy-lease-launch-failure",
+            "provider": "agy",
+            "model": "gemini-3.7-flash-medium",
+            "prompt": "Return probe JSON",
+            "output_schema": {"type": "object", "required": ["probe"]},
+        }
+    )
+
+    assert result["status"] == "FAILED"
+    assert result["blocker"] == "ASSIST_PROVIDER_FAILED"
+    assert result["account_lease_released"] is True
+    assert result["account_lease_cleanup_status"] == "RELEASED"
+    assert claim.release_count == 1
+    assert gateway._assist_account_claims == {}
+
+
+def test_agy_model_probe_missing_live_claim_requires_reconciliation(monkeypatch, tmp_path):
+    class FakeClaim:
+        account_alias_hash = "abc123def456"
+        lease_id_hash = "fed654cba321"
+
+        def __init__(self):
+            self.lease = SimpleNamespace(execution_env={"HOME": "/isolated/agy-account"})
+
+        def release(self):
+            raise AssertionError("missing in-memory claim must not fabricate release")
+
+    class FakeCoordinator:
+        def __init__(self, manager):
+            pass
+
+        def acquire_claim(self, **kwargs):
+            return FakeClaim()
+
+    class FakePopen:
+        pid = 55102
+
+        def __init__(self, command, *, stdout, stderr, **kwargs):
+            self._returncode = 0
+            stdout.write(
+                json.dumps(
+                    {
+                        "conversation_id": "lost-claim-probe",
+                        "status": "SUCCESS",
+                        "response": json.dumps({"probe": "ok"}),
+                    }
+                )
+            )
+            stdout.flush()
+
+        def poll(self):
+            return self._returncode
+
+    service = FakeService()
+    service.state_dir = tmp_path
+    gateway = UnifiedMCPGateway(service=service)
+    monkeypatch.setattr(gateway, "_provider_executable", lambda provider: ({"default_model": "gemini-3.7-flash-medium"}, "/bin/echo"))
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.get_account_pool_manager", lambda: "pool-manager")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.CrossProcessLeaseCoordinator", FakeCoordinator)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", FakePopen)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    _patch_probe_version(monkeypatch)
+
+    gateway._model_probe_submit(
+        {
+            "task_id": "agy-lost-claim",
+            "provider": "agy",
+            "model": "gemini-3.7-flash-medium",
+            "prompt": "Return probe JSON",
+            "output_schema": {"type": "object", "required": ["probe"]},
+        }
+    )
+    gateway._assist_account_claims.clear()
+
+    result = gateway._assist_refresh("agy-lost-claim")
+    assert result["status"] == "UNKNOWN_REQUIRES_RECONCILE"
+    assert result["blocker"] == "ASSIST_ACCOUNT_LEASE_RECONCILIATION_REQUIRED"
+    assert result["reconciliation_required"] is True
+    assert result["model_response_verified"] is False
+    assert result["account_lease_released"] is False
+    assert result["account_lease_cleanup_status"] == "RECONCILIATION_REQUIRED"
+    assert result.get("probe_evidence_hash") is None
+    assert not list((tmp_path / "assisted_provider_jobs" / "probe_evidence").glob("*.json"))
 
 
 def test_model_probe_feedback_loop_preflight_then_worker_candidate_once(monkeypatch, tmp_path):
@@ -2926,6 +3207,106 @@ def test_model_probe_wrong_payload_fails_schema_gate(monkeypatch, tmp_path):
     assert payload["schema_error"].startswith("output_schema_missing:")
 
 
+def test_agy_model_probe_print_timeout_is_transport_blocker(monkeypatch, tmp_path):
+    captured = {}
+
+    class FakePopen:
+        pid = 54005
+
+        def __init__(self, command, *, stdout, stderr, **kwargs):
+            captured["command"] = list(command)
+            self._returncode = 0
+            stdout.write(
+                json.dumps(
+                    {
+                        "conversation_id": "conv-timeout",
+                        "status": "SUCCESS",
+                        "response": "",
+                        "duration_seconds": 0,
+                        "num_turns": 1,
+                        "usage": {
+                            "input_tokens": 0,
+                            "output_tokens": 0,
+                            "thinking_tokens": 0,
+                            "cache_read_tokens": 0,
+                            "total_tokens": 0,
+                        },
+                    }
+                )
+                + "\n"
+            )
+            stderr.write(
+                "[agy] print timeout after 300s with turn in progress; returning partial output\n"
+            )
+            stdout.flush()
+            stderr.flush()
+
+        def poll(self):
+            return self._returncode
+
+    service = FakeService()
+    service.state_dir = tmp_path
+    monkeypatch.setenv("NEXUS_AGY_BIN", "/bin/echo")
+    monkeypatch.setattr(
+        "nexus.orchestrator.unified_mcp_gateway.subprocess.Popen",
+        FakePopen,
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.unified_mcp_gateway._git",
+        lambda *args, **kwargs: "a" * 40,
+    )
+    _patch_probe_version(monkeypatch)
+    gateway = UnifiedMCPGateway(service=service)
+    claim = SimpleNamespace(
+        account_alias_hash="abc123def456",
+        lease_id_hash="fed654cba321",
+        lease=SimpleNamespace(execution_env={"HOME": "/isolated/agy-timeout"}),
+        release=lambda: None,
+    )
+    monkeypatch.setattr(gateway, "_acquire_agy_probe_claim", lambda **kwargs: claim)
+
+    gateway.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 713,
+            "method": "tools/call",
+            "params": {
+                "name": "nexus_model_probe",
+                "arguments": {
+                    "task_id": "probe-agy-print-timeout",
+                    "provider": "agy",
+                    "model": "gemini-3.6-flash-medium",
+                    "prompt": "probe",
+                    "output_schema": {
+                        "type": "object",
+                        "required": ["patch"],
+                        "properties": {"patch": {"type": "string"}},
+                    },
+                },
+            },
+        }
+    )
+    assert captured["command"][captured["command"].index("--print-timeout") + 1] == "300s"
+
+    result = gateway.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 714,
+            "method": "tools/call",
+            "params": {
+                "name": "nexus_model_probe_result",
+                "arguments": {"task_id": "probe-agy-print-timeout"},
+            },
+        }
+    )
+    payload = result["result"]["structuredContent"]
+    assert payload["status"] == "FAILED"
+    assert payload["blocker"] == "ASSIST_PROVIDER_PRINT_TIMEOUT"
+    assert payload["schema_error"] == ""
+    assert payload["model_response_verified"] is False
+    assert payload["next_action"] == "nexus_task_retry"
+
+
 def test_agy_high_model_assist_command_omits_contradictory_effort_low():
     gateway = UnifiedMCPGateway(service=FakeService())
     command = gateway._assist_command(executable="/usr/local/bin/agy", provider="agy", model="gemini-3.6-flash-high", prompt="probe")
@@ -2933,7 +3314,7 @@ def test_agy_high_model_assist_command_omits_contradictory_effort_low():
     assert "--mode" in command and command[command.index("--mode") + 1] == "plan"
     assert command[command.index("--model") + 1] == "gemini-3.6-flash-high"
     assert "--effort" not in command
-    assert "--print-timeout" in command
+    assert command[command.index("--print-timeout") + 1] == "25s"
 
 
 def test_agy_medium_model_not_overridden_by_hardcoded_low():

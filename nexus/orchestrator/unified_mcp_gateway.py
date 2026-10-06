@@ -115,6 +115,12 @@ from nexus.orchestrator.standing_grant_store import (
     switch_task_card_authority,
     write_keyed_standing_grant_receipt,
 )
+from nexus.services.agy_account_pool import (
+    AgyAccountPoolBusyError,
+    AgyAccountPoolExhaustedError,
+    CrossProcessLeaseCoordinator,
+    get_account_pool_manager,
+)
 from nexus.services.model_capability_lineage import (
     CHANGE_KIND_VALUES,
     CalibrationPlanner,
@@ -188,6 +194,7 @@ PERMISSION_ENFORCEMENT_SHA256_AT_START: str
 # compiler so a hard-coded default can never override the model identity.
 AGY_EFFORT_TIERS: tuple[str, ...] = ("high", "medium", "low")
 AGY_PRINT_TIMEOUT = "25s"
+AGY_MODEL_PROBE_PRINT_TIMEOUT = "300s"
 
 
 def _agy_effort_tier(model: str) -> str:
@@ -206,6 +213,7 @@ def _compile_agy_command(
     prompt: str,
     json_schema: str = "",
     explicit_effort: str = "",
+    print_timeout: str = AGY_PRINT_TIMEOUT,
 ) -> list[str]:
     """Single source of truth for Agy CLI argument compilation.
 
@@ -238,7 +246,7 @@ def _compile_agy_command(
         raise GatewayInputError("agy model requires an explicit effort or an embedded tier suffix")
     if name:
         command.extend(["--model", name])
-    command.extend(["--print-timeout", AGY_PRINT_TIMEOUT, "--prompt", prompt])
+    command.extend(["--print-timeout", print_timeout, "--prompt", prompt])
     return command
 
 
@@ -1606,6 +1614,7 @@ class UnifiedMCPGateway:
         self._lineage_registry = ModelCapabilityLineageRegistry()
         self._calibration_planner = CalibrationPlanner(self._lineage_registry)
         self._assist_processes: dict[str, subprocess.Popen[str]] = {}
+        self._assist_account_claims: dict[str, Any] = {}
         self._assist_lock = threading.RLock()
         self._github_issue_observer = github_issue_observer or observe_github_issue
         self._mutation_repository_observer = (
@@ -2024,14 +2033,28 @@ class UnifiedMCPGateway:
         return value
 
     @staticmethod
-    def _assist_command(*, executable: str, provider: str, model: str, prompt: str, explicit_effort: str = "") -> list[str]:
+    def _assist_command(
+        *,
+        executable: str,
+        provider: str,
+        model: str,
+        prompt: str,
+        explicit_effort: str = "",
+        agy_print_timeout: str = AGY_PRINT_TIMEOUT,
+    ) -> list[str]:
         if provider == "cline":
             selected = model or "glm-5.2"
             if "/" not in selected:
                 selected = f"cline-pass/{selected}"
             return [executable, "--json", "--plan", "--auto-approve", "false", "--thinking", "none", "--timeout", str(CLINE_RUN_TIMEOUT_SECONDS), "--model", selected, prompt]
         if provider == "agy":
-            return _compile_agy_command(executable=executable, model=model, prompt=prompt, explicit_effort=explicit_effort)
+            return _compile_agy_command(
+                executable=executable,
+                model=model,
+                prompt=prompt,
+                explicit_effort=explicit_effort,
+                print_timeout=agy_print_timeout,
+            )
         if provider == "gemini":
             return [executable, "--skip-trust", "--approval-mode", "auto_edit", "-m", model, "-p", prompt, "--output-format", "json"]
         if provider == "opencode":
@@ -2085,9 +2108,19 @@ class UnifiedMCPGateway:
     def _decode_model_probe_payload(text: str, provider: str, resolved_model: str) -> tuple[Optional[dict[str, Any]], Optional[str]]:
         """Return only a model-originated JSON payload, never transport metadata."""
 
-        def decode_document(raw: str) -> Optional[dict[str, Any]]:
+        def decode_document(
+            raw: str, *, allow_single_json_fence: bool = False
+        ) -> Optional[dict[str, Any]]:
+            if not isinstance(raw, str):
+                return None
+            candidate = raw.strip()
+            if allow_single_json_fence:
+                if candidate.startswith("```json\n") and candidate.endswith("\n```"):
+                    candidate = candidate[len("```json\n") : -len("\n```")].strip()
+                elif candidate.startswith("```") or candidate.endswith("```"):
+                    return None
             try:
-                value = json.loads(raw.strip())
+                value = json.loads(candidate)
             except (json.JSONDecodeError, TypeError):
                 return None
             return value if isinstance(value, dict) else None
@@ -2104,7 +2137,18 @@ class UnifiedMCPGateway:
             "turn.started",
             "turn.completed",
         }
-        if provider not in {"cline", "codex"} and direct is not None and direct.get("type") not in transport_types:
+        if provider == "agy" and direct is not None:
+            if str(direct.get("status") or "").upper() != "SUCCESS":
+                return None, None
+            response = direct.get("response")
+            if isinstance(response, Mapping):
+                return dict(response), "agy_json_envelope"
+            if isinstance(response, str):
+                payload = decode_document(response, allow_single_json_fence=True)
+                if payload is not None:
+                    return payload, "agy_json_envelope"
+            return None, None
+        if provider not in {"cline", "codex", "agy"} and direct is not None and direct.get("type") not in transport_types:
             return direct, "direct_json_document"
 
         events: list[dict[str, Any]] = []
@@ -2324,21 +2368,33 @@ class UnifiedMCPGateway:
         stderr_path = Path(str(job.get("stderr_artifact") or ""))
         stdout = stdout_path.read_text(encoding="utf-8", errors="replace") if stdout_path.exists() else ""
         stderr = stderr_path.read_text(encoding="utf-8", errors="replace") if stderr_path.exists() else ""
+        provider = str(job.get("provider") or "")
+        stderr_lower = stderr.lower()
+        agy_print_timed_out = (
+            provider == "agy"
+            and "[agy] print timeout after" in stderr_lower
+            and "turn in progress" in stderr_lower
+        )
         is_model_probe = str(job.get("job_kind") or "assist") == "model_probe"
         response_provenance: Optional[str] = None
         if is_model_probe:
             parsed, response_provenance = self._decode_model_probe_payload(
                 stdout,
-                str(job.get("provider") or ""),
+                provider,
                 str(job.get("resolved_model") or ""),
             )
         else:
             parsed = self._decode_assist_payload(
                 stdout,
-                str(job.get("provider") or ""),
+                provider,
                 require_patch=True,
             )
-        schema_valid, schema_error = self._validate_output_schema(parsed, job.get("output_schema"))
+        if agy_print_timed_out:
+            parsed = None
+            response_provenance = None
+            schema_valid, schema_error = False, ""
+        else:
+            schema_valid, schema_error = self._validate_output_schema(parsed, job.get("output_schema"))
         started_at = job.get("started_at")
         provider_time_ms = 0
         if started_at:
@@ -2348,27 +2404,53 @@ class UnifiedMCPGateway:
                 provider_time_ms = 0
         model_response_verified = bool(
             is_model_probe
+            and not agy_print_timed_out
             and returncode == 0
             and parsed is not None
             and schema_valid
             and response_provenance
         )
-        provider_error_sha256 = hashlib.sha256(stderr.encode("utf-8")).hexdigest() if returncode != 0 and stderr else None
+        provider_error_sha256 = (
+            hashlib.sha256(stderr.encode("utf-8")).hexdigest()
+            if stderr and (returncode != 0 or agy_print_timed_out)
+            else None
+        )
+        if agy_print_timed_out:
+            status = "FAILED"
+            blocker = "ASSIST_PROVIDER_PRINT_TIMEOUT"
+            provider_error = "provider print timeout while turn remained in progress"
+        else:
+            status = "COMPLETED" if returncode == 0 and parsed is not None and schema_valid else "FAILED"
+            blocker = (
+                "ASSIST_PROVIDER_MALFORMED_OUTPUT"
+                if returncode == 0 and (parsed is None or not schema_valid)
+                else ("ASSIST_PROVIDER_FAILED" if returncode != 0 else None)
+            )
+            provider_error = "provider process failed" if returncode != 0 else ""
         job.update({
-            "status": "COMPLETED" if returncode == 0 and parsed is not None and schema_valid else "FAILED",
+            "status": status,
             "finished_at": self._utc_now(),
             "exit_code": returncode,
             "result": parsed,
             "model_response_verified": model_response_verified,
             "model_response_provenance": response_provenance,
-            "blocker": ("ASSIST_PROVIDER_MALFORMED_OUTPUT" if returncode == 0 and (parsed is None or not schema_valid) else ("ASSIST_PROVIDER_FAILED" if returncode != 0 else None)),
+            "blocker": blocker,
             "schema_error": schema_error,
             "schema_validation_level": "bounded_subset",
-            "provider_error": "provider process failed" if returncode != 0 else "",
+            "provider_error": provider_error,
             "provider_error_sha256": provider_error_sha256,
+            "provider_print_timeout": agy_print_timed_out,
             "provider_time_ms": provider_time_ms,
         })
         self._assist_record_stream_artifacts(job)
+        lease_cleanup_ok = self._release_assist_account_claim(task_id, job)
+        if is_model_probe and job.get("account_lease_id_hash") and not lease_cleanup_ok:
+            job.update({
+                "status": "UNKNOWN_REQUIRES_RECONCILE",
+                "blocker": "ASSIST_ACCOUNT_LEASE_RECONCILIATION_REQUIRED",
+                "reconciliation_required": True,
+                "model_response_verified": False,
+            })
         workspace_root = Path(str(job.get("workspace_root") or ""))
         if workspace_root.exists() and workspace_root != CANONICAL_SOURCE_ROOT:
             after = self._snapshot_workspace(workspace_root)
@@ -2477,6 +2559,10 @@ class UnifiedMCPGateway:
             "requested_tools_policy": job.get("requested_tools_policy", []),
             "tool_policy_enforcement": job.get("tool_policy_enforcement", "not_enforced"),
             "filesystem_delta": job.get("filesystem_delta", {"created": [], "removed": [], "changed": []}),
+            "account_alias_hash": job.get("account_alias_hash"),
+            "account_lease_id_hash": job.get("account_lease_id_hash"),
+            "account_lease_released": job.get("account_lease_released"),
+            "account_lease_cleanup_status": job.get("account_lease_cleanup_status"),
             "process_cleanup": job.get("process_cleanup", False),
             "process_killed": bool(job.get("process_killed", False)),
             "stream_flush_status": job.get("stream_flush_status", "not_observed"),
@@ -2727,6 +2813,15 @@ class UnifiedMCPGateway:
             self._cleanup_assist_workspace(job)
             with self._assist_lock:
                 self._assist_processes.pop(task_id, None)
+            if terminated:
+                self._release_assist_account_claim(task_id, job)
+            elif job.get("account_lease_id_hash"):
+                self._abandon_assist_account_claim(task_id, job)
+                job["status"] = "UNKNOWN_REQUIRES_RECONCILE"
+                job["blocker"] = "ASSIST_CANCEL_CLEANUP_INCOMPLETE"
+            self._assist_write(job)
+        elif job.get("account_lease_id_hash") and not job.get("account_lease_released"):
+            self._release_assist_account_claim(task_id, job)
             self._assist_write(job)
         return self._assist_response(job, operation="cancel")
 
@@ -3630,6 +3725,57 @@ class UnifiedMCPGateway:
         except StandingGrantReceiptError as exc:
             raise GatewayInputError(str(exc)) from exc
 
+    @staticmethod
+    def _agy_probe_model_family(model: str) -> str:
+        value = str(model or "").strip().lower()
+        if value.startswith("gemini-"):
+            return "gemini"
+        if value.startswith("claude-") or value.startswith("gpt-"):
+            return "claude_gpt"
+        raise GatewayInputError("AGY_MODEL_FAMILY_UNSUPPORTED")
+
+    def _acquire_agy_probe_claim(self, *, task_id: str, model: str):
+        manager = get_account_pool_manager()
+        coordinator = CrossProcessLeaseCoordinator(manager)
+        try:
+            return coordinator.acquire_claim(
+                consumer_id=f"model-probe:{task_id}",
+                wait_timeout=0.0,
+                model_family=self._agy_probe_model_family(model),
+            )
+        except AgyAccountPoolBusyError as exc:
+            raise GatewayInputError("AGY_ACCOUNT_POOL_BUSY") from exc
+        except AgyAccountPoolExhaustedError as exc:
+            raise GatewayInputError("AGY_ACCOUNT_POOL_EXHAUSTED") from exc
+
+    def _release_assist_account_claim(self, task_id: str, job: dict[str, Any]) -> bool:
+        with self._assist_lock:
+            claim = self._assist_account_claims.pop(task_id, None)
+        if claim is None:
+            if job.get("account_lease_id_hash"):
+                job["account_lease_released"] = False
+                job["account_lease_cleanup_status"] = "RECONCILIATION_REQUIRED"
+                return False
+            return True
+        try:
+            claim.release()
+        except Exception:
+            job["account_lease_released"] = False
+            job["account_lease_cleanup_status"] = "RELEASE_FAILED"
+            return False
+        job["account_lease_released"] = True
+        job["account_lease_cleanup_status"] = "RELEASED"
+        return True
+
+    def _abandon_assist_account_claim(self, task_id: str, job: dict[str, Any]) -> None:
+        with self._assist_lock:
+            claim = self._assist_account_claims.pop(task_id, None)
+        if claim is not None:
+            claim.abandon_parent_reference()
+        job["account_lease_released"] = False
+        job["account_lease_cleanup_status"] = "RECONCILIATION_REQUIRED"
+        job["reconciliation_required"] = True
+
     def _model_probe_submit(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         provider = str(arguments.get("provider") or "cline").strip().lower()
         metadata, executable = self._provider_executable(provider)
@@ -3691,7 +3837,13 @@ class UnifiedMCPGateway:
         stderr_path = root / f"{job_id}.stderr"
         workspace_root = Path(tempfile.mkdtemp(prefix=f"nexus-probe-{task_id}-", dir="/tmp"))
         probe_prompt = f"{prompt}\nReturn JSON matching this schema exactly: {json.dumps(schema, ensure_ascii=False)}"
-        command = self._assist_command(executable=executable, provider=provider, model=model, prompt=probe_prompt)
+        command = self._assist_command(
+            executable=executable,
+            provider=provider,
+            model=model,
+            prompt=probe_prompt,
+            agy_print_timeout=AGY_MODEL_PROBE_PRINT_TIMEOUT,
+        )
         job: dict[str, Any] = {
             "schema": "nexus.assisted_provider_job.v1",
             "job_kind": "model_probe",
@@ -3786,13 +3938,51 @@ class UnifiedMCPGateway:
                 "process_cleanup": True,
             })
             return self._assist_response(self._assist_write(job), operation="submit")
-        stdout_handle = stdout_path.open("w", encoding="utf-8")
-        stderr_handle = stderr_path.open("w", encoding="utf-8")
+        provider_env = None
+        account_claim = None
+        if provider == "agy":
+            try:
+                account_claim = self._acquire_agy_probe_claim(task_id=task_id, model=model)
+            except GatewayInputError as exc:
+                shutil.rmtree(workspace_root, ignore_errors=True)
+                job.update({
+                    "status": "FAILED",
+                    "finished_at": self._utc_now(),
+                    "blocker": str(exc),
+                    "provider_error": "Agy account pool unavailable for model probe",
+                    "model_response_verified": False,
+                    "process_cleanup": True,
+                })
+                return self._assist_response(self._assist_write(job), operation="submit")
+            provider_env = dict(account_claim.lease.execution_env)
+            job["account_alias_hash"] = account_claim.account_alias_hash
+            job["account_lease_id_hash"] = account_claim.lease_id_hash
+            job["account_lease_released"] = False
+            job["account_lease_cleanup_status"] = "HELD"
+            with self._assist_lock:
+                self._assist_account_claims[task_id] = account_claim
+            self._assist_write(job)
+        stdout_handle = None
+        stderr_handle = None
         try:
-            process = subprocess.Popen(command, cwd=workspace_root, stdout=stdout_handle, stderr=stderr_handle, text=True, start_new_session=True)
+            stdout_handle = stdout_path.open("w", encoding="utf-8")
+            stderr_handle = stderr_path.open("w", encoding="utf-8")
+            process = subprocess.Popen(
+                command,
+                cwd=workspace_root,
+                stdout=stdout_handle,
+                stderr=stderr_handle,
+                text=True,
+                start_new_session=True,
+                env=provider_env,
+            )
         except Exception:
-            stdout_handle.close()
-            stderr_handle.close()
+            if stdout_handle is not None:
+                stdout_handle.close()
+            if stderr_handle is not None:
+                stderr_handle.close()
+            if account_claim is not None:
+                self._release_assist_account_claim(task_id, job)
             shutil.rmtree(workspace_root, ignore_errors=True)
             job.update({"status": "FAILED", "finished_at": self._utc_now(), "blocker": "ASSIST_PROVIDER_FAILED", "provider_error": "provider process could not start"})
             return self._assist_response(self._assist_write(job), operation="submit")
@@ -3838,8 +4028,12 @@ class UnifiedMCPGateway:
                     terminated = False
             if terminated:
                 shutil.rmtree(workspace_root, ignore_errors=True)
+                if account_claim is not None:
+                    self._release_assist_account_claim(task_id, job)
+            elif account_claim is not None:
+                self._abandon_assist_account_claim(task_id, job)
             job.update({
-                "status": "FAILED",
+                "status": "FAILED" if terminated else "UNKNOWN_REQUIRES_RECONCILE",
                 "finished_at": self._utc_now(),
                 "blocker": (
                     "ASSIST_PROVIDER_IDENTITY_DRIFT"

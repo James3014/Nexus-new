@@ -285,8 +285,16 @@ def test_timeline_fields_project_through_public_view(tmp_path: Path) -> None:
         provider_started_at=now,
         first_stream_activity_at=now,
         provider_stream_last_activity_at=now,
+        first_tool_activity_at=now,
+        last_progress_activity_at=now,
         first_effect_at=now,
         time_to_first_effect_ms=1234,
+        tool_event_count=2,
+        liveness_policy={
+            "coding_progress_required": True,
+            "provider_stall_seconds": 90.0,
+            "stream_no_progress_seconds": 120.0,
+        },
         provider_pid=12345,
         provider_process_state="RUNNING",
     )
@@ -297,8 +305,16 @@ def test_timeline_fields_project_through_public_view(tmp_path: Path) -> None:
     assert public["provider_started_at"] == now
     assert public["first_stream_activity_at"] == now
     assert public["provider_stream_last_activity_at"] == now
+    assert public["first_tool_activity_at"] == now
+    assert public["last_progress_activity_at"] == now
     assert public["first_effect_at"] == now
     assert public["time_to_first_effect_ms"] == 1234
+    assert public["tool_event_count"] == 2
+    assert public["liveness_policy"] == {
+        "coding_progress_required": True,
+        "provider_stall_seconds": 90.0,
+        "stream_no_progress_seconds": 120.0,
+    }
     assert public["provider_pid"] == 12345
     assert public["provider_process_state"] == "RUNNING"
     assert public["input_delivery_state"] == "UNKNOWN"
