@@ -1,0 +1,20 @@
+{
+  "schema": "nexus.verification_receipt.v1",
+  "status": "PASS",
+  "test_suite": [
+    "tests/services/test_agy_dispatch.py",
+    "tests/services/test_agy_operation_journal.py",
+    "tests/services/test_external_account_pool.py",
+    "tests/services/test_workflow_doctor.py",
+    "tests/services/test_agy_reviewer_runtime.py",
+    "tests/services/test_agy_review.py"
+  ],
+  "passed": 218,
+  "failed": 0,
+  "duration_seconds": 24.64,
+  "ruff_format_check": "PASS",
+  "ruff_lint_check": "PASS",
+  "py_compile": "PASS",
+  "git_diff_check": "PASS",
+  "verified_at": "2026-10-06T00:28:27Z"
+}
