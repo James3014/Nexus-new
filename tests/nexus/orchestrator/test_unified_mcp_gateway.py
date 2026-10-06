@@ -2171,6 +2171,41 @@ def test_codex_jsonl_agent_message_decoder_extracts_payload():
     )
 
 
+def test_agy_model_probe_decoder_unwraps_success_response_envelope():
+    raw = json.dumps(
+        {
+            "conversation_id": "conv-1",
+            "status": "SUCCESS",
+            "response": json.dumps({"patch": "NO_PATCH"}),
+            "duration_seconds": 21.05,
+            "num_turns": 1,
+            "usage": {"input_tokens": 10, "output_tokens": 5, "thinking_tokens": 3},
+        }
+    )
+    assert UnifiedMCPGateway._decode_model_probe_payload(raw, "agy", "Gemini 3.8 Flash (Medium)") == (
+        {"patch": "NO_PATCH"},
+        "agy_json_envelope",
+    )
+
+
+def test_agy_model_probe_decoder_fails_closed_on_invalid_envelopes():
+    assert UnifiedMCPGateway._decode_model_probe_payload(
+        json.dumps({"status": "SUCCESS", "response": ""}),
+        "agy",
+        "Gemini 3.8 Flash (Medium)",
+    ) == (None, None)
+    assert UnifiedMCPGateway._decode_model_probe_payload(
+        json.dumps({"status": "SUCCESS", "response": "not-json"}),
+        "agy",
+        "Gemini 3.8 Flash (Medium)",
+    ) == (None, None)
+    assert UnifiedMCPGateway._decode_model_probe_payload(
+        json.dumps({"status": "ERROR", "response": json.dumps({"patch": "bad"})}),
+        "agy",
+        "Gemini 3.8 Flash (Medium)",
+    ) == (None, None)
+
+
 def test_model_probe_transport_provenance_rejects_mismatch_and_partial_events():
     forged_cline = _cline_probe_events({"probe": "ok"}, provider="evil")
     assert UnifiedMCPGateway._decode_model_probe_payload(
@@ -2926,6 +2961,99 @@ def test_model_probe_wrong_payload_fails_schema_gate(monkeypatch, tmp_path):
     assert payload["schema_error"].startswith("output_schema_missing:")
 
 
+def test_agy_model_probe_print_timeout_is_transport_blocker(monkeypatch, tmp_path):
+    captured = {}
+
+    class FakePopen:
+        pid = 54005
+
+        def __init__(self, command, *, stdout, stderr, **kwargs):
+            captured["command"] = list(command)
+            self._returncode = 0
+            stdout.write(
+                json.dumps(
+                    {
+                        "conversation_id": "conv-timeout",
+                        "status": "SUCCESS",
+                        "response": "",
+                        "duration_seconds": 0,
+                        "num_turns": 1,
+                        "usage": {
+                            "input_tokens": 0,
+                            "output_tokens": 0,
+                            "thinking_tokens": 0,
+                            "cache_read_tokens": 0,
+                            "total_tokens": 0,
+                        },
+                    }
+                )
+                + "\n"
+            )
+            stderr.write(
+                "[agy] print timeout after 300s with turn in progress; returning partial output\n"
+            )
+            stdout.flush()
+            stderr.flush()
+
+        def poll(self):
+            return self._returncode
+
+    service = FakeService()
+    service.state_dir = tmp_path
+    monkeypatch.setenv("NEXUS_AGY_BIN", "/bin/echo")
+    monkeypatch.setattr(
+        "nexus.orchestrator.unified_mcp_gateway.subprocess.Popen",
+        FakePopen,
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.unified_mcp_gateway._git",
+        lambda *args, **kwargs: "a" * 40,
+    )
+    _patch_probe_version(monkeypatch)
+    gateway = UnifiedMCPGateway(service=service)
+
+    gateway.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 713,
+            "method": "tools/call",
+            "params": {
+                "name": "nexus_model_probe",
+                "arguments": {
+                    "task_id": "probe-agy-print-timeout",
+                    "provider": "agy",
+                    "model": "gemini-3.6-flash-medium",
+                    "prompt": "probe",
+                    "output_schema": {
+                        "type": "object",
+                        "required": ["patch"],
+                        "properties": {"patch": {"type": "string"}},
+                    },
+                },
+            },
+        }
+    )
+    assert captured["command"][captured["command"].index("--print-timeout") + 1] == "300s"
+
+    result = gateway.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 714,
+            "method": "tools/call",
+            "params": {
+                "name": "nexus_model_probe_result",
+                "arguments": {"task_id": "probe-agy-print-timeout"},
+            },
+        }
+    )
+    payload = result["result"]["structuredContent"]
+    assert payload["status"] == "FAILED"
+    assert payload["blocker"] == "ASSIST_PROVIDER_PRINT_TIMEOUT"
+    assert payload["schema_error"] == ""
+    assert payload["model_response_verified"] is False
+    assert payload["next_action"] == "nexus_task_retry"
+
+
 def test_agy_high_model_assist_command_omits_contradictory_effort_low():
     gateway = UnifiedMCPGateway(service=FakeService())
     command = gateway._assist_command(executable="/usr/local/bin/agy", provider="agy", model="gemini-3.6-flash-high", prompt="probe")
@@ -2933,7 +3061,7 @@ def test_agy_high_model_assist_command_omits_contradictory_effort_low():
     assert "--mode" in command and command[command.index("--mode") + 1] == "plan"
     assert command[command.index("--model") + 1] == "gemini-3.6-flash-high"
     assert "--effort" not in command
-    assert "--print-timeout" in command
+    assert command[command.index("--print-timeout") + 1] == "25s"
 
 
 def test_agy_medium_model_not_overridden_by_hardcoded_low():

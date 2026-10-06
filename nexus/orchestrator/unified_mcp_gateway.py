@@ -188,6 +188,7 @@ PERMISSION_ENFORCEMENT_SHA256_AT_START: str
 # compiler so a hard-coded default can never override the model identity.
 AGY_EFFORT_TIERS: tuple[str, ...] = ("high", "medium", "low")
 AGY_PRINT_TIMEOUT = "25s"
+AGY_MODEL_PROBE_PRINT_TIMEOUT = "300s"
 
 
 def _agy_effort_tier(model: str) -> str:
@@ -206,6 +207,7 @@ def _compile_agy_command(
     prompt: str,
     json_schema: str = "",
     explicit_effort: str = "",
+    print_timeout: str = AGY_PRINT_TIMEOUT,
 ) -> list[str]:
     """Single source of truth for Agy CLI argument compilation.
 
@@ -238,7 +240,7 @@ def _compile_agy_command(
         raise GatewayInputError("agy model requires an explicit effort or an embedded tier suffix")
     if name:
         command.extend(["--model", name])
-    command.extend(["--print-timeout", AGY_PRINT_TIMEOUT, "--prompt", prompt])
+    command.extend(["--print-timeout", print_timeout, "--prompt", prompt])
     return command
 
 
@@ -2024,14 +2026,28 @@ class UnifiedMCPGateway:
         return value
 
     @staticmethod
-    def _assist_command(*, executable: str, provider: str, model: str, prompt: str, explicit_effort: str = "") -> list[str]:
+    def _assist_command(
+        *,
+        executable: str,
+        provider: str,
+        model: str,
+        prompt: str,
+        explicit_effort: str = "",
+        agy_print_timeout: str = AGY_PRINT_TIMEOUT,
+    ) -> list[str]:
         if provider == "cline":
             selected = model or "glm-5.2"
             if "/" not in selected:
                 selected = f"cline-pass/{selected}"
             return [executable, "--json", "--plan", "--auto-approve", "false", "--thinking", "none", "--timeout", str(CLINE_RUN_TIMEOUT_SECONDS), "--model", selected, prompt]
         if provider == "agy":
-            return _compile_agy_command(executable=executable, model=model, prompt=prompt, explicit_effort=explicit_effort)
+            return _compile_agy_command(
+                executable=executable,
+                model=model,
+                prompt=prompt,
+                explicit_effort=explicit_effort,
+                print_timeout=agy_print_timeout,
+            )
         if provider == "gemini":
             return [executable, "--skip-trust", "--approval-mode", "auto_edit", "-m", model, "-p", prompt, "--output-format", "json"]
         if provider == "opencode":
@@ -2104,7 +2120,18 @@ class UnifiedMCPGateway:
             "turn.started",
             "turn.completed",
         }
-        if provider not in {"cline", "codex"} and direct is not None and direct.get("type") not in transport_types:
+        if provider == "agy" and direct is not None:
+            if str(direct.get("status") or "").upper() != "SUCCESS":
+                return None, None
+            response = direct.get("response")
+            if isinstance(response, Mapping):
+                return dict(response), "agy_json_envelope"
+            if isinstance(response, str):
+                payload = decode_document(response)
+                if payload is not None:
+                    return payload, "agy_json_envelope"
+            return None, None
+        if provider not in {"cline", "codex", "agy"} and direct is not None and direct.get("type") not in transport_types:
             return direct, "direct_json_document"
 
         events: list[dict[str, Any]] = []
@@ -2324,21 +2351,33 @@ class UnifiedMCPGateway:
         stderr_path = Path(str(job.get("stderr_artifact") or ""))
         stdout = stdout_path.read_text(encoding="utf-8", errors="replace") if stdout_path.exists() else ""
         stderr = stderr_path.read_text(encoding="utf-8", errors="replace") if stderr_path.exists() else ""
+        provider = str(job.get("provider") or "")
+        stderr_lower = stderr.lower()
+        agy_print_timed_out = (
+            provider == "agy"
+            and "[agy] print timeout after" in stderr_lower
+            and "turn in progress" in stderr_lower
+        )
         is_model_probe = str(job.get("job_kind") or "assist") == "model_probe"
         response_provenance: Optional[str] = None
         if is_model_probe:
             parsed, response_provenance = self._decode_model_probe_payload(
                 stdout,
-                str(job.get("provider") or ""),
+                provider,
                 str(job.get("resolved_model") or ""),
             )
         else:
             parsed = self._decode_assist_payload(
                 stdout,
-                str(job.get("provider") or ""),
+                provider,
                 require_patch=True,
             )
-        schema_valid, schema_error = self._validate_output_schema(parsed, job.get("output_schema"))
+        if agy_print_timed_out:
+            parsed = None
+            response_provenance = None
+            schema_valid, schema_error = False, ""
+        else:
+            schema_valid, schema_error = self._validate_output_schema(parsed, job.get("output_schema"))
         started_at = job.get("started_at")
         provider_time_ms = 0
         if started_at:
@@ -2348,24 +2387,42 @@ class UnifiedMCPGateway:
                 provider_time_ms = 0
         model_response_verified = bool(
             is_model_probe
+            and not agy_print_timed_out
             and returncode == 0
             and parsed is not None
             and schema_valid
             and response_provenance
         )
-        provider_error_sha256 = hashlib.sha256(stderr.encode("utf-8")).hexdigest() if returncode != 0 and stderr else None
+        provider_error_sha256 = (
+            hashlib.sha256(stderr.encode("utf-8")).hexdigest()
+            if stderr and (returncode != 0 or agy_print_timed_out)
+            else None
+        )
+        if agy_print_timed_out:
+            status = "FAILED"
+            blocker = "ASSIST_PROVIDER_PRINT_TIMEOUT"
+            provider_error = "provider print timeout while turn remained in progress"
+        else:
+            status = "COMPLETED" if returncode == 0 and parsed is not None and schema_valid else "FAILED"
+            blocker = (
+                "ASSIST_PROVIDER_MALFORMED_OUTPUT"
+                if returncode == 0 and (parsed is None or not schema_valid)
+                else ("ASSIST_PROVIDER_FAILED" if returncode != 0 else None)
+            )
+            provider_error = "provider process failed" if returncode != 0 else ""
         job.update({
-            "status": "COMPLETED" if returncode == 0 and parsed is not None and schema_valid else "FAILED",
+            "status": status,
             "finished_at": self._utc_now(),
             "exit_code": returncode,
             "result": parsed,
             "model_response_verified": model_response_verified,
             "model_response_provenance": response_provenance,
-            "blocker": ("ASSIST_PROVIDER_MALFORMED_OUTPUT" if returncode == 0 and (parsed is None or not schema_valid) else ("ASSIST_PROVIDER_FAILED" if returncode != 0 else None)),
+            "blocker": blocker,
             "schema_error": schema_error,
             "schema_validation_level": "bounded_subset",
-            "provider_error": "provider process failed" if returncode != 0 else "",
+            "provider_error": provider_error,
             "provider_error_sha256": provider_error_sha256,
+            "provider_print_timeout": agy_print_timed_out,
             "provider_time_ms": provider_time_ms,
         })
         self._assist_record_stream_artifacts(job)
@@ -3691,7 +3748,13 @@ class UnifiedMCPGateway:
         stderr_path = root / f"{job_id}.stderr"
         workspace_root = Path(tempfile.mkdtemp(prefix=f"nexus-probe-{task_id}-", dir="/tmp"))
         probe_prompt = f"{prompt}\nReturn JSON matching this schema exactly: {json.dumps(schema, ensure_ascii=False)}"
-        command = self._assist_command(executable=executable, provider=provider, model=model, prompt=probe_prompt)
+        command = self._assist_command(
+            executable=executable,
+            provider=provider,
+            model=model,
+            prompt=probe_prompt,
+            agy_print_timeout=AGY_MODEL_PROBE_PRINT_TIMEOUT,
+        )
         job: dict[str, Any] = {
             "schema": "nexus.assisted_provider_job.v1",
             "job_kind": "model_probe",
