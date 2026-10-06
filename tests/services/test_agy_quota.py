@@ -335,14 +335,12 @@ def test_wrapper_sigterm_reaps_active_usage_process(tmp_path: Path) -> None:
     executable.chmod(0o700)
 
     env = os.environ.copy()
-    env.update(
-        {
-            "NEXUS_AGY_ACCOUNT_POOL_ROOT": str(pool),
-            "NEXUS_AGY_QUOTA_SNAPSHOT": str(snapshot),
-            "NEXUS_AGY_BINARY": str(executable),
-            "PID_FILE": str(pid_file),
-        }
-    )
+    env.update({
+        "NEXUS_AGY_ACCOUNT_POOL_ROOT": str(pool),
+        "NEXUS_AGY_QUOTA_SNAPSHOT": str(snapshot),
+        "NEXUS_AGY_BINARY": str(executable),
+        "PID_FILE": str(pid_file),
+    })
     wrapper = subprocess.Popen(
         [sys.executable, str(QUOTA_PATH), "--timeout", "30"],
         env=env,
