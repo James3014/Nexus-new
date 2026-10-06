@@ -1424,6 +1424,53 @@ def test_runtime_builder_uses_frozen_hash_bound_binary_only_contract(tmp_path: P
     )
 
 
+def test_runtime_builder_failure_is_bounded_and_redacted(tmp_path: Path):
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    _run_git(repo, "config", "user.email", "test@example.invalid")
+    _run_git(repo, "config", "user.name", "runtime-builder-test")
+    (repo / "pyproject.toml").write_text("[project]\nname='fixture'\nversion='0'\n")
+    (repo / "uv.lock").write_text("version = 1\nrevision = 3\n")
+    _run_git(repo, "add", ".")
+    _run_git(repo, "commit", "-m", "runtime contract")
+    workflow_sha = _run_git(repo, "rev-parse", "HEAD")
+    fake_uv = tmp_path / "uv"
+    fake_uv.write_text(
+        f"#!{sys.executable}\n"
+        "import sys\n"
+        "from pathlib import Path\n"
+        "args=sys.argv[1:]\n"
+        "if args and args[0] == 'export':\n"
+        " Path(args[args.index('--output-file')+1]).write_text('pytest==9 --hash=sha256:abc\\n')\n"
+        " raise SystemExit(0)\n"
+        "if args[:2] == ['pip','install'] and '--requirements' in args:\n"
+        " sys.stdout.write('Authorization: Bearer ghp_supersecret\\n')\n"
+        " sys.stderr.write('https://x-access-token:github_pat_secret@example.invalid/repo ' + ('x' * 5000))\n"
+        " raise SystemExit(23)\n"
+        "raise SystemExit(2)\n"
+    )
+    fake_uv.chmod(0o755)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        trusted_anchor._build_runtime(
+            argparse.Namespace(
+                repo_root=str(repo),
+                workflow_sha=workflow_sha,
+                uv_executable=str(fake_uv),
+                output_dir=str(tmp_path / "built-runtime"),
+            )
+        )
+
+    message = str(exc_info.value)
+    assert "stage=locked-binary-install" in message
+    assert "exit_code=23" in message
+    assert "<truncated>" in message
+    assert "<redacted>" in message
+    assert "ghp_supersecret" not in message
+    assert "github_pat_secret" not in message
+    assert len(message) < trusted_anchor.SUBPROCESS_DIAGNOSTIC_LIMIT + 1000
+
+
 @pytest.mark.parametrize(
     "tampered_groups",
     [

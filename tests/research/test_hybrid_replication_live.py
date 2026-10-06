@@ -550,13 +550,16 @@ def test_c_shadow_worktree_cleanup_always_performed(
     def failing_dispatch(**kwargs: object) -> tuple:
         source = Path(str(kwargs["cwd"]))
         assert (source / ".git").is_dir()
-        assert subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=source,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip() == rev
+        assert (
+            subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=source,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            == rev
+        )
         raise RuntimeError("dispatcher crashed unexpectedly")
 
     monkeypatch.setattr(
@@ -769,22 +772,24 @@ def test_load_binding_accepts_current_canonical_agy_generation(
 ) -> None:
     binding_path = tmp_path / "LIVE_BINDING.json"
     binding_path.write_text(
-        json.dumps({
-            "schema": "nexus.hybrid_replication.live_binding.v1",
-            "activation_state": "AUTOMATIC_CAPTURE_READY",
-            "frozen_receipts": {},
-            "d0": {
-                "implementation_path": "/tmp/d0_impl.py",
-                "implementation_sha256": "cca215a2de82996c072f958159541a93d58b1482af3430d93f537c58ddafa2f9",
-                "freeze_path": "/tmp/D0_V2_FROZEN.json",
-                "freeze_sha256": "f04fdeea8ddb8cbaa2216aa783a7fe510da7c2f8625f50763a0d59d5e2234eee",
-            },
-            "strong_online": {
-                "provider": "agy",
-                "requested_model": EXACT_AGY_MODEL,
-                "execution_generation": CANONICAL_AGY_EXECUTION_GENERATION,
-            },
-        }),
+        json.dumps(
+            {
+                "schema": "nexus.hybrid_replication.live_binding.v1",
+                "activation_state": "AUTOMATIC_CAPTURE_READY",
+                "frozen_receipts": {},
+                "d0": {
+                    "implementation_path": "/tmp/d0_impl.py",
+                    "implementation_sha256": "cca215a2de82996c072f958159541a93d58b1482af3430d93f537c58ddafa2f9",
+                    "freeze_path": "/tmp/D0_V2_FROZEN.json",
+                    "freeze_sha256": "f04fdeea8ddb8cbaa2216aa783a7fe510da7c2f8625f50763a0d59d5e2234eee",
+                },
+                "strong_online": {
+                    "provider": "agy",
+                    "requested_model": EXACT_AGY_MODEL,
+                    "execution_generation": CANONICAL_AGY_EXECUTION_GENERATION,
+                },
+            }
+        ),
         encoding="utf-8",
     )
     monkeypatch.setattr(

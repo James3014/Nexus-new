@@ -1271,6 +1271,45 @@ class TestAccountConcurrencyModel(unittest.TestCase):
         with self.assertRaises(AgyAccountPoolBusyError):
             coord.acquire_claim("worker-dispatcher-2", wait_timeout=0.1)
 
+    def test_y_reconcile_claim_receipt_requires_free_lock_and_exact_identity(self):
+        acc = AgyAccount(alias="reconcile_acc", home_dir=f"{self.test_dir}/reconcile_acc")
+        mgr1 = self._create_manager([acc])
+        coord1 = self._create_coordinator(mgr1, timeout=0.1)
+        claim = coord1.acquire_claim("worker-before-crash")
+        receipt_path = claim.receipt_path
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        inherited_fd = os.dup(claim.lock_file_obj.fileno())
+        claim.abandon_parent_reference()
+
+        mgr2 = self._create_manager([acc])
+        coord2 = self._create_coordinator(mgr2, timeout=0.1)
+        busy = coord2.reconcile_claim_receipt(
+            account_alias_hash=claim.account_alias_hash,
+            lease_id_hash=claim.lease_id_hash,
+            owner_pid=receipt["pid"],
+        )
+        self.assertEqual(busy["result"], "LEASE_BUSY_PRESERVED")
+        self.assertTrue(receipt_path.exists())
+
+        os.close(inherited_fd)
+        mismatch = coord2.reconcile_claim_receipt(
+            account_alias_hash=claim.account_alias_hash,
+            lease_id_hash="0" * 12,
+            owner_pid=receipt["pid"],
+        )
+        self.assertEqual(mismatch["result"], "LEASE_IDENTITY_MISMATCH_PRESERVED")
+        self.assertTrue(receipt_path.exists())
+
+        removed = coord2.reconcile_claim_receipt(
+            account_alias_hash=claim.account_alias_hash,
+            lease_id_hash=claim.lease_id_hash,
+            owner_pid=receipt["pid"],
+        )
+        self.assertEqual(removed["result"], "LEASE_RECEIPT_REMOVED")
+        self.assertFalse(receipt_path.exists())
+        replacement = coord2.acquire_claim("worker-after-reconcile", wait_timeout=0.1)
+        replacement.release()
+
     def test_x_collaborative_and_dispatcher_coexistence_and_mutual_exclusion(self):
         acc_a = AgyAccount(alias="acc_a", home_dir=f"{self.test_dir}/acc_a")
         acc_b = AgyAccount(alias="acc_b", home_dir=f"{self.test_dir}/acc_b")
