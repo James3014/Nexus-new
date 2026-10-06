@@ -569,7 +569,7 @@ def test_background_rotation_success_clears_live_failure_and_preserves_bounded_h
     assert record["failure_history"][-1]["failure_kind"] == (
         f"RECOVERED_{dispatch.MAX_FAILURE_HISTORY_ENTRIES + 1}"
     )
-    assert public["failure_history"] == record["failure_history"]
+    assert "failure_history" not in public
     assert not prompt_path.exists()
 
 
