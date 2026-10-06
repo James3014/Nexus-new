@@ -773,15 +773,17 @@ def test_run_frozen_stack_b_fallback_uses_agy(
     assert outcome.raw_result.failures == ()
 
 
-def test_load_binding_accepts_current_canonical_agy_generation(
-    monkeypatch: pytest.MonkeyPatch,
+def _write_loadable_agy_binding(
     tmp_path: Path,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    activation_state: str,
+) -> Path:
     binding_path = tmp_path / "LIVE_BINDING.json"
     binding_path.write_text(
         json.dumps({
             "schema": "nexus.hybrid_replication.live_binding.v1",
-            "activation_state": "AUTOMATIC_CAPTURE_READY",
+            "activation_state": activation_state,
             "frozen_receipts": {},
             "d0": {
                 "implementation_path": "/tmp/d0_impl.py",
@@ -812,6 +814,49 @@ def test_load_binding_accepts_current_canonical_agy_generation(
     monkeypatch.setattr(
         "nexus.research.hybrid_replication_live.resolve_canonical_agy_dispatch_path",
         lambda payload: Path("/tmp/nexus-agy-dispatch"),
+    )
+    return binding_path
+
+
+def test_load_binding_pending_readiness_control_requires_explicit_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    binding_path = _write_loadable_agy_binding(
+        tmp_path,
+        monkeypatch,
+        activation_state="READINESS_CONTROL_PENDING",
+    )
+
+    with pytest.raises(ValueError, match="live_binding_not_activated"):
+        _load_binding(binding_path)
+
+    loaded = _load_binding(binding_path, readiness_control=True)
+    assert loaded["activation_state"] == "READINESS_CONTROL_PENDING"
+
+
+def test_load_binding_ready_state_is_not_readiness_control_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    binding_path = _write_loadable_agy_binding(
+        tmp_path,
+        monkeypatch,
+        activation_state="AUTOMATIC_CAPTURE_READY",
+    )
+
+    with pytest.raises(ValueError, match="live_binding_not_activated"):
+        _load_binding(binding_path, readiness_control=True)
+
+
+def test_load_binding_accepts_current_canonical_agy_generation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    binding_path = _write_loadable_agy_binding(
+        tmp_path,
+        monkeypatch,
+        activation_state="AUTOMATIC_CAPTURE_READY",
     )
 
     loaded = _load_binding(binding_path)

@@ -314,13 +314,21 @@ def _frozen_receipt_hashes(
     return actual, declared
 
 
-def _load_binding(path: Path, *, require_activation: bool = True) -> dict[str, Any]:
+def _load_binding(
+    path: Path,
+    *,
+    require_activation: bool = True,
+    readiness_control: bool = False,
+) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("schema") != "nexus.hybrid_replication.live_binding.v1":
         raise ValueError("live_binding_schema_mismatch")
-    if require_activation and payload.get("activation_state") != "AUTOMATIC_CAPTURE_READY":
-        raise ValueError("live_binding_not_activated")
     if require_activation:
+        expected_state = (
+            "READINESS_CONTROL_PENDING" if readiness_control else "AUTOMATIC_CAPTURE_READY"
+        )
+        if payload.get("activation_state") != expected_state:
+            raise ValueError("live_binding_not_activated")
         actual_receipts, declared_receipts = _frozen_receipt_hashes(payload)
         if actual_receipts != FROZEN_RECEIPT_SHA256S:
             raise ValueError("frozen_receipt_physical_identity_drift")
@@ -2172,10 +2180,10 @@ def _identity_preflight_main(binding_path: Path) -> int:
     return 0 if receipt["activation_allowed"] else 5
 
 
-def _stack_main(binding_path: Path) -> int:
+def _stack_main(binding_path: Path, *, readiness_control: bool = False) -> int:
     payload = json.load(sys.stdin)
     snapshot = _snapshot_from_capture_payload(payload)
-    binding = _load_binding(binding_path)
+    binding = _load_binding(binding_path, readiness_control=readiness_control)
     outcome = run_frozen_stack(snapshot, binding=binding)
     print(json.dumps(asdict(outcome), ensure_ascii=False, sort_keys=True))
     return 0
@@ -2197,12 +2205,13 @@ def main() -> int:
     preflight.add_argument("--binding", default=str(DEFAULT_LIVE_BINDING))
     stack = sub.add_parser("stack")
     stack.add_argument("--binding", default=str(DEFAULT_LIVE_BINDING))
+    stack.add_argument("--readiness-control", action="store_true")
     sub.add_parser("ground-truth")
     args = parser.parse_args()
     if args.command == "identity-preflight":
         return _identity_preflight_main(Path(args.binding))
     if args.command == "stack":
-        return _stack_main(Path(args.binding))
+        return _stack_main(Path(args.binding), readiness_control=args.readiness_control)
     return _ground_truth_main()
 
 

@@ -26,7 +26,7 @@ jobs:
       T_AUTO: ${{ vars.NEXUS_HYBRID_REPLICATION_T_AUTO }}
       EXCLUDED_TASKS: ${{ vars.NEXUS_HYBRID_REPLICATION_EXCLUDED_TASKS }}
       EXCLUSION_SET_SHA256: ${{ vars.NEXUS_HYBRID_REPLICATION_EXCLUSION_SET_SHA256 }}
-      READINESS_CONTROL_TASK: ${{ vars.NEXUS_HYBRID_REPLICATION_READINESS_CONTROL_TASK }}
+      READINESS_CONTROL_TOKEN: ${{ vars.NEXUS_HYBRID_REPLICATION_READINESS_CONTROL_TOKEN }}
     steps:
       - name: Capture immutable research observation
         shell: bash
@@ -68,7 +68,7 @@ jobs:
           activation_state = os.environ.get("ACTIVATION_STATE", "").strip()
           t_auto = os.environ.get("T_AUTO", "").strip()
           expected_exclusion_set_sha256 = os.environ.get("EXCLUSION_SET_SHA256", "").strip()
-          readiness_control_task = os.environ.get("READINESS_CONTROL_TASK", "").strip()
+          readiness_control_token = os.environ.get("READINESS_CONTROL_TOKEN", "").strip()
           excluded = {
               item.strip()
               for item in os.environ.get("EXCLUDED_TASKS", "").split(",")
@@ -212,7 +212,15 @@ jobs:
               actual_exclusion_set_sha256 = digest(
                   ",".join(sorted(excluded)).encode("utf-8")
               )
-              is_readiness_control = bool(readiness_control_task) and task_key == readiness_control_task
+              issue_author = str((current_issue.get("user") or {}).get("login") or "")
+              readiness_control_marker = (
+                  f"NEXUS-HYBRID-REPLICATION-READINESS-CONTROL-V1:{readiness_control_token}"
+              )
+              is_readiness_control = (
+                  bool(readiness_control_token)
+                  and issue_author == repository.split("/", 1)[0]
+                  and readiness_control_marker in body
+              )
               if not is_readiness_control and (
                   activation_state != "AUTOMATIC_CAPTURE_READY" or not t_auto
               ):
