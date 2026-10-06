@@ -137,6 +137,8 @@ _QUOTA_PROGRESS_MAX_LINE = 8192
 _EFFECT_OBSERVATION_INTERVAL_SECONDS = 0.5
 DEFAULT_PROVIDER_STALL_SECONDS = 90.0
 DEFAULT_STREAM_NO_PROGRESS_SECONDS = 120.0
+DEFAULT_PRE_EFFECT_MAX_SECONDS = 90.0
+DEFAULT_PRE_EFFECT_MAX_TOOL_EVENTS = 24
 _AGY_STREAM_ACTIVITY_RE = re.compile(r"streamGenerateContent\?alt=sse")
 
 
@@ -162,6 +164,31 @@ def _stream_no_progress_seconds() -> float:
     return _bounded_positive_seconds(
         "NEXUS_AGY_STREAM_NO_PROGRESS_SECONDS",
         DEFAULT_STREAM_NO_PROGRESS_SECONDS,
+    )
+
+
+def _bounded_positive_int(env_name: str, default: int) -> int:
+    raw = os.getenv(env_name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(1, value)
+
+
+def _pre_effect_max_seconds() -> float:
+    return _bounded_positive_seconds(
+        "NEXUS_AGY_PRE_EFFECT_MAX_SECONDS",
+        DEFAULT_PRE_EFFECT_MAX_SECONDS,
+    )
+
+
+def _pre_effect_max_tool_events() -> int:
+    return _bounded_positive_int(
+        "NEXUS_AGY_PRE_EFFECT_MAX_TOOL_EVENTS",
+        DEFAULT_PRE_EFFECT_MAX_TOOL_EVENTS,
     )
 
 
@@ -988,6 +1015,8 @@ def classify_failure(
         return AccountFailureKind.ACCOUNT_UNAVAILABLE
     if "disabled" in text:
         return AccountFailureKind.ACCOUNT_DISABLED
+    if "nexus_agy_non_progress:pre_effect_tool_thrash" in text:
+        return AccountFailureKind.PRE_EFFECT_TOOL_THRASH
     if "nexus_agy_non_progress:provider_stream_no_progress" in text:
         return AccountFailureKind.PROVIDER_STREAM_NO_PROGRESS
     if "nexus_agy_non_progress:provider_stalled" in text:
@@ -1105,7 +1134,10 @@ def run_agy(
     expect_coding_progress: bool = False,
     provider_stall_seconds: float | None = None,
     stream_no_progress_seconds: float | None = None,
+    pre_effect_max_seconds: float | None = None,
+    pre_effect_max_tool_events: int | None = None,
 ):
+    expect_coding_progress = bool(expect_coding_progress and mode == "accept-edits")
     agy = shutil.which("agy")
     if not agy:
         raise RuntimeError("AGY_BINARY_NOT_FOUND")
@@ -1236,15 +1268,27 @@ def run_agy(
         if stream_no_progress_seconds is None
         else max(0.1, float(stream_no_progress_seconds))
     )
+    resolved_pre_effect_max_seconds = (
+        _pre_effect_max_seconds()
+        if pre_effect_max_seconds is None
+        else max(0.1, float(pre_effect_max_seconds))
+    )
+    resolved_pre_effect_max_tool_events = (
+        _pre_effect_max_tool_events()
+        if pre_effect_max_tool_events is None
+        else max(1, int(pre_effect_max_tool_events))
+    )
     provider_session_id: str | None = None
     transcript_path: Path | None = None
     transcript_offset = 0
     tool_event_count = 0
     first_tool_activity_at: str | None = None
+    first_tool_monotonic: float | None = None
     last_coding_progress_monotonic: float | None = None
 
     def _record_tool_events(count: int, *, observed_at: float) -> None:
-        nonlocal tool_event_count, first_tool_activity_at, last_coding_progress_monotonic
+        nonlocal tool_event_count, first_tool_activity_at, first_tool_monotonic
+        nonlocal last_coding_progress_monotonic
         if count <= 0:
             return
         tool_event_count += count
@@ -1256,6 +1300,7 @@ def run_agy(
         }
         if first_tool_activity_at is None:
             first_tool_activity_at = now_iso
+            first_tool_monotonic = observed_at
             payload["first_tool_activity_at"] = first_tool_activity_at
         if operation_hook:
             _operation_hook(operation_hook, **payload)
@@ -1383,6 +1428,11 @@ def run_agy(
                     and now - started >= resolved_provider_stall_seconds
                 ):
                     non_progress_failure = "PROVIDER_STALLED"
+                elif first_tool_monotonic is not None and (
+                    now - first_tool_monotonic >= resolved_pre_effect_max_seconds
+                    or tool_event_count >= resolved_pre_effect_max_tool_events
+                ):
+                    non_progress_failure = "PRE_EFFECT_TOOL_THRASH"
                 elif first_stream_monotonic is not None:
                     progress_anchor = max(
                         first_stream_monotonic,
@@ -2691,6 +2741,8 @@ def dispatch_run(
     admission: dict[str, Any] | None = None,
     provider_stall_seconds: float | None = None,
     stream_no_progress_seconds: float | None = None,
+    pre_effect_max_seconds: float | None = None,
+    pre_effect_max_tool_events: int | None = None,
 ) -> int:
     user_allow = list(allow or [])
     try:
@@ -3118,6 +3170,16 @@ def dispatch_run(
                     and "stream_no_progress_seconds" in runner.__code__.co_varnames
                 ):
                     runner_kwargs["stream_no_progress_seconds"] = stream_no_progress_seconds
+                if runner is run_agy or (
+                    hasattr(runner, "__code__")
+                    and "pre_effect_max_seconds" in runner.__code__.co_varnames
+                ):
+                    runner_kwargs["pre_effect_max_seconds"] = pre_effect_max_seconds
+                if runner is run_agy or (
+                    hasattr(runner, "__code__")
+                    and "pre_effect_max_tool_events" in runner.__code__.co_varnames
+                ):
+                    runner_kwargs["pre_effect_max_tool_events"] = pre_effect_max_tool_events
                 code, out, err, timed_out, wall_ms = runner(**runner_kwargs)
             finally:
                 restore_temp_permissions(permission_token)
@@ -3467,6 +3529,8 @@ def _spawn_background_operation(
     write_paths: list[str] | None = None,
     provider_stall_seconds: float | None = None,
     stream_no_progress_seconds: float | None = None,
+    pre_effect_max_seconds: float | None = None,
+    pre_effect_max_tool_events: int | None = None,
 ) -> dict[str, Any]:
     journal = AgyOperationJournal(operation_root)
     operation_id = new_operation_id()
@@ -3482,6 +3546,16 @@ def _spawn_background_operation(
         if stream_no_progress_seconds is None
         else max(0.1, float(stream_no_progress_seconds))
     )
+    resolved_pre_effect_max_seconds = (
+        _pre_effect_max_seconds()
+        if pre_effect_max_seconds is None
+        else max(0.1, float(pre_effect_max_seconds))
+    )
+    resolved_pre_effect_max_tool_events = (
+        _pre_effect_max_tool_events()
+        if pre_effect_max_tool_events is None
+        else max(1, int(pre_effect_max_tool_events))
+    )
     journal.create(
         operation_id=operation_id,
         attempt_id=attempt_id,
@@ -3496,6 +3570,8 @@ def _spawn_background_operation(
                 "coding_progress_required": coding_progress_required,
                 "provider_stall_seconds": resolved_provider_stall_seconds,
                 "stream_no_progress_seconds": resolved_stream_no_progress_seconds,
+                "pre_effect_max_seconds": resolved_pre_effect_max_seconds,
+                "pre_effect_max_tool_events": resolved_pre_effect_max_tool_events,
             }
         },
     )
@@ -3527,6 +3603,10 @@ def _spawn_background_operation(
         str(resolved_provider_stall_seconds),
         "--stream-no-progress-seconds",
         str(resolved_stream_no_progress_seconds),
+        "--pre-effect-max-seconds",
+        str(resolved_pre_effect_max_seconds),
+        "--pre-effect-max-tool-events",
+        str(resolved_pre_effect_max_tool_events),
     ]
     if model:
         argv += ["--model", model]
@@ -3724,6 +3804,8 @@ def _run_background_operation(
     heartbeat_interval: float = 15.0,
     provider_stall_seconds: float | None = None,
     stream_no_progress_seconds: float | None = None,
+    pre_effect_max_seconds: float | None = None,
+    pre_effect_max_tool_events: int | None = None,
 ) -> int:
     journal = AgyOperationJournal(operation_root)
     prompt_path = Path(prompt_file)
@@ -3836,6 +3918,8 @@ def _run_background_operation(
             operation_hook=on_event,
             provider_stall_seconds=provider_stall_seconds,
             stream_no_progress_seconds=stream_no_progress_seconds,
+            pre_effect_max_seconds=pre_effect_max_seconds,
+            pre_effect_max_tool_events=pre_effect_max_tool_events,
         )
         with state_lock:
             snapshot = dict(state)
@@ -4177,6 +4261,18 @@ def main(argv: list[str] | None = None) -> int:
         help="Coding-task deadline since last tool/source progress after provider stream begins",
     )
     ap.add_argument(
+        "--pre-effect-max-seconds",
+        type=float,
+        default=_pre_effect_max_seconds(),
+        help="Mutation-capable task deadline from first tool activity to first source effect",
+    )
+    ap.add_argument(
+        "--pre-effect-max-tool-events",
+        type=int,
+        default=_pre_effect_max_tool_events(),
+        help="Mutation-capable task tool-event budget before first source effect",
+    )
+    ap.add_argument(
         "--background",
         action="store_true",
         help="Start a durable background operation and return its operation_id immediately",
@@ -4274,6 +4370,8 @@ def main(argv: list[str] | None = None) -> int:
             operation_root=operation_root,
             provider_stall_seconds=args.provider_stall_seconds,
             stream_no_progress_seconds=args.stream_no_progress_seconds,
+            pre_effect_max_seconds=args.pre_effect_max_seconds,
+            pre_effect_max_tool_events=args.pre_effect_max_tool_events,
         )
 
     if args.background:
@@ -4293,6 +4391,8 @@ def main(argv: list[str] | None = None) -> int:
             operation_root=operation_root,
             provider_stall_seconds=args.provider_stall_seconds,
             stream_no_progress_seconds=args.stream_no_progress_seconds,
+            pre_effect_max_seconds=args.pre_effect_max_seconds,
+            pre_effect_max_tool_events=args.pre_effect_max_tool_events,
         )
         _print_operation(record)
         return 0
@@ -4312,6 +4412,8 @@ def main(argv: list[str] | None = None) -> int:
         temp_command_permissions=args.temp_command_permissions,
         provider_stall_seconds=args.provider_stall_seconds,
         stream_no_progress_seconds=args.stream_no_progress_seconds,
+        pre_effect_max_seconds=args.pre_effect_max_seconds,
+        pre_effect_max_tool_events=args.pre_effect_max_tool_events,
     )
 
 
