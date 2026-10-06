@@ -103,14 +103,10 @@ class ExperimentRunContract:
             self,
             workspace_realpath=str(workspace),
             controller_path=str(controller),
-            controller_sha256=_validate_optional_sha(
-                "controller_sha256", self.controller_sha256
-            )
+            controller_sha256=_validate_optional_sha("controller_sha256", self.controller_sha256)
             or "",
             prompt_sha256=_validate_optional_sha("prompt_sha256", self.prompt_sha256),
-            verifier_sha256=_validate_optional_sha(
-                "verifier_sha256", self.verifier_sha256
-            ),
+            verifier_sha256=_validate_optional_sha("verifier_sha256", self.verifier_sha256),
             experiment_contract_sha256=_validate_optional_sha(
                 "experiment_contract_sha256", self.experiment_contract_sha256
             ),
@@ -237,9 +233,7 @@ class ExperimentRunGuard:
             fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except (BlockingIOError, OSError) as exc:
             lock_handle.close()
-            raise WorkspaceOwnershipConflict(
-                "WORKSPACE_OWNERSHIP_CONFLICT"
-            ) from exc
+            raise WorkspaceOwnershipConflict("WORKSPACE_OWNERSHIP_CONFLICT") from exc
 
         contract_payload = normalized.payload()
         contract_sha = _canonical_json_sha256(contract_payload)
