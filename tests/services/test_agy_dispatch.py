@@ -4563,8 +4563,18 @@ def test_dispatch_run_forwards_exclude_accounts_to_lease_coordinator(
         lease_id_hash = "123456abcdef"
         lease = type("L", (), {"execution_env": {}})()
 
+    class FakeAccount:
+        alias = "google-08"
+
+    class FakeManager:
+        _use_real_manager = False
+        _accounts = [FakeAccount()]
+
     class FakeCoordinator:
-        def acquire_claim(self, **kwargs):            captured_exclude_hashes.append(kwargs.get("exclude_hashes", set()))
+        manager = FakeManager()
+
+        def acquire_claim(self, **kwargs):
+            captured_exclude_hashes.append(kwargs.get("exclude_hashes", set()))
             return FakeClaim()
 
         def close(self):
