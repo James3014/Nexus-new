@@ -1593,8 +1593,7 @@ def test_sigterm_during_dispatch_persists_supervisor_signal_outcome(
     tmp_path: Path,
 ) -> None:
     """Real subprocess receives SIGTERM mid-dispatch; durable record must reflect it."""
-    op_root = tmp_path / "ops"
-    # Pre-create the operation in the *parent* process so the child can use it.
+    op_root = tmp_path / "ops"    # Pre-create the operation in the *parent* process so the child can use it.
     journal = dispatch.AgyOperationJournal(op_root)
     operation_id = dispatch.new_operation_id()
     journal.create(
@@ -3023,8 +3022,7 @@ def test_run_agy_final_readback_captures_short_lived_effect_after_first_empty_sc
             time.sleep(0.1)
             Path(os.environ["AGY_SHORT_EFFECT_PATH"]).write_text("short effect")
             """
-        ),
-        encoding="utf-8",
+        ),        encoding="utf-8",
     )
     fake_agy.chmod(0o700)
     effect = work / "short-lived.txt"
@@ -4541,3 +4539,283 @@ def test_reconcile_completed_terminal_persists_provider_absence_metadata(
     assert reconciled["phase"] == "TERMINAL"
     assert reconciled["reconciliation"]["provider_alive_after"] is False
     assert reconciled["reconciliation"]["lease_cleanup"]["result"] == "ALREADY_ABSENT"
+
+
+def test_normalize_account_hash() -> None:
+    # 12-char hex string is preserved and lowercased
+    assert dispatch._normalize_account_hash("fd84db4038d7") == "fd84db4038d7"
+    assert dispatch._normalize_account_hash("FD84DB4038D7") == "fd84db4038d7"
+    # Alias is hashed with SHA-256 and truncated to 12 hex chars
+    import hashlib
+    expected_google_08 = hashlib.sha256(b"google-08").hexdigest()[:12]
+    assert dispatch._normalize_account_hash("google-08") == expected_google_08
+
+
+def test_dispatch_run_forwards_exclude_accounts_to_lease_coordinator(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    captured_exclude_hashes: list[set[str]] = []
+
+    class FakeClaim:
+        internal_id = "test-acct"
+        account_alias_hash = "abcdef012345"
+        lease_id_hash = "123456abcdef"
+        lease = type("L", (), {"execution_env": {}})()
+
+    class FakeCoordinator:
+        def acquire_claim(self, **kwargs):            captured_exclude_hashes.append(kwargs.get("exclude_hashes", set()))
+            return FakeClaim()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(dispatch, "run_agy", lambda **kwargs: (0, "ok", "", False, 100))
+
+    code = dispatch.dispatch_run(
+        prompt="hello",
+        cwd=str(tmp_path),
+        mode="plan",
+        model="gemini-3.8-flash",
+        coordinator=FakeCoordinator(),
+        exclude_accounts=["google-08", "fd84db4038d7"],
+    )
+    assert code == 0
+    assert len(captured_exclude_hashes) == 1
+    import hashlib
+    expected_google_08 = hashlib.sha256(b"google-08").hexdigest()[:12]
+    assert captured_exclude_hashes[0] == {expected_google_08, "fd84db4038d7"}
+
+
+def test_main_cli_parses_and_forwards_exclude_account(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    captured_dispatch_run_kwargs = {}
+
+    def fake_dispatch_run(**kwargs):
+        captured_dispatch_run_kwargs.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
+
+    rc = dispatch.main([
+        "--prompt",
+        "test exclude",
+        "--cwd",
+        str(tmp_path),
+        "--exclude-account",
+        "google-08",
+        "--exclude-account",
+        "fd84db4038d7",
+    ])
+    assert rc == 0
+    assert captured_dispatch_run_kwargs.get("exclude_accounts") == ["google-08", "fd84db4038d7"]
+
+def test_resolve_excluded_account_hashes_rejects_unknown_alias() -> None:
+    class Account:
+        alias = "google-08"
+
+    class Manager:
+        _use_real_manager = False
+        _accounts = [Account()]
+
+    with pytest.raises(ValueError, match="UNKNOWN_EXCLUDED_ACCOUNT_ALIAS:google-080"):
+        dispatch._resolve_excluded_account_hashes(["google-080"], manager=Manager())
+
+
+def test_background_spawn_persists_normalized_exclusion_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class FakeProcess:
+        pid = 424242
+
+    captured: dict[str, object] = {}
+
+    def fake_popen(argv, **kwargs):
+        captured["argv"] = argv
+        return FakeProcess()
+
+    monkeypatch.setattr(dispatch.subprocess, "Popen", fake_popen)
+    root = tmp_path / "ops"
+
+    record = dispatch._spawn_background_operation(
+        prompt="bounded exclusion evidence",
+        cwd=str(tmp_path),
+        mode="plan",
+        model="gemini-3.8-flash",
+        effort="low",
+        timeout=60,
+        max_calls=1,
+        pool_wait_timeout=1.0,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=root,
+        exclude_accounts=["FD84DB4038D7"],
+    )
+
+    assert record["excluded_account_hashes"] == ["fd84db4038d7"]
+    assert dispatch.public_operation_view(record)["excluded_account_hashes"] == [
+        "fd84db4038d7"
+    ]
+    argv = captured["argv"]
+    assert argv[argv.index("--exclude-account") + 1] == "fd84db4038d7"
+
+
+def test_foreground_hcom_operation_persists_and_forwards_exclusions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import hashlib
+
+    expected_hash = hashlib.sha256(b"google-08").hexdigest()[:12]
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        dispatch,
+        "_resolve_excluded_account_hashes",
+        lambda accounts, **_kwargs: {expected_hash},
+    )
+
+    def fake_dispatch_hcom_collab(**kwargs):
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(dispatch, "dispatch_hcom_collab", fake_dispatch_hcom_collab)
+
+    operation_root = tmp_path / "operations"
+    code = dispatch._run_foreground_hcom_operation(
+        cwd=str(tmp_path),
+        hcom_args=[],
+        model="gemini-3.8-flash",
+        pool_wait_timeout=1.0,
+        operation_root=operation_root,
+        exclude_accounts=["google-08"],
+    )
+
+    assert code == 0
+    assert captured["exclude_accounts"] == [expected_hash]
+    records = list((operation_root / "operations").glob("*/operation.json"))
+    assert len(records) == 1
+    record = json.loads(records[0].read_text(encoding="utf-8"))
+    assert record["excluded_account_hashes"] == [expected_hash]
+    assert dispatch.public_operation_view(record)["excluded_account_hashes"] == [
+        expected_hash
+    ]
+
+
+def test_rotation_success_clears_recovered_failure_kind(tmp_path: Path) -> None:
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    home = tmp_path / "home"
+    home.mkdir()
+
+    class Coordinator(_WriteScopeCoordinator):
+        def __init__(self, root: Path) -> None:
+            super().__init__(root)
+            self.rotated_claim = _WriteScopeClaim(root)
+            self.rotated_claim.account_alias_hash = "write-scope-2"
+            self.rotated_claim.lease_id_hash = "lease-write-2"
+            self.rotated_claim.internal_id = "write-scope-account-2"
+            self.rotation_count = 0
+
+        def rotate_claim(self, **kwargs):
+            self.rotation_count += 1
+            kwargs["current_claim"].release()
+            return self.rotated_claim
+
+    coordinator = Coordinator(home)
+    calls = 0
+    events: list[dict[str, object]] = []
+
+    def runner(**_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return 1, "", "RESOURCE_EXHAUSTED: quota exhausted", False, 10
+        return 0, "ok", "", False, 10
+
+    code = dispatch.dispatch_run(
+        prompt="rotate then succeed",
+        cwd=str(work),
+        mode="plan",
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+
+    classified = [event for event in events if event.get("phase") == "CLASSIFYING_FAILURE"]
+    executing = [event for event in events if event.get("phase") == "EXECUTING"]
+    folded: dict[str, object] = {}
+    for event in events:
+        folded.update(event)
+
+    assert code == 0
+    assert calls == 2
+    assert coordinator.rotation_count == 1
+    assert len(classified) == 1
+    assert classified[0]["failure_kind"] == "PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT"
+    assert len(executing) == 2
+    assert executing[1]["failure_kind"] is None
+    assert folded["attempts"] == 2
+    assert folded["rotations"] == 1
+    assert folded["failure_kind"] is None
+
+
+def test_rotation_second_failure_projects_terminal_failure_kind(tmp_path: Path) -> None:
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    home = tmp_path / "home"
+    home.mkdir()
+
+    class Coordinator(_WriteScopeCoordinator):
+        def __init__(self, root: Path) -> None:
+            super().__init__(root)
+            self.rotated_claim = _WriteScopeClaim(root)
+            self.rotated_claim.account_alias_hash = "write-scope-2"
+            self.rotated_claim.lease_id_hash = "lease-write-2"
+            self.rotated_claim.internal_id = "write-scope-account-2"
+            self.rotation_count = 0
+
+        def rotate_claim(self, **kwargs):
+            self.rotation_count += 1
+            kwargs["current_claim"].release()
+            return self.rotated_claim
+
+    coordinator = Coordinator(home)
+    calls = 0
+    events: list[dict[str, object]] = []
+
+    def runner(**_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return 1, "", "RESOURCE_EXHAUSTED: quota exhausted", False, 10
+        return 2, "", "syntax failure", False, 10
+
+    code = dispatch.dispatch_run(
+        prompt="rotate then fail",
+        cwd=str(work),
+        mode="plan",
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+
+    classified = [event for event in events if event.get("phase") == "CLASSIFYING_FAILURE"]
+    folded: dict[str, object] = {}
+    for event in events:
+        folded.update(event)
+
+    assert code == 2
+    assert calls == 2
+    assert coordinator.rotation_count == 1
+    assert [event["failure_kind"] for event in classified] == [
+        "PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT",
+        "SYNTAX_OR_IMPLEMENTATION_ERROR",
+    ]
+    assert folded["attempts"] == 2
+    assert folded["rotations"] == 1
+    assert folded["failure_kind"] == "SYNTAX_OR_IMPLEMENTATION_ERROR"
