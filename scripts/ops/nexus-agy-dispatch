@@ -3106,7 +3106,7 @@ def dispatch_run(
                     and "expect_coding_progress" in runner.__code__.co_varnames
                 ):
                     runner_kwargs["expect_coding_progress"] = bool(
-                        mode == "accept-edits" and projected_write_rules
+                        mode == "accept-edits" and write_paths
                     )
                 if runner is run_agy or (
                     hasattr(runner, "__code__")
