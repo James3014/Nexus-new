@@ -153,17 +153,6 @@ TRUSTED_PR1380_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, s
         "6068e086cbdf1e08723520a339269033346ff5a7553d87008cc8e9f1f22260b4",
     ),
 )
-# Exact one-use, four-way binding for Owner-authorized PR #1466 (Issue #1465
-# repaired nexus-runtime + nexus-learning exact-pin adoption).
-TRUSTED_PR1466_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
-    1466,
-    (
-        "0ff95ecbe90a66299ff40bc411ddd1045d978d43726729b454e5c1acf8d4a160",
-        "6068e086cbdf1e08723520a339269033346ff5a7553d87008cc8e9f1f22260b4",
-        "9f9a6d7b6a77548348a414fb121c497c8694fee6cea9b0356259d0c9d35f5483",
-        "1a316595f4525e6e77fe5b545d3acdc28bc463376b0172d8a5c5915dcd98f25f",
-    ),
-)
 
 REQUIRED_EVIDENCE_KEYS = {
     "schema_version",
@@ -246,7 +235,6 @@ def _validate_trusted_dependency_contract(
         TRUSTED_PR1288_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR1375_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR1380_DEPENDENCY_SNAPSHOT_TRANSITION,
-        TRUSTED_PR1466_DEPENDENCY_SNAPSHOT_TRANSITION,
     )
     for authorized_transition_record in authorized_transition_records:
         if authorized_transition_record is None:
