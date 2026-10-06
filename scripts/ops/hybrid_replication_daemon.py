@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import subprocess  # nosec B404
 from datetime import datetime, timezone
 from pathlib import Path
@@ -240,16 +239,6 @@ def advance_all(
     }
 
 
-def _launchd_loaded(label: str) -> bool:
-    completed = subprocess.run(  # nosec B603 B607
-        ["launchctl", "print", f"gui/{os.getuid()}/{label}"],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    return completed.returncode == 0
-
-
 def _evaluate_automatic_capture_readiness(
     *,
     ingest_report: dict[str, Any],
@@ -294,6 +283,7 @@ def evaluate_readiness_from_store(
     advance_report: dict[str, Any],
     control_task_key: str,
     launchd_label: str,
+    service_observation: dict[str, Any],
 ) -> dict[str, Any]:
     control_state = store.load_task(control_task_key)
     control_phase = str(control_state.get("phase")) if control_state else None
@@ -306,10 +296,19 @@ def evaluate_readiness_from_store(
         except (OSError, ValueError) as exc:
             control_score_error = f"{type(exc).__name__}:{exc}"
 
+    if service_observation.get("schema") != "nexus.hybrid_replication.service_observation.v1":
+        raise ValueError("service_observation_schema_mismatch")
+    if service_observation.get("label") != launchd_label:
+        raise ValueError("service_observation_label_mismatch")
+    if not isinstance(service_observation.get("loaded"), bool):
+        raise ValueError("service_observation_loaded_required")
+    if not str(service_observation.get("observed_at") or ""):
+        raise ValueError("service_observation_timestamp_required")
+
     result = _evaluate_automatic_capture_readiness(
         ingest_report=ingest_report,
         advance_report=advance_report,
-        launchd_loaded=_launchd_loaded(launchd_label),
+        launchd_loaded=bool(service_observation["loaded"]),
         control_phase=control_phase,
     )
     blockers = list(result["blockers"])
@@ -321,6 +320,7 @@ def evaluate_readiness_from_store(
     result["control_score_valid"] = control_score_valid
     result["control_score_error"] = control_score_error
     result["launchd_label"] = launchd_label
+    result["service_observation"] = dict(service_observation)
     result["claim_ceiling"] = "READINESS_CONTROL_ONLY_NOT_PRIMARY_COHORT"
     return result
 
@@ -335,6 +335,7 @@ def main() -> int:
     parser.add_argument("--ingest-only", action="store_true")
     parser.add_argument("--readiness-control-task-key")
     parser.add_argument("--launchd-label", default="com.nexus.hybrid-replication")
+    parser.add_argument("--service-observation")
     args = parser.parse_args()
 
     store = AutomaticReplicationStore(Path(args.root))
@@ -360,12 +361,16 @@ def main() -> int:
     )
     print(json.dumps(advance_report, ensure_ascii=False, sort_keys=True, indent=2))
     if args.readiness_control_task_key:
+        if not args.service_observation:
+            raise SystemExit("readiness mode requires --service-observation")
+        service_observation = json.loads(Path(args.service_observation).read_text(encoding="utf-8"))
         readiness_report = evaluate_readiness_from_store(
             store=store,
             ingest_report=ingest_report,
             advance_report=advance_report,
             control_task_key=args.readiness_control_task_key,
             launchd_label=args.launchd_label,
+            service_observation=service_observation,
         )
         print(json.dumps(readiness_report, ensure_ascii=False, sort_keys=True, indent=2))
         if readiness_report["status"] != "AUTOMATIC_CAPTURE_READY":

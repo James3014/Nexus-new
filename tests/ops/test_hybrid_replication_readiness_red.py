@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
+
+import pytest
 
 import scripts.ops.hybrid_replication_daemon as daemon
 from nexus.research.hybrid_replication_live import _prepare_shadow_checkout
@@ -275,7 +278,12 @@ def test_readiness_store_seam_rejects_tampered_score_receipt(tmp_path: Path, mon
     )
     state = controller.advance(snapshot.task_key)
     assert state["phase"] == "SCORED"
-    monkeypatch.setattr(daemon, "_launchd_loaded", lambda _: True)
+    service_observation = {
+        "schema": "nexus.hybrid_replication.service_observation.v1",
+        "label": "com.nexus.hybrid-replication",
+        "loaded": True,
+        "observed_at": "2026-10-07T00:10:01Z",
+    }
 
     ready = daemon.evaluate_readiness_from_store(
         store=store,
@@ -283,6 +291,7 @@ def test_readiness_store_seam_rejects_tampered_score_receipt(tmp_path: Path, mon
         advance_report=_healthy_advance(),
         control_task_key=snapshot.task_key,
         launchd_label="com.nexus.hybrid-replication",
+        service_observation=service_observation,
     )
     assert ready["status"] == READY
     assert ready["control_score_valid"] is True
@@ -296,6 +305,7 @@ def test_readiness_store_seam_rejects_tampered_score_receipt(tmp_path: Path, mon
         advance_report=_healthy_advance(),
         control_task_key=snapshot.task_key,
         launchd_label="com.nexus.hybrid-replication",
+        service_observation=service_observation,
     )
     assert blocked["status"] == "NOT_READY"
     assert "CONTROL_SCORE_INVALID" in blocked["blockers"]
@@ -320,7 +330,16 @@ def test_daemon_main_readiness_mode_consumes_store_and_launchd(tmp_path: Path, m
     assert controller.advance(snapshot.task_key)["phase"] == "SCORED"
 
     monkeypatch.setattr(daemon, "ingest", lambda **_: _healthy_ingest())
-    monkeypatch.setattr(daemon, "_launchd_loaded", lambda _: True)
+    observation_path = tmp_path / "service-observation.json"
+    observation_path.write_text(
+        json.dumps({
+            "schema": "nexus.hybrid_replication.service_observation.v1",
+            "label": "com.nexus.hybrid-replication",
+            "loaded": True,
+            "observed_at": "2026-10-07T00:10:01Z",
+        }),
+        encoding="utf-8",
+    )
     monkeypatch.setattr(
         "sys.argv",
         [
@@ -337,6 +356,23 @@ def test_daemon_main_readiness_mode_consumes_store_and_launchd(tmp_path: Path, m
             "unused",
             "--readiness-control-task-key",
             snapshot.task_key,
+            "--service-observation",
+            str(observation_path),
         ],
     )
     assert daemon.main() == 0
+
+
+def test_readiness_store_seam_requires_bound_service_observation(tmp_path: Path) -> None:
+    store = AutomaticReplicationStore(tmp_path)
+    snapshot = _snapshot(9004)
+    store.capture(snapshot, admission_disposition=READINESS_CONTROL_DISPOSITION)
+    with pytest.raises(ValueError, match="service_observation_schema_mismatch"):
+        daemon.evaluate_readiness_from_store(
+            store=store,
+            ingest_report=_healthy_ingest(),
+            advance_report=_healthy_advance(),
+            control_task_key=snapshot.task_key,
+            launchd_label="com.nexus.hybrid-replication",
+            service_observation={},
+        )
