@@ -1254,6 +1254,74 @@ class CrossProcessLeaseCoordinator:
 
             time.sleep(min(self.poll_interval, max(0.01, remaining)))
 
+    def reconcile_claim_receipt(
+        self,
+        *,
+        account_alias_hash: str,
+        lease_id_hash: str,
+        owner_pid: int,
+    ) -> dict[str, Any]:
+        """Remove one orphaned durable claim receipt only after proving it is safe.
+
+        The per-account flock must be acquirable and the surviving receipt must
+        match the exact opaque claim identity.  Any ambiguity preserves the
+        receipt, so future account acquisition remains fail-closed.
+        """
+        import fcntl
+
+        alias_hash = str(account_alias_hash or "").strip()
+        lease_hash = str(lease_id_hash or "").strip()
+        if not alias_hash or not lease_hash or not isinstance(owner_pid, int) or owner_pid <= 0:
+            return {"result": "LEASE_IDENTITY_INCOMPLETE"}
+
+        lock_path = self.leases_dir / f"{alias_hash}.lock"
+        receipt_path = self.leases_dir / f"{alias_hash}.receipt.json"
+        if not receipt_path.exists():
+            return {"result": "ALREADY_ABSENT"}
+
+        self.leases_dir.mkdir(parents=True, exist_ok=True)
+        lock_obj = lock_path.open("a+")
+        try:
+            try:
+                fcntl.flock(lock_obj.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except (BlockingIOError, OSError):
+                return {"result": "LEASE_BUSY_PRESERVED"}
+
+            try:
+                receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                return {"result": "LEASE_RECEIPT_UNREADABLE_PRESERVED"}
+
+            expected = {
+                "account_alias_hash": alias_hash,
+                "lease_id_hash": lease_hash,
+                "pid": owner_pid,
+            }
+            observed = {
+                "account_alias_hash": receipt.get("account_alias_hash"),
+                "lease_id_hash": receipt.get("lease_id_hash"),
+                "pid": receipt.get("pid"),
+            }
+            if observed != expected:
+                return {
+                    "result": "LEASE_IDENTITY_MISMATCH_PRESERVED",
+                    "observed": observed,
+                }
+
+            try:
+                receipt_path.unlink()
+            except OSError as exc:
+                return {
+                    "result": "LEASE_RECEIPT_REMOVE_FAILED",
+                    "error": type(exc).__name__,
+                }
+            return {"result": "LEASE_RECEIPT_REMOVED"}
+        finally:
+            try:
+                fcntl.flock(lock_obj.fileno(), fcntl.LOCK_UN)
+            finally:
+                lock_obj.close()
+
     def rotate_claim(
         self,
         current_claim: AccountLeaseClaim,

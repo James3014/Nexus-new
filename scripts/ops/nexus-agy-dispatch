@@ -4069,12 +4069,24 @@ def _run_background_operation(
         heartbeat_thread.join(timeout=2.0)
 
 
+def _completed_provider_exit_proven(record: dict[str, Any]) -> bool:
+    """Return whether durable terminal evidence proves this completed provider exited."""
+    return bool(
+        record.get("status") == "COMPLETED"
+        and record.get("phase") == "TERMINAL"
+        and record.get("provider_process_state") == "EXITED"
+        and record.get("has_unresolved_external_effect") is False
+        and record.get("exit_code") == 0
+    )
+
+
 def _cleanup_reconciled_lease(record: dict[str, Any]) -> dict[str, Any]:
     reconciliation = record.get("reconciliation")
-    if (
-        not isinstance(reconciliation, dict)
-        or reconciliation.get("provider_alive_after") is not False
-    ):
+    reconciled_provider_absent = bool(
+        isinstance(reconciliation, dict)
+        and reconciliation.get("provider_alive_after") is False
+    )
+    if not reconciled_provider_absent and not _completed_provider_exit_proven(record):
         return {"result": "NOT_SAFE_TO_CLEAN"}
 
     provider_pid = record.get("provider_pid")
@@ -4155,6 +4167,12 @@ def _reconcile_operation(
     lease_cleanup = _cleanup_reconciled_lease(record)
     reconciliation = dict(record.get("reconciliation") or {})
     reconciliation["lease_cleanup"] = lease_cleanup
+    if _completed_provider_exit_proven(record):
+        reconciliation.update({
+            "provider_alive_before": False,
+            "provider_alive_after": False,
+            "retry_permitted": False,
+        })
     if lease_cleanup.get("result") == "COLLAB_PROVIDER_IDENTITY_UNPROVEN_PRESERVED":
         reconciliation.update({
             "result": "HCOM_COLLAB_PROVIDER_IDENTITY_UNPROVEN",

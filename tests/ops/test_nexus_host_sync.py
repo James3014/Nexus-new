@@ -31,6 +31,7 @@ GROK_ACCOUNTS = ROOT / "scripts" / "ops" / "nexus-grok-accounts"
 HCOM_AGY_SAFE = ROOT / "scripts" / "ops" / "nexus-hcom-agy-safe"
 HERMES_CONTROLLER_GUARD = ROOT / "scripts" / "ops" / "nexus-hermes-controller-guard"
 HERMES_CONTINUATION_CONTROLLER = ROOT / "scripts" / "ops" / "nexus-hermes-continuation-controller"
+HERMES_CORE_COMPLETION = ROOT / "scripts" / "ops" / "nexus-hermes-core-completion"
 HERMES_LAUNCHD = ROOT / "scripts" / "ops" / "nexus-hermes-launchd"
 HERMES_OBSERVE_POLICY = ROOT / "scripts" / "ops" / "nexus-hermes-soak-observe-policy.json"
 HERMES_LAUNCHD = ROOT / "scripts" / "ops" / "nexus-hermes-launchd"
@@ -112,6 +113,7 @@ def _make_source_repo(tmp_path: Path) -> Path:
             HERMES_CONTINUATION_CONTROLLER,
             "scripts/ops/nexus-hermes-continuation-controller",
         ),
+        (HERMES_CORE_COMPLETION, "scripts/ops/nexus-hermes-core-completion"),
         (HERMES_LAUNCHD, "scripts/ops/nexus-hermes-launchd"),
         (HERMES_OBSERVE_POLICY, "scripts/ops/nexus-hermes-soak-observe-policy.json"),
         (HERMES_LAUNCHD, "scripts/ops/nexus-hermes-launchd"),
@@ -220,6 +222,9 @@ def _invoke(
     env["NEXUS_HERMES_CONTINUATION_CONTROLLER_TARGET"] = str(
         dispatch_target.parent / "nexus-hermes-continuation-controller"
     )
+    env["NEXUS_HERMES_CORE_COMPLETION_TARGET"] = str(
+        dispatch_target.parent / "nexus-hermes-core-completion"
+    )
     env["NEXUS_HERMES_LAUNCHD_TARGET"] = str(dispatch_target.parent / "nexus-hermes-launchd")
     return _run(argv, cwd=ROOT, env=env)
 
@@ -294,12 +299,14 @@ def test_sync_materializes_exact_generation_and_entrypoints(tmp_path: Path) -> N
     assert payload["components"]["hcom_agy_safe"]["status"] == "VERIFIED"
     assert payload["components"]["hermes_controller_guard"]["status"] == "VERIFIED"
     assert payload["components"]["hermes_continuation_controller"]["status"] == "VERIFIED"
+    assert payload["components"]["hermes_core_completion"]["status"] == "VERIFIED"
     assert payload["components"]["hermes_launchd"]["status"] == "VERIFIED"
     hcom_target = dispatch_target.parent / "hcom-agy-safe"
     assert hcom_target.is_symlink()
     assert hcom_target.resolve().read_bytes() == HCOM_AGY_SAFE.read_bytes()
     hermes_guard_target = dispatch_target.parent / "nexus-hermes-controller-guard"
     hermes_controller_target = dispatch_target.parent / "nexus-hermes-continuation-controller"
+    hermes_core_completion_target = dispatch_target.parent / "nexus-hermes-core-completion"
     hermes_launchd_target = dispatch_target.parent / "nexus-hermes-launchd"
     assert hermes_guard_target.is_symlink()
     assert hermes_guard_target.resolve().read_bytes() == HERMES_CONTROLLER_GUARD.read_bytes()
@@ -307,6 +314,10 @@ def test_sync_materializes_exact_generation_and_entrypoints(tmp_path: Path) -> N
     assert (
         hermes_controller_target.resolve().read_bytes()
         == HERMES_CONTINUATION_CONTROLLER.read_bytes()
+    )
+    assert hermes_core_completion_target.is_symlink()
+    assert (
+        hermes_core_completion_target.resolve().read_bytes() == HERMES_CORE_COMPLETION.read_bytes()
     )
     hermes_launchd_target = dispatch_target.parent / "nexus-hermes-launchd"
     assert hermes_launchd_target.is_symlink()

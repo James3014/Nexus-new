@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 import sysconfig
@@ -46,10 +47,11 @@ TRUSTED_EXTERNAL_RUNTIME_PACKAGES: tuple[tuple[str, str, str, str], ...] = (
         "nexus-runtime",
         "nexus_runtime",
         "https://github.com/James3014/nexus-runtime.git",
-        "0fbe9522cfa6fb178e328381486a18877808fa79",
+        "0a39e52770230a74c5431c0f9cc73a63fb090d8b",
     ),
 )
 UV_VERSION = "uv 0.9.2"
+SUBPROCESS_DIAGNOSTIC_LIMIT = 4096
 # Historical one-use, four-way binding for the Owner-approved TASK-001 Open SWE
 # optional-dependency transition. The corrective external-runtime architecture
 # restored the root dependency contract to the trusted baseline, so this
@@ -153,6 +155,17 @@ TRUSTED_PR1380_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, s
         "6068e086cbdf1e08723520a339269033346ff5a7553d87008cc8e9f1f22260b4",
     ),
 )
+# Exact one-use, four-way binding for Owner-approved PR #1507 (Issue #1506
+# Wave 20 bounded reconciliation Runtime pin adoption).
+TRUSTED_PR1507_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1507,
+    (
+        "0ff95ecbe90a66299ff40bc411ddd1045d978d43726729b454e5c1acf8d4a160",
+        "6068e086cbdf1e08723520a339269033346ff5a7553d87008cc8e9f1f22260b4",
+        "10eb27a29cfb60d8cc45e223a68a1221f7f285b04d2b9ab58f1ed2096b11a829",
+        "db1bd37456a5d302c0f508ab5ca193750f9d715985f2dcf5e67743a70e9d2667",
+    ),
+)
 
 REQUIRED_EVIDENCE_KEYS = {
     "schema_version",
@@ -235,6 +248,7 @@ def _validate_trusted_dependency_contract(
         TRUSTED_PR1288_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR1375_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR1380_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1507_DEPENDENCY_SNAPSHOT_TRANSITION,
     )
     for authorized_transition_record in authorized_transition_records:
         if authorized_transition_record is None:
@@ -341,6 +355,53 @@ def _runtime_subprocess_env(home: Path) -> dict[str, str]:
         if os.environ.get(key):
             environment[key] = os.environ[key]
     return environment
+
+
+def _bounded_subprocess_output(value: bytes | str | None) -> str:
+    if value is None:
+        return ""
+    text = value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value
+    text = re.sub(
+        r"(?i)(authorization:\s*(?:basic|bearer)\s+)\S+",
+        r"\1<redacted>",
+        text,
+    )
+    text = re.sub(
+        r"(?i)(https?://)[^/\s:@]+:[^@\s/]+@",
+        r"\1<redacted>@",
+        text,
+    )
+    text = re.sub(r"(?i)\b(?:ghp|github_pat)_[A-Za-z0-9_]+", "<redacted>", text)
+    if len(text) > SUBPROCESS_DIAGNOSTIC_LIMIT:
+        text = "<truncated>" + text[-SUBPROCESS_DIAGNOSTIC_LIMIT:]
+    return text
+
+
+def _run_runtime_subprocess(
+    args: list[str],
+    *,
+    stage: str,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+    text: bool = False,
+) -> subprocess.CompletedProcess[Any]:
+    try:
+        return subprocess.run(
+            args,
+            cwd=cwd,
+            env=env,
+            check=True,
+            capture_output=True,
+            text=text,
+        )
+    except subprocess.CalledProcessError as exc:
+        stdout = _bounded_subprocess_output(exc.stdout)
+        stderr = _bounded_subprocess_output(exc.stderr)
+        raise RuntimeError(
+            "trusted runtime subprocess failed: "
+            f"stage={stage} exit_code={exc.returncode} "
+            f"stdout={stdout!r} stderr={stderr!r}"
+        ) from None
 
 
 def _trusted_external_package_contract() -> list[dict[str, str]]:
@@ -472,25 +533,22 @@ def _build_runtime(args: argparse.Namespace) -> None:
         export_args.extend(["--extra", "legacy"])
         for distribution, _package, _repository, _commit in TRUSTED_EXTERNAL_RUNTIME_PACKAGES:
             export_args.extend(["--no-emit-package", distribution])
-        export_args.extend(
-            [
-                "--no-emit-project",
-                "--no-emit-workspace",
-                "--no-emit-local",
-                "--output-file",
-                str(requirements_path),
-            ]
-        )
-        subprocess.run(
+        export_args.extend([
+            "--no-emit-project",
+            "--no-emit-workspace",
+            "--no-emit-local",
+            "--output-file",
+            str(requirements_path),
+        ])
+        _run_runtime_subprocess(
             export_args,
+            stage="dependency-export",
             cwd=contract,
             env=environment,
-            check=True,
-            capture_output=True,
         )
         requirements = requirements_path.read_bytes()
         site_packages = build_root / "site-packages"
-        subprocess.run(
+        _run_runtime_subprocess(
             [
                 args.uv_executable,
                 "pip",
@@ -507,13 +565,12 @@ def _build_runtime(args: argparse.Namespace) -> None:
                 "--requirements",
                 str(requirements_path),
             ],
+            stage="locked-binary-install",
             cwd=contract,
             env=environment,
-            check=True,
-            capture_output=True,
         )
         for distribution, _package, repository, commit in TRUSTED_EXTERNAL_RUNTIME_PACKAGES:
-            subprocess.run(
+            _run_runtime_subprocess(
                 [
                     args.uv_executable,
                     "pip",
@@ -527,17 +584,15 @@ def _build_runtime(args: argparse.Namespace) -> None:
                     sys.executable,
                     f"{distribution} @ git+{repository}@{commit}",
                 ],
+                stage=f"external-package-install:{distribution}",
                 cwd=contract,
                 env=environment,
-                check=True,
-                capture_output=True,
             )
         external_packages = _verify_external_runtime_packages(site_packages)
-        uv_version = subprocess.run(
+        uv_version = _run_runtime_subprocess(
             [args.uv_executable, "--version"],
+            stage="uv-version",
             env=environment,
-            check=True,
-            capture_output=True,
             text=True,
         ).stdout.strip()
         if uv_version != UV_VERSION:
@@ -843,7 +898,8 @@ def verify_evidence(
                 metadata.get("schema_version") != RUNTIME_SCHEMA_VERSION
                 or metadata.get("pytest_plugins") != PYTEST_PLUGINS
                 or metadata.get("dependency_groups") != list(TRUSTED_RUNTIME_DEPENDENCY_GROUPS)
-                or metadata.get("external_packages") != _trusted_external_package_contract_with_provenance(
+                or metadata.get("external_packages")
+                != _trusted_external_package_contract_with_provenance(
                     metadata.get("external_packages")
                 )
                 or metadata.get("builder") != {"uv_version": UV_VERSION}
@@ -1018,7 +1074,8 @@ def _controller(args: argparse.Namespace) -> None:
         or runtime_identity.get("runtime_probe") != _runtime_probe()
         or runtime_identity.get("pytest_plugins") != PYTEST_PLUGINS
         or runtime_identity.get("dependency_groups") != list(TRUSTED_RUNTIME_DEPENDENCY_GROUPS)
-        or runtime_identity.get("external_packages") != _trusted_external_package_contract_with_provenance(
+        or runtime_identity.get("external_packages")
+        != _trusted_external_package_contract_with_provenance(
             runtime_identity.get("external_packages")
         )
         or runtime_identity.get("builder") != {"uv_version": UV_VERSION}
@@ -1089,7 +1146,8 @@ def _executor(args: argparse.Namespace) -> None:
         or runtime_metadata.get("runtime_probe") != _runtime_probe()
         or runtime_metadata.get("pytest_plugins") != PYTEST_PLUGINS
         or runtime_metadata.get("dependency_groups") != list(TRUSTED_RUNTIME_DEPENDENCY_GROUPS)
-        or runtime_metadata.get("external_packages") != _trusted_external_package_contract_with_provenance(
+        or runtime_metadata.get("external_packages")
+        != _trusted_external_package_contract_with_provenance(
             runtime_metadata.get("external_packages")
         )
         or runtime_metadata.get("builder") != {"uv_version": UV_VERSION}

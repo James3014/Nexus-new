@@ -83,7 +83,7 @@ def test_trusted_external_runtime_package_pair_is_exact() -> None:
             "nexus-runtime",
             "nexus_runtime",
             "https://github.com/James3014/nexus-runtime.git",
-            "0fbe9522cfa6fb178e328381486a18877808fa79",
+            "0a39e52770230a74c5431c0f9cc73a63fb090d8b",
         ),
     )
 
@@ -489,6 +489,62 @@ def test_pr1380_dependency_snapshot_transition_allows_only_exact_binding(monkeyp
             values[1],
             values[3],
             pull_request_number=1381,
+            head_product_init_is_regular=True,
+        )
+
+
+def test_pr1507_dependency_snapshot_transition_is_exact_and_separate() -> None:
+    assert trusted_anchor.TRUSTED_PR1507_DEPENDENCY_SNAPSHOT_TRANSITION == (
+        1507,
+        (
+            "0ff95ecbe90a66299ff40bc411ddd1045d978d43726729b454e5c1acf8d4a160",
+            "6068e086cbdf1e08723520a339269033346ff5a7553d87008cc8e9f1f22260b4",
+            "10eb27a29cfb60d8cc45e223a68a1221f7f285b04d2b9ab58f1ed2096b11a829",
+            "db1bd37456a5d302c0f508ab5ca193750f9d715985f2dcf5e67743a70e9d2667",
+        ),
+    )
+
+
+def test_pr1507_dependency_snapshot_transition_allows_only_exact_binding(monkeypatch) -> None:
+    values = [b"trusted pyproject\n", b"trusted lock\n", b"head pyproject\n", b"head lock\n"]
+    hashes = trusted_anchor.TRUSTED_PR1507_DEPENDENCY_SNAPSHOT_TRANSITION[1]
+    original_sha = trusted_anchor._sha
+    digest_by_value = dict(zip(values, hashes, strict=True))
+    monkeypatch.setattr(
+        trusted_anchor,
+        "_sha",
+        lambda value: digest_by_value.get(value, original_sha(value)),
+    )
+
+    trusted_anchor._validate_trusted_dependency_contract(
+        values[0],
+        values[2],
+        values[1],
+        values[3],
+        pull_request_number=1507,
+        head_product_init_is_regular=True,
+    )
+
+    for index in range(4):
+        tampered = list(values)
+        tampered[index] += b"tampered"
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                tampered[0],
+                tampered[2],
+                tampered[1],
+                tampered[3],
+                pull_request_number=1507,
+                head_product_init_is_regular=True,
+            )
+
+    with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+        trusted_anchor._validate_trusted_dependency_contract(
+            values[0],
+            values[2],
+            values[1],
+            values[3],
+            pull_request_number=1508,
             head_product_init_is_regular=True,
         )
 
@@ -1422,6 +1478,53 @@ def test_runtime_builder_uses_frozen_hash_bound_binary_only_contract(tmp_path: P
         isinstance(item["direct_url_sha256"], str) and len(item["direct_url_sha256"]) == 64
         for item in metadata["external_packages"]
     )
+
+
+def test_runtime_builder_failure_is_bounded_and_redacted(tmp_path: Path):
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    _run_git(repo, "config", "user.email", "test@example.invalid")
+    _run_git(repo, "config", "user.name", "runtime-builder-test")
+    (repo / "pyproject.toml").write_text("[project]\nname='fixture'\nversion='0'\n")
+    (repo / "uv.lock").write_text("version = 1\nrevision = 3\n")
+    _run_git(repo, "add", ".")
+    _run_git(repo, "commit", "-m", "runtime contract")
+    workflow_sha = _run_git(repo, "rev-parse", "HEAD")
+    fake_uv = tmp_path / "uv"
+    fake_uv.write_text(
+        f"#!{sys.executable}\n"
+        "import sys\n"
+        "from pathlib import Path\n"
+        "args=sys.argv[1:]\n"
+        "if args and args[0] == 'export':\n"
+        " Path(args[args.index('--output-file')+1]).write_text('pytest==9 --hash=sha256:abc\\n')\n"
+        " raise SystemExit(0)\n"
+        "if args[:2] == ['pip','install'] and '--requirements' in args:\n"
+        " sys.stdout.write('Authorization: Bearer ghp_supersecret\\n')\n"
+        " sys.stderr.write('https://x-access-token:github_pat_secret@example.invalid/repo ' + ('x' * 5000))\n"
+        " raise SystemExit(23)\n"
+        "raise SystemExit(2)\n"
+    )
+    fake_uv.chmod(0o755)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        trusted_anchor._build_runtime(
+            argparse.Namespace(
+                repo_root=str(repo),
+                workflow_sha=workflow_sha,
+                uv_executable=str(fake_uv),
+                output_dir=str(tmp_path / "built-runtime"),
+            )
+        )
+
+    message = str(exc_info.value)
+    assert "stage=locked-binary-install" in message
+    assert "exit_code=23" in message
+    assert "<truncated>" in message
+    assert "<redacted>" in message
+    assert "ghp_supersecret" not in message
+    assert "github_pat_secret" not in message
+    assert len(message) < trusted_anchor.SUBPROCESS_DIAGNOSTIC_LIMIT + 1000
 
 
 @pytest.mark.parametrize(

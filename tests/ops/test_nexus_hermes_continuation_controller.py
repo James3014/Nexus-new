@@ -35,7 +35,20 @@ def _policy(tmp_path: Path, *, with_handler: bool = True) -> Path:
     return path
 
 
-def _args(tmp_path: Path, *, mode: str = "execute", run_id: str = "run-test", operation_id=None):
+def _args(
+    tmp_path: Path,
+    *,
+    mode: str = "execute",
+    run_id: str = "run-test",
+    operation_id=None,
+    core_root=None,
+    expected_core_commit=None,
+    expected_core_tree=None,
+    work_product=None,
+    source_revision=None,
+    source_tree=None,
+    allowed_paths=None,
+):
     return argparse.Namespace(
         policy=str(_policy(tmp_path)),
         repo_root=str(tmp_path),
@@ -47,6 +60,13 @@ def _args(tmp_path: Path, *, mode: str = "execute", run_id: str = "run-test", op
         receipt_dir=str(tmp_path / "receipts"),
         run_id=run_id,
         max_cycles=3,
+        core_root=core_root,
+        expected_core_commit=expected_core_commit,
+        expected_core_tree=expected_core_tree,
+        work_product=work_product,
+        source_revision=source_revision,
+        source_tree=source_tree,
+        allowed_paths=allowed_paths,
     )
 
 
@@ -59,6 +79,18 @@ def _doctor(disposition: str, gate: str, *, operation_id=None):
         "claim_ceiling": "READ_ONLY_WORKFLOW_OBSERVATION",
         "resume_disposition": disposition,
         "next_gate": next_gate,
+    }
+
+
+def _core_result(*, verified: bool, reason_codes=None):
+    return {
+        "schema": MOD.CORE_COMPLETION_SCHEMA,
+        "claims_complete": verified,
+        "claims_verified": verified,
+        "core_commit": "94952e146615f74e45dbd780f6e2697460ce6184",
+        "core_tree": "f7eb11d58fdd28a2c43ca49b1c15da2c597befc6",
+        "reason_codes": list(reason_codes or []),
+        "result_hash": "sha256:" + ("a" * 64),
     }
 
 
@@ -337,3 +369,357 @@ def test_effect_cycle_receipt_contains_post_effect_readback(tmp_path, monkeypatc
     receipt = json.loads((tmp_path / "receipts/run-test/cycle-0001.json").read_text())
     assert receipt["post_effect_readback"]["doctor_disposition"] == "WAIT"
     assert receipt["post_effect_readback"]["guard"]["decision"] == "WAIT"
+
+
+def _make_valid_envelope(
+    *,
+    issue=1392,
+    run_id="run-test",
+    operation_id="agyop_valid",
+    source_revision="a" * 40,
+    artifact_path="pkg/code.py",
+    content_hash="sha256:" + ("b" * 64),
+):
+    core_mod = MOD._load_core_completion_mod()
+    return core_mod.materialize_work_product_envelope(
+        issue_number=issue,
+        run_id=run_id,
+        operation_id=operation_id,
+        source_revision=source_revision,
+        source_tree="c" * 40,
+        target_revision="d" * 40,
+        artifacts=[
+            {
+                "path": artifact_path,
+                "artifact_id": "art-1",
+                "content_hash": content_hash,
+            }
+        ],
+        verifier_observation={
+            "verifier_id": "pytest_unit",
+            "artifact_id": "art-1",
+            "artifact_hash": content_hash,
+            "status": "PASS",
+        },
+    )
+
+
+def test_red_control_terminal_completed_without_work_product_fails_closed(tmp_path, monkeypatch):
+    op = "agyop_red"
+    monkeypatch.setattr(
+        MOD, "_doctor", lambda **kwargs: _doctor("SAFE", "NO_PENDING_GATE", operation_id=op)
+    )
+    monkeypatch.setattr(MOD, "_guard_doctor", _guard)
+    args = _args(
+        tmp_path,
+        operation_id=op,
+        core_root=str(ROOT / ".reference" / "nexus-core"),
+    )
+    assert MOD.run_controller(args) == 4
+    receipt = json.loads((tmp_path / "receipts/run-test/cycle-0001.json").read_text())
+    assert receipt["outcome"] == "CORE_COMPLETION_NOT_VERIFIED"
+    assert receipt["core_completion"]["claims_verified"] is False
+    assert "EMPTY_WORK_PRODUCT_ENVELOPE" in receipt["core_completion"]["reason_codes"]
+
+
+def test_positive_control_verified_core_completion_allows_next_gate(tmp_path, monkeypatch):
+    op = "agyop_green"
+    monkeypatch.setattr(MOD, "_core_completion", lambda **kwargs: _core_result(verified=True))
+    monkeypatch.setattr(
+        MOD, "_doctor", lambda **kwargs: _doctor("SAFE", "EXACT_NEXT_GATE", operation_id=op)
+    )
+    monkeypatch.setattr(MOD, "_guard_doctor", _guard)
+    envelope = _make_valid_envelope(operation_id=op)
+    env_file = tmp_path / "envelope.json"
+    env_file.write_text(json.dumps(envelope))
+
+    args = _args(
+        tmp_path,
+        operation_id=op,
+        core_root=str(ROOT / ".reference" / "nexus-core"),
+        work_product=str(env_file),
+        source_revision="a" * 40,
+    )
+    assert MOD.run_controller(args) == 0
+    receipt = json.loads((tmp_path / "receipts/run-test/cycle-0001.json").read_text())
+    assert receipt["outcome"] == "EXACT_NEXT_GATE_ELIGIBLE"
+    assert receipt["core_completion"]["claims_verified"] is True
+    assert receipt["core_completion"]["claims_complete"] is True
+    assert receipt["core_completion"]["core_commit"] == "94952e146615f74e45dbd780f6e2697460ce6184"
+    assert receipt["core_completion"]["core_tree"] == "f7eb11d58fdd28a2c43ca49b1c15da2c597befc6"
+    assert receipt["core_completion"]["result_hash"] is not None
+
+    state = json.loads((tmp_path / "receipts/run-test/state.json").read_text())
+    assert state["core_completion_verified"] is True
+    assert state["core_completion"]["claims_verified"] is True
+
+
+def test_positive_control_noop_terminal_allows_closeout(tmp_path, monkeypatch):
+    op = "agyop_noop_pass"
+    monkeypatch.setattr(MOD, "_core_completion", lambda **kwargs: _core_result(verified=True))
+    monkeypatch.setattr(
+        MOD, "_doctor", lambda **kwargs: _doctor("SAFE", "NO_PENDING_GATE", operation_id=op)
+    )
+    monkeypatch.setattr(MOD, "_guard_doctor", _guard)
+    envelope = _make_valid_envelope(operation_id=op)
+    env_file = tmp_path / "envelope.json"
+    env_file.write_text(json.dumps(envelope))
+
+    args = _args(
+        tmp_path,
+        operation_id=op,
+        core_root=str(ROOT / ".reference" / "nexus-core"),
+        work_product=str(env_file),
+        source_revision="a" * 40,
+    )
+    assert MOD.run_controller(args) == 0
+    receipt = json.loads((tmp_path / "receipts/run-test/cycle-0001.json").read_text())
+    assert receipt["outcome"] == "TERMINAL_NOOP"
+    assert receipt["core_completion"]["claims_verified"] is True
+
+
+def test_negative_stale_envelope_hash_fails_closed(tmp_path, monkeypatch):
+    op = "agyop_tampered"
+    monkeypatch.setattr(
+        MOD, "_doctor", lambda **kwargs: _doctor("SAFE", "EXACT_NEXT_GATE", operation_id=op)
+    )
+    monkeypatch.setattr(MOD, "_guard_doctor", _guard)
+    envelope = _make_valid_envelope(operation_id=op)
+    envelope["issue_number"] = 1419  # tamper without re-hashing
+    env_file = tmp_path / "envelope.json"
+    env_file.write_text(json.dumps(envelope))
+
+    args = _args(
+        tmp_path,
+        operation_id=op,
+        core_root=str(ROOT / ".reference" / "nexus-core"),
+        work_product=str(env_file),
+        source_revision="a" * 40,
+    )
+    assert MOD.run_controller(args) == 4
+    receipt = json.loads((tmp_path / "receipts/run-test/cycle-0001.json").read_text())
+    assert receipt["outcome"] == "CORE_COMPLETION_NOT_VERIFIED"
+    assert "ENVELOPE_HASH_MISMATCH" in receipt["core_completion"]["reason_codes"]
+
+
+def test_negative_wrong_identities_fail_closed(tmp_path, monkeypatch):
+    op = "agyop_ident"
+    monkeypatch.setattr(
+        MOD, "_doctor", lambda **kwargs: _doctor("SAFE", "EXACT_NEXT_GATE", operation_id=op)
+    )
+    monkeypatch.setattr(MOD, "_guard_doctor", _guard)
+    envelope = _make_valid_envelope(operation_id="agyop_different")
+    env_file = tmp_path / "envelope.json"
+    env_file.write_text(json.dumps(envelope))
+
+    args = _args(
+        tmp_path,
+        operation_id=op,
+        core_root=str(ROOT / ".reference" / "nexus-core"),
+        work_product=str(env_file),
+        source_revision="a" * 40,
+    )
+    assert MOD.run_controller(args) == 4
+    receipt = json.loads((tmp_path / "receipts/run-test/cycle-0001.json").read_text())
+    assert receipt["outcome"] == "CORE_COMPLETION_NOT_VERIFIED"
+    assert "WRONG_OPERATION_ID" in receipt["core_completion"]["reason_codes"]
+
+
+def test_negative_wrong_source_tree_fails_closed(tmp_path, monkeypatch):
+    op = "agyop_wrong_tree"
+    monkeypatch.setattr(
+        MOD, "_doctor", lambda **kwargs: _doctor("SAFE", "EXACT_NEXT_GATE", operation_id=op)
+    )
+    monkeypatch.setattr(MOD, "_guard_doctor", _guard)
+    envelope = _make_valid_envelope(operation_id=op)
+    env_file = tmp_path / "envelope.json"
+    env_file.write_text(json.dumps(envelope))
+
+    args = _args(
+        tmp_path,
+        operation_id=op,
+        core_root=str(ROOT / ".reference" / "nexus-core"),
+        work_product=str(env_file),
+        source_revision="a" * 40,
+        source_tree="9" * 40,
+    )
+    assert MOD.run_controller(args) == 4
+    receipt = json.loads((tmp_path / "receipts/run-test/cycle-0001.json").read_text())
+    assert receipt["outcome"] == "CORE_COMPLETION_NOT_VERIFIED"
+    assert "WRONG_SOURCE_TREE" in receipt["core_completion"]["reason_codes"]
+
+
+def test_negative_verifier_fail_status_fails_closed(tmp_path, monkeypatch):
+    op = "agyop_fail_verifier"
+    monkeypatch.setattr(
+        MOD,
+        "_core_completion",
+        lambda **kwargs: _core_result(verified=False, reason_codes=["VERIFIER_STATUS_FAIL"]),
+    )
+    monkeypatch.setattr(
+        MOD, "_doctor", lambda **kwargs: _doctor("SAFE", "EXACT_NEXT_GATE", operation_id=op)
+    )
+    monkeypatch.setattr(MOD, "_guard_doctor", _guard)
+    core_mod = MOD._load_core_completion_mod()
+    envelope = core_mod.materialize_work_product_envelope(
+        issue_number=1392,
+        run_id="run-test",
+        operation_id=op,
+        source_revision="a" * 40,
+        source_tree="c" * 40,
+        target_revision="d" * 40,
+        artifacts=[
+            {
+                "path": "pkg/mod.py",
+                "artifact_id": "art-1",
+                "content_hash": "sha256:" + ("b" * 64),
+            }
+        ],
+        verifier_observation={
+            "verifier_id": "pytest_unit",
+            "artifact_id": "art-1",
+            "artifact_hash": "sha256:" + ("b" * 64),
+            "status": "FAIL",
+        },
+    )
+    env_file = tmp_path / "envelope.json"
+    env_file.write_text(json.dumps(envelope))
+
+    args = _args(
+        tmp_path,
+        operation_id=op,
+        core_root=str(ROOT / ".reference" / "nexus-core"),
+        work_product=str(env_file),
+        source_revision="a" * 40,
+    )
+    assert MOD.run_controller(args) == 4
+    receipt = json.loads((tmp_path / "receipts/run-test/cycle-0001.json").read_text())
+    assert receipt["outcome"] == "CORE_COMPLETION_NOT_VERIFIED"
+    assert any(
+        "CONTRADICTORY:verifier" in code or code == "VERIFIER_STATUS_FAIL"
+        for code in receipt["core_completion"]["reason_codes"]
+    )
+
+
+def test_negative_core_commit_mismatch_fails_closed(tmp_path, monkeypatch):
+    op = "agyop_mismatch"
+    monkeypatch.setattr(
+        MOD,
+        "_core_completion",
+        lambda **kwargs: _core_result(verified=False, reason_codes=["CORE_COMMIT_MISMATCH"]),
+    )
+    monkeypatch.setattr(
+        MOD, "_doctor", lambda **kwargs: _doctor("SAFE", "EXACT_NEXT_GATE", operation_id=op)
+    )
+    monkeypatch.setattr(MOD, "_guard_doctor", _guard)
+    envelope = _make_valid_envelope(operation_id=op)
+    env_file = tmp_path / "envelope.json"
+    env_file.write_text(json.dumps(envelope))
+
+    args = _args(
+        tmp_path,
+        operation_id=op,
+        core_root=str(ROOT / ".reference" / "nexus-core"),
+        expected_core_commit="0" * 40,
+        work_product=str(env_file),
+        source_revision="a" * 40,
+    )
+    assert MOD.run_controller(args) == 4
+    receipt = json.loads((tmp_path / "receipts/run-test/cycle-0001.json").read_text())
+    assert receipt["outcome"] == "CORE_COMPLETION_NOT_VERIFIED"
+    assert "CORE_COMMIT_MISMATCH" in receipt["core_completion"]["reason_codes"]
+
+
+def test_post_effect_readback_terminal_without_work_product_fails_closed(tmp_path, monkeypatch):
+    doctors = iter([
+        _doctor("SAFE", "CONTINUE_BOUNDED_ISSUE_WORK"),
+        _doctor("SAFE", "NEXT_GATE", operation_id="agyop_instant"),
+    ])
+    monkeypatch.setattr(MOD, "_doctor", lambda **kwargs: next(doctors))
+    monkeypatch.setattr(MOD, "_guard_doctor", _guard)
+    monkeypatch.setattr(
+        MOD,
+        "_handler_local_then_agy",
+        lambda **kwargs: {
+            "outcome": "AGY_OPERATION_STARTED",
+            "effect_started": True,
+            "operation_id": "agyop_instant",
+        },
+    )
+    args = _args(
+        tmp_path,
+        core_root=str(ROOT / ".reference" / "nexus-core"),
+    )
+    assert MOD.run_controller(args) == 4
+    receipt = json.loads((tmp_path / "receipts/run-test/cycle-0001.json").read_text())
+    assert receipt["outcome"] == "CORE_COMPLETION_NOT_VERIFIED"
+    assert receipt["core_completion"]["claims_verified"] is False
+
+
+def test_post_effect_readback_terminal_with_valid_work_product_succeeds(tmp_path, monkeypatch):
+    op = "agyop_instant_pass"
+    monkeypatch.setattr(MOD, "_core_completion", lambda **kwargs: _core_result(verified=True))
+    doctors = iter([
+        _doctor("SAFE", "CONTINUE_BOUNDED_ISSUE_WORK"),
+        _doctor("SAFE", "NEXT_GATE", operation_id=op),
+    ])
+    monkeypatch.setattr(MOD, "_doctor", lambda **kwargs: next(doctors))
+    monkeypatch.setattr(MOD, "_guard_doctor", _guard)
+    monkeypatch.setattr(
+        MOD,
+        "_handler_local_then_agy",
+        lambda **kwargs: {
+            "outcome": "AGY_OPERATION_STARTED",
+            "effect_started": True,
+            "operation_id": op,
+        },
+    )
+    envelope = _make_valid_envelope(operation_id=op)
+    env_file = tmp_path / "receipts" / "run-test" / f"work_product_{op}.json"
+    env_file.parent.mkdir(parents=True, exist_ok=True)
+    env_file.write_text(json.dumps(envelope))
+
+    args = _args(
+        tmp_path,
+        core_root=str(ROOT / ".reference" / "nexus-core"),
+        source_revision="a" * 40,
+    )
+    assert MOD.run_controller(args) == 0
+    receipt = json.loads((tmp_path / "receipts/run-test/cycle-0001.json").read_text())
+    assert receipt["outcome"] == "EXACT_NEXT_GATE_ELIGIBLE"
+    assert receipt["core_completion"]["claims_verified"] is True
+
+
+def test_cli_parser_includes_core_completion_flags():
+    parser = MOD.build_parser()
+    args = parser.parse_args([
+        "run",
+        "--policy",
+        "p.json",
+        "--repo-root",
+        ".",
+        "--receipt-dir",
+        "r",
+        "--core-root",
+        "/core",
+        "--expected-core-commit",
+        "abc",
+        "--expected-core-tree",
+        "def",
+        "--work-product",
+        "wp.json",
+        "--source-revision",
+        "src",
+        "--source-tree",
+        "tree",
+        "--allowed-paths",
+        "a.py",
+        "b.py",
+    ])
+    assert args.core_root == "/core"
+    assert args.expected_core_commit == "abc"
+    assert args.expected_core_tree == "def"
+    assert args.work_product == "wp.json"
+    assert args.source_revision == "src"
+    assert args.source_tree == "tree"
+    assert args.allowed_paths == ["a.py", "b.py"]

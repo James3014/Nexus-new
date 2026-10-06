@@ -4599,3 +4599,134 @@ def test_quota_preflight_progress_projects_admission_state(tmp_path: Path, monke
     assert admitted[0]["probe_state"] == "PROBE_OK"
     assert admitted[0]["quota_state"] == "weekly"
     assert admitted[0]["account_alias_hash"] == "abcdef012345"
+
+
+def test_cleanup_reconciled_lease_accepts_completed_terminal_exit_without_provider_alive_after(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    leases = tmp_path / "leases"
+    monkeypatch.setattr(dispatch, "LEASES_DIR", leases)
+    record = {
+        "status": "COMPLETED",
+        "phase": "TERMINAL",
+        "exit_code": 0,
+        "provider_process_state": "EXITED",
+        "has_unresolved_external_effect": False,
+        "account_alias_hash": "a" * 12,
+        "lease_id_hash": "b" * 12,
+        "pid": 4242,
+        "reconciliation": {},
+    }
+
+    result = dispatch._cleanup_reconciled_lease(record)
+
+    assert result == {"result": "ALREADY_ABSENT"}
+
+
+def test_cleanup_reconciled_lease_completed_terminal_exit_removes_exact_receipt(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    leases = tmp_path / "leases"
+    leases.mkdir()
+    monkeypatch.setattr(dispatch, "LEASES_DIR", leases)
+    alias_hash = "a" * 12
+    lease_hash = "b" * 12
+    receipt = leases / f"{alias_hash}.receipt.json"
+    receipt.write_text(
+        json.dumps({
+            "account_alias_hash": alias_hash,
+            "lease_id_hash": lease_hash,
+            "pid": 4242,
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+    record = {
+        "status": "COMPLETED",
+        "phase": "TERMINAL",
+        "exit_code": 0,
+        "provider_process_state": "EXITED",
+        "has_unresolved_external_effect": False,
+        "account_alias_hash": alias_hash,
+        "lease_id_hash": lease_hash,
+        "pid": 4242,
+        "reconciliation": {},
+    }
+
+    result = dispatch._cleanup_reconciled_lease(record)
+
+    assert result == {"result": "LEASE_RECEIPT_REMOVED"}
+    assert receipt.exists() is False
+
+
+@pytest.mark.parametrize(
+    ("changes", "expected"),
+    [
+        ({"status": "FAILED"}, "NOT_SAFE_TO_CLEAN"),
+        ({"phase": "RECONCILE_REQUIRED"}, "NOT_SAFE_TO_CLEAN"),
+        ({"exit_code": 1}, "NOT_SAFE_TO_CLEAN"),
+        ({"provider_process_state": "RUNNING"}, "NOT_SAFE_TO_CLEAN"),
+        ({"has_unresolved_external_effect": True}, "NOT_SAFE_TO_CLEAN"),
+    ],
+)
+def test_cleanup_reconciled_lease_completed_terminal_fallback_fails_closed(
+    tmp_path: Path,
+    monkeypatch,
+    changes: dict,
+    expected: str,
+) -> None:
+    monkeypatch.setattr(dispatch, "LEASES_DIR", tmp_path / "leases")
+    record = {
+        "status": "COMPLETED",
+        "phase": "TERMINAL",
+        "exit_code": 0,
+        "provider_process_state": "EXITED",
+        "has_unresolved_external_effect": False,
+        "account_alias_hash": "a" * 12,
+        "lease_id_hash": "b" * 12,
+        "pid": 4242,
+        "reconciliation": {},
+        **changes,
+    }
+
+    assert dispatch._cleanup_reconciled_lease(record)["result"] == expected
+
+
+def test_reconcile_completed_terminal_persists_provider_absence_metadata(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    operation_root = tmp_path / "operations"
+    journal = dispatch.AgyOperationJournal(operation_root)
+    operation_id = dispatch.new_operation_id()
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="a" * 64,
+        runtime_revision="b" * 40,
+    )
+    journal.update(
+        operation_id,
+        status="COMPLETED",
+        phase="TERMINAL",
+        exit_code=0,
+        provider_process_state="EXITED",
+        has_unresolved_external_effect=False,
+        account_alias_hash="a" * 12,
+        lease_id_hash="b" * 12,
+        pid=4242,
+    )
+    monkeypatch.setattr(dispatch, "LEASES_DIR", tmp_path / "leases")
+
+    reconciled = dispatch._reconcile_operation(journal, operation_id)
+
+    assert reconciled["status"] == "COMPLETED"
+    assert reconciled["phase"] == "TERMINAL"
+    assert reconciled["reconciliation"]["provider_alive_after"] is False
+    assert reconciled["reconciliation"]["lease_cleanup"]["result"] == "ALREADY_ABSENT"
