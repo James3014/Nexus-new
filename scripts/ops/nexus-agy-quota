@@ -128,7 +128,9 @@ def _account_email(state: dict[str, Any], name: str) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def _stop_usage_process(proc: subprocess.Popen[str], *, grace_seconds: float = 0.5) -> None:
+def _stop_usage_process(
+    proc: subprocess.Popen[str], *, grace_seconds: float = 0.5
+) -> None:
     """Terminate and reap the exact usage probe process group."""
 
     if proc.poll() is not None:
