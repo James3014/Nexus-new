@@ -12,6 +12,7 @@ from typing import Any
 from nexus.research.hybrid_replication_pipeline import (
     ADMISSION_MARKER,
     CAPTURE_MARKER,
+    READINESS_CONTROL_DISPOSITION,
     AutomaticReplicationController,
     AutomaticReplicationStore,
     ExternalFrozenStackRunner,
@@ -181,6 +182,7 @@ def advance_all(
     frozen_policy_sha256: str,
     stack_command: str,
     ground_truth_command: str,
+    readiness_control_task_key: str | None = None,
 ) -> dict[str, Any]:
     stack_runner = ExternalFrozenStackRunner(stack_command)
     ground_truth_resolver = ExternalGroundTruthResolver(ground_truth_command)
@@ -205,9 +207,16 @@ def advance_all(
     failures: list[dict[str, Any]] = []
     for state_path in sorted(store.tasks_root.glob("*/state.json")):
         state = json.loads(state_path.read_text(encoding="utf-8"))
-        if state.get("admission_disposition") != "ADMITTED_PRIMARY_FRESH_TASK":
-            continue
         task_key = str(state["task_key"])
+        disposition = state.get("admission_disposition")
+        is_primary = disposition == "ADMITTED_PRIMARY_FRESH_TASK"
+        is_readiness_control = (
+            disposition == READINESS_CONTROL_DISPOSITION
+            and readiness_control_task_key is not None
+            and task_key == readiness_control_task_key
+        )
+        if not (is_primary or is_readiness_control):
+            continue
         before = str(state.get("phase"))
         try:
             after = controller.advance(task_key)
@@ -347,6 +356,7 @@ def main() -> int:
         frozen_policy_sha256=args.frozen_policy_sha256,
         stack_command=args.stack_command,
         ground_truth_command=args.ground_truth_command,
+        readiness_control_task_key=args.readiness_control_task_key,
     )
     print(json.dumps(advance_report, ensure_ascii=False, sort_keys=True, indent=2))
     if args.readiness_control_task_key:

@@ -26,6 +26,7 @@ jobs:
       T_AUTO: ${{ vars.NEXUS_HYBRID_REPLICATION_T_AUTO }}
       EXCLUDED_TASKS: ${{ vars.NEXUS_HYBRID_REPLICATION_EXCLUDED_TASKS }}
       EXCLUSION_SET_SHA256: ${{ vars.NEXUS_HYBRID_REPLICATION_EXCLUSION_SET_SHA256 }}
+      READINESS_CONTROL_TASK: ${{ vars.NEXUS_HYBRID_REPLICATION_READINESS_CONTROL_TASK }}
     steps:
       - name: Capture immutable research observation
         shell: bash
@@ -67,6 +68,7 @@ jobs:
           activation_state = os.environ.get("ACTIVATION_STATE", "").strip()
           t_auto = os.environ.get("T_AUTO", "").strip()
           expected_exclusion_set_sha256 = os.environ.get("EXCLUSION_SET_SHA256", "").strip()
+          readiness_control_task = os.environ.get("READINESS_CONTROL_TASK", "").strip()
           excluded = {
               item.strip()
               for item in os.environ.get("EXCLUDED_TASKS", "").split(",")
@@ -210,13 +212,19 @@ jobs:
               actual_exclusion_set_sha256 = digest(
                   ",".join(sorted(excluded)).encode("utf-8")
               )
-              if activation_state != "AUTOMATIC_CAPTURE_READY" or not t_auto:
+              is_readiness_control = bool(readiness_control_task) and task_key == readiness_control_task
+              if not is_readiness_control and (
+                  activation_state != "AUTOMATIC_CAPTURE_READY" or not t_auto
+              ):
                   print(
                       "capture persisted; AUTOMATIC_CAPTURE_READY + T_auto are required "
                       "before prospective admission"
                   )
                   raise SystemExit(0)
-              if expected_exclusion_set_sha256 != actual_exclusion_set_sha256:
+              if (
+                  not is_readiness_control
+                  and expected_exclusion_set_sha256 != actual_exclusion_set_sha256
+              ):
                   raise SystemExit("activation exclusion-set hash mismatch; admission blocked")
 
               other_repos = [
@@ -224,36 +232,43 @@ jobs:
                   for repo in CANDIDATE_REPOSITORIES
                   if repo != repository and (repo in title or repo in body)
               ]
-              if task_key == "James3014/Nexus-new#1216":
-                  disposition = "EXPERIMENT_CONTROL_ISSUE"
-              elif task_key in excluded:
-                  disposition = "CONTAMINATION_EXCLUDED"
-              elif str(current_issue["created_at"]) < t_auto:
-                  disposition = "EXCLUDED_PRE_BOUNDARY"
-              elif parent_ambiguous:
-                  disposition = "PARENT_TASK_SCOPE_GAP"
-              elif parent_created_at is not None:
-                  disposition = (
-                      "EXCLUDE_PARENT_TASK_PRE_BOUNDARY"
-                      if parent_created_at < t_auto
-                      else "PARENT_TASK_SCOPE_GAP"
-                  )
-              elif other_repos:
-                  disposition = "CROSS_REPO_SCOPE_GAP"
-              elif issue_state_at_admission != "open":
-                  disposition = "INTAKE_PROTOCOL_LOSS_TERMINAL_BEFORE_ADMISSION"
-              elif implementation_prs:
-                  disposition = "INTAKE_PROTOCOL_LOSS_IMPLEMENTATION_PRESENT"
+              if is_readiness_control:
+                  disposition = "READINESS_CONTROL_EXCLUDED"
+                  admission_activation_state = "READINESS_CONTROL_PENDING"
+                  admission_boundary = captured_at
               else:
-                  disposition = "ADMITTED_PRIMARY_FRESH_TASK"
+                  admission_activation_state = activation_state
+                  admission_boundary = t_auto
+                  if task_key == "James3014/Nexus-new#1216":
+                      disposition = "EXPERIMENT_CONTROL_ISSUE"
+                  elif task_key in excluded:
+                      disposition = "CONTAMINATION_EXCLUDED"
+                  elif str(current_issue["created_at"]) < t_auto:
+                      disposition = "EXCLUDED_PRE_BOUNDARY"
+                  elif parent_ambiguous:
+                      disposition = "PARENT_TASK_SCOPE_GAP"
+                  elif parent_created_at is not None:
+                      disposition = (
+                          "EXCLUDE_PARENT_TASK_PRE_BOUNDARY"
+                          if parent_created_at < t_auto
+                          else "PARENT_TASK_SCOPE_GAP"
+                      )
+                  elif other_repos:
+                      disposition = "CROSS_REPO_SCOPE_GAP"
+                  elif issue_state_at_admission != "open":
+                      disposition = "INTAKE_PROTOCOL_LOSS_TERMINAL_BEFORE_ADMISSION"
+                  elif implementation_prs:
+                      disposition = "INTAKE_PROTOCOL_LOSS_IMPLEMENTATION_PRESENT"
+                  else:
+                      disposition = "ADMITTED_PRIMARY_FRESH_TASK"
 
               admission = {
                   "schema": "nexus.hybrid_replication.admission.v1",
                   "task_key": task_key,
                   "capture_sha256": capture["capture_sha256"],
                   "disposition": disposition,
-                  "activation_boundary": t_auto,
-                  "activation_state": activation_state,
+                  "activation_boundary": admission_boundary,
+                  "activation_state": admission_activation_state,
                   "exclusion_set_sha256": actual_exclusion_set_sha256,
                   "issue_state_at_admission": issue_state_at_admission,
                   "implementation_pr_numbers": implementation_prs,

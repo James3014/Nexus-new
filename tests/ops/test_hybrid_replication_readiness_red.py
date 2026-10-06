@@ -6,6 +6,7 @@ from pathlib import Path
 import scripts.ops.hybrid_replication_daemon as daemon
 from nexus.research.hybrid_replication_live import _prepare_shadow_checkout
 from nexus.research.hybrid_replication_pipeline import (
+    READINESS_CONTROL_DISPOSITION,
     AutomaticReplicationController,
     AutomaticReplicationStore,
     FrozenStackOutcome,
@@ -233,7 +234,7 @@ def _c_outcome() -> FrozenStackOutcome:
 def test_automatic_control_path_reaches_scored_terminal_state(tmp_path: Path) -> None:
     store = AutomaticReplicationStore(tmp_path)
     snapshot = _snapshot()
-    store.capture(snapshot, admission_disposition="ADMITTED_PRIMARY_FRESH_TASK")
+    store.capture(snapshot, admission_disposition=READINESS_CONTROL_DISPOSITION)
     terminal = GroundTruthEvidence(
         terminal_state="PASS",
         terminal_at="2026-10-07T00:10:00Z",
@@ -259,7 +260,7 @@ def test_automatic_control_path_reaches_scored_terminal_state(tmp_path: Path) ->
 def test_readiness_store_seam_rejects_tampered_score_receipt(tmp_path: Path, monkeypatch) -> None:
     store = AutomaticReplicationStore(tmp_path)
     snapshot = _snapshot(9002)
-    store.capture(snapshot, admission_disposition="ADMITTED_PRIMARY_FRESH_TASK")
+    store.capture(snapshot, admission_disposition=READINESS_CONTROL_DISPOSITION)
     terminal = GroundTruthEvidence(
         terminal_state="PASS",
         terminal_at="2026-10-07T00:10:00Z",
@@ -303,7 +304,7 @@ def test_readiness_store_seam_rejects_tampered_score_receipt(tmp_path: Path, mon
 def test_daemon_main_readiness_mode_consumes_store_and_launchd(tmp_path: Path, monkeypatch) -> None:
     store = AutomaticReplicationStore(tmp_path)
     snapshot = _snapshot(9003)
-    store.capture(snapshot, admission_disposition="ADMITTED_PRIMARY_FRESH_TASK")
+    store.capture(snapshot, admission_disposition=READINESS_CONTROL_DISPOSITION)
     terminal = GroundTruthEvidence(
         terminal_state="PASS",
         terminal_at="2026-10-07T00:10:00Z",

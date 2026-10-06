@@ -340,6 +340,15 @@ def _task_key(repository: str, issue_number: int) -> str:
     return f"{repository}#{int(issue_number)}"
 
 
+PRIMARY_ADMISSION_DISPOSITION = "ADMITTED_PRIMARY_FRESH_TASK"
+READINESS_CONTROL_DISPOSITION = "READINESS_CONTROL_EXCLUDED"
+READINESS_CONTROL_ACTIVATION_STATE = "READINESS_CONTROL_PENDING"
+_EXECUTABLE_ADMISSION_DISPOSITIONS = {
+    PRIMARY_ADMISSION_DISPOSITION,
+    READINESS_CONTROL_DISPOSITION,
+}
+
+
 @dataclass(frozen=True)
 class AdmissionReceipt:
     task_key: str
@@ -357,7 +366,10 @@ class AdmissionReceipt:
     schema: str = "nexus.hybrid_replication.admission.v1"
 
     def __post_init__(self) -> None:
-        if self.activation_state != "AUTOMATIC_CAPTURE_READY":
+        if self.disposition == READINESS_CONTROL_DISPOSITION:
+            if self.activation_state != READINESS_CONTROL_ACTIVATION_STATE:
+                raise ValueError("readiness_control_pending_required")
+        elif self.activation_state != "AUTOMATIC_CAPTURE_READY":
             raise ValueError("automatic_capture_ready_required")
         if len(self.exclusion_set_sha256) != 64 or any(
             char not in "0123456789abcdef" for char in self.exclusion_set_sha256
@@ -383,7 +395,10 @@ class AdmissionReceipt:
     ) -> "AdmissionReceipt":
         if not activation_boundary:
             raise ValueError("activation_boundary_required")
-        if activation_state != "AUTOMATIC_CAPTURE_READY":
+        if disposition == READINESS_CONTROL_DISPOSITION:
+            if activation_state != READINESS_CONTROL_ACTIVATION_STATE:
+                raise ValueError("readiness_control_pending_required")
+        elif activation_state != "AUTOMATIC_CAPTURE_READY":
             raise ValueError("automatic_capture_ready_required")
         if len(exclusion_set_sha256) != 64:
             raise ValueError("exclusion_set_sha256_required")
@@ -692,7 +707,7 @@ class AutomaticReplicationController:
         state = self.store.load_task(task_key)
         if state is None:
             raise ValueError("task_capture_missing")
-        if state.get("admission_disposition") != "ADMITTED_PRIMARY_FRESH_TASK":
+        if state.get("admission_disposition") not in _EXECUTABLE_ADMISSION_DISPOSITIONS:
             return state
         if state.get("phase") == "SCORED":
             return self.store.score_task(task_key)
@@ -776,7 +791,8 @@ class AutomaticReplicationStore:
 
     def capture(self, snapshot: TaskSnapshot, *, admission_disposition: str) -> dict[str, Any]:
         if admission_disposition not in {
-            "ADMITTED_PRIMARY_FRESH_TASK",
+            PRIMARY_ADMISSION_DISPOSITION,
+            READINESS_CONTROL_DISPOSITION,
             "EXPERIMENT_CONTROL_ISSUE",
             "EXCLUDED_PRE_BOUNDARY",
             "CROSS_REPO_SCOPE_GAP",
@@ -798,7 +814,7 @@ class AutomaticReplicationStore:
             ):
                 return existing
             raise ValueError("capture_identity_conflict")
-        if admission_disposition == "ADMITTED_PRIMARY_FRESH_TASK":
+        if admission_disposition in _EXECUTABLE_ADMISSION_DISPOSITIONS:
             phase = "ADMITTED"
         elif admission_disposition == "PRE_AUTOMATION_PROVISIONAL_CAPTURE":
             phase = "CAPTURED_PROVISIONAL"
@@ -839,7 +855,7 @@ class AutomaticReplicationStore:
         state["admitted_at"] = receipt.admitted_at
         state["phase"] = (
             "ADMITTED"
-            if receipt.disposition == "ADMITTED_PRIMARY_FRESH_TASK"
+            if receipt.disposition in _EXECUTABLE_ADMISSION_DISPOSITIONS
             else "CAPTURED_EXCLUDED"
         )
         self._write_json(self._state_path(receipt.task_key), state)
@@ -849,8 +865,8 @@ class AutomaticReplicationStore:
         state = self.load_task(task_key)
         if state is None:
             raise ValueError("capture_required_before_route")
-        if state.get("admission_disposition") != "ADMITTED_PRIMARY_FRESH_TASK":
-            raise ValueError("only_admitted_tasks_may_route")
+        if state.get("admission_disposition") not in _EXECUTABLE_ADMISSION_DISPOSITIONS:
+            raise ValueError("only_executable_admitted_tasks_may_route")
         if state.get("capture_sha256") != route.capture_sha256:
             raise ValueError("route_capture_identity_mismatch")
         existing = state.get("route")
