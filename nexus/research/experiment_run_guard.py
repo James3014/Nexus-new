@@ -220,9 +220,7 @@ class ExperimentRunGuard:
         normalized = contract.normalized()
         observed_controller_sha = sha256_file(Path(normalized.controller_path))
         if observed_controller_sha != normalized.controller_sha256:
-            raise ControllerDigestMismatch(
-                "CONTROLLER_PRE_EFFECT_SHA256_MISMATCH"
-            )
+            raise ControllerDigestMismatch("CONTROLLER_PRE_EFFECT_SHA256_MISMATCH")
 
         self.runs_dir.mkdir(parents=True, exist_ok=True)
         self.locks_dir.mkdir(parents=True, exist_ok=True)
