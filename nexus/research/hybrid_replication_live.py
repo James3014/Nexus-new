@@ -1908,6 +1908,7 @@ def run_frozen_stack(
         revision=snapshot.pre_implementation_revision,
         prompt=prompt,
         binding=binding,
+        default_branch=snapshot.default_branch,
     )
     usage = strong.get("usage") or {}
     input_tokens, uncached_input_tokens, output_tokens = _complete_token_usage_metrics(usage)

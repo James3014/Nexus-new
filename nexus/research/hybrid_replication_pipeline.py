@@ -694,6 +694,8 @@ class AutomaticReplicationController:
             raise ValueError("task_capture_missing")
         if state.get("admission_disposition") != "ADMITTED_PRIMARY_FRESH_TASK":
             return state
+        if state.get("phase") == "SCORED":
+            return self.store.score_task(task_key)
         if state.get("phase") == "ADMITTED":
             payload = dict(state["snapshot"])
             snapshot = TaskSnapshot.from_capture_payload(payload)
@@ -931,6 +933,10 @@ class AutomaticReplicationStore:
             raise ValueError("raw_seal_hash_mismatch")
         raw = json.loads(raw_bytes)
         ground_truth = dict(state["ground_truth"])
+        ground_truth_path = self._dir(task_key) / "ground_truth.json"
+        ground_truth_bytes = ground_truth_path.read_bytes()
+        if _sha256(ground_truth_bytes) != ground_truth.get("sha256"):
+            raise ValueError("ground_truth_hash_mismatch")
         score_payload = {
             "schema": "nexus.hybrid_replication.task_score.v1",
             "task_key": task_key,
@@ -941,6 +947,11 @@ class AutomaticReplicationStore:
             "terminal_state": ground_truth["terminal_state"],
             "terminal_at": ground_truth["terminal_at"],
             "evidence_refs": list(ground_truth.get("evidence_refs") or []),
+            "quality": {
+                "terminal_state": ground_truth["terminal_state"],
+                "evidence_refs": list(ground_truth.get("evidence_refs") or []),
+                "details": dict(ground_truth.get("details") or {}),
+            },
             "economics": {
                 "provider": raw.get("provider"),
                 "requested_model": raw.get("requested_model"),
@@ -956,7 +967,14 @@ class AutomaticReplicationStore:
             },
         }
         score_path = self._dir(task_key) / "score.json"
-        score_sha = self._write_json(score_path, score_payload, create_only=True)
+        expected_score_bytes = _canonical_bytes(score_payload) + b"\n"
+        expected_score_sha = _sha256(expected_score_bytes)
+        if score_path.exists():
+            if score_path.read_bytes() != expected_score_bytes:
+                raise ValueError("score_receipt_conflict")
+            score_sha = expected_score_sha
+        else:
+            score_sha = self._write_json(score_path, score_payload, create_only=True)
         state["score"] = {
             "schema": score_payload["schema"],
             "sha256": score_sha,

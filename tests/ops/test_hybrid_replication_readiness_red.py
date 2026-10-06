@@ -254,3 +254,88 @@ def test_automatic_control_path_reaches_scored_terminal_state(tmp_path: Path) ->
     assert state["score"] is not None
     assert state["raw_seal"] is not None
     assert state["ground_truth"] is not None
+
+
+def test_readiness_store_seam_rejects_tampered_score_receipt(tmp_path: Path, monkeypatch) -> None:
+    store = AutomaticReplicationStore(tmp_path)
+    snapshot = _snapshot(9002)
+    store.capture(snapshot, admission_disposition="ADMITTED_PRIMARY_FRESH_TASK")
+    terminal = GroundTruthEvidence(
+        terminal_state="PASS",
+        terminal_at="2026-10-07T00:10:00Z",
+        evidence_refs=("control:terminal",),
+    )
+    controller = AutomaticReplicationController(
+        store=store,
+        frozen_policy_sha256="5" * 64,
+        stack_runner=lambda _: _c_outcome(),
+        terminal_resolver=lambda _: terminal,
+        clock=lambda: "2026-10-07T00:00:02Z",
+    )
+    state = controller.advance(snapshot.task_key)
+    assert state["phase"] == "SCORED"
+    monkeypatch.setattr(daemon, "_launchd_loaded", lambda _: True)
+
+    ready = daemon.evaluate_readiness_from_store(
+        store=store,
+        ingest_report=_healthy_ingest(),
+        advance_report=_healthy_advance(),
+        control_task_key=snapshot.task_key,
+        launchd_label="com.nexus.hybrid-replication",
+    )
+    assert ready["status"] == READY
+    assert ready["control_score_valid"] is True
+    assert ready["claim_ceiling"] == "READINESS_CONTROL_ONLY_NOT_PRIMARY_COHORT"
+
+    score_path = store.tasks_root / "James3014__Nexus-new--9002" / "score.json"
+    score_path.write_text("{}\n", encoding="utf-8")
+    blocked = daemon.evaluate_readiness_from_store(
+        store=store,
+        ingest_report=_healthy_ingest(),
+        advance_report=_healthy_advance(),
+        control_task_key=snapshot.task_key,
+        launchd_label="com.nexus.hybrid-replication",
+    )
+    assert blocked["status"] == "NOT_READY"
+    assert "CONTROL_SCORE_INVALID" in blocked["blockers"]
+
+
+def test_daemon_main_readiness_mode_consumes_store_and_launchd(tmp_path: Path, monkeypatch) -> None:
+    store = AutomaticReplicationStore(tmp_path)
+    snapshot = _snapshot(9003)
+    store.capture(snapshot, admission_disposition="ADMITTED_PRIMARY_FRESH_TASK")
+    terminal = GroundTruthEvidence(
+        terminal_state="PASS",
+        terminal_at="2026-10-07T00:10:00Z",
+        evidence_refs=("control:terminal",),
+    )
+    controller = AutomaticReplicationController(
+        store=store,
+        frozen_policy_sha256="5" * 64,
+        stack_runner=lambda _: _c_outcome(),
+        terminal_resolver=lambda _: terminal,
+        clock=lambda: "2026-10-07T00:00:02Z",
+    )
+    assert controller.advance(snapshot.task_key)["phase"] == "SCORED"
+
+    monkeypatch.setattr(daemon, "ingest", lambda **_: _healthy_ingest())
+    monkeypatch.setattr(daemon, "_launchd_loaded", lambda _: True)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "hybrid_replication_daemon.py",
+            "--root",
+            str(tmp_path),
+            "--since",
+            "2026-10-07T00:00:00Z",
+            "--frozen-policy-sha256",
+            "5" * 64,
+            "--stack-command",
+            "unused",
+            "--ground-truth-command",
+            "unused",
+            "--readiness-control-task-key",
+            snapshot.task_key,
+        ],
+    )
+    assert daemon.main() == 0

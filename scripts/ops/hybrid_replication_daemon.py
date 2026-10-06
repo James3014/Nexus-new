@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess  # nosec B404
 from datetime import datetime, timezone
 from pathlib import Path
@@ -230,6 +231,16 @@ def advance_all(
     }
 
 
+def _launchd_loaded(label: str) -> bool:
+    completed = subprocess.run(  # nosec B603 B607
+        ["launchctl", "print", f"gui/{os.getuid()}/{label}"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return completed.returncode == 0
+
+
 def _evaluate_automatic_capture_readiness(
     *,
     ingest_report: dict[str, Any],
@@ -267,6 +278,44 @@ def _evaluate_automatic_capture_readiness(
     }
 
 
+def evaluate_readiness_from_store(
+    *,
+    store: AutomaticReplicationStore,
+    ingest_report: dict[str, Any],
+    advance_report: dict[str, Any],
+    control_task_key: str,
+    launchd_label: str,
+) -> dict[str, Any]:
+    control_state = store.load_task(control_task_key)
+    control_phase = str(control_state.get("phase")) if control_state else None
+    control_score_valid = False
+    control_score_error: str | None = None
+    if control_phase == "SCORED":
+        try:
+            store.score_task(control_task_key)
+            control_score_valid = True
+        except (OSError, ValueError) as exc:
+            control_score_error = f"{type(exc).__name__}:{exc}"
+
+    result = _evaluate_automatic_capture_readiness(
+        ingest_report=ingest_report,
+        advance_report=advance_report,
+        launchd_loaded=_launchd_loaded(launchd_label),
+        control_phase=control_phase,
+    )
+    blockers = list(result["blockers"])
+    if control_phase == "SCORED" and not control_score_valid:
+        blockers.append("CONTROL_SCORE_INVALID")
+    result["blockers"] = blockers
+    result["status"] = "AUTOMATIC_CAPTURE_READY" if not blockers else "NOT_READY"
+    result["control_task_key"] = control_task_key
+    result["control_score_valid"] = control_score_valid
+    result["control_score_error"] = control_score_error
+    result["launchd_label"] = launchd_label
+    result["claim_ceiling"] = "READINESS_CONTROL_ONLY_NOT_PRIMARY_COHORT"
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True)
@@ -275,6 +324,8 @@ def main() -> int:
     parser.add_argument("--stack-command")
     parser.add_argument("--ground-truth-command")
     parser.add_argument("--ingest-only", action="store_true")
+    parser.add_argument("--readiness-control-task-key")
+    parser.add_argument("--launchd-label", default="com.nexus.hybrid-replication")
     args = parser.parse_args()
 
     store = AutomaticReplicationStore(Path(args.root))
@@ -298,6 +349,17 @@ def main() -> int:
         ground_truth_command=args.ground_truth_command,
     )
     print(json.dumps(advance_report, ensure_ascii=False, sort_keys=True, indent=2))
+    if args.readiness_control_task_key:
+        readiness_report = evaluate_readiness_from_store(
+            store=store,
+            ingest_report=ingest_report,
+            advance_report=advance_report,
+            control_task_key=args.readiness_control_task_key,
+            launchd_label=args.launchd_label,
+        )
+        print(json.dumps(readiness_report, ensure_ascii=False, sort_keys=True, indent=2))
+        if readiness_report["status"] != "AUTOMATIC_CAPTURE_READY":
+            return 6
     if advance_report["failures"]:
         return 5
     if ingest_report["missing_capture"]:

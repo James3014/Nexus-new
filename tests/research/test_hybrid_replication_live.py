@@ -657,7 +657,7 @@ def test_run_frozen_stack_c_uses_agy(tmp_path: Path, monkeypatch: pytest.MonkeyP
         title="Implement bugfix",
         body="Implement bugfix in isolated checkout and add tests.",
         pre_implementation_revision=rev,
-        default_branch="main",
+        default_branch="trunk",
         source_event_id="test:run_frozen_stack_c",
     )
 
@@ -674,9 +674,15 @@ def test_run_frozen_stack_c_uses_agy(tmp_path: Path, monkeypatch: pytest.MonkeyP
         "usage": {"input_tokens": 150, "output_tokens": 50},
     }
 
+    observed_candidate_kwargs: dict[str, object] = {}
+
+    def fake_agy_candidate(**kwargs):
+        observed_candidate_kwargs.update(kwargs)
+        return mock_receipt, 2.5
+
     monkeypatch.setattr(
         "nexus.research.hybrid_replication_live._run_agy_candidate",
-        lambda **kwargs: (mock_receipt, 2.5),
+        fake_agy_candidate,
     )
 
     binding = {
@@ -690,6 +696,7 @@ def test_run_frozen_stack_c_uses_agy(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert outcome.raw_result.resolved_model == EXACT_AGY_MODEL
     assert outcome.strong_online_raw_response == mock_receipt
     assert outcome.raw_result.failures == ()
+    assert observed_candidate_kwargs["default_branch"] == "trunk"
 
 
 def test_run_frozen_stack_b_fallback_uses_agy(

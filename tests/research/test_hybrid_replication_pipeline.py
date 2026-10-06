@@ -471,6 +471,8 @@ def test_controller_joins_terminal_only_after_raw_seal(tmp_path: Path) -> None:
     assert score["raw_sha256"] == result["raw_seal"]["raw_sha256"]
     assert score["ground_truth_sha256"] == result["ground_truth"]["sha256"]
     assert score["terminal_state"] == "PASS"
+    assert score["quality"]["terminal_state"] == "PASS"
+    assert score["quality"]["evidence_refs"] == ["pr:1312", "verifier:pass"]
     assert score["route"] == "C"
 
 
