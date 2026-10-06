@@ -3008,7 +3008,7 @@ def dispatch_run(
     try:
         exclude_hashes = _resolve_excluded_account_hashes(
             exclude_accounts,
-            manager=coordinator.manager,
+            manager=getattr(coordinator, "manager", None),
         )
     except ValueError as exc:
         contract_failure = f"DISPATCH_CONTRACT_REJECTED:{exc}"
