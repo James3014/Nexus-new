@@ -44,8 +44,11 @@ from nexus.contracts.execution_readiness import (
 )
 from nexus.contracts.gateway_convergence import (
     ConvergenceAction,
+    ConvergenceReason,
+    DesiredDeploymentMode,
     GatewayConvergenceRequest,
 )
+from nexus.contracts.gateway_deployment import RECOVERY_RECEIPT_PATH
 from nexus.contracts.lifecycle_action import (
     ContractKind,
     ExternalCandidateAdoptionRequest,
@@ -1485,6 +1488,83 @@ def _evaluate_upstream_freshness(
         "upstream_freshness": freshness,
         "upstream_observation_error": error_msg,
     }
+
+
+def _receipt_only_main_movement(
+    *,
+    deployed_source_head: str | None,
+    observed_upstream_main_head: str | None,
+) -> bool:
+    """Prove that upstream movement changed only the tracked recovery receipt.
+
+    This is deliberately narrower than generic path-impact analysis.  Any
+    missing, divergent, truncated, malformed, or unavailable comparison fails
+    closed and preserves the existing recovery request.
+    """
+    deployed = str(deployed_source_head or "").strip().lower()
+    upstream = str(observed_upstream_main_head or "").strip().lower()
+    if (
+        not _SHA_RE.fullmatch(deployed)
+        or not _SHA_RE.fullmatch(upstream)
+        or deployed == upstream
+    ):
+        return False
+
+    github_cli, _resolution_error = _resolve_github_cli()
+    if github_cli is None:
+        return False
+    try:
+        result = subprocess.run(
+            [
+                github_cli,
+                "api",
+                (
+                    f"repos/{GITHUB_REPOSITORY.repository_id}/compare/"
+                    f"{deployed}...{upstream}"
+                ),
+            ],
+            cwd=CANONICAL_SOURCE_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if result.returncode != 0:
+        return False
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(payload, Mapping):
+        return False
+
+    base_commit = payload.get("base_commit")
+    head_commit = payload.get("head_commit")
+    merge_base = payload.get("merge_base_commit")
+    files = payload.get("files")
+    if (
+        payload.get("status") != "ahead"
+        or payload.get("behind_by") != 0
+        or not isinstance(payload.get("ahead_by"), int)
+        or payload["ahead_by"] <= 0
+        or not isinstance(base_commit, Mapping)
+        or base_commit.get("sha") != deployed
+        or not isinstance(head_commit, Mapping)
+        or head_commit.get("sha") != upstream
+        or not isinstance(merge_base, Mapping)
+        or merge_base.get("sha") != deployed
+        or not isinstance(files, list)
+        or len(files) != 1
+        or not isinstance(files[0], Mapping)
+    ):
+        return False
+    changed = files[0]
+    return (
+        changed.get("filename") == RECOVERY_RECEIPT_PATH
+        and changed.get("status") == "modified"
+    )
 
 
 def _default_observe_upstream_main(
@@ -5407,6 +5487,27 @@ class UnifiedMCPGateway:
             result = evaluate_gateway_convergence(request)
         except ValueError as exc:
             raise GatewayInputError(str(exc)) from exc
+
+        if (
+            result.action is ConvergenceAction.REQUEST_RECOVERY
+            and request.policy.mode is DesiredDeploymentMode.TRACK_ACCEPTED_MAIN
+            and request.active_effect is None
+            and status.get("upstream_freshness") == "STALE"
+            and _receipt_only_main_movement(
+                deployed_source_head=result.observed_loaded_commit,
+                observed_upstream_main_head=status.get("observed_upstream_main_head"),
+            )
+        ):
+            # Keep exact Git freshness telemetry as STALE.  The NOOP applies
+            # only to the recovery decision because the sole upstream delta is
+            # the tracked recovery authority receipt itself.
+            result = result.model_copy(
+                update={
+                    "action": ConvergenceAction.NOOP,
+                    "reason": ConvergenceReason.ALREADY_CONVERGED,
+                    "next_generation_required": False,
+                }
+            )
 
         next_action = {
             ConvergenceAction.NOOP: "none",

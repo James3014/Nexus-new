@@ -5542,23 +5542,39 @@ def test_gateway_convergence_receipt_only_main_churn_does_not_request_recovery(m
             return loaded_commit + "\n"
         if args == ("rev-parse", "HEAD^{tree}"):
             return loaded_tree + "\n"
-        if args == (
-            "merge-base",
-            "--is-ancestor",
-            loaded_commit,
-            current_upstream["commit"],
-        ):
-            return ""
-        if args == (
-            "diff",
-            "--name-only",
-            "--no-renames",
-            f"{loaded_commit}..{current_upstream['commit']}",
-        ):
-            return receipt_path + "\n"
         raise AssertionError(f"unexpected git call: {args}")
 
+    def fake_compare(args, **kwargs):
+        assert args == [
+            "/usr/bin/gh",
+            "api",
+            (
+                f"repos/James3014/Nexus-new/compare/"
+                f"{loaded_commit}...{current_upstream['commit']}"
+            ),
+        ]
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout=json.dumps(
+                {
+                    "status": "ahead",
+                    "ahead_by": 1,
+                    "behind_by": 0,
+                    "base_commit": {"sha": loaded_commit},
+                    "head_commit": {"sha": current_upstream["commit"]},
+                    "merge_base_commit": {"sha": loaded_commit},
+                    "files": [{"filename": receipt_path, "status": "modified"}],
+                }
+            ),
+            stderr="",
+        )
+
     monkeypatch.setattr(gateway_module, "_git", fake_git)
+    monkeypatch.setattr(
+        gateway_module, "_resolve_github_cli", lambda: ("/usr/bin/gh", None)
+    )
+    monkeypatch.setattr(gateway_module.subprocess, "run", fake_compare)
     gateway = UnifiedMCPGateway(
         service=FakeService(),
         upstream_observer=observe_upstream,
@@ -5610,18 +5626,36 @@ def test_gateway_convergence_runtime_path_movement_still_requests_recovery(monke
             return loaded_commit + "\n"
         if args == ("rev-parse", "HEAD^{tree}"):
             return "b" * 40 + "\n"
-        if args == ("merge-base", "--is-ancestor", loaded_commit, upstream_commit):
-            return ""
-        if args == (
-            "diff",
-            "--name-only",
-            "--no-renames",
-            f"{loaded_commit}..{upstream_commit}",
-        ):
-            return "nexus/orchestrator/unified_mcp_gateway.py\n"
         raise AssertionError(f"unexpected git call: {args}")
 
+    def fake_compare(args, **kwargs):
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout=json.dumps(
+                {
+                    "status": "ahead",
+                    "ahead_by": 1,
+                    "behind_by": 0,
+                    "base_commit": {"sha": loaded_commit},
+                    "head_commit": {"sha": upstream_commit},
+                    "merge_base_commit": {"sha": loaded_commit},
+                    "files": [
+                        {
+                            "filename": "nexus/orchestrator/unified_mcp_gateway.py",
+                            "status": "modified",
+                        }
+                    ],
+                }
+            ),
+            stderr="",
+        )
+
     monkeypatch.setattr(gateway_module, "_git", fake_git)
+    monkeypatch.setattr(
+        gateway_module, "_resolve_github_cli", lambda: ("/usr/bin/gh", None)
+    )
+    monkeypatch.setattr(gateway_module.subprocess, "run", fake_compare)
     gateway = UnifiedMCPGateway(
         service=FakeService(),
         upstream_observer=lambda: (
@@ -5666,11 +5700,16 @@ def test_gateway_convergence_unknown_main_movement_still_requests_recovery(monke
             return loaded_commit + "\n"
         if args == ("rev-parse", "HEAD^{tree}"):
             return "b" * 40 + "\n"
-        if args == ("merge-base", "--is-ancestor", loaded_commit, upstream_commit):
-            raise RuntimeError("history unavailable")
         raise AssertionError(f"unexpected git call: {args}")
 
+    def fail_compare(args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=args, timeout=5)
+
     monkeypatch.setattr(gateway_module, "_git", fake_git)
+    monkeypatch.setattr(
+        gateway_module, "_resolve_github_cli", lambda: ("/usr/bin/gh", None)
+    )
+    monkeypatch.setattr(gateway_module.subprocess, "run", fail_compare)
     gateway = UnifiedMCPGateway(
         service=FakeService(),
         upstream_observer=lambda: (
