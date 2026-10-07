@@ -175,6 +175,36 @@ def ingest(
     }
 
 
+def _partition_missing_admission_for_mode(
+    *,
+    store: AutomaticReplicationStore,
+    missing_admission: list[str],
+    control_task_key: str | None = None,
+) -> tuple[list[str], list[str]]:
+    missing = sorted(str(item) for item in missing_admission)
+    if control_task_key is not None:
+        blockers = [item for item in missing if item == control_task_key]
+        deferred = [item for item in missing if item != control_task_key]
+        return blockers, deferred
+
+    readiness_controls: list[str] = []
+    primary_admitted = False
+    for state_path in sorted(store.tasks_root.glob("*/state.json")):
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        disposition = state.get("admission_disposition")
+        if disposition == READINESS_CONTROL_DISPOSITION:
+            readiness_controls.append(str(state["task_key"]))
+        elif disposition == "ADMITTED_PRIMARY_FRESH_TASK":
+            primary_admitted = True
+
+    if len(readiness_controls) == 1 and not primary_admitted:
+        control_key = readiness_controls[0]
+        blockers = [item for item in missing if item == control_key]
+        deferred = [item for item in missing if item != control_key]
+        return blockers, deferred
+    return missing, []
+
+
 def advance_all(
     *,
     store: AutomaticReplicationStore,
@@ -316,13 +346,16 @@ def evaluate_readiness_from_store(
         raise ValueError("service_observation_timestamp_required")
 
     readiness_ingest_report = dict(ingest_report)
-    missing_admission = [str(item) for item in ingest_report.get("missing_admission") or []]
-    deferred_non_control_missing_admission = sorted(
-        item for item in missing_admission if item != control_task_key
+    missing_admission_blockers, deferred_non_control_missing_admission = (
+        _partition_missing_admission_for_mode(
+            store=store,
+            missing_admission=[
+                str(item) for item in ingest_report.get("missing_admission") or []
+            ],
+            control_task_key=control_task_key,
+        )
     )
-    readiness_ingest_report["missing_admission"] = [
-        item for item in missing_admission if item == control_task_key
-    ]
+    readiness_ingest_report["missing_admission"] = missing_admission_blockers
     result = _evaluate_automatic_capture_readiness(
         ingest_report=readiness_ingest_report,
         advance_report=advance_report,
@@ -406,7 +439,14 @@ def main() -> int:
         return 5
     if ingest_report["missing_capture"]:
         return 3
-    if ingest_report["missing_admission"]:
+    missing_admission_blockers, _ = _partition_missing_admission_for_mode(
+        store=store,
+        missing_admission=[
+            str(item) for item in ingest_report.get("missing_admission") or []
+        ],
+        control_task_key=args.readiness_control_task_key,
+    )
+    if missing_admission_blockers:
         return 4
     return 0
 
