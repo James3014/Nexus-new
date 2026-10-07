@@ -20,6 +20,7 @@ jobs:
       PR_BODY: ${{ github.event.pull_request.body || '' }}
       UV_TOOL_DIR: /tmp/nexus-core-tools
       UV_TOOL_BIN_DIR: /tmp/nexus-core-bin
+      NEXUS_CORE_TOOL_PIN: 4312560d5794458ec05bfa51404d555f9dca6f43
     steps:
       - name: Checkout exact pull-request head
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.2.2
@@ -42,19 +43,26 @@ jobs:
           git fetch --no-tags origin "${{ github.event.pull_request.base.sha }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
 
       - name: Protect trusted Core governance inputs
+        id: trusted-core
         shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import json
+          base_workflow="$RUNNER_TEMP/nexus-core-base-workflow.yml"
+          policy_result="$RUNNER_TEMP/nexus-core-pin-policy.json"
+          BASE_WORKFLOW="$base_workflow" python - <<'PY'
           import os
           from pathlib import Path
           import subprocess
 
           base = os.environ["BASE_SHA"]
-          protected = [".github/workflows/nexus-core-issue-completion.yml",".nexus-core/config.toml","scripts/ci/nexus-core-verify.sh"]
+          workflow_path = ".github/workflows/nexus-core-issue-completion.yml"
+          protected = [
+              ".nexus-core/config.toml",
+              "scripts/ci/nexus-core-verify.sh",
+              "scripts/ci/nexus_core_trusted_pin_policy.py",
+          ]
 
           def base_bytes(path: str) -> bytes:
               result = subprocess.run(
@@ -72,10 +80,46 @@ jobs:
               target = Path(path)
               if not target.is_file() or target.read_bytes() != base_bytes(path):
                   changed.append(path)
-
           if changed:
               raise SystemExit("NEXUS_CORE_GOVERNANCE_INPUT_CHANGED: " + ", ".join(changed))
+
+          Path(os.environ["BASE_WORKFLOW"]).write_bytes(base_bytes(workflow_path))
           PY
+
+          python scripts/ci/nexus_core_trusted_pin_policy.py \
+            --base-workflow "$base_workflow" \
+            --candidate-workflow .github/workflows/nexus-core-issue-completion.yml \
+            --output "$policy_result"
+
+          candidate_pin="$(python - "$policy_result" <<'PY'
+          import json
+          import sys
+          payload = json.load(open(sys.argv[1], encoding="utf-8"))
+          print(payload["candidate_pin"])
+          PY
+          )"
+          change_kind="$(python - "$policy_result" <<'PY'
+          import json
+          import sys
+          payload = json.load(open(sys.argv[1], encoding="utf-8"))
+          print(payload["change_kind"])
+          PY
+          )"
+          test "$candidate_pin" = "$(printf '%s' "$candidate_pin" | grep -E '^[0-9a-f]{40}$')"
+
+          if [ "$change_kind" = "PIN_ONLY" ]; then
+            upstream="$RUNNER_TEMP/nexus-core-upstream.git"
+            rm -rf -- "$upstream"
+            git init --bare "$upstream"
+            git -C "$upstream" remote add origin https://github.com/James3014/nexus-core.git
+            git -C "$upstream" fetch --no-tags origin main:refs/remotes/origin/main
+            test "$(git -C "$upstream" cat-file -t "$candidate_pin")" = commit
+            git -C "$upstream" merge-base --is-ancestor "$candidate_pin" refs/remotes/origin/main
+          fi
+
+          echo "core_pin=$candidate_pin" >> "$GITHUB_OUTPUT"
+          echo "change_kind=$change_kind" >> "$GITHUB_OUTPUT"
+
       - name: Resolve exact Issue binding
         id: issue
         shell: bash
@@ -106,7 +150,67 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$UV_TOOL_BIN_DIR"
-          uv tool install --force "git+https://github.com/James3014/nexus-core.git@00c791009aa4d626dacfe31012454ed1569a7b7c"
+          core_pin="${{ steps.trusted-core.outputs.core_pin }}"
+          test "$core_pin" = "$(printf '%s' "$core_pin" | grep -E '^[0-9a-f]{40}
+          echo "$UV_TOOL_BIN_DIR" >> "$GITHUB_PATH"
+
+
+      - name: Bind exact Issue contract
+        run: |
+          set -euo pipefail
+          nexus-certify issue-init --repo . --issue "${{ steps.issue.outputs.number }}"
+
+      - name: Verify exact Issue-bound candidate
+        run: |
+          set -euo pipefail
+          nexus-certify issue-check --repo . --issue "${{ steps.issue.outputs.number }}"
+
+      - name: Diagnose Core verifier failure
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import glob
+          import json
+
+          receipts = sorted(glob.glob(".nexus-core/receipts/*.json"))
+          if not receipts:
+              print("NEXUS_CORE_DIAGNOSTIC: no receipt available")
+              raise SystemExit(0)
+          path = receipts[-1]
+          payload = json.load(open(path, encoding="utf-8"))
+          verifier = payload.get("verifier") or {}
+          print("NEXUS_CORE_DIAGNOSTIC_RECEIPT:", path)
+          print("status:", payload.get("status"))
+          print("reason_codes:", payload.get("reason_codes"))
+          print("verifier_command:", verifier.get("command"))
+          print("verifier_exit_code:", verifier.get("exit_code"))
+          print("--- verifier stdout ---")
+          print(verifier.get("stdout", ""))
+          print("--- verifier stderr ---")
+          print(verifier.get("stderr", ""))
+          PY
+
+      - name: Install gitlink metadata for checkout post-cleanup
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' index_entry; do
+            mode="${index_entry%% *}"
+            if [ "$mode" != "160000" ]; then
+              continue
+            fi
+            gitlink_path="${index_entry#*$'\t'}"
+            if ! git config --file .gitmodules --get "submodule.${gitlink_path}.path" >/dev/null 2>&1; then
+              git config --file .gitmodules "submodule.${gitlink_path}.path" "$gitlink_path"
+              git config --file .gitmodules "submodule.${gitlink_path}.url" .
+            fi
+          done < <(git ls-files --stage -z)
+          git submodule foreach --recursive ':'
+)"
+          uv tool install --force "git+https://github.com/James3014/nexus-core.git@$core_pin"
           echo "$UV_TOOL_BIN_DIR" >> "$GITHUB_PATH"
 
 
