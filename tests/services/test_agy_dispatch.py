@@ -501,6 +501,78 @@ def test_background_timeout_is_persisted_as_outcome_unknown(tmp_path: Path, monk
     assert not prompt_path.exists()
 
 
+def test_background_rotation_success_clears_live_failure_and_preserves_bounded_history(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "rotation success")
+
+    def fake_dispatch_run(**kwargs):
+        hook = kwargs["operation_hook"]
+        for idx in range(dispatch.MAX_FAILURE_HISTORY_ENTRIES + 2):
+            hook({
+                "phase": "CLASSIFYING_FAILURE",
+                "attempts": idx + 1,
+                "rotations": idx,
+                "failure_kind": f"RECOVERED_{idx}",
+                "account_alias_hash": f"acct-{idx}",
+                "lease_id_hash": f"lease-{idx}",
+            })
+        hook({
+            "phase": "EXECUTING",
+            "attempts": dispatch.MAX_FAILURE_HISTORY_ENTRIES + 3,
+            "rotations": dispatch.MAX_FAILURE_HISTORY_ENTRIES + 2,
+            "failure_kind": None,
+            "account_alias_hash": "acct-final",
+            "lease_id_hash": "lease-final",
+        })
+        return 0
+
+    monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
+    code = dispatch._run_background_operation(
+        operation_id=operation_id,
+        prompt_file=str(prompt_path),
+        cwd=str(tmp_path),
+        mode="accept-edits",
+        model="gemini-test",
+        effort="medium",
+        timeout=30,
+        max_calls=1,
+        pool_wait_timeout=1.0,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=root,
+        heartbeat_interval=0.01,
+    )
+
+    record = journal.read(operation_id)
+    public = dispatch.public_operation_view(record)
+    assert code == 0
+    assert record["status"] == "COMPLETED"
+    assert record["failure_kind"] is None
+    assert len(record["failure_history"]) == dispatch.MAX_FAILURE_HISTORY_ENTRIES
+    assert record["failure_history"][0]["failure_kind"] == "RECOVERED_2"
+    assert record["failure_history"][-1]["failure_kind"] == (
+        f"RECOVERED_{dispatch.MAX_FAILURE_HISTORY_ENTRIES + 1}"
+    )
+    assert "failure_history" not in public
+    assert not prompt_path.exists()
+
+
 def test_quota_progress_is_durable_while_child_runs_and_identity_safe(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -4541,3 +4613,371 @@ def test_reconcile_completed_terminal_persists_provider_absence_metadata(
     assert reconciled["phase"] == "TERMINAL"
     assert reconciled["reconciliation"]["provider_alive_after"] is False
     assert reconciled["reconciliation"]["lease_cleanup"]["result"] == "ALREADY_ABSENT"
+
+
+def test_normalize_account_hash_and_resolve_known_alias() -> None:
+    import hashlib
+
+    class Account:
+        alias = "google-08"
+
+    class Manager:
+        _use_real_manager = False
+        _accounts = [Account()]
+
+    expected = hashlib.sha256(b"google-08").hexdigest()[:12]
+    assert dispatch._normalize_account_hash("FD84DB4038D7") == "fd84db4038d7"
+    assert dispatch._resolve_excluded_account_hashes(
+        ["google-08", "FD84DB4038D7"],
+        manager=Manager(),
+    ) == {expected, "fd84db4038d7"}
+
+
+def test_resolve_excluded_account_hashes_rejects_unknown_alias() -> None:
+    class Account:
+        alias = "google-08"
+
+    class Manager:
+        _use_real_manager = False
+        _accounts = [Account()]
+
+    with pytest.raises(ValueError, match="UNKNOWN_EXCLUDED_ACCOUNT_ALIAS:google-080"):
+        dispatch._resolve_excluded_account_hashes(["google-080"], manager=Manager())
+
+
+def test_dispatch_run_forwards_exclude_accounts_to_lease_coordinator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import hashlib
+
+    captured: list[set[str]] = []
+
+    class Account:
+        alias = "google-08"
+
+    class Manager:
+        _use_real_manager = False
+        _accounts = [Account()]
+
+    class Claim:
+        internal_id = "test-acct"
+        account_alias_hash = "abcdef012345"
+        lease_id_hash = "123456abcdef"
+        lease = type("L", (), {"execution_env": {}})()
+
+        def release(self) -> None:
+            pass
+
+    class Coordinator:
+        manager = Manager()
+
+        def acquire_claim(self, **kwargs):
+            captured.append(set(kwargs.get("exclude_hashes") or set()))
+            return Claim()
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(
+        dispatch,
+        "_apply_dynamic_availability",
+        lambda _model: (
+            {},
+            {
+                "family": "unknown",
+                "preferred": [],
+                "reserve": [],
+                "fallback": [],
+                "blocked": [],
+                "snapshot_fresh": False,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        dispatch,
+        "run_agy",
+        lambda **_kwargs: (0, "ok", "", False, 10),
+    )
+
+    code = dispatch.dispatch_run(
+        prompt="hello",
+        cwd=str(tmp_path),
+        mode="plan",
+        coordinator=Coordinator(),
+        exclude_accounts=["google-08", "fd84db4038d7"],
+    )
+
+    assert code == 0
+    expected = hashlib.sha256(b"google-08").hexdigest()[:12]
+    assert captured == [{expected, "fd84db4038d7"}]
+
+
+def test_dispatch_run_unknown_excluded_alias_rejects_before_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Account:
+        alias = "google-08"
+
+    class Manager:
+        _use_real_manager = False
+        _accounts = [Account()]
+
+    class Coordinator:
+        manager = Manager()
+
+        def acquire_claim(self, **_kwargs):
+            raise AssertionError("unknown excluded alias must fail before lease claim")
+
+    monkeypatch.setattr(
+        dispatch,
+        "_apply_dynamic_availability",
+        lambda _model: (
+            {},
+            {
+                "family": "unknown",
+                "preferred": [],
+                "reserve": [],
+                "fallback": [],
+                "blocked": [],
+                "snapshot_fresh": False,
+            },
+        ),
+    )
+
+    events: list[dict[str, object]] = []
+    code = dispatch.dispatch_run(
+        prompt="hello",
+        cwd=str(tmp_path),
+        mode="plan",
+        coordinator=Coordinator(),
+        exclude_accounts=["google-080"],
+        operation_hook=events.append,
+    )
+
+    assert code == 64
+    assert events[-1]["phase"] == "CONTRACT_REJECTED"
+    assert "UNKNOWN_EXCLUDED_ACCOUNT_ALIAS:google-080" in str(events[-1]["failure_kind"])
+
+
+def test_main_cli_parses_and_forwards_exclude_account(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_dispatch_run(**kwargs):
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
+
+    rc = dispatch.main([
+        "--prompt",
+        "test exclusion",
+        "--cwd",
+        str(tmp_path),
+        "--exclude-account",
+        "google-08",
+        "--exclude-account",
+        "fd84db4038d7",
+    ])
+
+    assert rc == 0
+    assert captured["exclude_accounts"] == ["google-08", "fd84db4038d7"]
+
+
+def test_background_spawn_persists_normalized_exclusion_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class FakeProcess:
+        pid = 424242
+
+    captured: dict[str, object] = {}
+
+    def fake_popen(argv, **kwargs):
+        captured["argv"] = argv
+        captured["kwargs"] = kwargs
+        return FakeProcess()
+
+    class FakeSubprocess:
+        DEVNULL = dispatch.subprocess.DEVNULL
+        Popen = staticmethod(fake_popen)
+
+    monkeypatch.setattr(dispatch, "subprocess", FakeSubprocess)
+    root = tmp_path / "ops"
+
+    record = dispatch._spawn_background_operation(
+        prompt="bounded exclusion evidence",
+        cwd=str(tmp_path),
+        mode="plan",
+        model="gemini-3.8-flash",
+        effort="low",
+        timeout=60,
+        max_calls=1,
+        pool_wait_timeout=1.0,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=root,
+        exclude_accounts=["FD84DB4038D7"],
+    )
+
+    assert record["excluded_account_hashes"] == ["fd84db4038d7"]
+    assert dispatch.public_operation_view(record)["excluded_account_hashes"] == ["fd84db4038d7"]
+    argv = captured["argv"]
+    assert argv[argv.index("--exclude-account") + 1] == "fd84db4038d7"
+
+
+def test_foreground_hcom_operation_persists_and_forwards_exclusions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import hashlib
+
+    expected = hashlib.sha256(b"google-08").hexdigest()[:12]
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        dispatch,
+        "_resolve_excluded_account_hashes",
+        lambda accounts, **_kwargs: {expected},
+    )
+
+    def fake_dispatch_hcom_collab(**kwargs):
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(dispatch, "dispatch_hcom_collab", fake_dispatch_hcom_collab)
+
+    operation_root = tmp_path / "operations"
+    code = dispatch._run_foreground_hcom_operation(
+        cwd=str(tmp_path),
+        hcom_args=[],
+        model="gemini-3.8-flash",
+        pool_wait_timeout=1.0,
+        operation_root=operation_root,
+        exclude_accounts=["google-08"],
+    )
+
+    assert code == 0
+    assert captured["exclude_accounts"] == [expected]
+    records = list((operation_root / "operations").glob("*/operation.json"))
+    assert len(records) == 1
+    record = json.loads(records[0].read_text(encoding="utf-8"))
+    assert record["excluded_account_hashes"] == [expected]
+    assert dispatch.public_operation_view(record)["excluded_account_hashes"] == [expected]
+
+
+def test_rotation_success_clears_recovered_failure_kind(tmp_path: Path) -> None:
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    home = tmp_path / "home"
+    home.mkdir()
+
+    class Coordinator(_WriteScopeCoordinator):
+        def __init__(self, root: Path) -> None:
+            super().__init__(root)
+            self.rotated_claim = _WriteScopeClaim(root)
+            self.rotated_claim.account_alias_hash = "write-scope-2"
+            self.rotated_claim.lease_id_hash = "lease-write-2"
+            self.rotated_claim.internal_id = "write-scope-account-2"
+            self.rotation_count = 0
+
+        def rotate_claim(self, **kwargs):
+            self.rotation_count += 1
+            kwargs["current_claim"].release()
+            return self.rotated_claim
+
+    coordinator = Coordinator(home)
+    calls = 0
+    events: list[dict[str, object]] = []
+
+    def runner(**_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return 1, "", "RESOURCE_EXHAUSTED: quota exhausted", False, 10
+        return 0, "ok", "", False, 10
+
+    code = dispatch.dispatch_run(
+        prompt="rotate then succeed",
+        cwd=str(work),
+        mode="plan",
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+
+    classified = [event for event in events if event.get("phase") == "CLASSIFYING_FAILURE"]
+    executing = [event for event in events if event.get("phase") == "EXECUTING"]
+    folded: dict[str, object] = {}
+    for event in events:
+        folded.update(event)
+
+    assert code == 0
+    assert calls == 2
+    assert coordinator.rotation_count == 1
+    assert len(classified) == 1
+    assert classified[0]["failure_kind"] == "PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT"
+    assert len(executing) == 2
+    assert executing[1]["failure_kind"] is None
+    assert folded["attempts"] == 2
+    assert folded["rotations"] == 1
+    assert folded["failure_kind"] is None
+
+
+def test_rotation_second_failure_projects_terminal_failure_kind(tmp_path: Path) -> None:
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    home = tmp_path / "home"
+    home.mkdir()
+
+    class Coordinator(_WriteScopeCoordinator):
+        def __init__(self, root: Path) -> None:
+            super().__init__(root)
+            self.rotated_claim = _WriteScopeClaim(root)
+            self.rotated_claim.account_alias_hash = "write-scope-2"
+            self.rotated_claim.lease_id_hash = "lease-write-2"
+            self.rotated_claim.internal_id = "write-scope-account-2"
+            self.rotation_count = 0
+
+        def rotate_claim(self, **kwargs):
+            self.rotation_count += 1
+            kwargs["current_claim"].release()
+            return self.rotated_claim
+
+    coordinator = Coordinator(home)
+    calls = 0
+    events: list[dict[str, object]] = []
+
+    def runner(**_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return 1, "", "RESOURCE_EXHAUSTED: quota exhausted", False, 10
+        return 2, "", "syntax failure", False, 10
+
+    code = dispatch.dispatch_run(
+        prompt="rotate then fail",
+        cwd=str(work),
+        mode="plan",
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+
+    classified = [event for event in events if event.get("phase") == "CLASSIFYING_FAILURE"]
+    folded: dict[str, object] = {}
+    for event in events:
+        folded.update(event)
+
+    assert code == 2
+    assert calls == 2
+    assert coordinator.rotation_count == 1
+    assert [event["failure_kind"] for event in classified] == [
+        "PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT",
+        "SYNTAX_OR_IMPLEMENTATION_ERROR",
+    ]
+    assert folded["attempts"] == 2
+    assert folded["rotations"] == 1
+    assert folded["failure_kind"] == "SYNTAX_OR_IMPLEMENTATION_ERROR"
