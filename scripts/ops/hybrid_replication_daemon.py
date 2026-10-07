@@ -182,27 +182,24 @@ def _partition_missing_admission_for_mode(
     control_task_key: str | None = None,
 ) -> tuple[list[str], list[str]]:
     missing = sorted(str(item) for item in missing_admission)
-    if control_task_key is not None:
-        blockers = [item for item in missing if item == control_task_key]
-        deferred = [item for item in missing if item != control_task_key]
-        return blockers, deferred
+    if control_task_key is None:
+        return missing, []
 
-    readiness_controls: list[str] = []
-    primary_admitted = False
+    control_state = store.load_task(control_task_key)
+    if (
+        control_state is None
+        or control_state.get("admission_disposition") != READINESS_CONTROL_DISPOSITION
+    ):
+        return missing, []
+
     for state_path in sorted(store.tasks_root.glob("*/state.json")):
         state = json.loads(state_path.read_text(encoding="utf-8"))
-        disposition = state.get("admission_disposition")
-        if disposition == READINESS_CONTROL_DISPOSITION:
-            readiness_controls.append(str(state["task_key"]))
-        elif disposition == "ADMITTED_PRIMARY_FRESH_TASK":
-            primary_admitted = True
+        if state.get("admission_disposition") == "ADMITTED_PRIMARY_FRESH_TASK":
+            return missing, []
 
-    if len(readiness_controls) == 1 and not primary_admitted:
-        control_key = readiness_controls[0]
-        blockers = [item for item in missing if item == control_key]
-        deferred = [item for item in missing if item != control_key]
-        return blockers, deferred
-    return missing, []
+    blockers = [item for item in missing if item == control_task_key]
+    deferred = [item for item in missing if item != control_task_key]
+    return blockers, deferred
 
 
 def advance_all(
@@ -392,9 +389,16 @@ def main() -> int:
     parser.add_argument("--ground-truth-command")
     parser.add_argument("--ingest-only", action="store_true")
     parser.add_argument("--readiness-control-task-key")
+    parser.add_argument("--deferred-admission-control-task-key")
     parser.add_argument("--launchd-label", default="com.nexus.hybrid-replication")
     parser.add_argument("--service-observation")
     args = parser.parse_args()
+    if (
+        args.readiness_control_task_key
+        and args.deferred_admission_control_task_key
+        and args.readiness_control_task_key != args.deferred_admission_control_task_key
+    ):
+        raise SystemExit("readiness and deferred-admission control task keys must match")
 
     store = AutomaticReplicationStore(Path(args.root))
     ingest_report = ingest(store=store, since=args.since)
@@ -440,7 +444,9 @@ def main() -> int:
     missing_admission_blockers, _ = _partition_missing_admission_for_mode(
         store=store,
         missing_admission=[str(item) for item in ingest_report.get("missing_admission") or []],
-        control_task_key=args.readiness_control_task_key,
+        control_task_key=(
+            args.readiness_control_task_key or args.deferred_admission_control_task_key
+        ),
     )
     if missing_admission_blockers:
         return 4
