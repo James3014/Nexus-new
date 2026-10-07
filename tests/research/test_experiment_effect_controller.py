@@ -138,3 +138,79 @@ def test_unresolved_effect_without_operation_id_never_relaunches(tmp_path: Path)
                 build_artifacts=lambda operation: _artifacts(tmp_path, dict(operation)),
                 poll_interval_seconds=0,
             )
+
+
+@pytest.mark.parametrize(
+    ("reconciled_status", "expected_reason"),
+    [
+        ("RUNNING", "PROVIDER_EFFECT_STILL_RUNNING_AFTER_RECONCILE"),
+        ("QUEUED", "PROVIDER_EFFECT_STILL_RUNNING_AFTER_RECONCILE"),
+        ("UNRECOGNIZED_STATUS", "PROVIDER_EFFECT_STATUS_UNRECOGNIZED"),
+    ],
+)
+def test_outcome_unknown_reconcile_requires_explicit_terminal_status(
+    tmp_path: Path,
+    reconciled_status: str,
+    expected_reason: str,
+) -> None:
+    guard = ExperimentRunGuard(tmp_path / "guard-state")
+    contract = _contract(tmp_path)
+    with guard.acquire(contract) as first:
+        first.begin_effect()
+        first.bind_operation("agyop_existing")
+        first.mark_outcome_unknown(operation_id="agyop_existing")
+
+    build_called = False
+
+    def forbidden_launch() -> str:
+        raise AssertionError("replacement effect must not launch")
+
+    def status(operation_id: str) -> dict[str, object]:
+        assert operation_id == "agyop_existing"
+        return {"status": "OUTCOME_UNKNOWN", "operation_id": operation_id}
+
+    def reconcile(operation_id: str) -> dict[str, object]:
+        assert operation_id == "agyop_existing"
+        return {"status": reconciled_status, "operation_id": operation_id}
+
+    def build(operation: dict[str, object]) -> EffectArtifacts:
+        nonlocal build_called
+        build_called = True
+        return _artifacts(tmp_path, operation)
+
+    with guard.acquire(contract) as replay:
+        with pytest.raises(ExperimentEffectOutcomeUnknown, match=expected_reason):
+            ExperimentEffectController(replay).run(
+                launch_effect=forbidden_launch,
+                read_status=status,
+                reconcile_effect=reconcile,
+                build_artifacts=build,
+                poll_interval_seconds=0,
+            )
+
+    assert build_called is False
+    with guard.acquire(contract) as readback:
+        assert readback.effect_record()["state"] == "OUTCOME_UNKNOWN"
+
+
+@pytest.mark.parametrize("terminal_status", ["FAILED", "CANCELLED"])
+def test_explicit_terminal_failure_statuses_remain_terminal(
+    tmp_path: Path,
+    terminal_status: str,
+) -> None:
+    contract = _contract(tmp_path)
+
+    result = run_guarded_effect(
+        state_root=tmp_path / "guard-state",
+        contract=contract,
+        launch_effect=lambda: "agyop_terminal_failure",
+        read_status=lambda operation_id: {
+            "status": terminal_status,
+            "operation_id": operation_id,
+        },
+        reconcile_effect=lambda _: pytest.fail("terminal status must not reconcile"),
+        build_artifacts=lambda operation: _artifacts(tmp_path, dict(operation)),
+        poll_interval_seconds=0,
+    )
+
+    assert result.terminal_record["status"] == terminal_status
