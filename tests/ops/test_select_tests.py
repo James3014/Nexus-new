@@ -1033,3 +1033,20 @@ def test_main_json_includes_selection_metadata(tmp_path, capsys):
     assert payload["high_risk_escalated"] is True
     assert payload["unmatched_paths"] == []
     assert payload["retry_recommended"] == []
+
+
+def test_nexus_core_trusted_pin_policy_selects_exact_governance_tests(tmp_path):
+    details = select_target_details(
+        ["scripts/ci/nexus_core_trusted_pin_policy.py"],
+        load_impact_rules(),
+        index_path=tmp_path / "missing_impact_index.json",
+        stats_path=tmp_path / "missing_impact_stats.json",
+        history_path=tmp_path / "missing_test_history.jsonl",
+    )
+
+    assert details.unmatched_paths == []
+    assert details.fallback_used is False
+    assert "tests/ops/test_nexus_core_trusted_pin_policy.py" in details.targets
+    assert "tests/ops/test_select_tests.py" in details.targets
+    assert "tests/ops/test_pr_impact_gate.py" in details.targets
+    assert "nexus_core_trusted_pin_maintenance_contract" in details.risk_reasons
