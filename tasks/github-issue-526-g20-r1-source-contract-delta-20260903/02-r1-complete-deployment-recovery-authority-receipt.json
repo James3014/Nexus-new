@@ -1,5 +1,3 @@
-[Reading 135 lines from start (total: 135 lines, 0 remaining)]
-
 {
   "accepted_source_merge": "0c8196b55c8ff467ae9c666d80863cac546e330d",
   "accepted_source_tree": "5dd8aba0c87be2797a6784d942e446cd55681402",
@@ -135,5 +133,3 @@
   "standing_grant_id": null,
   "standing_grant_receipt_sha256": null
 }
-
-[executed on device: JamesdeMac-mini.local (dc83c4e2-3002-4915-8e86-0f893e74c148)]
