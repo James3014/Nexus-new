@@ -21,6 +21,7 @@ if repo_root in sys.path:
 sys.path.insert(0, repo_root)
 
 import pytest
+from nexus_runtime.task_retry import CLEAN_SEMANTIC_REJECT, VerifierResidualPacket
 
 from nexus.contracts.lifecycle_action import (
     ContractKind,
@@ -51,6 +52,10 @@ from nexus.executors.worker_contract import (
     WorkerPreflight,
 )
 from nexus.executors.worker_registry import WorkerRegistry
+from nexus.orchestrator.acceptance_loop import (
+    CandidateAcceptanceRequest,
+    IndependentReviewReceipt,
+)
 from nexus.orchestrator.candidate_verifier import VerifiedCandidateReceipt
 from nexus.orchestrator.repository_contract_gate import (
     RepositoryContractGate,
@@ -9279,7 +9284,7 @@ def _m3c_repairable_workforce_state(
         "candidate_commit_sha": "c" * 40,
         "receipt_hash": "e" * 64,
     }
-    service._write_state(task_id, {
+    state = {
         "task_id": task_id,
         "status": "FINAL_BLOCK",
         "terminal_status": "FINAL_BLOCK",
@@ -9319,7 +9324,41 @@ def _m3c_repairable_workforce_state(
             "candidate_state_hash": "d" * 64,
             "verified_receipt_hash": "e" * 64,
         },
-    })
+    }
+    if acceptance_decision == "REPAIRABLE":
+        verifier_receipt_ref = "receipt://m3c-repair-verifier"
+        residual = VerifierResidualPacket.build(
+            task_id=task_id,
+            predecessor_attempt_id=old_attempt_id,
+            candidate_id="c" * 40,
+            candidate_sha256="d" * 64,
+            source_revision="m3c-source-revision",
+            verifier_id="m3c-independent-verifier",
+            verifier_version="v1",
+            verifier_receipt_ref=verifier_receipt_ref,
+            failure_class=CLEAN_SEMANTIC_REJECT,
+            residual_family="M3C_FIXTURE_SEMANTIC_REJECT",
+            failed_invariants=("M3C_REPAIR_REQUIRED",),
+            counterexample_refs=(verifier_receipt_ref,),
+            repair_target="IMPLEMENTATION",
+            claim_ceiling="TEST_FIXTURE_ONLY",
+        )
+        state.update({
+            "has_unresolved_external_effect": False,
+            "active_effect_count": 0,
+            "candidate_identity": {
+                "candidate_id": "c" * 40,
+                "candidate_sha256": "d" * 64,
+                "source_revision": "m3c-source-revision",
+            },
+            "verifier_identity": {
+                "verifier_id": "m3c-independent-verifier",
+                "verifier_version": "v1",
+                "receipt_ref": verifier_receipt_ref,
+            },
+            "verifier_residual": residual.to_dict(),
+        })
+    service._write_state(task_id, state)
     return service, request, old_envelope, old_receipt, old_verified_receipt
 
 
@@ -10702,3 +10741,252 @@ def test_ambient_core_failed_verification_does_not_unlock_candidate(tmp_path):
             candidate=SimpleNamespace(candidate_state_hash="candidate-state"),
             verified=_core_required_local_receipt(),
         )
+
+
+def _wave20_acceptance_pair(service, task_id, *, review_status="DEFECT", reviewer_id="reviewer-1"):
+    state = service._read_state(task_id)
+    request = CandidateAcceptanceRequest(
+        task_id=task_id,
+        attempt_id=state["attempt_id"],
+        implementer_id="worker-1",
+        candidate_commit_sha=state["candidate_commit_sha"],
+        candidate_tree_sha=state["candidate_tree_sha"],
+        candidate_state_hash=state["candidate_state_hash"],
+        candidate_diff_hash="1" * 64,
+        verified_receipt_hash=state["verified_receipt_hash"],
+    )
+    review = IndependentReviewReceipt(
+        task_id=request.task_id,
+        attempt_id=request.attempt_id,
+        reviewer_id=reviewer_id,
+        candidate_commit_sha=request.candidate_commit_sha,
+        candidate_tree_sha=request.candidate_tree_sha,
+        candidate_state_hash=request.candidate_state_hash,
+        candidate_diff_hash=request.candidate_diff_hash,
+        verified_receipt_hash=request.verified_receipt_hash,
+        verifier_artifact_hash="2" * 64,
+        review_status=review_status,
+        exit_code=0,
+        reasons=("INV_ORDERING",) if review_status == "DEFECT" else (),
+    )
+    return request, review
+
+
+def _wave20_repairable_service(tmp_path, monkeypatch, task_id):
+    service, _, old_envelope, old_receipt, old_verified_receipt = (
+        _m3c_repairable_workforce_state(
+            tmp_path,
+            monkeypatch,
+            task_id=task_id,
+            acceptance_decision="NOT_REPAIRABLE",
+        )
+    )
+    state = service._read_state(task_id)
+    state.update(
+        candidate_tree_sha="f" * 40,
+        target_initial_revision="b" * 40,
+        target_present=False,
+        lease=None,
+        active_provider=None,
+        worker_pid=None,
+        worker_child_pgid=None,
+        has_unresolved_external_effect=False,
+        active_effect_count=0,
+        execution=None,
+    )
+    state["promotion_packet"] = {
+        **dict(state["promotion_packet"]),
+        "candidate_tree_sha": "f" * 40,
+    }
+    service._write_state(task_id, state)
+    return service, old_envelope, old_receipt, old_verified_receipt
+
+
+def test_wave20_repairable_acceptance_projects_and_uses_runtime_retry(
+    tmp_path,
+    monkeypatch,
+):
+    task_id = "wave20-physical-repair"
+    service, old_envelope, _, _ = _wave20_repairable_service(
+        tmp_path,
+        monkeypatch,
+        task_id,
+    )
+    request, review = _wave20_acceptance_pair(service, task_id)
+
+    projected = service.project_candidate_acceptance_for_retry(request, review)
+    predecessor = service._read_state(task_id)
+
+    assert projected["acceptance"]["decision"] == "REPAIRABLE"
+    assert projected["mutated"] is True
+    assert predecessor["acceptance_decision"] == "REPAIRABLE"
+    assert predecessor["has_unresolved_external_effect"] is False
+    assert predecessor["active_effect_count"] == 0
+    assert predecessor["candidate_identity"] == {
+        "candidate_id": request.candidate_commit_sha,
+        "candidate_sha256": request.candidate_state_hash,
+        "source_revision": "b" * 40,
+    }
+    assert predecessor["verifier_identity"] == {
+        "verifier_id": review.reviewer_id,
+        "verifier_version": review.schema,
+        "receipt_ref": f"sha256:{review.verifier_artifact_hash}",
+    }
+    packet = predecessor["verifier_residual"]
+    assert packet["failure_class"] == "CLEAN_SEMANTIC_REJECT"
+    assert packet["predecessor_attempt_id"] == request.attempt_id
+    assert packet["candidate_id"] == request.candidate_commit_sha
+    assert packet["candidate_sha256"] == f"sha256:{request.candidate_state_hash}"
+    assert packet["source_revision"] == "b" * 40
+
+    monkeypatch.setattr(
+        service,
+        "_launch_worker",
+        lambda owned_task_id, _attempt_id: service._read_state(owned_task_id),
+    )
+    result = service.retry_task(task_id)
+    durable = service._read_state(task_id)
+
+    assert result["retry"]["decision"] == "REUSED_TASK_ID"
+    assert durable["attempt_id"] != request.attempt_id
+    assert durable["canonical_dispatch_envelope"] != old_envelope
+    assert durable["canonical_dispatch_envelope"]["provider"] == old_envelope["provider"]
+    assert durable["canonical_dispatch_envelope"]["model"] == old_envelope["model"]
+    bounded = result["retry"]["bounded_reconciliation"]
+    assert bounded["predecessor_attempt_id"] == request.attempt_id
+    assert bounded["successor_attempt_id"] == durable["attempt_id"]
+    assert bounded["residual_packet_sha256"] == packet["packet_sha256"]
+    assert bounded["repair_round"] == 1
+    assert bounded["max_repair_rounds"] == 1
+    assert bounded["required_post_repair_gate"] == "EXTERNAL_VERIFIER"
+    assert bounded["runtime_is_planner_authority"] is False
+    assert bounded["runtime_is_completion_authority"] is False
+
+
+@pytest.mark.parametrize(
+    ("review_status", "reviewer_id", "expected"),
+    [
+        ("PASS", "reviewer-1", "ACCEPT"),
+        ("PASS", "worker-1", "BLOCK"),
+    ],
+)
+def test_wave20_nonrepairable_acceptance_never_projects_runtime_state(
+    tmp_path,
+    monkeypatch,
+    review_status,
+    reviewer_id,
+    expected,
+):
+    task_id = f"wave20-no-project-{expected.lower()}"
+    service, _, _, _ = _wave20_repairable_service(
+        tmp_path,
+        monkeypatch,
+        task_id,
+    )
+    before = copy.deepcopy(service._read_state(task_id))
+    request, review = _wave20_acceptance_pair(
+        service,
+        task_id,
+        review_status=review_status,
+        reviewer_id=reviewer_id,
+    )
+
+    result = service.project_candidate_acceptance_for_retry(request, review)
+
+    assert result["acceptance"]["decision"] == expected
+    assert result["repair_projection"] is None
+    assert result["mutated"] is False
+    assert service._read_state(task_id) == before
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected"),
+    [
+        ("has_unresolved_external_effect", None, "BOUNDED_RECONCILIATION_PREDECESSOR_EFFECT_TRUTH_UNKNOWN"),
+        ("active_effect_count", None, "BOUNDED_RECONCILIATION_PREDECESSOR_EFFECT_ACTIVE_OR_UNKNOWN"),
+        ("active_effect_count", 1, "BOUNDED_RECONCILIATION_PREDECESSOR_EFFECT_ACTIVE_OR_UNKNOWN"),
+        ("active_effect_count", False, "BOUNDED_RECONCILIATION_PREDECESSOR_EFFECT_ACTIVE_OR_UNKNOWN"),
+    ],
+)
+def test_wave20_missing_unknown_or_active_effect_truth_fails_closed(
+    tmp_path,
+    monkeypatch,
+    field,
+    value,
+    expected,
+):
+    task_id = f"wave20-effect-truth-{field}-{value}"
+    service, _, _, _ = _wave20_repairable_service(
+        tmp_path,
+        monkeypatch,
+        task_id,
+    )
+    state = service._read_state(task_id)
+    if value is None:
+        state.pop(field, None)
+    else:
+        state[field] = value
+    service._write_state(task_id, state)
+    request, review = _wave20_acceptance_pair(service, task_id)
+    before = copy.deepcopy(service._read_state(task_id))
+
+    with pytest.raises(RuntimeError, match=expected):
+        service.project_candidate_acceptance_for_retry(request, review)
+
+    assert service._read_state(task_id) == before
+
+
+def test_wave20_unknown_predecessor_effect_fails_closed_before_projection(
+    tmp_path,
+    monkeypatch,
+):
+    task_id = "wave20-unknown-effect"
+    service, _, _, _ = _wave20_repairable_service(
+        tmp_path,
+        monkeypatch,
+        task_id,
+    )
+    state = service._read_state(task_id)
+    state["execution"] = {"outcome": "unknown"}
+    service._write_state(task_id, state)
+    request, review = _wave20_acceptance_pair(service, task_id)
+    before = copy.deepcopy(service._read_state(task_id))
+
+    with pytest.raises(
+        RuntimeError,
+        match="BOUNDED_RECONCILIATION_PREDECESSOR_EFFECT_UNKNOWN",
+    ):
+        service.project_candidate_acceptance_for_retry(request, review)
+
+    assert service._read_state(task_id) == before
+
+
+def test_wave20_second_repair_round_is_rejected_before_submit(
+    tmp_path,
+    monkeypatch,
+):
+    task_id = "wave20-budget-exhausted"
+    service, _, _, _ = _wave20_repairable_service(
+        tmp_path,
+        monkeypatch,
+        task_id,
+    )
+    request, review = _wave20_acceptance_pair(service, task_id)
+    service.project_candidate_acceptance_for_retry(request, review)
+    state = service._read_state(task_id)
+    state["request"]["bounded_reconciliation"] = {"repair_round": 1}
+    service._write_state(task_id, state)
+    monkeypatch.setattr(
+        service,
+        "_launch_worker",
+        lambda *_: pytest.fail("second repair round must not submit"),
+    )
+
+    result = service.retry_task(task_id)
+
+    assert result["retry"]["decision"] == "BLOCKED_REPAIR_BUDGET_EXHAUSTED"
+    decision = result["retry"]["bounded_reconciliation"]
+    assert decision["disposition"] == "REPAIR_BUDGET_EXHAUSTED"
+    assert decision["required_next_gate"] == "REPLAN_REQUEST"
+    assert decision["replan_requested"] is True
+    assert decision["runtime_is_planner_authority"] is False
