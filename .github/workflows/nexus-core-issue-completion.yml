@@ -20,7 +20,7 @@ jobs:
       PR_BODY: ${{ github.event.pull_request.body || '' }}
       UV_TOOL_DIR: /tmp/nexus-core-tools
       UV_TOOL_BIN_DIR: /tmp/nexus-core-bin
-      NEXUS_CORE_TOOL_PIN: ef81b65914f6d64e5dc1b13eb47f323d80b7a071
+      NEXUS_CORE_TOOL_PIN: 11b4945defb3dae031b712bf5d66b2bc1248b982
     steps:
       - name: Checkout exact pull-request head
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.2.2
