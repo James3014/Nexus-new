@@ -21,6 +21,7 @@ jobs:
       UV_TOOL_DIR: /tmp/nexus-core-tools
       UV_TOOL_BIN_DIR: /tmp/nexus-core-bin
       NEXUS_CORE_TOOL_PIN: 11b4945defb3dae031b712bf5d66b2bc1248b982
+      # HOSTILE_CANARY_EXTRA_WORKFLOW_BYTE_DO_NOT_MERGE
     steps:
       - name: Checkout exact pull-request head
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.2.2
