@@ -44,9 +44,10 @@ def _contract(
     )
 
 
-def test_same_run_same_contract_is_readable_but_cannot_start_twice(
-    tmp_path: Path,
-) -> None:
+def test_same_run_same_contract_is_reusable_after_release(tmp_path: Path) -> None:
+    # Preserve the historical node ID for exact-base test provenance.  #1541
+    # changes the meaning of "reusable" to read/reconcile-only: a new effect
+    # start under the same exact run must fail closed.
     state = tmp_path / "state"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
