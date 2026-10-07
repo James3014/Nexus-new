@@ -2489,6 +2489,11 @@ def test_fallback_clone_inside_source_is_rejected(tmp_path: Path) -> None:
 def test_unsupported_effort_for_claude_opus_fails_before_claim(tmp_path: Path) -> None:
     coordinator = _WriteScopeCoordinator(tmp_path / "home")
     events: list[dict[str, object]] = []
+    provider_calls: list[bool] = []
+
+    def runner(**_kwargs):
+        provider_calls.append(True)
+        return 0, "unexpected", "", False, 1
 
     code = dispatch.dispatch_run(
         prompt="run model",
@@ -2497,11 +2502,13 @@ def test_unsupported_effort_for_claude_opus_fails_before_claim(tmp_path: Path) -
         model="claude-opus-4-6",
         effort="low",
         coordinator=coordinator,
+        run_agy_fn=runner,
         operation_hook=events.append,
     )
 
     assert code == 64
     assert coordinator.acquire_count == 0
+    assert provider_calls == []
     assert any(
         e.get("failure_kind")
         == "DISPATCH_MODEL_CONTRACT_REJECTED:UNSUPPORTED_EFFORT_FOR_MODEL:claude-opus-4-6:low"
@@ -2595,6 +2602,11 @@ def test_provider_exit_invalid_model_selection_classified_as_model_contract_reje
     assert any(e.get("failure_kind") == "DISPATCH_MODEL_CONTRACT_REJECTED" for e in events)
     assert coordinator.acquire_count == 1
     assert coordinator.claim.released is True
+    classified = [event for event in events if event.get("phase") == "CLASSIFYING_FAILURE"]
+    assert len(classified) == 1
+    assert classified[0]["provider_effect"] is False
+    assert classified[0]["rotations"] == 0
+    assert not any(event.get("phase") == "ACCOUNT_ROTATED" for event in events)
 
 
 def test_headless_tool_permission_denial_classified_as_failure(tmp_path: Path) -> None:
