@@ -2497,7 +2497,7 @@ def dispatch_hcom_collab(
     consumer_id = "hcom-" + uuid.uuid4().hex
     exclude_hashes = _resolve_excluded_account_hashes(
         exclude_accounts,
-        manager=coordinator.manager,
+        manager=getattr(coordinator, "manager", None),
     )
     claim: AccountLeaseClaim | None = None
     child: Any = None
