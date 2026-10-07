@@ -251,3 +251,39 @@ def test_changed_paths_cli_rate_limit_writes_unavailable_witness(
     assert witness["status"] == "UNAVAILABLE"
     assert witness["authority"] == "ADVISORY_CACHE_ONLY"
     assert witness["reason"] == "GITHUB_RATE_LIMIT_EXHAUSTED"
+
+def test_collect_compare_changed_paths_validates_and_sorts() -> None:
+    before = "1" * 40
+    after = "2" * 40
+
+    class Client:
+        def request(self, path: str):
+            assert path.endswith(f"/compare/{before}...{after}")
+            return {
+                "files": [
+                    {"filename": "z.py"},
+                    {"filename": "a.py"},
+                    {"filename": "z.py"},
+                ]
+            }
+
+    assert gh.collect_compare_changed_paths(
+        Client(),
+        repository="James3014/Nexus-new",
+        before_sha=before,
+        after_sha=after,
+    ) == ["a.py", "z.py"]
+
+
+def test_compare_changed_paths_rejects_malformed_sha() -> None:
+    class Client:
+        def request(self, path: str):
+            raise AssertionError("network must not be reached")
+
+    with pytest.raises(ValueError, match="BEFORE_SHA_INVALID"):
+        gh.collect_compare_changed_paths(
+            Client(),
+            repository="James3014/Nexus-new",
+            before_sha="bad",
+            after_sha="2" * 40,
+        )
