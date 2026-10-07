@@ -29,8 +29,7 @@ class GitHubRateLimitExhausted(GitHubTransportError):
         self.path = path
         self.retry_after = retry_after
         super().__init__(
-            f"GITHUB_RATE_LIMIT_EXHAUSTED:{method}:{path}:"
-            f"retry_after_seconds={retry_after:.3f}"
+            f"GITHUB_RATE_LIMIT_EXHAUSTED:{method}:{path}:retry_after_seconds={retry_after:.3f}"
         )
 
 
@@ -153,9 +152,7 @@ class GitHubMetadataClient:
                 ) from exc
             except (urllib.error.URLError, TimeoutError, OSError) as exc:
                 if normalized_method == "GET":
-                    raise GitHubTransportError(
-                        f"GITHUB_GET_TRANSPORT_FAILED:{path}:{exc}"
-                    ) from exc
+                    raise GitHubTransportError(f"GITHUB_GET_TRANSPORT_FAILED:{path}:{exc}") from exc
                 raise GitHubWriteOutcomeUnknown(
                     f"GITHUB_WRITE_OUTCOME_UNKNOWN:{normalized_method}:{path}:{exc}"
                 ) from exc
@@ -201,9 +198,7 @@ def collect_compare_changed_paths(
         raise ValueError("BEFORE_SHA_INVALID")
     if not re.fullmatch(r"[0-9a-f]{40}", after_sha):
         raise ValueError("AFTER_SHA_INVALID")
-    payload = client.request(
-        f"/repos/{repository}/compare/{before_sha}...{after_sha}"
-    )
+    payload = client.request(f"/repos/{repository}/compare/{before_sha}...{after_sha}")
     if not isinstance(payload, Mapping):
         raise GitHubTransportError("COMPARE_RESPONSE_MALFORMED")
     files = payload.get("files")
