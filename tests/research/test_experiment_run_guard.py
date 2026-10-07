@@ -58,13 +58,20 @@ def test_same_run_same_contract_is_reusable_after_release(tmp_path: Path) -> Non
 
     first = guard.acquire(contract)
     assert first.disposition == "CREATED"
-    first.release()
+    with pytest.raises(
+        RunEffectConflict,
+        match="RUN_EFFECT_TERMINALIZATION_REQUIRED",
+    ):
+        first.release()
 
     record = guard.read(contract.run_id)
     assert record["contract_sha256"] == first.contract_sha256
-    assert record["effect"]["state"] == "STARTED"
+    assert record["effect"]["state"] == "OUTCOME_UNKNOWN"
 
-    with pytest.raises(RunEffectConflict, match="RUN_EFFECT_ALREADY_STARTED"):
+    with pytest.raises(
+        RunEffectConflict,
+        match="RUN_EFFECT_OUTCOME_UNKNOWN_RECONCILE_SAME_EFFECT",
+    ):
         guard.acquire(contract)
 
 
@@ -188,6 +195,7 @@ def test_same_run_id_with_changed_contract_fails_closed(tmp_path: Path) -> None:
     guard = ExperimentRunGuard(state)
 
     first = guard.acquire(_contract(workspace, controller))
+    first.mark_no_effect()
     first.release()
 
     with pytest.raises(RunContractConflict, match="RUN_CONTRACT_CONFLICT"):
@@ -223,6 +231,7 @@ def test_second_live_owner_on_same_workspace_fails_closed(tmp_path: Path) -> Non
                 )
             )
     finally:
+        first.mark_no_effect()
         first.release()
 
 
@@ -239,6 +248,7 @@ def test_same_run_id_with_different_workspace_realpath_fails_closed(
     guard = ExperimentRunGuard(state)
 
     first = guard.acquire(_contract(workspace_a, controller))
+    first.mark_no_effect()
     first.release()
 
     with pytest.raises(RunContractConflict, match="RUN_CONTRACT_CONFLICT"):
@@ -279,6 +289,7 @@ def test_controller_post_effect_drift_requires_fresh_reverification(
         assert fence.required_next_gate == "FRESH_REVERIFY_IMMUTABLE_RESPONSE"
         assert fence.expected_sha256 != fence.observed_sha256
     finally:
+        lease.mark_outcome_unknown()
         lease.release()
 
 
@@ -291,7 +302,59 @@ def test_stable_controller_allows_same_run_continuation(tmp_path: Path) -> None:
 
     with guard.acquire(_contract(workspace, controller)) as lease:
         fence = lease.verify_controller()
+        lease.mark_no_effect()
 
     assert fence.status == "CONTROLLER_STABLE"
     assert fence.same_workspace_continuation_allowed is True
     assert fence.required_next_gate is None
+
+def test_mark_no_effect_allows_one_fresh_effect_admission(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    controller = tmp_path / "controller.py"
+    controller.write_text("print('stable')\n", encoding="utf-8")
+    guard = ExperimentRunGuard(tmp_path / "state")
+    contract = _contract(workspace, controller)
+
+    first = guard.acquire(contract)
+    first.mark_no_effect()
+    first.release()
+
+    second = guard.acquire(contract)
+    assert second.disposition == "REUSED_NOT_STARTED"
+    second.bind_operation("agyop_second")
+    second.mark_terminal(
+        operation_id="agyop_second",
+        response_sha256="d" * 64,
+        receipt_sha256="e" * 64,
+    )
+    second.release()
+
+    with pytest.raises(RunEffectConflict, match="RUN_EFFECT_ALREADY_TERMINAL"):
+        guard.acquire(contract)
+
+
+def test_context_manager_without_terminal_truth_fails_closed(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    controller = tmp_path / "controller.py"
+    controller.write_text("print('stable')\n", encoding="utf-8")
+    guard = ExperimentRunGuard(tmp_path / "state")
+    contract = _contract(workspace, controller)
+
+    with pytest.raises(
+        RunEffectConflict,
+        match="RUN_EFFECT_TERMINALIZATION_REQUIRED",
+    ):
+        with guard.acquire(contract):
+            pass
+
+    record = guard.read(contract.run_id)
+    assert record["effect"]["state"] == "OUTCOME_UNKNOWN"
+
+    with pytest.raises(
+        RunEffectConflict,
+        match="RUN_EFFECT_OUTCOME_UNKNOWN_RECONCILE_SAME_EFFECT",
+    ):
+        guard.acquire(contract)
+
