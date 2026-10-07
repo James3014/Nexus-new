@@ -16,9 +16,11 @@ from nexus.research.hybrid_replication_live import (
     _run_agy_b_fallback,
     _run_agy_candidate,
     _valid_probability_distribution,
+    audit_post_terminal_revisions,
     build_agy_identity_preflight_receipt,
     build_d2_candidate_packet,
     build_identity_preflight_receipt,
+    build_post_terminal_revision_events,
     classify_frozen_task_family,
     evaluate_agy_receipt,
     poll_agy_operation,
@@ -114,6 +116,183 @@ def test_ground_truth_payload_is_unavailable_until_issue_is_terminal() -> None:
         "nexus/example.py",
         "tests/test_example.py",
     ]
+
+
+def _post_terminal_scored_state() -> dict[str, object]:
+    return {
+        "task_key": "James3014/Nexus-new#1541",
+        "admission_disposition": "ADMITTED_PRIMARY_FRESH_TASK",
+        "phase": "SCORED",
+        "snapshot": {
+            "repository": "James3014/Nexus-new",
+            "issue_number": 1541,
+        },
+        "ground_truth": {
+            "sha256": "a" * 64,
+            "terminal_at": "2026-10-07T08:46:22Z",
+            "terminal_state": "CLOSED_WITH_MERGED_PR",
+        },
+        "score": {
+            "sha256": "b" * 64,
+            "path": "score.json",
+        },
+    }
+
+
+def test_post_terminal_revision_detects_reopen_without_rewriting_score() -> None:
+    state = _post_terminal_scored_state()
+    events = build_post_terminal_revision_events(
+        state=state,
+        timeline=(
+            {
+                "id": 10,
+                "event": "closed",
+                "created_at": "2026-10-07T08:46:22Z",
+                "actor": {"login": "James3014"},
+            },
+            {
+                "id": 11,
+                "event": "reopened",
+                "created_at": "2026-10-07T09:21:35Z",
+                "actor": {"login": "James3014"},
+            },
+            {
+                "id": 12,
+                "event": "closed",
+                "created_at": "2026-10-07T09:42:17Z",
+                "actor": {"login": "James3014"},
+            },
+        ),
+    )
+
+    assert [item["event"] for item in events] == ["reopened", "closed"]
+    assert events[0]["score_effect"] == "SUPERSEDED_BY_POST_TERMINAL_REOPEN"
+    assert events[1]["score_effect"] == "POST_REOPEN_RECLOSURE_OBSERVED"
+    assert all(item["score_rewrite"] is False for item in events)
+    assert all(item["raw_rewrite"] is False for item in events)
+    assert all(item["route_rewrite"] is False for item in events)
+
+
+def test_post_terminal_revision_ignores_non_reopen_lifecycle_noise() -> None:
+    events = build_post_terminal_revision_events(
+        state=_post_terminal_scored_state(),
+        timeline=(
+            {
+                "id": 20,
+                "event": "labeled",
+                "created_at": "2026-10-07T09:00:00Z",
+            },
+            {
+                "id": 21,
+                "event": "closed",
+                "created_at": "2026-10-07T09:10:00Z",
+            },
+        ),
+    )
+    assert events == ()
+
+
+def test_post_terminal_audit_is_append_only_and_reduces_effective_scored_count(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import nexus.research.hybrid_replication_live as live
+
+    store_root = tmp_path / "store"
+    task_root = store_root / "tasks" / "task"
+    task_root.mkdir(parents=True)
+    ground_truth_bytes = b'{"terminal":"original"}\n'
+    score_bytes = b'{"score":"original"}\n'
+    (task_root / "ground_truth.json").write_bytes(ground_truth_bytes)
+    (task_root / "score.json").write_bytes(score_bytes)
+
+    state = _post_terminal_scored_state()
+    state["ground_truth"] = {
+        **dict(state["ground_truth"]),
+        "sha256": hashlib.sha256(ground_truth_bytes).hexdigest(),
+    }
+    state["score"] = {
+        **dict(state["score"]),
+        "sha256": hashlib.sha256(score_bytes).hexdigest(),
+    }
+    (task_root / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+    timeline = [
+        {
+            "id": 6034936137,
+            "event": "reopened",
+            "created_at": "2026-10-07T09:21:35Z",
+            "actor": {"login": "James3014"},
+        },
+        {
+            "id": 6035292584,
+            "event": "closed",
+            "created_at": "2026-10-07T09:42:17Z",
+            "actor": {"login": "James3014"},
+        },
+    ]
+    monkeypatch.setattr(live, "_gh_list", lambda *_args, **_kwargs: timeline)
+
+    output_root = tmp_path / "post-terminal-revisions"
+    first = audit_post_terminal_revisions(store_root=store_root, output_root=output_root)
+    second = audit_post_terminal_revisions(store_root=store_root, output_root=output_root)
+
+    assert first["scored_primary_count"] == 1
+    assert first["effective_scored_primary_count"] == 0
+    assert first["superseded_task_keys"] == ["James3014/Nexus-new#1541"]
+    assert [row["write_disposition"] for row in first["revision_receipts"]] == [
+        "CREATED",
+        "CREATED",
+    ]
+    assert [row["write_disposition"] for row in second["revision_receipts"]] == [
+        "REUSED_SAME_BYTES",
+        "REUSED_SAME_BYTES",
+    ]
+    assert first["score_rewrite"] is False
+    assert (task_root / "score.json").read_bytes() == score_bytes
+    assert (task_root / "ground_truth.json").read_bytes() == ground_truth_bytes
+
+
+def test_post_terminal_audit_fail_closes_on_conflicting_revision_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import nexus.research.hybrid_replication_live as live
+
+    store_root = tmp_path / "store"
+    task_root = store_root / "tasks" / "task"
+    task_root.mkdir(parents=True)
+    ground_truth_bytes = b'{"terminal":"original"}\n'
+    score_bytes = b'{"score":"original"}\n'
+    (task_root / "ground_truth.json").write_bytes(ground_truth_bytes)
+    (task_root / "score.json").write_bytes(score_bytes)
+    state = _post_terminal_scored_state()
+    state["ground_truth"] = {
+        **dict(state["ground_truth"]),
+        "sha256": hashlib.sha256(ground_truth_bytes).hexdigest(),
+    }
+    state["score"] = {
+        **dict(state["score"]),
+        "sha256": hashlib.sha256(score_bytes).hexdigest(),
+    }
+    (task_root / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+    timeline = [
+        {
+            "id": 99,
+            "event": "reopened",
+            "created_at": "2026-10-07T09:21:35Z",
+            "actor": {"login": "James3014"},
+        }
+    ]
+    monkeypatch.setattr(live, "_gh_list", lambda *_args, **_kwargs: timeline)
+    output_root = tmp_path / "post-terminal-revisions"
+    first = audit_post_terminal_revisions(store_root=store_root, output_root=output_root)
+    receipt_path = Path(first["revision_receipts"][0]["path"])
+    receipt_path.write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="immutable_post_terminal_revision_conflict"):
+        audit_post_terminal_revisions(store_root=store_root, output_root=output_root)
 
 
 def test_identity_preflight_receipt_separates_generation_drift_from_provider_drift() -> None:
