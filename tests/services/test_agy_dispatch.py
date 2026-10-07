@@ -2552,12 +2552,28 @@ def test_unrecognized_model_family_fails_before_claim_or_provider(tmp_path: Path
 
 
 def test_provider_exit_invalid_model_selection_classified_as_model_contract_rejected(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     home = tmp_path / "home"
     home.mkdir()
     coordinator = _WriteScopeCoordinator(home)
     events: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        dispatch,
+        "_apply_dynamic_availability",
+        lambda _model: (
+            {},
+            {
+                "family": "claude_gpt",
+                "preferred": [],
+                "reserve": [],
+                "fallback": [],
+                "blocked": [],
+                "snapshot_fresh": False,
+            },
+        ),
+    )
+    monkeypatch.setattr(dispatch, "_refresh_quota_snapshot_for_account", lambda *_a, **_kw: {})
 
     code = dispatch.dispatch_run(
         prompt="run model",
