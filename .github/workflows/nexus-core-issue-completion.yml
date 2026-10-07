@@ -139,65 +139,7 @@ jobs:
           set -euo pipefail
           mkdir -p "$UV_TOOL_BIN_DIR"
           core_pin="${{ steps.trusted-core.outputs.core_pin }}"
-          test "$core_pin" = "$(printf '%s' "$core_pin" | grep -E '^[0-9a-f]{40}
-          echo "$UV_TOOL_BIN_DIR" >> "$GITHUB_PATH"
-
-
-      - name: Bind exact Issue contract
-        run: |
-          set -euo pipefail
-          nexus-certify issue-init --repo . --issue "${{ steps.issue.outputs.number }}"
-
-      - name: Verify exact Issue-bound candidate
-        run: |
-          set -euo pipefail
-          nexus-certify issue-check --repo . --issue "${{ steps.issue.outputs.number }}"
-
-      - name: Diagnose Core verifier failure
-        if: failure()
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import glob
-          import json
-
-          receipts = sorted(glob.glob(".nexus-core/receipts/*.json"))
-          if not receipts:
-              print("NEXUS_CORE_DIAGNOSTIC: no receipt available")
-              raise SystemExit(0)
-          path = receipts[-1]
-          payload = json.load(open(path, encoding="utf-8"))
-          verifier = payload.get("verifier") or {}
-          print("NEXUS_CORE_DIAGNOSTIC_RECEIPT:", path)
-          print("status:", payload.get("status"))
-          print("reason_codes:", payload.get("reason_codes"))
-          print("verifier_command:", verifier.get("command"))
-          print("verifier_exit_code:", verifier.get("exit_code"))
-          print("--- verifier stdout ---")
-          print(verifier.get("stdout", ""))
-          print("--- verifier stderr ---")
-          print(verifier.get("stderr", ""))
-          PY
-
-      - name: Install gitlink metadata for checkout post-cleanup
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          while IFS= read -r -d '' index_entry; do
-            mode="${index_entry%% *}"
-            if [ "$mode" != "160000" ]; then
-              continue
-            fi
-            gitlink_path="${index_entry#*$'\t'}"
-            if ! git config --file .gitmodules --get "submodule.${gitlink_path}.path" >/dev/null 2>&1; then
-              git config --file .gitmodules "submodule.${gitlink_path}.path" "$gitlink_path"
-              git config --file .gitmodules "submodule.${gitlink_path}.url" .
-            fi
-          done < <(git ls-files --stage -z)
-          git submodule foreach --recursive ':'
-)"
+          test "$core_pin" = "$(printf '%s' "$core_pin" | grep -E '^[0-9a-f]{40}$')"
           uv tool install --force "git+https://github.com/James3014/nexus-core.git@$core_pin"
           echo "$UV_TOOL_BIN_DIR" >> "$GITHUB_PATH"
 
