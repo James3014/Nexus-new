@@ -20,6 +20,7 @@ jobs:
       PR_BODY: ${{ github.event.pull_request.body || '' }}
       UV_TOOL_DIR: /tmp/nexus-core-tools
       UV_TOOL_BIN_DIR: /tmp/nexus-core-bin
+      NEXUS_CORE_TOOL_PIN: ef81b65914f6d64e5dc1b13eb47f323d80b7a071
     steps:
       - name: Checkout exact pull-request head
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.2.2
@@ -42,19 +43,26 @@ jobs:
           git fetch --no-tags origin "${{ github.event.pull_request.base.sha }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
 
       - name: Protect trusted Core governance inputs
+        id: trusted-core
         shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import json
+          base_workflow="$RUNNER_TEMP/nexus-core-base-workflow.yml"
+          policy_result="$RUNNER_TEMP/nexus-core-pin-policy.json"
+          BASE_WORKFLOW="$base_workflow" python - <<'PY'
           import os
           from pathlib import Path
           import subprocess
 
           base = os.environ["BASE_SHA"]
-          protected = [".github/workflows/nexus-core-issue-completion.yml",".nexus-core/config.toml","scripts/ci/nexus-core-verify.sh"]
+          workflow_path = ".github/workflows/nexus-core-issue-completion.yml"
+          protected = [
+              ".nexus-core/config.toml",
+              "scripts/ci/nexus-core-verify.sh",
+              "scripts/ci/nexus_core_trusted_pin_policy.py",
+          ]
 
           def base_bytes(path: str) -> bytes:
               result = subprocess.run(
@@ -72,10 +80,34 @@ jobs:
               target = Path(path)
               if not target.is_file() or target.read_bytes() != base_bytes(path):
                   changed.append(path)
-
           if changed:
               raise SystemExit("NEXUS_CORE_GOVERNANCE_INPUT_CHANGED: " + ", ".join(changed))
+
+          Path(os.environ["BASE_WORKFLOW"]).write_bytes(base_bytes(workflow_path))
           PY
+
+          python scripts/ci/nexus_core_trusted_pin_policy.py \
+            --base-workflow "$base_workflow" \
+            --candidate-workflow .github/workflows/nexus-core-issue-completion.yml \
+            --output "$policy_result"
+
+          candidate_pin="$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["candidate_pin"])' "$policy_result")"
+          change_kind="$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["change_kind"])' "$policy_result")"
+          test "$candidate_pin" = "$(printf '%s' "$candidate_pin" | grep -E '^[0-9a-f]{40}$')"
+
+          if [ "$change_kind" = "PIN_ONLY" ]; then
+            upstream="$RUNNER_TEMP/nexus-core-upstream.git"
+            rm -rf -- "$upstream"
+            git init --bare "$upstream"
+            git -C "$upstream" remote add origin https://github.com/James3014/nexus-core.git
+            git -C "$upstream" fetch --no-tags origin main:refs/remotes/origin/main
+            test "$(git -C "$upstream" cat-file -t "$candidate_pin")" = commit
+            git -C "$upstream" merge-base --is-ancestor "$candidate_pin" refs/remotes/origin/main
+          fi
+
+          echo "core_pin=$candidate_pin" >> "$GITHUB_OUTPUT"
+          echo "change_kind=$change_kind" >> "$GITHUB_OUTPUT"
+
       - name: Resolve exact Issue binding
         id: issue
         shell: bash
@@ -106,7 +138,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$UV_TOOL_BIN_DIR"
-          uv tool install --force "git+https://github.com/James3014/nexus-core.git@00c791009aa4d626dacfe31012454ed1569a7b7c"
+          core_pin="${{ steps.trusted-core.outputs.core_pin }}"
+          test "$core_pin" = "$(printf '%s' "$core_pin" | grep -E '^[0-9a-f]{40}$')"
+          uv tool install --force "git+https://github.com/James3014/nexus-core.git@$core_pin"
           echo "$UV_TOOL_BIN_DIR" >> "$GITHUB_PATH"
 
 
