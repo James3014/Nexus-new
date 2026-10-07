@@ -707,7 +707,10 @@ def _is_docs_or_governance(path: str) -> bool:
 
 
 def _is_workflow_or_ci(path: str) -> bool:
-    return path.startswith(WORKFLOW_PREFIXES) or path in {".github/dependabot.yml"}
+    return path.startswith(WORKFLOW_PREFIXES) or path in {
+        ".github/dependabot.yml",
+        ".nexus-core/config.toml",
+    }
 
 
 def build_impact_plan(
