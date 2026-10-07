@@ -2028,6 +2028,191 @@ def _gh_list(path: str, *, accept: str | None = None) -> list[dict[str, Any]]:
     raise RuntimeError("github_pagination_exceeds_bound")
 
 
+POST_TERMINAL_REVISION_SCHEMA = "nexus.hybrid_replication.post_terminal_revision.v1"
+
+
+def build_post_terminal_revision_events(
+    *,
+    state: Mapping[str, Any],
+    timeline: Sequence[Mapping[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    """Return immutable lifecycle events that supersede an already-bound terminal snapshot.
+
+    A post-terminal reopen never rewrites admission, route, raw evidence, ground truth,
+    or score bytes. It only proves that the previously bound terminal snapshot is no
+    longer final-valid evidence for cohort analysis.
+    """
+
+    if state.get("phase") != "SCORED":
+        return ()
+    snapshot = state.get("snapshot") or {}
+    repository = str(snapshot.get("repository") or "")
+    issue_number = int(snapshot.get("issue_number") or 0)
+    task_key = str(state.get("task_key") or "")
+    ground_truth = state.get("ground_truth") or {}
+    score = state.get("score") or {}
+    terminal_at = str(ground_truth.get("terminal_at") or "")
+    terminal_time = _parse_timestamp(terminal_at)
+    if not repository or not issue_number or not task_key:
+        raise ValueError("post_terminal_task_identity_missing")
+    if terminal_time is None:
+        raise ValueError("post_terminal_original_terminal_time_missing")
+    ground_truth_sha = str(ground_truth.get("sha256") or "")
+    score_sha = str(score.get("sha256") or "")
+    if not ground_truth_sha or not score_sha:
+        raise ValueError("post_terminal_score_identity_missing")
+
+    events: list[dict[str, Any]] = []
+    reopened_seen = False
+    for item in timeline:
+        event = str(item.get("event") or "")
+        if event not in {"reopened", "closed"}:
+            continue
+        event_at = str(item.get("created_at") or "")
+        event_time = _parse_timestamp(event_at)
+        if event_time is None or event_time <= terminal_time:
+            continue
+        event_id = item.get("id")
+        if not isinstance(event_id, int):
+            raise ValueError("post_terminal_event_id_missing")
+        if event == "reopened":
+            reopened_seen = True
+        elif not reopened_seen:
+            # A later close matters only after the original terminal snapshot was reopened.
+            continue
+        actor = item.get("actor") or {}
+        events.append({
+            "schema": POST_TERMINAL_REVISION_SCHEMA,
+            "task_key": task_key,
+            "repository": repository,
+            "issue_number": issue_number,
+            "original_terminal_at": terminal_at,
+            "original_ground_truth_sha256": ground_truth_sha,
+            "original_score_sha256": score_sha,
+            "event_id": event_id,
+            "event": event,
+            "event_at": event_at,
+            "actor_login": str(actor.get("login") or "") if isinstance(actor, Mapping) else "",
+            "score_effect": (
+                "SUPERSEDED_BY_POST_TERMINAL_REOPEN"
+                if event == "reopened"
+                else "POST_REOPEN_RECLOSURE_OBSERVED"
+            ),
+            "material_false_safe_classification": "UNCLASSIFIED_FINAL_ANALYSIS_REQUIRED",
+            "raw_rewrite": False,
+            "route_rewrite": False,
+            "score_rewrite": False,
+            "evidence_refs": [f"issue_event:{event_id}:{event}@{event_at}"],
+        })
+    return tuple(events)
+
+
+def _write_create_only_json(path: Path, payload: Mapping[str, Any]) -> str:
+    expected = _canonical_bytes(dict(payload)) + b"\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        if path.read_bytes() != expected:
+            raise ValueError(f"immutable_post_terminal_revision_conflict:{path}")
+        return "REUSED_SAME_BYTES"
+
+    temp = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+    try:
+        fd = os.open(str(temp), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(expected)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.link(temp, path)
+        except FileExistsError:
+            if path.read_bytes() != expected:
+                raise ValueError(f"immutable_post_terminal_revision_conflict:{path}") from None
+            return "REUSED_SAME_BYTES"
+        dir_fd = os.open(str(path.parent), os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+        return "CREATED"
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def audit_post_terminal_revisions(
+    *,
+    store_root: Path,
+    output_root: Path,
+) -> dict[str, Any]:
+    """Audit SCORED tasks for GitHub reopen events without mutating task evidence."""
+
+    tasks_root = Path(store_root) / "tasks"
+    scored = 0
+    effective_scored = 0
+    superseded: list[str] = []
+    receipts: list[dict[str, Any]] = []
+
+    for state_path in sorted(tasks_root.glob("*/state.json")):
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        if state.get("admission_disposition") != "ADMITTED_PRIMARY_FRESH_TASK":
+            continue
+        if state.get("phase") != "SCORED":
+            continue
+        scored += 1
+
+        task_key = str(state.get("task_key") or "")
+        snapshot = state.get("snapshot") or {}
+        repository = str(snapshot.get("repository") or "")
+        issue_number = int(snapshot.get("issue_number") or 0)
+        score = state.get("score") or {}
+        ground_truth = state.get("ground_truth") or {}
+        if not task_key or not repository or not issue_number:
+            raise ValueError("post_terminal_task_identity_missing")
+
+        score_path = state_path.parent / str(score.get("path") or "score.json")
+        ground_truth_path = state_path.parent / "ground_truth.json"
+        if _sha256_file(score_path) != str(score.get("sha256") or ""):
+            raise ValueError(f"post_terminal_score_hash_mismatch:{task_key}")
+        if _sha256_file(ground_truth_path) != str(ground_truth.get("sha256") or ""):
+            raise ValueError(f"post_terminal_ground_truth_hash_mismatch:{task_key}")
+
+        timeline = _gh_list(
+            f"repos/{repository}/issues/{issue_number}/timeline",
+            accept="application/vnd.github+json",
+        )
+        revision_events = build_post_terminal_revision_events(state=state, timeline=timeline)
+        has_reopen = any(item["event"] == "reopened" for item in revision_events)
+        if has_reopen:
+            superseded.append(task_key)
+        else:
+            effective_scored += 1
+
+        key_dir = output_root / hashlib.sha256(task_key.encode("utf-8")).hexdigest()
+        for item in revision_events:
+            filename = f"{int(item['event_id'])}-{item['event']}.json"
+            disposition = _write_create_only_json(key_dir / filename, item)
+            receipts.append({
+                "task_key": task_key,
+                "event_id": item["event_id"],
+                "event": item["event"],
+                "path": str((key_dir / filename).resolve()),
+                "sha256": _sha256_file(key_dir / filename),
+                "write_disposition": disposition,
+            })
+
+    return {
+        "schema": "nexus.hybrid_replication.post_terminal_revision_audit.v1",
+        "store_root": str(Path(store_root).resolve()),
+        "output_root": str(Path(output_root).resolve()),
+        "scored_primary_count": scored,
+        "effective_scored_primary_count": effective_scored,
+        "superseded_score_count": len(superseded),
+        "superseded_task_keys": sorted(superseded),
+        "revision_receipts": receipts,
+        "raw_or_route_rewrite": False,
+        "score_rewrite": False,
+    }
+
+
 def _check_runs_until(
     repository: str,
     head_sha: str,
@@ -2251,11 +2436,27 @@ def main() -> int:
     stack.add_argument("--binding", default=str(DEFAULT_LIVE_BINDING))
     stack.add_argument("--readiness-control", action="store_true")
     sub.add_parser("ground-truth")
+    post_terminal = sub.add_parser("post-terminal-audit")
+    post_terminal.add_argument("--store-root", required=True)
+    post_terminal.add_argument("--output-root")
     args = parser.parse_args()
     if args.command == "identity-preflight":
         return _identity_preflight_main(Path(args.binding))
     if args.command == "stack":
         return _stack_main(Path(args.binding), readiness_control=args.readiness_control)
+    if args.command == "post-terminal-audit":
+        store_root = Path(args.store_root).expanduser().resolve()
+        output_root = (
+            Path(args.output_root).expanduser().resolve()
+            if args.output_root
+            else store_root.parent / "post-terminal-revisions"
+        )
+        result = audit_post_terminal_revisions(
+            store_root=store_root,
+            output_root=output_root,
+        )
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        return 0
     return _ground_truth_main()
 
 
