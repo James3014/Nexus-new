@@ -43,9 +43,7 @@ def test_missing_direct_url_fails_closed(monkeypatch) -> None:
     monkeypatch.setattr(observer.metadata, "distribution", lambda name: _Distribution(None))
     monkeypatch.setattr(sys, "argv", ["observer", "nexus-runtime"])
 
-    with pytest.raises(
-        SystemExit, match="NEXUS_CORE_DEPENDENCY_DIRECT_URL_MISSING:nexus-runtime"
-    ):
+    with pytest.raises(SystemExit, match="NEXUS_CORE_DEPENDENCY_DIRECT_URL_MISSING:nexus-runtime"):
         observer.main()
 
 
@@ -58,7 +56,5 @@ def test_invalid_commit_identity_fails_closed(monkeypatch, commit: str) -> None:
     )
     monkeypatch.setattr(sys, "argv", ["observer", "nexus-learning"])
 
-    with pytest.raises(
-        SystemExit, match="NEXUS_CORE_DEPENDENCY_COMMIT_INVALID:nexus-learning"
-    ):
+    with pytest.raises(SystemExit, match="NEXUS_CORE_DEPENDENCY_COMMIT_INVALID:nexus-learning"):
         observer.main()
