@@ -311,6 +311,90 @@ def test_readiness_store_seam_rejects_tampered_score_receipt(tmp_path: Path, mon
     assert "CONTROL_SCORE_INVALID" in blocked["blockers"]
 
 
+def test_readiness_defers_non_control_admission_until_primary_activation(tmp_path: Path) -> None:
+    store = AutomaticReplicationStore(tmp_path)
+    snapshot = _snapshot(9006)
+    store.capture(snapshot, admission_disposition=READINESS_CONTROL_DISPOSITION)
+    terminal = GroundTruthEvidence(
+        terminal_state="PASS",
+        terminal_at="2026-10-07T00:10:00Z",
+        evidence_refs=("control:terminal",),
+    )
+    controller = AutomaticReplicationController(
+        store=store,
+        frozen_policy_sha256="5" * 64,
+        stack_runner=lambda _: _c_outcome(),
+        terminal_resolver=lambda _: terminal,
+        clock=lambda: "2026-10-07T00:00:02Z",
+    )
+    assert controller.advance(snapshot.task_key)["phase"] == "SCORED"
+    ingest = _healthy_ingest(expected_count=3, mirrored_count=3)
+    ingest["missing_admission"] = [
+        "James3014/Nexus-new#9100",
+        "James3014/devspace#9101",
+    ]
+
+    ready = daemon.evaluate_readiness_from_store(
+        store=store,
+        ingest_report=ingest,
+        advance_report=_healthy_advance(),
+        control_task_key=snapshot.task_key,
+        launchd_label="com.nexus.hybrid-replication",
+        service_observation={
+            "schema": "nexus.hybrid_replication.service_observation.v1",
+            "label": "com.nexus.hybrid-replication",
+            "loaded": True,
+            "observed_at": "2026-10-07T00:10:01Z",
+        },
+    )
+
+    assert ready["status"] == READY
+    assert "MISSING_ADMISSION" not in ready["blockers"]
+    assert ready["deferred_non_control_missing_admission"] == [
+        "James3014/Nexus-new#9100",
+        "James3014/devspace#9101",
+    ]
+
+
+def test_readiness_still_rejects_missing_control_admission(tmp_path: Path) -> None:
+    store = AutomaticReplicationStore(tmp_path)
+    snapshot = _snapshot(9007)
+    store.capture(snapshot, admission_disposition=READINESS_CONTROL_DISPOSITION)
+    terminal = GroundTruthEvidence(
+        terminal_state="PASS",
+        terminal_at="2026-10-07T00:10:00Z",
+        evidence_refs=("control:terminal",),
+    )
+    controller = AutomaticReplicationController(
+        store=store,
+        frozen_policy_sha256="5" * 64,
+        stack_runner=lambda _: _c_outcome(),
+        terminal_resolver=lambda _: terminal,
+        clock=lambda: "2026-10-07T00:00:02Z",
+    )
+    assert controller.advance(snapshot.task_key)["phase"] == "SCORED"
+    ingest = _healthy_ingest()
+    ingest["missing_admission"] = [snapshot.task_key]
+
+    blocked = daemon.evaluate_readiness_from_store(
+        store=store,
+        ingest_report=ingest,
+        advance_report=_healthy_advance(),
+        control_task_key=snapshot.task_key,
+        launchd_label="com.nexus.hybrid-replication",
+        service_observation={
+            "schema": "nexus.hybrid_replication.service_observation.v1",
+            "label": "com.nexus.hybrid-replication",
+            "loaded": True,
+            "observed_at": "2026-10-07T00:10:01Z",
+        },
+    )
+
+    assert blocked["status"] == "NOT_READY"
+    assert "MISSING_ADMISSION" in blocked["blockers"]
+    assert blocked["deferred_non_control_missing_admission"] == []
+
+
 def test_daemon_main_readiness_mode_consumes_store_and_launchd(tmp_path: Path, monkeypatch) -> None:
     store = AutomaticReplicationStore(tmp_path)
     snapshot = _snapshot(9003)
