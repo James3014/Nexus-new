@@ -315,12 +315,21 @@ def evaluate_readiness_from_store(
     if not str(service_observation.get("observed_at") or ""):
         raise ValueError("service_observation_timestamp_required")
 
+    readiness_ingest_report = dict(ingest_report)
+    missing_admission = [str(item) for item in ingest_report.get("missing_admission") or []]
+    deferred_non_control_missing_admission = sorted(
+        item for item in missing_admission if item != control_task_key
+    )
+    readiness_ingest_report["missing_admission"] = [
+        item for item in missing_admission if item == control_task_key
+    ]
     result = _evaluate_automatic_capture_readiness(
-        ingest_report=ingest_report,
+        ingest_report=readiness_ingest_report,
         advance_report=advance_report,
         launchd_loaded=bool(service_observation["loaded"]),
         control_phase=control_phase,
     )
+    result["deferred_non_control_missing_admission"] = deferred_non_control_missing_admission
     blockers = list(result["blockers"])
     if control_phase == "SCORED" and not control_score_valid:
         blockers.append("CONTROL_SCORE_INVALID")
