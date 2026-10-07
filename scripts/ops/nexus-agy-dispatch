@@ -192,6 +192,74 @@ def _pre_effect_max_tool_events() -> int:
     )
 
 
+def _normalize_account_hash(raw: str) -> str:
+    cleaned = str(raw).strip()
+    if re.fullmatch(r"[0-9a-f]{12}", cleaned, re.IGNORECASE):
+        return cleaned.lower()
+    return hashlib.sha256(cleaned.encode("utf-8")).hexdigest()[:12]
+
+
+def _resolve_excluded_account_hashes(
+    raw_accounts: list[str] | None,
+    *,
+    manager: AgyAccountPoolManager | None = None,
+) -> set[str]:
+    cleaned = [str(item).strip() for item in (raw_accounts or []) if str(item).strip()]
+    if not cleaned:
+        return set()
+
+    exact_hashes = {
+        item.lower()
+        for item in cleaned
+        if re.fullmatch(r"[0-9a-f]{12}", item, re.IGNORECASE)
+    }
+    aliases = [
+        item
+        for item in cleaned
+        if not re.fullmatch(r"[0-9a-f]{12}", item, re.IGNORECASE)
+    ]
+    if not aliases:
+        return exact_hashes
+
+    if manager is None:
+        if not MANAGER.is_file() or not MANAGER_ROOT.is_dir():
+            raise RuntimeError("AGY_ACCOUNT_POOL_RUNTIME_MISSING")
+        manager = AgyAccountPoolManager(
+            manager_path=str(MANAGER),
+            manager_root=str(MANAGER_ROOT),
+            use_real_manager=True,
+        )
+
+    if getattr(manager, "_use_real_manager", False):
+        status = manager._call_manager_cli(["status", "--json"])
+        accounts_data = status.get("accounts") or {}
+        if isinstance(accounts_data, dict):
+            inventory_names = {
+                str(name).strip() for name in accounts_data if str(name).strip()
+            }
+        elif isinstance(accounts_data, list):
+            inventory_names = {
+                str(item.get("name") or "").strip()
+                for item in accounts_data
+                if isinstance(item, dict) and str(item.get("name") or "").strip()
+            }
+        else:
+            raise RuntimeError("AGY_ACCOUNT_POOL_INVENTORY_INVALID")
+    else:
+        inventory_names = {
+            str(getattr(account, "alias", "")).strip()
+            for account in getattr(manager, "_accounts", [])
+            if str(getattr(account, "alias", "")).strip()
+        }
+
+    unknown = sorted({alias for alias in aliases if alias not in inventory_names})
+    if unknown:
+        raise ValueError("UNKNOWN_EXCLUDED_ACCOUNT_ALIAS:" + ",".join(unknown))
+
+    exact_hashes.update(_normalize_account_hash(alias) for alias in aliases)
+    return exact_hashes
+
+
 def _read_new_provider_log_activity(
     log_path: Path | None,
     *,
@@ -1700,6 +1768,9 @@ def _runtime_revision() -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+MAX_FAILURE_HISTORY_ENTRIES = 16
+
+
 def _operation_hook(callback: Any, **payload: Any) -> None:
     if callback is not None:
         callback(payload)
@@ -2388,6 +2459,7 @@ def dispatch_hcom_collab(
     hcom_args: list[str],
     model: str | None,
     pool_wait_timeout: float = 15.0,
+    exclude_accounts: list[str] | None = None,
     coordinator: CrossProcessLeaseCoordinator | None = None,
     popen_factory: Any = subprocess.Popen,
     launcher_path: Path | None = None,
@@ -2426,7 +2498,10 @@ def dispatch_hcom_collab(
     model_family = str(availability_state["family"])
     scoped_model_family = model_family if model_family in {"gemini", "claude_gpt"} else None
     consumer_id = "hcom-" + uuid.uuid4().hex
-    exclude_hashes: set[str] = set()
+    exclude_hashes = _resolve_excluded_account_hashes(
+        exclude_accounts,
+        manager=getattr(coordinator, "manager", None),
+    )
     claim: AccountLeaseClaim | None = None
     child: Any = None
     status_read_fd: int | None = None
@@ -2637,7 +2712,9 @@ def _run_foreground_hcom_operation(
     model: str | None,
     pool_wait_timeout: float,
     operation_root: Path,
+    exclude_accounts: list[str] | None = None,
 ) -> int:
+    resolved_exclude_hashes = sorted(_resolve_excluded_account_hashes(exclude_accounts))
     journal = AgyOperationJournal(operation_root)
     operation_id = new_operation_id()
     attempt_id = new_attempt_id()
@@ -2653,7 +2730,11 @@ def _run_foreground_hcom_operation(
         effort=None,
         prompt_sha256=args_sha256,
         runtime_revision=_runtime_revision(),
-        initial_fields={"mode": "hcom_collab", "hcom_args_sha256": args_sha256},
+        initial_fields={
+            "mode": "hcom_collab",
+            "hcom_args_sha256": args_sha256,
+            "excluded_account_hashes": resolved_exclude_hashes,
+        },
     )
     journal.mark_started(operation_id, pid=os.getpid())
     journal.update(operation_id, phase="STARTING")
@@ -2682,6 +2763,7 @@ def _run_foreground_hcom_operation(
             hcom_args=hcom_args,
             model=model,
             pool_wait_timeout=pool_wait_timeout,
+            exclude_accounts=resolved_exclude_hashes,
             operation_hook=on_event,
         )
     except BaseException as exc:
@@ -2743,6 +2825,7 @@ def dispatch_run(
     stream_no_progress_seconds: float | None = None,
     pre_effect_max_seconds: float | None = None,
     pre_effect_max_tool_events: int | None = None,
+    exclude_accounts: list[str] | None = None,
 ) -> int:
     user_allow = list(allow or [])
     try:
@@ -2925,7 +3008,30 @@ def dispatch_run(
         return 75
 
     consumer_id = "desktop-" + uuid.uuid4().hex
-    exclude_hashes: set[str] = set()
+    try:
+        exclude_hashes = _resolve_excluded_account_hashes(
+            exclude_accounts,
+            manager=getattr(coordinator, "manager", None),
+        )
+    except ValueError as exc:
+        contract_failure = f"DISPATCH_CONTRACT_REJECTED:{exc}"
+        _operation_hook(
+            operation_hook,
+            phase="CONTRACT_REJECTED",
+            attempts=0,
+            rotations=0,
+            failure_kind=contract_failure,
+            provider_effect=False,
+        )
+        emit_meta({
+            "status": "invalid_contract",
+            "attempts": 0,
+            "rotations": 0,
+            "failure_kind": contract_failure,
+            "provider_effect": False,
+            "wall_ms": 0,
+        })
+        return 64
 
     claim: Optional[AccountLeaseClaim] = None
     try:
@@ -3108,6 +3214,7 @@ def dispatch_run(
                 phase="EXECUTING",
                 attempts=attempts,
                 rotations=rotations,
+                failure_kind=None,
                 account_alias_hash=claim.account_alias_hash,
                 lease_id_hash=claim.lease_id_hash,
             )
@@ -3531,7 +3638,9 @@ def _spawn_background_operation(
     stream_no_progress_seconds: float | None = None,
     pre_effect_max_seconds: float | None = None,
     pre_effect_max_tool_events: int | None = None,
+    exclude_accounts: list[str] | None = None,
 ) -> dict[str, Any]:
+    resolved_exclude_hashes = sorted(_resolve_excluded_account_hashes(exclude_accounts))
     journal = AgyOperationJournal(operation_root)
     operation_id = new_operation_id()
     attempt_id = new_attempt_id()
@@ -3566,6 +3675,7 @@ def _spawn_background_operation(
         prompt_sha256=hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
         runtime_revision=_runtime_revision(),
         initial_fields={
+            "excluded_account_hashes": resolved_exclude_hashes,
             "liveness_policy": {
                 "coding_progress_required": coding_progress_required,
                 "provider_stall_seconds": resolved_provider_stall_seconds,
@@ -3620,6 +3730,8 @@ def _spawn_background_operation(
         argv += ["--deny", rule]
     for write_path in write_paths or []:
         argv += ["--write-path", write_path]
+    for account_hash in resolved_exclude_hashes:
+        argv += ["--exclude-account", account_hash]
 
     stdout_path = journal.stdout_path(operation_id)
     stderr_path = journal.stderr_path(operation_id)
@@ -3806,6 +3918,7 @@ def _run_background_operation(
     stream_no_progress_seconds: float | None = None,
     pre_effect_max_seconds: float | None = None,
     pre_effect_max_tool_events: int | None = None,
+    exclude_accounts: list[str] | None = None,
 ) -> int:
     journal = AgyOperationJournal(operation_root)
     prompt_path = Path(prompt_file)
@@ -3828,6 +3941,7 @@ def _run_background_operation(
         "account_alias_hash": None,
         "lease_id_hash": None,
         "failure_kind": None,
+        "failure_history": [],
         "timed_out": False,
         "provider_pid": None,
         "provider_pgid": None,
@@ -3857,6 +3971,7 @@ def _run_background_operation(
             account_alias_hash=snapshot.get("account_alias_hash"),
             lease_id_hash=snapshot.get("lease_id_hash"),
             failure_kind=snapshot.get("failure_kind"),
+            failure_history=list(snapshot.get("failure_history") or []),
             provider_pid=snapshot.get("provider_pid"),
             provider_pgid=snapshot.get("provider_pgid"),
             provider_process_state=snapshot.get("provider_process_state") or "IDLE",
@@ -3878,6 +3993,22 @@ def _run_background_operation(
     def on_event(event: dict[str, Any]) -> None:
         with state_lock:
             state.update(event)
+            failure_kind = event.get("failure_kind")
+            if (
+                event.get("phase") == "CLASSIFYING_FAILURE"
+                and isinstance(failure_kind, str)
+                and failure_kind
+            ):
+                history = list(state.get("failure_history") or [])
+                history.append({
+                    "at": _agy_operation_journal.utc_now(),
+                    "attempts": int(state.get("attempts") or 0),
+                    "rotations": int(state.get("rotations") or 0),
+                    "failure_kind": failure_kind,
+                    "account_alias_hash": state.get("account_alias_hash"),
+                    "lease_id_hash": state.get("lease_id_hash"),
+                })
+                state["failure_history"] = history[-MAX_FAILURE_HISTORY_ENTRIES:]
             snapshot = dict(state)
         _heartbeat_snapshot(snapshot)
 
@@ -3920,6 +4051,7 @@ def _run_background_operation(
             stream_no_progress_seconds=stream_no_progress_seconds,
             pre_effect_max_seconds=pre_effect_max_seconds,
             pre_effect_max_tool_events=pre_effect_max_tool_events,
+            exclude_accounts=exclude_accounts,
         )
         with state_lock:
             snapshot = dict(state)
@@ -4298,6 +4430,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--status", metavar="OPERATION_ID")
     ap.add_argument("--reconcile", metavar="OPERATION_ID")
     ap.add_argument("--hcom-collab", action="store_true")
+    ap.add_argument(
+        "--exclude-account",
+        action="append",
+        default=[],
+        help="Account alias or 12-hex alias hash to ephemerally exclude; repeatable",
+    )
     ap.add_argument("--hcom-args-json", default="[]", help=argparse.SUPPRESS)
     ap.add_argument(
         "--finalize-no-effect",
@@ -4344,6 +4482,7 @@ def main(argv: list[str] | None = None) -> int:
             model=args.model,
             pool_wait_timeout=args.pool_wait_timeout,
             operation_root=operation_root,
+            exclude_accounts=args.exclude_account,
         )
 
     # The internal --operation-run already receives the effective execution root
@@ -4390,6 +4529,7 @@ def main(argv: list[str] | None = None) -> int:
             stream_no_progress_seconds=args.stream_no_progress_seconds,
             pre_effect_max_seconds=args.pre_effect_max_seconds,
             pre_effect_max_tool_events=args.pre_effect_max_tool_events,
+            exclude_accounts=args.exclude_account,
         )
 
     if args.background:
@@ -4411,6 +4551,7 @@ def main(argv: list[str] | None = None) -> int:
             stream_no_progress_seconds=args.stream_no_progress_seconds,
             pre_effect_max_seconds=args.pre_effect_max_seconds,
             pre_effect_max_tool_events=args.pre_effect_max_tool_events,
+            exclude_accounts=args.exclude_account,
         )
         _print_operation(record)
         return 0
@@ -4432,6 +4573,7 @@ def main(argv: list[str] | None = None) -> int:
         stream_no_progress_seconds=args.stream_no_progress_seconds,
         pre_effect_max_seconds=args.pre_effect_max_seconds,
         pre_effect_max_tool_events=args.pre_effect_max_tool_events,
+        exclude_accounts=args.exclude_account,
     )
 
 
