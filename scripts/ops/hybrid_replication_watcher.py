@@ -103,6 +103,7 @@ def fast_ingest(
     store: AutomaticReplicationStore,
     boundary: str,
     updated_since: str,
+    pending_capture: set[str] | None = None,
 ) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -115,6 +116,17 @@ def fast_ingest(
             row = _mirror_issue(store=store, repository=repository, issue=issue)
             rows.append(row)
             seen.add(str(row["task_key"]))
+
+    for task_key in sorted(pending_capture or set()):
+        if task_key in seen:
+            continue
+        repository, issue_text = task_key.rsplit("#", 1)
+        issue = daemon._gh_json("-X", "GET", f"repos/{repository}/issues/{int(issue_text)}")
+        if not isinstance(issue, dict):
+            raise RuntimeError("issue_response_not_object")
+        row = _mirror_issue(store=store, repository=repository, issue=issue)
+        rows.append(row)
+        seen.add(task_key)
 
     for state_path in sorted(store.tasks_root.glob("*/state.json")):
         state = json.loads(state_path.read_text(encoding="utf-8"))
@@ -235,6 +247,7 @@ def run_watcher(
 
     store = AutomaticReplicationStore(root)
     last_poll = _parse_timestamp(boundary)
+    pending_capture: set[str] = set()
     last_full = 0.0
     active: dict[str, Future[dict[str, Any]]] = {}
     watchdog_future: Future[dict[str, Any]] | None = None
@@ -249,7 +262,18 @@ def run_watcher(
             updated_since = (
                 (last_poll - timedelta(seconds=overlap_seconds)).isoformat().replace("+00:00", "Z")
             )
-            report = fast_ingest(store=store, boundary=boundary, updated_since=updated_since)
+            report = fast_ingest(
+                store=store,
+                boundary=boundary,
+                updated_since=updated_since,
+                pending_capture=pending_capture,
+            )
+            for row in report["rows"]:
+                task_key = str(row["task_key"])
+                if row.get("capture") == "MISSING":
+                    pending_capture.add(task_key)
+                else:
+                    pending_capture.discard(task_key)
             if report["rows"]:
                 print(json.dumps(report, ensure_ascii=False, sort_keys=True), flush=True)
             last_poll = now

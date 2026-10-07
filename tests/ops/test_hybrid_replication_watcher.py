@@ -141,3 +141,35 @@ def test_watcher_requires_prospective_store_binding(tmp_path: Path) -> None:
             ground_truth_command="python gt.py",
             max_loops=1,
         )
+
+
+def test_fast_ingest_rechecks_pending_missing_capture_each_poll(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot = _snapshot(1704)
+    receipt = _receipt(snapshot)
+    monkeypatch.setattr(watcher, "_issues_updated_since", lambda *_, **__: [])
+    monkeypatch.setattr(
+        daemon,
+        "_gh_json",
+        lambda *args: {"number": snapshot.issue_number, "created_at": snapshot.created_at},
+    )
+    monkeypatch.setattr(
+        daemon,
+        "_comments",
+        lambda repository, number: [
+            {"body": build_capture_comment(snapshot)},
+            {"body": build_admission_comment(receipt)},
+        ],
+    )
+    store = AutomaticReplicationStore(tmp_path)
+
+    report = watcher.fast_ingest(
+        store=store,
+        boundary="2026-10-07T11:59:59Z",
+        updated_since="2026-10-07T12:01:00Z",
+        pending_capture={snapshot.task_key},
+    )
+
+    assert report["rows"][0]["capture"] == "PRESENT"
+    assert store.load_task(snapshot.task_key)["phase"] == "ADMITTED"
