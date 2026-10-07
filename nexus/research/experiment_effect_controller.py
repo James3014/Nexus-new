@@ -24,6 +24,7 @@ from nexus.research.experiment_run_guard import (
 )
 
 _RUNNING_STATES = {"RUNNING", "QUEUED"}
+_TERMINAL_STATES = {"COMPLETED", "FAILED", "CANCELLED"}
 _UNKNOWN_STATE = "OUTCOME_UNKNOWN"
 
 
@@ -166,14 +167,30 @@ class ExperimentEffectController:
                 raise ExperimentEffectOutcomeUnknown("PROVIDER_EFFECT_WAIT_TIMEOUT")
             self._sleep(poll_interval_seconds)
 
+        reconciled = False
         if observed.get("status") == _UNKNOWN_STATE:
             observed = dict(reconcile_effect(operation_id))
-        if observed.get("status") == _UNKNOWN_STATE:
-            self._lease.mark_outcome_unknown(operation_id=operation_id)
-            raise ExperimentEffectOutcomeUnknown("PROVIDER_EFFECT_OUTCOME_UNKNOWN")
+            reconciled = True
+
         if observed.get("operation_id") not in {None, operation_id}:
             self._lease.mark_outcome_unknown(operation_id=operation_id)
             raise ExperimentEffectOutcomeUnknown("PROVIDER_OPERATION_IDENTITY_MISMATCH")
+
+        status = observed.get("status")
+        if status == _UNKNOWN_STATE:
+            self._lease.mark_outcome_unknown(operation_id=operation_id)
+            raise ExperimentEffectOutcomeUnknown("PROVIDER_EFFECT_OUTCOME_UNKNOWN")
+        if status in _RUNNING_STATES:
+            self._lease.mark_outcome_unknown(operation_id=operation_id)
+            reason = (
+                "PROVIDER_EFFECT_STILL_RUNNING_AFTER_RECONCILE"
+                if reconciled
+                else "PROVIDER_EFFECT_NOT_TERMINAL"
+            )
+            raise ExperimentEffectOutcomeUnknown(reason)
+        if status not in _TERMINAL_STATES:
+            self._lease.mark_outcome_unknown(operation_id=operation_id)
+            raise ExperimentEffectOutcomeUnknown("PROVIDER_EFFECT_STATUS_UNRECOGNIZED")
         return observed
 
 
