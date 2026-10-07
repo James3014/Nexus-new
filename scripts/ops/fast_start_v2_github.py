@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -189,51 +190,104 @@ def collect_pr_changed_paths(
     raise GitHubTransportError("PR_FILES_PAGINATION_EXCEEDED")
 
 
-def _cli_changed_paths(args: argparse.Namespace) -> int:
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
-    client = GitHubMetadataClient(token, repository=args.repository)
+def collect_compare_changed_paths(
+    client: GitHubMetadataClient,
+    *,
+    repository: str,
+    before_sha: str,
+    after_sha: str,
+) -> list[str]:
+    if not re.fullmatch(r"[0-9a-f]{40}", before_sha):
+        raise ValueError("BEFORE_SHA_INVALID")
+    if not re.fullmatch(r"[0-9a-f]{40}", after_sha):
+        raise ValueError("AFTER_SHA_INVALID")
+    payload = client.request(
+        f"/repos/{repository}/compare/{before_sha}...{after_sha}"
+    )
+    if not isinstance(payload, Mapping):
+        raise GitHubTransportError("COMPARE_RESPONSE_MALFORMED")
+    files = payload.get("files")
+    if not isinstance(files, list):
+        raise GitHubTransportError("COMPARE_FILES_RESPONSE_MALFORMED")
+    paths = {
+        str(item.get("filename") or "").strip()
+        for item in files
+        if isinstance(item, Mapping) and str(item.get("filename") or "").strip()
+    }
+    return sorted(paths)
+
+
+def _write_paths_or_unavailable(
+    *,
+    output: str,
+    repository: str,
+    event_subject: Mapping[str, Any],
+    producer: Callable[[], list[str]],
+) -> int:
     try:
-        paths = collect_pr_changed_paths(
-            client,
-            repository=args.repository,
-            pr_number=args.pr_number,
-        )
+        paths = producer()
     except GitHubRateLimitExhausted as exc:
-        Path(args.output).write_text("", encoding="utf-8")
-        print(
-            json.dumps(
-                {
-                    "schema": "nexus.fast_start_github_read.v1",
-                    "status": "UNAVAILABLE",
-                    "authority": "ADVISORY_CACHE_ONLY",
-                    "reason": "GITHUB_RATE_LIMIT_EXHAUSTED",
-                    "retry_after_seconds": exc.retry_after,
-                    "repository": args.repository,
-                    "pr_number": args.pr_number,
-                },
-                sort_keys=True,
-            )
-        )
+        Path(output).write_text("", encoding="utf-8")
+        witness = {
+            "schema": "nexus.fast_start_github_read.v1",
+            "status": "UNAVAILABLE",
+            "authority": "ADVISORY_CACHE_ONLY",
+            "reason": "GITHUB_RATE_LIMIT_EXHAUSTED",
+            "retry_after_seconds": exc.retry_after,
+            "repository": repository,
+            **dict(event_subject),
+        }
+        print(json.dumps(witness, sort_keys=True))
         return RATE_LIMIT_EXIT
 
-    Path(args.output).write_text(
+    Path(output).write_text(
         "".join(f"{path}\n" for path in paths),
         encoding="utf-8",
     )
-    print(
-        json.dumps(
-            {
-                "schema": "nexus.fast_start_github_read.v1",
-                "status": "OK",
-                "authority": "ADVISORY_CACHE_ONLY",
-                "repository": args.repository,
-                "pr_number": args.pr_number,
-                "changed_path_count": len(paths),
-            },
-            sort_keys=True,
-        )
-    )
+    witness = {
+        "schema": "nexus.fast_start_github_read.v1",
+        "status": "OK",
+        "authority": "ADVISORY_CACHE_ONLY",
+        "repository": repository,
+        "changed_path_count": len(paths),
+        **dict(event_subject),
+    }
+    print(json.dumps(witness, sort_keys=True))
     return 0
+
+
+def _cli_changed_paths(args: argparse.Namespace) -> int:
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
+    client = GitHubMetadataClient(token, repository=args.repository)
+    return _write_paths_or_unavailable(
+        output=args.output,
+        repository=args.repository,
+        event_subject={"pr_number": args.pr_number},
+        producer=lambda: collect_pr_changed_paths(
+            client,
+            repository=args.repository,
+            pr_number=args.pr_number,
+        ),
+    )
+
+
+def _cli_compare_paths(args: argparse.Namespace) -> int:
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
+    client = GitHubMetadataClient(token, repository=args.repository)
+    return _write_paths_or_unavailable(
+        output=args.output,
+        repository=args.repository,
+        event_subject={
+            "before_sha": args.before_sha,
+            "after_sha": args.after_sha,
+        },
+        producer=lambda: collect_compare_changed_paths(
+            client,
+            repository=args.repository,
+            before_sha=args.before_sha,
+            after_sha=args.after_sha,
+        ),
+    )
 
 
 def main() -> int:
@@ -243,9 +297,16 @@ def main() -> int:
     changed.add_argument("--repository", required=True)
     changed.add_argument("--pr-number", required=True, type=int)
     changed.add_argument("--output", required=True)
+    compare = subparsers.add_parser("compare-paths")
+    compare.add_argument("--repository", required=True)
+    compare.add_argument("--before-sha", required=True)
+    compare.add_argument("--after-sha", required=True)
+    compare.add_argument("--output", required=True)
     args = parser.parse_args()
     if args.command == "changed-paths":
         return _cli_changed_paths(args)
+    if args.command == "compare-paths":
+        return _cli_compare_paths(args)
     raise AssertionError("unreachable")
 
 
