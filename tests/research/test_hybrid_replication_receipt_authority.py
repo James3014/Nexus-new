@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -9,7 +10,7 @@ from nexus.research.hybrid_replication_live import (
 )
 
 
-def _binding(tmp_path: Path) -> dict[str, object]:
+def _binding(tmp_path: Path) -> dict[str, Any]:
     dm1 = tmp_path / "DM1_FINAL_RECEIPT.json"
     re2 = tmp_path / "RE2_FINAL_RECEIPT.json"
     dm1.write_text("dm1", encoding="utf-8")
