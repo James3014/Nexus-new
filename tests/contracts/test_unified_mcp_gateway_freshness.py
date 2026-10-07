@@ -22,6 +22,7 @@ from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
     UnifiedMCPGateway,
     _action_contract_digest,
     _action_contract_fingerprint,
+    _default_observe_upstream_change_scope,
     _evaluate_freshness,
     _evaluate_upstream_freshness,
     _hash_source_paths,
@@ -659,6 +660,114 @@ def test_combined_runtime_and_review_drift_keeps_reason_sets_separate():
     assert "action_definition_changed" in result["review_reasons"]
     assert "permission_enforcement_changed" in result["review_reasons"]
     assert all(reason not in result["reload_reasons"] for reason in result["review_reasons"])
+
+
+def test_observe_upstream_change_scope_returns_complete_bounded_paths(monkeypatch):
+    class _Proc:
+        returncode = 0
+        stdout = json.dumps({
+            "status": "ahead",
+            "file_count": 2,
+            "files": [
+                "docs/unrelated.md",
+                "nexus/services/local_assist_service.py",
+            ],
+        })
+        stderr = ""
+
+    monkeypatch.setattr(
+        gateway_module,
+        "_resolve_github_cli",
+        lambda: ("/usr/bin/gh", None),
+    )
+    monkeypatch.setattr(
+        gateway_module.subprocess,
+        "run",
+        lambda *args, **kwargs: _Proc(),
+    )
+
+    result = _default_observe_upstream_change_scope(
+        base_commit=SHA40_A,
+        head_commit=SHA40_B,
+    )
+
+    assert result == {
+        "base_commit": SHA40_A,
+        "head_commit": SHA40_B,
+        "changed_paths": (
+            "docs/unrelated.md",
+            "nexus/services/local_assist_service.py",
+        ),
+        "complete": True,
+        "error": None,
+    }
+
+
+def test_observe_upstream_change_scope_preserves_previous_filename_for_renames(monkeypatch):
+    class _Proc:
+        returncode = 0
+        stdout = json.dumps({
+            "status": "ahead",
+            "file_count": 1,
+            "files": [
+                "nexus/orchestrator/gateway_convergence_v2.py",
+                "nexus/orchestrator/gateway_convergence.py",
+            ],
+        })
+        stderr = ""
+
+    monkeypatch.setattr(
+        gateway_module,
+        "_resolve_github_cli",
+        lambda: ("/usr/bin/gh", None),
+    )
+    monkeypatch.setattr(
+        gateway_module.subprocess,
+        "run",
+        lambda *args, **kwargs: _Proc(),
+    )
+
+    result = _default_observe_upstream_change_scope(
+        base_commit=SHA40_A,
+        head_commit=SHA40_B,
+    )
+
+    assert result["complete"] is True
+    assert result["changed_paths"] == (
+        "nexus/orchestrator/gateway_convergence_v2.py",
+        "nexus/orchestrator/gateway_convergence.py",
+    )
+
+
+def test_observe_upstream_change_scope_fails_closed_at_compare_file_limit(monkeypatch):
+    class _Proc:
+        returncode = 0
+        stdout = json.dumps({
+            "status": "ahead",
+            "file_count": 300,
+            "files": [f"docs/file-{index}.md" for index in range(300)],
+        })
+        stderr = ""
+
+    monkeypatch.setattr(
+        gateway_module,
+        "_resolve_github_cli",
+        lambda: ("/usr/bin/gh", None),
+    )
+    monkeypatch.setattr(
+        gateway_module.subprocess,
+        "run",
+        lambda *args, **kwargs: _Proc(),
+    )
+
+    result = _default_observe_upstream_change_scope(
+        base_commit=SHA40_A,
+        head_commit=SHA40_B,
+    )
+
+    assert result["complete"] is False
+    assert result["error"] == "upstream_compare_file_limit_reached"
+    assert len(result["changed_paths"]) == 300
 
 
 def test_evaluate_upstream_freshness_current():
