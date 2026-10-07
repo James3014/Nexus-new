@@ -296,7 +296,7 @@ def test_query_timeout_reaps_usage_process(tmp_path: Path, monkeypatch) -> None:
         account_name="one",
         email=None,
         agy_binary=str(executable),
-        timeout=0.1,
+        timeout=0.5,
         checked_at="2026-10-07T00:00:00+00:00",
     )
 
