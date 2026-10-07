@@ -29,6 +29,9 @@ EXTERNAL_DISPATCH = ROOT / "scripts" / "ops" / "nexus-external-worker-dispatch"
 EXTERNAL_DISPATCH_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_external_worker_dispatch.sh"
 GROK_ACCOUNTS = ROOT / "scripts" / "ops" / "nexus-grok-accounts"
 HCOM_AGY_SAFE = ROOT / "scripts" / "ops" / "nexus-hcom-agy-safe"
+DSH_AGY_ADAPTER = ROOT / "scripts" / "ops" / "dsh-agy-adapter"
+DSH_AGY_ADAPTER_INDEX = DSH_AGY_ADAPTER / "index.js"
+DSH_AGY_ADAPTER_PACKAGE = DSH_AGY_ADAPTER / "package.json"
 HERMES_CONTROLLER_GUARD = ROOT / "scripts" / "ops" / "nexus-hermes-controller-guard"
 HERMES_CONTINUATION_CONTROLLER = ROOT / "scripts" / "ops" / "nexus-hermes-continuation-controller"
 HERMES_CORE_COMPLETION = ROOT / "scripts" / "ops" / "nexus-hermes-core-completion"
@@ -105,6 +108,8 @@ def _make_source_repo(tmp_path: Path) -> Path:
         (EXTERNAL_DISPATCH, "scripts/ops/nexus-external-worker-dispatch"),
         (GROK_ACCOUNTS, "scripts/ops/nexus-grok-accounts"),
         (HCOM_AGY_SAFE, "scripts/ops/nexus-hcom-agy-safe"),
+        (DSH_AGY_ADAPTER_INDEX, "scripts/ops/dsh-agy-adapter/index.js"),
+        (DSH_AGY_ADAPTER_PACKAGE, "scripts/ops/dsh-agy-adapter/package.json"),
         (
             HERMES_CONTROLLER_GUARD,
             "scripts/ops/nexus-hermes-controller-guard",
@@ -172,6 +177,7 @@ def _invoke(
     revision: str | None = None,
     desired_bundle: str | None = None,
     canonical_source_root: Path | None = None,
+    dsh_agy_adapter_target: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     quota_target = dispatch_target.parent / "nexus-agy-quota"
     workflow_doctor_target = dispatch_target.parent / "nexus-workflow-doctor"
@@ -216,6 +222,9 @@ def _invoke(
         argv += ["--desired-bundle-sha256", desired_bundle]
     env = os.environ.copy()
     env["NEXUS_HCOM_AGY_TARGET"] = str(dispatch_target.parent / "hcom-agy-safe")
+    env["NEXUS_DSH_AGY_ADAPTER_TARGET"] = str(
+        dsh_agy_adapter_target or dispatch_target.parent / "dsh-agy-adapter"
+    )
     env["NEXUS_HERMES_CONTROLLER_GUARD_TARGET"] = str(
         dispatch_target.parent / "nexus-hermes-controller-guard"
     )
@@ -228,6 +237,78 @@ def _invoke(
     env["NEXUS_HERMES_LAUNCHD_TARGET"] = str(dispatch_target.parent / "nexus-hermes-launchd")
     return _run(argv, cwd=ROOT, env=env)
 
+
+
+def test_manifest_and_sync_own_dsh_agy_adapter(tmp_path: Path) -> None:
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    assert manifest["components"]["dsh_agy_adapter"]["source_path"] == "scripts/ops/dsh-agy-adapter"
+    paths = {entry["path"] for entry in manifest["runtime_files"]}
+    assert "scripts/ops/dsh-agy-adapter/index.js" in paths
+    assert "scripts/ops/dsh-agy-adapter/package.json" in paths
+
+    source_repo = _make_source_repo(tmp_path)
+    revision = _git(source_repo, "rev-parse", "HEAD")
+    runtime_root = tmp_path / "runtime"
+    manager_python = tmp_path / "manager-python"
+    dispatch_target = tmp_path / "bin" / "nexus-agy-dispatch"
+    sync_target = tmp_path / "bin" / "nexus-host-sync"
+    dsh_runtime = tmp_path / "dsh-runtime"
+    adapter_target = dsh_runtime / "node_modules" / "@nexus" / "dsh-llm-agy-pilot"
+    dependency = dsh_runtime / "node_modules" / "@deepseek-ai" / "dsh-llm"
+    dependency.mkdir(parents=True)
+    (dependency / "package.json").write_text(
+        json.dumps({"name": "@deepseek-ai/dsh-llm", "type": "module", "exports": "./index.js"}),
+        encoding="utf-8",
+    )
+    (dependency / "index.js").write_text(
+        "export class LlmAdapter {}\n"
+        "export class LlmError extends Error { constructor(message, code, options={}) { super(message, options); this.code=code } }\n",
+        encoding="utf-8",
+    )
+    _write_fake_manager(manager_python)
+
+    sync = _invoke(
+        source_repo,
+        runtime_root,
+        manager_python,
+        dispatch_target,
+        sync_target,
+        "sync",
+        revision=revision,
+        dsh_agy_adapter_target=adapter_target,
+    )
+    assert sync.returncode == 0, sync.stderr + sync.stdout
+    payload = json.loads(sync.stdout)
+    assert payload["components"]["dsh_agy_adapter"]["status"] == "VERIFIED"
+    assert adapter_target.is_symlink()
+    assert adapter_target.resolve().is_dir()
+    assert (adapter_target / "index.js").read_bytes() == DSH_AGY_ADAPTER_INDEX.read_bytes()
+    assert (adapter_target / "package.json").read_bytes() == DSH_AGY_ADAPTER_PACKAGE.read_bytes()
+    import_probe = _run(
+        [
+            "node",
+            "--input-type=module",
+            "-e",
+            f"await import({str((adapter_target / 'index.js').as_uri())!r}); console.log('IMPORT_OK')",
+        ],
+        cwd=tmp_path,
+    )
+    assert import_probe.returncode == 0, import_probe.stderr + import_probe.stdout
+    assert "IMPORT_OK" in import_probe.stdout
+
+    verified = _invoke(
+        source_repo,
+        runtime_root,
+        manager_python,
+        dispatch_target,
+        sync_target,
+        "verify",
+        desired_bundle=payload["installed_bundle_sha256"],
+        dsh_agy_adapter_target=adapter_target,
+    )
+    assert verified.returncode == 0, verified.stderr + verified.stdout
+    verified_payload = json.loads(verified.stdout)
+    assert verified_payload["components"]["dsh_agy_adapter"]["status"] == "VERIFIED"
 
 def test_workflow_doctor_manifest_requires_canonical_source_root(tmp_path: Path) -> None:
     source_repo = _make_source_repo(tmp_path)
