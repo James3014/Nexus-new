@@ -27,7 +27,8 @@ def _pin_and_normalized(document: bytes) -> tuple[str, bytes]:
     match = matches[0]
     pin = match.group("pin").decode("ascii")
     normalized = (
-        document[: match.start("pin")] + b"__NEXUS_CORE_TOOL_PIN__"
+        document[: match.start("pin")]
+        + b"__NEXUS_CORE_TOOL_PIN__"
         + document[match.end("pin") :]
     )
     return pin, normalized
