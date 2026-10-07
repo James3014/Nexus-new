@@ -287,3 +287,15 @@ def test_compare_changed_paths_rejects_malformed_sha() -> None:
             before_sha="bad",
             after_sha="2" * 40,
         )
+
+def test_committed_fast_start_workflow_uses_bounded_github_transport() -> None:
+    workflow = (
+        REPO_ROOT / ".github" / "workflows" / "fast-start-v2-invalidator.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "scripts/ops/fast_start_v2_github.py changed-paths" in workflow
+    assert "scripts/ops/fast_start_v2_github.py compare-paths" in workflow
+    assert "steps.paths.outputs.unavailable == 'true'" in workflow
+    assert "from scripts.ops.fast_start_v2_github import (" in workflow
+    assert "FAST_START_POST_WRITE_READBACK_RATE_LIMIT_EXHAUSTED" in workflow
+    assert "GitHubMetadataClient(TOKEN, repository=REPOSITORY)" in workflow
