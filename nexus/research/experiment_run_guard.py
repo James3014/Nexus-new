@@ -213,6 +213,29 @@ class ExperimentRunLease:
             update=update,
         )
 
+    def mark_no_effect(self) -> dict[str, Any]:
+        """Release a reserved run only when no external operation was ever bound."""
+
+        self._ensure_active()
+
+        def update(effect: dict[str, Any]) -> dict[str, Any]:
+            if effect["state"] != "STARTED":
+                raise RunEffectConflict("RUN_EFFECT_NO_EFFECT_NOT_PROVABLE")
+            if (
+                effect.get("operation_id") is not None
+                or effect.get("response_sha256") is not None
+                or effect.get("receipt_sha256") is not None
+            ):
+                raise RunEffectConflict("RUN_EFFECT_NO_EFFECT_NOT_PROVABLE")
+            effect["state"] = "NOT_STARTED"
+            return effect
+
+        return self._guard._update_effect(
+            self._run_path,
+            expected_contract_sha256=self.contract_sha256,
+            update=update,
+        )
+
     def mark_outcome_unknown(self, *, operation_id: str | None = None) -> dict[str, Any]:
         """Fail closed after lost acknowledgement until the same effect is reconciled."""
 
@@ -291,15 +314,41 @@ class ExperimentRunLease:
     def release(self) -> None:
         if self._released:
             return
-        fcntl.flock(self._lock_handle.fileno(), fcntl.LOCK_UN)
-        self._lock_handle.close()
-        self._released = True
+        terminalization_error: RunEffectConflict | None = None
+        try:
+            record = self._guard._load_record(self._run_path)
+            if (
+                record.get("schema") == _SCHEMA
+                and record.get("contract_sha256") == self.contract_sha256
+                and record["effect"]["state"] == "STARTED"
+            ):
+                self.mark_outcome_unknown(
+                    operation_id=record["effect"].get("operation_id")
+                )
+                terminalization_error = RunEffectConflict(
+                    "RUN_EFFECT_TERMINALIZATION_REQUIRED"
+                )
+        finally:
+            fcntl.flock(self._lock_handle.fileno(), fcntl.LOCK_UN)
+            self._lock_handle.close()
+            self._released = True
+        if terminalization_error is not None:
+            raise terminalization_error
 
     def __enter__(self) -> "ExperimentRunLease":
         return self
 
-    def __exit__(self, *_exc: object) -> None:
-        self.release()
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        _exc: BaseException | None,
+        _tb: object,
+    ) -> None:
+        try:
+            self.release()
+        except RunEffectConflict:
+            if exc_type is None:
+                raise
 
 
 class ExperimentRunGuard:
