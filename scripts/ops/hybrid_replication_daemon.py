@@ -175,6 +175,33 @@ def ingest(
     }
 
 
+def _partition_missing_admission_for_mode(
+    *,
+    store: AutomaticReplicationStore,
+    missing_admission: list[str],
+    control_task_key: str | None = None,
+) -> tuple[list[str], list[str]]:
+    missing = sorted(str(item) for item in missing_admission)
+    if control_task_key is None:
+        return missing, []
+
+    control_state = store.load_task(control_task_key)
+    if (
+        control_state is None
+        or control_state.get("admission_disposition") != READINESS_CONTROL_DISPOSITION
+    ):
+        return missing, []
+
+    for state_path in sorted(store.tasks_root.glob("*/state.json")):
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        if state.get("admission_disposition") == "ADMITTED_PRIMARY_FRESH_TASK":
+            return missing, []
+
+    blockers = [item for item in missing if item == control_task_key]
+    deferred = [item for item in missing if item != control_task_key]
+    return blockers, deferred
+
+
 def advance_all(
     *,
     store: AutomaticReplicationStore,
@@ -289,12 +316,22 @@ def evaluate_readiness_from_store(
     control_phase = str(control_state.get("phase")) if control_state else None
     control_score_valid = False
     control_score_error: str | None = None
+    control_raw_valid = False
+    control_raw_failures: list[str] = []
+    control_raw_error: str | None = None
     if control_phase == "SCORED":
         try:
             store.score_task(control_task_key)
             control_score_valid = True
         except (OSError, ValueError) as exc:
             control_score_error = f"{type(exc).__name__}:{exc}"
+        if control_score_valid:
+            try:
+                raw = store.load_sealed_raw(control_task_key)
+                control_raw_failures = [str(item) for item in raw.get("failures") or []]
+                control_raw_valid = not control_raw_failures
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                control_raw_error = f"{type(exc).__name__}:{exc}"
 
     if service_observation.get("schema") != "nexus.hybrid_replication.service_observation.v1":
         raise ValueError("service_observation_schema_mismatch")
@@ -305,20 +342,38 @@ def evaluate_readiness_from_store(
     if not str(service_observation.get("observed_at") or ""):
         raise ValueError("service_observation_timestamp_required")
 
+    readiness_ingest_report = dict(ingest_report)
+    missing_admission_blockers, deferred_non_control_missing_admission = (
+        _partition_missing_admission_for_mode(
+            store=store,
+            missing_admission=[str(item) for item in ingest_report.get("missing_admission") or []],
+            control_task_key=control_task_key,
+        )
+    )
+    readiness_ingest_report["missing_admission"] = missing_admission_blockers
     result = _evaluate_automatic_capture_readiness(
-        ingest_report=ingest_report,
+        ingest_report=readiness_ingest_report,
         advance_report=advance_report,
         launchd_loaded=bool(service_observation["loaded"]),
         control_phase=control_phase,
     )
+    result["deferred_non_control_missing_admission"] = deferred_non_control_missing_admission
     blockers = list(result["blockers"])
     if control_phase == "SCORED" and not control_score_valid:
         blockers.append("CONTROL_SCORE_INVALID")
+    if control_phase == "SCORED" and control_score_valid:
+        if control_raw_error is not None:
+            blockers.append("CONTROL_RAW_INVALID")
+        elif control_raw_failures:
+            blockers.append("CONTROL_RAW_FAILURE_PRESENT")
     result["blockers"] = blockers
     result["status"] = "AUTOMATIC_CAPTURE_READY" if not blockers else "NOT_READY"
     result["control_task_key"] = control_task_key
     result["control_score_valid"] = control_score_valid
     result["control_score_error"] = control_score_error
+    result["control_raw_valid"] = control_raw_valid
+    result["control_raw_failures"] = control_raw_failures
+    result["control_raw_error"] = control_raw_error
     result["launchd_label"] = launchd_label
     result["service_observation"] = dict(service_observation)
     result["claim_ceiling"] = "READINESS_CONTROL_ONLY_NOT_PRIMARY_COHORT"
@@ -334,9 +389,16 @@ def main() -> int:
     parser.add_argument("--ground-truth-command")
     parser.add_argument("--ingest-only", action="store_true")
     parser.add_argument("--readiness-control-task-key")
+    parser.add_argument("--deferred-admission-control-task-key")
     parser.add_argument("--launchd-label", default="com.nexus.hybrid-replication")
     parser.add_argument("--service-observation")
     args = parser.parse_args()
+    if (
+        args.readiness_control_task_key
+        and args.deferred_admission_control_task_key
+        and args.readiness_control_task_key != args.deferred_admission_control_task_key
+    ):
+        raise SystemExit("readiness and deferred-admission control task keys must match")
 
     store = AutomaticReplicationStore(Path(args.root))
     ingest_report = ingest(store=store, since=args.since)
@@ -379,7 +441,14 @@ def main() -> int:
         return 5
     if ingest_report["missing_capture"]:
         return 3
-    if ingest_report["missing_admission"]:
+    missing_admission_blockers, _ = _partition_missing_admission_for_mode(
+        store=store,
+        missing_admission=[str(item) for item in ingest_report.get("missing_admission") or []],
+        control_task_key=(
+            args.readiness_control_task_key or args.deferred_admission_control_task_key
+        ),
+    )
+    if missing_admission_blockers:
         return 4
     return 0
 

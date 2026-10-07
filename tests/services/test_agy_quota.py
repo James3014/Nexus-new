@@ -270,3 +270,104 @@ def test_independent_failed_refresh_keeps_old_time_and_latest_failure(tmp_path):
     assert row["ok"] is True
     assert row["checked_at"] == old
     assert row["last_refresh"] == {"ok": False, "error": "timeout", "checked_at": new}
+
+
+def test_query_timeout_reaps_usage_process(tmp_path: Path, monkeypatch) -> None:
+    import sys
+    import time
+
+    account_home = tmp_path / "account"
+    account_home.mkdir()
+    pid_file = tmp_path / "agy.pid"
+    executable = tmp_path / "fake-agy"
+    executable.write_text(
+        "#!" + sys.executable + "\n"
+        "import os, time\n"
+        "from pathlib import Path\n"
+        "Path(os.environ['PID_FILE']).write_text(str(os.getpid()))\n"
+        "time.sleep(60)\n",
+        encoding="utf-8",
+    )
+    executable.chmod(0o700)
+    monkeypatch.setenv("PID_FILE", str(pid_file))
+
+    row = quota.query_account(
+        account_home=account_home,
+        account_name="one",
+        email=None,
+        agy_binary=str(executable),
+        timeout=0.5,
+        checked_at="2026-10-07T00:00:00+00:00",
+    )
+
+    assert row["ok"] is False
+    assert row["error"] == "timeout"
+    pid = int(pid_file.read_text())
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.02)
+    else:
+        raise AssertionError(f"timed-out usage process still alive: {pid}")
+
+
+def test_wrapper_sigterm_reaps_active_usage_process(tmp_path: Path) -> None:
+    import sys
+    import time
+
+    pool = tmp_path / "pool"
+    account_home = pool / "accounts" / "one"
+    account_home.mkdir(parents=True)
+    snapshot = tmp_path / "snapshot.json"
+    pid_file = tmp_path / "agy.pid"
+    executable = tmp_path / "fake-agy"
+    executable.write_text(
+        "#!" + sys.executable + "\n"
+        "import os, time\n"
+        "from pathlib import Path\n"
+        "Path(os.environ['PID_FILE']).write_text(str(os.getpid()))\n"
+        "time.sleep(60)\n",
+        encoding="utf-8",
+    )
+    executable.chmod(0o700)
+
+    env = os.environ.copy()
+    env.update({
+        "NEXUS_AGY_ACCOUNT_POOL_ROOT": str(pool),
+        "NEXUS_AGY_QUOTA_SNAPSHOT": str(snapshot),
+        "NEXUS_AGY_BINARY": str(executable),
+        "PID_FILE": str(pid_file),
+    })
+    wrapper = subprocess.Popen(
+        [sys.executable, str(QUOTA_PATH), "--timeout", "30"],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        deadline = time.monotonic() + 3.0
+        while not pid_file.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert pid_file.exists(), "usage child did not start"
+        child_pid = int(pid_file.read_text())
+
+        wrapper.terminate()
+        wrapper.wait(timeout=3.0)
+        assert wrapper.returncode != 0
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            try:
+                os.kill(child_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.02)
+        else:
+            raise AssertionError(f"usage child survived wrapper SIGTERM: {child_pid}")
+    finally:
+        if wrapper.poll() is None:
+            wrapper.kill()
+            wrapper.wait()
