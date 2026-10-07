@@ -96,7 +96,10 @@ from nexus.orchestrator.lifecycle_guards import (
     validate_architecture_approval,
 )
 from nexus.orchestrator.repository_contract_gate import RepositoryContractGate
-from nexus.orchestrator.runtime_retry_bridge import retry_task_via_runtime
+from nexus.orchestrator.runtime_retry_bridge import (
+    project_candidate_acceptance_for_runtime_repair,
+    retry_task_via_runtime,
+)
 from nexus.orchestrator.runtime_state_bridge import RuntimeStateBridge
 from nexus.orchestrator.self_hosted_controller import SelfHostedDevelopmentController
 from nexus.orchestrator.target_integration_lifecycle import TargetIntegrationLifecycle
@@ -9390,6 +9393,29 @@ class SelfHostedTaskService:
             verified_repair_evidence=verified_repair_evidence,
         )
         return result.to_dict()
+
+    def project_candidate_acceptance_for_retry(
+        self,
+        request: CandidateAcceptanceRequest | Mapping[str, Any],
+        review: IndependentReviewReceipt | Mapping[str, Any],
+        *,
+        verified_repair_evidence: Mapping[str, Any] | None = None,
+        repair_target: str = "IMPLEMENTATION",
+    ) -> dict[str, Any]:
+        """Project one existing REPAIRABLE acceptance into Runtime retry evidence.
+
+        The existing acceptance reducer remains authoritative. This method only
+        persists the exact evidence bindings needed by the canonical Runtime
+        RetryService and grants no approval, routing, worker, verifier,
+        completion, merge, release, or production authority.
+        """
+        return project_candidate_acceptance_for_runtime_repair(
+            self,
+            request,
+            review,
+            verified_repair_evidence=verified_repair_evidence,
+            repair_target=repair_target,
+        )
 
     def verify_task(self, task_id: str) -> dict[str, Any]:
         """Read-only verification of a self-hosted task.
