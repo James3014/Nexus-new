@@ -114,3 +114,23 @@ def test_committed_workflow_uses_single_canonical_pin_field_and_policy() -> None
     assert "scripts/ci/nexus_core_trusted_pin_policy.py" in text
     assert "steps.trusted-core.outputs.core_pin" in text
     assert "merge-base --is-ancestor" in text
+
+
+def test_committed_workflow_force_binds_exact_pr_base_ref() -> None:
+    workflow = (
+        REPO_ROOT / ".github" / "workflows" / "nexus-core-issue-completion.yml"
+    ).read_text(encoding="utf-8")
+
+    forced = (
+        'git fetch --no-tags origin '
+        '"+${{ github.event.pull_request.base.sha }}:'
+        'refs/remotes/origin/${{ github.event.pull_request.base.ref }}"'
+    )
+    unforced = (
+        'git fetch --no-tags origin '
+        '"${{ github.event.pull_request.base.sha }}:'
+        'refs/remotes/origin/${{ github.event.pull_request.base.ref }}"'
+    )
+
+    assert forced in workflow
+    assert unforced not in workflow
