@@ -395,6 +395,69 @@ def test_readiness_still_rejects_missing_control_admission(tmp_path: Path) -> No
     assert blocked["deferred_non_control_missing_admission"] == []
 
 
+def test_normal_daemon_defers_non_control_missing_admission_in_single_control_store(
+    tmp_path: Path,
+) -> None:
+    store = AutomaticReplicationStore(tmp_path)
+    control = _snapshot(9008)
+    store.capture(control, admission_disposition=READINESS_CONTROL_DISPOSITION)
+
+    blockers, deferred = daemon._partition_missing_admission_for_mode(
+        store=store,
+        missing_admission=[
+            "James3014/Nexus-new#9100",
+            "James3014/devspace#9101",
+        ],
+    )
+
+    assert blockers == []
+    assert deferred == [
+        "James3014/Nexus-new#9100",
+        "James3014/devspace#9101",
+    ]
+
+
+def test_normal_daemon_missing_admission_is_strict_without_unique_control_store(
+    tmp_path: Path,
+) -> None:
+    missing = ["James3014/devspace#9101"]
+    empty_store = AutomaticReplicationStore(tmp_path / "empty")
+
+    blockers, deferred = daemon._partition_missing_admission_for_mode(
+        store=empty_store,
+        missing_admission=missing,
+    )
+    assert blockers == missing
+    assert deferred == []
+
+    multi_store = AutomaticReplicationStore(tmp_path / "multi")
+    multi_store.capture(_snapshot(9009), admission_disposition=READINESS_CONTROL_DISPOSITION)
+    multi_store.capture(_snapshot(9010), admission_disposition=READINESS_CONTROL_DISPOSITION)
+    blockers, deferred = daemon._partition_missing_admission_for_mode(
+        store=multi_store,
+        missing_admission=missing,
+    )
+    assert blockers == missing
+    assert deferred == []
+
+
+def test_normal_daemon_missing_admission_is_strict_once_primary_is_admitted(
+    tmp_path: Path,
+) -> None:
+    store = AutomaticReplicationStore(tmp_path)
+    store.capture(_snapshot(9011), admission_disposition=READINESS_CONTROL_DISPOSITION)
+    store.capture(_snapshot(9012), admission_disposition="ADMITTED_PRIMARY_FRESH_TASK")
+    missing = ["James3014/devspace#9101"]
+
+    blockers, deferred = daemon._partition_missing_admission_for_mode(
+        store=store,
+        missing_admission=missing,
+    )
+
+    assert blockers == missing
+    assert deferred == []
+
+
 def test_daemon_main_readiness_mode_consumes_store_and_launchd(tmp_path: Path, monkeypatch) -> None:
     store = AutomaticReplicationStore(tmp_path)
     snapshot = _snapshot(9003)
