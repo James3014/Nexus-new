@@ -40,7 +40,7 @@ jobs:
       - name: Fetch exact base ref
         run: |
           set -euo pipefail
-          git fetch --no-tags origin "${{ github.event.pull_request.base.sha }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
+          git fetch --no-tags origin "+${{ github.event.pull_request.base.sha }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
 
       - name: Protect trusted Core governance inputs
         id: trusted-core
