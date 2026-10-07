@@ -18,14 +18,18 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 
 from nexus.research.hybrid_replication_pipeline import (
     FrozenStackOutcome,
     RawRouteResult,
     TaskSnapshot,
+)
+from nexus.research.hybrid_replication_prospective import (
+    ProspectiveExecutionGuard,
 )
 from nexus.services.direct_operation_journal import TERMINAL_STATES
 
@@ -732,6 +736,7 @@ def _jev_request(
     snapshot: TaskSnapshot,
     packet: Mapping[str, Any],
     binding: Mapping[str, Any],
+    prospective_guard: ProspectiveExecutionGuard | None = None,
 ) -> tuple[dict[str, Any], int, float]:
     catalog = list(packet["candidate_catalog"])
     criteria = {
@@ -772,6 +777,14 @@ def _jev_request(
             }
         },
     }
+
+    if prospective_guard is not None:
+        prospective_guard.ensure_synchronous_effect_start(
+            slot="jev",
+            effect_identity_sha256=_sha256_bytes(_canonical_bytes(payload)),
+            provider="typesafe",
+            model=str(binding["jev"]["requested_model"]),
+        )
 
     key = _jev_key(binding)
     attempts: list[dict[str, Any]] = []
@@ -1510,6 +1523,8 @@ def _run_agy_dispatch(
     poll_timeout: float = 300.0,
     poll_interval: float = 0.05,
     operation_root: Path | None = None,
+    prospective_guard: ProspectiveExecutionGuard | None = None,
+    effect_slot: str = "agy",
 ) -> tuple[dict[str, Any] | None, float, Path | None, Path | None, bool, str | None, Path]:
     dispatch_path = resolve_canonical_agy_dispatch_path(binding)
     if operation_root is None:
@@ -1528,39 +1543,54 @@ def _run_agy_dispatch(
 
     online = binding.get("strong_online")
     effort = str(online.get("effort") or "medium") if isinstance(online, Mapping) else "medium"
-    cmd = [
-        str(dispatch_path),
-        "--background",
-        "--cwd",
-        str(cwd),
-        "--mode",
-        mode,
-        "--model",
-        EXACT_AGY_MODEL,
-        "--effort",
-        effort,
-        "--timeout",
-        str(timeout),
-        "--max-calls",
-        "1",
-        "--operation-root",
-        str(operation_root),
-        *_agy_permission_args(cwd, mode=mode),
-    ]
-
+    prompt_sha256 = _sha256_bytes(prompt.encode("utf-8"))
     started = time.perf_counter()
-    cp = _run(cmd, input_text=prompt, timeout=60)
-    if cp.returncode != 0:
-        wall = time.perf_counter() - started
-        return None, wall, None, None, False, f"SPAWN_FAILED:{cp.stderr.strip()}", dispatch_path
+    recovered = None
+    if prospective_guard is not None:
+        recovered = prospective_guard.recover_provider_operation(
+            slot=effect_slot,
+            operation_root=operation_root,
+            prompt_sha256=prompt_sha256,
+            cwd=cwd,
+            model=EXACT_AGY_MODEL,
+            mode=mode,
+        )
 
-    try:
-        initial = json.loads(cp.stdout.strip())
-        operation_id = str(initial.get("operation_id") or "")
-    except Exception:
-        wall = time.perf_counter() - started
-        return None, wall, None, None, False, "MISSING_OR_CORRUPT_JOURNAL", dispatch_path
+    if recovered is None:
+        if prospective_guard is not None:
+            prospective_guard.before_provider_start()
+        cmd = [
+            str(dispatch_path),
+            "--background",
+            "--cwd",
+            str(cwd),
+            "--mode",
+            mode,
+            "--model",
+            EXACT_AGY_MODEL,
+            "--effort",
+            effort,
+            "--timeout",
+            str(timeout),
+            "--max-calls",
+            "1",
+            "--operation-root",
+            str(operation_root),
+            *_agy_permission_args(cwd, mode=mode),
+        ]
+        cp = _run(cmd, input_text=prompt, timeout=60)
+        if cp.returncode != 0:
+            wall = time.perf_counter() - started
+            return None, wall, None, None, False, f"SPAWN_FAILED:{cp.stderr.strip()}", dispatch_path
+        try:
+            initial = json.loads(cp.stdout.strip())
+        except Exception:
+            wall = time.perf_counter() - started
+            return None, wall, None, None, False, "MISSING_OR_CORRUPT_JOURNAL", dispatch_path
+    else:
+        initial = recovered
 
+    operation_id = str(initial.get("operation_id") or "")
     if not operation_id:
         wall = time.perf_counter() - started
         return None, wall, None, None, False, "MISSING_OR_CORRUPT_JOURNAL", dispatch_path
@@ -1572,6 +1602,24 @@ def _run_agy_dispatch(
         initial.get("stderr_path") or (operation_root / "operations" / operation_id / "stderr.log")
     )
     operation_json = stdout_path.parent / "operation.json"
+    if prospective_guard is not None and recovered is None:
+        journal_record = (
+            json.loads(operation_json.read_text(encoding="utf-8"))
+            if operation_json.is_file()
+            else initial
+        )
+        prospective_guard.bind_provider_operation(
+            slot=effect_slot,
+            operation_root=operation_root,
+            record=journal_record,
+            prompt_sha256=prompt_sha256,
+            cwd=cwd,
+            mode=mode,
+            recovered_from_journal=False,
+        )
+        prospective_guard.observe_provider_start(slot=effect_slot, record=journal_record)
+    elif prospective_guard is not None:
+        prospective_guard.observe_provider_start(slot=effect_slot, record=initial)
 
     effective_poll_timeout = max(
         float(poll_timeout),
@@ -1582,6 +1630,8 @@ def _run_agy_dispatch(
         timeout=effective_poll_timeout,
         poll_interval=poll_interval,
     )
+    if prospective_guard is not None and record is not None:
+        prospective_guard.observe_provider_start(slot=effect_slot, record=record)
     wall = time.perf_counter() - started
     return record, wall, stdout_path, stderr_path, timed_out, err, dispatch_path
 
@@ -1626,6 +1676,43 @@ def _prepare_shadow_checkout(
         raise RuntimeError(f"shadow_checkout_failed:{checked.stderr.strip()}")
 
 
+@contextmanager
+def _agy_shadow_checkout(
+    *,
+    repo: Path,
+    revision: str,
+    default_branch: str,
+    prospective_guard: ProspectiveExecutionGuard | None,
+    effect_slot: str,
+) -> Iterator[Path]:
+    if prospective_guard is None:
+        with tempfile.TemporaryDirectory(prefix=f"nexus-hybrid-replication-{effect_slot}-") as temp:
+            source = Path(temp) / "source"
+            _prepare_shadow_checkout(
+                repo=repo,
+                revision=revision,
+                source=source,
+                default_branch=default_branch,
+            )
+            yield source
+        return
+
+    source = prospective_guard.shadow_source(effect_slot)
+    if source.exists():
+        head = _run(["git", "rev-parse", "HEAD"], cwd=source, timeout=30)
+        if head.returncode != 0 or head.stdout.strip() != revision:
+            raise RuntimeError("persistent_shadow_revision_mismatch")
+    else:
+        source.parent.mkdir(parents=True, exist_ok=True)
+        _prepare_shadow_checkout(
+            repo=repo,
+            revision=revision,
+            source=source,
+            default_branch=default_branch,
+        )
+    yield source
+
+
 def _run_agy_b_fallback(
     *,
     repo: Path,
@@ -1636,13 +1723,15 @@ def _run_agy_b_fallback(
     timeout: int = 300,
     poll_timeout: float = 300.0,
     poll_interval: float = 0.05,
+    prospective_guard: ProspectiveExecutionGuard | None = None,
 ) -> tuple[dict[str, Any], float]:
-    with tempfile.TemporaryDirectory(prefix="nexus-hybrid-replication-b-") as temp:
-        root = Path(temp)
-        source = root / "source"
-        _prepare_shadow_checkout(
-            repo=repo, revision=revision, source=source, default_branch=default_branch
-        )
+    with _agy_shadow_checkout(
+        repo=repo,
+        revision=revision,
+        default_branch=default_branch,
+        prospective_guard=prospective_guard,
+        effect_slot="b-fallback",
+    ) as source:
         try:
             record, wall, stdout_path, stderr_path, timed_out, err, dispatch_path = (
                 _run_agy_dispatch(
@@ -1653,6 +1742,8 @@ def _run_agy_b_fallback(
                     timeout=timeout,
                     poll_timeout=poll_timeout,
                     poll_interval=poll_interval,
+                    prospective_guard=prospective_guard,
+                    effect_slot="b-fallback",
                 )
             )
             status_check = _run(["git", "status", "--porcelain=v1"], cwd=source, timeout=30)
@@ -1676,8 +1767,6 @@ def _run_agy_b_fallback(
             receipt["repository_mutated"] = mutated
             return receipt, wall
         finally:
-            # TemporaryDirectory owns standalone-clone cleanup; no Git worktree
-            # metadata exists to remove or prune.
             pass
 
 
@@ -1692,13 +1781,15 @@ def _run_agy_candidate(
     poll_timeout: float = 300.0,
     poll_interval: float = 0.05,
     allowed_paths: Sequence[str] | None = None,
+    prospective_guard: ProspectiveExecutionGuard | None = None,
 ) -> tuple[dict[str, Any], float]:
-    with tempfile.TemporaryDirectory(prefix="nexus-hybrid-replication-c-") as temp:
-        root = Path(temp)
-        source = root / "source"
-        _prepare_shadow_checkout(
-            repo=repo, revision=revision, source=source, default_branch=default_branch
-        )
+    with _agy_shadow_checkout(
+        repo=repo,
+        revision=revision,
+        default_branch=default_branch,
+        prospective_guard=prospective_guard,
+        effect_slot="c",
+    ) as source:
         try:
             record, wall, stdout_path, stderr_path, timed_out, err, dispatch_path = (
                 _run_agy_dispatch(
@@ -1709,6 +1800,8 @@ def _run_agy_candidate(
                     timeout=timeout,
                     poll_timeout=poll_timeout,
                     poll_interval=poll_interval,
+                    prospective_guard=prospective_guard,
+                    effect_slot="c",
                 )
             )
             sealing = seal_shadow_candidate(source, allowed_paths=allowed_paths)
@@ -1743,8 +1836,6 @@ def _run_agy_candidate(
             receipt.update(sealing)
             return receipt, wall
         finally:
-            # TemporaryDirectory owns standalone-clone cleanup; no Git worktree
-            # metadata exists to remove or prune.
             pass
 
 
@@ -1803,6 +1894,7 @@ def run_frozen_stack(
     snapshot: TaskSnapshot,
     *,
     binding: Mapping[str, Any],
+    prospective_guard: ProspectiveExecutionGuard | None = None,
 ) -> FrozenStackOutcome:
     repo = _repo_root(snapshot.repository, binding)
     _revision_exists(repo, snapshot.pre_implementation_revision)
@@ -1863,6 +1955,7 @@ def run_frozen_stack(
                 snapshot=snapshot,
                 packet=packet,
                 binding=binding,
+                prospective_guard=prospective_guard,
             )
             decision = {
                 "choice": jev_raw.get("choice", "ESCALATE"),
@@ -1888,6 +1981,7 @@ def run_frozen_stack(
                     prompt=prompt,
                     binding=binding,
                     default_branch=snapshot.default_branch,
+                    prospective_guard=prospective_guard,
                 )
                 fallbacks = ("DM1_TO_STRONG_ONLINE",)
             jev_usage = jev_raw.get("usage") or {}
@@ -1961,6 +2055,7 @@ def run_frozen_stack(
         prompt=prompt,
         binding=binding,
         default_branch=snapshot.default_branch,
+        prospective_guard=prospective_guard,
     )
     usage = strong.get("usage") or {}
     input_tokens, uncached_input_tokens, output_tokens = _complete_token_usage_metrics(usage)
@@ -2409,11 +2504,26 @@ def _identity_preflight_main(binding_path: Path) -> int:
     return 0 if receipt["activation_allowed"] else 5
 
 
-def _stack_main(binding_path: Path, *, readiness_control: bool = False) -> int:
+def _stack_main(
+    binding_path: Path,
+    *,
+    readiness_control: bool = False,
+    store_root: Path | None = None,
+) -> int:
     payload = json.load(sys.stdin)
     snapshot = _snapshot_from_capture_payload(payload)
     binding = _load_binding(binding_path, readiness_control=readiness_control)
-    outcome = run_frozen_stack(snapshot, binding=binding)
+    if store_root is None:
+        outcome = run_frozen_stack(snapshot, binding=binding)
+    else:
+        prospective_guard = ProspectiveExecutionGuard(store_root=store_root, snapshot=snapshot)
+        with prospective_guard.task_lock():
+            prospective_guard.ensure_execution_start()
+            outcome = run_frozen_stack(
+                snapshot,
+                binding=binding,
+                prospective_guard=prospective_guard,
+            )
     print(json.dumps(asdict(outcome), ensure_ascii=False, sort_keys=True))
     return 0
 
@@ -2435,6 +2545,7 @@ def main() -> int:
     stack = sub.add_parser("stack")
     stack.add_argument("--binding", default=str(DEFAULT_LIVE_BINDING))
     stack.add_argument("--readiness-control", action="store_true")
+    stack.add_argument("--store-root")
     sub.add_parser("ground-truth")
     post_terminal = sub.add_parser("post-terminal-audit")
     post_terminal.add_argument("--store-root", required=True)
@@ -2443,7 +2554,11 @@ def main() -> int:
     if args.command == "identity-preflight":
         return _identity_preflight_main(Path(args.binding))
     if args.command == "stack":
-        return _stack_main(Path(args.binding), readiness_control=args.readiness_control)
+        return _stack_main(
+            Path(args.binding),
+            readiness_control=args.readiness_control,
+            store_root=Path(args.store_root).expanduser().resolve() if args.store_root else None,
+        )
     if args.command == "post-terminal-audit":
         store_root = Path(args.store_root).expanduser().resolve()
         output_root = (
