@@ -256,14 +256,12 @@ class ExperimentRunLease:
             existing = effect.get("operation_id")
             if existing is not None and existing != operation_id:
                 raise RunEffectConflict("RUN_EFFECT_OPERATION_CONFLICT")
-            effect.update(
-                {
-                    "state": "TERMINAL",
-                    "operation_id": operation_id,
-                    "response_sha256": response_sha256,
-                    "receipt_sha256": receipt_sha256,
-                }
-            )
+            effect.update({
+                "state": "TERMINAL",
+                "operation_id": operation_id,
+                "response_sha256": response_sha256,
+                "receipt_sha256": receipt_sha256,
+            })
             return effect
 
         return self._guard._update_effect(
