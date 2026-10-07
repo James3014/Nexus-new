@@ -94,9 +94,7 @@ def test_malformed_or_missing_pin_fails_closed(bad_line: str) -> None:
         "name: Nexus Core issue completion\n"
         "jobs:\n"
         "  verify:\n"
-        "    env:\n"
-        + bad_line
-        + "    steps:\n"
+        "    env:\n" + bad_line + "    steps:\n"
         "      - run: echo trusted\n"
     ).encode("utf-8")
 
