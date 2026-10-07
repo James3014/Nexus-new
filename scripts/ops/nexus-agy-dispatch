@@ -1768,6 +1768,9 @@ def _runtime_revision() -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+MAX_FAILURE_HISTORY_ENTRIES = 16
+
+
 def _operation_hook(callback: Any, **payload: Any) -> None:
     if callback is not None:
         callback(payload)
@@ -3938,6 +3941,7 @@ def _run_background_operation(
         "account_alias_hash": None,
         "lease_id_hash": None,
         "failure_kind": None,
+        "failure_history": [],
         "timed_out": False,
         "provider_pid": None,
         "provider_pgid": None,
@@ -3967,6 +3971,7 @@ def _run_background_operation(
             account_alias_hash=snapshot.get("account_alias_hash"),
             lease_id_hash=snapshot.get("lease_id_hash"),
             failure_kind=snapshot.get("failure_kind"),
+            failure_history=list(snapshot.get("failure_history") or []),
             provider_pid=snapshot.get("provider_pid"),
             provider_pgid=snapshot.get("provider_pgid"),
             provider_process_state=snapshot.get("provider_process_state") or "IDLE",
@@ -3988,6 +3993,22 @@ def _run_background_operation(
     def on_event(event: dict[str, Any]) -> None:
         with state_lock:
             state.update(event)
+            failure_kind = event.get("failure_kind")
+            if (
+                event.get("phase") == "CLASSIFYING_FAILURE"
+                and isinstance(failure_kind, str)
+                and failure_kind
+            ):
+                history = list(state.get("failure_history") or [])
+                history.append({
+                    "at": _agy_operation_journal.utc_now(),
+                    "attempts": int(state.get("attempts") or 0),
+                    "rotations": int(state.get("rotations") or 0),
+                    "failure_kind": failure_kind,
+                    "account_alias_hash": state.get("account_alias_hash"),
+                    "lease_id_hash": state.get("lease_id_hash"),
+                })
+                state["failure_history"] = history[-MAX_FAILURE_HISTORY_ENTRIES:]
             snapshot = dict(state)
         _heartbeat_snapshot(snapshot)
 

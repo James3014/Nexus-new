@@ -789,6 +789,24 @@ class AutomaticReplicationStore:
             return None
         return self._read_json(path)
 
+    def load_sealed_raw(self, task_key: str) -> dict[str, Any]:
+        state = self.load_task(task_key)
+        if state is None:
+            raise ValueError("capture_required_before_raw_read")
+        seal = state.get("raw_seal")
+        if not isinstance(seal, Mapping):
+            raise ValueError("raw_seal_required_before_raw_read")
+        raw_path = self._dir(task_key) / str(seal.get("path") or "")
+        if not raw_path.is_file():
+            raise ValueError("raw_seal_file_missing")
+        raw_bytes = raw_path.read_bytes()
+        if _sha256(raw_bytes) != seal.get("raw_sha256"):
+            raise ValueError("raw_seal_hash_mismatch")
+        raw = json.loads(raw_bytes)
+        if not isinstance(raw, dict):
+            raise ValueError("raw_payload_must_be_object")
+        return raw
+
     def capture(self, snapshot: TaskSnapshot, *, admission_disposition: str) -> dict[str, Any]:
         if admission_disposition not in {
             PRIMARY_ADMISSION_DISPOSITION,

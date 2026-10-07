@@ -289,12 +289,22 @@ def evaluate_readiness_from_store(
     control_phase = str(control_state.get("phase")) if control_state else None
     control_score_valid = False
     control_score_error: str | None = None
+    control_raw_valid = False
+    control_raw_failures: list[str] = []
+    control_raw_error: str | None = None
     if control_phase == "SCORED":
         try:
             store.score_task(control_task_key)
             control_score_valid = True
         except (OSError, ValueError) as exc:
             control_score_error = f"{type(exc).__name__}:{exc}"
+        if control_score_valid:
+            try:
+                raw = store.load_sealed_raw(control_task_key)
+                control_raw_failures = [str(item) for item in raw.get("failures") or []]
+                control_raw_valid = not control_raw_failures
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                control_raw_error = f"{type(exc).__name__}:{exc}"
 
     if service_observation.get("schema") != "nexus.hybrid_replication.service_observation.v1":
         raise ValueError("service_observation_schema_mismatch")
@@ -314,11 +324,19 @@ def evaluate_readiness_from_store(
     blockers = list(result["blockers"])
     if control_phase == "SCORED" and not control_score_valid:
         blockers.append("CONTROL_SCORE_INVALID")
+    if control_phase == "SCORED" and control_score_valid:
+        if control_raw_error is not None:
+            blockers.append("CONTROL_RAW_INVALID")
+        elif control_raw_failures:
+            blockers.append("CONTROL_RAW_FAILURE_PRESENT")
     result["blockers"] = blockers
     result["status"] = "AUTOMATIC_CAPTURE_READY" if not blockers else "NOT_READY"
     result["control_task_key"] = control_task_key
     result["control_score_valid"] = control_score_valid
     result["control_score_error"] = control_score_error
+    result["control_raw_valid"] = control_raw_valid
+    result["control_raw_failures"] = control_raw_failures
+    result["control_raw_error"] = control_raw_error
     result["launchd_label"] = launchd_label
     result["service_observation"] = dict(service_observation)
     result["claim_ceiling"] = "READINESS_CONTROL_ONLY_NOT_PRIMARY_COHORT"

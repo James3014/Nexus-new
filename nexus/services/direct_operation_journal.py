@@ -604,6 +604,7 @@ class DirectOperationJournal:
             "tool_event_count": 0,
             "command_sha256": None,
             "failure_kind": None,
+            "failure_history": [],
             "exit_code": None,
             "observed_changed_paths": [],
             "source_baseline": source_baseline,

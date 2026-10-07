@@ -501,6 +501,78 @@ def test_background_timeout_is_persisted_as_outcome_unknown(tmp_path: Path, monk
     assert not prompt_path.exists()
 
 
+def test_background_rotation_success_clears_live_failure_and_preserves_bounded_history(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "rotation success")
+
+    def fake_dispatch_run(**kwargs):
+        hook = kwargs["operation_hook"]
+        for idx in range(dispatch.MAX_FAILURE_HISTORY_ENTRIES + 2):
+            hook({
+                "phase": "CLASSIFYING_FAILURE",
+                "attempts": idx + 1,
+                "rotations": idx,
+                "failure_kind": f"RECOVERED_{idx}",
+                "account_alias_hash": f"acct-{idx}",
+                "lease_id_hash": f"lease-{idx}",
+            })
+        hook({
+            "phase": "EXECUTING",
+            "attempts": dispatch.MAX_FAILURE_HISTORY_ENTRIES + 3,
+            "rotations": dispatch.MAX_FAILURE_HISTORY_ENTRIES + 2,
+            "failure_kind": None,
+            "account_alias_hash": "acct-final",
+            "lease_id_hash": "lease-final",
+        })
+        return 0
+
+    monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
+    code = dispatch._run_background_operation(
+        operation_id=operation_id,
+        prompt_file=str(prompt_path),
+        cwd=str(tmp_path),
+        mode="accept-edits",
+        model="gemini-test",
+        effort="medium",
+        timeout=30,
+        max_calls=1,
+        pool_wait_timeout=1.0,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=root,
+        heartbeat_interval=0.01,
+    )
+
+    record = journal.read(operation_id)
+    public = dispatch.public_operation_view(record)
+    assert code == 0
+    assert record["status"] == "COMPLETED"
+    assert record["failure_kind"] is None
+    assert len(record["failure_history"]) == dispatch.MAX_FAILURE_HISTORY_ENTRIES
+    assert record["failure_history"][0]["failure_kind"] == "RECOVERED_2"
+    assert record["failure_history"][-1]["failure_kind"] == (
+        f"RECOVERED_{dispatch.MAX_FAILURE_HISTORY_ENTRIES + 1}"
+    )
+    assert "failure_history" not in public
+    assert not prompt_path.exists()
+
+
 def test_quota_progress_is_durable_while_child_runs_and_identity_safe(
     tmp_path: Path, monkeypatch
 ) -> None:
