@@ -203,15 +203,20 @@ class ExperimentRunLease:
         if self._released:
             raise RunEffectConflict("RUN_LEASE_ALREADY_RELEASED")
 
-    @property
-    def effect_state(self) -> str:
-        """Return durable effect state without granting new-effect authority."""
+    def effect_record(self) -> dict[str, Any]:
+        """Return a copy of the durable effect binding without granting authority."""
 
         self._ensure_active()
         record = self._guard._load_record(self._run_path)
         if record.get("schema") != _SCHEMA:
             raise RunEffectConflict("LEGACY_RUN_EFFECT_STATE_UNKNOWN")
-        return str(record["effect"]["state"])
+        return dict(record["effect"])
+
+    @property
+    def effect_state(self) -> str:
+        """Return durable effect state without granting new-effect authority."""
+
+        return str(self.effect_record()["state"])
 
     def begin_effect(self) -> dict[str, Any]:
         """Consume this exact run's one provider-effect slot."""
