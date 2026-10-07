@@ -31,7 +31,7 @@ from scripts.ops.select_tests import (  # noqa: E402, I001
 
 DOC_PREFIXES = ("docs/", "openwiki/", "nexus_wiki_vault/")
 GOVERNANCE_FILES = {"AGENTS.md", "MUSE_PROTO.md"}
-WORKFLOW_PREFIXES = (".github/workflows/", "scripts/ops/")
+WORKFLOW_PREFIXES = (".github/workflows/", "scripts/ops/", "scripts/ci/")
 DEPENDENCY_FILES = {
     "pyproject.toml",
     "uv.lock",
