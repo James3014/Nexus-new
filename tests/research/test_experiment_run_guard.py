@@ -46,8 +46,8 @@ def _contract(
 
 def test_same_run_same_contract_is_reusable_after_release(tmp_path: Path) -> None:
     # Preserve the historical node ID for exact-base test provenance.  #1541
-    # changes the meaning of "reusable" to read/reconcile-only: a new effect
-    # start under the same exact run must fail closed.
+    # Reuse is read/reconciliation-only until begin_effect() explicitly consumes
+    # the exact run's one provider-effect slot.
     state = tmp_path / "state"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -58,21 +58,17 @@ def test_same_run_same_contract_is_reusable_after_release(tmp_path: Path) -> Non
 
     first = guard.acquire(contract)
     assert first.disposition == "CREATED"
-    with pytest.raises(
-        RunEffectConflict,
-        match="RUN_EFFECT_TERMINALIZATION_REQUIRED",
-    ):
-        first.release()
+    assert first.effect_state == "NOT_STARTED"
+    first.release()
+
+    second = guard.acquire(contract)
+    assert second.disposition == "REUSED"
+    assert second.effect_state == "NOT_STARTED"
+    second.release()
 
     record = guard.read(contract.run_id)
     assert record["contract_sha256"] == first.contract_sha256
-    assert record["effect"]["state"] == "OUTCOME_UNKNOWN"
-
-    with pytest.raises(
-        RunEffectConflict,
-        match="RUN_EFFECT_OUTCOME_UNKNOWN_RECONCILE_SAME_EFFECT",
-    ):
-        guard.acquire(contract)
+    assert record["effect"]["state"] == "NOT_STARTED"
 
 
 def test_terminal_effect_cannot_be_restarted(tmp_path: Path) -> None:
@@ -85,6 +81,7 @@ def test_terminal_effect_cannot_be_restarted(tmp_path: Path) -> None:
     contract = _contract(workspace, controller)
 
     with guard.acquire(contract) as lease:
+        lease.begin_effect()
         lease.bind_operation("agyop_example")
         lease.mark_terminal(
             operation_id="agyop_example",
@@ -101,8 +98,10 @@ def test_terminal_effect_cannot_be_restarted(tmp_path: Path) -> None:
         "state": "TERMINAL",
     }
 
-    with pytest.raises(RunEffectConflict, match="RUN_EFFECT_ALREADY_TERMINAL"):
-        guard.acquire(contract)
+    with guard.acquire(contract) as replay:
+        assert replay.effect_state == "TERMINAL"
+        with pytest.raises(RunEffectConflict, match="RUN_EFFECT_ALREADY_TERMINAL"):
+            replay.begin_effect()
 
 
 def test_outcome_unknown_requires_same_effect_reconciliation(tmp_path: Path) -> None:
@@ -115,6 +114,7 @@ def test_outcome_unknown_requires_same_effect_reconciliation(tmp_path: Path) -> 
     contract = _contract(workspace, controller)
 
     with guard.acquire(contract) as lease:
+        lease.begin_effect()
         lease.bind_operation("agyop_unknown")
         lease.mark_outcome_unknown(operation_id="agyop_unknown")
 
@@ -122,11 +122,48 @@ def test_outcome_unknown_requires_same_effect_reconciliation(tmp_path: Path) -> 
     assert record["effect"]["state"] == "OUTCOME_UNKNOWN"
     assert record["effect"]["operation_id"] == "agyop_unknown"
 
-    with pytest.raises(
-        RunEffectConflict,
-        match="RUN_EFFECT_OUTCOME_UNKNOWN_RECONCILE_SAME_EFFECT",
-    ):
-        guard.acquire(contract)
+    with guard.acquire(contract) as replay:
+        assert replay.effect_state == "OUTCOME_UNKNOWN"
+        with pytest.raises(
+            RunEffectConflict,
+            match="RUN_EFFECT_OUTCOME_UNKNOWN_RECONCILE_SAME_EFFECT",
+        ):
+            replay.begin_effect()
+
+
+def test_issue_1540_sequential_replay_is_fenced_before_duplicate_effect(
+    tmp_path: Path,
+) -> None:
+    state = tmp_path / "state"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    controller = tmp_path / "controller.py"
+    controller.write_text("print('stable')\n", encoding="utf-8")
+    guard = ExperimentRunGuard(state)
+    contract = _contract(workspace, controller, run_id="issue-1540/X2/crossmodel")
+    receipt = tmp_path / "receipts" / "X2-crossmodel.json"
+    launches: list[str] = []
+
+    with guard.acquire(contract) as first:
+        first.begin_effect()
+        launches.append("agyop_canonical")
+        first.bind_operation("agyop_canonical")
+        assert write_immutable_artifact(receipt, b'{"operation":"agyop_canonical"}\n') == "CREATED"
+        first.mark_terminal(
+            operation_id="agyop_canonical",
+            response_sha256="d" * 64,
+            receipt_sha256=_sha(receipt),
+        )
+
+    with guard.acquire(contract) as replay:
+        assert replay.disposition == "REUSED"
+        assert replay.effect_state == "TERMINAL"
+        with pytest.raises(RunEffectConflict, match="RUN_EFFECT_ALREADY_TERMINAL"):
+            replay.begin_effect()
+        assert launches == ["agyop_canonical"]
+
+    with pytest.raises(ImmutableArtifactConflict, match="IMMUTABLE_ARTIFACT_CONFLICT"):
+        write_immutable_artifact(receipt, b'{"operation":"agyop_duplicate"}\n')
 
 
 def test_immutable_artifact_is_create_once_and_conflicting_bytes_fail_closed(
@@ -195,7 +232,6 @@ def test_same_run_id_with_changed_contract_fails_closed(tmp_path: Path) -> None:
     guard = ExperimentRunGuard(state)
 
     first = guard.acquire(_contract(workspace, controller))
-    first.mark_no_effect()
     first.release()
 
     with pytest.raises(RunContractConflict, match="RUN_CONTRACT_CONFLICT"):
@@ -231,7 +267,6 @@ def test_second_live_owner_on_same_workspace_fails_closed(tmp_path: Path) -> Non
                 )
             )
     finally:
-        first.mark_no_effect()
         first.release()
 
 
@@ -248,7 +283,6 @@ def test_same_run_id_with_different_workspace_realpath_fails_closed(
     guard = ExperimentRunGuard(state)
 
     first = guard.acquire(_contract(workspace_a, controller))
-    first.mark_no_effect()
     first.release()
 
     with pytest.raises(RunContractConflict, match="RUN_CONTRACT_CONFLICT"):
@@ -289,7 +323,6 @@ def test_controller_post_effect_drift_requires_fresh_reverification(
         assert fence.required_next_gate == "FRESH_REVERIFY_IMMUTABLE_RESPONSE"
         assert fence.expected_sha256 != fence.observed_sha256
     finally:
-        lease.mark_outcome_unknown()
         lease.release()
 
 
@@ -302,7 +335,6 @@ def test_stable_controller_allows_same_run_continuation(tmp_path: Path) -> None:
 
     with guard.acquire(_contract(workspace, controller)) as lease:
         fence = lease.verify_controller()
-        lease.mark_no_effect()
 
     assert fence.status == "CONTROLLER_STABLE"
     assert fence.same_workspace_continuation_allowed is True
@@ -318,11 +350,14 @@ def test_mark_no_effect_allows_one_fresh_effect_admission(tmp_path: Path) -> Non
     contract = _contract(workspace, controller)
 
     first = guard.acquire(contract)
+    first.begin_effect()
     first.mark_no_effect()
     first.release()
 
     second = guard.acquire(contract)
-    assert second.disposition == "REUSED_NOT_STARTED"
+    assert second.disposition == "REUSED"
+    assert second.effect_state == "NOT_STARTED"
+    second.begin_effect()
     second.bind_operation("agyop_second")
     second.mark_terminal(
         operation_id="agyop_second",
@@ -331,8 +366,9 @@ def test_mark_no_effect_allows_one_fresh_effect_admission(tmp_path: Path) -> Non
     )
     second.release()
 
-    with pytest.raises(RunEffectConflict, match="RUN_EFFECT_ALREADY_TERMINAL"):
-        guard.acquire(contract)
+    with guard.acquire(contract) as replay:
+        with pytest.raises(RunEffectConflict, match="RUN_EFFECT_ALREADY_TERMINAL"):
+            replay.begin_effect()
 
 
 def test_context_manager_without_terminal_truth_fails_closed(tmp_path: Path) -> None:
@@ -347,14 +383,15 @@ def test_context_manager_without_terminal_truth_fails_closed(tmp_path: Path) -> 
         RunEffectConflict,
         match="RUN_EFFECT_TERMINALIZATION_REQUIRED",
     ):
-        with guard.acquire(contract):
-            pass
+        with guard.acquire(contract) as lease:
+            lease.begin_effect()
 
     record = guard.read(contract.run_id)
     assert record["effect"]["state"] == "OUTCOME_UNKNOWN"
 
-    with pytest.raises(
-        RunEffectConflict,
-        match="RUN_EFFECT_OUTCOME_UNKNOWN_RECONCILE_SAME_EFFECT",
-    ):
-        guard.acquire(contract)
+    with guard.acquire(contract) as replay:
+        with pytest.raises(
+            RunEffectConflict,
+            match="RUN_EFFECT_OUTCOME_UNKNOWN_RECONCILE_SAME_EFFECT",
+        ):
+            replay.begin_effect()
