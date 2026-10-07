@@ -1,6 +1,35 @@
-version = 1
+version = 2
 base_ref = "origin/main"
 allowed_patterns = ["**"]
 deletion_policy = "FORBID"
-verifier_command = ["bash", "scripts/ci/nexus-core-verify.sh"]
+universe_generation = 1
+
+[[materials]]
+id = "canonical-learning"
+observe_command = ["bash", "-lc", "exec \"$NEXUS_CORE_MATERIAL_PYTHON\" scripts/ci/nexus_core_observe_dependency.py nexus-learning"]
+timeout_seconds = 300
+logical_subject_id = "dependency/nexus-learning"
+evidence_kind = "resolved-dependency"
+requirement_mode = "REQUIRED"
+applicability = "APPLICABLE"
+expected_identity = "git-commit:d09f05b942f35236562ae26e7b718d111368b0b1"
+
+[[materials]]
+id = "canonical-runtime"
+observe_command = ["bash", "-lc", "exec \"$NEXUS_CORE_MATERIAL_PYTHON\" scripts/ci/nexus_core_observe_dependency.py nexus-runtime"]
+timeout_seconds = 300
+logical_subject_id = "dependency/nexus-runtime"
+evidence_kind = "resolved-dependency"
+requirement_mode = "REQUIRED"
+applicability = "APPLICABLE"
+expected_identity = "git-commit:0a39e52770230a74c5431c0f9cc73a63fb090d8b"
+
+[[verifiers]]
+id = "fast-l1"
+command = ["bash", "scripts/ci/nexus-core-verify.sh"]
 timeout_seconds = 3600
+logical_subject_id = "nexus/fast-l1"
+evidence_kind = "test-result"
+requirement_mode = "REQUIRED"
+applicability = "APPLICABLE"
+required_material_ids = ["canonical-learning", "canonical-runtime"]
