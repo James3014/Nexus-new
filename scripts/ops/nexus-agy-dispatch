@@ -1329,6 +1329,69 @@ def run_agy(
                     provider_session_id=provider_session_id,
                 )
 
+    def _refresh_progress_telemetry(*, observed_at: float) -> None:
+        nonlocal provider_log_offset, transcript_offset, first_stream_monotonic
+        if provider_log_path is not None:
+            (
+                provider_log_offset,
+                stream_events,
+                new_sessions,
+            ) = _read_new_provider_log_activity(
+                provider_log_path,
+                offset=provider_log_offset,
+            )
+            if new_sessions:
+                _advance_provider_sessions(new_sessions, observed_at=observed_at)
+            if stream_events:
+                now_iso = _agy_operation_journal.utc_now()
+                if first_stream_monotonic is None:
+                    first_stream_monotonic = observed_at
+                if not first_stream_seen.is_set():
+                    first_stream_seen.set()
+                    if operation_hook:
+                        _operation_hook(
+                            operation_hook,
+                            first_stream_activity_at=now_iso,
+                            provider_stream_last_activity_at=now_iso,
+                        )
+                elif operation_hook:
+                    _operation_hook(
+                        operation_hook,
+                        provider_stream_last_activity_at=now_iso,
+                    )
+
+        if transcript_path is not None:
+            transcript_offset, new_tool_events = _read_new_tool_activity(
+                transcript_path,
+                offset=transcript_offset,
+            )
+            _record_tool_events(new_tool_events, observed_at=observed_at)
+
+    def _classify_non_progress(*, observed_at: float) -> str | None:
+        if (
+            not first_stream_seen.is_set()
+            and tool_event_count == 0
+            and observed_at - started >= resolved_provider_stall_seconds
+        ):
+            return "PROVIDER_STALLED"
+        if first_tool_monotonic is not None and (
+            observed_at - first_tool_monotonic >= resolved_pre_effect_max_seconds
+            or tool_event_count >= resolved_pre_effect_max_tool_events
+        ):
+            return "PRE_EFFECT_TOOL_THRASH"
+        if first_stream_monotonic is not None:
+            progress_anchor = max(
+                first_stream_monotonic,
+                (
+                    last_coding_progress_monotonic
+                    if last_coding_progress_monotonic is not None
+                    else first_stream_monotonic
+                ),
+            )
+            if observed_at - progress_anchor >= resolved_stream_no_progress_seconds:
+                return "PROVIDER_STREAM_NO_PROGRESS"
+        return None
+
     def _drain_stdout(stream, sink: list[str]) -> None:
         nonlocal first_stream_monotonic
         if stream is None:
@@ -1385,65 +1448,20 @@ def run_agy(
         while process.poll() is None:
             now = time.monotonic()
 
-            if provider_log_path is not None:
-                (
-                    provider_log_offset,
-                    stream_events,
-                    new_sessions,
-                ) = _read_new_provider_log_activity(
-                    provider_log_path,
-                    offset=provider_log_offset,
-                )
-                if new_sessions:
-                    _advance_provider_sessions(new_sessions, observed_at=now)
-                if stream_events:
-                    now_iso = _agy_operation_journal.utc_now()
-                    if first_stream_monotonic is None:
-                        first_stream_monotonic = now
-                    if not first_stream_seen.is_set():
-                        first_stream_seen.set()
-                        if operation_hook:
-                            _operation_hook(
-                                operation_hook,
-                                first_stream_activity_at=now_iso,
-                                provider_stream_last_activity_at=now_iso,
-                            )
-                    elif operation_hook:
-                        _operation_hook(
-                            operation_hook,
-                            provider_stream_last_activity_at=now_iso,
-                        )
-
-            if transcript_path is not None:
-                transcript_offset, new_tool_events = _read_new_tool_activity(
-                    transcript_path,
-                    offset=transcript_offset,
-                )
-                _record_tool_events(new_tool_events, observed_at=now)
+            _refresh_progress_telemetry(observed_at=now)
 
             if expect_coding_progress and not first_effect_seen.is_set():
-                if (
-                    not first_stream_seen.is_set()
-                    and tool_event_count == 0
-                    and now - started >= resolved_provider_stall_seconds
-                ):
-                    non_progress_failure = "PROVIDER_STALLED"
-                elif first_tool_monotonic is not None and (
-                    now - first_tool_monotonic >= resolved_pre_effect_max_seconds
-                    or tool_event_count >= resolved_pre_effect_max_tool_events
-                ):
-                    non_progress_failure = "PRE_EFFECT_TOOL_THRASH"
-                elif first_stream_monotonic is not None:
-                    progress_anchor = max(
-                        first_stream_monotonic,
-                        (
-                            last_coding_progress_monotonic
-                            if last_coding_progress_monotonic is not None
-                            else first_stream_monotonic
-                        ),
+                non_progress_failure = _classify_non_progress(observed_at=now)
+                if non_progress_failure is not None:
+                    # Telemetry can become durable after the regular poll but before
+                    # termination. Refresh it at the watchdog boundary, then classify
+                    # again so a stale observation cannot kill or misclassify progress.
+                    boundary_now = time.monotonic()
+                    _refresh_progress_telemetry(observed_at=boundary_now)
+                    non_progress_failure = _classify_non_progress(
+                        observed_at=boundary_now
                     )
-                    if now - progress_anchor >= resolved_stream_no_progress_seconds:
-                        non_progress_failure = "PROVIDER_STREAM_NO_PROGRESS"
+
                 if non_progress_failure is not None:
                     # Source mutation is the strongest positive progress witness.
                     # Recheck immediately at the watchdog boundary so an effect
@@ -1468,7 +1486,7 @@ def run_agy(
                             non_progress_failure = None
                             now_effect_iso = _agy_operation_journal.utc_now()
                             effect_wall_ms = int((time.monotonic() - started) * 1000)
-                            last_coding_progress_monotonic = now
+                            last_coding_progress_monotonic = boundary_now
                             if operation_hook:
                                 _operation_hook(
                                     operation_hook,

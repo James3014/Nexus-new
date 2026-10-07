@@ -4541,3 +4541,126 @@ def test_reconcile_completed_terminal_persists_provider_absence_metadata(
     assert reconciled["phase"] == "TERMINAL"
     assert reconciled["reconciliation"]["provider_alive_after"] is False
     assert reconciled["reconciliation"]["lease_cleanup"]["result"] == "ALREADY_ABSENT"
+
+
+@pytest.mark.parametrize(
+    ("boundary_tool_events", "expected_failure"),
+    [
+        (1, None),
+        (3, "PRE_EFFECT_TOOL_THRASH"),
+    ],
+)
+def test_run_agy_refreshes_telemetry_at_watchdog_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    boundary_tool_events: int,
+    expected_failure: str | None,
+) -> None:
+    from io import StringIO
+
+    session_id = "33333333-4444-5555-6666-777777777777"
+    provider_reads = 0
+    tool_reads = 0
+
+    class FakeProcess:
+        def __init__(self, _argv, **_kwargs):
+            self.stdout = StringIO("")
+            self.stderr = StringIO("")
+            self.returncode = None
+            self.pid = None
+            self.poll_count = 0
+
+        def poll(self):
+            if self.returncode is not None:
+                return self.returncode
+            self.poll_count += 1
+            if self.poll_count >= 2:
+                self.returncode = 0
+            return self.returncode
+
+        def wait(self, timeout=None):
+            if self.returncode is None:
+                self.returncode = 0
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = -15
+
+        def kill(self):
+            self.returncode = -9
+
+    real_subprocess = dispatch.subprocess
+
+    class FakeSubprocess:
+        PIPE = real_subprocess.PIPE
+        TimeoutExpired = real_subprocess.TimeoutExpired
+        Popen = FakeProcess
+
+    def fake_provider_activity(_path, *, offset):
+        nonlocal provider_reads
+        provider_reads += 1
+        if provider_reads == 1:
+            return offset, 0, []
+        if provider_reads == 2:
+            return offset, 1, [session_id]
+        return offset, 0, []
+
+    def fake_tool_activity(_path, *, offset):
+        nonlocal tool_reads
+        tool_reads += 1
+        if tool_reads == 1:
+            return offset, boundary_tool_events
+        return offset, 0
+
+    ticks = iter([0.0, 0.2, 0.2, 0.2, 0.2, 0.2])
+
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(tmp_path / "agy.log"))
+    monkeypatch.setattr(dispatch.shutil, "which", lambda _name: "/tmp/fake-agy")
+    monkeypatch.setattr(dispatch, "subprocess", FakeSubprocess)
+    monkeypatch.setattr(dispatch.time, "monotonic", lambda: next(ticks, 0.2))
+    monkeypatch.setattr(dispatch.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(dispatch, "_read_new_provider_log_activity", fake_provider_activity)
+    monkeypatch.setattr(dispatch, "_read_new_tool_activity", fake_tool_activity)
+    monkeypatch.setattr(
+        dispatch,
+        "_agy_transcript_path",
+        lambda _env, _session: tmp_path / "transcript.jsonl",
+    )
+    monkeypatch.setattr(
+        dispatch.direct_operation_journal,
+        "capture_source_baseline",
+        lambda _cwd: {"tracked": {}},
+    )
+    monkeypatch.setattr(
+        dispatch.direct_operation_journal,
+        "observed_changed_paths_since",
+        lambda _cwd, _baseline: [],
+    )
+
+    events: list[dict[str, object]] = []
+    code, _out, err, timed_out, _wall_ms = dispatch.run_agy(
+        env={"HOME": str(tmp_path)},
+        prompt="watchdog boundary",
+        cwd=str(tmp_path),
+        mode="accept-edits",
+        model=None,
+        effort=None,
+        timeout=5,
+        operation_hook=events.append,
+        expect_coding_progress=True,
+        provider_stall_seconds=0.1,
+        stream_no_progress_seconds=0.1,
+        pre_effect_max_seconds=5,
+        pre_effect_max_tool_events=3,
+    )
+
+    assert provider_reads >= 2
+    assert tool_reads >= 1
+    assert timed_out is False
+    if expected_failure is None:
+        assert code == 0
+        assert "NEXUS_AGY_NON_PROGRESS:" not in err
+    else:
+        assert code != 0
+        assert f"NEXUS_AGY_NON_PROGRESS:{expected_failure}" in err
+        assert "NEXUS_AGY_NON_PROGRESS:PROVIDER_STALLED" not in err
