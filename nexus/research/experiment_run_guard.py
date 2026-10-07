@@ -322,12 +322,8 @@ class ExperimentRunLease:
                 and record.get("contract_sha256") == self.contract_sha256
                 and record["effect"]["state"] == "STARTED"
             ):
-                self.mark_outcome_unknown(
-                    operation_id=record["effect"].get("operation_id")
-                )
-                terminalization_error = RunEffectConflict(
-                    "RUN_EFFECT_TERMINALIZATION_REQUIRED"
-                )
+                self.mark_outcome_unknown(operation_id=record["effect"].get("operation_id"))
+                terminalization_error = RunEffectConflict("RUN_EFFECT_TERMINALIZATION_REQUIRED")
         finally:
             fcntl.flock(self._lock_handle.fileno(), fcntl.LOCK_UN)
             self._lock_handle.close()

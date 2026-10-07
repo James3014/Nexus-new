@@ -308,6 +308,7 @@ def test_stable_controller_allows_same_run_continuation(tmp_path: Path) -> None:
     assert fence.same_workspace_continuation_allowed is True
     assert fence.required_next_gate is None
 
+
 def test_mark_no_effect_allows_one_fresh_effect_admission(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -357,4 +358,3 @@ def test_context_manager_without_terminal_truth_fails_closed(tmp_path: Path) -> 
         match="RUN_EFFECT_OUTCOME_UNKNOWN_RECONCILE_SAME_EFFECT",
     ):
         guard.acquire(contract)
-
