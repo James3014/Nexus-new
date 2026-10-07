@@ -91,20 +91,8 @@ jobs:
             --candidate-workflow .github/workflows/nexus-core-issue-completion.yml \
             --output "$policy_result"
 
-          candidate_pin="$(python - "$policy_result" <<'PY'
-          import json
-          import sys
-          payload = json.load(open(sys.argv[1], encoding="utf-8"))
-          print(payload["candidate_pin"])
-          PY
-          )"
-          change_kind="$(python - "$policy_result" <<'PY'
-          import json
-          import sys
-          payload = json.load(open(sys.argv[1], encoding="utf-8"))
-          print(payload["change_kind"])
-          PY
-          )"
+          candidate_pin="$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["candidate_pin"])' "$policy_result")"
+          change_kind="$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["change_kind"])' "$policy_result")"
           test "$candidate_pin" = "$(printf '%s' "$candidate_pin" | grep -E '^[0-9a-f]{40}$')"
 
           if [ "$change_kind" = "PIN_ONLY" ]; then
