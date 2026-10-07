@@ -83,30 +83,42 @@ def _validate_optional_sha(name: str, value: str | None) -> str | None:
 
 
 def write_immutable_artifact(path: Path, content: bytes) -> str:
-    """Create one canonical artifact once; identical replay is read-only."""
+    """Atomically publish one canonical artifact; conflicting bytes fail closed."""
 
     target = Path(path).expanduser().resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
+    temp = target.with_name(f".{target.name}.{os.getpid()}.{id(content)}.tmp")
+
     try:
         fd = os.open(
-            str(target),
+            str(temp),
             os.O_WRONLY | os.O_CREAT | os.O_EXCL,
             0o600,
         )
-    except FileExistsError:
-        try:
-            existing = target.read_bytes()
-        except OSError as exc:
-            raise ImmutableArtifactConflict("IMMUTABLE_ARTIFACT_UNREADABLE") from exc
-        if existing != content:
-            raise ImmutableArtifactConflict("IMMUTABLE_ARTIFACT_CONFLICT")
-        return "REUSED_SAME_BYTES"
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
 
-    with os.fdopen(fd, "wb") as handle:
-        handle.write(content)
-        handle.flush()
-        os.fsync(handle.fileno())
-    return "CREATED"
+        try:
+            os.link(temp, target)
+        except FileExistsError:
+            try:
+                existing = target.read_bytes()
+            except OSError as exc:
+                raise ImmutableArtifactConflict("IMMUTABLE_ARTIFACT_UNREADABLE") from exc
+            if existing != content:
+                raise ImmutableArtifactConflict("IMMUTABLE_ARTIFACT_CONFLICT")
+            return "REUSED_SAME_BYTES"
+
+        dir_fd = os.open(str(target.parent), os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+        return "CREATED"
+    finally:
+        temp.unlink(missing_ok=True)
 
 
 @dataclass(frozen=True)
@@ -190,6 +202,40 @@ class ExperimentRunLease:
     def _ensure_active(self) -> None:
         if self._released:
             raise RunEffectConflict("RUN_LEASE_ALREADY_RELEASED")
+
+    @property
+    def effect_state(self) -> str:
+        """Return durable effect state without granting new-effect authority."""
+
+        self._ensure_active()
+        record = self._guard._load_record(self._run_path)
+        if record.get("schema") != _SCHEMA:
+            raise RunEffectConflict("LEGACY_RUN_EFFECT_STATE_UNKNOWN")
+        return str(record["effect"]["state"])
+
+    def begin_effect(self) -> dict[str, Any]:
+        """Consume this exact run's one provider-effect slot."""
+
+        self._ensure_active()
+
+        def update(effect: dict[str, Any]) -> dict[str, Any]:
+            state = effect["state"]
+            if state == "TERMINAL":
+                raise RunEffectConflict("RUN_EFFECT_ALREADY_TERMINAL")
+            if state == "OUTCOME_UNKNOWN":
+                raise RunEffectConflict("RUN_EFFECT_OUTCOME_UNKNOWN_RECONCILE_SAME_EFFECT")
+            if state == "STARTED":
+                raise RunEffectConflict("RUN_EFFECT_ALREADY_STARTED")
+            if state != "NOT_STARTED":
+                raise RunEffectConflict("RUN_EFFECT_STATE_INVALID")
+            effect["state"] = "STARTED"
+            return effect
+
+        return self._guard._update_effect(
+            self._run_path,
+            expected_contract_sha256=self.contract_sha256,
+            update=update,
+        )
 
     def bind_operation(self, operation_id: str) -> dict[str, Any]:
         """Bind the provider/runtime operation identity to this exact run."""
@@ -483,28 +529,6 @@ class ExperimentRunGuard:
         run_path = self._run_path(normalized.run_id)
         disposition = "CREATED"
 
-        def effect_start_record() -> dict[str, Any]:
-            return {
-                "state": "STARTED",
-                "effect_handle": normalized.run_id,
-                "operation_id": None,
-                "response_sha256": None,
-                "receipt_sha256": None,
-            }
-
-        def reject_existing_effect(existing: dict[str, Any]) -> None:
-            if existing.get("schema") != _SCHEMA:
-                raise RunEffectConflict("LEGACY_RUN_EFFECT_STATE_UNKNOWN")
-            state = existing["effect"]["state"]
-            if state == "TERMINAL":
-                raise RunEffectConflict("RUN_EFFECT_ALREADY_TERMINAL")
-            if state == "OUTCOME_UNKNOWN":
-                raise RunEffectConflict("RUN_EFFECT_OUTCOME_UNKNOWN_RECONCILE_SAME_EFFECT")
-            if state == "STARTED":
-                raise RunEffectConflict("RUN_EFFECT_ALREADY_STARTED")
-            if state != "NOT_STARTED":
-                raise RunEffectConflict("RUN_EFFECT_STATE_INVALID")
-
         try:
             if run_path.exists():
                 existing = self._load_record(run_path)
@@ -513,16 +537,21 @@ class ExperimentRunGuard:
                     or existing.get("contract") != contract_payload
                 ):
                     raise RunContractConflict("RUN_CONTRACT_CONFLICT")
-                reject_existing_effect(existing)
-                existing["effect"] = effect_start_record()
-                self._write_record(run_path, existing)
-                disposition = "REUSED_NOT_STARTED"
+                if existing.get("schema") != _SCHEMA:
+                    raise RunEffectConflict("LEGACY_RUN_EFFECT_STATE_UNKNOWN")
+                disposition = "REUSED"
             else:
                 record = {
                     "schema": _SCHEMA,
                     "contract": contract_payload,
                     "contract_sha256": contract_sha,
-                    "effect": effect_start_record(),
+                    "effect": {
+                        "state": "NOT_STARTED",
+                        "effect_handle": normalized.run_id,
+                        "operation_id": None,
+                        "response_sha256": None,
+                        "receipt_sha256": None,
+                    },
                 }
                 encoded = (
                     json.dumps(record, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
@@ -540,10 +569,9 @@ class ExperimentRunGuard:
                         or existing.get("contract") != contract_payload
                     ):
                         raise RunContractConflict("RUN_CONTRACT_CONFLICT")
-                    reject_existing_effect(existing)
-                    existing["effect"] = effect_start_record()
-                    self._write_record(run_path, existing)
-                    disposition = "REUSED_NOT_STARTED"
+                    if existing.get("schema") != _SCHEMA:
+                        raise RunEffectConflict("LEGACY_RUN_EFFECT_STATE_UNKNOWN")
+                    disposition = "REUSED"
                 else:
                     with os.fdopen(fd, "wb") as handle:
                         handle.write(encoded)
