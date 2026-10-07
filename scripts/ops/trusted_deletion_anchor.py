@@ -41,13 +41,13 @@ TRUSTED_EXTERNAL_RUNTIME_PACKAGES: tuple[tuple[str, str, str, str], ...] = (
         "nexus-learning",
         "nexus_learning",
         "https://github.com/James3014/nexus-learning.git",
-        "d09f05b942f35236562ae26e7b718d111368b0b1",
+        "33acad4332b382fac1196c8ea8a8d0f5b543661e",
     ),
     (
         "nexus-runtime",
         "nexus_runtime",
         "https://github.com/James3014/nexus-runtime.git",
-        "0a39e52770230a74c5431c0f9cc73a63fb090d8b",
+        "f135a5360f5bb60c730e205acc55b8957fca2cc1",
     ),
 )
 UV_VERSION = "uv 0.9.2"
