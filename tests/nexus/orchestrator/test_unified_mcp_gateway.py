@@ -5526,15 +5526,10 @@ def test_gateway_convergence_receipt_only_main_churn_does_not_request_recovery(m
     loaded_commit = "a" * 40
     loaded_tree = "b" * 40
     upstream_commits = iter(("c" * 40, "d" * 40, "e" * 40, "f" * 40))
-    current_upstream = {"commit": None}
-    receipt_path = (
-        "tasks/github-issue-526-g20-r1-source-contract-delta-20260903/"
-        "02-r1-complete-deployment-recovery-authority-receipt.json"
-    )
+    observed_pairs = []
 
     def observe_upstream():
         commit = next(upstream_commits)
-        current_upstream["commit"] = commit
         return commit, "2026-10-07T16:20:00+00:00", None
 
     def fake_git(*args):
@@ -5544,47 +5539,20 @@ def test_gateway_convergence_receipt_only_main_churn_does_not_request_recovery(m
             return loaded_tree + "\n"
         raise AssertionError(f"unexpected git call: {args}")
 
-    def fake_compare(args, **kwargs):
-        assert args == [
-            "/usr/bin/gh",
-            "api",
-            (
-                f"repos/James3014/Nexus-new/compare/"
-                f"{loaded_commit}...{current_upstream['commit']}"
-            ),
-        ]
-        return subprocess.CompletedProcess(
-            args,
-            0,
-            stdout=json.dumps(
-                {
-                    "status": "ahead",
-                    "ahead_by": 1,
-                    "behind_by": 0,
-                    "base_commit": {"sha": loaded_commit},
-                    "head_commit": {"sha": current_upstream["commit"]},
-                    "merge_base_commit": {"sha": loaded_commit},
-                    "files": [{"filename": receipt_path, "status": "modified"}],
-                }
-            ),
-            stderr="",
-        )
+    def receipt_only(*, deployed_source_head, observed_upstream_main_head):
+        observed_pairs.append((deployed_source_head, observed_upstream_main_head))
+        return True
 
     monkeypatch.setattr(gateway_module, "_git", fake_git)
-    monkeypatch.setattr(
-        gateway_module, "_resolve_github_cli", lambda: ("/usr/bin/gh", None)
-    )
-    monkeypatch.setattr(gateway_module.subprocess, "run", fake_compare)
+    monkeypatch.setattr(gateway_module, "_receipt_only_main_movement", receipt_only)
     gateway = UnifiedMCPGateway(
         service=FakeService(),
         upstream_observer=observe_upstream,
         upstream_cache_ttl_seconds=0,
     )
 
-    for request_id, desired_commit in enumerate(
-        ("c" * 40, "d" * 40, "e" * 40, "f" * 40),
-        start=1200,
-    ):
+    desired_commits = ("c" * 40, "d" * 40, "e" * 40, "f" * 40)
+    for request_id, desired_commit in enumerate(desired_commits, start=1200):
         response = gateway.handle(
             {
                 "jsonrpc": "2.0",
@@ -5614,6 +5582,10 @@ def test_gateway_convergence_receipt_only_main_churn_does_not_request_recovery(m
         assert payload["desired_commit"] == desired_commit
         assert payload["next_generation_required"] is False
 
+    assert observed_pairs == [
+        (loaded_commit, desired_commit) for desired_commit in desired_commits
+    ]
+
 
 def test_gateway_convergence_runtime_path_movement_still_requests_recovery(monkeypatch):
     import nexus.orchestrator.unified_mcp_gateway as gateway_module
@@ -5628,34 +5600,10 @@ def test_gateway_convergence_runtime_path_movement_still_requests_recovery(monke
             return "b" * 40 + "\n"
         raise AssertionError(f"unexpected git call: {args}")
 
-    def fake_compare(args, **kwargs):
-        return subprocess.CompletedProcess(
-            args,
-            0,
-            stdout=json.dumps(
-                {
-                    "status": "ahead",
-                    "ahead_by": 1,
-                    "behind_by": 0,
-                    "base_commit": {"sha": loaded_commit},
-                    "head_commit": {"sha": upstream_commit},
-                    "merge_base_commit": {"sha": loaded_commit},
-                    "files": [
-                        {
-                            "filename": "nexus/orchestrator/unified_mcp_gateway.py",
-                            "status": "modified",
-                        }
-                    ],
-                }
-            ),
-            stderr="",
-        )
-
     monkeypatch.setattr(gateway_module, "_git", fake_git)
     monkeypatch.setattr(
-        gateway_module, "_resolve_github_cli", lambda: ("/usr/bin/gh", None)
+        gateway_module, "_receipt_only_main_movement", lambda **kwargs: False
     )
-    monkeypatch.setattr(gateway_module.subprocess, "run", fake_compare)
     gateway = UnifiedMCPGateway(
         service=FakeService(),
         upstream_observer=lambda: (
@@ -5689,58 +5637,77 @@ def test_gateway_convergence_runtime_path_movement_still_requests_recovery(monke
     assert payload["canonical_next_action"] == "prepare_issue_526_recovery"
 
 
-def test_gateway_convergence_unknown_main_movement_still_requests_recovery(monkeypatch):
+def test_receipt_only_main_movement_requires_exact_github_compare(monkeypatch):
     import nexus.orchestrator.unified_mcp_gateway as gateway_module
 
     loaded_commit = "a" * 40
     upstream_commit = "c" * 40
+    receipt_path = (
+        "tasks/github-issue-526-g20-r1-source-contract-delta-20260903/"
+        "02-r1-complete-deployment-recovery-authority-receipt.json"
+    )
+    changed_path = {"value": receipt_path}
 
-    def fake_git(*args):
-        if args == ("rev-parse", "HEAD"):
-            return loaded_commit + "\n"
-        if args == ("rev-parse", "HEAD^{tree}"):
-            return "b" * 40 + "\n"
-        raise AssertionError(f"unexpected git call: {args}")
+    def fake_compare(args, **kwargs):
+        assert args == [
+            "/usr/bin/gh",
+            "api",
+            (
+                f"repos/James3014/Nexus-new/compare/"
+                f"{loaded_commit}...{upstream_commit}"
+            ),
+        ]
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout=json.dumps(
+                {
+                    "status": "ahead",
+                    "ahead_by": 1,
+                    "behind_by": 0,
+                    "base_commit": {"sha": loaded_commit},
+                    "head_commit": {"sha": upstream_commit},
+                    "merge_base_commit": {"sha": loaded_commit},
+                    "files": [
+                        {"filename": changed_path["value"], "status": "modified"}
+                    ],
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(
+        gateway_module, "_resolve_github_cli", lambda: ("/usr/bin/gh", None)
+    )
+    monkeypatch.setattr(gateway_module.subprocess, "run", fake_compare)
+
+    assert gateway_module._receipt_only_main_movement(
+        deployed_source_head=loaded_commit,
+        observed_upstream_main_head=upstream_commit,
+    ) is True
+
+    changed_path["value"] = "nexus/orchestrator/unified_mcp_gateway.py"
+    assert gateway_module._receipt_only_main_movement(
+        deployed_source_head=loaded_commit,
+        observed_upstream_main_head=upstream_commit,
+    ) is False
+
+
+def test_receipt_only_main_movement_fails_closed_when_compare_unknown(monkeypatch):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
 
     def fail_compare(args, **kwargs):
         raise subprocess.TimeoutExpired(cmd=args, timeout=5)
 
-    monkeypatch.setattr(gateway_module, "_git", fake_git)
     monkeypatch.setattr(
         gateway_module, "_resolve_github_cli", lambda: ("/usr/bin/gh", None)
     )
     monkeypatch.setattr(gateway_module.subprocess, "run", fail_compare)
-    gateway = UnifiedMCPGateway(
-        service=FakeService(),
-        upstream_observer=lambda: (
-            upstream_commit,
-            "2026-10-07T16:20:00+00:00",
-            None,
-        ),
-        upstream_cache_ttl_seconds=0,
-    )
-    response = gateway.handle(
-        {
-            "jsonrpc": "2.0",
-            "id": 1205,
-            "method": "tools/call",
-            "params": {
-                "name": "nexus_gateway_convergence",
-                "arguments": {
-                    "policy": {
-                        "mode": "TRACK_ACCEPTED_MAIN",
-                        "desired_commit": upstream_commit,
-                        "desired_tree": "d" * 40,
-                    },
-                    "readiness_state": "SAFE",
-                    "quiescence_state": "SAFE",
-                },
-            },
-        }
-    )
-    payload = response["result"]["structuredContent"]
-    assert payload["action"] == "REQUEST_RECOVERY"
-    assert payload["canonical_next_action"] == "prepare_issue_526_recovery"
+
+    assert gateway_module._receipt_only_main_movement(
+        deployed_source_head="a" * 40,
+        observed_upstream_main_head="c" * 40,
+    ) is False
 
 
 def test_gateway_convergence_tool_surfaces_same_effect_reconciliation(monkeypatch):
