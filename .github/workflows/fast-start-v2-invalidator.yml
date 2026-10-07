@@ -223,43 +223,54 @@ jobs:
           import json
           import os
           import re
-          import urllib.error
-          import urllib.request
           from typing import Any, Mapping
 
           from scripts.ops.fast_start_v2 import parse_registry_body, registry_payload_hash
+          from scripts.ops.fast_start_v2_github import (
+              GitHubMetadataClient,
+              GitHubRateLimitExhausted,
+              GitHubTransportError,
+              GitHubWriteOutcomeUnknown,
+          )
 
           REPOSITORY = "James3014/Nexus-new"
           REGISTRY_ISSUE = 549
           TOKEN = os.environ["GITHUB_TOKEN"]
           requested_paths: list[str] = []
+          write_attempted = False
+          github = GitHubMetadataClient(TOKEN, repository=REPOSITORY)
 
 
           def request(path: str, *, method: str = "GET", payload: Mapping[str, Any] | None = None) -> Any:
+              global write_attempted
               if not path.startswith("/"):
                   raise ValueError("GitHub path must start with /")
               requested_paths.append(path)
-              data = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
-              req = urllib.request.Request(
-                  f"https://api.github.com{path}",
-                  data=data,
-                  method=method,
-                  headers={
-                      "Accept": "application/vnd.github+json",
-                      "Authorization": f"Bearer {TOKEN}",
-                      "X-GitHub-Api-Version": "2022-11-28",
-                      "User-Agent": "nexus-fast-start-v2-reconciler",
-                      "Content-Type": "application/json",
-                  },
-              )
+              if method != "GET":
+                  write_attempted = True
               try:
-                  with urllib.request.urlopen(req, timeout=20) as response:
-                      raw = response.read()
-              except urllib.error.HTTPError as exc:
-                  raise RuntimeError(f"GitHub {method} failed: HTTP {exc.code} {path}") from exc
-              if not raw:
-                  return None
-              return json.loads(raw.decode("utf-8"))
+                  return github.request(path, method=method, payload=payload)
+              except GitHubRateLimitExhausted as exc:
+                  if write_attempted:
+                      raise RuntimeError(
+                          "FAST_START_POST_WRITE_READBACK_RATE_LIMIT_EXHAUSTED"
+                      ) from exc
+                  report = {
+                      "schema": "nexus.fast_start_registry_reconcile_report.v2",
+                      "authority": "ADVISORY_CACHE_ONLY",
+                      "event_name": os.environ.get("GITHUB_EVENT_NAME"),
+                      "action": "UNAVAILABLE",
+                      "reason": "GITHUB_RATE_LIMIT_EXHAUSTED",
+                      "retry_after_seconds": exc.retry_after,
+                      "requested_url_count": len(requested_paths),
+                      "implementation_source_or_test_body_reads": 0,
+                  }
+                  print(json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2))
+                  raise SystemExit(0) from exc
+              except GitHubWriteOutcomeUnknown as exc:
+                  raise RuntimeError(str(exc)) from exc
+              except GitHubTransportError as exc:
+                  raise RuntimeError(str(exc)) from exc
 
 
           def get(path: str) -> Any:
