@@ -349,9 +349,7 @@ def evaluate_readiness_from_store(
     missing_admission_blockers, deferred_non_control_missing_admission = (
         _partition_missing_admission_for_mode(
             store=store,
-            missing_admission=[
-                str(item) for item in ingest_report.get("missing_admission") or []
-            ],
+            missing_admission=[str(item) for item in ingest_report.get("missing_admission") or []],
             control_task_key=control_task_key,
         )
     )
@@ -441,9 +439,7 @@ def main() -> int:
         return 3
     missing_admission_blockers, _ = _partition_missing_admission_for_mode(
         store=store,
-        missing_admission=[
-            str(item) for item in ingest_report.get("missing_admission") or []
-        ],
+        missing_admission=[str(item) for item in ingest_report.get("missing_admission") or []],
         control_task_key=args.readiness_control_task_key,
     )
     if missing_admission_blockers:
