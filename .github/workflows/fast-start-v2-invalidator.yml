@@ -58,7 +58,7 @@ jobs:
       - name: Derive bounded changed-path evidence
         id: paths
         env:
-          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -69,29 +69,93 @@ jobs:
           set -euo pipefail
           out="$RUNNER_TEMP/fast-start-v2-paths.txt"
           : > "$out"
-          case "$EVENT_NAME" in
-            pull_request_target)
-              test "$PR_NUMBER" = "$(printf '%s' "$PR_NUMBER" | grep -E '^[0-9]+$')"
-              gh api --paginate "/repos/$REPOSITORY/pulls/$PR_NUMBER/files" --jq '.[].filename' \
-                | sort -u > "$out"
-              ;;
-            push)
-              test "$BEFORE_SHA" = "$(printf '%s' "$BEFORE_SHA" | grep -E '^[0-9a-f]{40}$')"
-              test "$AFTER_SHA" = "$(printf '%s' "$AFTER_SHA" | grep -E '^[0-9a-f]{40}$')"
-              gh api "/repos/$REPOSITORY/compare/$BEFORE_SHA...$AFTER_SHA" --jq '.files[].filename' \
-                | sort -u > "$out"
-              ;;
-            issues|issue_comment)
-              ;;
-            *)
-              echo "::error::unsupported event $EVENT_NAME"
-              exit 2
-              ;;
-          esac
-          echo "path_file=$out" >> "$GITHUB_OUTPUT"
+          python - "$out" <<'PY'
+          from __future__ import annotations
+
+          import os
+          import re
+          import sys
+          from pathlib import Path
+
+          from scripts.ops.github_read_retry import (
+              GitHubReadRateLimitExhausted,
+              github_json_get,
+          )
+
+          out = Path(sys.argv[1])
+          token = os.environ["GITHUB_TOKEN"]
+          repository = os.environ["REPOSITORY"]
+          event_name = os.environ["EVENT_NAME"]
+          pr_number = os.environ.get("PR_NUMBER", "")
+          before_sha = os.environ.get("BEFORE_SHA", "")
+          after_sha = os.environ.get("AFTER_SHA", "")
+          changed: set[str] = set()
+
+          def get(path: str):
+              return github_json_get(
+                  path,
+                  token=token,
+                  user_agent="nexus-fast-start-v2-invalidator",
+              )
+
+          try:
+              if event_name == "pull_request_target":
+                  if not re.fullmatch(r"[1-9][0-9]*", pr_number):
+                      raise ValueError("PR number malformed")
+                  for page in range(1, 11):
+                      rows = get(
+                          f"/repos/{repository}/pulls/{pr_number}/files"
+                          f"?per_page=100&page={page}"
+                      )
+                      if not isinstance(rows, list):
+                          raise RuntimeError("PR files response is not a list")
+                      for row in rows:
+                          if isinstance(row, dict) and isinstance(row.get("filename"), str):
+                              changed.add(row["filename"])
+                      if len(rows) < 100:
+                          break
+                  else:
+                      raise RuntimeError("PR files exceed bounded pagination")
+              elif event_name == "push":
+                  if not re.fullmatch(r"[0-9a-f]{40}", before_sha):
+                      raise ValueError("before SHA malformed")
+                  if not re.fullmatch(r"[0-9a-f]{40}", after_sha):
+                      raise ValueError("after SHA malformed")
+                  payload = get(
+                      f"/repos/{repository}/compare/{before_sha}...{after_sha}"
+                  )
+                  if not isinstance(payload, dict):
+                      raise RuntimeError("compare response is not an object")
+                  rows = payload.get("files")
+                  if not isinstance(rows, list):
+                      raise RuntimeError("compare files response is not a list")
+                  for row in rows:
+                      if isinstance(row, dict) and isinstance(row.get("filename"), str):
+                          changed.add(row["filename"])
+              elif event_name in {"issues", "issue_comment"}:
+                  pass
+              else:
+                  raise RuntimeError(f"unsupported event {event_name}")
+          except GitHubReadRateLimitExhausted as exc:
+              print(f"FAST_START_RATE_LIMIT_UNAVAILABLE: {exc}", file=sys.stderr)
+              out.write_text("", encoding="utf-8")
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+                  handle.write(f"path_file={out}\n")
+                  handle.write("rate_limit_unavailable=true\n")
+              raise SystemExit(0)
+
+          out.write_text(
+              "".join(f"{item}\n" for item in sorted(changed)),
+              encoding="utf-8",
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"path_file={out}\n")
+              handle.write("rate_limit_unavailable=false\n")
+          PY
 
       - name: Produce non-authoritative invalidation hint
         id: hint
+        if: steps.paths.outputs.rate_limit_unavailable != 'true'
         env:
           EVENT_NAME: ${{ github.event_name }}
           EVENT_PATH: ${{ github.event_path }}
@@ -129,7 +193,7 @@ jobs:
           echo "needs_attention=$needs_attention" >> "$GITHUB_OUTPUT"
 
       - name: Publish wakeup receipt only when relevant
-        if: steps.hint.outputs.affected != '0' || steps.hint.outputs.needs_attention == 'true'
+        if: steps.paths.outputs.rate_limit_unavailable != 'true' && (steps.hint.outputs.affected != '0' || steps.hint.outputs.needs_attention == 'true')
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
@@ -202,6 +266,10 @@ jobs:
           from typing import Any, Mapping
 
           from scripts.ops.fast_start_v2 import parse_registry_body, registry_payload_hash
+          from scripts.ops.github_read_retry import (
+              GitHubReadRateLimitExhausted,
+              github_json_get,
+          )
 
           REPOSITORY = "James3014/Nexus-new"
           REGISTRY_ISSUE = 549
@@ -209,10 +277,46 @@ jobs:
           requested_paths: list[str] = []
 
 
+          mutation_started = False
+
+
           def request(path: str, *, method: str = "GET", payload: Mapping[str, Any] | None = None) -> Any:
+              global mutation_started
+
               if not path.startswith("/"):
                   raise ValueError("GitHub path must start with /")
               requested_paths.append(path)
+
+              if method == "GET":
+                  try:
+                      return github_json_get(
+                          path,
+                          token=TOKEN,
+                          user_agent="nexus-fast-start-v2-reconciler",
+                      )
+                  except GitHubReadRateLimitExhausted as exc:
+                      if mutation_started:
+                          raise RuntimeError(
+                              f"REGISTRY_POSTWRITE_RATE_LIMIT_UNAVAILABLE: {exc}"
+                          ) from exc
+                      print(
+                          json.dumps(
+                              {
+                                  "schema": "nexus.fast_start_registry_reconcile_report.v2",
+                                  "authority": "ADVISORY_CACHE_ONLY",
+                                  "action": "RATE_LIMIT_UNAVAILABLE",
+                                  "reason": str(exc),
+                              },
+                              ensure_ascii=False,
+                              sort_keys=True,
+                          )
+                      )
+                      raise SystemExit(0)
+
+              if method != "PATCH":
+                  raise ValueError(f"unsupported GitHub mutation method: {method}")
+
+              mutation_started = True
               data = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
               req = urllib.request.Request(
                   f"https://api.github.com{path}",
@@ -230,7 +334,11 @@ jobs:
                   with urllib.request.urlopen(req, timeout=20) as response:
                       raw = response.read()
               except urllib.error.HTTPError as exc:
-                  raise RuntimeError(f"GitHub {method} failed: HTTP {exc.code} {path}") from exc
+                  detail = exc.read(8192).decode("utf-8", errors="replace").strip()
+                  raise RuntimeError(
+                      f"GitHub {method} failed: HTTP {exc.code} {path}: "
+                      f"{detail or exc.reason}"
+                  ) from exc
               if not raw:
                   return None
               return json.loads(raw.decode("utf-8"))
