@@ -8,7 +8,6 @@ import urllib.request
 from collections.abc import Callable
 from typing import Any
 
-
 DEFAULT_API_URL = "https://api.github.com"
 DEFAULT_MAX_RETRIES = 2
 DEFAULT_MAX_WAIT_SECONDS = 60.0
