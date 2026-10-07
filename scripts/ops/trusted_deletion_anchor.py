@@ -166,6 +166,17 @@ TRUSTED_PR1507_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, s
         "db1bd37456a5d302c0f508ab5ca193750f9d715985f2dcf5e67743a70e9d2667",
     ),
 )
+# Exact one-use, four-way binding for Owner-authorized PR #1545 (Issue #1544
+# Runtime/Learning false-green consumer settlement).
+TRUSTED_PR1545_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1545,
+    (
+        "10eb27a29cfb60d8cc45e223a68a1221f7f285b04d2b9ab58f1ed2096b11a829",
+        "db1bd37456a5d302c0f508ab5ca193750f9d715985f2dcf5e67743a70e9d2667",
+        "ae373bf727465af0a4692785ac2abf4cb521e5398dc721ee7dcf5fe05ebf07e2",
+        "28fcbc0a1cf233b3e2170545d9896042a9d99307480238426e00e3897490febb",
+    ),
+)
 
 REQUIRED_EVIDENCE_KEYS = {
     "schema_version",
@@ -249,6 +260,7 @@ def _validate_trusted_dependency_contract(
         TRUSTED_PR1375_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR1380_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR1507_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1545_DEPENDENCY_SNAPSHOT_TRANSITION,
     )
     for authorized_transition_record in authorized_transition_records:
         if authorized_transition_record is None:
