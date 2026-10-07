@@ -47,6 +47,7 @@ from nexus.contracts.gateway_convergence import (
     ConvergenceReason,
     DesiredDeploymentMode,
     GatewayConvergenceRequest,
+    RecoveryEffectState,
 )
 from nexus.contracts.gateway_deployment import RECOVERY_RECEIPT_PATH
 from nexus.contracts.lifecycle_action import (
@@ -5491,7 +5492,10 @@ class UnifiedMCPGateway:
         if (
             result.action is ConvergenceAction.REQUEST_RECOVERY
             and request.policy.mode is DesiredDeploymentMode.TRACK_ACCEPTED_MAIN
-            and request.active_effect is None
+            and (
+                request.active_effect is None
+                or request.active_effect.state is RecoveryEffectState.TERMINAL_SUCCESS
+            )
             and status.get("upstream_freshness") == "STALE"
             and _receipt_only_main_movement(
                 deployed_source_head=result.observed_loaded_commit,
