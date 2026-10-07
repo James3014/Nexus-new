@@ -395,6 +395,117 @@ def test_readiness_still_rejects_missing_control_admission(tmp_path: Path) -> No
     assert blocked["deferred_non_control_missing_admission"] == []
 
 
+def test_normal_daemon_defers_non_control_missing_admission_with_bound_control(
+    tmp_path: Path,
+) -> None:
+    store = AutomaticReplicationStore(tmp_path)
+    historical = _snapshot(9008)
+    active = _snapshot(9009)
+    store.capture(historical, admission_disposition=READINESS_CONTROL_DISPOSITION)
+    store.capture(active, admission_disposition=READINESS_CONTROL_DISPOSITION)
+
+    blockers, deferred = daemon._partition_missing_admission_for_mode(
+        store=store,
+        missing_admission=[
+            "James3014/Nexus-new#9100",
+            "James3014/devspace#9101",
+        ],
+        control_task_key=active.task_key,
+    )
+
+    assert blockers == []
+    assert deferred == [
+        "James3014/Nexus-new#9100",
+        "James3014/devspace#9101",
+    ]
+
+
+def test_normal_daemon_missing_admission_is_strict_without_bound_control(
+    tmp_path: Path,
+) -> None:
+    store = AutomaticReplicationStore(tmp_path)
+    store.capture(_snapshot(9010), admission_disposition=READINESS_CONTROL_DISPOSITION)
+    missing = ["James3014/devspace#9101"]
+
+    blockers, deferred = daemon._partition_missing_admission_for_mode(
+        store=store,
+        missing_admission=missing,
+    )
+
+    assert blockers == missing
+    assert deferred == []
+
+
+def test_normal_daemon_missing_admission_is_strict_for_invalid_bound_control(
+    tmp_path: Path,
+) -> None:
+    store = AutomaticReplicationStore(tmp_path)
+    missing = ["James3014/devspace#9101"]
+
+    blockers, deferred = daemon._partition_missing_admission_for_mode(
+        store=store,
+        missing_admission=missing,
+        control_task_key="James3014/Nexus-new#9999",
+    )
+
+    assert blockers == missing
+    assert deferred == []
+
+
+def test_normal_daemon_missing_admission_is_strict_once_primary_is_admitted(
+    tmp_path: Path,
+) -> None:
+    store = AutomaticReplicationStore(tmp_path)
+    control = _snapshot(9011)
+    store.capture(control, admission_disposition=READINESS_CONTROL_DISPOSITION)
+    store.capture(_snapshot(9012), admission_disposition="ADMITTED_PRIMARY_FRESH_TASK")
+    missing = ["James3014/devspace#9101"]
+
+    blockers, deferred = daemon._partition_missing_admission_for_mode(
+        store=store,
+        missing_admission=missing,
+        control_task_key=control.task_key,
+    )
+
+    assert blockers == missing
+    assert deferred == []
+
+
+def test_daemon_main_normal_mode_uses_bound_deferred_admission_control(
+    tmp_path: Path, monkeypatch
+) -> None:
+    store = AutomaticReplicationStore(tmp_path)
+    control = _snapshot(9013)
+    store.capture(control, admission_disposition=READINESS_CONTROL_DISPOSITION)
+    ingest = _healthy_ingest(expected_count=3, mirrored_count=3)
+    ingest["missing_admission"] = [
+        "James3014/Nexus-new#9100",
+        "James3014/devspace#9101",
+    ]
+    monkeypatch.setattr(daemon, "ingest", lambda **_: ingest)
+    monkeypatch.setattr(daemon, "advance_all", lambda **_: _healthy_advance())
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "hybrid_replication_daemon.py",
+            "--root",
+            str(tmp_path),
+            "--since",
+            "2026-10-07T00:00:00Z",
+            "--frozen-policy-sha256",
+            "5" * 64,
+            "--stack-command",
+            "unused",
+            "--ground-truth-command",
+            "unused",
+            "--deferred-admission-control-task-key",
+            control.task_key,
+        ],
+    )
+
+    assert daemon.main() == 0
+
+
 def test_daemon_main_readiness_mode_consumes_store_and_launchd(tmp_path: Path, monkeypatch) -> None:
     store = AutomaticReplicationStore(tmp_path)
     snapshot = _snapshot(9003)

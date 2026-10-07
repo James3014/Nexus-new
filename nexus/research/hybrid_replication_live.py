@@ -52,6 +52,34 @@ FROZEN_RECEIPT_SHA256S = {
     "dm1": "d85acab617dca8e2eab04c0e63246b41e1382ca0871607a96a424828bb05be99",
     "re2": "ae1414c73107140b234d38178165769faad9d33f217a3b1f8064953e144efc63",
 }
+FROZEN_RECEIPT_DURABLE_AUTHORITIES = {
+    "r3": {
+        "schema": "nexus.hybrid_replication.frozen_receipt_authority.v1",
+        "repository": "James3014/Nexus-new",
+        "issue": 1185,
+        "comment_id": 5887636459,
+        "comment_url": "https://github.com/James3014/Nexus-new/issues/1185#issuecomment-5887636459",
+        "author_login": "James3014",
+        "created_at": "2026-09-29T09:39:50Z",
+        "updated_at": "2026-09-29T09:39:50Z",
+        "comment_body_sha256": "7c7bb09ef46700f69dae6d14986f0313c57282325ecbb0b5f6e336da2b319729",
+        "artifact_name": "R3_PRIMARY_FINAL_24_OF_24.json",
+        "subject_sha256": "77dee0030b022240ec8b23c388b0a957dc70878dc28ebae03d0d4d720402db37",
+    },
+    "d2": {
+        "schema": "nexus.hybrid_replication.frozen_receipt_authority.v1",
+        "repository": "James3014/Nexus-new",
+        "issue": 1201,
+        "comment_id": 5890070954,
+        "comment_url": "https://github.com/James3014/Nexus-new/issues/1201#issuecomment-5890070954",
+        "author_login": "James3014",
+        "created_at": "2026-09-29T12:13:40Z",
+        "updated_at": "2026-09-29T12:13:40Z",
+        "comment_body_sha256": "271bc095c407b5272a40c4e0c643f5c341ad3afaeacf26ebc011fba86698bdb4",
+        "artifact_name": "D2_FINAL_RECEIPT.json",
+        "subject_sha256": "4873ae4c96b63a0306c5dcc3afff039ab8df8ff6c7ee7070382eebb4d4268e79",
+    },
+}
 JEV_ENDPOINT = "https://api.typesafe.ai/v1/systemone"
 DM1_TOP_PROBABILITY_MIN = 0.70
 DM1_MARGIN_MIN = 0.30
@@ -306,11 +334,27 @@ def _frozen_receipt_hashes(
         row = rows.get(name)
         if not isinstance(row, Mapping):
             raise ValueError(f"frozen_receipt_binding_invalid:{name}")
-        path = Path(str(row.get("path") or ""))
-        if not path.is_file():
-            raise ValueError(f"frozen_receipt_missing:{name}:{path}")
-        actual[name] = _sha256_file(path)
         declared[name] = str(row.get("sha256") or "")
+        path = Path(str(row.get("path") or ""))
+        expected_authority = FROZEN_RECEIPT_DURABLE_AUTHORITIES.get(name)
+        authority = row.get("durable_authority")
+
+        if authority is not None:
+            if expected_authority is None:
+                raise ValueError(f"frozen_receipt_authority_undeclared:{name}")
+            if not isinstance(authority, Mapping) or dict(authority) != expected_authority:
+                raise ValueError(f"frozen_receipt_authority_mismatch:{name}")
+            if expected_authority["subject_sha256"] != FROZEN_RECEIPT_SHA256S[name]:
+                raise ValueError(f"frozen_receipt_authority_subject_mismatch:{name}")
+
+        if path.is_file():
+            actual[name] = _sha256_file(path)
+            continue
+        if expected_authority is None:
+            raise ValueError(f"frozen_receipt_missing:{name}:{path}")
+        if authority is None:
+            raise ValueError(f"frozen_receipt_authority_missing:{name}")
+        actual[name] = str(expected_authority["subject_sha256"])
     return actual, declared
 
 
