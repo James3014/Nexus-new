@@ -58,7 +58,7 @@ jobs:
       - name: Derive bounded changed-path evidence
         id: paths
         env:
-          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -69,28 +69,54 @@ jobs:
           set -euo pipefail
           out="$RUNNER_TEMP/fast-start-v2-paths.txt"
           : > "$out"
+          unavailable=false
+          status=0
           case "$EVENT_NAME" in
             pull_request_target)
               test "$PR_NUMBER" = "$(printf '%s' "$PR_NUMBER" | grep -E '^[0-9]+$')"
-              gh api --paginate "/repos/$REPOSITORY/pulls/$PR_NUMBER/files" --jq '.[].filename' \
-                | sort -u > "$out"
+              set +e
+              python scripts/ops/fast_start_v2_github.py changed-paths \
+                --repository "$REPOSITORY" \
+                --pr-number "$PR_NUMBER" \
+                --output "$out"
+              status=$?
+              set -e
               ;;
             push)
               test "$BEFORE_SHA" = "$(printf '%s' "$BEFORE_SHA" | grep -E '^[0-9a-f]{40}$')"
               test "$AFTER_SHA" = "$(printf '%s' "$AFTER_SHA" | grep -E '^[0-9a-f]{40}$')"
-              gh api "/repos/$REPOSITORY/compare/$BEFORE_SHA...$AFTER_SHA" --jq '.files[].filename' \
-                | sort -u > "$out"
+              set +e
+              python scripts/ops/fast_start_v2_github.py compare-paths \
+                --repository "$REPOSITORY" \
+                --before-sha "$BEFORE_SHA" \
+                --after-sha "$AFTER_SHA" \
+                --output "$out"
+              status=$?
+              set -e
               ;;
             issues|issue_comment)
+              status=0
               ;;
             *)
               echo "::error::unsupported event $EVENT_NAME"
               exit 2
               ;;
           esac
+          if [ "$status" -eq 75 ]; then
+            unavailable=true
+          elif [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
           echo "path_file=$out" >> "$GITHUB_OUTPUT"
+          echo "unavailable=$unavailable" >> "$GITHUB_OUTPUT"
+
+      - name: Record advisory invalidation unavailability
+        if: steps.paths.outputs.unavailable == 'true'
+        run: |
+          printf '%s\n' '{"schema":"nexus.fast_start_invalidation.v1","status":"UNAVAILABLE","authority":"WAKEUP_HINT_ONLY","reason":"GITHUB_RATE_LIMIT_EXHAUSTED"}'
 
       - name: Produce non-authoritative invalidation hint
+        if: steps.paths.outputs.unavailable != 'true'
         id: hint
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -129,7 +155,7 @@ jobs:
           echo "needs_attention=$needs_attention" >> "$GITHUB_OUTPUT"
 
       - name: Publish wakeup receipt only when relevant
-        if: steps.hint.outputs.affected != '0' || steps.hint.outputs.needs_attention == 'true'
+        if: steps.paths.outputs.unavailable != 'true' && (steps.hint.outputs.affected != '0' || steps.hint.outputs.needs_attention == 'true')
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
