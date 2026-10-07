@@ -252,6 +252,7 @@ def test_changed_paths_cli_rate_limit_writes_unavailable_witness(
     assert witness["authority"] == "ADVISORY_CACHE_ONLY"
     assert witness["reason"] == "GITHUB_RATE_LIMIT_EXHAUSTED"
 
+
 def test_collect_compare_changed_paths_validates_and_sorts() -> None:
     before = "1" * 40
     after = "2" * 40
@@ -288,10 +289,11 @@ def test_compare_changed_paths_rejects_malformed_sha() -> None:
             after_sha="2" * 40,
         )
 
+
 def test_committed_fast_start_workflow_uses_bounded_github_transport() -> None:
-    workflow = (
-        REPO_ROOT / ".github" / "workflows" / "fast-start-v2-invalidator.yml"
-    ).read_text(encoding="utf-8")
+    workflow = (REPO_ROOT / ".github" / "workflows" / "fast-start-v2-invalidator.yml").read_text(
+        encoding="utf-8"
+    )
 
     assert "scripts/ops/fast_start_v2_github.py changed-paths" in workflow
     assert "scripts/ops/fast_start_v2_github.py compare-paths" in workflow
