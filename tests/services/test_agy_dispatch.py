@@ -536,7 +536,9 @@ def test_background_nonzero_exit_after_observed_effect_is_outcome_unknown(
 
     monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
     monkeypatch.setattr(dispatch._agy_operation_journal, "_process_alive", lambda _pid: False)
-    monkeypatch.setattr(dispatch._agy_operation_journal, "_process_group_alive", lambda _pgid: False)
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal, "_process_group_alive", lambda _pgid: False
+    )
 
     code = dispatch._run_background_operation(
         operation_id=operation_id,
