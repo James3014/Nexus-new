@@ -2673,3 +2673,28 @@ def test_trusted_jobs_never_execute_head_code_or_materialize_a_worktree():
         assert "worktree" not in serialized
         assert "submodule" not in serialized
         assert "source.tar" not in serialized or job_name == "trusted-controller"
+
+
+def test_canonical_raw_diff_ignores_git_abbrev_config(tmp_path: Path):
+    repo = tmp_path / "raw-diff-source"
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    _run_git(repo, "config", "user.email", "test@example.invalid")
+    _run_git(repo, "config", "user.name", "trusted-anchor-test")
+    source = repo / "sample.txt"
+    source.write_text("before\n", encoding="utf-8")
+    _run_git(repo, "add", "sample.txt")
+    _run_git(repo, "commit", "-m", "base")
+    base_sha = _run_git(repo, "rev-parse", "HEAD")
+    source.write_text("after\n", encoding="utf-8")
+    _run_git(repo, "commit", "-am", "head")
+    head_sha = _run_git(repo, "rev-parse", "HEAD")
+
+    _run_git(repo, "config", "core.abbrev", "9")
+    nine = trusted_anchor._canonical_raw_diff(repo, base_sha, head_sha)
+    _run_git(repo, "config", "core.abbrev", "8")
+    eight = trusted_anchor._canonical_raw_diff(repo, base_sha, head_sha)
+
+    assert nine == eight
+    metadata = nine.split(b"\0", 1)[0].split()
+    assert len(metadata[2]) == 40
+    assert len(metadata[3]) == 40

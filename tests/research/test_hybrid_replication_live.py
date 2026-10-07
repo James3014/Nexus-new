@@ -657,7 +657,7 @@ def test_run_frozen_stack_c_uses_agy(tmp_path: Path, monkeypatch: pytest.MonkeyP
         title="Implement bugfix",
         body="Implement bugfix in isolated checkout and add tests.",
         pre_implementation_revision=rev,
-        default_branch="main",
+        default_branch="trunk",
         source_event_id="test:run_frozen_stack_c",
     )
 
@@ -674,9 +674,15 @@ def test_run_frozen_stack_c_uses_agy(tmp_path: Path, monkeypatch: pytest.MonkeyP
         "usage": {"input_tokens": 150, "output_tokens": 50},
     }
 
+    observed_candidate_kwargs: dict[str, object] = {}
+
+    def fake_agy_candidate(**kwargs):
+        observed_candidate_kwargs.update(kwargs)
+        return mock_receipt, 2.5
+
     monkeypatch.setattr(
         "nexus.research.hybrid_replication_live._run_agy_candidate",
-        lambda **kwargs: (mock_receipt, 2.5),
+        fake_agy_candidate,
     )
 
     binding = {
@@ -690,6 +696,7 @@ def test_run_frozen_stack_c_uses_agy(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert outcome.raw_result.resolved_model == EXACT_AGY_MODEL
     assert outcome.strong_online_raw_response == mock_receipt
     assert outcome.raw_result.failures == ()
+    assert observed_candidate_kwargs["default_branch"] == "trunk"
 
 
 def test_run_frozen_stack_b_fallback_uses_agy(
@@ -766,15 +773,17 @@ def test_run_frozen_stack_b_fallback_uses_agy(
     assert outcome.raw_result.failures == ()
 
 
-def test_load_binding_accepts_current_canonical_agy_generation(
-    monkeypatch: pytest.MonkeyPatch,
+def _write_loadable_agy_binding(
     tmp_path: Path,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    activation_state: str,
+) -> Path:
     binding_path = tmp_path / "LIVE_BINDING.json"
     binding_path.write_text(
         json.dumps({
             "schema": "nexus.hybrid_replication.live_binding.v1",
-            "activation_state": "AUTOMATIC_CAPTURE_READY",
+            "activation_state": activation_state,
             "frozen_receipts": {},
             "d0": {
                 "implementation_path": "/tmp/d0_impl.py",
@@ -806,6 +815,49 @@ def test_load_binding_accepts_current_canonical_agy_generation(
         "nexus.research.hybrid_replication_live.resolve_canonical_agy_dispatch_path",
         lambda payload: Path("/tmp/nexus-agy-dispatch"),
     )
+    return binding_path
+
+
+def test_load_binding_pending_readiness_control_requires_explicit_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    binding_path = _write_loadable_agy_binding(
+        tmp_path,
+        monkeypatch,
+        activation_state="READINESS_CONTROL_PENDING",
+    )
+
+    with pytest.raises(ValueError, match="live_binding_not_activated"):
+        _load_binding(binding_path)
+
+    loaded = _load_binding(binding_path, readiness_control=True)
+    assert loaded["activation_state"] == "READINESS_CONTROL_PENDING"
+
+
+def test_load_binding_ready_state_is_not_readiness_control_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    binding_path = _write_loadable_agy_binding(
+        tmp_path,
+        monkeypatch,
+        activation_state="AUTOMATIC_CAPTURE_READY",
+    )
+
+    with pytest.raises(ValueError, match="live_binding_not_activated"):
+        _load_binding(binding_path, readiness_control=True)
+
+
+def test_load_binding_accepts_current_canonical_agy_generation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    binding_path = _write_loadable_agy_binding(
+        tmp_path,
+        monkeypatch,
+        activation_state="AUTOMATIC_CAPTURE_READY",
+    )
 
     loaded = _load_binding(binding_path)
 
@@ -830,7 +882,7 @@ def test_agy_identity_preflight_passes_new_generation(
         requested_provider="agy",
         requested_model=EXACT_AGY_MODEL,
         execution_generation=CANONICAL_AGY_EXECUTION_GENERATION,
-        previous_execution_generation="AGY_GEMINI_3_8_FLASH_MEDIUM_V4",
+        previous_execution_generation="AGY_GEMINI_3_8_FLASH_MEDIUM_V5",
         jev_requested_model="jev-latest",
         jev_resolved_model="jev-1.13.0",
         expected_jev_resolved_model="jev-1.13.0",
@@ -863,7 +915,7 @@ def test_agy_identity_preflight_rejects_model_or_transport_drift(
         requested_provider="agy",
         requested_model="gemini-3.8-flash-high",
         execution_generation=CANONICAL_AGY_EXECUTION_GENERATION,
-        previous_execution_generation="AGY_GEMINI_3_8_FLASH_MEDIUM_V4",
+        previous_execution_generation="AGY_GEMINI_3_8_FLASH_MEDIUM_V5",
         jev_requested_model="jev-latest",
         jev_resolved_model="jev-1.13.0",
         expected_jev_resolved_model="jev-1.13.0",

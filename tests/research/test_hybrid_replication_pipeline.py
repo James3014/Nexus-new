@@ -11,6 +11,8 @@ from nexus.research.hybrid_replication_pipeline import (
     ADMISSION_MARKER,
     CAPTURE_MARKER,
     CONTRACT_DELTA_MARKER,
+    READINESS_CONTROL_ACTIVATION_STATE,
+    READINESS_CONTROL_DISPOSITION,
     AdmissionReceipt,
     AutomaticReplicationController,
     AutomaticReplicationStore,
@@ -462,8 +464,18 @@ def test_controller_joins_terminal_only_after_raw_seal(tmp_path: Path) -> None:
         clock=lambda: "2026-10-01T00:02:00Z",
     )
     result = controller.advance(snapshot.task_key)
-    assert result["phase"] == "GROUND_TRUTH_BOUND"
+    assert result["phase"] == "SCORED"
     assert result["raw_seal"]["raw_sha256"]
+    assert result["ground_truth"]["sha256"]
+    assert result["score"]["sha256"]
+    score_path = tmp_path / "tasks" / "James3014__Nexus-new--1311" / "score.json"
+    score = json.loads(score_path.read_text(encoding="utf-8"))
+    assert score["raw_sha256"] == result["raw_seal"]["raw_sha256"]
+    assert score["ground_truth_sha256"] == result["ground_truth"]["sha256"]
+    assert score["terminal_state"] == "PASS"
+    assert score["quality"]["terminal_state"] == "PASS"
+    assert score["quality"]["evidence_refs"] == ["pr:1312", "verifier:pass"]
+    assert score["route"] == "C"
 
 
 def test_admission_receipt_round_trip_is_bound_to_capture() -> None:
@@ -522,6 +534,61 @@ def test_admission_requires_explicit_automatic_capture_ready() -> None:
             tracked_parent_issue_number=None,
             tracked_parent_created_at=None,
             admitted_at="2026-10-01T00:00:03Z",
+        )
+
+
+def test_readiness_control_admission_is_explicitly_excluded_and_executable(
+    tmp_path: Path,
+) -> None:
+    snapshot = _snapshot(1317)
+    receipt = AdmissionReceipt.create(
+        snapshot=snapshot,
+        disposition=READINESS_CONTROL_DISPOSITION,
+        activation_boundary=snapshot.captured_at,
+        activation_state=READINESS_CONTROL_ACTIVATION_STATE,
+        exclusion_set_sha256="6" * 64,
+        issue_state_at_admission="open",
+        implementation_pr_numbers=(),
+        tracked_parent_issue_number=None,
+        tracked_parent_created_at=None,
+        admitted_at=snapshot.captured_at,
+    )
+    assert parse_admission_comment(build_admission_comment(receipt)) == receipt
+
+    store = AutomaticReplicationStore(tmp_path)
+    store.capture(snapshot, admission_disposition="PRE_AUTOMATION_PROVISIONAL_CAPTURE")
+    promoted = store.apply_admission(receipt)
+    assert promoted["phase"] == "ADMITTED"
+    assert promoted["admission_disposition"] == READINESS_CONTROL_DISPOSITION
+
+    controller = AutomaticReplicationController(
+        store=store,
+        frozen_policy_sha256="5" * 64,
+        stack_runner=lambda _: _c_outcome(),
+        terminal_resolver=lambda _: GroundTruthEvidence(
+            terminal_state="PASS",
+            terminal_at="2026-10-07T00:10:00Z",
+            evidence_refs=("control:terminal",),
+        ),
+        clock=lambda: "2026-10-07T00:00:02Z",
+    )
+    assert controller.advance(snapshot.task_key)["phase"] == "SCORED"
+
+
+def test_primary_admission_cannot_use_readiness_control_pending_state() -> None:
+    snapshot = _snapshot(1318)
+    with pytest.raises(ValueError, match="automatic_capture_ready_required"):
+        AdmissionReceipt.create(
+            snapshot=snapshot,
+            disposition="ADMITTED_PRIMARY_FRESH_TASK",
+            activation_boundary=snapshot.captured_at,
+            activation_state=READINESS_CONTROL_ACTIVATION_STATE,
+            exclusion_set_sha256="6" * 64,
+            issue_state_at_admission="open",
+            implementation_pr_numbers=(),
+            tracked_parent_issue_number=None,
+            tracked_parent_created_at=None,
+            admitted_at=snapshot.captured_at,
         )
 
 
