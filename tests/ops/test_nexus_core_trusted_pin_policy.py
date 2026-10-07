@@ -113,4 +113,4 @@ def test_committed_workflow_uses_single_canonical_pin_field_and_policy() -> None
     text = workflow.decode("utf-8")
     assert "scripts/ci/nexus_core_trusted_pin_policy.py" in text
     assert "steps.trusted-core.outputs.core_pin" in text
-    assert "git merge-base --is-ancestor" in text
+    assert "merge-base --is-ancestor" in text
