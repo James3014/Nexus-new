@@ -208,3 +208,64 @@ def test_success_path_hook_fail_closed_without_verifier_pass():
     assert getattr(op, "verifier_receipt", None) is None
     orch._record_authoritative_memory_adoption(ctx)
     assert op.applied_lesson_ids == []
+
+
+def _verifier_fail_op(**over):
+    base = dict(
+        instance_id="task-1",
+        attempt=2,
+        final_patch="--- a/f.py\n+++ b/f.py\n@@\n-x\n+y\n",
+        solve_eligible=False,
+        evaluation_report="",
+        failure_reason="verifier rejected patch",
+        last_failure_class="VERIFIER_FAIL",
+        verifier_failure_kind="test_failed",
+        verifier_exit_code=1,
+        retrieved_lesson_ids=["L1"],
+        _memory_influence_trace=MemoryTrace(
+            available=True, selected_ids=["L1"], prompt_included=True
+        ),
+    )
+    base.update(over)
+    return SimpleNamespace(**base)
+
+
+def test_verifier_fail_with_patch_binds_fail_receipt_without_applied():
+    op = _verifier_fail_op()
+    ctx = SimpleNamespace(op=op, gov=SimpleNamespace(gate_exit="verification"))
+    orch = _orch()
+    orch._bind_applied_attribution_inputs(ctx)
+    receipt = op.verifier_receipt
+    assert receipt["verifier_status"] == "fail"
+    assert receipt["receipt_id"].startswith("verifier:task-1:attempt2:")
+    assert receipt["failure_kind"] == "test_failed"
+    assert receipt["exit_code"] == 1
+    assert op.applied_patch_hash == hashlib.sha256(op.final_patch.encode()).hexdigest()
+    orch._record_authoritative_memory_adoption(ctx)
+    assert op.applied_lesson_ids == []
+
+
+def test_verifier_fail_without_patch_still_binds_fail_receipt():
+    op = _verifier_fail_op(final_patch="")
+    ctx = SimpleNamespace(op=op, gov=SimpleNamespace(gate_exit="verification"))
+    _orch()._bind_applied_attribution_inputs(ctx)
+    assert op.verifier_receipt["verifier_status"] == "fail"
+    assert op.verifier_receipt["receipt_id"].startswith("verifier:task-1:attempt2:")
+    assert not getattr(op, "applied_patch_hash", "")
+    _orch()._record_authoritative_memory_adoption(ctx)
+    assert op.applied_lesson_ids == []
+
+
+def test_no_fail_receipt_outside_verification_gate():
+    op = _verifier_fail_op()
+    ctx = SimpleNamespace(op=op, gov=SimpleNamespace(gate_exit="patch_synthesis"))
+    _orch()._bind_applied_attribution_inputs(ctx)
+    assert getattr(op, "verifier_receipt", None) is None
+
+
+def test_existing_pass_receipt_not_overwritten_by_fail_path():
+    pass_receipt = {"verifier_status": "pass", "receipt_id": "verifier:keep"}
+    op = _verifier_fail_op(verifier_receipt=pass_receipt)
+    ctx = SimpleNamespace(op=op, gov=SimpleNamespace(gate_exit="verification"))
+    _orch()._bind_applied_attribution_inputs(ctx)
+    assert op.verifier_receipt is pass_receipt

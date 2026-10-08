@@ -1144,36 +1144,74 @@ class HealOrchestrator:
           applied patch is the selected one unless a differing
           ``selected_candidate_hash`` was recorded.
 
-        Existing values are never weakened or overwritten: a pre-set failing
-        verifier receipt stays failing and the authoritative check is unchanged.
+        * verifier fail: when VerificationPhase ran and rejected the attempt
+          (``gate_exit == "verification"`` without ``solve_eligible``, with a
+          verifier-failure marker), a ``verifier_status == "fail"`` receipt is
+          bound so the failed attempt still carries measured evidence for the
+          closure qualification. A fail receipt never makes ``applied`` non-empty:
+          the authoritative check in ``_record_authoritative_memory_adoption``
+          still requires an explicit verifier pass.
+
+        Existing values are never weakened or overwritten: a pre-set receipt
+        (pass or fail) is authoritative and is never replaced here.
         """
         op = ctx.op
         try:
             patch = str(getattr(op, "final_patch", "") or "")
-            if not patch:
-                return
-            patch_hash = hashlib.sha256(patch.encode()).hexdigest()
-            if not getattr(op, "applied_patch_hash", ""):
-                op.applied_patch_hash = patch_hash
-            if getattr(op, "selected_candidate_hash_matches_applied", None) is None:
-                selected = str(getattr(op, "selected_candidate_hash", "") or "")
-                op.selected_candidate_hash_matches_applied = (not selected) or selected == op.applied_patch_hash
+            patch_hash = ""
+            if patch:
+                patch_hash = hashlib.sha256(patch.encode()).hexdigest()
+                if not getattr(op, "applied_patch_hash", ""):
+                    op.applied_patch_hash = patch_hash
+                if getattr(op, "selected_candidate_hash_matches_applied", None) is None:
+                    selected = str(getattr(op, "selected_candidate_hash", "") or "")
+                    op.selected_candidate_hash_matches_applied = (not selected) or selected == op.applied_patch_hash
             existing = getattr(op, "verifier_receipt", None)
             if existing is not None:
                 return  # an explicit receipt (pass or fail) is authoritative
             gate_exit = str(getattr(getattr(ctx, "gov", None), "gate_exit", "") or "")
-            if gate_exit == "verification" and bool(getattr(op, "solve_eligible", False)):
-                report = str(getattr(op, "evaluation_report", "") or "")
+            if gate_exit != "verification":
+                return
+            report = str(getattr(op, "evaluation_report", "") or "")
+            instance = getattr(op, "instance_id", "") or getattr(op, "task_id", "")
+            if bool(getattr(op, "solve_eligible", False)):
+                if not patch:
+                    return  # a pass receipt requires the applied patch it attests to
                 op.verifier_receipt = {
                     "verifier_status": "pass",
                     "receipt_id": "verifier:%s:attempt%s:%s" % (
-                        getattr(op, "instance_id", "") or getattr(op, "task_id", ""),
+                        instance,
                         getattr(op, "attempt", ""),
                         hashlib.sha256(f"{patch_hash}|{report}".encode()).hexdigest()[:16],
                     ),
                 }
+                return
+            if not self._is_verifier_failure(op):
+                return
+            # Fail receipt: hash the applied patch when one exists; otherwise
+            # hash the failure reason so the receipt still has a stable id.
+            basis = f"{patch_hash}|{report}" if patch else str(getattr(op, "failure_reason", "") or "")
+            op.verifier_receipt = {
+                "verifier_status": "fail",
+                "receipt_id": "verifier:%s:attempt%s:%s" % (
+                    instance,
+                    getattr(op, "attempt", ""),
+                    hashlib.sha256(basis.encode()).hexdigest()[:16],
+                ),
+                "failure_kind": str(getattr(op, "verifier_failure_kind", "") or ""),
+                "exit_code": getattr(op, "verifier_exit_code", ""),
+            }
         except Exception:
             return  # fail closed: missing inputs leave applied empty
+
+    @staticmethod
+    def _is_verifier_failure(op: Any) -> bool:
+        """True when the recorded failure is a verifier rejection (not infra/other)."""
+        if str(getattr(op, "last_failure_class", "") or "") == "VERIFIER_FAIL":
+            return True
+        if str(getattr(op, "failure_class", "") or "") in {"verification_failed", "semantic_wrong_patch"}:
+            return True
+        return "verifier" in str(getattr(op, "failure_reason", "") or "").lower()
 
     def _record_authoritative_memory_adoption(self, ctx: HealContext) -> None:
         """Bind memory adoption only when patch and verifier receipts agree.
