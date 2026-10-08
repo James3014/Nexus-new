@@ -407,3 +407,21 @@ def test_compact_launch_records_bounded_compaction_evidence(
     assert result["operation"]["review_packet_mode"] == "compact"
     assert result["operation"]["review_compaction_schema"] == "nexus.agy_review_compaction.v1"
     assert len(result["operation"]["review_compact_payload_sha256"]) == 64
+
+
+def test_gemini_flash_dispatch_argv_carries_default_effort(monkeypatch, tmp_path: Path) -> None:
+    root, base, contract = make_repo(tmp_path)
+    op_root = tmp_path / "operations"
+    args = args_for(root, base, contract, op_root)
+    args.model = "gemini-3.8-flash"
+    args.effort = None
+    FakeSpawner.calls = []
+    monkeypatch.setattr(review, "_dispatcher_path", lambda: Path("/fake/nexus-agy-dispatch"))
+    monkeypatch.setattr(review, "_spawn_dispatch", FakeSpawner.spawn)
+
+    review.launch_review(args)
+
+    assert len(FakeSpawner.calls) == 1
+    argv = FakeSpawner.calls[0]
+    assert "--effort" in argv
+    assert argv[argv.index("--effort") + 1] == "medium"
