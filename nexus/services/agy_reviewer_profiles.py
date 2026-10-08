@@ -34,6 +34,7 @@ class AgyReviewerLaunchProfile:
     mode: str
     supported_efforts: tuple[str, ...] = ()
     tool_policy: str = "packet_only_deny_all"
+    default_effort: str | None = None
 
     def semantic_body(self) -> dict[str, Any]:
         return {
@@ -44,6 +45,7 @@ class AgyReviewerLaunchProfile:
             "mode": self.mode,
             "supported_efforts": list(self.supported_efforts),
             "tool_policy": self.tool_policy,
+            "default_effort": self.default_effort,
         }
 
     @property
@@ -61,6 +63,8 @@ _PROFILES = (
         profile_id="gemini-3-8-flash.packet-review.v2",
         model="gemini-3.8-flash",
         mode="plan",
+        supported_efforts=("low", "medium", "high"),
+        default_effort="medium",
     ),
     AgyReviewerLaunchProfile(
         profile_id="gemini-3-8-flash-low.packet-review.v2",
@@ -74,6 +78,13 @@ if len(_PROFILES_BY_MODEL) != len(_PROFILES):
     raise RuntimeError("DUPLICATE_REVIEWER_MODEL_PROFILE")
 if len({profile.profile_id for profile in _PROFILES}) != len(_PROFILES):
     raise RuntimeError("DUPLICATE_REVIEWER_PROFILE_ID")
+_invalid_efforts = [
+    p
+    for p in _PROFILES
+    if p.default_effort is not None and p.default_effort not in p.supported_efforts
+]
+if _invalid_efforts:
+    raise RuntimeError(f"INVALID_DEFAULT_EFFORT:{_invalid_efforts[0].model}")
 
 
 def supported_reviewer_models() -> tuple[str, ...]:
@@ -104,6 +115,16 @@ def resolve_reviewer_launch_profile(
     return profile
 
 
+def effective_reviewer_effort(
+    profile: AgyReviewerLaunchProfile,
+    requested_effort: str | None = None,
+) -> str | None:
+    effort = str(requested_effort or "").strip() or None
+    if effort is not None and effort not in profile.supported_efforts:
+        raise AgyReviewerProfileError(f"REVIEW_EFFORT_UNSUPPORTED:{profile.model}:{effort}")
+    return effort if effort is not None else profile.default_effort
+
+
 def launch_profile_evidence(
     profile: AgyReviewerLaunchProfile,
     *,
@@ -118,6 +139,9 @@ def launch_profile_evidence(
         "review_launch_profile_sha256": profile.profile_sha256,
         "review_launch_mode": profile.mode,
         "review_launch_requested_effort": effort,
+        "review_launch_effective_effort": effective_reviewer_effort(
+            profile, requested_effort=effort
+        ),
     }
 
 
@@ -126,6 +150,7 @@ __all__ = [
     "AgyReviewerProfileError",
     "REVIEWER_LAUNCH_CATALOG_VERSION",
     "REVIEWER_LAUNCH_PROFILE_SCHEMA",
+    "effective_reviewer_effort",
     "launch_profile_evidence",
     "resolve_reviewer_launch_profile",
     "supported_reviewer_models",
