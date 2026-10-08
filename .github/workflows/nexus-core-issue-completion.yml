@@ -62,6 +62,7 @@ jobs:
               ".nexus-core/config.toml",
               "scripts/ci/nexus-core-verify.sh",
               "scripts/ci/nexus_core_trusted_pin_policy.py",
+              "scripts/ci/nexus_core_observe_dependency.py",
           ]
 
           def base_bytes(path: str) -> bytes:
@@ -144,6 +145,17 @@ jobs:
           echo "$UV_TOOL_BIN_DIR" >> "$GITHUB_PATH"
 
 
+      - name: Bootstrap canonical dependency material environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          material_env="$RUNNER_TEMP/nexus-core-materials"
+          rm -rf "$material_env"
+          uv venv --python 3.11 "$material_env"
+          uv pip install --python "$material_env/bin/python" --requirement requirements/canonical-learning.txt
+          uv pip install --python "$material_env/bin/python" --requirement requirements/canonical-runtime.txt
+          echo "NEXUS_CORE_MATERIAL_PYTHON=$material_env/bin/python" >> "$GITHUB_ENV"
+
       - name: Bind exact Issue contract
         run: |
           set -euo pipefail
@@ -170,15 +182,30 @@ jobs:
           path = receipts[-1]
           payload = json.load(open(path, encoding="utf-8"))
           verifier = payload.get("verifier") or {}
+          artifacts = payload.get("evidence_artifacts") or []
+          outcome = payload.get("outcome") or {}
           print("NEXUS_CORE_DIAGNOSTIC_RECEIPT:", path)
-          print("status:", payload.get("status"))
-          print("reason_codes:", payload.get("reason_codes"))
-          print("verifier_command:", verifier.get("command"))
-          print("verifier_exit_code:", verifier.get("exit_code"))
-          print("--- verifier stdout ---")
-          print(verifier.get("stdout", ""))
-          print("--- verifier stderr ---")
-          print(verifier.get("stderr", ""))
+          print("status:", outcome.get("status") or payload.get("status"))
+          print("reason_codes:", outcome.get("reason_codes") or payload.get("reason_codes"))
+          if verifier:
+              print("verifier_command:", verifier.get("command"))
+              print("verifier_exit_code:", verifier.get("exit_code"))
+              print("--- verifier stdout ---")
+              print(verifier.get("stdout", ""))
+              print("--- verifier stderr ---")
+              print(verifier.get("stderr", ""))
+          for artifact in artifacts:
+              print("--- evidence artifact ---")
+              print("producer_id:", artifact.get("producer_id"))
+              print("kind:", artifact.get("producer_kind"))
+              print("status:", artifact.get("status"))
+              print("expected_identity:", artifact.get("expected_identity"))
+              print("observed_identity:", artifact.get("observed_identity"))
+              print("exit_code:", artifact.get("exit_code"))
+              print("--- stdout ---")
+              print(artifact.get("stdout", ""))
+              print("--- stderr ---")
+              print(artifact.get("stderr", ""))
           PY
 
       - name: Install gitlink metadata for checkout post-cleanup
