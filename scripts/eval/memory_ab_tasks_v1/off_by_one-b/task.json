@@ -1,0 +1,8 @@
+{
+  "id": "off_by_one-b",
+  "bug_class": "off_by_one",
+  "variant": "b",
+  "problem_statement": "last_k() returns one element too few. last_k([1, 2, 3, 4], 2) should return [3, 4] but returns [4].",
+  "target_file": "tail.py",
+  "repro_file": "repro.py"
+}
