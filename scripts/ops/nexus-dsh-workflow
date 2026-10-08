@@ -1,0 +1,790 @@
+#!/usr/bin/env python3
+"""Guarded Nexus entrypoint for resuming tracked DSH goals.
+
+This command does not own Issue completion, DSH goal lifecycle, provider routing,
+leases, verification, merge, or release. It stores a durable tracking binding
+for a DSH session and re-reads authoritative workflow state before any resume
+can launch the DSH process. Any BLOCK_RESUME decision exits 75; the provider is
+never invoked unless the decision is ALLOW_RESUME.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable, Sequence
+
+BINDING_SCHEMA = "nexus.dsh_tracking_binding.v1"
+PREFLIGHT_SCHEMA = "nexus.dsh_resume_preflight.v1"
+DOCTOR_SCHEMA = "nexus.workflow_doctor.v1"
+DOCTOR_CLAIM_CEILING = "READ_ONLY_WORKFLOW_OBSERVATION"
+PREFLIGHT_CLAIM_CEILING = "PRE_RESUME_GUARD_NO_COMPLETION_AUTHORITY"
+EXIT_BLOCKED = 75
+SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+
+
+class DshWorkflowError(RuntimeError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _canonical_json(value: dict[str, Any]) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _sha256_bytes(value: bytes) -> str:
+    return "sha256:" + hashlib.sha256(value).hexdigest()
+
+
+def _sha256_file(path: Path) -> str:
+    return _sha256_bytes(path.read_bytes())
+
+
+def _state_root(raw: str | None) -> Path:
+    configured = raw or os.getenv("NEXUS_DSH_WORKFLOW_STATE_ROOT")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return Path.home() / ".local/state/nexus-dsh-workflows"
+
+
+def _binding_path(root: Path, session_id: str) -> Path:
+    digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+    return root / "bindings" / f"{digest}.json"
+
+
+def _preflight_dir(root: Path, session_id: str) -> Path:
+    digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+    return root / "preflights" / digest
+
+
+def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}")
+    tmp.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _binding_hash(payload_without_hash: dict[str, Any]) -> str:
+    return _sha256_bytes(_canonical_json(payload_without_hash).encode("utf-8"))
+
+
+def _validate_repository(repository: str) -> str:
+    value = repository.strip()
+    if not REPOSITORY_RE.fullmatch(value):
+        raise DshWorkflowError(
+            "DSH_TRACKING_REPOSITORY_INVALID",
+            "repository must be an owner/name slug",
+        )
+    return value
+
+
+def _validate_session_id(session_id: str) -> str:
+    value = session_id.strip()
+    if not SESSION_RE.fullmatch(value):
+        raise DshWorkflowError(
+            "DSH_TRACKING_SESSION_INVALID",
+            "session id must be a normalized DSH session identifier",
+        )
+    return value
+
+
+def _parse_created_goal_log(path: Path) -> dict[str, Any]:
+    session_id: str | None = None
+    observed_cwd: str | None = None
+    create_calls: set[str] = set()
+    goal: dict[str, Any] | None = None
+
+    def record_session(candidate: str) -> None:
+        nonlocal session_id
+        candidate = _validate_session_id(candidate)
+        if session_id is not None and session_id != candidate:
+            raise DshWorkflowError(
+                "DSH_TRACKING_MULTIPLE_SESSIONS",
+                "log contains more than one session id",
+            )
+        session_id = candidate
+
+    def record_goal(candidate_goal: Any) -> None:
+        nonlocal goal
+        if not isinstance(candidate_goal, dict):
+            return
+        goal_id = candidate_goal.get("id")
+        revision = candidate_goal.get("revision")
+        objective = candidate_goal.get("objective")
+        if (
+            not isinstance(goal_id, str)
+            or not goal_id
+            or not isinstance(revision, int)
+            or revision < 1
+            or not isinstance(objective, str)
+            or not objective.strip()
+        ):
+            return
+        normalized = {
+            "id": goal_id,
+            "revision": revision,
+            "objective": objective.strip(),
+        }
+        if goal is not None and goal != normalized:
+            raise DshWorkflowError(
+                "DSH_TRACKING_MULTIPLE_GOALS",
+                "log contains multiple successful create_goal identities",
+            )
+        goal = normalized
+
+    with path.open("r", encoding="utf-8") as handle:
+        for line_number, raw in enumerate(handle, start=1):
+            line = raw.strip()
+            if not line:
+                continue
+
+            if line.startswith("DSH_SESSION_ID="):
+                record_session(line.split("=", 1)[1])
+                continue
+
+            if line.startswith("DSH_EVENT="):
+                event_text = line.split("=", 1)[1]
+            elif line.startswith("{"):
+                event_text = line
+            else:
+                continue
+
+            try:
+                event = json.loads(event_text)
+            except json.JSONDecodeError as exc:
+                raise DshWorkflowError(
+                    "DSH_TRACKING_LOG_INVALID_JSON",
+                    f"line {line_number} is not valid JSON",
+                ) from exc
+            if not isinstance(event, dict):
+                continue
+
+            if event.get("type") == "session":
+                candidate = event.get("sessionId")
+                if isinstance(candidate, str):
+                    record_session(candidate)
+                cwd = event.get("cwd")
+                if isinstance(cwd, str) and cwd:
+                    observed_cwd = cwd
+
+            if event.get("type") == "goal/change":
+                data = event.get("data")
+                if (
+                    isinstance(data, dict)
+                    and data.get("kind") == "goal/change"
+                    and data.get("operation") == "create"
+                ):
+                    record_goal(data.get("goal"))
+
+            if event.get("type") == "tool_call" and event.get("tool") == "create_goal":
+                call_id = event.get("callId")
+                if isinstance(call_id, str) and call_id:
+                    create_calls.add(call_id)
+
+            if (
+                event.get("type") == "tool_result"
+                and event.get("status") == "completed"
+                and event.get("callId") in create_calls
+            ):
+                raw_result = event.get("result")
+                if not isinstance(raw_result, str):
+                    continue
+                try:
+                    result = json.loads(raw_result)
+                except json.JSONDecodeError:
+                    continue
+                record_goal(result.get("goal") if isinstance(result, dict) else None)
+
+    if session_id is None:
+        raise DshWorkflowError(
+            "DSH_TRACKING_SESSION_NOT_OBSERVED",
+            "log does not contain a DSH session identity",
+        )
+    if goal is None:
+        raise DshWorkflowError(
+            "DSH_TRACKING_GOAL_NOT_OBSERVED",
+            "log does not contain a durable create_goal result",
+        )
+    return {
+        "session_id": session_id,
+        "observed_cwd": observed_cwd,
+        "goal": goal,
+    }
+
+
+def build_binding_from_log(
+    *,
+    log_path: Path,
+    repository: str,
+    issue_number: int,
+    repo_root: Path,
+    dsh_home: Path,
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    if issue_number < 1:
+        raise DshWorkflowError(
+            "DSH_TRACKING_ISSUE_INVALID",
+            "issue number must be positive",
+        )
+    observed = _parse_created_goal_log(log_path)
+    repo_root = repo_root.expanduser().resolve()
+    dsh_home = dsh_home.expanduser().resolve()
+    observed_cwd = observed.get("observed_cwd")
+    if observed_cwd and Path(observed_cwd).expanduser().resolve() != repo_root:
+        raise DshWorkflowError(
+            "DSH_TRACKING_REPO_ROOT_MISMATCH",
+            "DSH session cwd does not match the tracked repository root",
+        )
+
+    goal = observed["goal"]
+    body: dict[str, Any] = {
+        "schema": BINDING_SCHEMA,
+        "session_id": observed["session_id"],
+        "goal_id": goal["id"],
+        "goal_revision_at_bind": goal["revision"],
+        "objective": goal["objective"],
+        "repository": _validate_repository(repository),
+        "issue_number": issue_number,
+        "repo_root": str(repo_root),
+        "dsh_home": str(dsh_home),
+        "source_log_sha256": _sha256_file(log_path),
+        "created_at": created_at or _utc_now(),
+        "authority": "TRACKING_METADATA_ONLY",
+    }
+    return {**body, "binding_hash": _binding_hash(body)}
+
+
+def validate_binding(payload: dict[str, Any]) -> dict[str, Any]:
+    if payload.get("schema") != BINDING_SCHEMA:
+        raise DshWorkflowError(
+            "DSH_TRACKING_BINDING_SCHEMA_MISMATCH",
+            "tracking binding schema mismatch",
+        )
+    required = {
+        "session_id",
+        "goal_id",
+        "goal_revision_at_bind",
+        "objective",
+        "repository",
+        "issue_number",
+        "repo_root",
+        "dsh_home",
+        "source_log_sha256",
+        "created_at",
+        "authority",
+        "binding_hash",
+    }
+    if not required.issubset(payload):
+        raise DshWorkflowError(
+            "DSH_TRACKING_BINDING_INCOMPLETE",
+            "tracking binding is missing required fields",
+        )
+    _validate_session_id(str(payload["session_id"]))
+    _validate_repository(str(payload["repository"]))
+    if not isinstance(payload["issue_number"], int) or payload["issue_number"] < 1:
+        raise DshWorkflowError(
+            "DSH_TRACKING_BINDING_ISSUE_INVALID",
+            "tracking binding issue number is invalid",
+        )
+    if payload.get("authority") != "TRACKING_METADATA_ONLY":
+        raise DshWorkflowError(
+            "DSH_TRACKING_BINDING_AUTHORITY_INVALID",
+            "tracking binding cannot mint workflow authority",
+        )
+    without_hash = dict(payload)
+    observed_hash = str(without_hash.pop("binding_hash"))
+    expected_hash = _binding_hash(without_hash)
+    if observed_hash != expected_hash:
+        raise DshWorkflowError(
+            "DSH_TRACKING_BINDING_HASH_MISMATCH",
+            "tracking binding integrity check failed",
+        )
+    return payload
+
+
+def store_binding(root: Path, binding: dict[str, Any]) -> Path:
+    validate_binding(binding)
+    path = _binding_path(root, str(binding["session_id"]))
+    if path.exists():
+        existing = validate_binding(json.loads(path.read_text(encoding="utf-8")))
+        immutable = (
+            "session_id",
+            "goal_id",
+            "goal_revision_at_bind",
+            "objective",
+            "repository",
+            "issue_number",
+            "repo_root",
+            "dsh_home",
+            "source_log_sha256",
+        )
+        if any(existing.get(key) != binding.get(key) for key in immutable):
+            raise DshWorkflowError(
+                "DSH_TRACKING_BINDING_CONFLICT",
+                "session is already bound to different tracked work",
+            )
+        return path
+    _atomic_write_json(path, binding)
+    return path
+
+
+def load_binding(root: Path, session_id: str) -> dict[str, Any]:
+    session_id = _validate_session_id(session_id)
+    path = _binding_path(root, session_id)
+    if not path.is_file():
+        raise DshWorkflowError(
+            "DSH_TRACKING_BINDING_MISSING",
+            "tracked DSH resume requires a durable session binding",
+        )
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DshWorkflowError(
+            "DSH_TRACKING_BINDING_UNREADABLE",
+            "tracking binding cannot be read",
+        ) from exc
+    if not isinstance(payload, dict):
+        raise DshWorkflowError(
+            "DSH_TRACKING_BINDING_INVALID",
+            "tracking binding must be a JSON object",
+        )
+    return validate_binding(payload)
+
+
+def load_goal_projection(binding: dict[str, Any]) -> dict[str, Any]:
+    session_id = _validate_session_id(str(binding["session_id"]))
+    path = (
+        Path(str(binding["dsh_home"])).expanduser().resolve()
+        / "storages"
+        / "session_projcache"
+        / "sessions"
+        / f"{session_id}.json"
+    )
+    if not path.is_file():
+        raise DshWorkflowError(
+            "DSH_GOAL_PROJECTION_MISSING",
+            "persisted DSH goal projection is unavailable",
+        )
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DshWorkflowError(
+            "DSH_GOAL_PROJECTION_UNREADABLE",
+            "persisted DSH goal projection cannot be read",
+        ) from exc
+
+    rows = ((payload.get("record") or {}).get("rows") or {}) if isinstance(payload, dict) else {}
+    goal_row = rows.get("goal") if isinstance(rows, dict) else None
+    value = goal_row.get("val") if isinstance(goal_row, dict) else None
+    current = value.get("current") if isinstance(value, dict) else None
+    goal = current.get("goal") if isinstance(current, dict) else None
+    if not isinstance(goal, dict):
+        raise DshWorkflowError(
+            "DSH_GOAL_PROJECTION_MISSING_CURRENT",
+            "persisted DSH session has no current goal",
+        )
+
+    goal_id = goal.get("id")
+    revision = goal.get("revision")
+    objective = goal.get("objective")
+    phase = goal.get("phase")
+    if (
+        not isinstance(goal_id, str)
+        or not isinstance(revision, int)
+        or revision < 1
+        or not isinstance(objective, str)
+        or not objective.strip()
+        or phase not in {"active", "paused", "blocked", "complete"}
+    ):
+        raise DshWorkflowError(
+            "DSH_GOAL_PROJECTION_INVALID",
+            "persisted DSH current goal is malformed",
+        )
+    if goal_id != binding["goal_id"] or objective.strip() != binding["objective"]:
+        raise DshWorkflowError(
+            "DSH_GOAL_IDENTITY_MISMATCH",
+            "persisted DSH current goal no longer matches the tracked binding",
+        )
+    if revision < binding["goal_revision_at_bind"]:
+        raise DshWorkflowError(
+            "DSH_GOAL_REVISION_REGRESSED",
+            "persisted DSH goal revision predates the tracking binding",
+        )
+    if phase == "complete":
+        raise DshWorkflowError(
+            "DSH_GOAL_ALREADY_COMPLETE",
+            "persisted DSH goal is already complete and must not be resumed",
+        )
+
+    rounds_started = current.get("roundsStarted")
+    if not isinstance(rounds_started, int) or rounds_started < 0:
+        raise DshWorkflowError(
+            "DSH_GOAL_PROJECTION_INVALID",
+            "persisted DSH goal round counter is malformed",
+        )
+    return {
+        "goal_id": goal_id,
+        "goal_revision": revision,
+        "goal_objective": objective.strip(),
+        "goal_phase": phase,
+        "goal_rounds_started": rounds_started,
+        "projection_path": str(path),
+    }
+
+
+def _blocked_preflight(
+    binding: dict[str, Any],
+    *,
+    reason_code: str,
+    detail: str,
+    doctor: dict[str, Any] | None = None,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    source = doctor.get("source") if isinstance(doctor, dict) else None
+    task = doctor.get("task") if isinstance(doctor, dict) else None
+    next_gate = doctor.get("next_gate") if isinstance(doctor, dict) else None
+    return {
+        "schema": PREFLIGHT_SCHEMA,
+        "claim_ceiling": PREFLIGHT_CLAIM_CEILING,
+        "generated_at": generated_at or _utc_now(),
+        "decision": "BLOCK_RESUME",
+        "reason_code": reason_code,
+        "detail": detail,
+        "provider_invocation_allowed": False,
+        "session_id": binding["session_id"],
+        "goal_id": binding["goal_id"],
+        "repository": binding["repository"],
+        "issue_number": binding["issue_number"],
+        "binding_hash": binding["binding_hash"],
+        "doctor_resume_disposition": (
+            doctor.get("resume_disposition") if isinstance(doctor, dict) else None
+        ),
+        "doctor_next_gate": (next_gate.get("code") if isinstance(next_gate, dict) else None),
+        "source_head": source.get("head") if isinstance(source, dict) else None,
+        "source_github_main": (source.get("github_main") if isinstance(source, dict) else None),
+        "task_state": task.get("state") if isinstance(task, dict) else None,
+        "task_updated_at": (task.get("updated_at") if isinstance(task, dict) else None),
+        "task_url": task.get("url") if isinstance(task, dict) else None,
+    }
+
+
+def evaluate_doctor(
+    binding: dict[str, Any],
+    doctor: dict[str, Any],
+    *,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    if doctor.get("schema") != DOCTOR_SCHEMA:
+        return _blocked_preflight(
+            binding,
+            reason_code="WORKFLOW_DOCTOR_SCHEMA_MISMATCH",
+            detail="workflow doctor schema is not the expected version",
+            doctor=doctor,
+            generated_at=generated_at,
+        )
+    if doctor.get("claim_ceiling") != DOCTOR_CLAIM_CEILING:
+        return _blocked_preflight(
+            binding,
+            reason_code="WORKFLOW_DOCTOR_CLAIM_CEILING_MISMATCH",
+            detail="workflow doctor observation has an unexpected claim ceiling",
+            doctor=doctor,
+            generated_at=generated_at,
+        )
+
+    task = doctor.get("task")
+    if not isinstance(task, dict) or task.get("status") != "OBSERVED":
+        return _blocked_preflight(
+            binding,
+            reason_code="TRACKED_ISSUE_STATE_UNVERIFIED",
+            detail="tracked Issue state could not be authoritatively observed",
+            doctor=doctor,
+            generated_at=generated_at,
+        )
+    if task.get("issue_number") != binding["issue_number"]:
+        return _blocked_preflight(
+            binding,
+            reason_code="TRACKED_ISSUE_IDENTITY_MISMATCH",
+            detail="workflow doctor returned a different Issue identity",
+            doctor=doctor,
+            generated_at=generated_at,
+        )
+    if task.get("state") != "open":
+        return _blocked_preflight(
+            binding,
+            reason_code="TRACKED_ISSUE_TERMINAL",
+            detail="tracked Issue is terminal; resume requires a fresh reopened or successor contract",
+            doctor=doctor,
+            generated_at=generated_at,
+        )
+
+    disposition = doctor.get("resume_disposition")
+    next_gate = doctor.get("next_gate")
+    next_gate_code = next_gate.get("code") if isinstance(next_gate, dict) else None
+    if disposition != "SAFE":
+        return _blocked_preflight(
+            binding,
+            reason_code="WORKFLOW_NOT_SAFE_TO_RESUME",
+            detail="workflow doctor reported a non-safe disposition",
+            doctor=doctor,
+            generated_at=generated_at,
+        )
+    if next_gate_code != "CONTINUE_BOUNDED_ISSUE_WORK":
+        return _blocked_preflight(
+            binding,
+            reason_code="WORKFLOW_NEXT_GATE_NOT_RESUMABLE",
+            detail="tracked Issue is open but the current workflow gate is not bounded Issue work",
+            doctor=doctor,
+            generated_at=generated_at,
+        )
+
+    source = doctor.get("source")
+    return {
+        "schema": PREFLIGHT_SCHEMA,
+        "claim_ceiling": PREFLIGHT_CLAIM_CEILING,
+        "generated_at": generated_at or _utc_now(),
+        "decision": "ALLOW_RESUME",
+        "reason_code": "TRACKED_ISSUE_OPEN_AND_WORKFLOW_SAFE",
+        "detail": "fresh workflow evidence permits bounded tracked-Issue continuation",
+        "provider_invocation_allowed": True,
+        "session_id": binding["session_id"],
+        "goal_id": binding["goal_id"],
+        "repository": binding["repository"],
+        "issue_number": binding["issue_number"],
+        "binding_hash": binding["binding_hash"],
+        "doctor_resume_disposition": disposition,
+        "doctor_next_gate": next_gate_code,
+        "source_head": source.get("head") if isinstance(source, dict) else None,
+        "source_github_main": (source.get("github_main") if isinstance(source, dict) else None),
+        "task_state": task.get("state"),
+        "task_updated_at": task.get("updated_at"),
+        "task_url": task.get("url"),
+    }
+
+
+Runner = Callable[..., subprocess.CompletedProcess[str]]
+
+
+def run_preflight(
+    binding: dict[str, Any],
+    *,
+    doctor_bin: str,
+    runner: Runner = subprocess.run,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    try:
+        goal_projection = load_goal_projection(binding)
+    except DshWorkflowError as exc:
+        return _blocked_preflight(
+            binding,
+            reason_code=exc.code,
+            detail=str(exc),
+            generated_at=generated_at,
+        )
+
+    argv = [
+        doctor_bin,
+        "--json",
+        "--repo-root",
+        str(binding["repo_root"]),
+        "--repository",
+        str(binding["repository"]),
+        "--issue",
+        str(binding["issue_number"]),
+    ]
+    try:
+        proc = runner(
+            argv,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return _blocked_preflight(
+            binding,
+            reason_code="WORKFLOW_DOCTOR_UNAVAILABLE",
+            detail=f"{type(exc).__name__}: {exc}",
+            generated_at=generated_at,
+        )
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        return _blocked_preflight(
+            binding,
+            reason_code="WORKFLOW_DOCTOR_FAILED",
+            detail=detail[-1000:] or f"exit={proc.returncode}",
+            generated_at=generated_at,
+        )
+    try:
+        doctor = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        return _blocked_preflight(
+            binding,
+            reason_code="WORKFLOW_DOCTOR_OUTPUT_INVALID",
+            detail=f"{type(exc).__name__}: {exc}",
+            generated_at=generated_at,
+        )
+    if not isinstance(doctor, dict):
+        return _blocked_preflight(
+            binding,
+            reason_code="WORKFLOW_DOCTOR_OUTPUT_INVALID",
+            detail="workflow doctor output must be a JSON object",
+            generated_at=generated_at,
+        )
+    receipt = evaluate_doctor(binding, doctor, generated_at=generated_at)
+    receipt.update(goal_projection)
+    return receipt
+
+
+def persist_preflight(root: Path, receipt: dict[str, Any]) -> Path:
+    body = dict(receipt)
+    body["receipt_hash"] = _sha256_bytes(_canonical_json(body).encode("utf-8"))
+    session_dir = _preflight_dir(root, str(receipt["session_id"]))
+    stamp = str(receipt["generated_at"]).replace(":", "").replace("-", "")
+    unique = session_dir / f"{stamp}-{body['receipt_hash'][7:19]}.json"
+    _atomic_write_json(unique, body)
+    _atomic_write_json(session_dir / "latest.json", body)
+    return unique
+
+
+def build_dsh_resume_argv(
+    *,
+    dsh_bin: str,
+    session_id: str,
+    profile: str,
+    patches: Sequence[str],
+    json_output: bool,
+    task: str,
+) -> list[str]:
+    argv = [dsh_bin, "--profile", profile]
+    for patch in patches:
+        argv.extend(["--patch", patch])
+    if json_output:
+        argv.append("--json")
+    argv.extend(["--session-id", _validate_session_id(session_id), task])
+    return argv
+
+
+def _print_result(payload: dict[str, Any], *, receipt_path: Path | None = None) -> None:
+    out = dict(payload)
+    if receipt_path is not None:
+        out["receipt_path"] = str(receipt_path)
+    print(json.dumps(out, sort_keys=True))
+
+
+def _default_binary(name: str) -> str:
+    return str(Path.home() / ".local/bin" / name)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_bind = sub.add_parser("bind-log")
+    p_bind.add_argument("--log-file", required=True)
+    p_bind.add_argument("--repository", required=True)
+    p_bind.add_argument("--issue", required=True, type=int)
+    p_bind.add_argument("--repo-root", required=True)
+    p_bind.add_argument("--dsh-home", required=True)
+    p_bind.add_argument("--state-root")
+
+    p_check = sub.add_parser("check")
+    p_check.add_argument("--session-id", required=True)
+    p_check.add_argument("--state-root")
+    p_check.add_argument("--doctor-bin", default=_default_binary("nexus-workflow-doctor"))
+
+    p_resume = sub.add_parser("resume")
+    p_resume.add_argument("--session-id", required=True)
+    p_resume.add_argument("--state-root")
+    p_resume.add_argument("--doctor-bin", default=_default_binary("nexus-workflow-doctor"))
+    p_resume.add_argument("--dsh-bin", default=_default_binary("dsh"))
+    p_resume.add_argument("--profile", default="headless")
+    p_resume.add_argument("--patch", action="append", default=[])
+    p_resume.add_argument("--json", action="store_true", dest="json_output")
+    p_resume.add_argument("--task", required=True)
+
+    args = parser.parse_args(argv)
+    root = _state_root(getattr(args, "state_root", None))
+
+    try:
+        if args.command == "bind-log":
+            binding = build_binding_from_log(
+                log_path=Path(args.log_file).expanduser().resolve(),
+                repository=args.repository,
+                issue_number=args.issue,
+                repo_root=Path(args.repo_root),
+                dsh_home=Path(args.dsh_home),
+            )
+            path = store_binding(root, binding)
+            _print_result(binding, receipt_path=path)
+            return 0
+
+        binding = load_binding(root, args.session_id)
+        preflight = run_preflight(binding, doctor_bin=args.doctor_bin)
+        preflight["invocation"] = args.command
+        receipt_path = persist_preflight(root, preflight)
+        if args.command == "check":
+            _print_result(preflight, receipt_path=receipt_path)
+            return 0 if preflight["decision"] == "ALLOW_RESUME" else EXIT_BLOCKED
+
+        if preflight["decision"] != "ALLOW_RESUME":
+            _print_result(preflight, receipt_path=receipt_path)
+            return EXIT_BLOCKED
+
+        dsh_argv = build_dsh_resume_argv(
+            dsh_bin=args.dsh_bin,
+            session_id=args.session_id,
+            profile=args.profile,
+            patches=args.patch,
+            json_output=args.json_output,
+            task=args.task,
+        )
+        env = os.environ.copy()
+        env["DSH_HOME"] = str(binding["dsh_home"])
+        env["NEXUS_DSH_PREFLIGHT_RECEIPT"] = str(receipt_path)
+        proc = subprocess.run(
+            dsh_argv,
+            cwd=str(binding["repo_root"]),
+            env=env,
+            check=False,
+        )
+        return proc.returncode
+    except DshWorkflowError as exc:
+        payload = {
+            "schema": PREFLIGHT_SCHEMA,
+            "claim_ceiling": PREFLIGHT_CLAIM_CEILING,
+            "decision": "BLOCK_RESUME",
+            "reason_code": exc.code,
+            "detail": str(exc),
+            "provider_invocation_allowed": False,
+            "invocation": args.command,
+        }
+        print(json.dumps(payload, sort_keys=True))
+        return EXIT_BLOCKED
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        payload = {
+            "schema": PREFLIGHT_SCHEMA,
+            "claim_ceiling": PREFLIGHT_CLAIM_CEILING,
+            "decision": "BLOCK_RESUME",
+            "reason_code": "DSH_WORKFLOW_GUARD_ERROR",
+            "detail": f"{type(exc).__name__}: {exc}",
+            "provider_invocation_allowed": False,
+            "invocation": args.command,
+        }
+        print(json.dumps(payload, sort_keys=True))
+        return EXIT_BLOCKED
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
