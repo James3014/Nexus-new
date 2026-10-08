@@ -906,3 +906,104 @@ def test_active_operation_with_dead_wrapper_still_requires_reconciliation(
 
     assert disposition == "RECONCILE"
     assert gate["code"] == "RECONCILE_OPERATION"
+
+
+def test_cross_repo_runtime_binding_valid_is_safe() -> None:
+    runtime = _base_runtime()
+    runtime["installed_revision"] = "a" * 40
+    runtime["source_revision_match"] = True
+    runtime["components"]["workflow_source_binding"] = {
+        "status": "VERIFIED",
+        "repository": "james3014/nexus-new",
+    }
+
+    source = _base_source()
+    source["repository"] = "James3014/repository-intelligence-engine"
+    source["github_main"] = "b" * 40
+
+    disposition, gate = doctor._derive_next_gate(
+        source=source,
+        runtime=runtime,
+        task={"status": "OBSERVED", "state": "closed", "issue_number": 1599},
+        operation=_no_operation(),
+        pr={"status": "NOT_REQUESTED", "pr_number": None},
+        required_gates=[],
+        leases=_no_leases(),
+    )
+
+    assert disposition == "SAFE"
+    assert gate["code"] == "NO_PENDING_GATE"
+
+
+def test_cross_repo_runtime_binding_missing_fails_closed() -> None:
+    runtime = _base_runtime()
+    runtime["installed_revision"] = "a" * 40
+
+    source = _base_source()
+    source["repository"] = "James3014/repository-intelligence-engine"
+    source["github_main"] = "b" * 40
+
+    disposition, gate = doctor._derive_next_gate(
+        source=source,
+        runtime=runtime,
+        task={"status": "OBSERVED", "state": "closed", "issue_number": 1599},
+        operation=_no_operation(),
+        pr={"status": "NOT_REQUESTED", "pr_number": None},
+        required_gates=[],
+        leases=_no_leases(),
+    )
+
+    assert disposition == "BLOCKED"
+    assert gate["code"] == "RUNTIME_SOURCE_BINDING_UNVERIFIED"
+
+
+def test_cross_repo_runtime_binding_unverified_fails_closed() -> None:
+    runtime = _base_runtime()
+    runtime["installed_revision"] = "a" * 40
+    runtime["components"]["workflow_source_binding"] = {
+        "status": "UNKNOWN",
+        "repository": "james3014/nexus-new",
+    }
+
+    source = _base_source()
+    source["repository"] = "James3014/repository-intelligence-engine"
+    source["github_main"] = "b" * 40
+
+    disposition, gate = doctor._derive_next_gate(
+        source=source,
+        runtime=runtime,
+        task={"status": "OBSERVED", "state": "closed", "issue_number": 1599},
+        operation=_no_operation(),
+        pr={"status": "NOT_REQUESTED", "pr_number": None},
+        required_gates=[],
+        leases=_no_leases(),
+    )
+
+    assert disposition == "BLOCKED"
+    assert gate["code"] == "RUNTIME_SOURCE_BINDING_UNVERIFIED"
+
+
+def test_same_repo_runtime_drift_preserves_sync_behavior() -> None:
+    runtime = _base_runtime()
+    runtime["installed_revision"] = "a" * 40
+    runtime["components"]["workflow_source_binding"] = {
+        "status": "VERIFIED",
+        "repository": "James3014/Nexus-new",
+    }
+
+    source = _base_source()
+    source["repository"] = "james3014/nexus-new"
+    source["github_main"] = "b" * 40
+
+    disposition, gate = doctor._derive_next_gate(
+        source=source,
+        runtime=runtime,
+        task={"status": "OBSERVED", "state": "closed", "issue_number": 1599},
+        operation=_no_operation(),
+        pr={"status": "NOT_REQUESTED", "pr_number": None},
+        required_gates=[],
+        leases=_no_leases(),
+    )
+
+    assert disposition == "RECONCILE"
+    assert gate["code"] == "SYNC_RUNTIME_TO_CURRENT_MAIN"

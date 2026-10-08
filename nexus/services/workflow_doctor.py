@@ -834,6 +834,31 @@ def _derive_next_gate(
 
     if runtime.get("status") == "OBSERVED":
         components = runtime.get("components")
+        source_repo = source.get("repository")
+        source_binding = (
+            components.get("workflow_source_binding") if isinstance(components, dict) else None
+        )
+
+        bound_repo: str | None = None
+        if source_repo:
+            candidate_bound_repo = (
+                source_binding.get("repository") if isinstance(source_binding, dict) else None
+            )
+            if (
+                not isinstance(source_binding, dict)
+                or source_binding.get("status") != "VERIFIED"
+                or not isinstance(candidate_bound_repo, str)
+                or not candidate_bound_repo.strip()
+            ):
+                return "BLOCKED", {
+                    "code": "RUNTIME_SOURCE_BINDING_UNVERIFIED",
+                    "reason": (
+                        "Host runtime source binding is missing, unverified, "
+                        "or ambiguous for cross-repository freshness."
+                    ),
+                }
+            bound_repo = candidate_bound_repo.strip()
+
         drifted = (
             [
                 name
@@ -851,15 +876,26 @@ def _derive_next_gate(
                 "reason": "Host runtime status reports drift or invalid state.",
                 "components": drifted,
             }
-        alignment = _runtime_main_alignment(runtime, source.get("github_main"))
-        if alignment.get("status") == "DRIFT":
-            return "RECONCILE", {
-                "code": "SYNC_RUNTIME_TO_CURRENT_MAIN",
-                "reason": "Host runtime has no exact or content-equivalent binding to current GitHub main.",
-                "github_main": source.get("github_main"),
-                "installed_revision": runtime.get("installed_revision"),
-                "installed_bundle_sha256": runtime.get("installed_bundle_sha256"),
-            }
+
+        if source_repo and bound_repo and bound_repo.casefold() != source_repo.casefold():
+            if runtime.get("source_revision_match") is not True:
+                return "BLOCKED", {
+                    "code": "RUNTIME_SOURCE_BINDING_UNVERIFIED",
+                    "reason": (
+                        "Host runtime source binding does not prove an exact current "
+                        "revision for the bound source repository."
+                    ),
+                }
+        else:
+            alignment = _runtime_main_alignment(runtime, source.get("github_main"))
+            if alignment.get("status") == "DRIFT":
+                return "RECONCILE", {
+                    "code": "SYNC_RUNTIME_TO_CURRENT_MAIN",
+                    "reason": "Host runtime has no exact or content-equivalent binding to current GitHub main.",
+                    "github_main": source.get("github_main"),
+                    "installed_revision": runtime.get("installed_revision"),
+                    "installed_bundle_sha256": runtime.get("installed_bundle_sha256"),
+                }
 
     if pr_status == "OBSERVED" and pr.get("state") != "open":
         return "SAFE", {
