@@ -29,6 +29,8 @@ EXTERNAL_DISPATCH = ROOT / "scripts" / "ops" / "nexus-external-worker-dispatch"
 EXTERNAL_DISPATCH_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_external_worker_dispatch.sh"
 GROK_ACCOUNTS = ROOT / "scripts" / "ops" / "nexus-grok-accounts"
 HCOM_AGY_SAFE = ROOT / "scripts" / "ops" / "nexus-hcom-agy-safe"
+DSH_WORKFLOW = ROOT / "scripts" / "ops" / "nexus-dsh-workflow"
+CORE_ISSUE_CHECK_LOCAL = ROOT / "scripts" / "ops" / "nexus-core-issue-check-local"
 DSH_AGY_ADAPTER = ROOT / "scripts" / "ops" / "dsh-agy-adapter"
 DSH_AGY_ADAPTER_INDEX = DSH_AGY_ADAPTER / "index.js"
 DSH_AGY_ADAPTER_PACKAGE = DSH_AGY_ADAPTER / "package.json"
@@ -108,6 +110,8 @@ def _make_source_repo(tmp_path: Path) -> Path:
         (EXTERNAL_DISPATCH, "scripts/ops/nexus-external-worker-dispatch"),
         (GROK_ACCOUNTS, "scripts/ops/nexus-grok-accounts"),
         (HCOM_AGY_SAFE, "scripts/ops/nexus-hcom-agy-safe"),
+        (DSH_WORKFLOW, "scripts/ops/nexus-dsh-workflow"),
+        (CORE_ISSUE_CHECK_LOCAL, "scripts/ops/nexus-core-issue-check-local"),
         (DSH_AGY_ADAPTER_INDEX, "scripts/ops/dsh-agy-adapter/index.js"),
         (DSH_AGY_ADAPTER_PACKAGE, "scripts/ops/dsh-agy-adapter/package.json"),
         (
@@ -224,6 +228,10 @@ def _invoke(
     env["NEXUS_HCOM_AGY_TARGET"] = str(dispatch_target.parent / "hcom-agy-safe")
     env["NEXUS_DSH_AGY_ADAPTER_TARGET"] = str(
         dsh_agy_adapter_target or dispatch_target.parent / "dsh-agy-adapter"
+    )
+    env["NEXUS_DSH_WORKFLOW_TARGET"] = str(dispatch_target.parent / "nexus-dsh-workflow")
+    env["NEXUS_CORE_ISSUE_CHECK_LOCAL_TARGET"] = str(
+        dispatch_target.parent / "nexus-core-issue-check-local"
     )
     env["NEXUS_HERMES_CONTROLLER_GUARD_TARGET"] = str(
         dispatch_target.parent / "nexus-hermes-controller-guard"
@@ -370,6 +378,7 @@ def test_sync_materializes_exact_generation_and_entrypoints(tmp_path: Path) -> N
     assert payload["components"]["agy_dispatch"]["status"] == "VERIFIED"
     assert payload["components"]["agy_quota"]["status"] == "VERIFIED"
     assert payload["components"]["workflow_doctor"]["status"] == "VERIFIED"
+    assert payload["components"]["dsh_workflow_guard"]["status"] == "VERIFIED"
     assert payload["components"]["workflow_source_binding"]["status"] == "VERIFIED"
     assert payload["components"]["workflow_source_binding"]["repo_root"] == str(
         source_repo.resolve()
@@ -385,6 +394,9 @@ def test_sync_materializes_exact_generation_and_entrypoints(tmp_path: Path) -> N
     hcom_target = dispatch_target.parent / "hcom-agy-safe"
     assert hcom_target.is_symlink()
     assert hcom_target.resolve().read_bytes() == HCOM_AGY_SAFE.read_bytes()
+    dsh_workflow_target = dispatch_target.parent / "nexus-dsh-workflow"
+    assert dsh_workflow_target.is_symlink()
+    assert dsh_workflow_target.resolve().read_bytes() == DSH_WORKFLOW.read_bytes()
     hermes_guard_target = dispatch_target.parent / "nexus-hermes-controller-guard"
     hermes_controller_target = dispatch_target.parent / "nexus-hermes-continuation-controller"
     hermes_core_completion_target = dispatch_target.parent / "nexus-hermes-core-completion"
@@ -1059,3 +1071,246 @@ def test_hermes_runtime_components_rollback_to_generation_without_entrypoints(
     assert not hermes_guard_target.is_symlink()
     assert not hermes_controller_target.exists()
     assert not hermes_controller_target.is_symlink()
+
+
+def test_sync_materializes_core_issue_check_local_entrypoint(tmp_path: Path) -> None:
+    source_repo = _make_source_repo(tmp_path)
+    revision = _git(source_repo, "rev-parse", "HEAD")
+    runtime_root = tmp_path / "runtime"
+    manager_python = tmp_path / "manager-python"
+    dispatch_target = tmp_path / "bin" / "nexus-agy-dispatch"
+    sync_target = tmp_path / "bin" / "nexus-host-sync"
+    _write_fake_manager(manager_python)
+
+    sync = _invoke(
+        source_repo,
+        runtime_root,
+        manager_python,
+        dispatch_target,
+        sync_target,
+        "sync",
+        revision=revision,
+    )
+
+    assert sync.returncode == 0, sync.stderr + sync.stdout
+    payload = json.loads(sync.stdout)
+    assert payload["components"].get("core_issue_check_local", {}).get("status") == "VERIFIED"
+
+    target = dispatch_target.parent / "nexus-core-issue-check-local"
+    assert target.is_symlink()
+    assert target.resolve().read_bytes() == CORE_ISSUE_CHECK_LOCAL.read_bytes()
+
+
+_CORE_ISSUE_TUPLE = (
+    '        (\n            "core_issue_check_local",\n'
+    '            "scripts/ops/nexus-core-issue-check-local",\n'
+    "            _core_issue_check_local_target(),\n        ),\n"
+)
+
+
+def _make_old_then_new_repo(tmp_path: Path) -> tuple[Path, str, str]:
+    """Commit A: host-sync/manifest unaware of core_issue_check_local; B: current tree."""
+    repo = _make_source_repo(tmp_path)
+    new_script = (repo / "scripts/ops/nexus-host-sync").read_text(encoding="utf-8")
+    new_manifest = json.loads(
+        (repo / "scripts/ops/nexus-host-runtime-manifest.json").read_text(encoding="utf-8")
+    )
+    old_script = new_script.replace(_CORE_ISSUE_TUPLE, "")
+    assert (
+        old_script.count('core_issue_check_local",')
+        == new_script.count('core_issue_check_local",') - 2
+    )
+    old_manifest = json.loads(json.dumps(new_manifest))
+    del old_manifest["components"]["core_issue_check_local"]
+    (repo / "scripts/ops/nexus-host-sync").write_text(old_script, encoding="utf-8")
+    (repo / "scripts/ops/nexus-host-runtime-manifest.json").write_text(
+        json.dumps(old_manifest, indent=2) + "\n", encoding="utf-8"
+    )
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "generation A (old host-sync)")
+    rev_a = _git(repo, "rev-parse", "HEAD")
+    (repo / "scripts/ops/nexus-host-sync").write_text(new_script, encoding="utf-8")
+    (repo / "scripts/ops/nexus-host-runtime-manifest.json").write_text(
+        json.dumps(new_manifest, indent=2) + "\n", encoding="utf-8"
+    )
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "generation B (new host-sync + component)")
+    return repo, rev_a, _git(repo, "rev-parse", "HEAD")
+
+
+def _invoke_with_script(
+    script: Path,
+    *args: object,
+    extra_env: dict[str, str] | None = None,
+    **kwargs: object,
+) -> subprocess.CompletedProcess[str]:
+    """Run `_invoke` against a different host-sync script and optional extra env."""
+    module = sys.modules[__name__]
+    original_script = module.HOST_SYNC
+    saved = {k: os.environ.get(k) for k in (extra_env or {})}
+    module.HOST_SYNC = script
+    os.environ.update(extra_env or {})
+    try:
+        return module._invoke(*args, **kwargs)  # type: ignore[arg-type]
+    finally:
+        module.HOST_SYNC = original_script
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def _write_old_script(repo: Path, revision: str, dest: Path) -> Path:
+    proc = _run(["git", "-C", str(repo), "show", f"{revision}:scripts/ops/nexus-host-sync"])
+    assert proc.returncode == 0, proc.stderr
+    dest.write_text(proc.stdout, encoding="utf-8")
+    return dest
+
+
+def _reexec_env(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
+    manager_python = tmp_path / "manager-python"
+    _write_fake_manager(manager_python)
+    return (
+        tmp_path / "runtime",
+        manager_python,
+        tmp_path / "bin" / "nexus-agy-dispatch",
+        tmp_path / "bin" / "nexus-host-sync",
+    )
+
+
+def test_sync_reexecs_new_host_sync_to_activate_new_component_in_one_call(
+    tmp_path: Path,
+) -> None:
+    repo, rev_a, rev_b = _make_old_then_new_repo(tmp_path)
+    runtime_root, manager_python, dispatch_target, sync_target = _reexec_env(tmp_path)
+    old_script = _write_old_script(repo, rev_a, tmp_path / "old-host-sync")
+
+    first = _invoke_with_script(
+        old_script,
+        repo,
+        runtime_root,
+        manager_python,
+        dispatch_target,
+        sync_target,
+        "sync",
+        revision=rev_a,
+    )
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert "reexec" not in json.loads(first.stdout)
+    entrypoint = dispatch_target.parent / "nexus-core-issue-check-local"
+    assert not entrypoint.exists()
+
+    second = _invoke_with_script(
+        old_script,
+        repo,
+        runtime_root,
+        manager_python,
+        dispatch_target,
+        sync_target,
+        "sync",
+        revision=rev_b,
+    )
+    assert second.returncode == 0, second.stdout + second.stderr
+    payload = json.loads(second.stdout)
+    assert payload["state"] == "ALIGNED"
+    assert payload["reexec"]["exit_code"] == 0
+    assert payload["reexec"]["from_sha256"] != payload["reexec"]["to_sha256"]
+    assert entrypoint.is_symlink()
+    assert payload["components"]["core_issue_check_local"]["status"] == "VERIFIED"
+
+
+def test_sync_does_not_reexec_when_host_sync_bytes_equal(tmp_path: Path) -> None:
+    repo = _make_source_repo(tmp_path)
+    revision = _git(repo, "rev-parse", "HEAD")
+    runtime_root, manager_python, dispatch_target, sync_target = _reexec_env(tmp_path)
+    result = _invoke(
+        repo,
+        runtime_root,
+        manager_python,
+        dispatch_target,
+        sync_target,
+        "sync",
+        revision=revision,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "reexec" not in json.loads(result.stdout)
+
+
+def test_sync_reexec_guard_env_prevents_reexec(tmp_path: Path) -> None:
+    repo, rev_a, rev_b = _make_old_then_new_repo(tmp_path)
+    runtime_root, manager_python, dispatch_target, sync_target = _reexec_env(tmp_path)
+    old_script = _write_old_script(repo, rev_a, tmp_path / "old-host-sync")
+    guard = {"NEXUS_HOST_SYNC_REEXEC": "1"}
+    first = _invoke_with_script(
+        old_script,
+        repo,
+        runtime_root,
+        manager_python,
+        dispatch_target,
+        sync_target,
+        "sync",
+        revision=rev_a,
+        extra_env=guard,
+    )
+    assert first.returncode == 0, first.stdout + first.stderr
+    second = _invoke_with_script(
+        old_script,
+        repo,
+        runtime_root,
+        manager_python,
+        dispatch_target,
+        sync_target,
+        "sync",
+        revision=rev_b,
+        extra_env=guard,
+    )
+    payload = json.loads(second.stdout)
+    assert "reexec" not in payload
+    assert (runtime_root / "current").is_symlink()
+    assert not (dispatch_target.parent / "nexus-core-issue-check-local").exists()
+
+
+def test_sync_reexec_failure_is_fail_closed_and_keeps_switched_release(
+    tmp_path: Path,
+) -> None:
+    repo, _rev_a, rev_b = _make_old_then_new_repo(tmp_path)
+    # Make commit B's host-sync crash on any invocation after activation.
+    script = repo / "scripts/ops/nexus-host-sync"
+    script.write_text(
+        script
+        .read_text(encoding="utf-8")
+        .replace(
+            "def main(argv",
+            'def _boom() -> None:\n    raise SystemExit("child exploded")\n\n\ndef main(argv',
+            1,
+        )
+        .replace(
+            "    args = parser.parse_args(argv)\n",
+            '    args = parser.parse_args(argv)\n    if os.environ.get("NEXUS_HOST_SYNC_REEXEC") == "1":\n        _boom()\n',
+            1,
+        ),
+        encoding="utf-8",
+    )
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "generation C (crashing child)")
+    rev_c = _git(repo, "rev-parse", "HEAD")
+    runtime_root, manager_python, dispatch_target, sync_target = _reexec_env(tmp_path)
+    result = _invoke(
+        repo,
+        runtime_root,
+        manager_python,
+        dispatch_target,
+        sync_target,
+        "sync",
+        revision=rev_c,
+    )
+    assert result.returncode != 0
+    payload = json.loads(result.stdout)
+    assert payload["state"] == "ERROR"
+    assert payload["error"] == "HOST_SYNC_REEXEC_FAILED"
+    assert "child exploded" in payload["detail"]
+    assert payload["reexec"]["exit_code"] != 0
+    # The new generation stays switched (no automatic rollback).
+    current = json.loads((runtime_root / "current" / "host-generation.json").read_text())
+    assert current["source_revision"] == rev_c
