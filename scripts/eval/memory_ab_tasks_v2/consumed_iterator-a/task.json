@@ -1,0 +1,8 @@
+{
+  "id": "consumed_iterator-a",
+  "bug_class": "consumed_iterator",
+  "variant": "a",
+  "problem_statement": "summarize() returns count 0, total 0 and mean 0.0 when it is given a generator of two entries worth 400 cents in total. top_category() returns None for the same generator although it has entries.",
+  "target_file": "ledger_report.py",
+  "repro_file": "repro.py"
+}

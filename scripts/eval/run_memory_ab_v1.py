@@ -135,8 +135,13 @@ def git_tree_head(repo: Path) -> str:
     return git_rev_parse(repo, "HEAD^{tree}")
 
 
-def load_tasks(tasks_dir: Path, limit: int | None) -> list[dict[str, Any]]:
+def load_tasks(tasks_dir: Path, limit: int | None, task_ids: list[str] | None = None) -> list[dict[str, Any]]:
     task_dirs = sorted(p for p in tasks_dir.iterdir() if (p / "task.json").is_file())
+    if task_ids is not None:
+        unknown = sorted(set(task_ids) - {p.name for p in task_dirs})
+        if unknown:
+            raise RuntimeError(f"unknown task ids {unknown} under {tasks_dir}")
+        task_dirs = [p for p in task_dirs if p.name in set(task_ids)]
     tasks = []
     for task_dir in task_dirs:
         meta = json.loads((task_dir / "task.json").read_text(encoding="utf-8"))
@@ -685,12 +690,14 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--run-id", default="")
     parser.add_argument("--arms", default="off,on", help="comma-separated, run in this order (default off,on)")
     parser.add_argument("--limit", type=int, default=None, help="use only the first N tasks")
+    parser.add_argument("--task-ids", default="", help="comma-separated task ids to run (default: all)")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--patch-timeout", type=int, default=300, help="wall-clock seconds per pipeline attempt")
     parser.add_argument("--artifact-root", type=Path, default=DEFAULT_ARTIFACT_ROOT)
     parser.add_argument("--reflect-judge", choices=["none", "ollama"], default="none")
     args = parser.parse_args(argv)
     args.arms = [a.strip() for a in args.arms.split(",") if a.strip()]
+    args.task_ids = [t.strip() for t in args.task_ids.split(",") if t.strip()] or None
     if not args.arms or any(a not in ARMS for a in args.arms):
         parser.error(f"--arms must be a subset of {sorted(ARMS)}")
     if args.limit is not None and args.limit < 1:
@@ -703,7 +710,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    tasks = load_tasks(args.tasks_dir, args.limit)
+    tasks = load_tasks(args.tasks_dir, args.limit, args.task_ids)
 
     try:
         preflight_model(args.model)

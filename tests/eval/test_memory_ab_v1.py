@@ -103,6 +103,22 @@ def test_all_fixtures_are_red():
     assert all(r["red"] and r["within_budget"] for r in results), results
 
 
+def test_v2_fixtures_are_red():
+    v2_dir = EVAL_DIR / "memory_ab_tasks_v2"
+    results = verify_fixtures.verify_all(v2_dir)
+    assert len(results) == 12
+    assert {r["bug_class"] for r in results} == {
+        "timezone_naive_aware",
+        "consumed_iterator",
+        "mutate_while_iterating",
+        "float_money_rounding",
+        "greedy_regex_multiline",
+        "recursive_base_case",
+    }
+    assert {r["task_id"].rsplit("-", 1)[1] for r in results} == {"a", "b"}
+    assert all(r["red"] and r["within_budget"] for r in results), results
+
+
 def test_fixture_verifier_rejects_green_repro(tmp_path):
     task_dir = make_tasks(tmp_path, 1) / "toy-0"
     (task_dir / "m.py").write_text(FIXED, encoding="utf-8")

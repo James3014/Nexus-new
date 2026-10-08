@@ -1,0 +1,8 @@
+{
+  "id": "recursive_base_case-b",
+  "bug_class": "recursive_base_case",
+  "variant": "b",
+  "problem_statement": "leaf_paths() reports empty dicts as leaves: leaf_paths({'a': {}, 'b': 1}) returns [(('a',), {}), (('b',), 1)] instead of only [(('b',), 1)]. An empty dict nested inside a list is reported the same way.",
+  "target_file": "leaf_paths.py",
+  "repro_file": "repro.py"
+}

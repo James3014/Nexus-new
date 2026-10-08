@@ -7,6 +7,7 @@ the time budget. Exit 0 when all fixtures are red, 1 otherwise.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import shutil
 import subprocess
@@ -77,8 +78,10 @@ def verify_all(fixtures_dir: Path = FIXTURES_DIR) -> list[dict]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    fixtures_dir = Path(argv[0]) if argv else FIXTURES_DIR
-    results = verify_all(fixtures_dir)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--tasks-dir", type=Path, default=FIXTURES_DIR, help="fixture set to verify (default: v1)")
+    args = parser.parse_args(argv)
+    results = verify_all(args.tasks_dir)
     for item in results:
         status = "RED" if item["ok"] else "BAD"
         print(f"{status:4} {item['task_id']:32} rc={item['returncode']} t={item['elapsed_sec']}s {item['output_tail']}")
