@@ -131,4 +131,7 @@ def test_contract_budget_uses_request_override():
 @pytest.mark.parametrize("value", [0, -1, "x", None, True])
 def test_contract_budget_rejects_invalid_values(value):
     with pytest.raises(ValueError):
-        _Contract(_NoBuildOwner()).maximum_attempts({"task_id": "t", "maximum_attempts_per_task": value})
+        _Contract(_NoBuildOwner()).maximum_attempts({
+            "task_id": "t",
+            "maximum_attempts_per_task": value,
+        })
