@@ -1007,3 +1007,95 @@ def test_same_repo_runtime_drift_preserves_sync_behavior() -> None:
 
     assert disposition == "RECONCILE"
     assert gate["code"] == "SYNC_RUNTIME_TO_CURRENT_MAIN"
+
+
+def test_cross_repo_report_does_not_project_target_main_as_runtime_main(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = {
+        "status": "OBSERVED",
+        "repository": "James3014/repository-intelligence-engine",
+        "github_main": "b" * 40,
+        "head": "c" * 40,
+        "head_is_github_main": False,
+    }
+    runtime = {
+        "status": "OBSERVED",
+        "state": "INSTALLED",
+        "installed_revision": "a" * 40,
+        "installed_bundle_sha256": "bundle-a",
+        "source_revision_match": True,
+        "components": {
+            "host_sync": {"status": "VERIFIED"},
+            "workflow_doctor": {"status": "VERIFIED"},
+            "workflow_source_binding": {
+                "status": "VERIFIED",
+                "repository": "james3014/nexus-new",
+            },
+        },
+        "last_sync": {
+            "state": "ALIGNED",
+            "desired_revision": "a" * 40,
+            "desired_bundle_sha256": "bundle-a",
+            "installed_bundle_sha256": "bundle-a",
+        },
+    }
+
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        source=source,
+        runtime=runtime,
+        task={"status": "OBSERVED", "state": "closed", "issue_number": 1599},
+    )
+
+    alignment = payload["runtime"]["current_main_alignment"]
+    assert alignment["status"] == "NOT_APPLICABLE"
+    assert alignment["basis"] == "CROSS_REPOSITORY_SOURCE_BINDING"
+    assert alignment["target_repository"] == "James3014/repository-intelligence-engine"
+    assert alignment["runtime_source_repository"] == "james3014/nexus-new"
+    assert alignment["current_main"] is None
+
+    install = _completion_layers(payload)["Install/package"]
+    assert install["evidence"]["alignment"] == "NOT_APPLICABLE"
+    assert install["evidence"]["alignment_basis"] == "CROSS_REPOSITORY_SOURCE_BINDING"
+
+
+def test_same_repo_report_preserves_runtime_main_drift_projection(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = {
+        "status": "OBSERVED",
+        "repository": "James3014/Nexus-new",
+        "github_main": "b" * 40,
+        "head": "b" * 40,
+        "head_is_github_main": True,
+    }
+    runtime = {
+        "status": "OBSERVED",
+        "state": "INSTALLED",
+        "installed_revision": "a" * 40,
+        "components": {
+            "host_sync": {"status": "VERIFIED"},
+            "workflow_doctor": {"status": "VERIFIED"},
+            "workflow_source_binding": {
+                "status": "VERIFIED",
+                "repository": "james3014/nexus-new",
+            },
+        },
+    }
+
+    payload = _collect_with_observations(
+        monkeypatch,
+        tmp_path,
+        source=source,
+        runtime=runtime,
+        task={"status": "OBSERVED", "state": "closed", "issue_number": 1599},
+    )
+
+    alignment = payload["runtime"]["current_main_alignment"]
+    assert alignment["status"] == "DRIFT"
+    assert alignment["basis"] == "NO_CURRENT_MAIN_BINDING"
+    assert alignment["current_main"] == "b" * 40
