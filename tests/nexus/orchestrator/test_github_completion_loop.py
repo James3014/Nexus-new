@@ -7,12 +7,17 @@ import pytest
 
 from nexus.contracts.autonomy_goal import AutonomyActionClass
 from nexus.contracts.github_orchestration import (
+    CandidateBlobEquivalence,
     CheckResult,
     GitHubOrchestrationEvidence,
+    IntegrationBinding,
     MainMovementEvidence,
     ReviewResult,
+    canonical_hash,
+    compute_candidate_equivalence_proof_hash,
 )
 from nexus.orchestrator.github_completion_loop import (
+    DEFAULT_MAX_INTEGRATION_GENERATIONS,
     MAX_COMPLETION_ELAPSED_SECONDS,
     MAX_INTEGRATION_GENERATIONS,
     CasMergeResult,
@@ -523,23 +528,24 @@ def test_residual1_ambiguous_ack_with_wrong_tree_blocks(monkeypatch):
 
 
 def test_residual2_budget_exceeding_hard_maxima_fails_closed_before_port_calls():
-    """Residual 2: Budget widening (max_generations > 3 or max_elapsed > 2700) fails closed before any port calls."""
-    assert MAX_INTEGRATION_GENERATIONS == 3
+    """Residual 2: Budget widening (max_generations > 5 or max_elapsed > 2700) fails closed before any port calls."""
+    assert MAX_INTEGRATION_GENERATIONS == 5
+    assert DEFAULT_MAX_INTEGRATION_GENERATIONS == 5
     assert MAX_COMPLETION_ELAPSED_SECONDS == 2700.0
 
     initial_ev = _base_evidence(base_sha="d" * 40, current_main_sha="d" * 40)
     req = _base_request()
     port = SpyGitHubCompletionPort(main_states=[("e" * 40, "2" * 40)])
 
-    # Widened generations budget (e.g. 4, 999)
-    res_gen4 = run_github_completion_loop(
+    # Widened generations budget (e.g. 6, 999)
+    res_gen6 = run_github_completion_loop(
         initial_evidence=initial_ev,
         request=req,
         port=port,
-        max_generations=4,
+        max_generations=6,
     )
-    assert res_gen4.outcome is CompletionLoopOutcome.BLOCKED
-    assert "INVALID_GENERATION_BUDGET:4" in res_gen4.reason
+    assert res_gen6.outcome is CompletionLoopOutcome.BLOCKED
+    assert "INVALID_GENERATION_BUDGET:6" in res_gen6.reason
     assert len(port.calls) == 0  # Zero port calls!
 
     res_gen999 = run_github_completion_loop(
@@ -2761,3 +2767,748 @@ def test_g07_production_regression_5_post_merge_issue_readback_missing_or_failin
     assert "READ_ISSUE_STATES_FAILED" in r_failing.reason
     assert r_failing.details["post_merge_verification"]["allow_second_merge"] is False
     assert len(port_failing_states.cas_merge_calls) == 1  # 0 second merge
+
+
+# ==============================================================================
+# Issue 1384 Acceptance Criteria Tests: Completion Liveness Under Main Churn
+# ==============================================================================
+
+
+def test_issue1384_criterion1_four_consecutive_unrelated_main_movements_during_ci(monkeypatch):
+    """AC 1, 2, 3, 5, 6: Four consecutive unrelated main movements during exact-head CI
+
+    converge to CAS merge without Owner interruption, zero fresh Candidate re-acceptance,
+    fresh exact-head required checks per generation, candidate blob equivalence verified
+    each generation, and immutable source Candidate identity.
+    """
+    m0_sha = "00" * 20
+    m0_tree = "00" * 20
+    cand_c = "b" * 40
+    m1_sha = "11" * 20
+    m1_tree = "11" * 20
+    m2_sha = "22" * 20
+    m2_tree = "22" * 20
+    m3_sha = "33" * 20
+    m3_tree = "33" * 20
+    m4_sha = "44" * 20
+    m4_tree = "44" * 20
+
+    initial_ev = _base_evidence(base_sha=m0_sha, current_main_sha=m0_sha)
+
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+
+    port = SpyGitHubCompletionPort(
+        main_states=[
+            (m1_sha, m1_tree),  # gen 1 start
+            (m2_sha, m2_tree),  # main moves while gen 1 checks run
+            (m2_sha, m2_tree),  # gen 2 start
+            (m3_sha, m3_tree),  # main moves while gen 2 checks run
+            (m3_sha, m3_tree),  # gen 3 start
+            (m4_sha, m4_tree),  # main moves while gen 3 checks run
+            (m4_sha, m4_tree),  # gen 4 start
+            (m4_sha, m4_tree),  # gen 4 post-check confirms main unchanged
+            (m4_sha, m4_tree),
+        ],
+        default_pr_head=cand_c,
+        tree_shas={
+            m0_sha: m0_tree,
+            m1_sha: m1_tree,
+            m2_sha: m2_tree,
+            m3_sha: m3_tree,
+            m4_sha: m4_tree,
+        },
+        default_changed_paths=("docs/unrelated.md",),
+    )
+
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {"valid": True, "proven_paths": tuple(k["changed_main_paths"])},
+    )
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.build_impact_plan",
+        lambda *a, **k: type(
+            "Plan",
+            (),
+            {
+                "impact_class": "DOCS_GOVERNANCE",
+                "unmatched_paths": [],
+                "changed_paths": ["docs/unrelated.md"],
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.github_completion_loop.resolve_durable_merge_authorization",
+        lambda *a, **k: evaluate_action(ctx, req),
+    )
+
+    result = run_github_completion_loop(
+        initial_evidence=initial_ev,
+        request=req,
+        port=port,
+    )
+
+    # 1. Converged to completed CAS merge
+    assert result.outcome is CompletionLoopOutcome.COMPLETED
+    assert result.generation == 4
+
+    # 2. Materialized 4 consecutive generations chaining heads correctly
+    assert len(port.materialize_calls) == 4
+    assert port.materialize_calls[0]["expected_pr_head_sha"] == cand_c
+    assert port.materialize_calls[0]["generation"] == 1
+    assert port.materialize_calls[1]["expected_pr_head_sha"] == "01" * 20
+    assert port.materialize_calls[1]["generation"] == 2
+    assert port.materialize_calls[2]["expected_pr_head_sha"] == "02" * 20
+    assert port.materialize_calls[2]["generation"] == 3
+    assert port.materialize_calls[3]["expected_pr_head_sha"] == "03" * 20
+    assert port.materialize_calls[3]["generation"] == 4
+
+    # 3. Exact-head required checks were run for every generation
+    assert len(port.checks_calls) == 4
+    for i, gen in enumerate([1, 2, 3, 4]):
+        assert port.checks_calls[i]["head_sha"] == f"{gen:02x}" * 20
+        assert port.checks_calls[i]["generation"] == gen
+
+    # 4. Blob equivalence mechanically verified on every generation
+    assert len(port.read_blob_calls) == 8  # 4 generations * 2 (source + integration)
+
+    # 5. CAS merge executed at generation 4 on base M4 and head I4
+    assert len(port.cas_merge_calls) == 1
+    assert port.cas_merge_calls[0]["expected_base_sha"] == m4_sha
+    assert port.cas_merge_calls[0]["expected_head_sha"] == "04" * 20
+
+    # 6. Source candidate identity remained completely immutable
+    assert result.evidence.candidate.candidate_commit_sha == cand_c
+    assert result.evidence.candidate.candidate_tree_sha == "c" * 40
+    assert result.evidence.candidate.contract_hash == "2" * 64
+    assert result.evidence.candidate.independent_acceptance_hash == "5" * 64
+    assert result.evidence.integration.source_candidate_commit_sha == cand_c
+    assert result.evidence.integration.source_candidate_tree_sha == "c" * 40
+    assert result.evidence.integration.generation == 4
+    assert result.evidence.integration.integration_head_sha == "04" * 20
+    assert result.evidence.integration.integration_base_sha == m4_sha
+
+
+def test_issue1384_criterion4_test_impact_revalidates_only_affected_tests(monkeypatch):
+    """AC 4: TEST_IMPACT reruns only the affected test evidence without fresh candidate acceptance."""
+    m0_sha = "00" * 20
+    m0_tree = "00" * 20
+    cand_c = "b" * 40
+    m1_sha = "11" * 20
+    m1_tree = "11" * 20
+    m2_sha = "22" * 20
+    m2_tree = "22" * 20
+
+    initial_ev = _base_evidence(base_sha=m0_sha, current_main_sha=m0_sha)
+
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+
+    port = SpyGitHubCompletionPort(
+        main_states=[
+            (m1_sha, m1_tree),
+            (m2_sha, m2_tree),
+            (m2_sha, m2_tree),
+            (m2_sha, m2_tree),
+        ],
+        default_pr_head=cand_c,
+        tree_shas={
+            m0_sha: m0_tree,
+            m1_sha: m1_tree,
+            m2_sha: m2_tree,
+        },
+        default_changed_paths=("tests/unit/test_runner.py",),
+    )
+
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {"valid": True, "proven_paths": tuple(k["changed_main_paths"])},
+    )
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.build_impact_plan",
+        lambda *a, **k: type(
+            "Plan",
+            (),
+            {
+                "impact_class": "TEST_ONLY",
+                "unmatched_paths": [],
+                "changed_paths": ["tests/unit/test_runner.py"],
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.github_completion_loop.resolve_durable_merge_authorization",
+        lambda *a, **k: evaluate_action(ctx, req),
+    )
+
+    result = run_github_completion_loop(
+        initial_evidence=initial_ev,
+        request=req,
+        port=port,
+    )
+
+    assert result.outcome is CompletionLoopOutcome.COMPLETED
+    assert result.generation == 2
+    # TEST_IMPACT was revalidated on each movement, NO fresh candidate acceptance was performed
+    assert port.revalidation_calls == ["TEST_IMPACT", "TEST_IMPACT"]
+    assert result.evidence.candidate.independent_acceptance_hash == "5" * 64
+    assert len(port.cas_merge_calls) == 1
+    assert port.cas_merge_calls[0]["expected_base_sha"] == m2_sha
+
+
+def test_issue1384_criterion7_cas_base_moved_reenters_without_owner(monkeypatch):
+    """AC 7: Main movement immediately at CAS merge re-enters bounded requalification without Owner interruption."""
+    m0_sha = "00" * 20
+    m0_tree = "00" * 20
+    cand_c = "b" * 40
+    m1_sha = "11" * 20
+    m1_tree = "11" * 20
+    m2_sha = "22" * 20
+    m2_tree = "22" * 20
+
+    initial_ev = _base_evidence(base_sha=m0_sha, current_main_sha=m0_sha)
+
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+
+    port = SpyGitHubCompletionPort(
+        main_states=[
+            (m1_sha, m1_tree),
+            (m1_sha, m1_tree),
+            (m2_sha, m2_tree),
+            (m2_sha, m2_tree),
+            (m2_sha, m2_tree),
+        ],
+        default_pr_head=cand_c,
+        tree_shas={
+            m0_sha: m0_tree,
+            m1_sha: m1_tree,
+            m2_sha: m2_tree,
+        },
+        default_changed_paths=("docs/unrelated.md",),
+        cas_merge_results=[
+            CasMergeResult(
+                status=CasMergeStatus.BASE_MOVED,
+                reason="main moved right at merge time",
+            ),
+            CasMergeResult(status=CasMergeStatus.SUCCESS, merged_sha="aa" * 20),
+        ],
+    )
+
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {"valid": True, "proven_paths": tuple(k["changed_main_paths"])},
+    )
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.build_impact_plan",
+        lambda *a, **k: type(
+            "Plan",
+            (),
+            {
+                "impact_class": "DOCS_GOVERNANCE",
+                "unmatched_paths": [],
+                "changed_paths": ["docs/unrelated.md"],
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.github_completion_loop.resolve_durable_merge_authorization",
+        lambda *a, **k: evaluate_action(ctx, req),
+    )
+
+    result = run_github_completion_loop(
+        initial_evidence=initial_ev,
+        request=req,
+        port=port,
+    )
+
+    assert result.outcome is CompletionLoopOutcome.COMPLETED
+    assert result.generation == 2
+    assert len(port.cas_merge_calls) == 2
+    assert port.cas_merge_calls[0]["expected_base_sha"] == m1_sha
+    assert port.cas_merge_calls[1]["expected_base_sha"] == m2_sha
+    assert result.evidence.integration.generation == 2
+
+
+def test_issue1384_criterion8_resume_from_existing_generation(monkeypatch):
+    """AC 8: An evidence already at generation 8 (#1209 R8) can resume and absorb 3 drift steps
+
+    (R8 -> R9 -> R10 -> R11) without tripping GENERATION_BUDGET_EXHAUSTED or requiring fresh
+    Candidate acceptance or manual branch reconstruction.
+    """
+    cand_c = "b" * 40
+    m8_sha = "88" * 20
+    m8_tree = "88" * 20
+    i8_head = "08" * 20
+    i8_tree = "08" * 20
+
+    blob_eq = CandidateBlobEquivalence(
+        path="nexus/a.py",
+        source_blob_sha="1" * 40,
+        integration_blob_sha="1" * 40,
+    )
+    proof_hash = compute_candidate_equivalence_proof_hash(
+        source_candidate_commit_sha=cand_c,
+        source_candidate_tree_sha="c" * 40,
+        source_candidate_diff_hash="e" * 64,
+        integration_base_sha=m8_sha,
+        integration_head_sha=i8_head,
+        integration_tree_sha=i8_tree,
+        generation=8,
+        blob_equivalences=(blob_eq,),
+    )
+    gen8_binding = IntegrationBinding(
+        source_candidate_commit_sha=cand_c,
+        source_candidate_tree_sha="c" * 40,
+        source_contract_hash="2" * 64,
+        source_candidate_state_hash="3" * 64,
+        source_verified_receipt_hash="4" * 64,
+        source_independent_acceptance_hash="5" * 64,
+        source_candidate_diff_hash="e" * 64,
+        integration_base_sha=m8_sha,
+        integration_head_sha=i8_head,
+        integration_tree_sha=i8_tree,
+        generation=8,
+        requalification_hash="1" * 64,
+        check_subject_kind="INTEGRATION_HEAD",
+        check_subject_sha=i8_head,
+        check_subject_tree_sha=i8_tree,
+        blob_equivalences=(blob_eq,),
+        candidate_equivalence_proof_hash=proof_hash,
+    )
+
+    checks_r8 = (
+        CheckResult(
+            name="ci",
+            status="completed",
+            conclusion="success",
+            head_sha=i8_head,
+            generation=8,
+        ),
+    )
+    ev_r8 = _base_evidence(
+        base_sha=m8_sha,
+        head_sha=i8_head,
+        tree_sha=i8_tree,
+        current_main_sha=m8_sha,
+        integration=gen8_binding,
+        required_checks=checks_r8,
+        checks_hash=canonical_hash({"checks": [c.model_dump(mode="json") for c in checks_r8]}),
+    )
+
+    m9_sha = "99" * 20
+    m9_tree = "99" * 20
+    m10_sha = "aa" * 20
+    m10_tree = "aa" * 20
+    m11_sha = "bb" * 20
+    m11_tree = "bb" * 20
+
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+
+    port = SpyGitHubCompletionPort(
+        main_states=[
+            (m9_sha, m9_tree),  # gen 9 start
+            (m10_sha, m10_tree),  # moves during gen 9
+            (m10_sha, m10_tree),  # gen 10 start
+            (m11_sha, m11_tree),  # moves during gen 10
+            (m11_sha, m11_tree),  # gen 11 start
+            (m11_sha, m11_tree),  # gen 11 post-check unchanged
+            (m11_sha, m11_tree),
+        ],
+        default_pr_head=i8_head,
+        tree_shas={
+            m8_sha: m8_tree,
+            m9_sha: m9_tree,
+            m10_sha: m10_tree,
+            m11_sha: m11_tree,
+        },
+        default_changed_paths=("docs/unrelated.md",),
+    )
+
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {"valid": True, "proven_paths": tuple(k["changed_main_paths"])},
+    )
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.build_impact_plan",
+        lambda *a, **k: type(
+            "Plan",
+            (),
+            {
+                "impact_class": "DOCS_GOVERNANCE",
+                "unmatched_paths": [],
+                "changed_paths": ["docs/unrelated.md"],
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.github_completion_loop.resolve_durable_merge_authorization",
+        lambda *a, **k: evaluate_action(ctx, req),
+    )
+
+    result = run_github_completion_loop(
+        initial_evidence=ev_r8,
+        request=req,
+        port=port,
+        max_generations=5,
+    )
+
+    assert result.outcome is CompletionLoopOutcome.COMPLETED
+    assert result.generation == 11
+    assert len(port.materialize_calls) == 3
+    # First materialization (gen 9) chained from i8_head
+    assert port.materialize_calls[0]["expected_pr_head_sha"] == i8_head
+    assert port.materialize_calls[0]["generation"] == 9
+    assert port.materialize_calls[1]["expected_pr_head_sha"] == "09" * 20
+    assert port.materialize_calls[1]["generation"] == 10
+    assert port.materialize_calls[2]["expected_pr_head_sha"] == "0a" * 20
+    assert port.materialize_calls[2]["generation"] == 11
+
+    # Final CAS merge occurred at generation 11
+    assert len(port.cas_merge_calls) == 1
+    assert port.cas_merge_calls[0]["expected_base_sha"] == m11_sha
+    assert port.cas_merge_calls[0]["expected_head_sha"] == "0b" * 20
+
+
+def test_issue1384_criterion9_generation_budget_exhaustion_truthful_disposition(monkeypatch):
+    """AC 9: Exhaustion of relative generation budget returns truthful DEFERRED_CONCURRENCY
+
+    with GENERATION_BUDGET_EXHAUSTED, not FRESH_CANDIDATE_ACCEPTANCE_REQUIRED.
+    """
+    m0_sha = "00" * 20
+    cand_c = "b" * 40
+    shas = [f"{i:02x}" * 20 for i in range(1, 10)]
+    trees = [f"{i:02x}" * 20 for i in range(1, 10)]
+
+    tree_shas = {m0_sha: "00" * 20}
+    for s, t in zip(shas, trees):
+        tree_shas[s] = t
+
+    initial_ev = _base_evidence(base_sha=m0_sha, current_main_sha=m0_sha)
+
+    # 5 movements absorb gen 1..5. Movement 6 trips the relative budget of 5.
+    # Each generation consumes two reads: top read_main_state() and post-check read_main_state().
+    main_states = [
+        (shas[0], trees[0]),  # Gen 1 entry (shas[0] != m0) -> materializes I1
+        (shas[1], trees[1]),  # Gen 1 post-check -> detects drift to shas[1], loops to gen 2
+        (shas[1], trees[1]),  # Gen 2 entry -> materializes I2
+        (shas[2], trees[2]),  # Gen 2 post-check -> detects drift to shas[2], loops to gen 3
+        (shas[2], trees[2]),  # Gen 3 entry -> materializes I3
+        (shas[3], trees[3]),  # Gen 3 post-check -> detects drift to shas[3], loops to gen 4
+        (shas[3], trees[3]),  # Gen 4 entry -> materializes I4
+        (shas[4], trees[4]),  # Gen 4 post-check -> detects drift to shas[4], loops to gen 5
+        (shas[4], trees[4]),  # Gen 5 entry -> materializes I5
+        (shas[5], trees[5]),  # Gen 5 post-check -> detects drift to shas[5], loops to next
+        (
+            shas[5],
+            trees[5],
+        ),  # Gen 6 entry: current_generation (5) - start_generation (0) >= max_generations (5) -> EXHAUSTED!
+        (shas[6], trees[6]),
+        (shas[6], trees[6]),
+    ]
+
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+
+    port = SpyGitHubCompletionPort(
+        main_states=main_states,
+        default_pr_head=cand_c,
+        tree_shas=tree_shas,
+        default_changed_paths=("docs/unrelated.md",),
+    )
+
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {"valid": True, "proven_paths": tuple(k["changed_main_paths"])},
+    )
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.build_impact_plan",
+        lambda *a, **k: type(
+            "Plan",
+            (),
+            {
+                "impact_class": "DOCS_GOVERNANCE",
+                "unmatched_paths": [],
+                "changed_paths": ["docs/unrelated.md"],
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.github_completion_loop.resolve_durable_merge_authorization",
+        lambda *a, **k: evaluate_action(ctx, req),
+    )
+
+    result = run_github_completion_loop(
+        initial_evidence=initial_ev,
+        request=req,
+        port=port,
+        max_generations=5,
+    )
+
+    assert result.outcome is CompletionLoopOutcome.DEFERRED_CONCURRENCY
+    assert result.reason == "GENERATION_BUDGET_EXHAUSTED"
+    assert result.generation == 5
+    assert len(port.cas_merge_calls) == 0
+
+
+def test_issue1384_criterion9_resume_and_exhaust_relative_budget(monkeypatch):
+    """AC 8, 9: An already-integrated evidence (start_generation=8) that encounters 5 drift steps
+
+    (reaching gen 13) exhausts its relative budget of 5 truthfully with GENERATION_BUDGET_EXHAUSTED.
+    """
+    cand_c = "b" * 40
+    m8_sha = "88" * 20
+    m8_tree = "88" * 20
+    i8_head = "08" * 20
+    i8_tree = "08" * 20
+
+    blob_eq = CandidateBlobEquivalence(
+        path="nexus/a.py",
+        source_blob_sha="1" * 40,
+        integration_blob_sha="1" * 40,
+    )
+    proof_hash = compute_candidate_equivalence_proof_hash(
+        source_candidate_commit_sha=cand_c,
+        source_candidate_tree_sha="c" * 40,
+        source_candidate_diff_hash="e" * 64,
+        integration_base_sha=m8_sha,
+        integration_head_sha=i8_head,
+        integration_tree_sha=i8_tree,
+        generation=8,
+        blob_equivalences=(blob_eq,),
+    )
+    gen8_binding = IntegrationBinding(
+        source_candidate_commit_sha=cand_c,
+        source_candidate_tree_sha="c" * 40,
+        source_contract_hash="2" * 64,
+        source_candidate_state_hash="3" * 64,
+        source_verified_receipt_hash="4" * 64,
+        source_independent_acceptance_hash="5" * 64,
+        source_candidate_diff_hash="e" * 64,
+        integration_base_sha=m8_sha,
+        integration_head_sha=i8_head,
+        integration_tree_sha=i8_tree,
+        generation=8,
+        requalification_hash="1" * 64,
+        check_subject_kind="INTEGRATION_HEAD",
+        check_subject_sha=i8_head,
+        check_subject_tree_sha=i8_tree,
+        blob_equivalences=(blob_eq,),
+        candidate_equivalence_proof_hash=proof_hash,
+    )
+
+    checks_r8 = (
+        CheckResult(
+            name="ci",
+            status="completed",
+            conclusion="success",
+            head_sha=i8_head,
+            generation=8,
+        ),
+    )
+    ev_r8 = _base_evidence(
+        base_sha=m8_sha,
+        head_sha=i8_head,
+        tree_sha=i8_tree,
+        current_main_sha=m8_sha,
+        integration=gen8_binding,
+        required_checks=checks_r8,
+        checks_hash=canonical_hash({"checks": [c.model_dump(mode="json") for c in checks_r8]}),
+    )
+
+    shas = [f"{i:02x}" * 20 for i in range(9, 16)]
+    trees = [f"{i:02x}" * 20 for i in range(9, 16)]
+    tree_shas = {m8_sha: m8_tree}
+    for s, t in zip(shas, trees):
+        tree_shas[s] = t
+
+    # Relative budget is 5.
+    # Absorbs 5 generations: gen 9 (shas[0]), gen 10 (shas[1]), gen 11 (shas[2]), gen 12 (shas[3]), gen 13 (shas[4]).
+    # When main moves to shas[5], current_generation (13) - start_generation (8) == 5 >= max_generations (5) -> EXHAUSTS!
+    main_states = [
+        (shas[0], trees[0]),  # Gen 9 entry
+        (shas[1], trees[1]),  # Gen 9 post-check -> drift to shas[1]
+        (shas[1], trees[1]),  # Gen 10 entry
+        (shas[2], trees[2]),  # Gen 10 post-check -> drift to shas[2]
+        (shas[2], trees[2]),  # Gen 11 entry
+        (shas[3], trees[3]),  # Gen 11 post-check -> drift to shas[3]
+        (shas[3], trees[3]),  # Gen 12 entry
+        (shas[4], trees[4]),  # Gen 12 post-check -> drift to shas[4]
+        (shas[4], trees[4]),  # Gen 13 entry
+        (shas[5], trees[5]),  # Gen 13 post-check -> drift to shas[5]
+        (shas[5], trees[5]),  # Gen 14 entry: 13 - 8 = 5 >= 5 -> GENERATION_BUDGET_EXHAUSTED!
+        (shas[6], trees[6]),
+    ]
+
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+
+    port = SpyGitHubCompletionPort(
+        main_states=main_states,
+        default_pr_head=i8_head,
+        tree_shas=tree_shas,
+        default_changed_paths=("docs/unrelated.md",),
+    )
+
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {"valid": True, "proven_paths": tuple(k["changed_main_paths"])},
+    )
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.build_impact_plan",
+        lambda *a, **k: type(
+            "Plan",
+            (),
+            {
+                "impact_class": "DOCS_GOVERNANCE",
+                "unmatched_paths": [],
+                "changed_paths": ["docs/unrelated.md"],
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.github_completion_loop.resolve_durable_merge_authorization",
+        lambda *a, **k: evaluate_action(ctx, req),
+    )
+
+    result = run_github_completion_loop(
+        initial_evidence=ev_r8,
+        request=req,
+        port=port,
+        max_generations=5,
+    )
+
+    assert result.outcome is CompletionLoopOutcome.DEFERRED_CONCURRENCY
+    assert result.reason == "GENERATION_BUDGET_EXHAUSTED"
+    assert result.generation == 13
+    assert len(port.materialize_calls) == 5
+    assert len(port.cas_merge_calls) == 0
+
+
+def test_issue1384_criterion10_hostile_drift_fails_closed(monkeypatch):
+    """AC 10: Authority drift, candidate blob mismatch, and unknown impact fail closed without merge."""
+    m0_sha = "00" * 20
+    m0_tree = "00" * 20
+    cand_c = "b" * 40
+    m1_sha = "11" * 20
+    m1_tree = "11" * 20
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+
+    # 10a: Authority drift
+    initial_ev = _base_evidence(base_sha=m0_sha, current_main_sha=m0_sha)
+    port_auth = SpyGitHubCompletionPort(
+        main_states=[(m1_sha, m1_tree)],
+        default_pr_head=cand_c,
+        tree_shas={m0_sha: m0_tree, m1_sha: m1_tree},
+        default_changed_paths=("AGENTS.md",),
+    )
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {"valid": True, "proven_paths": tuple(k["changed_main_paths"])},
+    )
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.build_impact_plan",
+        lambda *a, **k: type(
+            "Plan",
+            (),
+            {
+                "impact_class": "AUTHORITY_DRIFT",
+                "unmatched_paths": [],
+                "changed_paths": ["AGENTS.md"],
+            },
+        )(),
+    )
+    res_auth = run_github_completion_loop(initial_evidence=initial_ev, request=req, port=port_auth)
+    assert res_auth.outcome is CompletionLoopOutcome.BLOCKED
+    assert "REQUALIFICATION_BLOCKED" in res_auth.reason
+    assert len(port_auth.cas_merge_calls) == 0
+
+    # 10b: Candidate blob SHA mismatch
+    port_blob = SpyGitHubCompletionPort(
+        main_states=[(m1_sha, m1_tree), (m1_sha, m1_tree)],
+        default_pr_head=cand_c,
+        tree_shas={m0_sha: m0_tree, m1_sha: m1_tree},
+        default_changed_paths=("docs/unrelated.md",),
+        blob_shas={
+            ("c" * 40, "nexus/a.py"): "1" * 40,
+            ("01" * 20, "nexus/a.py"): "9"
+            * 40,  # Corrupted / hostile candidate blob in integration tree
+        },
+    )
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.build_impact_plan",
+        lambda *a, **k: type(
+            "Plan",
+            (),
+            {
+                "impact_class": "DOCS_GOVERNANCE",
+                "unmatched_paths": [],
+                "changed_paths": ["docs/unrelated.md"],
+            },
+        )(),
+    )
+    res_blob = run_github_completion_loop(initial_evidence=initial_ev, request=req, port=port_blob)
+    assert res_blob.outcome is CompletionLoopOutcome.BLOCKED
+    assert "CANDIDATE_BLOB_SHA_MISMATCH:nexus/a.py" in res_blob.reason
+    assert len(port_blob.cas_merge_calls) == 0
+
+    # 10c: Unknown impact
+    port_unknown = SpyGitHubCompletionPort(
+        main_states=[(m1_sha, m1_tree)],
+        default_pr_head=cand_c,
+        tree_shas={m0_sha: m0_tree, m1_sha: m1_tree},
+        default_changed_paths=("unclassified/file.dat",),
+    )
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.build_impact_plan",
+        lambda *a, **k: type(
+            "Plan",
+            (),
+            {
+                "impact_class": "IMPACT_UNKNOWN",
+                "unmatched_paths": ["unclassified/file.dat"],
+                "changed_paths": ["unclassified/file.dat"],
+            },
+        )(),
+    )
+    res_unknown = run_github_completion_loop(
+        initial_evidence=initial_ev, request=req, port=port_unknown
+    )
+    assert res_unknown.outcome is CompletionLoopOutcome.BLOCKED
+    assert "REQUALIFICATION_BLOCKED" in res_unknown.reason or "IMPACT_UNKNOWN" in res_unknown.reason
+    assert len(port_unknown.cas_merge_calls) == 0
+
+    # 10d: Integration materialization merge conflict
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.build_impact_plan",
+        lambda *a, **k: type(
+            "Plan",
+            (),
+            {
+                "impact_class": "DOCS_GOVERNANCE",
+                "unmatched_paths": [],
+                "changed_paths": ["docs/unrelated.md"],
+            },
+        )(),
+    )
+    port_conflict = SpyGitHubCompletionPort(
+        main_states=[(m1_sha, m1_tree)],
+        default_pr_head=cand_c,
+        tree_shas={m0_sha: m0_tree, m1_sha: m1_tree},
+        default_changed_paths=("docs/unrelated.md",),
+        materialization_results=[
+            IntegrationMaterializationResult(
+                success=False,
+                conflict=True,
+                error="CONFLICT_IN_TREE_MERGE",
+            )
+        ],
+    )
+    res_conflict = run_github_completion_loop(
+        initial_evidence=initial_ev, request=req, port=port_conflict
+    )
+    assert res_conflict.outcome is CompletionLoopOutcome.BLOCKED
+    assert "INTEGRATION_MATERIALIZATION_FAILED:CONFLICT_IN_TREE_MERGE" in res_conflict.reason
+    assert len(port_conflict.cas_merge_calls) == 0
