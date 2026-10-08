@@ -599,9 +599,9 @@ def _identity_summary(identity: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _seal(body: dict[str, Any]) -> dict[str, Any]:
-    body["content_sha256"] = canonical_hash(
-        {k: v for k, v in body.items() if k != "content_sha256"}
-    )
+    body["content_sha256"] = canonical_hash({
+        k: v for k, v in body.items() if k != "content_sha256"
+    })
     return body
 
 
@@ -616,48 +616,44 @@ def project_report(
     if classification == "UNCHANGED" and not _is_clean(report):
         # Defense in depth: incomplete evidence may never read as "unchanged".
         classification = "UNKNOWN"
-    return _seal(
-        {
-            "schema": PROJECTION_SCHEMA,
-            "disposition": "OBSERVED",
-            "guard_family": GUARD_FAMILY,
-            "classification": classification,
-            "reviewer_attention": REVIEWER_ATTENTION[classification],
-            "reason_codes": _bounded_refs(report.get("reason_codes")),
-            "tightening_witnesses": _bounded_refs(report.get("tightening_witnesses")),
-            "loosening_witnesses": _bounded_refs(report.get("loosening_witnesses")),
-            "evidence_gaps": _bounded_refs(report.get("evidence_gaps")),
-            "collection_errors": _bounded_refs(report.get("collection_errors")),
-            "adapter_gaps": _bounded_refs(list(adapter_gaps)),
-            "evidence_complete": _is_clean(report) and not adapter_gaps,
-            "report_content_sha256": report["content_sha256"],
-            "engine_revision": engine_revision,
-            "old_identity": _identity_summary(report["old_identity"]),
-            "new_identity": _identity_summary(report["new_identity"]),
-            "authority": dict(AUTHORITY_STATEMENT),
-            "claim_ceiling": ADVISORY_CLAIM_CEILING,
-        }
-    )
+    return _seal({
+        "schema": PROJECTION_SCHEMA,
+        "disposition": "OBSERVED",
+        "guard_family": GUARD_FAMILY,
+        "classification": classification,
+        "reviewer_attention": REVIEWER_ATTENTION[classification],
+        "reason_codes": _bounded_refs(report.get("reason_codes")),
+        "tightening_witnesses": _bounded_refs(report.get("tightening_witnesses")),
+        "loosening_witnesses": _bounded_refs(report.get("loosening_witnesses")),
+        "evidence_gaps": _bounded_refs(report.get("evidence_gaps")),
+        "collection_errors": _bounded_refs(report.get("collection_errors")),
+        "adapter_gaps": _bounded_refs(list(adapter_gaps)),
+        "evidence_complete": _is_clean(report) and not adapter_gaps,
+        "report_content_sha256": report["content_sha256"],
+        "engine_revision": engine_revision,
+        "old_identity": _identity_summary(report["old_identity"]),
+        "new_identity": _identity_summary(report["new_identity"]),
+        "authority": dict(AUTHORITY_STATEMENT),
+        "claim_ceiling": ADVISORY_CLAIM_CEILING,
+    })
 
 
 def make_incomplete_projection(identity: Mapping[str, Any], reason: str) -> dict[str, Any]:
     """Absent/unverifiable report: classification is NOT_OBSERVED, never UNCHANGED."""
     code = reason if SAFE_REF.fullmatch(reason) else "UNSPECIFIED"
-    return _seal(
-        {
-            "schema": PROJECTION_SCHEMA,
-            "disposition": "ADVISORY_INCOMPLETE",
-            "guard_family": GUARD_FAMILY,
-            "classification": "NOT_OBSERVED",
-            "reviewer_attention": "EXPLICIT_UNCERTAINTY_REQUIRES_REVIEW",
-            "reason": code,
-            "evidence_complete": False,
-            "old_identity": {**_identity_summary(identity), "head_sha": identity["base_sha"]},
-            "new_identity": _identity_summary(identity),
-            "authority": dict(AUTHORITY_STATEMENT),
-            "claim_ceiling": ADVISORY_CLAIM_CEILING,
-        }
-    )
+    return _seal({
+        "schema": PROJECTION_SCHEMA,
+        "disposition": "ADVISORY_INCOMPLETE",
+        "guard_family": GUARD_FAMILY,
+        "classification": "NOT_OBSERVED",
+        "reviewer_attention": "EXPLICIT_UNCERTAINTY_REQUIRES_REVIEW",
+        "reason": code,
+        "evidence_complete": False,
+        "old_identity": {**_identity_summary(identity), "head_sha": identity["base_sha"]},
+        "new_identity": _identity_summary(identity),
+        "authority": dict(AUTHORITY_STATEMENT),
+        "claim_ceiling": ADVISORY_CLAIM_CEILING,
+    })
 
 
 def render_step_summary(projection: Mapping[str, Any]) -> str:
@@ -771,9 +767,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
     try:
-        engine: Any = engine_from_env(
-            {ENGINE_ROOT_ENV: args.engine_root, ENGINE_PYTHON_ENV: args.python_bin}
-        )
+        engine: Any = engine_from_env({
+            ENGINE_ROOT_ENV: args.engine_root,
+            ENGINE_PYTHON_ENV: args.python_bin,
+        })
         projection = generate_advisory(
             repo_root=Path(args.repo_root),
             identity=identity,

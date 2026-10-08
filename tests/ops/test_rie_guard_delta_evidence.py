@@ -249,9 +249,9 @@ def test_stale_or_wrong_base_head_report_rejected(repo, engine):
 
 
 def _rehash(report: dict) -> dict:
-    report["content_sha256"] = m.canonical_hash(
-        {k: v for k, v in report.items() if k != "content_sha256"}
-    )
+    report["content_sha256"] = m.canonical_hash({
+        k: v for k, v in report.items() if k != "content_sha256"
+    })
     return report
 
 
@@ -407,29 +407,27 @@ def test_cli_writes_artifact_and_summary_only(repo, tmp_path, engine, capsys):
     base = _commit(repo, GUARD_SRC, SELF_TEST_SRC)
     before = _git(repo, "status", "--porcelain")
     out, summary = tmp_path / "o" / "r.json", tmp_path / "s.md"
-    rc = m.main(
-        [
-            "--repo-root",
-            str(repo),
-            "--repository",
-            "James3014/Nexus-new",
-            "--pr-number",
-            "1580",
-            "--head-sha",
-            base,
-            "--base-sha",
-            base,
-            "--engine-root",
-            str(engine.engine_root),
-            "--python-bin",
-            engine.python_bin,
-            "--output",
-            str(out),
-            "--step-summary",
-            str(summary),
-            "--run-behavioral-probes",
-        ]
-    )
+    rc = m.main([
+        "--repo-root",
+        str(repo),
+        "--repository",
+        "James3014/Nexus-new",
+        "--pr-number",
+        "1580",
+        "--head-sha",
+        base,
+        "--base-sha",
+        base,
+        "--engine-root",
+        str(engine.engine_root),
+        "--python-bin",
+        engine.python_bin,
+        "--output",
+        str(out),
+        "--step-summary",
+        str(summary),
+        "--run-behavioral-probes",
+    ])
     assert rc == 0
     data = json.loads(out.read_text())
     assert data["classification"] == "UNCHANGED"
@@ -447,22 +445,20 @@ def test_cli_without_engine_config_emits_incomplete_and_exit_zero(repo, tmp_path
     monkeypatch.delenv(m.ENGINE_ROOT_ENV, raising=False)
     monkeypatch.delenv(m.ENGINE_PYTHON_ENV, raising=False)
     out = tmp_path / "r.json"
-    rc = m.main(
-        [
-            "--repo-root",
-            str(repo),
-            "--repository",
-            "o/r",
-            "--pr-number",
-            "1",
-            "--head-sha",
-            base,
-            "--base-sha",
-            base,
-            "--output",
-            str(out),
-        ]
-    )
+    rc = m.main([
+        "--repo-root",
+        str(repo),
+        "--repository",
+        "o/r",
+        "--pr-number",
+        "1",
+        "--head-sha",
+        base,
+        "--base-sha",
+        base,
+        "--output",
+        str(out),
+    ])
     assert rc == 0
     assert json.loads(out.read_text())["reason"] == "ENGINE_NOT_CONFIGURED"
 
@@ -490,9 +486,15 @@ def test_advisory_lane_has_no_mutation_path():
         if isinstance(n, (ast.Import, ast.ImportFrom))
         for a in (n.names if isinstance(n, ast.Import) else [n])
     }
-    assert imported.isdisjoint(
-        {"repository_intelligence", "requests", "urllib", "http", "socket", "httpx", "nexus"}
-    )
+    assert imported.isdisjoint({
+        "repository_intelligence",
+        "requests",
+        "urllib",
+        "http",
+        "socket",
+        "httpx",
+        "nexus",
+    })
     for token in (".github", "required_status", "task_card", "candidate_accept", "gh ", "git push"):
         assert token not in source.replace("candidate_acceptance", ""), token
     # the only file writes are the two declared outputs
