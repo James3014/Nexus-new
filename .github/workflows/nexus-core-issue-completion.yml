@@ -63,6 +63,7 @@ jobs:
               "scripts/ci/nexus-core-verify.sh",
               "scripts/ci/nexus_core_trusted_pin_policy.py",
               "scripts/ci/nexus_core_observe_dependency.py",
+              "scripts/ops/test_fast.sh",
           ]
 
           def base_bytes(path: str) -> bytes:
