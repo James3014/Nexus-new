@@ -8,6 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 ADAPTER_DIR = ROOT / "scripts" / "ops" / "dsh-agy-adapter"
+PRE_EFFECT = "PROVIDER_PROTOCOL_INVALID_PRE_EFFECT"
 
 
 def _run_node(
@@ -15,6 +16,7 @@ def _run_node(
     response: str,
     *,
     tool: bool = False,
+    dup_tool: bool = False,
     model: str = "gemini-3.8-flash-low",
     effort: str = "low",
     extra_env: dict[str, str] | None = None,
@@ -57,6 +59,9 @@ def _run_node(
         if tool
         else "[]"
     )
+    if dup_tool:
+        one = tool_schema[1:-1]
+        tool_schema = "[" + one + "," + one + "]"
     script.write_text(
         "import { AgyPoolAdapter } from './runtime/node_modules/@nexus/dsh-llm-agy-pilot/index.js';\n"
         "const adapter = new AgyPoolAdapter();\n"
@@ -64,7 +69,7 @@ def _run_node(
         "try {\n"
         f" for await (const event of adapter.stream({{model:{model!r},reasoningEffort:{effort!r},messages:[{{role:'user',content:[{{type:'text',text:'x'}}]}}],tools:{tool_schema}}})) out.push(event);\n"
         " console.log(JSON.stringify({ok:true,out}));\n"
-        "} catch (e) { console.log(JSON.stringify({ok:false,code:e.code||null,message:String(e.message)})); process.exitCode=3; }\n",
+        "} catch (e) { console.log(JSON.stringify({ok:false,code:e.code||null,originalCode:e.originalCode||null,effect:e.effect||null,retryable:e.retryable||false,message:String(e.message)})); process.exitCode=3; }\n",
         encoding="utf-8",
     )
     env = dict(os.environ)
@@ -113,14 +118,18 @@ def test_multiple_json_objects_fail_closed(tmp_path: Path) -> None:
     assert proc.returncode == 3
     payload = json.loads(proc.stdout)
     assert payload["ok"] is False
-    assert payload["code"] == "AGY_PROTOCOL_INVALID"
+    assert payload["code"] == PRE_EFFECT
+    assert "exactly one JSON object" in payload["message"]
+    assert payload["originalCode"] == "AGY_PROTOCOL_INVALID"
 
 
 def test_unknown_action_fails_closed(tmp_path: Path) -> None:
     proc = _run_node(tmp_path, '{"kind":"dsh_action","action_id":"A99","arguments":{}}', tool=True)
     assert proc.returncode == 3
     payload = json.loads(proc.stdout)
-    assert payload["code"] == "AGY_TOOL_NOT_AVAILABLE"
+    assert payload["code"] == PRE_EFFECT
+    assert payload["originalCode"] == "AGY_TOOL_NOT_AVAILABLE"
+    assert "unavailable DSH action: A99" in payload["message"]
 
 
 def test_action_arguments_must_be_object(tmp_path: Path) -> None:
@@ -129,7 +138,8 @@ def test_action_arguments_must_be_object(tmp_path: Path) -> None:
     )
     assert proc.returncode == 3
     payload = json.loads(proc.stdout)
-    assert payload["code"] == "AGY_PROTOCOL_INVALID"
+    assert payload["code"] == PRE_EFFECT
+    assert payload["originalCode"] == "AGY_PROTOCOL_INVALID"
 
 
 def test_model_effort_mismatch_fails_before_dispatch(tmp_path: Path) -> None:
@@ -180,3 +190,79 @@ def test_unknown_outcome_preserves_scratch_for_reconciliation(tmp_path: Path) ->
     assert scratch["has_git"] is True
     assert scratch["has_baseline"] is True
     assert Path(scratch["cwd"]).is_dir()
+
+
+def _calls(proc: subprocess.CompletedProcess[str]) -> list[dict]:
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    return [e for e in json.loads(proc.stdout)["out"] if e.get("type") == "block-end"]
+
+
+def test_semantic_label_in_action_id_maps_when_unambiguous(tmp_path: Path) -> None:
+    # Observed in #1327 turn 4: action_id "bash" instead of "A1".
+    proc = _run_node(
+        tmp_path,
+        '{"kind":"dsh_action","action_id":"read","arguments":{"file_path":"README.md"}}',
+        tool=True,
+    )
+    assert _calls(proc)[0]["block"]["name"] == "read"
+
+
+def test_label_variants_do_not_normalize(tmp_path: Path) -> None:
+    for variant in ("Read", "read ", "shell", "dsh.read"):
+        proc = _run_node(
+            tmp_path / variant.replace(" ", "_").replace(".", "_"),
+            json.dumps({"kind": "dsh_action", "action_id": variant, "arguments": {}}),
+            tool=True,
+        )
+        assert proc.returncode == 3, variant
+        payload = json.loads(proc.stdout)
+        assert payload["code"] == PRE_EFFECT
+        assert payload["originalCode"] == "AGY_TOOL_NOT_AVAILABLE"
+        assert payload["effect"] == "none" and payload["retryable"] is True
+
+
+def test_ambiguous_duplicate_label_fails_closed(tmp_path: Path) -> None:
+    proc = _run_node(
+        tmp_path,
+        '{"kind":"dsh_action","action_id":"read","arguments":{}}',
+        tool=True,
+        dup_tool=True,
+    )
+    assert proc.returncode == 3
+    assert json.loads(proc.stdout)["originalCode"] == "AGY_TOOL_NOT_AVAILABLE"
+
+
+def test_single_fenced_json_object_is_accepted(tmp_path: Path) -> None:
+    # Observed in #1327 turn 5: whole response wrapped in ```json fence.
+    proc = _run_node(tmp_path, '```json\n{"kind":"text","text":"EVIDENCE_BLOCKED"}\n```\n')
+    block = _calls_text(proc)
+    assert block["text"] == "EVIDENCE_BLOCKED"
+
+
+def _calls_text(proc: subprocess.CompletedProcess[str]) -> dict:
+    return _calls(proc)[0]["block"]
+
+
+def test_fence_with_prose_or_two_objects_fails_closed(tmp_path: Path) -> None:
+    cases = {
+        "prose": 'Here you go:\n```json\n{"kind":"text","text":"x"}\n```',
+        "two_fences": '```json\n{"kind":"text","text":"a"}\n```\n```json\n{"kind":"text","text":"b"}\n```',
+        "two_in_fence": '```json\n{"kind":"text","text":"a"}\n{"kind":"text","text":"b"}\n```',
+        "empty_fence": "```json\n```",
+        "empty": "",
+    }
+    for name, response in cases.items():
+        proc = _run_node(tmp_path / name, response)
+        assert proc.returncode == 3, name
+        payload = json.loads(proc.stdout)
+        assert payload["code"] == PRE_EFFECT, name
+        assert payload["originalCode"] == "AGY_PROTOCOL_INVALID", name
+
+
+def test_config_errors_are_not_reclassified_pre_effect(tmp_path: Path) -> None:
+    proc = _run_node(
+        tmp_path,
+        '{"kind":"text","text":"x"}',
+        extra_env={"NEXUS_DSH_AGY_TIMEOUT_SECONDS": "5"},
+    )
+    assert json.loads(proc.stdout)["code"] == "AGY_PROTOCOL_INVALID"
