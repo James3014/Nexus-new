@@ -10,6 +10,7 @@ import pytest
 from nexus_learning.lessons import LessonStore, build_lesson
 from nexus_learning.state_root import LearningStateRoot
 
+from nexus.services.local_heal.errors import PatchError, PatchErrorKind
 from nexus.services.local_heal.learning_closure_bridge import (
     LearningClosureBridge,
     write_learning_closure,
@@ -504,3 +505,70 @@ def test_finalize_refresh_updates_verifier_status_and_keeps_prompt_included(tmp_
     _orch()._refresh_memory_trace_verifier_status(SimpleNamespace(op=op))
     assert op._memory_influence_trace.verifier_status == "FAIL"
     assert op._memory_influence_trace.prompt_included is True
+
+
+def _normal_retry_setup(tmp_path: Path, monkeypatch):
+    from nexus.services.local_heal import memory_retrieval_adapter as adapter_mod
+
+    class _TmpCanonical(adapter_mod.CanonicalLessonStore):
+        def __init__(self, **_kwargs):
+            super().__init__(project_root=tmp_path)
+
+    class _Composite(adapter_mod.NexusCompositeLessonStore):
+        def __init__(self, stores=None):
+            super().__init__(stores=[_TmpCanonical()])
+
+    monkeypatch.setattr(adapter_mod, "CanonicalLessonStore", _TmpCanonical)
+    monkeypatch.setattr(adapter_mod, "NexusCompositeLessonStore", _Composite)
+
+
+def _normal_retry_ctx(tmp_path: Path, **over):
+    op = SimpleNamespace(
+        final_patch="",
+        pre_verification_final_patch="--- a/src/parser.py\n+++ b/src/parser.py\n@@ -1 +1 @@\n-x\n+y\n",
+        user_prompt="BASE",
+        problem_statement="fix the parser crash on empty token stream",
+        instance_id="task-normal",
+        repo_dir=tmp_path,
+        memory_enabled=True,
+        retrieved_lesson_ids=[],
+        attempt=1,
+        plan=None,
+        localized_files=[],
+        evaluation_report="",
+    )
+    for key, value in over.items():
+        setattr(op, key, value)
+    orch = _orch()
+    orch.corrector = SimpleNamespace(build_retry_prompt=lambda prompt, *a, **k: "BASE")
+    orch._extract_target_symbol = lambda ctx: ""
+    orch._resolve_target_file = lambda ctx: tmp_path / "src/parser.py"
+    return orch, SimpleNamespace(op=op)
+
+
+def test_normal_retry_injects_physical_lesson_into_prompt(tmp_path, monkeypatch):
+
+    title = "Guard parser fallback before indexing"
+    lsn_id = _judge_lesson_row(tmp_path, title)
+    _normal_retry_setup(tmp_path, monkeypatch)
+    orch, ctx = _normal_retry_ctx(tmp_path)
+    attempt_before = ctx.op.attempt
+
+    orch._handle_retry(ctx, PatchError(kind=PatchErrorKind.LOGIC_REGRESSION, message="x"))
+
+    assert ctx.op.user_prompt.startswith("BASE")
+    assert title in ctx.op.user_prompt
+    assert lsn_id in ctx.op._memory_prompt_injected_ids
+    assert ctx.op._memory_influence_trace.prompt_included is True
+    assert ctx.op.attempt == attempt_before + 1
+
+
+def test_normal_retry_memory_off_appends_nothing(tmp_path, monkeypatch):
+    _judge_lesson_row(tmp_path, "Guard parser fallback before indexing")
+    _normal_retry_setup(tmp_path, monkeypatch)
+    orch, ctx = _normal_retry_ctx(tmp_path, memory_enabled=False)
+
+    orch._handle_retry(ctx, PatchError(kind=PatchErrorKind.LOGIC_REGRESSION, message="x"))
+
+    assert ctx.op.user_prompt == "BASE"
+    assert not getattr(ctx.op, "_memory_prompt_injected_ids", None)

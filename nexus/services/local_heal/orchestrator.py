@@ -293,15 +293,22 @@ class HealOrchestrator:
         route_ctx = route_ctx if isinstance(route_ctx, dict) else {}
         disable_primary_semantic_retry = bool(route_ctx.get("disable_primary_semantic_retry", False))
 
-        # T1.6: Semantic retry eligible on first verification failure
-        semantic_retry_eligible = (
-            not disable_primary_semantic_retry
-            and
-            ctx.op.attempt == 1
-            and failure_class in ("semantic_wrong", "LOGIC_REGRESSION", "VERIFICATION_FAILED")
-            and evaluation_report
-            and getattr(ctx.op, "final_patch", "")
-        )
+        # T1.6: Semantic retry eligible on first verification failure.
+        # The first failing condition is kept on op so receipts can explain a skip.
+        if disable_primary_semantic_retry:
+            skip_reason = "disabled_by_route"
+        elif ctx.op.attempt != 1:
+            skip_reason = "not_first_attempt"
+        elif failure_class not in ("semantic_wrong", "LOGIC_REGRESSION", "VERIFICATION_FAILED"):
+            skip_reason = "failure_class_ineligible"
+        elif not evaluation_report:
+            skip_reason = "no_evaluation_report"
+        elif not getattr(ctx.op, "final_patch", ""):
+            skip_reason = "no_final_patch"
+        else:
+            skip_reason = ""
+        ctx.op.semantic_retry_skip_reason = skip_reason
+        semantic_retry_eligible = skip_reason == ""
 
         if semantic_retry_eligible:
             semantic_ok = self._attempt_multipass_semantic_retry(ctx, evaluation_report, failure_class)
@@ -328,6 +335,112 @@ class HealOrchestrator:
         if "LOGIC_REGRESSION" in failure_reason:
             return "LOGIC_REGRESSION"
         return "VERIFICATION_FAILED"
+
+    def _render_memory_lessons(self, ctx: HealContext, target_file: str) -> tuple[str, list[str]]:
+        """Render up to 3 advisory memory lessons for a retry prompt.
+
+        Shared by the semantic retry (C6P/C6S) and the normal retry loop.
+        Returns (text, rendered_ids); ("", []) when memory is disabled or nothing
+        matches. Never raises.
+        """
+        try:
+            # Attach the memory influence trace before the retry prompt is built.
+            # Previously it was attached only in _finalize_run (after all retries), so
+            # lessons never reached the retry prompt and nothing could be attributed.
+            if getattr(ctx.op, "_memory_influence_trace", None) is None:
+                try:
+                    self._attach_memory_influence_trace(ctx)
+                except Exception:
+                    pass
+            if not getattr(ctx.op, "memory_enabled", True):
+                return "", []
+
+            import re as _re
+
+            from nexus.services.local_heal.memory_retrieval_adapter import (
+                CanonicalLessonStore,
+                NexusCompositeLessonStore,
+            )
+
+            # C6P/C6S: Extract memory lesson CONTENT for active guidance
+            # Fixed: now reads actual lesson summaries, not just IDs
+            memory_lessons_text = ""
+            rendered_ids: list[str] = []
+            memory_trace = getattr(ctx.op, "_memory_influence_trace", None)
+            if memory_trace and hasattr(memory_trace, "selected_ids") and memory_trace.selected_ids:
+                # Read lesson content from memory store using IDs
+                try:
+                    problem_text = str(getattr(ctx.op, "problem_statement", "") or "")[:300]
+                    target_words = " ".join(
+                        w for w in _re.split(r"[^A-Za-z0-9]+", str(target_file or "")) if w
+                    )
+                    # Distilled canonical lessons first (queried directly so raw episode
+                    # rows in the composite cannot crowd them out).
+                    try:
+                        canonical_rows = CanonicalLessonStore().query(
+                            query_text=f"{problem_text} {target_words}".strip(), limit=2
+                        )
+                    except Exception:
+                        canonical_rows = []
+                    store = NexusCompositeLessonStore()
+                    # Selected ids first (legacy behaviour), plus the problem text so
+                    # keyword-based canonical lessons can match.
+                    composite_rows = store.query(
+                        query_text=" ".join([*memory_trace.selected_ids[:3], problem_text]).strip(),
+                        limit=3,
+                    )
+                    lessons = [*canonical_rows[:2], *composite_rows]
+                    if lessons:
+                        lesson_parts = []
+                        for lesson in lessons:
+                            if len(lesson_parts) >= 3:
+                                break
+                            summary = lesson.get("summary", "")
+                            classification = lesson.get("classification", "")
+                            lesson_id = lesson.get("lesson_id", lesson.get("id", ""))
+                            if str(lesson_id) in rendered_ids:
+                                continue
+                            title = str(lesson.get("title") or "")
+                            applies_when = [str(x) for x in (lesson.get("applies_when") or []) if str(x)]
+                            avoid_when = [str(x) for x in (lesson.get("avoid_when") or []) if str(x)]
+                            if title or applies_when or avoid_when:
+                                # Canonical nexus.learning_lesson.v1 row.
+                                text = f"Lesson [{classification}] (id: {lesson_id}): {title}"
+                                if summary:
+                                    text += f"\n  - {summary}"
+                                if applies_when:
+                                    text += f"\n  - applies when: {'; '.join(applies_when)}"
+                                if avoid_when:
+                                    text += f"\n  - avoid when: {'; '.join(avoid_when)}"
+                                if summary or title:
+                                    lesson_parts.append(text[:600])
+                                    rendered_ids.append(str(lesson_id))
+                            elif summary:
+                                lesson_parts.append(
+                                    f"Lesson [{classification}] (id: {lesson_id}):\n  - {summary}"
+                                )
+                                rendered_ids.append(str(lesson_id))
+                        if lesson_parts:
+                            memory_lessons_text = "\n".join(lesson_parts)
+                            rendered_ids = [i for i in rendered_ids if i]
+                            # Attribution inputs: ids actually rendered into the prompt.
+                            if rendered_ids and not getattr(ctx.op, "retrieved_lesson_ids", None):
+                                ctx.op.retrieved_lesson_ids = list(rendered_ids)
+                            # prompt_included only when text was really injected.
+                            if rendered_ids:
+                                ctx.op._memory_prompt_injected_ids = list(rendered_ids)
+                                try:
+                                    memory_trace.prompt_included = True
+                                except Exception:
+                                    pass
+                except Exception:
+                    # Fallback: use IDs if content read fails. These are not rendered
+                    # lessons, so no ids are reported for attribution.
+                    memory_lessons_text = f"Lessons found: {', '.join(memory_trace.selected_ids[:3])}"
+                    rendered_ids = []
+            return memory_lessons_text, rendered_ids
+        except Exception:
+            return "", []
 
     def _attempt_semantic_retry(
         self, ctx: HealContext, evaluation_report: str, failure_class: str
@@ -409,95 +522,8 @@ class HealOrchestrator:
                 f"{vfk}|{vse[:200]}|{vserr[:200]}|{vec}|{vch}".encode()
             ).hexdigest()[:16]
         
-        # Attach the memory influence trace before the retry prompt is built.
-        # Previously it was attached only in _finalize_run (after all retries), so
-        # lessons never reached the retry prompt and nothing could be attributed.
-        if getattr(ctx.op, "_memory_influence_trace", None) is None:
-            try:
-                self._attach_memory_influence_trace(ctx)
-            except Exception:
-                pass
-
-        # C6P/C6S: Extract memory lesson CONTENT for active guidance
-        # Fixed: now reads actual lesson summaries, not just IDs
-        memory_lessons_text = ""
-        memory_trace = getattr(ctx.op, "_memory_influence_trace", None)
-        if memory_trace and hasattr(memory_trace, "selected_ids") and memory_trace.selected_ids:
-            # Read lesson content from memory store using IDs
-            try:
-                import re as _re
-
-                from nexus.services.local_heal.memory_retrieval_adapter import (
-                    CanonicalLessonStore,
-                    NexusCompositeLessonStore,
-                )
-                problem_text = str(getattr(ctx.op, "problem_statement", "") or "")[:300]
-                target_words = " ".join(
-                    w for w in _re.split(r"[^A-Za-z0-9]+", str(target_file or "")) if w
-                )
-                # Distilled canonical lessons first (queried directly so raw episode
-                # rows in the composite cannot crowd them out).
-                try:
-                    canonical_rows = CanonicalLessonStore().query(
-                        query_text=f"{problem_text} {target_words}".strip(), limit=2
-                    )
-                except Exception:
-                    canonical_rows = []
-                store = NexusCompositeLessonStore()
-                # Selected ids first (legacy behaviour), plus the problem text so
-                # keyword-based canonical lessons can match.
-                composite_rows = store.query(
-                    query_text=" ".join([*memory_trace.selected_ids[:3], problem_text]).strip(),
-                    limit=3,
-                )
-                lessons = [*canonical_rows[:2], *composite_rows]
-                if lessons:
-                    lesson_parts = []
-                    rendered_ids: list[str] = []
-                    for lesson in lessons:
-                        if len(lesson_parts) >= 3:
-                            break
-                        summary = lesson.get("summary", "")
-                        classification = lesson.get("classification", "")
-                        lesson_id = lesson.get("lesson_id", lesson.get("id", ""))
-                        if str(lesson_id) in rendered_ids:
-                            continue
-                        title = str(lesson.get("title") or "")
-                        applies_when = [str(x) for x in (lesson.get("applies_when") or []) if str(x)]
-                        avoid_when = [str(x) for x in (lesson.get("avoid_when") or []) if str(x)]
-                        if title or applies_when or avoid_when:
-                            # Canonical nexus.learning_lesson.v1 row.
-                            text = f"Lesson [{classification}] (id: {lesson_id}): {title}"
-                            if summary:
-                                text += f"\n  - {summary}"
-                            if applies_when:
-                                text += f"\n  - applies when: {'; '.join(applies_when)}"
-                            if avoid_when:
-                                text += f"\n  - avoid when: {'; '.join(avoid_when)}"
-                            if summary or title:
-                                lesson_parts.append(text[:600])
-                                rendered_ids.append(str(lesson_id))
-                        elif summary:
-                            lesson_parts.append(
-                                f"Lesson [{classification}] (id: {lesson_id}):\n  - {summary}"
-                            )
-                            rendered_ids.append(str(lesson_id))
-                    if lesson_parts:
-                        memory_lessons_text = "\n".join(lesson_parts)
-                        rendered_ids = [i for i in rendered_ids if i]
-                        # Attribution inputs: ids actually rendered into the prompt.
-                        if rendered_ids and not getattr(ctx.op, "retrieved_lesson_ids", None):
-                            ctx.op.retrieved_lesson_ids = list(rendered_ids)
-                        # prompt_included only when text was really injected.
-                        if rendered_ids:
-                            ctx.op._memory_prompt_injected_ids = list(rendered_ids)
-                            try:
-                                memory_trace.prompt_included = True
-                            except Exception:
-                                pass
-            except Exception:
-                # Fallback: use IDs if content read fails
-                memory_lessons_text = f"Lessons found: {', '.join(memory_trace.selected_ids[:3])}"
+        # Attach memory trace and render canonical lessons (shared with the normal retry path).
+        memory_lessons_text, _ = self._render_memory_lessons(ctx, target_file)
 
         # C6AA: Extract bounded CodeIntel context for retry
         codeintel_context = self._extract_codeintel_context_for_retry(ctx)
@@ -1616,6 +1642,19 @@ class HealOrchestrator:
             error.structured_packet = sp
             
         ctx.op.user_prompt = self.corrector.build_retry_prompt(ctx.op.user_prompt, error, targeted_files=targeted_files, structured_packet=sp)
+        # Normal retry loop: inject advisory canonical lessons (memory-gated inside the helper).
+        import re as _re
+
+        patch_text = getattr(ctx.op, "final_patch", "") or getattr(ctx.op, "pre_verification_final_patch", "") or ""
+        target_match = _re.search(r"^\+\+\+ b/(.+)$", patch_text, _re.MULTILINE)
+        retry_target = target_match.group(1) if target_match else ""
+        lesson_text, lesson_ids = self._render_memory_lessons(ctx, retry_target)
+        # Fallback text (no rendered ids) is never injected into the normal retry.
+        if lesson_text and lesson_ids:
+            ctx.op.user_prompt = (
+                f"{ctx.op.user_prompt}\n\n## Lessons from prior verified attempts "
+                f"(advisory; verify against the failing test)\n{lesson_text}"
+            )
         ctx.op.attempt += 1
         return ctx
     
