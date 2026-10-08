@@ -19,6 +19,7 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -1242,6 +1243,70 @@ def _emit(payload: dict[str, Any]) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True))
 
 
+REEXEC_ENV = "NEXUS_HOST_SYNC_REEXEC"
+REEXEC_DETAIL_TAIL = 2000
+
+
+def _reexec_error(
+    *, from_sha: str, to_sha: str, exit_code: int | None, detail: str
+) -> dict[str, Any]:
+    return {
+        "schema": STATUS_SCHEMA,
+        "host": socket.gethostname(),
+        "state": "ERROR",
+        "error": "HOST_SYNC_REEXEC_FAILED",
+        "detail": detail[-REEXEC_DETAIL_TAIL:],
+        "reexec": {"from_sha256": from_sha, "to_sha256": to_sha, "exit_code": exit_code},
+    }
+
+
+def _maybe_reexec_new_host_sync(
+    release: Path, child_argv: list[str]
+) -> tuple[dict[str, Any], int] | None:
+    """Hand activation/status to the newly installed host-sync when its bytes differ.
+
+    The running (older) script may not know components declared by the new
+    generation. The release stays switched (no rollback); only the idempotent
+    activation + status pass is delegated, once (guarded by REEXEC_ENV).
+    """
+    if os.environ.get(REEXEC_ENV) == "1":
+        return None
+    new_script = release / "snapshot" / "scripts" / "ops" / "nexus-host-sync"
+    if not new_script.is_file():
+        return None
+    from_sha = _sha256(Path(__file__).resolve())
+    to_sha = _sha256(new_script)
+    if from_sha == to_sha:
+        return None
+    env = os.environ.copy()
+    env[REEXEC_ENV] = "1"
+    proc = subprocess.run(
+        [sys.executable, str(new_script), *child_argv],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    try:
+        payload = json.loads(proc.stdout)
+        if not isinstance(payload, dict):
+            raise ValueError("payload is not an object")
+        if proc.returncode != 0 and payload.get("state") == "ERROR":
+            raise ValueError(str(payload.get("error")))
+    except ValueError as exc:
+        detail = (proc.stderr or str(exc) or proc.stdout or "").strip()
+        failure = _reexec_error(
+            from_sha=from_sha, to_sha=to_sha, exit_code=proc.returncode, detail=detail
+        )
+        return failure, 2
+    payload["reexec"] = {
+        "from_sha256": from_sha,
+        "to_sha256": to_sha,
+        "exit_code": proc.returncode,
+    }
+    return payload, proc.returncode
+
+
 def _write_sync_observation(
     runtime_root: Path,
     *,
@@ -1545,6 +1610,38 @@ def main(argv: list[str] | None = None) -> int:
                 grok_accounts_target=grok_accounts_target,
             )
             _prune_releases(runtime_root)
+            child_argv = [
+                "--runtime-root",
+                str(runtime_root),
+                "--dispatch-target",
+                str(dispatch_target),
+                "--quota-target",
+                str(quota_target),
+                "--workflow-doctor-target",
+                str(workflow_doctor_target),
+                "--sync-target",
+                str(sync_target),
+                "--external-dispatch-target",
+                str(external_dispatch_target),
+                "--grok-accounts-target",
+                str(grok_accounts_target),
+                "--manager-python",
+                str(manager_python),
+                "sync",
+                "--revision",
+                revision,
+                "--source-repo",
+                str(source_repo),
+                "--remote-url",
+                args.remote_url,
+                "--no-fetch",
+            ]
+            if args.canonical_source_root:
+                child_argv += ["--canonical-source-root", args.canonical_source_root]
+            handoff = _maybe_reexec_new_host_sync(release, child_argv)
+            if handoff is not None:
+                _emit(handoff[0])
+                return handoff[1]
             payload = _status(
                 runtime_root=runtime_root,
                 dispatch_target=dispatch_target,
