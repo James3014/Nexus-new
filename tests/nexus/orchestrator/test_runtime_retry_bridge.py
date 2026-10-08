@@ -5,7 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from nexus.orchestrator.runtime_retry_bridge import _Contract, _Dispatch, _State, retry_task_via_runtime
+from nexus.orchestrator.runtime_retry_bridge import (
+    _Contract,
+    _Dispatch,
+    _State,
+    retry_task_via_runtime,
+)
 
 
 class Owner:
