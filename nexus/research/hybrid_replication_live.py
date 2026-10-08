@@ -163,45 +163,6 @@ def extract_literal_paths(text: str) -> tuple[str, ...]:
     return tuple(found)
 
 
-def classify_frozen_task_family(*, title: str, body: str) -> str:
-    text = f"{title}\n{body}".lower()
-    a_markers = (
-        "perform dependency discovery",
-        "direct imported modules",
-        "repository files that directly import",
-        "public top-level functions/classes",
-    )
-    if all(marker in text for marker in a_markers):
-        return "A"
-
-    b_markers = (
-        "repository localization",
-        "identify and rank",
-        "rank the supplied candidate",
-        "rank supplied candidate",
-        "which candidate file",
-        "which file",
-        "locate the file",
-        "localize the file",
-        "localise the file",
-    )
-    mutation_markers = (
-        "implement ",
-        "fix ",
-        "repair ",
-        "change ",
-        "add regression",
-        "modify ",
-        "delete ",
-        "refactor ",
-    )
-    if any(marker in text for marker in b_markers) and not any(
-        marker in text for marker in mutation_markers
-    ):
-        return "B"
-    return "C"
-
-
 def build_d2_candidate_packet(
     *,
     task_key: str,
@@ -1856,7 +1817,9 @@ def _complete_token_usage_metrics(
     return input_tokens, uncached_input_tokens, output_tokens
 
 
-def _c_prompt(snapshot: TaskSnapshot) -> tuple[str, dict[str, Any]]:
+def _c_prompt(
+    snapshot: TaskSnapshot, *, localization_hint_path: str | None = None
+) -> tuple[str, dict[str, Any]]:
     schema = {
         "type": "object",
         "additionalProperties": False,
@@ -1887,6 +1850,12 @@ def _c_prompt(snapshot: TaskSnapshot) -> tuple[str, dict[str, Any]]:
         f"SOURCE REVISION: {snapshot.pre_implementation_revision}\n"
         f"TITLE: {snapshot.title}\n\n{snapshot.body}"
     )
+    if localization_hint_path:
+        prompt += (
+            "\n\nLOCALIZATION (DM1-accepted under the frozen policy): start at "
+            f"`{localization_hint_path}`. This is a hint only; verify it before relying on "
+            "it. Everything else above is unchanged."
+        )
     return prompt, schema
 
 
@@ -1898,158 +1867,103 @@ def run_frozen_stack(
 ) -> FrozenStackOutcome:
     repo = _repo_root(snapshot.repository, binding)
     _revision_exists(repo, snapshot.pre_implementation_revision)
-    family = classify_frozen_task_family(title=snapshot.title, body=snapshot.body)
-
-    if family == "A":
-        started = time.perf_counter()
-        deterministic = _dependency_discovery(snapshot=snapshot, repo=repo)
-        wall = time.perf_counter() - started
-        if deterministic is not None:
-            raw = RawRouteResult.create(
-                route="A",
-                provider="deterministic",
-                requested_model="",
-                resolved_model="",
-                model_call_count=0,
-                input_tokens=0,
-                uncached_input_tokens=0,
-                output_tokens=0,
-                wall_time_seconds=wall,
-                failures=(),
-                retries=0,
-                fallbacks=(),
-                raw_response=deterministic,
-            )
-            return FrozenStackOutcome(
-                stratum="A",
-                deterministic_receipt=deterministic,
-                candidate_packet=None,
-                jev_raw_response=None,
-                dm1_decision=None,
-                strong_online_raw_response=None,
-                raw_result=raw,
-            )
-
-    if family == "B":
-        ranked, evidence = _rank_candidates(snapshot=snapshot, repo=repo, binding=binding)
-        repo_files = set(
-            _git(
-                repo, "ls-tree", "-r", "--name-only", snapshot.pre_implementation_revision
-            ).splitlines()
+    a_started = time.perf_counter()
+    deterministic = _dependency_discovery(snapshot=snapshot, repo=repo)
+    a_wall = time.perf_counter() - a_started
+    if deterministic is not None:
+        raw = RawRouteResult.create(
+            route="A",
+            provider="deterministic",
+            requested_model="",
+            resolved_model="",
+            model_call_count=0,
+            input_tokens=0,
+            uncached_input_tokens=0,
+            output_tokens=0,
+            wall_time_seconds=a_wall,
+            failures=(),
+            retries=0,
+            fallbacks=(),
+            raw_response=deterministic,
         )
-        literal = tuple(
-            path
-            for path in extract_literal_paths(f"{snapshot.title}\n{snapshot.body}")
-            if path in repo_files
+        return FrozenStackOutcome(
+            stratum="A",
+            deterministic_receipt=deterministic,
+            candidate_packet=None,
+            jev_raw_response=None,
+            dm1_decision=None,
+            strong_online_raw_response=None,
+            raw_result=raw,
         )
-        packet = build_d2_candidate_packet(
-            task_key=snapshot.task_key,
-            source_revision=snapshot.pre_implementation_revision,
-            task_contract=f"{snapshot.title}\n\n{snapshot.body}",
-            literal_paths=literal,
-            ranked_paths=ranked,
-            evidence=evidence,
-        )
-        if len(packet["candidate_catalog"]) >= 2:
-            jev_raw, jev_retries, jev_wall = _jev_request(
-                snapshot=snapshot,
-                packet=packet,
-                binding=binding,
-                prospective_guard=prospective_guard,
-            )
-            decision = {
-                "choice": jev_raw.get("choice", "ESCALATE"),
-                "top_probability": float(jev_raw.get("top_probability") or 0.0),
-                "margin": float(jev_raw.get("margin") or 0.0),
-                "policy_top_probability_min": DM1_TOP_PROBABILITY_MIN,
-                "policy_margin_min": DM1_MARGIN_MIN,
-            }
-            accepted = (
-                jev_raw.get("status") == "VALID"
-                and decision["choice"] != "ESCALATE"
-                and decision["top_probability"] >= DM1_TOP_PROBABILITY_MIN
-                and decision["margin"] >= DM1_MARGIN_MIN
-            )
-            strong = None
-            fallbacks: tuple[str, ...] = ()
-            strong_wall = 0.0
-            if not accepted:
-                prompt, schema = _b_fallback_prompt(snapshot, packet)
-                strong, strong_wall = _run_agy_b_fallback(
-                    repo=repo,
-                    revision=snapshot.pre_implementation_revision,
-                    prompt=prompt,
-                    binding=binding,
-                    default_branch=snapshot.default_branch,
-                    prospective_guard=prospective_guard,
-                )
-                fallbacks = ("DM1_TO_STRONG_ONLINE",)
-            jev_usage = jev_raw.get("usage") or {}
-            strong_usage = (strong or {}).get("usage") or {}
-            usage_records = (jev_usage,) if accepted else (jev_usage, strong_usage)
-            input_tokens, uncached_input_tokens, output_tokens = _complete_token_usage_metrics(
-                *usage_records
-            )
-            raw_response = {
-                "candidate_packet": packet,
-                "jev_raw_response": jev_raw,
-                "dm1_decision": decision,
-                "strong_online_raw_response": strong,
-                "accepted_by_frozen_policy": accepted,
-            }
-            raw = RawRouteResult.create(
-                route="B",
-                provider="typesafe" if accepted else "typesafe+agy",
-                requested_model=(
-                    str(binding["jev"]["requested_model"])
-                    if accepted
-                    else f"{binding['jev']['requested_model']}+{EXACT_AGY_MODEL}"
-                ),
-                resolved_model=(
-                    str(binding["jev"]["resolved_model"])
-                    if accepted
-                    else f"{binding['jev']['resolved_model']}+{(strong or {}).get('resolved_model') or (strong or {}).get('observed_model') or EXACT_AGY_MODEL}"
-                ),
-                model_call_count=1 if accepted else 2,
-                input_tokens=input_tokens,
-                uncached_input_tokens=uncached_input_tokens,
-                output_tokens=output_tokens,
-                wall_time_seconds=jev_wall + strong_wall,
-                failures=()
-                if jev_raw.get("status") == "VALID"
-                and (accepted or (strong or {}).get("status") == "VALID")
-                else (
-                    *(
-                        ()
-                        if jev_raw.get("status") == "VALID"
-                        else (str(jev_raw.get("status") or "JEV_FAILURE"),)
-                    ),
-                    *(
-                        ()
-                        if accepted or (strong or {}).get("status") == "VALID"
-                        else (str((strong or {}).get("status") or "AGY_FAILURE"),)
-                    ),
-                ),
-                retries=jev_retries,
-                fallbacks=fallbacks,
-                raw_response=raw_response,
-            )
-            return FrozenStackOutcome(
-                stratum="B",
-                deterministic_receipt={
-                    "status": "INSUFFICIENT_FOR_TERMINAL_CLOSURE",
-                    "d0_implementation_sha256": D0_IMPLEMENTATION_SHA256,
-                    "d2_packet_sha256": packet["packet_sha256"],
-                },
-                candidate_packet=packet,
-                jev_raw_response=jev_raw,
-                dm1_decision=decision,
-                strong_online_raw_response=strong,
-                raw_result=raw,
-            )
 
-    prompt, schema = _c_prompt(snapshot)
-    strong, wall = _run_agy_candidate(
+    d0_started = time.perf_counter()
+    ranked, evidence = _rank_candidates(snapshot=snapshot, repo=repo, binding=binding)
+    d0_wall = time.perf_counter() - d0_started
+    repo_files = set(
+        _git(repo, "ls-tree", "-r", "--name-only", snapshot.pre_implementation_revision).splitlines()
+    )
+    literal = tuple(
+        path
+        for path in extract_literal_paths(f"{snapshot.title}\n{snapshot.body}")
+        if path in repo_files
+    )
+    packet = build_d2_candidate_packet(
+        task_key=snapshot.task_key,
+        source_revision=snapshot.pre_implementation_revision,
+        task_contract=f"{snapshot.title}\n\n{snapshot.body}",
+        literal_paths=literal,
+        ranked_paths=ranked,
+        evidence=evidence,
+    )
+    catalog = list(packet["candidate_catalog"])
+
+    jev_raw: dict[str, Any] | None = None
+    jev_retries = 0
+    jev_wall = 0.0
+    localization_hint_path: str | None = None
+    if len(catalog) >= 2:
+        jev_raw, jev_retries, jev_wall = _jev_request(
+            snapshot=snapshot,
+            packet=packet,
+            binding=binding,
+            prospective_guard=prospective_guard,
+        )
+        decision: dict[str, Any] = {
+            "applicable": True,
+            "choice": jev_raw.get("choice", "ESCALATE"),
+            "top_probability": float(jev_raw.get("top_probability") or 0.0),
+            "margin": float(jev_raw.get("margin") or 0.0),
+            "policy_top_probability_min": DM1_TOP_PROBABILITY_MIN,
+            "policy_margin_min": DM1_MARGIN_MIN,
+        }
+        accepted = (
+            jev_raw.get("status") == "VALID"
+            and decision["choice"] != "ESCALATE"
+            and decision["top_probability"] >= DM1_TOP_PROBABILITY_MIN
+            and decision["margin"] >= DM1_MARGIN_MIN
+        )
+        if accepted:
+            # Jev chooses a candidate ID (e.g. "C1"); map it to the packet path.
+            by_id = {str(item["id"]): str(item["path"]) for item in catalog}
+            localization_hint_path = by_id.get(str(decision["choice"]))
+            if localization_hint_path is None:
+                accepted = False
+                decision["unmapped_choice"] = True
+    else:
+        decision = {
+            "applicable": False,
+            "reason": "candidate_set_below_two",
+            "choice": None,
+            "top_probability": 0.0,
+            "margin": 0.0,
+            "policy_top_probability_min": DM1_TOP_PROBABILITY_MIN,
+            "policy_margin_min": DM1_MARGIN_MIN,
+        }
+        accepted = False
+    jev_called = jev_raw is not None
+
+    prompt, schema = _c_prompt(snapshot, localization_hint_path=localization_hint_path)
+    strong, strong_wall = _run_agy_candidate(
         repo=repo,
         revision=snapshot.pre_implementation_revision,
         prompt=prompt,
@@ -2057,36 +1971,62 @@ def run_frozen_stack(
         default_branch=snapshot.default_branch,
         prospective_guard=prospective_guard,
     )
-    usage = strong.get("usage") or {}
-    input_tokens, uncached_input_tokens, output_tokens = _complete_token_usage_metrics(usage)
+    strong_usage = strong.get("usage") or {}
+    usage_records = ((jev_raw.get("usage") or {}, strong_usage) if jev_raw else (strong_usage,))
+    input_tokens, uncached_input_tokens, output_tokens = _complete_token_usage_metrics(
+        *usage_records
+    )
+    strong_model = strong.get("resolved_model") or strong.get("observed_model") or EXACT_AGY_MODEL
+    failures: list[str] = []
+    if jev_raw is not None and jev_raw.get("status") != "VALID":
+        failures.append(str(jev_raw.get("status") or "JEV_FAILURE"))
+    if strong.get("status") != "VALID":
+        failures.append(str(strong.get("status") or "AGY_FAILURE"))
+    stratum = "B" if accepted else "C"
+    raw_response = {
+        "candidate_packet": packet,
+        "jev_raw_response": jev_raw,
+        "dm1_decision": decision,
+        "dm1_applicable": bool(decision["applicable"]),
+        "localization_hint_path": localization_hint_path,
+        "accepted_by_frozen_policy": accepted,
+        "d0_wall_seconds": d0_wall,
+        "strong_online_raw_response": strong,
+    }
     raw = RawRouteResult.create(
-        route="C",
-        provider="agy",
-        requested_model=EXACT_AGY_MODEL,
-        resolved_model=str(
-            strong.get("resolved_model") or strong.get("observed_model") or EXACT_AGY_MODEL
+        route=stratum,
+        provider="typesafe+agy" if jev_called else "agy",
+        requested_model=(
+            f"{binding['jev']['requested_model']}+{EXACT_AGY_MODEL}"
+            if jev_called
+            else EXACT_AGY_MODEL
         ),
-        model_call_count=1,
+        resolved_model=(
+            f"{binding['jev']['resolved_model']}+{strong_model}"
+            if jev_called
+            else str(strong_model)
+        ),
+        model_call_count=(1 if jev_called else 0) + 1,
         input_tokens=input_tokens,
         uncached_input_tokens=uncached_input_tokens,
         output_tokens=output_tokens,
-        wall_time_seconds=wall,
-        failures=()
-        if strong.get("status") == "VALID"
-        else (str(strong.get("status") or "AGY_FAILURE"),),
-        retries=0,
-        fallbacks=(),
-        raw_response=strong,
+        wall_time_seconds=d0_wall + jev_wall + strong_wall,
+        failures=tuple(failures),
+        retries=jev_retries if jev_called else 0,
+        fallbacks=("DM1_TO_STRONG_ONLINE",) if jev_called and not accepted else (),
+        raw_response=raw_response,
     )
     return FrozenStackOutcome(
-        stratum="C",
+        stratum=stratum,
         deterministic_receipt={
             "status": "INSUFFICIENT_FOR_TERMINAL_CLOSURE",
-            "family_probe": family,
+            "d0_implementation_sha256": D0_IMPLEMENTATION_SHA256,
+            "d2_packet_sha256": packet["packet_sha256"],
+            "dm1_applicable": bool(decision["applicable"]),
         },
-        candidate_packet=None,
-        jev_raw_response=None,
-        dm1_decision=None,
+        candidate_packet=packet,
+        jev_raw_response=jev_raw,
+        dm1_decision=decision,
         strong_online_raw_response=strong,
         raw_result=raw,
     )

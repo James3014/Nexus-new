@@ -21,7 +21,6 @@ from nexus.research.hybrid_replication_live import (
     build_d2_candidate_packet,
     build_identity_preflight_receipt,
     build_post_terminal_revision_events,
-    classify_frozen_task_family,
     evaluate_agy_receipt,
     poll_agy_operation,
     resolve_canonical_agy_dispatch_path,
@@ -29,30 +28,6 @@ from nexus.research.hybrid_replication_live import (
     run_frozen_stack,
     seal_shadow_candidate,
 )
-
-
-def test_frozen_task_family_is_conservative() -> None:
-    a = classify_frozen_task_family(
-        title="Dependency discovery",
-        body=(
-            "At commit abc, perform dependency discovery for `nexus/core/example.py`. "
-            "Return its direct imported modules, repository files that directly import "
-            "this module, and its public top-level functions/classes."
-        ),
-    )
-    assert a == "A"
-
-    b = classify_frozen_task_family(
-        title="Repository localization",
-        body="Identify and rank the supplied candidate files most likely to require modification.",
-    )
-    assert b == "B"
-
-    c = classify_frozen_task_family(
-        title="Fix retry semantics",
-        body="Implement the bounded retry fix and add regression tests.",
-    )
-    assert c == "C"
 
 
 def test_d2_packet_preserves_literal_paths_before_frozen_ranked_candidates() -> None:
@@ -821,135 +796,229 @@ def test_b_fallback_plan_mode_rejects_repository_mutation(
     assert "nexus-hybrid-replication-b-" not in wt_out
 
 
-def test_run_frozen_stack_c_uses_agy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    repo_dir = tmp_path / "repo"
-    rev = _init_test_git_repo(repo_dir)
+_NATURAL_PATHS = tuple(f"nexus/mod{i}.py" for i in range(1, 9))
 
+
+def _commit_files(repo_dir: Path, names: tuple[str, ...], content: str = "x = 1\n") -> str:
+    for name in names:
+        target = repo_dir / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo_dir, check=True)
+    subprocess.run(["git", "commit", "-m", "add files"], cwd=repo_dir, check=True)
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo_dir, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _natural_snapshot(rev: str, *, title: str, body: str, issue: int = 101):
     from nexus.research.hybrid_replication_pipeline import TaskSnapshot
 
-    snapshot = TaskSnapshot.create(
+    return TaskSnapshot.create(
         repository="James3014/Nexus-new",
-        issue_number=101,
+        issue_number=issue,
         created_at="2026-10-01T00:00:00Z",
         captured_at="2026-10-01T00:00:00Z",
         issue_updated_at="2026-10-01T00:00:00Z",
-        title="Implement bugfix",
-        body="Implement bugfix in isolated checkout and add tests.",
+        title=title,
+        body=body,
         pre_implementation_revision=rev,
         default_branch="trunk",
-        source_event_id="test:run_frozen_stack_c",
+        source_event_id=f"test:run_frozen_stack:{issue}",
     )
 
-    mock_receipt = {
-        "schema": "nexus.hybrid_replication.agy_shadow_candidate.v1",
-        "status": "VALID",
-        "valid": True,
-        "operation_id": "agyop_candidate_123",
-        "observed_provider": "agy",
-        "observed_model": EXACT_AGY_MODEL,
-        "requested_model": EXACT_AGY_MODEL,
-        "resolved_model": EXACT_AGY_MODEL,
-        "transport_identity": "nexus-agy-dispatch",
-        "usage": {"input_tokens": 150, "output_tokens": 50},
-    }
 
-    observed_candidate_kwargs: dict[str, object] = {}
+_STRONG_RECEIPT = {
+    "schema": "nexus.hybrid_replication.agy_shadow_candidate.v1",
+    "status": "VALID",
+    "valid": True,
+    "operation_id": "agyop_candidate_123",
+    "observed_provider": "agy",
+    "observed_model": EXACT_AGY_MODEL,
+    "requested_model": EXACT_AGY_MODEL,
+    "resolved_model": EXACT_AGY_MODEL,
+    "transport_identity": "nexus-agy-dispatch",
+    "usage": {"input_tokens": 150, "output_tokens": 50},
+}
 
-    def fake_agy_candidate(**kwargs):
-        observed_candidate_kwargs.update(kwargs)
-        return mock_receipt, 2.5
+_JEV_BINDING_PART = {"requested_model": "jev-latest", "resolved_model": "jev-1.13.0"}
 
-    monkeypatch.setattr(
-        "nexus.research.hybrid_replication_live._run_agy_candidate",
-        fake_agy_candidate,
+
+def _wire_stack(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    ranked: tuple[str, ...],
+    jev: dict[str, object] | None,
+) -> dict[str, list]:
+    calls: dict[str, list] = {"rank": [], "jev": [], "strong": []}
+
+    def fake_rank(**kwargs):
+        calls["rank"].append(kwargs)
+        return ranked, {}
+
+    def fake_jev(**kwargs):
+        calls["jev"].append(kwargs)
+        assert jev is not None
+        return jev, 0, 0.5
+
+    def fake_strong(**kwargs):
+        calls["strong"].append(kwargs)
+        return _STRONG_RECEIPT, 2.5
+
+    monkeypatch.setattr("nexus.research.hybrid_replication_live._rank_candidates", fake_rank)
+    monkeypatch.setattr("nexus.research.hybrid_replication_live._jev_request", fake_jev)
+    monkeypatch.setattr("nexus.research.hybrid_replication_live._run_agy_candidate", fake_strong)
+    return calls
+
+
+def _natural_stack(tmp_path: Path, monkeypatch, *, ranked, jev):
+    repo_dir = tmp_path / "repo"
+    rev = _init_test_git_repo(repo_dir)
+    rev = _commit_files(repo_dir, _NATURAL_PATHS)
+    snapshot = _natural_snapshot(
+        rev,
+        title="Fix retry semantics",
+        body="Implement the bounded retry fix and add regression tests.",
     )
-
+    calls = _wire_stack(monkeypatch, ranked=ranked, jev=jev)
     binding = {
         "repo_roots": {"James3014/Nexus-new": str(repo_dir)},
+        "jev": _JEV_BINDING_PART,
     }
+    return run_frozen_stack(snapshot, binding=binding), calls
 
-    outcome = run_frozen_stack(snapshot, binding=binding)
+
+def test_natural_task_dm1_accept_routes_b_with_localization_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    jev = {
+        "status": "VALID",
+        "choice": "C3",
+        "top_probability": 0.9,
+        "margin": 0.5,
+        "usage": {"input_tokens": 50, "output_tokens": 10},
+    }
+    outcome, calls = _natural_stack(tmp_path, monkeypatch, ranked=_NATURAL_PATHS, jev=jev)
+    assert outcome.stratum == "B"
+    assert len(calls["jev"]) == 1 and len(calls["strong"]) == 1
+    hint = _NATURAL_PATHS[2]
+    prompt = calls["strong"][0]["prompt"]
+    assert f"LOCALIZATION (DM1-accepted under the frozen policy): start at `{hint}`." in prompt
+    assert calls["strong"][0]["default_branch"] == "trunk"
+    raw = outcome.raw_result
+    assert raw.provider == "typesafe+agy"
+    assert raw.requested_model == f"jev-latest+{EXACT_AGY_MODEL}"
+    assert raw.resolved_model == f"jev-1.13.0+{EXACT_AGY_MODEL}"
+    assert raw.model_call_count == 2
+    assert raw.fallbacks == ()
+    assert raw.failures == ()
+    assert raw.input_tokens == 200 and raw.output_tokens == 60
+    assert raw.raw_response["localization_hint_path"] == hint
+    assert raw.raw_response["accepted_by_frozen_policy"] is True
+    assert raw.raw_response["dm1_applicable"] is True
+    assert raw.raw_response["strong_online_raw_response"] == _STRONG_RECEIPT
+    assert "d0_wall_seconds" in raw.raw_response
+    assert outcome.dm1_decision["applicable"] is True
+    outcome.validate()
+
+
+def test_natural_task_dm1_escalate_routes_c_without_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    jev = {
+        "status": "VALID",
+        "choice": "ESCALATE",
+        "top_probability": 0.4,
+        "margin": 0.1,
+        "usage": {"input_tokens": 50, "output_tokens": 10},
+    }
+    outcome, calls = _natural_stack(tmp_path, monkeypatch, ranked=_NATURAL_PATHS, jev=jev)
     assert outcome.stratum == "C"
-    assert outcome.raw_result.provider == "agy"
-    assert outcome.raw_result.requested_model == EXACT_AGY_MODEL
-    assert outcome.raw_result.resolved_model == EXACT_AGY_MODEL
-    assert outcome.strong_online_raw_response == mock_receipt
-    assert outcome.raw_result.failures == ()
-    assert observed_candidate_kwargs["default_branch"] == "trunk"
+    assert "LOCALIZATION" not in calls["strong"][0]["prompt"]
+    raw = outcome.raw_result
+    assert raw.fallbacks == ("DM1_TO_STRONG_ONLINE",)
+    assert raw.model_call_count == 2
+    assert raw.raw_response["localization_hint_path"] is None
+    assert raw.raw_response["accepted_by_frozen_policy"] is False
+    outcome.validate()
 
 
-def test_run_frozen_stack_b_fallback_uses_agy(
+def test_natural_task_low_margin_jev_choice_routes_c(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    jev = {
+        "status": "VALID",
+        "choice": "C1",
+        "top_probability": 0.5,
+        "margin": 0.1,
+        "usage": {"input_tokens": 50, "output_tokens": 10},
+    }
+    outcome, calls = _natural_stack(tmp_path, monkeypatch, ranked=_NATURAL_PATHS, jev=jev)
+    assert outcome.stratum == "C"
+    assert "LOCALIZATION" not in calls["strong"][0]["prompt"]
+    assert outcome.raw_result.fallbacks == ("DM1_TO_STRONG_ONLINE",)
+
+
+def test_natural_task_unmapped_jev_choice_is_not_accepted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    jev = {
+        "status": "VALID",
+        "choice": "C99",
+        "top_probability": 0.9,
+        "margin": 0.5,
+        "usage": {"input_tokens": 50, "output_tokens": 10},
+    }
+    outcome, calls = _natural_stack(tmp_path, monkeypatch, ranked=_NATURAL_PATHS, jev=jev)
+    assert outcome.stratum == "C"
+    assert outcome.dm1_decision["unmapped_choice"] is True
+    assert "LOCALIZATION" not in calls["strong"][0]["prompt"]
+
+
+def test_natural_task_single_candidate_skips_jev_and_routes_c(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    outcome, calls = _natural_stack(tmp_path, monkeypatch, ranked=("nexus/mod1.py",), jev=None)
+    assert outcome.stratum == "C"
+    assert calls["jev"] == []
+    assert len(calls["strong"]) == 1
+    raw = outcome.raw_result
+    assert raw.provider == "agy"
+    assert raw.requested_model == EXACT_AGY_MODEL
+    assert raw.model_call_count == 1
+    assert raw.fallbacks == ()
+    assert raw.raw_response["dm1_applicable"] is False
+    assert outcome.jev_raw_response is None
+    assert outcome.dm1_decision["reason"] == "candidate_set_below_two"
+    assert outcome.deterministic_receipt["dm1_applicable"] is False
+    assert "family_probe" not in outcome.deterministic_receipt
+    outcome.validate()
+
+
+def test_a_template_task_routes_a_without_model_calls_or_ranking(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo_dir = tmp_path / "repo"
-    rev = _init_test_git_repo(repo_dir)
-
-    from nexus.research.hybrid_replication_pipeline import TaskSnapshot
-
-    snapshot = TaskSnapshot.create(
-        repository="James3014/Nexus-new",
-        issue_number=102,
-        created_at="2026-10-01T00:00:00Z",
-        captured_at="2026-10-01T00:00:00Z",
-        issue_updated_at="2026-10-01T00:00:00Z",
-        title="Localize file",
-        body="Identify and rank the supplied candidate files most likely to require modification.",
-        pre_implementation_revision=rev,
-        default_branch="main",
-        source_event_id="test:run_frozen_stack_b",
+    _init_test_git_repo(repo_dir)
+    rev = _commit_files(repo_dir, ("nexus/core/example.py",), content="import os\n")
+    snapshot = _natural_snapshot(
+        rev,
+        title="Dependency discovery",
+        body=(
+            "At commit abc, perform dependency discovery for `nexus/core/example.py`. "
+            "Return its direct imported modules, repository files that directly import "
+            "this module, and its public top-level functions/classes."
+        ),
+        issue=103,
     )
-
-    # Mock D0 candidate ranking to return 2 candidates
-    monkeypatch.setattr(
-        "nexus.research.hybrid_replication_live._rank_candidates",
-        lambda **kwargs: (("file1.txt", "file2.txt"), {}),
+    calls = _wire_stack(monkeypatch, ranked=_NATURAL_PATHS, jev=None)
+    outcome = run_frozen_stack(
+        snapshot, binding={"repo_roots": {"James3014/Nexus-new": str(repo_dir)}}
     )
-    # Mock JEV to return low margin (rejected by DM1 policy)
-    mock_jev = {
-        "status": "VALID",
-        "choice": "C1",
-        "top_probability": 0.50,  # below DM1_TOP_PROBABILITY_MIN (0.70)
-        "margin": 0.10,  # below DM1_MARGIN_MIN (0.30)
-        "usage": {"input_tokens": 50, "output_tokens": 10},
-    }
-    monkeypatch.setattr(
-        "nexus.research.hybrid_replication_live._jev_request",
-        lambda **kwargs: (mock_jev, 0, 0.5),
-    )
-
-    mock_b_receipt = {
-        "schema": "nexus.hybrid_replication.agy_live_raw.v1",
-        "status": "VALID",
-        "valid": True,
-        "operation_id": "agyop_b_fallback_456",
-        "observed_provider": "agy",
-        "observed_model": EXACT_AGY_MODEL,
-        "requested_model": EXACT_AGY_MODEL,
-        "resolved_model": EXACT_AGY_MODEL,
-        "transport_identity": "nexus-agy-dispatch",
-        "usage": {"input_tokens": 80, "output_tokens": 20},
-    }
-    monkeypatch.setattr(
-        "nexus.research.hybrid_replication_live._run_agy_b_fallback",
-        lambda **kwargs: (mock_b_receipt, 1.8),
-    )
-
-    binding = {
-        "repo_roots": {"James3014/Nexus-new": str(repo_dir)},
-        "jev": {
-            "requested_model": "jev-latest",
-            "resolved_model": "jev-1.13.0",
-        },
-    }
-
-    outcome = run_frozen_stack(snapshot, binding=binding)
-    assert outcome.stratum == "B"
-    assert outcome.raw_result.provider == "typesafe+agy"
-    assert outcome.raw_result.requested_model == f"jev-latest+{EXACT_AGY_MODEL}"
-    assert outcome.raw_result.resolved_model == f"jev-1.13.0+{EXACT_AGY_MODEL}"
-    assert outcome.raw_result.fallbacks == ("DM1_TO_STRONG_ONLINE",)
-    assert outcome.strong_online_raw_response == mock_b_receipt
-    assert outcome.raw_result.failures == ()
+    assert outcome.stratum == "A"
+    assert outcome.raw_result.model_call_count == 0
+    assert calls == {"rank": [], "jev": [], "strong": []}
+    outcome.validate()
 
 
 def _write_loadable_agy_binding(
