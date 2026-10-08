@@ -408,9 +408,13 @@ class LearningClosureBridge:
         lineage = _lineage(op)
         receipts = _capability_receipts(op)
         terminal_evidence = _terminal_evidence(op)
-        _, bound_receipt_id = _verifier_receipt_fields(op)
+        bound_verifier_status, bound_receipt_id = _verifier_receipt_fields(op)
         if bound_receipt_id and not terminal_evidence.get("receipt"):
             terminal_evidence["receipt"] = bound_receipt_id
+        if bound_verifier_status and not terminal_evidence.get("verifier_status"):
+            # Explicit measured verifier status so a parked attempt with a
+            # verifier failure counts as measured evidence (never as success).
+            terminal_evidence["verifier_status"] = bound_verifier_status
         episode_error = ""
         episode_write_status = "failed"
         persisted_episode: dict[str, Any] | None = None
@@ -552,9 +556,13 @@ class LearningClosureBridge:
         lineage = _lineage(op)
         receipts = _capability_receipts(op)
         terminal_evidence = _terminal_evidence(op)
-        _, bound_receipt_id = _verifier_receipt_fields(op)
+        bound_verifier_status, bound_receipt_id = _verifier_receipt_fields(op)
         if bound_receipt_id and not terminal_evidence.get("receipt"):
             terminal_evidence["receipt"] = bound_receipt_id
+        if bound_verifier_status and not terminal_evidence.get("verifier_status"):
+            # Explicit measured verifier status so a parked attempt with a
+            # verifier failure counts as measured evidence (never as success).
+            terminal_evidence["verifier_status"] = bound_verifier_status
         episode_error = ""
         episode_write_status = "failed"
         persisted_episode: dict[str, Any] | None = None
