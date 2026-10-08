@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.request
 import uuid
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,64 @@ def _disabled_writeback_evidence(target: str, **extra: Any) -> dict[str, Any]:
     }
     evidence.update(extra)
     return evidence
+
+
+REFLECT_JUDGE_ENV = "NEXUS_LEARNING_REFLECT_JUDGE"
+REFLECT_MODEL_ENV = "NEXUS_LEARNING_REFLECT_MODEL"
+_DEFAULT_REFLECT_MODEL = "qwen2.5-coder:7b"
+_OLLAMA_GENERATE_URL = "http://localhost:11434/api/generate"
+
+
+def _reflect_canonical_episode(project_root: Path, episode: dict[str, Any]) -> dict[str, Any]:
+    """Reflect one canonical episode into lessons. Never raises; never blocks the closure."""
+    if _learning_writeback_disabled():
+        return {"reflection_status": "disabled", "lesson_ids": []}
+    try:
+        from nexus.learning.lessons import LessonStore, reflect_episodes
+        from nexus_learning.state_root import LearningStateRoot
+
+        judge = None
+        model_name = ""
+        if os.environ.get(REFLECT_JUDGE_ENV, "none").strip().lower() == "ollama":
+            model_name = os.environ.get(REFLECT_MODEL_ENV, _DEFAULT_REFLECT_MODEL)
+
+            def judge(prompt: str) -> str:
+                body = json.dumps(
+                    {
+                        "model": model_name,
+                        "prompt": prompt,
+                        "stream": False,
+                        "options": {"temperature": 0.1, "num_predict": 512},
+                    }
+                ).encode("utf-8")
+                request = urllib.request.Request(
+                    _OLLAMA_GENERATE_URL,
+                    data=body,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                return str(payload["response"])
+
+        lessons = reflect_episodes([episode], judge=judge, model_name=model_name)
+        store = LessonStore(LearningStateRoot.from_project_root(project_root))
+        lesson_ids = [str(lesson["lesson_id"]) for lesson in lessons if store.append(lesson)]
+        if not lessons:
+            status = "empty"
+        elif lesson_ids:
+            status = "written"
+        else:
+            status = "failed"
+        first = lessons[0] if lessons else {}
+        return {
+            "reflection_status": status,
+            "lesson_ids": lesson_ids,
+            "reflector_kind": str((first.get("reflector") or {}).get("kind") or "") if first else "",
+            "evidence_origin": str(first.get("evidence_origin") or "") if first else "",
+        }
+    except Exception as exc:
+        return {"reflection_status": "failed", "lesson_ids": [], "error": exc.__class__.__name__}
 
 
 def classify_learning_outcome(ctx: Any) -> str:
@@ -288,6 +347,7 @@ class LearningClosureBridge:
         episode_error = ""
         episode_write_status = "failed"
         persisted_episode: dict[str, Any] | None = None
+        reflection: dict[str, Any] | None = None
         try:
             from nexus.contracts.learning_experience import build_nexus_learning_episode
 
@@ -310,6 +370,8 @@ class LearningClosureBridge:
             persisted, persisted_episode, episode_write_status = self._append_canonical_episode(episode)
             if not persisted:
                 episode_error = episode_write_status
+            elif persisted_episode is not None:
+                reflection = _reflect_canonical_episode(self.project_root, persisted_episode)
         except Exception as exc:
             episode = {}
             episode_error = exc.__class__.__name__
@@ -352,6 +414,8 @@ class LearningClosureBridge:
         }
         lesson["applied_lesson_ids"] = list(lineage["applied_lesson_ids"])
         lesson["stages"] = dict(episode.get("stages") or {})
+        if reflection is not None:
+            lesson["reflection"] = reflection
         lesson.update(self._write_findings_card(lesson, memory_trace))
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as handle:
@@ -408,6 +472,7 @@ class LearningClosureBridge:
         episode_error = ""
         episode_write_status = "failed"
         persisted_episode: dict[str, Any] | None = None
+        reflection: dict[str, Any] | None = None
         try:
             from nexus.contracts.learning_experience import build_nexus_learning_episode
 
@@ -428,6 +493,8 @@ class LearningClosureBridge:
             _ok, persisted_episode, episode_write_status = self._append_canonical_episode(episode)
             if not _ok:
                 episode_error = episode_write_status
+            elif persisted_episode is not None:
+                reflection = _reflect_canonical_episode(self.project_root, persisted_episode)
         except Exception as exc:
             episode = {}
             persisted_episode = None
@@ -475,7 +542,9 @@ class LearningClosureBridge:
             "learning_blocker": episode_error,
             "stages": dict(episode.get("stages") or {}),
         }
-        
+        if reflection is not None:
+            lesson["reflection"] = reflection
+
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(lesson, sort_keys=True) + "\n")
@@ -538,6 +607,10 @@ def write_learning_closure(ctx: Any, bridge: LearningClosureBridge | None = None
             "internal_only": True,
         }
     
+    lesson_row = result.get("lesson")
+    if isinstance(lesson_row, dict) and "reflection" in lesson_row:
+        result["reflection"] = lesson_row["reflection"]
+
     # OutcomeMemory is a derived projection of the canonical episode.  If the
     # canonical append failed, do not create a contradictory policy record.
     if not result.get("learning_write_succeeded", False):
