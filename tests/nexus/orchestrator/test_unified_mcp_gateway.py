@@ -5577,20 +5577,27 @@ def test_gateway_convergence_tool_surfaces_same_effect_reconciliation(monkeypatc
     assert payload["host_effect_performed"] is False
 
 def _gateway_materialization_args():
-    return {
+    from nexus.contracts.gateway_deployment import canonical_hash
+
+    values = {
         "request_id": "issue526-recovery-actuator-test",
         "idempotency_fence": "issue526-recovery-actuator-fence",
         "operation": "gateway-recovery-materialize",
         "effect_class": "GATEWAY_RECOVERY_MATERIALIZATION",
         "recovery_authority_id": "issue526-recovery-actuator-test",
         "recovery_authority_hash": "a" * 64,
-        "request_hash": "b" * 64,
+    }
+    return {
+        **values,
+        "request_hash": canonical_hash(values),
         "schema": "nexus.gateway.durable_recovery_materialization_request.v1",
     }
 
 
 def _gateway_recovery_args():
-    return {
+    from nexus.contracts.gateway_deployment import canonical_hash
+
+    values = {
         "request_id": "issue526-recovery-actuator-test",
         "idempotency_fence": "issue526-recovery-actuator-fence",
         "operation": "gateway-recover",
@@ -5601,7 +5608,10 @@ def _gateway_recovery_args():
         "desired_manifest_hash": "c" * 64,
         "predecessor_manifest_id": "r1-" + "2" * 40,
         "predecessor_manifest_hash": "d" * 64,
-        "request_hash": "e" * 64,
+    }
+    return {
+        **values,
+        "request_hash": canonical_hash(values),
         "schema": "nexus.gateway.durable_recovery_request.v2",
     }
 
