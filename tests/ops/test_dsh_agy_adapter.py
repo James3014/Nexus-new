@@ -17,6 +17,7 @@ def _run_node(
     *,
     tool: bool = False,
     dup_tool: bool = False,
+    tools_js: str | None = None,
     model: str = "gemini-3.8-flash-low",
     effort: str = "low",
     extra_env: dict[str, str] | None = None,
@@ -45,6 +46,7 @@ def _run_node(
         "#!/usr/bin/env python3\n"
         "import json, os, sys\n"
         "args=sys.argv[1:]\n"
+        f"import shutil; shutil.copy(args[args.index('--prompt-file')+1], {str(tmp_path / 'prompt.txt')!r})\n"
         f"open({str(argv_log)!r}, 'w').write(json.dumps(args))\n"
         "cwd=args[args.index('--cwd')+1]\n"
         f"open({str(scratch_log)!r}, 'w').write(json.dumps({{'cwd':cwd,'has_git':os.path.isdir(os.path.join(cwd,'.git')),'has_baseline':os.path.isfile(os.path.join(cwd,'.dsh-intelligence-scratch'))}}))\n"
@@ -59,6 +61,8 @@ def _run_node(
         if tool
         else "[]"
     )
+    if tools_js is not None:
+        tool_schema = tools_js
     if dup_tool:
         one = tool_schema[1:-1]
         tool_schema = "[" + one + "," + one + "]"
@@ -266,3 +270,69 @@ def test_config_errors_are_not_reclassified_pre_effect(tmp_path: Path) -> None:
         extra_env={"NEXUS_DSH_AGY_TIMEOUT_SECONDS": "5"},
     )
     assert json.loads(proc.stdout)["code"] == "AGY_PROTOCOL_INVALID"
+
+
+def _bash_tools(schema: str | None) -> str:
+    params = f",parameters:{schema}" if schema is not None else ""
+    return f"[{{name:'bash',description:'run'{params}}}]"
+
+
+_BASH_SCHEMA = (
+    "{type:'object',properties:{command:{type:'string'},description:{type:'string'}},"
+    "required:['command','description']}"
+)
+
+
+def _call_args(tmp_path: Path, arguments: str, tools_js: str, action: str = "A1") -> dict:
+    response = '{"kind":"dsh_action","action_id":"%s","arguments":%s}' % (action, arguments)
+    proc = _run_node(tmp_path, response, tools_js=tools_js)
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    calls = [e for e in json.loads(proc.stdout)["out"] if e.get("type") == "block-end"]
+    return json.loads(calls[0]["block"]["arguments"])
+
+
+def test_bash_description_filled_when_schema_requires_it(tmp_path: Path) -> None:
+    args = _call_args(tmp_path, '{"command":"ls"}', _bash_tools(_BASH_SCHEMA))
+    assert args == {"command": "ls", "description": "agy outer action: bash"}
+
+
+def test_bash_description_filled_when_empty_string(tmp_path: Path) -> None:
+    args = _call_args(tmp_path, '{"command":"ls","description":""}', _bash_tools(_BASH_SCHEMA))
+    assert args["description"] == "agy outer action: bash"
+
+
+def test_bash_description_not_overwritten(tmp_path: Path) -> None:
+    args = _call_args(tmp_path, '{"command":"ls","description":"list"}', _bash_tools(_BASH_SCHEMA))
+    assert args["description"] == "list"
+
+
+def test_other_required_fields_untouched(tmp_path: Path) -> None:
+    schema = (
+        "{type:'object',properties:{description:{type:'string'},timeout:{type:'number'}},"
+        "required:['description','timeout']}"
+    )
+    args = _call_args(tmp_path, '{"command":"ls"}', _bash_tools(schema))
+    assert args == {"command": "ls", "description": "agy outer action: bash"}
+
+
+def test_bash_without_schema_uses_label_fallback(tmp_path: Path) -> None:
+    args = _call_args(tmp_path, '{"command":"ls"}', _bash_tools(None))
+    assert args["description"] == "agy outer action: bash"
+
+
+def test_non_bash_without_schema_untouched(tmp_path: Path) -> None:
+    args = _call_args(tmp_path, '{"x":1}', "[{name:'other',description:'o'}]")
+    assert args == {"x": 1}
+
+
+def test_schema_not_requiring_description_untouched(tmp_path: Path) -> None:
+    schema = "{type:'object',properties:{command:{type:'string'}},required:['command']}"
+    args = _call_args(tmp_path, '{"command":"ls"}', _bash_tools(schema))
+    assert args == {"command": "ls"}
+
+
+def test_prompt_requires_bash_description(tmp_path: Path) -> None:
+    proc = _run_node(tmp_path, '{"kind":"text","text":"ok"}')
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    prompt = (tmp_path / "prompt.txt").read_text(encoding="utf-8")
+    assert "Every bash action must include a short description argument." in prompt
