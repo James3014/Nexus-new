@@ -134,3 +134,22 @@ def test_committed_workflow_force_binds_exact_pr_base_ref() -> None:
 
     assert forced in workflow
     assert unforced not in workflow
+
+
+def test_committed_workflow_protects_verifier_entrypoint_chain() -> None:
+    import re
+
+    import yaml
+
+    text = (REPO_ROOT / ".github" / "workflows" / "nexus-core-issue-completion.yml").read_text(
+        encoding="utf-8"
+    )
+    yaml.safe_load(text)
+    match = re.search(r"protected = \[(.*?)\]", text, re.S)
+    assert match is not None
+    protected = re.findall(r'"([^"]+)"', match.group(1))
+
+    # nexus-core-verify.sh execs scripts/ops/test_fast.sh; it must not be candidate-controlled.
+    assert "scripts/ci/nexus-core-verify.sh" in protected
+    assert "scripts/ops/test_fast.sh" in protected
+    assert "NEXUS_CORE_GOVERNANCE_INPUT_CHANGED" in text
