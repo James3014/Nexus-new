@@ -2,7 +2,7 @@
   "schema": "nexus.wiki.agent-index.v1",
   "authority": "derived_non_authoritative",
   "authority_manifest": "99_Schema/WIKI_AUTHORITY_MANIFEST.yaml",
-  "source_fingerprint": "c857a5b05bfb3275a2ef9f2cec33c89addf782b08173bc9b7f7bd74cf5b18853",
+  "source_fingerprint": "b33309b2c46eb0a88747e906959a32eddb19961dd587be63748ead75d097c23c",
   "included_page_count": 251,
   "excluded_page_count": 38,
   "canonical_page_count": 12,
@@ -6643,7 +6643,7 @@
       "is_canonical": false,
       "canonical_key": "",
       "one_sentence_summary": "本頁描述 Nexus v24.0 的實體調度序列，所有相位轉移均由 Rust Kernel 進行物理級裁決與 Fail-Closed 保障。 [Source: src/governance/transition_engine.rs]",
-      "content_sha256": "a7ee95d9b1ce02cbde0457e6e107a3d3b27f47eb8f3dd54fedbbe4bfdf0af8cd",
+      "content_sha256": "295ff6e9e50d746bf3d84cd66af072f0932ed7a9a6035d2fd77062684a215bb2",
       "outgoing_links": [
         [
           "canonical:system_overview",

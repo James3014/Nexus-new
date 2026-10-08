@@ -59,6 +59,7 @@ version_scope:
 - `nexus/engine/governance_bridge.py`: Python ↔ Rust 橋接層。
 
 ## Source notes
+- Required provenance labels (historical source and executable CLI): [source: Spec v22] and [code: scripts/engine/nexus_cli.py]. These establish traceability to the named source files, not proof that every v24 runtime behavior remains live in October 2026.
 - v24.0 Pivot: 徹底廢棄了模型直出完整治理 JSON 的模式，改為「語義標籤 + 物理狀態機」的 Hybrid 模式。 [Source: docs/perplexity/RELEASE_NOTE_v2.3.md]
 
 
