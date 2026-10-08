@@ -49,6 +49,18 @@ REFLECT_JUDGE_ENV = "NEXUS_LEARNING_REFLECT_JUDGE"
 REFLECT_MODEL_ENV = "NEXUS_LEARNING_REFLECT_MODEL"
 _DEFAULT_REFLECT_MODEL = "qwen2.5-coder:7b"
 _OLLAMA_GENERATE_URL = "http://localhost:11434/api/generate"
+_JUDGE_JSON_INSTRUCTION = (
+    "Respond with a single JSON object only; keys: title, lesson, applies_when "
+    "(list of strings), avoid_when (list of strings), confidence (0-1)."
+)
+
+
+def _with_problem_summary(op: Any, evidence: dict[str, Any]) -> dict[str, Any]:
+    """Return evidence with a bounded ``summary`` of the task problem (if absent)."""
+    problem = str(getattr(op, "problem_statement", "") or "")[:400]
+    if "summary" in evidence or not problem:
+        return evidence
+    return {**evidence, "summary": problem}
 
 
 def _reflect_canonical_episode(project_root: Path, episode: dict[str, Any]) -> dict[str, Any]:
@@ -68,9 +80,10 @@ def _reflect_canonical_episode(project_root: Path, episode: dict[str, Any]) -> d
             def judge(prompt: str) -> str:
                 body = json.dumps({
                     "model": model_name,
-                    "prompt": prompt,
+                    "prompt": f"{_JUDGE_JSON_INSTRUCTION}\n{prompt}",
                     "stream": False,
-                    "options": {"temperature": 0.1, "num_predict": 512},
+                    "format": "json",
+                    "options": {"temperature": 0.1, "num_predict": 768},
                 }).encode("utf-8")
                 request = urllib.request.Request(
                     _OLLAMA_GENERATE_URL,
@@ -299,7 +312,10 @@ def _build_qualification(ctx: Any, op: Any, terminal_evidence: dict[str, Any]) -
                 "sha256": hashlib.sha256(repro_script.encode("utf-8")).hexdigest(),
             }
         elif verifier_command_hash:
-            qualification["prevention_rule"] = {"kind": "verifier_command", "hash": verifier_command_hash}
+            qualification["prevention_rule"] = {
+                "kind": "verifier_command",
+                "hash": verifier_command_hash,
+            }
         if receipt_id:
             qualification["authority_qualification"] = {
                 "kind": "verifier_receipt",
@@ -428,12 +444,13 @@ class LearningClosureBridge:
                 action_id=lineage["action_id"],
                 source="local_heal",
                 terminal_outcome=lineage["terminal_outcome"],
-                terminal_evidence=terminal_evidence,
+                terminal_evidence=_with_problem_summary(op, terminal_evidence),
                 phase_receipts=receipts,
                 receipts=receipts,
                 retrieved_lesson_ids=lineage["retrieved_lesson_ids"],
                 applied_lesson_ids=lineage["applied_lesson_ids"],
-                qualification=getattr(op, "qualification", None) or _build_qualification(ctx, op, terminal_evidence),
+                qualification=getattr(op, "qualification", None)
+                or _build_qualification(ctx, op, terminal_evidence),
                 lesson_disposition=lineage["lesson_disposition"],
                 learning_write_succeeded=True,
                 idempotency_key=lineage["idempotency_key"],
@@ -582,13 +599,15 @@ class LearningClosureBridge:
                     if selected
                     else "PARKED"
                 ),
-                terminal_evidence=terminal_evidence
-                or ({"verifier": verifier_result} if selected else {}),
+                terminal_evidence=_with_problem_summary(
+                    op, terminal_evidence or ({"verifier": verifier_result} if selected else {})
+                ),
                 phase_receipts=receipts,
                 receipts=receipts,
                 retrieved_lesson_ids=lineage["retrieved_lesson_ids"],
                 applied_lesson_ids=lineage["applied_lesson_ids"],
-                qualification=getattr(op, "qualification", None) or _build_qualification(ctx, op, terminal_evidence),
+                qualification=getattr(op, "qualification", None)
+                or _build_qualification(ctx, op, terminal_evidence),
                 lesson_disposition=lineage["lesson_disposition"],
                 idempotency_key=f"{lineage['idempotency_key']}:{envelope.candidate_id}"
                 if lineage["idempotency_key"]

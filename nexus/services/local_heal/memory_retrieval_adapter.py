@@ -712,6 +712,15 @@ class CanonicalEpisodicMemoryLessonStore:
         return selected[:limit] if limit and limit > 0 else selected
 
 
+def _canonical_relevance(hit: dict[str, Any], source_lesson: dict[str, Any]) -> float:
+    """Relevance for a canonical lesson row; judge-reflected lessons get a floor of 0.5."""
+    score = float(hit.get("relevance_score") or 0.0)
+    reflector = source_lesson.get("reflector") if isinstance(source_lesson, dict) else None
+    if isinstance(reflector, dict) and str(reflector.get("kind") or "") == "judge":
+        return max(score, 0.5)
+    return score
+
+
 class CanonicalLessonStore:
     """Read-only adapter over the canonical nexus.learning_lesson.v1 ledger.
 
@@ -757,7 +766,7 @@ class CanonicalLessonStore:
             "provenance": f"lesson:{lesson_id}:{first_ref}" if first_ref else f"lesson:{lesson_id}",
             "task_id": source_task_ids[0] if source_task_ids else "",
             "evidence_ref": first_ref,
-            "relevance_score": float(hit.get("relevance_score") or 0.0),
+            "relevance_score": _canonical_relevance(hit, source_lesson),
             "title": str(hit.get("title") or ""),
             "applies_when": list(hit.get("applies_when") or []),
             "avoid_when": list(hit.get("avoid_when") or []),
@@ -799,12 +808,13 @@ class NexusCompositeLessonStore:
     """Composite Nexus memory read path with bounded, fail-open sources."""
 
     def __init__(self, stores: list[LessonStore] | None = None) -> None:
+        # Distilled canonical lessons first: raw episode rows must not crowd them out.
         self.stores = stores or [
+            CanonicalLessonStore(),
             LocalJsonlLessonStore(),
             FindingsMemoryLessonStore(),
             MemoryRepositoryLessonStore(),
             CanonicalEpisodicMemoryLessonStore(),
-            CanonicalLessonStore(),
         ]
         self.last_metadata: dict[str, Any] = {}
 

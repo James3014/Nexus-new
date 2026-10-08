@@ -89,7 +89,109 @@ def test_canonical_store_fail_open_and_missing_ledger(tmp_path):
 
 def test_composite_default_includes_canonical_store():
     stores = NexusCompositeLessonStore().stores
-    assert isinstance(stores[-1], CanonicalLessonStore)
+    assert isinstance(stores[0], CanonicalLessonStore)
+
+
+def test_judge_lesson_relevance_floor_and_deterministic_untouched():
+    judge_hit = {"lesson_id": "lsn:j", "relevance_score": 0.05, "title": "t"}
+    det_hit = {"lesson_id": "lsn:d", "relevance_score": 0.05, "title": "t"}
+    judge_row = CanonicalLessonStore._to_row(judge_hit, {"reflector": {"kind": "judge"}})
+    det_row = CanonicalLessonStore._to_row(det_hit, {"reflector": {"kind": "deterministic"}})
+    assert judge_row["relevance_score"] >= 0.5
+    assert det_row["relevance_score"] == pytest.approx(0.05)
+
+
+def _judge_lesson_row(tmp_path: Path, title: str) -> str:
+    lesson = build_lesson(
+        title=title,
+        lesson_body="Check the parser fallback before indexing the token stream.",
+        source_episode_ids=["ep-judge"],
+        outcome_polarity="failure",
+        applies_when=["parser crash on empty token stream"],
+        avoid_when=["parser input is validated upstream"],
+        source_task_ids=["task-parser"],
+        evidence_refs=["receipt://r-judge"],
+        evidence_origin="physical",
+        reflector={"kind": "judge", "model": "qwen2.5-coder:7b"},
+    )
+    LessonStore(LearningStateRoot.from_project_root(tmp_path)).append(lesson)
+    return lesson["lesson_id"]
+
+
+def test_c6p_block_renders_canonical_lesson_before_episode_rows(tmp_path, monkeypatch):
+    from nexus.services.local_heal import canonical_span as canonical_span_mod
+    from nexus.services.local_heal import memory_retrieval_adapter as adapter_mod
+    from nexus.services.local_heal.prompt_builder import PromptBuilder
+
+    title = "Guard parser fallback before indexing"
+    lsn_id = _judge_lesson_row(tmp_path, title)
+
+    class _TmpCanonical(adapter_mod.CanonicalLessonStore):
+        def __init__(self, **_kwargs):
+            super().__init__(project_root=tmp_path)
+
+    class _EpisodeStore:
+        last_metadata: dict = {}
+
+        def query(self, *, query_text, limit, current_state=None):
+            return [
+                {
+                    "lesson_id": "lep:ep-9",
+                    "title": "Raw episode row",
+                    "summary": "task ended SUCCEEDED via local_heal",
+                    "classification": "success",
+                    "applies_when": ["parser"],
+                    "avoid_when": [],
+                }
+            ]
+
+    class _Composite(adapter_mod.NexusCompositeLessonStore):
+        def __init__(self, stores=None):
+            super().__init__(stores=[_TmpCanonical(), _EpisodeStore()])
+
+    monkeypatch.setattr(adapter_mod, "CanonicalLessonStore", _TmpCanonical)
+    monkeypatch.setattr(adapter_mod, "NexusCompositeLessonStore", _Composite)
+    monkeypatch.setattr(
+        canonical_span_mod,
+        "get_canonical_search_span",
+        lambda **_kw: SimpleNamespace(span="x = 1", source="test"),
+    )
+
+    captured: dict = {}
+
+    class _Stop(Exception):
+        pass
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        raise _Stop
+
+    monkeypatch.setattr(
+        PromptBuilder, "build_verification_guided_retry_prompt", staticmethod(_capture)
+    )
+
+    orch = _orch()
+    orch._extract_target_symbol = lambda ctx: ""
+    orch._resolve_target_file = lambda ctx: "src/parser.py"
+    op = SimpleNamespace(
+        final_patch="--- a/src/parser.py\n+++ b/src/parser.py\n@@ -1 +1 @@\n-x\n+y\n",
+        user_prompt="fix the parser crash",
+        problem_statement="fix the parser crash on empty token stream",
+        retrieved_lesson_ids=[],
+        _memory_influence_trace=SimpleNamespace(selected_ids=["lep:ep-9"], prompt_included=False),
+    )
+    ctx = SimpleNamespace(op=op)
+
+    with pytest.raises(_Stop):
+        orch._attempt_semantic_retry(ctx, "verifier failed", "verification_failed")
+
+    text = captured["memory_lessons"]
+    assert title in text
+    assert "lep:" in text
+    assert text.index(title) < text.index("lep:")
+    assert op.retrieved_lesson_ids[0] == lsn_id
+    assert op._memory_prompt_injected_ids[0] == lsn_id
+    assert op.retrieved_lesson_ids.count(lsn_id) == 1
 
 
 def test_adapter_turns_canonical_rows_into_lessons(tmp_path):

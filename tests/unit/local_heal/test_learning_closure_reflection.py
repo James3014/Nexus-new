@@ -173,3 +173,44 @@ def test_writeback_disabled_skips_reflection_and_ledger(tmp_path: Path, monkeypa
     assert "reflection" not in closure
     assert reflection == {"reflection_status": "disabled", "lesson_ids": []}
     assert not (tmp_path / LESSONS_RELATIVE).exists()
+
+
+def test_ollama_judge_request_is_json_mode_with_instruction_and_problem_summary(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import urllib.request
+
+    monkeypatch.setenv("NEXUS_LEARNING_REFLECT_JUDGE", "ollama")
+    sent: list[dict] = []
+    judge_output = json.dumps({
+        "title": "Guard the parser",
+        "lesson": "Check empty input before parsing.",
+        "applies_when": ["parser"],
+        "avoid_when": [],
+        "confidence": 0.7,
+    })
+
+    def _fake_urlopen(request, *args, **kwargs):
+        sent.append(json.loads(request.data.decode("utf-8")))
+        return _FakeResponse({"response": judge_output})
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+
+    write_learning_closure(
+        _qualified_op(
+            problem_statement="fix the parser crash on empty input",
+            terminal_outcome="FAILED",
+            verifier_status="fail",
+        ),
+        bridge=_bridge(tmp_path),
+    )
+
+    assert sent, "judge request was not sent"
+    body = sent[0]
+    assert body["format"] == "json"
+    assert body["stream"] is False
+    assert body["options"]["num_predict"] == 768
+    assert body["prompt"].startswith(
+        "Respond with a single JSON object only; keys: title, lesson, applies_when"
+    )
+    assert "fix the parser crash on empty input" in body["prompt"]

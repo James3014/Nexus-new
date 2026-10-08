@@ -416,26 +416,43 @@ class HealOrchestrator:
         if memory_trace and hasattr(memory_trace, "selected_ids") and memory_trace.selected_ids:
             # Read lesson content from memory store using IDs
             try:
-                from nexus.services.local_heal.memory_retrieval_adapter import NexusCompositeLessonStore
+                import re as _re
+
+                from nexus.services.local_heal.memory_retrieval_adapter import (
+                    CanonicalLessonStore,
+                    NexusCompositeLessonStore,
+                )
+                problem_text = str(getattr(ctx.op, "problem_statement", "") or "")[:300]
+                target_words = " ".join(
+                    w for w in _re.split(r"[^A-Za-z0-9]+", str(target_file or "")) if w
+                )
+                # Distilled canonical lessons first (queried directly so raw episode
+                # rows in the composite cannot crowd them out).
+                try:
+                    canonical_rows = CanonicalLessonStore().query(
+                        query_text=f"{problem_text} {target_words}".strip(), limit=2
+                    )
+                except Exception:
+                    canonical_rows = []
                 store = NexusCompositeLessonStore()
                 # Selected ids first (legacy behaviour), plus the problem text so
                 # keyword-based canonical lessons can match.
-                lessons = store.query(
-                    query_text=" ".join(
-                        [
-                            *memory_trace.selected_ids[:3],
-                            str(getattr(ctx.op, "problem_statement", "") or "")[:300],
-                        ]
-                    ).strip(),
+                composite_rows = store.query(
+                    query_text=" ".join([*memory_trace.selected_ids[:3], problem_text]).strip(),
                     limit=3,
                 )
+                lessons = [*canonical_rows[:2], *composite_rows]
                 if lessons:
                     lesson_parts = []
                     rendered_ids: list[str] = []
-                    for lesson in lessons[:3]:
+                    for lesson in lessons:
+                        if len(lesson_parts) >= 3:
+                            break
                         summary = lesson.get("summary", "")
                         classification = lesson.get("classification", "")
                         lesson_id = lesson.get("lesson_id", lesson.get("id", ""))
+                        if str(lesson_id) in rendered_ids:
+                            continue
                         title = str(lesson.get("title") or "")
                         applies_when = [str(x) for x in (lesson.get("applies_when") or []) if str(x)]
                         avoid_when = [str(x) for x in (lesson.get("avoid_when") or []) if str(x)]
