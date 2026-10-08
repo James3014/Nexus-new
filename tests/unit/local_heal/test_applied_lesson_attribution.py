@@ -396,3 +396,111 @@ def test_existing_pass_receipt_not_overwritten_by_fail_path():
     ctx = SimpleNamespace(op=op, gov=SimpleNamespace(gate_exit="verification"))
     _orch()._bind_applied_attribution_inputs(ctx)
     assert op.verifier_receipt is pass_receipt
+
+
+def _retry_capture_setup(tmp_path: Path, monkeypatch):
+    from nexus.services.local_heal import canonical_span as canonical_span_mod
+    from nexus.services.local_heal import memory_retrieval_adapter as adapter_mod
+    from nexus.services.local_heal.prompt_builder import PromptBuilder
+
+    class _TmpCanonical(adapter_mod.CanonicalLessonStore):
+        def __init__(self, **_kwargs):
+            super().__init__(project_root=tmp_path)
+
+    class _Composite(adapter_mod.NexusCompositeLessonStore):
+        def __init__(self, stores=None):
+            super().__init__(stores=[_TmpCanonical()])
+
+    monkeypatch.setattr(adapter_mod, "CanonicalLessonStore", _TmpCanonical)
+    monkeypatch.setattr(adapter_mod, "NexusCompositeLessonStore", _Composite)
+    monkeypatch.setattr(
+        canonical_span_mod,
+        "get_canonical_search_span",
+        lambda **_kw: SimpleNamespace(span="x = 1", source="test"),
+    )
+
+    captured: dict = {}
+
+    class _Stop(Exception):
+        pass
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        raise _Stop
+
+    monkeypatch.setattr(
+        PromptBuilder, "build_verification_guided_retry_prompt", staticmethod(_capture)
+    )
+    return captured, _Stop
+
+
+def _retry_op(tmp_path: Path, **over):
+    base = dict(
+        final_patch="--- a/src/parser.py\n+++ b/src/parser.py\n@@ -1 +1 @@\n-x\n+y\n",
+        user_prompt="fix the parser crash",
+        problem_statement="fix the parser crash on empty token stream",
+        instance_id="task-retry",
+        repo_dir=tmp_path,
+        memory_enabled=True,
+        retrieved_lesson_ids=[],
+    )
+    base.update(over)
+    return SimpleNamespace(**base)
+
+
+def _retry_orch(tmp_path: Path) -> HealOrchestrator:
+    orch = _orch()
+    orch._extract_target_symbol = lambda ctx: ""
+    orch._resolve_target_file = lambda ctx: tmp_path / "src/parser.py"
+    return orch
+
+
+def test_retry_attaches_trace_and_injects_lesson_without_pre_attached_trace(tmp_path, monkeypatch):
+    title = "Guard parser fallback before indexing"
+    lsn_id = _judge_lesson_row(tmp_path, title)
+    captured, stop = _retry_capture_setup(tmp_path, monkeypatch)
+    op = _retry_op(tmp_path, memory_enabled=True)
+    ctx = SimpleNamespace(op=op)
+
+    with pytest.raises(stop):
+        _retry_orch(tmp_path)._attempt_semantic_retry(ctx, "verifier failed", "verification_failed")
+
+    assert title in captured["memory_lessons"]
+    assert lsn_id in op._memory_prompt_injected_ids
+    assert op._memory_influence_trace.prompt_included is True
+    assert lsn_id in op.retrieved_lesson_ids
+
+
+def test_retry_memory_off_injects_nothing_and_leaves_trace_empty(tmp_path, monkeypatch):
+    _judge_lesson_row(tmp_path, "Guard parser fallback before indexing")
+    captured, stop = _retry_capture_setup(tmp_path, monkeypatch)
+    op = _retry_op(tmp_path, memory_enabled=False)
+    ctx = SimpleNamespace(op=op)
+
+    with pytest.raises(stop):
+        _retry_orch(tmp_path)._attempt_semantic_retry(ctx, "verifier failed", "verification_failed")
+
+    assert "Lesson [" not in captured.get("memory_lessons", "")
+    assert op._memory_influence_trace.selected_ids == []
+    assert not op._memory_influence_trace.prompt_included
+    assert op.retrieved_lesson_ids == []
+
+
+def test_finalize_refresh_updates_verifier_status_and_keeps_prompt_included(tmp_path):
+    op = SimpleNamespace(
+        solve_eligible=True,
+        _memory_influence_trace=MemoryTrace(
+            available=True,
+            selected_ids=["lsn:x"],
+            prompt_included=True,
+            verifier_status="FAIL",
+        ),
+    )
+    _orch()._refresh_memory_trace_verifier_status(SimpleNamespace(op=op))
+    assert op._memory_influence_trace.verifier_status == "PASS"
+    assert op._memory_influence_trace.prompt_included is True
+
+    op.solve_eligible = False
+    _orch()._refresh_memory_trace_verifier_status(SimpleNamespace(op=op))
+    assert op._memory_influence_trace.verifier_status == "FAIL"
+    assert op._memory_influence_trace.prompt_included is True

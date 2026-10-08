@@ -409,6 +409,15 @@ class HealOrchestrator:
                 f"{vfk}|{vse[:200]}|{vserr[:200]}|{vec}|{vch}".encode()
             ).hexdigest()[:16]
         
+        # Attach the memory influence trace before the retry prompt is built.
+        # Previously it was attached only in _finalize_run (after all retries), so
+        # lessons never reached the retry prompt and nothing could be attributed.
+        if getattr(ctx.op, "_memory_influence_trace", None) is None:
+            try:
+                self._attach_memory_influence_trace(ctx)
+            except Exception:
+                pass
+
         # C6P/C6S: Extract memory lesson CONTENT for active guidance
         # Fixed: now reads actual lesson summaries, not just IDs
         memory_lessons_text = ""
@@ -1024,6 +1033,7 @@ class HealOrchestrator:
         ledger.finalize()
         ctx.op._latency_ledger = ledger
         self._attach_memory_influence_trace(ctx)
+        self._refresh_memory_trace_verifier_status(ctx)
         self._bind_applied_attribution_inputs(ctx)
         self._record_authoritative_memory_adoption(ctx)
         self._run_capability_bridges(ctx)
@@ -1079,6 +1089,25 @@ class HealOrchestrator:
             }
         if errors:
             ctx.op._capability_bridge_error = ";".join(errors)
+
+    def _refresh_memory_trace_verifier_status(self, ctx: HealContext) -> None:
+        """Sync the trace verifier_status with the final solve outcome.
+
+        The trace may be attached during a semantic retry, before the final
+        solve_eligible is known, so its verifier_status can be stale. Never
+        raises; prompt_included is left untouched.
+        """
+        try:
+            trace = getattr(ctx.op, "_memory_influence_trace", None)
+            if trace is None:
+                return
+            status = "PASS" if getattr(ctx.op, "solve_eligible", False) else "FAIL"
+            if isinstance(trace, dict):
+                trace["verifier_status"] = status
+            else:
+                trace.verifier_status = status
+        except Exception:
+            pass
 
     def _attach_memory_influence_trace(self, ctx: HealContext) -> None:
         if getattr(ctx.op, "_memory_influence_trace", None):
