@@ -11,6 +11,7 @@ import ast
 import copy
 import difflib
 import hashlib
+import importlib
 import json
 import os
 import re
@@ -44,8 +45,12 @@ from nexus.contracts.execution_readiness import (
 )
 from nexus.contracts.gateway_convergence import (
     ConvergenceAction,
+    ConvergenceReason,
+    DesiredDeploymentMode,
     GatewayConvergenceRequest,
+    RecoveryEffectState,
 )
+from nexus.contracts.gateway_deployment import RECOVERY_RECEIPT_PATH
 from nexus.contracts.lifecycle_action import (
     ContractKind,
     ExternalCandidateAdoptionRequest,
@@ -1487,6 +1492,83 @@ def _evaluate_upstream_freshness(
     }
 
 
+def _receipt_only_main_movement(
+    *,
+    deployed_source_head: str | None,
+    observed_upstream_main_head: str | None,
+) -> bool:
+    """Prove that upstream movement changed only the tracked recovery receipt.
+
+    This is deliberately narrower than generic path-impact analysis.  Any
+    missing, divergent, truncated, malformed, or unavailable comparison fails
+    closed and preserves the existing recovery request.
+    """
+    deployed = str(deployed_source_head or "").strip().lower()
+    upstream = str(observed_upstream_main_head or "").strip().lower()
+    if (
+        not _SHA_RE.fullmatch(deployed)
+        or not _SHA_RE.fullmatch(upstream)
+        or deployed == upstream
+    ):
+        return False
+
+    github_cli, _resolution_error = _resolve_github_cli()
+    if github_cli is None:
+        return False
+    try:
+        result = subprocess.run(
+            [
+                github_cli,
+                "api",
+                (
+                    f"repos/{GITHUB_REPOSITORY.repository_id}/compare/"
+                    f"{deployed}...{upstream}"
+                ),
+            ],
+            cwd=CANONICAL_SOURCE_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if result.returncode != 0:
+        return False
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(payload, Mapping):
+        return False
+
+    base_commit = payload.get("base_commit")
+    head_commit = payload.get("head_commit")
+    merge_base = payload.get("merge_base_commit")
+    files = payload.get("files")
+    if (
+        payload.get("status") != "ahead"
+        or payload.get("behind_by") != 0
+        or not isinstance(payload.get("ahead_by"), int)
+        or payload["ahead_by"] <= 0
+        or not isinstance(base_commit, Mapping)
+        or base_commit.get("sha") != deployed
+        or not isinstance(head_commit, Mapping)
+        or head_commit.get("sha") != upstream
+        or not isinstance(merge_base, Mapping)
+        or merge_base.get("sha") != deployed
+        or not isinstance(files, list)
+        or len(files) != 1
+        or not isinstance(files[0], Mapping)
+    ):
+        return False
+    changed = files[0]
+    return (
+        changed.get("filename") == RECOVERY_RECEIPT_PATH
+        and changed.get("status") == "modified"
+    )
+
+
 def _default_observe_upstream_main(
     *,
     timeout_seconds: float = 3.0,
@@ -1586,6 +1668,24 @@ def _evaluate_freshness(
         "reload_required": reload_required,
         "reload_reasons": reload_reasons,
     }
+
+
+def _gateway_recovery_manager() -> Any:
+    """Load the repository-owned #526 recovery manager only for recovery actions."""
+
+    return importlib.import_module("scripts.ops.mcp_gateway_durable")
+
+
+def _gateway_recovery_result(result: Any) -> dict[str, Any]:
+    if isinstance(result, Mapping):
+        return dict(result)
+    dump = getattr(result, "model_dump", None)
+    if not callable(dump):
+        raise GatewayInputError("GATEWAY_RECOVERY_MANAGER_RESULT_INVALID")
+    payload = dump()
+    if not isinstance(payload, Mapping):
+        raise GatewayInputError("GATEWAY_RECOVERY_MANAGER_RESULT_INVALID")
+    return dict(payload)
 
 
 class UnifiedMCPGateway:
@@ -4428,11 +4528,150 @@ class UnifiedMCPGateway:
 
     @staticmethod
     def tool_specs() -> list[dict[str, Any]]:
+        recovery_request_schema = {
+            "type": "object",
+            "required": [
+                "request_id",
+                "idempotency_fence",
+                "operation",
+                "effect_class",
+                "recovery_authority_id",
+                "recovery_authority_hash",
+                "desired_manifest_id",
+                "desired_manifest_hash",
+                "predecessor_manifest_id",
+                "predecessor_manifest_hash",
+                "request_hash",
+                "schema",
+            ],
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                },
+                "idempotency_fence": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                },
+                "operation": {"type": "string", "enum": ["gateway-recover"]},
+                "effect_class": {
+                    "type": "string",
+                    "enum": ["GATEWAY_DURABLE_RECOVERY"],
+                },
+                "recovery_authority_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                },
+                "recovery_authority_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+                "desired_manifest_id": {
+                    "type": "string",
+                    "pattern": "^r1-[0-9a-f]{40}$",
+                },
+                "desired_manifest_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+                "predecessor_manifest_id": {
+                    "type": "string",
+                    "pattern": "^r1-[0-9a-f]{40}$",
+                },
+                "predecessor_manifest_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+                "request_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+                "schema": {
+                    "type": "string",
+                    "enum": ["nexus.gateway.durable_recovery_request.v2"],
+                },
+            },
+            "additionalProperties": False,
+        }
+        materialization_request_schema = {
+            "type": "object",
+            "required": [
+                "request_id",
+                "idempotency_fence",
+                "operation",
+                "effect_class",
+                "recovery_authority_id",
+                "recovery_authority_hash",
+                "request_hash",
+                "schema",
+            ],
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                },
+                "idempotency_fence": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                },
+                "operation": {
+                    "type": "string",
+                    "enum": ["gateway-recovery-materialize"],
+                },
+                "effect_class": {
+                    "type": "string",
+                    "enum": ["GATEWAY_RECOVERY_MATERIALIZATION"],
+                },
+                "recovery_authority_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                },
+                "recovery_authority_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+                "request_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+                "schema": {
+                    "type": "string",
+                    "enum": [
+                        "nexus.gateway.durable_recovery_materialization_request.v1"
+                    ],
+                },
+            },
+            "additionalProperties": False,
+        }
         return [
             {
                 "name": "nexus_gateway_status",
                 "description": "Read the single gateway identity, manifest, route stages, and lifecycle counts.",
                 "inputSchema": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "nexus_gateway_recovery_materialize",
+                "description": (
+                    "Materialize one exact protected #526 recovery authority into the "
+                    "repository-owned manager stores. This starts no Gateway host effect."
+                ),
+                "inputSchema": materialization_request_schema,
+            },
+            {
+                "name": "nexus_gateway_recovery_preflight",
+                "description": (
+                    "Run the existing repository-owned #526 recovery manager to the "
+                    "effect-free TARGET_READY + ROLLBACK_READY checkpoint."
+                ),
+                "inputSchema": copy.deepcopy(recovery_request_schema),
+            },
+            {
+                "name": "nexus_gateway_recover",
+                "description": (
+                    "Execute or reconcile one exact protected #526 Gateway recovery "
+                    "request through the existing durable manager state machine."
+                ),
+                "inputSchema": copy.deepcopy(recovery_request_schema),
             },
             {
                 "name": "nexus_project_entry",
@@ -5361,6 +5600,29 @@ class UnifiedMCPGateway:
             "lifecycle": lifecycle,
         }
 
+    @staticmethod
+    def _gateway_recovery_materialize(
+        arguments: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        manager = _gateway_recovery_manager()
+        return _gateway_recovery_result(
+            manager.gateway_recovery_materialize(dict(arguments))
+        )
+
+    @staticmethod
+    def _gateway_recovery_preflight(
+        arguments: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        manager = _gateway_recovery_manager()
+        return _gateway_recovery_result(manager.gateway_recover(dict(arguments)))
+
+    @staticmethod
+    def _gateway_recover_exact(
+        arguments: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        manager = _gateway_recovery_manager()
+        return _gateway_recovery_result(manager._gateway_recover_live(dict(arguments)))
+
     def _gateway_convergence(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         """Classify one #1064 convergence generation without performing effects."""
 
@@ -5407,6 +5669,30 @@ class UnifiedMCPGateway:
             result = evaluate_gateway_convergence(request)
         except ValueError as exc:
             raise GatewayInputError(str(exc)) from exc
+
+        if (
+            result.action is ConvergenceAction.REQUEST_RECOVERY
+            and request.policy.mode is DesiredDeploymentMode.TRACK_ACCEPTED_MAIN
+            and (
+                request.active_effect is None
+                or request.active_effect.state is RecoveryEffectState.TERMINAL_SUCCESS
+            )
+            and status.get("upstream_freshness") == "STALE"
+            and _receipt_only_main_movement(
+                deployed_source_head=result.observed_loaded_commit,
+                observed_upstream_main_head=status.get("observed_upstream_main_head"),
+            )
+        ):
+            # Keep exact Git freshness telemetry as STALE.  The NOOP applies
+            # only to the recovery decision because the sole upstream delta is
+            # the tracked recovery authority receipt itself.
+            result = result.model_copy(
+                update={
+                    "action": ConvergenceAction.NOOP,
+                    "reason": ConvergenceReason.ALREADY_CONVERGED,
+                    "next_generation_required": False,
+                }
+            )
 
         next_action = {
             ConvergenceAction.NOOP: "none",
@@ -7038,6 +7324,12 @@ class UnifiedMCPGateway:
     def _call_tool(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         if name == "nexus_gateway_status":
             return self._gateway_status()
+        if name == "nexus_gateway_recovery_materialize":
+            return self._gateway_recovery_materialize(arguments)
+        if name == "nexus_gateway_recovery_preflight":
+            return self._gateway_recovery_preflight(arguments)
+        if name == "nexus_gateway_recover":
+            return self._gateway_recover_exact(arguments)
         if name == "nexus_gateway_convergence":
             return self._gateway_convergence(arguments)
         if name == EXECUTION_READINESS_TOOL_NAME:

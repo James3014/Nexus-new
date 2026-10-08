@@ -5445,6 +5445,171 @@ def test_project_entry_invalid_issue_number_is_public_input_error(issue):
     assert response["result"]["isError"] is True
 
 
+
+def _gateway_recovery_materialization_args():
+    return {
+        "request_id": "issue526-recovery-a1",
+        "idempotency_fence": "issue526-recovery-fence-a1",
+        "operation": "gateway-recovery-materialize",
+        "effect_class": "GATEWAY_RECOVERY_MATERIALIZATION",
+        "recovery_authority_id": "issue526-recovery-a1",
+        "recovery_authority_hash": "a" * 64,
+        "request_hash": "b" * 64,
+        "schema": "nexus.gateway.durable_recovery_materialization_request.v1",
+    }
+
+
+def _gateway_recovery_args():
+    return {
+        "request_id": "issue526-recovery-a1",
+        "idempotency_fence": "issue526-recovery-fence-a1",
+        "operation": "gateway-recover",
+        "effect_class": "GATEWAY_DURABLE_RECOVERY",
+        "recovery_authority_id": "issue526-recovery-a1",
+        "recovery_authority_hash": "a" * 64,
+        "desired_manifest_id": "r1-" + "b" * 40,
+        "desired_manifest_hash": "c" * 64,
+        "predecessor_manifest_id": "r1-" + "d" * 40,
+        "predecessor_manifest_hash": "e" * 64,
+        "request_hash": "f" * 64,
+        "schema": "nexus.gateway.durable_recovery_request.v2",
+    }
+
+
+def test_gateway_recovery_actions_are_typed_closed_and_registered():
+    specs = {item["name"]: item["inputSchema"] for item in UnifiedMCPGateway.tool_specs()}
+    assert {
+        "nexus_gateway_recovery_materialize",
+        "nexus_gateway_recovery_preflight",
+        "nexus_gateway_recover",
+    }.issubset(specs)
+
+    materialize = specs["nexus_gateway_recovery_materialize"]
+    assert materialize["additionalProperties"] is False
+    assert set(materialize["required"]) == set(_gateway_recovery_materialization_args())
+    assert materialize["properties"]["operation"]["enum"] == ["gateway-recovery-materialize"]
+    assert materialize["properties"]["effect_class"]["enum"] == [
+        "GATEWAY_RECOVERY_MATERIALIZATION"
+    ]
+    assert materialize["properties"]["schema"]["enum"] == [
+        "nexus.gateway.durable_recovery_materialization_request.v1"
+    ]
+
+    for name in ("nexus_gateway_recovery_preflight", "nexus_gateway_recover"):
+        schema = specs[name]
+        assert schema["additionalProperties"] is False
+        assert set(schema["required"]) == set(_gateway_recovery_args())
+        assert schema["properties"]["operation"]["enum"] == ["gateway-recover"]
+        assert schema["properties"]["effect_class"]["enum"] == [
+            "GATEWAY_DURABLE_RECOVERY"
+        ]
+        assert schema["properties"]["schema"]["enum"] == [
+            "nexus.gateway.durable_recovery_request.v2"
+        ]
+        for forbidden in (
+            "command",
+            "shell",
+            "path",
+            "service",
+            "launchd_label",
+            "plist",
+            "source_root",
+            "manager_path",
+        ):
+            assert forbidden not in schema["properties"]
+
+
+def test_gateway_recovery_action_dispatches_exact_requests_to_existing_manager(monkeypatch):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    calls = []
+
+    class Outcome:
+        def __init__(self, stage):
+            self.stage = stage
+
+        def model_dump(self):
+            return {
+                "stage": self.stage,
+                "request_id": "issue526-recovery-a1",
+                "effect_started": self.stage == "recover",
+            }
+
+    class FakeManager:
+        @staticmethod
+        def gateway_recovery_materialize(request):
+            calls.append(("materialize", dict(request)))
+            return {
+                "request_id": request["request_id"],
+                "effect_started": False,
+                "stage": "materialize",
+            }
+
+        @staticmethod
+        def gateway_recover(request):
+            calls.append(("preflight", dict(request)))
+            return Outcome("preflight")
+
+        @staticmethod
+        def _gateway_recover_live(request):
+            calls.append(("recover", dict(request)))
+            return Outcome("recover")
+
+    monkeypatch.setattr(
+        gateway_module,
+        "_gateway_recovery_manager",
+        lambda: FakeManager,
+        raising=False,
+    )
+    gateway = UnifiedMCPGateway(service=FakeService())
+
+    materialize_args = _gateway_recovery_materialization_args()
+    materialize = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 10640,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_gateway_recovery_materialize",
+            "arguments": materialize_args,
+        },
+    })
+    assert materialize["result"]["isError"] is False
+    assert materialize["result"]["structuredContent"]["effect_started"] is False
+
+    recovery_args = _gateway_recovery_args()
+    preflight = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 10641,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_gateway_recovery_preflight",
+            "arguments": recovery_args,
+        },
+    })
+    assert preflight["result"]["isError"] is False
+    assert preflight["result"]["structuredContent"]["effect_started"] is False
+    assert preflight["result"]["structuredContent"]["stage"] == "preflight"
+
+    recover = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 10642,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_gateway_recover",
+            "arguments": recovery_args,
+        },
+    })
+    assert recover["result"]["isError"] is False
+    assert recover["result"]["structuredContent"]["effect_started"] is True
+    assert recover["result"]["structuredContent"]["stage"] == "recover"
+
+    assert calls == [
+        ("materialize", materialize_args),
+        ("preflight", recovery_args),
+        ("recover", recovery_args),
+    ]
+
+
 def test_gateway_convergence_tool_is_decision_only_and_reuses_status_observation(monkeypatch):
     import nexus.orchestrator.unified_mcp_gateway as gateway_module
 
@@ -5517,6 +5682,263 @@ def test_gateway_convergence_tool_is_decision_only_and_reuses_status_observation
     assert pinned_payload["action"] == "NOOP"
     assert pinned_payload["reason"] == "PINNED_ALREADY_LOADED"
     assert pinned_payload["canonical_next_action"] == "none"
+
+
+def test_gateway_convergence_receipt_only_main_churn_does_not_request_recovery(monkeypatch):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    loaded_commit = "a" * 40
+    loaded_tree = "b" * 40
+    upstream_commits = iter(("c" * 40, "d" * 40, "e" * 40, "f" * 40))
+    observed_pairs = []
+
+    def observe_upstream():
+        commit = next(upstream_commits)
+        return commit, "2026-10-07T16:20:00+00:00", None
+
+    def fake_git(*args):
+        if args == ("rev-parse", "HEAD"):
+            return loaded_commit + "\n"
+        if args == ("rev-parse", "HEAD^{tree}"):
+            return loaded_tree + "\n"
+        raise AssertionError(f"unexpected git call: {args}")
+
+    def receipt_only(*, deployed_source_head, observed_upstream_main_head):
+        observed_pairs.append((deployed_source_head, observed_upstream_main_head))
+        return True
+
+    monkeypatch.setattr(gateway_module, "_git", fake_git)
+    monkeypatch.setattr(gateway_module, "_receipt_only_main_movement", receipt_only)
+    gateway = UnifiedMCPGateway(
+        service=FakeService(),
+        upstream_observer=observe_upstream,
+        upstream_cache_ttl_seconds=0,
+    )
+
+    desired_commits = ("c" * 40, "d" * 40, "e" * 40, "f" * 40)
+    for request_id, desired_commit in enumerate(desired_commits, start=1200):
+        response = gateway.handle(
+            {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": "tools/call",
+                "params": {
+                    "name": "nexus_gateway_convergence",
+                    "arguments": {
+                        "policy": {
+                            "mode": "TRACK_ACCEPTED_MAIN",
+                            "desired_commit": desired_commit,
+                            "desired_tree": "9" * 40,
+                        },
+                        "readiness_state": "SAFE",
+                        "quiescence_state": "SAFE",
+                    },
+                },
+            }
+        )
+        payload = response["result"]["structuredContent"]
+        assert response["result"].get("isError") is not True
+        assert payload["observed_upstream_freshness"] == "STALE"
+        assert payload["action"] == "NOOP"
+        assert payload["reason"] == "ALREADY_CONVERGED"
+        assert payload["canonical_next_action"] == "none"
+        assert payload["observed_loaded_commit"] == loaded_commit
+        assert payload["desired_commit"] == desired_commit
+        assert payload["next_generation_required"] is False
+
+    assert observed_pairs == [
+        (loaded_commit, desired_commit) for desired_commit in desired_commits
+    ]
+
+
+def test_gateway_convergence_runtime_path_movement_still_requests_recovery(monkeypatch):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    loaded_commit = "a" * 40
+    upstream_commit = "c" * 40
+
+    def fake_git(*args):
+        if args == ("rev-parse", "HEAD"):
+            return loaded_commit + "\n"
+        if args == ("rev-parse", "HEAD^{tree}"):
+            return "b" * 40 + "\n"
+        raise AssertionError(f"unexpected git call: {args}")
+
+    monkeypatch.setattr(gateway_module, "_git", fake_git)
+    monkeypatch.setattr(
+        gateway_module, "_receipt_only_main_movement", lambda **kwargs: False
+    )
+    gateway = UnifiedMCPGateway(
+        service=FakeService(),
+        upstream_observer=lambda: (
+            upstream_commit,
+            "2026-10-07T16:20:00+00:00",
+            None,
+        ),
+        upstream_cache_ttl_seconds=0,
+    )
+    response = gateway.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1204,
+            "method": "tools/call",
+            "params": {
+                "name": "nexus_gateway_convergence",
+                "arguments": {
+                    "policy": {
+                        "mode": "TRACK_ACCEPTED_MAIN",
+                        "desired_commit": upstream_commit,
+                        "desired_tree": "d" * 40,
+                    },
+                    "readiness_state": "SAFE",
+                    "quiescence_state": "SAFE",
+                },
+            },
+        }
+    )
+    payload = response["result"]["structuredContent"]
+    assert payload["action"] == "REQUEST_RECOVERY"
+    assert payload["canonical_next_action"] == "prepare_issue_526_recovery"
+
+
+def test_receipt_only_main_movement_requires_exact_github_compare(monkeypatch):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    loaded_commit = "a" * 40
+    upstream_commit = "c" * 40
+    receipt_path = (
+        "tasks/github-issue-526-g20-r1-source-contract-delta-20260903/"
+        "02-r1-complete-deployment-recovery-authority-receipt.json"
+    )
+    changed_path = {"value": receipt_path}
+
+    def fake_compare(args, **kwargs):
+        assert args == [
+            "/usr/bin/gh",
+            "api",
+            (
+                f"repos/James3014/Nexus-new/compare/"
+                f"{loaded_commit}...{upstream_commit}"
+            ),
+        ]
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout=json.dumps(
+                {
+                    "status": "ahead",
+                    "ahead_by": 1,
+                    "behind_by": 0,
+                    "base_commit": {"sha": loaded_commit},
+                    "head_commit": {"sha": upstream_commit},
+                    "merge_base_commit": {"sha": loaded_commit},
+                    "files": [
+                        {"filename": changed_path["value"], "status": "modified"}
+                    ],
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(
+        gateway_module, "_resolve_github_cli", lambda: ("/usr/bin/gh", None)
+    )
+    monkeypatch.setattr(gateway_module.subprocess, "run", fake_compare)
+
+    assert gateway_module._receipt_only_main_movement(
+        deployed_source_head=loaded_commit,
+        observed_upstream_main_head=upstream_commit,
+    ) is True
+
+    changed_path["value"] = "nexus/orchestrator/unified_mcp_gateway.py"
+    assert gateway_module._receipt_only_main_movement(
+        deployed_source_head=loaded_commit,
+        observed_upstream_main_head=upstream_commit,
+    ) is False
+
+
+def test_receipt_only_main_movement_fails_closed_when_compare_unknown(monkeypatch):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    def fail_compare(args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=args, timeout=5)
+
+    monkeypatch.setattr(
+        gateway_module, "_resolve_github_cli", lambda: ("/usr/bin/gh", None)
+    )
+    monkeypatch.setattr(gateway_module.subprocess, "run", fail_compare)
+
+    assert gateway_module._receipt_only_main_movement(
+        deployed_source_head="a" * 40,
+        observed_upstream_main_head="c" * 40,
+    ) is False
+
+
+def test_gateway_convergence_receipt_only_after_terminal_success_does_not_request_recovery(monkeypatch):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    loaded_commit = "a" * 40
+    loaded_tree = "b" * 40
+    upstream_commit = "c" * 40
+
+    def fake_git(*args):
+        if args == ("rev-parse", "HEAD"):
+            return loaded_commit + "\n"
+        if args == ("rev-parse", "HEAD^{tree}"):
+            return loaded_tree + "\n"
+        raise AssertionError(f"unexpected git call: {args}")
+
+    monkeypatch.setattr(gateway_module, "_git", fake_git)
+    monkeypatch.setattr(
+        gateway_module, "_receipt_only_main_movement", lambda **kwargs: True
+    )
+    gateway = UnifiedMCPGateway(
+        service=FakeService(),
+        upstream_observer=lambda: (
+            upstream_commit,
+            "2026-10-07T16:25:00+00:00",
+            None,
+        ),
+        upstream_cache_ttl_seconds=0,
+    )
+    response = gateway.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1206,
+            "method": "tools/call",
+            "params": {
+                "name": "nexus_gateway_convergence",
+                "arguments": {
+                    "policy": {
+                        "mode": "TRACK_ACCEPTED_MAIN",
+                        "desired_commit": upstream_commit,
+                        "desired_tree": "d" * 40,
+                    },
+                    "readiness_state": "SAFE",
+                    "quiescence_state": "SAFE",
+                    "active_effect": {
+                        "state": "TERMINAL_SUCCESS",
+                        "operation_id": "op-terminal",
+                        "request_id": "request-terminal",
+                        "idempotency_fence": "fence-terminal",
+                        "target_commit": loaded_commit,
+                        "target_tree": loaded_tree,
+                        "postflight_verified": True,
+                        "postflight_loaded_commit": loaded_commit,
+                        "postflight_loaded_tree": loaded_tree,
+                        "postflight_receipt_hash": "1" * 64,
+                    },
+                },
+            },
+        }
+    )
+    payload = response["result"]["structuredContent"]
+    assert response["result"].get("isError") is not True
+    assert payload["observed_upstream_freshness"] == "STALE"
+    assert payload["action"] == "NOOP"
+    assert payload["reason"] == "ALREADY_CONVERGED"
+    assert payload["canonical_next_action"] == "none"
+    assert payload["next_generation_required"] is False
 
 
 def test_gateway_convergence_tool_surfaces_same_effect_reconciliation(monkeypatch):
