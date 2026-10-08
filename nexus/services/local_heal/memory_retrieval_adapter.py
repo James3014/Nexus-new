@@ -723,7 +723,9 @@ class CanonicalLessonStore:
     backend = "canonical_lesson"
 
     def __init__(self, *, project_root: Path | None = None, path: Path | None = None) -> None:
-        self.project_root = Path(project_root) if project_root is not None else Path(__file__).resolve().parents[3]
+        self.project_root = (
+            Path(project_root) if project_root is not None else Path(__file__).resolve().parents[3]
+        )
         self.path = Path(path) if path is not None else None
         self.last_error = ""
         self.last_metadata: dict[str, Any] = {}
@@ -745,23 +747,21 @@ class CanonicalLessonStore:
         ]
         row = dict(hit)
         polarity = str(hit.get("classification") or hit.get("pattern_type") or "")
-        row.update(
-            {
-                "lesson_id": lesson_id,
-                "finding_id": lesson_id,
-                "summary": str(hit.get("summary") or ""),
-                "classification": polarity,
-                "pattern_type": polarity,
-                "source": "canonical_lesson",
-                "provenance": f"lesson:{lesson_id}:{first_ref}" if first_ref else f"lesson:{lesson_id}",
-                "task_id": source_task_ids[0] if source_task_ids else "",
-                "evidence_ref": first_ref,
-                "relevance_score": float(hit.get("relevance_score") or 0.0),
-                "title": str(hit.get("title") or ""),
-                "applies_when": list(hit.get("applies_when") or []),
-                "avoid_when": list(hit.get("avoid_when") or []),
-            }
-        )
+        row.update({
+            "lesson_id": lesson_id,
+            "finding_id": lesson_id,
+            "summary": str(hit.get("summary") or ""),
+            "classification": polarity,
+            "pattern_type": polarity,
+            "source": "canonical_lesson",
+            "provenance": f"lesson:{lesson_id}:{first_ref}" if first_ref else f"lesson:{lesson_id}",
+            "task_id": source_task_ids[0] if source_task_ids else "",
+            "evidence_ref": first_ref,
+            "relevance_score": float(hit.get("relevance_score") or 0.0),
+            "title": str(hit.get("title") or ""),
+            "applies_when": list(hit.get("applies_when") or []),
+            "avoid_when": list(hit.get("avoid_when") or []),
+        })
         return row
 
     def query(self, *, query_text: str, limit: int) -> list[dict[str, Any]]:

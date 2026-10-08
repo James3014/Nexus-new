@@ -72,7 +72,9 @@ def _op(lesson_id: str, **over):
 def test_canonical_store_returns_physical_excludes_simulated(tmp_path):
     phys = _write(tmp_path, "physical", "Empty list indexing guard")
     sim = _write(tmp_path, "simulated", "Empty list indexing simulated guard")
-    rows = CanonicalLessonStore(project_root=tmp_path).query(query_text="empty list indexing", limit=3)
+    rows = CanonicalLessonStore(project_root=tmp_path).query(
+        query_text="empty list indexing", limit=3
+    )
     ids = [r["lesson_id"] for r in rows]
     assert ids == [phys]
     assert sim not in ids
@@ -109,7 +111,9 @@ def test_adoption_sets_applied_and_closure_reinforces(tmp_path, monkeypatch):
     import nexus.learning.outcome_memory as om
 
     monkeypatch.setattr(om.OutcomeMemoryManager, "save_episode_and_tune_sync", lambda *a, **k: None)
-    bridge = LearningClosureBridge(path=tmp_path / "c.jsonl", project_root=tmp_path, enable_findings=False)
+    bridge = LearningClosureBridge(
+        path=tmp_path / "c.jsonl", project_root=tmp_path, enable_findings=False
+    )
     row = bridge.write_lesson(ctx)
     assert row["applied_lesson_ids"] == [lid]
     assert row["lesson_disposition"] == "reinforce"
@@ -136,7 +140,9 @@ def test_not_applied_when_authority_missing(over):
 def test_not_applied_when_prompt_not_included():
     op = _op(
         "L1",
-        _memory_influence_trace=MemoryTrace(available=True, selected_ids=["L1"], prompt_included=False),
+        _memory_influence_trace=MemoryTrace(
+            available=True, selected_ids=["L1"], prompt_included=False
+        ),
     )
     _orch()._record_authoritative_memory_adoption(SimpleNamespace(op=op))
     assert op.applied_lesson_ids == []
@@ -144,7 +150,11 @@ def test_not_applied_when_prompt_not_included():
 
 def test_memory_off_leaves_retrieved_and_applied_empty():
     op = SimpleNamespace(
-        instance_id="t", memory_enabled=False, final_patch="", problem_statement="p", repo_dir=Path("."),
+        instance_id="t",
+        memory_enabled=False,
+        final_patch="",
+        problem_statement="p",
+        repo_dir=Path("."),
         retrieved_lesson_ids=[],
     )
     orch = _orch()
@@ -160,9 +170,15 @@ def test_memory_off_leaves_retrieved_and_applied_empty():
 def test_success_path_hook_populates_inputs_and_enables_adoption():
     patch = "--- a/f.py\n+++ b/f.py\n@@\n-x\n+y\n"
     op = SimpleNamespace(
-        instance_id="task-1", attempt=1, final_patch=patch, solve_eligible=True,
-        evaluation_report="ok", retrieved_lesson_ids=["L1"],
-        _memory_influence_trace=MemoryTrace(available=True, selected_ids=["L1"], prompt_included=True),
+        instance_id="task-1",
+        attempt=1,
+        final_patch=patch,
+        solve_eligible=True,
+        evaluation_report="ok",
+        retrieved_lesson_ids=["L1"],
+        _memory_influence_trace=MemoryTrace(
+            available=True, selected_ids=["L1"], prompt_included=True
+        ),
     )
     ctx = SimpleNamespace(op=op, gov=SimpleNamespace(gate_exit="verification"))
     orch = _orch()
@@ -176,9 +192,16 @@ def test_success_path_hook_populates_inputs_and_enables_adoption():
 
 
 def test_success_path_hook_fail_closed_without_verifier_pass():
-    op = SimpleNamespace(instance_id="t", attempt=1, final_patch="diff", solve_eligible=True,
-                         retrieved_lesson_ids=["L1"],
-                         _memory_influence_trace=MemoryTrace(available=True, selected_ids=["L1"], prompt_included=True))
+    op = SimpleNamespace(
+        instance_id="t",
+        attempt=1,
+        final_patch="diff",
+        solve_eligible=True,
+        retrieved_lesson_ids=["L1"],
+        _memory_influence_trace=MemoryTrace(
+            available=True, selected_ids=["L1"], prompt_included=True
+        ),
+    )
     ctx = SimpleNamespace(op=op, gov=SimpleNamespace(gate_exit=""))
     orch = _orch()
     orch._bind_applied_attribution_inputs(ctx)
