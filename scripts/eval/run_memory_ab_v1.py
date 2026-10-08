@@ -257,6 +257,17 @@ def redirect_learning_state(state_root: Path, reports_root: Path | None = None) 
             _orig(self, project_root or active_root(), *args, **kwargs)
 
         store_cls.__init__ = store_init
+
+    canonical_lesson_cls = getattr(mra, "CanonicalLessonStore", None)
+    if canonical_lesson_cls is not None:
+        canonical_lesson_init = canonical_lesson_cls.__init__
+
+        def canonical_lesson_init_redirected(self, *, project_root=None, path=None):
+            if project_root is None and path is None:
+                project_root = active_root()
+            canonical_lesson_init(self, project_root=project_root, path=path)
+
+        canonical_lesson_cls.__init__ = canonical_lesson_init_redirected
     _REDIRECT_INSTALLED = True
 
 
