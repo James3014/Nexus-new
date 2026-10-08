@@ -29,7 +29,15 @@ REQUIREMENTS = (
     "requirements/canonical-learning.txt",
     "requirements/canonical-runtime.txt",
 )
-PIN_RE = re.compile(r"^\s*NEXUS_CORE_TOOL_PIN:\s*([0-9a-f]{40})\s*$", re.MULTILINE)
+# Legacy single-job gate pinned the tool via NEXUS_CORE_TOOL_PIN; the two-job gate
+# (nexus-core#116/#120) pins it via the composite-action inputs `nexus-certify-ref`
+# and the `uses: James3014/nexus-core/.github/actions/<name>@<sha>` lines. Exactly one
+# distinct sha must appear across all of them.
+PIN_RE = re.compile(
+    r"^\s*(?:NEXUS_CORE_TOOL_PIN:\s*|nexus-certify-ref:\s*\"?)([0-9a-f]{40})\"?\s*$"
+    r"|^\s*-?\s*uses:\s*James3014/nexus-core/\.github/actions/[A-Za-z0-9_-]+@([0-9a-f]{40})\s*(?:#.*)?$",
+    re.MULTILINE,
+)
 CLAIM_RE = re.compile(r"claim ceiling:\s*(\S+)", re.IGNORECASE)
 CORE_REPO_URL = "git+https://github.com/James3014/nexus-core.git@{pin}"
 EXIT_OK = 0
@@ -90,11 +98,11 @@ def read_pin(repo: Path, base_ref: str) -> str:
         text = _git(repo, "show", f"{base_ref}:{WORKFLOW_PATH}")
     except LocalCheckError as exc:
         raise LocalCheckError("CORE_PIN_UNRESOLVED", str(exc)) from exc
-    matches = set(PIN_RE.findall(text))
+    matches = {a or b for a, b in PIN_RE.findall(text)}
     if len(matches) != 1:
         raise LocalCheckError(
             "CORE_PIN_UNRESOLVED",
-            f"expected exactly one NEXUS_CORE_TOOL_PIN in {base_ref}:{WORKFLOW_PATH}",
+            f"expected exactly one distinct Core pin (NEXUS_CORE_TOOL_PIN or nexus-certify-ref/uses@sha) in {base_ref}:{WORKFLOW_PATH}",
         )
     return matches.pop()
 
