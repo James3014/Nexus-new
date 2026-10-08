@@ -84,6 +84,59 @@ def _hcom_agy_target() -> Path:
     return Path.home() / ".local/bin/hcom-agy-safe"
 
 
+def _dsh_agy_adapter_target() -> Path:
+    raw = os.getenv("NEXUS_DSH_AGY_ADAPTER_TARGET")
+    if raw:
+        return Path(os.path.abspath(os.path.expanduser(raw)))
+    return (
+        Path.home()
+        / ".local/share/dsh-runtime/node_modules/@nexus/dsh-llm-agy-pilot"
+    )
+
+
+def _dsh_agy_adapter_generation(target: Path, bundle_sha: str) -> Path:
+    return target.parent / f".dsh-llm-agy-pilot-{bundle_sha}"
+
+
+def _materialize_dsh_agy_adapter(
+    source: Path,
+    target: Path,
+    *,
+    bundle_sha: str,
+    runtime_root: Path,
+) -> Path:
+    required = ("index.js", "package.json")
+    for name in required:
+        if not (source / name).is_file():
+            raise HostSyncError(f"RELEASE_DSH_AGY_ADAPTER_FILE_MISSING:{name}")
+
+    generation = _dsh_agy_adapter_generation(target, bundle_sha)
+    if generation.exists():
+        if not generation.is_dir():
+            raise HostSyncError("DSH_AGY_ADAPTER_GENERATION_NOT_DIRECTORY")
+        for name in required:
+            if not (generation / name).is_file() or _sha256(generation / name) != _sha256(
+                source / name
+            ):
+                raise HostSyncError(f"DSH_AGY_ADAPTER_GENERATION_DRIFT:{name}")
+    else:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.parent / f".{generation.name}.tmp.{os.getpid()}"
+        shutil.rmtree(tmp, ignore_errors=True)
+        tmp.mkdir()
+        try:
+            for name in required:
+                shutil.copy2(source / name, tmp / name)
+            os.replace(tmp, generation)
+        except Exception:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
+
+    _backup_entrypoint(target, runtime_root)
+    _atomic_symlink(generation, target)
+    return generation
+
+
 def _hermes_guard_target() -> Path:
     raw = os.getenv("NEXUS_HERMES_CONTROLLER_GUARD_TARGET")
     if raw:
@@ -345,6 +398,13 @@ def _parse_manifest(data: bytes) -> dict[str, Any]:
         )
     if isinstance(components, dict) and isinstance(components.get("grok_accounts"), dict):
         required.add("scripts/ops/nexus-grok-accounts")
+    if isinstance(components, dict) and isinstance(components.get("dsh_agy_adapter"), dict):
+        required.update(
+            {
+                "scripts/ops/dsh-agy-adapter/index.js",
+                "scripts/ops/dsh-agy-adapter/package.json",
+            }
+        )
     if isinstance(components, dict) and isinstance(
         components.get("hermes_controller_guard"), dict
     ):
@@ -838,6 +898,22 @@ def _activate(
     elif grok_accounts_target.is_symlink():
         grok_accounts_target.unlink()
 
+    dsh_agy_adapter_target = _dsh_agy_adapter_target()
+    dsh_agy_adapter_source = release / "snapshot" / "scripts" / "ops" / "dsh-agy-adapter"
+    if _manifest_has_component(release_manifest, "dsh_agy_adapter"):
+        generation = _read_generation(release)
+        bundle_sha = generation.get("bundle_sha256")
+        if not isinstance(bundle_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", bundle_sha):
+            raise HostSyncError("DSH_AGY_ADAPTER_BUNDLE_IDENTITY_INVALID")
+        _materialize_dsh_agy_adapter(
+            dsh_agy_adapter_source,
+            dsh_agy_adapter_target,
+            bundle_sha=bundle_sha,
+            runtime_root=runtime_root,
+        )
+    elif dsh_agy_adapter_target.is_symlink():
+        dsh_agy_adapter_target.unlink()
+
     hcom_agy_target = _hcom_agy_target()
     hcom_agy_source = release / "snapshot" / "scripts" / "ops" / "nexus-hcom-agy-safe"
     if _manifest_has_component(release_manifest, "hcom_agy_safe"):
@@ -1003,6 +1079,36 @@ def _status(
             "status": "VERIFIED" if grok_accounts_ok else "DRIFT",
             "sha256": _sha256(grok_accounts_source) if grok_accounts_source.is_file() else None,
             "entrypoint": str(grok_accounts_target),
+        }
+
+    if _manifest_has_component(manifest, "dsh_agy_adapter"):
+        dsh_agy_adapter_source = release / "snapshot" / "scripts" / "ops" / "dsh-agy-adapter"
+        dsh_agy_adapter_target = _dsh_agy_adapter_target()
+        index_path = dsh_agy_adapter_source / "index.js"
+        package_path = dsh_agy_adapter_source / "package.json"
+        bundle_sha = generation.get("bundle_sha256")
+        expected_generation = (
+            _dsh_agy_adapter_generation(dsh_agy_adapter_target, bundle_sha)
+            if isinstance(bundle_sha, str)
+            else dsh_agy_adapter_target.parent / ".invalid-dsh-agy-adapter-generation"
+        )
+        installed_index = expected_generation / "index.js"
+        installed_package = expected_generation / "package.json"
+        dsh_agy_adapter_ok = (
+            index_path.is_file()
+            and package_path.is_file()
+            and installed_index.is_file()
+            and installed_package.is_file()
+            and _sha256(index_path) == _sha256(installed_index)
+            and _sha256(package_path) == _sha256(installed_package)
+            and _same_target(dsh_agy_adapter_target, expected_generation)
+        )
+        payload["components"]["dsh_agy_adapter"] = {
+            "status": "VERIFIED" if dsh_agy_adapter_ok else "DRIFT",
+            "index_sha256": _sha256(installed_index) if installed_index.is_file() else None,
+            "package_sha256": _sha256(installed_package) if installed_package.is_file() else None,
+            "entrypoint": str(dsh_agy_adapter_target),
+            "generation": str(expected_generation),
         }
 
     if _manifest_has_component(manifest, "hcom_agy_safe"):

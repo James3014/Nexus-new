@@ -527,6 +527,51 @@ def _runtime_main_alignment(
     }
 
 
+def _runtime_alignment_projection(
+    runtime: dict[str, Any],
+    source: dict[str, Any],
+) -> dict[str, Any]:
+    source_repo = source.get("repository")
+    if not isinstance(source_repo, str) or not source_repo.strip():
+        return _runtime_main_alignment(runtime, source.get("github_main"))
+
+    components = runtime.get("components")
+    source_binding = (
+        components.get("workflow_source_binding") if isinstance(components, dict) else None
+    )
+    bound_repo = source_binding.get("repository") if isinstance(source_binding, dict) else None
+    if (
+        not isinstance(source_binding, dict)
+        or source_binding.get("status") != "VERIFIED"
+        or not isinstance(bound_repo, str)
+        or not bound_repo.strip()
+    ):
+        return {
+            "status": "UNKNOWN",
+            "basis": "RUNTIME_SOURCE_BINDING_UNVERIFIED",
+            "current_main": None,
+            "target_repository": source_repo,
+            "runtime_source_repository": bound_repo,
+            "installed_revision": runtime.get("installed_revision"),
+            "installed_bundle_sha256": runtime.get("installed_bundle_sha256"),
+        }
+
+    bound_repo = bound_repo.strip()
+    if bound_repo.casefold() != source_repo.strip().casefold():
+        return {
+            "status": "NOT_APPLICABLE",
+            "basis": "CROSS_REPOSITORY_SOURCE_BINDING",
+            "current_main": None,
+            "target_repository": source_repo,
+            "runtime_source_repository": bound_repo,
+            "installed_revision": runtime.get("installed_revision"),
+            "installed_bundle_sha256": runtime.get("installed_bundle_sha256"),
+            "source_revision_match": runtime.get("source_revision_match"),
+        }
+
+    return _runtime_main_alignment(runtime, source.get("github_main"))
+
+
 def _operation_path(home: Path, operation_id: str) -> Path | None:
     if operation_id.startswith("agyop_"):
         return (
@@ -834,6 +879,31 @@ def _derive_next_gate(
 
     if runtime.get("status") == "OBSERVED":
         components = runtime.get("components")
+        source_repo = source.get("repository")
+        source_binding = (
+            components.get("workflow_source_binding") if isinstance(components, dict) else None
+        )
+
+        bound_repo: str | None = None
+        if source_repo:
+            candidate_bound_repo = (
+                source_binding.get("repository") if isinstance(source_binding, dict) else None
+            )
+            if (
+                not isinstance(source_binding, dict)
+                or source_binding.get("status") != "VERIFIED"
+                or not isinstance(candidate_bound_repo, str)
+                or not candidate_bound_repo.strip()
+            ):
+                return "BLOCKED", {
+                    "code": "RUNTIME_SOURCE_BINDING_UNVERIFIED",
+                    "reason": (
+                        "Host runtime source binding is missing, unverified, "
+                        "or ambiguous for cross-repository freshness."
+                    ),
+                }
+            bound_repo = candidate_bound_repo.strip()
+
         drifted = (
             [
                 name
@@ -851,15 +921,26 @@ def _derive_next_gate(
                 "reason": "Host runtime status reports drift or invalid state.",
                 "components": drifted,
             }
-        alignment = _runtime_main_alignment(runtime, source.get("github_main"))
-        if alignment.get("status") == "DRIFT":
-            return "RECONCILE", {
-                "code": "SYNC_RUNTIME_TO_CURRENT_MAIN",
-                "reason": "Host runtime has no exact or content-equivalent binding to current GitHub main.",
-                "github_main": source.get("github_main"),
-                "installed_revision": runtime.get("installed_revision"),
-                "installed_bundle_sha256": runtime.get("installed_bundle_sha256"),
-            }
+
+        if source_repo and bound_repo and bound_repo.casefold() != source_repo.casefold():
+            if runtime.get("source_revision_match") is not True:
+                return "BLOCKED", {
+                    "code": "RUNTIME_SOURCE_BINDING_UNVERIFIED",
+                    "reason": (
+                        "Host runtime source binding does not prove an exact current "
+                        "revision for the bound source repository."
+                    ),
+                }
+        else:
+            alignment = _runtime_main_alignment(runtime, source.get("github_main"))
+            if alignment.get("status") == "DRIFT":
+                return "RECONCILE", {
+                    "code": "SYNC_RUNTIME_TO_CURRENT_MAIN",
+                    "reason": "Host runtime has no exact or content-equivalent binding to current GitHub main.",
+                    "github_main": source.get("github_main"),
+                    "installed_revision": runtime.get("installed_revision"),
+                    "installed_bundle_sha256": runtime.get("installed_bundle_sha256"),
+                }
 
     if pr_status == "OBSERVED" and pr.get("state") != "open":
         return "SAFE", {
@@ -1041,7 +1122,7 @@ def _project_completion_matrix(
 
     alignment = runtime.get("current_main_alignment")
     if not isinstance(alignment, dict):
-        alignment = _runtime_main_alignment(runtime, source.get("github_main"))
+        alignment = _runtime_alignment_projection(runtime, source)
     installed_revision = runtime.get("installed_revision")
     exact_subject_install = bool(subject_revision and installed_revision == subject_revision)
     content_equivalent_main_install = bool(
@@ -1225,9 +1306,9 @@ def collect_workflow_doctor(
         repository, pr_number, repo_root=repo_root, runner=runner
     )
     runtime = _collect_runtime(home=home, runner=runner)
-    runtime["current_main_alignment"] = _runtime_main_alignment(
+    runtime["current_main_alignment"] = _runtime_alignment_projection(
         runtime,
-        source.get("github_main"),
+        source,
     )
     quota = _collect_quota_snapshot(home)
     operation = _collect_operations(

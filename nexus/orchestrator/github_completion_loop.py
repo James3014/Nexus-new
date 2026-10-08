@@ -50,7 +50,8 @@ from nexus.services.issue_closure_guard import (
     verify_post_merge_state,
 )
 
-MAX_INTEGRATION_GENERATIONS: int = 3
+MAX_INTEGRATION_GENERATIONS: int = 5
+DEFAULT_MAX_INTEGRATION_GENERATIONS: int = 5
 MAX_COMPLETION_ELAPSED_SECONDS: float = 2700.0
 
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -432,7 +433,7 @@ def run_github_completion_loop(
     initial_evidence: GitHubOrchestrationEvidence,
     request: StandingGrantRequest | Mapping[str, Any],
     port: GitHubCompletionPort,
-    max_generations: int = 3,
+    max_generations: int = DEFAULT_MAX_INTEGRATION_GENERATIONS,
     max_elapsed_seconds: float = 2700.0,
     git_root: Path | None = None,
     now_provider: Callable[[], datetime] | None = None,
@@ -440,7 +441,7 @@ def run_github_completion_loop(
 ) -> CompletionLoopResult:
     """Execute the bounded GitHub PR drift-completion loop.
 
-    Absorbs ordinary safe main drift automatically up to max_generations (default 3)
+    Absorbs ordinary safe main drift automatically up to max_generations (default 5)
     while failing closed on conflict, foreign push, check failure, authority drift,
     unknown impact, or standing grant mismatch.
     """
@@ -477,9 +478,15 @@ def run_github_completion_loop(
         )
 
     current_evidence = initial_evidence
-    current_generation = (
+    # Note: start_generation tracks the entry baseline generation for this loop invocation.
+    # Relative budgeting (current_generation - start_generation >= max_generations) ensures
+    # that an already-integrated candidate (e.g. resuming at generation 8) receives
+    # its full bounded drift budget for this completion loop run rather than immediately
+    # starving against an absolute generation threshold.
+    start_generation = (
         initial_evidence.integration.generation if initial_evidence.integration else 0
     )
+    current_generation = start_generation
     last_produced_head_sha = initial_evidence.head_sha
 
     while True:
@@ -510,7 +517,7 @@ def run_github_completion_loop(
         # Check if main moved
         if current_main_sha != current_evidence.base_sha:
             # Main has moved! Check generation budget
-            if current_generation >= max_generations:
+            if current_generation - start_generation >= max_generations:
                 return CompletionLoopResult(
                     outcome=CompletionLoopOutcome.DEFERRED_CONCURRENCY,
                     reason="GENERATION_BUDGET_EXHAUSTED",
