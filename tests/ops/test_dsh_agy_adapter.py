@@ -11,8 +11,13 @@ ADAPTER_DIR = ROOT / "scripts" / "ops" / "dsh-agy-adapter"
 
 
 def _run_node(
-    tmp_path: Path, response: str, *, tool: bool = False, model: str = "gemini-3.8-flash-low",
-    effort: str = "low", extra_env: dict[str, str] | None = None,
+    tmp_path: Path,
+    response: str,
+    *,
+    tool: bool = False,
+    model: str = "gemini-3.8-flash-low",
+    effort: str = "low",
+    extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     runtime = tmp_path / "runtime"
     adapter = runtime / "node_modules" / "@nexus" / "dsh-llm-agy-pilot"
@@ -49,7 +54,8 @@ def _run_node(
     script = tmp_path / "run.mjs"
     tool_schema = (
         "[{name:'read',description:'read',parameters:{type:'object',properties:{file_path:{type:'string'}},required:['file_path']}}]"
-        if tool else "[]"
+        if tool
+        else "[]"
     )
     script.write_text(
         "import { AgyPoolAdapter } from './runtime/node_modules/@nexus/dsh-llm-agy-pilot/index.js';\n"
@@ -118,7 +124,9 @@ def test_unknown_action_fails_closed(tmp_path: Path) -> None:
 
 
 def test_action_arguments_must_be_object(tmp_path: Path) -> None:
-    proc = _run_node(tmp_path, '{"kind":"dsh_action","action_id":"A1","arguments":"oops"}', tool=True)
+    proc = _run_node(
+        tmp_path, '{"kind":"dsh_action","action_id":"A1","arguments":"oops"}', tool=True
+    )
     assert proc.returncode == 3
     payload = json.loads(proc.stdout)
     assert payload["code"] == "AGY_PROTOCOL_INVALID"
@@ -137,7 +145,8 @@ def test_model_effort_mismatch_fails_before_dispatch(tmp_path: Path) -> None:
 
 def test_timeout_contract_is_bounded_before_dispatch(tmp_path: Path) -> None:
     proc = _run_node(
-        tmp_path, '{"kind":"text","text":"unused"}',
+        tmp_path,
+        '{"kind":"text","text":"unused"}',
         extra_env={"NEXUS_DSH_AGY_TIMEOUT_SECONDS": "901"},
     )
     assert proc.returncode == 3

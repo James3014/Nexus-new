@@ -238,7 +238,6 @@ def _invoke(
     return _run(argv, cwd=ROOT, env=env)
 
 
-
 def test_manifest_and_sync_own_dsh_agy_adapter(tmp_path: Path) -> None:
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     assert manifest["components"]["dsh_agy_adapter"]["source_path"] == "scripts/ops/dsh-agy-adapter"
@@ -309,6 +308,7 @@ def test_manifest_and_sync_own_dsh_agy_adapter(tmp_path: Path) -> None:
     assert verified.returncode == 0, verified.stderr + verified.stdout
     verified_payload = json.loads(verified.stdout)
     assert verified_payload["components"]["dsh_agy_adapter"]["status"] == "VERIFIED"
+
 
 def test_workflow_doctor_manifest_requires_canonical_source_root(tmp_path: Path) -> None:
     source_repo = _make_source_repo(tmp_path)
