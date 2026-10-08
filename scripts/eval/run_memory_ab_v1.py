@@ -313,7 +313,9 @@ class ModelCallCounter:
     def __call__(self, *args: Any, **kwargs: Any) -> str:
         impl = self.impl
         if impl is None:
-            from benchmarking.swebench_lite.swe_local_heal import nexus_local_generate as impl  # noqa: N813
+            from benchmarking.swebench_lite.swe_local_heal import (
+                nexus_local_generate as impl,  # noqa: N813
+            )
         if len(args) >= 4:
             args = (*args[:3], self.model, *args[4:])
         else:
