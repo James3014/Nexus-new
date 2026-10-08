@@ -96,6 +96,10 @@
       "mode": "0755"
     },
     {
+      "path": "scripts/ops/nexus-core-issue-check-local",
+      "mode": "0755"
+    },
+    {
       "path": "scripts/ops/install_nexus_workflow_doctor.sh",
       "mode": "0755"
     },
@@ -160,6 +164,9 @@
     },
     "dsh_workflow_guard": {
       "source_path": "scripts/ops/nexus-dsh-workflow"
+    },
+    "core_issue_check_local": {
+      "source_path": "scripts/ops/nexus-core-issue-check-local"
     },
     "grok_accounts": {
       "source_path": "scripts/ops/nexus-grok-accounts"
