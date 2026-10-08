@@ -26,8 +26,29 @@ function protocolError(message, cause) {
   return new LlmError(message, 'AGY_PROTOCOL_INVALID', cause ? { cause } : undefined)
 }
 
+const PRE_EFFECT_CODE = 'PROVIDER_PROTOCOL_INVALID_PRE_EFFECT'
+
+// The provider response is validated before any outer action is emitted to DSH,
+// so a malformed envelope here never has an effect. Surface that as a distinct
+// retryable code while keeping the original code and detail visible.
+function preEffectError(error) {
+  const detail = String(error?.message ?? error)
+  const originalCode = error?.code ?? null
+  const wrapped = new LlmError(detail, PRE_EFFECT_CODE, { cause: error })
+  wrapped.originalCode = originalCode
+  wrapped.effect = 'none'
+  wrapped.retryable = true
+  return wrapped
+}
+
+// Accept exactly one JSON object, optionally wrapped in exactly one whole-response
+// markdown fence. Prose around the fence or multiple fences still fail closed.
+const FENCED = /^```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n?```$/i
+
 function decodeJson(text) {
-  const raw = String(text ?? '').trim()
+  let raw = String(text ?? '').trim()
+  const fenced = FENCED.exec(raw)
+  if (fenced && !fenced[1].includes('```')) raw = fenced[1].trim()
   if (!raw) throw protocolError('Agy protocol response is empty')
   let payload
   try {
@@ -265,18 +286,32 @@ export class AgyPoolAdapter extends LlmAdapter {
     } finally {
       await rm(scratchCwd, { recursive: true, force: true }).catch(() => {})
     }
-    const payload = decodeJson(rawPayload)
+    let payload
+    try {
+      payload = decodeJson(rawPayload)
+    } catch (error) {
+      throw preEffectError(error)
+    }
     if (payload.kind === 'dsh_action') {
       const actionCatalog = actionCatalogFor(options)
-      const entry = actionCatalog.find(item => item.action_id === payload.action_id)
+      let entry = actionCatalog.find(item => item.action_id === payload.action_id)
+      if (!entry && typeof payload.action_id === 'string') {
+        // Observed: the model sometimes puts the semantic label ("bash") in
+        // action_id. Accept only an exact, case-sensitive label that maps to
+        // exactly one catalog entry; anything else stays unavailable.
+        const byLabel = actionCatalog.filter(
+          item => item.semantic_label && item.semantic_label === payload.action_id,
+        )
+        if (byLabel.length === 1) entry = byLabel[0]
+      }
       if (!entry || !entry.semantic_label) {
-        throw new LlmError(
+        throw preEffectError(new LlmError(
           'Agy requested unavailable DSH action: ' + String(payload.action_id),
           'AGY_TOOL_NOT_AVAILABLE',
-        )
+        ))
       }
       if (!payload.arguments || Array.isArray(payload.arguments) || typeof payload.arguments !== 'object') {
-        throw protocolError('Agy outer action arguments must be a JSON object')
+        throw preEffectError(protocolError('Agy outer action arguments must be a JSON object'))
       }
       const args = JSON.stringify(payload.arguments)
       const id = 'agy-call-' + randomUUID()
@@ -292,7 +327,7 @@ export class AgyPoolAdapter extends LlmAdapter {
     }
 
     if (payload.kind !== 'text' || typeof payload.text !== 'string') {
-      throw protocolError('Agy protocol requires kind=text or kind=dsh_action')
+      throw preEffectError(protocolError('Agy protocol requires kind=text or kind=dsh_action'))
     }
     yield { type: 'block-start', index: 0, blockType: 'text' }
     if (payload.text.length > 0) yield { type: 'text-delta', index: 0, text: payload.text }
