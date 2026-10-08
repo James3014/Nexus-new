@@ -16,7 +16,6 @@ import hashlib
 import json
 from typing import Any, Mapping
 
-
 BUNDLE_SCHEMA = "nexus.capability_evidence_bundle.v1"
 VERDICT_SCHEMA = "nexus.capability_evidence_bundle_verdict.v1"
 SOURCE_HASH_KIND = "workspace_revision_task_statement_v1"
@@ -283,8 +282,6 @@ def extract_bounded_consumer_payload(
         return {}
     name = str(capability or "").strip()
     maps = _collect_receipt_maps(stage, response)
-    resp = maps[1] if len(maps) > 1 else (maps[0] if maps else {})
-
     candidates: list[Any] = []
     for m in maps:
         for key in ("consumer_payload", "evidence", "outcome"):
