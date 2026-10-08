@@ -351,6 +351,17 @@ def test_ci_script_change_selects_ci_machinery_regressions():
     assert "tests/ops/test_ci_gate_report_trust_audit.py" in plan.pytest_targets
 
 
+def test_nexus_core_config_change_selects_ci_machinery_regressions():
+    plan = build_impact_plan([".nexus-core/config.toml"])
+
+    assert plan.tier == 2
+    assert plan.impact_class == "CI_INFRASTRUCTURE"
+    assert plan.workflow_validation_required is True
+    assert plan.unmatched_paths == []
+    assert "tests/ops/test_pr_impact_gate.py" in plan.pytest_targets
+    assert "tests/ops/test_ci_gate_report_trust_audit.py" in plan.pytest_targets
+
+
 def test_unknown_impact_fails_closed_to_broader_verification():
     plan = build_impact_plan(["mystery/runtime.surface"])
 
