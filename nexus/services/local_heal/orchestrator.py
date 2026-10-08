@@ -418,22 +418,57 @@ class HealOrchestrator:
             try:
                 from nexus.services.local_heal.memory_retrieval_adapter import NexusCompositeLessonStore
                 store = NexusCompositeLessonStore()
+                # Selected ids first (legacy behaviour), plus the problem text so
+                # keyword-based canonical lessons can match.
                 lessons = store.query(
-                    query_text=" ".join(memory_trace.selected_ids[:3]),
+                    query_text=" ".join(
+                        [
+                            *memory_trace.selected_ids[:3],
+                            str(getattr(ctx.op, "problem_statement", "") or "")[:300],
+                        ]
+                    ).strip(),
                     limit=3,
                 )
                 if lessons:
                     lesson_parts = []
-                    for lesson in lessons:
+                    rendered_ids: list[str] = []
+                    for lesson in lessons[:3]:
                         summary = lesson.get("summary", "")
                         classification = lesson.get("classification", "")
                         lesson_id = lesson.get("lesson_id", lesson.get("id", ""))
-                        if summary:
+                        title = str(lesson.get("title") or "")
+                        applies_when = [str(x) for x in (lesson.get("applies_when") or []) if str(x)]
+                        avoid_when = [str(x) for x in (lesson.get("avoid_when") or []) if str(x)]
+                        if title or applies_when or avoid_when:
+                            # Canonical nexus.learning_lesson.v1 row.
+                            text = f"Lesson [{classification}] (id: {lesson_id}): {title}"
+                            if summary:
+                                text += f"\n  - {summary}"
+                            if applies_when:
+                                text += f"\n  - applies when: {'; '.join(applies_when)}"
+                            if avoid_when:
+                                text += f"\n  - avoid when: {'; '.join(avoid_when)}"
+                            if summary or title:
+                                lesson_parts.append(text[:600])
+                                rendered_ids.append(str(lesson_id))
+                        elif summary:
                             lesson_parts.append(
                                 f"Lesson [{classification}] (id: {lesson_id}):\n  - {summary}"
                             )
+                            rendered_ids.append(str(lesson_id))
                     if lesson_parts:
                         memory_lessons_text = "\n".join(lesson_parts)
+                        rendered_ids = [i for i in rendered_ids if i]
+                        # Attribution inputs: ids actually rendered into the prompt.
+                        if rendered_ids and not getattr(ctx.op, "retrieved_lesson_ids", None):
+                            ctx.op.retrieved_lesson_ids = list(rendered_ids)
+                        # prompt_included only when text was really injected.
+                        if rendered_ids:
+                            ctx.op._memory_prompt_injected_ids = list(rendered_ids)
+                            try:
+                                memory_trace.prompt_included = True
+                            except Exception:
+                                pass
             except Exception:
                 # Fallback: use IDs if content read fails
                 memory_lessons_text = f"Lessons found: {', '.join(memory_trace.selected_ids[:3])}"
@@ -972,6 +1007,7 @@ class HealOrchestrator:
         ledger.finalize()
         ctx.op._latency_ledger = ledger
         self._attach_memory_influence_trace(ctx)
+        self._bind_applied_attribution_inputs(ctx)
         self._record_authoritative_memory_adoption(ctx)
         self._run_capability_bridges(ctx)
         self.governance_gate.audit(ctx)
@@ -1068,7 +1104,10 @@ class HealOrchestrator:
                 task_id=getattr(ctx.op, "instance_id", "") or getattr(ctx.op, "task_id", ""),
             )
             adapter.last_metadata["evidence_packet_included"] = False
-            adapter.last_metadata["prompt_included"] = bool(adapter.last_metadata.get("selected_ids"))
+            # Fail closed: prompt_included only when lesson text was actually injected.
+            adapter.last_metadata["prompt_included"] = bool(adapter.last_metadata.get("selected_ids")) and bool(
+                getattr(ctx.op, "_memory_prompt_injected_ids", None)
+            )
             adapter.last_metadata["verifier_status"] = "PASS" if getattr(ctx.op, "solve_eligible", False) else "FAIL"
             ctx.op._memory_influence_trace = build_memory_trace_from_adapter(adapter.last_metadata)
         except Exception as exc:
@@ -1088,6 +1127,53 @@ class HealOrchestrator:
                     "internal_only": True,
                 }
             ctx.op._memory_influence_trace_error = exc.__class__.__name__
+
+    def _bind_applied_attribution_inputs(self, ctx: HealContext) -> None:
+        """Populate the inputs `_record_authoritative_memory_adoption` requires.
+
+        Runs at finalize, the first point where the final applied patch and the
+        verifier outcome are both settled for the ordinary local-heal flow:
+
+        * applied patch: ``ctx.op.final_patch`` (the text applied to the repo;
+          retries overwrite it, so this is the last applied patch).
+        * verifier pass: the verification loop only exits with
+          ``gate_exit == "verification"`` and ``solve_eligible`` after
+          VerificationPhase succeeded (``solve_eligible``/``evaluation_report``
+          are set by that phase). Runs with no verify phase never qualify.
+        * selected candidate: the ordinary flow has a single candidate, so the
+          applied patch is the selected one unless a differing
+          ``selected_candidate_hash`` was recorded.
+
+        Existing values are never weakened or overwritten: a pre-set failing
+        verifier receipt stays failing and the authoritative check is unchanged.
+        """
+        op = ctx.op
+        try:
+            patch = str(getattr(op, "final_patch", "") or "")
+            if not patch:
+                return
+            patch_hash = hashlib.sha256(patch.encode()).hexdigest()
+            if not getattr(op, "applied_patch_hash", ""):
+                op.applied_patch_hash = patch_hash
+            if getattr(op, "selected_candidate_hash_matches_applied", None) is None:
+                selected = str(getattr(op, "selected_candidate_hash", "") or "")
+                op.selected_candidate_hash_matches_applied = (not selected) or selected == op.applied_patch_hash
+            existing = getattr(op, "verifier_receipt", None)
+            if existing is not None:
+                return  # an explicit receipt (pass or fail) is authoritative
+            gate_exit = str(getattr(getattr(ctx, "gov", None), "gate_exit", "") or "")
+            if gate_exit == "verification" and bool(getattr(op, "solve_eligible", False)):
+                report = str(getattr(op, "evaluation_report", "") or "")
+                op.verifier_receipt = {
+                    "verifier_status": "pass",
+                    "receipt_id": "verifier:%s:attempt%s:%s" % (
+                        getattr(op, "instance_id", "") or getattr(op, "task_id", ""),
+                        getattr(op, "attempt", ""),
+                        hashlib.sha256(f"{patch_hash}|{report}".encode()).hexdigest()[:16],
+                    ),
+                }
+        except Exception:
+            return  # fail closed: missing inputs leave applied empty
 
     def _record_authoritative_memory_adoption(self, ctx: HealContext) -> None:
         """Bind memory adoption only when patch and verifier receipts agree.
