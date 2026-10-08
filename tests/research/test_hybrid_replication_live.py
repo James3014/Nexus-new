@@ -1107,3 +1107,110 @@ def test_agy_identity_preflight_rejects_model_or_transport_drift(
     assert receipt["status"] == "BLOCKED_IDENTITY_OR_PROVIDER_DRIFT"
     assert receipt["strong_online_identity_match"] is False
     assert receipt["transport_identity_match"] is False
+
+
+def test_prospective_agy_dispatch_recovers_matching_operation_without_relaunch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nexus.research import hybrid_replication_live as live
+    from nexus.research.hybrid_replication_pipeline import (
+        AdmissionReceipt,
+        AutomaticReplicationStore,
+        TaskSnapshot,
+        build_admission_comment,
+    )
+    from nexus.research.hybrid_replication_prospective import ProspectiveExecutionGuard
+
+    snapshot = TaskSnapshot.create(
+        repository="James3014/Nexus-new",
+        issue_number=1990,
+        created_at="2026-10-07T12:00:00Z",
+        captured_at="2026-10-07T12:00:01Z",
+        issue_updated_at="2026-10-07T12:00:00Z",
+        title="Lost ack control",
+        body="Implement bounded shadow change.",
+        pre_implementation_revision="a" * 40,
+        default_branch="main",
+        source_event_id="lost-ack:1990",
+    )
+    store = AutomaticReplicationStore(tmp_path / "store")
+    store.capture(snapshot, admission_disposition="PRE_AUTOMATION_PROVISIONAL_CAPTURE")
+    receipt = AdmissionReceipt.create(
+        snapshot=snapshot,
+        disposition="ADMITTED_PRIMARY_FRESH_TASK",
+        activation_boundary="2026-10-07T11:59:59Z",
+        activation_state="AUTOMATIC_CAPTURE_READY",
+        exclusion_set_sha256="6" * 64,
+        issue_state_at_admission="open",
+        implementation_pr_numbers=(),
+        tracked_parent_issue_number=None,
+        tracked_parent_created_at=None,
+        admitted_at="2026-10-07T12:00:02Z",
+    )
+    store.apply_admission(receipt)
+    guard = ProspectiveExecutionGuard(store_root=tmp_path / "store", snapshot=snapshot)
+    monkeypatch.setattr(
+        "nexus.research.hybrid_replication_prospective._gh_list",
+        lambda path: (
+            [{"body": build_admission_comment(receipt)}] if path.endswith("/comments") else []
+        ),
+    )
+    monkeypatch.setattr(
+        "nexus.research.hybrid_replication_prospective._gh_json",
+        lambda *args: {"state": "open", "updated_at": "2026-10-07T12:00:02Z"},
+    )
+    guard.ensure_execution_start()
+
+    cwd = guard.shadow_source("c")
+    cwd.mkdir(parents=True)
+    operation_root = tmp_path / "operations"
+    op_dir = operation_root / "operations" / "agyop_existing"
+    op_dir.mkdir(parents=True)
+    prompt = "same prompt"
+    prompt_sha = live._sha256_bytes(prompt.encode("utf-8"))
+    operation = {
+        "operation_id": "agyop_existing",
+        "status": "COMPLETED",
+        "provider": "agy",
+        "model": live.EXACT_AGY_MODEL,
+        "observed_provider": "agy",
+        "observed_model": live.EXACT_AGY_MODEL,
+        "prompt_sha256": prompt_sha,
+        "cwd": str(cwd.resolve()),
+        "created_at": "2026-10-07T12:00:03Z",
+        "provider_started_at": "2026-10-07T12:00:04Z",
+    }
+    (op_dir / "operation.json").write_text(json.dumps(operation), encoding="utf-8")
+    (op_dir / "stdout.log").write_text("", encoding="utf-8")
+    (op_dir / "stderr.log").write_text("", encoding="utf-8")
+
+    dispatch = tmp_path / live.CANONICAL_AGY_DISPATCH_NAME
+    dispatch.write_text("stub", encoding="utf-8")
+    monkeypatch.setattr(live, "resolve_canonical_agy_dispatch_path", lambda _: dispatch)
+    monkeypatch.setattr(
+        live,
+        "_run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("dispatcher must not relaunch after lost ack")
+        ),
+    )
+    monkeypatch.setattr(
+        live,
+        "poll_agy_operation",
+        lambda *args, **kwargs: (operation, False, None),
+    )
+
+    record, _, _, _, timed_out, err, _ = live._run_agy_dispatch(
+        cwd=cwd,
+        prompt=prompt,
+        mode="accept-edits",
+        binding={"strong_online": {"effort": "medium"}},
+        operation_root=operation_root,
+        prospective_guard=guard,
+        effect_slot="c",
+    )
+
+    assert record is not None
+    assert record["operation_id"] == "agyop_existing"
+    assert timed_out is False
+    assert err is None
