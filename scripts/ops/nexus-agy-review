@@ -334,7 +334,7 @@ def launch_review(args: argparse.Namespace) -> dict[str, Any]:
             cwd=subject.repo_root,
             provider="agy",
             model=profile.model,
-            effort=args.effort,
+            effort=effective_effort,
             prompt_sha256=hashlib.sha256(build_review_prompt(packet).encode("utf-8")).hexdigest(),
             runtime_revision=None,
             initial_fields={

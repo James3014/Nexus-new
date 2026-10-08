@@ -419,9 +419,43 @@ def test_gemini_flash_dispatch_argv_carries_default_effort(monkeypatch, tmp_path
     monkeypatch.setattr(review, "_dispatcher_path", lambda: Path("/fake/nexus-agy-dispatch"))
     monkeypatch.setattr(review, "_spawn_dispatch", FakeSpawner.spawn)
 
-    review.launch_review(args)
+    result = review.launch_review(args)
+    record = AgyOperationJournal(op_root).read(result["operation"]["operation_id"])
+    assert record["effort"] == "medium"
+    assert record["review_launch_effective_effort"] == "medium"
 
     assert len(FakeSpawner.calls) == 1
     argv = FakeSpawner.calls[0]
     assert "--effort" in argv
     assert argv[argv.index("--effort") + 1] == "medium"
+
+
+def test_gemini_flash_terminal_receipt_carries_effective_effort(
+    monkeypatch, tmp_path: Path
+) -> None:
+    root, base, contract = make_repo(tmp_path)
+    op_root = tmp_path / "operations"
+    args = args_for(root, base, contract, op_root)
+    args.model = "gemini-3.8-flash"
+    args.effort = None
+    FakeSpawner.calls = []
+    monkeypatch.setattr(review, "_dispatcher_path", lambda: Path("/fake/nexus-agy-dispatch"))
+    monkeypatch.setattr(review, "_spawn_dispatch", FakeSpawner.spawn)
+
+    launched = review.launch_review(args)
+    opid = launched["operation"]["operation_id"]
+    journal = AgyOperationJournal(op_root)
+    journal.mark_terminal(
+        opid,
+        status="COMPLETED",
+        exit_code=0,
+        cwd=str(root),
+        observed_provider="agy",
+        observed_model="gemini-3.8-flash",
+        provider_session_id="session-1",
+    )
+    journal.stdout_path(opid).write_text("No material defects.\nACCEPT\n", encoding="utf-8")
+
+    status = review.status_review(opid, operation_root=str(op_root))
+    assert status["receipt"]["verdict"] == "ACCEPT"
+    assert status["receipt"]["review_launch_effective_effort"] == "medium"
