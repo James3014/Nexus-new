@@ -12,6 +12,7 @@ attempt, appended as each completes), scorecard.json, validation.json.
 
 Exit codes: 0 ok, 2 preflight failed (model/Ollama/learning-writeback), 3 state leak.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -47,7 +48,9 @@ def _import_adoption():
     except ImportError:
         if str(NEXUS_LEARNING_BRANCH_ROOT) not in sys.path:
             sys.path.insert(0, str(NEXUS_LEARNING_BRANCH_ROOT))
-        for name in [m for m in sys.modules if m == "nexus_learning" or m.startswith("nexus_learning.")]:
+        for name in [
+            m for m in sys.modules if m == "nexus_learning" or m.startswith("nexus_learning.")
+        ]:
             del sys.modules[name]
         from nexus_learning import adoption as module
 
@@ -100,6 +103,7 @@ class AttemptTimeout(BaseException):
 
 # ---------------------------------------------------------------- helpers
 
+
 def utc_run_id() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
@@ -135,7 +139,9 @@ def git_tree_head(repo: Path) -> str:
     return git_rev_parse(repo, "HEAD^{tree}")
 
 
-def load_tasks(tasks_dir: Path, limit: int | None, task_ids: list[str] | None = None) -> list[dict[str, Any]]:
+def load_tasks(
+    tasks_dir: Path, limit: int | None, task_ids: list[str] | None = None
+) -> list[dict[str, Any]]:
     task_dirs = sorted(p for p in tasks_dir.iterdir() if (p / "task.json").is_file())
     if task_ids is not None:
         unknown = sorted(set(task_ids) - {p.name for p in task_dirs})
@@ -165,9 +171,13 @@ def preflight_model(model: str, url: str = OLLAMA_TAGS_URL) -> None:
         raise ModelUnavailable(f"Ollama not reachable at {url}: {exc}") from exc
     names = {str(m.get("name", "")) for m in data.get("models", [])}
     if model not in names and f"{model}:latest" not in names:
-        raise ModelUnavailable(f"model {model!r} not installed in Ollama; available: {sorted(names)}")
+        raise ModelUnavailable(
+            f"model {model!r} not installed in Ollama; available: {sorted(names)}"
+        )
     if os.environ.get(LESSON_WRITEBACK_ENV, "1").strip().lower() in DISABLED_VALUES:
-        raise ModelUnavailable(f"{LESSON_WRITEBACK_ENV} disables learning writeback; the on arm needs it")
+        raise ModelUnavailable(
+            f"{LESSON_WRITEBACK_ENV} disables learning writeback; the on arm needs it"
+        )
 
 
 # ------------------------------------------------- learning state isolation
@@ -190,7 +200,9 @@ def redirect_learning_state(state_root: Path, reports_root: Path | None = None) 
     """
     global _ACTIVE_STATE_ROOT, _ACTIVE_REPORTS_ROOT, _REDIRECT_INSTALLED
     _ACTIVE_STATE_ROOT = Path(state_root).resolve()
-    _ACTIVE_REPORTS_ROOT = Path(reports_root or state_root.parent / "reports" / "local_heal").resolve()
+    _ACTIVE_REPORTS_ROOT = Path(
+        reports_root or state_root.parent / "reports" / "local_heal"
+    ).resolve()
     os.environ["NEXUS_LEARNING_STATE_ROOT"] = str(_ACTIVE_STATE_ROOT)
     if _REDIRECT_INSTALLED:
         return
@@ -231,7 +243,9 @@ def redirect_learning_state(state_root: Path, reports_root: Path | None = None) 
 
     bridge_init = lcb.LearningClosureBridge.__init__
 
-    def bridge_init_redirected(self, path=None, *, findings_store=None, project_root=None, enable_findings=True):
+    def bridge_init_redirected(
+        self, path=None, *, findings_store=None, project_root=None, enable_findings=True
+    ):
         root = Path(project_root) if project_root else active_root()
         bridge_init(
             self,
@@ -250,7 +264,11 @@ def redirect_learning_state(state_root: Path, reports_root: Path | None = None) 
 
     mra.LocalJsonlLessonStore.__init__ = jsonl_init_redirected
 
-    for store_cls in (mra.FindingsMemoryLessonStore, mra.MemoryRepositoryLessonStore, mra.CanonicalEpisodicMemoryLessonStore):
+    for store_cls in (
+        mra.FindingsMemoryLessonStore,
+        mra.MemoryRepositoryLessonStore,
+        mra.CanonicalEpisodicMemoryLessonStore,
+    ):
         original = store_cls.__init__
 
         def store_init(self, project_root=None, *args, _orig=original, **kwargs):
@@ -301,6 +319,7 @@ class StateGuard:
 
 # ------------------------------------------------------- per-attempt logic
 
+
 class ModelCallCounter:
     """Wraps the Ollama generate function: pins the model and counts completed calls."""
 
@@ -336,7 +355,9 @@ def run_pipeline(ctx: Any, generate_fn: Callable[..., str]) -> Any:
     return HealPipeline(ollama_generate_fn=generate_fn).run(ctx)
 
 
-def build_ctx(task: dict[str, Any], work_dir: Path, arm: str, attempt_id: str, run_root: Path, python: str) -> Any:
+def build_ctx(
+    task: dict[str, Any], work_dir: Path, arm: str, attempt_id: str, run_root: Path, python: str
+) -> Any:
     from nexus.services.local_heal.pipeline import HealContext
 
     nexus_arm, memory_enabled, _ = ARMS[arm]
@@ -501,7 +522,11 @@ def run_attempt(
 
     # Retrieval receipt: explicit disabled receipt for the off arm, trace-backed for the on arm.
     trace = getattr(ctx, "_memory_influence_trace", None)
-    trace_dict = trace.to_dict() if hasattr(trace, "to_dict") else (trace if isinstance(trace, dict) else None)
+    trace_dict = (
+        trace.to_dict()
+        if hasattr(trace, "to_dict")
+        else (trace if isinstance(trace, dict) else None)
+    )
     retrieval_path = work_dir / "retrieval_receipt.json"
     retrieval_path.write_text(
         json.dumps(
@@ -563,7 +588,10 @@ def run_attempt(
         "applied_attributed_lesson_ids": applied,
         "applied_lesson_ids": applied,
         "evidence_origin": "physical",
-        "evidence_refs": [f"retrieval_receipt:{retrieval_path}", f"ollama_consumption:{consumption_path}"],
+        "evidence_refs": [
+            f"retrieval_receipt:{retrieval_path}",
+            f"ollama_consumption:{consumption_path}",
+        ],
         "terminal_outcome": terminal,
         "measured_elapsed_seconds": elapsed,
         "intervention_events": [],
@@ -601,35 +629,33 @@ def build_workflow_rows(rows: list[dict[str, Any]], model: str) -> list[dict[str
     out = []
     for row in rows:
         passed = row["terminal_outcome"] == "SUCCEEDED" and not row["ineligibility_reasons"]
-        out.append(
-            {
-                "workflow_identity": row["workflow"],
-                "workflow_revision": model,
-                "task_fingerprint": row["task_fingerprint"],
-                "attempt_count": 1,
-                "qualified_success_count": 1 if passed else 0,
-                "critical_failure_count": 0 if row["terminal_outcome"] == "SUCCEEDED" else 1,
-                "semantic_failure_count": None,
-                "provider_failure_count": None,
-                "false_allow_count": None,
-                "model_invocation_count": row["model_calls"],
-                "provider_invocation_count": None,
-                "fallback_count": 0,
-                "token_usage": None,
-                "human_intervention_count": 0,
-                "wall_time_seconds": row["measured_elapsed_seconds"],
-                "monetary_cost_usd": None,
-                "missingness_reasons": [
-                    "semantic_failure_count",
-                    "provider_failure_count",
-                    "false_allow_count",
-                    "provider_invocation_count",
-                    "token_usage",
-                    "monetary_cost_usd",
-                ],
-                "ineligibility_reasons": list(row["ineligibility_reasons"]),
-            }
-        )
+        out.append({
+            "workflow_identity": row["workflow"],
+            "workflow_revision": model,
+            "task_fingerprint": row["task_fingerprint"],
+            "attempt_count": 1,
+            "qualified_success_count": 1 if passed else 0,
+            "critical_failure_count": 0 if row["terminal_outcome"] == "SUCCEEDED" else 1,
+            "semantic_failure_count": None,
+            "provider_failure_count": None,
+            "false_allow_count": None,
+            "model_invocation_count": row["model_calls"],
+            "provider_invocation_count": None,
+            "fallback_count": 0,
+            "token_usage": None,
+            "human_intervention_count": 0,
+            "wall_time_seconds": row["measured_elapsed_seconds"],
+            "monetary_cost_usd": None,
+            "missingness_reasons": [
+                "semantic_failure_count",
+                "provider_failure_count",
+                "false_allow_count",
+                "provider_invocation_count",
+                "token_usage",
+                "monetary_cost_usd",
+            ],
+            "ineligibility_reasons": list(row["ineligibility_reasons"]),
+        })
     return out
 
 
@@ -697,15 +723,24 @@ def append_row(path: Path, row: dict[str, Any]) -> None:
 
 # --------------------------------------------------------------- driver
 
+
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--tasks-dir", type=Path, default=DEFAULT_TASKS_DIR)
     parser.add_argument("--run-id", default="")
-    parser.add_argument("--arms", default="off,on", help="comma-separated, run in this order (default off,on)")
+    parser.add_argument(
+        "--arms", default="off,on", help="comma-separated, run in this order (default off,on)"
+    )
     parser.add_argument("--limit", type=int, default=None, help="use only the first N tasks")
-    parser.add_argument("--task-ids", default="", help="comma-separated task ids to run (default: all)")
+    parser.add_argument(
+        "--task-ids", default="", help="comma-separated task ids to run (default: all)"
+    )
     parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--patch-timeout", type=int, default=300, help="wall-clock seconds per pipeline attempt")
+    parser.add_argument(
+        "--patch-timeout", type=int, default=300, help="wall-clock seconds per pipeline attempt"
+    )
     parser.add_argument("--artifact-root", type=Path, default=DEFAULT_ARTIFACT_ROOT)
     parser.add_argument("--reflect-judge", choices=["none", "ollama"], default="none")
     args = parser.parse_args(argv)
@@ -781,7 +816,9 @@ def main(argv: list[str] | None = None) -> int:
 
     leaks = guard.leaks()
     scorecard = build_scorecard(rows, len(tasks), args.model)
-    (run_root / "scorecard.json").write_text(json.dumps(scorecard, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (run_root / "scorecard.json").write_text(
+        json.dumps(scorecard, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     validation = build_validation(
         rows,
         run_id=args.run_id,
@@ -792,7 +829,9 @@ def main(argv: list[str] | None = None) -> int:
         reflect_judge=args.reflect_judge,
         leaks=leaks,
     )
-    (run_root / "validation.json").write_text(json.dumps(validation, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (run_root / "validation.json").write_text(
+        json.dumps(validation, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     # Advisory adoption decision. No state_root is passed, so nothing is persisted to a learning state.
     decision = adoption.build_adoption_from_scorecard(
         scorecard,
@@ -806,7 +845,9 @@ def main(argv: list[str] | None = None) -> int:
     (run_root / "adoption_decision.json").write_text(
         json.dumps(decision, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8"
     )
-    print(f"adoption_decision: {decision['decision']} reasons={decision['reason_codes']} (source={NEXUS_LEARNING_SOURCE})")
+    print(
+        f"adoption_decision: {decision['decision']} reasons={decision['reason_codes']} (source={NEXUS_LEARNING_SOURCE})"
+    )
 
     print(f"run_root: {run_root}")
     print(f"rows: {len(rows)} real_model_call_executed={validation['real_model_call_executed']}")

@@ -1,4 +1,5 @@
 """Unit tests for the memory-on vs memory-off A/B runner (issue #1639). No model calls."""
+
 from __future__ import annotations
 
 import json
@@ -29,16 +30,14 @@ def make_tasks(root: Path, count: int = 2) -> Path:
         (task_dir / "m.py").write_text(BUGGY, encoding="utf-8")
         (task_dir / "repro.py").write_text(REPRO, encoding="utf-8")
         (task_dir / "task.json").write_text(
-            json.dumps(
-                {
-                    "id": task_dir.name,
-                    "bug_class": "toy",
-                    "variant": str(i),
-                    "problem_statement": "f() returns 1 instead of 2",
-                    "target_file": "m.py",
-                    "repro_file": "repro.py",
-                }
-            ),
+            json.dumps({
+                "id": task_dir.name,
+                "bug_class": "toy",
+                "variant": str(i),
+                "problem_statement": "f() returns 1 instead of 2",
+                "target_file": "m.py",
+                "repro_file": "repro.py",
+            }),
             encoding="utf-8",
         )
     return tasks
@@ -74,17 +73,26 @@ def harness(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "STATE_WATCH_ROOTS", [watched])
     monkeypatch.setattr(runner, "git_head", lambda repo: "0" * 40)
     monkeypatch.setattr(runner, "git_tree_head", lambda repo: "1" * 40)
-    for key in ("NEXUS_OLLAMA_MODEL", "NEXUS_PATCH_TIMEOUT_SECONDS", "NEXUS_LEARNING_REFLECT_JUDGE", "NEXUS_LEARNING_STATE_ROOT"):
+    for key in (
+        "NEXUS_OLLAMA_MODEL",
+        "NEXUS_PATCH_TIMEOUT_SECONDS",
+        "NEXUS_LEARNING_REFLECT_JUDGE",
+        "NEXUS_LEARNING_STATE_ROOT",
+    ):
         monkeypatch.setenv(key, "")
     return {"root": tmp_path, "watched": watched, "monkeypatch": monkeypatch}
 
 
 def run_main(harness, extra_args=None, run_id="t1"):
     args = [
-        "--tasks-dir", str(make_tasks(harness["root"])),
-        "--run-id", run_id,
-        "--artifact-root", str(harness["root"] / "art"),
-        "--limit", "2",
+        "--tasks-dir",
+        str(make_tasks(harness["root"])),
+        "--run-id",
+        run_id,
+        "--artifact-root",
+        str(harness["root"] / "art"),
+        "--limit",
+        "2",
     ] + (extra_args or [])
     return runner.main(args)
 
@@ -141,8 +149,12 @@ def test_ab_rows_scorecard_and_validation(harness):
     off = [r for r in rows if r["memory_arm"] == "memory_off"]
     on = [r for r in rows if r["memory_arm"] == "memory_on"]
     assert len(off) == len(on) == 2
-    assert all(r["workflow"] == "nexus_memory_off" and r["terminal_outcome"] == "FAILED" for r in off)
-    assert all(r["workflow"] == "nexus_memory_on" and r["terminal_outcome"] == "SUCCEEDED" for r in on)
+    assert all(
+        r["workflow"] == "nexus_memory_off" and r["terminal_outcome"] == "FAILED" for r in off
+    )
+    assert all(
+        r["workflow"] == "nexus_memory_on" and r["terminal_outcome"] == "SUCCEEDED" for r in on
+    )
     assert all(r["memory_flag_applied"] for r in rows)
     assert all(r["ineligibility_reasons"] == [] for r in rows)
     # Arms ran in order: all off rows precede all on rows in rows.jsonl.
@@ -176,7 +188,10 @@ def test_ab_rows_scorecard_and_validation(harness):
 def test_rows_carry_retrieval_and_consumption_receipts(harness):
     harness["monkeypatch"].setattr(runner, "run_pipeline", fake_pipeline_factory())
     assert run_main(harness) == 0
-    rows = [json.loads(line) for line in (harness["root"] / "art" / "t1" / "rows.jsonl").read_text().splitlines()]
+    rows = [
+        json.loads(line)
+        for line in (harness["root"] / "art" / "t1" / "rows.jsonl").read_text().splitlines()
+    ]
     for row in rows:
         refs = row["evidence_refs"]
         assert any("retrieval_receipt" in ref for ref in refs)
@@ -194,7 +209,9 @@ def test_rows_carry_retrieval_and_consumption_receipts(harness):
 
 def test_preflight_failure_writes_no_rows(harness, capsys):
     harness["monkeypatch"].setattr(
-        runner, "preflight_model", lambda *a, **k: (_ for _ in ()).throw(runner.ModelUnavailable("down"))
+        runner,
+        "preflight_model",
+        lambda *a, **k: (_ for _ in ()).throw(runner.ModelUnavailable("down")),
     )
     assert run_main(harness) == runner.EXIT_PREFLIGHT
     assert not (harness["root"] / "art" / "t1" / "rows.jsonl").exists()
@@ -203,7 +220,9 @@ def test_preflight_failure_writes_no_rows(harness, capsys):
 
 def test_state_leak_is_reported_with_exit_3(harness, capsys):
     leak_target = harness["watched"] / "memory.json"
-    harness["monkeypatch"].setattr(runner, "run_pipeline", fake_pipeline_factory(extra_write=leak_target))
+    harness["monkeypatch"].setattr(
+        runner, "run_pipeline", fake_pipeline_factory(extra_write=leak_target)
+    )
     assert run_main(harness) == runner.EXIT_STATE_LEAK
     assert f"STATE_LEAK: {leak_target}" in capsys.readouterr().out
     validation = json.loads((harness["root"] / "art" / "t1" / "validation.json").read_text())
@@ -217,7 +236,10 @@ def test_pipeline_exception_is_recorded_not_raised(harness):
 
     harness["monkeypatch"].setattr(runner, "run_pipeline", boom)
     assert run_main(harness) == 0
-    rows = [json.loads(line) for line in (harness["root"] / "art" / "t1" / "rows.jsonl").read_text().splitlines()]
+    rows = [
+        json.loads(line)
+        for line in (harness["root"] / "art" / "t1" / "rows.jsonl").read_text().splitlines()
+    ]
     assert len(rows) == 4
     assert all("pipeline_exception" in r["ineligibility_reasons"] for r in rows)
     assert all(r["pipeline_status"] == "exception" for r in rows)

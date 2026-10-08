@@ -5,6 +5,7 @@ Each fixture is copied to a temp dir and its repro.py is executed there. A
 fixture is valid only when repro exits non-zero (the bug is present) within
 the time budget. Exit 0 when all fixtures are red, 1 otherwise.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -35,7 +36,9 @@ def load_task(task_dir: Path) -> dict:
     return meta
 
 
-def run_repro(work_dir: Path, repro_file: str, python: str = sys.executable) -> tuple[int, float, str]:
+def run_repro(
+    work_dir: Path, repro_file: str, python: str = sys.executable
+) -> tuple[int, float, str]:
     started = time.monotonic()
     try:
         proc = subprocess.run(
@@ -78,13 +81,19 @@ def verify_all(fixtures_dir: Path = FIXTURES_DIR) -> list[dict]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--tasks-dir", type=Path, default=FIXTURES_DIR, help="fixture set to verify (default: v1)")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--tasks-dir", type=Path, default=FIXTURES_DIR, help="fixture set to verify (default: v1)"
+    )
     args = parser.parse_args(argv)
     results = verify_all(args.tasks_dir)
     for item in results:
         status = "RED" if item["ok"] else "BAD"
-        print(f"{status:4} {item['task_id']:32} rc={item['returncode']} t={item['elapsed_sec']}s {item['output_tail']}")
+        print(
+            f"{status:4} {item['task_id']:32} rc={item['returncode']} t={item['elapsed_sec']}s {item['output_tail']}"
+        )
     bad = [item["task_id"] for item in results if not item["ok"]]
     print(f"{len(results) - len(bad)}/{len(results)} fixtures red")
     return 1 if bad or not results else 0
