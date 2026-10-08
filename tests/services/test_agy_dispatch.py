@@ -501,6 +501,74 @@ def test_background_timeout_is_persisted_as_outcome_unknown(tmp_path: Path, monk
     assert not prompt_path.exists()
 
 
+def test_background_nonzero_exit_after_observed_effect_is_outcome_unknown(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="low",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "post-effect crash")
+
+    effect_at = "2026-10-07T11:22:53+00:00"
+
+    def fake_dispatch_run(**kwargs):
+        kwargs["operation_hook"]({
+            "phase": "EXECUTING",
+            "attempts": 1,
+            "rotations": 0,
+            "failure_kind": "UNKNOWN",
+            "first_effect_at": effect_at,
+            "provider_pid": 12345,
+            "provider_pgid": 12345,
+        })
+        return -9
+
+    monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
+    monkeypatch.setattr(dispatch._agy_operation_journal, "_process_alive", lambda _pid: False)
+    monkeypatch.setattr(
+        dispatch._agy_operation_journal, "_process_group_alive", lambda _pgid: False
+    )
+
+    code = dispatch._run_background_operation(
+        operation_id=operation_id,
+        prompt_file=str(prompt_path),
+        cwd=str(tmp_path),
+        mode="accept-edits",
+        model="gemini-test",
+        effort="low",
+        timeout=30,
+        max_calls=1,
+        pool_wait_timeout=1.0,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=root,
+        heartbeat_interval=0.01,
+    )
+
+    record = journal.read(operation_id)
+    assert code == -9
+    assert record["status"] == "OUTCOME_UNKNOWN"
+    assert record["failure_kind"] == "UNKNOWN"
+    assert record["first_effect_at"] == effect_at
+    assert record["has_unresolved_external_effect"] is True
+    assert record["reconciliation"]["result"] == "PROVIDER_EXIT_AFTER_OBSERVED_EFFECT"
+    assert record["reconciliation"]["provider_alive_after"] is False
+    assert record["reconciliation"]["retry_permitted"] is False
+    assert not prompt_path.exists()
+
+
 def test_background_rotation_success_clears_live_failure_and_preserves_bounded_history(
     tmp_path: Path, monkeypatch
 ) -> None:

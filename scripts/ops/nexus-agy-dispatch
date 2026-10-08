@@ -4102,6 +4102,7 @@ def _run_background_operation(
             return int(exit_code if exit_code not in (None, 0) else 1)
 
         timed_out = bool(snapshot.get("timed_out")) or failure_kind == "TIMEOUT"
+        effect_observed = snapshot.get("first_effect_at") is not None
         if timed_out:
             terminal_status = "OUTCOME_UNKNOWN"
             reconciliation = {
@@ -4112,6 +4113,16 @@ def _run_background_operation(
         elif exit_code == 0:
             terminal_status = "COMPLETED"
             reconciliation = None
+        elif effect_observed:
+            terminal_status = "OUTCOME_UNKNOWN"
+            failure_kind = failure_kind or "PROVIDER_EXIT_AFTER_EFFECT"
+            reconciliation = {
+                "at": _agy_operation_journal.utc_now(),
+                "result": "PROVIDER_EXIT_AFTER_OBSERVED_EFFECT",
+                "provider_alive_before": bool(provider_pid or provider_pgid),
+                "provider_alive_after": False,
+                "retry_permitted": False,
+            }
         else:
             terminal_status = "FAILED"
             reconciliation = None
@@ -4156,6 +4167,9 @@ def _run_background_operation(
             permission_profile_kind=snapshot.get("permission_profile_kind"),
             effective_permissions=snapshot.get("effective_permissions"),
             tool_event_count=int(snapshot.get("tool_event_count") or 0),
+            has_unresolved_external_effect=bool(
+                terminal_status == "OUTCOME_UNKNOWN" and effect_observed
+            ),
             **attestation,
         )
         if (
