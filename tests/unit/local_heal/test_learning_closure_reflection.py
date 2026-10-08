@@ -46,7 +46,9 @@ def _lesson_rows(tmp_path: Path) -> list[dict]:
     path = tmp_path / LESSONS_RELATIVE
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
 
 
 @pytest.fixture(autouse=True)
@@ -135,15 +137,13 @@ def test_ollama_judge_output_is_used_when_valid(tmp_path: Path, monkeypatch) -> 
     monkeypatch.setenv("NEXUS_LEARNING_REFLECT_JUDGE", "ollama")
     judge_output = (
         "```json\n"
-        + json.dumps(
-            {
-                "title": "Verify parser fix before closing",
-                "lesson": "Run the parser regression check before marking the fix done.",
-                "applies_when": ["parser"],
-                "avoid_when": [],
-                "confidence": 0.8,
-            }
-        )
+        + json.dumps({
+            "title": "Verify parser fix before closing",
+            "lesson": "Run the parser regression check before marking the fix done.",
+            "applies_when": ["parser"],
+            "avoid_when": [],
+            "confidence": 0.8,
+        })
         + "\n```"
     )
     monkeypatch.setattr(
@@ -165,7 +165,9 @@ def test_writeback_disabled_skips_reflection_and_ledger(tmp_path: Path, monkeypa
     monkeypatch.setenv("NEXUS_LOCAL_HEAL_LEARNING_WRITEBACK", "off")
 
     closure = write_learning_closure(_qualified_op(), bridge=_bridge(tmp_path))
-    reflection = _reflect_canonical_episode(tmp_path, {"episode_id": "ep-disabled", "terminal_outcome": "SUCCEEDED"})
+    reflection = _reflect_canonical_episode(
+        tmp_path, {"episode_id": "ep-disabled", "terminal_outcome": "SUCCEEDED"}
+    )
 
     assert closure["writeback_status"] == "disabled"
     assert "reflection" not in closure
