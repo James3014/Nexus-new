@@ -1,0 +1,1 @@
+Disposable Core v2 canonical dependency evidence canary for Issue #1534. Do not merge.\n
