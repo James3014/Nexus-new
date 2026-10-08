@@ -68,9 +68,9 @@ class RieKnowledgeApplicabilityError(ValueError):
 def canonical_hash(value: Mapping[str, Any]) -> str:
     """Hash identical to the RIE report content hash (``ensure_ascii`` JSON)."""
     return hashlib.sha256(
-        json.dumps(
-            dict(value), sort_keys=True, separators=(",", ":"), ensure_ascii=True
-        ).encode("utf-8")
+        json.dumps(dict(value), sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
+            "utf-8"
+        )
     ).hexdigest()
 
 
@@ -132,8 +132,15 @@ def run_knowledge_operation(
     try:
         stdin = json.dumps(dict(evidence), ensure_ascii=True, allow_nan=False)
         proc = runner(
-            [python_bin, "-m", "repository_intelligence.cli",
-             "--operation", "knowledge", "--input", "-"],
+            [
+                python_bin,
+                "-m",
+                "repository_intelligence.cli",
+                "--operation",
+                "knowledge",
+                "--input",
+                "-",
+            ],
             input=stdin,
             capture_output=True,
             text=True,
@@ -228,10 +235,10 @@ def project_knowledge_report(report: Mapping[str, Any]) -> dict[str, Any]:
             status = "UNKNOWN"
         counts[status] += 1
         if status in _REVIEW_NEEDED_ORDER:
-            review.append(
-                (_REVIEW_NEEDED_ORDER.index(status),
-                 f"{status}:{_bound(rel.get('artifact_path'), MAX_REF_CHARS - 24)}")
-            )
+            review.append((
+                _REVIEW_NEEDED_ORDER.index(status),
+                f"{status}:{_bound(rel.get('artifact_path'), MAX_REF_CHARS - 24)}",
+            ))
     review.sort()
     refs = [_bound(text, MAX_REF_CHARS) for _, text in review[:MAX_REFS]]
     uncovered = [
@@ -285,11 +292,16 @@ def build_codeintel_knowledge_evidence(
     """
     identity = dict(snapshot or {})
     if not all(identity.get(k) for k in _IDENTITY_KEYS):
-        return {"knowledge_applicability": not_applicable_projection(
-            ["REVISION_IDENTITY_UNAVAILABLE"])}
+        return {
+            "knowledge_applicability": not_applicable_projection(["REVISION_IDENTITY_UNAVAILABLE"])
+        }
     if not knowledge_artifacts:
-        return {"knowledge_applicability": not_applicable_projection(
-            ["KNOWLEDGE_CLAIM_SOURCE_NOT_AVAILABLE", *collection_errors])}
+        return {
+            "knowledge_applicability": not_applicable_projection([
+                "KNOWLEDGE_CLAIM_SOURCE_NOT_AVAILABLE",
+                *collection_errors,
+            ])
+        }
     evidence = {
         "snapshot": identity,
         "knowledge_artifacts": [dict(a) for a in knowledge_artifacts],
