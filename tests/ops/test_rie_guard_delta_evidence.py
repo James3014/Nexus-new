@@ -1,7 +1,7 @@
 """Issue #1580: RIE guard semantic delta advisory evidence (G1-G3).
 
 Engine-dependent tests need the pinned RIE checkout (NEXUS_RIE_ENGINE_ROOT and
-NEXUS_RIE_PYTHON_BIN) and are skipped otherwise; they never fall back to a
+NEXUS_RIE_PYTHON_BIN) and are not collected otherwise; they never fall back to a
 different engine revision.
 """
 
@@ -63,17 +63,31 @@ def _identity(base: str, head: str) -> dict:
     )
 
 
-@pytest.fixture(scope="module")
-def engine() -> m.SubprocessEngine:
+def _configured_engine() -> m.SubprocessEngine | None:
+    """Return the pinned engine when configured; engine tests are not collected otherwise.
+
+    A skipped test would make the exact-base impact gate reject the comparison, so
+    engine-dependent tests are defined only when the pinned checkout is configured.
+    """
     root, py = os.environ.get(m.ENGINE_ROOT_ENV), os.environ.get(m.ENGINE_PYTHON_ENV)
     if not root or not py:
-        pytest.skip("pinned RIE engine not configured")
+        return None
     eng = m.SubprocessEngine(root, py)
-    try:
-        eng.verify_pin()
-    except m.GuardDeltaEvidenceError:
-        pytest.skip("configured RIE checkout is not the pinned clean revision")
+    eng.verify_pin()
     return eng
+
+
+_ENGINE = _configured_engine()
+
+
+def _engine_only(fn):
+    return fn if _ENGINE is not None else None
+
+
+@pytest.fixture(scope="module")
+def engine() -> m.SubprocessEngine:
+    assert _ENGINE is not None
+    return _ENGINE
 
 
 def _run(repo, base, head, engine, probes=False):
@@ -157,6 +171,7 @@ def test_missing_commit_and_missing_sources_become_explicit_gaps(repo):
 # --------------------------------------------------- G3 negative / false-green
 
 
+@_engine_only
 def test_removed_enforcement_never_renders_tightens(repo, engine):
     assert STEMS_LINE in GUARD_SRC
     base = _commit(repo, GUARD_SRC, SELF_TEST_SRC)
@@ -175,6 +190,7 @@ def test_removed_enforcement_never_renders_tightens(repo, engine):
     assert _run(repo, base, head, engine, True)["classification"] == "LOOSENS"
 
 
+@_engine_only
 def test_behavioral_tightening_requires_independent_witness(repo, engine):
     assert FROZEN_LINE in GUARD_SRC
     loose = GUARD_SRC.replace(FROZEN_LINE, "frozen_prefixes = ()")
@@ -188,6 +204,7 @@ def test_behavioral_tightening_requires_independent_witness(repo, engine):
     ]
 
 
+@_engine_only
 def test_impl_and_self_test_cochange_is_not_false_green(repo, engine):
     base = _commit(repo, GUARD_SRC, SELF_TEST_SRC)
     head = _commit(repo, GUARD_SRC + "\n# cosmetic\n", SELF_TEST_SRC + "\n# cosmetic\n")
@@ -197,6 +214,7 @@ def test_impl_and_self_test_cochange_is_not_false_green(repo, engine):
         assert "IMPLEMENTATION_AND_SELF_TEST_CHANGED_TOGETHER" in out["reason_codes"]["items"]
 
 
+@_engine_only
 def test_prose_only_change_stays_unknown(repo, engine):
     base = _commit(repo, GUARD_SRC, SELF_TEST_SRC)
     prose = GUARD_SRC.replace("Mechanical regression guard", "Reworded regression guard", 1)
@@ -208,6 +226,7 @@ def test_prose_only_change_stays_unknown(repo, engine):
     assert out["tightening_witnesses"]["total"] == 0 == out["loosening_witnesses"]["total"]
 
 
+@_engine_only
 def test_unreadable_guard_never_renders_unchanged(repo, engine):
     base = _commit(repo, GUARD_SRC, SELF_TEST_SRC)
     head = _commit(repo, None, None)
@@ -217,6 +236,7 @@ def test_unreadable_guard_never_renders_unchanged(repo, engine):
     assert any("UNAVAILABLE" in e for e in out["collection_errors"]["items"])
 
 
+@_engine_only
 def test_identical_base_head_with_probes_is_unchanged_and_complete(repo, engine):
     base = _commit(repo, GUARD_SRC, SELF_TEST_SRC)
     out = _run(repo, base, base, engine, probes=True)
@@ -227,6 +247,7 @@ def test_identical_base_head_with_probes_is_unchanged_and_complete(repo, engine)
     assert out["adapter_gaps"]["items"] == ["BEHAVIORAL_PROBES_NOT_RUN"]
 
 
+@_engine_only
 def test_stale_or_wrong_base_head_report_rejected(repo, engine):
     base = _commit(repo, GUARD_SRC, SELF_TEST_SRC)
     head = _commit(repo, GUARD_SRC + "#\n", SELF_TEST_SRC)
@@ -255,6 +276,7 @@ def _rehash(report: dict) -> dict:
     return report
 
 
+@_engine_only
 def test_rehashed_tampering_is_rejected_by_canonical_verifier(repo, engine):
     base = _commit(repo, GUARD_SRC, SELF_TEST_SRC)
     head = _commit(repo, GUARD_SRC + "#\n", SELF_TEST_SRC)
@@ -403,6 +425,7 @@ def test_reviewer_attention_semantics_match_issue():
     }
 
 
+@_engine_only
 def test_cli_writes_artifact_and_summary_only(repo, tmp_path, engine, capsys):
     base = _commit(repo, GUARD_SRC, SELF_TEST_SRC)
     before = _git(repo, "status", "--porcelain")
