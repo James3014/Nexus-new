@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import urllib.request
@@ -261,6 +262,55 @@ def _terminal_evidence(op: Any) -> dict[str, Any]:
     return result
 
 
+def _verifier_receipt_fields(op: Any) -> tuple[str, str]:
+    """Return (verifier_status, receipt_id) from the op's bound verifier receipt."""
+    receipt = getattr(op, "verifier_receipt", None)
+    if not isinstance(receipt, dict):
+        return "", ""
+    verifier_status = str(receipt.get("verifier_status") or "").lower()
+    receipt_id = str(receipt.get("receipt_id") or receipt.get("path") or "")
+    return verifier_status, receipt_id
+
+
+def _build_qualification(ctx: Any, op: Any, terminal_evidence: dict[str, Any]) -> dict[str, Any]:
+    """Derive episode qualification only from evidence the closure actually measured.
+
+    repeatability: the bug was reproduced red before repair and the verifier ran.
+    prevention_rule: the repro script (or verifier command) that guards the fix.
+    authority_qualification: the verifier receipt that authorizes the outcome.
+    Returns {} when none of these is evidenced. Never raises.
+    """
+    del terminal_evidence  # receipt binding is handled by the caller
+    try:
+        verifier_status, receipt_id = _verifier_receipt_fields(op)
+        qualification: dict[str, Any] = {}
+        if getattr(op, "reproduced", False) is True and verifier_status in {"pass", "fail"}:
+            qualification["repeatability"] = {
+                "kind": "repro_then_verify",
+                "reproduced": True,
+                "verifier_status": verifier_status,
+                "receipt_id": receipt_id,
+            }
+        repro_script = str(getattr(ctx, "repro_script", "") or "")
+        verifier_command_hash = str(getattr(op, "verifier_command_hash", "") or "")
+        if repro_script:
+            qualification["prevention_rule"] = {
+                "kind": "repro_script",
+                "sha256": hashlib.sha256(repro_script.encode("utf-8")).hexdigest(),
+            }
+        elif verifier_command_hash:
+            qualification["prevention_rule"] = {"kind": "verifier_command", "hash": verifier_command_hash}
+        if receipt_id:
+            qualification["authority_qualification"] = {
+                "kind": "verifier_receipt",
+                "receipt_id": receipt_id,
+                "verifier_status": verifier_status,
+            }
+        return qualification
+    except Exception:
+        return {}
+
+
 class LearningClosureBridge:
     def __init__(
         self,
@@ -358,6 +408,9 @@ class LearningClosureBridge:
         lineage = _lineage(op)
         receipts = _capability_receipts(op)
         terminal_evidence = _terminal_evidence(op)
+        _, bound_receipt_id = _verifier_receipt_fields(op)
+        if bound_receipt_id and not terminal_evidence.get("receipt"):
+            terminal_evidence["receipt"] = bound_receipt_id
         episode_error = ""
         episode_write_status = "failed"
         persisted_episode: dict[str, Any] | None = None
@@ -376,7 +429,7 @@ class LearningClosureBridge:
                 receipts=receipts,
                 retrieved_lesson_ids=lineage["retrieved_lesson_ids"],
                 applied_lesson_ids=lineage["applied_lesson_ids"],
-                qualification=getattr(op, "qualification", None),
+                qualification=getattr(op, "qualification", None) or _build_qualification(ctx, op, terminal_evidence),
                 lesson_disposition=lineage["lesson_disposition"],
                 learning_write_succeeded=True,
                 idempotency_key=lineage["idempotency_key"],
@@ -499,6 +552,9 @@ class LearningClosureBridge:
         lineage = _lineage(op)
         receipts = _capability_receipts(op)
         terminal_evidence = _terminal_evidence(op)
+        _, bound_receipt_id = _verifier_receipt_fields(op)
+        if bound_receipt_id and not terminal_evidence.get("receipt"):
+            terminal_evidence["receipt"] = bound_receipt_id
         episode_error = ""
         episode_write_status = "failed"
         persisted_episode: dict[str, Any] | None = None
@@ -524,6 +580,7 @@ class LearningClosureBridge:
                 receipts=receipts,
                 retrieved_lesson_ids=lineage["retrieved_lesson_ids"],
                 applied_lesson_ids=lineage["applied_lesson_ids"],
+                qualification=getattr(op, "qualification", None) or _build_qualification(ctx, op, terminal_evidence),
                 lesson_disposition=lineage["lesson_disposition"],
                 idempotency_key=f"{lineage['idempotency_key']}:{envelope.candidate_id}"
                 if lineage["idempotency_key"]
