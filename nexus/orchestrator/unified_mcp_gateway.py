@@ -48,6 +48,8 @@ from nexus.contracts.gateway_convergence import (
 )
 from nexus.contracts.gateway_deployment import (
     ContractError as GatewayDeploymentContractError,
+)
+from nexus.contracts.gateway_deployment import (
     GatewayRecoveryMaterializationRequest,
     GatewayRecoveryRequest,
     validate_recovery_materialization_request,
