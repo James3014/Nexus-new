@@ -1,0 +1,330 @@
+#!/usr/bin/env python3
+"""Run the Nexus Core Issue-bound check locally with CI parity.
+
+Reads the Core pin from the base ref's workflow, installs that pin into an
+isolated pin-keyed tool directory, builds a hash-keyed material venv, runs
+``issue-init`` and ``issue-check`` in a temporary clean detached worktree at the
+exact committed HEAD, and prints a JSON summary. It holds no completion
+authority: the Core receipt is the only verdict. Local or tooling problems fail
+closed with exit 2; a Core verdict other than VERIFIED exits 1.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import Any, Sequence
+
+SCHEMA = "nexus.core_issue_check_local.v1"
+WORKFLOW_PATH = ".github/workflows/nexus-core-issue-completion.yml"
+REQUIREMENTS = (
+    "requirements/canonical-learning.txt",
+    "requirements/canonical-runtime.txt",
+)
+PIN_RE = re.compile(r"^\s*NEXUS_CORE_TOOL_PIN:\s*([0-9a-f]{40})\s*$", re.MULTILINE)
+CLAIM_RE = re.compile(r"claim ceiling:\s*(\S+)", re.IGNORECASE)
+CORE_REPO_URL = "git+https://github.com/James3014/nexus-core.git@{pin}"
+EXIT_OK = 0
+EXIT_CORE_FAILED = 1
+EXIT_ERROR = 2
+
+
+class LocalCheckError(RuntimeError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _run(
+    cmd: Sequence[str],
+    *,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+    code: str = "COMMAND_FAILED",
+) -> subprocess.CompletedProcess[str]:
+    try:
+        result = subprocess.run(
+            list(cmd),
+            cwd=cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        raise LocalCheckError(code, f"cannot execute {cmd[0]}: {exc}") from exc
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()[-500:]
+        raise LocalCheckError(code, f"{' '.join(cmd[:3])} failed: {detail}")
+    return result
+
+
+def _git(repo: Path, *args: str, code: str = "GIT_FAILED") -> str:
+    return _run(["git", "-C", str(repo), *args], code=code).stdout
+
+
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def check_clean(repo: Path) -> None:
+    status = _git(repo, "status", "--porcelain", "--untracked-files=all")
+    if status.strip():
+        raise LocalCheckError(
+            "WORKTREE_DIRTY",
+            "source worktree has uncommitted or untracked files: "
+            + "; ".join(status.strip().splitlines()[:5]),
+        )
+
+
+def read_pin(repo: Path, base_ref: str) -> str:
+    try:
+        text = _git(repo, "show", f"{base_ref}:{WORKFLOW_PATH}")
+    except LocalCheckError as exc:
+        raise LocalCheckError("CORE_PIN_UNRESOLVED", str(exc)) from exc
+    matches = set(PIN_RE.findall(text))
+    if len(matches) != 1:
+        raise LocalCheckError(
+            "CORE_PIN_UNRESOLVED",
+            f"expected exactly one NEXUS_CORE_TOOL_PIN in {base_ref}:{WORKFLOW_PATH}",
+        )
+    return matches.pop()
+
+
+def ensure_tool(cache_root: Path, pin: str) -> Path:
+    base = cache_root / "tools" / pin
+    certify = base / "bin" / "nexus-certify"
+    if certify.exists():
+        return certify
+    env = dict(os.environ)
+    env["UV_TOOL_DIR"] = str(base / "tools")
+    env["UV_TOOL_BIN_DIR"] = str(base / "bin")
+    base.mkdir(parents=True, exist_ok=True)
+    _run(
+        ["uv", "tool", "install", "--force", CORE_REPO_URL.format(pin=pin)],
+        env=env,
+        code="CORE_INSTALL_FAILED",
+    )
+    if not certify.exists():
+        raise LocalCheckError("CORE_INSTALL_FAILED", f"{certify} missing after install")
+    return certify
+
+
+def ensure_materials(cache_root: Path, repo: Path, head: str) -> Path:
+    digest = hashlib.sha256()
+    for rel in REQUIREMENTS:
+        digest.update(_git(repo, "show", f"{head}:{rel}", code="MATERIALS_FAILED").encode())
+    env_dir = cache_root / "materials" / digest.hexdigest()
+    python = env_dir / "bin" / "python"
+    if python.exists():
+        return python
+    shutil.rmtree(env_dir, ignore_errors=True)
+    env_dir.parent.mkdir(parents=True, exist_ok=True)
+    _run(["uv", "venv", "--python", "3.11", str(env_dir)], code="MATERIALS_FAILED")
+    for rel in REQUIREMENTS:
+        _run(
+            ["uv", "pip", "install", "--python", str(python), "--requirement", rel],
+            cwd=repo,
+            code="MATERIALS_FAILED",
+        )
+    return python
+
+
+def resolve_token() -> str:
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    if token:
+        return token
+    try:
+        result = subprocess.run(
+            ["gh", "auth", "token"], capture_output=True, text=True, check=False
+        )
+    except OSError as exc:
+        raise LocalCheckError("GITHUB_TOKEN_UNAVAILABLE", str(exc)) from exc
+    token = result.stdout.strip()
+    if result.returncode != 0 or not token:
+        raise LocalCheckError(
+            "GITHUB_TOKEN_UNAVAILABLE", "no GITHUB_TOKEN and gh auth token failed"
+        )
+    return token
+
+
+def _find(obj: Any, keys: Sequence[str]) -> Any:
+    if isinstance(obj, dict):
+        for key in keys:
+            if obj.get(key) not in (None, ""):
+                return obj[key]
+        for value in obj.values():
+            found = _find(value, keys)
+            if found is not None:
+                return found
+    elif isinstance(obj, list):
+        for value in obj:
+            found = _find(value, keys)
+            if found is not None:
+                return found
+    return None
+
+
+def newest_receipt(worktree: Path) -> Path | None:
+    receipts = sorted(
+        (worktree / ".nexus-core" / "receipts").glob("*.json"),
+        key=lambda p: (p.stat().st_mtime_ns, p.name),
+    )
+    return receipts[-1] if receipts else None
+
+
+def run_check(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    repo = Path(args.repo_root).resolve()
+    cache_root = Path(args.cache_root).expanduser().resolve()
+    output_dir = Path(args.output_dir).resolve() if args.output_dir else None
+
+    if not (repo / ".git").exists():
+        raise LocalCheckError("NOT_A_REPO", f"{repo} is not a git worktree root")
+    check_clean(repo)
+    head = _git(repo, "rev-parse", "HEAD").strip()
+    head_tree = _git(repo, "rev-parse", "HEAD^{tree}").strip()
+    if not args.no_fetch:
+        _git(repo, "fetch", "origin", "main", code="FETCH_FAILED")
+    base_sha = _git(
+        repo, "rev-parse", "--verify", f"{args.base_ref}^{{commit}}", code="BASE_REF_MISSING"
+    ).strip()
+    pin = read_pin(repo, args.base_ref)
+
+    certify = Path(args.certify_bin) if args.certify_bin else ensure_tool(cache_root, pin)
+    if not certify.exists():
+        raise LocalCheckError("CORE_INSTALL_FAILED", f"certify binary not found: {certify}")
+    token = resolve_token()
+    output_dir = output_dir or (cache_root / "runs" / f"issue-{args.issue}-{head[:12]}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    tmp_parent = Path(tempfile.mkdtemp(prefix="nexus-core-local-"))
+    worktree = tmp_parent / "wt"
+    added = False
+    try:
+        _git(repo, "worktree", "add", "--detach", str(worktree), head, code="WORKTREE_FAILED")
+        added = True
+        python = (
+            Path(args.material_python)
+            if args.material_python
+            else ensure_materials(cache_root, worktree, head)
+        )
+        if not args.no_fetch:
+            _git(worktree, "fetch", "origin", "main", code="FETCH_FAILED")
+        env = dict(os.environ)
+        env.update(
+            GITHUB_TOKEN=token,
+            NEXUS_CORE_MATERIAL_PYTHON=str(python),
+            PYTHONDONTWRITEBYTECODE="1",
+        )
+        log_path = output_dir / f"issue-{args.issue}-check.log"
+        log_parts: list[str] = []
+        rc = 0
+        for sub in ("issue-init", "issue-check"):
+            try:
+                proc = subprocess.run(
+                    [str(certify), sub, "--repo", ".", "--issue", str(args.issue)],
+                    cwd=worktree,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            except OSError as exc:
+                raise LocalCheckError("CORE_EXEC_FAILED", str(exc)) from exc
+            log_parts.append(f"$ {sub} (exit {proc.returncode})\n{proc.stdout}{proc.stderr}")
+            if proc.returncode != 0:
+                rc = proc.returncode
+                break
+        log_text = "\n".join(log_parts)
+        log_path.write_text(log_text, encoding="utf-8")
+
+        receipt = newest_receipt(worktree)
+        receipt_data: dict[str, Any] = {}
+        receipt_out: Path | None = None
+        if receipt is not None:
+            receipt_out = output_dir / receipt.name
+            shutil.copy2(receipt, receipt_out)
+            try:
+                receipt_data = json.loads(receipt.read_text(encoding="utf-8"))
+            except ValueError as exc:
+                raise LocalCheckError("RECEIPT_INVALID", str(exc)) from exc
+        elif rc == 0:
+            raise LocalCheckError("RECEIPT_MISSING", "Core exited 0 but wrote no receipt")
+
+        outcome = receipt_data.get("outcome") if isinstance(receipt_data, dict) else None
+        status = outcome.get("status") if isinstance(outcome, dict) else None
+        if status is None:
+            status = "NO_RECEIPT_STATUS"
+        claim_match = CLAIM_RE.findall(log_text)
+        summary = {
+            "schema": SCHEMA,
+            "pin": pin,
+            "base_ref": args.base_ref,
+            "base_sha": base_sha,
+            "head": head,
+            "head_tree": head_tree,
+            "issue": args.issue,
+            "status": status,
+            "claim": claim_match[-1] if claim_match else None,
+            "receipt_path": str(receipt_out) if receipt_out else None,
+            "receipt_sha256": _sha256_file(receipt_out) if receipt_out else None,
+            "receipt_hash": _find(receipt_data, ("receipt_hash", "hash")),
+            "target_tree": _find(receipt_data, ("target_tree", "tree")),
+            "log_path": str(log_path),
+            "core_exit_code": rc,
+        }
+        ok = rc == 0 and status == "VERIFIED"
+        return summary, EXIT_OK if ok else EXIT_CORE_FAILED
+    finally:
+        if added:
+            subprocess.run(
+                ["git", "-C", str(repo), "worktree", "remove", "--force", str(worktree)],
+                capture_output=True,
+                check=False,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo), "worktree", "prune"], capture_output=True, check=False
+            )
+        shutil.rmtree(tmp_parent, ignore_errors=True)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--issue", type=int, required=True)
+    parser.add_argument("--repo-root", default=".")
+    parser.add_argument("--base-ref", default="origin/main")
+    parser.add_argument("--cache-root", default="~/.cache/nexus-core-local")
+    parser.add_argument("--output-dir")
+    parser.add_argument("--no-fetch", action="store_true")
+    parser.add_argument("--certify-bin", help="override Core binary (tests)")
+    parser.add_argument("--material-python", help="override material python")
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        summary, code = run_check(args)
+    except LocalCheckError as exc:
+        summary = {
+            "schema": SCHEMA,
+            "issue": args.issue,
+            "status": "ERROR",
+            "error_code": exc.code,
+            "error": str(exc),
+        }
+        code = EXIT_ERROR
+    print(json.dumps(summary, indent=2, sort_keys=True))
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())
