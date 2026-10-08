@@ -575,3 +575,209 @@ def test_generic_guard_error_exits_blocked_without_spawning_dsh(tmp_path: Path) 
     assert payload["reason_code"] == "DSH_WORKFLOW_GUARD_ERROR"
     assert payload["invocation"] == "resume"
     assert payload["provider_invocation_allowed"] is False
+
+
+def _write_failing_fake_dsh(path: Path) -> None:
+    path.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, sys\n"
+        "from pathlib import Path\n"
+        "marker = Path(os.environ['FAKE_DSH_MARKER'])\n"
+        "marker.write_text(marker.read_text() + 'x' if marker.exists() else 'x')\n"
+        "edit = os.environ.get('FAKE_DSH_EDIT')\n"
+        "if edit:\n"
+        "    Path(edit).write_text('broken = undefined_name\\n')\n"
+        "    Path(edit).with_name('scratch.py').write_text('x = 1\\n')\n"
+        "sys.exit(int(os.environ.get('FAKE_DSH_EXIT', '0')))\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
+def _quarantine_setup(tmp_path: Path) -> dict:
+    binding = _binding(tmp_path)
+    repo = Path(binding["repo_root"])
+    for cmd in (
+        ["init", "-q"],
+        ["config", "user.email", "t@example.invalid"],
+        ["config", "user.name", "t"],
+    ):
+        subprocess.run(["git", *cmd], cwd=repo, check=True, capture_output=True)
+    (repo / "mod.py").write_text("value = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "base"], cwd=repo, check=True)
+    state_root = tmp_path / "state"
+    guard.store_binding(state_root, binding)
+    doctor_bin = tmp_path / "doctor"
+    _write_doctor(
+        doctor_bin,
+        _doctor(state="open", disposition="SAFE", gate="CONTINUE_BOUNDED_ISSUE_WORK"),
+    )
+    dsh_bin = tmp_path / "dsh"
+    _write_failing_fake_dsh(dsh_bin)
+    return {
+        "binding": binding,
+        "repo": repo,
+        "state_root": state_root,
+        "doctor": doctor_bin,
+        "dsh": dsh_bin,
+        "marker": tmp_path / "dsh-count",
+    }
+
+
+def _resume(ctx: dict, *, exit_code: int, edit: bool) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env["FAKE_DSH_MARKER"] = str(ctx["marker"])
+    env["FAKE_DSH_EXIT"] = str(exit_code)
+    if edit:
+        env["FAKE_DSH_EDIT"] = str(ctx["repo"] / "mod.py")
+    else:
+        env.pop("FAKE_DSH_EDIT", None)
+    return _run_cli(
+        "resume",
+        "--session-id",
+        ctx["binding"]["session_id"],
+        "--state-root",
+        str(ctx["state_root"]),
+        "--doctor-bin",
+        str(ctx["doctor"]),
+        "--dsh-bin",
+        str(ctx["dsh"]),
+        "--task",
+        "continue",
+        env=env,
+    )
+
+
+def _turn_state(ctx: dict) -> dict:
+    path = ctx["state_root"] / "turn-state" / f"{ctx['binding']['session_id']}.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_failed_dirty_turn_is_quarantined_blocks_next_resume_until_ack(tmp_path: Path) -> None:
+    ctx = _quarantine_setup(tmp_path)
+    binding_file = guard._binding_path(ctx["state_root"], ctx["binding"]["session_id"])
+    binding_before = binding_file.read_bytes()
+
+    failed = _resume(ctx, exit_code=1, edit=True)
+    assert failed.returncode == 1  # DSH's own exit code is preserved
+    assert ctx["marker"].read_text() == "x"
+    state = _turn_state(ctx)
+    assert state["state"] == "TURN_FAILED_DIRTY"
+    assert binding_file.read_bytes() == binding_before
+    # Never reverts: the broken edit and scratch file are still on disk.
+    assert (ctx["repo"] / "mod.py").read_text() == "broken = undefined_name\n"
+    assert (ctx["repo"] / "scratch.py").is_file()
+
+    quarantine = _assert_receipt_hash_verifies(Path(state["quarantine_receipt"]))
+    assert quarantine["schema"] == "nexus.dsh_turn_quarantine.v1"
+    assert quarantine["state"] == "TURN_FAILED_DIRTY"
+    assert quarantine["dsh_exit_code"] == 1
+    assert quarantine["new_untracked_paths"] == ["scratch.py"]
+    assert quarantine["automatic_revert"] is False
+    patch = Path(quarantine["turn_patch"]["path"])
+    assert "undefined_name" in patch.read_text(encoding="utf-8")
+    assert quarantine["turn_patch"]["sha256"] == guard._sha256_file(patch)
+    assert (
+        quarantine["pre_turn"]["worktree_diff_sha256"]
+        != (quarantine["post_turn"]["worktree_diff_sha256"])
+    )
+    assert "quarantine" in Path(state["quarantine_receipt"]).parts
+
+    for command in ("check", "resume"):
+        argv = [
+            command,
+            "--session-id",
+            ctx["binding"]["session_id"],
+            "--state-root",
+            str(ctx["state_root"]),
+            "--doctor-bin",
+            str(ctx["doctor"]),
+        ]
+        if command == "resume":
+            argv += ["--dsh-bin", str(ctx["dsh"]), "--task", "continue"]
+        env = os.environ.copy()
+        env["FAKE_DSH_MARKER"] = str(ctx["marker"])
+        blocked = _run_cli(*argv, env=env)
+        assert blocked.returncode == guard.EXIT_BLOCKED
+        receipt = json.loads(blocked.stdout.strip().splitlines()[-1])
+        assert receipt["decision"] == "BLOCK_RESUME"
+        assert receipt["reason_code"] == "PREVIOUS_TURN_FAILED_DIRTY"
+        assert receipt["provider_invocation_allowed"] is False
+    assert ctx["marker"].read_text() == "x"  # provider not invoked again
+
+    acked = _run_cli(
+        "ack-turn-failure",
+        "--session-id",
+        ctx["binding"]["session_id"],
+        "--state-root",
+        str(ctx["state_root"]),
+        "--reason",
+        "reviewed quarantine patch",
+    )
+    assert acked.returncode == 0, acked.stderr
+    ack = _assert_receipt_hash_verifies(Path(json.loads(acked.stdout)["receipt_path"]))
+    assert ack["schema"] == "nexus.dsh_turn_failure_ack.v1"
+    assert ack["reason"] == "reviewed quarantine patch"
+    assert ack["acknowledged_by"]
+    assert ack["generated_at"]
+    assert ack["acknowledged_state"] == "TURN_FAILED_DIRTY"
+    assert ack["current_worktree"]["worktree_diff_sha256"].startswith("sha256:")
+    assert _turn_state(ctx)["state"] == "TURN_FAILURE_ACKNOWLEDGED"
+
+    allowed = _resume(ctx, exit_code=0, edit=False)
+    assert allowed.returncode == 0, allowed.stderr
+    assert ctx["marker"].read_text() == "xx"
+    assert _turn_state(ctx)["state"] == "TURN_OK"
+
+
+def test_failed_clean_turn_does_not_block_and_is_reported(tmp_path: Path) -> None:
+    ctx = _quarantine_setup(tmp_path)
+    failed = _resume(ctx, exit_code=1, edit=False)
+    assert failed.returncode == 1
+    state = _turn_state(ctx)
+    assert state["state"] == "TURN_FAILED_CLEAN"
+    quarantine = _assert_receipt_hash_verifies(Path(state["quarantine_receipt"]))
+    assert quarantine["turn_patch"] is None
+    assert quarantine["new_untracked_paths"] == []
+
+    env = os.environ.copy()
+    env["FAKE_DSH_MARKER"] = str(ctx["marker"])
+    checked = _run_cli(
+        "check",
+        "--session-id",
+        ctx["binding"]["session_id"],
+        "--state-root",
+        str(ctx["state_root"]),
+        "--doctor-bin",
+        str(ctx["doctor"]),
+        env=env,
+    )
+    assert checked.returncode == 0
+    receipt = json.loads(checked.stdout)
+    assert receipt["decision"] == "ALLOW_RESUME"
+    assert receipt["previous_turn_state"] == "TURN_FAILED_CLEAN"
+
+    again = _resume(ctx, exit_code=0, edit=False)
+    assert again.returncode == 0
+    assert ctx["marker"].read_text() == "xx"
+
+
+def test_ack_without_pending_failure_or_reason_is_rejected(tmp_path: Path) -> None:
+    ctx = _quarantine_setup(tmp_path)
+    base = [
+        "ack-turn-failure",
+        "--session-id",
+        ctx["binding"]["session_id"],
+        "--state-root",
+        str(ctx["state_root"]),
+    ]
+    nothing = _run_cli(*base, "--reason", "why")
+    assert nothing.returncode == guard.EXIT_BLOCKED
+    assert json.loads(nothing.stdout)["reason_code"] == "NO_TURN_FAILURE_TO_ACK"
+
+    _resume(ctx, exit_code=1, edit=True)
+    blank = _run_cli(*base, "--reason", "  ")
+    assert blank.returncode == guard.EXIT_BLOCKED
+    assert json.loads(blank.stdout)["reason_code"] == "TURN_ACK_REASON_REQUIRED"
+    assert _turn_state(ctx)["state"] == "TURN_FAILED_DIRTY"

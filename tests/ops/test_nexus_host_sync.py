@@ -30,6 +30,7 @@ EXTERNAL_DISPATCH_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_external
 GROK_ACCOUNTS = ROOT / "scripts" / "ops" / "nexus-grok-accounts"
 HCOM_AGY_SAFE = ROOT / "scripts" / "ops" / "nexus-hcom-agy-safe"
 DSH_WORKFLOW = ROOT / "scripts" / "ops" / "nexus-dsh-workflow"
+CORE_ISSUE_CHECK_LOCAL = ROOT / "scripts" / "ops" / "nexus-core-issue-check-local"
 DSH_AGY_ADAPTER = ROOT / "scripts" / "ops" / "dsh-agy-adapter"
 DSH_AGY_ADAPTER_INDEX = DSH_AGY_ADAPTER / "index.js"
 DSH_AGY_ADAPTER_PACKAGE = DSH_AGY_ADAPTER / "package.json"
@@ -110,6 +111,7 @@ def _make_source_repo(tmp_path: Path) -> Path:
         (GROK_ACCOUNTS, "scripts/ops/nexus-grok-accounts"),
         (HCOM_AGY_SAFE, "scripts/ops/nexus-hcom-agy-safe"),
         (DSH_WORKFLOW, "scripts/ops/nexus-dsh-workflow"),
+        (CORE_ISSUE_CHECK_LOCAL, "scripts/ops/nexus-core-issue-check-local"),
         (DSH_AGY_ADAPTER_INDEX, "scripts/ops/dsh-agy-adapter/index.js"),
         (DSH_AGY_ADAPTER_PACKAGE, "scripts/ops/dsh-agy-adapter/package.json"),
         (
@@ -228,6 +230,9 @@ def _invoke(
         dsh_agy_adapter_target or dispatch_target.parent / "dsh-agy-adapter"
     )
     env["NEXUS_DSH_WORKFLOW_TARGET"] = str(dispatch_target.parent / "nexus-dsh-workflow")
+    env["NEXUS_CORE_ISSUE_CHECK_LOCAL_TARGET"] = str(
+        dispatch_target.parent / "nexus-core-issue-check-local"
+    )
     env["NEXUS_HERMES_CONTROLLER_GUARD_TARGET"] = str(
         dispatch_target.parent / "nexus-hermes-controller-guard"
     )
@@ -1066,3 +1071,31 @@ def test_hermes_runtime_components_rollback_to_generation_without_entrypoints(
     assert not hermes_guard_target.is_symlink()
     assert not hermes_controller_target.exists()
     assert not hermes_controller_target.is_symlink()
+
+
+def test_sync_materializes_core_issue_check_local_entrypoint(tmp_path: Path) -> None:
+    source_repo = _make_source_repo(tmp_path)
+    revision = _git(source_repo, "rev-parse", "HEAD")
+    runtime_root = tmp_path / "runtime"
+    manager_python = tmp_path / "manager-python"
+    dispatch_target = tmp_path / "bin" / "nexus-agy-dispatch"
+    sync_target = tmp_path / "bin" / "nexus-host-sync"
+    _write_fake_manager(manager_python)
+
+    sync = _invoke(
+        source_repo,
+        runtime_root,
+        manager_python,
+        dispatch_target,
+        sync_target,
+        "sync",
+        revision=revision,
+    )
+
+    assert sync.returncode == 0, sync.stderr + sync.stdout
+    payload = json.loads(sync.stdout)
+    assert payload["components"].get("core_issue_check_local", {}).get("status") == "VERIFIED"
+
+    target = dispatch_target.parent / "nexus-core-issue-check-local"
+    assert target.is_symlink()
+    assert target.resolve().read_bytes() == CORE_ISSUE_CHECK_LOCAL.read_bytes()
