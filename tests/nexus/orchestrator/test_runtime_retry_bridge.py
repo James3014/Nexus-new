@@ -107,8 +107,14 @@ class _NoBuildOwner:
         raise AssertionError("must not be called")
 
 
-def test_contract_budget_defaults_from_task_contract_for_minimal_request():
-    assert _Contract(_NoBuildOwner()).maximum_attempts({"task_id": "t"}) == 1
+def test_contract_budget_defaults_to_service_default_for_minimal_request():
+    from nexus.orchestrator.self_hosted_task_service import DEFAULT_MAXIMUM_ATTEMPTS_PER_TASK
+
+    assert (
+        _Contract(_NoBuildOwner()).maximum_attempts({"task_id": "t"})
+        == DEFAULT_MAXIMUM_ATTEMPTS_PER_TASK
+        == 5
+    )
 
 
 def test_contract_budget_uses_request_override():
