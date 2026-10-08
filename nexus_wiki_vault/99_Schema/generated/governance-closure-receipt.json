@@ -2,12 +2,12 @@
   "schema": "nexus.wiki.governance-closure-receipt.v1",
   "authority": "derived_non_authoritative",
   "status": "closed",
-  "source_fingerprint": "c4910d8c29a127ad57d00a4c8cb8a4f38bbcf357e7019c977223b940edc119bf",
-  "governance_input_fingerprint": "12cf644c40e1c3f4de31531d1514c4db3dac8031fdf646621751d483db433e9b",
+  "source_fingerprint": "b33309b2c46eb0a88747e906959a32eddb19961dd587be63748ead75d097c23c",
+  "governance_input_fingerprint": "a0f132975d57a07a5114d963c3e8610bf8b4a1e4863ec43195ce1dd6949b2755",
   "artifact_hashes": {
-    "agent-index.json": "238be70e781316450081bf34fd77ce4d9a5151842f91e4f151b4a2e0c58d6a4d",
-    "wikilink-graph.json": "9170dd057c556e67690e346b37995728482707eabe8ffe57101fbd157072a274",
-    "unresolved-link-inventory.json": "ad8f3f7463200da7ac59215c1598af101f6def8291411588c3353a108915dbfd"
+    "agent-index.json": "a86ed0e2780be945ee131de58d7809afaed400dd4ff8fa7e715992428d6b3416",
+    "wikilink-graph.json": "17e0c00e073413da1bde13b7e301db3eaa465296a24a817a8ced16aef1e7e0c3",
+    "unresolved-link-inventory.json": "1ffedcf51b9f7a5d62d1273072840120d987c30da435429bc218b14850a19994"
   },
   "checks": [
     {
