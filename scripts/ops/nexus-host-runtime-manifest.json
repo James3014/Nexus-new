@@ -92,6 +92,10 @@
       "mode": "0755"
     },
     {
+      "path": "scripts/ops/nexus-dsh-workflow",
+      "mode": "0755"
+    },
+    {
       "path": "scripts/ops/install_nexus_workflow_doctor.sh",
       "mode": "0755"
     },
@@ -153,6 +157,9 @@
     "workflow_doctor": {
       "source_path": "scripts/ops/nexus-workflow-doctor",
       "installer_path": "scripts/ops/install_nexus_workflow_doctor.sh"
+    },
+    "dsh_workflow_guard": {
+      "source_path": "scripts/ops/nexus-dsh-workflow"
     },
     "grok_accounts": {
       "source_path": "scripts/ops/nexus-grok-accounts"

@@ -29,6 +29,7 @@ EXTERNAL_DISPATCH = ROOT / "scripts" / "ops" / "nexus-external-worker-dispatch"
 EXTERNAL_DISPATCH_INSTALLER = ROOT / "scripts" / "ops" / "install_nexus_external_worker_dispatch.sh"
 GROK_ACCOUNTS = ROOT / "scripts" / "ops" / "nexus-grok-accounts"
 HCOM_AGY_SAFE = ROOT / "scripts" / "ops" / "nexus-hcom-agy-safe"
+DSH_WORKFLOW = ROOT / "scripts" / "ops" / "nexus-dsh-workflow"
 DSH_AGY_ADAPTER = ROOT / "scripts" / "ops" / "dsh-agy-adapter"
 DSH_AGY_ADAPTER_INDEX = DSH_AGY_ADAPTER / "index.js"
 DSH_AGY_ADAPTER_PACKAGE = DSH_AGY_ADAPTER / "package.json"
@@ -108,6 +109,7 @@ def _make_source_repo(tmp_path: Path) -> Path:
         (EXTERNAL_DISPATCH, "scripts/ops/nexus-external-worker-dispatch"),
         (GROK_ACCOUNTS, "scripts/ops/nexus-grok-accounts"),
         (HCOM_AGY_SAFE, "scripts/ops/nexus-hcom-agy-safe"),
+        (DSH_WORKFLOW, "scripts/ops/nexus-dsh-workflow"),
         (DSH_AGY_ADAPTER_INDEX, "scripts/ops/dsh-agy-adapter/index.js"),
         (DSH_AGY_ADAPTER_PACKAGE, "scripts/ops/dsh-agy-adapter/package.json"),
         (
@@ -225,6 +227,7 @@ def _invoke(
     env["NEXUS_DSH_AGY_ADAPTER_TARGET"] = str(
         dsh_agy_adapter_target or dispatch_target.parent / "dsh-agy-adapter"
     )
+    env["NEXUS_DSH_WORKFLOW_TARGET"] = str(dispatch_target.parent / "nexus-dsh-workflow")
     env["NEXUS_HERMES_CONTROLLER_GUARD_TARGET"] = str(
         dispatch_target.parent / "nexus-hermes-controller-guard"
     )
@@ -370,6 +373,7 @@ def test_sync_materializes_exact_generation_and_entrypoints(tmp_path: Path) -> N
     assert payload["components"]["agy_dispatch"]["status"] == "VERIFIED"
     assert payload["components"]["agy_quota"]["status"] == "VERIFIED"
     assert payload["components"]["workflow_doctor"]["status"] == "VERIFIED"
+    assert payload["components"]["dsh_workflow_guard"]["status"] == "VERIFIED"
     assert payload["components"]["workflow_source_binding"]["status"] == "VERIFIED"
     assert payload["components"]["workflow_source_binding"]["repo_root"] == str(
         source_repo.resolve()
@@ -385,6 +389,9 @@ def test_sync_materializes_exact_generation_and_entrypoints(tmp_path: Path) -> N
     hcom_target = dispatch_target.parent / "hcom-agy-safe"
     assert hcom_target.is_symlink()
     assert hcom_target.resolve().read_bytes() == HCOM_AGY_SAFE.read_bytes()
+    dsh_workflow_target = dispatch_target.parent / "nexus-dsh-workflow"
+    assert dsh_workflow_target.is_symlink()
+    assert dsh_workflow_target.resolve().read_bytes() == DSH_WORKFLOW.read_bytes()
     hermes_guard_target = dispatch_target.parent / "nexus-hermes-controller-guard"
     hermes_controller_target = dispatch_target.parent / "nexus-hermes-continuation-controller"
     hermes_core_completion_target = dispatch_target.parent / "nexus-hermes-core-completion"

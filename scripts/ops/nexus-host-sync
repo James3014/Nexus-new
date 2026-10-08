@@ -94,6 +94,13 @@ def _dsh_agy_adapter_target() -> Path:
     )
 
 
+def _dsh_workflow_target() -> Path:
+    raw = os.getenv("NEXUS_DSH_WORKFLOW_TARGET")
+    if raw:
+        return Path(os.path.abspath(os.path.expanduser(raw)))
+    return Path.home() / ".local/bin/nexus-dsh-workflow"
+
+
 def _dsh_agy_adapter_generation(target: Path, bundle_sha: str) -> Path:
     return target.parent / f".dsh-llm-agy-pilot-{bundle_sha}"
 
@@ -398,6 +405,10 @@ def _parse_manifest(data: bytes) -> dict[str, Any]:
         )
     if isinstance(components, dict) and isinstance(components.get("grok_accounts"), dict):
         required.add("scripts/ops/nexus-grok-accounts")
+    if isinstance(components, dict) and isinstance(
+        components.get("dsh_workflow_guard"), dict
+    ):
+        required.add("scripts/ops/nexus-dsh-workflow")
     if isinstance(components, dict) and isinstance(components.get("dsh_agy_adapter"), dict):
         required.update(
             {
@@ -929,6 +940,11 @@ def _activate(
 
     for component_name, relative_path, target in (
         (
+            "dsh_workflow_guard",
+            "scripts/ops/nexus-dsh-workflow",
+            _dsh_workflow_target(),
+        ),
+        (
             "hermes_controller_guard",
             "scripts/ops/nexus-hermes-controller-guard",
             _hermes_guard_target(),
@@ -1125,6 +1141,11 @@ def _status(
         }
 
     for component_name, relative_path, target in (
+        (
+            "dsh_workflow_guard",
+            "scripts/ops/nexus-dsh-workflow",
+            _dsh_workflow_target(),
+        ),
         (
             "hermes_controller_guard",
             "scripts/ops/nexus-hermes-controller-guard",
