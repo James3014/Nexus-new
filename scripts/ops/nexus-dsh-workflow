@@ -6,19 +6,32 @@ leases, verification, merge, or release. It stores a durable tracking binding
 for a DSH session and re-reads authoritative workflow state before any resume
 can launch the DSH process. Any BLOCK_RESUME decision exits 75; the provider is
 never invoked unless the decision is ALLOW_RESUME.
+
+The ``red-gate`` subcommand is a deterministic, outer, pre-mutation test-evidence
+gate. It does not trust a model's RED_READY claim: from a controller-written
+contract it inspects the worktree diff (test-only changes, no duplicate
+definitions, no oracle asserting the buggy literal), re-runs the target pytest
+nodes with an explicit interpreter, and requires every node to fail with the
+contracted assertion signature. Any REVISE_RED decision exits 75. It holds no
+verifier or completion authority.
 """
 
 from __future__ import annotations
 
 import argparse
+import ast
+import fnmatch
 import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
+from xml.etree import ElementTree
 
 BINDING_SCHEMA = "nexus.dsh_tracking_binding.v1"
 PREFLIGHT_SCHEMA = "nexus.dsh_resume_preflight.v1"
@@ -687,6 +700,513 @@ def _default_binary(name: str) -> str:
     return str(Path.home() / ".local/bin" / name)
 
 
+RED_CONTRACT_SCHEMA = "nexus.dsh_red_contract.v1"
+RED_RECEIPT_SCHEMA = "nexus.dsh_red_gate_receipt.v1"
+RED_CLAIM_CEILING = "PRE_MUTATION_RED_EVIDENCE_GATE_NO_COMPLETION_AUTHORITY"
+RED_SEMANTICS = "TARGET_DEFECT_REPRODUCED_BY_VALID_ORACLE"
+RED_CONTRACT_KEYS = {
+    "schema",
+    "repository",
+    "issue_number",
+    "invariant",
+    "test_nodes",
+    "expected_failure",
+    "forbidden_oracle_literals",
+    "test_path_globs",
+}
+RED_NODE_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./-]*\.py::[^\s:][^\s]*$")
+RED_MESSAGE_LIMIT = 2000
+
+
+def _require(condition: bool, detail: str) -> None:
+    if not condition:
+        raise DshWorkflowError("RED_CONTRACT_INVALID", detail)
+
+
+def _is_str_list(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(v, str) and v for v in value)
+
+
+def validate_red_contract(contract: Any) -> dict[str, Any]:
+    _require(isinstance(contract, dict), "contract must be a JSON object")
+    keys = set(contract)
+    allowed = RED_CONTRACT_KEYS | {"python"}
+    _require(not (keys - allowed), f"unknown contract fields: {sorted(keys - allowed)}")
+    _require(
+        not (RED_CONTRACT_KEYS - keys),
+        f"missing contract fields: {sorted(RED_CONTRACT_KEYS - keys)}",
+    )
+    _require(contract["schema"] == RED_CONTRACT_SCHEMA, "contract schema mismatch")
+    repository = contract["repository"]
+    _require(
+        isinstance(repository, str) and bool(REPOSITORY_RE.fullmatch(repository)),
+        "repository must be an owner/name slug",
+    )
+    issue = contract["issue_number"]
+    _require(
+        isinstance(issue, int) and not isinstance(issue, bool) and issue > 0,
+        "issue_number must be positive int",
+    )
+    _require(
+        isinstance(contract["invariant"], str) and bool(contract["invariant"].strip()),
+        "invariant required",
+    )
+    nodes = contract["test_nodes"]
+    _require(_is_str_list(nodes) and bool(nodes), "test_nodes must be a non-empty list of strings")
+    for node in nodes:
+        path = node.split("::", 1)[0]
+        _require(
+            bool(RED_NODE_RE.fullmatch(node)) and ".." not in path.split("/"),
+            f"invalid pytest node id: {node}",
+        )
+    expected = contract["expected_failure"]
+    _require(
+        isinstance(expected, dict) and set(expected) == {"kind", "message_regex"},
+        "expected_failure must have exactly kind and message_regex",
+    )
+    _require(expected["kind"] == "assertion", "expected_failure.kind must be 'assertion'")
+    regex = expected["message_regex"]
+    _require(isinstance(regex, str) and bool(regex), "message_regex must be a non-empty string")
+    try:
+        re.compile(regex)
+    except re.error as exc:
+        raise DshWorkflowError("RED_CONTRACT_INVALID", f"message_regex invalid: {exc}") from exc
+    _require(
+        _is_str_list(contract["forbidden_oracle_literals"]),
+        "forbidden_oracle_literals must be a string list",
+    )
+    globs = contract["test_path_globs"]
+    _require(_is_str_list(globs) and bool(globs), "test_path_globs must be a non-empty string list")
+    if "python" in contract:
+        _require(
+            isinstance(contract["python"], str) and bool(contract["python"]),
+            "python must be a string",
+        )
+    return contract
+
+
+def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        ["git", "-c", "core.quotepath=off", *args],
+        cwd=str(repo),
+        capture_output=True,
+        check=False,
+    )
+
+
+def _git_ok(repo: Path, *args: str) -> bytes:
+    proc = _git(repo, *args)
+    if proc.returncode != 0:
+        raise DshWorkflowError(
+            "RED_ARGUMENT_INVALID",
+            f"git {' '.join(args[:2])} failed: {proc.stderr.decode('utf-8', 'replace').strip()}",
+        )
+    return proc.stdout
+
+
+def _split_z(raw: bytes) -> list[str]:
+    return [p.decode("utf-8", "surrogateescape") for p in raw.split(b"\0") if p]
+
+
+def _glob_match(path: str, pattern: str) -> bool:
+    candidates = {pattern, pattern.replace("**/", "")}
+    return any(fnmatch.fnmatchcase(path, c) for c in candidates)
+
+
+def _collect_worktree_changes(repo: Path, base: str) -> tuple[list[str], list[str], str]:
+    tracked = _split_z(_git_ok(repo, "diff", "--name-only", "--no-renames", "-z", base))
+    untracked = _split_z(_git_ok(repo, "ls-files", "--others", "--exclude-standard", "-z"))
+    diff_bytes = _git_ok(repo, "diff", "--binary", "--no-renames", base)
+    digest = hashlib.sha256()
+    digest.update(diff_bytes)
+    for rel in sorted(set(untracked)):
+        digest.update(b"\0untracked\0" + rel.encode("utf-8", "surrogateescape") + b"\0")
+        try:
+            digest.update((repo / rel).read_bytes())
+        except OSError:
+            digest.update(b"<unreadable>")
+    changed = sorted(set(tracked) | set(untracked))
+    return changed, sorted(set(untracked)), "sha256:" + digest.hexdigest()
+
+
+def _def_counts(tree: ast.AST) -> dict[str, dict[str, int]]:
+    scopes: dict[str, dict[str, int]] = {}
+
+    def visit(body: list[ast.stmt], scope: str) -> None:
+        counts = scopes.setdefault(scope, {})
+        for stmt in body:
+            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                counts[stmt.name] = counts.get(stmt.name, 0) + 1
+                if isinstance(stmt, ast.ClassDef):
+                    visit(stmt.body, f"{scope}.{stmt.name}" if scope else stmt.name)
+
+    visit(tree.body, "")  # type: ignore[attr-defined]
+    return scopes
+
+
+def _find_duplicates(repo: Path, base: str, rel: str, tree: ast.AST) -> list[dict[str, Any]]:
+    base_counts: dict[str, dict[str, int]] = {}
+    proc = _git(repo, "show", f"{base}:{rel}")
+    if proc.returncode == 0:
+        try:
+            base_counts = _def_counts(ast.parse(proc.stdout))
+        except (SyntaxError, ValueError):
+            base_counts = {}
+    found: list[dict[str, Any]] = []
+    for scope, counts in sorted(_def_counts(tree).items()):
+        for name, count in sorted(counts.items()):
+            before = base_counts.get(scope, {}).get(name, 0)
+            if count > 1 and count > before:
+                found.append({
+                    "path": rel,
+                    "scope": scope or "<module>",
+                    "name": name,
+                    "count": count,
+                })
+    return found
+
+
+def _split_node(node: str) -> tuple[str, list[str]]:
+    path, _, rest = node.partition("::")
+    parts = [re.sub(r"\[.*\]$", "", p) for p in rest.split("::") if p]
+    return path, parts
+
+
+def _target_functions(tree: ast.AST, parts: list[str]) -> list[ast.AST]:
+    scope: list[ast.AST] = [tree]
+    for part in parts[:-1]:
+        scope = [
+            s
+            for container in scope
+            for s in getattr(container, "body", [])
+            if isinstance(s, ast.ClassDef) and s.name == part
+        ]
+    if not parts:
+        return []
+    return [
+        s
+        for container in scope
+        for s in getattr(container, "body", [])
+        if isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef)) and s.name == parts[-1]
+    ]
+
+
+def _str_const(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
+
+
+def _oracle_violations(func: ast.AST, forbidden: set[str]) -> list[tuple[int, str]]:
+    hits: list[tuple[int, str]] = []
+    for assertion in ast.walk(func):
+        if not isinstance(assertion, ast.Assert):
+            continue
+        for cmp_node in ast.walk(assertion.test):
+            if not isinstance(cmp_node, ast.Compare):
+                continue
+            operands = [cmp_node.left, *cmp_node.comparators]
+            for i, op in enumerate(cmp_node.ops):
+                left, right = operands[i], operands[i + 1]
+                if isinstance(op, (ast.Eq, ast.Is)):
+                    for side in (left, right):
+                        value = _str_const(side)
+                        if value in forbidden:
+                            hits.append((cmp_node.lineno, str(value)))
+                elif isinstance(op, ast.In) and isinstance(right, (ast.List, ast.Tuple, ast.Set)):
+                    for elt in right.elts:
+                        value = _str_const(elt)
+                        if value in forbidden:
+                            hits.append((cmp_node.lineno, str(value)))
+    return hits
+
+
+def _truncate(text: str) -> str:
+    return text if len(text) <= RED_MESSAGE_LIMIT else text[:RED_MESSAGE_LIMIT] + "...[truncated]"
+
+
+def _parse_junit(path: Path) -> tuple[list[dict[str, Any]] | None, bool]:
+    """Return testcase records (None if unreadable) and whether an <error> was seen."""
+    try:
+        root = ElementTree.parse(path).getroot()
+    except (OSError, ElementTree.ParseError):
+        return None, False
+    cases: list[dict[str, Any]] = []
+    has_error = False
+    for case in root.iter("testcase"):
+        outcome, message = "passed", ""
+        for child in case:
+            tag = child.tag
+            text = f"{child.get('message') or ''}\n{child.text or ''}"
+            if tag == "error":
+                has_error = True
+                outcome, message = "error", text
+            elif tag == "failure" and outcome != "error":
+                outcome, message = "failed", text
+            elif tag == "skipped" and outcome == "passed":
+                outcome, message = "skipped", text
+        cases.append({
+            "classname": case.get("classname") or "",
+            "name": case.get("name") or "",
+            "outcome": outcome,
+            "message": message.strip(),
+        })
+    return cases, has_error
+
+
+def _run_red_tests(
+    repo: Path, python: str, nodes: list[str], timeout: float, expected_regex: str
+) -> dict[str, Any]:
+    codes: set[str] = set()
+    result: dict[str, Any] = {"command": [], "exit_code": None, "node_results": [], "codes": codes}
+    py_path = Path(python)
+    if not (py_path.is_file() and os.access(python, os.X_OK)):
+        on_path = shutil.which(python) if os.sep not in python else None
+        if on_path is None:
+            codes.add("ENVIRONMENT_FAILURE")
+            result["command"] = [python, "-m", "pytest"]
+            return result
+    with tempfile.TemporaryDirectory(prefix="nexus-red-gate-") as tmp:
+        junit = Path(tmp) / "junit.xml"
+        argv = [
+            python,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "-q",
+            f"--junitxml={junit}",
+            *nodes,
+        ]
+        result["command"] = argv
+        env = os.environ.copy()
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        try:
+            proc = subprocess.run(
+                argv, cwd=str(repo), env=env, capture_output=True, timeout=timeout, check=False
+            )
+        except subprocess.TimeoutExpired:
+            codes.add("TEST_RUN_TIMEOUT")
+            return result
+        except OSError:
+            codes.add("ENVIRONMENT_FAILURE")
+            return result
+        result["exit_code"] = proc.returncode
+        output = (proc.stdout + proc.stderr).decode("utf-8", "replace")
+        if proc.returncode in (126, 127):
+            codes.add("ENVIRONMENT_FAILURE")
+            return result
+        cases, has_error = _parse_junit(junit)
+    if "No module named pytest" in output:
+        codes.add("ENVIRONMENT_FAILURE")
+    elif proc.returncode == 5 or re.search(r"^ERROR: not found: ", output, re.MULTILINE):
+        codes.add("TEST_NODE_NOT_FOUND")
+    elif (
+        cases is None or proc.returncode in (2, 3, 4) or has_error or proc.returncode not in (0, 1)
+    ):
+        codes.add("COLLECTION_OR_SETUP_FAILURE")
+    if codes:
+        return result
+    regex = re.compile(expected_regex, re.MULTILINE)
+    for node in nodes:
+        path, parts = _split_node(node)
+        module = path[:-3].replace("/", ".")
+        raw_name = node.partition("::")[2].split("::")[-1]
+        classname = ".".join([module, *parts[:-1]])
+        match = [
+            c
+            for c in cases
+            if c["classname"] == classname
+            and (c["name"] == raw_name or c["name"].startswith(f"{parts[-1]}["))
+            and (c["name"] == raw_name or "[" not in raw_name)
+        ]
+        if not match:
+            codes.add("TEST_NODE_NOT_FOUND")
+            result["node_results"].append({"nodeid": node, "outcome": "not_found", "message": ""})
+            continue
+        failed = [c for c in match if c["outcome"] == "failed"]
+        if not failed:
+            codes.add("NO_RED_OBSERVED")
+            first = match[0]
+            result["node_results"].append({
+                "nodeid": node,
+                "outcome": first["outcome"],
+                "message": _truncate(first["message"]),
+            })
+            continue
+        bad = [c for c in failed if not (regex.search(c["message"]) and "assert" in c["message"])]
+        if bad:
+            codes.add("UNINTENDED_FAILURE")
+        first = failed[0]
+        result["node_results"].append({
+            "nodeid": node,
+            "outcome": "failed_unintended" if bad else "failed_expected",
+            "message": _truncate(first["message"]),
+        })
+    return result
+
+
+def _red_receipt(body: dict[str, Any]) -> dict[str, Any]:
+    receipt = dict(body)
+    receipt["receipt_hash"] = _sha256_bytes(_canonical_json(body).encode("utf-8"))
+    return receipt
+
+
+def persist_red_gate(root: Path, receipt: dict[str, Any]) -> Path:
+    gate_dir = root / "red-gates" / str(receipt["contract_hash"])[7:]
+    stamp = str(receipt["generated_at"]).replace(":", "").replace("-", "")
+    unique = gate_dir / f"{stamp}-{receipt['receipt_hash'][7:19]}.json"
+    _atomic_write_json(unique, receipt)
+    _atomic_write_json(gate_dir / "latest.json", receipt)
+    return unique
+
+
+def run_red_gate(
+    *,
+    repo_root: Path,
+    base_revision: str,
+    contract_path: Path,
+    python: str | None,
+    timeout: float,
+) -> dict[str, Any]:
+    """Evaluate RED evidence. Raises DshWorkflowError for argument/contract errors.
+
+    The error carries ``contract`` / ``contract_hash`` attributes when known.
+    """
+    try:
+        raw = json.loads(contract_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise DshWorkflowError("RED_CONTRACT_INVALID", f"cannot read contract: {exc}") from exc
+    contract = validate_red_contract(raw)
+    contract_hash = _sha256_bytes(_canonical_json(contract).encode("utf-8"))
+    interpreter = python or contract.get("python")
+    if not interpreter:
+        raise DshWorkflowError("RED_ARGUMENT_INVALID", "--python is required")
+    if timeout <= 0:
+        raise DshWorkflowError("RED_ARGUMENT_INVALID", "timeout must be positive")
+    repo = repo_root.expanduser().resolve()
+    if not repo.is_dir():
+        raise DshWorkflowError("RED_ARGUMENT_INVALID", "repo root is not a directory")
+    _git_ok(repo, "rev-parse", "--show-toplevel")
+    base = _git_ok(repo, "rev-parse", "--verify", f"{base_revision}^{{commit}}").decode().strip()
+    head = _git_ok(repo, "rev-parse", "HEAD").decode().strip()
+
+    codes: set[str] = set()
+    changed, _untracked, diff_hash = _collect_worktree_changes(repo, base)
+    globs = contract["test_path_globs"]
+    test_paths = [p for p in changed if any(_glob_match(p, g) for g in globs)]
+    if any(p not in test_paths for p in changed):
+        codes.add("PRODUCTION_SOURCE_MODIFIED")
+    if not test_paths:
+        codes.add("NO_TEST_CHANGE")
+
+    trees: dict[str, ast.AST] = {}
+    duplicates: list[dict[str, Any]] = []
+    for rel in test_paths:
+        if not rel.endswith(".py") or not (repo / rel).is_file():
+            continue
+        try:
+            tree = ast.parse((repo / rel).read_bytes(), filename=rel)
+        except (SyntaxError, ValueError):
+            codes.add("TEST_FILE_SYNTAX_ERROR")
+            continue
+        trees[rel] = tree
+        duplicates.extend(_find_duplicates(repo, base, rel, tree))
+    if duplicates:
+        codes.add("DUPLICATE_TEST_DEFINITION")
+
+    forbidden = set(contract["forbidden_oracle_literals"])
+    violations: list[dict[str, Any]] = []
+    for node in contract["test_nodes"]:
+        path, parts = _split_node(node)
+        if path not in test_paths:
+            codes.add("RED_TEST_NOT_FROM_THIS_TURN")
+            continue
+        tree = trees.get(path)
+        if tree is None:
+            continue
+        for func in _target_functions(tree, parts):
+            for line, literal in _oracle_violations(func, forbidden):
+                violations.append({"nodeid": node, "line": line, "literal": literal})
+    if violations:
+        codes.add("ORACLE_ENCODES_BUGGY_BEHAVIOR")
+
+    run = _run_red_tests(
+        repo,
+        interpreter,
+        list(contract["test_nodes"]),
+        timeout,
+        contract["expected_failure"]["message_regex"],
+    )
+    codes |= run["codes"]
+
+    reason_codes = sorted(codes)
+    ready = not reason_codes
+    body = {
+        "schema": RED_RECEIPT_SCHEMA,
+        "claim_ceiling": RED_CLAIM_CEILING,
+        "decision": "RED_READY" if ready else "REVISE_RED",
+        "red_semantics": RED_SEMANTICS if ready else None,
+        "implementation_allowed": ready,
+        "reason_codes": reason_codes,
+        "contract_hash": contract_hash,
+        "contract": contract,
+        "repository": contract["repository"],
+        "issue_number": contract["issue_number"],
+        "base_revision": base,
+        "repo_head": head,
+        "worktree_diff_sha256": diff_hash,
+        "changed_paths": changed,
+        "changed_test_paths": test_paths,
+        "duplicate_definitions": duplicates,
+        "oracle_violations": violations,
+        "command": run["command"],
+        "exit_code": run["exit_code"],
+        "node_results": run["node_results"],
+        "generated_at": _utc_now(),
+    }
+    return _red_receipt(body)
+
+
+def _red_error_receipt(code: str, detail: str) -> dict[str, Any]:
+    return _red_receipt({
+        "schema": RED_RECEIPT_SCHEMA,
+        "claim_ceiling": RED_CLAIM_CEILING,
+        "decision": "REVISE_RED",
+        "red_semantics": None,
+        "implementation_allowed": False,
+        "reason_codes": [code],
+        "detail": detail,
+        "generated_at": _utc_now(),
+    })
+
+
+def _main_red_gate(args: argparse.Namespace) -> int:
+    try:
+        receipt = run_red_gate(
+            repo_root=Path(args.repo_root),
+            base_revision=args.base_revision,
+            contract_path=Path(args.contract).expanduser(),
+            python=args.python,
+            timeout=args.timeout,
+        )
+    except DshWorkflowError as exc:
+        print(json.dumps(_red_error_receipt(exc.code, str(exc)), sort_keys=True))
+        return EXIT_BLOCKED
+    except (OSError, ValueError) as exc:
+        print(
+            json.dumps(
+                _red_error_receipt("RED_GATE_ERROR", f"{type(exc).__name__}: {exc}"), sort_keys=True
+            )
+        )
+        return EXIT_BLOCKED
+    out = dict(receipt)
+    if args.state_root:
+        out["receipt_path"] = str(persist_red_gate(_state_root(args.state_root), receipt))
+    print(json.dumps(out, sort_keys=True))
+    return 0 if receipt["decision"] == "RED_READY" else EXIT_BLOCKED
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -714,7 +1234,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     p_resume.add_argument("--json", action="store_true", dest="json_output")
     p_resume.add_argument("--task", required=True)
 
+    p_red = sub.add_parser("red-gate")
+    p_red.add_argument("--repo-root", required=True)
+    p_red.add_argument("--base-revision", required=True)
+    p_red.add_argument("--contract", required=True)
+    p_red.add_argument("--python", required=True)
+    p_red.add_argument("--state-root")
+    p_red.add_argument("--timeout", type=float, default=600.0)
+
     args = parser.parse_args(argv)
+    if args.command == "red-gate":
+        return _main_red_gate(args)
     root = _state_root(getattr(args, "state_root", None))
 
     try:
