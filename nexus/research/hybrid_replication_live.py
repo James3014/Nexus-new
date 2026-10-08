@@ -87,22 +87,51 @@ FROZEN_RECEIPT_DURABLE_AUTHORITIES = {
 JEV_ENDPOINT = "https://api.typesafe.ai/v1/systemone"
 DM1_TOP_PROBABILITY_MIN = 0.70
 DM1_MARGIN_MIN = 0.30
-DEFAULT_LIVE_BINDING = Path(
-    "/Users/james/nexus-hybrid-deployment-replication-20260930/live/LIVE_BINDING.json"
+_DEFAULT_REPO_NAMES = (
+    "Nexus-new",
+    "devspace",
+    "nexus-core",
+    "nexus-learning",
+    "nexus-open-swe-runtime",
+    "repository-intelligence-engine",
+    "nexus-runtime",
+    "nexus-opencli-reviewer",
 )
 
-DEFAULT_REPO_ROOTS = {
-    "James3014/Nexus-new": "/Users/james/Workspace/Nexus-new",
-    "James3014/devspace": "/Users/james/Workspace/devspace",
-    "James3014/nexus-core": "/Users/james/Workspace/nexus-core",
-    "James3014/nexus-learning": "/Users/james/Workspace/nexus-learning",
-    "James3014/nexus-open-swe-runtime": "/Users/james/Workspace/nexus-open-swe-runtime",
-    "James3014/repository-intelligence-engine": (
-        "/Users/james/Workspace/repository-intelligence-engine"
-    ),
-    "James3014/nexus-runtime": "/Users/james/Workspace/nexus-runtime",
-    "James3014/nexus-opencli-reviewer": "/Users/james/Workspace/nexus-opencli-reviewer",
-}
+
+def resolve_workspace_root(env: Mapping[str, str] | None = None, home: Path | None = None) -> Path:
+    """Workspace root: NEXUS_WORKSPACE_ROOT if set, else ``<home>/Workspace``."""
+    env = os.environ if env is None else env
+    override = env.get("NEXUS_WORKSPACE_ROOT")
+    if override:
+        return Path(override)
+    return (Path.home() if home is None else home) / "Workspace"
+
+
+def resolve_live_binding(env: Mapping[str, str] | None = None, home: Path | None = None) -> Path:
+    """Live binding: NEXUS_HYBRID_LIVE_BINDING if set, else the home-relative default."""
+    env = os.environ if env is None else env
+    override = env.get("NEXUS_HYBRID_LIVE_BINDING")
+    if override:
+        return Path(override)
+    return (
+        (Path.home() if home is None else home)
+        / "nexus-hybrid-deployment-replication-20260930"
+        / "live"
+        / "LIVE_BINDING.json"
+    )
+
+
+def resolve_default_repo_roots(
+    env: Mapping[str, str] | None = None, home: Path | None = None
+) -> dict[str, str]:
+    root = resolve_workspace_root(env, home)
+    return {f"James3014/{name}": str(root / name) for name in _DEFAULT_REPO_NAMES}
+
+
+DEFAULT_LIVE_BINDING = resolve_live_binding()
+
+DEFAULT_REPO_ROOTS = resolve_default_repo_roots()
 
 _PATH_RE = re.compile(
     r"(?<![A-Za-z0-9_.-])((?:[A-Za-z0-9_.-]+/)+"
