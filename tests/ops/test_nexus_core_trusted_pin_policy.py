@@ -112,9 +112,9 @@ def test_committed_workflow_uses_single_canonical_pin_across_two_job_gate() -> N
     """
     import re
 
-    text = (
-        REPO_ROOT / ".github" / "workflows" / "nexus-core-issue-completion.yml"
-    ).read_text(encoding="utf-8")
+    text = (REPO_ROOT / ".github" / "workflows" / "nexus-core-issue-completion.yml").read_text(
+        encoding="utf-8"
+    )
 
     uses = re.findall(
         r"uses:\s*James3014/nexus-core/\.github/actions/([A-Za-z0-9_-]+)@([0-9a-f]{40})", text
