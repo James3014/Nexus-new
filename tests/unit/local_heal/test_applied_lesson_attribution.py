@@ -358,9 +358,34 @@ def test_verifier_fail_without_patch_still_binds_fail_receipt():
     assert op.applied_lesson_ids == []
 
 
-def test_no_fail_receipt_outside_verification_gate():
-    op = _verifier_fail_op()
-    ctx = SimpleNamespace(op=op, gov=SimpleNamespace(gate_exit="patch_synthesis"))
+def test_fail_receipt_bound_on_retry_exit_with_verifier_evidence():
+    # Real retry flow: a failed heal exits at gate "patcher", not "verification".
+    op = _verifier_fail_op(
+        failure_reason="LOGIC_REGRESSION:VERIFICATION_FAILED",
+        failure_class="semantic_wrong",
+        last_failure_class="",
+        verifier_failure_kind="",
+    )
+    ctx = SimpleNamespace(op=op, gov=SimpleNamespace(gate_exit="patcher"))
+    _orch()._bind_applied_attribution_inputs(ctx)
+    assert op.verifier_receipt["verifier_status"] == "fail"
+    assert op.verifier_receipt["gate_exit"] == "patcher"
+    _orch()._record_authoritative_memory_adoption(ctx)
+    assert op.applied_lesson_ids == []
+
+
+def test_no_fail_receipt_for_infra_failure_without_verifier_markers():
+    op = _verifier_fail_op(
+        solve_eligible=False,
+        failure_reason="PROVIDER_TIMEOUT",
+        failure_class="",
+        last_failure_class="",
+        verifier_failure_kind="",
+        _memory_influence_trace=MemoryTrace(
+            available=True, selected_ids=["L1"], prompt_included=True
+        ),
+    )
+    ctx = SimpleNamespace(op=op, gov=SimpleNamespace(gate_exit="patcher"))
     _orch()._bind_applied_attribution_inputs(ctx)
     assert getattr(op, "verifier_receipt", None) is None
 

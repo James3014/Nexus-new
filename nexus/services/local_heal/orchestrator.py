@@ -1161,11 +1161,12 @@ class HealOrchestrator:
           applied patch is the selected one unless a differing
           ``selected_candidate_hash`` was recorded.
 
-        * verifier fail: when VerificationPhase ran and rejected the attempt
-          (``gate_exit == "verification"`` without ``solve_eligible``, with a
-          verifier-failure marker), a ``verifier_status == "fail"`` receipt is
-          bound so the failed attempt still carries measured evidence for the
-          closure qualification. A fail receipt never makes ``applied`` non-empty:
+        * verifier fail: when the attempt is not ``solve_eligible`` and carries
+          verifier-failure evidence (see ``_is_verifier_failure``), regardless of
+          which gate exited the retry loop (a failed heal in the real retry flow
+          exits at ``gate_exit == "patcher"``), a ``verifier_status == "fail"``
+          receipt is bound so the failed attempt still carries measured evidence
+          for the closure qualification. A fail receipt never makes ``applied`` non-empty:
           the authoritative check in ``_record_authoritative_memory_adoption``
           still requires an explicit verifier pass.
 
@@ -1187,11 +1188,11 @@ class HealOrchestrator:
             if existing is not None:
                 return  # an explicit receipt (pass or fail) is authoritative
             gate_exit = str(getattr(getattr(ctx, "gov", None), "gate_exit", "") or "")
-            if gate_exit != "verification":
-                return
             report = str(getattr(op, "evaluation_report", "") or "")
             instance = getattr(op, "instance_id", "") or getattr(op, "task_id", "")
             if bool(getattr(op, "solve_eligible", False)):
+                if gate_exit != "verification":
+                    return
                 if not patch:
                     return  # a pass receipt requires the applied patch it attests to
                 op.verifier_receipt = {
@@ -1217,18 +1218,33 @@ class HealOrchestrator:
                 ),
                 "failure_kind": str(getattr(op, "verifier_failure_kind", "") or ""),
                 "exit_code": getattr(op, "verifier_exit_code", ""),
+                "gate_exit": gate_exit,
             }
         except Exception:
             return  # fail closed: missing inputs leave applied empty
 
     @staticmethod
     def _is_verifier_failure(op: Any) -> bool:
-        """True when the recorded failure is a verifier rejection (not infra/other)."""
+        """True when the attempt evidences that a verifier ran and rejected it.
+
+        Independent of the exit gate: any one of these markers is enough.
+        Infrastructure failures (e.g. ``PROVIDER_TIMEOUT``) carry none of them.
+        """
+        failure_reason = str(getattr(op, "failure_reason", "") or "").upper()
+        if any(marker in failure_reason for marker in ("VERIFICATION_FAILED", "LOGIC_REGRESSION", "VERIFIER")):
+            return True
+        if str(getattr(op, "failure_class", "") or "") in {
+            "semantic_wrong",
+            "semantic_wrong_patch",
+            "verification_failed",
+        }:
+            return True
         if str(getattr(op, "last_failure_class", "") or "") == "VERIFIER_FAIL":
             return True
-        if str(getattr(op, "failure_class", "") or "") in {"verification_failed", "semantic_wrong_patch"}:
+        if str(getattr(op, "verifier_failure_kind", "") or ""):
             return True
-        return "verifier" in str(getattr(op, "failure_reason", "") or "").lower()
+        trace = getattr(op, "_memory_influence_trace", None)
+        return str(getattr(trace, "verifier_status", "") or "").upper() == "FAIL"
 
     def _record_authoritative_memory_adoption(self, ctx: HealContext) -> None:
         """Bind memory adoption only when patch and verifier receipts agree.

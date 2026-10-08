@@ -11,6 +11,7 @@ from nexus.services.local_heal.learning_closure_bridge import (
 from nexus.services.local_heal.memory_retrieval_adapter import (
     CanonicalEpisodicMemoryLessonStore,
 )
+from nexus.services.local_heal.orchestrator import HealOrchestrator
 
 LESSONS_RELATIVE = Path(".nexus/memory/learning_lessons.jsonl")
 EPISODES_RELATIVE = Path(".nexus/memory/learning_episodes.jsonl")
@@ -146,3 +147,39 @@ def test_failed_verified_episode_is_qualified_failure_polarity(tmp_path: Path) -
     assert len(lessons) == 1
     assert lessons[0]["evidence_origin"] == "physical"
     assert lessons[0]["outcome_polarity"] == "failure"
+
+
+def test_retry_exit_verifier_fail_is_parked_and_reflected(tmp_path: Path) -> None:
+    # Real retry flow: failed heal exits at gate "patcher" with verifier-fail evidence.
+    op = SimpleNamespace(
+        task_id="task-qual-2",
+        instance_id="task-qual-2",
+        attempt=2,
+        attempt_id="attempt-2",
+        action_id="action-2",
+        idempotency_key="idem-qual-2",
+        receipt_path="receipt:pending",
+        terminal_evidence_present=True,
+        solve_eligible=False,
+        failure_reason="LOGIC_REGRESSION:VERIFICATION_FAILED",
+        failure_class="semantic_wrong",
+        problem_statement="fix the parser so keys are parsed",
+        reproduced=True,
+        final_patch="--- a/parser.py\n+++ b/parser.py\n@@\n-x\n+y\n",
+    )
+    ctx = SimpleNamespace(op=op, repro_script=REPRO, gov=SimpleNamespace(gate_exit="patcher"))
+    HealOrchestrator._bind_applied_attribution_inputs(object.__new__(HealOrchestrator), ctx)
+    assert op.verifier_receipt["verifier_status"] == "fail"
+
+    closure = write_learning_closure(ctx, bridge=_bridge(tmp_path))
+
+    episode = _episode(tmp_path)
+    assert episode["terminal_outcome"] == "PARKED"
+    assert episode["qualification_status"] == "QUALIFIED"
+    assert episode["terminal_evidence"]["verifier_status"] == "fail"
+    reflection = closure["reflection"]
+    assert reflection["reflection_status"] == "written"
+    lessons = _rows(tmp_path / LESSONS_RELATIVE)
+    assert len(lessons) == 1
+    assert lessons[0]["outcome_polarity"] == "failure"
+    assert lessons[0]["evidence_origin"] == "physical"
