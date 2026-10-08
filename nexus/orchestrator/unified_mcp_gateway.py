@@ -11,6 +11,7 @@ import ast
 import copy
 import difflib
 import hashlib
+import importlib
 import json
 import os
 import re
@@ -1667,6 +1668,24 @@ def _evaluate_freshness(
         "reload_required": reload_required,
         "reload_reasons": reload_reasons,
     }
+
+
+def _gateway_recovery_manager() -> Any:
+    """Load the repository-owned #526 recovery manager only for recovery actions."""
+
+    return importlib.import_module("scripts.ops.mcp_gateway_durable")
+
+
+def _gateway_recovery_result(result: Any) -> dict[str, Any]:
+    if isinstance(result, Mapping):
+        return dict(result)
+    dump = getattr(result, "model_dump", None)
+    if not callable(dump):
+        raise GatewayInputError("GATEWAY_RECOVERY_MANAGER_RESULT_INVALID")
+    payload = dump()
+    if not isinstance(payload, Mapping):
+        raise GatewayInputError("GATEWAY_RECOVERY_MANAGER_RESULT_INVALID")
+    return dict(payload)
 
 
 class UnifiedMCPGateway:
@@ -4509,11 +4528,150 @@ class UnifiedMCPGateway:
 
     @staticmethod
     def tool_specs() -> list[dict[str, Any]]:
+        recovery_request_schema = {
+            "type": "object",
+            "required": [
+                "request_id",
+                "idempotency_fence",
+                "operation",
+                "effect_class",
+                "recovery_authority_id",
+                "recovery_authority_hash",
+                "desired_manifest_id",
+                "desired_manifest_hash",
+                "predecessor_manifest_id",
+                "predecessor_manifest_hash",
+                "request_hash",
+                "schema",
+            ],
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                },
+                "idempotency_fence": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                },
+                "operation": {"type": "string", "enum": ["gateway-recover"]},
+                "effect_class": {
+                    "type": "string",
+                    "enum": ["GATEWAY_DURABLE_RECOVERY"],
+                },
+                "recovery_authority_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                },
+                "recovery_authority_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+                "desired_manifest_id": {
+                    "type": "string",
+                    "pattern": "^r1-[0-9a-f]{40}$",
+                },
+                "desired_manifest_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+                "predecessor_manifest_id": {
+                    "type": "string",
+                    "pattern": "^r1-[0-9a-f]{40}$",
+                },
+                "predecessor_manifest_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+                "request_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+                "schema": {
+                    "type": "string",
+                    "enum": ["nexus.gateway.durable_recovery_request.v2"],
+                },
+            },
+            "additionalProperties": False,
+        }
+        materialization_request_schema = {
+            "type": "object",
+            "required": [
+                "request_id",
+                "idempotency_fence",
+                "operation",
+                "effect_class",
+                "recovery_authority_id",
+                "recovery_authority_hash",
+                "request_hash",
+                "schema",
+            ],
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                },
+                "idempotency_fence": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                },
+                "operation": {
+                    "type": "string",
+                    "enum": ["gateway-recovery-materialize"],
+                },
+                "effect_class": {
+                    "type": "string",
+                    "enum": ["GATEWAY_RECOVERY_MATERIALIZATION"],
+                },
+                "recovery_authority_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                },
+                "recovery_authority_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+                "request_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+                "schema": {
+                    "type": "string",
+                    "enum": [
+                        "nexus.gateway.durable_recovery_materialization_request.v1"
+                    ],
+                },
+            },
+            "additionalProperties": False,
+        }
         return [
             {
                 "name": "nexus_gateway_status",
                 "description": "Read the single gateway identity, manifest, route stages, and lifecycle counts.",
                 "inputSchema": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "nexus_gateway_recovery_materialize",
+                "description": (
+                    "Materialize one exact protected #526 recovery authority into the "
+                    "repository-owned manager stores. This starts no Gateway host effect."
+                ),
+                "inputSchema": materialization_request_schema,
+            },
+            {
+                "name": "nexus_gateway_recovery_preflight",
+                "description": (
+                    "Run the existing repository-owned #526 recovery manager to the "
+                    "effect-free TARGET_READY + ROLLBACK_READY checkpoint."
+                ),
+                "inputSchema": copy.deepcopy(recovery_request_schema),
+            },
+            {
+                "name": "nexus_gateway_recover",
+                "description": (
+                    "Execute or reconcile one exact protected #526 Gateway recovery "
+                    "request through the existing durable manager state machine."
+                ),
+                "inputSchema": copy.deepcopy(recovery_request_schema),
             },
             {
                 "name": "nexus_project_entry",
@@ -5441,6 +5599,29 @@ class UnifiedMCPGateway:
             "github_observer": github_observer_runtime_identity(),
             "lifecycle": lifecycle,
         }
+
+    @staticmethod
+    def _gateway_recovery_materialize(
+        arguments: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        manager = _gateway_recovery_manager()
+        return _gateway_recovery_result(
+            manager.gateway_recovery_materialize(dict(arguments))
+        )
+
+    @staticmethod
+    def _gateway_recovery_preflight(
+        arguments: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        manager = _gateway_recovery_manager()
+        return _gateway_recovery_result(manager.gateway_recover(dict(arguments)))
+
+    @staticmethod
+    def _gateway_recover_exact(
+        arguments: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        manager = _gateway_recovery_manager()
+        return _gateway_recovery_result(manager._gateway_recover_live(dict(arguments)))
 
     def _gateway_convergence(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         """Classify one #1064 convergence generation without performing effects."""
@@ -7143,6 +7324,12 @@ class UnifiedMCPGateway:
     def _call_tool(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         if name == "nexus_gateway_status":
             return self._gateway_status()
+        if name == "nexus_gateway_recovery_materialize":
+            return self._gateway_recovery_materialize(arguments)
+        if name == "nexus_gateway_recovery_preflight":
+            return self._gateway_recovery_preflight(arguments)
+        if name == "nexus_gateway_recover":
+            return self._gateway_recover_exact(arguments)
         if name == "nexus_gateway_convergence":
             return self._gateway_convergence(arguments)
         if name == EXECUTION_READINESS_TOOL_NAME:

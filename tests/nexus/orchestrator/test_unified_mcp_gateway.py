@@ -5445,6 +5445,171 @@ def test_project_entry_invalid_issue_number_is_public_input_error(issue):
     assert response["result"]["isError"] is True
 
 
+
+def _gateway_recovery_materialization_args():
+    return {
+        "request_id": "issue526-recovery-a1",
+        "idempotency_fence": "issue526-recovery-fence-a1",
+        "operation": "gateway-recovery-materialize",
+        "effect_class": "GATEWAY_RECOVERY_MATERIALIZATION",
+        "recovery_authority_id": "issue526-recovery-a1",
+        "recovery_authority_hash": "a" * 64,
+        "request_hash": "b" * 64,
+        "schema": "nexus.gateway.durable_recovery_materialization_request.v1",
+    }
+
+
+def _gateway_recovery_args():
+    return {
+        "request_id": "issue526-recovery-a1",
+        "idempotency_fence": "issue526-recovery-fence-a1",
+        "operation": "gateway-recover",
+        "effect_class": "GATEWAY_DURABLE_RECOVERY",
+        "recovery_authority_id": "issue526-recovery-a1",
+        "recovery_authority_hash": "a" * 64,
+        "desired_manifest_id": "r1-" + "b" * 40,
+        "desired_manifest_hash": "c" * 64,
+        "predecessor_manifest_id": "r1-" + "d" * 40,
+        "predecessor_manifest_hash": "e" * 64,
+        "request_hash": "f" * 64,
+        "schema": "nexus.gateway.durable_recovery_request.v2",
+    }
+
+
+def test_gateway_recovery_actions_are_typed_closed_and_registered():
+    specs = {item["name"]: item["inputSchema"] for item in UnifiedMCPGateway.tool_specs()}
+    assert {
+        "nexus_gateway_recovery_materialize",
+        "nexus_gateway_recovery_preflight",
+        "nexus_gateway_recover",
+    }.issubset(specs)
+
+    materialize = specs["nexus_gateway_recovery_materialize"]
+    assert materialize["additionalProperties"] is False
+    assert set(materialize["required"]) == set(_gateway_recovery_materialization_args())
+    assert materialize["properties"]["operation"]["enum"] == ["gateway-recovery-materialize"]
+    assert materialize["properties"]["effect_class"]["enum"] == [
+        "GATEWAY_RECOVERY_MATERIALIZATION"
+    ]
+    assert materialize["properties"]["schema"]["enum"] == [
+        "nexus.gateway.durable_recovery_materialization_request.v1"
+    ]
+
+    for name in ("nexus_gateway_recovery_preflight", "nexus_gateway_recover"):
+        schema = specs[name]
+        assert schema["additionalProperties"] is False
+        assert set(schema["required"]) == set(_gateway_recovery_args())
+        assert schema["properties"]["operation"]["enum"] == ["gateway-recover"]
+        assert schema["properties"]["effect_class"]["enum"] == [
+            "GATEWAY_DURABLE_RECOVERY"
+        ]
+        assert schema["properties"]["schema"]["enum"] == [
+            "nexus.gateway.durable_recovery_request.v2"
+        ]
+        for forbidden in (
+            "command",
+            "shell",
+            "path",
+            "service",
+            "launchd_label",
+            "plist",
+            "source_root",
+            "manager_path",
+        ):
+            assert forbidden not in schema["properties"]
+
+
+def test_gateway_recovery_action_dispatches_exact_requests_to_existing_manager(monkeypatch):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    calls = []
+
+    class Outcome:
+        def __init__(self, stage):
+            self.stage = stage
+
+        def model_dump(self):
+            return {
+                "stage": self.stage,
+                "request_id": "issue526-recovery-a1",
+                "effect_started": self.stage == "recover",
+            }
+
+    class FakeManager:
+        @staticmethod
+        def gateway_recovery_materialize(request):
+            calls.append(("materialize", dict(request)))
+            return {
+                "request_id": request["request_id"],
+                "effect_started": False,
+                "stage": "materialize",
+            }
+
+        @staticmethod
+        def gateway_recover(request):
+            calls.append(("preflight", dict(request)))
+            return Outcome("preflight")
+
+        @staticmethod
+        def _gateway_recover_live(request):
+            calls.append(("recover", dict(request)))
+            return Outcome("recover")
+
+    monkeypatch.setattr(
+        gateway_module,
+        "_gateway_recovery_manager",
+        lambda: FakeManager,
+        raising=False,
+    )
+    gateway = UnifiedMCPGateway(service=FakeService())
+
+    materialize_args = _gateway_recovery_materialization_args()
+    materialize = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 10640,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_gateway_recovery_materialize",
+            "arguments": materialize_args,
+        },
+    })
+    assert materialize["result"]["isError"] is False
+    assert materialize["result"]["structuredContent"]["effect_started"] is False
+
+    recovery_args = _gateway_recovery_args()
+    preflight = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 10641,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_gateway_recovery_preflight",
+            "arguments": recovery_args,
+        },
+    })
+    assert preflight["result"]["isError"] is False
+    assert preflight["result"]["structuredContent"]["effect_started"] is False
+    assert preflight["result"]["structuredContent"]["stage"] == "preflight"
+
+    recover = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 10642,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_gateway_recover",
+            "arguments": recovery_args,
+        },
+    })
+    assert recover["result"]["isError"] is False
+    assert recover["result"]["structuredContent"]["effect_started"] is True
+    assert recover["result"]["structuredContent"]["stage"] == "recover"
+
+    assert calls == [
+        ("materialize", materialize_args),
+        ("preflight", recovery_args),
+        ("recover", recovery_args),
+    ]
+
+
 def test_gateway_convergence_tool_is_decision_only_and_reuses_status_observation(monkeypatch):
     import nexus.orchestrator.unified_mcp_gateway as gateway_module
 
@@ -5517,7 +5682,6 @@ def test_gateway_convergence_tool_is_decision_only_and_reuses_status_observation
     assert pinned_payload["action"] == "NOOP"
     assert pinned_payload["reason"] == "PINNED_ALREADY_LOADED"
     assert pinned_payload["canonical_next_action"] == "none"
-
 
 
 def test_gateway_convergence_receipt_only_main_churn_does_not_request_recovery(monkeypatch):
