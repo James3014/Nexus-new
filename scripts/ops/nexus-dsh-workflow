@@ -114,7 +114,7 @@ def _validate_session_id(session_id: str) -> str:
     return value
 
 
-def _parse_created_goal_log(path: Path) -> dict[str, Any]:
+def _parse_created_goal_log(path: Path, *, require_goal: bool = True) -> dict[str, Any]:
     session_id: str | None = None
     observed_cwd: str | None = None
     create_calls: set[str] = set()
@@ -226,7 +226,7 @@ def _parse_created_goal_log(path: Path) -> dict[str, Any]:
             "DSH_TRACKING_SESSION_NOT_OBSERVED",
             "log does not contain a DSH session identity",
         )
-    if goal is None:
+    if goal is None and require_goal:
         raise DshWorkflowError(
             "DSH_TRACKING_GOAL_NOT_OBSERVED",
             "log does not contain a durable create_goal result",
@@ -246,13 +246,17 @@ def build_binding_from_log(
     repo_root: Path,
     dsh_home: Path,
     created_at: str | None = None,
+    phase: str | None = None,
+    parent_session_id: str | None = None,
+    goal_objective: str | None = None,
 ) -> dict[str, Any]:
+    """Build a binding; with ``phase`` set, a missing goal yields a phase-scoped binding."""
     if issue_number < 1:
         raise DshWorkflowError(
             "DSH_TRACKING_ISSUE_INVALID",
             "issue number must be positive",
         )
-    observed = _parse_created_goal_log(log_path)
+    observed = _parse_created_goal_log(log_path, require_goal=phase is None)
     repo_root = repo_root.expanduser().resolve()
     dsh_home = dsh_home.expanduser().resolve()
     observed_cwd = observed.get("observed_cwd")
@@ -262,7 +266,7 @@ def build_binding_from_log(
             "DSH session cwd does not match the tracked repository root",
         )
 
-    goal = observed["goal"]
+    goal = observed["goal"] or {"id": None, "revision": None, "objective": goal_objective}
     body: dict[str, Any] = {
         "schema": BINDING_SCHEMA,
         "session_id": observed["session_id"],
@@ -277,6 +281,12 @@ def build_binding_from_log(
         "created_at": created_at or _utc_now(),
         "authority": "TRACKING_METADATA_ONLY",
     }
+    # Lineage fields are optional and hashed only when present, so legacy bindings
+    # keep their exact hash.
+    if phase is not None:
+        body["phase"] = phase
+    if parent_session_id is not None:
+        body["parent_session_id"] = _validate_session_id(parent_session_id)
     return {**body, "binding_hash": _binding_hash(body)}
 
 
@@ -343,6 +353,8 @@ def store_binding(root: Path, binding: dict[str, Any]) -> Path:
             "repo_root",
             "dsh_home",
             "source_log_sha256",
+            "phase",
+            "parent_session_id",
         )
         if any(existing.get(key) != binding.get(key) for key in immutable):
             raise DshWorkflowError(
@@ -606,7 +618,35 @@ def run_preflight(
             detail=str(exc),
             generated_at=generated_at,
         )
+    receipt = run_issue_preflight(
+        binding, doctor_bin=doctor_bin, runner=runner, generated_at=generated_at
+    )
+    if receipt["decision"] == "ALLOW_RESUME":
+        receipt.update(goal_projection)
+    return receipt
 
+
+def issue_subject(repository: str, issue_number: int, repo_root: Path) -> dict[str, Any]:
+    """Binding-shaped subject for preflights that run before any session exists."""
+    repository = _validate_repository(repository)
+    return {
+        "session_id": f"start-phase-{repository.replace('/', '_')}-{issue_number}",
+        "goal_id": None,
+        "repository": repository,
+        "issue_number": issue_number,
+        "binding_hash": None,
+        "repo_root": str(repo_root.expanduser().resolve()),
+    }
+
+
+def run_issue_preflight(
+    binding: dict[str, Any],
+    *,
+    doctor_bin: str,
+    runner: Runner = subprocess.run,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    """Authoritative Issue-open + doctor-SAFE preflight; needs no session binding."""
     argv = [
         doctor_bin,
         "--json",
@@ -656,9 +696,7 @@ def run_preflight(
             detail="workflow doctor output must be a JSON object",
             generated_at=generated_at,
         )
-    receipt = evaluate_doctor(binding, doctor, generated_at=generated_at)
-    receipt.update(goal_projection)
-    return receipt
+    return evaluate_doctor(binding, doctor, generated_at=generated_at)
 
 
 def persist_preflight(root: Path, receipt: dict[str, Any]) -> Path:
@@ -1695,12 +1733,15 @@ def record_failed_turn(
     *,
     pre: dict[str, Any] | None,
     exit_code: int,
+    force_dirty_reason: str | None = None,
 ) -> dict[str, Any]:
     """Persist quarantine receipt + turn state for a non-zero DSH exit. Never reverts files."""
     session_id = str(binding["session_id"])
     repo = Path(str(binding["repo_root"]))
     post = _worktree_snapshot(repo, pre["head"] if pre else None)
-    if pre is None or post is None:
+    if force_dirty_reason is not None:
+        dirty, why = True, force_dirty_reason
+    elif pre is None or post is None:
         dirty, why = True, "SNAPSHOT_UNAVAILABLE"
     else:
         dirty = (
@@ -1736,10 +1777,10 @@ def record_failed_turn(
         "reason": why,
         "dsh_exit_code": exit_code,
         "session_id": session_id,
-        "goal_id": binding["goal_id"],
+        "goal_id": binding.get("goal_id"),
         "repository": binding["repository"],
         "issue_number": binding["issue_number"],
-        "binding_hash": binding["binding_hash"],
+        "binding_hash": binding.get("binding_hash"),
         "repo_root": str(repo),
         "pre_turn": pre,
         "post_turn": post,
@@ -1759,6 +1800,8 @@ def record_failed_turn(
         quarantine_receipt=str(receipt_path),
         quarantine_receipt_hash=receipt["receipt_hash"],
         dsh_exit_code=exit_code,
+        repository=binding["repository"],
+        issue_number=binding["issue_number"],
     )
 
 
@@ -1801,6 +1844,225 @@ def acknowledge_turn_failure(
     return receipt, path
 
 
+PHASE_RUN_SCHEMA = "nexus.dsh_phase_run.v1"
+PHASES = ("red", "green", "repair")
+
+
+def find_dirty_sibling(root: Path, repository: str, issue_number: int) -> dict[str, Any] | None:
+    """A TURN_FAILED_DIRTY state for any session tracked for this repository+issue, if any."""
+    turn_dir = root / "turn-state"
+    candidates: dict[str, dict[str, Any]] = {}
+    if turn_dir.is_dir():
+        for path in sorted(turn_dir.glob("*.json")):
+            state = load_turn_state(root, path.stem)
+            if state is not None:
+                candidates[path.stem] = state
+    for path in sorted((root / "bindings").glob("*.json")):
+        try:
+            binding = validate_binding(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError, DshWorkflowError):
+            continue
+        if binding["repository"] != repository or binding["issue_number"] != issue_number:
+            continue
+        state = load_turn_state(root, str(binding["session_id"]))
+        if state is not None:
+            candidates[str(binding["session_id"])] = {**state, "repository": repository}
+            candidates[str(binding["session_id"])]["issue_number"] = issue_number
+    for session_id, state in sorted(candidates.items()):
+        if (
+            state.get("state") == TURN_FAILED_DIRTY
+            and state.get("repository") == repository
+            and state.get("issue_number") == issue_number
+        ):
+            return {"session_id": session_id, **state}
+    return None
+
+
+def _load_prior_receipts(paths: Sequence[str]) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    for raw in paths:
+        path = Path(raw).expanduser().resolve()
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise DshWorkflowError(
+                "PRIOR_RECEIPT_UNREADABLE", f"prior receipt {path} cannot be read"
+            ) from exc
+        digest = payload.get("receipt_hash") if isinstance(payload, dict) else None
+        if not isinstance(digest, str) or not digest:
+            raise DshWorkflowError(
+                "PRIOR_RECEIPT_HASH_MISSING", f"prior receipt {path} has no receipt_hash"
+            )
+        out.append((str(path), digest))
+    return out
+
+
+def build_phase_task(
+    *,
+    phase: str,
+    goal_objective: str | None,
+    parent_has_goal: bool,
+    prior_receipts: Sequence[tuple[str, str]],
+    contract_text: str,
+) -> str:
+    may_create = phase == "red" and not parent_has_goal
+    lines = [
+        "NEXUS CONTROLLER HEADER (fixed; precedes the phase contract)",
+        f"Phase: {phase}",
+        f"Goal objective: {goal_objective or '(none supplied)'}",
+        "Do not call create_goal unless phase=red and no goal exists.",
+        (
+            "create_goal for this phase: call it once with the goal objective above."
+            if may_create
+            else "create_goal for this phase: NOT allowed; do not call it."
+        ),
+        "Allowed paths: edit only the paths the phase contract below allows; touch nothing else.",
+        "Every bash action must include a short description.",
+        "Use precise idempotent edits; never re-run insertion scripts; no helper/scratch files.",
+        "Prior phase receipts:",
+    ]
+    if prior_receipts:
+        lines.extend(f"- {path} receipt_hash={digest}" for path, digest in prior_receipts)
+    else:
+        lines.append("- (none)")
+    return "\n".join(lines) + "\n\nPHASE CONTRACT\n\n" + contract_text
+
+
+def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
+    repository = _validate_repository(args.repository)
+    if args.issue < 1:
+        raise DshWorkflowError("DSH_TRACKING_ISSUE_INVALID", "issue number must be positive")
+    repo_root = Path(args.repo_root).expanduser().resolve()
+    dsh_home = Path(args.dsh_home).expanduser().resolve()
+    parent = _validate_session_id(args.parent_session_id) if args.parent_session_id else None
+    try:
+        contract_text = Path(args.phase_contract).expanduser().read_text(encoding="utf-8")
+    except OSError as exc:
+        raise DshWorkflowError(
+            "PHASE_CONTRACT_UNREADABLE", "phase contract cannot be read"
+        ) from exc
+    prior = _load_prior_receipts(args.prior_receipt)
+    parent_has_goal = False
+    if parent:
+        try:
+            parent_has_goal = load_binding(root, parent).get("goal_id") is not None
+        except DshWorkflowError:
+            parent_has_goal = False
+
+    subject = issue_subject(repository, args.issue, repo_root)
+    sibling = find_dirty_sibling(root, repository, args.issue)
+    if sibling is not None:
+        preflight = _blocked_preflight(
+            subject,
+            reason_code="PREVIOUS_TURN_FAILED_DIRTY",
+            detail=(
+                f"session {sibling['session_id']} for this Issue failed dirty; inspect its "
+                "quarantine receipt and run ack-turn-failure before starting a new phase"
+            ),
+        )
+        preflight["quarantine_receipt"] = sibling.get("quarantine_receipt")
+        preflight["blocking_session_id"] = sibling["session_id"]
+    else:
+        preflight = run_issue_preflight(subject, doctor_bin=args.doctor_bin)
+    preflight["invocation"] = "start-phase"
+    preflight["phase"] = args.phase
+    receipt_path = persist_preflight(root, preflight)
+    if preflight["decision"] != "ALLOW_RESUME":
+        _print_result(preflight, receipt_path=receipt_path)
+        return EXIT_BLOCKED
+
+    task = build_phase_task(
+        phase=args.phase,
+        goal_objective=args.goal_objective,
+        parent_has_goal=parent_has_goal,
+        prior_receipts=prior,
+        contract_text=contract_text,
+    )
+    dsh_argv = [args.dsh_bin, "--profile", args.profile]
+    for patch in args.patch:
+        dsh_argv.extend(["--patch", patch])
+    dsh_argv.extend(["--json", task])
+    stamp = _utc_now().replace(":", "").replace("-", "").replace(".", "")
+    log_path = root / "phases" / str(args.issue) / f"{stamp}-{os.getpid()}-{args.phase}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env["DSH_HOME"] = str(dsh_home)
+    env["NEXUS_DSH_PREFLIGHT_RECEIPT"] = str(receipt_path)
+    pre_turn = _worktree_snapshot(repo_root)
+    with log_path.open("wb") as sink:
+        proc = subprocess.run(
+            dsh_argv,
+            cwd=str(repo_root),
+            env=env,
+            stdout=sink,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+    session_id: str | None = None
+    try:
+        session_id = _parse_created_goal_log(log_path, require_goal=False)["session_id"]
+    except DshWorkflowError:
+        session_id = None
+    binding: dict[str, Any] | None = None
+    binding_error: str | None = None
+    if session_id is not None:
+        try:
+            binding = build_binding_from_log(
+                log_path=log_path,
+                repository=repository,
+                issue_number=args.issue,
+                repo_root=repo_root,
+                dsh_home=dsh_home,
+                phase=args.phase,
+                parent_session_id=parent,
+                goal_objective=args.goal_objective,
+            )
+            if args.phase == "red" and binding["goal_id"] is None:
+                raise DshWorkflowError(
+                    "DSH_TRACKING_GOAL_NOT_OBSERVED", "red phase did not create a durable goal"
+                )
+            store_binding(root, binding)
+        except DshWorkflowError as exc:
+            binding_error = f"{exc.code}: {exc}"
+            binding = None
+    turn_subject = binding or {**subject, "session_id": session_id or ""}
+    forced: str | None = None
+    if session_id is None:
+        session_id = f"start-phase-unobserved-{args.issue}-{stamp}-{args.phase}"
+        turn_subject = {**subject, "session_id": session_id}
+        forced = "SESSION_NOT_OBSERVED"
+    if proc.returncode != 0 or forced:
+        turn = record_failed_turn(
+            root,
+            turn_subject,
+            pre=pre_turn,
+            exit_code=proc.returncode,
+            force_dirty_reason=forced,
+        )
+    else:
+        turn = _write_turn_state(
+            root, session_id, TURN_OK, repository=repository, issue_number=args.issue
+        )
+    summary = {
+        "schema": PHASE_RUN_SCHEMA,
+        "session_id": session_id,
+        "phase": args.phase,
+        "parent_session_id": parent,
+        "log_path": str(log_path),
+        "dsh_exit_code": proc.returncode,
+        "turn_state": turn["state"],
+        "binding_hash": binding["binding_hash"] if binding else None,
+        "preflight_receipt_path": str(receipt_path),
+    }
+    if binding_error:
+        summary["binding_error"] = binding_error
+    print(json.dumps(summary, sort_keys=True))
+    if proc.returncode == 0 and (binding_error or forced):
+        return EXIT_BLOCKED
+    return proc.returncode
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1827,6 +2089,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     p_resume.add_argument("--patch", action="append", default=[])
     p_resume.add_argument("--json", action="store_true", dest="json_output")
     p_resume.add_argument("--task", required=True)
+
+    p_phase = sub.add_parser("start-phase")
+    p_phase.add_argument("--repository", required=True)
+    p_phase.add_argument("--issue", required=True, type=int)
+    p_phase.add_argument("--phase", required=True, choices=PHASES)
+    p_phase.add_argument("--repo-root", required=True)
+    p_phase.add_argument("--dsh-home", required=True)
+    p_phase.add_argument("--phase-contract", required=True)
+    p_phase.add_argument("--patch", action="append", default=[])
+    p_phase.add_argument("--profile", default="headless")
+    p_phase.add_argument("--parent-session-id")
+    p_phase.add_argument("--prior-receipt", action="append", default=[])
+    p_phase.add_argument("--dsh-bin", default=_default_binary("dsh"))
+    p_phase.add_argument("--doctor-bin", default=_default_binary("nexus-workflow-doctor"))
+    p_phase.add_argument("--state-root")
+    p_phase.add_argument("--goal-objective")
 
     p_red = sub.add_parser("red-gate")
     p_red.add_argument("--repo-root", required=True)
@@ -1868,6 +2146,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             path = store_binding(root, binding)
             _print_result(binding, receipt_path=path)
             return 0
+
+        if args.command == "start-phase":
+            return _main_start_phase(args, root)
 
         binding = load_binding(root, args.session_id)
         if args.command == "ack-turn-failure":
