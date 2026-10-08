@@ -46,6 +46,15 @@ from nexus.contracts.gateway_convergence import (
     ConvergenceAction,
     GatewayConvergenceRequest,
 )
+from nexus.contracts.gateway_deployment import (
+    ContractError as GatewayDeploymentContractError,
+)
+from nexus.contracts.gateway_deployment import (
+    GatewayRecoveryMaterializationRequest,
+    GatewayRecoveryRequest,
+    validate_recovery_materialization_request,
+    validate_recovery_request,
+)
 from nexus.contracts.lifecycle_action import (
     ContractKind,
     ExternalCandidateAdoptionRequest,
@@ -1586,6 +1595,36 @@ def _evaluate_freshness(
         "reload_required": reload_required,
         "reload_reasons": reload_reasons,
     }
+
+
+def _execute_gateway_recovery_materialize(
+    request: GatewayRecoveryMaterializationRequest,
+) -> dict[str, Any]:
+    """Call the fixed repository-owned materialization manager without host effects."""
+    from scripts.ops.mcp_gateway_durable import gateway_recovery_materialize
+
+    return gateway_recovery_materialize(request)
+
+
+def _execute_gateway_recovery_preflight(
+    request: GatewayRecoveryRequest,
+) -> dict[str, Any]:
+    """Call the manager's effect-free recovery checkpoint."""
+    from scripts.ops.mcp_gateway_durable import gateway_recover
+
+    return gateway_recover(request).model_dump()
+
+
+def _execute_gateway_recovery(request: GatewayRecoveryRequest) -> dict[str, Any]:
+    """Enter the manager-owned durable effect/reconciliation state machine.
+
+    The live seam stays absent from the legacy manager CLI/dispatch.  This
+    Nexus-owned protected MCP action is the only public transport binding and
+    carries no caller-selected process, plist, executable, path, or retry knob.
+    """
+    from scripts.ops.mcp_gateway_durable import _gateway_recover_live
+
+    return _gateway_recover_live(request).model_dump()
 
 
 class UnifiedMCPGateway:
@@ -4427,12 +4466,143 @@ class UnifiedMCPGateway:
             raise GatewayInputError(str(exc)) from exc
 
     @staticmethod
+    def _validated_gateway_materialization_request(
+        arguments: Mapping[str, Any],
+    ) -> GatewayRecoveryMaterializationRequest:
+        try:
+            request = GatewayRecoveryMaterializationRequest.model_validate(arguments)
+            return validate_recovery_materialization_request(request)
+        except (GatewayDeploymentContractError, TypeError, ValueError) as exc:
+            raise GatewayInputError(f"gateway recovery materialization request rejected: {exc}") from exc
+
+    @staticmethod
+    def _validated_gateway_recovery_request(
+        arguments: Mapping[str, Any],
+    ) -> GatewayRecoveryRequest:
+        try:
+            request = GatewayRecoveryRequest.model_validate(arguments)
+            return validate_recovery_request(request)
+        except (GatewayDeploymentContractError, TypeError, ValueError) as exc:
+            raise GatewayInputError(f"gateway recovery request rejected: {exc}") from exc
+
+    def _gateway_recovery_materialize(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        request = self._validated_gateway_materialization_request(arguments)
+        result = _execute_gateway_recovery_materialize(request)
+        if result.get("effect_started") is not False:
+            raise GatewayInputError("gateway recovery materialization started a host effect")
+        return result
+
+    def _gateway_recovery_preflight(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        request = self._validated_gateway_recovery_request(arguments)
+        result = _execute_gateway_recovery_preflight(request)
+        if result.get("effect_started") is not False:
+            raise GatewayInputError("gateway recovery preflight started a host effect")
+        return result
+
+    def _gateway_recover(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        request = self._validated_gateway_recovery_request(arguments)
+        return _execute_gateway_recovery(request)
+
+    @staticmethod
     def tool_specs() -> list[dict[str, Any]]:
+        recovery_identifier = {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+        }
+        sha256 = {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        materialization_schema = {
+            "type": "object",
+            "required": [
+                "request_id",
+                "idempotency_fence",
+                "operation",
+                "effect_class",
+                "recovery_authority_id",
+                "recovery_authority_hash",
+                "request_hash",
+                "schema",
+            ],
+            "properties": {
+                "request_id": recovery_identifier,
+                "idempotency_fence": recovery_identifier,
+                "operation": {"const": "gateway-recovery-materialize"},
+                "effect_class": {"const": "GATEWAY_RECOVERY_MATERIALIZATION"},
+                "recovery_authority_id": recovery_identifier,
+                "recovery_authority_hash": sha256,
+                "request_hash": sha256,
+                "schema": {
+                    "const": "nexus.gateway.durable_recovery_materialization_request.v1"
+                },
+            },
+            "additionalProperties": False,
+        }
+        recovery_schema = {
+            "type": "object",
+            "required": [
+                "request_id",
+                "idempotency_fence",
+                "operation",
+                "effect_class",
+                "recovery_authority_id",
+                "recovery_authority_hash",
+                "desired_manifest_id",
+                "desired_manifest_hash",
+                "predecessor_manifest_id",
+                "predecessor_manifest_hash",
+                "request_hash",
+                "schema",
+            ],
+            "properties": {
+                "request_id": recovery_identifier,
+                "idempotency_fence": recovery_identifier,
+                "operation": {"const": "gateway-recover"},
+                "effect_class": {"const": "GATEWAY_DURABLE_RECOVERY"},
+                "recovery_authority_id": recovery_identifier,
+                "recovery_authority_hash": sha256,
+                "desired_manifest_id": {
+                    "type": "string",
+                    "pattern": "^r1-[0-9a-f]{40}$",
+                },
+                "desired_manifest_hash": sha256,
+                "predecessor_manifest_id": {
+                    "type": "string",
+                    "pattern": "^r1-[0-9a-f]{40}$",
+                },
+                "predecessor_manifest_hash": sha256,
+                "request_hash": sha256,
+                "schema": {"const": "nexus.gateway.durable_recovery_request.v2"},
+            },
+            "additionalProperties": False,
+        }
         return [
             {
                 "name": "nexus_gateway_status",
                 "description": "Read the single gateway identity, manifest, route stages, and lifecycle counts.",
                 "inputSchema": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "nexus_gateway_recovery_materialize",
+                "description": (
+                    "Materialize one exact tracked #526 recovery authority/request pair through the "
+                    "repository-owned manager. Effect-free: never starts a Gateway/process/launchd effect."
+                ),
+                "inputSchema": materialization_schema,
+            },
+            {
+                "name": "nexus_gateway_recovery_preflight",
+                "description": (
+                    "Run the exact materialized #526 recovery request through the manager's effect-free "
+                    "TARGET_READY/ROLLBACK_READY checkpoint. Never starts a host effect."
+                ),
+                "inputSchema": recovery_schema,
+            },
+            {
+                "name": "nexus_gateway_recover",
+                "description": (
+                    "Execute or reconcile one exact #526 recovery request through the manager-owned durable "
+                    "state machine. Exact replay keeps the same request/fence; no caller-selected host controls."
+                ),
+                "inputSchema": recovery_schema,
             },
             {
                 "name": "nexus_project_entry",
@@ -7038,6 +7208,12 @@ class UnifiedMCPGateway:
     def _call_tool(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         if name == "nexus_gateway_status":
             return self._gateway_status()
+        if name == "nexus_gateway_recovery_materialize":
+            return self._gateway_recovery_materialize(arguments)
+        if name == "nexus_gateway_recovery_preflight":
+            return self._gateway_recovery_preflight(arguments)
+        if name == "nexus_gateway_recover":
+            return self._gateway_recover(arguments)
         if name == "nexus_gateway_convergence":
             return self._gateway_convergence(arguments)
         if name == EXECUTION_READINESS_TOOL_NAME:
