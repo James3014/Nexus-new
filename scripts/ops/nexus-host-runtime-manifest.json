@@ -122,6 +122,14 @@
     {
       "path": "scripts/ops/nexus-hermes-soak-observe-policy.json",
       "mode": "0644"
+    },
+    {
+      "path": "scripts/ops/dsh-agy-adapter/index.js",
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/ops/dsh-agy-adapter/package.json",
+      "mode": "0644"
     }
   ],
   "components": {
@@ -163,6 +171,9 @@
     },
     "hermes_launchd": {
       "source_path": "scripts/ops/nexus-hermes-launchd"
+    },
+    "dsh_agy_adapter": {
+      "source_path": "scripts/ops/dsh-agy-adapter"
     }
   }
 }
