@@ -1929,7 +1929,9 @@ def run_frozen_stack(
     ranked, evidence = _rank_candidates(snapshot=snapshot, repo=repo, binding=binding)
     d0_wall = time.perf_counter() - d0_started
     repo_files = set(
-        _git(repo, "ls-tree", "-r", "--name-only", snapshot.pre_implementation_revision).splitlines()
+        _git(
+            repo, "ls-tree", "-r", "--name-only", snapshot.pre_implementation_revision
+        ).splitlines()
     )
     literal = tuple(
         path
@@ -2001,7 +2003,7 @@ def run_frozen_stack(
         prospective_guard=prospective_guard,
     )
     strong_usage = strong.get("usage") or {}
-    usage_records = ((jev_raw.get("usage") or {}, strong_usage) if jev_raw else (strong_usage,))
+    usage_records = (jev_raw.get("usage") or {}, strong_usage) if jev_raw else (strong_usage,)
     input_tokens, uncached_input_tokens, output_tokens = _complete_token_usage_metrics(
         *usage_records
     )
