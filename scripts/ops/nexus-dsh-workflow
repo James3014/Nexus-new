@@ -27,6 +27,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -718,9 +719,9 @@ RED_NODE_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./-]*\.py::[^\s:][^\s]*$")
 RED_MESSAGE_LIMIT = 2000
 
 
-def _require(condition: bool, detail: str) -> None:
+def _require(condition: bool, detail: str, code: str = "RED_CONTRACT_INVALID") -> None:
     if not condition:
-        raise DshWorkflowError("RED_CONTRACT_INVALID", detail)
+        raise DshWorkflowError(code, detail)
 
 
 def _is_str_list(value: Any) -> bool:
@@ -794,11 +795,11 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
     )
 
 
-def _git_ok(repo: Path, *args: str) -> bytes:
+def _git_ok(repo: Path, *args: str, code: str = "RED_ARGUMENT_INVALID") -> bytes:
     proc = _git(repo, *args)
     if proc.returncode != 0:
         raise DshWorkflowError(
-            "RED_ARGUMENT_INVALID",
+            code,
             f"git {' '.join(args[:2])} failed: {proc.stderr.decode('utf-8', 'replace').strip()}",
         )
     return proc.stdout
@@ -954,18 +955,22 @@ def _parse_junit(path: Path) -> tuple[list[dict[str, Any]] | None, bool]:
     return cases, has_error
 
 
+def _python_available(python: str) -> bool:
+    py_path = Path(python)
+    if py_path.is_file() and os.access(python, os.X_OK):
+        return True
+    return os.sep not in python and shutil.which(python) is not None
+
+
 def _run_red_tests(
     repo: Path, python: str, nodes: list[str], timeout: float, expected_regex: str
 ) -> dict[str, Any]:
     codes: set[str] = set()
     result: dict[str, Any] = {"command": [], "exit_code": None, "node_results": [], "codes": codes}
-    py_path = Path(python)
-    if not (py_path.is_file() and os.access(python, os.X_OK)):
-        on_path = shutil.which(python) if os.sep not in python else None
-        if on_path is None:
-            codes.add("ENVIRONMENT_FAILURE")
-            result["command"] = [python, "-m", "pytest"]
-            return result
+    if not _python_available(python):
+        codes.add("ENVIRONMENT_FAILURE")
+        result["command"] = [python, "-m", "pytest"]
+        return result
     with tempfile.TemporaryDirectory(prefix="nexus-red-gate-") as tmp:
         junit = Path(tmp) / "junit.xml"
         argv = [
@@ -1207,6 +1212,595 @@ def _main_red_gate(args: argparse.Namespace) -> int:
     return 0 if receipt["decision"] == "RED_READY" else EXIT_BLOCKED
 
 
+GREEN_CONTRACT_SCHEMA = "nexus.dsh_green_contract.v1"
+GREEN_RECEIPT_SCHEMA = "nexus.dsh_green_gate_receipt.v1"
+GREEN_CLAIM_CEILING = "POST_IMPLEMENTATION_EVIDENCE_GATE_NO_COMPLETION_AUTHORITY"
+GREEN_SEMANTICS = "TARGET_FIXED_REGRESSIONS_CLEAN_SCOPE_CLEAN"
+GREEN_CONTRACT_KEYS = {
+    "schema",
+    "repository",
+    "issue_number",
+    "target_test_nodes",
+    "regression_pytest_targets",
+    "allowed_change_globs",
+    "lint",
+}
+GREEN_LINT_KEYS = {"ruff_check_paths_from_changes", "ruff_format_preview"}
+GREEN_TARGET_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./-]*(::[^\s:][^\s]*)?$")
+
+
+def _green_require(condition: bool, detail: str) -> None:
+    _require(condition, detail, "GREEN_CONTRACT_INVALID")
+
+
+def validate_green_contract(contract: Any) -> dict[str, Any]:
+    _green_require(isinstance(contract, dict), "contract must be a JSON object")
+    keys = set(contract)
+    _green_require(
+        not (keys - GREEN_CONTRACT_KEYS), f"unknown fields: {sorted(keys - GREEN_CONTRACT_KEYS)}"
+    )
+    _green_require(
+        not (GREEN_CONTRACT_KEYS - keys),
+        f"missing contract fields: {sorted(GREEN_CONTRACT_KEYS - keys)}",
+    )
+    _green_require(contract["schema"] == GREEN_CONTRACT_SCHEMA, "contract schema mismatch")
+    repository = contract["repository"]
+    _green_require(
+        isinstance(repository, str) and bool(REPOSITORY_RE.fullmatch(repository)),
+        "repository must be an owner/name slug",
+    )
+    issue = contract["issue_number"]
+    _green_require(
+        isinstance(issue, int) and not isinstance(issue, bool) and issue > 0,
+        "issue_number must be positive int",
+    )
+    nodes = contract["target_test_nodes"]
+    _green_require(
+        _is_str_list(nodes) and bool(nodes),
+        "target_test_nodes must be a non-empty list of strings",
+    )
+    for node in nodes:
+        path = node.split("::", 1)[0]
+        _green_require(
+            bool(RED_NODE_RE.fullmatch(node)) and ".." not in path.split("/"),
+            f"invalid pytest node id: {node}",
+        )
+    targets = contract["regression_pytest_targets"]
+    _green_require(_is_str_list(targets), "regression_pytest_targets must be a string list")
+    for target in targets:
+        path = target.split("::", 1)[0]
+        _green_require(
+            bool(GREEN_TARGET_RE.fullmatch(target)) and ".." not in path.split("/"),
+            f"invalid regression target: {target}",
+        )
+    globs = contract["allowed_change_globs"]
+    _green_require(
+        _is_str_list(globs) and bool(globs), "allowed_change_globs must be a non-empty string list"
+    )
+    lint = contract["lint"]
+    _green_require(
+        isinstance(lint, dict) and set(lint) == GREEN_LINT_KEYS,
+        f"lint must have exactly {sorted(GREEN_LINT_KEYS)}",
+    )
+    _green_require(
+        all(isinstance(lint[k], bool) for k in GREEN_LINT_KEYS), "lint flags must be booleans"
+    )
+    return contract
+
+
+def _node_cases(cases: list[dict[str, Any]], node: str) -> list[dict[str, Any]]:
+    path, parts = _split_node(node)
+    module = path[:-3].replace("/", ".")
+    raw_name = node.partition("::")[2].split("::")[-1]
+    classname = ".".join([module, *parts[:-1]])
+    return [
+        c
+        for c in cases
+        if c["classname"] == classname
+        and (c["name"] == raw_name or c["name"].startswith(f"{parts[-1]}["))
+        and (c["name"] == raw_name or "[" not in raw_name)
+    ]
+
+
+def _run_pytest(repo: Path, python: str, targets: list[str], timeout: float) -> dict[str, Any]:
+    """Run pytest once; returns command, exit_code, cases, output and error flags."""
+    result: dict[str, Any] = {
+        "command": [python, "-m", "pytest", *targets],
+        "exit_code": None,
+        "cases": None,
+        "codes": set(),
+        "not_found": False,
+        "output_tail": "",
+    }
+    codes: set[str] = result["codes"]
+    if not _python_available(python):
+        codes.add("ENVIRONMENT_FAILURE")
+        return result
+    with tempfile.TemporaryDirectory(prefix="nexus-green-gate-") as tmp:
+        junit = Path(tmp) / "junit.xml"
+        argv = [python, "-m", "pytest", "-p", "no:cacheprovider", "-q", f"--junitxml={junit}"]
+        argv.extend(targets)
+        result["command"] = argv
+        env = os.environ.copy()
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        try:
+            proc = subprocess.run(
+                argv, cwd=str(repo), env=env, capture_output=True, timeout=timeout, check=False
+            )
+        except subprocess.TimeoutExpired:
+            codes.add("TEST_RUN_TIMEOUT")
+            return result
+        except OSError:
+            codes.add("ENVIRONMENT_FAILURE")
+            return result
+        result["exit_code"] = proc.returncode
+        output = (proc.stdout + proc.stderr).decode("utf-8", "replace")
+        result["output_tail"] = _truncate(output[-RED_MESSAGE_LIMIT:])
+        if proc.returncode in (126, 127):
+            codes.add("ENVIRONMENT_FAILURE")
+            return result
+        cases, has_error = _parse_junit(junit)
+    result["cases"] = cases
+    if "No module named pytest" in output:
+        codes.add("ENVIRONMENT_FAILURE")
+    elif proc.returncode == 5 or re.search(r"^ERROR: not found: ", output, re.MULTILINE):
+        codes.add("TEST_NODE_NOT_FOUND")
+        result["not_found"] = True
+    elif (
+        cases is None or proc.returncode in (2, 3, 4) or has_error or proc.returncode not in (0, 1)
+    ):
+        codes.add("COLLECTION_OR_SETUP_FAILURE")
+    return result
+
+
+def _is_python_script(repo: Path, rel: str) -> bool:
+    if not rel.startswith("scripts/") or "." in Path(rel).name:
+        return False
+    try:
+        with (repo / rel).open("rb") as handle:
+            first = handle.readline(200)
+    except OSError:
+        return False
+    return first.startswith(b"#!") and b"python" in first
+
+
+def _run_ruff(
+    repo: Path, python: str, args: list[str], paths: list[str], timeout: float
+) -> dict[str, Any]:
+    argv = [python, "-m", "ruff", *args, *paths]
+    out: dict[str, Any] = {"command": argv, "exit_code": None, "output": "", "status": "ok"}
+    env = os.environ.copy()
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    try:
+        proc = subprocess.run(
+            argv, cwd=str(repo), env=env, capture_output=True, timeout=timeout, check=False
+        )
+    except subprocess.TimeoutExpired:
+        out["status"] = "timeout"
+        return out
+    except OSError:
+        out["status"] = "environment"
+        return out
+    out["exit_code"] = proc.returncode
+    out["output"] = _truncate((proc.stdout + proc.stderr).decode("utf-8", "replace"))
+    if proc.returncode == 0:
+        return out
+    out["status"] = "violation" if proc.returncode == 1 else "environment"
+    return out
+
+
+def _run_green_lint(
+    repo: Path,
+    python: str,
+    lint: dict[str, bool],
+    changed: list[str],
+    timeout: float,
+    codes: set[str],
+) -> dict[str, Any]:
+    existing = [p for p in changed if (repo / p).is_file()]
+    py_files = [p for p in existing if p.endswith(".py")]
+    check_paths = py_files + [p for p in existing if _is_python_script(repo, p)]
+    report: dict[str, Any] = {"ruff_check": None, "ruff_format": None}
+    wants = [
+        ("ruff_check", lint["ruff_check_paths_from_changes"], check_paths),
+        ("ruff_format", lint["ruff_format_preview"], py_files),
+    ]
+    if not any(flag and paths for _name, flag, paths in wants):
+        return report
+    if not _python_available(python):
+        codes.add("ENVIRONMENT_FAILURE")
+        return report
+    probe = subprocess.run(
+        [python, "-m", "ruff", "--version"], cwd=str(repo), capture_output=True, check=False
+    )
+    if probe.returncode != 0:
+        codes.add("ENVIRONMENT_FAILURE")
+        return report
+    for name, flag, paths in wants:
+        if not flag or not paths:
+            continue
+        if name == "ruff_check":
+            run = _run_ruff(repo, python, ["check", "--no-cache"], paths, timeout)
+            violation_code = "LINT_FAILURE"
+        else:
+            run = _run_ruff(
+                repo, python, ["format", "--check", "--preview", "--no-cache"], paths, timeout
+            )
+            violation_code = "FORMAT_FAILURE"
+        report[name] = run
+        if run["status"] == "violation":
+            codes.add(violation_code)
+        elif run["status"] == "timeout":
+            codes.add("TEST_RUN_TIMEOUT")
+        elif run["status"] == "environment":
+            codes.add("ENVIRONMENT_FAILURE")
+    return report
+
+
+def _green_receipt(body: dict[str, Any]) -> dict[str, Any]:
+    receipt = dict(body)
+    receipt["receipt_hash"] = _sha256_bytes(_canonical_json(body).encode("utf-8"))
+    return receipt
+
+
+def persist_green_gate(root: Path, receipt: dict[str, Any]) -> Path:
+    gate_dir = root / "green-gates" / str(receipt["contract_hash"])[7:]
+    stamp = str(receipt["generated_at"]).replace(":", "").replace("-", "")
+    unique = gate_dir / f"{stamp}-{receipt['receipt_hash'][7:19]}.json"
+    _atomic_write_json(unique, receipt)
+    _atomic_write_json(gate_dir / "latest.json", receipt)
+    return unique
+
+
+def _diff_check(repo: Path, base: str, untracked: list[str]) -> dict[str, Any]:
+    failures: list[str] = []
+    proc = _git(repo, "diff", "--check", "--no-renames", base)
+    if proc.returncode != 0:
+        failures.append(proc.stdout.decode("utf-8", "replace")[:RED_MESSAGE_LIMIT])
+    for rel in untracked:
+        extra = _git(repo, "diff", "--check", "--no-index", "--", os.devnull, rel)
+        if extra.returncode != 0:
+            failures.append(extra.stdout.decode("utf-8", "replace")[:RED_MESSAGE_LIMIT])
+    return {"exit_code": proc.returncode, "failures": failures}
+
+
+def run_green_gate(
+    *,
+    repo_root: Path,
+    base_revision: str,
+    contract_path: Path,
+    python: str,
+    timeout: float,
+) -> dict[str, Any]:
+    """Evaluate post-implementation evidence. Raises DshWorkflowError for argument errors."""
+    try:
+        raw = json.loads(contract_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise DshWorkflowError("GREEN_CONTRACT_INVALID", f"cannot read contract: {exc}") from exc
+    contract = validate_green_contract(raw)
+    contract_hash = _sha256_bytes(_canonical_json(contract).encode("utf-8"))
+    if not python:
+        raise DshWorkflowError("GREEN_ARGUMENT_INVALID", "--python is required")
+    if timeout <= 0:
+        raise DshWorkflowError("GREEN_ARGUMENT_INVALID", "timeout must be positive")
+    repo = repo_root.expanduser().resolve()
+    if not repo.is_dir():
+        raise DshWorkflowError("GREEN_ARGUMENT_INVALID", "repo root is not a directory")
+    bad = "GREEN_ARGUMENT_INVALID"
+    _git_ok(repo, "rev-parse", "--show-toplevel", code=bad)
+    base = (
+        _git_ok(repo, "rev-parse", "--verify", f"{base_revision}^{{commit}}", code=bad)
+        .decode()
+        .strip()
+    )
+    head = _git_ok(repo, "rev-parse", "HEAD", code=bad).decode().strip()
+
+    codes: set[str] = set()
+    changed, untracked, diff_hash = _collect_worktree_changes(repo, base)
+    globs = contract["allowed_change_globs"]
+    untracked_set = set(untracked)
+    outside_tracked = [
+        p for p in changed if p not in untracked_set and not any(_glob_match(p, g) for g in globs)
+    ]
+    outside_untracked = [p for p in untracked if not any(_glob_match(p, g) for g in globs)]
+    if outside_tracked:
+        codes.add("CHANGE_OUTSIDE_ALLOWED_GLOBS")
+    if outside_untracked:
+        codes.add("UNTRACKED_FILE_OUTSIDE_ALLOWED_GLOBS")
+    if not changed:
+        codes.add("NO_CHANGE")
+
+    diff_check = _diff_check(repo, base, [p for p in untracked if p not in outside_untracked])
+    if diff_check["failures"]:
+        codes.add("DIFF_CHECK_FAILURE")
+
+    # Target nodes: every contracted node must be found and pass.
+    node_results: list[dict[str, Any]] = []
+    target_run = _run_pytest(repo, python, list(contract["target_test_nodes"]), timeout)
+    codes |= target_run["codes"]
+    if not target_run["codes"]:
+        for node in contract["target_test_nodes"]:
+            match = _node_cases(target_run["cases"], node)
+            if not match:
+                codes.add("TEST_NODE_NOT_FOUND")
+                node_results.append({"nodeid": node, "outcome": "not_found", "message": ""})
+                continue
+            bad_case = next((c for c in match if c["outcome"] != "passed"), None)
+            if bad_case is not None:
+                codes.add("TARGET_TESTS_NOT_PASSING")
+            node_results.append({
+                "nodeid": node,
+                "outcome": bad_case["outcome"] if bad_case else "passed",
+                "message": _truncate(bad_case["message"]) if bad_case else "",
+            })
+    elif target_run["exit_code"] == 1 and target_run["cases"]:
+        codes.add("TARGET_TESTS_NOT_PASSING")
+
+    regression_run: dict[str, Any] | None = None
+    regression_failures: list[dict[str, Any]] = []
+    if contract["regression_pytest_targets"]:
+        regression_run = _run_pytest(
+            repo, python, list(contract["regression_pytest_targets"]), timeout
+        )
+        codes |= regression_run["codes"]
+        if not regression_run["codes"] and regression_run["exit_code"] == 1:
+            codes.add("REGRESSION_TESTS_FAILING")
+        for case in regression_run["cases"] or []:
+            if case["outcome"] in ("failed", "error"):
+                regression_failures.append({
+                    "classname": case["classname"],
+                    "name": case["name"],
+                    "outcome": case["outcome"],
+                    "message": _truncate(case["message"]),
+                })
+
+    lint_report = _run_green_lint(repo, python, contract["lint"], changed, timeout, codes)
+
+    reason_codes = sorted(codes)
+    ready = not reason_codes
+    body = {
+        "schema": GREEN_RECEIPT_SCHEMA,
+        "claim_ceiling": GREEN_CLAIM_CEILING,
+        "decision": "GREEN_READY" if ready else "REVISE_GREEN",
+        "green_semantics": GREEN_SEMANTICS if ready else None,
+        "reason_codes": reason_codes,
+        "contract_hash": contract_hash,
+        "contract": contract,
+        "repository": contract["repository"],
+        "issue_number": contract["issue_number"],
+        "base_revision": base,
+        "repo_head": head,
+        "worktree_diff_sha256": diff_hash,
+        "changed_paths": changed,
+        "untracked_paths": untracked,
+        "paths_outside_allowed_globs": outside_tracked,
+        "untracked_outside_allowed_globs": outside_untracked,
+        "diff_check": diff_check,
+        "commands": {
+            "target_tests": target_run["command"],
+            "regression_tests": regression_run["command"] if regression_run else None,
+            "ruff_check": (lint_report["ruff_check"] or {}).get("command"),
+            "ruff_format": (lint_report["ruff_format"] or {}).get("command"),
+        },
+        "exit_codes": {
+            "target_tests": target_run["exit_code"],
+            "regression_tests": regression_run["exit_code"] if regression_run else None,
+            "ruff_check": (lint_report["ruff_check"] or {}).get("exit_code"),
+            "ruff_format": (lint_report["ruff_format"] or {}).get("exit_code"),
+            "git_diff_check": diff_check["exit_code"],
+        },
+        "node_results": node_results,
+        "target_output_tail": target_run["output_tail"],
+        "regression_failures": regression_failures,
+        "regression_output_tail": regression_run["output_tail"] if regression_run else "",
+        "lint_output": {
+            "ruff_check": (lint_report["ruff_check"] or {}).get("output"),
+            "ruff_format": (lint_report["ruff_format"] or {}).get("output"),
+        },
+        "generated_at": _utc_now(),
+    }
+    return _green_receipt(body)
+
+
+def _green_error_receipt(code: str, detail: str) -> dict[str, Any]:
+    return _green_receipt({
+        "schema": GREEN_RECEIPT_SCHEMA,
+        "claim_ceiling": GREEN_CLAIM_CEILING,
+        "decision": "REVISE_GREEN",
+        "green_semantics": None,
+        "reason_codes": [code],
+        "detail": detail,
+        "generated_at": _utc_now(),
+    })
+
+
+def _main_green_gate(args: argparse.Namespace) -> int:
+    try:
+        receipt = run_green_gate(
+            repo_root=Path(args.repo_root),
+            base_revision=args.base_revision,
+            contract_path=Path(args.contract).expanduser(),
+            python=args.python,
+            timeout=args.timeout,
+        )
+    except DshWorkflowError as exc:
+        print(json.dumps(_green_error_receipt(exc.code, str(exc)), sort_keys=True))
+        return EXIT_BLOCKED
+    except (OSError, ValueError) as exc:
+        detail = f"{type(exc).__name__}: {exc}"
+        print(json.dumps(_green_error_receipt("GREEN_GATE_ERROR", detail), sort_keys=True))
+        return EXIT_BLOCKED
+    out = dict(receipt)
+    if args.state_root:
+        out["receipt_path"] = str(persist_green_gate(_state_root(args.state_root), receipt))
+    print(json.dumps(out, sort_keys=True))
+    return 0 if receipt["decision"] == "GREEN_READY" else EXIT_BLOCKED
+
+
+TURN_STATE_SCHEMA = "nexus.dsh_turn_state.v1"
+QUARANTINE_SCHEMA = "nexus.dsh_turn_quarantine.v1"
+TURN_ACK_SCHEMA = "nexus.dsh_turn_failure_ack.v1"
+TURN_CLAIM_CEILING = "FAILED_TURN_RECORD_NO_COMPLETION_AUTHORITY"
+TURN_FAILED_DIRTY = "TURN_FAILED_DIRTY"
+TURN_FAILED_CLEAN = "TURN_FAILED_CLEAN"
+TURN_OK = "TURN_OK"
+TURN_ACKNOWLEDGED = "TURN_FAILURE_ACKNOWLEDGED"
+
+
+def _turn_state_path(root: Path, session_id: str) -> Path:
+    return root / "turn-state" / f"{_validate_session_id(session_id)}.json"
+
+
+def load_turn_state(root: Path, session_id: str) -> dict[str, Any] | None:
+    path = _turn_state_path(root, session_id)
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise DshWorkflowError(
+            "TURN_STATE_UNREADABLE", "turn state cannot be read; failing closed"
+        ) from exc
+    if not isinstance(payload, dict) or payload.get("schema") != TURN_STATE_SCHEMA:
+        raise DshWorkflowError("TURN_STATE_INVALID", "turn state is malformed; failing closed")
+    return payload
+
+
+def _write_turn_state(root: Path, session_id: str, state: str, **extra: Any) -> dict[str, Any]:
+    payload = {
+        "schema": TURN_STATE_SCHEMA,
+        "session_id": session_id,
+        "state": state,
+        "updated_at": _utc_now(),
+        **extra,
+    }
+    _atomic_write_json(_turn_state_path(root, session_id), payload)
+    return payload
+
+
+def _worktree_snapshot(repo: Path, base: str | None = None) -> dict[str, Any] | None:
+    """HEAD, worktree diff hash (vs ``base`` or HEAD) and untracked list; None if unavailable."""
+    try:
+        code = "TURN_SNAPSHOT_UNAVAILABLE"
+        head = _git_ok(repo, "rev-parse", "HEAD", code=code).decode().strip()
+        _changed, untracked, digest = _collect_worktree_changes(repo, base or head)
+    except (DshWorkflowError, OSError):
+        return None
+    return {"head": head, "worktree_diff_sha256": digest, "untracked_paths": untracked}
+
+
+def record_failed_turn(
+    root: Path,
+    binding: dict[str, Any],
+    *,
+    pre: dict[str, Any] | None,
+    exit_code: int,
+) -> dict[str, Any]:
+    """Persist quarantine receipt + turn state for a non-zero DSH exit. Never reverts files."""
+    session_id = str(binding["session_id"])
+    repo = Path(str(binding["repo_root"]))
+    post = _worktree_snapshot(repo, pre["head"] if pre else None)
+    if pre is None or post is None:
+        dirty, why = True, "SNAPSHOT_UNAVAILABLE"
+    else:
+        dirty = (
+            post["head"] != pre["head"]
+            or post["worktree_diff_sha256"] != pre["worktree_diff_sha256"]
+        )
+        why = "WORKTREE_CHANGED_DURING_TURN" if dirty else "WORKTREE_UNCHANGED"
+    state = TURN_FAILED_DIRTY if dirty else TURN_FAILED_CLEAN
+    generated_at = _utc_now()
+    qdir = root / "quarantine" / session_id
+    stamp = generated_at.replace(":", "").replace("-", "")
+    patch_info: dict[str, Any] | None = None
+    if pre is not None and post is not None and dirty:
+        patch = _git_ok(repo, "diff", "--binary", "--no-renames", pre["head"], code="TURN_PATCH")
+        patch_path = qdir / f"{stamp}-{hashlib.sha256(patch).hexdigest()[:12]}.patch"
+        patch_path.parent.mkdir(parents=True, exist_ok=True)
+        patch_path.write_bytes(patch)
+        patch_info = {
+            "path": str(patch_path),
+            "sha256": _sha256_bytes(patch),
+            "bytes": len(patch),
+            "base": pre["head"],
+        }
+    new_untracked = (
+        sorted(set(post["untracked_paths"]) - set(pre["untracked_paths"]))
+        if pre is not None and post is not None
+        else None
+    )
+    body = {
+        "schema": QUARANTINE_SCHEMA,
+        "claim_ceiling": TURN_CLAIM_CEILING,
+        "state": state,
+        "reason": why,
+        "dsh_exit_code": exit_code,
+        "session_id": session_id,
+        "goal_id": binding["goal_id"],
+        "repository": binding["repository"],
+        "issue_number": binding["issue_number"],
+        "binding_hash": binding["binding_hash"],
+        "repo_root": str(repo),
+        "pre_turn": pre,
+        "post_turn": post,
+        "turn_patch": patch_info,
+        "new_untracked_paths": new_untracked,
+        "automatic_revert": False,
+        "generated_at": generated_at,
+    }
+    receipt = {**body, "receipt_hash": _sha256_bytes(_canonical_json(body).encode("utf-8"))}
+    receipt_path = qdir / f"{stamp}-{receipt['receipt_hash'][7:19]}.json"
+    _atomic_write_json(receipt_path, receipt)
+    _atomic_write_json(qdir / "latest.json", receipt)
+    return _write_turn_state(
+        root,
+        session_id,
+        state,
+        quarantine_receipt=str(receipt_path),
+        quarantine_receipt_hash=receipt["receipt_hash"],
+        dsh_exit_code=exit_code,
+    )
+
+
+def acknowledge_turn_failure(
+    root: Path, binding: dict[str, Any], *, reason: str, acknowledged_by: str | None = None
+) -> tuple[dict[str, Any], Path]:
+    session_id = str(binding["session_id"])
+    if not reason.strip():
+        raise DshWorkflowError("TURN_ACK_REASON_REQUIRED", "ack requires a non-empty reason")
+    state = load_turn_state(root, session_id)
+    if state is None or state.get("state") not in (TURN_FAILED_DIRTY, TURN_FAILED_CLEAN):
+        raise DshWorkflowError("NO_TURN_FAILURE_TO_ACK", "no failed turn is pending for session")
+    snapshot = _worktree_snapshot(Path(str(binding["repo_root"])))
+    generated_at = _utc_now()
+    who = acknowledged_by or os.getenv("USER") or os.getenv("LOGNAME") or "unknown"
+    body = {
+        "schema": TURN_ACK_SCHEMA,
+        "claim_ceiling": TURN_CLAIM_CEILING,
+        "session_id": session_id,
+        "acknowledged_state": state["state"],
+        "quarantine_receipt": state.get("quarantine_receipt"),
+        "quarantine_receipt_hash": state.get("quarantine_receipt_hash"),
+        "acknowledged_by": who,
+        "reason": reason.strip(),
+        "current_worktree": snapshot,
+        "generated_at": generated_at,
+    }
+    receipt = {**body, "receipt_hash": _sha256_bytes(_canonical_json(body).encode("utf-8"))}
+    stamp = generated_at.replace(":", "").replace("-", "")
+    path = root / "turn-acks" / session_id / f"{stamp}-{receipt['receipt_hash'][7:19]}.json"
+    _atomic_write_json(path, receipt)
+    _write_turn_state(
+        root,
+        session_id,
+        TURN_ACKNOWLEDGED,
+        acknowledged_state=state["state"],
+        ack_receipt=str(path),
+        ack_receipt_hash=receipt["receipt_hash"],
+    )
+    return receipt, path
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1242,9 +1836,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     p_red.add_argument("--state-root")
     p_red.add_argument("--timeout", type=float, default=600.0)
 
+    p_green = sub.add_parser("green-gate")
+    p_green.add_argument("--repo-root", required=True)
+    p_green.add_argument("--base-revision", required=True)
+    p_green.add_argument("--contract", required=True)
+    p_green.add_argument("--python", required=True)
+    p_green.add_argument("--state-root")
+    p_green.add_argument("--timeout", type=float, default=600.0)
+
+    p_ack = sub.add_parser("ack-turn-failure")
+    p_ack.add_argument("--session-id", required=True)
+    p_ack.add_argument("--reason", required=True)
+    p_ack.add_argument("--state-root")
+
     args = parser.parse_args(argv)
     if args.command == "red-gate":
         return _main_red_gate(args)
+    if args.command == "green-gate":
+        return _main_green_gate(args)
     root = _state_root(getattr(args, "state_root", None))
 
     try:
@@ -1261,7 +1870,28 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         binding = load_binding(root, args.session_id)
-        preflight = run_preflight(binding, doctor_bin=args.doctor_bin)
+        if args.command == "ack-turn-failure":
+            ack, ack_path = acknowledge_turn_failure(root, binding, reason=args.reason)
+            _print_result(ack, receipt_path=ack_path)
+            return 0
+
+        turn_state = load_turn_state(root, args.session_id)
+        previous_turn = turn_state.get("state") if turn_state else None
+        if previous_turn == TURN_FAILED_DIRTY:
+            assert turn_state is not None
+            preflight = _blocked_preflight(
+                binding,
+                reason_code="PREVIOUS_TURN_FAILED_DIRTY",
+                detail=(
+                    "previous DSH turn failed and changed the worktree; inspect the "
+                    "quarantine receipt and run ack-turn-failure to continue"
+                ),
+            )
+            preflight["quarantine_receipt"] = turn_state.get("quarantine_receipt")
+        else:
+            preflight = run_preflight(binding, doctor_bin=args.doctor_bin)
+        if previous_turn in (TURN_FAILED_DIRTY, TURN_FAILED_CLEAN):
+            preflight["previous_turn_state"] = previous_turn
         preflight["invocation"] = args.command
         receipt_path = persist_preflight(root, preflight)
         if args.command == "check":
@@ -1283,12 +1913,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         env = os.environ.copy()
         env["DSH_HOME"] = str(binding["dsh_home"])
         env["NEXUS_DSH_PREFLIGHT_RECEIPT"] = str(receipt_path)
+        pre_turn = _worktree_snapshot(Path(str(binding["repo_root"])))
         proc = subprocess.run(
             dsh_argv,
             cwd=str(binding["repo_root"]),
             env=env,
             check=False,
         )
+        if proc.returncode != 0:
+            failed = record_failed_turn(root, binding, pre=pre_turn, exit_code=proc.returncode)
+            print(json.dumps(failed, sort_keys=True), file=sys.stderr)
+        else:
+            _write_turn_state(root, str(binding["session_id"]), TURN_OK)
         return proc.returncode
     except DshWorkflowError as exc:
         payload = {
