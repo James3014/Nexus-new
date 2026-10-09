@@ -57,9 +57,10 @@ It verifies all of the following before counting a family:
 - exact task and attempt identity; verifier-backed eligible candidate row hash
   and contract identity;
 - pre-action state submission preceding the outcome binding;
-- normalized repository-relative `tasks/.../*.md` path, exact 40-character
-  Git source revision, and exact Git-object bytes matching the *saved* Task
-  Card hash;
+- normalized repository-relative `tasks/.../*.md` path, or an absolute
+  Task Card path anchored to the original contract's `controller_repo_root`;
+  exact 40-character Git source revision and exact Git-object bytes matching
+  the *saved* Task Card hash;
 - single issuer section with one taxonomy value, one allowed family and a
   nonempty specific rationale; no duplicate declaration.
 
@@ -70,10 +71,13 @@ from relabeling it.
 
 The derived readiness snapshot retains a `task_family_provenance` readback
 per verified task (Task Card/contract hash, source revision and selected family)
-and a deterministic **structural** family-disjoint split witness. The witness
-does not attest to balanced PASS/FAIL distribution across train/dev, final
-split acceptance, clean held-out family overlap or training eligibility:
-fresh Wave 2 / T0-T1 scientific adjudication remains the owner of those claims.
+and a deterministic **structural** family-disjoint split witness with disjoint
+task lists and observed PASS/FAIL counts on **both** train and dev. When no
+family-disjoint partition has both labels on each side, readiness remains
+`WAITING_FOR_DATA` even if five distinct family names are present. The witness
+does not attest to the eventual statistically defensible split, sealed holdout
+near-duplicate independence or training eligibility; fresh Wave 2 / T0-T1
+scientific adjudication remains the owner of those claims.
 
 Only a natural corpus meeting the existing five-family, strong-verifier
 PASS+FAIL, dedup, leakage and holdout gates may reach

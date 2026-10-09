@@ -1273,10 +1273,19 @@ def _verified_preexecution_task_families(
             if submitted.tzinfo is None or bound.tzinfo is None or submitted > bound:
                 continue
 
-            card_rel = Path(str(state.get("task_card_path") or ""))
+            card_path = Path(str(state.get("task_card_path") or ""))
+            if card_path.is_absolute():
+                controller_root = Path(str(contract.get("controller_repo_root") or ""))
+                if not controller_root.is_absolute():
+                    continue
+                try:
+                    card_rel = card_path.relative_to(controller_root)
+                except ValueError:
+                    continue
+            else:
+                card_rel = card_path
             if (
-                card_rel.is_absolute()
-                or ".." in card_rel.parts
+                ".." in card_rel.parts
                 or len(card_rel.parts) < 3
                 or card_rel.parts[0] != "tasks"
                 or card_rel.suffix != ".md"
@@ -1398,16 +1407,62 @@ def refresh_registered_experiment(
     if not {"PASS", "FAIL"} <= set(verified_labels):
         readiness["blockers"].append("mapped_family_binary_coverage_unavailable")
         readiness["disposition"] = "WAITING_FOR_DATA"
-    ordered = sorted(set(task_families.values()))
-    readiness["family_disjoint_split_witness"] = (
-        {
-            "train_families": ordered[:-1],
-            "dev_families": ordered[-1:],
-            "train_dev_overlap": [],
+    # A counted-family total alone is not a scientific split witness. Both
+    # train and dev must contain independently labeled PASS and FAIL tasks.
+    family_members: dict[str, list[tuple[str, str]]] = {}
+    for task_id, row in sorted(family_provenance.items()):
+        family_members.setdefault(row["family"], []).append((task_id, row["verifier_status"]))
+    ordered = sorted(family_members)
+    required_labels = {"PASS", "FAIL"}
+
+    def labels_for(groups: Sequence[str]) -> set[str]:
+        return {label for family in groups for _, label in family_members[family]}
+
+    dev_families: list[str] = []
+    # A single self-contained dev family is preferred. Otherwise two
+    # complementary families suffice for binary classification whenever a
+    # genuine split exists; deterministic and bounded by O(family_count^2).
+    for family in ordered:
+        other = [f for f in ordered if f != family]
+        if required_labels <= labels_for([family]) and required_labels <= labels_for(other):
+            dev_families = [family]
+            break
+    if not dev_families:
+        for i, first in enumerate(ordered):
+            for second in ordered[i + 1 :]:
+                other = [f for f in ordered if f not in {first, second}]
+                if required_labels <= labels_for([first, second]) and required_labels <= labels_for(
+                    other
+                ):
+                    dev_families = [first, second]
+                    break
+            if dev_families:
+                break
+
+    if not dev_families:
+        readiness["blockers"].append("family_disjoint_labeled_split_unavailable")
+        readiness["disposition"] = "WAITING_FOR_DATA"
+        readiness["family_disjoint_split_witness"] = None
+    else:
+        train_families = [f for f in ordered if f not in dev_families]
+        train_rows = sorted(row for f in train_families for row in family_members[f])
+        dev_rows = sorted(row for f in dev_families for row in family_members[f])
+        readiness["family_disjoint_split_witness"] = {
+            "train_families": train_families,
+            "dev_families": dev_families,
+            "train_tasks": [task for task, _ in train_rows],
+            "dev_tasks": [task for task, _ in dev_rows],
+            "train_label_counts": {
+                label: sum(status == label for _, status in train_rows)
+                for label in ("PASS", "FAIL")
+            },
+            "dev_label_counts": {
+                label: sum(status == label for _, status in dev_rows) for label in ("PASS", "FAIL")
+            },
+            "train_dev_overlap": sorted(
+                {task for task, _ in train_rows} & {task for task, _ in dev_rows}
+            ),
         }
-        if len(ordered) >= 2
-        else None
-    )
     continuity = dict(spec.get("continuity") or {})
     checkpoint_root = state_root / str(
         continuity.get("checkpoint_relative_root") or "research/clm_system_one"

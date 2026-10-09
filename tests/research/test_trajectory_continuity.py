@@ -1885,6 +1885,7 @@ def _preexecution_card_family_fixture(tmp_path: Path, monkeypatch: pytest.Monkey
         contract_identity = {
             "task_id": task_id,
             "controller_revision": revision,
+            "controller_repo_root": str(repo),
             "target_base_revision": "a" * 40,
         }
         state = {
@@ -1931,6 +1932,40 @@ def test_registered_refresh_uses_verified_preexecution_task_family(tmp_path, mon
     assert refresh["checkpoint"]["status"] == "READY_TO_REAUDIT"
     assert refresh["checkpoint"]["auto_chain"] is False
     assert refresh["checkpoint"]["next_allowed_action"] == "T0_T1_REAUDIT_ONLY"
+
+
+def test_absolute_card_path_bound_to_original_controller_root(tmp_path, monkeypatch):
+    repo, state_root, evidence_root, cards = _preexecution_card_family_fixture(
+        tmp_path, monkeypatch
+    )
+    for task_id in ("task-f0-pass", "task-f0-fail"):
+        state_path = state_root / f"{task_id}.json"
+        state = json.loads(state_path.read_text())
+        state["task_card_path"] = str(repo / cards[task_id])
+        state_path.write_text(json.dumps(state))
+    readiness = refresh_registered_experiment(
+        repo_root=repo,
+        canonical_state_root=state_root,
+        candidate_evidence_root=evidence_root,
+    )["readiness"]
+    assert readiness["task_family_count"] == 5
+    assert readiness["disposition"] == "READY_TO_REAUDIT"
+
+
+def test_absolute_card_path_outside_original_controller_root_fails_closed(tmp_path, monkeypatch):
+    repo, state_root, evidence_root, _ = _preexecution_card_family_fixture(tmp_path, monkeypatch)
+    for task_id in ("task-f0-pass", "task-f0-fail"):
+        state_path = state_root / f"{task_id}.json"
+        state = json.loads(state_path.read_text())
+        state["task_card_path"] = str(tmp_path / "other-repo" / "tasks" / f"{task_id}.md")
+        state_path.write_text(json.dumps(state))
+    readiness = refresh_registered_experiment(
+        repo_root=repo,
+        canonical_state_root=state_root,
+        candidate_evidence_root=evidence_root,
+    )["readiness"]
+    assert readiness["task_family_count"] == 4
+    assert readiness["disposition"] == "WAITING_FOR_DATA"
 
 
 def test_task_family_fails_closed_on_tampered_card_identity(tmp_path, monkeypatch):
@@ -2099,6 +2134,28 @@ def test_cross_attempt_outcomes_cannot_relabel_prior_task_trajectories(tmp_path,
     assert "task-f0-pass" not in readiness["task_family_provenance"]
     assert "task-f0-fail" not in readiness["task_family_provenance"]
     assert readiness["disposition"] == "WAITING_FOR_DATA"
+
+
+def test_family_disjoint_split_needs_both_labels_on_each_side(tmp_path, monkeypatch):
+    repo, state_root, evidence_root, _ = _preexecution_card_family_fixture(tmp_path, monkeypatch)
+    # All five families have FAIL, but only one family has a labeled PASS;
+    # there is no family-disjoint train/dev partition with both classes.
+    for i in range(1, _MIN_TASK_FAMILIES):
+        task_id = f"task-f{i}-pass"
+        state_path = state_root / f"{task_id}.json"
+        state = json.loads(state_path.read_text())
+        state["task_card_hash"] = "0" * 64
+        state_path.write_text(json.dumps(state))
+    readiness = refresh_registered_experiment(
+        repo_root=repo,
+        canonical_state_root=state_root,
+        candidate_evidence_root=evidence_root,
+    )["readiness"]
+    assert readiness["task_family_count"] == 5
+    assert readiness["mapped_family_strong_labels"]["PASS"] == 1
+    assert readiness["disposition"] == "WAITING_FOR_DATA"
+    assert "family_disjoint_labeled_split_unavailable" in readiness["blockers"]
+    assert readiness["family_disjoint_split_witness"] is None
 
 
 def test_unmapped_pass_labels_cannot_unlock_family_readiness(tmp_path, monkeypatch):
