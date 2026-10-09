@@ -1820,7 +1820,10 @@ def _preexecution_card_family_fixture(tmp_path: Path, monkeypatch: pytest.Monkey
     (docs / "FINAL_HOLDOUT_DO_NOT_TRAIN.json").write_text('{"historical_replay_tasks":[]}')
     (docs / "TRAJECTORY_CORPUS_READINESS_REPORT.md").write_text("fixture only")
     (docs / "TRAJECTORY_VERIFIER_EXPERIMENT_REPORT.md").write_text("fixture only")
-    sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
+
+    def sha(path: Path) -> str:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
     spec = {
         "schema": "nexus.research_experiment_spec.v1",
         "experiment_id": "NEXUS_SYSTEM_ONE_CLM_V2",
@@ -1838,8 +1841,11 @@ def _preexecution_card_family_fixture(tmp_path: Path, monkeypatch: pytest.Monkey
     }
     (spec_dir / "trajectory_verifier_v2_spec.json").write_text(json.dumps(spec))
     categories = [
-        "defect_repair", "feature_extension", "test_oracle",
-        "runtime_recovery", "evidence_integrity",
+        "defect_repair",
+        "feature_extension",
+        "test_oracle",
+        "runtime_recovery",
+        "evidence_integrity",
     ]
     cards = {}
     for task_id, family in expected.items():
@@ -1859,9 +1865,18 @@ def _preexecution_card_family_fixture(tmp_path: Path, monkeypatch: pytest.Monkey
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     subprocess.run(["git", "add", "tasks", "docs", "nexus"], cwd=repo, check=True)
     subprocess.run(
-        ["git", "-c", "user.name=fixture", "-c", "user.email=fixture@example.org",
-         "commit", "-qm", "freeze pre-execution family declaration"],
-        cwd=repo, check=True,
+        [
+            "git",
+            "-c",
+            "user.name=fixture",
+            "-c",
+            "user.email=fixture@example.org",
+            "commit",
+            "-qm",
+            "freeze pre-execution family declaration",
+        ],
+        cwd=repo,
+        check=True,
     )
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
     state_root.mkdir(parents=True)
@@ -1884,21 +1899,25 @@ def _preexecution_card_family_fixture(tmp_path: Path, monkeypatch: pytest.Monkey
         }
         (state_root / f"{task_id}.json").write_text(json.dumps(state))
         _, row_ref = _candidate_row(
-            tmp_path, monkeypatch, task_id=task_id, candidate_id=cand_id,
-            status=task_id.rsplit("-", 1)[1], contract_identity=contract_identity,
+            tmp_path,
+            monkeypatch,
+            task_id=task_id,
+            candidate_id=cand_id,
+            status=task_id.rsplit("-", 1)[1],
+            contract_identity=contract_identity,
         )
         _trajectory(
-            evidence_root, task_id=task_id,
+            evidence_root,
+            task_id=task_id,
             trajectory_id=f"traj-{cand_id}",
-            candidate_id=cand_id, candidate_ref=row_ref,
+            candidate_id=cand_id,
+            candidate_ref=row_ref,
         )
     return repo, state_root, evidence_root, cards
 
 
 def test_registered_refresh_uses_verified_preexecution_task_family(tmp_path, monkeypatch):
-    repo, state_root, evidence_root, _ = _preexecution_card_family_fixture(
-        tmp_path, monkeypatch
-    )
+    repo, state_root, evidence_root, _ = _preexecution_card_family_fixture(tmp_path, monkeypatch)
     refresh = refresh_registered_experiment(
         repo_root=repo,
         canonical_state_root=state_root,
@@ -1934,9 +1953,7 @@ def test_task_family_fails_closed_on_tampered_card_identity(tmp_path, monkeypatc
 
 
 def test_task_family_fails_closed_when_legacy_state_missing(tmp_path, monkeypatch):
-    repo, state_root, evidence_root, _ = _preexecution_card_family_fixture(
-        tmp_path, monkeypatch
-    )
+    repo, state_root, evidence_root, _ = _preexecution_card_family_fixture(tmp_path, monkeypatch)
     for path in state_root.glob("*.json"):
         path.unlink()
     refresh = refresh_registered_experiment(
@@ -1949,19 +1966,20 @@ def test_task_family_fails_closed_when_legacy_state_missing(tmp_path, monkeypatc
     assert refresh["checkpoint"]["auto_chain"] is False
 
 
-def test_issuer_card_current_worktree_edits_cannot_relabel_frozen_task(
-    tmp_path, monkeypatch
-):
+def test_issuer_card_current_worktree_edits_cannot_relabel_frozen_task(tmp_path, monkeypatch):
     repo, state_root, evidence_root, cards = _preexecution_card_family_fixture(
         tmp_path, monkeypatch
     )
     for task_id in ("task-f0-pass", "task-f0-fail"):
         path = repo / cards[task_id]
-        path.write_text(path.read_text().replace(
-            "track1_family: defect_repair", "track1_family: runtime_recovery"
-        ))
+        path.write_text(
+            path.read_text().replace(
+                "track1_family: defect_repair", "track1_family: runtime_recovery"
+            )
+        )
     readiness = refresh_registered_experiment(
-        repo_root=repo, canonical_state_root=state_root,
+        repo_root=repo,
+        canonical_state_root=state_root,
         candidate_evidence_root=evidence_root,
     )["readiness"]
     assert readiness["task_family_count"] == 5
@@ -1969,9 +1987,7 @@ def test_issuer_card_current_worktree_edits_cannot_relabel_frozen_task(
     assert readiness["family_disjoint_split_witness"]["train_dev_overlap"] == []
 
 
-def test_issuer_card_post_effect_retrofit_cannot_mint_family(
-    tmp_path, monkeypatch
-):
+def test_issuer_card_post_effect_retrofit_cannot_mint_family(tmp_path, monkeypatch):
     repo, state_root, evidence_root, cards = _preexecution_card_family_fixture(
         tmp_path, monkeypatch
     )
@@ -1986,16 +2002,15 @@ def test_issuer_card_post_effect_retrofit_cannot_mint_family(
         state["task_card_hash"] = hashlib.sha256(path.read_bytes()).hexdigest()
         state_path.write_text(json.dumps(state))
     readiness = refresh_registered_experiment(
-        repo_root=repo, canonical_state_root=state_root,
+        repo_root=repo,
+        canonical_state_root=state_root,
         candidate_evidence_root=evidence_root,
     )["readiness"]
     assert readiness["task_family_count"] == 4
     assert readiness["disposition"] == "WAITING_FOR_DATA"
 
 
-def test_unknown_issuer_family_and_duplicate_declaration_fail_closed(
-    tmp_path, monkeypatch
-):
+def test_unknown_issuer_family_and_duplicate_declaration_fail_closed(tmp_path, monkeypatch):
     import subprocess
 
     repo, state_root, evidence_root, cards = _preexecution_card_family_fixture(
@@ -2007,28 +2022,32 @@ def test_unknown_issuer_family_and_duplicate_declaration_fail_closed(
         ("task-f0-fail", "track1_family: defect_repair\\ntrack1_family: runtime_recovery"),
     ):
         path = repo / cards[task_id]
-        path.write_text(path.read_text().replace(
-            "track1_family: defect_repair", corruption
-        ))
+        path.write_text(path.read_text().replace("track1_family: defect_repair", corruption))
     subprocess.run(["git", "add", "tasks"], cwd=repo, check=True)
     subprocess.run(
-        ["git", "-c", "user.name=fixture", "-c", "user.email=fixture@example.org",
-         "commit", "-qm", "forge invalid family declarations"],
-        cwd=repo, check=True,
+        [
+            "git",
+            "-c",
+            "user.name=fixture",
+            "-c",
+            "user.email=fixture@example.org",
+            "commit",
+            "-qm",
+            "forge invalid family declarations",
+        ],
+        cwd=repo,
+        check=True,
     )
-    revision = subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=repo, text=True
-    ).strip()
+    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
     for task_id in ("task-f0-pass", "task-f0-fail"):
         state_path = state_root / f"{task_id}.json"
         state = json.loads(state_path.read_text())
         state["controller_revision"] = revision
-        state["task_card_hash"] = hashlib.sha256(
-            (repo / cards[task_id]).read_bytes()
-        ).hexdigest()
+        state["task_card_hash"] = hashlib.sha256((repo / cards[task_id]).read_bytes()).hexdigest()
         state_path.write_text(json.dumps(state))
     readiness = refresh_registered_experiment(
-        repo_root=repo, canonical_state_root=state_root,
+        repo_root=repo,
+        canonical_state_root=state_root,
         candidate_evidence_root=evidence_root,
     )["readiness"]
     assert readiness["task_family_count"] == 4
@@ -2036,15 +2055,12 @@ def test_unknown_issuer_family_and_duplicate_declaration_fail_closed(
 
 
 def test_holdout_task_does_not_gain_family_provenance(tmp_path, monkeypatch):
-    repo, state_root, evidence_root, _ = _preexecution_card_family_fixture(
-        tmp_path, monkeypatch
-    )
+    repo, state_root, evidence_root, _ = _preexecution_card_family_fixture(tmp_path, monkeypatch)
     holdout_path = repo / "docs/research/trajectory_verifier_v2/FINAL_HOLDOUT_DO_NOT_TRAIN.json"
-    holdout_path.write_text(json.dumps({
-        "historical_replay_tasks": ["task-f0-pass"]
-    }))
+    holdout_path.write_text(json.dumps({"historical_replay_tasks": ["task-f0-pass"]}))
     readiness = refresh_registered_experiment(
-        repo_root=repo, canonical_state_root=state_root,
+        repo_root=repo,
+        canonical_state_root=state_root,
         candidate_evidence_root=evidence_root,
     )["readiness"]
     assert "task-f0-pass" not in readiness["task_family_provenance"]
@@ -2052,29 +2068,31 @@ def test_holdout_task_does_not_gain_family_provenance(tmp_path, monkeypatch):
     assert readiness["disposition"] == "WAITING_FOR_DATA"
 
 
-def test_cross_attempt_outcomes_cannot_relabel_prior_task_trajectories(
-    tmp_path, monkeypatch
-):
-    repo, state_root, evidence_root, _ = _preexecution_card_family_fixture(
-        tmp_path, monkeypatch
-    )
+def test_cross_attempt_outcomes_cannot_relabel_prior_task_trajectories(tmp_path, monkeypatch):
+    repo, state_root, evidence_root, _ = _preexecution_card_family_fixture(tmp_path, monkeypatch)
     # Older and newer attempts with one task_id cannot share the current
     # task-id-only family map without independent attempt-level proof.
     for task_id in ("task-f0-pass", "task-f0-fail"):
         state = json.loads((state_root / f"{task_id}.json").read_text())
         candidate_id = f"cross-{task_id}"
         _, row_ref = _candidate_row(
-            tmp_path, monkeypatch, task_id=task_id, candidate_id=candidate_id,
+            tmp_path,
+            monkeypatch,
+            task_id=task_id,
+            candidate_id=candidate_id,
             status=task_id.rsplit("-", 1)[1],
             contract_identity=state["contract"],
         )
         _trajectory(
-            evidence_root, task_id=task_id,
-            trajectory_id=f"traj-{candidate_id}", candidate_id=candidate_id,
+            evidence_root,
+            task_id=task_id,
+            trajectory_id=f"traj-{candidate_id}",
+            candidate_id=candidate_id,
             candidate_ref=row_ref,
         )
     readiness = refresh_registered_experiment(
-        repo_root=repo, canonical_state_root=state_root,
+        repo_root=repo,
+        canonical_state_root=state_root,
         candidate_evidence_root=evidence_root,
     )["readiness"]
     assert readiness["task_family_count"] == 4
@@ -2083,12 +2101,8 @@ def test_cross_attempt_outcomes_cannot_relabel_prior_task_trajectories(
     assert readiness["disposition"] == "WAITING_FOR_DATA"
 
 
-def test_unmapped_pass_labels_cannot_unlock_family_readiness(
-    tmp_path, monkeypatch
-):
-    repo, state_root, evidence_root, _ = _preexecution_card_family_fixture(
-        tmp_path, monkeypatch
-    )
+def test_unmapped_pass_labels_cannot_unlock_family_readiness(tmp_path, monkeypatch):
+    repo, state_root, evidence_root, _ = _preexecution_card_family_fixture(tmp_path, monkeypatch)
     for i in range(_MIN_TASK_FAMILIES):
         task_id = f"task-f{i}-pass"
         state_path = state_root / f"{task_id}.json"
@@ -2096,7 +2110,8 @@ def test_unmapped_pass_labels_cannot_unlock_family_readiness(
         state["task_card_hash"] = "0" * 64
         state_path.write_text(json.dumps(state))
     readiness = refresh_registered_experiment(
-        repo_root=repo, canonical_state_root=state_root,
+        repo_root=repo,
+        canonical_state_root=state_root,
         candidate_evidence_root=evidence_root,
     )["readiness"]
     assert readiness["task_family_count"] == 5

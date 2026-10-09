@@ -32,11 +32,11 @@ _MIN_TASK_FAMILIES = 5
 # this research consumer is not a task classifier or a second truth store.
 _TRACK1_FAMILY_TAXONOMY = "TRACK1_ENGINEERING_V1"
 _TRACK1_FAMILY_CATEGORIES = frozenset({
-    "defect_repair",          # repair existing, demonstrably incorrect behavior
-    "feature_extension",     # introduce previously absent capability
-    "test_oracle",           # test, verifier, or assertion correctness
-    "runtime_recovery",      # runtime/transport/restart continuity
-    "evidence_integrity",    # evidence identity, lineage, tamper safety
+    "defect_repair",  # repair existing, demonstrably incorrect behavior
+    "feature_extension",  # introduce previously absent capability
+    "test_oracle",  # test, verifier, or assertion correctness
+    "runtime_recovery",  # runtime/transport/restart continuity
+    "evidence_integrity",  # evidence identity, lineage, tamper safety
     "architecture_maintenance",  # behavior-preserving internal restructuring
 })
 
@@ -1205,20 +1205,15 @@ def _verified_preexecution_task_families(
                 and task not in holdout_ids
                 and str(outcome.get("trajectory_id") or "") not in excluded_ids
             ):
-                observed_attempts.setdefault(task, set()).add(
-                    str(outcome.get("attempt_id") or "")
-                )
+                observed_attempts.setdefault(task, set()).add(str(outcome.get("attempt_id") or ""))
         except (OSError, ValueError, TypeError):
             continue
     rejected.update(
-        task for task, attempts in observed_attempts.items()
-        if len(attempts) > 1 or "" in attempts
+        task for task, attempts in observed_attempts.items() if len(attempts) > 1 or "" in attempts
     )
 
     def _one_card_field(text: str, key: str) -> str:
-        pattern = re.compile(
-            rf"^{re.escape(key)}:[ \t]*([^\r\n]*?)[ \t]*$", re.MULTILINE
-        )
+        pattern = re.compile(rf"^{re.escape(key)}:[ \t]*([^\r\n]*?)[ \t]*$", re.MULTILINE)
         found = pattern.findall(text)
         return found[0] if len(found) == 1 else ""
 
@@ -1226,10 +1221,7 @@ def _verified_preexecution_task_families(
         try:
             outcome = json.loads(outcome_path.read_text(encoding="utf-8"))
             task_id = str(outcome.get("task_id") or "")
-            if (
-                str(outcome.get("trajectory_id") or "") in excluded_ids
-                or task_id in holdout_ids
-            ):
+            if str(outcome.get("trajectory_id") or "") in excluded_ids or task_id in holdout_ids:
                 continue
             if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", task_id):
                 continue
@@ -1243,17 +1235,16 @@ def _verified_preexecution_task_families(
             if not isinstance(contract, Mapping) or not contract:
                 continue
             if not all(
-                str(row.get("task_id") or "") == task_id
-                for row in (outcome, state, contract)
+                str(row.get("task_id") or "") == task_id for row in (outcome, state, contract)
             ):
                 continue
             attempt_id = str(outcome.get("attempt_id") or "")
             if not attempt_id or attempt_id != str(state.get("attempt_id") or ""):
                 continue
 
-            candidate_path = (evidence_root / str(
-                outcome.get("candidate_evidence_ref") or ""
-            )).resolve()
+            candidate_path = (
+                evidence_root / str(outcome.get("candidate_evidence_ref") or "")
+            ).resolve()
             if evidence_root not in candidate_path.parents or not candidate_path.is_file():
                 continue
             candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
@@ -1261,9 +1252,9 @@ def _verified_preexecution_task_families(
                 candidate.get("task_id") != task_id
                 or candidate.get("attempt_id") != attempt_id
                 or candidate.get("record_sha256") != outcome.get("candidate_record_sha256")
-                or candidate.get("record_sha256") != _sha256_json({
-                    key: value for key, value in candidate.items()
-                    if key != "record_sha256"
+                or candidate.get("record_sha256")
+                != _sha256_json({
+                    key: value for key, value in candidate.items() if key != "record_sha256"
                 })
                 or candidate.get("task_contract_sha256") != _sha256_json(contract)
                 or candidate.get("dataset_eligible") is not True
@@ -1272,28 +1263,22 @@ def _verified_preexecution_task_families(
             ):
                 continue
             target_rev = str(
-                contract.get("target_base_revision")
-                or contract.get("controller_revision") or ""
+                contract.get("target_base_revision") or contract.get("controller_revision") or ""
             )
             if target_rev and target_rev != str(candidate.get("source_revision") or ""):
                 continue
 
-            submitted = datetime.fromisoformat(
-                str(state["submitted_at"]).replace("Z", "+00:00")
-            )
-            bound = datetime.fromisoformat(
-                str(outcome["bound_at"]).replace("Z", "+00:00")
-            )
-            if (
-                submitted.tzinfo is None or bound.tzinfo is None
-                or submitted > bound
-            ):
+            submitted = datetime.fromisoformat(str(state["submitted_at"]).replace("Z", "+00:00"))
+            bound = datetime.fromisoformat(str(outcome["bound_at"]).replace("Z", "+00:00"))
+            if submitted.tzinfo is None or bound.tzinfo is None or submitted > bound:
                 continue
 
             card_rel = Path(str(state.get("task_card_path") or ""))
             if (
-                card_rel.is_absolute() or ".." in card_rel.parts
-                or len(card_rel.parts) < 3 or card_rel.parts[0] != "tasks"
+                card_rel.is_absolute()
+                or ".." in card_rel.parts
+                or len(card_rel.parts) < 3
+                or card_rel.parts[0] != "tasks"
                 or card_rel.suffix != ".md"
             ):
                 continue
@@ -1309,18 +1294,15 @@ def _verified_preexecution_task_families(
             # pre-execution revision, never the mutable current working tree.
             proc = subprocess.run(
                 ["git", "show", f"{card_revision}:{card_rel.as_posix()}"],
-                cwd=repo, capture_output=True, check=False, timeout=5,
+                cwd=repo,
+                capture_output=True,
+                check=False,
+                timeout=5,
             )
-            if (
-                proc.returncode != 0
-                or hashlib.sha256(proc.stdout).hexdigest() != expected_sha
-            ):
+            if proc.returncode != 0 or hashlib.sha256(proc.stdout).hexdigest() != expected_sha:
                 continue
             text = proc.stdout.decode("utf-8")
-            if (
-                f"task_id: `{task_id}`" not in text
-                and f"task_id: {task_id}" not in text
-            ):
+            if f"task_id: `{task_id}`" not in text and f"task_id: {task_id}" not in text:
                 continue
             # The issuer's metadata must occupy one explicit, frozen section;
             # arbitrary objective or example text cannot become a label.
@@ -1409,9 +1391,7 @@ def refresh_registered_experiment(
     # The strong PASS and FAIL that unlock a family-disjoint re-audit must
     # themselves have proven family provenance. An unmapped historical PASS
     # must never complete the labeled family's binary coverage.
-    verified_labels = [
-        row["verifier_status"] for row in family_provenance.values()
-    ]
+    verified_labels = [row["verifier_status"] for row in family_provenance.values()]
     readiness["mapped_family_strong_labels"] = {
         status: verified_labels.count(status) for status in ("PASS", "FAIL")
     }
