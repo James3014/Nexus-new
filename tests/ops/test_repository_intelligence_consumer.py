@@ -67,7 +67,7 @@ def _valid_terminal_bundle() -> dict:
     return bundle
 
 
-def test_action_commit_pinned_to_rate_limit_resilient_main():
+def test_action_commit_pinned_to_pr34():
     assert PINNED_ACTION_COMMIT == "88285acf570688befbc8e36eb73f46987171bd4e"
 
 
