@@ -1572,6 +1572,10 @@ def resolve_execution_lane(
     }
 
 
+# Attempt budget applied when a request carries no explicit maximum_attempts_per_task.
+DEFAULT_MAXIMUM_ATTEMPTS_PER_TASK = 5
+
+
 class SelfHostedTaskService:
     _CUSTOM_RUNNER_FORBIDDEN_EVIDENCE_FIELDS = frozenset(
         {
@@ -3650,7 +3654,7 @@ class SelfHostedTaskService:
             provider_order=provider_order,
             maximum_provider_calls=len(provider_order) if requested_worker == "auto" else (2 if fallback_worker else 1),
             maximum_replans=0,
-            maximum_attempts_per_task=int(request.get("maximum_attempts_per_task", 5) or 5),
+            maximum_attempts_per_task=int(request.get("maximum_attempts_per_task", DEFAULT_MAXIMUM_ATTEMPTS_PER_TASK) or DEFAULT_MAXIMUM_ATTEMPTS_PER_TASK),
             maximum_wall_time_seconds=float(request.get("maximum_wall_time_seconds", 0) or 0),
             maximum_changed_files=int(request.get("maximum_changed_files", 0) or 0),
             maximum_deleted_files=int(request.get("maximum_deleted_files", 0) or 0),
