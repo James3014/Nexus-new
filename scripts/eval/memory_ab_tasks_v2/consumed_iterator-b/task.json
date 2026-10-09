@@ -1,0 +1,8 @@
+{
+  "id": "consumed_iterator-b",
+  "bug_class": "consumed_iterator",
+  "variant": "b",
+  "problem_statement": "read_table() reports row_count 0 for a table with two data rows when it is given an iterator of rows. The records list is correct, and the columns are correct.",
+  "target_file": "table_reader.py",
+  "repro_file": "repro.py"
+}

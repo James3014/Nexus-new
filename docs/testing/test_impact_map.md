@@ -102,6 +102,7 @@
 | scripts/engine/commands/learn_actions.py | tests/engine/test_learn_actions.py | active | medium | learn_cli_action_contract |
 | scripts/engine/commands/multi_agent_actions.py | tests/engine/test_multi_agent_actions.py | active | medium | multi_agent_cli_action_contract |
 | scripts/engine/commands/registry_actions.py | tests/engine/test_registry_actions.py | active | medium | registry_cli_action_contract |
+| scripts/eval | tests/eval/test_memory_ab_v1.py | active | medium | memory_ab_eval_harness_contract |
 | scripts/engine/commands/research_actions.py | tests/engine/test_research_actions.py | active | medium | research_cli_action_contract |
 | scripts/engine/commands/sandbox_actions.py | tests/engine/test_sandbox_actions.py | active | medium | sandbox_cli_action_and_physical_runner_contract |
 | scripts/ops/ci_gate.py | tests/ops/test_ci_gate_report_trust_audit.py, tests/ops/test_ci_gate_closeout_contract.py, tests/ops/test_ci_gate_wiki_sync_block.py | active | high | governance |

@@ -1,0 +1,8 @@
+{
+  "id": "wrong_comparison_operator-b",
+  "bug_class": "wrong_comparison_operator",
+  "variant": "b",
+  "problem_statement": "has_passing() should report True when a score meets the threshold exactly. has_passing([60], 60) currently returns False.",
+  "target_file": "grading.py",
+  "repro_file": "repro.py"
+}

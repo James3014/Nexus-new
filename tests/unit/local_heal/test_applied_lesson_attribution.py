@@ -1,0 +1,574 @@
+"""#1632: canonical lesson retrieval and authoritative applied-lesson attribution."""
+
+from __future__ import annotations
+
+import hashlib
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from nexus_learning.lessons import LessonStore, build_lesson
+from nexus_learning.state_root import LearningStateRoot
+
+from nexus.services.local_heal.errors import PatchError, PatchErrorKind
+from nexus.services.local_heal.learning_closure_bridge import (
+    LearningClosureBridge,
+    write_learning_closure,
+)
+from nexus.services.local_heal.memory_retrieval_adapter import (
+    CanonicalLessonStore,
+    MemoryRetrievalAdapter,
+    NexusCompositeLessonStore,
+)
+from nexus.services.local_heal.memory_trace import MemoryTrace
+from nexus.services.local_heal.orchestrator import HealOrchestrator
+
+
+def _write(root: Path, origin: str, title: str) -> str:
+    lesson = build_lesson(
+        title=title,
+        lesson_body="Guard the empty sequence before indexing the first element.",
+        source_episode_ids=["ep-1"],
+        outcome_polarity="success",
+        applies_when=["indexing empty list"],
+        avoid_when=["list is validated upstream"],
+        source_task_ids=["task-a"],
+        evidence_refs=["receipt://r1"],
+        evidence_origin=origin,
+    )
+    LessonStore(LearningStateRoot.from_project_root(root)).append(lesson)
+    return lesson["lesson_id"]
+
+
+def _orch() -> HealOrchestrator:
+    return object.__new__(HealOrchestrator)
+
+
+def _op(lesson_id: str, **over):
+    base = dict(
+        instance_id="task-1",
+        attempt_id="a1",
+        action_id="act1",
+        idempotency_key="idem-1",
+        terminal_outcome="SUCCEEDED",
+        solve_eligible=True,
+        failure_reason="",
+        receipt_path="receipt://verifier",
+        memory_enabled=True,
+        retrieved_lesson_ids=[lesson_id],
+        applied_patch_hash="abc123",
+        selected_candidate_hash_matches_applied=True,
+        verifier_receipt={"verifier_status": "pass", "receipt_id": "r1"},
+        _memory_influence_trace=MemoryTrace(
+            available=True,
+            selected_ids=[lesson_id],
+            memory_evidence_ids=[lesson_id],
+            prompt_included=True,
+        ),
+    )
+    base.update(over)
+    return SimpleNamespace(**base)
+
+
+def test_canonical_store_returns_physical_excludes_simulated(tmp_path):
+    phys = _write(tmp_path, "physical", "Empty list indexing guard")
+    sim = _write(tmp_path, "simulated", "Empty list indexing simulated guard")
+    rows = CanonicalLessonStore(project_root=tmp_path).query(
+        query_text="empty list indexing", limit=3
+    )
+    ids = [r["lesson_id"] for r in rows]
+    assert ids == [phys]
+    assert sim not in ids
+    assert rows[0]["title"] and rows[0]["applies_when"] and rows[0]["avoid_when"]
+
+
+def test_canonical_store_fail_open_and_missing_ledger(tmp_path):
+    store = CanonicalLessonStore(project_root=tmp_path)
+    assert store.query(query_text="anything", limit=3) == []
+    assert store.last_error == ""
+
+
+def test_composite_default_includes_canonical_store():
+    stores = NexusCompositeLessonStore().stores
+    assert isinstance(stores[0], CanonicalLessonStore)
+
+
+def test_judge_lesson_relevance_floor_and_deterministic_untouched():
+    judge_hit = {"lesson_id": "lsn:j", "relevance_score": 0.05, "title": "t"}
+    det_hit = {"lesson_id": "lsn:d", "relevance_score": 0.05, "title": "t"}
+    judge_row = CanonicalLessonStore._to_row(judge_hit, {"reflector": {"kind": "judge"}})
+    det_row = CanonicalLessonStore._to_row(det_hit, {"reflector": {"kind": "deterministic"}})
+    assert judge_row["relevance_score"] >= 0.5
+    assert det_row["relevance_score"] == pytest.approx(0.05)
+
+
+def _judge_lesson_row(tmp_path: Path, title: str) -> str:
+    lesson = build_lesson(
+        title=title,
+        lesson_body="Check the parser fallback before indexing the token stream.",
+        source_episode_ids=["ep-judge"],
+        outcome_polarity="failure",
+        applies_when=["parser crash on empty token stream"],
+        avoid_when=["parser input is validated upstream"],
+        source_task_ids=["task-parser"],
+        evidence_refs=["receipt://r-judge"],
+        evidence_origin="physical",
+        reflector={"kind": "judge", "model": "qwen2.5-coder:7b"},
+    )
+    LessonStore(LearningStateRoot.from_project_root(tmp_path)).append(lesson)
+    return lesson["lesson_id"]
+
+
+def test_c6p_block_renders_canonical_lesson_before_episode_rows(tmp_path, monkeypatch):
+    from nexus.services.local_heal import canonical_span as canonical_span_mod
+    from nexus.services.local_heal import memory_retrieval_adapter as adapter_mod
+    from nexus.services.local_heal.prompt_builder import PromptBuilder
+
+    title = "Guard parser fallback before indexing"
+    lsn_id = _judge_lesson_row(tmp_path, title)
+
+    class _TmpCanonical(adapter_mod.CanonicalLessonStore):
+        def __init__(self, **_kwargs):
+            super().__init__(project_root=tmp_path)
+
+    class _EpisodeStore:
+        last_metadata: dict = {}
+
+        def query(self, *, query_text, limit, current_state=None):
+            return [
+                {
+                    "lesson_id": "lep:ep-9",
+                    "title": "Raw episode row",
+                    "summary": "task ended SUCCEEDED via local_heal",
+                    "classification": "success",
+                    "applies_when": ["parser"],
+                    "avoid_when": [],
+                }
+            ]
+
+    class _Composite(adapter_mod.NexusCompositeLessonStore):
+        def __init__(self, stores=None):
+            super().__init__(stores=[_TmpCanonical(), _EpisodeStore()])
+
+    monkeypatch.setattr(adapter_mod, "CanonicalLessonStore", _TmpCanonical)
+    monkeypatch.setattr(adapter_mod, "NexusCompositeLessonStore", _Composite)
+    monkeypatch.setattr(
+        canonical_span_mod,
+        "get_canonical_search_span",
+        lambda **_kw: SimpleNamespace(span="x = 1", source="test"),
+    )
+
+    captured: dict = {}
+
+    class _Stop(Exception):
+        pass
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        raise _Stop
+
+    monkeypatch.setattr(
+        PromptBuilder, "build_verification_guided_retry_prompt", staticmethod(_capture)
+    )
+
+    orch = _orch()
+    orch._extract_target_symbol = lambda ctx: ""
+    orch._resolve_target_file = lambda ctx: "src/parser.py"
+    op = SimpleNamespace(
+        final_patch="--- a/src/parser.py\n+++ b/src/parser.py\n@@ -1 +1 @@\n-x\n+y\n",
+        user_prompt="fix the parser crash",
+        problem_statement="fix the parser crash on empty token stream",
+        retrieved_lesson_ids=[],
+        _memory_influence_trace=SimpleNamespace(selected_ids=["lep:ep-9"], prompt_included=False),
+    )
+    ctx = SimpleNamespace(op=op)
+
+    with pytest.raises(_Stop):
+        orch._attempt_semantic_retry(ctx, "verifier failed", "verification_failed")
+
+    text = captured["memory_lessons"]
+    assert title in text
+    assert "lep:" in text
+    assert text.index(title) < text.index("lep:")
+    assert op.retrieved_lesson_ids[0] == lsn_id
+    assert op._memory_prompt_injected_ids[0] == lsn_id
+    assert op.retrieved_lesson_ids.count(lsn_id) == 1
+
+
+def test_adapter_turns_canonical_rows_into_lessons(tmp_path):
+    lid = _write(tmp_path, "physical", "Empty list indexing guard")
+    adapter = MemoryRetrievalAdapter(store=CanonicalLessonStore(project_root=tmp_path))
+    lessons = adapter.retrieve(query_text="empty list indexing", limit=3)
+    assert [row.finding_id for row in lessons] == [lid]
+    assert lessons[0].provenance
+    assert lessons[0].pattern_type == "success"
+
+
+def test_adoption_sets_applied_and_closure_reinforces(tmp_path, monkeypatch):
+    lid = _write(tmp_path, "physical", "Empty list indexing guard")
+    op = _op(lid)
+    ctx = SimpleNamespace(op=op)
+    _orch()._record_authoritative_memory_adoption(ctx)
+    assert op.applied_lesson_ids == [lid]
+
+    import nexus.learning.outcome_memory as om
+
+    monkeypatch.setattr(om.OutcomeMemoryManager, "save_episode_and_tune_sync", lambda *a, **k: None)
+    bridge = LearningClosureBridge(
+        path=tmp_path / "c.jsonl", project_root=tmp_path, enable_findings=False
+    )
+    row = bridge.write_lesson(ctx)
+    assert row["applied_lesson_ids"] == [lid]
+    assert row["lesson_disposition"] == "reinforce"
+    result = write_learning_closure(ctx, bridge)
+    assert result["lesson"]["applied_lesson_ids"] == [lid]
+    assert result["lesson"]["lesson_disposition"] == "reinforce"
+
+
+@pytest.mark.parametrize(
+    "over",
+    [
+        {"verifier_receipt": {"verifier_status": "fail", "receipt_id": "r1"}},
+        {"selected_candidate_hash_matches_applied": False},
+        {"applied_patch_hash": ""},
+    ],
+)
+def test_not_applied_when_authority_missing(over):
+    op = _op("L1", **over)
+    _orch()._record_authoritative_memory_adoption(SimpleNamespace(op=op))
+    assert op.applied_lesson_ids == []
+    assert op.applied_lesson_attribution == {}
+
+
+def test_not_applied_when_prompt_not_included():
+    op = _op(
+        "L1",
+        _memory_influence_trace=MemoryTrace(
+            available=True, selected_ids=["L1"], prompt_included=False
+        ),
+    )
+    _orch()._record_authoritative_memory_adoption(SimpleNamespace(op=op))
+    assert op.applied_lesson_ids == []
+
+
+def test_memory_off_leaves_retrieved_and_applied_empty():
+    op = SimpleNamespace(
+        instance_id="t",
+        memory_enabled=False,
+        final_patch="",
+        problem_statement="p",
+        repo_dir=Path("."),
+        retrieved_lesson_ids=[],
+    )
+    orch = _orch()
+    orch._attach_memory_influence_trace(SimpleNamespace(op=op))
+    orch._record_authoritative_memory_adoption(SimpleNamespace(op=op))
+    assert op.applied_lesson_ids == []
+    from nexus.services.local_heal.learning_closure_bridge import _lineage
+
+    lin = _lineage(op)
+    assert lin["retrieved_lesson_ids"] == [] and lin["applied_lesson_ids"] == []
+
+
+def test_success_path_hook_populates_inputs_and_enables_adoption():
+    patch = "--- a/f.py\n+++ b/f.py\n@@\n-x\n+y\n"
+    op = SimpleNamespace(
+        instance_id="task-1",
+        attempt=1,
+        final_patch=patch,
+        solve_eligible=True,
+        evaluation_report="ok",
+        retrieved_lesson_ids=["L1"],
+        _memory_influence_trace=MemoryTrace(
+            available=True, selected_ids=["L1"], prompt_included=True
+        ),
+    )
+    ctx = SimpleNamespace(op=op, gov=SimpleNamespace(gate_exit="verification"))
+    orch = _orch()
+    orch._bind_applied_attribution_inputs(ctx)
+    assert op.applied_patch_hash == hashlib.sha256(patch.encode()).hexdigest()
+    assert op.selected_candidate_hash_matches_applied is True
+    assert op.verifier_receipt["verifier_status"] == "pass"
+    assert op.verifier_receipt["receipt_id"]
+    orch._record_authoritative_memory_adoption(ctx)
+    assert op.applied_lesson_ids == ["L1"]
+
+
+def test_success_path_hook_fail_closed_without_verifier_pass():
+    op = SimpleNamespace(
+        instance_id="t",
+        attempt=1,
+        final_patch="diff",
+        solve_eligible=True,
+        retrieved_lesson_ids=["L1"],
+        _memory_influence_trace=MemoryTrace(
+            available=True, selected_ids=["L1"], prompt_included=True
+        ),
+    )
+    ctx = SimpleNamespace(op=op, gov=SimpleNamespace(gate_exit=""))
+    orch = _orch()
+    orch._bind_applied_attribution_inputs(ctx)
+    assert getattr(op, "verifier_receipt", None) is None
+    orch._record_authoritative_memory_adoption(ctx)
+    assert op.applied_lesson_ids == []
+
+
+def _verifier_fail_op(**over):
+    base = dict(
+        instance_id="task-1",
+        attempt=2,
+        final_patch="--- a/f.py\n+++ b/f.py\n@@\n-x\n+y\n",
+        solve_eligible=False,
+        evaluation_report="",
+        failure_reason="verifier rejected patch",
+        last_failure_class="VERIFIER_FAIL",
+        verifier_failure_kind="test_failed",
+        verifier_exit_code=1,
+        retrieved_lesson_ids=["L1"],
+        _memory_influence_trace=MemoryTrace(
+            available=True, selected_ids=["L1"], prompt_included=True
+        ),
+    )
+    base.update(over)
+    return SimpleNamespace(**base)
+
+
+def test_verifier_fail_with_patch_binds_fail_receipt_without_applied():
+    op = _verifier_fail_op()
+    ctx = SimpleNamespace(op=op, gov=SimpleNamespace(gate_exit="verification"))
+    orch = _orch()
+    orch._bind_applied_attribution_inputs(ctx)
+    receipt = op.verifier_receipt
+    assert receipt["verifier_status"] == "fail"
+    assert receipt["receipt_id"].startswith("verifier:task-1:attempt2:")
+    assert receipt["failure_kind"] == "test_failed"
+    assert receipt["exit_code"] == 1
+    assert op.applied_patch_hash == hashlib.sha256(op.final_patch.encode()).hexdigest()
+    orch._record_authoritative_memory_adoption(ctx)
+    assert op.applied_lesson_ids == []
+
+
+def test_verifier_fail_without_patch_still_binds_fail_receipt():
+    op = _verifier_fail_op(final_patch="")
+    ctx = SimpleNamespace(op=op, gov=SimpleNamespace(gate_exit="verification"))
+    _orch()._bind_applied_attribution_inputs(ctx)
+    assert op.verifier_receipt["verifier_status"] == "fail"
+    assert op.verifier_receipt["receipt_id"].startswith("verifier:task-1:attempt2:")
+    assert not getattr(op, "applied_patch_hash", "")
+    _orch()._record_authoritative_memory_adoption(ctx)
+    assert op.applied_lesson_ids == []
+
+
+def test_fail_receipt_bound_on_retry_exit_with_verifier_evidence():
+    # Real retry flow: a failed heal exits at gate "patcher", not "verification".
+    op = _verifier_fail_op(
+        failure_reason="LOGIC_REGRESSION:VERIFICATION_FAILED",
+        failure_class="semantic_wrong",
+        last_failure_class="",
+        verifier_failure_kind="",
+    )
+    ctx = SimpleNamespace(op=op, gov=SimpleNamespace(gate_exit="patcher"))
+    _orch()._bind_applied_attribution_inputs(ctx)
+    assert op.verifier_receipt["verifier_status"] == "fail"
+    assert op.verifier_receipt["gate_exit"] == "patcher"
+    _orch()._record_authoritative_memory_adoption(ctx)
+    assert op.applied_lesson_ids == []
+
+
+def test_no_fail_receipt_for_infra_failure_without_verifier_markers():
+    op = _verifier_fail_op(
+        solve_eligible=False,
+        failure_reason="PROVIDER_TIMEOUT",
+        failure_class="",
+        last_failure_class="",
+        verifier_failure_kind="",
+        _memory_influence_trace=MemoryTrace(
+            available=True, selected_ids=["L1"], prompt_included=True
+        ),
+    )
+    ctx = SimpleNamespace(op=op, gov=SimpleNamespace(gate_exit="patcher"))
+    _orch()._bind_applied_attribution_inputs(ctx)
+    assert getattr(op, "verifier_receipt", None) is None
+
+
+def test_existing_pass_receipt_not_overwritten_by_fail_path():
+    pass_receipt = {"verifier_status": "pass", "receipt_id": "verifier:keep"}
+    op = _verifier_fail_op(verifier_receipt=pass_receipt)
+    ctx = SimpleNamespace(op=op, gov=SimpleNamespace(gate_exit="verification"))
+    _orch()._bind_applied_attribution_inputs(ctx)
+    assert op.verifier_receipt is pass_receipt
+
+
+def _retry_capture_setup(tmp_path: Path, monkeypatch):
+    from nexus.services.local_heal import canonical_span as canonical_span_mod
+    from nexus.services.local_heal import memory_retrieval_adapter as adapter_mod
+    from nexus.services.local_heal.prompt_builder import PromptBuilder
+
+    class _TmpCanonical(adapter_mod.CanonicalLessonStore):
+        def __init__(self, **_kwargs):
+            super().__init__(project_root=tmp_path)
+
+    class _Composite(adapter_mod.NexusCompositeLessonStore):
+        def __init__(self, stores=None):
+            super().__init__(stores=[_TmpCanonical()])
+
+    monkeypatch.setattr(adapter_mod, "CanonicalLessonStore", _TmpCanonical)
+    monkeypatch.setattr(adapter_mod, "NexusCompositeLessonStore", _Composite)
+    monkeypatch.setattr(
+        canonical_span_mod,
+        "get_canonical_search_span",
+        lambda **_kw: SimpleNamespace(span="x = 1", source="test"),
+    )
+
+    captured: dict = {}
+
+    class _Stop(Exception):
+        pass
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        raise _Stop
+
+    monkeypatch.setattr(
+        PromptBuilder, "build_verification_guided_retry_prompt", staticmethod(_capture)
+    )
+    return captured, _Stop
+
+
+def _retry_op(tmp_path: Path, **over):
+    base = dict(
+        final_patch="--- a/src/parser.py\n+++ b/src/parser.py\n@@ -1 +1 @@\n-x\n+y\n",
+        user_prompt="fix the parser crash",
+        problem_statement="fix the parser crash on empty token stream",
+        instance_id="task-retry",
+        repo_dir=tmp_path,
+        memory_enabled=True,
+        retrieved_lesson_ids=[],
+    )
+    base.update(over)
+    return SimpleNamespace(**base)
+
+
+def _retry_orch(tmp_path: Path) -> HealOrchestrator:
+    orch = _orch()
+    orch._extract_target_symbol = lambda ctx: ""
+    orch._resolve_target_file = lambda ctx: tmp_path / "src/parser.py"
+    return orch
+
+
+def test_retry_attaches_trace_and_injects_lesson_without_pre_attached_trace(tmp_path, monkeypatch):
+    title = "Guard parser fallback before indexing"
+    lsn_id = _judge_lesson_row(tmp_path, title)
+    captured, stop = _retry_capture_setup(tmp_path, monkeypatch)
+    op = _retry_op(tmp_path, memory_enabled=True)
+    ctx = SimpleNamespace(op=op)
+
+    with pytest.raises(stop):
+        _retry_orch(tmp_path)._attempt_semantic_retry(ctx, "verifier failed", "verification_failed")
+
+    assert title in captured["memory_lessons"]
+    assert lsn_id in op._memory_prompt_injected_ids
+    assert op._memory_influence_trace.prompt_included is True
+    assert lsn_id in op.retrieved_lesson_ids
+
+
+def test_retry_memory_off_injects_nothing_and_leaves_trace_empty(tmp_path, monkeypatch):
+    _judge_lesson_row(tmp_path, "Guard parser fallback before indexing")
+    captured, stop = _retry_capture_setup(tmp_path, monkeypatch)
+    op = _retry_op(tmp_path, memory_enabled=False)
+    ctx = SimpleNamespace(op=op)
+
+    with pytest.raises(stop):
+        _retry_orch(tmp_path)._attempt_semantic_retry(ctx, "verifier failed", "verification_failed")
+
+    assert "Lesson [" not in captured.get("memory_lessons", "")
+    assert op._memory_influence_trace.selected_ids == []
+    assert not op._memory_influence_trace.prompt_included
+    assert op.retrieved_lesson_ids == []
+
+
+def test_finalize_refresh_updates_verifier_status_and_keeps_prompt_included(tmp_path):
+    op = SimpleNamespace(
+        solve_eligible=True,
+        _memory_influence_trace=MemoryTrace(
+            available=True,
+            selected_ids=["lsn:x"],
+            prompt_included=True,
+            verifier_status="FAIL",
+        ),
+    )
+    _orch()._refresh_memory_trace_verifier_status(SimpleNamespace(op=op))
+    assert op._memory_influence_trace.verifier_status == "PASS"
+    assert op._memory_influence_trace.prompt_included is True
+
+    op.solve_eligible = False
+    _orch()._refresh_memory_trace_verifier_status(SimpleNamespace(op=op))
+    assert op._memory_influence_trace.verifier_status == "FAIL"
+    assert op._memory_influence_trace.prompt_included is True
+
+
+def _normal_retry_setup(tmp_path: Path, monkeypatch):
+    from nexus.services.local_heal import memory_retrieval_adapter as adapter_mod
+
+    class _TmpCanonical(adapter_mod.CanonicalLessonStore):
+        def __init__(self, **_kwargs):
+            super().__init__(project_root=tmp_path)
+
+    class _Composite(adapter_mod.NexusCompositeLessonStore):
+        def __init__(self, stores=None):
+            super().__init__(stores=[_TmpCanonical()])
+
+    monkeypatch.setattr(adapter_mod, "CanonicalLessonStore", _TmpCanonical)
+    monkeypatch.setattr(adapter_mod, "NexusCompositeLessonStore", _Composite)
+
+
+def _normal_retry_ctx(tmp_path: Path, **over):
+    op = SimpleNamespace(
+        final_patch="",
+        pre_verification_final_patch="--- a/src/parser.py\n+++ b/src/parser.py\n@@ -1 +1 @@\n-x\n+y\n",
+        user_prompt="BASE",
+        problem_statement="fix the parser crash on empty token stream",
+        instance_id="task-normal",
+        repo_dir=tmp_path,
+        memory_enabled=True,
+        retrieved_lesson_ids=[],
+        attempt=1,
+        plan=None,
+        localized_files=[],
+        evaluation_report="",
+    )
+    for key, value in over.items():
+        setattr(op, key, value)
+    orch = _orch()
+    orch.corrector = SimpleNamespace(build_retry_prompt=lambda prompt, *a, **k: "BASE")
+    orch._extract_target_symbol = lambda ctx: ""
+    orch._resolve_target_file = lambda ctx: tmp_path / "src/parser.py"
+    return orch, SimpleNamespace(op=op)
+
+
+def test_normal_retry_injects_physical_lesson_into_prompt(tmp_path, monkeypatch):
+
+    title = "Guard parser fallback before indexing"
+    lsn_id = _judge_lesson_row(tmp_path, title)
+    _normal_retry_setup(tmp_path, monkeypatch)
+    orch, ctx = _normal_retry_ctx(tmp_path)
+    attempt_before = ctx.op.attempt
+
+    orch._handle_retry(ctx, PatchError(kind=PatchErrorKind.LOGIC_REGRESSION, message="x"))
+
+    assert ctx.op.user_prompt.startswith("BASE")
+    assert title in ctx.op.user_prompt
+    assert lsn_id in ctx.op._memory_prompt_injected_ids
+    assert ctx.op._memory_influence_trace.prompt_included is True
+    assert ctx.op.attempt == attempt_before + 1
+
+
+def test_normal_retry_memory_off_appends_nothing(tmp_path, monkeypatch):
+    _judge_lesson_row(tmp_path, "Guard parser fallback before indexing")
+    _normal_retry_setup(tmp_path, monkeypatch)
+    orch, ctx = _normal_retry_ctx(tmp_path, memory_enabled=False)
+
+    orch._handle_retry(ctx, PatchError(kind=PatchErrorKind.LOGIC_REGRESSION, message="x"))
+
+    assert ctx.op.user_prompt == "BASE"
+    assert not getattr(ctx.op, "_memory_prompt_injected_ids", None)

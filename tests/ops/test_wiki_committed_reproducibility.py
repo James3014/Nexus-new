@@ -33,6 +33,16 @@ def _run_check(
     )
 
 
+def test_git_tree_enumeration_preserves_non_ascii_wiki_path():
+    """Git's default quotePath setting must not omit non-ASCII committed pages."""
+    from scripts.ops.check_wiki_committed_reproducibility import list_wiki_files_at_ref
+
+    expected = "nexus_wiki_vault/02_Modules/nexus_能力盤點_2026-02-20後新增.md"
+    paths = list_wiki_files_at_ref(REPO_ROOT, "HEAD")
+    assert expected in paths
+    assert len(paths) == len(set(paths))
+
+
 def test_clean_committed_tree_rebuild_matches_tracked_outputs(tmp_path):
     """Rebuilt artifacts from committed sources must match committed artifacts.
     

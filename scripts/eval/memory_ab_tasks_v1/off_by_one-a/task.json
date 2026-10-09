@@ -1,0 +1,8 @@
+{
+  "id": "off_by_one-a",
+  "bug_class": "off_by_one",
+  "variant": "a",
+  "problem_statement": "chunk() drops the final partial chunk. For items [1, 2, 3, 4, 5] and size 2 it returns [[1, 2], [3, 4]] instead of [[1, 2], [3, 4], [5]]. Fix chunk() so every element is included.",
+  "target_file": "pagination.py",
+  "repro_file": "repro.py"
+}
