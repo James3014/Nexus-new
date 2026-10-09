@@ -388,7 +388,7 @@ def _b_outcome(
     )
 
 
-def test_low_margin_b_is_rejected_because_it_must_route_c() -> None:
+def test_low_margin_b_requires_strong_online_fallback() -> None:
     bad = _b_outcome(top=0.69, margin=0.40, strong={"status": "VALID"})
     with pytest.raises(ValueError, match="b_requires_dm1_accept"):
         bad.validate()

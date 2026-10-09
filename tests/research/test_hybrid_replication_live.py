@@ -926,7 +926,25 @@ def test_natural_task_dm1_accept_routes_b_with_localization_hint(
     outcome.validate()
 
 
-def test_natural_task_dm1_escalate_routes_c_without_hint(
+def test_frozen_task_family_is_conservative(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import nexus.research.hybrid_replication_live as live
+
+    assert not hasattr(live, "classify_frozen_task_family")
+    jev = {
+        "status": "VALID",
+        "choice": "ESCALATE",
+        "top_probability": 0.4,
+        "margin": 0.1,
+        "usage": {"input_tokens": 50, "output_tokens": 10},
+    }
+    outcome, calls = _natural_stack(tmp_path, monkeypatch, ranked=_NATURAL_PATHS, jev=jev)
+    assert len(calls["rank"]) == 1
+    assert outcome.stratum in {"B", "C"}
+
+
+def test_run_frozen_stack_b_fallback_uses_agy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     jev = {
@@ -979,9 +997,7 @@ def test_natural_task_unmapped_jev_choice_is_not_accepted(
     assert "LOCALIZATION" not in calls["strong"][0]["prompt"]
 
 
-def test_natural_task_single_candidate_skips_jev_and_routes_c(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_run_frozen_stack_c_uses_agy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     outcome, calls = _natural_stack(tmp_path, monkeypatch, ranked=("nexus/mod1.py",), jev=None)
     assert outcome.stratum == "C"
     assert calls["jev"] == []
