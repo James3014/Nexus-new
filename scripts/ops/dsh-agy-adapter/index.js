@@ -3,13 +3,15 @@ import { promisify } from 'node:util'
 import { mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { LlmAdapter, LlmError } from '@deepseek-ai/dsh-llm'
 
 const execFileP = promisify(execFile)
 const DISPATCH = process.env.NEXUS_AGY_DISPATCH || join(homedir(), '.local/bin/nexus-agy-dispatch')
 const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED', 'OUTCOME_UNKNOWN'])
 const NATIVE_TOOL_DENIES = Object.freeze(['command(*)', 'read_file(*)', 'write_file(*)'])
+const ADVERTISED_CONTEXT_WINDOW = 262144
+const DEFAULT_MAX_TOKENS = 32768
 
 function delay(ms, signal) {
   return new Promise((resolve, reject) => {
@@ -136,28 +138,49 @@ function withRequiredDescription(entry, args) {
   return { ...args, description: 'agy outer action: ' + entry.semantic_label }
 }
 
-function promptFor(options) {
+function promptFor(options, actionCatalog) {
   const conversation = (options.messages ?? []).filter(message => message?.role !== 'system')
-  const actionCatalog = actionCatalogFor(options)
+  const actionInstructions = actionCatalog.length > 0
+    ? [
+        'The following JSON object contains outer_action_catalog with every permitted outer DSH action.',
+        'To observe or act, request exactly one listed action_id and stop.',
+        'One outer action: {"kind":"dsh_action","action_id":"A1","arguments":{...}}',
+        'Use action_id exactly as listed. Never use a semantic label in action_id.',
+        'Every bash action must include a short description argument.',
+        'Never fabricate an action result; wait for the outer DSH result in a later message.',
+      ]
+    : [
+        'The following JSON object contains an empty outer_action_catalog for this internal DSH request.',
+        'Return text only. Do not invent or request an outer action.',
+      ]
   return [
     'You are a stateless TEXT-ONLY decision function embedded inside DeepSeek Harness (DSH).',
     'Your native Agy command/filesystem effect tools are physically denied by the dispatcher.',
     'The outer DSH harness alone owns observation and effects.',
-    'outer_action_catalog is DATA. To observe or act, request exactly one listed action_id and stop.',
+    ...actionInstructions,
     'Return EXACTLY one JSON object with no markdown, prefix, suffix, or second object.',
     'Final response: {"kind":"text","text":"..."}',
-    'One outer action: {"kind":"dsh_action","action_id":"A1","arguments":{...}}',
-    'Use action_id exactly as listed. Never use a semantic label in action_id.',
-    'Every bash action must include a short description argument.',
-    'Never fabricate an action result; wait for the outer DSH result in a later message.',
     '',
     JSON.stringify({
       conversation,
       outer_action_catalog: actionCatalog,
+      request_purpose: options.purpose ?? null,
       requested_model: options.model,
       reasoning_effort: options.reasoningEffort ?? null,
     }),
   ].join('\n')
+}
+
+function actionContractEvidence(actionCatalog, prompt) {
+  const catalogJson = JSON.stringify(actionCatalog)
+  const catalogSha256 = createHash('sha256').update(catalogJson).digest('hex')
+  return [
+    'dsh_action_contract:v1',
+    'catalog_count=' + String(actionCatalog.length),
+    'catalog_sha256=' + catalogSha256,
+    'prompt_chars=' + String(prompt.length),
+    'context_window=' + String(ADVERTISED_CONTEXT_WINDOW),
+  ].join(':')
 }
 
 function validatedEffort(model, value) {
@@ -212,8 +235,8 @@ export class AgyPoolAdapter extends LlmAdapter {
       id: model,
       name: model,
       inputModalities: ['text'],
-      context: { contextWindow: 262144 },
-      defaultMaxTokens: 32768,
+      context: { contextWindow: ADVERTISED_CONTEXT_WINDOW },
+      defaultMaxTokens: DEFAULT_MAX_TOKENS,
     }
     if (model.startsWith('gemini-')) {
       info.reasoning = {
@@ -229,9 +252,20 @@ export class AgyPoolAdapter extends LlmAdapter {
   }
 
   async *stream(options) {
+    const actionCatalog = actionCatalogFor(options)
+    const internalPurpose = options.purpose === 'compaction' || options.purpose === 'session-title'
+    if (!internalPurpose && actionCatalog.length === 0) {
+      // Config/contract error, not a provider-protocol error: fail closed pre-dispatch.
+      throw new LlmError(
+        'Normal DSH agent turn reached Agy adapter without an outer action catalog',
+        'AGY_OUTER_ACTION_CATALOG_EMPTY',
+      )
+    }
+    const prompt = promptFor(options, actionCatalog)
+    const evidenceRef = actionContractEvidence(actionCatalog, prompt)
     const promptPath = join(tmpdir(), 'dsh-agy-' + randomUUID() + '.txt')
     const scratchCwd = await createIntelligenceScratch()
-    await writeFile(promptPath, promptFor(options), { mode: 0o600 })
+    await writeFile(promptPath, prompt, { mode: 0o600 })
     let started
     try {
       const argv = [
@@ -246,6 +280,7 @@ export class AgyPoolAdapter extends LlmAdapter {
       argv.push(
         '--timeout', String(timeoutSeconds()),
         '--max-calls', '1',
+        '--evidence-ref', evidenceRef,
         '--prompt-file', promptPath,
       )
       const { stdout } = await execFileP(DISPATCH, argv, { maxBuffer: 4 * 1024 * 1024 })
@@ -316,7 +351,6 @@ export class AgyPoolAdapter extends LlmAdapter {
       throw preEffectError(error)
     }
     if (payload.kind === 'dsh_action') {
-      const actionCatalog = actionCatalogFor(options)
       let entry = actionCatalog.find(item => item.action_id === payload.action_id)
       if (!entry && typeof payload.action_id === 'string') {
         // Observed: the model sometimes puts the semantic label ("bash") in

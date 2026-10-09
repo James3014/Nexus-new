@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import signal
@@ -1036,9 +1037,13 @@ def test_background_spawn_returns_durable_operation_identity(tmp_path: Path, mon
         stream_no_progress_seconds=29.0,
         pre_effect_max_seconds=41.0,
         pre_effect_max_tool_events=13,
+        evidence_refs=["dsh_action_contract:v1:catalog_count=1:catalog_sha256=" + ("a" * 64)],
     )
 
     assert record["status"] == "QUEUED"
+    assert record["evidence_refs"] == [
+        "dsh_action_contract:v1:catalog_count=1:catalog_sha256=" + ("a" * 64)
+    ]
     assert record["pid"] == 424242
     assert record["operation_id"].startswith("agyop_")
     raw = (root / "operations" / record["operation_id"] / "operation.json").read_text()
@@ -5049,3 +5054,21 @@ def test_rotation_second_failure_projects_terminal_failure_kind(tmp_path: Path) 
     assert folded["attempts"] == 2
     assert folded["rotations"] == 1
     assert folded["failure_kind"] == "SYNTAX_OR_IMPLEMENTATION_ERROR"
+
+
+def test_evidence_refs_are_bounded_and_validated() -> None:
+    assert dispatch._normalize_evidence_refs(None) == []
+    assert dispatch._normalize_evidence_refs([" ref:1 "]) == ["ref:1"]
+    for bad in ([""], ["a\nb"], ["x" * 513]):
+        with pytest.raises(ValueError, match="EVIDENCE_REF_INVALID"):
+            dispatch._normalize_evidence_refs(bad)
+    with pytest.raises(ValueError, match="EVIDENCE_REF_LIMIT_EXCEEDED"):
+        dispatch._normalize_evidence_refs(["r"] * 17)
+
+
+def test_evidence_ref_requires_background_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sys, "stdin", io.StringIO("hello"))
+    with pytest.raises(SystemExit, match="EVIDENCE_REF_REQUIRES_BACKGROUND"):
+        dispatch.main(["--cwd", str(tmp_path), "--evidence-ref", "x:1"])
