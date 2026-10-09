@@ -1137,6 +1137,21 @@ def classify_failure(
     return AccountFailureKind.UNKNOWN
 
 
+# Only an error/fatal-severity errorreport line for the agent executor itself is
+# terminal; warnings, retries, and unrelated diagnostics (title generation) are not.
+_AGY_TERMINAL_EXECUTOR_ERROR_RE = re.compile(
+    r"(?m)^[EF]\d{4}\s+\S+\s+\d+\s+errorreport\.go:\d+\]\s+"
+    r"agent executor error:(?P<detail>[^\n]*)$"
+)
+
+
+def _has_terminal_quota_log_signal(text: str) -> bool:
+    return any(
+        _has_quota_failure_signal(match.group("detail"))
+        for match in _AGY_TERMINAL_EXECUTOR_ERROR_RE.finditer(text)
+    )
+
+
 _AGY_ALIAS_RESOLUTION_RE = re.compile(
     r'model alias "(?P<alias>[^"\n]+)" resolved to "(?P<resolved>[^"\n]+)"'
 )
@@ -3332,6 +3347,20 @@ def dispatch_run(
                     operation_hook,
                     effect_observation_error=f"ATTEMPT_BASELINE_CAPTURE_FAILED:{type(exc).__name__}",
                 )
+            provider_log_path = env.get("NEXUS_AGY_ATTESTATION_LOG") or os.getenv(
+                "NEXUS_AGY_ATTESTATION_LOG"
+            )
+            # None means this attempt's log span is unknown; never scan stale bytes.
+            provider_log_attempt_offset: int | None = 0
+            if provider_log_path:
+                try:
+                    provider_log_attempt_offset = (
+                        Path(provider_log_path).expanduser().stat().st_size
+                    )
+                except FileNotFoundError:
+                    provider_log_attempt_offset = 0
+                except OSError:
+                    provider_log_attempt_offset = None
             permission_token = None
             try:
                 allow_rules = list(effective_permissions.get("allow") or [])
@@ -3396,18 +3425,23 @@ def dispatch_run(
             total_wall_ms += wall_ms
 
             provider_log_text = ""
-            provider_log_path = env.get("NEXUS_AGY_ATTESTATION_LOG") or os.getenv(
-                "NEXUS_AGY_ATTESTATION_LOG"
-            )
+            attempt_log_text = ""
             if provider_log_path:
                 try:
-                    provider_log_text = (
-                        Path(provider_log_path)
-                        .expanduser()
-                        .read_text(encoding="utf-8", errors="replace")
-                    )
+                    provider_log_bytes = Path(provider_log_path).expanduser().read_bytes()
                 except OSError:
-                    provider_log_text = ""
+                    provider_log_bytes = b""
+                provider_log_text = provider_log_bytes.decode("utf-8", errors="replace")
+                if provider_log_attempt_offset is not None:
+                    # A log shorter than the pre-attempt offset was truncated or
+                    # replaced during this attempt, so all of it is current.
+                    if len(provider_log_bytes) >= provider_log_attempt_offset:
+                        provider_log_bytes = provider_log_bytes[provider_log_attempt_offset:]
+                    attempt_log_text = provider_log_bytes.decode("utf-8", errors="replace")
+            # Issue #1362: agy may exit 0 after a terminal executor quota failure.
+            provider_terminal_quota = (
+                code == 0 and not timed_out and _has_terminal_quota_log_signal(attempt_log_text)
+            )
             provider_log_lower = provider_log_text.lower()
             provider_headless_denial = (
                 "print mode: soft-denying tool confirmation" in provider_log_lower
@@ -3455,7 +3489,13 @@ def dispatch_run(
             )
             scope_blocked = bool(write_paths and scope_state == "VIOLATION_OUT_OF_SCOPE")
 
-            if code == 0 and not timed_out and not permission_blocked and not scope_blocked:
+            if (
+                code == 0
+                and not timed_out
+                and not permission_blocked
+                and not scope_blocked
+                and not provider_terminal_quota
+            ):
                 sys.stdout.write(out)
                 if err:
                     sys.stderr.write(err)
@@ -3475,6 +3515,8 @@ def dispatch_run(
             kind = (
                 AccountFailureKind.PERMISSION_OR_SCOPE_ERROR
                 if (permission_blocked or scope_blocked)
+                else AccountFailureKind.QUOTA_EXHAUSTED
+                if provider_terminal_quota
                 else classify_failure(code, out, err, timed_out)
             )
             last_kind = kind.value

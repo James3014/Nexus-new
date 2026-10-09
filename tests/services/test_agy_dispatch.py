@@ -5349,3 +5349,245 @@ def test_rotation_second_failure_projects_terminal_failure_kind(tmp_path: Path) 
     assert folded["attempts"] == 2
     assert folded["rotations"] == 1
     assert folded["failure_kind"] == "SYNTAX_OR_IMPLEMENTATION_ERROR"
+
+
+# Issue #1362: agy can exit 0 with no output while its own log records a terminal
+# executor quota failure for the same operation.
+_AGY_TERMINAL_QUOTA_LOG_LINE = (
+    "E1008 09:14:03.512204   4242 errorreport.go:224] agent executor error: "
+    "pre-invocation hook: context summarization: RESOURCE_EXHAUSTED (code 429): "
+    "Individual quota reached.\n"
+)
+
+
+def _agy_created_conversation_line(session_id: str) -> str:
+    return f"I1008 09:14:01.000000   4242 server.go:1263] Created conversation {session_id}\n"
+
+
+def test_exit_zero_empty_output_with_current_terminal_quota_log_is_not_completed(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    target = work / "target.txt"
+    log = tmp_path / "agy.log"
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(log))
+
+    class Coordinator(_WriteScopeCoordinator):
+        rotation_count = 0
+
+        def rotate_claim(self, **_kwargs):
+            self.rotation_count += 1
+            raise dispatch.AgyAccountPoolExhaustedError("no alternate account in test")
+
+    original_observe = dispatch.direct_operation_journal.observed_changed_paths_since
+    observed: list[object] = []
+
+    def record_observation(cwd: str, baseline: dict[str, object]):
+        paths = original_observe(cwd, baseline)
+        observed.append(paths)
+        return paths
+
+    monkeypatch.setattr(
+        dispatch.direct_operation_journal,
+        "observed_changed_paths_since",
+        record_observation,
+    )
+    coordinator = Coordinator(home)
+    calls = 0
+    events: list[dict[str, object]] = []
+
+    def runner(**_kwargs):
+        nonlocal calls
+        calls += 1
+        with log.open("a", encoding="utf-8") as fh:
+            fh.write(_agy_created_conversation_line("bb007db1-8535-4f40-b074-232d0da1e9a8"))
+            fh.write(_AGY_TERMINAL_QUOTA_LOG_LINE)
+        return 0, "", "", False, 10
+
+    code = dispatch.dispatch_run(
+        prompt="edit target",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(target)],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+
+    meta = capsys.readouterr().err
+    classified = [event for event in events if event.get("phase") == "CLASSIFYING_FAILURE"]
+    assert code != 0
+    assert calls == 1
+    assert '"status": "completed"' not in meta
+    assert classified
+    assert classified[0]["failure_kind"] == "PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT"
+    assert classified[0]["provider_effect"] is False
+    assert classified[0]["reconciliation_required"] is False
+    assert observed and observed[-1] == []
+    assert not target.exists()
+
+
+def test_exit_zero_output_with_earlier_unrelated_503_diagnostic_stays_completed(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    log = tmp_path / "agy.log"
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(log))
+
+    class Coordinator(_WriteScopeCoordinator):
+        rotation_count = 0
+
+        def rotate_claim(self, **_kwargs):
+            self.rotation_count += 1
+            raise AssertionError("successful output must not rotate")
+
+    coordinator = Coordinator(home)
+    calls = 0
+    events: list[dict[str, object]] = []
+
+    def runner(**_kwargs):
+        nonlocal calls
+        calls += 1
+        with log.open("a", encoding="utf-8") as fh:
+            fh.write(_agy_created_conversation_line("11111111-2222-3333-4444-555555555555"))
+            fh.write(
+                "E1008 09:14:02.000000   4242 errorreport.go:224] title generation failed: "
+                "UNAVAILABLE (code 503): The service is currently unavailable.\n"
+            )
+        return 0, "REVIEW_OK: no blocking findings\n", "", False, 10
+
+    code = dispatch.dispatch_run(
+        prompt="review packet",
+        cwd=str(work),
+        mode="plan",
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert calls == 1
+    assert coordinator.rotation_count == 0
+    assert "REVIEW_OK: no blocking findings" in captured.out
+    assert '"status": "completed"' in captured.err
+    assert not [event for event in events if event.get("phase") == "CLASSIFYING_FAILURE"]
+
+
+def test_stale_or_nonterminal_quota_log_lines_do_not_fail_current_success(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    target = work / "target.txt"
+    log = tmp_path / "agy.log"
+    # A prior operation's terminal quota failure is already in the shared log.
+    log.write_text(
+        _agy_created_conversation_line("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        + _AGY_TERMINAL_QUOTA_LOG_LINE,
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(log))
+
+    class Coordinator(_WriteScopeCoordinator):
+        rotation_count = 0
+
+        def rotate_claim(self, **_kwargs):
+            self.rotation_count += 1
+            raise AssertionError("completed in-scope effect must not rotate")
+
+    coordinator = Coordinator(home)
+    calls = 0
+    events: list[dict[str, object]] = []
+
+    def runner(**_kwargs):
+        nonlocal calls
+        calls += 1
+        with log.open("a", encoding="utf-8") as fh:
+            fh.write(_agy_created_conversation_line("22222222-3333-4444-5555-666666666666"))
+            fh.write(
+                "W1008 09:15:00.000000   4343 retry.go:88] retrying model call after "
+                "RESOURCE_EXHAUSTED (code 429): Individual quota reached. attempt 1/3\n"
+            )
+        target.write_text("provider edit", encoding="utf-8")
+        return 0, "", "", False, 10
+
+    code = dispatch.dispatch_run(
+        prompt="edit target",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(target)],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+
+    meta = capsys.readouterr().err
+    assert code == 0
+    assert calls == 1
+    assert coordinator.rotation_count == 0
+    assert target.read_text(encoding="utf-8") == "provider edit"
+    assert '"status": "completed"' in meta
+    assert not [event for event in events if event.get("phase") == "CLASSIFYING_FAILURE"]
+
+
+def test_exit_zero_terminal_quota_after_source_effect_requires_reconciliation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    target = work / "target.txt"
+    log = tmp_path / "agy.log"
+    monkeypatch.setenv("NEXUS_AGY_ATTESTATION_LOG", str(log))
+
+    class Coordinator(_WriteScopeCoordinator):
+        rotation_count = 0
+
+        def rotate_claim(self, **_kwargs):
+            self.rotation_count += 1
+            raise AssertionError("source effect must not be replayed on another account")
+
+    coordinator = Coordinator(home)
+    events: list[dict[str, object]] = []
+
+    def runner(**_kwargs):
+        target.write_text("partial provider effect", encoding="utf-8")
+        log.write_text(
+            _agy_created_conversation_line("bb007db1-8535-4f40-b074-232d0da1e9a8")
+            + _AGY_TERMINAL_QUOTA_LOG_LINE,
+            encoding="utf-8",
+        )
+        return 0, "", "", False, 10
+
+    code = dispatch.dispatch_run(
+        prompt="change source once",
+        cwd=str(work),
+        mode="accept-edits",
+        write_paths=[str(target)],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+
+    classified = [event for event in events if event.get("phase") == "CLASSIFYING_FAILURE"]
+    assert code != 0
+    assert len(classified) == 1
+    assert classified[0]["failure_kind"] == "PROVIDER_QUOTA_EXHAUSTED_AFTER_EFFECT"
+    assert classified[0]["provider_effect"] is True
+    assert classified[0]["reconciliation_required"] is True
+    assert coordinator.rotation_count == 0
+    assert target.read_text(encoding="utf-8") == "partial provider effect"
