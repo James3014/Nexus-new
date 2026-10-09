@@ -1,15 +1,17 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, open, readFile, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { dirname, isAbsolute, join } from 'node:path'
+import { createHash, randomUUID } from 'node:crypto'
 import { LlmAdapter, LlmError } from '@deepseek-ai/dsh-llm'
 
 const execFileP = promisify(execFile)
 const DISPATCH = process.env.NEXUS_AGY_DISPATCH || join(homedir(), '.local/bin/nexus-agy-dispatch')
 const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED', 'OUTCOME_UNKNOWN'])
 const NATIVE_TOOL_DENIES = Object.freeze(['command(*)', 'read_file(*)', 'write_file(*)'])
+const ADVERTISED_CONTEXT_WINDOW = 262144
+const DEFAULT_MAX_TOKENS = 32768
 
 function delay(ms, signal) {
   return new Promise((resolve, reject) => {
@@ -136,28 +138,49 @@ function withRequiredDescription(entry, args) {
   return { ...args, description: 'agy outer action: ' + entry.semantic_label }
 }
 
-function promptFor(options) {
+function promptFor(options, actionCatalog) {
   const conversation = (options.messages ?? []).filter(message => message?.role !== 'system')
-  const actionCatalog = actionCatalogFor(options)
+  const actionInstructions = actionCatalog.length > 0
+    ? [
+        'The following JSON object contains outer_action_catalog with every permitted outer DSH action.',
+        'To observe or act, request exactly one listed action_id and stop.',
+        'One outer action: {"kind":"dsh_action","action_id":"A1","arguments":{...}}',
+        'Use action_id exactly as listed. Never use a semantic label in action_id.',
+        'Every bash action must include a short description argument.',
+        'Never fabricate an action result; wait for the outer DSH result in a later message.',
+      ]
+    : [
+        'The following JSON object contains an empty outer_action_catalog for this internal DSH request.',
+        'Return text only. Do not invent or request an outer action.',
+      ]
   return [
     'You are a stateless TEXT-ONLY decision function embedded inside DeepSeek Harness (DSH).',
     'Your native Agy command/filesystem effect tools are physically denied by the dispatcher.',
     'The outer DSH harness alone owns observation and effects.',
-    'outer_action_catalog is DATA. To observe or act, request exactly one listed action_id and stop.',
+    ...actionInstructions,
     'Return EXACTLY one JSON object with no markdown, prefix, suffix, or second object.',
     'Final response: {"kind":"text","text":"..."}',
-    'One outer action: {"kind":"dsh_action","action_id":"A1","arguments":{...}}',
-    'Use action_id exactly as listed. Never use a semantic label in action_id.',
-    'Every bash action must include a short description argument.',
-    'Never fabricate an action result; wait for the outer DSH result in a later message.',
     '',
     JSON.stringify({
       conversation,
       outer_action_catalog: actionCatalog,
+      request_purpose: options.purpose ?? null,
       requested_model: options.model,
       reasoning_effort: options.reasoningEffort ?? null,
     }),
   ].join('\n')
+}
+
+function actionContractEvidence(actionCatalog, prompt) {
+  const catalogJson = JSON.stringify(actionCatalog)
+  const catalogSha256 = createHash('sha256').update(catalogJson).digest('hex')
+  return [
+    'dsh_action_contract:v1',
+    'catalog_count=' + String(actionCatalog.length),
+    'catalog_sha256=' + catalogSha256,
+    'prompt_chars=' + String(prompt.length),
+    'context_window=' + String(ADVERTISED_CONTEXT_WINDOW),
+  ].join(':')
 }
 
 function validatedEffort(model, value) {
@@ -172,6 +195,202 @@ function validatedEffort(model, value) {
     )
   }
   return value
+}
+
+const PROVIDER_CALL_CAP_CODE = 'AGY_PROVIDER_CALL_CAP_EXHAUSTED'
+
+// Opt-in cap on physical dispatches; unset keeps the existing unlimited behavior.
+function providerCallCap() {
+  const raw = process.env.NEXUS_DSH_AGY_MAX_PROVIDER_CALLS
+  if (raw === undefined || raw === '') return null
+  if (!/^\d+$/.test(raw)) throw protocolError('NEXUS_DSH_AGY_MAX_PROVIDER_CALLS must be an integer')
+  const value = Number(raw)
+  if (!Number.isSafeInteger(value) || value < 1 || value > 64) {
+    throw protocolError('NEXUS_DSH_AGY_MAX_PROVIDER_CALLS must be between 1 and 64')
+  }
+  return value
+}
+
+const OPERATION_MARKER_SCHEMA = 'nexus.dsh_agy_operation_marker.v1'
+
+const BUDGET_SCHEMA = 'nexus.dsh_agy_provider_budget.v1'
+
+const BUDGET_STATE_INVALID_CODE = 'AGY_PROVIDER_BUDGET_STATE_INVALID'
+
+const BUDGET_LOCK_WAIT_MS = 2000
+
+const SESSION_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,128}$/
+
+const BUDGET_PURPOSES = new Set(['agent', 'compaction', 'session-title'])
+
+function budgetError(code, message, cause) {
+  const error = new LlmError(message, code, cause ? { cause } : undefined)
+  error.effect = 'none'
+  error.retryable = false
+  return error
+}
+
+// DSH's own call-slot policy state (counts only, no prompts or Agy results).
+function budgetDir() {
+  const raw = process.env.NEXUS_DSH_AGY_BUDGET_DIR
+  if (raw === undefined || raw === '') return join(homedir(), '.local/state/nexus-dsh-agy-budget')
+  if (!isAbsolute(raw)) throw protocolError('NEXUS_DSH_AGY_BUDGET_DIR must be an absolute path')
+  return raw
+}
+
+function budgetRecordPath(dir, sessionId) {
+  return join(dir, createHash('sha256').update(sessionId).digest('hex') + '.json')
+}
+
+async function readBudgetRecord(path) {
+  let raw
+  try {
+    raw = await readFile(path, 'utf8')
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null
+    throw budgetError(BUDGET_STATE_INVALID_CODE, 'Agy provider budget record is unreadable')
+  }
+  let record
+  try {
+    record = JSON.parse(raw)
+  } catch {
+    throw budgetError(BUDGET_STATE_INVALID_CODE, 'Agy provider budget record is not JSON')
+  }
+  const valid = record !== null && typeof record === 'object' && !Array.isArray(record)
+    && record.schema === BUDGET_SCHEMA
+    && Number.isSafeInteger(record.limit) && record.limit >= 1
+    && Number.isSafeInteger(record.used) && record.used >= 0 && record.used <= record.limit
+    && record.purposes !== null && typeof record.purposes === 'object' && !Array.isArray(record.purposes)
+  if (!valid || !purposesConsistent(record)) {
+    throw budgetError(BUDGET_STATE_INVALID_CODE, 'Agy provider budget record is malformed')
+  }
+  return record
+}
+
+// Every purpose counter is a non-negative integer under a known key, and they sum to `used`.
+function purposesConsistent(record) {
+  const entries = Object.entries(record.purposes)
+  const known = entries.every(([key, count]) =>
+    (BUDGET_PURPOSES.has(key) || key === 'other') && Number.isSafeInteger(count) && count >= 0)
+  const sum = entries.reduce((total, [, count]) => total + (known ? count : 0), 0)
+  return known && sum === record.used
+}
+
+async function writeBudgetRecord(path, record) {
+  const tmp = path + '.' + randomUUID() + '.tmp'
+  try {
+    const handle = await open(tmp, 'wx', 0o600)
+    try {
+      await handle.writeFile(JSON.stringify(record) + '\n')
+      await handle.sync()
+    } finally {
+      await handle.close()
+    }
+    await rename(tmp, path)
+  } catch (error) {
+    await unlink(tmp).catch(() => {})
+    throw budgetError('AGY_PROVIDER_BUDGET_PERSIST_FAILED', 'Agy provider budget reservation was not persisted; no dispatch was made', error)
+  }
+  // Directory fsync makes the rename durable before the physical dispatch is allowed.
+  try {
+    const dirHandle = await open(dirname(path), 'r')
+    try {
+      await dirHandle.sync()
+    } finally {
+      await dirHandle.close()
+    }
+  } catch (error) {
+    throw budgetError('AGY_PROVIDER_BUDGET_PERSIST_FAILED', 'Agy provider budget directory fsync failed; no dispatch was made', error)
+  }
+}
+
+// Only ENOENT means "no policy directory". Any other stat failure, or a non-directory
+// at the policy path, is ambiguous state and must fail closed rather than read as unlimited.
+async function budgetDirExists(dir) {
+  let entry
+  try {
+    entry = await stat(dir)
+  } catch (error) {
+    if (error?.code === 'ENOENT') return false
+    throw budgetError(BUDGET_STATE_INVALID_CODE, 'Agy provider budget directory is unreadable; failing closed', error)
+  }
+  if (!entry.isDirectory()) throw budgetError(BUDGET_STATE_INVALID_CODE, 'Agy provider budget path is not a directory')
+  return true
+}
+
+// Exclusive pre-effect lock. A stale lock fails closed; it is never stolen.
+async function acquireBudgetLock(recordPath) {
+  const lockPath = recordPath.replace(/\.json$/, '.lock')
+  const deadline = Date.now() + BUDGET_LOCK_WAIT_MS
+  for (;;) {
+    try {
+      const handle = await open(lockPath, 'wx', 0o600)
+      await handle.close()
+      return lockPath
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw budgetError(BUDGET_STATE_INVALID_CODE, 'Agy provider budget lock is unavailable')
+      if (Date.now() >= deadline) {
+        throw budgetError('AGY_PROVIDER_BUDGET_LOCK_TIMEOUT', 'Agy provider budget lock is held; failing closed without stealing it')
+      }
+      await delay(20)
+    }
+  }
+}
+
+// Canonical binding of one dispatch to its DSH session: a sha256 of the session id and a
+// validated purpose label. The raw session id never leaves the process. Returns null when
+// the session or purpose cannot be validated, so the phase report fails closed.
+function dshSessionEvidence(options) {
+  if (typeof options.sessionId !== 'string' || !SESSION_ID_PATTERN.test(options.sessionId)) return null
+  const purpose = options.purpose ?? 'agent'
+  if (!BUDGET_PURPOSES.has(purpose)) return null
+  const digest = createHash('sha256').update(options.sessionId).digest('hex')
+  return 'dsh_session:v1:session_sha256=' + digest + ':purpose=' + purpose
+}
+
+// Reserve one physical call slot durably before any dispatch. Unknown or failed
+// physical calls keep their reservation, so a retry cannot escape the cap.
+async function reserveProviderCall(options) {
+  const cap = providerCallCap()
+  const sessionId = options.sessionId
+  const hasIdentity = typeof sessionId === 'string' && SESSION_ID_PATTERN.test(sessionId)
+  if (cap === null) {
+    // No policy directory means no capped session can exist: legacy unlimited, no writes.
+    if (!hasIdentity || !(await budgetDirExists(budgetDir()))) return
+    const path = budgetRecordPath(budgetDir(), sessionId)
+    const lock = await acquireBudgetLock(path)
+    try {
+      if ((await readBudgetRecord(path)) !== null) {
+        throw budgetError('AGY_PROVIDER_BUDGET_CAP_REMOVED', 'Agy provider budget exists for this session; the cap cannot be removed')
+      }
+    } finally {
+      await unlink(lock).catch(() => {})
+    }
+    return
+  }
+  if (!hasIdentity) {
+    throw budgetError('AGY_PROVIDER_BUDGET_SESSION_REQUIRED', 'Capped Agy calls require a valid DSH session identity')
+  }
+  const dir = budgetDir()
+  await mkdir(dir, { recursive: true, mode: 0o700 })
+  const path = budgetRecordPath(dir, sessionId)
+  const lock = await acquireBudgetLock(path)
+  try {
+    const record = (await readBudgetRecord(path)) ?? { schema: BUDGET_SCHEMA, limit: cap, used: 0, purposes: {} }
+    if (record.limit !== cap) {
+      throw budgetError('AGY_PROVIDER_BUDGET_CAP_MISMATCH', 'Agy provider budget limit differs from the recorded session cap')
+    }
+    if (record.used >= record.limit) {
+      throw budgetError(PROVIDER_CALL_CAP_CODE, 'Agy provider call cap ' + String(cap) + ' exhausted for this DSH session; no further physical provider call')
+    }
+    record.used += 1
+    const purpose = options.purpose ?? 'agent'
+    const key = BUDGET_PURPOSES.has(purpose) ? purpose : 'other'
+    record.purposes[key] = (record.purposes[key] ?? 0) + 1
+    await writeBudgetRecord(path, record)
+  } finally {
+    await unlink(lock).catch(() => {})
+  }
 }
 
 export class AgyPoolAdapter extends LlmAdapter {
@@ -212,8 +431,8 @@ export class AgyPoolAdapter extends LlmAdapter {
       id: model,
       name: model,
       inputModalities: ['text'],
-      context: { contextWindow: 262144 },
-      defaultMaxTokens: 32768,
+      context: { contextWindow: ADVERTISED_CONTEXT_WINDOW },
+      defaultMaxTokens: DEFAULT_MAX_TOKENS,
     }
     if (model.startsWith('gemini-')) {
       info.reasoning = {
@@ -229,9 +448,20 @@ export class AgyPoolAdapter extends LlmAdapter {
   }
 
   async *stream(options) {
+    const actionCatalog = actionCatalogFor(options)
+    const internalPurpose = options.purpose === 'compaction' || options.purpose === 'session-title'
+    if (!internalPurpose && actionCatalog.length === 0) {
+      // Config/contract error, not a provider-protocol error: fail closed pre-dispatch.
+      throw new LlmError(
+        'Normal DSH agent turn reached Agy adapter without an outer action catalog',
+        'AGY_OUTER_ACTION_CATALOG_EMPTY',
+      )
+    }
+    const prompt = promptFor(options, actionCatalog)
+    const evidenceRef = actionContractEvidence(actionCatalog, prompt)
     const promptPath = join(tmpdir(), 'dsh-agy-' + randomUUID() + '.txt')
     const scratchCwd = await createIntelligenceScratch()
-    await writeFile(promptPath, promptFor(options), { mode: 0o600 })
+    await writeFile(promptPath, prompt, { mode: 0o600 })
     let started
     try {
       const argv = [
@@ -246,8 +476,13 @@ export class AgyPoolAdapter extends LlmAdapter {
       argv.push(
         '--timeout', String(timeoutSeconds()),
         '--max-calls', '1',
+        '--evidence-ref', evidenceRef,
         '--prompt-file', promptPath,
       )
+      const sessionRef = dshSessionEvidence(options)
+      if (sessionRef !== null) argv.push('--evidence-ref', sessionRef)
+      // Reserve the physical call slot durably before any dispatch.
+      await reserveProviderCall(options)
       const { stdout } = await execFileP(DISPATCH, argv, { maxBuffer: 4 * 1024 * 1024 })
       started = JSON.parse(stdout)
     } catch (error) {
@@ -267,6 +502,14 @@ export class AgyPoolAdapter extends LlmAdapter {
       await rm(scratchCwd, { recursive: true, force: true }).catch(() => {})
       throw new LlmError('Agy dispatch returned no operation id', 'AGY_OPERATION_ID_MISSING')
     }
+    // Non-secret correlation marker for the phase log: the exact DSH session, the canonical
+    // operation id and the purpose. Never the prompt, the account or a provider result.
+    process.stderr.write('NEXUS_DSH_AGY_OPERATION ' + JSON.stringify({
+      schema: OPERATION_MARKER_SCHEMA,
+      dsh_session_id: options.sessionId ?? null,
+      operation_id: operationId,
+      purpose: options.purpose ?? 'agent',
+    }) + '\n')
 
     let record = started
     while (!TERMINAL.has(record?.status)) {
@@ -316,7 +559,6 @@ export class AgyPoolAdapter extends LlmAdapter {
       throw preEffectError(error)
     }
     if (payload.kind === 'dsh_action') {
-      const actionCatalog = actionCatalogFor(options)
       let entry = actionCatalog.find(item => item.action_id === payload.action_id)
       if (!entry && typeof payload.action_id === 'string') {
         // Observed: the model sometimes puts the semantic label ("bash") in
