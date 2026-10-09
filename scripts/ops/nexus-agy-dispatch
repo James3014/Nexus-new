@@ -3619,6 +3619,16 @@ def _write_private_prompt(path: Path, prompt: str) -> None:
         os.fsync(fh.fileno())
 
 
+def _normalize_evidence_refs(values: list[str] | None) -> list[str]:
+    refs = [str(value).strip() for value in (values or [])]
+    if len(refs) > 16:
+        raise ValueError("EVIDENCE_REF_LIMIT_EXCEEDED")
+    for ref in refs:
+        if not ref or len(ref) > 512 or any(ord(char) < 0x20 for char in ref):
+            raise ValueError("EVIDENCE_REF_INVALID")
+    return refs
+
+
 def _spawn_background_operation(
     *,
     prompt: str,
@@ -3639,8 +3649,10 @@ def _spawn_background_operation(
     pre_effect_max_seconds: float | None = None,
     pre_effect_max_tool_events: int | None = None,
     exclude_accounts: list[str] | None = None,
+    evidence_refs: list[str] | None = None,
 ) -> dict[str, Any]:
     resolved_exclude_hashes = sorted(_resolve_excluded_account_hashes(exclude_accounts))
+    resolved_evidence_refs = _normalize_evidence_refs(evidence_refs)
     journal = AgyOperationJournal(operation_root)
     operation_id = new_operation_id()
     attempt_id = new_attempt_id()
@@ -3676,6 +3688,7 @@ def _spawn_background_operation(
         runtime_revision=_runtime_revision(),
         initial_fields={
             "excluded_account_hashes": resolved_exclude_hashes,
+            "evidence_refs": resolved_evidence_refs,
             "liveness_policy": {
                 "coding_progress_required": coding_progress_required,
                 "provider_stall_seconds": resolved_provider_stall_seconds,
@@ -4450,6 +4463,12 @@ def main(argv: list[str] | None = None) -> int:
         default=[],
         help="Account alias or 12-hex alias hash to ephemerally exclude; repeatable",
     )
+    ap.add_argument(
+        "--evidence-ref",
+        action="append",
+        default=[],
+        help="Bounded non-secret operation evidence reference; repeatable",
+    )
     ap.add_argument("--hcom-args-json", default="[]", help=argparse.SUPPRESS)
     ap.add_argument(
         "--finalize-no-effect",
@@ -4523,6 +4542,9 @@ def main(argv: list[str] | None = None) -> int:
     if not prompt.strip():
         raise SystemExit("EMPTY_PROMPT")
 
+    if args.evidence_ref and not args.background and not args.operation_run:
+        raise SystemExit("EVIDENCE_REF_REQUIRES_BACKGROUND")
+
     if args.operation_run:
         return _run_background_operation(
             operation_id=args.operation_run,
@@ -4566,6 +4588,7 @@ def main(argv: list[str] | None = None) -> int:
             pre_effect_max_seconds=args.pre_effect_max_seconds,
             pre_effect_max_tool_events=args.pre_effect_max_tool_events,
             exclude_accounts=args.exclude_account,
+            evidence_refs=args.evidence_ref,
         )
         _print_operation(record)
         return 0

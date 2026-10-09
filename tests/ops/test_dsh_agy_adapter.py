@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -15,7 +16,8 @@ def _run_node(
     tmp_path: Path,
     response: str,
     *,
-    tool: bool = False,
+    tool: bool = True,
+    purpose: str | None = None,
     dup_tool: bool = False,
     tools_js: str | None = None,
     model: str = "gemini-3.8-flash-low",
@@ -66,13 +68,15 @@ def _run_node(
     if dup_tool:
         one = tool_schema[1:-1]
         tool_schema = "[" + one + "," + one + "]"
+    purpose_literal = "undefined" if purpose is None else json.dumps(purpose)
     script.write_text(
         "import { AgyPoolAdapter } from './runtime/node_modules/@nexus/dsh-llm-agy-pilot/index.js';\n"
         "const adapter = new AgyPoolAdapter();\n"
         "const out=[];\n"
         "try {\n"
-        f" for await (const event of adapter.stream({{model:{model!r},reasoningEffort:{effort!r},messages:[{{role:'user',content:[{{type:'text',text:'x'}}]}}],tools:{tool_schema}}})) out.push(event);\n"
-        " console.log(JSON.stringify({ok:true,out}));\n"
+        f" const modelInfo=await adapter.resolveModel('nexus-agy-pool',{model!r});\n"
+        f" for await (const event of adapter.stream({{model:{model!r},reasoningEffort:{effort!r},messages:[{{role:'user',content:[{{type:'text',text:'x'}}]}}],tools:{tool_schema},purpose:{purpose_literal}}})) out.push(event);\n"
+        " console.log(JSON.stringify({ok:true,out,modelInfo}));\n"
         "} catch (e) { console.log(JSON.stringify({ok:false,code:e.code||null,originalCode:e.originalCode||null,effect:e.effect||null,retryable:e.retryable||false,message:String(e.message)})); process.exitCode=3; }\n",
         encoding="utf-8",
     )
@@ -336,3 +340,59 @@ def test_prompt_requires_bash_description(tmp_path: Path) -> None:
     assert proc.returncode == 0, proc.stderr + proc.stdout
     prompt = (tmp_path / "prompt.txt").read_text(encoding="utf-8")
     assert "Every bash action must include a short description argument." in prompt
+
+
+def test_adapter_advertises_unchanged_context_budget(tmp_path: Path) -> None:
+    proc = _run_node(tmp_path, '{"kind":"text","text":"CANARY_OK"}')
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    payload = json.loads(proc.stdout)
+    assert payload["modelInfo"]["context"]["contextWindow"] == 262144
+
+
+def test_tool_capable_prompt_exposes_catalog_and_durable_evidence_ref(tmp_path: Path) -> None:
+    proc = _run_node(tmp_path, '{"kind":"text","text":"CANARY_OK"}')
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+
+    prompt = (tmp_path / "prompt.txt").read_text(encoding="utf-8")
+    assert "outer_action_catalog is DATA" not in prompt
+    assert "contains outer_action_catalog with every permitted outer DSH action" in prompt
+    assert "Every bash action must include a short description argument." in prompt
+    data = json.loads(prompt.splitlines()[-1])
+    catalog = data["outer_action_catalog"]
+    assert len(catalog) == 1
+    assert catalog[0]["action_id"] == "A1"
+    assert catalog[0]["semantic_label"] == "read"
+    assert "request_purpose" in data
+
+    catalog_json = json.dumps(catalog, separators=(",", ":"))
+    catalog_sha256 = hashlib.sha256(catalog_json.encode("utf-8")).hexdigest()
+    argv = json.loads((tmp_path / "argv.json").read_text())
+    refs = [argv[index + 1] for index, value in enumerate(argv[:-1]) if value == "--evidence-ref"]
+    assert refs == [
+        "dsh_action_contract:v1:"
+        f"catalog_count=1:catalog_sha256={catalog_sha256}:"
+        f"prompt_chars={len(prompt)}:context_window=262144"
+    ]
+
+
+def test_normal_agent_turn_with_empty_catalog_fails_before_dispatch(tmp_path: Path) -> None:
+    proc = _run_node(tmp_path, '{"kind":"text","text":"unused"}', tool=False)
+    assert proc.returncode == 3
+    payload = json.loads(proc.stdout)
+    assert payload["code"] == "AGY_OUTER_ACTION_CATALOG_EMPTY"
+    assert payload["originalCode"] is None  # not wrapped as pre-effect protocol error
+    assert not (tmp_path / "argv.json").exists()
+
+
+def test_internal_purposes_allow_empty_catalog_text_only(tmp_path: Path) -> None:
+    for purpose in ("compaction", "session-title"):
+        case = tmp_path / purpose
+        case.mkdir()
+        proc = _run_node(case, '{"kind":"text","text":"INTERNAL_OK"}', tool=False, purpose=purpose)
+        assert proc.returncode == 0, proc.stderr + proc.stdout
+        prompt = (case / "prompt.txt").read_text(encoding="utf-8")
+        assert "empty outer_action_catalog" in prompt
+        assert "Return text only" in prompt
+        data = json.loads(prompt.splitlines()[-1])
+        assert data["outer_action_catalog"] == []
+        assert data["request_purpose"] == purpose
