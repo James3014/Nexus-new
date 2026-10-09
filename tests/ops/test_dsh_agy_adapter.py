@@ -1047,3 +1047,31 @@ def test_zero_retries_keeps_single_physical_dispatch(tmp_path: Path) -> None:
     assert proc.returncode == 3
     assert json.loads(proc.stdout)["code"] == POOL_BUSY
     assert len(_attempts(tmp_path)) == 1
+
+
+def test_contradictory_effect_evidence_is_never_retried(tmp_path: Path) -> None:
+    # first_effect_at=null and no changed paths do not override an explicit effect,
+    # an unresolved external effect, or a write-scope violation in the same record.
+    contradictions = {
+        "provider-effect": {"provider_effect": True},
+        "unresolved-effect": {"has_unresolved_external_effect": True},
+        "scope-violation": {"scope_validation_state": "VIOLATION_OUT_OF_SCOPE"},
+    }
+    for name, fields in contradictions.items():
+        record = {"operation_id": "agyop_x", "observed_changed_paths": [], **fields}
+        invalid = _run_node(
+            tmp_path / ("invalid-" + name),
+            OK_TEXT,
+            script=[{"response": "not json", "record": record}, {"response": OK_TEXT}],
+        )
+        assert invalid.returncode == 3, name
+        payload = json.loads(invalid.stdout)
+        assert payload["code"] == "PROVIDER_PROTOCOL_INVALID_EFFECT_UNPROVEN", name
+        assert payload["retryable"] is False, name
+        assert len(_attempts(tmp_path / ("invalid-" + name))) == 1, name
+        busy = dict(_pool_busy("agyop_x"))
+        busy["record"] = {**busy["record"], **record}
+        failed = _run_node(tmp_path / ("busy-" + name), OK_TEXT, script=[busy, _ok("ok")])
+        assert failed.returncode == 3, name
+        assert json.loads(failed.stdout)["code"] == "AGY_OPERATION_FAILED", name
+        assert len(_attempts(tmp_path / ("busy-" + name))) == 1, name
