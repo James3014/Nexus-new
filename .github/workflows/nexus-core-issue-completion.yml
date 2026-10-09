@@ -1,8 +1,14 @@
 name: Nexus Core issue completion
 
+# Two-job consumer workflow for the Nexus Core issue gate.
+# - 'run' produces and Sigstore-signs the receipt (needs id-token: write).
+# - 'verify' is the required check: it verifies the signature against THIS
+#   workflow file on the default branch and checks the receipt against the exact
+#   head, base config and Issue.
+# Requires container isolation ([isolation] mode = "container") in the
+# committed .nexus-core/config.toml.
 on:
   pull_request_target:
-    branches: [main]
     types: [opened, synchronize, reopened, edited]
 
 permissions:
@@ -10,218 +16,52 @@ permissions:
   issues: read
   pull-requests: read
 
+concurrency:
+  group: nexus-core-issue-completion-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
-  nexus-core-issue-completion:
-    name: Nexus Core issue completion
+  run:
+    name: Nexus Core issue run
+    # Same-repository branches only; fork PRs are intentionally excluded.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.repo.fork == false
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    env:
-      GITHUB_TOKEN: ${{ github.token }}
-      PR_BODY: ${{ github.event.pull_request.body || '' }}
-      UV_TOOL_DIR: /tmp/nexus-core-tools
-      UV_TOOL_BIN_DIR: /tmp/nexus-core-bin
-      NEXUS_CORE_TOOL_PIN: 11b4945defb3dae031b712bf5d66b2bc1248b982
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      id-token: write
+    outputs:
+      artifact-name: ${{ steps.gate.outputs.artifact-name }}
+      issue-number: ${{ steps.gate.outputs.issue-number }}
     steps:
-      - name: Checkout exact pull-request head
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.2.2
+      - id: gate
+        uses: James3014/nexus-core/.github/actions/issue-gate@dafa3f9339269b8fc200c60e24b712134cb9b4fc
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-          persist-credentials: true
-          submodules: false
+          nexus-certify-ref: "dafa3f9339269b8fc200c60e24b712134cb9b4fc"
 
-      - name: Remove checkout credentials
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config --local --unset-all 'http.https://github.com/.extraheader' || true
-          git config --local --unset-all core.sshCommand || true
-
-      - name: Fetch exact base ref
-        run: |
-          set -euo pipefail
-          git fetch --no-tags origin "+${{ github.event.pull_request.base.sha }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
-
-      - name: Protect trusted Core governance inputs
-        id: trusted-core
-        shell: bash
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -euo pipefail
-          base_workflow="$RUNNER_TEMP/nexus-core-base-workflow.yml"
-          policy_result="$RUNNER_TEMP/nexus-core-pin-policy.json"
-          BASE_WORKFLOW="$base_workflow" python - <<'PY'
-          import os
-          from pathlib import Path
-          import subprocess
-
-          base = os.environ["BASE_SHA"]
-          workflow_path = ".github/workflows/nexus-core-issue-completion.yml"
-          protected = [
-              ".nexus-core/config.toml",
-              "scripts/ci/nexus-core-verify.sh",
-              "scripts/ci/nexus_core_trusted_pin_policy.py",
-              "scripts/ci/nexus_core_observe_dependency.py",
-          ]
-
-          def base_bytes(path: str) -> bytes:
-              result = subprocess.run(
-                  ["git", "show", f"{base}:{path}"],
-                  stdout=subprocess.PIPE,
-                  stderr=subprocess.PIPE,
-                  check=False,
-              )
-              if result.returncode != 0:
-                  raise SystemExit(f"NEXUS_CORE_TRUSTED_INPUT_BASE_MISSING: {path}")
-              return result.stdout
-
-          changed = []
-          for path in protected:
-              target = Path(path)
-              if not target.is_file() or target.read_bytes() != base_bytes(path):
-                  changed.append(path)
-          if changed:
-              raise SystemExit("NEXUS_CORE_GOVERNANCE_INPUT_CHANGED: " + ", ".join(changed))
-
-          Path(os.environ["BASE_WORKFLOW"]).write_bytes(base_bytes(workflow_path))
-          PY
-
-          python scripts/ci/nexus_core_trusted_pin_policy.py \
-            --base-workflow "$base_workflow" \
-            --candidate-workflow .github/workflows/nexus-core-issue-completion.yml \
-            --output "$policy_result"
-
-          candidate_pin="$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["candidate_pin"])' "$policy_result")"
-          change_kind="$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["change_kind"])' "$policy_result")"
-          test "$candidate_pin" = "$(printf '%s' "$candidate_pin" | grep -E '^[0-9a-f]{40}$')"
-
-          if [ "$change_kind" = "PIN_ONLY" ]; then
-            upstream="$RUNNER_TEMP/nexus-core-upstream.git"
-            rm -rf -- "$upstream"
-            git init --bare "$upstream"
-            git -C "$upstream" remote add origin https://github.com/James3014/nexus-core.git
-            git -C "$upstream" fetch --no-tags origin main:refs/remotes/origin/main
-            test "$(git -C "$upstream" cat-file -t "$candidate_pin")" = commit
-            git -C "$upstream" merge-base --is-ancestor "$candidate_pin" refs/remotes/origin/main
-          fi
-
-          echo "core_pin=$candidate_pin" >> "$GITHUB_OUTPUT"
-          echo "change_kind=$change_kind" >> "$GITHUB_OUTPUT"
-
-      - name: Resolve exact Issue binding
-        id: issue
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import os
-          import re
-
-          body = os.environ.get("PR_BODY", "")
-          matches = re.findall(r"<!--\s*NEXUS_CORE_ISSUE:\s*([1-9][0-9]*)\s*-->", body)
-          if len(matches) != 1:
-              raise SystemExit(
-                  "NEXUS_CORE_ISSUE_BINDING_REQUIRED: PR body must contain exactly one "
-                  "'<!-- NEXUS_CORE_ISSUE: <number> -->' marker."
-              )
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
-              handle.write(f"number={matches[0]}\n")
-          PY
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # trusted immutable pin
-
-      - name: Set up Python
-        run: uv python install 3.11
-
-      - name: Install pinned nexus-certify outside candidate tree
-        run: |
-          set -euo pipefail
-          mkdir -p "$UV_TOOL_BIN_DIR"
-          core_pin="${{ steps.trusted-core.outputs.core_pin }}"
-          test "$core_pin" = "$(printf '%s' "$core_pin" | grep -E '^[0-9a-f]{40}$')"
-          uv tool install --force "git+https://github.com/James3014/nexus-core.git@$core_pin"
-          echo "$UV_TOOL_BIN_DIR" >> "$GITHUB_PATH"
-
-
-      - name: Bootstrap canonical dependency material environment
-        shell: bash
-        run: |
-          set -euo pipefail
-          material_env="$RUNNER_TEMP/nexus-core-materials"
-          rm -rf "$material_env"
-          uv venv --python 3.11 "$material_env"
-          uv pip install --python "$material_env/bin/python" --requirement requirements/canonical-learning.txt
-          uv pip install --python "$material_env/bin/python" --requirement requirements/canonical-runtime.txt
-          echo "NEXUS_CORE_MATERIAL_PYTHON=$material_env/bin/python" >> "$GITHUB_ENV"
-
-      - name: Bind exact Issue contract
-        run: |
-          set -euo pipefail
-          nexus-certify issue-init --repo . --issue "${{ steps.issue.outputs.number }}"
-
-      - name: Verify exact Issue-bound candidate
-        run: |
-          set -euo pipefail
-          nexus-certify issue-check --repo . --issue "${{ steps.issue.outputs.number }}"
-
-      - name: Diagnose Core verifier failure
-        if: failure()
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import glob
-          import json
-
-          receipts = sorted(glob.glob(".nexus-core/receipts/*.json"))
-          if not receipts:
-              print("NEXUS_CORE_DIAGNOSTIC: no receipt available")
-              raise SystemExit(0)
-          path = receipts[-1]
-          payload = json.load(open(path, encoding="utf-8"))
-          verifier = payload.get("verifier") or {}
-          artifacts = payload.get("evidence_artifacts") or []
-          outcome = payload.get("outcome") or {}
-          print("NEXUS_CORE_DIAGNOSTIC_RECEIPT:", path)
-          print("status:", outcome.get("status") or payload.get("status"))
-          print("reason_codes:", outcome.get("reason_codes") or payload.get("reason_codes"))
-          if verifier:
-              print("verifier_command:", verifier.get("command"))
-              print("verifier_exit_code:", verifier.get("exit_code"))
-              print("--- verifier stdout ---")
-              print(verifier.get("stdout", ""))
-              print("--- verifier stderr ---")
-              print(verifier.get("stderr", ""))
-          for artifact in artifacts:
-              print("--- evidence artifact ---")
-              print("producer_id:", artifact.get("producer_id"))
-              print("kind:", artifact.get("producer_kind"))
-              print("status:", artifact.get("status"))
-              print("expected_identity:", artifact.get("expected_identity"))
-              print("observed_identity:", artifact.get("observed_identity"))
-              print("exit_code:", artifact.get("exit_code"))
-              print("--- stdout ---")
-              print(artifact.get("stdout", ""))
-              print("--- stderr ---")
-              print(artifact.get("stderr", ""))
-          PY
-
-      - name: Install gitlink metadata for checkout post-cleanup
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          while IFS= read -r -d '' index_entry; do
-            mode="${index_entry%% *}"
-            if [ "$mode" != "160000" ]; then
-              continue
-            fi
-            gitlink_path="${index_entry#*$'\t'}"
-            if ! git config --file .gitmodules --get "submodule.${gitlink_path}.path" >/dev/null 2>&1; then
-              git config --file .gitmodules "submodule.${gitlink_path}.path" "$gitlink_path"
-              git config --file .gitmodules "submodule.${gitlink_path}.url" .
-            fi
-          done < <(git ls-files --stage -z)
-          git submodule foreach --recursive ':'
+  verify:
+    name: Nexus Core issue completion
+    needs: run
+    if: >-
+      always() &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.repo.fork == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: James3014/nexus-core/.github/actions/receipt-verify@dafa3f9339269b8fc200c60e24b712134cb9b4fc
+        with:
+          artifact-name: ${{ needs.run.outputs.artifact-name }}
+          expected-identity: https://github.com/James3014/Nexus-new/.github/workflows/nexus-core-issue-completion.yml@refs/heads/main
+          github-repository: ${{ github.repository }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          base-sha: ${{ github.event.pull_request.base.sha }}
+          issue-number: ${{ needs.run.outputs.issue-number }}
+          nexus-certify-ref: "dafa3f9339269b8fc200c60e24b712134cb9b4fc"
