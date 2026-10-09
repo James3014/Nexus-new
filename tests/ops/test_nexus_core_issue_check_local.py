@@ -171,3 +171,22 @@ def test_cleanup_on_tooling_error(env):
     assert proc.returncode == 2
     assert out["error_code"] == "CORE_EXEC_FAILED"
     assert len(git(env["repo"], "worktree", "list").splitlines()) == 1
+
+
+def test_pin_read_from_two_job_workflow_fields(env):
+    """The two-job gate pins the tool via nexus-certify-ref and uses@sha (nexus-core#116/#120)."""
+    repo = env["repo"]
+    (repo / WORKFLOW).write_text(
+        "jobs:\n  run:\n    steps:\n"
+        f"      - uses: James3014/nexus-core/.github/actions/issue-gate@{PIN}\n"
+        f'        with:\n          nexus-certify-ref: "{PIN}"\n'
+        "  verify:\n    steps:\n"
+        f"      - uses: James3014/nexus-core/.github/actions/receipt-verify@{PIN}  # pin\n"
+        f'        with:\n          nexus-certify-ref: "{PIN}"\n'
+    )
+    git(repo, "commit", "-q", "-am", "two-job gate")
+    git(repo, "push", "-q", "origin", "main")
+    git(repo, "fetch", "-q", "origin", "main")
+    proc, out = run(env)
+    assert proc.returncode == 0, proc.stderr
+    assert out["pin"] == PIN
