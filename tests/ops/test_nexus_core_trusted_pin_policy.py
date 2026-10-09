@@ -102,7 +102,7 @@ def test_malformed_or_missing_pin_fails_closed(bad_line: str) -> None:
         policy.validate_pin_update(_workflow("1" * 40), candidate)
 
 
-def test_committed_workflow_uses_single_canonical_pin_across_two_job_gate() -> None:
+def test_committed_workflow_uses_single_canonical_pin_field_and_policy() -> None:
     """Since nexus-core#116/#120 the gate is two jobs built from composite actions.
 
     The canonical pin is the 40-hex sha shared by every `uses: James3014/nexus-core/...@sha`
@@ -132,9 +132,25 @@ def test_committed_workflow_uses_single_canonical_pin_across_two_job_gate() -> N
         assert forbidden not in text, forbidden
 
 
-@pytest.mark.skip(
-    reason="base-ref force binding moved into the James3014/nexus-core issue-gate composite "
-    "action (nexus-core#116) and is covered by nexus-core's own tests"
-)
-def test_committed_workflow_force_binds_exact_pr_base_ref() -> None:  # pragma: no cover
-    pass
+def test_committed_workflow_force_binds_exact_pr_base_ref() -> None:
+    """Base pinning now happens inside the nexus-core issue-gate composite action.
+
+    The committed workflow must delegate to that action (which force-fetches the
+    exact PR base sha, nexus-core#116) and must not carry its own unforced fetch.
+    """
+    import re
+
+    workflow = (REPO_ROOT / ".github" / "workflows" / "nexus-core-issue-completion.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert re.search(
+        r"uses:\s*James3014/nexus-core/\.github/actions/issue-gate@[0-9a-f]{40}", workflow
+    )
+    unforced = (
+        "git fetch --no-tags origin "
+        '"${{ github.event.pull_request.base.sha }}:'
+        'refs/remotes/origin/${{ github.event.pull_request.base.ref }}"'
+    )
+    assert unforced not in workflow
+    assert "git fetch" not in workflow
