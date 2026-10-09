@@ -17,6 +17,7 @@
 | tasks/trajectory-verifier-wave0-runtime-20260930/02-derived-recovery-request.json | tests/contracts/test_gateway_deployment_contract.py, tests/ops/test_mcp_gateway_durable.py | active | high | trajectory_verifier_wave0_recovery_request_contract |
 | tasks/trajectory-verifier-wave1-runtime-20260930/01-source-acceptance-evidence.json | tests/contracts/test_gateway_deployment_contract.py, tests/ops/test_mcp_gateway_durable.py | active | high | trajectory_verifier_wave1_source_acceptance_contract |
 | tasks/trajectory-verifier-wave1-runtime-20260930/02-derived-recovery-request.json | tests/contracts/test_gateway_deployment_contract.py, tests/ops/test_mcp_gateway_durable.py | active | high | trajectory_verifier_wave1_recovery_request_contract |
+| .gitmodules | tests/ops/test_gitmodules_declares_gitlinks.py | active | high | checkout_gitlink_metadata_contract |
 | .gitignore | tests/ops/test_repository_secret_hygiene.py, tests/ops/test_select_tests.py | active | high | repository_secret_hygiene_contract |
 | .nexus-core/config.toml | tests/ops/test_select_tests.py, tests/ops/test_pr_impact_gate.py | active | high | nexus_core_completion_config_contract |
 | .agents/skills | tests/ops/test_skill_file_contract.py, tests/learning/test_skill_catalog.py, tests/learning/test_skill_schema.py, tests/ops/test_ci_gate_report_trust_audit.py | active | high | skill_artifact_contract_and_catalog_governance |
