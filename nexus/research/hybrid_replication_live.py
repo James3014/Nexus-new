@@ -33,6 +33,14 @@ D0_DEFAULT_PATH = Path(
     "task-localization-v1/d0_v2_develop.py"
 )
 D0_DEFAULT_FREEZE = D0_DEFAULT_PATH.with_name("D0_V2_FROZEN.json")
+D0_FREEZE_SHA256 = "f04fdeea8ddb8cbaa2216aa783a7fe510da7c2f8625f50763a0d59d5e2234eee"
+CODEX_EXECUTABLE_SHA256 = "61b0194f3bb6534439c8d26a3ed57d0805f84b884588b761795323eeb92fcf70"
+FROZEN_RECEIPT_SHA256S = {
+    "r3": "77dee0030b022240ec8b23c388b0a957dc70878dc28ebae03d0d4d720402db37",
+    "d2": "4873ae4c96b63a0306c5dcc3afff039ab8df8ff6c7ee7070382eebb4d4268e79",
+    "dm1": "d85acab617dca8e2eab04c0e63246b41e1382ca0871607a96a424828bb05be99",
+    "re2": "ae1414c73107140b234d38178165769faad9d33f217a3b1f8064953e144efc63",
+}
 JEV_ENDPOINT = "https://api.typesafe.ai/v1/systemone"
 DM1_TOP_PROBABILITY_MIN = 0.70
 DM1_MARGIN_MIN = 0.30
@@ -56,6 +64,15 @@ DEFAULT_REPO_ROOTS = {
 _PATH_RE = re.compile(
     r"(?<![A-Za-z0-9_.-])((?:[A-Za-z0-9_.-]+/)+"
     r"(?:[A-Za-z0-9_.-]+\.(?:py|ts|tsx|js|mjs|cjs|json|ya?ml|toml|ini|cfg|sh|md|txt)))"
+)
+
+_FORBIDDEN_SHADOW_COMMANDS = (
+    re.compile(r"\bgit\s+(?:push|fetch|pull|clone|commit)\b", re.IGNORECASE),
+    re.compile(r"\b(?:gh|curl|wget|ssh)\s+", re.IGNORECASE),
+    re.compile(
+        r"\b(?:pip|npm|pnpm|yarn)\s+install\b|\buv\s+(?:pip\s+)?install\b",
+        re.IGNORECASE,
+    ),
 )
 
 
@@ -187,6 +204,16 @@ def build_d2_candidate_packet(
     return payload
 
 
+def _parse_timestamp(value: str) -> dt.datetime | None:
+    text = value.strip()
+    if not text:
+        return None
+    parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc)
+
+
 def resolve_ground_truth_payload(
     *,
     issue: Mapping[str, Any],
@@ -195,20 +222,39 @@ def resolve_ground_truth_payload(
     if str(issue.get("state") or "") != "closed":
         return None
 
+    terminal_at = str(issue.get("closed_at") or "")
+    terminal_time = _parse_timestamp(terminal_at)
+    if terminal_time is None:
+        raise ValueError("closed_issue_missing_closed_at")
+
+    eligible_prs: list[Mapping[str, Any]] = []
+    for pr in merged_prs:
+        merged_time = _parse_timestamp(str(pr.get("merged_at") or ""))
+        if merged_time is None or merged_time > terminal_time:
+            continue
+        eligible_prs.append(pr)
+
     issue_number = int(issue.get("number") or 0)
     changed_files = sorted({
-        str(path) for pr in merged_prs for path in pr.get("changed_files", ()) if str(path)
+        str(path)
+        for pr in eligible_prs
+        for path in pr.get("changed_files", ())
+        if str(path)
     })
     check_rows = sorted({
-        (str(name), str(state)) for pr in merged_prs for name, state in pr.get("checks", ())
+        (str(name), str(state))
+        for pr in eligible_prs
+        for name, state in pr.get("checks", ())
     })
-    refs = [f"issue:{issue_number}:closed"]
-    for pr in merged_prs:
+    refs = [f"issue:{issue_number}:closed@{terminal_at}"]
+    for pr in eligible_prs:
         refs.append(f"pr:{int(pr['number'])}@{str(pr.get('merge_commit_sha') or '')}")
 
     return {
-        "terminal_state": ("CLOSED_WITH_MERGED_PR" if merged_prs else "CLOSED_WITHOUT_MERGED_PR"),
-        "terminal_at": str(issue.get("closed_at") or ""),
+        "terminal_state": (
+            "CLOSED_WITH_MERGED_PR" if eligible_prs else "CLOSED_WITHOUT_MERGED_PR"
+        ),
+        "terminal_at": terminal_at,
         "evidence_refs": refs,
         "details": {
             "merged_prs": [
@@ -216,8 +262,9 @@ def resolve_ground_truth_payload(
                     "number": int(pr["number"]),
                     "merge_commit_sha": str(pr.get("merge_commit_sha") or ""),
                     "head_sha": str(pr.get("head_sha") or ""),
+                    "merged_at": str(pr.get("merged_at") or ""),
                 }
-                for pr in merged_prs
+                for pr in eligible_prs
             ],
             "changed_files": changed_files,
             "checks": [{"name": name, "state": state} for name, state in check_rows],
@@ -243,21 +290,63 @@ def _snapshot_from_capture_payload(payload: Mapping[str, Any]) -> TaskSnapshot:
     )
 
 
+def _frozen_receipt_hashes(
+    binding: Mapping[str, Any],
+) -> tuple[dict[str, str], dict[str, str]]:
+    rows = binding.get("frozen_receipts")
+    if not isinstance(rows, Mapping) or set(rows) != set(FROZEN_RECEIPT_SHA256S):
+        raise ValueError("frozen_receipt_binding_set_mismatch")
+    actual: dict[str, str] = {}
+    declared: dict[str, str] = {}
+    for name in FROZEN_RECEIPT_SHA256S:
+        row = rows.get(name)
+        if not isinstance(row, Mapping):
+            raise ValueError(f"frozen_receipt_binding_invalid:{name}")
+        path = Path(str(row.get("path") or ""))
+        if not path.is_file():
+            raise ValueError(f"frozen_receipt_missing:{name}:{path}")
+        actual[name] = _sha256_file(path)
+        declared[name] = str(row.get("sha256") or "")
+    return actual, declared
+
+
 def _load_binding(path: Path, *, require_activation: bool = True) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("schema") != "nexus.hybrid_replication.live_binding.v1":
         raise ValueError("live_binding_schema_mismatch")
     if require_activation and payload.get("activation_state") != "AUTOMATIC_CAPTURE_READY":
         raise ValueError("live_binding_not_activated")
+    if require_activation:
+        actual_receipts, declared_receipts = _frozen_receipt_hashes(payload)
+        if actual_receipts != FROZEN_RECEIPT_SHA256S:
+            raise ValueError("frozen_receipt_physical_identity_drift")
+        if declared_receipts != FROZEN_RECEIPT_SHA256S:
+            raise ValueError("frozen_receipt_declared_identity_drift")
+        d0 = payload.get("d0") or {}
+        if str(d0.get("implementation_sha256") or "") != D0_IMPLEMENTATION_SHA256:
+            raise ValueError("d0_declared_identity_drift")
+        if str(d0.get("freeze_sha256") or "") != D0_FREEZE_SHA256:
+            raise ValueError("d0_freeze_declared_identity_drift")
+        if _sha256_file(Path(str(d0.get("implementation_path") or ""))) != D0_IMPLEMENTATION_SHA256:
+            raise ValueError("d0_implementation_hash_drift")
+        if _sha256_file(Path(str(d0.get("freeze_path") or ""))) != D0_FREEZE_SHA256:
+            raise ValueError("d0_freeze_hash_drift")
+        online = payload.get("strong_online") or {}
+        if str(online.get("codex_executable_sha256") or "") != CODEX_EXECUTABLE_SHA256:
+            raise ValueError("codex_declared_executable_identity_drift")
     return payload
 
 
 def build_identity_preflight_receipt(
     *,
     d0_sha256: str,
+    d0_freeze_sha256: str,
+    frozen_receipt_sha256s: Mapping[str, str],
+    declared_frozen_receipt_sha256s: Mapping[str, str],
     codex_cli: str,
     previous_codex_cli: str,
     codex_executable_sha256: str,
+    expected_codex_executable_sha256: str,
     jev_requested_model: str,
     jev_resolved_model: str,
     expected_jev_resolved_model: str,
@@ -268,19 +357,36 @@ def build_identity_preflight_receipt(
 ) -> dict[str, Any]:
     generation_change = codex_cli != previous_codex_cli
     provider_drift = jev_resolved_model != expected_jev_resolved_model
+    frozen_receipts_match = (
+        dict(frozen_receipt_sha256s) == FROZEN_RECEIPT_SHA256S
+        and dict(declared_frozen_receipt_sha256s) == FROZEN_RECEIPT_SHA256S
+    )
+    codex_identity_match = (
+        codex_executable_sha256 == CODEX_EXECUTABLE_SHA256
+        and expected_codex_executable_sha256 == CODEX_EXECUTABLE_SHA256
+    )
     activation_allowed = (
         d0_sha256 == D0_IMPLEMENTATION_SHA256
-        and len(codex_executable_sha256) == 64
+        and d0_freeze_sha256 == D0_FREEZE_SHA256
+        and frozen_receipts_match
+        and codex_identity_match
         and jev_status == "VALID"
         and not provider_drift
     )
     receipt = {
-        "schema": "nexus.hybrid_replication.identity_preflight.v1",
+        "schema": "nexus.hybrid_replication.identity_preflight.v2",
         "created_at_utc": created_at_utc,
         "d0_implementation_sha256": d0_sha256,
+        "d0_freeze_sha256": d0_freeze_sha256,
+        "frozen_receipt_sha256s": dict(frozen_receipt_sha256s),
+        "declared_frozen_receipt_sha256s": dict(declared_frozen_receipt_sha256s),
+        "expected_frozen_receipt_sha256s": dict(FROZEN_RECEIPT_SHA256S),
+        "frozen_receipts_match": frozen_receipts_match,
         "codex_cli": codex_cli,
         "previous_codex_cli": previous_codex_cli,
         "codex_executable_sha256": codex_executable_sha256,
+        "expected_codex_executable_sha256": expected_codex_executable_sha256,
+        "codex_identity_match": codex_identity_match,
         "execution_generation_change": generation_change,
         "jev_requested_model": jev_requested_model,
         "jev_resolved_model": jev_resolved_model,
@@ -334,6 +440,10 @@ def _load_d0(binding: Mapping[str, Any], repo: Path) -> tuple[Any, Mapping[str, 
         raise ValueError("unexpected_d0_identity")
     if _sha256_file(path) != expected:
         raise ValueError("d0_implementation_hash_drift")
+    if str(d0.get("freeze_sha256") or "") != D0_FREEZE_SHA256:
+        raise ValueError("unexpected_d0_freeze_identity")
+    if _sha256_file(freeze_path) != D0_FREEZE_SHA256:
+        raise ValueError("d0_freeze_hash_drift")
     freeze = json.loads(freeze_path.read_text(encoding="utf-8"))
     if str(freeze.get("implementation_sha256")) != expected:
         raise ValueError("d0_freeze_identity_mismatch")
@@ -455,6 +565,20 @@ def _jev_key(binding: Mapping[str, Any]) -> str:
     return cp.stdout.strip()
 
 
+def _valid_probability_distribution(probabilities: Mapping[str, Any]) -> bool:
+    if not probabilities:
+        return False
+    try:
+        values = [float(value) for value in probabilities.values()]
+    except (TypeError, ValueError):
+        return False
+    return (
+        len(values) == len(probabilities)
+        and all(0.0 <= value <= 1.0 for value in values)
+        and abs(sum(values) - 1.0) <= 0.03
+    )
+
+
 def _jev_request(
     *,
     snapshot: TaskSnapshot,
@@ -562,9 +686,14 @@ def _jev_request(
 
     ans = (out.get("answers") or {}).get("file_choice") or {}
     probs = ans.get("probabilities") or {}
-    ordered = sorted(
-        ((str(k), float(v)) for k, v in probs.items()),
-        key=lambda item: (-item[1], item[0]),
+    probabilities_valid = _valid_probability_distribution(probs)
+    ordered = (
+        sorted(
+            ((str(k), float(v)) for k, v in probs.items()),
+            key=lambda item: (-item[1], item[0]),
+        )
+        if probabilities_valid
+        else []
     )
     choice = str(ans.get("choice") or "")
     valid = (
@@ -572,7 +701,8 @@ def _jev_request(
         and ans.get("type") == "choice"
         and choice in criteria
         and set(probs) == set(criteria)
-        and ordered
+        and probabilities_valid
+        and bool(ordered)
         and choice == ordered[0][0]
         and isinstance(out.get("usage"), dict)
     )
@@ -718,6 +848,189 @@ def _run_codex(
         )
 
 
+def _codex_command_strings(events: str) -> tuple[str, ...]:
+    commands: list[str] = []
+    for line in events.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        stack: list[Any] = [event]
+        while stack:
+            item = stack.pop()
+            if isinstance(item, Mapping):
+                for key, value in item.items():
+                    if key in {"command", "cmd"} and isinstance(value, str):
+                        commands.append(value)
+                    elif isinstance(value, (Mapping, list, tuple)):
+                        stack.append(value)
+            elif isinstance(item, (list, tuple)):
+                stack.extend(item)
+    return tuple(commands)
+
+
+def _run_codex_candidate(
+    *,
+    repo: Path,
+    revision: str,
+    prompt: str,
+    schema: Mapping[str, Any],
+    binding: Mapping[str, Any],
+) -> tuple[dict[str, Any], float]:
+    online = binding["strong_online"]
+    binary = str(online["codex_binary"])
+    version = _run([binary, "--version"], timeout=15)
+    if version.returncode != 0:
+        raise RuntimeError("codex_version_unavailable")
+    if version.stdout.strip() != str(online["codex_cli"]):
+        raise RuntimeError(
+            f"codex_cli_generation_drift:{version.stdout.strip()}:{online['codex_cli']}"
+        )
+    executable = Path(str(online["codex_executable_path"]))
+    actual_executable_sha = _sha256_file(executable)
+    if actual_executable_sha != str(online["codex_executable_sha256"]):
+        raise RuntimeError("codex_executable_hash_drift")
+    if actual_executable_sha != CODEX_EXECUTABLE_SHA256:
+        raise RuntimeError("codex_executable_frozen_identity_drift")
+
+    with tempfile.TemporaryDirectory(prefix="nexus-hybrid-replication-c-") as temp:
+        root = Path(temp)
+        source = root / "source"
+        added = _run(
+            ["git", "worktree", "add", "--detach", str(source), revision],
+            cwd=repo,
+            timeout=60,
+        )
+        if added.returncode != 0:
+            raise RuntimeError(f"shadow_worktree_add_failed:{added.stderr.strip()}")
+        try:
+            schema_path = root / "schema.json"
+            output_path = root / "last.json"
+            schema_path.write_text(json.dumps(schema, sort_keys=True), encoding="utf-8")
+            cmd = [
+                binary,
+                "--no-daemon",
+                "exec",
+                "-m",
+                str(online["requested_model"]),
+                "--ephemeral",
+                "--ignore-user-config",
+                "--ignore-rules",
+                "--skip-git-repo-check",
+                "--json",
+                "-s",
+                "workspace-write",
+                "-C",
+                str(source),
+                "--output-schema",
+                str(schema_path),
+                "-o",
+                str(output_path),
+                prompt,
+            ]
+            started = time.perf_counter()
+            cp = _run(cmd, timeout=300)
+            wall = time.perf_counter() - started
+            parsed = _codex_usage(cp.stdout)
+            try:
+                result = json.loads(output_path.read_text(encoding="utf-8"))
+                parse_error = None
+            except Exception as exc:
+                result = {}
+                parse_error = f"{type(exc).__name__}:{exc}"
+
+            tracked = _run(
+                ["git", "diff", "--name-only", "-z", "HEAD"],
+                cwd=source,
+                timeout=30,
+            )
+            untracked = _run(
+                ["git", "ls-files", "--others", "--exclude-standard", "-z"],
+                cwd=source,
+                timeout=30,
+            )
+            if tracked.returncode != 0 or untracked.returncode != 0:
+                raise RuntimeError("shadow_candidate_status_failed")
+            changed_files = sorted({
+                item
+                for item in (tracked.stdout + untracked.stdout).split("\0")
+                if item
+            })
+            diff = _run(["git", "diff", "--binary", "HEAD"], cwd=source, timeout=30)
+            if diff.returncode != 0:
+                raise RuntimeError("shadow_candidate_diff_failed")
+            diff_bytes = diff.stdout.encode("utf-8")
+            untracked_rows: list[dict[str, Any]] = []
+            oversized_untracked: list[str] = []
+            for rel in [item for item in untracked.stdout.split("\0") if item]:
+                file_path = source / rel
+                if not file_path.is_file():
+                    continue
+                data = file_path.read_bytes()
+                row = {
+                    "path": rel,
+                    "sha256": _sha256_bytes(data),
+                    "size": len(data),
+                }
+                if len(data) <= 5_000_000:
+                    row["gzip_base64"] = base64.b64encode(
+                        gzip.compress(data, mtime=0)
+                    ).decode("ascii")
+                else:
+                    oversized_untracked.append(rel)
+                untracked_rows.append(row)
+
+            commands = _codex_command_strings(cp.stdout)
+            forbidden = sorted({
+                command
+                for command in commands
+                if any(pattern.search(command) for pattern in _FORBIDDEN_SHADOW_COMMANDS)
+            })
+            protocol_valid = (
+                cp.returncode == 0
+                and bool(result)
+                and not forbidden
+                and not oversized_untracked
+            )
+            return (
+                {
+                    "schema": "nexus.hybrid_replication.strong_online_shadow_candidate.v1",
+                    "status": "VALID" if protocol_valid else "INVALID",
+                    "requested_model": online["requested_model"],
+                    "resolved_model": online["requested_model"],
+                    "codex_cli": version.stdout.strip(),
+                    "codex_executable_sha256": actual_executable_sha,
+                    "sandbox": "workspace-write",
+                    "returncode": cp.returncode,
+                    "wall_time_seconds": wall,
+                    "usage": parsed["usage"],
+                    "observable_turns": parsed["turns"],
+                    "error_events": parsed["errors"],
+                    "parse_error": parse_error,
+                    "final_response": result,
+                    "changed_files": changed_files,
+                    "diff_sha256": _sha256_bytes(diff_bytes),
+                    "diff_gzip_base64": base64.b64encode(
+                        gzip.compress(diff_bytes, mtime=0)
+                    ).decode("ascii"),
+                    "untracked_files": untracked_rows,
+                    "oversized_untracked_files": oversized_untracked,
+                    "observed_commands": list(commands),
+                    "forbidden_commands": forbidden,
+                    "protocol_valid": protocol_valid,
+                    "events_sha256": _sha256_bytes(cp.stdout.encode("utf-8")),
+                },
+                wall,
+            )
+        finally:
+            _run(
+                ["git", "worktree", "remove", "--force", str(source)],
+                cwd=repo,
+                timeout=60,
+            )
+            _run(["git", "worktree", "prune"], cwd=repo, timeout=30)
+
+
 def _b_fallback_prompt(
     snapshot: TaskSnapshot, packet: Mapping[str, Any]
 ) -> tuple[str, dict[str, Any]]:
@@ -752,26 +1065,27 @@ def _c_prompt(snapshot: TaskSnapshot) -> tuple[str, dict[str, Any]]:
         "type": "object",
         "additionalProperties": False,
         "properties": {
-            "summary": {"type": "string"},
-            "recommended_files": {
-                "type": "array",
-                "maxItems": 12,
-                "items": {"type": "string"},
+            "status": {
+                "type": "string",
+                "enum": ["CANDIDATE", "NO_CHANGE", "BLOCKED"],
             },
+            "summary": {"type": "string"},
             "risk_notes": {
                 "type": "array",
                 "maxItems": 12,
                 "items": {"type": "string"},
             },
         },
-        "required": ["summary", "recommended_files", "risk_notes"],
+        "required": ["status", "summary", "risk_notes"],
     }
     prompt = (
         "You are the frozen strong-Online arm for a prospective Nexus engineering "
-        "replication. Work only from this pre-outcome task contract and the exact source "
-        "revision mounted read-only. Do not modify files. Do not use future PR, changed-file, "
-        "verifier, merge, or final-worker outcome information. Return a bounded pre-outcome "
-        "implementation prediction: concise approach, likely files, and risks.\n\n"
+        "replication. Work only in this isolated captured-base checkout. Implement the "
+        "supplied task as a best-effort shadow Candidate while preserving its exact "
+        "authority and scope. Do not commit, push, fetch, pull, clone, call gh/curl/wget/ssh, "
+        "or install dependencies. Do not use future PR, changed-file, verifier, merge, or "
+        "final-worker outcome information. Return only the bounded execution summary required "
+        "by the output schema; the harness separately seals the physical diff.\n\n"
         f"TASK KEY: {snapshot.task_key}\n"
         f"SOURCE REVISION: {snapshot.pre_implementation_revision}\n"
         f"TITLE: {snapshot.title}\n\n{snapshot.body}"
@@ -926,7 +1240,7 @@ def run_frozen_stack(
             )
 
     prompt, schema = _c_prompt(snapshot)
-    strong, wall = _run_codex(
+    strong, wall = _run_codex_candidate(
         repo=repo,
         revision=snapshot.pre_implementation_revision,
         prompt=prompt,
@@ -969,13 +1283,69 @@ def run_frozen_stack(
 
 
 def _gh_json(*args: str) -> Any:
-    cp = _run(["gh", "api", *args], timeout=60)
+    cp = subprocess.run(  # nosec B603 B607
+        ["gh", "api", *args],
+        stdin=subprocess.DEVNULL,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=60,
+    )
     if cp.returncode != 0:
         raise RuntimeError(f"gh_api_failed:{cp.returncode}:{cp.stderr.strip()}")
     return json.loads(cp.stdout)
 
 
+def _gh_list(path: str, *, accept: str | None = None) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for page in range(1, 11):
+        sep = "&" if "?" in path else "?"
+        args = ["-X", "GET"]
+        if accept:
+            args.extend(["-H", f"Accept: {accept}"])
+        args.append(f"{path}{sep}per_page=100&page={page}")
+        payload = _gh_json(*args)
+        if not isinstance(payload, list):
+            raise RuntimeError("github_paged_response_not_list")
+        rows.extend(item for item in payload if isinstance(item, dict))
+        if len(payload) < 100:
+            return rows
+    raise RuntimeError("github_pagination_exceeds_bound")
+
+
+def _check_runs_until(
+    repository: str,
+    head_sha: str,
+    terminal_time: dt.datetime,
+) -> tuple[tuple[str, str], ...]:
+    rows: list[tuple[str, str]] = []
+    for page in range(1, 11):
+        payload = _gh_json(
+            "-X",
+            "GET",
+            f"repos/{repository}/commits/{head_sha}/check-runs?per_page=100&page={page}",
+        )
+        batch = payload.get("check_runs", []) if isinstance(payload, Mapping) else []
+        if not isinstance(batch, list):
+            raise RuntimeError("check_runs_response_not_list")
+        for item in batch:
+            if not isinstance(item, Mapping):
+                continue
+            completed_time = _parse_timestamp(str(item.get("completed_at") or ""))
+            if completed_time is None or completed_time > terminal_time:
+                continue
+            rows.append((
+                str(item.get("name") or ""),
+                str(item.get("conclusion") or item.get("status") or ""),
+            ))
+        if len(batch) < 100:
+            return tuple(rows)
+    raise RuntimeError("check_runs_pagination_exceeds_bound")
+
+
 def _resolve_ground_truth_from_state(state: Mapping[str, Any]) -> dict[str, Any] | None:
+    if state.get("phase") != "RAW_SEALED":
+        raise ValueError("ground_truth_requires_raw_sealed")
     snapshot = state.get("snapshot") or {}
     repository = str(snapshot.get("repository") or "")
     issue_number = int(snapshot.get("issue_number") or 0)
@@ -984,64 +1354,67 @@ def _resolve_ground_truth_from_state(state: Mapping[str, Any]) -> dict[str, Any]
     issue = _gh_json(f"repos/{repository}/issues/{issue_number}")
     if str(issue.get("state") or "") != "closed":
         return None
+    terminal_at = str(issue.get("closed_at") or "")
+    terminal_time = _parse_timestamp(terminal_at)
+    if terminal_time is None:
+        raise ValueError("closed_issue_missing_closed_at")
 
-    timeline = _gh_json(
-        "-X",
-        "GET",
+    timeline = _gh_list(
         f"repos/{repository}/issues/{issue_number}/timeline",
-        "-f",
-        "per_page=100",
+        accept="application/vnd.github+json",
     )
-    pr_numbers = sorted({
-        int(source_issue["number"])
-        for item in timeline
-        if isinstance(item, dict) and item.get("event") == "cross-referenced"
-        for source in [item.get("source") or {}]
-        for source_issue in [source.get("issue") or {}]
-        if "pull_request" in source_issue
-        and str(source_issue.get("repository_url") or "")
-        == f"https://api.github.com/repos/{repository}"
-        and isinstance(source_issue.get("number"), int)
-    })
-    merged: list[dict[str, Any]] = []
-    for number in pr_numbers:
-        pr = _gh_json(f"repos/{repository}/pulls/{number}")
-        if not pr.get("merged_at"):
+    pr_numbers: set[int] = set()
+    for item in timeline:
+        if item.get("event") != "cross-referenced":
             continue
-        files = _gh_json(
-            "-X",
-            "GET",
-            f"repos/{repository}/pulls/{number}/files",
-            "-f",
-            "per_page=100",
-        )
+        event_time = _parse_timestamp(str(item.get("created_at") or ""))
+        if event_time is not None and event_time > terminal_time:
+            continue
+        source = item.get("source") or {}
+        source_issue = source.get("issue") if isinstance(source, Mapping) else {}
+        if not isinstance(source_issue, Mapping) or "pull_request" not in source_issue:
+            continue
+        if str(source_issue.get("repository_url") or "") != (
+            f"https://api.github.com/repos/{repository}"
+        ):
+            continue
+        number = source_issue.get("number")
+        if isinstance(number, int):
+            pr_numbers.add(number)
+
+    merged: list[dict[str, Any]] = []
+    for number in sorted(pr_numbers):
+        pr = _gh_json(f"repos/{repository}/pulls/{number}")
+        merged_at = str(pr.get("merged_at") or "")
+        merged_time = _parse_timestamp(merged_at)
+        if merged_time is None or merged_time > terminal_time:
+            continue
+        files = _gh_list(f"repos/{repository}/pulls/{number}/files")
         head_sha = str((pr.get("head") or {}).get("sha") or "")
-        checks = _gh_json(f"repos/{repository}/commits/{head_sha}/check-runs?per_page=100")
         merged.append({
             "number": number,
             "merge_commit_sha": str(pr.get("merge_commit_sha") or ""),
             "head_sha": head_sha,
+            "merged_at": merged_at,
             "changed_files": tuple(
                 str(item.get("filename") or "")
                 for item in files
-                if isinstance(item, dict) and item.get("filename")
+                if item.get("filename")
             ),
-            "checks": tuple(
-                (
-                    str(item.get("name") or ""),
-                    str(item.get("conclusion") or item.get("status") or ""),
-                )
-                for item in checks.get("check_runs", [])
-                if isinstance(item, dict)
-            ),
+            "checks": _check_runs_until(repository, head_sha, terminal_time),
         })
     return resolve_ground_truth_payload(issue=issue, merged_prs=tuple(merged))
 
 
 def _identity_preflight_main(binding_path: Path) -> int:
     binding = _load_binding(binding_path, require_activation=False)
-    d0_path = Path(str(binding["d0"]["implementation_path"]))
+    d0 = binding["d0"]
+    d0_path = Path(str(d0["implementation_path"]))
+    d0_freeze_path = Path(str(d0["freeze_path"]))
     d0_sha = _sha256_file(d0_path)
+    d0_freeze_sha = _sha256_file(d0_freeze_path)
+    frozen_actual, frozen_declared = _frozen_receipt_hashes(binding)
+
     binary = str(binding["strong_online"]["codex_binary"])
     version = _run([binary, "--version"], timeout=15)
     if version.returncode != 0:
@@ -1084,20 +1457,27 @@ def _identity_preflight_main(binding_path: Path) -> int:
     )
     receipt = build_identity_preflight_receipt(
         d0_sha256=d0_sha,
+        d0_freeze_sha256=d0_freeze_sha,
+        frozen_receipt_sha256s=frozen_actual,
+        declared_frozen_receipt_sha256s=frozen_declared,
         codex_cli=version.stdout.strip(),
         previous_codex_cli=str(binding["strong_online"]["previous_codex_cli"]),
         codex_executable_sha256=executable_sha,
+        expected_codex_executable_sha256=str(
+            binding["strong_online"]["codex_executable_sha256"]
+        ),
         jev_requested_model=str(binding["jev"]["requested_model"]),
         jev_resolved_model=str(jev_raw.get("resolved_model") or ""),
         expected_jev_resolved_model=str(binding["jev"]["resolved_model"]),
         jev_status=str(jev_raw.get("status") or ""),
         jev_usage=dict(jev_raw.get("usage") or {}),
         jev_latency_ms=wall * 1000,
-        created_at_utc=dt.datetime
-        .now(dt.timezone.utc)
-        .replace(microsecond=0)
-        .isoformat()
-        .replace("+00:00", "Z"),
+        created_at_utc=(
+            dt.datetime.now(dt.timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        ),
     )
     receipt["jev_retries"] = retries
     receipt["jev_request_sha256"] = jev_raw.get("request_sha256")
