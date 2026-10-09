@@ -114,11 +114,14 @@ def _validate_session_id(session_id: str) -> str:
     return value
 
 
-def _parse_created_goal_log(path: Path, *, require_goal: bool = True) -> dict[str, Any]:
+def _parse_created_goal_log(
+    path: Path, *, require_goal: bool = True, required_round_cap: int | None = None
+) -> dict[str, Any]:
     session_id: str | None = None
     observed_cwd: str | None = None
     create_calls: set[str] = set()
     goal: dict[str, Any] | None = None
+    round_caps: list[Any] = []
 
     def record_session(candidate: str) -> None:
         nonlocal session_id
@@ -157,6 +160,7 @@ def _parse_created_goal_log(path: Path, *, require_goal: bool = True) -> dict[st
                 "log contains multiple successful create_goal identities",
             )
         goal = normalized
+        round_caps.append(candidate_goal.get("maxGoalRounds"))
 
     with path.open("r", encoding="utf-8") as handle:
         for line_number, raw in enumerate(handle, start=1):
@@ -231,6 +235,18 @@ def _parse_created_goal_log(path: Path, *, require_goal: bool = True) -> dict[st
             "DSH_TRACKING_GOAL_NOT_OBSERVED",
             "log does not contain a durable create_goal result",
         )
+    # Fail closed: a model ignoring the header must not leave a 256-round Goal bound.
+    if (
+        required_round_cap is not None
+        and goal is not None
+        and not (
+            round_caps and all(type(cap) is int and cap == required_round_cap for cap in round_caps)
+        )
+    ):
+        raise DshWorkflowError(
+            "DSH_GOAL_ROUND_CAP_MISMATCH",
+            f"created goal maxGoalRounds must be exactly {required_round_cap}",
+        )
     return {
         "session_id": session_id,
         "observed_cwd": observed_cwd,
@@ -249,6 +265,7 @@ def build_binding_from_log(
     phase: str | None = None,
     parent_session_id: str | None = None,
     goal_objective: str | None = None,
+    required_round_cap: int | None = None,
 ) -> dict[str, Any]:
     """Build a binding; with ``phase`` set, a missing goal yields a phase-scoped binding."""
     if issue_number < 1:
@@ -256,7 +273,9 @@ def build_binding_from_log(
             "DSH_TRACKING_ISSUE_INVALID",
             "issue number must be positive",
         )
-    observed = _parse_created_goal_log(log_path, require_goal=phase is None)
+    observed = _parse_created_goal_log(
+        log_path, require_goal=phase is None, required_round_cap=required_round_cap
+    )
     repo_root = repo_root.expanduser().resolve()
     dsh_home = dsh_home.expanduser().resolve()
     observed_cwd = observed.get("observed_cwd")
@@ -1245,7 +1264,18 @@ def _main_red_gate(args: argparse.Namespace) -> int:
         return EXIT_BLOCKED
     out = dict(receipt)
     if args.state_root:
-        out["receipt_path"] = str(persist_red_gate(_state_root(args.state_root), receipt))
+        try:
+            out["receipt_path"] = str(
+                persist_red_gate_with_sidecar(
+                    _state_root(args.state_root),
+                    receipt,
+                    repo=Path(args.repo_root),
+                    base=receipt["base_revision"],
+                )
+            )
+        except DshWorkflowError as exc:
+            print(json.dumps(_red_error_receipt(exc.code, str(exc)), sort_keys=True))
+            return EXIT_BLOCKED
     print(json.dumps(out, sort_keys=True))
     return 0 if receipt["decision"] == "RED_READY" else EXIT_BLOCKED
 
@@ -1490,6 +1520,261 @@ def persist_green_gate(root: Path, receipt: dict[str, Any]) -> Path:
     return unique
 
 
+# Derived recovery evidence beside a gate receipt: the exact bytes that the
+# receipt's worktree_diff_sha256 covers. It is never verification or acceptance.
+GATE_SIDECAR_SCHEMA = "nexus.dsh_gate_sidecar.v1"
+GATE_SIDECAR_CLAIM_CEILING = "DERIVED_RECOVERY_EVIDENCE_ONLY"
+_SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+
+
+_SHA256_PREFIXED = re.compile(r"sha256:[0-9a-f]{64}")
+GATE_SIDECAR_READY = {"red": "RED_READY", "green": "GREEN_READY"}
+
+
+def _gate_sidecar_dir(root: Path, gate: str, receipt: dict[str, Any]) -> Path:
+    contract_hash = receipt.get("contract_hash")
+    receipt_hash = receipt.get("receipt_hash")
+    if (
+        gate not in GATE_SIDECAR_READY
+        or not isinstance(contract_hash, str)
+        or not isinstance(receipt_hash, str)
+        or not _SHA256_PREFIXED.fullmatch(contract_hash)
+        or not _SHA256_PREFIXED.fullmatch(receipt_hash)
+    ):
+        raise DshWorkflowError(
+            "GATE_SIDECAR_INVALID", "gate sidecar identity is not a sha256 segment"
+        )
+    return root / "gate-sidecars" / gate / contract_hash[7:] / receipt_hash[7:]
+
+
+def _gate_scope_globs(gate: str, receipt: dict[str, Any]) -> list[str]:
+    contract = receipt.get("contract")
+    key = "test_path_globs" if gate == "red" else "allowed_change_globs"
+    globs = contract.get(key) if isinstance(contract, dict) else None
+    if not isinstance(globs, list) or not globs or not all(isinstance(g, str) for g in globs):
+        raise DshWorkflowError("GATE_SIDECAR_SCOPE_UNKNOWN", "gate receipt has no scope globs")
+    return globs
+
+
+def _private_write_bytes(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(data)
+    os.replace(tmp, path)
+
+
+def _is_safe_rel(rel: str) -> bool:
+    parts = Path(rel).parts
+    return (
+        bool(parts)
+        and not Path(rel).is_absolute()
+        and all(part not in ("", ".", "..") for part in parts)
+    )
+
+
+def _safe_untracked_file(repo: Path, rel: str) -> Path:
+    if not _is_safe_rel(rel):
+        raise DshWorkflowError("GATE_SIDECAR_PATH_UNSAFE", f"untracked path is unsafe: {rel!r}")
+    current = repo
+    for part in Path(rel).parts:
+        current = current / part
+        if current.is_symlink():
+            raise DshWorkflowError(
+                "GATE_SIDECAR_SYMLINK_REFUSED", f"untracked path crosses a symlink: {rel!r}"
+            )
+    if not current.is_file():
+        raise DshWorkflowError(
+            "GATE_SIDECAR_PATH_UNSAFE", f"untracked path is not a regular file: {rel!r}"
+        )
+    return current
+
+
+def _gate_snapshot(
+    repo: Path, base: str, globs: list[str]
+) -> tuple[bytes, list[tuple[str, bytes]]]:
+    """Exact inputs of ``_collect_worktree_changes``, limited to the gate's allowed scope.
+
+    Scope is checked on names before any file bytes are read, so an out-of-scope
+    untracked file is never archived.
+    """
+    code = "GATE_SIDECAR_UNAVAILABLE"
+    tracked = _split_z(_git_ok(repo, "diff", "--name-only", "--no-renames", "-z", base, code=code))
+    untracked = sorted(
+        set(_split_z(_git_ok(repo, "ls-files", "--others", "--exclude-standard", "-z", code=code)))
+    )
+    for rel in [*tracked, *untracked]:
+        if not any(_glob_match(rel, g) for g in globs):
+            raise DshWorkflowError(
+                "GATE_SIDECAR_SCOPE_VIOLATION",
+                f"changed path is outside the gate scope; nothing archived: {rel!r}",
+            )
+    patch = _git_ok(repo, "diff", "--binary", "--no-renames", base, code=code)
+    return patch, [(rel, _safe_untracked_file(repo, rel).read_bytes()) for rel in untracked]
+
+
+def _snapshot_digest(patch: bytes, files: list[tuple[str, bytes]]) -> str:
+    digest = hashlib.sha256()
+    digest.update(patch)
+    for rel, data in files:
+        digest.update(b"\0untracked\0" + rel.encode("utf-8", "surrogateescape") + b"\0")
+        digest.update(data)
+    return "sha256:" + digest.hexdigest()
+
+
+def write_gate_sidecar(
+    root: Path, receipt: dict[str, Any], *, gate: str, repo: Path, base: str
+) -> Path:
+    """Persist the bytes behind ``receipt`` or raise; nothing is written on mismatch."""
+    head = _git_ok(repo, "rev-parse", "HEAD", code="GATE_SIDECAR_UNAVAILABLE").decode().strip()
+    if head != receipt.get("repo_head") or base != receipt.get("base_revision"):
+        raise DshWorkflowError(
+            "GATE_SIDECAR_IDENTITY_MISMATCH",
+            "repository head or base differs from the gate receipt; no sidecar written",
+        )
+    sdir = _gate_sidecar_dir(root, gate, receipt)
+    patch, files = _gate_snapshot(repo, base, _gate_scope_globs(gate, receipt))
+    expected = receipt["worktree_diff_sha256"]
+    if _snapshot_digest(patch, files) != expected:
+        raise DshWorkflowError(
+            "GATE_SIDECAR_DIGEST_MISMATCH",
+            "current worktree no longer matches the gate receipt digest; no sidecar written",
+        )
+
+    def _store(data: bytes) -> dict[str, Any]:
+        blob = hashlib.sha256(data).hexdigest()
+        _private_write_bytes(sdir / "blobs" / blob, data)
+        return {"blob": blob, "bytes": len(data)}
+
+    manifest = {
+        "schema": GATE_SIDECAR_SCHEMA,
+        "claim_ceiling": GATE_SIDECAR_CLAIM_CEILING,
+        "gate": gate,
+        "receipt_hash": receipt["receipt_hash"],
+        "contract_hash": receipt["contract_hash"],
+        "repository": receipt.get("repository"),
+        "issue_number": receipt.get("issue_number"),
+        "repo_head": head,
+        "base_revision": base,
+        "worktree_diff_sha256": expected,
+        "tracked_patch": _store(patch),
+        "untracked": [{"path": rel, **_store(data)} for rel, data in files],
+    }
+    manifest_path = sdir / "manifest.json"
+    _private_write_bytes(
+        manifest_path, (json.dumps(manifest, sort_keys=True, indent=2) + "\n").encode("utf-8")
+    )
+    return manifest_path
+
+
+def verify_gate_sidecar(root: Path, receipt: dict[str, Any], *, gate: str) -> dict[str, Any]:
+    """Integrity-check a sidecar against its receipt. Recovery evidence only, not acceptance."""
+    sdir = _gate_sidecar_dir(root, gate, receipt)
+    try:
+        manifest = json.loads((sdir / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise DshWorkflowError(
+            "GATE_SIDECAR_UNREADABLE", "gate sidecar cannot be read; failing closed"
+        ) from exc
+    if not isinstance(manifest, dict) or manifest.get("schema") != GATE_SIDECAR_SCHEMA:
+        raise DshWorkflowError("GATE_SIDECAR_INVALID", "gate sidecar is malformed; failing closed")
+    # receipt_path is an output-only annotation added by the CLI; the persisted
+    # receipt body never contains it, so it is excluded from the body digest.
+    body = {k: v for k, v in receipt.items() if k not in ("receipt_hash", "receipt_path")}
+    if _sha256_bytes(_canonical_json(body).encode("utf-8")) != receipt.get("receipt_hash"):
+        raise DshWorkflowError(
+            "GATE_SIDECAR_RECEIPT_TAMPERED",
+            "receipt body does not match its receipt_hash; failing closed",
+        )
+    bound_fields = (
+        "gate",
+        "receipt_hash",
+        "contract_hash",
+        "repository",
+        "issue_number",
+        "claim_ceiling",
+        "repo_head",
+        "base_revision",
+        "worktree_diff_sha256",
+    )
+    expected = {**receipt, "gate": gate, "claim_ceiling": GATE_SIDECAR_CLAIM_CEILING}
+    if any(manifest.get(field) != expected.get(field) for field in bound_fields):
+        raise DshWorkflowError(
+            "GATE_SIDECAR_INTEGRITY_FAILED", "gate sidecar is not bound to this receipt"
+        )
+
+    def _read(entry: Any) -> bytes:
+        blob = entry.get("blob") if isinstance(entry, dict) else None
+        if not isinstance(blob, str) or not _SHA256_HEX.fullmatch(blob):
+            raise DshWorkflowError("GATE_SIDECAR_INVALID", "gate sidecar blob reference is invalid")
+        try:
+            data = (sdir / "blobs" / blob).read_bytes()
+        except OSError as exc:
+            raise DshWorkflowError(
+                "GATE_SIDECAR_INTEGRITY_FAILED", "gate sidecar blob is missing"
+            ) from exc
+        if hashlib.sha256(data).hexdigest() != blob or len(data) != entry.get("bytes"):
+            raise DshWorkflowError(
+                "GATE_SIDECAR_INTEGRITY_FAILED", "gate sidecar blob failed its digest"
+            )
+        return data
+
+    patch = _read(manifest.get("tracked_patch"))
+    entries = manifest.get("untracked")
+    if not isinstance(entries, list):
+        raise DshWorkflowError("GATE_SIDECAR_INVALID", "gate sidecar is malformed; failing closed")
+    files: list[tuple[str, bytes]] = []
+    for entry in entries:
+        rel = entry.get("path") if isinstance(entry, dict) else None
+        if not isinstance(rel, str) or not _is_safe_rel(rel):
+            raise DshWorkflowError("GATE_SIDECAR_PATH_UNSAFE", "gate sidecar path is unsafe")
+        files.append((rel, _read(entry)))
+    if _snapshot_digest(patch, sorted(files)) != receipt.get("worktree_diff_sha256"):
+        raise DshWorkflowError(
+            "GATE_SIDECAR_INTEGRITY_FAILED", "gate sidecar does not reproduce the receipt digest"
+        )
+    return manifest
+
+
+def persist_gate_with_sidecar(
+    gate: str,
+    persist: Callable[[Path, dict[str, Any]], Path],
+    root: Path,
+    receipt: dict[str, Any],
+    *,
+    repo: Path,
+    base: str,
+) -> Path:
+    """Write the sidecar first so a mismatch leaves no receipt behind; then persist unchanged.
+
+    Only a ready receipt is archived. Failed or revise receipts persist exactly as before.
+    """
+    if receipt.get("decision") == GATE_SIDECAR_READY[gate]:
+        try:
+            write_gate_sidecar(root, receipt, gate=gate, repo=repo, base=base)
+        except OSError as exc:
+            raise DshWorkflowError(
+                "GATE_SIDECAR_WRITE_FAILED",
+                f"gate sidecar could not be written; no receipt persisted: {exc}",
+            ) from exc
+    return persist(root, receipt)
+
+
+def persist_green_gate_with_sidecar(
+    root: Path, receipt: dict[str, Any], *, repo: Path, base: str
+) -> Path:
+    return persist_gate_with_sidecar(
+        "green", persist_green_gate, root, receipt, repo=repo, base=base
+    )
+
+
+def persist_red_gate_with_sidecar(
+    root: Path, receipt: dict[str, Any], *, repo: Path, base: str
+) -> Path:
+    return persist_gate_with_sidecar("red", persist_red_gate, root, receipt, repo=repo, base=base)
+
+
 def _diff_check(repo: Path, base: str, untracked: list[str]) -> dict[str, Any]:
     failures: list[str] = []
     proc = _git(repo, "diff", "--check", "--no-renames", base)
@@ -1670,7 +1955,18 @@ def _main_green_gate(args: argparse.Namespace) -> int:
         return EXIT_BLOCKED
     out = dict(receipt)
     if args.state_root:
-        out["receipt_path"] = str(persist_green_gate(_state_root(args.state_root), receipt))
+        try:
+            out["receipt_path"] = str(
+                persist_green_gate_with_sidecar(
+                    _state_root(args.state_root),
+                    receipt,
+                    repo=Path(args.repo_root),
+                    base=receipt["base_revision"],
+                )
+            )
+        except DshWorkflowError as exc:
+            print(json.dumps(_green_error_receipt(exc.code, str(exc)), sort_keys=True))
+            return EXIT_BLOCKED
     print(json.dumps(out, sort_keys=True))
     return 0 if receipt["decision"] == "GREEN_READY" else EXIT_BLOCKED
 
@@ -1912,7 +2208,8 @@ def build_phase_task(
         f"Goal objective: {goal_objective or '(none supplied)'}",
         "Do not call create_goal unless phase=red and no goal exists.",
         (
-            "create_goal for this phase: call it once with the goal objective above."
+            "create_goal for this phase: call it once with the goal objective above"
+            " and max_goal_rounds=1 (single wave; never omit it)."
             if may_create
             else "create_goal for this phase: NOT allowed; do not call it."
         ),
@@ -1926,6 +2223,197 @@ def build_phase_task(
     else:
         lines.append("- (none)")
     return "\n".join(lines) + "\n\nPHASE CONTRACT\n\n" + contract_text
+
+
+AGY_OPERATION_SUMMARY_SCHEMA = "nexus.dsh_agy_operation_summary.v1"
+AGY_OPERATION_MARKER_PREFIX = "NEXUS_DSH_AGY_OPERATION "
+AGY_OPERATION_MARKER_SCHEMA = "nexus.dsh_agy_operation_marker.v1"
+AGY_OPERATION_ID = re.compile(r"agyop_[0-9a-f]{32}")
+AGY_OPERATION_PURPOSES = frozenset({"agent", "compaction", "session-title"})
+AGY_ACTION_REF_PREFIX = "dsh_action_contract:v1:"
+AGY_SESSION_REF_PREFIX = "dsh_session:v1:"
+AGY_PROMPT_CHARS = re.compile(r":prompt_chars=(\d+)(?::|$)")
+AGY_MAX_OPERATIONS = 16
+AGY_MAX_MARKER_LINES = 4096
+AGY_STATUS_TIMEOUT_SECONDS = 10
+
+
+def _agy_dispatch_bin() -> str:
+    return os.environ.get("NEXUS_AGY_DISPATCH") or str(
+        Path.home() / ".local" / "bin" / "nexus-agy-dispatch"
+    )
+
+
+def _valid_operation_marker(payload: Any) -> bool:
+    return (
+        isinstance(payload, dict)
+        and payload.get("schema") == AGY_OPERATION_MARKER_SCHEMA
+        and isinstance(payload.get("dsh_session_id"), str)
+        and isinstance(payload.get("operation_id"), str)
+        and AGY_OPERATION_ID.fullmatch(payload["operation_id"]) is not None
+        and payload.get("purpose") in AGY_OPERATION_PURPOSES
+    )
+
+
+def _unknown_operation(
+    op_id: str | None, purpose: str | None, reason: str, status: Any = None
+) -> dict[str, Any]:
+    return {
+        "operation_id": op_id,
+        "purpose": purpose,
+        "status": status,
+        "prompt_chars": None,
+        "prompt_chars_unit": "characters",
+        "evidence": "UNKNOWN",
+        "reason": reason,
+    }
+
+
+def _read_operation_status(op_id: str) -> tuple[dict[str, Any] | None, str | None]:
+    """Read-only canonical status; any failure is UNKNOWN, never an invented count."""
+    try:
+        proc = subprocess.run(
+            [_agy_dispatch_bin(), "--status", op_id],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=AGY_STATUS_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None, "STATUS_UNAVAILABLE"
+    if proc.returncode != 0:
+        return None, "STATUS_UNAVAILABLE"
+    try:
+        payload = json.loads(proc.stdout)
+    except ValueError:
+        return None, "STATUS_MALFORMED"
+    if not isinstance(payload, dict):
+        return None, "STATUS_MALFORMED"
+    return payload, None
+
+
+def _verify_operation_evidence(
+    status: dict[str, Any], op_id: str, session_id: str, purpose: str
+) -> tuple[int | None, str | None]:
+    """Return the canonical prompt_chars only when the record binds to this session and purpose."""
+    if status.get("operation_id") != op_id:
+        return None, "RECORD_OPERATION_MISMATCH"
+    refs = status.get("evidence_refs")
+    if not isinstance(refs, list) or not all(isinstance(ref, str) for ref in refs):
+        return None, "EVIDENCE_MALFORMED"
+    action_refs = [ref for ref in refs if ref.startswith(AGY_ACTION_REF_PREFIX)]
+    if not action_refs:
+        return None, "EVIDENCE_MISSING"
+    if len(action_refs) != 1:
+        if len(set(action_refs)) > 1:
+            return None, "EVIDENCE_CONFLICT"
+        return None, "EVIDENCE_DUPLICATE"
+    match = AGY_PROMPT_CHARS.search(action_refs[0])
+    if match is None:
+        return None, "EVIDENCE_MALFORMED"
+    prompt_chars = int(match.group(1))
+    session_refs = [ref for ref in refs if ref.startswith(AGY_SESSION_REF_PREFIX)]
+    if not session_refs:
+        return None, "SESSION_EVIDENCE_MISSING"
+    digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+    expected = f"{AGY_SESSION_REF_PREFIX}session_sha256={digest}:purpose={purpose}"
+    if len(session_refs) != 1:
+        return None, "SESSION_EVIDENCE_CONFLICT"
+    if session_refs[0] != expected:
+        return None, "SESSION_EVIDENCE_MISMATCH"
+    return prompt_chars, None
+
+
+def _agy_operation_summary(
+    session_id: str | None, coverage: str, operations: list[dict[str, Any]]
+) -> dict[str, Any]:
+    # A phase log cannot prove an exhaustive operation count (a lost ack leaves no marker),
+    # so exhaustive is always false.
+    return {
+        "schema": AGY_OPERATION_SUMMARY_SCHEMA,
+        "session_id": session_id,
+        "coverage": coverage,
+        "exhaustive": False,
+        "operations": operations,
+    }
+
+
+def read_canonical_agy_operations(log_path: Path, session_id: str | None) -> dict[str, Any]:
+    """Summarize Agy operations of one DSH session from its phase log, verified canonically.
+
+    Markers are correlation hints only. An operation is CANONICAL only when its
+    canonical --status record names the same operation, binds to this DSH session
+    by hash and purpose, and carries exactly one action-contract prompt_chars.
+    prompt_chars counts characters, not tokens. Gateway metrics are ignored.
+    """
+    if session_id is None:
+        return _agy_operation_summary(None, "NO_SESSION_IDENTITY", [])
+    try:
+        handle = log_path.open("r", encoding="utf-8", errors="replace")
+    except OSError:
+        return _agy_operation_summary(session_id, "UNKNOWN_LOG_UNREADABLE", [])
+    purposes: dict[str, str] = {}
+    conflicts: set[str] = set()
+    entries: list[dict[str, Any]] = []
+    matched = False
+    marker_lines = 0
+    truncated = False
+    with handle:
+        for raw in handle:
+            if not raw.startswith(AGY_OPERATION_MARKER_PREFIX):
+                continue
+            marker_lines += 1
+            if marker_lines > AGY_MAX_MARKER_LINES:
+                truncated = True
+                break
+            try:
+                payload = json.loads(raw[len(AGY_OPERATION_MARKER_PREFIX) :])
+            except ValueError:
+                payload = None
+            if not _valid_operation_marker(payload):
+                entries.append(_unknown_operation(None, None, "MARKER_MALFORMED"))
+                continue
+            if payload["dsh_session_id"] != session_id:
+                continue
+            matched = True
+            op_id = payload["operation_id"]
+            if op_id in purposes:
+                if purposes[op_id] != payload["purpose"]:
+                    conflicts.add(op_id)
+                continue
+            purposes[op_id] = payload["purpose"]
+    if truncated:
+        coverage = "NON_EXHAUSTIVE_LIMIT"
+    elif matched:
+        coverage = "OBSERVED_NON_EXHAUSTIVE"
+    else:
+        coverage = "NON_EXHAUSTIVE_NO_MARKER"
+    selected = list(purposes.items())
+    if len(selected) > AGY_MAX_OPERATIONS:
+        selected = selected[:AGY_MAX_OPERATIONS]
+        coverage = "NON_EXHAUSTIVE_LIMIT"
+    for op_id, purpose in selected:
+        if op_id in conflicts:
+            entries.append(_unknown_operation(op_id, purpose, "MARKER_CONFLICT"))
+            continue
+        status, reason = _read_operation_status(op_id)
+        if status is None:
+            entries.append(_unknown_operation(op_id, purpose, reason or "STATUS_UNAVAILABLE"))
+            continue
+        prompt_chars, reason = _verify_operation_evidence(status, op_id, session_id, purpose)
+        if reason is not None:
+            entries.append(_unknown_operation(op_id, purpose, reason, status.get("status")))
+            continue
+        entries.append({
+            "operation_id": op_id,
+            "purpose": purpose,
+            "status": status.get("status"),
+            "prompt_chars": prompt_chars,
+            "prompt_chars_unit": "characters",
+            "evidence": "CANONICAL",
+            "reason": None,
+        })
+    return _agy_operation_summary(session_id, coverage, entries)
 
 
 def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
@@ -2004,6 +2492,11 @@ def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
         session_id = _parse_created_goal_log(log_path, require_goal=False)["session_id"]
     except DshWorkflowError:
         session_id = None
+    # Canonical operation evidence is read for the observed session only, never for the
+    # synthetic unobserved fallback id assigned below.
+    canonical_agy_operations = (
+        read_canonical_agy_operations(log_path, session_id) if session_id is not None else None
+    )
     binding: dict[str, Any] | None = None
     binding_error: str | None = None
     if session_id is not None:
@@ -2017,6 +2510,7 @@ def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
                 phase=args.phase,
                 parent_session_id=parent,
                 goal_objective=args.goal_objective,
+                required_round_cap=1 if args.phase == "red" and not parent_has_goal else None,
             )
             if args.phase == "red" and binding["goal_id"] is None:
                 raise DshWorkflowError(
@@ -2055,6 +2549,8 @@ def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
         "binding_hash": binding["binding_hash"] if binding else None,
         "preflight_receipt_path": str(receipt_path),
     }
+    if canonical_agy_operations is not None:
+        summary["canonical_agy_operations"] = canonical_agy_operations
     if binding_error:
         summary["binding_error"] = binding_error
     print(json.dumps(summary, sort_keys=True))
