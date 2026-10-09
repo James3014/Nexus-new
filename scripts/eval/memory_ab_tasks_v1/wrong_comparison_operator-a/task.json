@@ -1,0 +1,8 @@
+{
+  "id": "wrong_comparison_operator-a",
+  "bug_class": "wrong_comparison_operator",
+  "variant": "a",
+  "problem_statement": "is_in_range() treats the lower bound as exclusive, but the range is documented as inclusive on both ends. is_in_range(5, 5, 10) should be True.",
+  "target_file": "bounds.py",
+  "repro_file": "repro.py"
+}

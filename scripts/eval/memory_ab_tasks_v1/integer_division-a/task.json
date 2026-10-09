@@ -1,0 +1,8 @@
+{
+  "id": "integer_division-a",
+  "bug_class": "integer_division",
+  "variant": "a",
+  "problem_statement": "average() truncates to an integer. average([1, 2]) should return 1.5 but returns 1.",
+  "target_file": "stats.py",
+  "repro_file": "repro.py"
+}

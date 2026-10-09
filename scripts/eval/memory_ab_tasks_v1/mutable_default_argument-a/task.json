@@ -1,0 +1,8 @@
+{
+  "id": "mutable_default_argument-a",
+  "bug_class": "mutable_default_argument",
+  "variant": "a",
+  "problem_statement": "collect_tags() leaks tags between calls. The second call collect_tags('b') returns ['a', 'b'] instead of ['b'] because the default list is shared.",
+  "target_file": "tags.py",
+  "repro_file": "repro.py"
+}

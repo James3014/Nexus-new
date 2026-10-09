@@ -1,24 +1,24 @@
-from typing import Any, Callable, List
-from pathlib import Path
 import hashlib
 import subprocess
-from nexus.services.local_heal.interface import IPhase, PhaseResult, RepairPlan
+from pathlib import Path
+from typing import Any, Callable, List
+
+from nexus.evidence.abort_receipt import write_abort_receipt
 from nexus.services.local_heal.context import HealContext
-from nexus.services.local_heal.governance_gate import GovernanceGate
+from nexus.services.local_heal.context_guard import ContextGuard
 from nexus.services.local_heal.corrector import SelfCorrector
 from nexus.services.local_heal.errors import PatchError, PatchErrorKind
-from nexus.services.local_heal.evidence_compactor import EvidenceCompactor
-from nexus.services.local_heal.latency_ledger import LatencyLedger
-from nexus.services.local_heal.role_contract import build_role_receipt, RoleReceipt
-from nexus.evidence.abort_receipt import write_abort_receipt
-
 from nexus.services.local_heal.failure_analyzer import FailureAnalyzer
-from nexus.services.local_heal.context_guard import ContextGuard
+from nexus.services.local_heal.governance_gate import GovernanceGate
+from nexus.services.local_heal.interface import IPhase, PhaseResult, RepairPlan
+from nexus.services.local_heal.latency_ledger import LatencyLedger
 from nexus.services.local_heal.phase_runner import PhaseRunner
+from nexus.services.local_heal.role_contract import build_role_receipt
+
 
 class HealOrchestrator:
     """🛡️ Nexus Heal Orchestrator (Refactored: Modular / Strategy-Driven / Fail-Closed)"""
-    
+
     def __init__(
         self,
         phases: List[IPhase],
@@ -29,7 +29,7 @@ class HealOrchestrator:
         self._initialize_phases(phases)
         self.governance_gate = governance_gate
         self.receipt_writer = receipt_writer
-        
+
         # Dependency Injection (Internal)
         self.corrector = SelfCorrector()
         self.failure_analyzer = FailureAnalyzer()
@@ -42,21 +42,39 @@ class HealOrchestrator:
         self.loc_phase = None
         self.patch_phase = None
         self.verify_phase = None
-        
+
         # (Rest of phase detection logic moved here to keep constructor clean)
         if len(phases) == 5:
-            self.repro_phase, self.plan_phase, self.loc_phase, self.patch_phase, self.verify_phase = phases
+            (
+                self.repro_phase,
+                self.plan_phase,
+                self.loc_phase,
+                self.patch_phase,
+                self.verify_phase,
+            ) = phases
         else:
             unmatched = []
             for phase in phases:
                 name = phase.__class__.__name__
-                if "Reproduction" in name: self.repro_phase = phase
-                elif "Planning" in name: self.plan_phase = phase
-                elif "Localization" in name: self.loc_phase = phase
-                elif "Patch" in name: self.patch_phase = phase
-                elif "Verification" in name: self.verify_phase = phase
-                else: unmatched.append(phase)
-            if unmatched and not any((self.repro_phase, self.plan_phase, self.loc_phase, self.patch_phase, self.verify_phase)):
+                if "Reproduction" in name:
+                    self.repro_phase = phase
+                elif "Planning" in name:
+                    self.plan_phase = phase
+                elif "Localization" in name:
+                    self.loc_phase = phase
+                elif "Patch" in name:
+                    self.patch_phase = phase
+                elif "Verification" in name:
+                    self.verify_phase = phase
+                else:
+                    unmatched.append(phase)
+            if unmatched and not any((
+                self.repro_phase,
+                self.plan_phase,
+                self.loc_phase,
+                self.patch_phase,
+                self.verify_phase,
+            )):
                 slots = ["repro_phase", "plan_phase", "loc_phase", "patch_phase", "verify_phase"]
                 for slot, phase in zip(slots, unmatched):
                     setattr(self, slot, phase)
@@ -71,7 +89,7 @@ class HealOrchestrator:
         )
 
         start_wall = time.time()
-        
+
         ledger = LatencyLedger(
             task_id=getattr(ctx.op, "task_id", ""),
             instance_id=getattr(ctx.op, "instance_id", ""),
@@ -90,7 +108,7 @@ class HealOrchestrator:
             ctx.op.run_group = derive_default_run_group(ctx.op)
         else:
             ctx.op.run_group = canonical_run_group(raw_run_group)
-        
+
         try:
             # 1. 啟動階段 (P1-3)
             if not self._run_linear_phases(ctx, ledger):
@@ -105,7 +123,7 @@ class HealOrchestrator:
 
             ctx.op.runner_completed = True
             return ctx
-            
+
         finally:
             self._finalize_run(ctx, ledger, start_wall)
 
@@ -126,7 +144,8 @@ class HealOrchestrator:
             ("localization", self.loc_phase),
         ]
         for name, phase in phases:
-            if not phase: continue
+            if not phase:
+                continue
             res = self.phase_runner.run_phase(phase, name, ctx, ledger)
             if not res.success:
                 ctx.gov.gate_exit = res.exit_layer or name
@@ -134,7 +153,7 @@ class HealOrchestrator:
                 ctx.op.runner_completed = True
                 self._write_abort_receipt_on_failure(ctx, name, res.failure_reason)
                 return False
-            
+
             self._record_role_receipt(ctx, name)
         return True
 
@@ -144,53 +163,75 @@ class HealOrchestrator:
         if patch_phase_client is not None and hasattr(patch_phase_client, "generate"):
             return patch_phase_client
         from nexus.services.local_heal.llm_client import OllamaLLMClient
+
         return OllamaLLMClient(None)
 
     def _run_repair_loop(self, ctx: HealContext, ledger: LatencyLedger) -> None:
         """執行 Patch 合成與驗證的迭代迴圈。"""
         import os
+
         while ctx.op.attempt <= ctx.op.max_tries:
             self._reset_workspace(ctx)
-            
+
             # Step 4: Patch Synthesis
-            if not self.patch_phase: break
-            
+            if not self.patch_phase:
+                break
+
             # Seam 整合：若使用 local_qwen_backend
-            if getattr(ctx.op, "use_local_qwen_backend", False) or os.environ.get("NEXUS_LOCAL_QWEN_BACKEND") == "1":
-                from nexus.services.local_heal.backends.local_patch_synthesis_backend import LocalPatchSynthesisBackend
+            if (
+                getattr(ctx.op, "use_local_qwen_backend", False)
+                or os.environ.get("NEXUS_LOCAL_QWEN_BACKEND") == "1"
+            ):
+                from nexus.services.local_heal.backends.local_patch_synthesis_backend import (
+                    LocalPatchSynthesisBackend,
+                )
+
                 backend = LocalPatchSynthesisBackend()
-                
+
                 previous_feedback = None
                 if ctx.op.attempt > 1:
-                    from nexus.services.local_heal.failure_feedback_builder import build_failure_feedback
+                    from nexus.services.local_heal.failure_feedback_builder import (
+                        build_failure_feedback,
+                    )
+
                     stdout_tail = getattr(ctx.op, "last_stdout_tail", "")
                     stderr_tail = getattr(ctx.op, "last_stderr_tail", "")
                     previous_feedback = build_failure_feedback(
                         task_id=getattr(ctx.op, "task_id", "t_unknown"),
                         failure_class=getattr(ctx.op, "last_failure_class", "VERIFIER_FAIL"),
-                        target_file=ctx.op.localized_files[0].path if ctx.op.localized_files else "f.py",
-                        target_symbol=ctx.op.plan.search_symbols[0] if ctx.op.plan and ctx.op.plan.search_symbols else "func",
+                        target_file=ctx.op.localized_files[0].path
+                        if ctx.op.localized_files
+                        else "f.py",
+                        target_symbol=ctx.op.plan.search_symbols[0]
+                        if ctx.op.plan and ctx.op.plan.search_symbols
+                        else "func",
                         locked_search=getattr(ctx.op, "locked_search", ""),
                         previous_block_reason=ctx.op.failure_reason or "VERIFIER_FAIL",
                         verifier_status="fail",
                         stdout_tail=stdout_tail,
                         stderr_tail=stderr_tail,
                     )
-                    
+
                 target_file = ctx.op.localized_files[0].path if ctx.op.localized_files else "f.py"
-                target_symbol = ctx.op.plan.search_symbols[0] if ctx.op.plan and ctx.op.plan.search_symbols else "func"
-                
+                target_symbol = (
+                    ctx.op.plan.search_symbols[0]
+                    if ctx.op.plan and ctx.op.plan.search_symbols
+                    else "func"
+                )
+
                 resp = backend.generate_patch(
                     task_id=getattr(ctx.op, "task_id", "t_unknown"),
                     problem_statement=ctx.op.problem_statement,
                     target_file=target_file,
                     target_symbol=target_symbol,
                     locked_search=getattr(ctx.op, "locked_search", ""),
-                    verifier_command=tuple(ctx.op.verifier_command) if hasattr(ctx.op, "verifier_command") else (),
+                    verifier_command=tuple(ctx.op.verifier_command)
+                    if hasattr(ctx.op, "verifier_command")
+                    else (),
                     attempt=ctx.op.attempt,
                     previous_feedback=previous_feedback,
                 )
-                
+
                 ctx.op.final_patch = resp["candidate_text"]
                 ctx.op.local_model_called = resp["local_model_called"]
                 res = PhaseResult(success=True)
@@ -202,25 +243,32 @@ class HealOrchestrator:
                     res,
                 )
             else:
-                res = self.phase_runner.run_phase(self.patch_phase, f"patch_attempt_{ctx.op.attempt}", ctx, ledger)
-            
+                res = self.phase_runner.run_phase(
+                    self.patch_phase, f"patch_attempt_{ctx.op.attempt}", ctx, ledger
+                )
+
             if not res.success:
                 if self._handle_patch_failure(ctx, res, ledger):
                     continue
                 else:
                     break
-            
+
             # Step 5: Verification
             if not self.verify_phase:
                 ctx.op.solve_eligible = True
                 break
-                
-            v_res = self.phase_runner.run_phase(self.verify_phase, f"verify_attempt_{ctx.op.attempt}", ctx, ledger)
+
+            v_res = self.phase_runner.run_phase(
+                self.verify_phase, f"verify_attempt_{ctx.op.attempt}", ctx, ledger
+            )
             if v_res.success:
                 ctx.gov.gate_exit = "verification"
                 break
             else:
-                if getattr(ctx.op, "use_local_qwen_backend", False) or os.environ.get("NEXUS_LOCAL_QWEN_BACKEND") == "1":
+                if (
+                    getattr(ctx.op, "use_local_qwen_backend", False)
+                    or os.environ.get("NEXUS_LOCAL_QWEN_BACKEND") == "1"
+                ):
                     receipt = getattr(ctx.op, "verifier_receipt", None)
                     if receipt:
                         ctx.op.last_stdout_tail = getattr(receipt, "stdout_tail", "")
@@ -231,7 +279,9 @@ class HealOrchestrator:
                     ctx.gov.gate_exit = "verification"
                     break
 
-    def _handle_patch_failure(self, ctx: HealContext, res: PhaseResult, ledger: LatencyLedger) -> bool:
+    def _handle_patch_failure(
+        self, ctx: HealContext, res: PhaseResult, ledger: LatencyLedger
+    ) -> bool:
         """處理 Patch 生成失敗，判定是否重試。"""
         err_kind = self.failure_analyzer.classify_patch_failure(res.failure_reason)
         err = PatchError(kind=err_kind, message=res.failure_reason)
@@ -241,13 +291,13 @@ class HealOrchestrator:
         # precise MODEL_* code; replacing it with a parser bucket (for
         # example NO_BLOCKS_FOUND) loses the actual failure provenance.
         model_failure = self._model_failure_reason(res.failure_reason)
-        
+
         # B4: Set last_failure_class for retry feedback
         ctx.op.last_failure_class = err_kind.name
-        
+
         if not model_failure:
             self._record_model_status(ctx, err_kind.name, detail=res.failure_reason, phase="patch")
-        
+
         # 嘗試自動修復 SEARCH_MISMATCH (Fuzzy Match)
         if err_kind == PatchErrorKind.SEARCH_MISMATCH:
             self._attempt_fuzzy_healing(ctx, res, err)
@@ -281,9 +331,12 @@ class HealOrchestrator:
             target_file = ctx.op.repo_dir / f_path
             if target_file.exists():
                 from nexus.services.local_heal.closest_snippet import find_closest_snippet
+
                 file_content = target_file.read_text(encoding="utf-8", errors="replace")
                 search_symbols = ctx.op.plan.search_symbols if ctx.op.plan else []
-                err.closest_match = find_closest_snippet(file_content, failed_text, context_hints=search_symbols)
+                err.closest_match = find_closest_snippet(
+                    file_content, failed_text, context_hints=search_symbols
+                )
 
     def _handle_verification_failure(self, ctx: HealContext, res: PhaseResult) -> None:
         """Handle verification failure with T1.6 semantic retry on first failure."""
@@ -291,20 +344,31 @@ class HealOrchestrator:
         failure_class = self._classify_verification_failure(ctx, res.failure_reason)
         route_ctx = getattr(ctx.op, "route_context", {}) if hasattr(ctx, "op") else {}
         route_ctx = route_ctx if isinstance(route_ctx, dict) else {}
-        disable_primary_semantic_retry = bool(route_ctx.get("disable_primary_semantic_retry", False))
-
-        # T1.6: Semantic retry eligible on first verification failure
-        semantic_retry_eligible = (
-            not disable_primary_semantic_retry
-            and
-            ctx.op.attempt == 1
-            and failure_class in ("semantic_wrong", "LOGIC_REGRESSION", "VERIFICATION_FAILED")
-            and evaluation_report
-            and getattr(ctx.op, "final_patch", "")
+        disable_primary_semantic_retry = bool(
+            route_ctx.get("disable_primary_semantic_retry", False)
         )
 
+        # T1.6: Semantic retry eligible on first verification failure.
+        # The first failing condition is kept on op so receipts can explain a skip.
+        if disable_primary_semantic_retry:
+            skip_reason = "disabled_by_route"
+        elif ctx.op.attempt != 1:
+            skip_reason = "not_first_attempt"
+        elif failure_class not in ("semantic_wrong", "LOGIC_REGRESSION", "VERIFICATION_FAILED"):
+            skip_reason = "failure_class_ineligible"
+        elif not evaluation_report:
+            skip_reason = "no_evaluation_report"
+        elif not getattr(ctx.op, "final_patch", ""):
+            skip_reason = "no_final_patch"
+        else:
+            skip_reason = ""
+        ctx.op.semantic_retry_skip_reason = skip_reason
+        semantic_retry_eligible = skip_reason == ""
+
         if semantic_retry_eligible:
-            semantic_ok = self._attempt_multipass_semantic_retry(ctx, evaluation_report, failure_class)
+            semantic_ok = self._attempt_multipass_semantic_retry(
+                ctx, evaluation_report, failure_class
+            )
             if semantic_ok:
                 # Semantic retry succeeded — skip normal retry loop
                 return
@@ -329,6 +393,118 @@ class HealOrchestrator:
             return "LOGIC_REGRESSION"
         return "VERIFICATION_FAILED"
 
+    def _render_memory_lessons(self, ctx: HealContext, target_file: str) -> tuple[str, list[str]]:
+        """Render up to 3 advisory memory lessons for a retry prompt.
+
+        Shared by the semantic retry (C6P/C6S) and the normal retry loop.
+        Returns (text, rendered_ids); ("", []) when memory is disabled or nothing
+        matches. Never raises.
+        """
+        try:
+            # Attach the memory influence trace before the retry prompt is built.
+            # Previously it was attached only in _finalize_run (after all retries), so
+            # lessons never reached the retry prompt and nothing could be attributed.
+            if getattr(ctx.op, "_memory_influence_trace", None) is None:
+                try:
+                    self._attach_memory_influence_trace(ctx)
+                except Exception:
+                    pass
+            if not getattr(ctx.op, "memory_enabled", True):
+                return "", []
+
+            import re as _re
+
+            from nexus.services.local_heal.memory_retrieval_adapter import (
+                CanonicalLessonStore,
+                NexusCompositeLessonStore,
+            )
+
+            # C6P/C6S: Extract memory lesson CONTENT for active guidance
+            # Fixed: now reads actual lesson summaries, not just IDs
+            memory_lessons_text = ""
+            rendered_ids: list[str] = []
+            memory_trace = getattr(ctx.op, "_memory_influence_trace", None)
+            if memory_trace and hasattr(memory_trace, "selected_ids") and memory_trace.selected_ids:
+                # Read lesson content from memory store using IDs
+                try:
+                    problem_text = str(getattr(ctx.op, "problem_statement", "") or "")[:300]
+                    target_words = " ".join(
+                        w for w in _re.split(r"[^A-Za-z0-9]+", str(target_file or "")) if w
+                    )
+                    # Distilled canonical lessons first (queried directly so raw episode
+                    # rows in the composite cannot crowd them out).
+                    try:
+                        canonical_rows = CanonicalLessonStore().query(
+                            query_text=f"{problem_text} {target_words}".strip(), limit=2
+                        )
+                    except Exception:
+                        canonical_rows = []
+                    store = NexusCompositeLessonStore()
+                    # Selected ids first (legacy behaviour), plus the problem text so
+                    # keyword-based canonical lessons can match.
+                    composite_rows = store.query(
+                        query_text=" ".join([*memory_trace.selected_ids[:3], problem_text]).strip(),
+                        limit=3,
+                    )
+                    lessons = [*canonical_rows[:2], *composite_rows]
+                    if lessons:
+                        lesson_parts = []
+                        for lesson in lessons:
+                            if len(lesson_parts) >= 3:
+                                break
+                            summary = lesson.get("summary", "")
+                            classification = lesson.get("classification", "")
+                            lesson_id = lesson.get("lesson_id", lesson.get("id", ""))
+                            if str(lesson_id) in rendered_ids:
+                                continue
+                            title = str(lesson.get("title") or "")
+                            applies_when = [
+                                str(x) for x in (lesson.get("applies_when") or []) if str(x)
+                            ]
+                            avoid_when = [
+                                str(x) for x in (lesson.get("avoid_when") or []) if str(x)
+                            ]
+                            if title or applies_when or avoid_when:
+                                # Canonical nexus.learning_lesson.v1 row.
+                                text = f"Lesson [{classification}] (id: {lesson_id}): {title}"
+                                if summary:
+                                    text += f"\n  - {summary}"
+                                if applies_when:
+                                    text += f"\n  - applies when: {'; '.join(applies_when)}"
+                                if avoid_when:
+                                    text += f"\n  - avoid when: {'; '.join(avoid_when)}"
+                                if summary or title:
+                                    lesson_parts.append(text[:600])
+                                    rendered_ids.append(str(lesson_id))
+                            elif summary:
+                                lesson_parts.append(
+                                    f"Lesson [{classification}] (id: {lesson_id}):\n  - {summary}"
+                                )
+                                rendered_ids.append(str(lesson_id))
+                        if lesson_parts:
+                            memory_lessons_text = "\n".join(lesson_parts)
+                            rendered_ids = [i for i in rendered_ids if i]
+                            # Attribution inputs: ids actually rendered into the prompt.
+                            if rendered_ids and not getattr(ctx.op, "retrieved_lesson_ids", None):
+                                ctx.op.retrieved_lesson_ids = list(rendered_ids)
+                            # prompt_included only when text was really injected.
+                            if rendered_ids:
+                                ctx.op._memory_prompt_injected_ids = list(rendered_ids)
+                                try:
+                                    memory_trace.prompt_included = True
+                                except Exception:
+                                    pass
+                except Exception:
+                    # Fallback: use IDs if content read fails. These are not rendered
+                    # lessons, so no ids are reported for attribution.
+                    memory_lessons_text = (
+                        f"Lessons found: {', '.join(memory_trace.selected_ids[:3])}"
+                    )
+                    rendered_ids = []
+            return memory_lessons_text, rendered_ids
+        except Exception:
+            return "", []
+
     def _attempt_semantic_retry(
         self, ctx: HealContext, evaluation_report: str, failure_class: str
     ) -> bool:
@@ -338,17 +514,16 @@ class HealOrchestrator:
         failure into the prompt, and asks the LLM to rewrite only REPLACE.
         Returns True if retry succeeded (patch applied + verification passed).
         """
-        import re
-        import json
         import hashlib
-        from nexus.services.local_heal.prompt_builder import PromptBuilder
-        from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
-        from nexus.services.local_heal.patcher import Patcher
-        from nexus.services.local_heal.patch_applier import PatchApplier
-        from nexus.services.local_heal.interface import LocalizedFile
-        from nexus.services.local_heal.model_result import classify_model_exception
+        import re
+
         from nexus.engine.local_model_policy import LocalModelPolicy
         from nexus.services.local_heal.canonical_span import get_canonical_search_span
+        from nexus.services.local_heal.model_result import classify_model_exception
+        from nexus.services.local_heal.patch_applier import PatchApplier
+        from nexus.services.local_heal.patcher import Patcher
+        from nexus.services.local_heal.prompt_builder import PromptBuilder
+        from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
 
         # 1. Extract canonical SEARCH span using hybrid strategy
         final_patch = getattr(ctx.op, "final_patch", "")
@@ -367,7 +542,6 @@ class HealOrchestrator:
             return False
 
         canonical_search = canonical_result.span
-        canonical_source = canonical_result.source
 
         # 2. Extract target file from patch
         target_file_match = re.search(r"^\+\+\+ b/(.+)$", final_patch, re.MULTILINE)
@@ -380,7 +554,7 @@ class HealOrchestrator:
 
         # 4. Build semantic retry prompt
         original_prompt = getattr(ctx.op, "user_prompt", "")
-        
+
         # C15-3C: Pass verifier evidence when available and ready
         evidence_injected = False
         evidence_fields = ""
@@ -390,57 +564,35 @@ class HealOrchestrator:
         vserr = ""
         vec = ""
         vch = ""
-        
+
         vfe_available = getattr(ctx.op, "verifier_failure_evidence_available", False)
         sr_ready = getattr(ctx.op, "semantic_retry_evidence_ready", False)
         failure_class = getattr(ctx.op, "failure_class", "")
-        
-        if sr_ready and vfe_available and failure_class in ("verification_failed", "semantic_wrong_patch"):
+
+        if (
+            sr_ready
+            and vfe_available
+            and failure_class in ("verification_failed", "semantic_wrong_patch")
+        ):
             vfk = getattr(ctx.op, "verifier_failure_kind", "")
             vse = getattr(ctx.op, "verifier_stdout_excerpt", "")
             vserr = getattr(ctx.op, "verifier_stderr_excerpt", "")
             vec = getattr(ctx.op, "verifier_exit_code", "")
             vch = getattr(ctx.op, "verifier_command_hash", "")
             evidence_injected = True
-            evidence_fields = ",".join(
-                f for f in [vfk, vse[:50], vserr[:50], str(vec), vch] if f
-            )
+            evidence_fields = ",".join(f for f in [vfk, vse[:50], vserr[:50], str(vec), vch] if f)
             evidence_hash = hashlib.sha256(
                 f"{vfk}|{vse[:200]}|{vserr[:200]}|{vec}|{vch}".encode()
             ).hexdigest()[:16]
-        
-        # C6P/C6S: Extract memory lesson CONTENT for active guidance
-        # Fixed: now reads actual lesson summaries, not just IDs
-        memory_lessons_text = ""
-        memory_trace = getattr(ctx.op, "_memory_influence_trace", None)
-        if memory_trace and hasattr(memory_trace, "selected_ids") and memory_trace.selected_ids:
-            # Read lesson content from memory store using IDs
-            try:
-                from nexus.services.local_heal.memory_retrieval_adapter import NexusCompositeLessonStore
-                store = NexusCompositeLessonStore()
-                lessons = store.query(
-                    query_text=" ".join(memory_trace.selected_ids[:3]),
-                    limit=3,
-                )
-                if lessons:
-                    lesson_parts = []
-                    for lesson in lessons:
-                        summary = lesson.get("summary", "")
-                        classification = lesson.get("classification", "")
-                        lesson_id = lesson.get("lesson_id", lesson.get("id", ""))
-                        if summary:
-                            lesson_parts.append(
-                                f"Lesson [{classification}] (id: {lesson_id}):\n  - {summary}"
-                            )
-                    if lesson_parts:
-                        memory_lessons_text = "\n".join(lesson_parts)
-            except Exception:
-                # Fallback: use IDs if content read fails
-                memory_lessons_text = f"Lessons found: {', '.join(memory_trace.selected_ids[:3])}"
+
+        # Attach memory trace and render canonical lessons (shared with the normal retry path).
+        memory_lessons_text, _ = self._render_memory_lessons(ctx, target_file)
 
         # C6AA: Extract bounded CodeIntel context for retry
         codeintel_context = self._extract_codeintel_context_for_retry(ctx)
-        codeintel_hash = hashlib.sha256(codeintel_context.encode()).hexdigest()[:16] if codeintel_context else ""
+        codeintel_hash = (
+            hashlib.sha256(codeintel_context.encode()).hexdigest()[:16] if codeintel_context else ""
+        )
 
         # C6AB: Retrieve successful repair patterns for retry guidance
         research_patterns_text = ""
@@ -448,14 +600,25 @@ class HealOrchestrator:
         research_hash = ""
         try:
             from nexus.services.local_heal.repair_pattern_retrieval import (
-                retrieve_successful_repair_patterns,
                 format_research_patterns_for_prompt,
+                retrieve_successful_repair_patterns,
             )
-            _jsonl_path = Path(__file__).resolve().parents[3] / ".nexus" / "reports" / "learn" / "learning_closure.jsonl"
+
+            _jsonl_path = (
+                Path(__file__).resolve().parents[3]
+                / ".nexus"
+                / "reports"
+                / "learn"
+                / "learning_closure.jsonl"
+            )
             _patterns = retrieve_successful_repair_patterns(str(_jsonl_path), limit=5)
             research_pattern_count = len(_patterns)
             research_patterns_text = format_research_patterns_for_prompt(_patterns)
-            research_hash = hashlib.sha256(research_patterns_text.encode()).hexdigest()[:16] if research_patterns_text else ""
+            research_hash = (
+                hashlib.sha256(research_patterns_text.encode()).hexdigest()[:16]
+                if research_patterns_text
+                else ""
+            )
         except Exception:
             pass
 
@@ -474,7 +637,7 @@ class HealOrchestrator:
             codeintel_context=codeintel_context,
             research_patterns=research_patterns_text,
         )
-        
+
         # C15-3C: Record pass-through metadata
         ctx.op._orchestrator_verifier_evidence_passed = evidence_injected
         ctx.op._orchestrator_verifier_evidence_fields = evidence_fields
@@ -497,18 +660,31 @@ class HealOrchestrator:
         llm_client = self._resolve_semantic_retry_llm_client()
         # C15-3Q: record client identity for diagnostics
         patch_phase_client = getattr(self.patch_phase, "llm_client", None)
-        client_reused = (llm_client is patch_phase_client and patch_phase_client is not None)
+        client_reused = llm_client is patch_phase_client and patch_phase_client is not None
         client_class = type(llm_client).__name__ if llm_client is not None else ""
         semantic_prompt_len = len(semantic_prompt) if semantic_prompt else 0
-        semantic_prompt_hash = hashlib.sha256(semantic_prompt.encode()).hexdigest()[:16] if semantic_prompt else ""
+        semantic_prompt_hash = (
+            hashlib.sha256(semantic_prompt.encode()).hexdigest()[:16] if semantic_prompt else ""
+        )
         semantic_prompt_has_verifier_evidence = evidence_injected
-        invocation_source = "pipeline_delegated_retry" if getattr(ctx.op, "_is_delegated_retry", False) else "orchestrator_semantic_retry"
+        invocation_source = (
+            "pipeline_delegated_retry"
+            if getattr(ctx.op, "_is_delegated_retry", False)
+            else "orchestrator_semantic_retry"
+        )
 
         # C15-3Q: write partial telemetry now so early exits capture diagnostics
-        def _write_sr_telemetry(status: str, failure_reason: str, raw_resp_len: int = 0,
-                                raw_resp_excerpt: str = "", resp_is_none: bool = False,
-                                resp_empty: bool = False, resp_type: str = "",
-                                output_class: str = "", parser_error_kind: str = "") -> None:
+        def _write_sr_telemetry(
+            status: str,
+            failure_reason: str,
+            raw_resp_len: int = 0,
+            raw_resp_excerpt: str = "",
+            resp_is_none: bool = False,
+            resp_empty: bool = False,
+            resp_type: str = "",
+            output_class: str = "",
+            parser_error_kind: str = "",
+        ) -> None:
             ctx.op._semantic_retry_telemetry = {
                 "semantic_retry_count": 1,
                 "same_span_retry": True,
@@ -528,9 +704,15 @@ class HealOrchestrator:
                 "fallback_rule_reason": "",
                 "model_patch_reward": 0.0,
                 "deterministic_fallback_reward": 0.0,
-                "orchestrator_verifier_evidence_passed_to_retry": getattr(ctx.op, "_orchestrator_verifier_evidence_passed", False),
-                "orchestrator_verifier_evidence_fields": getattr(ctx.op, "_orchestrator_verifier_evidence_fields", ""),
-                "orchestrator_retry_prompt_evidence_hash": getattr(ctx.op, "_orchestrator_retry_prompt_evidence_hash", ""),
+                "orchestrator_verifier_evidence_passed_to_retry": getattr(
+                    ctx.op, "_orchestrator_verifier_evidence_passed", False
+                ),
+                "orchestrator_verifier_evidence_fields": getattr(
+                    ctx.op, "_orchestrator_verifier_evidence_fields", ""
+                ),
+                "orchestrator_retry_prompt_evidence_hash": getattr(
+                    ctx.op, "_orchestrator_retry_prompt_evidence_hash", ""
+                ),
                 # C15-3Q new diagnostics
                 "semantic_retry_client_reused": client_reused,
                 "semantic_retry_client_class": client_class,
@@ -538,7 +720,9 @@ class HealOrchestrator:
                 "semantic_retry_prompt_hash": semantic_prompt_hash,
                 "semantic_retry_prompt_has_verifier_evidence": semantic_prompt_has_verifier_evidence,
                 "semantic_retry_codeintel_injected": bool(codeintel_context),
-                "semantic_retry_codeintel_nodes": len(codeintel_context.splitlines()) if codeintel_context else 0,
+                "semantic_retry_codeintel_nodes": len(codeintel_context.splitlines())
+                if codeintel_context
+                else 0,
                 "semantic_retry_codeintel_edges": 0,
                 "semantic_retry_codeintel_context_hash": codeintel_hash,
                 "semantic_retry_research_patterns_injected": bool(research_patterns_text),
@@ -546,12 +730,19 @@ class HealOrchestrator:
                 "semantic_retry_research_context_hash": research_hash,
                 "semantic_retry_belief_used": bool(getattr(ctx.op, "_belief_budget_used", False)),
                 "semantic_retry_belief_before": getattr(ctx.op, "_belief_before", None),
-                "semantic_retry_belief_after": getattr(ctx.op, "_belief_trace", {}).get("belief_after") if hasattr(ctx.op, "_belief_trace") and isinstance(getattr(ctx.op, "_belief_trace", None), dict) else None,
+                "semantic_retry_belief_after": getattr(ctx.op, "_belief_trace", {}).get(
+                    "belief_after"
+                )
+                if hasattr(ctx.op, "_belief_trace")
+                and isinstance(getattr(ctx.op, "_belief_trace", None), dict)
+                else None,
                 "semantic_retry_uncertainty_delta": getattr(ctx.op, "_uncertainty_delta", None),
                 "semantic_retry_budget_policy": str(getattr(ctx.op, "_budget_policy", "")),
                 "semantic_retry_budget_rounds": int(getattr(ctx.op, "_budget_rounds", 2)),
                 "semantic_retry_raw_response_len": raw_resp_len,
-                "semantic_retry_raw_response_excerpt": raw_resp_excerpt[:500] if raw_resp_excerpt else "",
+                "semantic_retry_raw_response_excerpt": raw_resp_excerpt[:500]
+                if raw_resp_excerpt
+                else "",
                 "semantic_retry_response_is_none": resp_is_none,
                 "semantic_retry_response_empty": resp_empty,
                 "semantic_retry_response_type": resp_type,
@@ -606,15 +797,17 @@ class HealOrchestrator:
         # 7. Parse SEARCH/REPLACE from response
         # C6U: Force anchored_edit mode for retry to enable replace-only contract
         import os
+
         original_protocol_mode = os.environ.get("NEXUS_PROTOCOL_MODE")
         os.environ["NEXUS_PROTOCOL_MODE"] = "anchored_edit"
-        
+
         parser = SolidSearchReplaceProtocol()
-        
+
         # C15-5E Path B: Unified-Diff-to-SSRP Converter for Semantic Retry
         output_class = parser.classify_format(response)
         if output_class == "UNIFIED_DIFF":
             from nexus.services.local_heal.diff_to_ssrp import DiffToSSRPConverter
+
             expected_target = target_file
             source_text = ""
             target_path = ctx.op.repo_dir / expected_target
@@ -625,18 +818,16 @@ class HealOrchestrator:
                     pass
             if not source_text and ctx.op.localized_files:
                 source_text = ctx.op.localized_files[0].content
-            
+
             if expected_target and source_text:
                 converted_ssrp, conv_status, conv_tele = DiffToSSRPConverter.convert(
-                    raw_diff=response,
-                    expected_target_file=expected_target,
-                    source_text=source_text
+                    raw_diff=response, expected_target_file=expected_target, source_text=source_text
                 )
                 if conv_status == "unified_diff_to_ssrp_converted" and converted_ssrp:
                     response = converted_ssrp
 
         intents_or_error = parser.parse(response, anchor_text=canonical_search)
-        
+
         # Restore original protocol mode
         if original_protocol_mode is None:
             os.environ.pop("NEXUS_PROTOCOL_MODE", None)
@@ -695,12 +886,14 @@ class HealOrchestrator:
         ctx.op.model_decisions[-1]["status"] = "SUCCESS"
         # Save first attempt patch hash before overwriting with retry result
         first_patch = getattr(ctx.op, "final_patch", "")
-        ctx.op._first_attempt_patch_hash = hashlib.sha256(first_patch.encode()).hexdigest() if first_patch else ""
+        ctx.op._first_attempt_patch_hash = (
+            hashlib.sha256(first_patch.encode()).hexdigest() if first_patch else ""
+        )
         ctx.op.final_patch = "\n".join(apply_res.applied_diffs).strip()
 
         # 10. Re-run verification
         v_res = self.phase_runner.run_phase(
-            self.verify_phase, f"verify_semantic_retry", ctx, ctx.op._latency_ledger
+            self.verify_phase, "verify_semantic_retry", ctx, ctx.op._latency_ledger
         )
 
         # 11. Write semantic retry telemetry (success path — overwrite the partial telemetry)
@@ -710,7 +903,9 @@ class HealOrchestrator:
             "original_verification_failure": verifier_failure[:500],
             "observed_behavior": verifier_failure[:300],
             "behavior_delta_verified": v_res.success,
-            "verifier_result_after_retry": "PASS" if v_res.success else f"FAIL: {getattr(ctx.op, 'evaluation_report', '')[:200]}",
+            "verifier_result_after_retry": "PASS"
+            if v_res.success
+            else f"FAIL: {getattr(ctx.op, 'evaluation_report', '')[:200]}",
             "search_locked": True,
             "replace_rewritten": True,
             "canonical_search_hash": hashlib.sha256(canonical_search.encode()).hexdigest()[:16],
@@ -725,9 +920,15 @@ class HealOrchestrator:
             "model_patch_reward": 1.0 if v_res.success else 0.0,
             "deterministic_fallback_reward": 0.0,
             # C15-3C: Orchestrator verifier evidence pass-through
-            "orchestrator_verifier_evidence_passed_to_retry": getattr(ctx.op, "_orchestrator_verifier_evidence_passed", False),
-            "orchestrator_verifier_evidence_fields": getattr(ctx.op, "_orchestrator_verifier_evidence_fields", ""),
-            "orchestrator_retry_prompt_evidence_hash": getattr(ctx.op, "_orchestrator_retry_prompt_evidence_hash", ""),
+            "orchestrator_verifier_evidence_passed_to_retry": getattr(
+                ctx.op, "_orchestrator_verifier_evidence_passed", False
+            ),
+            "orchestrator_verifier_evidence_fields": getattr(
+                ctx.op, "_orchestrator_verifier_evidence_fields", ""
+            ),
+            "orchestrator_retry_prompt_evidence_hash": getattr(
+                ctx.op, "_orchestrator_retry_prompt_evidence_hash", ""
+            ),
             # C15-3Q new diagnostics
             "semantic_retry_client_reused": client_reused,
             "semantic_retry_client_class": client_class,
@@ -735,7 +936,9 @@ class HealOrchestrator:
             "semantic_retry_prompt_hash": semantic_prompt_hash,
             "semantic_retry_prompt_has_verifier_evidence": semantic_prompt_has_verifier_evidence,
             "semantic_retry_codeintel_injected": bool(codeintel_context),
-            "semantic_retry_codeintel_nodes": len(codeintel_context.splitlines()) if codeintel_context else 0,
+            "semantic_retry_codeintel_nodes": len(codeintel_context.splitlines())
+            if codeintel_context
+            else 0,
             "semantic_retry_codeintel_edges": 0,
             "semantic_retry_codeintel_context_hash": codeintel_hash,
             "semantic_retry_research_patterns_injected": bool(research_patterns_text),
@@ -743,12 +946,17 @@ class HealOrchestrator:
             "semantic_retry_research_context_hash": research_hash,
             "semantic_retry_belief_used": bool(getattr(ctx.op, "_belief_budget_used", False)),
             "semantic_retry_belief_before": getattr(ctx.op, "_belief_before", None),
-            "semantic_retry_belief_after": getattr(ctx.op, "_belief_trace", {}).get("belief_after") if hasattr(ctx.op, "_belief_trace") and isinstance(getattr(ctx.op, "_belief_trace", None), dict) else None,
+            "semantic_retry_belief_after": getattr(ctx.op, "_belief_trace", {}).get("belief_after")
+            if hasattr(ctx.op, "_belief_trace")
+            and isinstance(getattr(ctx.op, "_belief_trace", None), dict)
+            else None,
             "semantic_retry_uncertainty_delta": getattr(ctx.op, "_uncertainty_delta", None),
             "semantic_retry_budget_policy": str(getattr(ctx.op, "_budget_policy", "")),
             "semantic_retry_budget_rounds": int(getattr(ctx.op, "_budget_rounds", 2)),
             "semantic_retry_raw_response_len": raw_resp_len,
-            "semantic_retry_raw_response_excerpt": raw_resp_excerpt[:500] if raw_resp_excerpt else "",
+            "semantic_retry_raw_response_excerpt": raw_resp_excerpt[:500]
+            if raw_resp_excerpt
+            else "",
             "semantic_retry_response_is_none": resp_is_none,
             "semantic_retry_response_empty": False,
             "semantic_retry_response_type": resp_type,
@@ -767,8 +975,7 @@ class HealOrchestrator:
         return False
 
     def _attempt_multipass_semantic_retry(
-        self, ctx: HealContext, evaluation_report: str, failure_class: str,
-        max_rounds: int = 2
+        self, ctx: HealContext, evaluation_report: str, failure_class: str, max_rounds: int = 2
     ) -> bool:
         """C6N: Multipass semantic retry with assertion decomposition.
 
@@ -782,8 +989,8 @@ class HealOrchestrator:
         uncertainty_delta = None
         budget_policy = "moderate"
         try:
-            from nexus.services.local_heal.belief_budget_policy import resolve_retry_budget
             from nexus.core.belief_engine import BeliefEngine
+            from nexus.services.local_heal.belief_budget_policy import resolve_retry_budget
 
             task_id = str(getattr(ctx.op, "instance_id", "") or getattr(ctx.op, "task_id", ""))
             assumption = f"local_heal:{task_id}:repair_outcome"
@@ -816,8 +1023,11 @@ class HealOrchestrator:
         for round_num in range(max_rounds):
             # Extract current unmet assertions from verifier output
             verifier_stdout = getattr(ctx.op, "verifier_stdout_excerpt", "")
-            assertions = [line.strip() for line in verifier_stdout.split("\n")
-                         if line.strip().startswith("EVIDENCE:")]
+            assertions = [
+                line.strip()
+                for line in verifier_stdout.split("\n")
+                if line.strip().startswith("EVIDENCE:")
+            ]
 
             if not assertions:
                 # No more assertions to fix — try single retry with full checklist
@@ -844,7 +1054,9 @@ class HealOrchestrator:
         return self._attempt_semantic_retry(ctx, evaluation_report, failure_class)
 
     def _prioritize_assertions_with_autoreason(
-        self, assertions: list[str], ctx: HealContext,
+        self,
+        assertions: list[str],
+        ctx: HealContext,
     ) -> list[str]:
         """Rank assertions by fixability/importance for multipass retry.
 
@@ -891,8 +1103,10 @@ class HealOrchestrator:
             if result.get("status") == "SUCCESS":
                 borda_scores = result.get("borda_scores", {})
                 if borda_scores:
-                    scored = [(borda_scores.get(chr(ord("A") + i), 0.0), i, a)
-                              for i, a in enumerate(assertions)]
+                    scored = [
+                        (borda_scores.get(chr(ord("A") + i), 0.0), i, a)
+                        for i, a in enumerate(assertions)
+                    ]
                     scored.sort(key=lambda x: (-x[0], x[1]))
                     return [a for _, _, a in scored]
         except Exception:
@@ -931,7 +1145,9 @@ class HealOrchestrator:
             if callers:
                 lines.append("Call relationships: " + "; ".join(callers[:5]))
 
-            functions = [n["name"] for n in nodes if n["type"] == "function" and n["name"] != target_symbol]
+            functions = [
+                n["name"] for n in nodes if n["type"] == "function" and n["name"] != target_symbol
+            ]
             if functions:
                 lines.append(f"Other functions in file: {', '.join(functions[:8])}")
 
@@ -966,12 +1182,15 @@ class HealOrchestrator:
 
     def _finalize_run(self, ctx: HealContext, ledger: LatencyLedger, start_wall: float) -> None:
         import time
+
         ctx.op.wall_time_sec = time.time() - start_wall
         ledger.wall_end = time.monotonic()
         ledger.retry_count = max(0, ctx.op.attempt - 1)
         ledger.finalize()
         ctx.op._latency_ledger = ledger
         self._attach_memory_influence_trace(ctx)
+        self._refresh_memory_trace_verifier_status(ctx)
+        self._bind_applied_attribution_inputs(ctx)
         self._record_authoritative_memory_adoption(ctx)
         self._run_capability_bridges(ctx)
         self.governance_gate.audit(ctx)
@@ -996,14 +1215,19 @@ class HealOrchestrator:
     def _run_capability_bridges(self, ctx: HealContext) -> None:
         errors = []
         try:
-            from nexus.services.local_heal.reasoning_advisory_bridge import apply_autoreason_advisory, apply_belief_update
+            from nexus.services.local_heal.reasoning_advisory_bridge import (
+                apply_autoreason_advisory,
+                apply_belief_update,
+            )
 
             apply_autoreason_advisory(ctx)
             apply_belief_update(ctx)
         except Exception as exc:
             errors.append(exc.__class__.__name__)
         try:
-            from nexus.services.local_heal.claim_delivery_gate import validate_context_claim_delivery
+            from nexus.services.local_heal.claim_delivery_gate import (
+                validate_context_claim_delivery,
+            )
 
             # P2-D: Derive hash_match from ctx.op for claim gate
             _hash_match = getattr(ctx.op, "selected_candidate_hash_matches_applied", None)
@@ -1027,17 +1251,40 @@ class HealOrchestrator:
         if errors:
             ctx.op._capability_bridge_error = ";".join(errors)
 
+    def _refresh_memory_trace_verifier_status(self, ctx: HealContext) -> None:
+        """Sync the trace verifier_status with the final solve outcome.
+
+        The trace may be attached during a semantic retry, before the final
+        solve_eligible is known, so its verifier_status can be stale. Never
+        raises; prompt_included is left untouched.
+        """
+        try:
+            trace = getattr(ctx.op, "_memory_influence_trace", None)
+            if trace is None:
+                return
+            status = "PASS" if getattr(ctx.op, "solve_eligible", False) else "FAIL"
+            if isinstance(trace, dict):
+                trace["verifier_status"] = status
+            else:
+                trace.verifier_status = status
+        except Exception:
+            pass
+
     def _attach_memory_influence_trace(self, ctx: HealContext) -> None:
         if getattr(ctx.op, "_memory_influence_trace", None):
             return
         # MEMORY-EVAL-3: Check memory_enabled flag
         if not getattr(ctx.op, "memory_enabled", True):
             from nexus.services.local_heal.memory_trace import get_empty_trace
+
             ctx.op._memory_influence_trace = get_empty_trace()
             return
         try:
             from nexus.services.local_heal.memory_retrieval_adapter import MemoryRetrievalAdapter
-            from nexus.services.local_heal.memory_trace import build_memory_trace_from_adapter, get_empty_trace
+            from nexus.services.local_heal.memory_trace import (
+                build_memory_trace_from_adapter,
+                get_empty_trace,
+            )
 
             target_symbol = self._extract_target_symbol(ctx)
             target_file = self._resolve_target_file(ctx)
@@ -1068,8 +1315,13 @@ class HealOrchestrator:
                 task_id=getattr(ctx.op, "instance_id", "") or getattr(ctx.op, "task_id", ""),
             )
             adapter.last_metadata["evidence_packet_included"] = False
-            adapter.last_metadata["prompt_included"] = bool(adapter.last_metadata.get("selected_ids"))
-            adapter.last_metadata["verifier_status"] = "PASS" if getattr(ctx.op, "solve_eligible", False) else "FAIL"
+            # Fail closed: prompt_included only when lesson text was actually injected.
+            adapter.last_metadata["prompt_included"] = bool(
+                adapter.last_metadata.get("selected_ids")
+            ) and bool(getattr(ctx.op, "_memory_prompt_injected_ids", None))
+            adapter.last_metadata["verifier_status"] = (
+                "PASS" if getattr(ctx.op, "solve_eligible", False) else "FAIL"
+            )
             ctx.op._memory_influence_trace = build_memory_trace_from_adapter(adapter.last_metadata)
         except Exception as exc:
             try:
@@ -1089,6 +1341,116 @@ class HealOrchestrator:
                 }
             ctx.op._memory_influence_trace_error = exc.__class__.__name__
 
+    def _bind_applied_attribution_inputs(self, ctx: HealContext) -> None:
+        """Populate the inputs `_record_authoritative_memory_adoption` requires.
+
+        Runs at finalize, the first point where the final applied patch and the
+        verifier outcome are both settled for the ordinary local-heal flow:
+
+        * applied patch: ``ctx.op.final_patch`` (the text applied to the repo;
+          retries overwrite it, so this is the last applied patch).
+        * verifier pass: the verification loop only exits with
+          ``gate_exit == "verification"`` and ``solve_eligible`` after
+          VerificationPhase succeeded (``solve_eligible``/``evaluation_report``
+          are set by that phase). Runs with no verify phase never qualify.
+        * selected candidate: the ordinary flow has a single candidate, so the
+          applied patch is the selected one unless a differing
+          ``selected_candidate_hash`` was recorded.
+
+        * verifier fail: when the attempt is not ``solve_eligible`` and carries
+          verifier-failure evidence (see ``_is_verifier_failure``), regardless of
+          which gate exited the retry loop (a failed heal in the real retry flow
+          exits at ``gate_exit == "patcher"``), a ``verifier_status == "fail"``
+          receipt is bound so the failed attempt still carries measured evidence
+          for the closure qualification. A fail receipt never makes ``applied`` non-empty:
+          the authoritative check in ``_record_authoritative_memory_adoption``
+          still requires an explicit verifier pass.
+
+        Existing values are never weakened or overwritten: a pre-set receipt
+        (pass or fail) is authoritative and is never replaced here.
+        """
+        op = ctx.op
+        try:
+            patch = str(getattr(op, "final_patch", "") or "")
+            patch_hash = ""
+            if patch:
+                patch_hash = hashlib.sha256(patch.encode()).hexdigest()
+                if not getattr(op, "applied_patch_hash", ""):
+                    op.applied_patch_hash = patch_hash
+                if getattr(op, "selected_candidate_hash_matches_applied", None) is None:
+                    selected = str(getattr(op, "selected_candidate_hash", "") or "")
+                    op.selected_candidate_hash_matches_applied = (
+                        not selected
+                    ) or selected == op.applied_patch_hash
+            existing = getattr(op, "verifier_receipt", None)
+            if existing is not None:
+                return  # an explicit receipt (pass or fail) is authoritative
+            gate_exit = str(getattr(getattr(ctx, "gov", None), "gate_exit", "") or "")
+            report = str(getattr(op, "evaluation_report", "") or "")
+            instance = getattr(op, "instance_id", "") or getattr(op, "task_id", "")
+            if bool(getattr(op, "solve_eligible", False)):
+                if gate_exit != "verification":
+                    return
+                if not patch:
+                    return  # a pass receipt requires the applied patch it attests to
+                op.verifier_receipt = {
+                    "verifier_status": "pass",
+                    "receipt_id": "verifier:%s:attempt%s:%s"
+                    % (
+                        instance,
+                        getattr(op, "attempt", ""),
+                        hashlib.sha256(f"{patch_hash}|{report}".encode()).hexdigest()[:16],
+                    ),
+                }
+                return
+            if not self._is_verifier_failure(op):
+                return
+            # Fail receipt: hash the applied patch when one exists; otherwise
+            # hash the failure reason so the receipt still has a stable id.
+            basis = (
+                f"{patch_hash}|{report}" if patch else str(getattr(op, "failure_reason", "") or "")
+            )
+            op.verifier_receipt = {
+                "verifier_status": "fail",
+                "receipt_id": "verifier:%s:attempt%s:%s"
+                % (
+                    instance,
+                    getattr(op, "attempt", ""),
+                    hashlib.sha256(basis.encode()).hexdigest()[:16],
+                ),
+                "failure_kind": str(getattr(op, "verifier_failure_kind", "") or ""),
+                "exit_code": getattr(op, "verifier_exit_code", ""),
+                "gate_exit": gate_exit,
+            }
+        except Exception:
+            return  # fail closed: missing inputs leave applied empty
+
+    @staticmethod
+    def _is_verifier_failure(op: Any) -> bool:
+        """True when the attempt evidences that a verifier ran and rejected it.
+
+        Independent of the exit gate: any one of these markers is enough.
+        Infrastructure failures (e.g. ``PROVIDER_TIMEOUT``) carry none of them.
+        """
+        failure_reason = str(getattr(op, "failure_reason", "") or "").upper()
+        if any(
+            marker in failure_reason
+            for marker in ("VERIFICATION_FAILED", "LOGIC_REGRESSION", "VERIFIER")
+        ):
+            return True
+        if str(getattr(op, "failure_class", "") or "") in {
+            "semantic_wrong",
+            "semantic_wrong_patch",
+            "verification_failed",
+        }:
+            return True
+        if str(getattr(op, "last_failure_class", "") or "") == "VERIFIER_FAIL":
+            return True
+        if str(getattr(op, "verifier_failure_kind", "") or ""):
+            return True
+        trace = getattr(op, "_memory_influence_trace", None)
+        return str(getattr(trace, "verifier_status", "") or "").upper() == "FAIL"
+
     def _record_authoritative_memory_adoption(self, ctx: HealContext) -> None:
         """Bind memory adoption only when patch and verifier receipts agree.
 
@@ -1101,19 +1463,43 @@ class HealOrchestrator:
         ids = []
         prompt_included = False
         if trace is not None:
-            ids = list(getattr(trace, "memory_evidence_ids", None) or getattr(trace, "selected_ids", None) or [])
+            ids = list(
+                getattr(trace, "memory_evidence_ids", None)
+                or getattr(trace, "selected_ids", None)
+                or []
+            )
             prompt_included = bool(getattr(trace, "prompt_included", False))
         verifier = getattr(op, "verifier_receipt", None)
         if isinstance(verifier, dict):
-            verifier_status = str(verifier.get("verifier_status") or verifier.get("status") or "").lower()
-            verifier_ref = verifier.get("receipt_id") or verifier.get("evidence_ref") or verifier.get("path") or ""
+            verifier_status = str(
+                verifier.get("verifier_status") or verifier.get("status") or ""
+            ).lower()
+            verifier_ref = (
+                verifier.get("receipt_id")
+                or verifier.get("evidence_ref")
+                or verifier.get("path")
+                or ""
+            )
         else:
-            verifier_status = str(getattr(verifier, "verifier_status", "") or getattr(verifier, "status", "")).lower()
-            verifier_ref = str(getattr(verifier, "receipt_id", "") or getattr(verifier, "evidence_ref", "") or "")
+            verifier_status = str(
+                getattr(verifier, "verifier_status", "") or getattr(verifier, "status", "")
+            ).lower()
+            verifier_ref = str(
+                getattr(verifier, "receipt_id", "") or getattr(verifier, "evidence_ref", "") or ""
+            )
         patch_hash = str(getattr(op, "applied_patch_hash", "") or "")
         hash_match = bool(getattr(op, "selected_candidate_hash_matches_applied", False))
-        patch_ref = str(getattr(op, "patch_receipt_path", "") or getattr(op, "applied_patch_receipt", "") or "")
-        authoritative = bool(ids and prompt_included and patch_hash and hash_match and verifier_status in {"pass", "passed", "success"} and (verifier_ref or verifier is not None))
+        patch_ref = str(
+            getattr(op, "patch_receipt_path", "") or getattr(op, "applied_patch_receipt", "") or ""
+        )
+        authoritative = bool(
+            ids
+            and prompt_included
+            and patch_hash
+            and hash_match
+            and verifier_status in {"pass", "passed", "success"}
+            and (verifier_ref or verifier is not None)
+        )
         if authoritative:
             op.applied_lesson_ids = sorted({str(item) for item in ids if str(item)})
             op.applied_lesson_attribution = {
@@ -1145,12 +1531,11 @@ class HealOrchestrator:
     def _attach_evidence_harness(self, ctx: HealContext) -> None:
         """RRL3: Attach evidence harness (write-only observability)."""
         try:
-            from nexus.services.local_heal.evidence_harness import EvidenceHarness
             from pathlib import Path
 
-            harness = EvidenceHarness(
-                output_dir=Path("artifacts/runtime/rrl3_runs")
-            )
+            from nexus.services.local_heal.evidence_harness import EvidenceHarness
+
+            harness = EvidenceHarness(output_dir=Path("artifacts/runtime/rrl3_runs"))
             op = ctx.op if hasattr(ctx, "op") else ctx
             # Use instance_id as task_id (OperationalContext has instance_id, not task_id)
             task_id = str(getattr(op, "instance_id", "unknown"))
@@ -1179,8 +1564,9 @@ class HealOrchestrator:
     def _attach_live_full_loop_artifacts(self, ctx: HealContext) -> None:
         """EVAL-SUBSTRATE-1B: Live full-loop artifact capture (runtime wiring)."""
         try:
-            from nexus.services.local_heal.live_artifact_collector import LiveArtifactCollector
             from pathlib import Path
+
+            from nexus.services.local_heal.live_artifact_collector import LiveArtifactCollector
 
             op = ctx.op if hasattr(ctx, "op") else ctx
             task_id = str(getattr(op, "instance_id", "unknown"))
@@ -1191,13 +1577,23 @@ class HealOrchestrator:
             mem_trace = getattr(op, "_memory_influence_trace", None)
             if explicit_arm in {"nexus_memory_on", "nexus_memory_off"}:
                 arm = explicit_arm
-            elif memory_enabled and mem_trace and getattr(mem_trace, "trace_status", "") == "TRACE_AVAILABLE":
+            elif (
+                memory_enabled
+                and mem_trace
+                and getattr(mem_trace, "trace_status", "") == "TRACE_AVAILABLE"
+            ):
                 arm = "nexus_memory_on"
             else:
                 arm = "nexus_memory_off"
 
             # MEMORY-EVAL-3B: Configurable output root from ctx.op
-            output_root = Path(getattr(op, "artifact_output_root", "artifacts/runtime/eval_substrate_1b_runtime_wiring_v0/runs"))
+            output_root = Path(
+                getattr(
+                    op,
+                    "artifact_output_root",
+                    "artifacts/runtime/eval_substrate_1b_runtime_wiring_v0/runs",
+                )
+            )
 
             collector = LiveArtifactCollector(
                 task_id=task_id,
@@ -1225,7 +1621,9 @@ class HealOrchestrator:
             collector.capture_evidence_packet(evidence if evidence else {"unavailable": True})
 
             # Prompt manifest
-            prompt_len = len(str(getattr(op, "system_prompt", ""))) + len(str(getattr(op, "user_prompt", "")))
+            prompt_len = len(str(getattr(op, "system_prompt", ""))) + len(
+                str(getattr(op, "user_prompt", ""))
+            )
             # MEMORY-EVAL-3: Check if memory was actually retrieved (not just trace exists)
             memory_actually_retrieved = (
                 memory_enabled
@@ -1309,6 +1707,7 @@ class HealOrchestrator:
     def _reset_workspace(self, ctx: HealContext) -> None:
         # P1-3: Portable root detection — use env var or fall back to detecting via git
         import os
+
         nexus_root_env = os.environ.get("NEXUS_ROOT", "")
         if nexus_root_env:
             current_root = Path(nexus_root_env).resolve()
@@ -1327,7 +1726,9 @@ class HealOrchestrator:
 
         if not ctx.op.repo_dir or not (ctx.op.repo_dir / ".git").exists():
             return
-        subprocess.run(["git", "checkout", "--", "."], cwd=str(ctx.op.repo_dir), capture_output=True)
+        subprocess.run(
+            ["git", "checkout", "--", "."], cwd=str(ctx.op.repo_dir), capture_output=True
+        )
         subprocess.run(["git", "clean", "-fd"], cwd=str(ctx.op.repo_dir), capture_output=True)
 
     def _build_patch_failure_structured_packet(
@@ -1343,7 +1744,9 @@ class HealOrchestrator:
             repro_command = ""
             if ctx.op.plan and getattr(ctx.op.plan, "verifier_command", ""):
                 repro_command = str(ctx.op.plan.verifier_command)
-            syntax_error_msg = str(metadata.get("syntax_error_msg", "") or error.message or "")[:200]
+            syntax_error_msg = str(metadata.get("syntax_error_msg", "") or error.message or "")[
+                :200
+            ]
             syntax_error_line = 0
             raw_line = metadata.get("syntax_error_line", 0)
             try:
@@ -1400,16 +1803,24 @@ class HealOrchestrator:
             raw_artifact_ref="patch_synthesis.search_mismatch",
         )
 
-    def _handle_retry(self, ctx: HealContext, error: PatchError, res: PhaseResult | None = None) -> HealContext:
+    def _handle_retry(
+        self, ctx: HealContext, error: PatchError, res: PhaseResult | None = None
+    ) -> HealContext:
         _PATCH_BLACKLIST = {"reproduce_bug.py", "repro.py", "test_repro.py"}
         targeted_files = ", ".join([
-            f.path for f in getattr(ctx.op, "localized_files", [])
+            f.path
+            for f in getattr(ctx.op, "localized_files", [])
             if Path(f.path).name not in _PATCH_BLACKLIST
         ])
-        
+
         sp = None
-        if error.kind in (PatchErrorKind.LOGIC_REGRESSION, PatchErrorKind.SEARCH_MISMATCH, PatchErrorKind.SYNTAX_ERROR):
+        if error.kind in (
+            PatchErrorKind.LOGIC_REGRESSION,
+            PatchErrorKind.SEARCH_MISMATCH,
+            PatchErrorKind.SYNTAX_ERROR,
+        ):
             from nexus.services.local_heal.evidence_compactor import EvidenceCompactor
+
             if res is not None:
                 sp = self._build_patch_failure_structured_packet(ctx, error, res)
             if sp is None:
@@ -1428,11 +1839,30 @@ class HealOrchestrator:
                     env_failure_reason=env_failure_reason,
                 )
             error.structured_packet = sp
-            
-        ctx.op.user_prompt = self.corrector.build_retry_prompt(ctx.op.user_prompt, error, targeted_files=targeted_files, structured_packet=sp)
+
+        ctx.op.user_prompt = self.corrector.build_retry_prompt(
+            ctx.op.user_prompt, error, targeted_files=targeted_files, structured_packet=sp
+        )
+        # Normal retry loop: inject advisory canonical lessons (memory-gated inside the helper).
+        import re as _re
+
+        patch_text = (
+            getattr(ctx.op, "final_patch", "")
+            or getattr(ctx.op, "pre_verification_final_patch", "")
+            or ""
+        )
+        target_match = _re.search(r"^\+\+\+ b/(.+)$", patch_text, _re.MULTILINE)
+        retry_target = target_match.group(1) if target_match else ""
+        lesson_text, lesson_ids = self._render_memory_lessons(ctx, retry_target)
+        # Fallback text (no rendered ids) is never injected into the normal retry.
+        if lesson_text and lesson_ids:
+            ctx.op.user_prompt = (
+                f"{ctx.op.user_prompt}\n\n## Lessons from prior verified attempts "
+                f"(advisory; verify against the failing test)\n{lesson_text}"
+            )
         ctx.op.attempt += 1
         return ctx
-    
+
     def _get_model_for_phase(self, ctx: HealContext, phase_name: str) -> str:
         """Extract the model name used for a given phase from model_decisions."""
         for decision in reversed(ctx.op.model_decisions):
@@ -1440,7 +1870,9 @@ class HealOrchestrator:
                 return decision.get("model", "")
         return ""
 
-    def _record_model_status(self, ctx: HealContext, status: str, detail: str = "", *, phase: str | None = None) -> None:
+    def _record_model_status(
+        self, ctx: HealContext, status: str, detail: str = "", *, phase: str | None = None
+    ) -> None:
         for decision in reversed(ctx.op.model_decisions):
             if phase is None or decision.get("phase") == phase:
                 decision["status"] = status
@@ -1448,17 +1880,22 @@ class HealOrchestrator:
                     decision["detail"] = detail[:500]
                 return
 
-    def _write_abort_receipt_on_failure(self, ctx: HealContext, phase_name: str, failure_reason: str) -> None:
+    def _write_abort_receipt_on_failure(
+        self, ctx: HealContext, phase_name: str, failure_reason: str
+    ) -> None:
         """P0.1b: Write abort receipt when a phase fails."""
         try:
             from pathlib import Path
+
             nexus_root = Path(__file__).resolve().parents[3]
             output_dir = nexus_root / ".nexus/reports/local_heal" / _safe_id(ctx.op.instance_id)
             write_abort_receipt(
                 output_dir=output_dir,
                 task_id=getattr(ctx.op, "task_id", ctx.op.instance_id),
                 instance_id=ctx.op.instance_id,
-                failure_class="workspace_provisioning" if "repro" in phase_name.lower() else "phase_failure",
+                failure_class="workspace_provisioning"
+                if "repro" in phase_name.lower()
+                else "phase_failure",
                 failure_reason=failure_reason,
                 failure_subclass=_map_failure_subclass(failure_reason),
                 workspace_path=str(ctx.op.repo_dir),
@@ -1474,6 +1911,7 @@ class HealOrchestrator:
 
 def _safe_id(instance_id: str) -> str:
     import re
+
     return re.sub(r"[^A-Za-z0-9_.-]+", "__", instance_id).strip("_") or "unknown"
 
 
