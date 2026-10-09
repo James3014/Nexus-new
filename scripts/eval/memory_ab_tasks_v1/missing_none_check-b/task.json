@@ -1,0 +1,8 @@
+{
+  "id": "missing_none_check-b",
+  "bug_class": "missing_none_check",
+  "variant": "b",
+  "problem_statement": "find_user_email() raises TypeError when no user matches the id. It should return None in that case.",
+  "target_file": "directory.py",
+  "repro_file": "repro.py"
+}

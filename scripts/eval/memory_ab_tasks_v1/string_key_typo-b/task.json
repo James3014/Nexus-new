@@ -1,0 +1,8 @@
+{
+  "id": "string_key_typo-b",
+  "bug_class": "string_key_typo",
+  "variant": "b",
+  "problem_statement": "content_type() always falls back to text/plain. The header lookup uses the key 'content_type' but HTTP headers are stored as 'Content-Type'.",
+  "target_file": "headers.py",
+  "repro_file": "repro.py"
+}
