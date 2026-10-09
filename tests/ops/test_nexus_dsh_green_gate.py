@@ -276,3 +276,12 @@ def test_invalid_contract_fails_closed(repo: Path, tmp_path: Path, mutation: dic
     assert code == guard.EXIT_BLOCKED
     assert receipt["decision"] == "REVISE_GREEN"
     assert receipt["reason_codes"] == ["GREEN_CONTRACT_INVALID"]
+
+
+def test_missing_python_receipt_records_intended_argv(repo: Path, tmp_path: Path) -> None:
+    _fix(repo)
+    python_path = str(tmp_path / "no-such-python")
+    code, receipt = _gate(repo, tmp_path, python=python_path)
+    target_run = receipt.get("commands", {}).get("target_tests", [])
+    assert target_run[:6] == [python_path, "-m", "pytest", "-p", "no:cacheprovider", "-q"]
+    assert target_run[-1:] == receipt["contract"]["target_test_nodes"]
