@@ -368,6 +368,10 @@ def test_c_prompt_requires_shadow_candidate_execution() -> None:
     prompt, schema = _c_prompt(snapshot)
     assert "Implement" in prompt
     assert "isolated" in prompt
+    assert "SANDBOX BOUNDARY:" in prompt
+    assert prompt.index("SANDBOX BOUNDARY:") < prompt.index("TASK KEY:")
+    hinted, _ = _c_prompt(snapshot, localization_hint_path="nexus/x.py")
+    assert hinted.index("SANDBOX BOUNDARY:") < hinted.index("LOCALIZATION (")
     assert schema["properties"]["status"]["enum"] == ["CANDIDATE", "NO_CHANGE", "BLOCKED"]
 
 
