@@ -99,6 +99,22 @@ class Container:
     assert "Container.method" in symbols
 
 
+def test_dot_prefixed_source_path_is_preserved(tmp_path: Path):
+    repo, vault, manifest = _fixture(tmp_path)
+    github_workflow = repo / ".github" / "workflows" / "wiki-governance.yml"
+    github_workflow.parent.mkdir(parents=True)
+    github_workflow.write_text("name: wiki-governance\n", encoding="utf-8")
+    manifest["content_freshness"]["page_overrides"]["01_System/Authority.md"]["source_paths"] = [
+        ".github/workflows/wiki-governance.yml"
+    ]
+
+    report = audit.build_report(repo, vault, manifest, run_commands=False)
+
+    assert report["status"] == "PASS"
+    source_paths = report["pages"][0]["source_paths"]
+    assert any(row["path"] == ".github/workflows/wiki-governance.yml" and row["exists"] for row in source_paths)
+
+
 def test_missing_source_path_fails_closed(tmp_path: Path):
     repo, vault, manifest = _fixture(tmp_path)
     manifest["content_freshness"]["page_overrides"]["01_System/Authority.md"][

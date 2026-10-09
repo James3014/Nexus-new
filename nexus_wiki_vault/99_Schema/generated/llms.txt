@@ -21,6 +21,7 @@ Rules:
   path: 00_Home/CURRENT_STATE.md
   authority: operational
   classification: current
+  summary: > **Freshness notice (2026-10-08):** The source-bound snapshot below supersedes the 2026-07-13 architecture/status narrative for present-day navigation. The retained legacy sections are historical observations, not a live-system readiness verdict. Do not promote commit, CI or documentation evidence into runtime or acceptance truth.
 
 - canonical_key: system_overview
   title: System Overview
