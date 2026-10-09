@@ -192,3 +192,16 @@ class TestRegression:
         builder = EvidenceGraphBuilder()
         graph = builder.build("C_13453", "/tmp/fake_repo", target_files=[])
         assert graph.task_id == "C_13453"
+
+
+def test_evidence_graph_imports_extractor_from_runtime_support_namespace():
+    """Phase 2.5: evidence_graph consumes the canonical nexus_runtime.support path."""
+    from nexus_runtime.support.local_ast import (
+        RuntimeASTExtractor as CanonicalExtractor,
+    )
+
+    import nexus.services.local_heal.evidence_graph as evidence_graph_module
+
+    assert evidence_graph_module.RuntimeASTExtractor is CanonicalExtractor
+    source = Path(evidence_graph_module.__file__).read_text(encoding="utf-8")
+    assert "nexus_runtime_support_candidate" not in source

@@ -380,6 +380,19 @@ def _run_family_canary(
     # callers can isolate parallel runs with NEXUS_CLOSURE_SCRATCH.
     canary_root = CANARY_WORKSPACE_ROOT / task_id
     canary_root.mkdir(parents=True, exist_ok=True)
+    if positive and name == "meta_opt":
+        # The meta_opt mainchain entry persists its canary episode through the
+        # canonical outcome memory, which is idempotent per task/attempt/action.
+        # A prior run on the same machine (the exact-base impact gate runs base
+        # then head in one job) leaves the ledger behind, so the second save
+        # returns IDEMPOTENT_DUPLICATE and the canary reads as FAILED.  Repair
+        # only this generated /tmp canary artifact; never touch a user workspace.
+        for stale in (
+            canary_root / ".nexus" / "memory" / "outcome_history.jsonl",
+            canary_root / ".nexus" / "memory" / "dynamic_learning_policy.json",
+        ):
+            if stale.exists():
+                stale.unlink()
     canary_target = canary_root / "target.py"
     canary_target.write_text(
         (

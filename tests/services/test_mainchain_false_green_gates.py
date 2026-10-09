@@ -125,7 +125,7 @@ def _learning(c: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_p0_tampered_seal_blocks_local_and_online(monkeypatch) -> None:
-    import nexus_runtime_support_candidate.composition as ceb
+    import nexus_runtime.support.composition as ceb
 
     from nexus.services import runtime_compat
 
