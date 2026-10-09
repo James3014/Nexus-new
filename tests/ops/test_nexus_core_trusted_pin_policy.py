@@ -103,34 +103,54 @@ def test_malformed_or_missing_pin_fails_closed(bad_line: str) -> None:
 
 
 def test_committed_workflow_uses_single_canonical_pin_field_and_policy() -> None:
-    workflow = (
-        REPO_ROOT / ".github" / "workflows" / "nexus-core-issue-completion.yml"
-    ).read_bytes()
+    """Since nexus-core#116/#120 the gate is two jobs built from composite actions.
 
-    pin, _normalized = policy._pin_and_normalized(workflow)
+    The canonical pin is the 40-hex sha shared by every `uses: James3014/nexus-core/...@sha`
+    line and every `nexus-certify-ref` input; trusted inputs (config, workflow) are read from
+    the base ref by the tool itself, so no byte-compare "protect" step or PIN_ONLY policy
+    step exists in the workflow any more.
+    """
+    import re
 
-    assert len(pin) == 40
-    text = workflow.decode("utf-8")
-    assert "scripts/ci/nexus_core_trusted_pin_policy.py" in text
-    assert "steps.trusted-core.outputs.core_pin" in text
-    assert "merge-base --is-ancestor" in text
+    text = (REPO_ROOT / ".github" / "workflows" / "nexus-core-issue-completion.yml").read_text(
+        encoding="utf-8"
+    )
+
+    uses = re.findall(
+        r"uses:\s*James3014/nexus-core/\.github/actions/([A-Za-z0-9_-]+)@([0-9a-f]{40})", text
+    )
+    refs = re.findall(r'nexus-certify-ref:\s*"([0-9a-f]{40})"', text)
+    assert {name for name, _ in uses} == {"issue-gate", "receipt-verify"}
+    shas = {sha for _, sha in uses} | set(refs)
+    assert len(shas) == 1 and len(refs) == 2, (uses, refs)
+    assert "pull_request_target" in text
+    assert "head.repo.fork == false" in text
+    assert "id-token: write" in text
+    assert "name: Nexus Core issue completion" in text
+    assert "needs: run" in text
+    for forbidden in ("uv sync", "uv build", "pip install", "NEXUS_CORE_TOOL_PIN"):
+        assert forbidden not in text, forbidden
 
 
 def test_committed_workflow_force_binds_exact_pr_base_ref() -> None:
+    """Base pinning now happens inside the nexus-core issue-gate composite action.
+
+    The committed workflow must delegate to that action (which force-fetches the
+    exact PR base sha, nexus-core#116) and must not carry its own unforced fetch.
+    """
+    import re
+
     workflow = (REPO_ROOT / ".github" / "workflows" / "nexus-core-issue-completion.yml").read_text(
         encoding="utf-8"
     )
 
-    forced = (
-        "git fetch --no-tags origin "
-        '"+${{ github.event.pull_request.base.sha }}:'
-        'refs/remotes/origin/${{ github.event.pull_request.base.ref }}"'
+    assert re.search(
+        r"uses:\s*James3014/nexus-core/\.github/actions/issue-gate@[0-9a-f]{40}", workflow
     )
     unforced = (
         "git fetch --no-tags origin "
         '"${{ github.event.pull_request.base.sha }}:'
         'refs/remotes/origin/${{ github.event.pull_request.base.ref }}"'
     )
-
-    assert forced in workflow
     assert unforced not in workflow
+    assert "git fetch" not in workflow

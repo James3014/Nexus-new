@@ -2,11 +2,16 @@ version = 2
 base_ref = "origin/main"
 allowed_patterns = ["**"]
 deletion_policy = "FORBID"
-universe_generation = 1
+universe_generation = 2
+
+[isolation]
+mode = "container"
+image = "ghcr.io/astral-sh/uv:python3.11-bookworm@sha256:58683a39536f1f4ed2e1dd79cf155edccfb47731aba8964bd0312aac942126cf"
+network = "bridge"
 
 [[materials]]
 id = "canonical-learning"
-observe_command = ["bash", "-lc", "exec \"$NEXUS_CORE_MATERIAL_PYTHON\" scripts/ci/nexus_core_observe_dependency.py nexus-learning"]
+observe_command = ["bash", "-lc", "PY=\"$(bash scripts/ci/nexus_core_material_env.sh)\" && exec \"$PY\" scripts/ci/nexus_core_observe_dependency.py nexus-learning"]
 timeout_seconds = 300
 logical_subject_id = "dependency/nexus-learning"
 evidence_kind = "resolved-dependency"
@@ -16,7 +21,7 @@ expected_identity = "git-commit:d09f05b942f35236562ae26e7b718d111368b0b1"
 
 [[materials]]
 id = "canonical-runtime"
-observe_command = ["bash", "-lc", "exec \"$NEXUS_CORE_MATERIAL_PYTHON\" scripts/ci/nexus_core_observe_dependency.py nexus-runtime"]
+observe_command = ["bash", "-lc", "PY=\"$(bash scripts/ci/nexus_core_material_env.sh)\" && exec \"$PY\" scripts/ci/nexus_core_observe_dependency.py nexus-runtime"]
 timeout_seconds = 300
 logical_subject_id = "dependency/nexus-runtime"
 evidence_kind = "resolved-dependency"
@@ -26,7 +31,7 @@ expected_identity = "git-commit:0a39e52770230a74c5431c0f9cc73a63fb090d8b"
 
 [[verifiers]]
 id = "fast-l1"
-command = ["bash", "scripts/ci/nexus-core-verify.sh"]
+command = ["bash", "-c", "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0='*' && exec bash scripts/ci/nexus-core-verify.sh"]
 timeout_seconds = 3600
 logical_subject_id = "nexus/fast-l1"
 evidence_kind = "test-result"
