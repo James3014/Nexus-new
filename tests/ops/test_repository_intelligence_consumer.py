@@ -67,8 +67,8 @@ def _valid_terminal_bundle() -> dict:
     return bundle
 
 
-def test_action_commit_pinned_to_pr34():
-    assert PINNED_ACTION_COMMIT == "b1a0bd882e37a08a3a540947ae767a23d752bd67"
+def test_action_commit_pinned_to_rate_limit_resilient_main():
+    assert PINNED_ACTION_COMMIT == "88285acf570688befbc8e36eb73f46987171bd4e"
 
 
 def test_timeout_fixture_produces_valid_advisory_incomplete_evidence(tmp_path: Path):
