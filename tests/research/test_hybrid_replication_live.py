@@ -995,6 +995,61 @@ def test_natural_task_single_candidate_skips_jev_and_routes_c(
     outcome.validate()
 
 
+def _timeout_stack(tmp_path: Path, monkeypatch, strong_online):
+    repo_dir = tmp_path / "repo"
+    _init_test_git_repo(repo_dir)
+    rev = _commit_files(repo_dir, _NATURAL_PATHS)
+    snapshot = _natural_snapshot(
+        rev, title="Fix retry semantics", body="Implement the bounded retry fix.", issue=104
+    )
+    jev = {"status": "VALID", "choice": "ESCALATE", "usage": {}}
+    calls = _wire_stack(monkeypatch, ranked=_NATURAL_PATHS, jev=jev)
+    binding: dict[str, object] = {
+        "repo_roots": {"James3014/Nexus-new": str(repo_dir)},
+        "jev": _JEV_BINDING_PART,
+    }
+    if strong_online is not None:
+        binding["strong_online"] = strong_online
+    return snapshot, binding, calls
+
+
+def test_strong_online_timeout_defaults_to_300_seconds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot, binding, calls = _timeout_stack(tmp_path, monkeypatch, None)
+    outcome = run_frozen_stack(snapshot, binding=binding)
+    assert calls["strong"][0]["timeout"] == 300
+    assert calls["strong"][0]["poll_timeout"] == 360.0
+    assert outcome.raw_result.raw_response["strong_online_timeout_seconds"] == 300
+
+
+def test_strong_online_timeout_is_bound_from_generation_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot, binding, calls = _timeout_stack(
+        tmp_path,
+        monkeypatch,
+        {"provider": "agy", "effort": "medium", "candidate_timeout_seconds": 1800},
+    )
+    outcome = run_frozen_stack(snapshot, binding=binding)
+    assert calls["strong"][0]["timeout"] == 1800
+    assert calls["strong"][0]["poll_timeout"] == 1860.0
+    assert outcome.raw_result.raw_response["strong_online_timeout_seconds"] == 1800
+
+
+@pytest.mark.parametrize("bad", [10, "abc", 7201, True, None])
+def test_invalid_strong_online_timeout_fails_before_any_model_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad: object
+) -> None:
+    snapshot, binding, calls = _timeout_stack(
+        tmp_path, monkeypatch, {"candidate_timeout_seconds": bad}
+    )
+    with pytest.raises(ValueError, match="strong_online_candidate_timeout_invalid"):
+        run_frozen_stack(snapshot, binding=binding)
+    assert calls["jev"] == []
+    assert calls["strong"] == []
+
+
 def test_a_template_task_routes_a_without_model_calls_or_ranking(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

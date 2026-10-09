@@ -1888,6 +1888,22 @@ def _c_prompt(
     return prompt, schema
 
 
+def _strong_online_timeout_seconds(binding: Mapping[str, Any]) -> int:
+    section = binding.get("strong_online")
+    if not isinstance(section, Mapping) or "candidate_timeout_seconds" not in section:
+        return 300
+    raw = section["candidate_timeout_seconds"]
+    try:
+        if isinstance(raw, bool) or (isinstance(raw, float) and not raw.is_integer()):
+            raise ValueError
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise ValueError("strong_online_candidate_timeout_invalid") from None
+    if not 60 <= value <= 7200:
+        raise ValueError("strong_online_candidate_timeout_invalid")
+    return value
+
+
 def run_frozen_stack(
     snapshot: TaskSnapshot,
     *,
@@ -1925,6 +1941,7 @@ def run_frozen_stack(
             raw_result=raw,
         )
 
+    strong_timeout = _strong_online_timeout_seconds(binding)
     d0_started = time.perf_counter()
     ranked, evidence = _rank_candidates(snapshot=snapshot, repo=repo, binding=binding)
     d0_wall = time.perf_counter() - d0_started
@@ -2001,6 +2018,8 @@ def run_frozen_stack(
         binding=binding,
         default_branch=snapshot.default_branch,
         prospective_guard=prospective_guard,
+        timeout=strong_timeout,
+        poll_timeout=float(strong_timeout + 60),
     )
     strong_usage = strong.get("usage") or {}
     usage_records = (jev_raw.get("usage") or {}, strong_usage) if jev_raw else (strong_usage,)
@@ -2022,6 +2041,7 @@ def run_frozen_stack(
         "localization_hint_path": localization_hint_path,
         "accepted_by_frozen_policy": accepted,
         "d0_wall_seconds": d0_wall,
+        "strong_online_timeout_seconds": strong_timeout,
         "strong_online_raw_response": strong,
     }
     raw = RawRouteResult.create(
