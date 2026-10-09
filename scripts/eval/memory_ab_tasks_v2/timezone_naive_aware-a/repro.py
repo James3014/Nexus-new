@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from schedule import earliest_due
 
+
 def check(label, got_fn, want):
     try:
         got = got_fn()
@@ -37,4 +38,6 @@ check("past tasks skipped", lambda: earliest_due(past, now), "future")
 exact = [{"id": "exact", "due": "2026-03-01T07:00:00"}]
 check("equal-to-now is pending", lambda: earliest_due(exact, now), "exact")
 
-check("nothing pending", lambda: earliest_due([{"id": "x", "due": "2026-03-01T01:00:00Z"}], now), None)
+check(
+    "nothing pending", lambda: earliest_due([{"id": "x", "due": "2026-03-01T01:00:00Z"}], now), None
+)

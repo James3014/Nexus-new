@@ -1,5 +1,6 @@
 from expiry import drop_expired
 
+
 def check(label, got_fn, want):
     try:
         got = got_fn()

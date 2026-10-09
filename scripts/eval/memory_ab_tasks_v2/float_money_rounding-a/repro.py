@@ -1,5 +1,6 @@
 from checkout import checkout_total
 
+
 def check(label, got_fn, want):
     try:
         got = got_fn()

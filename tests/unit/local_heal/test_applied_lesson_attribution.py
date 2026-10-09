@@ -199,7 +199,7 @@ def test_adapter_turns_canonical_rows_into_lessons(tmp_path):
     lid = _write(tmp_path, "physical", "Empty list indexing guard")
     adapter = MemoryRetrievalAdapter(store=CanonicalLessonStore(project_root=tmp_path))
     lessons = adapter.retrieve(query_text="empty list indexing", limit=3)
-    assert [l.finding_id for l in lessons] == [lid]
+    assert [row.finding_id for row in lessons] == [lid]
     assert lessons[0].provenance
     assert lessons[0].pattern_type == "success"
 

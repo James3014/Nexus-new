@@ -1,5 +1,6 @@
 from flatten import flatten
 
+
 def check(label, got_fn, want):
     try:
         got = got_fn()

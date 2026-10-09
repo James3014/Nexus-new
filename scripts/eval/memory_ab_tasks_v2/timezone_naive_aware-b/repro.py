@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from audit_log import in_window
 
+
 def check(label, got_fn, want):
     try:
         got = got_fn()
@@ -21,8 +22,15 @@ records = [
     {"id": "d", "at": "2026-05-03T00:00:00Z"},
 ]
 check("mixed records ordered by instant", lambda: in_window(records, start, end), ["c", "a", "b"])
-check("offset-less only", lambda: in_window([{"id": "n", "at": "2026-05-02T06:00:00"}], start, end), ["n"])
-bounds = [{"id": "lo", "at": "2026-05-02T04:00:00Z"}, {"id": "hi", "at": "2026-05-02T06:30:00+00:00"}]
+check(
+    "offset-less only",
+    lambda: in_window([{"id": "n", "at": "2026-05-02T06:00:00"}], start, end),
+    ["n"],
+)
+bounds = [
+    {"id": "lo", "at": "2026-05-02T04:00:00Z"},
+    {"id": "hi", "at": "2026-05-02T06:30:00+00:00"},
+]
 check("bounds are inclusive", lambda: in_window(bounds, start, end), ["lo", "hi"])
 # Wall clock 09:00 looks after the window, but the instant 04:00Z is inside it.
 shifted = [{"id": "off", "at": "2026-05-02T09:00:00+05:00"}]

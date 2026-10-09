@@ -1,5 +1,6 @@
 from ledger_report import summarize, top_category
 
+
 def check(label, got_fn, want):
     try:
         got = got_fn()
@@ -14,7 +15,13 @@ DATA = [
     {"category": "food", "amount": 250},
 ]
 
-check("summarize generator", lambda: summarize(iter(DATA[:2])), {"count": 2, "total": 400, "mean": 200.0})
-check("summarize empty generator", lambda: summarize(iter([])), {"count": 0, "total": 0, "mean": 0.0})
+check(
+    "summarize generator",
+    lambda: summarize(iter(DATA[:2])),
+    {"count": 2, "total": 400, "mean": 200.0},
+)
+check(
+    "summarize empty generator", lambda: summarize(iter([])), {"count": 0, "total": 0, "mean": 0.0}
+)
 check("top_category generator", lambda: top_category(iter(DATA)), "food")
 check("top_category list", lambda: top_category(DATA), "food")

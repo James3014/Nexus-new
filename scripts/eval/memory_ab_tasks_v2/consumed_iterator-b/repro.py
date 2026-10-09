@@ -1,5 +1,6 @@
 from table_reader import read_table
 
+
 def check(label, got_fn, want):
     try:
         got = got_fn()

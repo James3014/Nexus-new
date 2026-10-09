@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from bill_split import split_evenly
 
+
 def check(label, got_fn, want):
     try:
         got = got_fn()
