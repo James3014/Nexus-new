@@ -1363,6 +1363,237 @@ def test_plan_without_write_scope_remains_allowed(tmp_path: Path) -> None:
     assert coordinator.claim.released is True
 
 
+def test_zero_successful_quota_queries_can_allow_provider_with_explicit_unknown_decision(
+    tmp_path: Path, monkeypatch
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+    events: list[dict[str, object]] = []
+    launches: list[bool] = []
+    monkeypatch.setattr(
+        dispatch,
+        "_apply_dynamic_availability",
+        lambda _model: (
+            {},
+            {
+                "family": "gemini",
+                "snapshot_fresh": False,
+                "preferred": [],
+                "reserve": [],
+                "fallback": [],
+                "blocked": [],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        dispatch, "_account_family_quota_state", lambda *_args, **_kwargs: ("unknown", None, False)
+    )
+    monkeypatch.setattr(
+        dispatch, "_dynamic_availability_state", lambda *_args: {"family": "gemini"}
+    )
+    monkeypatch.setattr(dispatch, "_publish_dynamic_availability", lambda *_args: None)
+
+    def failed_quota_probe(_account, *, on_phase_hook, **_kwargs):
+        on_phase_hook(quota_preflight_progress={"phase": "ACCOUNT_RESULT", "ok": False})
+        on_phase_hook(
+            quota_preflight_progress={
+                "phase": "FINISHED",
+                "ok_count": 0,
+                "ok_count_semantics": "successful_quota_queries",
+            }
+        )
+        return {}
+
+    monkeypatch.setattr(dispatch, "_refresh_quota_snapshot_for_account", failed_quota_probe)
+
+    def runner(**_kwargs):
+        launches.append(True)
+        return 0, "provider completed", "", False, 1
+
+    code = dispatch.dispatch_run(
+        prompt="read only",
+        cwd=str(tmp_path),
+        mode="plan",
+        model="gemini-test",
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+
+    assert code == 0
+    assert launches == [True]
+    decisions = [
+        event["quota_preflight_decision"] for event in events if "quota_preflight_decision" in event
+    ]
+    assert decisions == [
+        {
+            "account_alias_hash": coordinator.claim.account_alias_hash,
+            "model_family": "gemini",
+            "evidence_state": "UNKNOWN",
+            "quota_window_state": "unknown",
+            "probe_state": "FAILED",
+            "dispatch_decision": "ALLOW_UNKNOWN_QUOTA",
+        }
+    ]
+    projected = dispatch._quota_progress_projection(
+        {"phase": "FINISHED", "total": 1, "ok": 0},
+        account_name="private-account-id",
+        account_alias_hash="012345abcdef",
+    )
+    assert projected is not None
+    assert projected["ok_count"] == 0
+    assert projected["ok_count_semantics"] == "successful_quota_queries"
+
+
+def test_cached_failed_quota_probe_is_distinct_from_known_blocked_quota(
+    tmp_path: Path, monkeypatch
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+    snapshot = {"accounts": [{"account": coordinator.claim.internal_id, "ok": False}]}
+    events: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        dispatch,
+        "_apply_dynamic_availability",
+        lambda _model: (
+            snapshot,
+            {
+                "family": "gemini",
+                "snapshot_fresh": True,
+                "preferred": [],
+                "reserve": [],
+                "fallback": [coordinator.claim.internal_id],
+                "blocked": [],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        dispatch, "_account_family_quota_state", lambda *_args, **_kwargs: ("unknown", None, True)
+    )
+    code = dispatch.dispatch_run(
+        prompt="read only",
+        cwd=str(tmp_path),
+        mode="plan",
+        model="gemini-test",
+        coordinator=coordinator,
+        run_agy_fn=lambda **_kwargs: (0, "ok", "", False, 1),
+        operation_hook=events.append,
+    )
+    assert code == 0
+    decision = [
+        event["quota_preflight_decision"] for event in events if "quota_preflight_decision" in event
+    ][-1]
+    assert decision["probe_state"] == "CACHED_FAILED"
+    assert decision["evidence_state"] == "UNKNOWN"
+    assert decision["dispatch_decision"] == "ALLOW_UNKNOWN_QUOTA"
+
+
+def test_known_blocked_quota_decision_prevents_provider_launch(tmp_path: Path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+    coordinator.retire_failed_claim = lambda *_args, **_kwargs: None
+    events: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        dispatch,
+        "_apply_dynamic_availability",
+        lambda _model: (
+            {},
+            {
+                "family": "gemini",
+                "snapshot_fresh": True,
+                "preferred": [],
+                "reserve": [],
+                "fallback": ["account"],
+                "blocked": [],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        dispatch, "_account_family_quota_state", lambda *_args, **_kwargs: ("blocked", None, True)
+    )
+    monkeypatch.setattr(dispatch, "_max_account_failovers", lambda: 0)
+
+    def runner(**_kwargs):
+        raise AssertionError("known blocked quota must not launch provider")
+
+    code = dispatch.dispatch_run(
+        prompt="read only",
+        cwd=str(tmp_path),
+        mode="plan",
+        model="gemini-test",
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+
+    assert code == 75
+    decisions = [
+        event["quota_preflight_decision"] for event in events if "quota_preflight_decision" in event
+    ]
+    assert decisions[-1]["evidence_state"] == "KNOWN_BLOCKED"
+    assert decisions[-1]["dispatch_decision"] == "BLOCK_KNOWN_QUOTA"
+
+
+def test_quota_preflight_decision_survives_terminal_journal_readback(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="gemini-test",
+        effort="medium",
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "read only")
+    decision = {
+        "account_alias_hash": "012345abcdef",
+        "model_family": "gemini",
+        "evidence_state": "UNKNOWN",
+        "quota_window_state": "unknown",
+        "probe_state": "FAILED",
+        "dispatch_decision": "ALLOW_UNKNOWN_QUOTA",
+    }
+
+    def fake_dispatch_run(**kwargs):
+        kwargs["operation_hook"]({"quota_preflight_decision": decision})
+        return 0
+
+    monkeypatch.setattr(dispatch, "dispatch_run", fake_dispatch_run)
+    assert (
+        dispatch._run_background_operation(
+            operation_id=operation_id,
+            prompt_file=str(prompt_path),
+            cwd=str(tmp_path),
+            mode="plan",
+            model="gemini-test",
+            effort="medium",
+            timeout=30,
+            max_calls=1,
+            pool_wait_timeout=1.0,
+            allow=[],
+            deny=[],
+            temp_command_permissions=False,
+            operation_root=root,
+            heartbeat_interval=60,
+        )
+        == 0
+    )
+    assert (
+        dispatch.AgyOperationJournal(root).read(operation_id)["quota_preflight_decision"]
+        == decision
+    )
+
+
 def test_accept_edits_projects_bounded_write_scope_and_restores(
     tmp_path: Path,
 ) -> None:
@@ -2258,6 +2489,11 @@ def test_fallback_clone_inside_source_is_rejected(tmp_path: Path) -> None:
 def test_unsupported_effort_for_claude_opus_fails_before_claim(tmp_path: Path) -> None:
     coordinator = _WriteScopeCoordinator(tmp_path / "home")
     events: list[dict[str, object]] = []
+    provider_calls: list[bool] = []
+
+    def runner(**_kwargs):
+        provider_calls.append(True)
+        return 0, "unexpected", "", False, 1
 
     code = dispatch.dispatch_run(
         prompt="run model",
@@ -2266,11 +2502,13 @@ def test_unsupported_effort_for_claude_opus_fails_before_claim(tmp_path: Path) -
         model="claude-opus-4-6",
         effort="low",
         coordinator=coordinator,
+        run_agy_fn=runner,
         operation_hook=events.append,
     )
 
     assert code == 64
     assert coordinator.acquire_count == 0
+    assert provider_calls == []
     assert any(
         e.get("failure_kind")
         == "DISPATCH_MODEL_CONTRACT_REJECTED:UNSUPPORTED_EFFORT_FOR_MODEL:claude-opus-4-6:low"
@@ -2279,13 +2517,70 @@ def test_unsupported_effort_for_claude_opus_fails_before_claim(tmp_path: Path) -
     )
 
 
+def test_unrecognized_model_family_fails_before_claim_or_provider(tmp_path: Path) -> None:
+    coordinator = _WriteScopeCoordinator(tmp_path / "home")
+    events: list[dict[str, object]] = []
+    provider_calls: list[bool] = []
+
+    def runner(**_kwargs):
+        provider_calls.append(True)
+        raise AssertionError("an unrecognized model family must be rejected before provider start")
+
+    model = "legacy-engine-7"
+    code = dispatch.dispatch_run(
+        prompt="run model",
+        cwd=str(tmp_path),
+        mode="plan",
+        model=model,
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+
+    rejected = [event for event in events if event.get("phase") == "MODEL_REJECTED"]
+    assert code == 64
+    assert coordinator.acquire_count == 0
+    assert provider_calls == []
+    assert rejected == [
+        {
+            "phase": "MODEL_REJECTED",
+            "attempts": 0,
+            "rotations": 0,
+            "failure_kind": f"DISPATCH_MODEL_REJECTED:UNSUPPORTED_MODEL_FAMILY:{model}",
+            "provider_effect": False,
+        }
+    ]
+    assert not any(
+        event.get("provider_started_at")
+        or event.get("provider_pid")
+        or event.get("provider_effect") is True
+        for event in events
+    )
+
+
 def test_provider_exit_invalid_model_selection_classified_as_model_contract_rejected(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     home = tmp_path / "home"
     home.mkdir()
     coordinator = _WriteScopeCoordinator(home)
     events: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        dispatch,
+        "_apply_dynamic_availability",
+        lambda _model: (
+            {},
+            {
+                "family": "claude_gpt",
+                "preferred": [],
+                "reserve": [],
+                "fallback": [],
+                "blocked": [],
+                "snapshot_fresh": False,
+            },
+        ),
+    )
+    monkeypatch.setattr(dispatch, "_refresh_quota_snapshot_for_account", lambda *_a, **_kw: {})
 
     code = dispatch.dispatch_run(
         prompt="run model",
@@ -2307,6 +2602,11 @@ def test_provider_exit_invalid_model_selection_classified_as_model_contract_reje
     assert any(e.get("failure_kind") == "DISPATCH_MODEL_CONTRACT_REJECTED" for e in events)
     assert coordinator.acquire_count == 1
     assert coordinator.claim.released is True
+    classified = [event for event in events if event.get("phase") == "CLASSIFYING_FAILURE"]
+    assert len(classified) == 1
+    assert classified[0]["provider_effect"] is False
+    assert classified[0]["rotations"] == 0
+    assert not any(event.get("phase") == "ACCOUNT_ROTATED" for event in events)
 
 
 def test_headless_tool_permission_denial_classified_as_failure(tmp_path: Path) -> None:
