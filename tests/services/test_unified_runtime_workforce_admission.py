@@ -663,7 +663,7 @@ def test_local_authority_failures_are_zero_call_and_identical_across_receipt_sur
     monkeypatch: pytest.MonkeyPatch,
     tamper: str,
 ) -> None:
-    import nexus_runtime_support_candidate.composition as unified_runtime_module
+    import nexus_runtime.support.composition as unified_runtime_module
 
     original = unified_runtime_module.evaluate_runtime_workforce_admission
 
@@ -1462,7 +1462,7 @@ def test_missing_invoker_provider_identity_is_zero_call() -> None:
 
 
 def test_admission_hash_mismatch_is_zero_call(monkeypatch: pytest.MonkeyPatch) -> None:
-    import nexus_runtime_support_candidate.composition as unified_runtime_module
+    import nexus_runtime.support.composition as unified_runtime_module
 
     original = unified_runtime_module.evaluate_runtime_workforce_admission
 
@@ -1510,7 +1510,7 @@ def test_admitted_online_authority_is_exact_and_receipt_bound() -> None:
 def test_evidence_seal_failure_preserves_admitted_online_authority_without_invoking(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import nexus_runtime_support_candidate.composition as evidence_bundle_module
+    import nexus_runtime.support.composition as evidence_bundle_module
 
     monkeypatch.setattr(
         evidence_bundle_module,
