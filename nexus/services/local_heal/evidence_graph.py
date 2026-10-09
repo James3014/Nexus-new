@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from nexus_runtime_support_candidate.local_ast import RuntimeASTExtractor
+from nexus_runtime.support.local_ast import RuntimeASTExtractor
 
 
 @dataclass
