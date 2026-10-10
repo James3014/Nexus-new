@@ -30,6 +30,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -2876,6 +2877,588 @@ def read_canonical_agy_operations(log_path: Path, session_id: str | None) -> dic
     return _agy_operation_summary(session_id, coverage, entries)
 
 
+MODEL_ROUTE_SCHEMA = "nexus.dsh_model_route.v1"
+MODEL_ROUTE_CLAIM_CEILING = "PHASE_ROUTE_OBSERVATION_NO_COMPLETION_AUTHORITY"
+ROUTE_MODES = ("off", "auto")
+# Ordered cheapest first; top is never assigned.
+ROUTE_TIERS = ("light", "small", "mid")
+ROUTE_EFFORTS = ("low", "medium", "high")
+ROUTE_CONFIDENCE_FLOOR = 0.5
+ROUTE_PROVIDER = "nexus-agy-pool"
+ROUTE_CLASSIFIER_MODEL = "gemini-3.8-flash-low"
+ROUTE_CLASSIFIER_EFFORT = "low"
+ROUTE_CLASSIFIER_DENIES = ("command(*)", "read_file(*)", "write_file(*)")
+ROUTE_CLASSIFIER_TIMEOUT_SECONDS = 45.0
+ROUTE_CLASSIFIER_MAX_TIMEOUT_SECONDS = 120.0
+ROUTE_POLL_INTERVAL_SECONDS = 0.25
+ROUTE_START_TIMEOUT_SECONDS = 30
+ROUTE_ANSWER_MAX_CHARS = 4096
+ROUTE_REASON_MAX_CHARS = 500
+ROUTE_CONTRACT_MAX_CHARS = 24000
+ROUTE_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+ROUTE_GEMINI_COST_RE = re.compile(r"^gemini-[0-9][0-9.]*-(flash|pro)(?:-(low|medium|high))?$")
+ROUTE_FAMILY_COST = {"flash": 0, "pro": 1}
+ROUTE_TERMINAL_FAILURES = frozenset({"FAILED", "CANCELLED", "OUTCOME_UNKNOWN"})
+# None means "the session default" (the --patch model).
+DEFAULT_ROUTE_TABLE: dict[str, dict[str, str] | None] = {
+    "light": {"model": "gemini-3.8-flash", "effort": "low"},
+    "small": {"model": "gemini-3.8-flash", "effort": "medium"},
+    "mid": None,
+}
+ROUTE_DEFAULT_ID_RE = re.compile(r"^(\s*)(?:-\s+)?id:\s*['\"]?agent-default-model['\"]?\s*$")
+ROUTE_LIST_ITEM_RE = re.compile(r"^(\s*)-\s")
+ROUTE_SCALAR_RE = re.compile(
+    r"^\s*(provider|model|reasoningEffort):\s*['\"]?([^'\"#\s]*)['\"]?\s*$"
+)
+# #1685 deterministic floors, applied after classification (they never pick a model).
+ROUTE_FLOOR_TIER = "mid"
+ROUTE_LARGE_FILE_LINES = 1500
+ROUTE_FLOOR_FEEDBACK_CODES = ("RED_ORACLE_DEFECT", "UNINTENDED_FAILURE")
+ROUTE_FEEDBACK_CODE_RE = re.compile(
+    r"(?<![A-Z0-9_])(" + "|".join(ROUTE_FLOOR_FEEDBACK_CODES) + r")(?![A-Z0-9_])"
+)
+ROUTE_PATH_TOKEN_RE = re.compile(r"(?<![\w./-])([\w.-]+(?:/[\w.-]+)*)")
+ROUTE_MAX_PATH_TOKENS = 256
+ROUTE_MAX_NAMED_FILES = 32
+
+
+def load_route_table(path: str | None) -> dict[str, dict[str, str] | None]:
+    """The tier table: the Issue default, overridden per tier by a JSON file."""
+    table = {tier: (dict(entry) if entry else None) for tier, entry in DEFAULT_ROUTE_TABLE.items()}
+    if path is None:
+        return table
+    try:
+        raw = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise DshWorkflowError("ROUTE_TABLE_INVALID", "route table cannot be read as JSON") from exc
+    if not isinstance(raw, dict):
+        raise DshWorkflowError("ROUTE_TABLE_INVALID", "route table must be a JSON object")
+    for tier, entry in raw.items():
+        if tier not in ROUTE_TIERS:
+            raise DshWorkflowError(
+                "ROUTE_TABLE_INVALID", f"route table tier {tier!r} is not allowed"
+            )
+        if entry is None:
+            table[tier] = None
+            continue
+        if (
+            not isinstance(entry, dict)
+            or set(entry) != {"model", "effort"}
+            or not isinstance(entry["model"], str)
+            or ROUTE_MODEL_RE.fullmatch(entry["model"]) is None
+            or entry["effort"] not in ROUTE_EFFORTS
+        ):
+            raise DshWorkflowError(
+                "ROUTE_TABLE_INVALID", f"route table tier {tier!r} needs exactly a model and effort"
+            )
+        table[tier] = {"model": entry["model"], "effort": entry["effort"]}
+    return table
+
+
+def _model_cost(model: str | None, effort: str | None) -> tuple[int, int] | None:
+    """A comparable cost rank, or None when the order is not known."""
+    match = ROUTE_GEMINI_COST_RE.fullmatch(model or "")
+    if match is None:
+        return None
+    suffix = match.group(2)
+    if suffix and effort and suffix != effort:
+        return None
+    level = effort or suffix
+    if level not in ROUTE_EFFORTS:
+        return None
+    return ROUTE_FAMILY_COST[match.group(1)], ROUTE_EFFORTS.index(level)
+
+
+def is_strictly_cheaper(
+    model: str | None, effort: str | None, default_model: str | None, default_effort: str | None
+) -> bool:
+    candidate = _model_cost(model, effort)
+    default = _model_cost(default_model, default_effort)
+    return candidate is not None and default is not None and candidate < default
+
+
+def default_model_from_patches(patches: Sequence[str]) -> dict[str, str | None]:
+    """The session default (agent-default-model) the caller's patches select; last patch wins."""
+    found: dict[str, str | None] = {"provider": None, "model": None, "effort": None}
+    for raw in patches:
+        try:
+            lines = Path(raw).expanduser().read_text(encoding="utf-8").splitlines()
+        except (OSError, ValueError):
+            return {"provider": None, "model": None, "effort": None}
+        for index, line in enumerate(lines):
+            head = ROUTE_DEFAULT_ID_RE.match(line)
+            if head is None:
+                continue
+            values: dict[str, str] = {}
+            for follow in lines[index + 1 :]:
+                item = ROUTE_LIST_ITEM_RE.match(follow)
+                if item is not None and len(item.group(1)) <= len(head.group(1)):
+                    break
+                scalar = ROUTE_SCALAR_RE.match(follow)
+                if scalar is not None:
+                    values[scalar.group(1)] = scalar.group(2)
+            if "model" in values:
+                model = values["model"]
+                found = {
+                    "provider": values.get("provider"),
+                    "model": model if ROUTE_MODEL_RE.fullmatch(model) else None,
+                    "effort": values.get("reasoningEffort"),
+                }
+    return found
+
+
+def _count_lines(path: Path) -> int:
+    count, last = 0, b"\n"
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            count += chunk.count(b"\n")
+            last = chunk[-1:]
+    return count + (0 if last == b"\n" else 1)
+
+
+def named_repository_files(repo_root: Path, contract_text: str) -> list[dict[str, Any]]:
+    """Regular repository files the contract names, with line counts, in first-mention order.
+
+    Only relative paths that resolve inside the repository count; absolute, parent-relative,
+    .git, symlink-escaping and missing paths are ignored.
+    """
+    repo = repo_root.resolve()
+    named: dict[str, int] = {}
+    tokens = 0
+    for match in ROUTE_PATH_TOKEN_RE.finditer(contract_text):
+        token = match.group(1).rstrip(".")
+        parts = token.split("/")
+        if (
+            token in named
+            or not ("/" in token or "." in token)
+            or any(part in ("", ".", "..", ".git") for part in parts)
+        ):
+            continue
+        tokens += 1
+        if tokens > ROUTE_MAX_PATH_TOKENS:
+            break
+        candidate = repo / token
+        try:
+            resolved = candidate.resolve()
+            resolved.relative_to(repo)
+            if not resolved.is_file():
+                continue
+            named[token] = _count_lines(resolved)
+        except (OSError, ValueError):
+            continue
+        if len(named) >= ROUTE_MAX_NAMED_FILES:
+            break
+    return [{"path": path, "lines": lines} for path, lines in named.items()]
+
+
+def route_floor(
+    phase: str, contract_text: str, named_files: Sequence[dict[str, Any]]
+) -> tuple[str | None, str | None]:
+    """The deterministic minimum tier for this phase task and why (#1685)."""
+    reasons: list[str] = []
+    if phase == "red":
+        # A wrong RED oracle is the costliest failure.
+        reasons.append("RED_PHASE")
+    reasons.extend(
+        f"LARGE_FILE:{item['path']}={item['lines']}"
+        for item in named_files
+        if item["lines"] > ROUTE_LARGE_FILE_LINES
+    )
+    if phase == "repair":
+        found = set(ROUTE_FEEDBACK_CODE_RE.findall(contract_text))
+        reasons.extend(
+            f"REPAIR_GATE_FEEDBACK:{code}" for code in ROUTE_FLOOR_FEEDBACK_CODES if code in found
+        )
+    if not reasons:
+        return None, None
+    return ROUTE_FLOOR_TIER, ";".join(reasons)
+
+
+def build_classifier_prompt(
+    phase: str, contract_text: str, named_files: Sequence[dict[str, Any]]
+) -> str:
+    if named_files:
+        facts = [
+            "Named repository files (line counts):",
+            *(f"- {item['path']}: {item['lines']} lines" for item in named_files),
+            f"Total: {sum(item['lines'] for item in named_files)} lines",
+        ]
+    else:
+        facts = ["Named repository files: (none found)"]
+    contract = contract_text
+    if len(contract) > ROUTE_CONTRACT_MAX_CHARS:
+        contract = contract[:ROUTE_CONTRACT_MAX_CHARS] + "\n[contract truncated for routing]"
+    return "\n".join([
+        "NEXUS DSH PHASE ROUTE CLASSIFIER",
+        "Classify the bounded phase task below into one cost tier. Do not use tools.",
+        "Do not solve the task. Judge only the phase name, the repository facts and the contract.",
+        "Judge the reading load (how much existing code must be read and understood),"
+        " not only the size of the edit.",
+        "Tiers:",
+        "- light: mechanical, checked at a glance",
+        "- small: needs reading, well specified",
+        "- mid: implementation with tests, or diagnosis",
+        "Answer with exactly one JSON object and nothing else:",
+        '{"tier":"light|small|mid","confidence":0..1,"reason":"..."}',
+        f"Phase: {phase}",
+        *facts,
+        "",
+        "PHASE CONTRACT",
+        "",
+        contract,
+    ])
+
+
+def parse_classifier_answer(text: str | None) -> tuple[dict[str, Any] | None, str | None]:
+    """Exactly one {tier, confidence, reason} object; anything else is a fallback code."""
+    malformed = (None, "CLASSIFIER_ANSWER_MALFORMED")
+    if not isinstance(text, str) or len(text) > ROUTE_ANSWER_MAX_CHARS:
+        return malformed
+    body = text.strip()
+    fenced = re.fullmatch(r"```(?:json)?\s*\n(.*)\n```", body, flags=re.DOTALL)
+    if fenced is not None:
+        body = fenced.group(1).strip()
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        return malformed
+    if not isinstance(payload, dict) or set(payload) != {"tier", "confidence", "reason"}:
+        return malformed
+    confidence = payload["confidence"]
+    if (
+        isinstance(confidence, bool)
+        or not isinstance(confidence, (int, float))
+        or not 0 <= confidence <= 1
+        or not isinstance(payload["reason"], str)
+        or not isinstance(payload["tier"], str)
+    ):
+        return malformed
+    if payload["tier"] not in ROUTE_TIERS:
+        return None, "TIER_UNKNOWN"
+    return {
+        "tier": payload["tier"],
+        "confidence": float(confidence),
+        "reason": payload["reason"][:ROUTE_REASON_MAX_CHARS],
+    }, None
+
+
+def decide_route(
+    *,
+    answer_text: str | None,
+    classifier_error: str | None,
+    classifier_operation_id: str | None,
+    table: dict[str, dict[str, str] | None],
+    default_model: str | None,
+    default_effort: str | None,
+    floor_tier: str | None,
+    floor_reason: str | None,
+) -> dict[str, Any]:
+    """Pure, replayable mapping from one classifier answer to a phase route.
+
+    Every failure keeps the session default (fail open, with the reason recorded); a floor
+    only raises the tier, and a table model is used only when it is provably cheaper than
+    that default.
+    """
+    inputs = {
+        "answer_text": answer_text,
+        "classifier_error": classifier_error,
+        "classifier_operation_id": classifier_operation_id,
+        "table": table,
+        "default_model": default_model,
+        "default_effort": default_effort,
+        "floor_tier": floor_tier,
+        "floor_reason": floor_reason,
+    }
+    route: dict[str, Any] = {
+        "mode": "auto",
+        "tier": None,
+        "classified_tier": None,
+        "confidence": None,
+        "reason": None,
+        "model": default_model,
+        "effort": default_effort,
+        "classifier_operation_id": classifier_operation_id,
+        "fallback_reason": None,
+        "floor_reason": floor_reason,
+        "applied": False,
+        "decision_inputs_sha256": _sha256_bytes(_canonical_json(inputs).encode("utf-8")),
+    }
+    if classifier_error is not None:
+        route["fallback_reason"] = classifier_error
+        return route
+    answer, code = parse_classifier_answer(answer_text)
+    if answer is None:
+        route["fallback_reason"] = code
+        return route
+    route.update(
+        classified_tier=answer["tier"], confidence=answer["confidence"], reason=answer["reason"]
+    )
+    if answer["confidence"] < ROUTE_CONFIDENCE_FLOOR:
+        route["fallback_reason"] = "LOW_CONFIDENCE"
+        return route
+    tier = answer["tier"]
+    if floor_tier is not None and ROUTE_TIERS.index(floor_tier) > ROUTE_TIERS.index(tier):
+        tier = floor_tier
+    route["tier"] = tier
+    entry = table.get(tier)
+    if entry is None:
+        return route
+    if not is_strictly_cheaper(entry["model"], entry["effort"], default_model, default_effort):
+        route["fallback_reason"] = "NOT_CHEAPER_THAN_DEFAULT"
+        return route
+    route.update(model=entry["model"], effort=entry["effort"], applied=True)
+    return route
+
+
+def render_route_patch(route: dict[str, Any]) -> str:
+    """The derived agent-default-model patch; route facts are JSON-escaped comments only."""
+    facts = [
+        ("tier", route["tier"]),
+        ("classified_tier", route["classified_tier"]),
+        ("confidence", route["confidence"]),
+        ("reason", json.dumps(route["reason"])),
+        ("floor_reason", route["floor_reason"] or "none"),
+        ("classifier_operation_id", route["classifier_operation_id"]),
+        ("decision_inputs_sha256", route["decision_inputs_sha256"]),
+    ]
+    header = "".join(f"# route {key}: {value}\n" for key, value in facts)
+    return (
+        "# Derived by nexus-dsh-workflow --model-route auto for one phase only.\n"
+        + header
+        + "- id: agent-default-model\n"
+        "  config:\n"
+        f"    provider: {ROUTE_PROVIDER}\n"
+        f"    model: {route['model']}\n"
+        f"    reasoningEffort: {route['effort']}\n"
+    )
+
+
+def _classifier_scratch() -> Path:
+    scratch = Path(tempfile.mkdtemp(prefix="nexus-dsh-route-classifier-"))
+    (scratch / ".dsh-intelligence-scratch").write_text(
+        "DSH_AGY_INTELLIGENCE_NO_TARGET_EFFECTS\n", encoding="utf-8"
+    )
+    for cmd in (
+        ["init", "-q"],
+        ["add", ".dsh-intelligence-scratch"],
+        ["-c", "user.name=nexus", "-c", "user.email=nexus@localhost", "commit", "-q", "-m", "s"],
+    ):
+        subprocess.run(["git", *cmd], cwd=scratch, capture_output=True, check=False)
+    return scratch
+
+
+def run_route_classifier(prompt: str, timeout: float) -> tuple[str | None, str | None, str | None]:
+    """One plan-mode, no-tool classifier call through canonical nexus-agy-dispatch.
+
+    Returns (answer_text, operation_id, error_code). Never raises: every failure is a
+    fallback code so the phase keeps its session default.
+    """
+    scratch = _classifier_scratch()
+    preserve = False
+    fd, prompt_path = tempfile.mkstemp(prefix="nexus-dsh-route-", suffix=".txt")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(prompt)
+        argv = [
+            _agy_dispatch_bin(),
+            "--background",
+            "--cwd",
+            str(scratch),
+            "--mode",
+            "plan",
+            "--model",
+            ROUTE_CLASSIFIER_MODEL,
+            "--effort",
+            ROUTE_CLASSIFIER_EFFORT,
+        ]
+        for rule in ROUTE_CLASSIFIER_DENIES:
+            argv.extend(["--deny", rule])
+        argv.extend([
+            "--timeout",
+            str(int(timeout)),
+            "--max-calls",
+            "1",
+            "--prompt-file",
+            prompt_path,
+        ])
+        deadline = time.monotonic() + timeout
+        try:
+            started = subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=ROUTE_START_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None, None, "CLASSIFIER_DISPATCH_FAILED"
+        try:
+            op_id = json.loads(started.stdout).get("operation_id")
+        except (ValueError, AttributeError):
+            op_id = None
+        if (
+            started.returncode != 0
+            or not isinstance(op_id, str)
+            or AGY_OPERATION_ID.fullmatch(op_id) is None
+        ):
+            return None, None, "CLASSIFIER_DISPATCH_FAILED"
+        while True:
+            status, _ = _read_operation_status(op_id)
+            if status is not None:
+                if status.get("operation_id") != op_id:
+                    return None, op_id, "CLASSIFIER_STATUS_MISMATCH"
+                state = status.get("status")
+                if state == "COMPLETED":
+                    try:
+                        with open(str(status.get("stdout_path")), encoding="utf-8") as out:
+                            return out.read(ROUTE_ANSWER_MAX_CHARS + 1), op_id, None
+                    except (OSError, ValueError):
+                        return None, op_id, "CLASSIFIER_OUTPUT_UNREADABLE"
+                if state in ROUTE_TERMINAL_FAILURES:
+                    preserve = state == "OUTCOME_UNKNOWN"
+                    return None, op_id, "CLASSIFIER_OPERATION_FAILED"
+            if time.monotonic() >= deadline:
+                # The operation may still finish; keep its scratch for canonical reconcile.
+                preserve = True
+                code = "CLASSIFIER_STATUS_UNAVAILABLE" if status is None else "CLASSIFIER_TIMEOUT"
+                return None, op_id, code
+            time.sleep(ROUTE_POLL_INTERVAL_SECONDS)
+    finally:
+        Path(prompt_path).unlink(missing_ok=True)
+        if not preserve:
+            shutil.rmtree(scratch, ignore_errors=True)
+
+
+def _route_off(default: dict[str, str | None]) -> dict[str, Any]:
+    return {
+        "mode": "off",
+        "tier": None,
+        "classified_tier": None,
+        "confidence": None,
+        "reason": None,
+        "model": default["model"],
+        "effort": default["effort"],
+        "classifier_operation_id": None,
+        "fallback_reason": None,
+        "floor_reason": None,
+        "derived_patch_path": None,
+        "receipt_path": None,
+        "observation": None,
+    }
+
+
+def build_router(args: argparse.Namespace) -> dict[str, Any] | None:
+    """Validated --model-route inputs, or None when routing is off (argv stays unchanged)."""
+    if args.route_table is not None and args.model_route != "auto":
+        raise DshWorkflowError(
+            "ROUTE_ARGUMENT_INVALID", "--route-table requires --model-route auto"
+        )
+    if not 0 < args.route_classifier_timeout <= ROUTE_CLASSIFIER_MAX_TIMEOUT_SECONDS:
+        raise DshWorkflowError(
+            "ROUTE_ARGUMENT_INVALID",
+            f"--route-classifier-timeout must be in (0, {ROUTE_CLASSIFIER_MAX_TIMEOUT_SECONDS:g}]",
+        )
+    if args.model_route != "auto":
+        return None
+    table = load_route_table(args.route_table)
+    return {
+        "table": table,
+        "table_sha256": (
+            _sha256_file(Path(args.route_table).expanduser())
+            if args.route_table
+            else _sha256_bytes(_canonical_json(table).encode("utf-8"))
+        ),
+        "default": default_model_from_patches(args.patch),
+        "timeout": args.route_classifier_timeout,
+    }
+
+
+def route_phase(
+    router: dict[str, Any],
+    *,
+    root: Path,
+    stem: str,
+    repo_root: Path,
+    repository: str,
+    issue_number: int,
+    phase: str,
+    parent_session_id: str | None,
+    contract_text: str,
+) -> dict[str, Any]:
+    """Classify one phase task, apply #1685 floors, derive its patch, persist the receipt."""
+    default = router["default"]
+    named_files = named_repository_files(repo_root, contract_text)
+    floor_tier, floor_reason = route_floor(phase, contract_text, named_files)
+    prompt = build_classifier_prompt(phase, contract_text, named_files)
+    answer: str | None = None
+    op_id: str | None = None
+    error: str | None = None
+    started = time.monotonic()
+    if default["model"] is None or _model_cost(default["model"], default["effort"]) is None:
+        error = "DEFAULT_MODEL_UNKNOWN"
+    elif default["provider"] != ROUTE_PROVIDER:
+        error = "DEFAULT_PROVIDER_UNSUPPORTED"
+    else:
+        answer, op_id, error = run_route_classifier(prompt, router["timeout"])
+    wall_ms = int((time.monotonic() - started) * 1000)
+    route = decide_route(
+        answer_text=answer,
+        classifier_error=error,
+        classifier_operation_id=op_id,
+        table=router["table"],
+        default_model=default["model"],
+        default_effort=default["effort"],
+        floor_tier=floor_tier,
+        floor_reason=floor_reason,
+    )
+    route_dir = root / "routes" / str(issue_number)
+    derived_path: Path | None = None
+    derived_sha: str | None = None
+    if route["applied"]:
+        derived_path = route_dir / f"{stem}.patch.yml"
+        derived_path.parent.mkdir(parents=True, exist_ok=True)
+        derived_path.write_text(render_route_patch(route), encoding="utf-8")
+        derived_sha = _sha256_file(derived_path)
+    route.update(
+        derived_patch_path=str(derived_path) if derived_path else None,
+        derived_patch_sha256=derived_sha,
+        route_table_sha256=router["table_sha256"],
+        observation={
+            "classifier_wall_ms": wall_ms,
+            "classifier_prompt_chars": len(prompt),
+            "classifier_prompt_chars_unit": "characters",
+            "tokens": None,
+            "cost": None,
+            "cost_evidence": "NOT_OBSERVED",
+        },
+    )
+    body = {
+        "schema": MODEL_ROUTE_SCHEMA,
+        "claim_ceiling": MODEL_ROUTE_CLAIM_CEILING,
+        "generated_at": _utc_now(),
+        "repository": repository,
+        "issue_number": issue_number,
+        "phase": phase,
+        "parent_session_id": parent_session_id,
+        "phase_contract_sha256": _sha256_bytes(contract_text.encode("utf-8")),
+        "named_files": named_files,
+        "classifier_model": ROUTE_CLASSIFIER_MODEL,
+        "classifier_prompt_sha256": _sha256_bytes(prompt.encode("utf-8")),
+        "classifier_answer_raw": answer,
+        "route_table": router["table"],
+        "default_provider": default["provider"],
+        "default_model": default["model"],
+        "default_effort": default["effort"],
+        **route,
+    }
+    receipt = dict(body)
+    receipt["receipt_hash"] = _sha256_bytes(_canonical_json(body).encode("utf-8"))
+    receipt_path = route_dir / f"{stem}.route.json"
+    _atomic_write_json(receipt_path, receipt)
+    route.update(receipt_path=str(receipt_path), receipt_hash=receipt["receipt_hash"])
+    return route
+
+
 PHASE_CHAIN_SCHEMA = "nexus.dsh_phase_chain.v1"
 PHASE_CHAIN_CLAIM_CEILING = "PHASE_CHAIN_RECORD_NO_COMPLETION_AUTHORITY"
 AUTO_REPAIR_MAX = 3
@@ -2894,6 +3477,7 @@ def _run_phase_turn(
     parent: str | None,
     green_gate_command: str | None,
     red_gate_command: str | None = None,
+    router: dict[str, Any] | None = None,
 ) -> tuple[int, dict[str, Any]]:
     """Run one preflight-guarded DSH turn; returns its exit code and result payload."""
     parent_has_goal = False
@@ -2939,17 +3523,38 @@ def _run_phase_turn(
         green_gate_command=green_gate_command,
         red_gate_command=red_gate_command,
     )
+    stamp = _utc_now().replace(":", "").replace("-", "").replace(".", "")
+    stem = f"{stamp}-{os.getpid()}-{phase}"
+    patches = list(args.patch)
+    if router is None:
+        route = _route_off(default_model_from_patches(args.patch))
+    else:
+        # Route this phase task only; the derived patch overrides the session default for
+        # this one DSH process and is never recorded in the session binding.
+        route = route_phase(
+            router,
+            root=root,
+            stem=stem,
+            repo_root=repo_root,
+            repository=repository,
+            issue_number=args.issue,
+            phase=phase,
+            parent_session_id=parent,
+            contract_text=contract_text,
+        )
+        if route["derived_patch_path"]:
+            patches.append(route["derived_patch_path"])
     dsh_argv = [args.dsh_bin, "--profile", args.profile]
-    for patch in args.patch:
+    for patch in patches:
         dsh_argv.extend(["--patch", patch])
     dsh_argv.extend(["--json", task])
-    stamp = _utc_now().replace(":", "").replace("-", "").replace(".", "")
-    log_path = root / "phases" / str(args.issue) / f"{stamp}-{os.getpid()}-{phase}.log"
+    log_path = root / "phases" / str(args.issue) / f"{stem}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     env["DSH_HOME"] = str(dsh_home)
     env["NEXUS_DSH_PREFLIGHT_RECEIPT"] = str(receipt_path)
     pre_turn = _worktree_snapshot(repo_root)
+    phase_started = time.monotonic()
     with log_path.open("wb") as sink:
         proc = subprocess.run(
             dsh_argv,
@@ -2959,6 +3564,7 @@ def _run_phase_turn(
             stderr=subprocess.STDOUT,
             check=False,
         )
+    phase_wall_ms = int((time.monotonic() - phase_started) * 1000)
 
     session_id: str | None = None
     try:
@@ -3022,6 +3628,8 @@ def _run_phase_turn(
         "turn_state": turn["state"],
         "binding_hash": binding["binding_hash"] if binding else None,
         "preflight_receipt_path": str(receipt_path),
+        "route": route,
+        "phase_wall_ms": phase_wall_ms,
     }
     if canonical_agy_operations is not None:
         summary["canonical_agy_operations"] = canonical_agy_operations
@@ -3208,6 +3816,7 @@ def _chain_entry(
         "session_id": run.get("session_id") if ran else None,
         "dsh_exit_code": run.get("dsh_exit_code") if ran else None,
         "turn_state": run.get("turn_state") if ran else None,
+        "route": run.get("route") if ran else None,
         "run": run,
         "gate": None,
     }
@@ -3309,6 +3918,7 @@ def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
         "repository": repository,
         "repo_root": repo_root,
         "dsh_home": dsh_home,
+        "router": build_router(args),
     }
     if not args.green_contract and not args.red_contract:
         code, payload = _run_phase_turn(
@@ -3392,6 +4002,7 @@ def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
         "red_receipt_hash": red["receipt_hash"] if red else None,
         "green_gate_command": gate_command,
         "auto_repair_limit": args.auto_repair,
+        "model_route": args.model_route,
         "repairs_used": 0,
         "phases": [],
         "final_decision": None,
@@ -3660,6 +4271,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     p_phase.add_argument("--auto-repair-red", type=int, default=0)
     p_phase.add_argument("--continue-to-green", action="store_true")
     p_phase.add_argument("--green-phase-contract")
+    p_phase.add_argument("--model-route", choices=ROUTE_MODES, default="off")
+    p_phase.add_argument("--route-table")
+    p_phase.add_argument(
+        "--route-classifier-timeout", type=float, default=ROUTE_CLASSIFIER_TIMEOUT_SECONDS
+    )
 
     p_red = sub.add_parser("red-gate")
     p_red.add_argument("--repo-root", required=True)
