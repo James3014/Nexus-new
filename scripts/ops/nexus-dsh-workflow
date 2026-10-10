@@ -1019,6 +1019,53 @@ def _python_available(python: str) -> bool:
     return os.sep not in python and shutil.which(python) is not None
 
 
+# A pytest long traceback ends each raising frame with "path:line: ExceptionType";
+# intermediate frames carry no exception type.
+_CRASH_LINE_RE = re.compile(
+    r"^(?P<path>[^\s:][^:\n]*\.py):(?P<line>\d+): (?P<exc>[A-Za-z_][\w.]*)[ \t]*$", re.MULTILINE
+)
+
+
+def _crash_location(text: str) -> dict[str, Any]:
+    """Innermost failing location of one testcase; fails closed when not exactly one."""
+    crashes = list(_CRASH_LINE_RE.finditer(text))
+    if not crashes:
+        return {"status": "UNAVAILABLE"}
+    if len(crashes) > 1:  # chained exceptions: no single failing assertion
+        return {"status": "AMBIGUOUS"}
+    match = crashes[0]
+    return {
+        "status": "BOUND",
+        "path": match["path"],
+        "line": int(match["line"]),
+        "exception": match["exc"],
+    }
+
+
+def _file_sha256(repo: Path, rel: str) -> str | None:
+    if not _is_safe_rel(rel) or not (repo / rel).is_file():
+        return None
+    return "sha256:" + hashlib.sha256((repo / rel).read_bytes()).hexdigest()
+
+
+def _node_assertion_location(repo: Path, failed: list[dict[str, Any]]) -> dict[str, Any]:
+    """One location bound to the file bytes it points into, across all failed cases of a node."""
+    locations = [_crash_location(c["message"]) for c in failed]
+    statuses = {loc["status"] for loc in locations}
+    if "AMBIGUOUS" in statuses:
+        return {"status": "AMBIGUOUS"}
+    if statuses != {"BOUND"}:
+        return {"status": "UNAVAILABLE"}
+    distinct = {(loc["path"], loc["line"], loc["exception"]) for loc in locations}
+    if len(distinct) != 1:
+        return {"status": "AMBIGUOUS"}
+    location = locations[0]
+    digest = _file_sha256(repo, location["path"])
+    if digest is None:
+        return {"status": "UNAVAILABLE"}
+    return {**location, "path_sha256": digest}
+
+
 def _run_red_tests(
     repo: Path, python: str, nodes: list[str], timeout: float, expected_regex: str
 ) -> dict[str, Any]:
@@ -1104,6 +1151,7 @@ def _run_red_tests(
             "nodeid": node,
             "outcome": "failed_unintended" if bad else "failed_expected",
             "message": _truncate(first["message"]),
+            "assertion_location": _node_assertion_location(repo, failed),
         })
     return result
 
@@ -1798,6 +1846,81 @@ def _diff_check(repo: Path, base: str, untracked: list[str]) -> dict[str, Any]:
     return {"exit_code": proc.returncode, "failures": failures}
 
 
+def _load_red_oracle(
+    path: Path, contract: dict[str, Any], base: str
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Bind a RED_READY receipt for the same issue and base; anything else is INVALID."""
+
+    def invalid(detail: str) -> tuple[dict[str, Any], None]:
+        return {"status": "INVALID", "detail": detail}, None
+
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return invalid(f"cannot read red receipt: {type(exc).__name__}")
+    if not isinstance(receipt, dict) or receipt.get("schema") != RED_RECEIPT_SCHEMA:
+        return invalid("red receipt schema mismatch")
+    body = {k: v for k, v in receipt.items() if k not in ("receipt_hash", "receipt_path")}
+    if _sha256_bytes(_canonical_json(body).encode("utf-8")) != receipt.get("receipt_hash"):
+        return invalid("red receipt body does not match its receipt_hash")
+    if receipt.get("decision") != "RED_READY":
+        return invalid("red receipt is not RED_READY")
+    if (receipt.get("repository"), receipt.get("issue_number")) != (
+        contract["repository"],
+        contract["issue_number"],
+    ):
+        return invalid("red receipt is bound to a different repository or issue")
+    if receipt.get("base_revision") != base:
+        return invalid("red receipt is bound to a different base revision")
+    nodes = receipt.get("node_results")
+    test_paths = receipt.get("changed_test_paths")
+    if not (isinstance(nodes, list) and all(isinstance(n, dict) for n in nodes)) or not (
+        isinstance(test_paths, list) and all(isinstance(p, str) for p in test_paths)
+    ):
+        return invalid("red receipt node_results or changed_test_paths malformed")
+    red = {
+        "test_paths": set(test_paths),
+        "locations": {n.get("nodeid"): n.get("assertion_location") for n in nodes},
+    }
+    return {"status": "BOUND", "red_receipt_hash": receipt["receipt_hash"]}, red
+
+
+def _classify_target_failure(
+    repo: Path, node: str, failed: list[dict[str, Any]], red: dict[str, Any]
+) -> dict[str, Any]:
+    """RED_ORACLE_DEFECT only when both locations are exact, comparable and differ.
+
+    Every other ambiguity stays an ordinary target failure (UNCLASSIFIED).
+    """
+    green_loc = _node_assertion_location(repo, failed)
+    red_loc = red["locations"].get(node)
+    out: dict[str, Any] = {"assertion_location": green_loc, "red_assertion_location": red_loc}
+
+    def verdict(classification: str, detail: str | None = None) -> dict[str, Any]:
+        return {**out, "oracle_classification": classification, "oracle_detail": detail}
+
+    if any(c["outcome"] != "failed" for c in failed):
+        return verdict("UNCLASSIFIED", "GREEN_OUTCOME_NOT_FAILED")
+    if green_loc["status"] != "BOUND":
+        return verdict("UNCLASSIFIED", f"GREEN_LOCATION_{green_loc['status']}")
+    if green_loc["exception"] != "AssertionError":
+        return verdict("UNCLASSIFIED", "GREEN_FAILURE_NOT_ASSERTION")
+    if green_loc["path"] not in red["test_paths"]:
+        return verdict("IMPLEMENTATION_FAILURE", "GREEN_ASSERTION_OUTSIDE_RED_TESTS")
+    if not isinstance(red_loc, dict) or red_loc.get("status") not in ("BOUND", "AMBIGUOUS"):
+        return verdict("UNCLASSIFIED", "RED_LOCATION_UNAVAILABLE")
+    if red_loc["status"] == "AMBIGUOUS":
+        return verdict("UNCLASSIFIED", "RED_LOCATION_AMBIGUOUS")
+    red_path, red_line = red_loc.get("path"), red_loc.get("line")
+    if not isinstance(red_path, str) or not isinstance(red_line, int):
+        return verdict("UNCLASSIFIED", "RED_LOCATION_UNAVAILABLE")
+    if red_loc.get("path_sha256") != _file_sha256(repo, red_path):
+        return verdict("UNCLASSIFIED", "RED_LOCATION_FILE_CHANGED")
+    if (green_loc["path"], green_loc["line"]) == (red_path, red_line):
+        return verdict("IMPLEMENTATION_FAILURE", "SAME_ASSERTION_AS_RED")
+    return verdict("RED_ORACLE_DEFECT", "ASSERTION_DIFFERS_FROM_RED")
+
+
 def run_green_gate(
     *,
     repo_root: Path,
@@ -1805,8 +1928,14 @@ def run_green_gate(
     contract_path: Path,
     python: str,
     timeout: float,
+    red_receipt: Path | None = None,
 ) -> dict[str, Any]:
-    """Evaluate post-implementation evidence. Raises DshWorkflowError for argument errors."""
+    """Evaluate post-implementation evidence. Raises DshWorkflowError for argument errors.
+
+    With ``red_receipt``, a target that now fails on a different assertion than the
+    one RED bound is reported as RED_ORACLE_DEFECT instead of TARGET_TESTS_NOT_PASSING.
+    Either way the decision is REVISE_GREEN; this is diagnostic only.
+    """
     try:
         raw = json.loads(contract_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -1848,6 +1977,13 @@ def run_green_gate(
     if diff_check["failures"]:
         codes.add("DIFF_CHECK_FAILURE")
 
+    red_oracle: dict[str, Any] | None = None
+    red: dict[str, Any] | None = None
+    if red_receipt is not None:
+        red_oracle, red = _load_red_oracle(red_receipt, contract, base)
+        if red is None:
+            codes.add("RED_RECEIPT_INVALID")
+
     # Target nodes: every contracted node must be found and pass.
     node_results: list[dict[str, Any]] = []
     target_run = _run_pytest(repo, python, list(contract["target_test_nodes"]), timeout)
@@ -1859,13 +1995,21 @@ def run_green_gate(
                 codes.add("TEST_NODE_NOT_FOUND")
                 node_results.append({"nodeid": node, "outcome": "not_found", "message": ""})
                 continue
-            bad_case = next((c for c in match if c["outcome"] != "passed"), None)
+            failing = [c for c in match if c["outcome"] != "passed"]
+            bad_case = failing[0] if failing else None
+            oracle: dict[str, Any] = {}
+            if failing and red is not None:
+                oracle = _classify_target_failure(repo, node, failing, red)
             if bad_case is not None:
-                codes.add("TARGET_TESTS_NOT_PASSING")
+                if oracle.get("oracle_classification") == "RED_ORACLE_DEFECT":
+                    codes.add("RED_ORACLE_DEFECT")
+                else:
+                    codes.add("TARGET_TESTS_NOT_PASSING")
             node_results.append({
                 "nodeid": node,
                 "outcome": bad_case["outcome"] if bad_case else "passed",
                 "message": _truncate(bad_case["message"]) if bad_case else "",
+                **oracle,
             })
     elif target_run["exit_code"] == 1 and target_run["cases"]:
         codes.add("TARGET_TESTS_NOT_PASSING")
@@ -1933,6 +2077,8 @@ def run_green_gate(
         },
         "generated_at": _utc_now(),
     }
+    if red_oracle is not None:
+        body["red_oracle"] = red_oracle
     return _green_receipt(body)
 
 
@@ -1956,6 +2102,7 @@ def _main_green_gate(args: argparse.Namespace) -> int:
             contract_path=Path(args.contract).expanduser(),
             python=args.python,
             timeout=args.timeout,
+            red_receipt=Path(args.red_receipt).expanduser() if args.red_receipt else None,
         )
     except DshWorkflowError as exc:
         print(json.dumps(_green_error_receipt(exc.code, str(exc)), sort_keys=True))
@@ -2628,6 +2775,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     p_green.add_argument("--python", required=True)
     p_green.add_argument("--state-root")
     p_green.add_argument("--timeout", type=float, default=600.0)
+    p_green.add_argument("--red-receipt")
 
     p_ack = sub.add_parser("ack-turn-failure")
     p_ack.add_argument("--session-id", required=True)
