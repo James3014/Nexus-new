@@ -5669,3 +5669,215 @@ def test_exit_zero_terminal_quota_after_source_effect_requires_reconciliation(
     assert classified[0]["reconciliation_required"] is True
     assert coordinator.rotation_count == 0
     assert target.read_text(encoding="utf-8") == "partial provider effect"
+
+
+def _family_gate_snapshot(now: float, *, stale_unknown: bool) -> dict:
+    fresh = _iso(now)
+    stale = _iso(now - 6 * 3600)
+    blocked = {"weekly": _window(0.0, reset_at=_iso(now + 86400))}
+    capacity = {"weekly": _window(100.0, reset_at=_iso(now + 86400))}
+    rows = [
+        {
+            "account": "blocked-acct",
+            "ok": True,
+            "checked_at": fresh,
+            "groups": {"Claude and GPT models": blocked},
+        },
+    ]
+    if stale_unknown:
+        # Last-known capacity, but stale: availability is UNKNOWN, not exhausted.
+        rows.append({
+            "account": "write-scope-account",
+            "ok": True,
+            "checked_at": stale,
+            "groups": {"Claude and GPT models": capacity},
+        })
+    return {"checked_at": fresh, "accounts": rows}
+
+
+def test_family_gate_does_not_declare_exhaustion_when_unknown_accounts_exist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = time.time()
+    snapshot = _family_gate_snapshot(now, stale_unknown=True)
+    monkeypatch.setattr(dispatch, "_load_quota_snapshot", lambda *_a, **_kw: snapshot)
+    refreshed: list[str] = []
+
+    def refresh(account_name, **_kw):
+        refreshed.append(account_name)
+        return snapshot  # bounded per-account refresh could not make it fresh
+
+    monkeypatch.setattr(dispatch, "_refresh_quota_snapshot_for_account", refresh)
+    coordinator = _WriteScopeCoordinator(tmp_path / "home")
+    (tmp_path / "home").mkdir()
+    events: list[dict[str, object]] = []
+    runner_calls: list[bool] = []
+
+    def runner(**_kwargs):
+        runner_calls.append(True)
+        return 0, "ok", "", False, 1
+
+    code = dispatch.dispatch_run(
+        prompt="reply",
+        cwd=str(tmp_path),
+        mode="plan",
+        model="claude-sonnet-4-6",
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+
+    assert not any(e.get("phase") == "QUOTA_PREFLIGHT_EXHAUSTED" for e in events)
+    assert not any(e.get("failure_kind") == "PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT" for e in events)
+    assert coordinator.acquire_count == 1
+    assert refreshed == ["write-scope-account"]
+    decisions = [e["quota_preflight_decision"] for e in events if e.get("quota_preflight_decision")]
+    assert decisions[-1]["evidence_state"] == "UNKNOWN"
+    assert decisions[-1]["dispatch_decision"] == "ALLOW_UNKNOWN_QUOTA"
+    assert code == 0 and runner_calls == [True]
+
+
+def test_family_gate_all_known_blocked_rejects_and_persists_decision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = time.time()
+    snapshot = _family_gate_snapshot(now, stale_unknown=False)
+    monkeypatch.setattr(dispatch, "_load_quota_snapshot", lambda *_a, **_kw: snapshot)
+    root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="claude-sonnet-4-6",
+        effort=None,
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "reply")
+    coordinator = _WriteScopeCoordinator(tmp_path / "home")
+    real_dispatch_run = dispatch.dispatch_run
+
+    def gated_dispatch_run(**kwargs):
+        return real_dispatch_run(
+            **kwargs,
+            coordinator=coordinator,
+            run_agy_fn=lambda **_kw: (_ for _ in ()).throw(AssertionError("no provider")),
+        )
+
+    monkeypatch.setattr(dispatch, "dispatch_run", gated_dispatch_run)
+    code = dispatch._run_background_operation(
+        operation_id=operation_id,
+        prompt_file=str(prompt_path),
+        cwd=str(tmp_path),
+        mode="plan",
+        model="claude-sonnet-4-6",
+        effort=None,
+        timeout=30,
+        max_calls=1,
+        pool_wait_timeout=1.0,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=root,
+        heartbeat_interval=60,
+    )
+
+    record = dispatch.AgyOperationJournal(root).read(operation_id)
+    assert code == 75
+    assert coordinator.acquire_count == 0
+    assert record["status"] == "FAILED"
+    assert record["failure_kind"] == "PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT"
+    assert record["attempts"] == 0 and record["rotations"] == 0
+    assert record["provider_started_at"] is None
+    decision = record["quota_preflight_decision"]
+    assert decision == {
+        "account_alias_hash": None,
+        "model_family": "claude_gpt",
+        "evidence_state": "KNOWN_BLOCKED",
+        "quota_window_state": "blocked",
+        "probe_state": "CACHED_SUCCEEDED",
+        "dispatch_decision": "BLOCK_KNOWN_QUOTA",
+    }
+    progress = record["quota_preflight_progress"]
+    assert progress["phase"] == "PREFLIGHT_BLOCKED"
+    assert progress["admission_state"] == "KNOWN_BLOCKED"
+    assert (progress["blocked_count"], progress["unknown_count"], progress["usable_count"]) == (
+        1,
+        0,
+        0,
+    )
+
+
+@pytest.mark.parametrize(
+    ("error", "failure_kind"),
+    [
+        (dispatch.AgyAccountPoolExhaustedError, "ACCOUNT_UNAVAILABLE"),
+        (dispatch.AgyAccountPoolBusyError, "AGY_ACCOUNT_POOL_BUSY"),
+    ],
+)
+def test_unknown_family_claim_failure_is_typed_in_durable_readback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error, failure_kind
+) -> None:
+    now = time.time()
+    snapshot = _family_gate_snapshot(now, stale_unknown=True)
+    monkeypatch.setattr(dispatch, "_load_quota_snapshot", lambda *_a, **_kw: snapshot)
+    root = tmp_path / "ops"
+    journal = dispatch.AgyOperationJournal(root)
+    operation_id = dispatch.new_operation_id()
+    prompt_path = journal.prompt_path(operation_id)
+    journal.create(
+        operation_id=operation_id,
+        attempt_id=dispatch.new_attempt_id(),
+        cwd=str(tmp_path),
+        provider="agy",
+        model="claude-sonnet-4-6",
+        effort=None,
+        prompt_sha256="0" * 64,
+        runtime_revision="a" * 40,
+    )
+    dispatch._write_private_prompt(prompt_path, "reply")
+
+    class Unclaimable:
+        def acquire_claim(self, **_kwargs):
+            raise error("no claimable account")
+
+    real_dispatch_run = dispatch.dispatch_run
+    monkeypatch.setattr(
+        dispatch,
+        "dispatch_run",
+        lambda **kwargs: real_dispatch_run(**kwargs, coordinator=Unclaimable()),
+    )
+    code = dispatch._run_background_operation(
+        operation_id=operation_id,
+        prompt_file=str(prompt_path),
+        cwd=str(tmp_path),
+        mode="plan",
+        model="claude-sonnet-4-6",
+        effort=None,
+        timeout=30,
+        max_calls=1,
+        pool_wait_timeout=0.1,
+        allow=[],
+        deny=[],
+        temp_command_permissions=False,
+        operation_root=root,
+        heartbeat_interval=60,
+    )
+
+    record = dispatch.AgyOperationJournal(root).read(operation_id)
+    assert code == 75
+    assert record["status"] == "FAILED"
+    assert record["failure_kind"] == failure_kind
+    assert record["attempts"] == 0 and record["rotations"] == 0
+    assert record["provider_started_at"] is None
+    progress = record["quota_preflight_progress"]
+    assert progress["admission_state"] == "UNKNOWN_NOT_CLAIMABLE"
+    assert (progress["blocked_count"], progress["unknown_count"], progress["usable_count"]) == (
+        1,
+        1,
+        0,
+    )

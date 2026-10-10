@@ -825,14 +825,17 @@ def _account_family_quota_state(
 
 def _quota_preflight_decision(
     *,
-    account_alias_hash: str,
+    account_alias_hash: str | None,
     model_family: str,
     quota_state: str,
     evidence_fresh: bool,
     probe_state: str,
     dispatch_decision: str,
-) -> dict[str, str]:
-    """Separate quota-query health from the policy decision for one claimed account."""
+) -> dict[str, str | None]:
+    """Separate quota-query health from the policy decision.
+
+    ``account_alias_hash`` is None only for a family-level decision made before any claim.
+    """
     evidence_state = (
         "KNOWN_BLOCKED"
         if evidence_fresh and quota_state == "blocked"
@@ -3035,10 +3038,15 @@ def dispatch_run(
         + list(availability_state.get("fallback", []))
     )
     blocked_candidates = list(availability_state.get("blocked", []))
+    raw_unknown = availability_state.get("unknown")
+    unknown_candidates = list(raw_unknown) if isinstance(raw_unknown, list) else []
+    # Only a family whose every account is KNOWN blocked is exhausted. UNKNOWN
+    # (stale/failed evidence) accounts proceed to claim and bounded per-account refresh.
     if (
         availability_state.get("snapshot_fresh")
         and len(usable_candidates) == 0
         and len(blocked_candidates) > 0
+        and len(unknown_candidates) == 0
         and scoped_model_family is not None
     ):
         _operation_hook(
@@ -3053,7 +3061,18 @@ def dispatch_run(
                 "admission_state": "KNOWN_BLOCKED",
                 "probe_state": "PROBE_OK",
                 "quota_state": "blocked",
+                "usable_count": 0,
+                "blocked_count": len(blocked_candidates),
+                "unknown_count": 0,
             },
+            quota_preflight_decision=_quota_preflight_decision(
+                account_alias_hash=None,
+                model_family=scoped_model_family,
+                quota_state="blocked",
+                evidence_fresh=True,
+                probe_state="CACHED_SUCCEEDED",
+                dispatch_decision="BLOCK_KNOWN_QUOTA",
+            ),
         )
         emit_meta({
             "status": "failed",
@@ -3099,22 +3118,32 @@ def dispatch_run(
             wait_timeout=pool_wait_timeout,
             model_family=scoped_model_family,
         )
-    except AgyAccountPoolBusyError:
-        emit_meta({
-            "status": "pool_busy",
+    except (AgyAccountPoolBusyError, AgyAccountPoolExhaustedError) as claim_exc:
+        busy = isinstance(claim_exc, AgyAccountPoolBusyError)
+        claim_failure = "AGY_ACCOUNT_POOL_BUSY" if busy else "ACCOUNT_UNAVAILABLE"
+        claim_event: dict[str, Any] = {
+            "phase": "ACCOUNT_CLAIM_FAILED",
             "attempts": 0,
             "rotations": 0,
-            "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
+            "failure_kind": claim_failure,
             "provider_effect": False,
-            "wall_ms": 0,
-        })
-        return 75
-    except AgyAccountPoolExhaustedError:
+        }
+        if scoped_model_family is not None:
+            claim_event["quota_preflight_progress"] = {
+                "phase": "PREFLIGHT_BLOCKED",
+                "admission_state": (
+                    "UNKNOWN_NOT_CLAIMABLE" if unknown_candidates else "NOT_CLAIMABLE"
+                ),
+                "usable_count": len(usable_candidates),
+                "blocked_count": len(blocked_candidates),
+                "unknown_count": len(unknown_candidates),
+            }
+        _operation_hook(operation_hook, **claim_event)
         emit_meta({
-            "status": "pool_exhausted",
+            "status": "pool_busy" if busy else "pool_exhausted",
             "attempts": 0,
             "rotations": 0,
-            "failure_kind": "ACCOUNT_UNAVAILABLE",
+            "failure_kind": claim_failure,
             "provider_effect": False,
             "wall_ms": 0,
         })
