@@ -2633,6 +2633,8 @@ def test_provider_model_rejection_after_observed_source_effect_requires_reconcil
 
     coordinator = Coordinator(home)
     events: list[dict[str, object]] = []
+    # Isolate quota preflight from host quota state so the target branch is reached.
+    monkeypatch.setattr(dispatch, "_load_quota_snapshot", lambda *_a, **_kw: {})
     monkeypatch.setattr(dispatch, "_refresh_quota_snapshot_for_account", lambda *_a, **_kw: {})
 
     def runner(**_kwargs):
