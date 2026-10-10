@@ -5677,13 +5677,21 @@ def _family_gate_snapshot(now: float, *, stale_unknown: bool) -> dict:
     blocked = {"weekly": _window(0.0, reset_at=_iso(now + 86400))}
     capacity = {"weekly": _window(100.0, reset_at=_iso(now + 86400))}
     rows = [
-        {"account": "blocked-acct", "ok": True, "checked_at": fresh,
-         "groups": {"Claude and GPT models": blocked}},
+        {
+            "account": "blocked-acct",
+            "ok": True,
+            "checked_at": fresh,
+            "groups": {"Claude and GPT models": blocked},
+        },
     ]
     if stale_unknown:
         # Last-known capacity, but stale: availability is UNKNOWN, not exhausted.
-        rows.append({"account": "write-scope-account", "ok": True, "checked_at": stale,
-                     "groups": {"Claude and GPT models": capacity}})
+        rows.append({
+            "account": "write-scope-account",
+            "ok": True,
+            "checked_at": stale,
+            "groups": {"Claude and GPT models": capacity},
+        })
     return {"checked_at": fresh, "accounts": rows}
 
 
@@ -5720,9 +5728,7 @@ def test_family_gate_does_not_declare_exhaustion_when_unknown_accounts_exist(
     )
 
     assert not any(e.get("phase") == "QUOTA_PREFLIGHT_EXHAUSTED" for e in events)
-    assert not any(
-        e.get("failure_kind") == "PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT" for e in events
-    )
+    assert not any(e.get("failure_kind") == "PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT" for e in events)
     assert coordinator.acquire_count == 1
     assert refreshed == ["write-scope-account"]
     decisions = [e["quota_preflight_decision"] for e in events if e.get("quota_preflight_decision")]
@@ -5799,7 +5805,11 @@ def test_family_gate_all_known_blocked_rejects_and_persists_decision(
     progress = record["quota_preflight_progress"]
     assert progress["phase"] == "PREFLIGHT_BLOCKED"
     assert progress["admission_state"] == "KNOWN_BLOCKED"
-    assert (progress["blocked_count"], progress["unknown_count"], progress["usable_count"]) == (1, 0, 0)
+    assert (progress["blocked_count"], progress["unknown_count"], progress["usable_count"]) == (
+        1,
+        0,
+        0,
+    )
 
 
 @pytest.mark.parametrize(
@@ -5866,4 +5876,8 @@ def test_unknown_family_claim_failure_is_typed_in_durable_readback(
     assert record["provider_started_at"] is None
     progress = record["quota_preflight_progress"]
     assert progress["admission_state"] == "UNKNOWN_NOT_CLAIMABLE"
-    assert (progress["blocked_count"], progress["unknown_count"], progress["usable_count"]) == (1, 1, 0)
+    assert (progress["blocked_count"], progress["unknown_count"], progress["usable_count"]) == (
+        1,
+        1,
+        0,
+    )
