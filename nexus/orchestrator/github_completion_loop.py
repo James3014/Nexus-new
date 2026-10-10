@@ -488,6 +488,8 @@ def run_github_completion_loop(
     )
     current_generation = start_generation
     last_produced_head_sha = initial_evidence.head_sha
+    # Base SHA rejected by the last CAS BASE_MOVED signal, pending corroboration.
+    cas_base_moved_from: str | None = None
 
     while True:
         # Check elapsed time budget
@@ -513,6 +515,18 @@ def run_github_completion_loop(
 
         # Read current main state
         current_main_sha, current_main_tree_sha = port.read_main_state()
+
+        # A CAS BASE_MOVED signal must be corroborated by observed main movement.
+        # A stable main contradicts it: fail closed instead of re-merging the same generation.
+        if cas_base_moved_from is not None and current_main_sha == cas_base_moved_from:
+            return CompletionLoopResult(
+                outcome=CompletionLoopOutcome.BLOCKED,
+                reason=f"CAS_BASE_MOVED_UNCORROBORATED: main still {current_main_sha}",
+                generation=current_generation,
+                integration_head_sha=last_produced_head_sha,
+                evidence=current_evidence,
+            )
+        cas_base_moved_from = None
 
         # Check if main moved
         if current_main_sha != current_evidence.base_sha:
@@ -1120,7 +1134,8 @@ def run_github_completion_loop(
 
         if cas_result.status == CasMergeStatus.BASE_MOVED:
             # Main moved immediately before/during CAS merge!
-            # Loop to absorb drift (if within generation budget)
+            # Loop to absorb drift (if within generation budget) once main movement is observed
+            cas_base_moved_from = current_evidence.base_sha
             continue
 
         if cas_result.status == CasMergeStatus.AMBIGUOUS_ACK:
