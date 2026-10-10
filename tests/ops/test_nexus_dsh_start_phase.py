@@ -20,6 +20,8 @@ def tmp_path(dsh_non_temp_path: Path) -> Path:
     # DSH grants its temp areas to every session, so the guard rejects workspaces
     # under pytest's tmp_path (#1607); keep these repositories outside them.
     return dsh_non_temp_path
+
+
 REPO = "James3014/Nexus-new"
 
 FAKE_DSH = """#!/usr/bin/env python3
