@@ -2614,6 +2614,59 @@ def test_provider_exit_invalid_model_selection_classified_as_model_contract_reje
     assert not any(event.get("phase") == "ACCOUNT_ROTATED" for event in events)
 
 
+def test_provider_model_rejection_after_observed_source_effect_requires_reconciliation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    work = tmp_path / "repo"
+    work.mkdir()
+    subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    target = work / "partial-effect.txt"
+
+    class Coordinator(_WriteScopeCoordinator):
+        rotation_count = 0
+
+        def rotate_claim(self, **kwargs):
+            self.rotation_count += 1
+            raise AssertionError("a model rejection after an effect must not rotate")
+
+    coordinator = Coordinator(home)
+    events: list[dict[str, object]] = []
+    monkeypatch.setattr(dispatch, "_refresh_quota_snapshot_for_account", lambda *_a, **_kw: {})
+
+    def runner(**_kwargs):
+        target.write_text("provider already changed source", encoding="utf-8")
+        return (
+            1,
+            "",
+            'error: invalid model selection (--model "claude-opus-4-6"): unknown model\n',
+            False,
+            10,
+        )
+
+    code = dispatch.dispatch_run(
+        prompt="edit then model rejection",
+        cwd=str(work),
+        mode="accept-edits",
+        model="claude-opus-4-6",
+        write_paths=[str(target)],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+
+    classified = [event for event in events if event.get("phase") == "CLASSIFYING_FAILURE"]
+    assert code == 1
+    assert len(classified) == 1
+    assert classified[0]["failure_kind"] == "DISPATCH_MODEL_CONTRACT_REJECTED"
+    # A physically observed source change must never be reported as no provider effect.
+    assert classified[0]["provider_effect"] is True
+    assert classified[0]["reconciliation_required"] is True
+    assert coordinator.rotation_count == 0
+    assert not any(event.get("phase") == "ACCOUNT_ROTATED" for event in events)
+
+
 def test_headless_tool_permission_denial_classified_as_failure(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
