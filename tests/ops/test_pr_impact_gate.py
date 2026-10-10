@@ -319,6 +319,21 @@ def test_contract_or_authority_change_escalates_to_tier2():
     assert "tests/services/test_policy_gate.py" in plan.pytest_targets
 
 
+@pytest.mark.parametrize(
+    "changed_path", ["uv.lock", "pyproject.toml", "product/execution/python_runner.py"]
+)
+def test_oci_contract_changes_select_both_frozen_profile_regressions(changed_path):
+    plan = build_impact_plan([changed_path])
+
+    assert plan.tier == 2
+    assert plan.impact_class == "HIGH_RISK_INTEGRATION"
+    assert plan.unmatched_paths == []
+    assert {
+        "tests/product/test_python_runner.py",
+        "tests/product/test_http_e2e.py",
+    }.issubset(set(plan.pytest_targets))
+
+
 def test_legacy_capability_gate_uses_high_risk_mapped_oracles():
     plan = build_impact_plan(["nexus/governance/capability_gate.py"])
 
