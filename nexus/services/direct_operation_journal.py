@@ -692,6 +692,15 @@ class DirectOperationJournal:
                         changes.setdefault("scope_validation_state", "PENDING")
                     else:
                         changes.setdefault("scope_validation_state", "UNCONSTRAINED")
+                reconciliation = changes.get("reconciliation")
+                if (
+                    "reconciled_at" not in changes
+                    and isinstance(reconciliation, dict)
+                    and isinstance(reconciliation.get("at"), str)
+                ):
+                    # Every reconciliation receipt carries its observation time;
+                    # keep the durable top-level timeline field bound to it.
+                    changes["reconciled_at"] = reconciliation["at"]
                 candidate_record = {**record, **changes}
                 _validate_continuity_fields(candidate_record)
                 record.update(changes)

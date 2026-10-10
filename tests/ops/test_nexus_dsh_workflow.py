@@ -14,6 +14,13 @@ SCRIPT = ROOT / "scripts" / "ops" / "nexus-dsh-workflow"
 guard = SourceFileLoader("nexus_dsh_workflow_test", str(SCRIPT)).load_module()
 
 
+@pytest.fixture
+def tmp_path(dsh_non_temp_path: Path) -> Path:
+    # DSH grants its temp areas to every session, so the guard rejects workspaces
+    # under pytest's tmp_path (#1607); keep these repositories outside them.
+    return dsh_non_temp_path
+
+
 def _write_log(path: Path, *, cwd: Path) -> tuple[str, str]:
     session_id = "session-test-1600"
     goal_id = "goal-test-1600"
@@ -96,6 +103,8 @@ def _write_goal_projection(
 def _binding(tmp_path: Path) -> dict:
     repo = tmp_path / "repo"
     repo.mkdir()
+    # Resume requires a standalone repository whose Git metadata is inside repo (#1607).
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True, capture_output=True)
     dsh_home = tmp_path / "dsh-home"
     dsh_home.mkdir()
     log = tmp_path / "turn.jsonl"

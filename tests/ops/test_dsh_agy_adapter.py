@@ -49,11 +49,17 @@ def _run_node(
     script_file.write_text(json.dumps(script or []), encoding="utf-8")
     counter_file = tmp_path / "counter.txt"
     attempts_log = tmp_path / "attempts.log"
+    ops_dir = tmp_path / "ops"
+    ops_dir.mkdir()
     dispatch = tmp_path / "dispatch.py"
     dispatch.write_text(
         "#!/usr/bin/env python3\n"
         "import json, os, sys\n"
         "args=sys.argv[1:]\n"
+        f"ops={str(ops_dir)!r}\n"
+        "if args[:1]==['--status']:\n"
+        "    print(open(os.path.join(ops,args[1]+'.json')).read())\n"
+        "    sys.exit(0)\n"
         f"script=json.load(open({str(script_file)!r}))\n"
         f"counter={str(counter_file)!r}\n"
         "n=int(open(counter).read()) if os.path.exists(counter) else 0\n"
@@ -73,8 +79,16 @@ def _run_node(
         "if 'response' in step:\n"
         f"    stdout_path={str(tmp_path / 'step.stdout')!r}\n"
         "    open(stdout_path,'w').write(step['response'])\n"
-        "rec={'operation_id':'agyop_test','status':step.get('status',status),'stdout_path':stdout_path}\n"
+        "rec={'operation_id':'agyop_test','status':step.get('status',status),'stdout_path':stdout_path,\n"
+        "     'stderr_path':None,'first_effect_at':None,'observed_changed_paths':None}\n"
         "rec.update(step.get('record',{}))\n"
+        "if 'stderr_meta' in step:\n"
+        "    rec['stderr_path']=os.path.join(ops,rec['operation_id']+'.stderr')\n"
+        "    lines=[m if isinstance(m,str) else 'NEXUS_AGY_DISPATCH '+json.dumps(m) for m in step['stderr_meta']]\n"
+        "    open(rec['stderr_path'],'w').write(''.join(line+'\\n' for line in lines))\n"
+        "if step.get('background'):\n"
+        "    open(os.path.join(ops,rec['operation_id']+'.json'),'w').write(json.dumps(rec))\n"
+        "    rec={'operation_id':rec['operation_id'],'status':'QUEUED'}\n"
         "print(json.dumps(rec))\n",
         encoding="utf-8",
     )
@@ -757,3 +771,307 @@ def test_single_dispatch_carries_contract_and_session_evidence_together(tmp_path
     assert len(contract) == 1
     assert _session_ref("S-both", "agent") in refs
     assert len(refs) == 2
+
+
+POOL_BUSY = "AGY_ACCOUNT_POOL_BUSY_PRE_EFFECT"
+QUOTA_PRE_EFFECT = "PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT"
+OK_TEXT = '{"kind":"text","text":"OK"}'
+
+
+def _pool_busy(op: str, **meta_overrides: object) -> dict:
+    # Mirrors the installed dispatcher: the background run exits 75 and writes its
+    # structured NEXUS_AGY_DISPATCH meta to the operation stderr_path.
+    meta = {
+        "status": "pool_busy",
+        "attempts": 0,
+        "rotations": 0,
+        "failure_kind": "AGY_ACCOUNT_POOL_BUSY",
+        "provider_effect": False,
+        "wall_ms": 0,
+    }
+    meta.update(meta_overrides)
+    meta = {key: value for key, value in meta.items() if value is not _ABSENT}
+    return {
+        "background": True,
+        "status": "FAILED",
+        "record": {"operation_id": op, "exit_code": 75, "failure_kind": None},
+        "stderr_meta": [meta],
+    }
+
+
+_ABSENT = object()
+
+
+def _ok(op: str) -> dict:
+    return {"background": True, "response": OK_TEXT, "record": {"operation_id": op}}
+
+
+def _attempts(tmp_path: Path) -> list[dict]:
+    log = tmp_path / "attempts.log"
+    if not log.exists():
+        return []
+    return [json.loads(line) for line in log.read_text().splitlines()]
+
+
+def _pairs(argv: list[str]) -> list[tuple[str, str]]:
+    return list(zip(argv, argv[1:]))
+
+
+def test_pre_effect_protocol_invalid_then_success_retries_with_fresh_prompt(tmp_path: Path) -> None:
+    proc = _run_node(
+        tmp_path,
+        OK_TEXT,
+        script=[
+            {"response": "not json", "record": {"operation_id": "agyop_1"}},
+            {"response": OK_TEXT, "record": {"operation_id": "agyop_2"}},
+        ],
+    )
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert json.loads(proc.stdout)["ok"] is True
+    attempts = _attempts(tmp_path)
+    assert [a["n"] for a in attempts] == [1, 2]
+    prompts = [a["prompt"] for a in attempts]
+    assert len(set(prompts)) == 2
+    assert not any(Path(prompt).exists() for prompt in prompts)
+
+
+def test_pool_busy_twice_then_success_uses_canonical_pool_wait(tmp_path: Path) -> None:
+    proc = _run_node(
+        tmp_path,
+        OK_TEXT,
+        script=[_pool_busy("agyop_1"), _pool_busy("agyop_2"), _ok("agyop_3")],
+        extra_env={"FAKE_SESSION_ID": "S-pool"},
+    )
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert json.loads(proc.stdout)["ok"] is True
+    attempts = _attempts(tmp_path)
+    assert len(attempts) == 3
+    refs = [_evidence_args(a["args"]) for a in attempts]
+    assert refs[0] == refs[1] == refs[2]
+    assert _session_ref("S-pool", "agent") in refs[0]
+    for attempt in attempts:
+        assert ("--pool-wait-timeout", "120") in _pairs(attempt["args"])
+    markers = [
+        json.loads(line[len("NEXUS_DSH_AGY_OPERATION ") :])
+        for line in proc.stderr.splitlines()
+        if line.startswith("NEXUS_DSH_AGY_OPERATION ")
+    ]
+    assert [m["operation_id"] for m in markers] == ["agyop_1", "agyop_2", "agyop_3"]
+    assert {m["dsh_session_id"] for m in markers} == {"S-pool"}
+    assert "outer_action_catalog" not in proc.stderr
+
+
+def test_pool_busy_retry_exhausted_is_typed_and_honest(tmp_path: Path) -> None:
+    proc = _run_node(tmp_path, OK_TEXT, script=[_pool_busy("agyop_busy")])
+    assert proc.returncode == 3
+    payload = json.loads(proc.stdout)
+    assert payload["code"] == POOL_BUSY
+    assert payload["attempts"] == 3
+    assert payload["effect"] == "none"
+    assert payload["failureKind"] == "AGY_ACCOUNT_POOL_BUSY"
+    assert "pool" in payload["message"] and "quota" not in payload["message"].lower()
+    assert len(_attempts(tmp_path)) == 3
+
+
+def test_quota_pre_effect_is_typed_distinct_from_pool_capacity(tmp_path: Path) -> None:
+    quota = {
+        "background": True,
+        "status": "FAILED",
+        "record": {
+            "operation_id": "agyop_q",
+            "exit_code": 75,
+            "failure_kind": QUOTA_PRE_EFFECT,
+        },
+        "stderr_meta": [
+            {
+                "status": "failed",
+                "attempts": 0,
+                "rotations": 0,
+                "failure_kind": QUOTA_PRE_EFFECT,
+                "provider_effect": False,
+                "wall_ms": 0,
+            }
+        ],
+    }
+    proc = _run_node(
+        tmp_path, OK_TEXT, script=[quota], extra_env={"NEXUS_DSH_AGY_PRE_EFFECT_RETRIES": "0"}
+    )
+    assert proc.returncode == 3
+    payload = json.loads(proc.stdout)
+    assert payload["code"] == QUOTA_PRE_EFFECT
+    assert "quota" in payload["message"].lower() and "pool busy" not in payload["message"]
+    assert len(_attempts(tmp_path)) == 1
+    again = _run_node(tmp_path / "again", OK_TEXT, script=[quota, _ok("agyop_ok")])
+    assert again.returncode == 0, again.stderr + again.stdout
+    assert len(_attempts(tmp_path / "again")) == 2
+
+
+def test_retry_and_pool_wait_config_errors_fail_before_dispatch(tmp_path: Path) -> None:
+    for name, env in (
+        ("retries-high", {"NEXUS_DSH_AGY_PRE_EFFECT_RETRIES": "4"}),
+        ("retries-text", {"NEXUS_DSH_AGY_PRE_EFFECT_RETRIES": "two"}),
+        ("wait-low", {"NEXUS_DSH_AGY_POOL_WAIT_SECONDS": "14"}),
+        ("wait-high", {"NEXUS_DSH_AGY_POOL_WAIT_SECONDS": "601"}),
+        ("backoff-high", {"NEXUS_DSH_AGY_RETRY_BACKOFF_MS": "30001"}),
+    ):
+        proc = _run_node(tmp_path / name, OK_TEXT, script=[_pool_busy("agyop_x")], extra_env=env)
+        assert proc.returncode == 3, name
+        payload = json.loads(proc.stdout)
+        assert payload["code"] == "AGY_PROTOCOL_INVALID", name
+        assert _attempts(tmp_path / name) == [], name
+
+
+def test_pool_wait_env_is_passed_to_canonical_dispatcher(tmp_path: Path) -> None:
+    proc = _run_node(tmp_path, OK_TEXT, extra_env={"NEXUS_DSH_AGY_POOL_WAIT_SECONDS": "300"})
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    argv = json.loads((tmp_path / "argv.json").read_text())
+    assert ("--pool-wait-timeout", "300") in _pairs(argv)
+
+
+def test_no_retry_without_proof_of_no_effect(tmp_path: Path) -> None:
+    cases = {
+        "recorded-effect": dict(
+            _pool_busy("agyop_e"),
+            record={
+                "operation_id": "agyop_e",
+                "exit_code": 75,
+                "first_effect_at": "2026-10-10T00:00:00Z",
+            },
+        ),
+        "changed-paths": dict(
+            _pool_busy("agyop_c"),
+            record={"operation_id": "agyop_c", "exit_code": 75, "observed_changed_paths": ["a"]},
+        ),
+        "meta-effect-absent": _pool_busy("agyop_a", provider_effect=_ABSENT, attempts=1),
+        "meta-effect-true": _pool_busy("agyop_t", provider_effect=True),
+        "malformed-meta": dict(
+            _pool_busy("agyop_m"),
+            stderr_meta=["NEXUS_AGY_DISPATCH {not json", _pool_busy("x")["stderr_meta"][0]],
+        ),
+        "no-meta": {
+            "background": True,
+            "status": "FAILED",
+            "record": {"operation_id": "agyop_n", "exit_code": 75},
+        },
+    }
+    for name, step in cases.items():
+        proc = _run_node(tmp_path / name, OK_TEXT, script=[step, _ok("agyop_ok")])
+        assert proc.returncode == 3, name
+        payload = json.loads(proc.stdout)
+        assert payload["code"] == "AGY_OPERATION_FAILED", name
+        assert len(_attempts(tmp_path / name)) == 1, name
+
+
+def test_no_retry_for_outcome_unknown_or_start_lost_ack(tmp_path: Path) -> None:
+    unknown = _run_node(
+        tmp_path / "unknown",
+        OK_TEXT,
+        script=[{"status": "OUTCOME_UNKNOWN", "record": {"operation_id": "agyop_u"}}, _ok("ok")],
+    )
+    assert json.loads(unknown.stdout)["code"] == "AGY_OUTCOME_UNKNOWN"
+    assert len(_attempts(tmp_path / "unknown")) == 1
+    # Start failure: an operation may exist even though no stdout ack arrived.
+    lost = _run_node(
+        tmp_path / "lost",
+        OK_TEXT,
+        script=[{"start_fail": _pool_busy("x")["stderr_meta"][0]}, _ok("ok")],
+    )
+    assert json.loads(lost.stdout)["code"] == "AGY_DISPATCH_START_FAILED"
+    assert len(_attempts(tmp_path / "lost")) == 1
+
+
+def test_protocol_invalid_with_recorded_effect_is_not_retried(tmp_path: Path) -> None:
+    proc = _run_node(
+        tmp_path,
+        OK_TEXT,
+        script=[
+            {
+                "response": "not json",
+                "record": {"operation_id": "agyop_1", "first_effect_at": "2026-10-10T00:00:00Z"},
+            },
+            {"response": OK_TEXT},
+        ],
+    )
+    assert proc.returncode == 3
+    payload = json.loads(proc.stdout)
+    assert payload["code"] != PRE_EFFECT
+    assert payload["retryable"] is False
+    assert len(_attempts(tmp_path)) == 1
+
+
+def test_retries_count_against_session_budget_and_stop_at_cap(tmp_path: Path) -> None:
+    proc = _run_node(
+        tmp_path,
+        OK_TEXT,
+        script=[_pool_busy("agyop_busy")],
+        extra_env={
+            "NEXUS_DSH_AGY_MAX_PROVIDER_CALLS": "3",
+            "NEXUS_DSH_AGY_PRE_EFFECT_RETRIES": "3",
+            "FAKE_SESSION_ID": "S-retry-cap",
+        },
+    )
+    assert proc.returncode == 3
+    payload = json.loads(proc.stdout)
+    assert payload["code"] == "AGY_PROVIDER_CALL_CAP_EXHAUSTED"
+    assert len(_attempts(tmp_path)) == 3
+    record = json.loads(_budget_record_path(tmp_path / "budget", "S-retry-cap").read_text())
+    assert record["used"] == 3
+    assert record["purposes"] == {"agent": 3}
+
+
+def test_title_retry_keeps_title_purpose_and_budget(tmp_path: Path) -> None:
+    proc = _run_node(
+        tmp_path,
+        OK_TEXT,
+        tool=False,
+        purpose="session-title",
+        script=[_pool_busy("agyop_1"), _ok("agyop_2")],
+        extra_env={"NEXUS_DSH_AGY_MAX_PROVIDER_CALLS": "5", "FAKE_SESSION_ID": "S-title"},
+    )
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    attempts = _attempts(tmp_path)
+    assert len(attempts) == 2
+    for attempt in attempts:
+        assert _session_ref("S-title", "session-title") in _evidence_args(attempt["args"])
+    record = json.loads(_budget_record_path(tmp_path / "budget", "S-title").read_text())
+    assert record["purposes"] == {"session-title": 2}
+
+
+def test_zero_retries_keeps_single_physical_dispatch(tmp_path: Path) -> None:
+    proc = _run_node(
+        tmp_path,
+        OK_TEXT,
+        script=[_pool_busy("agyop_1"), _ok("agyop_2")],
+        extra_env={"NEXUS_DSH_AGY_PRE_EFFECT_RETRIES": "0"},
+    )
+    assert proc.returncode == 3
+    assert json.loads(proc.stdout)["code"] == POOL_BUSY
+    assert len(_attempts(tmp_path)) == 1
+
+
+def test_contradictory_effect_evidence_is_never_retried(tmp_path: Path) -> None:
+    # first_effect_at=null and no changed paths do not override an explicit effect,
+    # an unresolved external effect, or a write-scope violation in the same record.
+    contradictions = {
+        "provider-effect": {"provider_effect": True},
+        "unresolved-effect": {"has_unresolved_external_effect": True},
+        "scope-violation": {"scope_validation_state": "VIOLATION_OUT_OF_SCOPE"},
+    }
+    for name, fields in contradictions.items():
+        record = {"operation_id": "agyop_x", "observed_changed_paths": [], **fields}
+        invalid = _run_node(
+            tmp_path / ("invalid-" + name),
+            OK_TEXT,
+            script=[{"response": "not json", "record": record}, {"response": OK_TEXT}],
+        )
+        assert invalid.returncode == 3, name
+        payload = json.loads(invalid.stdout)
+        assert payload["code"] == "PROVIDER_PROTOCOL_INVALID_EFFECT_UNPROVEN", name
+        assert payload["retryable"] is False, name
+        assert len(_attempts(tmp_path / ("invalid-" + name))) == 1, name
+        busy = dict(_pool_busy("agyop_x"))
+        busy["record"] = {**busy["record"], **record}
+        failed = _run_node(tmp_path / ("busy-" + name), OK_TEXT, script=[busy, _ok("ok")])
+        assert failed.returncode == 3, name
+        assert json.loads(failed.stdout)["code"] == "AGY_OPERATION_FAILED", name
+        assert len(_attempts(tmp_path / ("busy-" + name))) == 1, name

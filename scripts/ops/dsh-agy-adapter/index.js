@@ -79,6 +79,115 @@ function timeoutSeconds() {
   return value
 }
 
+function boundedEnvInt(name, fallback, min, max) {
+  const raw = process.env[name]
+  if (raw === undefined || raw === '') return fallback
+  if (!/^\d+$/.test(raw)) throw protocolError(name + ' must be an integer')
+  const value = Number(raw)
+  if (!Number.isSafeInteger(value) || value < min || value > max) {
+    throw protocolError(name + ' must be between ' + String(min) + ' and ' + String(max))
+  }
+  return value
+}
+
+const POOL_BUSY_CODE = 'AGY_ACCOUNT_POOL_BUSY_PRE_EFFECT'
+const QUOTA_PRE_EFFECT_CODE = 'PROVIDER_QUOTA_EXHAUSTED_PRE_EFFECT'
+const RETRYABLE_PRE_EFFECT_CODES = new Set([PRE_EFFECT_CODE, POOL_BUSY_CODE, QUOTA_PRE_EFFECT_CODE])
+const DEFAULT_RETRY_BACKOFF_MS = Object.freeze([10000, 30000])
+const DISPATCH_META_PREFIX = 'NEXUS_AGY_DISPATCH '
+const DISPATCH_STDERR_MAX_BYTES = 4 * 1024 * 1024
+
+function preEffectRetries() {
+  return boundedEnvInt('NEXUS_DSH_AGY_PRE_EFFECT_RETRIES', 2, 0, 3)
+}
+
+function poolWaitSeconds() {
+  return boundedEnvInt('NEXUS_DSH_AGY_POOL_WAIT_SECONDS', 120, 15, 600)
+}
+
+// Optional override (tests/operators) of the 10s/30s backoff, still bounded to 30s per wait.
+function retryBackoffMs() {
+  const raw = process.env.NEXUS_DSH_AGY_RETRY_BACKOFF_MS
+  if (raw === undefined || raw === '') return DEFAULT_RETRY_BACKOFF_MS
+  const parts = raw.split(',').map(part => part.trim())
+  const valid = parts.length >= 1 && parts.length <= 3
+    && parts.every(part => /^\d+$/.test(part) && Number(part) <= 30000)
+  if (!valid) throw protocolError('NEXUS_DSH_AGY_RETRY_BACKOFF_MS must be 1-3 integers between 0 and 30000')
+  return parts.map(Number)
+}
+
+// The record carries explicit evidence that the operation produced no effect.
+// A missing key is not proof; any recorded effect or changed path excludes retry.
+function recordProvesNoEffect(record) {
+  if (!record || typeof record !== 'object') return false
+  if (record.first_effect_at !== null) return false
+  // Any contradictory effect evidence in the same record fails closed.
+  if (record.provider_effect === true || record.has_unresolved_external_effect === true) return false
+  if (typeof record.scope_validation_state === 'string' && record.scope_validation_state.startsWith('VIOLATION')) return false
+  const changed = record.observed_changed_paths
+  if (changed !== null && changed !== undefined && !(Array.isArray(changed) && changed.length === 0)) return false
+  const reconciliation = record.reconciliation
+  return !(reconciliation && typeof reconciliation === 'object' && reconciliation.retry_permitted === false)
+}
+
+// The canonical dispatcher writes `NEXUS_AGY_DISPATCH {json}` to the operation stderr.
+// Returns the last meta object, or null when absent, unreadable or any meta line is malformed.
+async function readDispatchMeta(stderrPath) {
+  if (typeof stderrPath !== 'string' || !isAbsolute(stderrPath)) return null
+  let text
+  try {
+    if ((await stat(stderrPath)).size > DISPATCH_STDERR_MAX_BYTES) return null
+    text = await readFile(stderrPath, 'utf8')
+  } catch {
+    return null
+  }
+  let meta = null
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.startsWith(DISPATCH_META_PREFIX)) continue
+    try {
+      meta = JSON.parse(line.slice(DISPATCH_META_PREFIX.length))
+    } catch {
+      return null
+    }
+    if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return null
+  }
+  return meta
+}
+
+function describeMeta(meta) {
+  if (!meta) return ''
+  const parts = ['status', 'failure_kind', 'reason']
+    .filter(key => typeof meta[key] === 'string' && meta[key] !== '')
+    .map(key => key + '=' + meta[key])
+  return parts.length > 0 ? ' [dispatch ' + parts.join(', ') + ']' : ''
+}
+
+// Typed pre-effect error for a FAILED operation, or null unless the record and the
+// dispatcher meta both prove that no provider effect occurred.
+function classifyFailedOperation(record, meta, operationId) {
+  if (record?.status !== 'FAILED' || !recordProvesNoEffect(record)) return null
+  if (!meta || meta.provider_effect !== false) return null
+  const kind = meta.failure_kind
+  if (record.failure_kind !== null && record.failure_kind !== undefined && record.failure_kind !== kind) return null
+  let code
+  let detail
+  if (meta.status === 'pool_busy' && kind === 'AGY_ACCOUNT_POOL_BUSY') {
+    code = POOL_BUSY_CODE
+    detail = 'Agy account pool busy (no free lease slot) before any provider effect'
+  } else if (kind === QUOTA_PRE_EFFECT_CODE) {
+    code = QUOTA_PRE_EFFECT_CODE
+    detail = 'Agy provider quota exhausted before any provider effect'
+  } else {
+    return null
+  }
+  const error = new LlmError(detail + '; operation ' + operationId + ' FAILED', code)
+  error.effect = 'none'
+  error.retryable = true
+  error.failureKind = kind
+  error.operationId = operationId
+  return error
+}
+
 async function createIntelligenceScratch() {
   const scratch = await mkdtemp(join(tmpdir(), 'nexus-dsh-agy-intelligence-'))
   try {
@@ -461,6 +570,39 @@ export class AgyPoolAdapter extends LlmAdapter {
         'AGY_OUTER_ACTION_CATALOG_EMPTY',
       )
     }
+    const maxRetries = preEffectRetries()
+    const backoff = retryBackoffMs()
+    const poolWait = poolWaitSeconds()
+    let events
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        events = await this.runAttempt(options, actionCatalog, poolWait)
+        break
+      } catch (error) {
+        if (error && typeof error === 'object') error.attempts = attempt
+        // Only provably pre-effect failures get a new canonical operation; every attempt
+        // reserves its own budget slot, so retries cannot bypass the session cap.
+        const retryable = RETRYABLE_PRE_EFFECT_CODES.has(error?.code)
+          && error?.effect === 'none'
+          && attempt <= maxRetries
+        if (!retryable) throw error
+        try {
+          await delay(backoff[Math.min(attempt - 1, backoff.length - 1)], options.signal)
+        } catch (abortError) {
+          throw new LlmError(
+            'DSH request aborted during Agy pre-effect retry backoff',
+            'AGY_OPERATION_ABORTED',
+            { cause: abortError },
+          )
+        }
+      }
+    }
+    yield* events
+  }
+
+  // One physical provider step. The response is validated and projected before any
+  // event is returned, so a thrown error never follows an emitted outer action.
+  async runAttempt(options, actionCatalog, poolWait) {
     const prompt = promptFor(options, actionCatalog)
     const evidenceRef = actionContractEvidence(actionCatalog, prompt)
     const promptPath = join(tmpdir(), 'dsh-agy-' + randomUUID() + '.txt')
@@ -480,6 +622,7 @@ export class AgyPoolAdapter extends LlmAdapter {
       argv.push(
         '--timeout', String(timeoutSeconds()),
         '--max-calls', '1',
+        '--pool-wait-timeout', String(poolWait),
         '--evidence-ref', evidenceRef,
         '--prompt-file', promptPath,
       )
@@ -543,9 +686,10 @@ export class AgyPoolAdapter extends LlmAdapter {
     }
     if (record.status !== 'COMPLETED') {
       await rm(scratchCwd, { recursive: true, force: true }).catch(() => {})
-      throw new LlmError(
+      const meta = await readDispatchMeta(record.stderr_path)
+      throw classifyFailedOperation(record, meta, operationId) ?? new LlmError(
         'Agy operation ' + operationId + ' ended as ' + String(record.status)
-          + (record.failure_kind ? ' (' + record.failure_kind + ')' : ''),
+          + (record.failure_kind ? ' (' + record.failure_kind + ')' : '') + describeMeta(meta),
         'AGY_OPERATION_FAILED',
       )
     }
@@ -556,11 +700,25 @@ export class AgyPoolAdapter extends LlmAdapter {
     } finally {
       await rm(scratchCwd, { recursive: true, force: true }).catch(() => {})
     }
+    const noEffect = recordProvesNoEffect(record)
+    const invalid = error => {
+      if (noEffect) return preEffectError(error)
+      // A recorded or unprovable effect excludes the pre-effect retry class.
+      const wrapped = new LlmError(
+        String(error?.message ?? error) + '; operation ' + operationId + ' has no proof of zero effect',
+        'PROVIDER_PROTOCOL_INVALID_EFFECT_UNPROVEN',
+        { cause: error },
+      )
+      wrapped.originalCode = error?.code ?? null
+      wrapped.effect = 'unknown'
+      wrapped.retryable = false
+      return wrapped
+    }
     let payload
     try {
       payload = decodeJson(rawPayload)
     } catch (error) {
-      throw preEffectError(error)
+      throw invalid(error)
     }
     if (payload.kind === 'dsh_action') {
       let entry = actionCatalog.find(item => item.action_id === payload.action_id)
@@ -574,34 +732,38 @@ export class AgyPoolAdapter extends LlmAdapter {
         if (byLabel.length === 1) entry = byLabel[0]
       }
       if (!entry || !entry.semantic_label) {
-        throw preEffectError(new LlmError(
+        throw invalid(new LlmError(
           'Agy requested unavailable DSH action: ' + String(payload.action_id),
           'AGY_TOOL_NOT_AVAILABLE',
         ))
       }
       if (!payload.arguments || Array.isArray(payload.arguments) || typeof payload.arguments !== 'object') {
-        throw preEffectError(protocolError('Agy outer action arguments must be a JSON object'))
+        throw invalid(protocolError('Agy outer action arguments must be a JSON object'))
       }
       const args = JSON.stringify(withRequiredDescription(entry, payload.arguments))
       const id = 'agy-call-' + randomUUID()
-      yield { type: 'block-start', index: 0, blockType: 'tool-call' }
-      yield { type: 'tool-call-delta', index: 0, id, name: entry.semantic_label, argumentsDelta: args }
-      yield {
-        type: 'block-end',
-        index: 0,
-        block: { type: 'tool-call', id, name: entry.semantic_label, arguments: args },
-      }
-      yield { type: 'finish', reason: { kind: 'tool-calls' } }
-      return
+      return [
+        { type: 'block-start', index: 0, blockType: 'tool-call' },
+        { type: 'tool-call-delta', index: 0, id, name: entry.semantic_label, argumentsDelta: args },
+        {
+          type: 'block-end',
+          index: 0,
+          block: { type: 'tool-call', id, name: entry.semantic_label, arguments: args },
+        },
+        { type: 'finish', reason: { kind: 'tool-calls' } },
+      ]
     }
 
     if (payload.kind !== 'text' || typeof payload.text !== 'string') {
-      throw preEffectError(protocolError('Agy protocol requires kind=text or kind=dsh_action'))
+      throw invalid(protocolError('Agy protocol requires kind=text or kind=dsh_action'))
     }
-    yield { type: 'block-start', index: 0, blockType: 'text' }
-    if (payload.text.length > 0) yield { type: 'text-delta', index: 0, text: payload.text }
-    yield { type: 'block-end', index: 0, block: { type: 'text', text: payload.text } }
-    yield { type: 'finish', reason: { kind: 'stop' } }
+    const events = [{ type: 'block-start', index: 0, blockType: 'text' }]
+    if (payload.text.length > 0) events.push({ type: 'text-delta', index: 0, text: payload.text })
+    events.push(
+      { type: 'block-end', index: 0, block: { type: 'text', text: payload.text } },
+      { type: 'finish', reason: { kind: 'stop' } },
+    )
+    return events
   }
 }
 
