@@ -26,6 +26,7 @@
 | nexus/feedback | tests/events, tests/unit/evaluation/test_policy_delta.py, tests/unit/committee/test_data_flow_v267.py, tests/architecture/test_boundaries_v3.py, tests/architecture/test_boundaries_v4.py | active | high | developer_feedback_contract |
 | nexus/committee/controller.py | tests/unit/committee/test_data_flow_v267.py, tests/research/test_candidate_evidence_committee_integration.py | active | high | candidate_evidence_committee_sidecar_contract |
 | nexus/committee/diversity_sampler.py | tests/unit/committee/test_data_flow_v267.py, tests/architecture/test_boundaries_v4.py | active | high | issue51_proven_orphan_cleanup_contract |
+| nexus/search/sampler.py | tests/unit/committee/search/test_diversity.py, tests/architecture/test_boundaries_v2.py, tests/architecture/test_boundaries_v3.py | active | high | issue653_proven_orphan_retirement_contract |
 | nexus/env/diff_report.py | tests/architecture/test_boundaries_v3.py, tests/architecture/test_boundaries_v4.py | active | high | issue51_proven_orphan_cleanup_contract |
 | nexus/env/snapshot.py | tests/architecture/test_boundaries_v3.py, tests/architecture/test_boundaries_v4.py | active | high | issue51_proven_orphan_cleanup_contract |
 | nexus/policy/compatibility.py | tests/services/test_policy_gate.py, tests/architecture/test_boundaries_v3.py, tests/architecture/test_boundaries_v4.py | active | high | issue51_proven_orphan_cleanup_contract |
