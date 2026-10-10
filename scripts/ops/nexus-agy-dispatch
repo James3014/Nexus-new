@@ -3548,6 +3548,9 @@ def dispatch_run(
                     reconciliation_required = True
             elif kind == AccountFailureKind.MODEL_OR_TASK_ERROR:
                 last_kind = "DISPATCH_MODEL_CONTRACT_REJECTED"
+                if attempt_changed_paths:
+                    provider_effect_observed = True
+                    reconciliation_required = True
             elif kind == AccountFailureKind.QUOTA_EXHAUSTED:
                 if attempt_changed_paths:
                     last_kind = "PROVIDER_QUOTA_EXHAUSTED_AFTER_EFFECT"

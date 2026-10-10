@@ -1082,7 +1082,7 @@ def test_canonical_agy_dispatch_identity_matches_source() -> None:
     dispatch_path = repo_root / "scripts" / "ops" / "nexus-agy-dispatch"
 
     assert hashlib.sha256(dispatch_path.read_bytes()).hexdigest() == CANONICAL_AGY_DISPATCH_SHA256
-    assert CANONICAL_AGY_EXECUTION_GENERATION == "AGY_GEMINI_3_8_FLASH_MEDIUM_V9"
+    assert CANONICAL_AGY_EXECUTION_GENERATION == "AGY_GEMINI_3_8_FLASH_MEDIUM_V10"
 
 
 def test_agy_identity_preflight_rejects_model_or_transport_drift(
