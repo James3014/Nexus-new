@@ -2366,7 +2366,7 @@ def test_g07_test_h_drift_generation_revalidates_g07(monkeypatch):
     """Test H: generation N drift re-validates fresh merge fields; stale validation is not reused."""
     old_main = "d" * 40
     new_main = "e" * 40
-    int_head = "01" * 20
+    newer_main = "f" * 40
 
     ev, req = _setup_g07_test(monkeypatch, current_main_sha=old_main, base_sha=old_main)
     pr_body = _make_g07_pr_body([(1232, "KEEP_OPEN")], extra_prose="#1232 remains open.")
@@ -2388,32 +2388,35 @@ def test_g07_test_h_drift_generation_revalidates_g07(monkeypatch):
         )(),
     )
 
-    # Generation 1 dynamic fields provider that provides fresh base and head
-    def dynamic_fields(*, repository, pull_request_number):
-        return FinalMergeFields(
-            pr_number=pull_request_number,
-            head_sha=int_head,
-            base_sha=new_main,
+    # Fresh base and head fields for each generation attempt
+    fields_by_generation = [
+        FinalMergeFields(
+            pr_number=ev.pull_request_number,
+            head_sha=f"{gen:02x}" * 20,
+            base_sha=base,
             merge_method="squash",
             pr_body=pr_body,
-            commit_title="neutral generation 1",
+            commit_title=f"neutral generation {gen}",
         )
+        for gen, base in ((1, new_main), (2, newer_main))
+    ]
 
     port = SpyGitHubCompletionPort(
-        main_states=[(new_main, "2" * 40)],
+        main_states=[(new_main, "2" * 40), (new_main, "2" * 40), (newer_main, "3" * 40)],
         default_pr_head="b" * 40,
         cas_merge_results=[
-            CasMergeResult(status=CasMergeStatus.BASE_MOVED),  # Gen 0 drifts
+            CasMergeResult(status=CasMergeStatus.BASE_MOVED),  # Gen 1 drifts at CAS
             CasMergeResult(status=CasMergeStatus.SUCCESS, merged_sha="a" * 40),
         ],
-        final_merge_fields=dynamic_fields,
+        final_merge_fields=fields_by_generation,
         issue_states={1232: "open"},
     )
     res = run_github_completion_loop(initial_evidence=ev, request=req, port=port)
     assert res.outcome is CompletionLoopOutcome.COMPLETED
-    assert res.generation == 1
+    assert res.generation == 2
     # Verify read_final_merge_fields was called on both generation attempts
-    assert len(port.read_final_merge_fields_calls) >= 2
+    assert len(port.read_final_merge_fields_calls) == 2
+    assert [c["expected_base_sha"] for c in port.cas_merge_calls] == [new_main, newer_main]
 
 
 def test_g07_test_i_post_effect_keep_open_actual_open_completed(monkeypatch):
@@ -3028,6 +3031,85 @@ def test_issue1384_criterion7_cas_base_moved_reenters_without_owner(monkeypatch)
     assert port.cas_merge_calls[0]["expected_base_sha"] == m1_sha
     assert port.cas_merge_calls[1]["expected_base_sha"] == m2_sha
     assert result.evidence.integration.generation == 2
+
+
+def test_issue1384_cas_base_moved_with_stable_main_blocks_without_blind_retry(monkeypatch):
+    """CAS BASE_MOVED must be corroborated by observed main movement; a stable main
+    contradicts the signal and must fail closed instead of re-merging the same generation."""
+    m0_sha = "00" * 20
+    m0_tree = "00" * 20
+    m1_sha = "11" * 20
+    m1_tree = "11" * 20
+
+    initial_ev = _base_evidence(base_sha=m0_sha, current_main_sha=m0_sha)
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+
+    port = SpyGitHubCompletionPort(
+        main_states=[(m1_sha, m1_tree)],
+        default_pr_head="b" * 40,
+        tree_shas={m0_sha: m0_tree, m1_sha: m1_tree},
+        default_changed_paths=("docs/unrelated.md",),
+        cas_merge_results=[
+            CasMergeResult(status=CasMergeStatus.BASE_MOVED, reason="contradictory"),
+            CasMergeResult(status=CasMergeStatus.BASE_MOVED, reason="contradictory"),
+            CasMergeResult(status=CasMergeStatus.SUCCESS, merged_sha="aa" * 20),
+        ],
+    )
+
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {"valid": True, "proven_paths": tuple(k["changed_main_paths"])},
+    )
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.build_impact_plan",
+        lambda *a, **k: type(
+            "Plan",
+            (),
+            {
+                "impact_class": "DOCS_GOVERNANCE",
+                "unmatched_paths": [],
+                "changed_paths": ["docs/unrelated.md"],
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.github_completion_loop.resolve_durable_merge_authorization",
+        lambda *a, **k: evaluate_action(ctx, req),
+    )
+
+    result = run_github_completion_loop(initial_evidence=initial_ev, request=req, port=port)
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert result.reason == f"CAS_BASE_MOVED_UNCORROBORATED: main still {m1_sha}"
+    assert result.generation == 1
+    assert result.merged_commit_sha is None
+    assert len(port.cas_merge_calls) == 1
+    assert port.cas_merge_calls[0]["expected_base_sha"] == m1_sha
+    assert len(port.materialize_calls) == 1
+    assert port.reconcile_calls == []
+
+
+def test_issue1384_cas_base_moved_with_stable_main_blocks_at_entry_generation(monkeypatch):
+    """Without any prior drift, a stable-main BASE_MOVED still blocks after one CAS attempt."""
+    ev, req = _setup_g07_test(monkeypatch)
+    port = SpyGitHubCompletionPort(
+        main_states=[(ev.base_sha, ev.tree_sha)],
+        default_pr_head=ev.head_sha,
+        cas_merge_results=[
+            CasMergeResult(status=CasMergeStatus.BASE_MOVED),
+            CasMergeResult(status=CasMergeStatus.SUCCESS, merged_sha="a" * 40),
+        ],
+    )
+
+    result = run_github_completion_loop(initial_evidence=ev, request=req, port=port)
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert result.reason == f"CAS_BASE_MOVED_UNCORROBORATED: main still {ev.base_sha}"
+    assert result.generation == 0
+    assert len(port.cas_merge_calls) == 1
+    assert port.materialize_calls == []
+    assert port.reconcile_calls == []
 
 
 def test_issue1384_criterion8_resume_from_existing_generation(monkeypatch):
