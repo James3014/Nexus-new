@@ -353,6 +353,37 @@ def test_classifier_dispatch_errors_fail_open_to_default(
     assert _patches(argv) == [str(ctx["patch"])]
 
 
+@pytest.mark.parametrize(
+    ("requested", "dispatched"),
+    [(None, "45"), ("0.5", "1"), ("0.01", "1"), ("1", "1"), ("44.5", "45"), ("120", "120")],
+)
+def test_canonical_dispatch_timeout_is_at_least_one_whole_second(
+    tmp_path: Path, monkeypatch, requested: str | None, dispatched: str
+) -> None:
+    # A sub-second --route-classifier-timeout must never reach the dispatcher as
+    # `--timeout 0`; the default (A/B-measured) 45s path is unchanged.
+    ctx = _setup(tmp_path, monkeypatch)
+    extra = () if requested is None else ("--route-classifier-timeout", requested)
+    route = _auto(ctx, _answer("light"), extra=extra)["route"]
+    assert route["fallback_reason"] is None
+    start = _agy_argvs(ctx)[0]
+    assert start[start.index("--timeout") + 1] == dispatched
+
+
+def test_fractional_classifier_deadline_still_fails_open_to_default(
+    tmp_path: Path, monkeypatch
+) -> None:
+    ctx = _setup(tmp_path, monkeypatch)
+    monkeypatch.setenv("FAKE_AGY_STATUS", "RUNNING")
+    route = _auto(ctx, _answer("light"), extra=("--route-classifier-timeout", "0.2"))["route"]
+    assert route["fallback_reason"] == "CLASSIFIER_TIMEOUT"
+    assert route["model"] == "gemini-3.1-pro-high"
+    start = _agy_argvs(ctx)[0]
+    assert start[start.index("--timeout") + 1] == "1"
+    (argv,) = pc._calls(ctx)
+    assert _patches(argv) == [str(ctx["patch"])]
+
+
 def test_missing_dispatcher_binary_fails_open(tmp_path: Path, monkeypatch) -> None:
     ctx = _setup(tmp_path, monkeypatch)
     monkeypatch.setenv("NEXUS_AGY_DISPATCH", str(tmp_path / "absent"))
