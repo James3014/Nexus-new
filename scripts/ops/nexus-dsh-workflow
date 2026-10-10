@@ -2358,6 +2358,242 @@ def _load_prior_receipts(paths: Sequence[str]) -> list[tuple[str, str]]:
     return out
 
 
+# DSH ``workspace-write`` grants writes only under the session cwd (plus host temp
+# areas). Exact-worktree Git metadata (index, index.lock, objects, refs) is
+# therefore writable only when it physically lives in ``<repo_root>/.git``. A
+# linked worktree keeps it in the parent repository's common Git dir, so DSH is
+# never spawned there; the supported mode is an explicit standalone clone (#1607,
+# donor pattern #1342). The DSH sandbox itself is unchanged.
+GIT_METADATA_CONTRACT_SCHEMA = "nexus.dsh_git_metadata_contract.v1"
+STANDALONE_CLONE_SCHEMA = "nexus.dsh_standalone_clone.v1"
+STANDALONE_CLAIM_CEILING = "DSH_EXECUTION_SURFACE_ONLY_NO_COPY_BACK_NO_PUBLICATION_AUTHORITY"
+GIT_IDENTITY_ENV = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_COMMON_DIR",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_NAMESPACE",
+)
+FULL_REVISION_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+ORIGIN_SLUG_RE = re.compile(r"[:/]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?$")
+
+
+def _identity_git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    env = {k: v for k, v in os.environ.items() if k not in GIT_IDENTITY_ENV}
+    return subprocess.run(
+        ["git", *args], cwd=str(repo), env=env, text=True, capture_output=True, check=False
+    )
+
+
+def git_metadata_contract(repo_root: Path, *, env: dict[str, str] | None = None) -> dict[str, Any]:
+    """Whether DSH Git metadata operations for ``repo_root`` stay inside its workspace."""
+    root = repo_root.expanduser().resolve()
+    result: dict[str, Any] = {
+        "schema": GIT_METADATA_CONTRACT_SCHEMA,
+        "contract": "STANDALONE_REAL_GIT_DIR_INSIDE_WORKSPACE",
+        "repo_root": str(root),
+        "ok": False,
+    }
+
+    def fail(code: str, detail: str, **extra: Any) -> dict[str, Any]:
+        return {**result, **extra, "reason_code": code, "detail": detail}
+
+    current_env = os.environ if env is None else env
+    overrides = sorted(key for key in GIT_IDENTITY_ENV if current_env.get(key))
+    if overrides:
+        return fail(
+            "DSH_GIT_IDENTITY_AMBIGUOUS",
+            f"Git identity environment overrides are set: {', '.join(overrides)}",
+        )
+    if not root.is_dir():
+        return fail("DSH_GIT_IDENTITY_UNRESOLVED", "repo root is not a directory")
+    proc = _identity_git(
+        root,
+        "rev-parse",
+        "--path-format=absolute",
+        "--show-toplevel",
+        "--git-dir",
+        "--git-common-dir",
+    )
+    lines = proc.stdout.splitlines()
+    if proc.returncode != 0 or len(lines) != 3:
+        return fail("DSH_GIT_IDENTITY_UNRESOLVED", "repo root is not a resolvable Git worktree")
+    toplevel, git_dir, common_dir = (Path(line).resolve() for line in lines)
+    paths = {"git_dir": str(git_dir), "git_common_dir": str(common_dir)}
+    if toplevel != root:
+        return fail(
+            "DSH_GIT_IDENTITY_AMBIGUOUS",
+            f"repo root is not the exact Git toplevel ({toplevel})",
+            **paths,
+        )
+    dot_git = root / ".git"
+    if dot_git.is_symlink():
+        return fail("DSH_GIT_IDENTITY_AMBIGUOUS", ".git is a symlink", **paths)
+    if dot_git.is_file() or git_dir != common_dir:
+        return fail(
+            "DSH_LINKED_WORKTREE_GIT_METADATA_OUTSIDE_WORKSPACE",
+            (
+                f"repo root is a linked Git worktree; its git dir {git_dir} and common dir "
+                f"{common_dir} are outside the DSH workspace-write root, so exact-worktree Git "
+                "metadata operations are denied. Run `nexus-dsh-workflow prepare-standalone "
+                "--repository <owner/name> --source-repo-root <this root> --base-revision "
+                "<full sha> --target <path>` and start DSH with --repo-root <target>"
+            ),
+            **paths,
+        )
+    if not dot_git.is_dir() or git_dir != dot_git:
+        return fail(
+            "DSH_GIT_IDENTITY_AMBIGUOUS", "git dir is not the real <repo_root>/.git", **paths
+        )
+    alternates = common_dir / "objects" / "info" / "alternates"
+    if alternates.exists():
+        return fail(
+            "DSH_GIT_OBJECT_STORE_SHARED",
+            "object store borrows another repository through alternates",
+            **paths,
+        )
+    return {**result, **paths, "ok": True, "reason_code": None}
+
+
+def _origin_slug(url: str) -> str | None:
+    match = ORIGIN_SLUG_RE.search(url.strip())
+    return match.group(1) if match else None
+
+
+def _within(path: Path, root: Path) -> bool:
+    return path == root or root in path.parents
+
+
+def _validate_standalone_target(target: Path, *, origin: str, base: str) -> dict[str, Any]:
+    contract = git_metadata_contract(target)
+    remote = _identity_git(target, "remote", "get-url", "origin").stdout.strip()
+    head = _identity_git(target, "rev-parse", "--verify", "HEAD").stdout.strip()
+    if not contract["ok"] or remote != origin or head != base:
+        raise DshWorkflowError(
+            "STANDALONE_TARGET_IDENTITY_MISMATCH",
+            f"target is not an exact standalone clone of {origin} at {base}: "
+            f"contract={contract.get('reason_code')} origin={remote!r} head={head!r}",
+        )
+    status = _identity_git(target, "status", "--porcelain", "--untracked-files=all")
+    if status.returncode != 0 or status.stdout:
+        raise DshWorkflowError("STANDALONE_TARGET_DIRTY", "standalone target is not clean")
+    return contract
+
+
+def prepare_standalone_clone(
+    *, repository: str, source_repo_root: Path, base_revision: str, target: Path
+) -> dict[str, Any]:
+    """Create or exactly reuse a clean standalone clone; never copies work back."""
+    repository = _validate_repository(repository)
+    if any(os.environ.get(key) for key in GIT_IDENTITY_ENV):
+        raise DshWorkflowError("STANDALONE_SOURCE_AMBIGUOUS", "Git identity overrides are set")
+    source = source_repo_root.expanduser().resolve()
+    probe = _identity_git(
+        source, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"
+    )
+    lines = probe.stdout.splitlines()
+    if probe.returncode != 0 or len(lines) != 2 or Path(lines[0]).resolve() != source:
+        raise DshWorkflowError(
+            "STANDALONE_SOURCE_AMBIGUOUS", "source repo root is not an exact Git toplevel"
+        )
+    common_dir = Path(lines[1]).resolve()
+    origin = _identity_git(source, "remote", "get-url", "origin").stdout.strip()
+    if not origin:
+        raise DshWorkflowError("STANDALONE_SOURCE_NO_ORIGIN", "source has no origin remote")
+    if _origin_slug(origin) != repository:
+        raise DshWorkflowError(
+            "STANDALONE_REPOSITORY_MISMATCH",
+            f"source origin {origin!r} does not identify {repository}",
+        )
+    base = base_revision.strip()
+    if not FULL_REVISION_RE.fullmatch(base):
+        raise DshWorkflowError("STANDALONE_BASE_INVALID", "base revision must be a full object id")
+    if _identity_git(source, "cat-file", "-e", f"{base}^{{commit}}").returncode != 0:
+        raise DshWorkflowError("STANDALONE_BASE_UNAVAILABLE", f"base {base} is not in the source")
+    dest = target.expanduser().resolve()
+    if any(_within(dest, root) or _within(root, dest) for root in (source, common_dir)):
+        raise DshWorkflowError(
+            "STANDALONE_TARGET_UNSAFE",
+            "target must be disjoint from the source worktree and its common Git dir",
+        )
+    if dest.exists() and not dest.is_dir():
+        raise DshWorkflowError("STANDALONE_TARGET_UNSAFE", "target exists and is not a directory")
+
+    reused = dest.is_dir() and any(dest.iterdir())
+    if not reused:
+        created = not dest.exists()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+
+        def run(cwd: Path, *args: str) -> None:
+            proc = _identity_git(cwd, *args)
+            if proc.returncode == 0:
+                return
+            if created:
+                shutil.rmtree(dest, ignore_errors=True)
+            else:
+                for child in dest.iterdir():
+                    if child.is_dir() and not child.is_symlink():
+                        shutil.rmtree(child, ignore_errors=True)
+                    else:
+                        child.unlink(missing_ok=True)
+            raise DshWorkflowError(
+                "STANDALONE_CLONE_FAILED", f"git {args[0]} failed: {proc.stderr.strip()[-500:]}"
+            )
+
+        # --no-local: independent object store, no hardlinks, no alternates, no
+        # linked-worktree metadata. origin is restored to the exact source identity.
+        run(dest.parent, "clone", "--quiet", "--no-local", "--no-checkout", str(source), str(dest))
+        run(dest, "remote", "set-url", "origin", origin)
+        if _identity_git(dest, "cat-file", "-e", f"{base}^{{commit}}").returncode != 0:
+            run(dest, "fetch", "--quiet", "--no-tags", str(source), base)
+        run(dest, "-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", base)
+    contract = _validate_standalone_target(dest, origin=origin, base=base)
+    body: dict[str, Any] = {
+        "schema": STANDALONE_CLONE_SCHEMA,
+        "claim_ceiling": STANDALONE_CLAIM_CEILING,
+        "generated_at": _utc_now(),
+        "repository": repository,
+        "base_revision": base,
+        "origin_url": origin,
+        "source_repo_root": str(source),
+        "source_git_common_dir": str(common_dir),
+        "target": str(dest),
+        "reused": reused,
+        "git_metadata_contract": contract,
+        "copy_back": "NONE",
+        "publication_authority": "NONE",
+    }
+    return {**body, "receipt_hash": _sha256_bytes(_canonical_json(body).encode("utf-8"))}
+
+
+def _main_prepare_standalone(args: argparse.Namespace) -> int:
+    try:
+        receipt = prepare_standalone_clone(
+            repository=args.repository,
+            source_repo_root=Path(args.source_repo_root),
+            base_revision=args.base_revision,
+            target=Path(args.target),
+        )
+    except (DshWorkflowError, OSError) as exc:
+        print(
+            json.dumps(
+                {
+                    "schema": STANDALONE_CLONE_SCHEMA,
+                    "claim_ceiling": STANDALONE_CLAIM_CEILING,
+                    "decision": "BLOCKED",
+                    "reason_code": getattr(exc, "code", "STANDALONE_CLONE_FAILED"),
+                    "detail": str(exc),
+                },
+                sort_keys=True,
+            )
+        )
+        return EXIT_BLOCKED
+    print(json.dumps(receipt, sort_keys=True))
+    return 0
+
+
 def build_phase_task(
     *,
     phase: str,
@@ -2620,6 +2856,7 @@ def _run_phase_turn(
 
     subject = issue_subject(repository, args.issue, repo_root)
     sibling = find_dirty_sibling(root, repository, args.issue)
+    git_contract = git_metadata_contract(repo_root)
     if sibling is not None:
         preflight = _blocked_preflight(
             subject,
@@ -2631,8 +2868,13 @@ def _run_phase_turn(
         )
         preflight["quarantine_receipt"] = sibling.get("quarantine_receipt")
         preflight["blocking_session_id"] = sibling["session_id"]
+    elif not git_contract["ok"]:
+        preflight = _blocked_preflight(
+            subject, reason_code=git_contract["reason_code"], detail=git_contract["detail"]
+        )
     else:
         preflight = run_issue_preflight(subject, doctor_bin=args.doctor_bin)
+    preflight["git_metadata_contract"] = git_contract
     preflight["invocation"] = "start-phase"
     preflight["phase"] = phase
     receipt_path = persist_preflight(root, preflight)
@@ -3341,6 +3583,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     p_green.add_argument("--timeout", type=float, default=600.0)
     p_green.add_argument("--red-receipt")
 
+    p_clone = sub.add_parser("prepare-standalone")
+    p_clone.add_argument("--repository", required=True)
+    p_clone.add_argument("--source-repo-root", required=True)
+    p_clone.add_argument("--base-revision", required=True)
+    p_clone.add_argument("--target", required=True)
+
     p_ack = sub.add_parser("ack-turn-failure")
     p_ack.add_argument("--session-id", required=True)
     p_ack.add_argument("--reason", required=True)
@@ -3351,6 +3599,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _main_red_gate(args)
     if args.command == "green-gate":
         return _main_green_gate(args)
+    if args.command == "prepare-standalone":
+        return _main_prepare_standalone(args)
     root = _state_root(getattr(args, "state_root", None))
 
     try:
@@ -3377,6 +3627,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         turn_state = load_turn_state(root, args.session_id)
         previous_turn = turn_state.get("state") if turn_state else None
+        git_contract = git_metadata_contract(Path(str(binding["repo_root"])))
         if previous_turn == TURN_FAILED_DIRTY:
             assert turn_state is not None
             preflight = _blocked_preflight(
@@ -3388,8 +3639,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ),
             )
             preflight["quarantine_receipt"] = turn_state.get("quarantine_receipt")
+        elif not git_contract["ok"]:
+            preflight = _blocked_preflight(
+                binding, reason_code=git_contract["reason_code"], detail=git_contract["detail"]
+            )
         else:
             preflight = run_preflight(binding, doctor_bin=args.doctor_bin)
+        preflight["git_metadata_contract"] = git_contract
         if previous_turn in (TURN_FAILED_DIRTY, TURN_FAILED_CLEAN):
             preflight["previous_turn_state"] = previous_turn
         preflight["invocation"] = args.command
