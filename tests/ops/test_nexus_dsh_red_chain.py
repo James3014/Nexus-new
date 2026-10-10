@@ -393,3 +393,158 @@ def test_red_contract_bound_to_other_issue_blocks_before_spawn(tmp_path: Path) -
     assert proc.returncode == guard.EXIT_BLOCKED
     assert json.loads(proc.stdout)["reason_code"] == "RED_CONTRACT_INVALID"
     assert pc._calls(ctx) == []
+
+
+# The RED oracle binds the first assertion; a GREEN implementation that satisfies it
+# but trips the second, never-RED-verified assertion is a RED oracle defect (#1665).
+ORACLE_TEST = (
+    "import mod\n\n\ndef test_value_is_three():\n"
+    "    assert mod.value == 3\n"
+    "    assert getattr(mod, 'extra', 0) == 4\n"
+)
+GATE_KEYS = {"kind", "decision", "reason_codes", "receipt_hash", "receipt_path"}
+
+
+def _green_receipts(out: dict) -> list[dict]:
+    return [
+        json.loads(Path(p["gate"]["receipt_path"]).read_text(encoding="utf-8"))
+        for p in out["phases"]
+        if p["gate"] and p["gate"]["kind"] == "green"
+    ]
+
+
+def test_continue_to_green_passes_exact_red_receipt_to_every_green_gate(tmp_path: Path) -> None:
+    ctx = _setup(tmp_path)
+    plan = [
+        _red("s-red", GOOD_TEST, goal=True),
+        {"session": "s-green", "write": pc._value(2)},
+        {"session": "s-repair-1", "write": pc._value(3)},
+    ]
+    proc = _start_red(ctx, plan, "--auto-repair", "1", *_green_args(ctx))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    out = pc._chain(ctx, proc)
+    assert out["stop_reason"] == "GREEN_READY"
+    red_path, red_hash = out["red_receipt_path"], out["red_receipt_hash"]
+    assert red_path == out["phases"][0]["gate"]["receipt_path"]
+    # The header's exact gate argv is the one the guard evaluates, RED receipt included.
+    assert shlex.split(out["green_gate_command"])[-2:] == ["--red-receipt", red_path]
+    calls = pc._calls(ctx)
+    assert f"`{out['green_gate_command']}`" in calls[1][-1]
+    assert f"`{out['green_gate_command']}`" in calls[2][-1]
+    gates = [p["gate"] for p in out["phases"][1:]]
+    assert [g["decision"] for g in gates] == ["REVISE_GREEN", "GREEN_READY"]
+    for gate in gates:
+        assert gate["red_receipt_path"] == red_path
+        assert gate["red_receipt_hash"] == red_hash
+        assert gate["red_oracle"] == {"status": "BOUND", "red_receipt_hash": red_hash}
+    receipts = _green_receipts(out)
+    assert [r["red_oracle"] for r in receipts] == [
+        {"status": "BOUND", "red_receipt_hash": red_hash}
+    ] * 2
+    # Failing on the very assertion RED bound is an ordinary implementation failure.
+    assert receipts[0]["reason_codes"] == ["TARGET_TESTS_NOT_PASSING"]
+    assert receipts[0]["node_results"][0]["oracle_classification"] == "IMPLEMENTATION_FAILURE"
+
+
+def test_continue_to_green_reports_red_oracle_defect_through_chain(tmp_path: Path) -> None:
+    ctx = _setup(tmp_path)
+    plan = [
+        _red("s-red", ORACLE_TEST, goal=True),
+        {"session": "s-green", "write": pc._value(3)},
+        {"session": "s-repair-1", "write": pc._value(3)},
+    ]
+    proc = _start_red(ctx, plan, "--auto-repair", "1", *_green_args(ctx))
+    assert proc.returncode == guard.EXIT_BLOCKED, proc.stdout + proc.stderr
+    out = pc._chain(ctx, proc)
+    assert out["phases"][0]["gate"]["decision"] == "RED_READY"
+    assert out["stop_reason"] == "AUTO_REPAIR_EXHAUSTED"
+    gates = [p["gate"] for p in out["phases"][1:]]
+    assert [p["phase"] for p in out["phases"]] == ["red", "green", "repair"]
+    for gate in gates:
+        assert gate["decision"] == "REVISE_GREEN"
+        assert "RED_ORACLE_DEFECT" in gate["reason_codes"]
+        assert "TARGET_TESTS_NOT_PASSING" not in gate["reason_codes"]
+    for receipt in _green_receipts(out):
+        node = receipt["node_results"][0]
+        assert node["oracle_classification"] == "RED_ORACLE_DEFECT"
+        assert node["oracle_detail"] == "ASSERTION_DIFFERS_FROM_RED"
+        assert receipt["red_oracle"]["red_receipt_hash"] == out["red_receipt_hash"]
+
+
+@pytest.mark.parametrize("mode", ["swapped", "tampered"])
+def test_red_receipt_changed_after_red_ready_stops_green_chain(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    mode: str,
+) -> None:
+    ctx = _setup(tmp_path)
+    original = guard.run_green_gate
+
+    def change_then_gate(**kwargs):
+        path = kwargs["red_receipt"]
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if mode == "swapped":
+            # A different, self-consistent RED_READY receipt at the same path.
+            body = {k: v for k, v in payload.items() if k not in ("receipt_hash", "receipt_path")}
+            body["generated_at"] = "2000-01-01T00:00:00Z"
+            payload = guard._red_receipt(body)
+        else:
+            payload["changed_test_paths"] = ["elsewhere.py"]
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return original(**kwargs)
+
+    monkeypatch.setattr(guard, "run_green_gate", change_then_gate)
+    plan = [_red("s-red", GOOD_TEST, goal=True), {"session": "s-green", "write": pc._value(3)}]
+    ctx["plan"].write_text(json.dumps(plan), encoding="utf-8")
+    monkeypatch.setenv("FAKE_DSH_CALLS", str(ctx["calls"]))
+    monkeypatch.setenv("FAKE_DSH_PLAN", str(ctx["plan"]))
+    code = guard.main([
+        "start-phase",
+        "--repository",
+        pc.REPO,
+        "--issue",
+        str(pc.ISSUE),
+        "--phase",
+        "red",
+        "--repo-root",
+        str(ctx["repo"]),
+        "--dsh-home",
+        str(ctx["home"]),
+        "--phase-contract",
+        str(ctx["contract"]),
+        "--state-root",
+        str(ctx["state"]),
+        "--doctor-bin",
+        str(ctx["doctor"]),
+        "--dsh-bin",
+        str(ctx["dsh"]),
+        "--red-contract",
+        str(ctx["red"]),
+        "--auto-repair",
+        "2",
+        *_green_args(ctx),
+    ])
+    out = json.loads(capsys.readouterr().out)
+    assert code == guard.EXIT_BLOCKED
+    assert out["stop_reason"] == "RED_RECEIPT_INVALID"
+    assert out["repairs_used"] == 0
+    assert [p["phase"] for p in out["phases"]] == ["red", "green"]
+
+
+def test_green_chain_without_continue_to_green_is_unchanged(tmp_path: Path) -> None:
+    ctx = _setup(tmp_path)
+    (ctx["repo"] / "test_red.py").write_text(ORACLE_TEST, encoding="utf-8")
+    proc = pc._start(
+        ctx, [{"session": "s-green", "write": pc._value(3)}], "--green-contract", str(ctx["green"])
+    )
+    assert proc.returncode == guard.EXIT_BLOCKED, proc.stdout + proc.stderr
+    out = pc._chain(ctx, proc)
+    assert "--red-receipt" not in out["green_gate_command"]
+    assert out["stop_reason"] == "AUTO_REPAIR_EXHAUSTED"
+    gate = out["phases"][0]["gate"]
+    assert set(gate) == GATE_KEYS
+    assert gate["reason_codes"] == ["TARGET_TESTS_NOT_PASSING"]
+    (receipt,) = _green_receipts(out)
+    assert "red_oracle" not in receipt
+    assert "oracle_classification" not in receipt["node_results"][0]
