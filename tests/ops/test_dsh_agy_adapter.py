@@ -401,11 +401,26 @@ def test_prompt_requires_bash_description(tmp_path: Path) -> None:
     assert "Every bash action must include a short description argument." in prompt
 
 
-def test_adapter_advertises_unchanged_context_budget(tmp_path: Path) -> None:
+def test_adapter_advertises_transport_effective_context_budget(tmp_path: Path) -> None:
+    # #1666: DSH compaction-basic triggers at floor(min(W*0.8, W - maxTokens - 65536)).
+    # Agy summarized a gemini-3.1-pro-high trajectory once it passed ~108k provider tokens,
+    # and the adapter prompt costs ~2.0-2.3 provider tokens per DSH-estimated token, so the
+    # DSH trigger must stay near 32k estimated tokens (~75k provider tokens at the worst observed ratio).
     proc = _run_node(tmp_path, '{"kind":"text","text":"CANARY_OK"}')
     assert proc.returncode == 0, proc.stderr + proc.stdout
     payload = json.loads(proc.stdout)
-    assert payload["modelInfo"]["context"]["contextWindow"] == 262144
+    window = payload["modelInfo"]["context"]["contextWindow"]
+    max_tokens = payload["modelInfo"]["defaultMaxTokens"]
+    assert window == 131072
+    trigger = int(min(window * 0.8, window - max_tokens - 65536))
+    retained = int(0.16 * (window - max_tokens))
+    assert trigger == 32768
+    assert int(trigger * 2.292) < 108280
+    assert retained < trigger
+    # Default retention must leave room after one compaction: the uncompactable prefix
+    # (24-tool catalog 4633 + system prompt ~700 estimated tokens), the retained tail and
+    # a summary allowance still fit under the trigger, or DSH reports "still above threshold".
+    assert 4633 + 700 + retained + 4096 < trigger
 
 
 def test_tool_capable_prompt_exposes_catalog_and_durable_evidence_ref(tmp_path: Path) -> None:
@@ -430,7 +445,7 @@ def test_tool_capable_prompt_exposes_catalog_and_durable_evidence_ref(tmp_path: 
     assert refs == [
         "dsh_action_contract:v1:"
         f"catalog_count=1:catalog_sha256={catalog_sha256}:"
-        f"prompt_chars={len(prompt)}:context_window=262144"
+        f"prompt_chars={len(prompt)}:context_window=131072"
     ]
 
 
