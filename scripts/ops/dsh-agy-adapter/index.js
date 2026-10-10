@@ -10,7 +10,11 @@ const execFileP = promisify(execFile)
 const DISPATCH = process.env.NEXUS_AGY_DISPATCH || join(homedir(), '.local/bin/nexus-agy-dispatch')
 const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED', 'OUTCOME_UNKNOWN'])
 const NATIVE_TOOL_DENIES = Object.freeze(['command(*)', 'read_file(*)', 'write_file(*)'])
-const ADVERTISED_CONTEXT_WINDOW = 262144
+// Transport-effective budget (#1666), not the model's native window. DSH compacts at
+// floor(min(W * 0.8, W - maxTokens - 65536)) estimated tokens = 32768 here. The flattened
+// Agy prompt costs ~2.0-2.3 provider tokens per DSH-estimated token, which keeps a request
+// at or below ~75k provider tokens, under where Agy's own summarizer took over (~108k-116k).
+const ADVERTISED_CONTEXT_WINDOW = 131072
 const DEFAULT_MAX_TOKENS = 32768
 
 function delay(ms, signal) {
