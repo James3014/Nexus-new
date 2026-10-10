@@ -3,6 +3,7 @@
 | :--- | :--- | :--- | :--- | :--- |
 | uv.lock | tests/product/test_python_runner.py, tests/product/test_http_e2e.py | active | high | frozen_python_oci_lockfile_contract |
 | pyproject.toml | tests/product/test_python_runner.py, tests/product/test_http_e2e.py | active | high | frozen_python_oci_dependency_contract |
+| product/execution/python_runner.py | tests/product/test_python_runner.py, tests/product/test_http_e2e.py | active | high | frozen_python_oci_runner_http_consumer_contract |
 | product | tests/product/test_changeset_certification_adapter.py, tests/product/test_evidence_receipt_hardening.py, tests/product/test_false_completion_benchmark.py, tests/product/test_github_adapter.py, tests/product/test_kernel.py, tests/product/test_robustness.py, tests/product/test_semantic_matrix.py | active | high | product_contract |
 | product/kernel/__init__.py | tests/product/test_kernel.py | active | high | product_kernel_contract |
 | product/adapters/github.py | tests/product/test_github_adapter.py | active | high | product_github_adapter_contract |

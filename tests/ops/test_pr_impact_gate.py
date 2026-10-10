@@ -319,9 +319,11 @@ def test_contract_or_authority_change_escalates_to_tier2():
     assert "tests/services/test_policy_gate.py" in plan.pytest_targets
 
 
-@pytest.mark.parametrize("dependency_path", ["uv.lock", "pyproject.toml"])
-def test_oci_dependency_changes_select_both_frozen_profile_regressions(dependency_path):
-    plan = build_impact_plan([dependency_path])
+@pytest.mark.parametrize(
+    "changed_path", ["uv.lock", "pyproject.toml", "product/execution/python_runner.py"]
+)
+def test_oci_contract_changes_select_both_frozen_profile_regressions(changed_path):
+    plan = build_impact_plan([changed_path])
 
     assert plan.tier == 2
     assert plan.impact_class == "HIGH_RISK_INTEGRATION"
