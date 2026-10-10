@@ -1012,6 +1012,19 @@ def _parse_junit(path: Path) -> tuple[list[dict[str, Any]] | None, bool]:
     return cases, has_error
 
 
+def _build_pytest_argv(python: str, junit: str, nodes: list[str]) -> list[str]:
+    return [
+        python,
+        "-m",
+        "pytest",
+        "-p",
+        "no:cacheprovider",
+        "-q",
+        f"--junitxml={junit}",
+        *nodes,
+    ]
+
+
 def _python_available(python: str) -> bool:
     py_path = Path(python)
     if py_path.is_file() and os.access(python, os.X_OK):
@@ -1026,20 +1039,11 @@ def _run_red_tests(
     result: dict[str, Any] = {"command": [], "exit_code": None, "node_results": [], "codes": codes}
     if not _python_available(python):
         codes.add("ENVIRONMENT_FAILURE")
-        result["command"] = [python, "-m", "pytest"]
+        result["command"] = _build_pytest_argv(python, "<not-created>", nodes)
         return result
     with tempfile.TemporaryDirectory(prefix="nexus-red-gate-") as tmp:
         junit = Path(tmp) / "junit.xml"
-        argv = [
-            python,
-            "-m",
-            "pytest",
-            "-p",
-            "no:cacheprovider",
-            "-q",
-            f"--junitxml={junit}",
-            *nodes,
-        ]
+        argv = _build_pytest_argv(python, str(junit), nodes)
         result["command"] = argv
         env = os.environ.copy()
         env["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -1373,7 +1377,7 @@ def _node_cases(cases: list[dict[str, Any]], node: str) -> list[dict[str, Any]]:
 def _run_pytest(repo: Path, python: str, targets: list[str], timeout: float) -> dict[str, Any]:
     """Run pytest once; returns command, exit_code, cases, output and error flags."""
     result: dict[str, Any] = {
-        "command": [python, "-m", "pytest", *targets],
+        "command": [],
         "exit_code": None,
         "cases": None,
         "codes": set(),
@@ -1383,11 +1387,11 @@ def _run_pytest(repo: Path, python: str, targets: list[str], timeout: float) -> 
     codes: set[str] = result["codes"]
     if not _python_available(python):
         codes.add("ENVIRONMENT_FAILURE")
+        result["command"] = _build_pytest_argv(python, "<not-created>", targets)
         return result
     with tempfile.TemporaryDirectory(prefix="nexus-green-gate-") as tmp:
         junit = Path(tmp) / "junit.xml"
-        argv = [python, "-m", "pytest", "-p", "no:cacheprovider", "-q", f"--junitxml={junit}"]
-        argv.extend(targets)
+        argv = _build_pytest_argv(python, str(junit), targets)
         result["command"] = argv
         env = os.environ.copy()
         env["PYTHONDONTWRITEBYTECODE"] = "1"
