@@ -548,3 +548,39 @@ def test_green_chain_without_continue_to_green_is_unchanged(tmp_path: Path) -> N
     (receipt,) = _green_receipts(out)
     assert "red_oracle" not in receipt
     assert "oracle_classification" not in receipt["node_results"][0]
+
+
+def test_direct_green_start_phase_passes_supplied_red_receipt_to_gate(tmp_path: Path) -> None:
+    # #1678: `start-phase --phase green --red-receipt R` must bind R in the in-process
+    # green gate exactly as continue-to-green does, so #1665 can classify the oracle.
+    ctx = _setup(tmp_path)
+    red_proc = _start_red(ctx, [_red("s-red", ORACLE_TEST, goal=True)])
+    assert red_proc.returncode == 0, red_proc.stdout + red_proc.stderr
+    red_out = pc._chain(ctx, red_proc)
+    red_path, red_hash = red_out["red_receipt_path"], red_out["red_receipt_hash"]
+    ctx["calls"].unlink()
+    plan = [{"session": "s-green", "write": pc._value(3)}, {"session": "s-x"}]
+    proc = pc._start(
+        ctx,
+        plan,
+        "--green-contract",
+        str(ctx["green"]),
+        "--red-receipt",
+        red_path,
+        "--parent-session-id",
+        "s-red",
+    )
+    assert proc.returncode == guard.EXIT_BLOCKED, proc.stdout + proc.stderr
+    out = pc._chain(ctx, proc)
+    assert out["red_receipt_hash"] == red_hash
+    assert shlex.split(out["green_gate_command"])[-2:] == ["--red-receipt", red_path]
+    assert f"`{out['green_gate_command']}`" in pc._calls(ctx)[0][-1]
+    gate = out["phases"][0]["gate"]
+    bound = {"status": "BOUND", "red_receipt_hash": red_hash}
+    assert gate["red_receipt_path"] == red_path and gate["red_receipt_hash"] == red_hash
+    assert gate["red_oracle"] == bound
+    receipt = json.loads(Path(gate["receipt_path"]).read_text(encoding="utf-8"))
+    assert receipt["red_oracle"] == bound
+    assert "RED_ORACLE_DEFECT" in receipt["reason_codes"]
+    assert receipt["node_results"][0]["oracle_classification"] == "RED_ORACLE_DEFECT"
+    assert out["stop_reason"] == "AUTO_REPAIR_EXHAUSTED"

@@ -3970,6 +3970,11 @@ def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
         if args.red_receipt
         else None
     )
+    # A supplied RED_READY receipt binds every in-process green gate, exactly as in
+    # continue-to-green, so a target failing on another assertion is RED_ORACLE_DEFECT.
+    gate_red: tuple[str, str] | None = (
+        (str(Path(args.red_receipt).expanduser().resolve()), red["receipt_hash"]) if red else None
+    )
     # RED and GREEN gates share one base: the pre-turn HEAD (or the RED_READY receipt's base).
     base = (
         _git_ok(
@@ -3986,7 +3991,11 @@ def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
     gate_command = (
         shlex.join(
             green_gate_command(
-                repo_root=repo_root, base_revision=base, contract_path=green_path, python=python
+                repo_root=repo_root,
+                base_revision=base,
+                contract_path=green_path,
+                python=python,
+                red_receipt=gate_red[0] if gate_red else None,
             )
         )
         if green_path
@@ -4020,7 +4029,6 @@ def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
         return path
 
     phase, text, path, link = args.phase, contract_text, contract_path, parent
-    gate_red: tuple[str, str] | None = None
     if red_contract is not None and red_path is not None:
         red_hash = _sha256_bytes(_canonical_json(red_contract).encode("utf-8"))
         red_command = shlex.join(
