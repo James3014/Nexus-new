@@ -619,6 +619,228 @@ def test_r1b1_real_git_bundle_bare_store_and_two_detached_worktrees(tmp_path, mo
         assert g._r1_verify_worktree(worktree, manifest) == worktree
 
 
+def _r1_bundle_spy(monkeypatch):
+    """Record every fixed subprocess and the scratch refs seen at bundle create."""
+    calls = []
+    refs_at_bundle_create = []
+    real_run = g._r1_run
+
+    def spy(*command, **kwargs):
+        calls.append(command)
+        if command[3:5] == ("bundle", "create"):
+            refs_at_bundle_create.append(
+                subprocess.run(
+                    ["git", "--git-dir", command[2], "for-each-ref",
+                     "--format=%(refname) %(objectname) %(objecttype)"],
+                    check=True, capture_output=True, text=True,
+                ).stdout.splitlines()
+            )
+        return real_run(*command, **kwargs)
+
+    monkeypatch.setattr(g, "_r1_run", spy)
+    return calls, refs_at_bundle_create
+
+
+def _r1_mark_shallow(repository: Path, boundary: str) -> None:
+    """Make a real repository report a shallow history boundary."""
+    git_dir = Path(
+        subprocess.check_output(
+            ["git", "-C", str(repository), "rev-parse", "--absolute-git-dir"],
+            text=True,
+        ).strip()
+    )
+    (git_dir / "shallow").write_text(f"{boundary}\n")
+
+
+def _r1_shallow_mirror_with_full_remote(fixture, tmp_path, monkeypatch):
+    """Host topology: full fixed remote first, then a shallow authority mirror."""
+    mirror = fixture["mirror"]
+    remote = tmp_path / "fixed-remote.git"
+    subprocess.run(
+        ["git", "clone", "-q", "--bare", "--no-local", str(mirror), str(remote)],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(mirror), "remote", "set-url", "origin", str(remote)],
+        check=True,
+    )
+    monkeypatch.setattr(g, "HOST_AUTHORITY_REMOTE", str(remote))
+    # Cutting history at ``desired`` drops its parent from local transport.
+    _r1_mark_shallow(mirror, fixture["desired"])
+    assert subprocess.check_output(
+        ["git", "-C", str(mirror), "rev-parse", "--is-shallow-repository"], text=True
+    ).strip() == "true"
+    assert subprocess.check_output(
+        ["git", "--git-dir", str(remote), "rev-parse", "--is-shallow-repository"],
+        text=True,
+    ).strip() == "false"
+    fresh_main = subprocess.check_output(
+        ["git", "-C", str(mirror), "rev-parse", "main"], text=True
+    ).strip()
+    return remote, fresh_main
+
+
+def test_r1_shallow_mirror_refspec_fetch_loses_role_ref_and_history(tmp_path, monkeypatch):
+    """RED witness: local ``fetch +<sha>:<ref>`` from a shallow mirror exits 0
+    without the ref, and binding the ref afterwards leaves an ancestry gap."""
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    _, fresh_main = _r1_shallow_mirror_with_full_remote(fixture, tmp_path, monkeypatch)
+    scratch = tmp_path / "witness.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(scratch)], check=True)
+    fetched = subprocess.run(
+        [
+            "git", "--git-dir", str(scratch), "fetch", "--no-tags",
+            str(fixture["mirror"]), f"+{fresh_main}:refs/nexus-r1/fresh-main",
+        ],
+        capture_output=True, text=True, check=False,
+    )
+    assert fetched.returncode == 0
+    assert "shallow roots are not allowed to be updated" in fetched.stderr
+    assert subprocess.run(
+        ["git", "--git-dir", str(scratch), "rev-parse", "--verify", "-q",
+         "refs/nexus-r1/fresh-main"],
+        capture_output=True, check=False,
+    ).returncode != 0
+    subprocess.run(
+        ["git", "--git-dir", str(scratch), "update-ref",
+         "refs/nexus-r1/fresh-main", fresh_main],
+        check=True,
+    )
+    traversal = subprocess.run(
+        ["git", "--git-dir", str(scratch), "rev-list", "--objects", "--quiet",
+         "refs/nexus-r1/fresh-main"],
+        capture_output=True, text=True, check=False,
+    )
+    assert traversal.returncode != 0
+    assert "parents" in traversal.stderr
+
+
+def test_r1_shallow_mirror_bundle_uses_fixed_full_remote_with_exact_role_refs(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    remote, fresh_main = _r1_shallow_mirror_with_full_remote(
+        fixture, tmp_path, monkeypatch
+    )
+    receipt = fixture["receipt"]
+    artifact_scratch, predecessor_store = g._r1_verify_predecessor_artifact(receipt)
+    calls, refs_at_bundle_create = _r1_bundle_spy(monkeypatch)
+    try:
+        bundle, heads = g._r1_create_or_verify_bundle(
+            receipt, fresh_main, predecessor_store
+        )
+    finally:
+        shutil.rmtree(artifact_scratch, ignore_errors=True)
+    fetch_transports = [
+        command[-2] for command in calls if command[3:4] == ("fetch",)
+    ]
+    assert fetch_transports == [str(remote), str(remote), str(predecessor_store)]
+    assert str(fixture["mirror"]) not in fetch_transports
+    assert all(
+        "--depth" not in command and "--update-shallow" not in command
+        for command in calls
+    )
+    expected = {
+        "refs/nexus-r1/fresh-main": fresh_main,
+        "refs/nexus-r1/desired": fixture["desired"],
+        "refs/nexus-r1/predecessor": fixture["predecessor"],
+    }
+    assert refs_at_bundle_create == [
+        [f"{ref} {commit} commit" for ref, commit in sorted(expected.items())]
+    ]
+    assert {head.ref: head.commit for head in heads} == expected
+    verify_store = tmp_path / "independent-verify.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(verify_store)], check=True)
+    verified = subprocess.run(
+        ["git", "--git-dir", str(verify_store), "bundle", "verify", str(bundle)],
+        check=True, capture_output=True, text=True,
+    )
+    assert "complete history" in verified.stdout
+    listed = subprocess.check_output(
+        ["git", "bundle", "list-heads", str(bundle)], text=True
+    ).splitlines()
+    assert sorted(listed) == sorted(f"{commit} {ref}" for ref, commit in expected.items())
+    subprocess.run(
+        [
+            "git", "--git-dir", str(verify_store), "fetch", "-q", "--no-tags",
+            str(bundle), *(f"+{ref}:{ref}" for ref in expected),
+        ],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "--git-dir", str(verify_store), "fsck", "--full", "--strict"],
+        check=True, capture_output=True,
+    )
+    for ref, commit in expected.items():
+        assert subprocess.check_output(
+            ["git", "--git-dir", str(verify_store), "rev-parse", ref], text=True
+        ).strip() == commit
+
+
+def test_r1_shallow_mirror_recovery_preflight_stages_without_host_effect(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    _r1_shallow_mirror_with_full_remote(fixture, tmp_path, monkeypatch)
+    launchctl = []
+    monkeypatch.setattr(
+        g, "_launchctl_observation", lambda *a, **k: launchctl.append((a, k))
+    )
+    outcome = g.gateway_recover(fixture["request"])
+    assert outcome.result == "BLOCKED"
+    assert outcome.effect_started is False
+    assert outcome.physical_observation["readiness"] == ["TARGET_READY", "ROLLBACK_READY"]
+    assert launchctl == []
+
+
+def test_r1_bundle_role_ref_wrong_missing_or_incomplete_transport_fails_closed(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    remote, fresh_main = _r1_shallow_mirror_with_full_remote(
+        fixture, tmp_path, monkeypatch
+    )
+    receipt = fixture["receipt"]
+    artifact_scratch, predecessor_store = g._r1_verify_predecessor_artifact(receipt)
+    real_run = g._r1_run
+
+    def assert_no_bundle(calls):
+        assert not any(command[3:5] == ("bundle", "create") for command in calls)
+
+    try:
+        # Missing exact object on the fixed transport.
+        calls, _ = _r1_bundle_spy(monkeypatch)
+        with pytest.raises(g.GatewayContractError):
+            g._r1_create_or_verify_bundle(receipt, "f" * 40, predecessor_store)
+        assert_no_bundle(calls)
+
+        # A ref transaction binding a role to a different object.
+        def rebinding(*command, **kwargs):
+            if command[3:4] == ("update-ref",) and command[-2] == fixture["desired"]:
+                command = (*command[:-2], fresh_main, command[-1])
+            return real_run(*command, **kwargs)
+
+        monkeypatch.setattr(g, "_r1_run", rebinding)
+        calls, _ = _r1_bundle_spy(monkeypatch)
+        with pytest.raises(g.GatewayContractError, match="R1 bundle role ref binding mismatch"):
+            g._r1_create_or_verify_bundle(receipt, fresh_main, predecessor_store)
+        assert_no_bundle(calls)
+
+        # Incomplete transport: the fixed remote is itself shallow at fresh
+        # main, so no source (including the predecessor artifact) supplies the
+        # cut ancestry.
+        monkeypatch.setattr(g, "_r1_run", real_run)
+        _r1_mark_shallow(remote, fresh_main)
+        calls, _ = _r1_bundle_spy(monkeypatch)
+        with pytest.raises(g.GatewayContractError, match="R1 bundle source history incomplete"):
+            g._r1_create_or_verify_bundle(receipt, fresh_main, predecessor_store)
+        assert_no_bundle(calls)
+    finally:
+        shutil.rmtree(artifact_scratch, ignore_errors=True)
+    assert not any(g.GATEWAY_SOURCE_BUNDLES_ROOT.glob("*.bundle"))
+    assert not g.GATEWAY_REPOSITORY.exists()
+
+
 def _r1m_materialization_request(
     receipt,
     *,

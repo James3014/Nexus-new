@@ -451,6 +451,7 @@ GATEWAY_SOURCE_BUNDLES_ROOT = GATEWAY_STATE_ROOT / "source-bundles"
 GATEWAY_PREDECESSOR_ARTIFACT_ROOT = GATEWAY_STATE_ROOT / "predecessor-artifacts"
 GATEWAY_REPOSITORY = GATEWAY_STATE_ROOT / "repository.git"
 _R1_PERSISTENT_FSCK_TIMEOUT_SECONDS = 120
+_R1_AUTHORITY_FETCH_TIMEOUT_SECONDS = 300
 GATEWAY_RECOVERY_AUTHORITY_STORE = GATEWAY_STATE_ROOT / "recovery-authority.json"
 GATEWAY_RECOVERY_MATERIALIZATION_ROOT = GATEWAY_STATE_ROOT / "recovery-materializations"
 RECOVERY_AUTHORITY_SOURCE_PATH = RECOVERY_RECEIPT_PATH
@@ -1327,16 +1328,66 @@ def _r1_create_or_verify_bundle(
         source = scratch / "source.git"
         candidate = scratch / "candidate.bundle"
         _r1_run("git", "init", "--bare", str(source))
+        authority_root = Path(HOST_AUTHORITY_SOURCE_ROOT)
+        # A shallow mirror makes ``fetch +<sha>:<ref>`` exit 0 while rejecting
+        # the ref update and cannot supply complete history.  Commit identity is
+        # already bound to fresh main, so only object transport moves to the
+        # fixed full remote; the shallow mirror is never used as a source.
+        authority_transport = (
+            HOST_AUTHORITY_REMOTE
+            if _r1_run(
+                "git", "-C", str(authority_root), "rev-parse", "--is-shallow-repository"
+            ) != "false"
+            else str(authority_root)
+        )
+        if _r1_run(
+            "git", "--git-dir", str(predecessor_store),
+            "rev-parse", "--is-shallow-repository",
+        ) != "false":
+            raise _gateway_error("R1 bundle source history shallow")
         for (role, ref), commit in zip(_R1_ROLE_REFS, expected, strict=True):
-            source_root = (
-                predecessor_store
-                if role == "predecessor"
-                else Path(HOST_AUTHORITY_SOURCE_ROOT)
+            transport = (
+                str(predecessor_store) if role == "predecessor" else authority_transport
             )
             _r1_run(
                 "git", "--git-dir", str(source), "fetch", "--no-tags",
-                str(source_root), f"+{commit}:{ref}",
+                "--no-write-fetch-head", transport, commit,
+                timeout=_R1_AUTHORITY_FETCH_TIMEOUT_SECONDS,
             )
+            # Create each role ref explicitly (create-only) instead of relying
+            # on fetch to write the destination ref.
+            _r1_run(
+                "git", "--git-dir", str(source), "update-ref", "--no-deref",
+                ref, commit, "",
+            )
+            try:
+                bound = _r1_run(
+                    "git", "--git-dir", str(source), "rev-parse", "--verify",
+                    "--end-of-options", f"{ref}^{{commit}}",
+                )
+            except GatewayContractError as exc:
+                raise _gateway_error("R1 bundle role ref binding mismatch", exc) from exc
+            if bound != commit:
+                raise _gateway_error("R1 bundle role ref binding mismatch")
+        observed_refs = str(
+            _r1_run(
+                "git", "--git-dir", str(source), "for-each-ref",
+                "--format=%(refname) %(objectname)",
+            )
+        ).splitlines()
+        if sorted(observed_refs) != sorted(
+            f"{ref} {commit}" for (_, ref), commit in zip(_R1_ROLE_REFS, expected, strict=True)
+        ) or _r1_run(
+            "git", "--git-dir", str(source), "rev-parse", "--is-shallow-repository"
+        ) != "false":
+            raise _gateway_error("R1 bundle role ref binding mismatch")
+        try:
+            _r1_run(
+                "git", "--git-dir", str(source), "rev-list", "--objects", "--quiet",
+                *(ref for _, ref in _R1_ROLE_REFS),
+            )
+        except GatewayContractError as exc:
+            raise _gateway_error("R1 bundle source history incomplete", exc) from exc
         _r1_run(
             "git", "--git-dir", str(source), "bundle", "create",
             str(candidate), *(ref for _, ref in _R1_ROLE_REFS),
