@@ -3038,7 +3038,8 @@ def dispatch_run(
         + list(availability_state.get("fallback", []))
     )
     blocked_candidates = list(availability_state.get("blocked", []))
-    unknown_candidates = list(availability_state.get("unknown", []))
+    raw_unknown = availability_state.get("unknown")
+    unknown_candidates = list(raw_unknown) if isinstance(raw_unknown, list) else []
     # Only a family whose every account is KNOWN blocked is exhausted. UNKNOWN
     # (stale/failed evidence) accounts proceed to claim and bounded per-account refresh.
     if (
