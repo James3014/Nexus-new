@@ -2363,7 +2363,9 @@ def _load_prior_receipts(paths: Sequence[str]) -> list[tuple[str, str]]:
 # therefore writable only when it physically lives in ``<repo_root>/.git``. A
 # linked worktree keeps it in the parent repository's common Git dir, so DSH is
 # never spawned there; the supported mode is an explicit standalone clone (#1607,
-# donor pattern #1342). The DSH sandbox itself is unchanged.
+# donor pattern #1342). Because DSH also grants the host temp areas to every
+# session, neither the workspace nor any checkout of its repository family may
+# live under them. The DSH sandbox itself is unchanged.
 GIT_METADATA_CONTRACT_SCHEMA = "nexus.dsh_git_metadata_contract.v1"
 STANDALONE_CLONE_SCHEMA = "nexus.dsh_standalone_clone.v1"
 STANDALONE_CLAIM_CEILING = "DSH_EXECUTION_SURFACE_ONLY_NO_COPY_BACK_NO_PUBLICATION_AUTHORITY"
@@ -2378,6 +2380,24 @@ GIT_IDENTITY_ENV = (
 )
 FULL_REVISION_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 ORIGIN_SLUG_RE = re.compile(r"[:/]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?$")
+
+
+def dsh_temp_write_roots(env: dict[str, str] | None = None) -> list[Path]:
+    """Superset of the temp areas DSH workspace-write grants (``/tmp`` + ``os.tmpdir()``)."""
+    current = os.environ if env is None else env
+    node_tmpdir = next(
+        (current[key] for key in ("TMPDIR", "TMP", "TEMP") if current.get(key)), "/tmp"
+    )
+    raw = {"/tmp", node_tmpdir.rstrip("/") or "/", tempfile.gettempdir()}
+    return sorted({Path(path).resolve() for path in raw})
+
+
+def _under_temp_grant(path: Path, env: dict[str, str] | None = None) -> Path | None:
+    return next((root for root in dsh_temp_write_roots(env) if _within(path, root)), None)
+
+
+def _within(path: Path, root: Path) -> bool:
+    return path == root or root in path.parents
 
 
 def _identity_git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -2447,6 +2467,14 @@ def git_metadata_contract(repo_root: Path, *, env: dict[str, str] | None = None)
         return fail(
             "DSH_GIT_IDENTITY_AMBIGUOUS", "git dir is not the real <repo_root>/.git", **paths
         )
+    temp_root = _under_temp_grant(root, env=current_env)
+    if temp_root is not None:
+        return fail(
+            "DSH_WORKSPACE_UNDER_DSH_TEMP_GRANT",
+            f"repo root is under {temp_root}, which DSH grants writable to every session; "
+            "use a standalone clone under a non-temp root",
+            **paths,
+        )
     alternates = common_dir / "objects" / "info" / "alternates"
     if alternates.exists():
         return fail(
@@ -2460,10 +2488,6 @@ def git_metadata_contract(repo_root: Path, *, env: dict[str, str] | None = None)
 def _origin_slug(url: str) -> str | None:
     match = ORIGIN_SLUG_RE.search(url.strip())
     return match.group(1) if match else None
-
-
-def _within(path: Path, root: Path) -> bool:
-    return path == root or root in path.parents
 
 
 def _validate_standalone_target(target: Path, *, origin: str, base: str) -> dict[str, Any]:
@@ -2513,6 +2537,29 @@ def prepare_standalone_clone(
     if _identity_git(source, "cat-file", "-e", f"{base}^{{commit}}").returncode != 0:
         raise DshWorkflowError("STANDALONE_BASE_UNAVAILABLE", f"base {base} is not in the source")
     dest = target.expanduser().resolve()
+    temp_root = _under_temp_grant(dest)
+    if temp_root is not None:
+        raise DshWorkflowError(
+            "STANDALONE_TARGET_UNDER_DSH_TEMP_GRANT",
+            f"target is under {temp_root}, which DSH grants writable to every session",
+        )
+    # Every checkout of the source repository family must stay outside the DSH temp
+    # grant, otherwise a session in the clone could still write parent/sibling source.
+    listing = _identity_git(source, "worktree", "list", "--porcelain")
+    if listing.returncode != 0:
+        raise DshWorkflowError("STANDALONE_SOURCE_AMBIGUOUS", "cannot list source worktrees")
+    family = {source, common_dir} | {
+        Path(line[len("worktree ") :]).resolve()
+        for line in listing.stdout.splitlines()
+        if line.startswith("worktree ") and Path(line[len("worktree ") :]).exists()
+    }
+    exposed = sorted(str(path) for path in family if _under_temp_grant(path) is not None)
+    if exposed:
+        raise DshWorkflowError(
+            "STANDALONE_SOURCE_EXPOSED_UNDER_DSH_TEMP_GRANT",
+            "source repository checkouts under the DSH temp grant would stay writable from "
+            f"the clone: {', '.join(exposed)}",
+        )
     if any(_within(dest, root) or _within(root, dest) for root in (source, common_dir)):
         raise DshWorkflowError(
             "STANDALONE_TARGET_UNSAFE",
@@ -2559,6 +2606,8 @@ def prepare_standalone_clone(
         "origin_url": origin,
         "source_repo_root": str(source),
         "source_git_common_dir": str(common_dir),
+        "source_family_paths": sorted(str(path) for path in family),
+        "dsh_temp_write_roots": [str(path) for path in dsh_temp_write_roots()],
         "target": str(dest),
         "reused": reused,
         "git_metadata_contract": contract,
