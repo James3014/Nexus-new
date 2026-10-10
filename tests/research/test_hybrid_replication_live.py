@@ -876,15 +876,19 @@ def _wire_stack(
     return calls
 
 
-def _natural_stack(tmp_path: Path, monkeypatch, *, ranked, jev):
+def _natural_stack(
+    tmp_path: Path,
+    monkeypatch,
+    *,
+    ranked,
+    jev,
+    body: str = "Implement the bounded retry fix and add regression tests.",
+    extra_paths: tuple[str, ...] = (),
+):
     repo_dir = tmp_path / "repo"
     rev = _init_test_git_repo(repo_dir)
-    rev = _commit_files(repo_dir, _NATURAL_PATHS)
-    snapshot = _natural_snapshot(
-        rev,
-        title="Fix retry semantics",
-        body="Implement the bounded retry fix and add regression tests.",
-    )
+    rev = _commit_files(repo_dir, _NATURAL_PATHS + extra_paths)
+    snapshot = _natural_snapshot(rev, title="Fix retry semantics", body=body)
     calls = _wire_stack(monkeypatch, ranked=ranked, jev=jev)
     binding = {
         "repo_roots": {"James3014/Nexus-new": str(repo_dir)},
@@ -925,6 +929,33 @@ def test_natural_task_dm1_accept_routes_b_with_localization_hint(
     assert "d0_wall_seconds" in raw.raw_response
     assert outcome.dm1_decision["applicable"] is True
     outcome.validate()
+
+
+def test_natural_task_seals_frozen_d0_top8_separately_from_truncated_packet(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ranked = _NATURAL_PATHS + ("nexus/mod9.py",)
+    outcome, _calls = _natural_stack(
+        tmp_path,
+        monkeypatch,
+        ranked=ranked,
+        jev={
+            "status": "VALID",
+            "choice": "ESCALATE",
+            "top_probability": 0.4,
+            "margin": 0.1,
+            "usage": {"input_tokens": 50, "output_tokens": 10},
+        },
+        body="Fix `nexus/literal.py` and add regression tests.",
+        extra_paths=("nexus/literal.py", "nexus/mod9.py"),
+    )
+    raw = outcome.raw_result.raw_response
+    catalog = raw["candidate_packet"]["candidate_catalog"]
+    assert [item["path"] for item in catalog] == ["nexus/literal.py", *_NATURAL_PATHS[:7]]
+    assert catalog[0]["source"] == "LITERAL_TASK_PATH"
+    # The sealed D0 top-8 is the frozen ranking itself: no literal paths, no
+    # truncation by the packet, and nothing past rank 8.
+    assert raw["d0_top8_paths"] == list(_NATURAL_PATHS)
 
 
 def test_frozen_task_family_is_conservative(

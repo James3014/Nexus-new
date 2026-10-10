@@ -605,7 +605,8 @@ def _localization_score(
             "accepted": False,
             "accepted_path": None,
             "accepted_path_in_changed_files": None,
-            "d0_candidate_hit_count": None,
+            "d0_top8_hit_count": None,
+            "packet_candidate_hit_count": None,
             "candidate_count": 0,
             "wrong_confident_dm1_accept": False,
             "legacy_raw": True,
@@ -614,6 +615,9 @@ def _localization_score(
     candidates = [
         str(item.get("path")) for item in packet.get("candidate_catalog") or [] if item.get("path")
     ]
+    # Frozen D0 top-8 as sealed in raw; the D2 packet prepends literal task paths
+    # and truncates, so it is not a D0 measurement. Absent seal -> unknown.
+    d0_top8 = raw_response.get("d0_top8_paths")
     changed = {str(path) for path in ground_truth_details.get("changed_files") or []}
     accepted = bool(raw_response.get("accepted_by_frozen_policy"))
     accepted_path = raw_response.get("localization_hint_path") if accepted else None
@@ -624,7 +628,12 @@ def _localization_score(
         "accepted": accepted,
         "accepted_path": accepted_path,
         "accepted_path_in_changed_files": in_changed,
-        "d0_candidate_hit_count": (len(set(candidates) & changed) if changed else None),
+        "d0_top8_hit_count": (
+            len({str(path) for path in d0_top8[:8]} & changed)
+            if changed and isinstance(d0_top8, list)
+            else None
+        ),
+        "packet_candidate_hit_count": (len(set(candidates) & changed) if changed else None),
         "candidate_count": len(candidates),
         "wrong_confident_dm1_accept": bool(accepted and changed and accepted_path not in changed),
     }

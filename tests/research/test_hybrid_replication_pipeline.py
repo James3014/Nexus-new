@@ -767,6 +767,7 @@ def _nested_b_raw() -> dict[str, object]:
         "localization_hint_path": "nexus/a.py",
         "accepted_by_frozen_policy": True,
         "d0_wall_seconds": 0.1,
+        "d0_top8_paths": ["nexus/a.py", "nexus/b.py"],
         "strong_online_raw_response": {"status": "VALID"},
     }
 
@@ -775,7 +776,8 @@ def test_score_localization_hit_for_accepted_path(tmp_path: Path) -> None:
     loc = _score_with_raw(tmp_path, 1330, _nested_b_raw(), ["nexus/a.py", "tests/t.py"])
     assert loc["accepted_path_in_changed_files"] is True
     assert loc["wrong_confident_dm1_accept"] is False
-    assert loc["d0_candidate_hit_count"] == 1
+    assert loc["d0_top8_hit_count"] == 1
+    assert loc["packet_candidate_hit_count"] == 1
     assert loc["candidate_count"] == 2
 
 
@@ -783,7 +785,48 @@ def test_score_localization_flags_wrong_confident_accept(tmp_path: Path) -> None
     loc = _score_with_raw(tmp_path, 1331, _nested_b_raw(), ["nexus/other.py"])
     assert loc["accepted_path_in_changed_files"] is False
     assert loc["wrong_confident_dm1_accept"] is True
-    assert loc["d0_candidate_hit_count"] == 0
+    assert loc["d0_top8_hit_count"] == 0
+    assert loc["packet_candidate_hit_count"] == 0
+
+
+def test_score_localization_d0_top8_ignores_literal_only_hit(tmp_path: Path) -> None:
+    raw = _nested_b_raw()
+    raw["candidate_packet"] = {
+        "candidate_catalog": [
+            {"id": "C1", "path": "literal.py", "source": "LITERAL_TASK_PATH"},
+            {"id": "C2", "path": "d0.py", "source": "D0_V2_FROZEN"},
+        ]
+    }
+    raw["localization_hint_path"] = "literal.py"
+    raw["d0_top8_paths"] = ["d0.py"]
+    loc = _score_with_raw(tmp_path, 1333, raw, ["literal.py"])
+    assert loc["d0_top8_hit_count"] == 0
+    assert loc["packet_candidate_hit_count"] == 1
+
+
+def test_score_localization_d0_top8_counts_paths_truncated_from_packet(
+    tmp_path: Path,
+) -> None:
+    d0 = [f"nexus/mod{i}.py" for i in range(1, 9)]
+    raw = _nested_b_raw()
+    raw["candidate_packet"] = {
+        "candidate_catalog": [
+            {"id": f"C{i}", "path": path} for i, path in enumerate(["literal.py", *d0[:7]], 1)
+        ]
+    }
+    raw["localization_hint_path"] = "literal.py"
+    raw["d0_top8_paths"] = d0
+    loc = _score_with_raw(tmp_path, 1334, raw, [d0[7]])
+    assert loc["d0_top8_hit_count"] == 1
+    assert loc["packet_candidate_hit_count"] == 0
+
+
+def test_score_localization_without_sealed_d0_top8_is_unknown(tmp_path: Path) -> None:
+    raw = _nested_b_raw()
+    del raw["d0_top8_paths"]
+    loc = _score_with_raw(tmp_path, 1335, raw, ["nexus/a.py"])
+    assert loc["d0_top8_hit_count"] is None
+    assert loc["packet_candidate_hit_count"] == 1
 
 
 def test_score_localization_legacy_flat_raw(tmp_path: Path) -> None:

@@ -2050,6 +2050,7 @@ def run_frozen_stack(
         "localization_hint_path": localization_hint_path,
         "accepted_by_frozen_policy": accepted,
         "d0_wall_seconds": d0_wall,
+        "d0_top8_paths": list(ranked[:8]),
         "strong_online_timeout_seconds": strong_timeout,
         "strong_online_raw_response": strong,
     }
