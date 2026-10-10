@@ -25,6 +25,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -2300,6 +2301,12 @@ def acknowledge_turn_failure(
 
 PHASE_RUN_SCHEMA = "nexus.dsh_phase_run.v1"
 PHASES = ("red", "green", "repair")
+SAFE_EDIT_RULE = (
+    "Never edit files with sed -i, perl -pi, or scripts that insert or append text; use the"
+    " edit/write tools or a single anchored replacement that fails if the anchor is not found"
+    " exactly once; after every edit run `git diff --stat`."
+)
+INTERPRETER_RULE = "Use only the repository interpreter `.venv/bin/python`."
 
 
 def find_dirty_sibling(root: Path, repository: str, issue_number: int) -> dict[str, Any] | None:
@@ -2358,8 +2365,17 @@ def build_phase_task(
     parent_has_goal: bool,
     prior_receipts: Sequence[tuple[str, str]],
     contract_text: str,
+    green_gate_command: str | None = None,
 ) -> str:
     may_create = phase == "red" and not parent_has_goal
+    gate_lines = (
+        [
+            "Before claiming GREEN_READY, run this exact command and read its decision: "
+            f"`{green_gate_command}`"
+        ]
+        if green_gate_command
+        else []
+    )
     lines = [
         "NEXUS CONTROLLER HEADER (fixed; precedes the phase contract)",
         f"Phase: {phase}",
@@ -2374,6 +2390,9 @@ def build_phase_task(
         "Allowed paths: edit only the paths the phase contract below allows; touch nothing else.",
         "Every bash action must include a short description.",
         "Use precise idempotent edits; never re-run insertion scripts; no helper/scratch files.",
+        SAFE_EDIT_RULE,
+        INTERPRETER_RULE,
+        *gate_lines,
         "Prior phase receipts:",
     ]
     if prior_receipts:
@@ -2574,20 +2593,25 @@ def read_canonical_agy_operations(log_path: Path, session_id: str | None) -> dic
     return _agy_operation_summary(session_id, coverage, entries)
 
 
-def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
-    repository = _validate_repository(args.repository)
-    if args.issue < 1:
-        raise DshWorkflowError("DSH_TRACKING_ISSUE_INVALID", "issue number must be positive")
-    repo_root = Path(args.repo_root).expanduser().resolve()
-    dsh_home = Path(args.dsh_home).expanduser().resolve()
-    parent = _validate_session_id(args.parent_session_id) if args.parent_session_id else None
-    try:
-        contract_text = Path(args.phase_contract).expanduser().read_text(encoding="utf-8")
-    except OSError as exc:
-        raise DshWorkflowError(
-            "PHASE_CONTRACT_UNREADABLE", "phase contract cannot be read"
-        ) from exc
-    prior = _load_prior_receipts(args.prior_receipt)
+PHASE_CHAIN_SCHEMA = "nexus.dsh_phase_chain.v1"
+PHASE_CHAIN_CLAIM_CEILING = "PHASE_CHAIN_RECORD_NO_COMPLETION_AUTHORITY"
+AUTO_REPAIR_MAX = 3
+
+
+def _run_phase_turn(
+    args: argparse.Namespace,
+    root: Path,
+    *,
+    repository: str,
+    repo_root: Path,
+    dsh_home: Path,
+    phase: str,
+    contract_text: str,
+    prior: Sequence[tuple[str, str]],
+    parent: str | None,
+    green_gate_command: str | None,
+) -> tuple[int, dict[str, Any]]:
+    """Run one preflight-guarded DSH turn; returns its exit code and result payload."""
     parent_has_goal = False
     if parent:
         try:
@@ -2611,25 +2635,25 @@ def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
     else:
         preflight = run_issue_preflight(subject, doctor_bin=args.doctor_bin)
     preflight["invocation"] = "start-phase"
-    preflight["phase"] = args.phase
+    preflight["phase"] = phase
     receipt_path = persist_preflight(root, preflight)
     if preflight["decision"] != "ALLOW_RESUME":
-        _print_result(preflight, receipt_path=receipt_path)
-        return EXIT_BLOCKED
+        return EXIT_BLOCKED, {**preflight, "receipt_path": str(receipt_path)}
 
     task = build_phase_task(
-        phase=args.phase,
+        phase=phase,
         goal_objective=args.goal_objective,
         parent_has_goal=parent_has_goal,
         prior_receipts=prior,
         contract_text=contract_text,
+        green_gate_command=green_gate_command,
     )
     dsh_argv = [args.dsh_bin, "--profile", args.profile]
     for patch in args.patch:
         dsh_argv.extend(["--patch", patch])
     dsh_argv.extend(["--json", task])
     stamp = _utc_now().replace(":", "").replace("-", "").replace(".", "")
-    log_path = root / "phases" / str(args.issue) / f"{stamp}-{os.getpid()}-{args.phase}.log"
+    log_path = root / "phases" / str(args.issue) / f"{stamp}-{os.getpid()}-{phase}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     env["DSH_HOME"] = str(dsh_home)
@@ -2665,12 +2689,12 @@ def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
                 issue_number=args.issue,
                 repo_root=repo_root,
                 dsh_home=dsh_home,
-                phase=args.phase,
+                phase=phase,
                 parent_session_id=parent,
                 goal_objective=args.goal_objective,
-                required_round_cap=1 if args.phase == "red" and not parent_has_goal else None,
+                required_round_cap=1 if phase == "red" and not parent_has_goal else None,
             )
-            if args.phase == "red" and binding["goal_id"] is None:
+            if phase == "red" and binding["goal_id"] is None:
                 raise DshWorkflowError(
                     "DSH_TRACKING_GOAL_NOT_OBSERVED", "red phase did not create a durable goal"
                 )
@@ -2681,7 +2705,7 @@ def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
     turn_subject = binding or {**subject, "session_id": session_id or ""}
     forced: str | None = None
     if session_id is None:
-        session_id = f"start-phase-unobserved-{args.issue}-{stamp}-{args.phase}"
+        session_id = f"start-phase-unobserved-{args.issue}-{stamp}-{phase}"
         turn_subject = {**subject, "session_id": session_id}
         forced = "SESSION_NOT_OBSERVED"
     if proc.returncode != 0 or forced:
@@ -2699,7 +2723,7 @@ def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
     summary = {
         "schema": PHASE_RUN_SCHEMA,
         "session_id": session_id,
-        "phase": args.phase,
+        "phase": phase,
         "parent_session_id": parent,
         "log_path": str(log_path),
         "dsh_exit_code": proc.returncode,
@@ -2711,10 +2735,308 @@ def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
         summary["canonical_agy_operations"] = canonical_agy_operations
     if binding_error:
         summary["binding_error"] = binding_error
-    print(json.dumps(summary, sort_keys=True))
     if proc.returncode == 0 and (binding_error or forced):
-        return EXIT_BLOCKED
-    return proc.returncode
+        return EXIT_BLOCKED, summary
+    return proc.returncode, summary
+
+
+def _load_red_receipt(path: Path, repository: str, issue_number: int) -> dict[str, Any]:
+    """A hash-intact RED_READY receipt for this Issue, or RED_RECEIPT_INVALID."""
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise DshWorkflowError("RED_RECEIPT_INVALID", f"red receipt cannot be read: {exc}") from exc
+    if not isinstance(receipt, dict):
+        raise DshWorkflowError("RED_RECEIPT_INVALID", "red receipt must be a JSON object")
+    body = {k: v for k, v in receipt.items() if k not in ("receipt_hash", "receipt_path")}
+    problems = [
+        (receipt.get("schema") != RED_RECEIPT_SCHEMA, "schema mismatch"),
+        (receipt.get("decision") != "RED_READY", "decision is not RED_READY"),
+        (
+            _sha256_bytes(_canonical_json(body).encode("utf-8")) != receipt.get("receipt_hash"),
+            "body does not match receipt_hash",
+        ),
+        (receipt.get("repository") != repository, "repository mismatch"),
+        (receipt.get("issue_number") != issue_number, "issue mismatch"),
+        (not isinstance(receipt.get("base_revision"), str), "base_revision missing"),
+    ]
+    failed = [detail for bad, detail in problems if bad]
+    if failed:
+        raise DshWorkflowError("RED_RECEIPT_INVALID", "red receipt rejected: " + "; ".join(failed))
+    return receipt
+
+
+def green_gate_command(
+    *, repo_root: Path, base_revision: str, contract_path: Path, python: Path
+) -> list[str]:
+    """The exact green-gate argv the guard evaluates; also shown to DSH in the header."""
+    return [
+        str(python),
+        str(Path(__file__).resolve()),
+        "green-gate",
+        "--repo-root",
+        str(repo_root),
+        "--base-revision",
+        base_revision,
+        "--contract",
+        str(contract_path),
+        "--python",
+        str(python),
+    ]
+
+
+def build_repair_contract(
+    contract_text: str,
+    receipt: dict[str, Any],
+    *,
+    receipt_path: str,
+    attempt: int,
+    limit: int,
+) -> str:
+    """Original phase contract plus the failing green-gate evidence for one repair turn."""
+    lines = [
+        "",
+        f"GREEN GATE FEEDBACK (auto-repair {attempt}/{limit}; generated by start-phase)",
+        f"Gate decision: {receipt.get('decision')}",
+        f"Gate receipt: {receipt_path} receipt_hash={receipt.get('receipt_hash')}",
+        "Reason codes: " + ", ".join(receipt.get("reason_codes") or []),
+        "Fix only what these reasons require, within the allowed paths above.",
+    ]
+    failing = [n for n in receipt.get("node_results") or [] if n.get("outcome") != "passed"]
+    if failing:
+        lines.append("Failing target nodes:")
+        lines.extend(f"- {n['nodeid']} [{n['outcome']}]: {n.get('message', '')}" for n in failing)
+    elif (receipt.get("exit_codes") or {}).get("target_tests") not in (0, None):
+        lines.extend(["Target test output (tail):", str(receipt.get("target_output_tail", ""))])
+    regressions = receipt.get("regression_failures") or []
+    if regressions:
+        lines.append("Regression failures:")
+        lines.extend(
+            f"- {r['classname']}::{r['name']} [{r['outcome']}]: {r.get('message', '')}"
+            for r in regressions
+        )
+    for name, output in (receipt.get("lint_output") or {}).items():
+        if output:
+            lines.extend([f"Lint output ({name}):", str(output)])
+    diff_failures = (receipt.get("diff_check") or {}).get("failures") or []
+    if diff_failures:
+        lines.extend(["git diff --check failures:", *map(str, diff_failures)])
+    outside = (receipt.get("paths_outside_allowed_globs") or []) + (
+        receipt.get("untracked_outside_allowed_globs") or []
+    )
+    if outside:
+        lines.append("Paths outside allowed globs: " + ", ".join(outside))
+    return contract_text.rstrip("\n") + "\n" + "\n".join(lines) + "\n"
+
+
+def _chain_entry(
+    phase: str, contract_path: Path, contract_text: str, parent: str | None, run: dict[str, Any]
+) -> dict[str, Any]:
+    ran = run.get("schema") == PHASE_RUN_SCHEMA
+    return {
+        "phase": phase,
+        "contract_path": str(contract_path),
+        "contract_sha256": _sha256_bytes(contract_text.encode("utf-8")),
+        "parent_session_id": parent,
+        "session_id": run.get("session_id") if ran else None,
+        "dsh_exit_code": run.get("dsh_exit_code") if ran else None,
+        "turn_state": run.get("turn_state") if ran else None,
+        "run": run,
+        "gate": None,
+    }
+
+
+def _run_internal_green_gate(
+    root: Path, *, repo_root: Path, base: str, contract_path: Path, python: Path
+) -> tuple[dict[str, Any], str | None]:
+    """In-process green-gate with #1700 sidecar persistence; returns (receipt, path)."""
+    try:
+        receipt = run_green_gate(
+            repo_root=repo_root,
+            base_revision=base,
+            contract_path=contract_path,
+            python=str(python),
+            timeout=600.0,
+        )
+        path = persist_green_gate_with_sidecar(root, receipt, repo=repo_root, base=base)
+    except DshWorkflowError as exc:
+        return _green_error_receipt(exc.code, str(exc)), None
+    except (OSError, ValueError) as exc:
+        detail = f"{type(exc).__name__}: {exc}"
+        return _green_error_receipt("GREEN_GATE_ERROR", detail), None
+    return receipt, str(path)
+
+
+def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
+    repository = _validate_repository(args.repository)
+    if args.issue < 1:
+        raise DshWorkflowError("DSH_TRACKING_ISSUE_INVALID", "issue number must be positive")
+    repo_root = Path(args.repo_root).expanduser().resolve()
+    dsh_home = Path(args.dsh_home).expanduser().resolve()
+    parent = _validate_session_id(args.parent_session_id) if args.parent_session_id else None
+    contract_path = Path(args.phase_contract).expanduser().resolve()
+    try:
+        contract_text = contract_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise DshWorkflowError(
+            "PHASE_CONTRACT_UNREADABLE", "phase contract cannot be read"
+        ) from exc
+    prior = _load_prior_receipts(args.prior_receipt)
+
+    bad_arg = "START_PHASE_ARGUMENT_INVALID"
+    if not 0 <= args.auto_repair <= AUTO_REPAIR_MAX:
+        raise DshWorkflowError(bad_arg, f"--auto-repair must be 0..{AUTO_REPAIR_MAX}")
+    if (args.auto_repair or args.red_receipt) and not args.green_contract:
+        raise DshWorkflowError(bad_arg, "--auto-repair/--red-receipt require --green-contract")
+    if args.auto_repair and args.phase == "red":
+        raise DshWorkflowError(bad_arg, "--auto-repair applies to green or repair phases only")
+    turn = {
+        "repository": repository,
+        "repo_root": repo_root,
+        "dsh_home": dsh_home,
+    }
+    if not args.green_contract:
+        code, payload = _run_phase_turn(
+            args,
+            root,
+            **turn,
+            phase=args.phase,
+            contract_text=contract_text,
+            prior=prior,
+            parent=parent,
+            green_gate_command=None,
+        )
+        print(json.dumps(payload, sort_keys=True))
+        return code
+
+    green_path = Path(args.green_contract).expanduser().resolve()
+    try:
+        green_contract = validate_green_contract(json.loads(green_path.read_text(encoding="utf-8")))
+    except (OSError, ValueError) as exc:
+        raise DshWorkflowError("GREEN_CONTRACT_INVALID", f"cannot read contract: {exc}") from exc
+    if green_contract["repository"] != repository or green_contract["issue_number"] != args.issue:
+        raise DshWorkflowError(
+            "GREEN_CONTRACT_INVALID", "green contract is bound to a different repository/Issue"
+        )
+    green_hash = _sha256_bytes(_canonical_json(green_contract).encode("utf-8"))
+    red = (
+        _load_red_receipt(Path(args.red_receipt).expanduser(), repository, args.issue)
+        if args.red_receipt
+        else None
+    )
+    base = (
+        _git_ok(
+            repo_root,
+            "rev-parse",
+            "--verify",
+            f"{red['base_revision'] if red else 'HEAD'}^{{commit}}",
+            code=bad_arg,
+        )
+        .decode()
+        .strip()
+    )
+    python = repo_root / ".venv" / "bin" / "python"
+    gate_argv = green_gate_command(
+        repo_root=repo_root, base_revision=base, contract_path=green_path, python=python
+    )
+    gate_command = shlex.join(gate_argv)
+    stamp = _utc_now().replace(":", "").replace("-", "").replace(".", "")
+    chain_dir = root / "phase-chains" / str(args.issue) / f"{stamp}-{os.getpid()}"
+    chain: dict[str, Any] = {
+        "schema": PHASE_CHAIN_SCHEMA,
+        "claim_ceiling": PHASE_CHAIN_CLAIM_CEILING,
+        "repository": repository,
+        "issue_number": args.issue,
+        "base_revision": base,
+        "green_contract_path": str(green_path),
+        "green_contract_hash": green_hash,
+        "red_receipt_hash": red["receipt_hash"] if red else None,
+        "green_gate_command": gate_command,
+        "auto_repair_limit": args.auto_repair,
+        "repairs_used": 0,
+        "phases": [],
+        "final_decision": None,
+        "stop_reason": None,
+    }
+    summary_path = chain_dir / "summary.json"
+
+    phase, text, path, link = args.phase, contract_text, contract_path, parent
+    while True:
+        code, run = _run_phase_turn(
+            args,
+            root,
+            **turn,
+            phase=phase,
+            contract_text=text,
+            prior=prior,
+            parent=link,
+            green_gate_command=gate_command,
+        )
+        entry = _chain_entry(phase, path, text, link, run)
+        chain["phases"].append(entry)
+        _atomic_write_json(summary_path, chain)
+        if run.get("schema") != PHASE_RUN_SCHEMA:
+            chain["stop_reason"] = "PHASE_PREFLIGHT_BLOCKED"
+            break
+        if run["dsh_exit_code"] != 0:
+            # Failed turns are never auto-repaired; quarantine rules already applied.
+            chain["stop_reason"] = "DSH_TURN_FAILED"
+            break
+        if code != 0:
+            chain["stop_reason"] = "PHASE_BINDING_FAILED"
+            break
+        if phase == "red":
+            chain["stop_reason"] = "NO_GATE_FOR_RED_PHASE"
+            break
+        receipt, receipt_path = _run_internal_green_gate(
+            root, repo_root=repo_root, base=base, contract_path=green_path, python=python
+        )
+        entry["gate"] = {
+            "decision": receipt["decision"],
+            "reason_codes": receipt["reason_codes"],
+            "receipt_hash": receipt["receipt_hash"],
+            "receipt_path": receipt_path,
+        }
+        chain["final_decision"] = receipt["decision"]
+        _atomic_write_json(summary_path, chain)
+        if receipt_path is None:
+            chain["stop_reason"] = "GREEN_GATE_ERROR"
+            break
+        if receipt.get("contract_hash") != green_hash:
+            chain["stop_reason"] = "GREEN_CONTRACT_DRIFT"
+            break
+        if receipt["decision"] == "GREEN_READY":
+            chain["stop_reason"] = "GREEN_READY"
+            break
+        if "ENVIRONMENT_FAILURE" in receipt["reason_codes"]:
+            # A repair turn cannot fix the gate's interpreter; do not spend budget on it.
+            chain["stop_reason"] = "GREEN_GATE_ENVIRONMENT_FAILURE"
+            break
+        if chain["repairs_used"] >= args.auto_repair:
+            chain["stop_reason"] = "AUTO_REPAIR_EXHAUSTED"
+            break
+        chain["repairs_used"] += 1
+        attempt = chain["repairs_used"]
+        text = build_repair_contract(
+            contract_text,
+            receipt,
+            receipt_path=receipt_path,
+            attempt=attempt,
+            limit=args.auto_repair,
+        )
+        path = chain_dir / f"repair-{attempt}-contract.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        prior = [*prior, (receipt_path, receipt["receipt_hash"])]
+        phase, link = "repair", entry["session_id"]
+
+    _atomic_write_json(summary_path, chain)
+    print(json.dumps({**chain, "summary_path": str(summary_path)}, sort_keys=True))
+    if chain["stop_reason"] in ("GREEN_READY", "NO_GATE_FOR_RED_PHASE"):
+        return 0
+    if chain["stop_reason"] == "DSH_TURN_FAILED":
+        return int(chain["phases"][-1]["dsh_exit_code"])
+    return EXIT_BLOCKED
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -2759,6 +3081,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     p_phase.add_argument("--doctor-bin", default=_default_binary("nexus-workflow-doctor"))
     p_phase.add_argument("--state-root")
     p_phase.add_argument("--goal-objective")
+    p_phase.add_argument("--green-contract")
+    p_phase.add_argument("--auto-repair", type=int, default=0)
+    p_phase.add_argument("--red-receipt")
 
     p_red = sub.add_parser("red-gate")
     p_red.add_argument("--repo-root", required=True)
