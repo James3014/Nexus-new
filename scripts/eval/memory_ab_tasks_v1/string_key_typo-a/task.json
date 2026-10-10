@@ -1,0 +1,8 @@
+{
+  "id": "string_key_typo-a",
+  "bug_class": "string_key_typo",
+  "variant": "a",
+  "problem_statement": "effective_timeout() raises KeyError for the default configuration. The merged config contains timeout_seconds but the lookup uses timeout_secs.",
+  "target_file": "settings.py",
+  "repro_file": "repro.py"
+}

@@ -2143,7 +2143,7 @@ def test_registered_provider_executable_unifies_agy_aliases(monkeypatch, tmp_pat
     linked_dir = tmp_path / "linked"
     linked_dir.symlink_to(target_dir, target_is_directory=True)
     alias = str(linked_dir / "agy")
-    monkeypatch.setattr("nexus.services.unified_runtime.shutil.which", lambda value: alias)
+    monkeypatch.setattr("shutil.which", lambda value: alias)
     resolved = resolve_registered_provider_executable(
         "agy",
         environ={
@@ -2156,7 +2156,7 @@ def test_registered_provider_executable_unifies_agy_aliases(monkeypatch, tmp_pat
 
 def test_registered_provider_executable_rejects_agy_alias_drift(monkeypatch) -> None:
     monkeypatch.setattr(
-        "nexus.services.unified_runtime.shutil.which",
+        "shutil.which",
         lambda value: value,
     )
     with pytest.raises(ValueError, match="provider_executable_alias_mismatch"):

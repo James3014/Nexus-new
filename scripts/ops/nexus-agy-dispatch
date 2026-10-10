@@ -648,6 +648,8 @@ def _quota_progress_projection(
         value = event.get(source_key)
         if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 10000:
             projected[target_key] = value
+    if "ok_count" in projected:
+        projected["ok_count_semantics"] = "successful_quota_queries"
 
     if isinstance(event.get("ok"), bool):
         projected["ok"] = event["ok"]
@@ -819,6 +821,47 @@ def _account_family_quota_state(
         state, reset_ts = _family_quota_state(groups, group_name, now_ts=current)
         return state, reset_ts, True
     return "unknown", None, False
+
+
+def _quota_preflight_decision(
+    *,
+    account_alias_hash: str,
+    model_family: str,
+    quota_state: str,
+    evidence_fresh: bool,
+    probe_state: str,
+    dispatch_decision: str,
+) -> dict[str, str]:
+    """Separate quota-query health from the policy decision for one claimed account."""
+    evidence_state = (
+        "KNOWN_BLOCKED"
+        if evidence_fresh and quota_state == "blocked"
+        else "KNOWN_ELIGIBLE"
+        if evidence_fresh and quota_state in {"five_hour", "weekly"}
+        else "UNKNOWN"
+    )
+    return {
+        "account_alias_hash": account_alias_hash,
+        "model_family": model_family,
+        "evidence_state": evidence_state,
+        "quota_window_state": quota_state,
+        "probe_state": probe_state,
+        "dispatch_decision": dispatch_decision,
+    }
+
+
+def _selected_snapshot_probe_state(snapshot: dict, account_name: str) -> str:
+    rows = snapshot.get("accounts") if isinstance(snapshot, dict) else None
+    if not isinstance(rows, list):
+        return "NOT_RUN"
+    for row in rows:
+        if isinstance(row, dict) and row.get("account") == account_name:
+            if row.get("ok") is True:
+                return "CACHED_SUCCEEDED"
+            if row.get("ok") is False:
+                return "CACHED_FAILED"
+            return "CACHED_UNKNOWN"
+    return "NOT_RUN"
 
 
 def _dynamic_availability_state(
@@ -1092,6 +1135,21 @@ def classify_failure(
     if returncode == 2:
         return AccountFailureKind.SYNTAX_OR_IMPLEMENTATION_ERROR
     return AccountFailureKind.UNKNOWN
+
+
+# Only an error/fatal-severity errorreport line for the agent executor itself is
+# terminal; warnings, retries, and unrelated diagnostics (title generation) are not.
+_AGY_TERMINAL_EXECUTOR_ERROR_RE = re.compile(
+    r"(?m)^[EF]\d{4}\s+\S+\s+\d+\s+errorreport\.go:\d+\]\s+"
+    r"agent executor error:(?P<detail>[^\n]*)$"
+)
+
+
+def _has_terminal_quota_log_signal(text: str) -> bool:
+    return any(
+        _has_quota_failure_signal(match.group("detail"))
+        for match in _AGY_TERMINAL_EXECUTOR_ERROR_RE.finditer(text)
+    )
 
 
 _AGY_ALIAS_RESOLUTION_RE = re.compile(
@@ -3093,6 +3151,9 @@ def dispatch_run(
 
     try:
         while True:
+            quota_probe = {
+                "state": _selected_snapshot_probe_state(quota_snapshot, claim.internal_id)
+            }
             if scoped_model_family is not None:
                 quota_state, reset_ts, evidence_fresh = _account_family_quota_state(
                     quota_snapshot,
@@ -3100,9 +3161,24 @@ def dispatch_run(
                     model_family=scoped_model_family,
                 )
                 if not evidence_fresh:
+                    quota_probe["state"] = "UNKNOWN"
+
+                    def on_quota_progress(**event: Any) -> None:
+                        progress = event.get("quota_preflight_progress")
+                        if isinstance(progress, dict):
+                            if progress.get("phase") == "ACCOUNT_RESULT":
+                                quota_probe["state"] = (
+                                    "SUCCEEDED" if progress.get("ok") is True else "FAILED"
+                                )
+                            elif progress.get("phase") == "TIMED_OUT":
+                                quota_probe["state"] = "TIMED_OUT"
+                            elif progress.get("phase") == "START_FAILED":
+                                quota_probe["state"] = "START_FAILED"
+                        _operation_hook(operation_hook, **event)
+
                     quota_snapshot = _refresh_quota_snapshot_for_account(
                         claim.internal_id,
-                        on_phase_hook=lambda **event: _operation_hook(operation_hook, **event),
+                        on_phase_hook=on_quota_progress,
                         account_alias_hash=claim.account_alias_hash,
                     )
                     availability_state = _dynamic_availability_state(model, quota_snapshot)
@@ -3113,6 +3189,21 @@ def dispatch_run(
                         model_family=scoped_model_family,
                     )
                 if evidence_fresh and quota_state == "blocked":
+                    _operation_hook(
+                        operation_hook,
+                        quota_preflight_decision=_quota_preflight_decision(
+                            account_alias_hash=claim.account_alias_hash,
+                            model_family=scoped_model_family,
+                            quota_state=quota_state,
+                            evidence_fresh=evidence_fresh,
+                            probe_state=quota_probe["state"],
+                            dispatch_decision=(
+                                "BLOCK_KNOWN_QUOTA"
+                                if rotations >= max_failovers
+                                else "ROTATE_KNOWN_QUOTA"
+                            ),
+                        ),
+                    )
                     unavailable_until = (
                         reset_ts
                         if reset_ts is not None and reset_ts > time.time()
@@ -3207,6 +3298,33 @@ def dispatch_run(
                         "account_alias_hash": claim.account_alias_hash,
                     },
                 )
+                _operation_hook(
+                    operation_hook,
+                    quota_preflight_decision=_quota_preflight_decision(
+                        account_alias_hash=claim.account_alias_hash,
+                        model_family=scoped_model_family,
+                        quota_state=quota_state,
+                        evidence_fresh=evidence_fresh,
+                        probe_state=quota_probe["state"],
+                        dispatch_decision=(
+                            "ALLOW_KNOWN_ELIGIBLE"
+                            if evidence_fresh and quota_state in {"five_hour", "weekly"}
+                            else "ALLOW_UNKNOWN_QUOTA"
+                        ),
+                    ),
+                )
+            else:
+                _operation_hook(
+                    operation_hook,
+                    quota_preflight_decision=_quota_preflight_decision(
+                        account_alias_hash=claim.account_alias_hash,
+                        model_family=model_family,
+                        quota_state="not_applicable",
+                        evidence_fresh=False,
+                        probe_state="NOT_RUN",
+                        dispatch_decision="ALLOW_NO_QUOTA_FAMILY",
+                    ),
+                )
 
             attempts += 1
             _operation_hook(
@@ -3229,6 +3347,20 @@ def dispatch_run(
                     operation_hook,
                     effect_observation_error=f"ATTEMPT_BASELINE_CAPTURE_FAILED:{type(exc).__name__}",
                 )
+            provider_log_path = env.get("NEXUS_AGY_ATTESTATION_LOG") or os.getenv(
+                "NEXUS_AGY_ATTESTATION_LOG"
+            )
+            # None means this attempt's log span is unknown; never scan stale bytes.
+            provider_log_attempt_offset: int | None = 0
+            if provider_log_path:
+                try:
+                    provider_log_attempt_offset = (
+                        Path(provider_log_path).expanduser().stat().st_size
+                    )
+                except FileNotFoundError:
+                    provider_log_attempt_offset = 0
+                except OSError:
+                    provider_log_attempt_offset = None
             permission_token = None
             try:
                 allow_rules = list(effective_permissions.get("allow") or [])
@@ -3293,18 +3425,23 @@ def dispatch_run(
             total_wall_ms += wall_ms
 
             provider_log_text = ""
-            provider_log_path = env.get("NEXUS_AGY_ATTESTATION_LOG") or os.getenv(
-                "NEXUS_AGY_ATTESTATION_LOG"
-            )
+            attempt_log_text = ""
             if provider_log_path:
                 try:
-                    provider_log_text = (
-                        Path(provider_log_path)
-                        .expanduser()
-                        .read_text(encoding="utf-8", errors="replace")
-                    )
+                    provider_log_bytes = Path(provider_log_path).expanduser().read_bytes()
                 except OSError:
-                    provider_log_text = ""
+                    provider_log_bytes = b""
+                provider_log_text = provider_log_bytes.decode("utf-8", errors="replace")
+                if provider_log_attempt_offset is not None:
+                    # A log shorter than the pre-attempt offset was truncated or
+                    # replaced during this attempt, so all of it is current.
+                    if len(provider_log_bytes) >= provider_log_attempt_offset:
+                        provider_log_bytes = provider_log_bytes[provider_log_attempt_offset:]
+                    attempt_log_text = provider_log_bytes.decode("utf-8", errors="replace")
+            # Issue #1362: agy may exit 0 after a terminal executor quota failure.
+            provider_terminal_quota = (
+                code == 0 and not timed_out and _has_terminal_quota_log_signal(attempt_log_text)
+            )
             provider_log_lower = provider_log_text.lower()
             provider_headless_denial = (
                 "print mode: soft-denying tool confirmation" in provider_log_lower
@@ -3352,7 +3489,13 @@ def dispatch_run(
             )
             scope_blocked = bool(write_paths and scope_state == "VIOLATION_OUT_OF_SCOPE")
 
-            if code == 0 and not timed_out and not permission_blocked and not scope_blocked:
+            if (
+                code == 0
+                and not timed_out
+                and not permission_blocked
+                and not scope_blocked
+                and not provider_terminal_quota
+            ):
                 sys.stdout.write(out)
                 if err:
                     sys.stderr.write(err)
@@ -3372,6 +3515,8 @@ def dispatch_run(
             kind = (
                 AccountFailureKind.PERMISSION_OR_SCOPE_ERROR
                 if (permission_blocked or scope_blocked)
+                else AccountFailureKind.QUOTA_EXHAUSTED
+                if provider_terminal_quota
                 else classify_failure(code, out, err, timed_out)
             )
             last_kind = kind.value
@@ -3619,6 +3764,16 @@ def _write_private_prompt(path: Path, prompt: str) -> None:
         os.fsync(fh.fileno())
 
 
+def _normalize_evidence_refs(values: list[str] | None) -> list[str]:
+    refs = [str(value).strip() for value in (values or [])]
+    if len(refs) > 16:
+        raise ValueError("EVIDENCE_REF_LIMIT_EXCEEDED")
+    for ref in refs:
+        if not ref or len(ref) > 512 or any(ord(char) < 0x20 for char in ref):
+            raise ValueError("EVIDENCE_REF_INVALID")
+    return refs
+
+
 def _spawn_background_operation(
     *,
     prompt: str,
@@ -3639,8 +3794,10 @@ def _spawn_background_operation(
     pre_effect_max_seconds: float | None = None,
     pre_effect_max_tool_events: int | None = None,
     exclude_accounts: list[str] | None = None,
+    evidence_refs: list[str] | None = None,
 ) -> dict[str, Any]:
     resolved_exclude_hashes = sorted(_resolve_excluded_account_hashes(exclude_accounts))
+    resolved_evidence_refs = _normalize_evidence_refs(evidence_refs)
     journal = AgyOperationJournal(operation_root)
     operation_id = new_operation_id()
     attempt_id = new_attempt_id()
@@ -3676,6 +3833,7 @@ def _spawn_background_operation(
         runtime_revision=_runtime_revision(),
         initial_fields={
             "excluded_account_hashes": resolved_exclude_hashes,
+            "evidence_refs": resolved_evidence_refs,
             "liveness_policy": {
                 "coding_progress_required": coding_progress_required,
                 "provider_stall_seconds": resolved_provider_stall_seconds,
@@ -3956,6 +4114,7 @@ def _run_background_operation(
         "tool_event_count": 0,
         "provider_session_id": None,
         "quota_preflight_progress": None,
+        "quota_preflight_decision": None,
         "permission_profile_sha256": None,
         "permission_profile_kind": None,
         "effective_permissions": None,
@@ -3985,6 +4144,7 @@ def _run_background_operation(
             tool_event_count=int(snapshot.get("tool_event_count") or 0),
             provider_session_id=snapshot.get("provider_session_id"),
             quota_preflight_progress=snapshot.get("quota_preflight_progress"),
+            quota_preflight_decision=snapshot.get("quota_preflight_decision"),
             permission_profile_sha256=snapshot.get("permission_profile_sha256"),
             permission_profile_kind=snapshot.get("permission_profile_kind"),
             effective_permissions=snapshot.get("effective_permissions"),
@@ -4450,6 +4610,12 @@ def main(argv: list[str] | None = None) -> int:
         default=[],
         help="Account alias or 12-hex alias hash to ephemerally exclude; repeatable",
     )
+    ap.add_argument(
+        "--evidence-ref",
+        action="append",
+        default=[],
+        help="Bounded non-secret operation evidence reference; repeatable",
+    )
     ap.add_argument("--hcom-args-json", default="[]", help=argparse.SUPPRESS)
     ap.add_argument(
         "--finalize-no-effect",
@@ -4523,6 +4689,9 @@ def main(argv: list[str] | None = None) -> int:
     if not prompt.strip():
         raise SystemExit("EMPTY_PROMPT")
 
+    if args.evidence_ref and not args.background and not args.operation_run:
+        raise SystemExit("EVIDENCE_REF_REQUIRES_BACKGROUND")
+
     if args.operation_run:
         return _run_background_operation(
             operation_id=args.operation_run,
@@ -4566,6 +4735,7 @@ def main(argv: list[str] | None = None) -> int:
             pre_effect_max_seconds=args.pre_effect_max_seconds,
             pre_effect_max_tool_events=args.pre_effect_max_tool_events,
             exclude_accounts=args.exclude_account,
+            evidence_refs=args.evidence_ref,
         )
         _print_operation(record)
         return 0

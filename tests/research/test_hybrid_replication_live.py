@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from nexus.research.hybrid_replication_live import (
+    CANONICAL_AGY_DISPATCH_SHA256,
     CANONICAL_AGY_EXECUTION_GENERATION,
     EXACT_AGY_MODEL,
     FROZEN_RECEIPT_SHA256S,
@@ -1218,6 +1219,14 @@ def test_agy_identity_preflight_passes_new_generation(
     assert receipt["status"] == "PASS_NEW_EXECUTION_GENERATION"
     assert receipt["strong_online_identity_match"] is True
     assert receipt["transport_identity_match"] is True
+
+
+def test_canonical_agy_dispatch_identity_matches_source() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    dispatch_path = repo_root / "scripts" / "ops" / "nexus-agy-dispatch"
+
+    assert hashlib.sha256(dispatch_path.read_bytes()).hexdigest() == CANONICAL_AGY_DISPATCH_SHA256
+    assert CANONICAL_AGY_EXECUTION_GENERATION == "AGY_GEMINI_3_8_FLASH_MEDIUM_V10"
 
 
 def test_agy_identity_preflight_rejects_model_or_transport_drift(

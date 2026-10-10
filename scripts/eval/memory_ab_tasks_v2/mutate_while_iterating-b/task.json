@@ -1,0 +1,8 @@
+{
+  "id": "mutate_while_iterating-b",
+  "bug_class": "mutate_while_iterating",
+  "variant": "b",
+  "problem_statement": "compact() removes only some of the empty batches. On [[], [], [1], [], [], [2, 3]] it returns 2 and leaves empty batches in the list. The surviving batches are in the right order.",
+  "target_file": "batches.py",
+  "repro_file": "repro.py"
+}

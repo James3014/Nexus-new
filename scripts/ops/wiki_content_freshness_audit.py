@@ -48,7 +48,13 @@ def _sha256(data: bytes) -> str:
 
 
 def _normalise(path: str) -> str:
-    return str(path or "").replace("\\", "/").lstrip("./")
+    normalised = str(path or "").replace("\\", "/")
+    while normalised.startswith("./"):
+        normalised = normalised[2:]
+    if normalised == ".." or normalised.startswith(("../", "/")):
+        # Never turn an escaping source reference into an apparently valid path.
+        return "__invalid_wiki_source_path__"
+    return normalised
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:

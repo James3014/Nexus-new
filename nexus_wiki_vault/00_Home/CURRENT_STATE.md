@@ -9,12 +9,34 @@ verified_at: '2026-07-13'
 content_verified_against_commit: a2ae57ab96a9ddb0243858f4f2c1776709511af5
 document_updated_in_commit: fecda71e417c453a7ea2ae0229478784921c362a
 source_of_truth: repository evidence and current runtime reports
-confidence: high
+confidence: mixed
 ---
 
 # Nexus Current State
 
-## 1. Current identity
+> **Freshness notice (2026-10-08):** The source-bound snapshot below supersedes the 2026-07-13 architecture/status narrative for present-day navigation. The retained legacy sections are historical observations, not a live-system readiness verdict. Do not promote commit, CI or documentation evidence into runtime or acceptance truth.
+
+## Current repository evidence (2026-10-08, source-only)
+
+The following are exact observed default-branch revision identities, **not** claims of deployment, continuous readiness, independent acceptance or production certification. Nexus spans separately governed repositories; each must be checked at its own revision.
+
+| Repository | Observed main (2026-10-08) | Evidence boundary |
+|---|---|---|
+| `James3014/Nexus-new` | `55d4a49f9e1777d453c076eab09203a51477d4b6` | Governance/collaboration and compatibility host; source revision only |
+| `James3014/nexus-core` | `663cd72c0879907bbf029b5d25a37abbdae36118` | Evidence Trust and Completion; source revision only |
+| `James3014/nexus-learning` | `0f6ec13a9a4ec4c1093424abad1a02c806eaf84e` | Evidence-bounded learning; source revision only |
+| `James3014/nexus-open-swe-runtime` | `8cc747b0bc548106e32cff9973ae87a93e4b0504` | External execution runtime repository; source revision only |
+| `James3014/devspace` | `a3103fab6ca9afe3e81a13f2885e68996136825d` | Independent host/control transport; source revision only |
+
+The Nexus-new repository's current `AGENTS.md` is the agent-operation authority. Its `docs/governance/current_operating_mode.yaml` defines the BOOTSTRAP engineering-lane default in its declared scope; it does **not** authorize routing, worker admission, acceptance, merge or release. The `CapabilityPlanner` remains sole Nexus route/capability authority. The Core and Learning repositories are separate authorities for their declared functions, not implicit proof that the legacy three-world overview below remains current.
+
+**Evidence ceiling:** source identities and current repository contracts observed on 2026-10-08. Runtime deployment identity, heartbeat/readiness, complete cross-repository wiring and independent acceptance have **not** been reverified for this page. Any claimed live status requires separate current evidence.
+
+## Historical architecture snapshot (verified 2026-07-13)
+
+The following sections document the July 2026 three-world interpretation and v32.x assumptions. They remain for traceability only. Their paths, blockers, wiring conclusions and promotion gates must not be presented as current without checking present source and runtime.
+
+## 1. Historical identity (July 2026)
 
 Nexus is an AI Agent governance operating system built around a physical-integrity P-X-D-R-A-C lifecycle. It provides governance, tool isolation, evidence collection, and claim verification for AI swarms.
 
