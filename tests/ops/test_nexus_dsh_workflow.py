@@ -96,6 +96,8 @@ def _write_goal_projection(
 def _binding(tmp_path: Path) -> dict:
     repo = tmp_path / "repo"
     repo.mkdir()
+    # Resume requires a standalone repository whose Git metadata is inside repo (#1607).
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True, capture_output=True)
     dsh_home = tmp_path / "dsh-home"
     dsh_home.mkdir()
     log = tmp_path / "turn.jsonl"
