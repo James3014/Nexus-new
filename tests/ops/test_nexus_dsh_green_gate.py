@@ -232,6 +232,66 @@ def test_untracked_allowed_file_whitespace_blocks(repo: Path, tmp_path: Path) ->
     assert "DIFF_CHECK_FAILURE" in receipt["reason_codes"]
 
 
+def test_untracked_allowed_clean_file_is_green(repo: Path, tmp_path: Path) -> None:
+    # `git diff --no-index` exits 1 whenever content differs; that alone is not a
+    # whitespace error (#1708).
+    _fix(repo)
+    (repo / "tests" / "test_new.py").write_text("X = 1\n", encoding="utf-8")
+    code, receipt = _gate(repo, tmp_path, _contract(lint=_no_lint()))
+    assert code == 0, receipt
+    assert receipt["decision"] == "GREEN_READY"
+    assert receipt["reason_codes"] == []
+
+
+def test_diff_check_untracked_clean_passes(repo: Path) -> None:
+    (repo / "tests" / "test_new.py").write_text("X = 1\n", encoding="utf-8")
+    result = guard._diff_check(repo, "HEAD", ["tests/test_new.py"])
+    assert result == {"exit_code": 0, "failures": []}
+
+
+def test_diff_check_untracked_whitespace_fails_with_bounded_evidence(repo: Path) -> None:
+    (repo / "tests" / "test_new.py").write_text("X = 1  \n" * 2000, encoding="utf-8")
+    result = guard._diff_check(repo, "HEAD", ["tests/test_new.py"])
+    assert result["exit_code"] == 0
+    assert len(result["failures"]) == 1
+    assert "tests/test_new.py:1: trailing whitespace." in result["failures"][0]
+    assert len(result["failures"][0]) <= guard.RED_MESSAGE_LIMIT
+
+
+def test_diff_check_untracked_missing_file_fails_closed(repo: Path) -> None:
+    result = guard._diff_check(repo, "HEAD", ["tests/absent.py"])
+    assert len(result["failures"]) == 1
+    assert "absent.py" in result["failures"][0]
+
+
+@pytest.mark.parametrize("returncode", [2, 128])
+def test_diff_check_untracked_exit_above_one_fails_closed(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, returncode: int
+) -> None:
+    (repo / "tests" / "test_new.py").write_text("X = 1\n", encoding="utf-8")
+    real_git = guard._git
+
+    def fake_git(path: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
+        if "--no-index" in args:
+            return subprocess.CompletedProcess(list(args), returncode, b"", b"")
+        return real_git(path, *args)
+
+    monkeypatch.setattr(guard, "_git", fake_git)
+    result = guard._diff_check(repo, "HEAD", ["tests/test_new.py"])
+    assert len(result["failures"]) == 1
+    assert f"exit {returncode}" in result["failures"][0]
+
+
+def test_diff_check_tracked_behavior_unchanged(repo: Path) -> None:
+    _fix(repo, "def value():\n    return 2  \n")
+    result = guard._diff_check(repo, "HEAD", [])
+    assert result["exit_code"] != 0
+    assert len(result["failures"]) == 1
+    assert "app.py:2: trailing whitespace." in result["failures"][0]
+    _fix(repo)
+    assert guard._diff_check(repo, "HEAD", []) == {"exit_code": 0, "failures": []}
+
+
 def test_no_change_blocks(repo: Path, tmp_path: Path) -> None:
     code, receipt = _gate(repo, tmp_path)
     assert code == guard.EXIT_BLOCKED
