@@ -418,6 +418,10 @@ def _r1b1_fixture(
     monkeypatch.setattr(g, "HOST_GID", os.getgid())
     state = tmp_path / "state"
     state.mkdir(mode=0o700)
+    # BSD/macOS children inherit the parent directory group, not the process
+    # group (pytest tmp under /tmp is gid 0). Pin the manager state root to the
+    # exact fenced identity so descendants inherit HOST_UID/HOST_GID/0700.
+    os.chown(state, g.HOST_UID, g.HOST_GID)
     state.chmod(0o700)
     monkeypatch.setattr(g, "GATEWAY_STATE_ROOT", state)
     monkeypatch.setattr(g, "GATEWAY_SOURCE_BUNDLES_ROOT", state / "source-bundles")
@@ -475,6 +479,7 @@ def _r1b1_fixture(
     predecessor_manifest = derive_deployment_manifest(source_set, role="predecessor")
     artifact_root = g.GATEWAY_PREDECESSOR_ARTIFACT_ROOT
     artifact_root.mkdir(mode=0o700)
+    artifact_root.chmod(0o700)
     artifact_candidate = artifact_root / "candidate.bundle"
     subprocess.run(
         [
