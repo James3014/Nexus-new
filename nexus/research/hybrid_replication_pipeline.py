@@ -300,14 +300,19 @@ class FrozenStackOutcome:
                 raise ValueError("a_requires_deterministic_receipt")
             return
         if self.stratum == "B":
-            if not self.candidate_packet or not self.jev_raw_response or not self.dm1_decision:
-                raise ValueError("b_requires_candidate_jev_dm1_evidence")
+            if (
+                not self.candidate_packet
+                or not self.jev_raw_response
+                or not self.dm1_decision
+                or not self.strong_online_raw_response
+            ):
+                raise ValueError("b_requires_candidate_jev_dm1_strong_evidence")
             choice = str(self.dm1_decision.get("choice") or "")
             top = float(self.dm1_decision.get("top_probability") or 0.0)
             margin = float(self.dm1_decision.get("margin") or 0.0)
             accepted = choice != "ESCALATE" and top >= 0.70 and margin >= 0.30
-            if not accepted and not self.strong_online_raw_response:
-                raise ValueError("b_fallback_required")
+            if not accepted:
+                raise ValueError("b_requires_dm1_accept")
             return
         if self.stratum == "C":
             if not self.strong_online_raw_response:
@@ -589,6 +594,49 @@ def parse_contract_delta_comment(body: str) -> dict[str, Any]:
         raise ValueError("contract_delta_sha256_mismatch")
     payload["body"] = _decode_body(str(payload["body_gzip_base64"]))
     return payload
+
+
+def _localization_score(
+    raw_response: Any, ground_truth_details: Mapping[str, Any]
+) -> dict[str, Any]:
+    if not isinstance(raw_response, Mapping) or "candidate_packet" not in raw_response:
+        return {
+            "dm1_applicable": False,
+            "accepted": False,
+            "accepted_path": None,
+            "accepted_path_in_changed_files": None,
+            "d0_top8_hit_count": None,
+            "packet_candidate_hit_count": None,
+            "candidate_count": 0,
+            "wrong_confident_dm1_accept": False,
+            "legacy_raw": True,
+        }
+    packet = raw_response.get("candidate_packet") or {}
+    candidates = [
+        str(item.get("path")) for item in packet.get("candidate_catalog") or [] if item.get("path")
+    ]
+    # Frozen D0 top-8 as sealed in raw; the D2 packet prepends literal task paths
+    # and truncates, so it is not a D0 measurement. Absent seal -> unknown.
+    d0_top8 = raw_response.get("d0_top8_paths")
+    changed = {str(path) for path in ground_truth_details.get("changed_files") or []}
+    accepted = bool(raw_response.get("accepted_by_frozen_policy"))
+    accepted_path = raw_response.get("localization_hint_path") if accepted else None
+    accepted_path = str(accepted_path) if accepted_path else None
+    in_changed = None if not changed or not accepted else accepted_path in changed
+    return {
+        "dm1_applicable": bool(raw_response.get("dm1_applicable")),
+        "accepted": accepted,
+        "accepted_path": accepted_path,
+        "accepted_path_in_changed_files": in_changed,
+        "d0_top8_hit_count": (
+            len({str(path) for path in d0_top8[:8]} & changed)
+            if changed and isinstance(d0_top8, list)
+            else None
+        ),
+        "packet_candidate_hit_count": (len(set(candidates) & changed) if changed else None),
+        "candidate_count": len(candidates),
+        "wrong_confident_dm1_accept": bool(accepted and changed and accepted_path not in changed),
+    }
 
 
 def frozen_stack_outcome_from_payload(payload: Mapping[str, Any]) -> FrozenStackOutcome:
@@ -971,6 +1019,10 @@ class AutomaticReplicationStore:
         ground_truth_bytes = ground_truth_path.read_bytes()
         if _sha256(ground_truth_bytes) != ground_truth.get("sha256"):
             raise ValueError("ground_truth_hash_mismatch")
+        localization = _localization_score(
+            raw.get("raw_response"),
+            ground_truth.get("details") or {},
+        )
         score_payload = {
             "schema": "nexus.hybrid_replication.task_score.v1",
             "task_key": task_key,
@@ -986,6 +1038,7 @@ class AutomaticReplicationStore:
                 "evidence_refs": list(ground_truth.get("evidence_refs") or []),
                 "details": dict(ground_truth.get("details") or {}),
             },
+            "localization": localization,
             "economics": {
                 "provider": raw.get("provider"),
                 "requested_model": raw.get("requested_model"),
