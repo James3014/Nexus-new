@@ -315,13 +315,13 @@ def test_frozen_stack_outcome_enforces_a_b_c_contract() -> None:
         candidate_packet={"candidate_ids": ["x", "y"]},
         jev_raw_response={"choice": "x", "probabilities": {"x": 0.82, "y": 0.18}},
         dm1_decision={"choice": "x", "top_probability": 0.82, "margin": 0.64},
-        strong_online_raw_response=None,
+        strong_online_raw_response={"status": "VALID"},
         raw_result=RawRouteResult.create(
             route="B",
-            provider="jev",
-            requested_model="jev-latest",
-            resolved_model="jev-1.13.0",
-            model_call_count=1,
+            provider="typesafe+agy",
+            requested_model="jev-latest+agy",
+            resolved_model="jev-1.13.0+agy",
+            model_call_count=2,
             input_tokens=80,
             uncached_input_tokens=80,
             output_tokens=8,
@@ -360,20 +360,22 @@ def test_frozen_stack_outcome_enforces_a_b_c_contract() -> None:
     c.validate()
 
 
-def test_low_margin_b_requires_strong_online_fallback() -> None:
-    bad = FrozenStackOutcome(
+def _b_outcome(
+    *, top: float, margin: float, strong: dict[str, object] | None
+) -> FrozenStackOutcome:
+    return FrozenStackOutcome(
         stratum="B",
         deterministic_receipt={"status": "INSUFFICIENT"},
         candidate_packet={"candidate_ids": ["x", "y"]},
         jev_raw_response={"choice": "x"},
-        dm1_decision={"choice": "x", "top_probability": 0.69, "margin": 0.40},
-        strong_online_raw_response=None,
+        dm1_decision={"choice": "x", "top_probability": top, "margin": margin},
+        strong_online_raw_response=strong,
         raw_result=RawRouteResult.create(
             route="B",
-            provider="jev",
-            requested_model="jev-latest",
-            resolved_model="jev-1.13.0",
-            model_call_count=1,
+            provider="typesafe+agy",
+            requested_model="jev-latest+agy",
+            resolved_model="jev-1.13.0+agy",
+            model_call_count=2,
             input_tokens=80,
             uncached_input_tokens=80,
             output_tokens=8,
@@ -384,7 +386,17 @@ def test_low_margin_b_requires_strong_online_fallback() -> None:
             raw_response={"choice": "x"},
         ),
     )
-    with pytest.raises(ValueError, match="b_fallback_required"):
+
+
+def test_low_margin_b_requires_strong_online_fallback() -> None:
+    bad = _b_outcome(top=0.69, margin=0.40, strong={"status": "VALID"})
+    with pytest.raises(ValueError, match="b_requires_dm1_accept"):
+        bad.validate()
+
+
+def test_b_requires_strong_online_evidence() -> None:
+    bad = _b_outcome(top=0.82, margin=0.64, strong=None)
+    with pytest.raises(ValueError, match="b_requires_candidate_jev_dm1_strong_evidence"):
         bad.validate()
 
 
@@ -689,3 +701,136 @@ def test_ground_truth_details_are_sealed_with_terminal_identity(tmp_path: Path) 
         ),
     )
     assert state["ground_truth"]["details"]["changed_files"] == ["nexus/example.py"]
+
+
+def _score_with_raw(
+    tmp_path: Path, issue: int, raw_response: dict[str, object], changed_files: list[str]
+) -> dict[str, object]:
+    store = AutomaticReplicationStore(tmp_path)
+    snapshot = _snapshot(issue)
+    store.capture(snapshot, admission_disposition="ADMITTED_PRIMARY_FRESH_TASK")
+    store.freeze_route(
+        snapshot.task_key,
+        RouteClassification(
+            stratum="B",
+            reason="dm1 accepted",
+            capture_sha256=snapshot.capture_sha256,
+            frozen_policy_sha256="7" * 64,
+            decided_at="2026-10-01T00:01:00Z",
+        ),
+    )
+    store.seal_raw(
+        snapshot.task_key,
+        RawRouteResult.create(
+            route="B",
+            provider="typesafe+agy",
+            requested_model="jev+agy",
+            resolved_model="jev+agy",
+            model_call_count=2,
+            input_tokens=10,
+            uncached_input_tokens=10,
+            output_tokens=2,
+            wall_time_seconds=0.5,
+            failures=(),
+            retries=0,
+            fallbacks=(),
+            raw_response=raw_response,
+        ),
+    )
+    store.bind_ground_truth(
+        snapshot.task_key,
+        GroundTruthEvidence(
+            terminal_state="CLOSED_WITH_MERGED_PR",
+            terminal_at="2026-10-01T00:30:00Z",
+            evidence_refs=("pr:1@" + "b" * 40,),
+            details={"changed_files": changed_files},
+        ),
+    )
+    store.score_task(snapshot.task_key)
+    score_path = tmp_path / "tasks" / snapshot.task_key.replace("/", "__") / "score.json"
+    if not score_path.exists():
+        score_path = next(tmp_path.rglob("score.json"))
+    return json.loads(score_path.read_text(encoding="utf-8"))["localization"]
+
+
+def _nested_b_raw() -> dict[str, object]:
+    return {
+        "candidate_packet": {
+            "candidate_catalog": [
+                {"id": "C1", "path": "nexus/a.py"},
+                {"id": "C2", "path": "nexus/b.py"},
+            ]
+        },
+        "jev_raw_response": {"status": "VALID"},
+        "dm1_decision": {"applicable": True, "choice": "C1"},
+        "dm1_applicable": True,
+        "localization_hint_path": "nexus/a.py",
+        "accepted_by_frozen_policy": True,
+        "d0_wall_seconds": 0.1,
+        "d0_top8_paths": ["nexus/a.py", "nexus/b.py"],
+        "strong_online_raw_response": {"status": "VALID"},
+    }
+
+
+def test_score_localization_hit_for_accepted_path(tmp_path: Path) -> None:
+    loc = _score_with_raw(tmp_path, 1330, _nested_b_raw(), ["nexus/a.py", "tests/t.py"])
+    assert loc["accepted_path_in_changed_files"] is True
+    assert loc["wrong_confident_dm1_accept"] is False
+    assert loc["d0_top8_hit_count"] == 1
+    assert loc["packet_candidate_hit_count"] == 1
+    assert loc["candidate_count"] == 2
+
+
+def test_score_localization_flags_wrong_confident_accept(tmp_path: Path) -> None:
+    loc = _score_with_raw(tmp_path, 1331, _nested_b_raw(), ["nexus/other.py"])
+    assert loc["accepted_path_in_changed_files"] is False
+    assert loc["wrong_confident_dm1_accept"] is True
+    assert loc["d0_top8_hit_count"] == 0
+    assert loc["packet_candidate_hit_count"] == 0
+
+
+def test_score_localization_d0_top8_ignores_literal_only_hit(tmp_path: Path) -> None:
+    raw = _nested_b_raw()
+    raw["candidate_packet"] = {
+        "candidate_catalog": [
+            {"id": "C1", "path": "literal.py", "source": "LITERAL_TASK_PATH"},
+            {"id": "C2", "path": "d0.py", "source": "D0_V2_FROZEN"},
+        ]
+    }
+    raw["localization_hint_path"] = "literal.py"
+    raw["d0_top8_paths"] = ["d0.py"]
+    loc = _score_with_raw(tmp_path, 1333, raw, ["literal.py"])
+    assert loc["d0_top8_hit_count"] == 0
+    assert loc["packet_candidate_hit_count"] == 1
+
+
+def test_score_localization_d0_top8_counts_paths_truncated_from_packet(
+    tmp_path: Path,
+) -> None:
+    d0 = [f"nexus/mod{i}.py" for i in range(1, 9)]
+    raw = _nested_b_raw()
+    raw["candidate_packet"] = {
+        "candidate_catalog": [
+            {"id": f"C{i}", "path": path} for i, path in enumerate(["literal.py", *d0[:7]], 1)
+        ]
+    }
+    raw["localization_hint_path"] = "literal.py"
+    raw["d0_top8_paths"] = d0
+    loc = _score_with_raw(tmp_path, 1334, raw, [d0[7]])
+    assert loc["d0_top8_hit_count"] == 1
+    assert loc["packet_candidate_hit_count"] == 0
+
+
+def test_score_localization_without_sealed_d0_top8_is_unknown(tmp_path: Path) -> None:
+    raw = _nested_b_raw()
+    del raw["d0_top8_paths"]
+    loc = _score_with_raw(tmp_path, 1335, raw, ["nexus/a.py"])
+    assert loc["d0_top8_hit_count"] is None
+    assert loc["packet_candidate_hit_count"] == 1
+
+
+def test_score_localization_legacy_flat_raw(tmp_path: Path) -> None:
+    loc = _score_with_raw(tmp_path, 1332, {"status": "VALID", "operation_id": "x"}, ["a.py"])
+    assert loc["legacy_raw"] is True
+    assert loc["candidate_count"] == 0
+    assert loc["wrong_confident_dm1_accept"] is False
