@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from nexus.orchestrator.canonical_core_transport import extract_git_manifest
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 @pytest.fixture
@@ -231,3 +236,32 @@ def test_t14_dirty_target_oracle(test_repo: Path):
     assert manifest["target_tree"] != f"git-tree:{base_tree}"
     assert len(manifest["entries"]) == 1
     assert manifest["entries"][0]["path"] == "tracked_a.txt"
+
+
+def _imported_sys_path(extra_env: dict[str, str] | None = None) -> list[str]:
+    """sys.path of a fresh interpreter that imports the transport module."""
+    env = {k: v for k, v in os.environ.items() if k != "NEXUS_CORE_REPO_ROOT"}
+    env.update(extra_env or {})
+    code = (
+        "import json, sys\n"
+        "import nexus.orchestrator.canonical_core_transport\n"
+        "print(json.dumps(sys.path))\n"
+    )
+    out = subprocess.check_output(
+        [sys.executable, "-c", code], cwd=str(REPO_ROOT), env=env, text=True
+    )
+    return json.loads(out.strip().splitlines()[-1])
+
+
+def test_transport_import_injects_no_developer_checkout_path():
+    """Without NEXUS_CORE_REPO_ROOT, no hardcoded developer path is put on sys.path."""
+    sys_path = _imported_sys_path()
+    assert not any("/Users/jameschen" in entry for entry in sys_path)
+
+
+def test_transport_import_uses_configured_core_root_when_set(tmp_path: Path):
+    """NEXUS_CORE_REPO_ROOT, when set, is the only extra Core root placed on sys.path."""
+    core_root = tmp_path / "nexus-core"
+    core_root.mkdir()
+    sys_path = _imported_sys_path({"NEXUS_CORE_REPO_ROOT": str(core_root)})
+    assert sys_path[0] == str(core_root.resolve())

@@ -35,13 +35,16 @@ from nexus.orchestrator.ambient_core import (
 
 _EXACT_GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
-# The Core worktree actually imported by this transport process. The legacy
-# hardcoded CORE_REPO_ROOT pointed at a developer machine path that does not
-# exist here; keep it as the configured expectation (never as executed truth)
-# and derive the ACTUAL executed identity from the imported product module.
-CORE_REPO_ROOT = Path("/Users/jameschen/Workspace/nexus-core").resolve()
-if str(CORE_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(CORE_REPO_ROOT))
+# Core is consumed as the pinned installed `nexus-certify` package (see
+# pyproject.toml). A local Core checkout is placed ahead of the installed
+# package only when explicitly configured via NEXUS_CORE_REPO_ROOT; no
+# developer-machine path is hardcoded. The ACTUAL executed identity is always
+# derived from the imported product module (see _resolve_core_source_root).
+_configured_core_root = os.environ.get("NEXUS_CORE_REPO_ROOT", "").strip()
+if _configured_core_root:
+    _core_repo_root = Path(_configured_core_root).expanduser().resolve()
+    if str(_core_repo_root) not in sys.path:
+        sys.path.insert(0, str(_core_repo_root))
 
 try:
     from product.adapters.generic_verification import verify_generic_changeset
