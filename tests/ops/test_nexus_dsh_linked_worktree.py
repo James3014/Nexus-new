@@ -19,8 +19,6 @@ import tempfile
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "ops" / "nexus-dsh-workflow"
 guard = SourceFileLoader("nexus_dsh_workflow_linked_worktree_test", str(SCRIPT)).load_module()
@@ -38,10 +36,20 @@ GIT_IDENTITY_ENV = (
     "GIT_NAMESPACE",
 )
 
-needs_seatbelt = pytest.mark.skipif(
-    sys.platform != "darwin" or shutil.which("sandbox-exec") is None,
-    reason="physical DSH Seatbelt confinement witness requires macOS sandbox-exec",
+SEATBELT_AVAILABLE = sys.platform == "darwin" and shutil.which("sandbox-exec") is not None
+PHYSICAL_WITNESSES = (
+    "test_linked_worktree_git_restore_is_physically_denied_under_workspace_write",
+    "test_standalone_clone_allows_exact_git_metadata_ops_and_denies_parent_and_siblings",
 )
+
+
+def physical_seatbelt_witness(func, *, available: bool = SEATBELT_AVAILABLE):
+    """Expose a physical DSH Seatbelt witness as a test node only where it can run.
+
+    Elsewhere the name is bound to None, so pytest collects no node at all rather
+    than a skipped one that could be mistaken for confinement evidence.
+    """
+    return func if available else None
 
 
 def _git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -211,6 +219,13 @@ def _start_phase(ctx: dict[str, Path], repo_root: Path, env: dict[str, str] | No
     )
 
 
+def test_physical_witnesses_are_collected_only_where_seatbelt_runs() -> None:
+    for name in PHYSICAL_WITNESSES:
+        assert callable(globals()[name]) is SEATBELT_AVAILABLE, name
+    assert physical_seatbelt_witness(len, available=False) is None
+    assert physical_seatbelt_witness(len, available=True) is len
+
+
 def test_dsh_temp_write_roots_cover_tmp_and_node_tmpdir(tmp_path: Path) -> None:
     roots = guard.dsh_temp_write_roots({"TMPDIR": str(tmp_path) + "/"})
     assert Path("/tmp").resolve() in roots
@@ -218,7 +233,7 @@ def test_dsh_temp_write_roots_cover_tmp_and_node_tmpdir(tmp_path: Path) -> None:
     assert Path(tempfile.gettempdir()).resolve() in roots
 
 
-@needs_seatbelt
+@physical_seatbelt_witness
 def test_linked_worktree_git_restore_is_physically_denied_under_workspace_write(
     dsh_non_temp_path: Path,
 ) -> None:
@@ -307,7 +322,7 @@ def test_resume_blocks_linked_worktree_before_spawning_dsh(
     assert _last_json(proc)["provider_invocation_allowed"] is False
 
 
-@needs_seatbelt
+@physical_seatbelt_witness
 def test_standalone_clone_allows_exact_git_metadata_ops_and_denies_parent_and_siblings(
     dsh_non_temp_path: Path,
 ) -> None:
