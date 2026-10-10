@@ -292,6 +292,16 @@ def test_diff_check_tracked_behavior_unchanged(repo: Path) -> None:
     assert guard._diff_check(repo, "HEAD", []) == {"exit_code": 0, "failures": []}
 
 
+def test_untracked_allowed_clean_file_passes_diff_check(repo: Path, tmp_path: Path) -> None:
+    # #1686: an uncommitted RED test is the normal GREEN input; `git diff --no-index`
+    # exits 1 merely because the file differs from /dev/null.
+    _fix(repo)
+    (repo / "tests" / "test_new.py").write_text("X = 1\n", encoding="utf-8")
+    code, receipt = _gate(repo, tmp_path, _contract(lint=_no_lint()))
+    assert receipt["diff_check"]["failures"] == []
+    assert code == 0, receipt["reason_codes"]
+
+
 def test_no_change_blocks(repo: Path, tmp_path: Path) -> None:
     code, receipt = _gate(repo, tmp_path)
     assert code == guard.EXIT_BLOCKED
