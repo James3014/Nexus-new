@@ -1781,9 +1781,20 @@ def _diff_check(repo: Path, base: str, untracked: list[str]) -> dict[str, Any]:
     if proc.returncode != 0:
         failures.append(proc.stdout.decode("utf-8", "replace")[:RED_MESSAGE_LIMIT])
     for rel in untracked:
+        # `--no-index` exits 1 whenever content differs, so 0/1 alone are normal
+        # comparison outcomes; `--check` problems are reported on stdout. Exit >1 or
+        # stderr (e.g. unreadable path) is an execution failure and fails closed.
         extra = _git(repo, "diff", "--check", "--no-index", "--", os.devnull, rel)
-        if extra.returncode != 0:
-            failures.append(extra.stdout.decode("utf-8", "replace")[:RED_MESSAGE_LIMIT])
+        out = extra.stdout.decode("utf-8", "replace")
+        err = extra.stderr.decode("utf-8", "replace")
+        if out.strip():
+            failures.append(out[:RED_MESSAGE_LIMIT])
+        elif extra.returncode not in (0, 1) or err.strip():
+            failures.append(
+                f"git diff --check --no-index {rel} exit {extra.returncode}: {err}"[
+                    :RED_MESSAGE_LIMIT
+                ]
+            )
     return {"exit_code": proc.returncode, "failures": failures}
 
 
