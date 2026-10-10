@@ -3059,10 +3059,16 @@ def _load_red_receipt(path: Path, repository: str, issue_number: int) -> dict[st
 
 
 def green_gate_command(
-    *, repo_root: Path, base_revision: str, contract_path: Path, python: Path, gate: str = "green"
+    *,
+    repo_root: Path,
+    base_revision: str,
+    contract_path: Path,
+    python: Path,
+    gate: str = "green",
+    red_receipt: str | None = None,
 ) -> list[str]:
     """The exact green-gate (or red-gate) argv the guard evaluates; shown to DSH in the header."""
-    return [
+    argv = [
         str(python),
         str(Path(__file__).resolve()),
         f"{gate}-gate",
@@ -3075,6 +3081,7 @@ def green_gate_command(
         "--python",
         str(python),
     ]
+    return [*argv, "--red-receipt", red_receipt] if red_receipt else argv
 
 
 def build_repair_contract(
@@ -3207,7 +3214,13 @@ def _chain_entry(
 
 
 def _run_internal_green_gate(
-    root: Path, *, repo_root: Path, base: str, contract_path: Path, python: Path
+    root: Path,
+    *,
+    repo_root: Path,
+    base: str,
+    contract_path: Path,
+    python: Path,
+    red_receipt: Path | None = None,
 ) -> tuple[dict[str, Any], str | None]:
     """In-process green-gate with #1700 sidecar persistence; returns (receipt, path)."""
     try:
@@ -3217,6 +3230,7 @@ def _run_internal_green_gate(
             contract_path=contract_path,
             python=str(python),
             timeout=600.0,
+            red_receipt=red_receipt,
         )
         path = persist_green_gate_with_sidecar(root, receipt, repo=repo_root, base=base)
     except DshWorkflowError as exc:
@@ -3392,6 +3406,7 @@ def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
         return path
 
     phase, text, path, link = args.phase, contract_text, contract_path, parent
+    gate_red: tuple[str, str] | None = None
     if red_contract is not None and red_path is not None:
         red_hash = _sha256_bytes(_canonical_json(red_contract).encode("utf-8"))
         red_command = shlex.join(
@@ -3493,6 +3508,19 @@ def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
             prior = [*prior, (chain["red_receipt_path"], chain["red_receipt_hash"])]
             phase, (path, text) = "green", green_phase
             link = chain["phases"][-1]["session_id"]
+            # Every GREEN gate in this chain binds the exact RED_READY receipt, so a target
+            # failing on a different assertion than RED bound is RED_ORACLE_DEFECT (#1665).
+            gate_red = (chain["red_receipt_path"], chain["red_receipt_hash"])
+            gate_command = shlex.join(
+                green_gate_command(
+                    repo_root=repo_root,
+                    base_revision=base,
+                    contract_path=green_path,
+                    python=python,
+                    red_receipt=gate_red[0],
+                )
+            )
+            chain["green_gate_command"] = gate_command
 
     while green_path is not None and chain["stop_reason"] is None:
         code, run = _run_phase_turn(
@@ -3516,7 +3544,12 @@ def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
             chain["stop_reason"] = "NO_GATE_FOR_RED_PHASE"
             break
         receipt, receipt_path = _run_internal_green_gate(
-            root, repo_root=repo_root, base=base, contract_path=green_path, python=python
+            root,
+            repo_root=repo_root,
+            base=base,
+            contract_path=green_path,
+            python=python,
+            red_receipt=Path(gate_red[0]) if gate_red else None,
         )
         entry["gate"] = {
             "kind": "green",
@@ -3525,6 +3558,12 @@ def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
             "receipt_hash": receipt["receipt_hash"],
             "receipt_path": receipt_path,
         }
+        if gate_red:
+            entry["gate"].update({
+                "red_receipt_path": gate_red[0],
+                "red_receipt_hash": gate_red[1],
+                "red_oracle": receipt.get("red_oracle"),
+            })
         chain["final_decision"] = receipt["decision"]
         _atomic_write_json(summary_path, chain)
         if receipt_path is None:
@@ -3532,6 +3571,13 @@ def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
             break
         if receipt.get("contract_hash") != green_hash:
             chain["stop_reason"] = "GREEN_CONTRACT_DRIFT"
+            break
+        if gate_red and receipt.get("red_oracle") != {
+            "status": "BOUND",
+            "red_receipt_hash": gate_red[1],
+        }:
+            # The gate did not bind the exact RED_READY receipt; repair cannot fix that.
+            chain["stop_reason"] = "RED_RECEIPT_INVALID"
             break
         if receipt["decision"] == "GREEN_READY":
             chain["stop_reason"] = "GREEN_READY"
