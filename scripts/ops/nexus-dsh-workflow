@@ -23,6 +23,7 @@ import ast
 import fnmatch
 import hashlib
 import json
+import math
 import os
 import re
 import shlex
@@ -3273,9 +3274,11 @@ def run_route_classifier(prompt: str, timeout: float) -> tuple[str | None, str |
         ]
         for rule in ROUTE_CLASSIFIER_DENIES:
             argv.extend(["--deny", rule])
+        # The dispatcher takes whole seconds; never truncate a sub-second budget to 0.
+        # The outer deadline below keeps the exact requested (possibly fractional) value.
         argv.extend([
             "--timeout",
-            str(int(timeout)),
+            str(max(1, math.ceil(timeout))),
             "--max-calls",
             "1",
             "--prompt-file",
