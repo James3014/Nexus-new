@@ -1,10 +1,12 @@
 # Task Card: remove six archived legacy adapters
 
+Historical source-PR current-main binding: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`; retained as historical evidence after the Issue #428 active rebind.
+
 - artifact_authority: current
 - task_id: `github-issue-52-legacy-adapters`
 - source_issue: `#52`
 - owner: James Chen
-- status: ACTIVE
+- status: COMPLETE / TERMINAL_RECONCILIATION
 - baseline_revision: `069596056fff852bad8c826725902d25361aa9c7`
 - commit_required: true
 - candidate_required: true
@@ -13,6 +15,8 @@
 - worker_may_approve: false
 - worker_may_integrate: false
 - `AUTO_CHAIN=false`
+- terminal_marker: `LEGACY_ADAPTERS_REMOVED_AND_SOURCE_INVENTORY_VERIFIED`
+- claim_ceiling: `LEGACY_ADAPTERS_REMOVED_AND_SOURCE_INVENTORY_VERIFIED_PROVEN_ONLY`
 
 ## Objective
 
@@ -67,3 +71,45 @@ scope widening. PR #87 becomes superseded only after this fresh Candidate is
 physically established.
 
 Claim ceiling: `SIX_ARCHIVED_CALLER_FREE_ADAPTERS_REMOVED_CANDIDATE_ONLY`.
+
+## Terminal reconciliation (post-merge)
+
+Physically merged by PR #215:
+
+- PR #215 base: `069596056fff852bad8c826725902d25361aa9c7`
+- PR #215 head: `845954d1498e7afffce9b278f5827edb7682dd01`
+- PR #215 merge: `2c820eab67669ab63297bf76fcf1751aaa9496ba`
+
+Historical verification receipt: `eb668fb76f0c30d8f025db42cdb8e320d556c037`
+(original 2026-08-13 snapshot). Reconfirmed at historical current main
+`12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`:
+
+- all six authorized `scripts/legacy` adapter paths are absent;
+- exactly their six stale `muse_nexus.egg-info/SOURCES.txt` rows are absent;
+- PR #215 merge commit is an ancestor of current main.
+
+Reconfirmed at historical current main `cdf2570ede5ae218f36f886b696c8da45458043a`
+(post-PR236 rebind, merge commit `663ea1660c4e2db5527472a63d7f720f1cc9ff20`):
+
+- all six authorized `scripts/legacy` adapter paths are absent;
+- exactly their six stale `muse_nexus.egg-info/SOURCES.txt` rows are absent;
+- PR #215 merge commit is an ancestor of current main.
+
+Reconfirmed at current main `71ae533ec9f795477131645f96cea1c93b4f4d40`
+(post-PR333 rebind, merge commit `2fe681f6648263ebad60246bf891259d04303d63`):
+
+- all six authorized `scripts/legacy` adapter paths are absent;
+- exactly their six stale `muse_nexus.egg-info/SOURCES.txt` rows are absent;
+- PR #215 merge commit is an ancestor of current main.
+
+Evidence from PR #215: 539 focused replacement/migration/CLI tests passed;
+wheel and sdist contain none of the six deleted paths. Historical live
+required-check rollup: `NOT_RECOVERED`/`NOT_ASSERTED`; no CI/check receipt is
+claimed for this metadata-only reconciliation.
+
+Marker `LEGACY_ADAPTERS_REMOVED_AND_SOURCE_INVENTORY_VERIFIED` is bound to the
+exact merged implementation above. `AUTO_CHAIN=false`. Claim ceiling
+`LEGACY_ADAPTERS_REMOVED_AND_SOURCE_INVENTORY_VERIFIED_PROVEN_ONLY`: no
+runtime, route, Workforce, lifecycle, approval, integration, merge, release,
+or production authority; no #55 serialization completion claim; no PR #87
+authority; no self-approval or self-merge.

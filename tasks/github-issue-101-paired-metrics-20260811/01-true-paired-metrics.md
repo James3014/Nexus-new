@@ -1,13 +1,19 @@
 # Task Card: Issue #101 True Paired R2B2 Metrics
 
+Historical source-PR current-main binding: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`; retained as historical evidence after the Issue #428 active rebind.
+
 - task_id: github-issue-101
 - issue: #101
-- status: ACTIVE
-- base_sha: e13ad5472296c8a303387f19662d19ce5a82bd0a
+- status: COMPLETE / TERMINAL_RECONCILIATION
+- historical_baseline: e13ad5472296c8a303387f19662d19ce5a82bd0a
+- reconciled_main: 71ae533ec9f795477131645f96cea1c93b4f4d40
+- current_main: 71ae533ec9f795477131645f96cea1c93b4f4d40
 - worker_role: luna_worker
 - autonomy: bounded implementation
 - target: /private/tmp/nexus-issue101-luna-019fee
 - AUTO_CHAIN: false
+- terminal_marker: R2B2_TRUE_PAIRED_METRICS_PROVEN
+- claim_ceiling: repository-contained paired metrics source/tests only
 
 ## Objective
 
@@ -84,3 +90,24 @@ git diff --name-only e13ad5472296c8a303387f19662d19ce5a82bd0a...HEAD
 - `RECOVERABLE_BLOCK`: test/tool infrastructure failure.
 - `HARD_BLOCK`: report/schema authority conflict, required cross-scope edit,
   ambiguous pairing identity, or inability to fail closed.
+
+## Terminal reconciliation
+
+Completed by PR #108: exact head
+`ce7e40ed99deece77cc587d6dd729faed527751a`, merge
+`4437d34afc78b247354fbd0d2c1d7bf0d2fdf4c9`, reconciled on current `main`
+`71ae533ec9f795477131645f96cea1c93b4f4d40` (historical current-main receipts
+`cdf2570ede5ae218f36f886b696c8da45458043a` post-PR236 and
+`12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601` pre-PR236 rebind). Required checks
+succeeded with Tier3 skipped as expected; Owner terminal receipt comment
+`5282536716`; 65 zero-provider focused tests passed on current main (metrics
+and report suites). Historical baseline
+`e13ad5472296c8a303387f19662d19ce5a82bd0a`, the two-file implementation
+ceiling, and the forbidden-scope boundary are preserved unchanged.
+
+`R2B2_TRUE_PAIRED_METRICS_PROVEN` is limited to the repository-contained true
+paired R2B2 metrics source and tests. It grants no benchmark-superiority,
+causal, provider, execution, release, integration, runtime, or production
+authority. Issue #100 observation-integrity, #102 report verifier, and #103
+execution-topology boundaries remain separate and are not activated here.
+`AUTO_CHAIN=false`.

@@ -1,20 +1,48 @@
 # Owner-approved DeepSeek L1 Governance Write-back
 
+Historical source-PR current-main binding: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`; retained as historical evidence after the Issue #428 active rebind.
+
 **artifact_authority:** current
 **owner:** James Chen
-**status:** active, governed, PR-only
+**status:** COMPLETE
 **source_issue:** https://github.com/James3014/Nexus-new/issues/107
+**baseline_main:** 025bb5df0275423801b550451fedfc7b60dfb2ca
+**historical_baseline:** 025bb5df0275423801b550451fedfc7b60dfb2ca
+**reconciled_main:** 71ae533ec9f795477131645f96cea1c93b4f4d40
+**current_main:** 71ae533ec9f795477131645f96cea1c93b4f4d40
+**implementation_commit:** 89ed130ac5d3ad58106e7d9ba8f0d3a65066fdc2
+**rebind_lineage_commit:** db59f2430de5eafa041cf02f0ac2448791babf59
+**current_frontier:** TERMINAL_RECONCILIATION
+**frontier_status:** COMPLETE
+**terminal_marker:** OWNER_APPROVED_DEEPSEEK_L1_ROLE_WRITEBACK_PROVEN
+**claim_ceiling:** OWNER_APPROVED_DEEPSEEK_L1_ROLE_WRITEBACK_PROVEN_ONLY
 **AUTO_CHAIN:** false
 
 ## Ordered cards
 
 | Order | Task ID | Card | Status | Dependency |
 |---:|---|---|---|---|
-| 0 | `deepseek-l1-governance-writeback` | `00-deepseek-l1-governance-writeback.md` | IN_PROGRESS | Owner-approved Issue #107 |
+| 0 | `deepseek-l1-governance-writeback` | `00-deepseek-l1-governance-writeback.md` | COMPLETE | Owner-approved Issue #107 |
 
 ## Current frontier
 
-`deepseek-l1-governance-writeback` is the sole frontier. It may implement the
-approved manifest, policy, and minimum contract/admission evidence, commit and
-open a PR to `main`, then stop. No merge, successor execution, or queue-role
-change is authorized by this campaign.
+PR #110 physically merged exact head
+`db59f2430de5eafa041cf02f0ac2448791babf59` onto base
+`025bb5df0275423801b550451fedfc7b60dfb2ca` as
+`89ed130ac5d3ad58106e7d9ba8f0d3a65066fdc2`, with an exact six-file scope
+(policy, manifest, two tests, and this campaign pair) and five exact-head
+workflows completed successfully. The Owner receipt on Issue #107 records
+physical completion. At PR #110 / Issue #107 merge time, the DeepSeek entry
+read back as `REGISTERED_CONDITIONAL`/`AVAILABLE`/`L1`/`default_route: false`
+with bounded candidate roles only, the dated 2026-08-11 policy amendment was
+recorded, and the L1.5 reviewer proposal was NOT APPROVED. Current main
+`46e21858` since commit `eb0c746f` (2026-08-15 writeback) records
+`autonomy: L2` for `opencode_deepseek_v4_flash`; that later promotion is not
+authorized by and is not re-claimed by Issue #107 / PR #261, which remain
+bound to the historical Owner-approved L1 writeback receipt.
+
+`OWNER_APPROVED_DEEPSEEK_L1_ROLE_WRITEBACK_PROVEN` is limited to the exact
+Workforce policy/manifest write-back reconciliation. It grants no provider
+runtime call, L1.5 approval, default-route or Workforce expansion, runtime
+activation, approval, integration, merge, release, or production authority.
+`AUTO_CHAIN=false`.

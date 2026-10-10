@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: COMPLETE
 task_id: github-issue-56-remove-typer-correct-cli-docs
 campaign_id: github-issue-56-typer-cli-docs-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/56
@@ -10,7 +10,19 @@ worker_may_commit: false
 worker_may_approve: false
 worker_may_integrate: false
 worker_may_push: false
+frontier_status: TERMINAL_RECONCILIATION
+terminal_marker: ISSUE_56_PRODUCT_COMPLETE_STALE_CARD_ONLY_PROVEN
+claim_ceiling: ISSUE_56_PRODUCT_COMPLETE_STALE_CARD_ONLY_PROVEN_ONLY
+historical_baseline: 14dd1f29183b09646215462b97b0dd0feb8c0743
+pr70_base: 84eaa6886e0388a4e15f5b837c89e37768b14307
+pr70_head: 40c37dc5eed5a72199c373ea3e21bd51bf9462bc
+pr70_merge: 4e785930eb67ea973a9917c906561c1c86946595
+historical_reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
+reconciled_main: 71ae533ec9f795477131645f96cea1c93b4f4d40
+current_main: 71ae533ec9f795477131645f96cea1c93b4f4d40
 ---
+
+Historical source-PR current-main binding: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`; retained as historical evidence after the Issue #428 active rebind.
 
 # Remove Direct Typer Contract and Correct CLI/Cueline Docs
 
@@ -66,3 +78,27 @@ transitive dependency truth, and receives independent exact-commit review.
 
 `RECOVERABLE_BLOCK` for lock/docs/test defects. `HARD_BLOCK` if current
 first-party code actually imports Typer or requires it as a direct API contract.
+
+## Physical evidence and terminal boundary
+
+- Issue #56 is closed `completed` (2026-08-10).
+- PR #70 merged 2026-08-10: head
+  `40c37dc5eed5a72199c373ea3e21bd51bf9462bc` onto base
+  `84eaa6886e0388a4e15f5b837c89e37768b14307` as
+  `4e785930eb67ea973a9917c906561c1c86946595`; exact delivered product scope:
+  `pyproject.toml`, `uv.lock`, `openwiki/runtime/cli-and-cueline.md` plus the
+  Task Card pair; five changed files, zero deletions.
+- Owner receipt `issuecomment-5253052085`
+  (`POST_MERGE_RECONCILIATION_20260811`): `PRODUCT_COMPLETE / STALE_CARD_ONLY`;
+  exact-base Bandit/Pyright/Ruff/impact/Wiki gates passed; Tier 3 skipped;
+  transitive Typer may remain by design.
+- Current main `71ae533ec9f795477131645f96cea1c93b4f4d40` readback: PR #70 merge
+  `4e785930...` and head `40c37dc5...` are ancestors
+  (`git merge-base --is-ancestor`); `pyproject.toml` contains no direct Typer
+  declaration; `openwiki/runtime/cli-and-cueline.md` contains no Typer or stale
+  command/Cueline claim.
+
+`ISSUE_56_PRODUCT_COMPLETE_STALE_CARD_ONLY_PROVEN` is limited to the exact
+GitHub collaboration cleanup at the merged PR #70 head. It grants no product,
+runtime, route, Workforce, lifecycle, Candidate, approval, integration, merge,
+release, or production authority. `AUTO_CHAIN=false`.
