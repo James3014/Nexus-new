@@ -451,6 +451,7 @@ GATEWAY_SOURCE_BUNDLES_ROOT = GATEWAY_STATE_ROOT / "source-bundles"
 GATEWAY_PREDECESSOR_ARTIFACT_ROOT = GATEWAY_STATE_ROOT / "predecessor-artifacts"
 GATEWAY_REPOSITORY = GATEWAY_STATE_ROOT / "repository.git"
 _R1_PERSISTENT_FSCK_TIMEOUT_SECONDS = 120
+_R1_AUTHORITY_FETCH_TIMEOUT_SECONDS = 300
 GATEWAY_RECOVERY_AUTHORITY_STORE = GATEWAY_STATE_ROOT / "recovery-authority.json"
 GATEWAY_RECOVERY_MATERIALIZATION_ROOT = GATEWAY_STATE_ROOT / "recovery-materializations"
 RECOVERY_AUTHORITY_SOURCE_PATH = RECOVERY_RECEIPT_PATH
@@ -1327,16 +1328,53 @@ def _r1_create_or_verify_bundle(
         source = scratch / "source.git"
         candidate = scratch / "candidate.bundle"
         _r1_run("git", "init", "--bare", str(source))
-        for (role, ref), commit in zip(_R1_ROLE_REFS, expected, strict=True):
-            source_root = (
-                predecessor_store
-                if role == "predecessor"
-                else Path(HOST_AUTHORITY_SOURCE_ROOT)
-            )
+        git = ("git", "--git-dir", str(source))
+        refs = dict(_R1_ROLE_REFS)
+        # The fixed authority mirror may be shallow: fetching from it exits 0
+        # without writing the role ref, and update-ref alone would bundle
+        # truncated history.  Read complete fresh-main history only from the
+        # fixed remote ref and require it to still be the observed fresh main.
+        _r1_run(
+            *git,
+            "fetch",
+            "--no-tags",
+            HOST_AUTHORITY_REMOTE,
+            f"+{HOST_AUTHORITY_REF}:{refs['fresh-main']}",
+            timeout=_R1_AUTHORITY_FETCH_TIMEOUT_SECONDS,
+        )
+        if (
             _r1_run(
-                "git", "--git-dir", str(source), "fetch", "--no-tags",
-                str(source_root), f"+{commit}:{ref}",
+                *git,
+                "rev-parse",
+                "--verify",
+                "--end-of-options",
+                f"{refs['fresh-main']}^{{commit}}",
             )
+            != fresh_main
+        ):
+            raise _gateway_error("R1 fixed remote main moved during bundle construction")
+        try:
+            _r1_run(*git, "merge-base", "--is-ancestor", receipt.desired_commit, fresh_main)
+        except GatewayContractError as exc:
+            raise _gateway_error("R1 bundle desired outside fresh main", exc) from exc
+        _r1_run(*git, "update-ref", refs["desired"], receipt.desired_commit, "0" * 40)
+        _r1_run(
+            *git,
+            "fetch",
+            "--no-tags",
+            str(predecessor_store),
+            f"+{receipt.predecessor_commit}:{refs['predecessor']}",
+        )
+        if str(
+            _r1_run(
+                *git,
+                "for-each-ref",
+                "--format=%(refname) %(objectname)",
+            )
+        ).splitlines() != sorted(
+            f"{ref} {commit}" for (_, ref), commit in zip(_R1_ROLE_REFS, expected, strict=True)
+        ):
+            raise _gateway_error("R1 bundle role ref set mismatch")
         _r1_run(
             "git", "--git-dir", str(source), "bundle", "create",
             str(candidate), *(ref for _, ref in _R1_ROLE_REFS),

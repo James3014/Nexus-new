@@ -1,4 +1,5 @@
 # ruff: noqa: E701, E702, E731
+import dataclasses
 import fcntl
 import hashlib
 import json
@@ -1560,6 +1561,316 @@ def test_r1b1_named_role_swap_extra_refs_and_valid_bundle_encodings(tmp_path, mo
         encoded.append(hashlib.sha256(path.read_bytes()).hexdigest())
     assert encoded[0] != encoded[1]
     assert fixture["desired_manifest"].deployment_id == fixture["receipt"].desired_manifest_id
+
+
+def _r1_bundle_harness(tmp_path, monkeypatch, *, after_command=None):
+    """Real-git harness around the manager bundle seam.
+
+    The spy only observes and forwards to real git; ``after_command`` may apply
+    a real post-command ref mutation to witness fail-closed role binding.
+    """
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    fresh_main = subprocess.check_output(
+        ["git", "-C", str(fixture["mirror"]), "rev-parse", "HEAD"], text=True
+    ).strip()
+    expected = {
+        "refs/nexus-r1/fresh-main": fresh_main,
+        "refs/nexus-r1/desired": fixture["desired"],
+        "refs/nexus-r1/predecessor": fixture["predecessor"],
+    }
+    observed = {"bundle_create_refs": None, "host_calls": []}
+    real_run = g._r1_run
+
+    def spy(*command, **kwargs):
+        if command[:2] == ("git", "--git-dir") and command[3:5] == ("bundle", "create"):
+            observed["bundle_create_refs"] = subprocess.check_output(
+                [
+                    "git",
+                    "--git-dir",
+                    command[2],
+                    "for-each-ref",
+                    "--format=%(refname) %(objectname)",
+                ],
+                text=True,
+            ).splitlines()
+        result = real_run(*command, **kwargs)
+        if after_command and command[:2] == ("git", "--git-dir"):
+            after_command(Path(command[2]), command[3:], fixture)
+        return result
+
+    monkeypatch.setattr(g, "_r1_run", spy)
+    monkeypatch.setattr(
+        g,
+        "_launchctl_observation",
+        lambda *args, **kwargs: observed["host_calls"].append((args, kwargs)),
+    )
+    return fixture, fresh_main, expected, observed
+
+
+def _r1_bundle_call(fixture, fresh_main, receipt=None, predecessor_store=None):
+    scratch, verified_store = g._r1_verify_predecessor_artifact(fixture["receipt"])
+    try:
+        return g._r1_create_or_verify_bundle(
+            receipt or fixture["receipt"],
+            fresh_main,
+            predecessor_store or verified_store,
+        )
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def _r1_shallow_authority_mirror(tmp_path, monkeypatch, fixture, depth=3):
+    """Model the live host: a shallow fixed mirror of a complete fixed origin."""
+    shallow = tmp_path / "shallow-authority"
+    subprocess.run(
+        [
+            "git",
+            "clone",
+            "-q",
+            f"--depth={depth}",
+            "--branch",
+            "main",
+            f"file://{fixture['mirror']}",
+            str(shallow),
+        ],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(shallow), "remote", "set-url", "origin", g.HOST_AUTHORITY_REMOTE],
+        check=True,
+    )
+    monkeypatch.setattr(g, "HOST_AUTHORITY_SOURCE_ROOT", shallow)
+    return shallow
+
+
+def _r1_assert_self_contained_bundle(tmp_path, bundle, expected):
+    """The bundle alone reproduces exactly the three role refs with full history."""
+    empty = tmp_path / f"verify-{bundle.stem[:12]}.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(empty)], check=True)
+    verified = subprocess.run(
+        ["git", "--git-dir", str(empty), "bundle", "verify", str(bundle)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert verified.returncode == 0, verified.stderr
+    assert "requires" not in verified.stdout + verified.stderr
+    subprocess.run(
+        [
+            "git",
+            "--git-dir",
+            str(empty),
+            "fetch",
+            "-q",
+            "--no-tags",
+            str(bundle),
+            *(f"+{ref}:{ref}" for ref in expected),
+        ],
+        check=True,
+    )
+    subprocess.run(["git", "--git-dir", str(empty), "fsck", "--full", "--strict"], check=True)
+    assert (
+        subprocess.check_output(
+            ["git", "--git-dir", str(empty), "rev-parse", "--is-shallow-repository"], text=True
+        ).strip()
+        == "false"
+    )
+    assert sorted(
+        subprocess.check_output(
+            [
+                "git",
+                "--git-dir",
+                str(empty),
+                "for-each-ref",
+                "--format=%(refname) %(objectname)",
+            ],
+            text=True,
+        ).splitlines()
+    ) == sorted(f"{ref} {commit}" for ref, commit in expected.items())
+
+
+def test_r1_bundle_binds_exact_three_role_refs_before_bundle_create(tmp_path, monkeypatch):
+    fixture, fresh_main, expected, observed = _r1_bundle_harness(tmp_path, monkeypatch)
+    bundle, heads = _r1_bundle_call(fixture, fresh_main)
+
+    assert sorted(observed["bundle_create_refs"]) == sorted(
+        f"{ref} {commit}" for ref, commit in expected.items()
+    )
+    assert {head.ref: head.commit for head in heads} == expected
+    _r1_assert_self_contained_bundle(tmp_path, bundle, expected)
+    persisted = bundle.read_bytes()
+
+    # Persisted-bundle identity/semantic verification is unchanged on replay.
+    replay_bundle, replay_heads = _r1_bundle_call(fixture, fresh_main)
+    assert (replay_bundle, replay_heads) == (bundle, heads)
+    assert replay_bundle.read_bytes() == persisted
+    assert observed["host_calls"] == []
+    assert not g.GATEWAY_REPOSITORY.exists()
+    assert not g.GATEWAY_DEPLOYMENTS_ROOT.exists()
+
+
+def test_r1_shallow_authority_mirror_stages_complete_three_role_bundle(tmp_path, monkeypatch):
+    """#526 v31: the fixed mirror is shallow; desired is its shallow root."""
+    fixture, fresh_main, expected, observed = _r1_bundle_harness(tmp_path, monkeypatch)
+    shallow = _r1_shallow_authority_mirror(tmp_path, monkeypatch, fixture)
+    assert (
+        subprocess.check_output(
+            ["git", "-C", str(shallow), "rev-parse", "--is-shallow-repository"], text=True
+        ).strip()
+        == "true"
+    )
+    assert (shallow / ".git/shallow").read_text().split() == [fixture["desired"]]
+    # Live failure layer 1: the fixed shallow-mirror fetch exits 0 without the ref.
+    probe = tmp_path / "probe.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(probe)], check=True)
+    subprocess.run(
+        [
+            "git",
+            "--git-dir",
+            str(probe),
+            "fetch",
+            "-q",
+            "--no-tags",
+            str(shallow),
+            f"+{fresh_main}:refs/nexus-r1/fresh-main",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    assert (
+        subprocess.run(
+            [
+                "git",
+                "--git-dir",
+                str(probe),
+                "rev-parse",
+                "--verify",
+                "-q",
+                "refs/nexus-r1/fresh-main",
+            ],
+            check=False,
+            capture_output=True,
+        ).returncode
+        != 0
+    )
+
+    def mirror_state():
+        return (
+            (shallow / ".git/shallow").read_bytes(),
+            subprocess.check_output(
+                ["git", "-C", str(shallow), "for-each-ref", "--format=%(refname) %(objectname)"]
+            ),
+            subprocess.check_output(["git", "-C", str(shallow), "count-objects", "-v"]),
+        )
+
+    before = mirror_state()
+    staged = g.stage_verified_git_store(fixture["request"], fixture["receipt"])
+
+    bundle = g.GATEWAY_SOURCE_BUNDLES_ROOT / f"{fixture['receipt'].receipt_hash}.bundle"
+    assert sorted(observed["bundle_create_refs"]) == sorted(
+        f"{ref} {commit}" for ref, commit in expected.items()
+    )
+    assert {head.ref: head.commit for head in staged.bundle_evidence.role_heads} == expected
+    _r1_assert_self_contained_bundle(tmp_path, bundle, expected)
+    assert staged.desired_path.is_dir() and staged.predecessor_path.is_dir()
+    # The host authority mirror is observed only, never unshallowed or mutated.
+    assert mirror_state() == before
+    assert observed["host_calls"] == []
+
+
+def test_r1_shallow_mirror_fixed_remote_moved_during_bundle_fails_closed(tmp_path, monkeypatch):
+    fixture, fresh_main, _, observed = _r1_bundle_harness(tmp_path, monkeypatch)
+    _r1_shallow_authority_mirror(tmp_path, monkeypatch, fixture)
+    real_verify = g._r1_verify_predecessor_artifact
+    origin = fixture["mirror"]
+
+    def verify_then_move_origin(receipt):
+        verified = real_verify(receipt)
+        subprocess.run(
+            ["git", "-C", str(origin), "commit", "-q", "--allow-empty", "-m", "moved"],
+            check=True,
+        )
+        return verified
+
+    monkeypatch.setattr(g, "_r1_verify_predecessor_artifact", verify_then_move_origin)
+    with pytest.raises(g.GatewayContractError, match="fixed remote main moved"):
+        g.stage_verified_git_store(fixture["request"], fixture["receipt"])
+
+    assert observed["bundle_create_refs"] is None
+    assert list(g.GATEWAY_SOURCE_BUNDLES_ROOT.iterdir()) == []
+    assert observed["host_calls"] == []
+    assert not g.GATEWAY_REPOSITORY.exists()
+
+
+@pytest.mark.parametrize("substitution", ("fresh-main", "desired", "predecessor-store"))
+def test_r1_shallow_mirror_bundle_identity_substitution_fails_closed(
+    tmp_path, monkeypatch, substitution
+):
+    fixture, fresh_main, _, observed = _r1_bundle_harness(tmp_path, monkeypatch)
+    _r1_shallow_authority_mirror(tmp_path, monkeypatch, fixture)
+    receipt = fixture["receipt"]
+    predecessor_store = None
+    if substitution == "fresh-main":
+        # A caller-observed head other than the fixed remote main is rejected.
+        fresh_main, match = receipt.accepted_source_merge, "fixed remote main moved"
+    elif substitution == "desired":
+        # Exact commit outside fresh-main history (here: the predecessor side).
+        receipt = dataclasses.replace(receipt, desired_commit=fixture["predecessor"])
+        match = "desired outside fresh main"
+    else:
+        predecessor_store = tmp_path / "empty-predecessor.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(predecessor_store)], check=True)
+        match = "fixed subprocess rejected"
+    with pytest.raises(g.GatewayContractError, match=match):
+        _r1_bundle_call(fixture, fresh_main, receipt, predecessor_store)
+
+    assert observed["bundle_create_refs"] is None
+    assert list(g.GATEWAY_SOURCE_BUNDLES_ROOT.iterdir()) == []
+    assert observed["host_calls"] == []
+
+
+@pytest.mark.parametrize(
+    ("role", "mutation"),
+    (
+        ("desired", "rebind"),
+        ("predecessor", "delete"),
+        ("extra", "add"),
+    ),
+)
+def test_r1_bundle_mismatched_missing_or_extra_role_ref_fails_closed(
+    tmp_path, monkeypatch, role, mutation
+):
+    def mutate(source, command, fixture):
+        if (
+            not source.parent.name.startswith(".bundle-source.")
+            or command[0]
+            not in {
+                "fetch",
+                "update-ref",
+            }
+            or not any(
+                f"refs/nexus-r1/{'predecessor' if role == 'extra' else role}" in arg
+                for arg in command
+            )
+        ):
+            return
+        target = f"refs/nexus-r1/{role}"
+        if mutation == "delete":
+            argv = ["update-ref", "-d", target]
+        else:
+            argv = ["update-ref", target, fixture["receipt"].accepted_source_merge]
+        subprocess.run(["git", "--git-dir", str(source), *argv], check=True)
+
+    fixture, fresh_main, _, observed = _r1_bundle_harness(
+        tmp_path, monkeypatch, after_command=mutate
+    )
+    with pytest.raises(g.GatewayContractError, match="role ref set mismatch"):
+        _r1_bundle_call(fixture, fresh_main)
+
+    assert observed["bundle_create_refs"] is None
+    assert list(g.GATEWAY_SOURCE_BUNDLES_ROOT.iterdir()) == []
+    assert observed["host_calls"] == []
+    assert not g.GATEWAY_REPOSITORY.exists()
 
 
 def test_r1b1_bounded_subprocess_import_failure_is_rejected(tmp_path, monkeypatch):
