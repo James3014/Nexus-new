@@ -3467,6 +3467,24 @@ PHASE_CHAIN_CLAIM_CEILING = "PHASE_CHAIN_RECORD_NO_COMPLETION_AUTHORITY"
 AUTO_REPAIR_MAX = 3
 
 
+GOAL_LINEAGE_MAX_DEPTH = 16
+
+
+def _lineage_has_goal(root: Path, session: str | None) -> bool:
+    """Whether ``session`` or a bound ancestor owns a goal (repair turns inherit it)."""
+    seen: set[str] = set()
+    while session and session not in seen and len(seen) < GOAL_LINEAGE_MAX_DEPTH:
+        seen.add(session)
+        try:
+            binding = load_binding(root, session)
+        except DshWorkflowError:
+            return False
+        if binding.get("goal_id") is not None:
+            return True
+        session = binding.get("parent_session_id")
+    return False
+
+
 def _run_phase_turn(
     args: argparse.Namespace,
     root: Path,
@@ -3483,12 +3501,7 @@ def _run_phase_turn(
     router: dict[str, Any] | None = None,
 ) -> tuple[int, dict[str, Any]]:
     """Run one preflight-guarded DSH turn; returns its exit code and result payload."""
-    parent_has_goal = False
-    if parent:
-        try:
-            parent_has_goal = load_binding(root, parent).get("goal_id") is not None
-        except DshWorkflowError:
-            parent_has_goal = False
+    parent_has_goal = _lineage_has_goal(root, parent)
 
     subject = issue_subject(repository, args.issue, repo_root)
     sibling = find_dirty_sibling(root, repository, args.issue)

@@ -584,3 +584,21 @@ def test_direct_green_start_phase_passes_supplied_red_receipt_to_gate(tmp_path: 
     assert "RED_ORACLE_DEFECT" in receipt["reason_codes"]
     assert receipt["node_results"][0]["oracle_classification"] == "RED_ORACLE_DEFECT"
     assert out["stop_reason"] == "AUTO_REPAIR_EXHAUSTED"
+
+
+def test_red_auto_repair_max_limit_keeps_goal_lineage(tmp_path: Path) -> None:
+    # Repair turns inherit the chain's goal; a 2nd/3rd RED repair must neither be told to
+    # create a goal nor fail binding because its direct parent did not create one.
+    ctx = _setup(tmp_path)
+    plan = [_red("s-red", BAD_TEST, goal=True)] + [_red(f"s-r{i}", BAD_TEST) for i in range(1, 6)]
+    proc = _start_red(ctx, plan, "--auto-repair-red", "3")
+    assert proc.returncode == guard.EXIT_BLOCKED, proc.stdout + proc.stderr
+    out = pc._chain(ctx, proc)
+    assert out["stop_reason"] == "RED_AUTO_REPAIR_EXHAUSTED"
+    assert out["red_repairs_used"] == out["red_auto_repair_limit"] == 3
+    assert [p["gate"]["decision"] for p in out["phases"]] == ["REVISE_RED"] * 4
+    assert all(p["run"].get("binding_error") is None for p in out["phases"])
+    calls = pc._calls(ctx)
+    assert len(calls) == 4
+    for call in calls[1:]:
+        assert "create_goal for this phase: NOT allowed; do not call it." in call[-1]
