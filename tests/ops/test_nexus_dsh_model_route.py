@@ -22,6 +22,15 @@ rc = SourceFileLoader(
     str(Path(__file__).resolve().with_name("test_nexus_dsh_red_chain.py")),
 ).load_module()
 guard = pc.guard
+
+
+@pytest.fixture
+def tmp_path(dsh_non_temp_path: Path) -> Path:
+    # DSH grants its temp areas to every session, so the guard rejects workspaces
+    # under pytest's tmp_path (#1607); keep these repositories outside them.
+    return dsh_non_temp_path
+
+
 OP_ID = "agyop_" + "1" * 32
 
 FAKE_AGY = (
