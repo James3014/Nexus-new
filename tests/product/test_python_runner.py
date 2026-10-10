@@ -1,9 +1,11 @@
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
 
 from product.execution.python_runner import (
+    LOCK_DIGEST,
     PythonOCIProfile,
     PythonOCIRunner,
     RunnerResult,
@@ -149,6 +151,33 @@ def test_manifest_lock_reload_binds_actual_uv_lock():
         root / "uv.lock",
     )
     assert profile.profile_id == "python-oci-pytest-v1"
+
+
+def test_profile_digest_subjects_match_current_uv_lock_bytes():
+    root = Path(__file__).parents[2]
+    digest = hashlib.sha256((root / "uv.lock").read_bytes()).hexdigest()
+    manifest = json.loads(
+        (root / "product/execution/profiles/python-oci-pytest-v1.json").read_text()
+    )
+    lock = json.loads(
+        (root / "product/execution/profiles/python-oci-pytest-v1.lock").read_text()
+    )
+
+    assert LOCK_DIGEST == "sha256:" + digest
+    assert manifest["lock_digest"] == "sha256:" + digest
+    assert lock["uv_lock_sha256"] == digest
+
+
+def test_substituted_uv_lock_bytes_still_fail_closed(tmp_path):
+    root = Path(__file__).parents[2]
+    tampered = tmp_path / "uv.lock"
+    tampered.write_bytes((root / "uv.lock").read_bytes() + b"\n# substituted\n")
+    with pytest.raises(ValueError, match="uv.lock digest mismatch"):
+        PythonOCIProfile.load(
+            root / "product/execution/profiles/python-oci-pytest-v1.json",
+            root / "product/execution/profiles/python-oci-pytest-v1.lock",
+            tampered,
+        )
 
 
 @pytest.mark.parametrize("mutation", ["missing", "extra", "reordered", "wrong-hash"])
