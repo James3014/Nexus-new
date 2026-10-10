@@ -592,8 +592,11 @@ jobs:
           date -u +%Y-%m-%dT%H:%M:%S+00:00 > "$WITNESS_DIR/not-before.txt"
           set +e
           "${witness_cmd[@]}" 2>&1 | tee "$WITNESS_DIR/pytest.log"
-          echo "${PIPESTATUS[0]}" > "$WITNESS_DIR/pytest-exit.txt"
-          echo "pytest exit: $(cat "$WITNESS_DIR/pytest-exit.txt")"
+          pytest_status="${PIPESTATUS[0]}"
+          set -e
+          echo "$pytest_status" > "$WITNESS_DIR/pytest-exit.txt"
+          echo "pytest exit: $pytest_status"
+          exit "$pytest_status"
 
       - name: Verify physical witness receipt
         run: |

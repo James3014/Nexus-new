@@ -451,3 +451,56 @@ def test_cli_verify_cannot_pass_with_a_mocked_platform_but_no_physical_canary(
     receipt = json.loads(output.read_text(encoding="utf-8"))
     assert receipt["status"] == "FAIL"
     assert receipt["reason_code"] in {"SANDBOX_EXEC_MISSING", "SANDBOX_EXEC_PATH_SHADOWED"}
+
+
+def _witness_job() -> dict:
+    import yaml
+
+    workflow = yaml.safe_load((ROOT / ".github/workflows/pytest.yml").read_text(encoding="utf-8"))
+    return workflow["jobs"]["dsh-seatbelt-physical-witness"]
+
+
+def _witness_step(job: dict, name: str) -> dict:
+    (step,) = [step for step in job["steps"] if step.get("name") == name]
+    return step
+
+
+def test_witness_job_cannot_be_skipped_or_soft_failed() -> None:
+    job = _witness_job()
+    assert job["runs-on"] == "macos-15"
+    assert job["permissions"] == {"contents": "read"}
+    for key in ("if", "continue-on-error"):
+        assert key not in job
+    for step in job["steps"]:
+        assert "continue-on-error" not in step, step.get("name")
+
+
+@pytest.mark.parametrize("pytest_status", [0, 1, 3, 137])
+def test_witness_pytest_step_propagates_the_pytest_exit_status(
+    tmp_path: Path, pytest_status: int
+) -> None:
+    # Runs the workflow step's real shell with a stub pytest that prints
+    # green-looking output and exits with ``pytest_status``.
+    step = _witness_step(_witness_job(), "Run DSH Seatbelt physical witnesses")
+    assert step.get("shell", "bash") == "bash"
+    stub = tmp_path / ".venv" / "bin" / "python"
+    stub.parent.mkdir(parents=True)
+    stub.write_text(f"#!/bin/sh\necho '12 passed'\nexit {pytest_status}\n", encoding="utf-8")
+    stub.chmod(0o755)
+    witness_dir = tmp_path / "witness"
+    witness_dir.mkdir()
+
+    proc = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        cwd=tmp_path,
+        env={"PATH": os.environ["PATH"], "WITNESS_DIR": str(witness_dir), **step["env"]},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert proc.returncode == pytest_status, proc.stdout + proc.stderr
+    assert (witness_dir / "pytest-exit.txt").read_text(encoding="utf-8").strip() == str(
+        pytest_status
+    )
+    assert "12 passed" in (witness_dir / "pytest.log").read_text(encoding="utf-8")
