@@ -159,9 +159,7 @@ def test_profile_digest_subjects_match_current_uv_lock_bytes():
     manifest = json.loads(
         (root / "product/execution/profiles/python-oci-pytest-v1.json").read_text()
     )
-    lock = json.loads(
-        (root / "product/execution/profiles/python-oci-pytest-v1.lock").read_text()
-    )
+    lock = json.loads((root / "product/execution/profiles/python-oci-pytest-v1.lock").read_text())
 
     assert LOCK_DIGEST == "sha256:" + digest
     assert manifest["lock_digest"] == "sha256:" + digest
