@@ -1357,7 +1357,16 @@ def _r1_create_or_verify_bundle(
             _r1_run(*git, "merge-base", "--is-ancestor", receipt.desired_commit, fresh_main)
         except GatewayContractError as exc:
             raise _gateway_error("R1 bundle desired outside fresh main", exc) from exc
-        _r1_run(*git, "update-ref", refs["desired"], receipt.desired_commit, "0" * 40)
+        # Name desired by fetching it from the scratch repository itself: the
+        # complete history is already present, the non-forced refspec only
+        # creates the role ref, and no Git ref-writer primitive is introduced.
+        _r1_run(
+            *git,
+            "fetch",
+            "--no-tags",
+            str(source),
+            f"{receipt.desired_commit}:{refs['desired']}",
+        )
         _r1_run(
             *git,
             "fetch",
