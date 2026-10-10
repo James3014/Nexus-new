@@ -387,6 +387,14 @@ def test_prompt_requires_bash_description(tmp_path: Path) -> None:
     assert "Every bash action must include a short description argument." in prompt
 
 
+def test_adapter_advertises_unchanged_context_budget(tmp_path: Path) -> None:
+    # #1666 changed only the advertised window; the per-request output budget is unchanged.
+    proc = _run_node(tmp_path, '{"kind":"text","text":"CANARY_OK"}')
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    payload = json.loads(proc.stdout)
+    assert payload["modelInfo"]["defaultMaxTokens"] == 32768
+
+
 def test_adapter_advertises_transport_effective_context_budget(tmp_path: Path) -> None:
     # #1666: DSH compaction-basic triggers at floor(min(W*0.8, W - maxTokens - 65536)).
     # Agy summarized a gemini-3.1-pro-high trajectory once it passed ~108k provider tokens,
