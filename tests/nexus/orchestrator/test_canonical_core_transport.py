@@ -265,3 +265,171 @@ def test_transport_import_uses_configured_core_root_when_set(tmp_path: Path):
     core_root.mkdir()
     sys_path = _imported_sys_path({"NEXUS_CORE_REPO_ROOT": str(core_root)})
     assert sys_path[0] == str(core_root.resolve())
+
+
+# --- NN-1 phase 2: installed-package identity from PEP 610 direct_url.json ---
+EXPECTED_CORE_REVISION = "77c7fb8fdc8c68a85c771280decd4a1e01b55085"
+
+
+def _install_fake_certify(
+    site: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    direct_url: dict | str | None,
+    *,
+    dist_name: str = "nexus_certify",
+):
+    """Create a fake installed nexus-certify (product/ + dist-info) under `site`.
+
+    Points the transport's imported-Core package at the fake `product/`.
+    """
+    from types import SimpleNamespace
+
+    from nexus.orchestrator import canonical_core_transport as transport
+
+    package_dir = site / "product"
+    package_dir.mkdir(parents=True)
+    (package_dir / "__init__.py").write_text("")
+    dist_info = site / f"{dist_name}-0.2.0.dist-info"
+    dist_info.mkdir()
+    (dist_info / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: nexus-certify\nVersion: 0.2.0\n"
+    )
+    (dist_info / "RECORD").write_text(
+        f"product/__init__.py,,\n{dist_info.name}/METADATA,,\n{dist_info.name}/RECORD,,\n"
+    )
+    if direct_url is not None:
+        text = direct_url if isinstance(direct_url, str) else json.dumps(direct_url)
+        (dist_info / "direct_url.json").write_text(text)
+    monkeypatch.syspath_prepend(str(site))
+    monkeypatch.setattr(
+        transport,
+        "_IMPORTED_CORE_PACKAGE",
+        SimpleNamespace(__file__=str(package_dir / "__init__.py")),
+    )
+    return transport
+
+
+def _vcs_direct_url(commit: str) -> dict:
+    return {
+        "url": "https://github.com/James3014/nexus-core.git",
+        "vcs_info": {"vcs": "git", "commit_id": commit, "requested_revision": commit},
+    }
+
+
+def test_expected_core_revision_is_owner_decided_pin():
+    from nexus.orchestrator import canonical_core_transport as transport
+
+    assert transport.CANONICAL_CORE_REVISION == EXPECTED_CORE_REVISION
+    pyproject = (REPO_ROOT / "pyproject.toml").read_text()
+    assert f"nexus-core.git@{EXPECTED_CORE_REVISION}" in pyproject
+
+
+def test_installed_core_identity_available_when_direct_url_matches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    transport = _install_fake_certify(
+        tmp_path / "site", monkeypatch, _vcs_direct_url(EXPECTED_CORE_REVISION)
+    )
+    identity = transport.read_observed_core_identity()
+    assert identity["available"] is True
+    assert identity["observed_commit"] == EXPECTED_CORE_REVISION
+    assert identity["revision_match"] is True
+    assert identity["identity_source"] == "direct_url.json"
+    status = transport.core_provenance_status(identity)
+    assert status["status"] == "CORE_REVISION_PINNED"
+    assert status["fail_closed"] is False
+
+
+def test_installed_core_identity_unavailable_when_direct_url_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    transport = _install_fake_certify(tmp_path / "site", monkeypatch, None)
+    identity = transport.read_observed_core_identity()
+    assert identity["available"] is False
+    assert identity["observed_commit"] is None
+    status = transport.core_provenance_status(identity)
+    assert status["status"] == "CORE_IDENTITY_UNAVAILABLE"
+    assert status["fail_closed"] is True
+
+
+def test_installed_core_identity_mismatch_when_direct_url_commit_differs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    wrong = "fde015797672b0aac5dca7b41c7e5a0b901698d4"
+    transport = _install_fake_certify(tmp_path / "site", monkeypatch, _vcs_direct_url(wrong))
+    identity = transport.read_observed_core_identity()
+    assert identity["available"] is True
+    assert identity["observed_commit"] == wrong
+    status = transport.core_provenance_status(identity)
+    assert status["status"] == "CORE_REVISION_MISMATCH"
+    assert status["fail_closed"] is True
+
+
+@pytest.mark.parametrize(
+    "direct_url",
+    [
+        "{not json",
+        {"url": "file:///src/nexus-core", "dir_info": {"editable": True}},
+        {"url": "https://x/y.git", "vcs_info": {"vcs": "hg", "commit_id": EXPECTED_CORE_REVISION}},
+        {"url": "https://x/y.git", "vcs_info": {"vcs": "git"}},
+        {"url": "https://x/y.git", "vcs_info": {"vcs": "git", "commit_id": "77c7fb8"}},
+        {
+            "url": "https://x/y.git",
+            "vcs_info": {"vcs": "git", "commit_id": EXPECTED_CORE_REVISION.upper()},
+        },
+    ],
+)
+def test_installed_core_identity_fails_closed_on_unusable_direct_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, direct_url
+):
+    transport = _install_fake_certify(tmp_path / "site", monkeypatch, direct_url)
+    identity = transport.read_observed_core_identity()
+    assert identity["available"] is False
+    assert identity["observed_commit"] is None
+    assert transport.core_provenance_status(identity)["status"] == "CORE_IDENTITY_UNAVAILABLE"
+
+
+def test_direct_url_not_trusted_when_imported_core_is_not_the_installed_distribution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A shadowing product/ elsewhere must not inherit the installed distribution's identity."""
+    from types import SimpleNamespace
+
+    transport = _install_fake_certify(
+        tmp_path / "site", monkeypatch, _vcs_direct_url(EXPECTED_CORE_REVISION)
+    )
+    shadow = tmp_path / "shadow" / "product"
+    shadow.mkdir(parents=True)
+    (shadow / "__init__.py").write_text("")
+    monkeypatch.setattr(
+        transport, "_IMPORTED_CORE_PACKAGE", SimpleNamespace(__file__=str(shadow / "__init__.py"))
+    )
+    identity = transport.read_observed_core_identity()
+    assert identity["observed_commit"] != EXPECTED_CORE_REVISION
+    assert transport.core_provenance_status(identity)["fail_closed"] is True
+
+
+def test_explicit_core_root_still_uses_git_identity(tmp_path: Path):
+    """NEXUS_CORE_REPO_ROOT opt-in path (checkout identity via git) is unchanged."""
+    from nexus.orchestrator.canonical_core_transport import read_observed_core_identity
+
+    repo = tmp_path / "core"
+    (repo / "product").mkdir(parents=True)
+    (repo / "product" / "__init__.py").write_text("")
+    env = {
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_SYSTEM": os.devnull,
+        "PATH": os.environ["PATH"],
+    }
+    for args in (
+        ["init", "-q"],
+        ["add", "."],
+        ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "c"],
+    ):
+        subprocess.run(["git", *args], cwd=repo, check=True, env=env)
+    head = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=repo, text=True, env=env
+    ).strip()
+    identity = read_observed_core_identity(core_root=repo)
+    assert identity["available"] is True
+    assert identity["observed_commit"] == head
