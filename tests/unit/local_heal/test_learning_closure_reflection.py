@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from nexus.services.local_heal import lesson_embedding
 from nexus.services.local_heal.learning_closure_bridge import (
     LearningClosureBridge,
     _reflect_canonical_episode,
@@ -115,14 +116,13 @@ class _FakeResponse:
 
 
 def test_ollama_judge_failure_falls_back_to_deterministic(tmp_path: Path, monkeypatch) -> None:
-    import urllib.request
 
     monkeypatch.setenv("NEXUS_LEARNING_REFLECT_JUDGE", "ollama")
 
     def _raise(*args, **kwargs):
         raise OSError("connection refused")
 
-    monkeypatch.setattr(urllib.request, "urlopen", _raise)
+    monkeypatch.setattr(lesson_embedding, "_open", _raise)
 
     closure = write_learning_closure(_qualified_op(), bridge=_bridge(tmp_path))
 
@@ -132,7 +132,6 @@ def test_ollama_judge_failure_falls_back_to_deterministic(tmp_path: Path, monkey
 
 
 def test_ollama_judge_output_is_used_when_valid(tmp_path: Path, monkeypatch) -> None:
-    import urllib.request
 
     monkeypatch.setenv("NEXUS_LEARNING_REFLECT_JUDGE", "ollama")
     judge_output = (
@@ -147,8 +146,8 @@ def test_ollama_judge_output_is_used_when_valid(tmp_path: Path, monkeypatch) -> 
         + "\n```"
     )
     monkeypatch.setattr(
-        urllib.request,
-        "urlopen",
+        lesson_embedding,
+        "_open",
         lambda *args, **kwargs: _FakeResponse({"response": judge_output}),
     )
 
@@ -178,7 +177,6 @@ def test_writeback_disabled_skips_reflection_and_ledger(tmp_path: Path, monkeypa
 def test_ollama_judge_request_is_json_mode_with_instruction_and_problem_summary(
     tmp_path: Path, monkeypatch
 ) -> None:
-    import urllib.request
 
     monkeypatch.setenv("NEXUS_LEARNING_REFLECT_JUDGE", "ollama")
     sent: list[dict] = []
@@ -194,7 +192,7 @@ def test_ollama_judge_request_is_json_mode_with_instruction_and_problem_summary(
         sent.append(json.loads(request.data.decode("utf-8")))
         return _FakeResponse({"response": judge_output})
 
-    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(lesson_embedding, "_open", _fake_urlopen)
 
     write_learning_closure(
         _qualified_op(

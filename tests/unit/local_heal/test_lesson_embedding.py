@@ -26,7 +26,7 @@ def _fake_urlopen(calls, vector=(0.1, 0.2, 0.3)):
 
 def test_returns_vector_and_posts_expected_payload(monkeypatch):
     calls: list = []
-    monkeypatch.setattr(le.urllib.request, "urlopen", _fake_urlopen(calls))
+    monkeypatch.setattr(le, "_open", _fake_urlopen(calls))
     assert le.embed_text("x" * 5000) == [0.1, 0.2, 0.3]
     request, timeout = calls[0]
     assert timeout == 30
@@ -40,13 +40,13 @@ def test_none_on_urlopen_error(monkeypatch):
     def boom(*_a, **_k):
         raise OSError("down")
 
-    monkeypatch.setattr(le.urllib.request, "urlopen", boom)
+    monkeypatch.setattr(le, "_open", boom)
     assert le.embed_text("hello") is None
 
 
 def test_none_when_env_none(monkeypatch):
     calls: list = []
-    monkeypatch.setattr(le.urllib.request, "urlopen", _fake_urlopen(calls))
+    monkeypatch.setattr(le, "_open", _fake_urlopen(calls))
     monkeypatch.setenv(le.EMBED_MODEL_ENV, "none")
     assert le.embed_text("hello") is None
     assert calls == []
@@ -54,7 +54,7 @@ def test_none_when_env_none(monkeypatch):
 
 def test_caches_repeats(monkeypatch):
     calls: list = []
-    monkeypatch.setattr(le.urllib.request, "urlopen", _fake_urlopen(calls))
+    monkeypatch.setattr(le, "_open", _fake_urlopen(calls))
     assert le.embed_text("same") == le.embed_text("same")
     assert len(calls) == 1
 

@@ -4,13 +4,12 @@ import hashlib
 import inspect
 import json
 import os
-import urllib.request
 import uuid
 from pathlib import Path
 from typing import Any
 
 from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
-from nexus.services.local_heal.lesson_embedding import embed_model_name, embed_text
+from nexus.services.local_heal.lesson_embedding import embed_model_name, embed_text, post_local_json
 from nexus.services.local_heal.memory_trace import MemoryTrace
 
 INTERNAL_CLASSIFICATIONS = {
@@ -80,21 +79,17 @@ def _reflect_canonical_episode(project_root: Path, episode: dict[str, Any]) -> d
             model_name = os.environ.get(REFLECT_MODEL_ENV, _DEFAULT_REFLECT_MODEL)
 
             def judge(prompt: str) -> str:
-                body = json.dumps({
-                    "model": model_name,
-                    "prompt": f"{_JUDGE_JSON_INSTRUCTION}\n{prompt}",
-                    "stream": False,
-                    "format": "json",
-                    "options": {"temperature": 0.1, "num_predict": 768},
-                }).encode("utf-8")
-                request = urllib.request.Request(
+                payload = post_local_json(
                     _OLLAMA_GENERATE_URL,
-                    data=body,
-                    headers={"Content-Type": "application/json"},
-                    method="POST",
+                    {
+                        "model": model_name,
+                        "prompt": f"{_JUDGE_JSON_INSTRUCTION}\n{prompt}",
+                        "stream": False,
+                        "format": "json",
+                        "options": {"temperature": 0.1, "num_predict": 768},
+                    },
+                    timeout=60,
                 )
-                with urllib.request.urlopen(request, timeout=60) as response:
-                    payload = json.loads(response.read().decode("utf-8"))
                 return str(payload["response"])
 
         reflect_kwargs: dict[str, Any] = {"judge": judge, "model_name": model_name}
