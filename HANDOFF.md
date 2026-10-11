@@ -13,9 +13,9 @@
 
 ## 待確認（沒有 Issue 號）
 - #1733 已關閉（以 CI issue completion 證據；nexus-certify issue-init 因 EVIDENCE_UNIVERSE_STALE 無法使用）；#1580 需獨立 reviewer 與合併後 workflow 證據，留給 Owner。
-- forecast_gate planner 觸發、LanceDB 向量欄位/根目錄 resolver、MemPalace constraints_source 已接上；本地 nexus_runtime 舊於 pin（ece9bd30），相關測試以 CI 為準。
-- 後續：約 25 個檔案的 LanceDB 硬編碼路徑尚未改用 `nexus/services/lancedb_roots.py`；缺 tenant_id/drawer_id/aaak_content 的舊表仍無法寫入；`trigger_source` 是否進 sealed stage receipt 需改 nexus-runtime。
-- 舊 open PR 長期無活動（如 #1437、#1447；#1583 與 #1584 head 是同一個 SHA），是否關閉待 Owner 決定（建議：#1583 為 #1584 重複可關；#1437 v15 receipt 多半已被取代；#1447 待 Owner）。
+- forecast_gate、LanceDB、MemPalace 接線已完成：forecast_gate 在 run_mainchain 端到端執行且 receipt 保留 `trigger_source`（位於 `capability_results.forecast_gate.response`）；LanceDB 根目錄改用 `nexus/services/lancedb_roots.py`（guard test 防回退；`nexus/infrastructure/storage_implementations.py` 因分層規則保留字面路徑）；舊表自動補 tenant_id/drawer_id/aaak_content。
+- MemPalace：同一 skill 在同類任務連續失敗 3 次（`NEXUS_BELIEF_FORBID_STREAK`）會寫入「禁止」belief，成功即解除；目前只顯示在 plan trace / prompt，selector 不會實際移除被禁止的 skill（要強制需另改路由）。
+- #1447（#526 relevance-aware convergence）是否保留待 Owner；#1437、#1583 已關閉。
 
 ## 卡住 / 注意
 - `nexus run` 現在只有在 delivery-gate receipt 同時符合本次 run_id 與目前 HEAD 時才是 VERIFIED（#1734）。執行 delivery gate 時要設定 `NEXUS_RUN_ID=<task_id>`，否則一律 UNVERIFIED。
