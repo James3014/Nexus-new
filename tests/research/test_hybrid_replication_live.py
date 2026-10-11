@@ -1256,7 +1256,12 @@ def test_agy_identity_preflight_passes_new_generation(
     assert receipt["transport_identity_match"] is True
 
 
-def test_canonical_agy_constants_are_binding_defaults_only() -> None:
+def test_canonical_agy_dispatch_identity_matches_source() -> None:
+    """Name kept for exact-base node continuity; D1 makes the constants defaults only.
+
+    The frozen binding's declared dispatcher sha256 is the identity authority, so the
+    source dispatcher on ``main`` is no longer required to equal the module constant.
+    """
     assert re.fullmatch(r"[0-9a-f]{64}", CANONICAL_AGY_DISPATCH_SHA256)
     assert re.fullmatch(r"AGY_[A-Z0-9_]+_V\d+", CANONICAL_AGY_EXECUTION_GENERATION)
 
