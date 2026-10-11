@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import re
+import stat
 import subprocess
+import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
@@ -582,7 +586,410 @@ def _validate_rebind(
     return rebind
 
 
+# ---------------------------------------------------------------------------
+# Owner attestation for agent-authored pull requests (#1750 phase 2).
+#
+# An agent acting under its own GitHub identity may only get a PR through this
+# gate with a grant the Owner signed on a device-bound key (Touch ID on the
+# Owner's Mac).  The public keys and the agent identities are read from the
+# exact base revision, so the PR under review cannot change either.
+# ---------------------------------------------------------------------------
+ATTESTATION_START_MARKER = "<!-- NEXUS_OWNER_ATTESTATION_V1"
+ATTESTATION_END_MARKER = "NEXUS_OWNER_ATTESTATION_V1 -->"
+ATTESTATION_SCHEMA = "nexus.owner_grant_attestation.v1"
+SIGNING_KEYS_PATH = "governance/owner-signing-keys.json"
+SIGNING_KEYS_SCHEMA = "nexus.owner_signing_keys.v1"
+AGENT_IDENTITIES_PATH = "governance/agent-identities.json"
+AGENT_IDENTITIES_SCHEMA = "nexus.agent_identities.v1"
+ATTESTATION_MAX_LIFETIME = timedelta(days=7)
+ATTESTATION_CLOCK_SKEW = timedelta(minutes=5)
+TRUSTED_OPENSSL = Path("/usr/bin/openssl")
+# Paths an attestation can never cover: the trust configuration itself, CI and
+# the gate code that enforces it.
+ATTESTATION_PROTECTED_PATTERNS = (
+    "governance/**",
+    ".github/**",
+    "scripts/ops/trusted_*",
+    "AGENTS.md",
+    "CLAUDE.md",
+)
+_GITHUB_LOGIN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?$")
+_PATH_PATTERN = re.compile(r"^[A-Za-z0-9._*?/-]{1,200}$")
+
+
+def _glob_regex(pattern: str) -> re.Pattern[str]:
+    if (
+        not _PATH_PATTERN.fullmatch(pattern)
+        or ".." in pattern.split("/")
+        or pattern.startswith("/")
+    ):
+        raise LaneBindingError("ATTESTATION_PATH_PATTERN_INVALID")
+    out = []
+    index = 0
+    while index < len(pattern):
+        if pattern.startswith("**", index):
+            out.append(".*")
+            index += 2
+        elif pattern[index] == "*":
+            out.append("[^/]*")
+            index += 1
+        elif pattern[index] == "?":
+            out.append("[^/]")
+            index += 1
+        else:
+            out.append(re.escape(pattern[index]))
+            index += 1
+    return re.compile("".join(out))
+
+
+def _path_matches(path: str, patterns: Sequence[str]) -> bool:
+    return any(_glob_regex(pattern).fullmatch(path) for pattern in patterns)
+
+
+def _parse_utc(value: Any, label: str) -> datetime:
+    text = _exact_str(value, label)
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise LaneBindingError(f"{label}_INVALID") from exc
+    if parsed.tzinfo is None:
+        raise LaneBindingError(f"{label}_TIMEZONE_REQUIRED")
+    return parsed.astimezone(timezone.utc)
+
+
+def canonical_attestation_bytes(payload: Mapping[str, Any]) -> bytes:
+    """The exact bytes the Owner signs: compact, key-sorted UTF-8 JSON."""
+    return json.dumps(
+        dict(payload), ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+
+
+def extract_attestation(body: Any) -> dict[str, Any] | None:
+    text = body if isinstance(body, str) else ""
+    starts = text.count(ATTESTATION_START_MARKER)
+    if starts == 0:
+        return None
+    if starts != 1 or text.count(ATTESTATION_END_MARKER) != 1:
+        raise LaneBindingError("ATTESTATION_MARKER_COUNT_INVALID")
+    start = text.index(ATTESTATION_START_MARKER) + len(ATTESTATION_START_MARKER)
+    end = text.index(ATTESTATION_END_MARKER)
+    if end < start:
+        raise LaneBindingError("ATTESTATION_MARKER_ORDER_INVALID")
+    try:
+        return _exact_dict(json.loads(text[start:end]), "ATTESTATION")
+    except json.JSONDecodeError as exc:
+        raise LaneBindingError("ATTESTATION_JSON_INVALID") from exc
+
+
+def render_attestation(envelope: Mapping[str, Any]) -> str:
+    return (
+        f"{ATTESTATION_START_MARKER}\n"
+        f"{json.dumps(dict(envelope), indent=2, sort_keys=True, ensure_ascii=False)}\n"
+        f"{ATTESTATION_END_MARKER}"
+    )
+
+
+def _base_json(repo_root: Path, base_sha: str, path: str, label: str) -> dict[str, Any] | None:
+    proc = subprocess.run(
+        ["git", "-C", str(repo_root), "show", f"{base_sha}:{path}"],
+        check=False,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        return None
+    try:
+        return _exact_dict(json.loads(proc.stdout.decode("utf-8")), label)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise LaneBindingError(f"{label}_INVALID") from exc
+
+
+def load_agent_identities(repo_root: Path, base_sha: str) -> frozenset[str]:
+    config = _base_json(repo_root, base_sha, AGENT_IDENTITIES_PATH, "AGENT_IDENTITIES")
+    if config is None:
+        return frozenset()
+    if config.get("schema") != AGENT_IDENTITIES_SCHEMA:
+        raise LaneBindingError("AGENT_IDENTITIES_SCHEMA_INVALID")
+    agents = config.get("agents")
+    if not isinstance(agents, list) or not all(
+        isinstance(item, str) and _GITHUB_LOGIN.fullmatch(item) for item in agents
+    ):
+        raise LaneBindingError("AGENT_IDENTITIES_INVALID")
+    return frozenset(item.lower() for item in agents)
+
+
+def load_owner_signing_keys(repo_root: Path, base_sha: str, owner_id: str) -> dict[str, str]:
+    config = _base_json(repo_root, base_sha, SIGNING_KEYS_PATH, "OWNER_SIGNING_KEYS")
+    if config is None:
+        return {}
+    if config.get("schema") != SIGNING_KEYS_SCHEMA or config.get("owner_id") != owner_id:
+        raise LaneBindingError("OWNER_SIGNING_KEYS_SCHEMA_INVALID")
+    keys = config.get("keys")
+    if not isinstance(keys, list):
+        raise LaneBindingError("OWNER_SIGNING_KEYS_INVALID")
+    pinned: dict[str, str] = {}
+    for entry in keys:
+        item = _exact_dict(entry, "OWNER_SIGNING_KEY")
+        pem = item.get("public_key_pem")
+        if not isinstance(pem, str):
+            raise LaneBindingError("OWNER_SIGNING_KEY_PEM_INVALID")
+        key_id = _sha(item.get("key_id"), "OWNER_SIGNING_KEY_ID", size=64)
+        if signing_key_id(pem) != key_id:
+            raise LaneBindingError("OWNER_SIGNING_KEY_ID_MISMATCH")
+        pinned[key_id] = pem
+    return pinned
+
+
+def _pem_der(pem: str) -> bytes:
+    lines = [line.strip() for line in pem.strip().splitlines()]
+    if (
+        len(lines) < 3
+        or lines[0] != "-----BEGIN PUBLIC KEY-----"
+        or lines[-1] != "-----END PUBLIC KEY-----"
+    ):
+        raise LaneBindingError("OWNER_SIGNING_KEY_PEM_INVALID")
+    try:
+        return base64.b64decode("".join(lines[1:-1]), validate=True)
+    except ValueError as exc:
+        raise LaneBindingError("OWNER_SIGNING_KEY_PEM_INVALID") from exc
+
+
+def signing_key_id(pem: str) -> str:
+    """Key id: SHA-256 of the DER SubjectPublicKeyInfo."""
+    return hashlib.sha256(_pem_der(pem)).hexdigest()
+
+
+def _trusted_openssl() -> Path:
+    try:
+        info = TRUSTED_OPENSSL.stat()
+    except OSError as exc:
+        raise LaneBindingError("TRUSTED_OPENSSL_UNAVAILABLE") from exc
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != 0
+        or info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+    ):
+        raise LaneBindingError("TRUSTED_OPENSSL_UNTRUSTED")
+    return TRUSTED_OPENSSL
+
+
+def verify_p256_signature(pem: str, message: bytes, signature_der: bytes) -> bool:
+    """ECDSA P-256 / SHA-256 verification through the system OpenSSL binary."""
+    openssl = _trusted_openssl()
+    with tempfile.TemporaryDirectory() as raw:
+        directory = Path(raw)
+        key = directory / "key.pem"
+        sig = directory / "sig.der"
+        data = directory / "data.bin"
+        key.write_text(pem.strip() + "\n", encoding="ascii")
+        sig.write_bytes(signature_der)
+        data.write_bytes(message)
+        algorithm = subprocess.run(
+            [str(openssl), "pkey", "-pubin", "-in", str(key), "-noout", "-text"],
+            check=False,
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+        )
+        if algorithm.returncode != 0 or "prime256v1" not in algorithm.stdout:
+            return False
+        proc = subprocess.run(
+            [
+                str(openssl),
+                "dgst",
+                "-sha256",
+                "-verify",
+                str(key),
+                "-signature",
+                str(sig),
+                str(data),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+        )
+    return proc.returncode == 0 and proc.stdout.strip() == "Verified OK"
+
+
+def _changed_paths(repo_root: Path, base_sha: str, head_sha: str) -> list[str]:
+    proc = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo_root),
+            "diff",
+            "--name-only",
+            "--no-renames",
+            "-z",
+            base_sha,
+            head_sha,
+        ],
+        check=False,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        raise LaneBindingError("ATTESTATION_CHANGED_PATHS_UNAVAILABLE")
+    paths = [part.decode("utf-8", errors="strict") for part in proc.stdout.split(b"\0") if part]
+    if not paths:
+        raise LaneBindingError("ATTESTATION_CHANGED_PATHS_EMPTY")
+    return paths
+
+
+def _bound_issue_numbers(body: Any, binding: Mapping[str, Any]) -> set[int]:
+    issues: set[int] = set()
+    if isinstance(binding.get("issue_number"), int):
+        issues.add(binding["issue_number"])
+    text = body if isinstance(body, str) else ""
+    for match in re.finditer(r"<!--\s*NEXUS_CORE_ISSUE:\s*([1-9][0-9]*)\s*-->", text):
+        issues.add(int(match.group(1)))
+    return issues
+
+
+def verify_owner_attestation(
+    envelope: Mapping[str, Any],
+    *,
+    repository: str,
+    owner_id: str,
+    agent_login: str,
+    bound_issues: set[int],
+    changed_paths: Sequence[str],
+    pinned_keys: Mapping[str, str],
+    now: datetime,
+) -> dict[str, Any]:
+    """Check one Owner-signed grant against the exact PR it is attached to."""
+    if set(envelope) != {"payload", "key_id", "signature"}:
+        raise LaneBindingError("ATTESTATION_FIELDS_INVALID")
+    if not pinned_keys:
+        raise LaneBindingError("OWNER_SIGNING_KEY_NOT_CONFIGURED")
+    key_id = _sha(envelope.get("key_id"), "ATTESTATION_KEY_ID", size=64)
+    pem = pinned_keys.get(key_id)
+    if pem is None:
+        raise LaneBindingError("ATTESTATION_KEY_NOT_PINNED")
+    try:
+        signature = base64.b64decode(
+            _exact_str(envelope.get("signature"), "ATTESTATION_SIGNATURE"), validate=True
+        )
+    except ValueError as exc:
+        raise LaneBindingError("ATTESTATION_SIGNATURE_ENCODING_INVALID") from exc
+    payload = _exact_dict(envelope.get("payload"), "ATTESTATION_PAYLOAD")
+    if not verify_p256_signature(pem, canonical_attestation_bytes(payload), signature):
+        raise LaneBindingError("ATTESTATION_SIGNATURE_INVALID")
+
+    expected_fields = {
+        "schema",
+        "repository",
+        "owner_id",
+        "agent_login",
+        "issue_number",
+        "allowed_actions",
+        "allowed_paths",
+        "issued_at",
+        "expires_at",
+        "nonce",
+    }
+    if set(payload) != expected_fields or payload.get("schema") != ATTESTATION_SCHEMA:
+        raise LaneBindingError("ATTESTATION_PAYLOAD_SCHEMA_INVALID")
+    if payload.get("repository") != repository:
+        raise LaneBindingError("ATTESTATION_REPOSITORY_MISMATCH")
+    if payload.get("owner_id") != owner_id:
+        raise LaneBindingError("ATTESTATION_OWNER_MISMATCH")
+    if str(payload.get("agent_login") or "").lower() != agent_login.lower():
+        raise LaneBindingError("ATTESTATION_AGENT_MISMATCH")
+    issue = _exact_int(payload.get("issue_number"), "ATTESTATION_ISSUE_NUMBER")
+    if issue not in bound_issues:
+        raise LaneBindingError("ATTESTATION_ISSUE_NOT_BOUND_TO_PR")
+    actions = payload.get("allowed_actions")
+    if not isinstance(actions, list) or "GITHUB_MERGE" not in actions:
+        raise LaneBindingError("ATTESTATION_MERGE_NOT_GRANTED")
+    patterns = payload.get("allowed_paths")
+    if (
+        not isinstance(patterns, list)
+        or not patterns
+        or not all(isinstance(p, str) for p in patterns)
+    ):
+        raise LaneBindingError("ATTESTATION_PATHS_INVALID")
+    _safe_id(payload.get("nonce"), "ATTESTATION_NONCE")
+    issued_at = _parse_utc(payload.get("issued_at"), "ATTESTATION_ISSUED_AT")
+    expires_at = _parse_utc(payload.get("expires_at"), "ATTESTATION_EXPIRES_AT")
+    if expires_at <= issued_at or expires_at - issued_at > ATTESTATION_MAX_LIFETIME:
+        raise LaneBindingError("ATTESTATION_LIFETIME_INVALID")
+    if now + ATTESTATION_CLOCK_SKEW < issued_at:
+        raise LaneBindingError("ATTESTATION_NOT_YET_VALID")
+    if now >= expires_at:
+        raise LaneBindingError("ATTESTATION_EXPIRED")
+    for path in changed_paths:
+        if _path_matches(path, ATTESTATION_PROTECTED_PATTERNS):
+            raise LaneBindingError(f"ATTESTATION_PROTECTED_PATH:{path}")
+        if not _path_matches(path, patterns):
+            raise LaneBindingError(f"ATTESTATION_PATH_OUT_OF_SCOPE:{path}")
+    return {
+        "schema": "nexus.owner_attestation_check.v1",
+        "status": "PASS",
+        "key_id": key_id,
+        "agent_login": agent_login,
+        "issue_number": issue,
+        "payload_sha256": hashlib.sha256(canonical_attestation_bytes(payload)).hexdigest(),
+        "expires_at": expires_at.isoformat(),
+        "changed_path_count": len(changed_paths),
+    }
+
+
 def validate_event(
+    event: Mapping[str, Any],
+    *,
+    repo_root: Path,
+    enforcement_start_pr_number: int = ENFORCEMENT_START_PR_NUMBER,
+    legacy_pr_heads: Mapping[int, str] = LEGACY_PR_HEAD_ALLOWLIST,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    result = _validate_lane_event(
+        event,
+        repo_root=repo_root,
+        enforcement_start_pr_number=enforcement_start_pr_number,
+        legacy_pr_heads=legacy_pr_heads,
+    )
+    root = _exact_dict(event, "EVENT")
+    pr = _exact_dict(root.get("pull_request"), "PULL_REQUEST")
+    base_sha = _sha(
+        _exact_dict(pr.get("base"), "PULL_REQUEST_BASE").get("sha"), "BASE_SHA", size=40
+    )
+    head_sha = _sha(
+        _exact_dict(pr.get("head"), "PULL_REQUEST_HEAD").get("sha"), "HEAD_SHA", size=40
+    )
+    agents = load_agent_identities(repo_root, base_sha)
+    actors: set[str] = set()
+    for holder in (pr.get("user"), root.get("sender")):
+        if isinstance(holder, Mapping):
+            login = holder.get("login")
+            if isinstance(login, str):
+                actors.add(login.lower())
+    agent_actors = sorted(actors & agents)
+    if not agent_actors:
+        return result
+    if len(agent_actors) != 1:
+        raise LaneBindingError("ATTESTATION_AGENT_AMBIGUOUS")
+    envelope = extract_attestation(pr.get("body"))
+    if envelope is None:
+        raise LaneBindingError("AGENT_PR_REQUIRES_OWNER_ATTESTATION")
+    repository = _exact_str(
+        _exact_dict(root.get("repository"), "REPOSITORY").get("full_name"), "REPOSITORY_FULL_NAME"
+    )
+    owner_id = repository.split("/", 1)[0]
+    binding = extract_binding(pr.get("body"))
+    attestation = verify_owner_attestation(
+        envelope,
+        repository=repository,
+        owner_id=owner_id,
+        agent_login=agent_actors[0],
+        bound_issues=_bound_issue_numbers(pr.get("body"), binding),
+        changed_paths=_changed_paths(repo_root, base_sha, head_sha),
+        pinned_keys=load_owner_signing_keys(repo_root, base_sha, owner_id),
+        now=now or datetime.now(timezone.utc),
+    )
+    return {**result, "owner_attestation": attestation}
+
+
+def _validate_lane_event(
     event: Mapping[str, Any],
     *,
     repo_root: Path,
