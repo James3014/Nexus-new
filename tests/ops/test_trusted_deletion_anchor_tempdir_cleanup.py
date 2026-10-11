@@ -140,18 +140,18 @@ def _verifier_bundle(root: Path) -> tuple[Path, argparse.Namespace]:
         "run_id": 1765,
         "pull_request_number": 1765,
     }
-    manifest_bytes = json.dumps(
-        {"workflow_identity": identity, "base_sha": base_sha, "head_sha": head_sha}
-    ).encode()
+    manifest_bytes = json.dumps({
+        "workflow_identity": identity,
+        "base_sha": base_sha,
+        "head_sha": head_sha,
+    }).encode()
     manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
-    anchor_bytes = json.dumps(
-        {
-            "manifest_sha256": manifest_sha256,
-            "workflow_identity": identity,
-            "base_sha": base_sha,
-            "head_sha": head_sha,
-        }
-    ).encode()
+    anchor_bytes = json.dumps({
+        "manifest_sha256": manifest_sha256,
+        "workflow_identity": identity,
+        "base_sha": base_sha,
+        "head_sha": head_sha,
+    }).encode()
     (bundle_dir / "manifest.json").write_bytes(manifest_bytes)
     (bundle_dir / "external-anchor.json").write_bytes(anchor_bytes)
     (bundle_dir / "raw-evidence.json").write_text("{}")
