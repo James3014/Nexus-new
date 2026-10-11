@@ -1,4 +1,5 @@
 """The 27 planner sources owned by nexus-runtime (D2, Phase 4b)."""
+
 from __future__ import annotations
 
 _SUPPORT = {
@@ -34,7 +35,7 @@ _PLANNING = [
 ]
 
 PAIRS: list[tuple[str, str]] = list(_SUPPORT.items()) + [
-    (n, "nexus_runtime.planning." + n[len("nexus."):]) for n in _PLANNING
+    (n, "nexus_runtime.planning." + n[len("nexus.") :]) for n in _PLANNING
 ]
 assert len(PAIRS) == 27
 

@@ -74,9 +74,7 @@ def test_planner_mount_binds_one_exact_primary_shared_playbook(tmp_path: Path) -
     assert "shared_playbook_exact_identity_bound" in contract["load_reason_codes"]
 
 
-def test_planner_mount_fails_closed_when_required_playbook_is_missing(
-    tmp_path: Path
-) -> None:
+def test_planner_mount_fails_closed_when_required_playbook_is_missing(tmp_path: Path) -> None:
     report = _status_report(tmp_path, ["diagnose"])
 
     result = build_skill_mount_evidence(
@@ -133,9 +131,7 @@ def test_planner_mount_rejects_second_primary_playbook(tmp_path: Path) -> None:
     ]
 
 
-def test_planner_mount_preserves_optional_skill_without_shared_playbook(
-    tmp_path: Path
-) -> None:
+def test_planner_mount_preserves_optional_skill_without_shared_playbook(tmp_path: Path) -> None:
     report = _status_report(tmp_path, ["plain-skill"])
 
     result = build_skill_mount_evidence(
