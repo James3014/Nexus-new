@@ -683,6 +683,7 @@ def test_canonical_seam_has_one_planner_call_and_no_forbidden_runtime_dependenci
         "nexus.contracts.canonical_execution",
         "nexus.engine.capability_contracts",
         "nexus.engine.capability_planner",
+        "pathlib",
     }
     lowered = source.lower()
     for forbidden in (
