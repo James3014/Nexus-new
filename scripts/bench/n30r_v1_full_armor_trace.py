@@ -64,6 +64,7 @@ def _invoke_planner(
 ) -> dict:
     """Build the benchmark snapshot through the same canonical identity producers as Runtime."""
     from nexus.contracts.canonical_execution import CanonicalTaskContext
+    from nexus.core.repo_root import REPO_ROOT
     from nexus.engine.canonical_execution import plan_canonical_task_bundle
     from nexus.services.capability_evidence_bundle import (
         build_capability_evidence_bundle,
@@ -99,7 +100,7 @@ def _invoke_planner(
             },
             budget={"max_cost": 20},
         )
-        bundle = plan_canonical_task_bundle(context)
+        bundle = plan_canonical_task_bundle(context, shared_playbook_root=REPO_ROOT)
         payload = bundle.to_dict()
         planner_decision_id = bundle.plan_hash
         canonical_execution = canonical_execution_identity(bundle)

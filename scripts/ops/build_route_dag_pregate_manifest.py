@@ -9,6 +9,7 @@ from typing import Any
 
 from nexus.contracts.route_dag_pregate import build_route_dag_pregate
 from nexus.contracts.route_runtime_plan import build_route_runtime_plan_from_pregate
+from nexus.core.repo_root import REPO_ROOT
 from nexus.engine.capability_planner import CapabilityPlanner, default_capability_nodes
 from nexus.services.codeintel.skeleton_provider import lookup_implementation
 from scripts.ops.report_output import resolve_report_output
@@ -29,7 +30,7 @@ def build_route_dag_pregate_manifest(
     symbols: list[str] | None = None,
     symbol_roots: list[str] | None = None,
 ) -> dict[str, Any]:
-    plan = CapabilityPlanner().plan(
+    plan = CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
         task_desc=task_desc,
         task_type=task_type,
         route=route or {},

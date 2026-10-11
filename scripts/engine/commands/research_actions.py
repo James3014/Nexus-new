@@ -83,9 +83,10 @@ def _default_route_builder(**kwargs: Any) -> dict[str, Any]:
 
 
 def _default_planner_factory() -> ResearchPlannerLike:
+    from nexus.core.repo_root import REPO_ROOT
     from nexus.engine.capability_planner import CapabilityPlanner
 
-    return CapabilityPlanner()
+    return CapabilityPlanner(shared_playbook_root=REPO_ROOT)
 
 
 def _default_learning_policy_loader(repo_root: Path) -> Any:

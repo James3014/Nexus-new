@@ -1712,7 +1712,7 @@ else:
                 # Keep skill-routing compatibility effects, but route/depth truth is
                 # consumed directly from the canonical CapabilityPlanner.
                 router.route_candidates("R", router_context)
-                planner_plan = CapabilityPlanner().plan(
+                planner_plan = CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
                     task_desc=task_desc,
                     task_type="learn_ingest",
                     route={
@@ -1898,7 +1898,7 @@ else:
                     "tenant_id": "default",
                 }
                 router.route_candidates("R", router_context)
-                planner_plan = CapabilityPlanner().plan(
+                planner_plan = CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
                     task_desc=task_desc,
                     task_type="learn_converge",
                     route={
