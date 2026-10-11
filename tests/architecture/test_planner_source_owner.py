@@ -22,15 +22,19 @@ def _normalize(text: str) -> str:
 
 
 @pytest.mark.parametrize(("nexus_module", "runtime_module"), ALIASABLE_PAIRS)
-def test_duplicated_planner_sources_match_runtime_modulo_imports(nexus_module, runtime_module):
+def test_planner_shims_point_at_runtime(nexus_module, runtime_module):
+    """Step 0 pinned these sources equal to runtime modulo imports; they are now shims."""
     path = ROOT / (nexus_module.replace(".", "/") + ".py")
-    assert _normalize(path.read_text(encoding="utf-8")) == _normalize(_runtime_source(runtime_module))
+    text = path.read_text(encoding="utf-8")
+    assert f'install_alias(__name__, "{runtime_module}")' in text
+    assert len(text.splitlines()) < 12
 
 
 @pytest.mark.parametrize(("nexus_module", "runtime_module"), DIVERGENT_PAIRS)
 def test_divergent_pairs_are_not_yet_equivalent(nexus_module, runtime_module):
     """Nexus-new is ahead of the runtime copy; flips (and must be re-gated) once runtime catches up."""
     path = ROOT / (nexus_module.replace(".", "/") + ".py")
+    assert "install_alias" not in path.read_text(encoding="utf-8")
     assert _normalize(path.read_text(encoding="utf-8")) != _normalize(_runtime_source(runtime_module))
 
 
