@@ -7,7 +7,6 @@ from typing import Any, Protocol
 
 from nexus.services.memory_repository_lifecycle import ScopedMemoryRepositoryRegistry
 
-
 # Shared across syncs so the registry's repository cache (keyed by root/db/table) is actually reused.
 _SHARED_REGISTRY = ScopedMemoryRepositoryRegistry()
 

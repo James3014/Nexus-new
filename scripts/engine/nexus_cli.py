@@ -20,6 +20,13 @@ except ImportError:
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+repo_root = REPO_ROOT
+
+import shlex
+
 # `nexus delegate` retirement (#1739): fail closed (EX_CONFIG) and point at the real orchestrator.
 DELEGATE_RETIRED_EXIT_CODE = 78
 DELEGATE_RETIRED_MESSAGE = (
@@ -30,12 +37,7 @@ DELEGATE_RETIRED_MESSAGE = (
     "  nexus multi-agent submit --task-id ID\n"
     "  nexus multi-agent verify --task-id ID"
 )
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
-repo_root = REPO_ROOT
-
-import shlex
 
 class SanitizedRunner:
     """🛡️ SanitizedRunner with AllowedTaskRegistry to prevent command injection & shell escape"""
@@ -2272,8 +2274,13 @@ else:
     @nexus_group.command(name="resume")
     def resume():
         """🌬️ [Metabolism] Resume task from last physical checkpoint."""
+        from nexus.core.mission_contracts import (
+            MissionStatus,
+            MissionTransitionError,
+            NexusMission,
+            transition,
+        )
         from nexus.services.metabolism_engine import metabolism
-        from nexus.core.mission_contracts import MissionStatus, MissionTransitionError, NexusMission, transition
         checkpoint = metabolism.load_checkpoint()
         if not checkpoint or not checkpoint.get("task_id"):
             click.echo("❌ No checkpoint found.")
@@ -3580,7 +3587,12 @@ else:
     @mission_group.command(name="pause")
     def mission_pause():
         """⏸️ Force snapshot of current state and pause the campaign."""
-        from nexus.core.mission_contracts import MissionStatus, MissionTransitionError, NexusMission, transition
+        from nexus.core.mission_contracts import (
+            MissionStatus,
+            MissionTransitionError,
+            NexusMission,
+            transition,
+        )
         mission = NexusMission.load(repo_root)
         if not mission:
             click.echo("❌ No mission found.")
@@ -3608,7 +3620,12 @@ else:
     @mission_group.command(name="resume")
     def mission_resume():
         """🌬️ Check environment preflight, budget, and restore the loop from snapshot."""
-        from nexus.core.mission_contracts import MissionStatus, MissionTransitionError, NexusMission, transition
+        from nexus.core.mission_contracts import (
+            MissionStatus,
+            MissionTransitionError,
+            NexusMission,
+            transition,
+        )
         mission = NexusMission.load(repo_root)
         if not mission:
             click.echo("❌ No paused mission found.")
@@ -3655,7 +3672,12 @@ else:
     @mission_group.command(name="abort")
     def mission_abort():
         """🛑 Abort the campaign (terminal state)."""
-        from nexus.core.mission_contracts import MissionStatus, MissionTransitionError, NexusMission, transition
+        from nexus.core.mission_contracts import (
+            MissionStatus,
+            MissionTransitionError,
+            NexusMission,
+            transition,
+        )
         mission = NexusMission.load(repo_root)
         if not mission:
             click.echo("❌ No mission found.")
