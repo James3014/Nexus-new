@@ -27,7 +27,8 @@ def test_planner_shims_point_at_runtime(nexus_module, runtime_module):
     path = ROOT / (nexus_module.replace(".", "/") + ".py")
     text = path.read_text(encoding="utf-8")
     assert f'install_alias(__name__, "{runtime_module}")' in text
-    assert len(text.splitlines()) < 12
+    assert len(text.splitlines()) < 30
+    assert "if TYPE_CHECKING:" in text  # static re-export for type checkers
 
 
 @pytest.mark.parametrize(("nexus_module", "runtime_module"), DIVERGENT_PAIRS)
