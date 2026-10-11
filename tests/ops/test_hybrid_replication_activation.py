@@ -34,6 +34,16 @@ if argv[:2] == ["variable", "set"]:
 elif argv[:2] == ["variable", "list"]:
     rows = [{{"name": k, "value": v}} for k, v in state.get(repo, {{}}).items()]
     print(json.dumps(rows))
+elif argv[:2] == ["variable", "delete"]:
+    mode = os.environ.get("FAKE_GH_DELETE_MODE", "")
+    if mode == "404":
+        sys.stderr.write("HTTP 404: Not Found")
+        sys.exit(1)
+    if mode == "error":
+        sys.stderr.write("HTTP 500: server error")
+        sys.exit(1)
+    state.get(repo, {{}}).pop(argv[2], None)
+    json.dump(state, open(state_path, "w", encoding="utf-8"))
 else:
     sys.exit(64)
 """
@@ -315,3 +325,102 @@ def test_first_generation_manifest_is_valid_and_not_ready() -> None:
     for variables in rendered.values():
         assert variables[activation.VAR_ACTIVATION_STATE] == "NOT_READY"
         assert variables[activation.VAR_T_AUTO] == ""
+
+
+NOT_READY = {
+    "activation_state": "NOT_READY",
+    "t_auto": None,
+    "excluded_tasks": [],
+    "readiness_control_token": "",
+}
+EMPTY_VARS = (
+    "NEXUS_HYBRID_REPLICATION_T_AUTO",
+    "NEXUS_HYBRID_REPLICATION_EXCLUDED_TASKS",
+    "NEXUS_HYBRID_REPLICATION_READINESS_CONTROL_TOKEN",
+)
+
+
+def test_push_empty_values_use_delete_not_set(
+    tmp_path: Path, fake_gh: tuple[str, Path, Path]
+) -> None:
+    gh, log, _ = fake_gh
+    manifest = _write_manifest(tmp_path, repositories=["a/b"], **NOT_READY)
+    assert activation.main(["push", "--manifest", str(manifest), "--gh", gh]) == 0
+    calls = _calls(log)
+    deleted = {call[2] for call in calls if call[:2] == ["variable", "delete"]}
+    assert deleted == set(EMPTY_VARS)
+    assert all(
+        call == ["variable", "delete", call[2], "--repo", "a/b"]
+        for call in calls
+        if call[1] == "delete"
+    )
+    assert not [call for call in calls if call[1] == "set" and call[2] in EMPTY_VARS]
+    assert {call[2] for call in calls if call[1] == "set"} == {
+        "NEXUS_HYBRID_REPLICATION_ACTIVATION_STATE",
+        "NEXUS_HYBRID_REPLICATION_EXCLUSION_SET_SHA256",
+    }
+
+
+def test_push_delete_404_is_success(
+    tmp_path: Path,
+    fake_gh: tuple[str, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    gh, _, _ = fake_gh
+    monkeypatch.setenv("FAKE_GH_DELETE_MODE", "404")
+    manifest = _write_manifest(tmp_path, repositories=["a/b"], **NOT_READY)
+    assert activation.main(["push", "--manifest", str(manifest), "--gh", gh]) == 0
+    assert json.loads(capsys.readouterr().out)["failures"] == []
+
+
+def test_push_delete_other_error_is_failure(
+    tmp_path: Path,
+    fake_gh: tuple[str, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    gh, _, _ = fake_gh
+    monkeypatch.setenv("FAKE_GH_DELETE_MODE", "error")
+    manifest = _write_manifest(tmp_path, repositories=["a/b"], **NOT_READY)
+    assert activation.main(["push", "--manifest", str(manifest), "--gh", gh]) == 3
+    failures = json.loads(capsys.readouterr().out)["failures"]
+    assert {item["variable"] for item in failures} == set(EMPTY_VARS)
+    assert all(
+        item["repository"] == "a/b" and item["returncode"] == 1 and "HTTP 500" in item["stderr"]
+        for item in failures
+    )
+
+
+def test_readback_absent_equals_empty_after_not_ready_push(
+    tmp_path: Path, fake_gh: tuple[str, Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    gh, _, state = fake_gh
+    manifest = _write_manifest(tmp_path, repositories=["a/b"], **NOT_READY)
+    assert activation.main(["push", "--manifest", str(manifest), "--gh", gh]) == 0
+    capsys.readouterr()
+    live = json.loads(state.read_text(encoding="utf-8"))["a/b"]
+    assert not set(EMPTY_VARS) & set(live)
+    assert activation.main(["readback", "--manifest", str(manifest), "--gh", gh]) == 0
+    assert json.loads(capsys.readouterr().out)["drift"] == []
+
+
+def test_readback_present_nonempty_vs_expected_empty_is_drift(
+    tmp_path: Path, fake_gh: tuple[str, Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    gh, _, state = fake_gh
+    manifest = _write_manifest(tmp_path, repositories=["a/b"], **NOT_READY)
+    assert activation.main(["push", "--manifest", str(manifest), "--gh", gh]) == 0
+    capsys.readouterr()
+    live = json.loads(state.read_text(encoding="utf-8"))
+    live["a/b"]["NEXUS_HYBRID_REPLICATION_T_AUTO"] = "2026-10-12T00:00:00Z"
+    state.write_text(json.dumps(live), encoding="utf-8")
+    assert activation.main(["readback", "--manifest", str(manifest), "--gh", gh]) == 2
+    assert json.loads(capsys.readouterr().out)["drift"] == [
+        {
+            "repository": "a/b",
+            "variable": "NEXUS_HYBRID_REPLICATION_T_AUTO",
+            "expected": "",
+            "actual": "2026-10-12T00:00:00Z",
+        }
+    ]

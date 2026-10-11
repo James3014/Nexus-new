@@ -5,7 +5,7 @@ Authority: RESEARCH_OBSERVATION_ONLY. The manifest is the only place a human
 edits activation state; the five per-repository GitHub Actions variables passed
 by the ``.github/workflows/hybrid-replication-capture.yml`` caller to the reusable
 workflow are derived from it, pushed
-with ``gh variable set`` and verified with ``gh variable list``.
+with ``gh variable set`` (empty values: ``gh variable delete``) and verified with ``gh variable list``.
 """
 
 from __future__ import annotations
@@ -162,26 +162,44 @@ def render(manifest: ActivationManifest) -> dict[str, dict[str, str]]:
     return {repository: dict(variables) for repository in manifest.repositories}
 
 
+def _is_not_found(stderr: str) -> bool:
+    lowered = stderr.lower()
+    return "http 404" in lowered or "not found" in lowered
+
+
 def push(
     manifest: ActivationManifest, *, gh: str = "gh", runner: Runner = subprocess.run
 ) -> list[dict[str, Any]]:
-    """Run ``gh variable set`` for every repository and variable; return failures."""
+    """Apply every variable to every repository; return failures.
+
+    The GitHub API rejects empty variable values (HTTP 422), so an empty desired
+    value is applied with ``gh variable delete``; deleting an already-absent
+    variable (HTTP 404 / not found) counts as success.
+    """
     failures: list[dict[str, Any]] = []
     for repository, variables in render(manifest).items():
         for name, value in variables.items():
+            if value == "":
+                command = [gh, "variable", "delete", name, "--repo", repository]
+            else:
+                command = [gh, "variable", "set", name, "--repo", repository, "--body", value]
             completed = runner(  # nosec B603
-                [gh, "variable", "set", name, "--repo", repository, "--body", value],
+                command,
                 check=False,
                 capture_output=True,
                 text=True,
             )
-            if completed.returncode != 0:
-                failures.append({
-                    "repository": repository,
-                    "variable": name,
-                    "returncode": completed.returncode,
-                    "stderr": (completed.stderr or "").strip(),
-                })
+            if completed.returncode != 0 and not (
+                value == "" and _is_not_found(completed.stderr or "")
+            ):
+                failures.append(
+                    {
+                        "repository": repository,
+                        "variable": name,
+                        "returncode": completed.returncode,
+                        "stderr": (completed.stderr or "").strip(),
+                    }
+                )
     return failures
 
 
@@ -198,12 +216,14 @@ def readback(
             text=True,
         )
         if completed.returncode != 0:
-            drift.append({
-                "repository": repository,
-                "error": "gh_variable_list_failed",
-                "returncode": completed.returncode,
-                "stderr": (completed.stderr or "").strip(),
-            })
+            drift.append(
+                {
+                    "repository": repository,
+                    "error": "gh_variable_list_failed",
+                    "returncode": completed.returncode,
+                    "stderr": (completed.stderr or "").strip(),
+                }
+            )
             continue
         try:
             listed = json.loads(completed.stdout)
@@ -213,13 +233,16 @@ def readback(
             continue
         for name, want in expected.items():
             have = actual.get(name)
-            if have != want:
-                drift.append({
-                    "repository": repository,
-                    "variable": name,
-                    "expected": want,
-                    "actual": have,
-                })
+            # An absent variable evaluates to "" in GitHub Actions (vars.X).
+            if (have if have is not None else "") != want:
+                drift.append(
+                    {
+                        "repository": repository,
+                        "variable": name,
+                        "expected": want,
+                        "actual": have,
+                    }
+                )
     return drift
 
 

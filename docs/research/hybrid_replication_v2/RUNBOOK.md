@@ -117,10 +117,13 @@ uv run python scripts/ops/hybrid_replication_activation.py readback \
 ```
 
 Expected: `push` exit 0 with `"failures": []`; `readback` exit 0 with `"drift": []`. Stop on
-`push` exit 3 (some `gh variable set` failed) or `readback` exit 2 (drift). The five
+`push` exit 3 (some `gh variable set`/`delete` failed) or `readback` exit 2 (drift). The five
 variables are `NEXUS_HYBRID_REPLICATION_ACTIVATION_STATE`, `_T_AUTO`, `_EXCLUDED_TASKS`,
 `_EXCLUSION_SET_SHA256`, `_READINESS_CONTROL_TOKEN` (see `AUTOMATION_CONTRACT.json`
-`activation.*_variable`). Do not set them by hand.
+`activation.*_variable`). Do not set them by hand. Empty values are applied by deleting the
+variable (the GitHub API rejects empty values), and `readback` treats an absent variable as
+empty. The activation script is an operator tool run from a current `main` checkout, not from
+the frozen `<RUNTIME>` (nothing in the frozen runtime imports it).
 
 ## 4. Readiness control Issue (D5)
 
