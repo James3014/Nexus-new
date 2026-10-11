@@ -3,7 +3,6 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List
 from datetime import datetime, timezone
-from nexus.services.lancedb_roots import LANCEDB_ROOT_RELPATHS, TENANT_JSONL, VECTOR_DB, resolve_lancedb_root
 from nexus.infrastructure.storage_interfaces import MemoryStorage, CacheStore, JsonlStore, BeliefStore, ConfigStore
 
 logger = logging.getLogger(__name__)
@@ -18,7 +17,8 @@ class LanceDBStorage(MemoryStorage):
         return LanceDBStorage(self.project_root, tenant_id=str(tenant_id), audit_events=self.audit_events)
 
     def store(self, tenant_id: str, artifact_type: str, data: Dict[str, Any]) -> Dict[str, Any]:
-        db_dir = resolve_lancedb_root(TENANT_JSONL, self.project_root, tenant_id=tenant_id, honor_env=False)
+        tenant_dir = self.project_root / ".nexus" / "tenants" / tenant_id
+        db_dir = tenant_dir / "lancedb"
         db_dir.mkdir(parents=True, exist_ok=True)
         compressed = {
             "aaak_id": f"{artifact_type}-{int(datetime.now(timezone.utc).timestamp())}",
@@ -36,11 +36,9 @@ class LanceDBStorage(MemoryStorage):
         limit = kwargs.get("limit", 10)
         tenant_id = str(kwargs.get("tenant_id") or self.tenant_id or "")
         include_all_tenants = bool(kwargs.get("include_all_tenants", False))
-        tenants_root = self.project_root / LANCEDB_ROOT_RELPATHS[TENANT_JSONL]
+        tenants_root = self.project_root / ".nexus" / "tenants"
         if tenant_id:
-            tenant_dirs = list(
-                resolve_lancedb_root(TENANT_JSONL, self.project_root, tenant_id=tenant_id, honor_env=False).glob("*.jsonl")
-            )
+            tenant_dirs = list((tenants_root / tenant_id / "lancedb").glob("*.jsonl"))
         elif include_all_tenants:
             audit_reason = str(kwargs.get("audit_reason") or "").strip()
             if not audit_reason:
@@ -210,7 +208,7 @@ class LanceBeliefStore(BeliefStore):
         self.last_read_error = ""
         try:
             import lancedb
-            db_path = resolve_lancedb_root(VECTOR_DB, self.project_root)
+            db_path = self.project_root / ".nexus" / "vector_db"
             if not db_path.exists():
                 return []
             db = lancedb.connect(str(db_path))

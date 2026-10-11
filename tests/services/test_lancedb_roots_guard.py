@@ -29,6 +29,11 @@ ALLOWLIST = {
         "sets/restores NEXUS_MEMORY_DB_PATH in the process env to a temp dir for the preflight; it names the "
         "env var to export it, it does not resolve a root"
     ),
+    "nexus/infrastructure/storage_implementations.py": (
+        "infrastructure layer must not import nexus.services (enforced by "
+        "test_infrastructure_layer_has_no_service_layer_imports); keeps the VECTOR_DB and tenant JSONL "
+        "literals, which resolve to the same paths as lancedb_roots"
+    ),
     "scripts/bench/capability_ab_runner.py": (
         "exports NEXUS_MEMORY_DB_PATH into the benchmark subprocess env; it names the env var to set it, "
         "it does not resolve a root"
