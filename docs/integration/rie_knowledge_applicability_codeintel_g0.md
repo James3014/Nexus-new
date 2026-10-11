@@ -56,3 +56,78 @@ Fields under `knowledge_applicability` in the existing codeintel `consumer_paylo
 Reason codes and document/source text are never forwarded. An affected artifact means
 review-needed, not semantically wrong. CapabilityPlanner remains the sole selector and
 #472 package identity / consumer receipts remain the consumption authority.
+
+## G0 follow-up: manifest (#1579)
+
+Claim ceiling for this step: `REPOSITORY_KNOWLEDGE_MANIFEST_DECLARATION_ONLY`.
+
+The G0 inventory above found no repo-owned artifact that declares source relations.
+This follow-up adds the smallest owner-reviewable one:
+`docs/knowledge/rie_knowledge_manifest.v1.json` (schema
+`nexus.rie_knowledge_manifest.v1`). It is **owner-declared, not derived**: nothing infers
+a relation from document text, and nothing in runtime writes to it.
+
+### Manifest contract
+
+Top level: `schema`, `revision` (the commit at which every `expected_content_sha256` was
+computed), `claim_ceiling`, `notes`, `entries[]`. Each entry:
+
+| Field | Meaning |
+| --- | --- |
+| `id` | Unique stable artifact id (becomes RIE `artifact_id`). |
+| `path` | Repo-relative knowledge artifact (a doc intended as model context). |
+| `source_refs[]` | `{path, expected_content_sha256}`: sources the doc explicitly names; sha256 is over the git blob bytes at `revision`. |
+| `covers[]` | Narrow globs of additional paths whose change should flag the doc for review. A bare `*`/`**` is rejected. |
+| `in_scope` | Must be `true`; the union of covers and source paths is the RIE `in_scope` boundary. |
+
+Declared today (each doc literally names the source files it describes):
+
+* `rie-guard-semantic-delta-g0`: `docs/integration/rie_guard_semantic_delta_g0.md` ->
+  `scripts/ops/canonical_owner_guard.py`, `scripts/ops/rie_guard_delta_evidence.py`.
+* `rie-knowledge-applicability-codeintel-g0`: this document ->
+  `nexus/services/rie_knowledge_applicability.py`.
+* `m5-rdc-local-bridge`: `docs/integration/m5_rdc_local_bridge.md` ->
+  `nexus/services/m5_local/{deterministic_fallback,host_inventory,telemetry,cli}.py`.
+
+`docs/architecture/AI_CONTROL_PLANE_BOUNDARY.md` was considered and **not** declared: it
+names no source file, so any relation would be invented.
+
+### How to extend
+
+Add an entry only when the document explicitly names the files it describes and is genuinely
+model context. Compute each hash with `hashlib.sha256` over the blob bytes at the new
+`revision` (`git show <revision>:<path>`), bump `revision` for the whole manifest, and keep
+`covers` narrow. Re-hashing sources after a source change is an owner act: it asserts the
+doc was reviewed against the new source.
+
+### STALE_DECLARATION is surfaced, never hidden
+
+`nexus/services/rie_knowledge_manifest.py` validates the schema (fail closed on a malformed
+manifest) and recomputes source hashes. A source whose current hash differs from the
+declared one, or is missing, marks that entry `STALE_DECLARATION` per entry; loading does not
+fail. The producer forwards those as `MANIFEST_STALE_DECLARATION:<id>` entries in the
+projection's `evidence_gaps` and in the artifact's `manifest` block, and the pinned RIE engine
+independently reports the relation as `STALE_EXACT_SOURCE` (review needed, not "wrong"). An
+entry whose artifact file is missing at head is excluded from the claims and reported as a
+declaration gap, never as `CURRENT`.
+
+### Producer wiring (no runtime selection)
+
+`build_manifest_knowledge_evidence` (same module) takes repo root, PR identity
+(repository, pr_number, head/base/current_main sha), the manifest and
+`git diff --name-status base..head` output, builds `changes[]` (ADD/MODIFY/DELETE/RENAME) and
+`observed_source_sha256` (git blobs at head), and calls the existing
+`build_codeintel_knowledge_evidence`. `scripts/ops/rie_knowledge_evidence.py` is the CLI
+(`NEXUS_RIE_ENGINE_ROOT`, `NEXUS_RIE_PYTHON_BIN`; `--output`, `--step-summary`). It exits 0
+with an explicit `NOT_APPLICABLE` artifact when the engine is unconfigured, exits 0 with
+`ADVISORY_INCOMPLETE` on adapter/engine failures, and exits 1 on malformed identity. No model
+call. Because `covers` and source paths define `in_scope`, `uncovered_change_refs` is
+structurally empty for this manifest; it reports only declared relations.
+
+### Still open (G3)
+
+Not done here: adding a Planner capability (forbidden by the Issue), wiring into
+UnifiedRuntime/Planner execution, and the physical proof. G3 still needs one real
+Planner-selected `codeintel` task, an RIE report produced and verified in that run, the bounded
+payload serialized into the #472 package, and an Online/WorkerRegistry physical provider-input
+receipt binding the package/payload identity, plus an independent verifier.

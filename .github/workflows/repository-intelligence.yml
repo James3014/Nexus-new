@@ -54,7 +54,7 @@ jobs:
   terminal:
     needs: snapshot
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -66,7 +66,7 @@ jobs:
         with:
           pr-number: ${{ github.event.pull_request.number }}
           expected-head-sha: ${{ github.event.pull_request.head.sha }}
-          timeout-seconds: "1500"
+          timeout-seconds: "2400"
           poll-seconds: "60"
           quiescence-seconds: "60"
 
@@ -112,5 +112,71 @@ jobs:
         with:
           name: repository-intelligence-terminal-pr-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
           path: ${{ steps.ri-terminal.outputs.report-path || 'repository-intelligence-terminal.json' }}
+          if-no-files-found: error
+          retention-days: 30
+
+  guard-delta:
+    # Advisory only: never a required check and never blocks the PR.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout repository
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout pinned Repository Intelligence engine
+        id: checkout-engine
+        continue-on-error: true
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: James3014/repository-intelligence-engine
+          ref: 88285acf570688befbc8e36eb73f46987171bd4e
+          path: .rie-engine
+          persist-credentials: false
+
+      - name: Generate guard semantic delta advisory evidence
+        id: guard-delta
+        continue-on-error: true
+        shell: bash
+        env:
+          RIE_PIN: 88285acf570688befbc8e36eb73f46987171bd4e
+          GITHUB_REPOSITORY_ID: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -uo pipefail
+          # Fail closed: any setup problem leaves the engine unconfigured, so the
+          # script emits ADVISORY_INCOMPLETE (exit 0) instead of a directional answer.
+          unset NEXUS_RIE_ENGINE_ROOT NEXUS_RIE_PYTHON_BIN
+          git fetch --no-tags origin "$BASE_SHA" "$HEAD_SHA" || true
+          if [ "$(git -C .rie-engine rev-parse HEAD 2>/dev/null)" = "$RIE_PIN" ]; then
+            export NEXUS_RIE_ENGINE_ROOT="$GITHUB_WORKSPACE/.rie-engine"
+            export NEXUS_RIE_PYTHON_BIN=python3
+          else
+            echo "RIE engine checkout does not match pin; engine left unconfigured" >&2
+          fi
+          # Never pass --run-behavioral-probes: PR-head Python must not execute in CI.
+          python3 scripts/ops/rie_guard_delta_evidence.py \
+            --repository "$GITHUB_REPOSITORY_ID" \
+            --pr-number "$PR_NUMBER" \
+            --base-sha "$BASE_SHA" \
+            --head-sha "$HEAD_SHA" \
+            --output repository-intelligence-guard-delta.json \
+            --step-summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload guard delta advisory evidence
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: repository-intelligence-guard-delta-pr-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: repository-intelligence-guard-delta.json
           if-no-files-found: error
           retention-days: 30
