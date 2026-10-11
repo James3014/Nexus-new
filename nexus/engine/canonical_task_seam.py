@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
+from nexus.core.repo_root import REPO_ROOT
+
 _FEATURE_INTENT_TOKENS = frozenset({"build", "create", "add", "implement", "feature"})
 _FEATURE_INTENT_TOKEN_RE = re.compile(r"(?<!\w)([A-Za-z]+)(?!\w)")
 
@@ -554,7 +556,7 @@ def build_canonical_planner_admission(
     )
     from nexus.engine.canonical_execution import plan_canonical_task_bundle
 
-    bundle = plan_canonical_task_bundle(context)
+    bundle = plan_canonical_task_bundle(context, shared_playbook_root=REPO_ROOT)
     planner_output = bundle.to_dict()
     plan_payload = planner_output["plan_payload"]
     demands = (plan_payload.get("signal_snapshot") or {}).get("workforce_demands")
@@ -797,7 +799,9 @@ def execute_canonical_product_task(
         codeintel=codeintel,
         budget=runtime_budget,
     )
-    bundle = plan_canonical_task_bundle(canonical_context)
+    bundle = plan_canonical_task_bundle(
+        canonical_context, shared_playbook_root=REPO_ROOT
+    )
     plan_payload = bundle.to_dict()["plan_payload"]
     bindings, policy_providers = _resolve_policy_workforce_bindings(
         plan_payload,
