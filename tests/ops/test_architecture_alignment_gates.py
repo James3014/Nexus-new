@@ -26,7 +26,11 @@ def test_storage_layer_does_not_import_service_layer_and_exposes_scoped_access()
 
 
 def test_belief_gate_and_learning_steward_are_runtime_contracts():
-    belief_contracts = (ROOT / "nexus/core/belief_contracts.py").read_text(encoding="utf-8")
+    # nexus.core.belief_contracts is an alias shim (D2); the contract source lives in nexus-runtime.
+    import importlib
+    import inspect
+
+    belief_contracts = inspect.getsource(importlib.import_module("nexus_runtime.planning.core.belief_contracts"))
     orchestrator = (ROOT / "nexus/core/orchestrator.py").read_text(encoding="utf-8")
     steward = (ROOT / "nexus/core/learning_steward.py").read_text(encoding="utf-8")
 
