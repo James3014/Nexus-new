@@ -6,7 +6,9 @@ sys.path.append('.')
 
 def check_learning_status():
     try:
-        db = lancedb.connect(".nexus/memory/memory_index.lancedb")
+        from nexus.services.lancedb_roots import MEMORY_INDEX, resolve_lancedb_root
+
+        db = lancedb.connect(str(resolve_lancedb_root(MEMORY_INDEX, ".", honor_env=False)))
         tables = db.list_tables()
         
         print("🔍 [Phase 1: Memory & Wisdom Storage check]")

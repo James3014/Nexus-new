@@ -3,6 +3,7 @@ import os
 import time
 from pathlib import Path
 from nexus.services.implementation_pack import ImplementationPackGenerator
+from nexus.services.lancedb_roots import TENANT_JSONL, resolve_lancedb_root
 from nexus.services.mem_palace import MemPalace
 
 def run_comparison():
@@ -40,7 +41,7 @@ def run_comparison():
     
     # 4. 檢查記憶閉環 (AAAK 壓縮率)
     raw_pack_size = os.path.getsize(impl_dir / "implementation_pack.json")
-    shard_file = root / ".nexus" / "tenants" / tenant / "lancedb" / "i_pack_stable.jsonl"
+    shard_file = resolve_lancedb_root(TENANT_JSONL, root, tenant_id=tenant, honor_env=False) / "i_pack_stable.jsonl"
     
     # 讀取最後一行（最新的壓縮記錄）
     with open(shard_file, "r") as f:

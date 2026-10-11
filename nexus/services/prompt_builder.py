@@ -6,6 +6,7 @@ import hashlib
 import logging
 from nexus.governance.capability_gate import CapabilityGate
 from nexus.services.mem_palace import MemPalace
+from nexus.services.lancedb_roots import VECTOR_DB, resolve_lancedb_root
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +141,7 @@ Rules:
         try:
             if self._wisdom_vault is None:
                 from nexus.research.wisdom.wisdom_vault import WisdomVault
-                db_path = str(self.project_root / ".nexus" / "vector_db")
+                db_path = str(resolve_lancedb_root(VECTOR_DB, self.project_root))
                 self._wisdom_vault = WisdomVault(db_path=db_path)
             
             results = self._wisdom_vault.search_wisdom(task, limit=2)

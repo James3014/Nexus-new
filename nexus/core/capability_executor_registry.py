@@ -808,6 +808,7 @@ def _exec_lancedb(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRe
     start = time.monotonic()
     try:
         from pathlib import Path
+        from nexus.services.lancedb_roots import KNOWLEDGE, resolve_lancedb_root
         from nexus.services.memory_repository import MemoryRepository
 
         constraints = dict(plan.constraints or {})
@@ -815,7 +816,7 @@ def _exec_lancedb(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRe
         query = str(constraints.get("search_query") or task_desc or "").strip()
         table = str(constraints.get("search_table") or "policy").strip()
         limit = max(1, min(20, int(constraints.get("search_limit") or 5)))
-        repository = MemoryRepository(root / ".nexus" / "knowledge" / "lancedb")
+        repository = MemoryRepository(resolve_lancedb_root(KNOWLEDGE, root, honor_env=False))
         frame = repository.search_fts(
             table,
             query,
@@ -2122,6 +2123,7 @@ def _exec_semantic_searcher(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
         )
     try:
         from pathlib import Path
+        from nexus.services.lancedb_roots import KNOWLEDGE, resolve_lancedb_root
         from nexus.services.memory_repository import MemoryRepository
 
         constraints = dict(plan.constraints or {})
@@ -2129,7 +2131,7 @@ def _exec_semantic_searcher(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
         query = str(constraints.get("search_query") or task_desc or "").strip()
         table = str(constraints.get("search_table") or "policy").strip()
         limit = max(1, min(20, int(constraints.get("search_limit") or 5)))
-        repository = MemoryRepository(root / ".nexus" / "knowledge" / "lancedb")
+        repository = MemoryRepository(resolve_lancedb_root(KNOWLEDGE, root, honor_env=False))
         inst = cls(repository)
         hits = list(inst.search(query=query, table_name=table, limit=limit) or [])[:limit]
         elapsed = int((time.monotonic() - start) * 1000)

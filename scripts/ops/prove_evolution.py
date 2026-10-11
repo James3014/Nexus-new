@@ -45,7 +45,9 @@ def generate_proof():
 
     # 3. Wisdom Layer Incremental Index (Sys 3)
     try:
-        db = lancedb.connect(str(root / ".nexus" / "memory" / "memory_index.lancedb"))
+        from nexus.services.lancedb_roots import MEMORY_INDEX, resolve_lancedb_root
+
+        db = lancedb.connect(str(resolve_lancedb_root(MEMORY_INDEX, root, honor_env=False)))
         table = db.open_table("memory_index")
         df = table.to_pandas()
         matched_df = df[df['task_id'] == target_task_id]

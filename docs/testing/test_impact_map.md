@@ -260,6 +260,7 @@
 | tests/services/test_findings_embedding.py | tests/services/test_findings_embedding.py | active | medium | test_contract |
 | tests/services/test_memory_repository_schema.py | tests/services/test_memory_repository_schema.py | active | medium | test_contract |
 | tests/services/test_lancedb_roots.py | tests/services/test_lancedb_roots.py | active | medium | test_contract |
+| tests/services/test_lancedb_roots_guard.py | tests/services/test_lancedb_roots_guard.py | active | medium | test_contract |
 | nexus_swarm | tests/ops/test_swarm_deploy_path.py | active | medium | swarm_deploy_path_contract |
 | nexus-swarm-v22-prod | tests/ops/test_swarm_deploy_path.py | active | medium | swarm_archived_fork_contract |
 | tests/ops/test_swarm_deploy_path.py | tests/ops/test_swarm_deploy_path.py | active | medium | test_contract |
