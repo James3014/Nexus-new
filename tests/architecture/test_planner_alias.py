@@ -27,7 +27,8 @@ def test_patch_through_nexus_name_reaches_runtime_module(monkeypatch):
     reason="capability_planner diverges: Nexus-new is ahead of nexus-runtime 0456b78 (#1737 mainchain gate)",
 )
 def test_capability_planner_identity():
-    from nexus.engine.capability_planner import CapabilityPlanner as A
     from nexus_runtime.planning.engine.capability_planner import CapabilityPlanner as B
+
+    from nexus.engine.capability_planner import CapabilityPlanner as A
 
     assert A is B

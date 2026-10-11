@@ -8,6 +8,10 @@
 - `James3014/nexus-runtime` owns execution coordination, retry/replan state, writer/effect boundaries, durable context/state, and explicit composition.
 - Runtime may carry a packaged planner implementation for standalone qualification/compatibility, but that implementation is not a second Nexus route authority.
 
+## Phase 4b source ownership (D2)
+
+`James3014/nexus-runtime` is the planner *source* owner; Nexus-new keeps route/capability *decision* authority through issue binding. 24 duplicated planner modules in Nexus-new are now `install_alias` shims of `nexus_runtime.planning.*` / `nexus_runtime.support.*` (paths kept, no deletions). Three remain full copies because Nexus-new is ahead of nexus-runtime 0456b78: `nexus/engine/capability_planner.py` (#1737 mainchain gate), `nexus/engine/canonical_execution.py`, `nexus/services/capability_evidence_bundle.py` (#1579). They are aliased, and `runtime_compat` stops injecting the six factories, only after runtime catches up (`tests/architecture/test_planner_source_owner.py`).
+
 ## Complete host binding
 
 `nexus.services.runtime_compat` binds the following six symbols as one family:
