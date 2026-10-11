@@ -149,33 +149,55 @@ def test_runtime_identity_function_is_deterministic():
     assert first == second
 
 
-def test_http_owner_standing_grant_issue_is_exposed_idempotent_and_fail_closed(
+def test_http_owner_standing_grant_issue_is_exposed_and_fails_closed_without_host_confirmation(
     tmp_path, monkeypatch,
 ):
+    """The loopback HTTP transport cannot ask the Owner, so it never issues (#1750)."""
     receipt_path = tmp_path / "standing-grant" / "standing-grant.json"
     monkeypatch.setattr(sg_store, "DEFAULT_RECEIPT_PATH", receipt_path)
     server, thread = _server()
     issued_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     arguments = {
-        "ownerConfirmation": True,
         "repository": "James3014/Nexus-new",
         "coordinatorId": "chatgpt-http",
         "goalId": "issue-982-wave3-http",
         "coordinationScopeId": "owner-thread-http",
-        "allowedActions": ["GITHUB_MERGE"],
+        "allowedActions": ["TASK_SUBMIT"],
         "ttlMinutes": 30,
         "issuedAt": issued_at,
     }
-    payload = {
-        "jsonrpc": "2.0",
-        "id": 9050,
-        "method": "tools/call",
-        "params": {
-            "name": "nexus_owner_standing_grant_issue",
-            "arguments": arguments,
-        },
-    }
+
+    def call(request_id, call_arguments):
+        payload = {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "tools/call",
+            "params": {
+                "name": "nexus_owner_standing_grant_issue",
+                "arguments": call_arguments,
+            },
+        }
+        return json.loads(_request(server, payload, token="secret").read())["result"]
+
     try:
+        initialized = json.loads(
+            _request(
+                server,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 9048,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-11-25",
+                        "capabilities": {"elicitation": {"form": {}}},
+                        "clientInfo": {"name": "probe"},
+                    },
+                },
+                token="secret",
+            ).read()
+        )
+        assert initialized["result"]["protocolVersion"] == "2024-11-05"
+
         listed = json.loads(
             _request(
                 server,
@@ -189,39 +211,21 @@ def test_http_owner_standing_grant_issue_is_exposed_idempotent_and_fail_closed(
             if tool["name"] == "nexus_owner_standing_grant_issue"
         )
         assert spec["inputSchema"]["additionalProperties"] is False
-        assert spec["inputSchema"]["properties"]["ownerConfirmation"]["const"] is True
+        assert "ownerConfirmation" not in spec["inputSchema"]["properties"]
 
-        first = json.loads(_request(server, payload, token="secret").read())["result"]
-        assert first["isError"] is False
-        first_content = first["structuredContent"]
-        assert first_content["status"] == "ISSUED"
-        assert first_content["allowed_actions"] == ["GITHUB_MERGE"]
-        assert first_content["merge_performed"] is False
+        refused = call(9050, arguments)
+        assert refused["isError"] is True
+        assert "OWNER_CONFIRMATION_CHANNEL_UNAVAILABLE" in refused["structuredContent"]["error"]
 
-        replay = json.loads(_request(server, payload, token="secret").read())["result"]
-        assert replay["isError"] is False
-        replay_content = replay["structuredContent"]
-        assert replay_content["status"] == "REPLAYED"
-        assert replay_content["receipt_hash"] == first_content["receipt_hash"]
-
-        rejected_payload = {
-            **payload,
-            "id": 9051,
-            "params": {
-                **payload["params"],
-                "arguments": {**arguments, "ownerConfirmation": False},
-            },
-        }
-        rejected = json.loads(
-            _request(server, rejected_payload, token="secret").read()
-        )["result"]
-        assert rejected["isError"] is True
-        assert "OWNER_CONFIRMATION_REQUIRED" in rejected["structuredContent"]["error"]
+        forged = call(9051, {**arguments, "ownerConfirmation": True})
+        assert forged["isError"] is True
+        assert "OWNER_CONFIRMATION_PARAMETER_REMOVED" in forged["structuredContent"]["error"]
     finally:
         server.shutdown()
         server.server_close()
         thread.join(timeout=3)
     assert not thread.is_alive()
+    assert not receipt_path.parent.exists() or not any(receipt_path.parent.rglob("*.json"))
 
 
 def test_http_external_candidate_adoption_canary_is_pending_physical_idempotent_and_fail_closed(
