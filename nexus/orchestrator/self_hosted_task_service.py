@@ -26,15 +26,21 @@ from uuid import uuid4
 from nexus_runtime.execution_state import ExecutionStateStore
 from nexus_runtime.task_lifecycle import (
     ACTIVE_EXECUTION_STATUSES,
-    DIRECT_EXECUTION_STATUSES,
     DURABLE_SELF_HOSTED_STATUSES,
-    INTEGRATION_INTERMEDIATE_STATUSES,
     INVALID_STATE_STATUSES,
-    KNOWN_SELF_HOSTED_STATUSES,
     PENDING_CANDIDATE_STATUSES,
     RESUMABLE_STATUSES,
     RETRYABLE_TASK_STATUSES,
     TERMINAL_STATUSES,
+)
+from nexus_runtime.task_lifecycle import (
+    DIRECT_EXECUTION_STATUSES as DIRECT_EXECUTION_STATUSES,
+)
+from nexus_runtime.task_lifecycle import (
+    INTEGRATION_INTERMEDIATE_STATUSES as INTEGRATION_INTERMEDIATE_STATUSES,
+)
+from nexus_runtime.task_lifecycle import (
+    KNOWN_SELF_HOSTED_STATUSES as KNOWN_SELF_HOSTED_STATUSES,
 )
 
 from nexus.contracts.autonomy_goal import AutonomyActionClass, AutonomyGoalGrant
