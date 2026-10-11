@@ -765,8 +765,8 @@ def validate_event(
         requested_lane=lane,
         owner_id=owner_id,
     )
-    sender = root.get("sender") if isinstance(root.get("sender"), Mapping) else {}
-    if sender.get("login") != owner_id:
+    sender = root.get("sender")
+    if not isinstance(sender, Mapping) or sender.get("login") != owner_id:
         # The rebind record is an unkeyed self-hash; only the Owner acting on
         # the PR event can make it an Owner decision.
         raise LaneBindingError("OWNER_LANE_REBIND_SENDER_NOT_OWNER")
