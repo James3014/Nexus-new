@@ -14,8 +14,12 @@ ROOT_LITERAL_PATTERNS = {
     "vector_db root": re.compile(r"\.nexus/vector_db|[\"']vector_db[\"']"),
     "memory index root": re.compile(r"memory_index\.lancedb"),
     "knowledge root": re.compile(r"[\"']knowledge[\"']\s*/\s*[\"']lancedb[\"']|knowledge/lancedb"),
-    "repository root": re.compile(r"\.nexus[\"']\s*/\s*[\"']memory_repository[\"']|\.nexus/memory_repository"),
-    "tenant jsonl root": re.compile(r"[\"']tenants[\"'].*[\"']lancedb[\"']|\.nexus/tenants/.*lancedb"),
+    "repository root": re.compile(
+        r"\.nexus[\"']\s*/\s*[\"']memory_repository[\"']|\.nexus/memory_repository"
+    ),
+    "tenant jsonl root": re.compile(
+        r"[\"']tenants[\"'].*[\"']lancedb[\"']|\.nexus/tenants/.*lancedb"
+    ),
     "memory db env": re.compile(r"NEXUS_MEMORY_DB_PATH"),
 }
 
@@ -39,7 +43,9 @@ def _scan() -> dict[str, list[str]]:
             rel = path.relative_to(REPO_ROOT).as_posix()
             if rel == RESOLVER:
                 continue
-            for lineno, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            for lineno, line in enumerate(
+                path.read_text(encoding="utf-8", errors="replace").splitlines(), 1
+            ):
                 if line.lstrip().startswith("#"):
                     continue
                 for label, pattern in ROOT_LITERAL_PATTERNS.items():
@@ -49,7 +55,9 @@ def _scan() -> dict[str, list[str]]:
 
 
 def test_no_hardcoded_lancedb_root_literals_outside_resolver():
-    offenders = [entry for rel, entries in _scan().items() if rel not in ALLOWLIST for entry in entries]
+    offenders = [
+        entry for rel, entries in _scan().items() if rel not in ALLOWLIST for entry in entries
+    ]
     assert not offenders, (
         "Use nexus.services.lancedb_roots.resolve_lancedb_root instead of hardcoding LanceDB roots "
         "(or add a reasoned ALLOWLIST entry):\n" + "\n".join(offenders)

@@ -5,6 +5,7 @@ import os
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from pathlib import Path
+from nexus.services.lancedb_roots import MEMORY_INDEX, resolve_lancedb_root
 from nexus.learning.learning_closure_effectiveness import (
     normalize_learning_episode,
     append_learning_episode,
@@ -14,7 +15,6 @@ from nexus.learning.learning_closure_effectiveness import (
 logger = logging.getLogger(__name__)
 
 from nexus.core.domain_firewall import DomainFirewall
-from nexus.services.lancedb_roots import MEMORY_INDEX, resolve_lancedb_root
 
 class SkillsRouter:
 
@@ -200,7 +200,7 @@ class SkillsRouter:
                 return {"status": "SUCCESS", "hit_rate": 1.0 if results else 0.0, "results": results, "tenant": tenant_id}
             from nexus.services.memory_repository import MemoryRepository
             from pathlib import Path
-            repo = MemoryRepository(resolve_lancedb_root(MEMORY_INDEX, self.project_root, honor_env=False))
+            repo = MemoryRepository(resolve_lancedb_root(MEMORY_INDEX, Path(self.project_root), honor_env=False))
             tables = repo.list_tables()
             if not tables:
                 return {"status": "SUCCESS", "hit_rate": 0.0, "results": [], "tenant": tenant_id}

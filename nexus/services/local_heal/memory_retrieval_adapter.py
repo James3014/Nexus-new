@@ -9,8 +9,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
-from nexus.services.local_heal.lesson_embedding import embed_text
 from nexus.services.lancedb_roots import REPOSITORY, resolve_lancedb_root
+from nexus.services.local_heal.lesson_embedding import embed_text
 
 
 @dataclass(frozen=True)

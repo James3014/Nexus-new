@@ -38,9 +38,10 @@ def run_e2e_evolution_test():
     
     # Manually seeding belief into LanceDB for MemPalace
     import lancedb
+
     from nexus.services.lancedb_roots import VECTOR_DB, resolve_lancedb_root
 
-    db = lancedb.connect(str(resolve_lancedb_root(VECTOR_DB, root)))
+    db = lancedb.connect(str(resolve_lancedb_root(VECTOR_DB, nexus_dir.parent)))
     res = db.list_tables()
     tables = res if isinstance(res, list) else getattr(res, "tables", res)
     
@@ -118,6 +119,7 @@ def run_e2e_evolution_test():
     print("\n   [Sys 3: Wisdom Layer - LanceDB Incremental Index]")
     try:
         import lancedb
+
         from nexus.services.lancedb_roots import MEMORY_INDEX, resolve_lancedb_root
 
         db = lancedb.connect(str(resolve_lancedb_root(MEMORY_INDEX, root, honor_env=False)))

@@ -115,7 +115,9 @@ def test_old_table_missing_tenant_drawer_aaak_accepts_new_row_after_evolution(tm
     lancedb.connect(tmp_path / "db").create_table("t", data=[_pre_governance_row()])
 
     repo = MemoryRepository(tmp_path / "db", embedding_provider=NoEmbeddingProvider())
-    assert repo.semantic_dedup_ingest("t", {"id": "new", "content": LONG}, tenant_id="acme").startswith("NEW")
+    assert repo.semantic_dedup_ingest(
+        "t", {"id": "new", "content": LONG}, tenant_id="acme"
+    ).startswith("NEW")
     assert repo.last_schema_evolution["status"] == "added"
     assert {"tenant_id", "drawer_id", "aaak_content"} <= set(repo.last_schema_evolution["columns"])
 
