@@ -13,7 +13,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from nexus.app import research_flow_service
-from nexus.core.repo_root import REPO_ROOT
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.learning.skill_fit_closure import read_json, write_json
 
@@ -68,7 +67,7 @@ def build_heep_runtime_post_apply_smoke(
             budget={"runtime_skill_policy_overlay_path": overlay_path},
             selected_capabilities=[capability],
         )
-        planned = CapabilityPlanner(shared_playbook_root=REPO_ROOT)._build_skill_mount_evidence(
+        planned = CapabilityPlanner(shared_playbook_root=PROJECT_ROOT)._build_skill_mount_evidence(
             skills=requests,
             budget={"skill_status_report": skill_status_report},
             selected_capabilities=[capability],

@@ -30,7 +30,8 @@ def test_belief_gate_and_learning_steward_are_runtime_contracts():
     import importlib
     import inspect
 
-    belief_contracts = inspect.getsource(importlib.import_module("nexus_runtime.planning.core.belief_contracts"))
+    belief_module = importlib.import_module("nexus_runtime.planning.core.belief_contracts")
+    belief_contracts = inspect.getsource(belief_module)
     orchestrator = (ROOT / "nexus/core/orchestrator.py").read_text(encoding="utf-8")
     steward = (ROOT / "nexus/core/learning_steward.py").read_text(encoding="utf-8")
 
