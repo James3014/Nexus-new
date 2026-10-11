@@ -8,6 +8,8 @@ import pytest
 
 from scripts.ops.trusted_merge_lane_gate import (
     BINDING_SCHEMA,
+    ENFORCEMENT_START_PR_NUMBER,
+    LEGACY_PR_HEAD_ALLOWLIST,
     REBIND_SCHEMA,
     IssueClosureIntentError,
     LaneBindingError,
@@ -63,10 +65,19 @@ def _repo(tmp_path: Path, *, card_lane: str = "GOVERNED", change_card_on_head: b
     return repo, base, head, card_bytes
 
 
-def _event(*, base: str, head: str, body: str | None, number: int = PR_NUMBER, **pr_extras):
+def _event(
+    *,
+    base: str,
+    head: str,
+    body: str | None,
+    number: int = PR_NUMBER,
+    sender: str = "James3014",
+    **pr_extras,
+):
     return {
         "event_name": "pull_request_target",
         "repository": {"full_name": REPOSITORY},
+        "sender": {"login": sender},
         "pull_request": {
             "number": number,
             "body": body,
@@ -137,14 +148,76 @@ def _binding(
     return value
 
 
-def test_pre_enforcement_pr_keeps_compatibility(tmp_path: Path):
+def test_pre_enforcement_pr_keeps_compatibility_only_for_pinned_head(tmp_path: Path):
     repo, base, head, _ = _repo(tmp_path)
     result = validate_event(
         _event(base=base, head=head, body=None, number=1060),
         repo_root=repo,
+        legacy_pr_heads={1060: head},
     )
     assert result["status"] == "PASS"
     assert result["reason"] == "PRE_ENFORCEMENT_PR_COMPATIBILITY"
+
+
+def test_new_head_on_legacy_pr_number_is_enforced(tmp_path: Path):
+    repo, base, head, _ = _repo(tmp_path)
+    with pytest.raises(LaneBindingError, match="PR_BODY_REQUIRED"):
+        validate_event(
+            _event(base=base, head=head, body=None, number=1060),
+            repo_root=repo,
+            legacy_pr_heads={1060: "0" * 40},
+        )
+    with pytest.raises(IssueClosureIntentError, match="UNINTENDED_CLOSING_KEYWORD"):
+        validate_event(
+            _event(base=base, head=head, body="Closes #900", number=1017),
+            repo_root=repo,
+            legacy_pr_heads={},
+        )
+
+
+def test_shipped_legacy_allowlist_is_frozen_to_pre_enforcement_heads():
+    assert LEGACY_PR_HEAD_ALLOWLIST
+    for number, head in LEGACY_PR_HEAD_ALLOWLIST.items():
+        assert number < ENFORCEMENT_START_PR_NUMBER
+        assert len(head) == 40 and int(head, 16) >= 0
+    with pytest.raises(TypeError):
+        LEGACY_PR_HEAD_ALLOWLIST[1] = "0" * 40  # type: ignore[index]
+
+
+def test_owner_inline_cannot_replace_governed_card_for_closed_issue(tmp_path: Path):
+    repo, base, head, _ = _repo(tmp_path, card_lane="GOVERNED")
+    binding = _binding(lane="DIRECT_CANONICAL", head=head)
+    body = (
+        "Closes #1023\n"
+        + render_intent({"issue": 1023, "on_merge": "CLOSE"})
+        + "\n"
+        + render_binding(binding)
+    )
+    with pytest.raises(LaneBindingError, match="OWNER_INLINE_CANNOT_REPLACE_GOVERNED_TASK_CARD"):
+        validate_event(_event(base=base, head=head, body=body), repo_root=repo)
+
+
+def test_owner_inline_for_issue_without_governed_card_still_passes(tmp_path: Path):
+    repo, base, head, _ = _repo(tmp_path, card_lane="GOVERNED")
+    binding = _binding(lane="DIRECT_CANONICAL", head=head)
+    body = (
+        "Closes #4242\n"
+        + render_intent({"issue": 4242, "on_merge": "CLOSE"})
+        + "\n"
+        + render_binding(binding)
+    )
+    result = validate_event(_event(base=base, head=head, body=body), repo_root=repo)
+    assert result["reason"] == "GENUINE_DIRECT_OWNER_INLINE"
+
+
+def test_rebind_posted_by_non_owner_sender_blocks(tmp_path: Path):
+    repo, base, head, card_bytes = _repo(tmp_path, card_lane="GOVERNED")
+    binding = _binding(lane="DIRECT_DELEGATED", head=head, card_bytes=card_bytes, rebind=True)
+    with pytest.raises(LaneBindingError, match="OWNER_LANE_REBIND_SENDER_NOT_OWNER"):
+        validate_event(
+            _event(base=base, head=head, body=render_binding(binding), sender="worker-bot"),
+            repo_root=repo,
+        )
 
 
 def test_new_pr_without_typed_binding_blocks(tmp_path: Path):
