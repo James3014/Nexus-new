@@ -35,9 +35,9 @@
 | nexus/core | tests/core, tests/test_core_*.py | active | high | core_contract |
 | nexus/memory | tests/unit/memory, tests/integration/test_v28_contract_sealing.py, tests/test_lab_only_deprecations.py | active | medium | lab_only_module_contract |
 | nexus/federation/fleet_manager.py | tests/federation, tests/test_lab_only_deprecations.py | active | medium | lab_only_module_contract |
-| nexus/search/sampler.py | tests/unit/committee/search/test_sampler.py, tests/unit/committee/test_data_flow_v267.py | active | medium | committee_adaptive_resampler_contract |
+| nexus/search/sampler.py | tests/unit/committee/search/test_adaptive_resampler.py, tests/unit/committee/test_data_flow_v267.py | active | medium | committee_adaptive_resampler_contract |
 | tests/test_lab_only_deprecations.py | tests/test_lab_only_deprecations.py | active | medium | test_contract |
-| tests/unit/committee/search/test_sampler.py | tests/unit/committee/search/test_sampler.py | active | medium | test_contract |
+| tests/unit/committee/search/test_adaptive_resampler.py | tests/unit/committee/search/test_adaptive_resampler.py | active | medium | test_contract |
 | tests/unit/committee/test_data_flow_v267.py | tests/unit/committee/test_data_flow_v267.py | active | high | test_contract |
 | nexus/infrastructure/state_json_store.py | tests/infrastructure/test_state_json_store.py, tests/core, tests/services/test_policy_gate.py, tests/gates/test_s2t_memory_sidecar_fixtures.py, tests/ops/test_select_tests.py, tests/ops/test_pr_impact_gate.py, tests/architecture/test_boundaries.py, tests/architecture/test_boundaries_v2.py, tests/architecture/test_boundaries_v3.py, tests/architecture/test_boundaries_v4.py | active | high | state_json_atomic_cas_contract |
 | nexus/core/context_hub.py | tests/core/test_context_hub_strict_deps.py, tests/core/test_context_budget_sources.py, tests/core/test_context_text_store.py | active | high | context_hub_split_contract |
