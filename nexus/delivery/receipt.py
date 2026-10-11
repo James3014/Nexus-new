@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -106,11 +107,17 @@ def build_delivery_receipt(
     acceptance_primary: str,
     branch: str | None = None,
     head: str | None = None,
+    head_sha: str | None = None,
+    run_id: str | None = None,
 ) -> dict[str, Any]:
     if branch is None:
         branch = subprocess.check_output(["git", "branch", "--show-current"]).decode().strip()
     if head is None:
         head = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).decode().strip()
+    if head_sha is None:
+        head_sha = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
+    if run_id is None:
+        run_id = os.environ.get("NEXUS_RUN_ID", "").strip()
 
     delivery_evidence = _delivery_gate_evidence(
         evidence_path=evidence_path,
@@ -126,6 +133,8 @@ def build_delivery_receipt(
         "version": "v24.1-canonical",
         "branch": branch,
         "head": head,
+        "head_sha": head_sha,
+        "run_id": run_id or None,
         "steps": [
             {"name": "integrity", "exit_code": 0},
             {"name": "anti_drift", "exit_code": 0, "command": "verify_governance_seal.py"},
@@ -163,6 +172,8 @@ def write_delivery_receipt(
     acceptance_status: str,
     acceptance_gate: bool,
     acceptance_primary: str,
+    run_id: str | None = None,
+    head_sha: str | None = None,
 ) -> Path:
     payload = build_delivery_receipt(
         evidence_path=evidence_path,
@@ -173,6 +184,8 @@ def write_delivery_receipt(
         acceptance_status=acceptance_status,
         acceptance_gate=acceptance_gate,
         acceptance_primary=acceptance_primary,
+        run_id=run_id,
+        head_sha=head_sha,
     )
     receipt_path.parent.mkdir(parents=True, exist_ok=True)
     receipt_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

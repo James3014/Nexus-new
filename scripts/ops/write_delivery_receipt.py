@@ -18,6 +18,7 @@ def main() -> int:
     parser.add_argument("--acceptance-status", required=True)
     parser.add_argument("--acceptance-gate", required=True)
     parser.add_argument("--acceptance-primary", required=True)
+    parser.add_argument("--run-id", default=None)
     args = parser.parse_args()
 
     write_delivery_receipt(
@@ -30,6 +31,7 @@ def main() -> int:
         acceptance_status=args.acceptance_status,
         acceptance_gate=str(args.acceptance_gate).lower() == "true",
         acceptance_primary=args.acceptance_primary,
+        run_id=args.run_id,
     )
     return 0
 

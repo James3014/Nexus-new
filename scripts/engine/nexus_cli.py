@@ -1349,15 +1349,24 @@ else:
             task_desc=task_id,
             artifact_paths=artifact_paths,
         )
+        from nexus.engine.completion_contract import evaluate_delivery_closeout
+
+        receipt_file = REPO_ROOT / ".nexus" / "reports" / "delivery_gate.json"
+        delivery_failures = evaluate_delivery_closeout(
+            receipt_path=receipt_file,
+            run_id=str(task_id),
+            head_sha=revision,
+        )
         report_payload = build_completion_envelope(
             command_name="run",
             task_name=task_id,
             runtime_ok=runtime_ok,
             execution_path="cli->canonical_task_seam->mainchain",
             artifact_paths=artifact_paths,
-            semantic_failures=direct_mode_audit["semantic_failures"],
+            semantic_failures=[*direct_mode_audit["semantic_failures"], *delivery_failures],
             tests_run=direct_mode_audit["verify_results"],
         )
+        report_payload["delivery_receipt_path"] = str(receipt_file)
         if direct_mode_audit["enabled"]:
             report_payload["direct_mode"] = direct_mode_audit["spec"]
             report_payload["changed_targets"] = direct_mode_audit["changed_targets"]

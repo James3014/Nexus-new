@@ -4,8 +4,36 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from nexus.delivery.receipt import load_delivery_receipt
 from nexus.engine.completion_enforcer import enforce_completion
 from nexus.engine.runtime_classification import classify_semantic
+
+
+def evaluate_delivery_closeout(
+    *,
+    receipt_path: str | Path,
+    run_id: str,
+    head_sha: str,
+) -> list[str]:
+    """Return semantic failures for a run's delivery-gate closeout (empty means VERIFIED-eligible).
+
+    A receipt written by ``nexus.delivery.receipt.write_delivery_receipt`` must exist,
+    belong to ``run_id``, have passed the gate, and carry a ``head_sha`` equal to the
+    current HEAD.
+    """
+    path = Path(receipt_path)
+    receipt = load_delivery_receipt(path) if path.is_file() else {}
+    if not receipt:
+        return ["delivery_gate_not_run"]
+    if str(receipt.get("run_id") or "") != str(run_id):
+        return ["delivery_receipt_run_mismatch"]
+    receipt_sha = str(receipt.get("head_sha") or "").strip()
+    current = str(head_sha or "").strip()
+    if not receipt_sha or not current or receipt_sha != current:
+        return ["delivery_receipt_stale"]
+    if receipt.get("delivery_gate_passed") is not True:
+        return ["delivery_gate_failed"]
+    return []
 
 
 def build_completion_envelope(
