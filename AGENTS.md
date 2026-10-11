@@ -5,7 +5,7 @@ Scope: all coding agents.
 ## RepoLearn activation
 
 - RepoLearn: `ENABLED`; source `James3014/repo-learning`; mode `guided`.
-- Contract: `g5-learning-control-loop-v3` / `8fa154f05bb3a5a1652d8a0b8388e718ce685257a2da26e2121c2ce52a9855ac`.
+- Contract: `g5-learning-control-loop-v4` / `bb35e86b579ccd8f95933045100ddd45798e3586b17cbf47410c010a82e3b759`.
 - If unavailable, continue normally without weakening authority.
 
 ## Authority bootstrap
