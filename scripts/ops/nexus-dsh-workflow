@@ -3467,6 +3467,24 @@ PHASE_CHAIN_CLAIM_CEILING = "PHASE_CHAIN_RECORD_NO_COMPLETION_AUTHORITY"
 AUTO_REPAIR_MAX = 3
 
 
+GOAL_LINEAGE_MAX_DEPTH = 16
+
+
+def _lineage_has_goal(root: Path, session: str | None) -> bool:
+    """Whether ``session`` or a bound ancestor owns a goal (repair turns inherit it)."""
+    seen: set[str] = set()
+    while session and session not in seen and len(seen) < GOAL_LINEAGE_MAX_DEPTH:
+        seen.add(session)
+        try:
+            binding = load_binding(root, session)
+        except DshWorkflowError:
+            return False
+        if binding.get("goal_id") is not None:
+            return True
+        session = binding.get("parent_session_id")
+    return False
+
+
 def _run_phase_turn(
     args: argparse.Namespace,
     root: Path,
@@ -3483,12 +3501,7 @@ def _run_phase_turn(
     router: dict[str, Any] | None = None,
 ) -> tuple[int, dict[str, Any]]:
     """Run one preflight-guarded DSH turn; returns its exit code and result payload."""
-    parent_has_goal = False
-    if parent:
-        try:
-            parent_has_goal = load_binding(root, parent).get("goal_id") is not None
-        except DshWorkflowError:
-            parent_has_goal = False
+    parent_has_goal = _lineage_has_goal(root, parent)
 
     subject = issue_subject(repository, args.issue, repo_root)
     sibling = find_dirty_sibling(root, repository, args.issue)
@@ -3970,6 +3983,11 @@ def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
         if args.red_receipt
         else None
     )
+    # A supplied RED_READY receipt binds every in-process green gate, exactly as in
+    # continue-to-green, so a target failing on another assertion is RED_ORACLE_DEFECT.
+    gate_red: tuple[str, str] | None = (
+        (str(Path(args.red_receipt).expanduser().resolve()), red["receipt_hash"]) if red else None
+    )
     # RED and GREEN gates share one base: the pre-turn HEAD (or the RED_READY receipt's base).
     base = (
         _git_ok(
@@ -3986,7 +4004,11 @@ def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
     gate_command = (
         shlex.join(
             green_gate_command(
-                repo_root=repo_root, base_revision=base, contract_path=green_path, python=python
+                repo_root=repo_root,
+                base_revision=base,
+                contract_path=green_path,
+                python=python,
+                red_receipt=gate_red[0] if gate_red else None,
             )
         )
         if green_path
@@ -4020,7 +4042,6 @@ def _main_start_phase(args: argparse.Namespace, root: Path) -> int:
         return path
 
     phase, text, path, link = args.phase, contract_text, contract_path, parent
-    gate_red: tuple[str, str] | None = None
     if red_contract is not None and red_path is not None:
         red_hash = _sha256_bytes(_canonical_json(red_contract).encode("utf-8"))
         red_command = shlex.join(

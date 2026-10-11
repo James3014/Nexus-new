@@ -407,10 +407,15 @@ def test_red_receipt_binds_gate_base_and_invalid_receipt_blocks(tmp_path: Path) 
         "--red-receipt",
         str(red),
     )
-    assert proc.returncode == 0, proc.stdout + proc.stderr
     out = _chain(ctx, proc)
     assert out["red_receipt_hash"] == guard._red_receipt(body)["receipt_hash"]
     assert out["base_revision"] == ctx["base"]
+    # The supplied receipt reaches the gate; one without RED node evidence cannot bind the
+    # oracle, so the chain fails closed instead of reporting GREEN_READY (#1678/#1665).
+    assert proc.returncode == guard.EXIT_BLOCKED, proc.stdout + proc.stderr
+    assert out["stop_reason"] == "RED_RECEIPT_INVALID"
+    assert out["phases"][0]["gate"]["red_oracle"]["status"] == "INVALID"
+    assert out["repairs_used"] == 0
 
     tampered = tmp_path / "red-bad.json"
     tampered.write_text(
