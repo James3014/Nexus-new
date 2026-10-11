@@ -1,0 +1,8 @@
+{
+  "id": "float_money_rounding-b",
+  "bug_class": "float_money_rounding",
+  "variant": "b",
+  "problem_statement": "split_fare('10.00', 3) returns three shares of '3.33', which add up to 9.99 rather than the 10.00 fare. Expected: shares are 2-decimal strings that sum exactly to the fare, with leftover cents going to the first riders.",
+  "target_file": "fare_split.py",
+  "repro_file": "repro.py"
+}

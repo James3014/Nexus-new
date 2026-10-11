@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Protocol
+
+from nexus.services.local_heal.lesson_embedding import embed_text
 
 
 @dataclass(frozen=True)
@@ -791,9 +794,14 @@ class CanonicalLessonStore:
                 return []
             lessons = load_lessons(path)
             by_id = {str(lesson.get("lesson_id")): lesson for lesson in lessons}
-            hits = retrieve_lessons(
-                lessons, query_text=query_text, limit=limit, require_physical=True
-            )
+            kwargs: dict[str, Any] = {
+                "query_text": query_text,
+                "limit": limit,
+                "require_physical": True,
+            }
+            if "query_embedding" in inspect.signature(retrieve_lessons).parameters:
+                kwargs["query_embedding"] = embed_text(query_text)
+            hits = retrieve_lessons(lessons, **kwargs)
             rows = [self._to_row(hit, by_id.get(str(hit.get("lesson_id")), {})) for hit in hits]
         except Exception as exc:  # fail open: memory must never block the caller
             self.last_error = exc.__class__.__name__

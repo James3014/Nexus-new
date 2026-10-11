@@ -1,0 +1,8 @@
+{
+  "id": "consumed_iterator-b",
+  "bug_class": "consumed_iterator",
+  "variant": "b",
+  "problem_statement": "describe() raises ValueError for map() input such as map(float, ['3', '9', '4']), although the readings are there. Expected: any iterable of numbers gives (max - min, count), and an empty input gives (0, 0).",
+  "target_file": "sensor_log.py",
+  "repro_file": "repro.py"
+}

@@ -1,0 +1,8 @@
+{
+  "id": "timezone_naive_aware-b",
+  "bug_class": "timezone_naive_aware",
+  "variant": "b",
+  "problem_statement": "active_leases() raises TypeError when a lease's 'start' or 'end' has no UTC offset while `now` is timezone-aware. Expected: an offset-less timestamp is read as UTC and the sorted ids of the leases active at `now` are returned.",
+  "target_file": "leases.py",
+  "repro_file": "repro.py"
+}

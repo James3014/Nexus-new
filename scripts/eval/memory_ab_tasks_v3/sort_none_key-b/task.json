@@ -1,0 +1,8 @@
+{
+  "id": "sort_none_key-b",
+  "bug_class": "sort_none_key",
+  "variant": "b",
+  "problem_statement": "order_files() raises TypeError when some files have no 'modified' date. Expected: dated files come oldest first, undated files come last sorted by name, and files with the same date are sorted by name.",
+  "target_file": "listing.py",
+  "repro_file": "repro.py"
+}

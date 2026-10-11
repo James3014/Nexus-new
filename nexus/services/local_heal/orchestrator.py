@@ -412,8 +412,6 @@ class HealOrchestrator:
             if not getattr(ctx.op, "memory_enabled", True):
                 return "", []
 
-            import re as _re
-
             from nexus.services.local_heal.memory_retrieval_adapter import (
                 CanonicalLessonStore,
                 NexusCompositeLessonStore,
@@ -428,14 +426,14 @@ class HealOrchestrator:
                 # Read lesson content from memory store using IDs
                 try:
                     problem_text = str(getattr(ctx.op, "problem_statement", "") or "")[:300]
-                    target_words = " ".join(
-                        w for w in _re.split(r"[^A-Za-z0-9]+", str(target_file or "")) if w
-                    )
                     # Distilled canonical lessons first (queried directly so raw episode
                     # rows in the composite cannot crowd them out).
                     try:
+                        failure_excerpt = str(getattr(ctx.op, "verifier_stderr_excerpt", "") or "")[
+                            :200
+                        ]
                         canonical_rows = CanonicalLessonStore().query(
-                            query_text=f"{problem_text} {target_words}".strip(), limit=2
+                            query_text=f"{problem_text} {failure_excerpt}".strip(), limit=3
                         )
                     except Exception:
                         canonical_rows = []
