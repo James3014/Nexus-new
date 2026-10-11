@@ -38,12 +38,8 @@ PAIRS: list[tuple[str, str]] = list(_SUPPORT.items()) + [
 ]
 assert len(PAIRS) == 27
 
-# Nexus-new is AHEAD of nexus-runtime 0456b78 for these (Step 0 equivalence gate
-# failed beyond import paths); they must not be aliased until runtime catches up.
-DIVERGENT = {
-    "nexus.engine.canonical_execution",
-    "nexus.engine.capability_planner",
-    "nexus.services.capability_evidence_bundle",
-}
+# Runtime PR #149 synced the three planner modules that Nexus-new was ahead on;
+# nothing is divergent any more and all 27 are aliased.
+DIVERGENT: set[str] = set()
 ALIASABLE_PAIRS = [p for p in PAIRS if p[0] not in DIVERGENT]
 DIVERGENT_PAIRS = [p for p in PAIRS if p[0] in DIVERGENT]

@@ -22,10 +22,6 @@ def test_patch_through_nexus_name_reaches_runtime_module(monkeypatch):
     assert runtime_mod.get_freshness_evidence is stub
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="capability_planner diverges: Nexus-new is ahead of nexus-runtime 0456b78 (#1737 mainchain gate)",
-)
 def test_capability_planner_identity():
     from nexus_runtime.planning.engine.capability_planner import CapabilityPlanner as B
 
