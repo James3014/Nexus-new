@@ -30,6 +30,7 @@ from typing import Any, Mapping, Optional
 from urllib.parse import urlsplit
 from uuid import uuid4
 
+import nexus.orchestrator.standing_grant_store as _standing_grant_store_module
 from nexus.contracts.autonomy_goal import (
     AutonomyActionClass,
     RepositoryIdentity,
@@ -101,6 +102,15 @@ from nexus.orchestrator.mutation_admission import (
     CANONICAL_REPOSITORIES,
     MutationAdmissionError,
     MutationAdmissionStore,
+)
+from nexus.orchestrator.owner_confirmation import (
+    LEGACY_PROTOCOL_VERSION,
+    NEGOTIATED_ELICITATION_PROTOCOL,
+    OwnerConfirmationError,
+    OwnerConfirmationRequest,
+    StdioElicitationChannel,
+    UnavailableConfirmationChannel,
+    client_supports_form_elicitation,
 )
 from nexus.orchestrator.self_hosted_task_service import (
     CANONICAL_SOURCE_ROOT,
@@ -257,6 +267,19 @@ def _compile_agy_command(
 
 class GatewayInputError(ValueError):
     """Raised when a public gateway request is outside its bounded contract."""
+
+
+# Until per-effect scope enforcement exists (#1750 phase 2), host-confirmed
+# grants may not carry merge-, integration-, release- or grant-class authority.
+_SCOPE_ENFORCEMENT_REQUIRED_ACTIONS = frozenset(
+    {
+        AutonomyActionClass.GITHUB_MERGE,
+        AutonomyActionClass.CANDIDATE_INTEGRATE,
+        AutonomyActionClass.PRODUCTION_RELEASE,
+        AutonomyActionClass.RUNTIME_ACTIVATE,
+        AutonomyActionClass.OWNER_REPRESENTATION_GRANT_ISSUE,
+    }
+)
 
 
 def _text(value: Any, field: str, *, max_length: int = 4096) -> str:
@@ -1701,8 +1724,16 @@ class UnifiedMCPGateway:
         mutation_repository_observer: Any = None,
         upstream_observer: Any = None,
         upstream_cache_ttl_seconds: float = 30.0,
+        owner_confirmation_channel: Any = None,
     ):
         self.service = service or SelfHostedTaskService()
+        # Owner confirmation is never a tool argument (#1750). Without a host
+        # channel that can ask the human, authority issuance fails closed.
+        self._owner_confirmation_injected = owner_confirmation_channel is not None
+        self._owner_confirmation_channel = (
+            owner_confirmation_channel or UnavailableConfirmationChannel()
+        )
+        self._stdio_streams: tuple[Any, Any] | None = None
         # These kwargs remain accepted for compatibility with older callers,
         # but neither runner is a gateway authority.  Assisted jobs are
         # provider probes/advice only; governed implementation enters through
@@ -3585,7 +3616,6 @@ class UnifiedMCPGateway:
         execute GitHub actions, or create another grant authority.
         """
         allowed_keys = {
-            "ownerConfirmation",
             "repository",
             "coordinatorId",
             "goalId",
@@ -3595,11 +3625,12 @@ class UnifiedMCPGateway:
             "issuedAt",
             "expectedCurrentReceiptHash",
         }
+        if "ownerConfirmation" in arguments:
+            # A model-supplied Boolean is not Owner consent (#1750).
+            raise GatewayInputError("OWNER_CONFIRMATION_PARAMETER_REMOVED")
         unknown_keys = set(arguments.keys()) - allowed_keys
         if unknown_keys:
             raise GatewayInputError(f"unknown arguments: {', '.join(sorted(unknown_keys))}")
-        if arguments.get("ownerConfirmation") is not True:
-            raise GatewayInputError("OWNER_CONFIRMATION_REQUIRED")
         if str(arguments.get("repository") or "").strip() != GITHUB_REPOSITORY.repository_id:
             raise GatewayInputError("STANDING_GRANT_REPOSITORY_MISMATCH")
 
@@ -3622,6 +3653,10 @@ class UnifiedMCPGateway:
                 raise GatewayInputError(f"STANDING_GRANT_ACTION_INVALID:{raw_action}") from exc
             if action in parsed_actions:
                 raise GatewayInputError("STANDING_GRANT_ACTION_DUPLICATE")
+            if action in _SCOPE_ENFORCEMENT_REQUIRED_ACTIONS:
+                raise GatewayInputError(
+                    f"STANDING_GRANT_ACTION_REQUIRES_SCOPE_ENFORCEMENT:{action.value}"
+                )
             parsed_actions.append(action)
         parsed_actions.sort(key=lambda action: action.value)
 
@@ -3689,6 +3724,24 @@ class UnifiedMCPGateway:
             context=context,
             supersedes_grant_hash=expected_current,
         )
+        def ask_owner() -> dict[str, Any]:
+            return self._confirm_with_owner(
+                tool="nexus_owner_standing_grant_issue",
+                draft={**request_identity, "ownerId": context.owner_id, "receiptHash": receipt.receipt_hash},
+                summary_lines=(
+                    f"Repository: {GITHUB_REPOSITORY.repository_id}",
+                    f"Goal: {goal_id}",
+                    f"Coordination scope: {coordination_scope_id}",
+                    f"Coordinator: {coordinator_id}",
+                    f"Allowed actions: {', '.join(action.value for action in parsed_actions)}",
+                    f"Valid: {issued_at.isoformat()} -> {expires_at.isoformat()}",
+                    f"Supersedes: {expected_current or 'none'}",
+                ),
+                now=now,
+                not_after=expires_at,
+            )
+
+        confirmation: dict[str, Any] | None = None
         key = StandingGrantKey(
             GITHUB_REPOSITORY,
             goal_id,
@@ -3719,6 +3772,9 @@ class UnifiedMCPGateway:
                     and current_hash != expected_current
                 ):
                     raise StandingGrantReceiptError("CAS_MISMATCH")
+                # Ask only once the write is otherwise admissible; the store
+                # re-checks the predecessor (CAS) when the write happens.
+                confirmation = ask_owner()
                 write_keyed_standing_grant_receipt(
                     receipt,
                     expected_receipt_hash=expected_current,
@@ -3727,6 +3783,14 @@ class UnifiedMCPGateway:
                 if rebound is None or rebound.receipt_hash != receipt.receipt_hash:
                     raise StandingGrantReceiptError("ISSUANCE_READBACK_MISMATCH")
                 status = "ISSUED"
+                self._append_owner_confirmation_audit(
+                    {
+                        "schema": "nexus.owner_confirmation_outcome.v1",
+                        "evidence_hash": confirmation["evidence_hash"],
+                        "outcome": status,
+                        "receipt_hash": receipt.receipt_hash,
+                    }
+                )
         except StandingGrantReceiptError as exc:
             raise GatewayInputError(str(exc)) from exc
 
@@ -3748,11 +3812,66 @@ class UnifiedMCPGateway:
             "idempotent_replay": status == "REPLAYED",
             "merge_performed": False,
             "claim_ceiling": "STANDING_GRANT_ISSUED_ONLY",
+            "owner_confirmation": confirmation,
         }
+
+    def _confirm_with_owner(
+        self,
+        *,
+        tool: str,
+        draft: Mapping[str, Any],
+        summary_lines: tuple[str, ...],
+        now: datetime,
+        not_after: datetime,
+    ) -> dict[str, Any]:
+        """Ask the Owner through the host and record the answer before any write."""
+        request = OwnerConfirmationRequest.build(
+            tool=tool,
+            draft=draft,
+            summary_lines=summary_lines,
+            now=now,
+            not_after=not_after,
+        )
+        try:
+            evidence = self._owner_confirmation_channel.confirm(request)
+        except OwnerConfirmationError as exc:
+            raise GatewayInputError(str(exc)) from exc
+        if evidence.draft_hash != request.draft_hash or evidence.request_id != request.request_id:
+            raise GatewayInputError("OWNER_CONFIRMATION_BINDING_MISMATCH")
+        record = {
+            **evidence.to_dict(),
+            "evidence_hash": evidence.evidence_hash,
+            # The draft carries the receipt hash, so the record names the exact
+            # grant the Owner was shown.
+            "draft": dict(request.draft),
+        }
+        self._append_owner_confirmation_audit(record)
+        return record
+
+    @staticmethod
+    def _append_owner_confirmation_audit(record: Mapping[str, Any]) -> None:
+        directory = _standing_grant_store_module.DEFAULT_RECEIPT_PATH.parent
+        try:
+            _standing_grant_store_module._assert_dir_chain_safe(directory, create=True)
+            fd = os.open(
+                str(directory / "owner-confirmations.jsonl"),
+                os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW,
+                0o600,
+            )
+            try:
+                os.write(
+                    fd,
+                    (json.dumps(dict(record), sort_keys=True, ensure_ascii=False) + "\n").encode(
+                        "utf-8"
+                    ),
+                )
+            finally:
+                os.close(fd)
+        except (OSError, _standing_grant_store_module.StandingGrantReceiptError) as exc:
+            raise GatewayInputError("OWNER_CONFIRMATION_AUDIT_WRITE_FAILED") from exc
 
     def _task_card_authority_switch(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         allowed_keys = {
-            "ownerConfirmation",
             "attemptKey",
             "expectedCurrentReceiptHash",
             "expectedCurrentGoalId",
@@ -3761,12 +3880,13 @@ class UnifiedMCPGateway:
             "successorThreadId",
             "ttlMinutes",
         }
+        if "ownerConfirmation" in arguments:
+            # A switch writes a new grant at a new key, so it needs the same
+            # host-mediated Owner confirmation as issuance (#1750).
+            raise GatewayInputError("OWNER_CONFIRMATION_PARAMETER_REMOVED")
         unknown_keys = set(arguments.keys()) - allowed_keys
         if unknown_keys:
             raise GatewayInputError(f"unknown arguments: {', '.join(sorted(unknown_keys))}")
-        owner_confirmation = arguments.get("ownerConfirmation")
-        if owner_confirmation is not True:
-            raise GatewayInputError("OWNER_CONFIRMATION_REQUIRED")
         attempt_key = _text(arguments.get("attemptKey"), "attemptKey", max_length=128)
         expected_current_receipt_hash = _text(
             arguments.get("expectedCurrentReceiptHash"),
@@ -3801,6 +3921,30 @@ class UnifiedMCPGateway:
         if isinstance(raw_ttl, bool) or not isinstance(raw_ttl, int) or raw_ttl < 1 or raw_ttl > 30:
             raise GatewayInputError("ttlMinutes must be an integer between 1 and 30")
         ttl_minutes = raw_ttl
+        now = datetime.now(timezone.utc)
+        self._confirm_with_owner(
+            tool="nexus_task_card_authority_switch",
+            draft={
+                "repository": GITHUB_REPOSITORY.repository_id,
+                "attemptKey": attempt_key,
+                "expectedCurrentReceiptHash": expected_current_receipt_hash,
+                "expectedCurrentGoalId": expected_current_goal_id,
+                "expectedCurrentThreadId": expected_current_thread_id,
+                "successorGoalId": successor_goal_id,
+                "successorThreadId": successor_thread_id,
+                "allowedActions": ["TASK_CARD_COMMIT", "TASK_CARD_CREATE"],
+                "ttlMinutes": ttl_minutes,
+            },
+            summary_lines=(
+                f"Repository: {GITHUB_REPOSITORY.repository_id}",
+                f"From grant: {expected_current_receipt_hash} (goal {expected_current_goal_id})",
+                f"New task-card scope: goal {successor_goal_id}, thread {successor_thread_id}",
+                "Allowed actions: TASK_CARD_COMMIT, TASK_CARD_CREATE",
+                f"Valid for: {ttl_minutes} minutes (never beyond the current grant)",
+            ),
+            now=now,
+            not_after=now + timedelta(minutes=ttl_minutes),
+        )
 
         try:
             return switch_task_card_authority(
@@ -5165,15 +5309,17 @@ class UnifiedMCPGateway:
             {
                 "name": "nexus_owner_standing_grant_issue",
                 "description": (
-                    "Materialize one explicit Owner-confirmed keyed standing grant "
-                    "through the canonical CAS store. Issues authority only; never "
-                    "executes merge, push, route, approval, release, or production effects."
+                    "Draft one keyed standing grant and ask the Owner to confirm it through "
+                    "the host (MCP elicitation); the grant is written only after the host "
+                    "returns the Owner's acceptance. Fails closed when the host cannot ask. "
+                    "Merge, integration, release, activation and grant-issuing actions are "
+                    "not grantable yet. Never executes merge, push, route, approval, release, "
+                    "or production effects."
                 ),
                 "inputSchema": {
                     "type": "object",
                     "additionalProperties": False,
                     "required": [
-                        "ownerConfirmation",
                         "repository",
                         "coordinatorId",
                         "goalId",
@@ -5183,7 +5329,6 @@ class UnifiedMCPGateway:
                         "issuedAt",
                     ],
                     "properties": {
-                        "ownerConfirmation": {"type": "boolean", "const": True},
                         "repository": {
                             "type": "string",
                             "const": "James3014/Nexus-new",
@@ -5212,12 +5357,11 @@ class UnifiedMCPGateway:
             },
             {
                 "name": "nexus_task_card_authority_switch",
-                "description": "Switch canonical standing grant to a bounded temporary task-card authority scope.",
+                "description": "Switch canonical standing grant to a bounded temporary task-card authority scope after the Owner confirms it through the host (MCP elicitation); fails closed when the host cannot ask.",
                 "inputSchema": {
                     "type": "object",
                     "additionalProperties": False,
                     "required": [
-                        "ownerConfirmation",
                         "attemptKey",
                         "expectedCurrentReceiptHash",
                         "expectedCurrentGoalId",
@@ -5227,7 +5371,6 @@ class UnifiedMCPGateway:
                         "ttlMinutes",
                     ],
                     "properties": {
-                        "ownerConfirmation": {"type": "boolean", "const": True},
                         "attemptKey": {"type": "string", "maxLength": 128},
                         "expectedCurrentReceiptHash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                         "expectedCurrentGoalId": {"type": "string", "maxLength": 128},
@@ -7480,13 +7623,16 @@ class UnifiedMCPGateway:
     def handle(self, request: Mapping[str, Any]) -> Optional[dict[str, Any]]:
         method = request.get("method")
         request_id = request.get("id")
-        if method == "notifications/initialized" or request_id is None:
+        if method is None or method == "notifications/initialized" or request_id is None:
+            # Responses to gateway-initiated requests are consumed by the
+            # confirmation channel; a stray one is never a new request.
             return None
         if method == "initialize":
+            protocol_version = self._negotiate_initialize(request.get("params"))
             return {
                 "jsonrpc": "2.0", "id": request_id,
                 "result": {
-                    "protocolVersion": "2024-11-05",
+                    "protocolVersion": protocol_version,
                     "capabilities": {"tools": {"listChanged": False}},
                     "serverInfo": {
                         "name": GATEWAY_NAME,
@@ -7513,8 +7659,36 @@ class UnifiedMCPGateway:
                 return self._error(request_id, exc)
         return {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32601, "message": f"method not found: {method}"}}
 
+    def _negotiate_initialize(self, params: Any) -> str:
+        params = params if isinstance(params, Mapping) else {}
+        requested = str(params.get("protocolVersion") or "")
+        capabilities = params.get("capabilities")
+        client_info = params.get("clientInfo")
+        if (
+            self._stdio_streams is not None
+            and not self._owner_confirmation_injected
+            and client_supports_form_elicitation(requested, capabilities)
+        ):
+            input_stream, output_stream = self._stdio_streams
+            self._owner_confirmation_channel = StdioElicitationChannel(
+                input_stream=input_stream,
+                output_stream=output_stream,
+                protocol_version=NEGOTIATED_ELICITATION_PROTOCOL,
+                client_info=client_info if isinstance(client_info, Mapping) else {},
+            )
+            return NEGOTIATED_ELICITATION_PROTOCOL
+        if not self._owner_confirmation_injected:
+            self._owner_confirmation_channel = UnavailableConfirmationChannel()
+        return LEGACY_PROTOCOL_VERSION
+
     def serve(self, input_stream, output_stream) -> None:
-        for line in input_stream:
+        # One stdio session: the confirmation channel reads its answer from the
+        # same stream, so lines are pulled with readline rather than iteration.
+        self._stdio_streams = (input_stream, output_stream)
+        while True:
+            line = input_stream.readline()
+            if not line:
+                break
             if not line.strip():
                 continue
             response = self.handle(json.loads(line))

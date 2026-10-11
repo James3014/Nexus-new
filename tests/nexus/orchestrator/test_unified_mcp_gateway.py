@@ -3802,21 +3802,51 @@ def test_assisted_retry_valid_same_task_uses_fresh_attempt_action_and_idempotenc
     assert second["attempt_history"][0]["attempt_id"] == first["attempt_id"]
 
 
+class _AcceptingOwnerChannel:
+    """Test double for a host that returns the Owner's acceptance."""
+
+    def __init__(self):
+        self.requests = []
+
+    def confirm(self, request):
+        from nexus.orchestrator.owner_confirmation import OwnerConfirmationEvidence
+
+        self.requests.append(request)
+        return OwnerConfirmationEvidence(
+            schema="nexus.owner_confirmation_evidence.v1",
+            assurance_level="TEST_DOUBLE",
+            channel="test",
+            tool=request.tool,
+            draft_hash=request.draft_hash,
+            message_sha256="0" * 64,
+            request_id=request.request_id,
+            nonce=request.nonce,
+            requested_at=request.requested_at.isoformat(),
+            responded_at=request.requested_at.isoformat(),
+            deadline=request.deadline.isoformat(),
+            action="accept",
+            protocol_version="2025-06-18",
+            client_info={},
+            local_principal="test",
+        )
+
+
 def test_gateway_owner_standing_grant_issue_is_typed_cas_and_idempotent(monkeypatch, tmp_path):
     import nexus.orchestrator.standing_grant_store as sg_store
 
     receipt_path = tmp_path / "authority" / "standing-grant.json"
     monkeypatch.setattr(sg_store, "DEFAULT_RECEIPT_PATH", receipt_path)
 
-    gateway = UnifiedMCPGateway(service=FakeService())
+    gateway = UnifiedMCPGateway(
+        service=FakeService(), owner_confirmation_channel=_AcceptingOwnerChannel()
+    )
     issued_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     args = {
-        "ownerConfirmation": True,
         "repository": "James3014/Nexus-new",
         "coordinatorId": "chatgpt-primary",
         "goalId": "issue-982-wave3-a6",
         "coordinationScopeId": "owner-thread-first-wave",
-        "allowedActions": ["GITHUB_MERGE"],
+        "allowedActions": ["TASK_SUBMIT"],
         "ttlMinutes": 30,
         "issuedAt": issued_at,
     }
@@ -3830,7 +3860,7 @@ def test_gateway_owner_standing_grant_issue_is_typed_cas_and_idempotent(monkeypa
     assert first["result"]["isError"] is False, first
     payload = first["result"]["structuredContent"]
     assert payload["status"] == "ISSUED"
-    assert payload["allowed_actions"] == ["GITHUB_MERGE"]
+    assert payload["allowed_actions"] == ["TASK_SUBMIT"]
     assert payload["merge_performed"] is False
     assert payload["claim_ceiling"] == "STANDING_GRANT_ISSUED_ONLY"
 
@@ -3845,7 +3875,7 @@ def test_gateway_owner_standing_grant_issue_is_typed_cas_and_idempotent(monkeypa
     loaded = sg_store.load_keyed_standing_grant_receipt(key)
     assert loaded is not None
     assert loaded.receipt_hash == payload["receipt_hash"]
-    assert [action.value for action in loaded.context.allowed_actions] == ["GITHUB_MERGE"]
+    assert [action.value for action in loaded.context.allowed_actions] == ["TASK_SUBMIT"]
 
     replay = gateway.handle({
         "jsonrpc": "2.0",
@@ -3862,7 +3892,7 @@ def test_gateway_owner_standing_grant_issue_is_typed_cas_and_idempotent(monkeypa
 
     successor_args = {
         **args,
-        "allowedActions": ["GITHUB_MERGE", "REPOSITORY_PUSH"],
+        "allowedActions": ["REPOSITORY_PUSH", "TASK_SUBMIT"],
         "expectedCurrentReceiptHash": payload["receipt_hash"],
     }
     successor = gateway.handle({
@@ -3882,8 +3912,8 @@ def test_gateway_owner_standing_grant_issue_is_typed_cas_and_idempotent(monkeypa
     assert rebound is not None
     assert rebound.receipt_hash == successor_payload["receipt_hash"]
     assert sorted(action.value for action in rebound.context.allowed_actions) == [
-        "GITHUB_MERGE",
         "REPOSITORY_PUSH",
+        "TASK_SUBMIT",
     ]
 
 
@@ -3894,7 +3924,9 @@ def test_gateway_owner_standing_grant_issue_accepts_exact_expired_predecessor(
 
     receipt_path = tmp_path / "authority" / "standing-grant.json"
     monkeypatch.setattr(sg_store, "DEFAULT_RECEIPT_PATH", receipt_path)
-    gateway = UnifiedMCPGateway(service=FakeService())
+    gateway = UnifiedMCPGateway(
+        service=FakeService(), owner_confirmation_channel=_AcceptingOwnerChannel()
+    )
     now = datetime.now(timezone.utc).replace(microsecond=0)
     repository = RepositoryIdentity(
         repository_id="James3014/Nexus-new",
@@ -3930,12 +3962,11 @@ def test_gateway_owner_standing_grant_issue_accepts_exact_expired_predecessor(
         "params": {
             "name": "nexus_owner_standing_grant_issue",
             "arguments": {
-                "ownerConfirmation": True,
                 "repository": "James3014/Nexus-new",
                 "coordinatorId": "chatgpt-primary",
                 "goalId": context.goal_id,
                 "coordinationScopeId": context.thread_id,
-                "allowedActions": ["GITHUB_MERGE"],
+                "allowedActions": ["TASK_SUBMIT"],
                 "ttlMinutes": 30,
                 "issuedAt": now.isoformat(),
                 "expectedCurrentReceiptHash": predecessor.receipt_hash,
@@ -3947,7 +3978,7 @@ def test_gateway_owner_standing_grant_issue_accepts_exact_expired_predecessor(
     payload = response["result"]["structuredContent"]
     assert payload["status"] == "ISSUED"
     assert payload["supersedes_grant_hash"] == predecessor.receipt_hash
-    assert payload["allowed_actions"] == ["GITHUB_MERGE"]
+    assert payload["allowed_actions"] == ["TASK_SUBMIT"]
     rebound = sg_store.load_keyed_standing_grant_receipt(key, now=now)
     assert rebound is not None
     assert rebound.receipt_hash == payload["receipt_hash"]
@@ -3961,7 +3992,9 @@ def test_gateway_owner_standing_grant_issue_rejects_revoked_structural_predecess
 
     receipt_path = tmp_path / "authority" / "standing-grant.json"
     monkeypatch.setattr(sg_store, "DEFAULT_RECEIPT_PATH", receipt_path)
-    gateway = UnifiedMCPGateway(service=FakeService())
+    gateway = UnifiedMCPGateway(
+        service=FakeService(), owner_confirmation_channel=_AcceptingOwnerChannel()
+    )
     now = datetime.now(timezone.utc).replace(microsecond=0)
     repository = RepositoryIdentity(
         repository_id="James3014/Nexus-new",
@@ -3993,12 +4026,11 @@ def test_gateway_owner_standing_grant_issue_rejects_revoked_structural_predecess
         "params": {
             "name": "nexus_owner_standing_grant_issue",
             "arguments": {
-                "ownerConfirmation": True,
                 "repository": "James3014/Nexus-new",
                 "coordinatorId": "chatgpt-primary",
                 "goalId": context.goal_id,
                 "coordinationScopeId": context.thread_id,
-                "allowedActions": ["GITHUB_MERGE"],
+                "allowedActions": ["TASK_SUBMIT"],
                 "ttlMinutes": 30,
                 "issuedAt": now.isoformat(),
                 "expectedCurrentReceiptHash": predecessor.receipt_hash,
@@ -4020,7 +4052,9 @@ def test_gateway_owner_standing_grant_issue_structural_predecessor_hostile_contr
 
     receipt_path = tmp_path / "authority" / "standing-grant.json"
     monkeypatch.setattr(sg_store, "DEFAULT_RECEIPT_PATH", receipt_path)
-    gateway = UnifiedMCPGateway(service=FakeService())
+    gateway = UnifiedMCPGateway(
+        service=FakeService(), owner_confirmation_channel=_AcceptingOwnerChannel()
+    )
     now = datetime.now(timezone.utc).replace(microsecond=0)
     repository = RepositoryIdentity(
         repository_id="James3014/Nexus-new",
@@ -4039,12 +4073,11 @@ def test_gateway_owner_standing_grant_issue_structural_predecessor_hostile_contr
         })
 
     base = {
-        "ownerConfirmation": True,
         "repository": "James3014/Nexus-new",
         "coordinatorId": "chatgpt-primary",
         "goalId": "issue-1232-hostile-goal",
         "coordinationScopeId": "issue-1232-hostile-scope",
-        "allowedActions": ["GITHUB_MERGE"],
+        "allowedActions": ["TASK_SUBMIT"],
         "ttlMinutes": 30,
         "issuedAt": now.isoformat(),
     }
@@ -4121,25 +4154,27 @@ def test_gateway_owner_standing_grant_issue_fails_closed_before_write(monkeypatc
 
     receipt_path = tmp_path / "authority" / "standing-grant.json"
     monkeypatch.setattr(sg_store, "DEFAULT_RECEIPT_PATH", receipt_path)
-    gateway = UnifiedMCPGateway(service=FakeService())
+    gateway = UnifiedMCPGateway(
+        service=FakeService(), owner_confirmation_channel=_AcceptingOwnerChannel()
+    )
 
     issued_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     good = {
-        "ownerConfirmation": True,
         "repository": "James3014/Nexus-new",
         "coordinatorId": "chatgpt-primary",
         "goalId": "issue-982-wave3-a6-negative",
         "coordinationScopeId": "owner-thread-negative",
-        "allowedActions": ["GITHUB_MERGE"],
+        "allowedActions": ["TASK_SUBMIT"],
         "ttlMinutes": 30,
         "issuedAt": issued_at,
     }
 
     bad_cases = (
-        ({**good, "ownerConfirmation": False}, "OWNER_CONFIRMATION_REQUIRED"),
+        ({**good, "ownerConfirmation": True}, "OWNER_CONFIRMATION_PARAMETER_REMOVED"),
         ({**good, "repository": "someone/else"}, "STANDING_GRANT_REPOSITORY_MISMATCH"),
         ({**good, "allowedActions": ["NOT_A_REAL_ACTION"]}, "STANDING_GRANT_ACTION_INVALID"),
-        ({**good, "allowedActions": ["GITHUB_MERGE", "GITHUB_MERGE"]}, "STANDING_GRANT_ACTION_DUPLICATE"),
+        ({**good, "allowedActions": ["TASK_SUBMIT", "TASK_SUBMIT"]}, "STANDING_GRANT_ACTION_DUPLICATE"),
+        ({**good, "allowedActions": ["GITHUB_MERGE"]}, "STANDING_GRANT_ACTION_REQUIRES_SCOPE_ENFORCEMENT"),
         ({**good, "receiptPath": "/tmp/raw.json"}, "unknown arguments"),
     )
     for index, (arguments, expected_error) in enumerate(bad_cases, start=930):
@@ -4213,7 +4248,9 @@ def test_gateway_task_card_authority_switch_and_restore_workflow(monkeypatch, tm
     orig_receipt = StandingGrantReceipt.issue(grant_id="grant-orig", context=context)
     sg_store.write_keyed_standing_grant_receipt(orig_receipt)
 
-    gateway = UnifiedMCPGateway(service=FakeService())
+    gateway = UnifiedMCPGateway(
+        service=FakeService(), owner_confirmation_channel=_AcceptingOwnerChannel()
+    )
 
     # Switch using settled camelCase fields
     switch_res = gateway.handle({
@@ -4223,7 +4260,6 @@ def test_gateway_task_card_authority_switch_and_restore_workflow(monkeypatch, tm
         "params": {
             "name": "nexus_task_card_authority_switch",
             "arguments": {
-                "ownerConfirmation": True,
                 "attemptKey": "attempt-gw-switch",
                 "expectedCurrentReceiptHash": orig_receipt.receipt_hash,
                     "expectedCurrentGoalId": "goal-orig",
@@ -4289,7 +4325,9 @@ def test_gateway_task_card_authority_switch_and_restore_fail_closed(monkeypatch,
     orig_receipt = StandingGrantReceipt.issue(grant_id="grant-orig", context=context)
     sg_store.write_keyed_standing_grant_receipt(orig_receipt)
 
-    gateway = UnifiedMCPGateway(service=FakeService())
+    gateway = UnifiedMCPGateway(
+        service=FakeService(), owner_confirmation_channel=_AcceptingOwnerChannel()
+    )
 
     # Switch rejected without ownerConfirmation
     res = gateway.handle({
@@ -4299,7 +4337,7 @@ def test_gateway_task_card_authority_switch_and_restore_fail_closed(monkeypatch,
         "params": {
             "name": "nexus_task_card_authority_switch",
             "arguments": {
-                "ownerConfirmation": False,
+                "ownerConfirmation": True,
                 "attemptKey": "attempt-gw-fail-1",
                 "expectedCurrentReceiptHash": orig_receipt.receipt_hash,
                     "expectedCurrentGoalId": "goal-orig",
@@ -4311,7 +4349,7 @@ def test_gateway_task_card_authority_switch_and_restore_fail_closed(monkeypatch,
         },
     })
     assert res["result"]["isError"] is True
-    assert "OWNER_CONFIRMATION_REQUIRED" in res["result"]["structuredContent"]["error"]
+    assert "OWNER_CONFIRMATION_PARAMETER_REMOVED" in res["result"]["structuredContent"]["error"]
 
     # Switch rejected with ttlMinutes > 30
     res = gateway.handle({
@@ -4321,7 +4359,6 @@ def test_gateway_task_card_authority_switch_and_restore_fail_closed(monkeypatch,
         "params": {
             "name": "nexus_task_card_authority_switch",
             "arguments": {
-                "ownerConfirmation": True,
                 "attemptKey": "attempt-gw-fail-2",
                 "expectedCurrentReceiptHash": orig_receipt.receipt_hash,
                 "expectedCurrentGoalId": "goal-orig",
@@ -4346,7 +4383,6 @@ def test_gateway_task_card_authority_switch_and_restore_fail_closed(monkeypatch,
         ("extra_unrecognized_prop", "evil"),
     ):
         switch_args = {
-            "ownerConfirmation": True,
             "attemptKey": "attempt-gw-bad-field",
             "expectedCurrentReceiptHash": orig_receipt.receipt_hash,
             "expectedCurrentGoalId": "goal-orig",
@@ -4388,7 +4424,6 @@ def test_gateway_task_card_authority_switch_and_restore_fail_closed(monkeypatch,
     switch_schema = switch_spec["inputSchema"]
     assert switch_schema["additionalProperties"] is False
     assert set(switch_schema["required"]) == {
-        "ownerConfirmation",
         "attemptKey",
         "expectedCurrentReceiptHash",
             "expectedCurrentGoalId",
