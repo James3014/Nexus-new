@@ -32,8 +32,8 @@ def test_ultra_review_dry_run_writes_report_and_sandbox(tmp_path, monkeypatch):
 
     report_path = tmp_path / "reports" / "ultra.json"
     assert report_path.exists()
-    assert payload["gate_passed"] is True
-    assert payload["status"] == "DRY_RUN_PASS"
+    assert payload["gate_passed"] is False  # dry-run never verifies
+    assert payload["status"] == "DRY_RUN_NOT_VERIFIED"
     assert payload["diff"]["has_worktree_delta"] is True
     assert "nexus/engine/sample.py" in payload["diff"]["changed_files"]
     assert (tmp_path / "reports" / "sandboxes" / payload["run_id"] / "changes.diff").exists()
@@ -103,7 +103,7 @@ def test_ultra_review_sandbox_mirror_falls_back_to_copytree(tmp_path, monkeypatc
         sandbox_root=".nexus/reports/ultra_review/sandboxes",
     )
 
-    assert payload["gate_passed"] is True
+    assert payload["gate_passed"] is False  # dry-run never verifies
     assert payload["sandbox_mirror"]["strategy"] == "copytree"
     assert payload["sandbox_mirror"]["fallback_reason"] == "worktree unavailable"
 
@@ -140,7 +140,7 @@ def test_ultra_review_worktree_mirror_keeps_empty_diff_fast_path(tmp_path):
         sandbox_root=".nexus/reports/ultra_review/sandboxes",
     )
 
-    assert payload["gate_passed"] is True
+    assert payload["gate_passed"] is False  # dry-run never verifies
     assert payload["sandbox_mirror"]["strategy"] == "git_worktree"
     assert payload["sandbox_mirror"]["empty_diff"] is True
 
@@ -357,7 +357,7 @@ def test_ultra_review_filters_runtime_artifacts_from_diff_and_status(tmp_path):
         sandbox_root=".nexus/reports/ultra_review/sandboxes",
     )
 
-    assert payload["gate_passed"] is True
+    assert payload["gate_passed"] is False  # dry-run never verifies
     assert payload["diff"]["changed_files"] == []
     assert payload["diff"]["has_worktree_delta"] is False
     diff_text = (tmp_path / payload["artifacts"]["diff"]).read_text(encoding="utf-8")
@@ -378,7 +378,7 @@ def test_ultra_review_logic_repro_handles_changed_paths_with_spaces(tmp_path):
         sandbox_root="reports/sandboxes",
     )
 
-    assert payload["gate_passed"] is True
+    assert payload["gate_passed"] is False  # dry-run never verifies
     assert payload["logic_breaker"]["passed"] is True
 
 
@@ -396,7 +396,7 @@ def test_ultra_review_logic_repro_accepts_deleted_files(tmp_path):
         sandbox_root="reports/sandboxes",
     )
 
-    assert payload["gate_passed"] is True
+    assert payload["gate_passed"] is False  # dry-run never verifies
     assert payload["logic_breaker"]["passed"] is True
 
 
@@ -434,4 +434,4 @@ def test_ultra_review_cli_outputs_json(monkeypatch, tmp_path):
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["task"] == "review cli route"
-    assert payload["gate_passed"] is True
+    assert payload["gate_passed"] is False  # dry-run never verifies

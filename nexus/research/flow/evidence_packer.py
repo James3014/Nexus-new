@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from nexus.engine.asi_constraints import ASIConstraintStore
 from nexus.research.doc_scout_adapter import DocScoutAdapter, build_external_scout_providers_from_env
@@ -13,6 +15,126 @@ from nexus.research.flow.route_decider import task_body_only
 def safe_trace_slug(text: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9_.-]+", "-", str(text or "task")).strip("-")
     return slug[:96] or "task"
+
+
+AUTO_NIGHTSHIFT_ENV = "NEXUS_AUTO_NIGHTSHIFT_ON_HYPER_FAILURE"
+AUTO_NIGHTSHIFT_BUDGET_MIN_ENV = "NEXUS_AUTO_NIGHTSHIFT_BUDGET_MIN"
+AUTO_NIGHTSHIFT_MAX_ROUNDS_ENV = "NEXUS_AUTO_NIGHTSHIFT_MAX_ROUNDS"
+AUTO_NIGHTSHIFT_DEFAULT_BUDGET_MIN = 1
+AUTO_NIGHTSHIFT_DEFAULT_MAX_ROUNDS = 2
+
+
+def auto_nightshift_enabled() -> bool:
+    """Opt-in flag (default OFF) for auto-running Nightshift after a failed hyper_sprint."""
+    return os.getenv(AUTO_NIGHTSHIFT_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_positive_int(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.getenv(name, "").strip() or default))
+    except ValueError:
+        return default
+
+
+def maybe_run_nightshift_after_hyper_failure(
+    *,
+    repo_root: Path,
+    result: dict[str, Any],
+    nightshift_recommended: bool,
+    task_desc: str,
+    target_file: str,
+    test_file: str,
+    runner_factory: Callable[..., Any] | None = None,
+) -> dict[str, Any] | None:
+    """Run the real AutoResearchNightShift when hyper failed, it was recommended and the flag is on.
+
+    Returns None when not applicable (flag off, hyper not failed, not recommended). Otherwise returns a
+    receipt whose ``invoked``/``recovered`` come only from the runner's own JSON report file; a runner
+    exception sets ``failure_reason`` and never ``recovered``.
+    """
+    if not auto_nightshift_enabled() or not nightshift_recommended:
+        return None
+    if str(result.get("flow", "")) != "hyper_sprint" or str(result.get("status", "")) == "SUCCESS":
+        return None
+    budget = {
+        "budget_min": _env_positive_int(AUTO_NIGHTSHIFT_BUDGET_MIN_ENV, AUTO_NIGHTSHIFT_DEFAULT_BUDGET_MIN),
+        "max_rounds": _env_positive_int(AUTO_NIGHTSHIFT_MAX_ROUNDS_ENV, AUTO_NIGHTSHIFT_DEFAULT_MAX_ROUNDS),
+        "convergence_patience": 1,
+    }
+    receipt: dict[str, Any] = {
+        "schema_version": "nexus_nightshift_auto_run_v1",
+        "trigger": "hyper_failure",
+        "budget": budget,
+        "invoked": False,
+        "recovered": False,
+        "report_path": "",
+        "failure_reason": "",
+        "runner_report": {},
+    }
+    started = time.time()
+    try:
+        if runner_factory is None:
+            from nexus.app.nightshift_runner_service import AutoResearchNightShift as runner_factory
+        runner = runner_factory(
+            task=task_desc,
+            project_root=repo_root,
+            target_file=target_file,
+            test_file=test_file,
+            budget_min=budget["budget_min"],
+            max_rounds=budget["max_rounds"],
+            convergence_patience=budget["convergence_patience"],
+        )
+        run_return = runner.run()
+        report_path = Path(runner.project_root) / ".nexus" / "reports" / f"nightshift_{runner.task.replace('/', '_')}.json"
+    except Exception as exc:  # noqa: BLE001 - runner failure must be recorded, never raised into the flow
+        receipt["failure_reason"] = f"nightshift_runner_exception:{type(exc).__name__}:{str(exc)[:200]}"
+        return receipt
+    report: dict[str, Any] = {}
+    if report_path.exists() and report_path.stat().st_mtime >= started - 1:
+        try:
+            loaded = json.loads(report_path.read_text(encoding="utf-8"))
+            report = loaded if isinstance(loaded, dict) else {}
+        except (OSError, ValueError):
+            report = {}
+    if not report:
+        reason = ""
+        if isinstance(run_return, dict):
+            reason = str(run_return.get("reason") or run_return.get("status") or "")
+        receipt["failure_reason"] = f"nightshift_no_report:{reason}" if reason else "nightshift_no_report"
+        return receipt
+    receipt["invoked"] = True
+    receipt["report_path"] = str(report_path)
+    receipt["runner_report"] = report
+    receipt["recovered"] = str(report.get("terminal_state", "")) == "SUCCESS"
+    if not receipt["recovered"]:
+        receipt["failure_reason"] = f"nightshift_not_recovered:{report.get('terminal_state', '')}"
+    return receipt
+
+
+def apply_nightshift_auto_run(evidence: dict[str, Any], auto_run: dict[str, Any] | None) -> dict[str, Any]:
+    """Overlay an auto-run receipt (runner's own report) onto capability evidence."""
+    if not auto_run:
+        return evidence
+    updated = dict(evidence)
+    report = dict(updated.get("nightshift_report") or {})
+    report.update(
+        {
+            "invoked": bool(auto_run.get("invoked")),
+            "recovered": bool(auto_run.get("recovered")),
+            "report_path": str(auto_run.get("report_path") or ""),
+            "failure_reason": str(auto_run.get("failure_reason") or ""),
+            "budget": dict(auto_run.get("budget") or {}),
+            "trigger": str(auto_run.get("trigger") or ""),
+            "runner_report": dict(auto_run.get("runner_report") or {}),
+        }
+    )
+    updated["nightshift_report"] = report
+    updated["nightshift_invoked"] = report["invoked"]
+    updated["nightshift_recovered"] = report["recovered"]
+    updated["nightshift_report_path"] = report["report_path"]
+    updated["nightshift_failure_reason"] = report["failure_reason"]
+    updated["nightshift_auto_run"] = dict(auto_run)
+    return updated
 
 
 def write_msa_receipt_reports(repo_root: Path, *, task_id: str | None, evidence: dict[str, Any]) -> dict[str, Any]:

@@ -111,10 +111,13 @@ class UltraReviewService:
         fleet = self._build_dry_run_fleet(test_candidates, security_sentry, logic_breaker, ghost_regression)
         out_path = self._resolve(report_path)
         self._record_progress(progress, progress_path, "report_written", report_path=str(out_path))
+        # Dry-run executes no real review: a clean dry-run is NOT_VERIFIED, never a pass.
+        sub_checks_passed = gate_passed
+        gate_passed = False
         payload = {
             "schema_version": SCHEMA_VERSION,
             "run_id": run_id,
-            "status": "DRY_RUN_PASS" if gate_passed else "DRY_RUN_FAIL",
+            "status": "DRY_RUN_NOT_VERIFIED" if sub_checks_passed else "DRY_RUN_FAIL",
             "gate_passed": gate_passed,
             "mode": "dry-run",
             "task": task,

@@ -20,6 +20,8 @@ class LearningGateResult:
     next_run_hit: float
     lesson_quality: float
     failure_reasons: list[str]
+    # PASS / FAIL / UNVERIFIED (UNVERIFIED = no outcome evidence; never a pass)
+    status: str = "FAIL"
 
 def evaluate_learning_gate(run_dir: Path, project_root: Path, config: LearningGateConfig = None) -> LearningGateResult:
     """
@@ -41,7 +43,7 @@ def evaluate_learning_gate(run_dir: Path, project_root: Path, config: LearningGa
             pass
 
     if not event_data:
-        global_outcome_file = project_root / ".nexus" / "telemetry" / "skill_outcome_events.jsonl"
+        global_outcome_file = project_root / ".nexus" / "metrics" / "skill_outcome_events.jsonl"
         if global_outcome_file.exists():
             try:
                 lines = global_outcome_file.read_text().splitlines()
@@ -51,8 +53,8 @@ def evaluate_learning_gate(run_dir: Path, project_root: Path, config: LearningGa
                 pass
 
     if not event_data:
-        logger.warning("No outcome event found for learning gate evaluation. Passing by default for bootstrap.")
-        return LearningGateResult(True, 0.0, 0.0, 0.0, [])
+        logger.warning("No outcome event found for learning gate evaluation. Learning gate is UNVERIFIED (not passed).")
+        return LearningGateResult(False, 0.0, 0.0, 0.0, ["no_outcome_evidence"], status="UNVERIFIED")
         
     def _extract_metric(key: str) -> float:
         val = event_data.get(key)
@@ -93,5 +95,6 @@ def evaluate_learning_gate(run_dir: Path, project_root: Path, config: LearningGa
         pattern_reuse=pattern_reuse,
         next_run_hit=next_run_hit,
         lesson_quality=lesson_quality,
-        failure_reasons=reasons
+        failure_reasons=reasons,
+        status="PASS" if passed else "FAIL",
     )
