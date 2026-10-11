@@ -8,6 +8,14 @@ from typing import Any, Protocol
 from nexus.services.memory_repository_lifecycle import ScopedMemoryRepositoryRegistry
 
 
+# Shared across syncs so the registry's repository cache (keyed by root/db/table) is actually reused.
+_SHARED_REGISTRY = ScopedMemoryRepositoryRegistry()
+
+
+def reset_shared_registry() -> None:
+    _SHARED_REGISTRY.reset()
+
+
 class FindingsVectorSync(Protocol):
     """Adapter boundary for optional findings-card vector indexing."""
 
@@ -32,7 +40,7 @@ class MemoryRepositoryFindingsVectorSync:
 
         db_path = os.environ.get("NEXUS_MEMORY_DB_PATH")
         resolved_db_path = Path(db_path) if db_path else self.project_root / ".nexus" / "memory" / "memory_index.lancedb"
-        registry = self.registry or ScopedMemoryRepositoryRegistry()
+        registry = self.registry or _SHARED_REGISTRY
         repo = registry.repository_for(
             project_root=self.project_root,
             db_path=resolved_db_path,

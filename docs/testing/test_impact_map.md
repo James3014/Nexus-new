@@ -235,3 +235,4 @@
 | tests/test_replay_case_delivery.py | No direct import of core/services/engine found |
 | tests/test_v18_legacy_delivery.py | No direct import of core/services/engine found |
 | tests/test_llm_token_regex.py | No direct import of core/services/engine found |
+| tests/services/test_findings_embedding.py | tests/services/test_findings_embedding.py | active | medium | test_contract |
