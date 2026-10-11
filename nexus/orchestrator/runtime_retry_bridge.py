@@ -9,6 +9,7 @@ from nexus_runtime.task_retry import (
     CLEAN_SEMANTIC_REJECT,
     RetryService,
     VerifierResidualPacket,
+    resolve_maximum_attempts,
 )
 
 from nexus.orchestrator.acceptance_loop import (
@@ -36,20 +37,9 @@ class _Contract:
         self.owner = owner
 
     def maximum_attempts(self, request):
-        if "maximum_attempts_per_task" not in request:
-            from . import self_hosted_task_service as module
+        from . import self_hosted_task_service as module
 
-            return module.DEFAULT_MAXIMUM_ATTEMPTS_PER_TASK
-        raw = request["maximum_attempts_per_task"]
-        try:
-            if isinstance(raw, bool):
-                raise ValueError("bool")
-            value = int(raw)
-        except (TypeError, ValueError):
-            raise ValueError(f"ATTEMPT_BUDGET_INVALID:{raw!r}") from None
-        if value < 1:
-            raise ValueError(f"ATTEMPT_BUDGET_INVALID:{raw!r}")
-        return value
+        return resolve_maximum_attempts(request, default=module.DEFAULT_MAXIMUM_ATTEMPTS_PER_TASK)
 
     def build_retry_request(self, state):
         callback = getattr(self.owner, "_retry_request", None)
