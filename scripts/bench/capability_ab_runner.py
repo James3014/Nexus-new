@@ -5170,9 +5170,11 @@ def _run_with_nexus_codex(
             "self_heal_status": self_heal_status,
         },
     }
+    from nexus.core.repo_root import REPO_ROOT
+
     capability_plan_payload = route.get("capability_plan") if isinstance(route.get("capability_plan"), dict) else None
     if capability_plan_payload is None:
-        capability_plan = CapabilityPlanner().plan(
+        capability_plan = CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
             task_desc=task.task_desc,
             task_type=task.task_type,
             route=route,
@@ -5195,7 +5197,7 @@ def _run_with_nexus_codex(
         task_desc=task.task_desc,
         task_type=task.task_type,
         recommended_flow=str(route.get("recommended_flow") or ""),
-        plan=CapabilityPlanner().plan(
+        plan=CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
             task_desc=task.task_desc,
             task_type=task.task_type,
             route=route,

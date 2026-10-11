@@ -9,6 +9,7 @@ from nexus.core.belief_contracts import CapabilityExecutionPlan, SkillSlot
 from nexus.core.capability_constraints import CapabilityConstraints
 from nexus.core.capability_registry import CapabilityRegistry
 from nexus.core.capability_signal_set import CapabilitySignalSet
+from nexus.core.repo_root import REPO_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,7 @@ class CapabilitySelector:
             "prompt_compression": bool(signal_set.metadata.get("prompt_compression", False)),
             "local_enabled": bool(signal_set.metadata.get("local_enabled", False)),
         }
-        planner_plan = CapabilityPlanner().plan(
+        planner_plan = CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
             task_desc=signal_set.task_desc,
             task_type=str(signal_set.metadata.get("task_type") or "legacy_compat"),
             route=planner_route,

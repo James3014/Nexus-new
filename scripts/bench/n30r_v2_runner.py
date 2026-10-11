@@ -530,8 +530,9 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
 
     # Planner
     t_planner_start = time.monotonic()
+    from nexus.core.repo_root import REPO_ROOT
     from nexus.engine.capability_planner import CapabilityPlanner
-    planner = CapabilityPlanner()
+    planner = CapabilityPlanner(shared_playbook_root=REPO_ROOT)
 
     # Back up environment variables
     env_keys = [

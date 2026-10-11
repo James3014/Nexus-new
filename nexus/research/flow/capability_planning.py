@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from nexus.core.repo_root import REPO_ROOT
 from nexus.engine.capability_executor_controls import build_executor_controls
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.engine.learning_policy_loader import merge_runtime_learning_policy
@@ -39,7 +40,7 @@ def compose_capability_plan(
             "governance_layers": ["ultra_review"] if "ultra_review" in recommended_caps else [],
         },
     }
-    plan = CapabilityPlanner().plan(task_desc=task_desc, task_type=task_type, route=seed_route)
+    plan = CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(task_desc=task_desc, task_type=task_type, route=seed_route)
     selected = {str(item) for item in plan.selected_capabilities}
     legacy_selected = ["hyper_sprint"] if "hyper" in selected else ["baseline"]
     if "autoreason" in selected:
@@ -102,7 +103,7 @@ def build_capability_plan_and_decision(
     skills: list[dict[str, Any]] | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     decision_route = {key: value for key, value in route.items() if key != "capability_stack"}
-    plan = CapabilityPlanner().plan(
+    plan = CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
         task_desc=task_desc,
         task_type=task_type,
         route=decision_route,

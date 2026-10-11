@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from nexus.core.repo_root import REPO_ROOT
 from nexus.engine.capability_contracts import CapabilityPlan
 
 
@@ -22,7 +23,7 @@ class CapabilitySelector:
     ) -> CapabilityPlan:
         from nexus.engine.capability_planner import CapabilityPlanner
 
-        return CapabilityPlanner().plan(
+        return CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
             task_desc=task_desc,
             task_type=task_type,
             route=route,

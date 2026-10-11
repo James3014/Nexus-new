@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from nexus.core.repo_root import REPO_ROOT
 from nexus.engine.capability_planner import CapabilityPlanner
 
 
@@ -30,7 +31,7 @@ def build_universal_agent_interface(task: Mapping[str, Any]) -> dict[str, Any]:
     route = payload.get("route", {})
     if not isinstance(route, Mapping):
         raise ValueError("route_must_be_object")
-    plan = CapabilityPlanner().plan(
+    plan = CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
         task_desc=task_statement,
         task_type=task_type,
         route=dict(route),

@@ -1,32 +1,15 @@
-from __future__ import annotations
+"""Alias of ``nexus_runtime.planning.engine.planner.policy_applier``; the planner source is owned by nexus-runtime (D2, Phase 4b)."""
 
-from typing import Any, Callable
+import importlib
+import sys
+from typing import TYPE_CHECKING
 
-from nexus.engine.capability_contracts import CapabilityNode
+from nexus_runtime._compat_aliases import install_alias
 
+if TYPE_CHECKING:  # static re-export for type checkers; runtime identity comes from the alias below
+    from nexus_runtime.planning.engine.planner.policy_applier import *  # noqa: F403  # pyright: ignore[reportWildcardImportFromLibrary]
 
-def apply_learning_policy(
-    *,
-    nodes: dict[str, CapabilityNode],
-    states: dict[str, str],
-    reasons: dict[str, list[str]],
-    learning_policy: dict[str, Any],
-    enable: Callable[[str, str], None],
-) -> None:
-    for name in learning_policy.get("promoted_capabilities", ()) or ():
-        cap = str(name)
-        if cap in nodes:
-            enable(cap, "learning_policy_promoted")
-    for name in learning_policy.get("penalized_capabilities", ()) or ():
-        cap = str(name)
-        if cap not in nodes:
-            continue
-        reasons[cap].append("learning_policy_penalized")
-        if learning_policy.get("enforce_penalties") is True and states.get(cap) == "conditional":
-            states[cap] = "optional"
-
-    # Governed episodic memory injection adoption
-    episodic_injection = learning_policy.get("episodic_memory_injection", {})
-    if isinstance(episodic_injection, dict) and episodic_injection.get("enabled") is True:
-        if "memory" in nodes:
-            enable("memory", "governed_learning_policy_adoption")
+install_alias(__name__, "nexus_runtime.planning.engine.planner.policy_applier")
+sys.modules[__name__] = importlib.import_module(
+    "nexus_runtime.planning.engine.planner.policy_applier"
+)

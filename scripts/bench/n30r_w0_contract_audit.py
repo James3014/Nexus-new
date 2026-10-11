@@ -133,9 +133,10 @@ class ContractTrace:
 # ---------------------------------------------------------------------------
 def run_lane_a(spy: SpyManager) -> dict:
     """Call real CapabilityPlanner.plan() and capture input/output."""
+    from nexus.core.repo_root import REPO_ROOT
     from nexus.engine.capability_planner import CapabilityPlanner
 
-    planner = CapabilityPlanner()
+    planner = CapabilityPlanner(shared_playbook_root=REPO_ROOT)
 
     os.environ["NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR"] = "1"
     os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY"] = "localheal_pipeline"

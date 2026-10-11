@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from nexus.app import research_flow_service
+from nexus.core.repo_root import REPO_ROOT
 from nexus.engine.capability_planner import CapabilityPlanner
 
 
@@ -45,7 +46,7 @@ def build_smoke(*, overlay_path: Path, skill_status_report: Path) -> dict[str, A
             budget=budget,
             selected_capabilities=[capability_id],
         )
-        evidence = CapabilityPlanner._build_skill_mount_evidence(
+        evidence = CapabilityPlanner(shared_playbook_root=REPO_ROOT)._build_skill_mount_evidence(
             skills=requests,
             budget=budget,
             selected_capabilities=[capability_id],

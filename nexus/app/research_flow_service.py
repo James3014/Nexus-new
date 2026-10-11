@@ -15,6 +15,7 @@ from typing import Any
 from dataclasses import asdict
 import click
 
+from nexus.core.repo_root import REPO_ROOT
 from nexus.research.flow.auto_flow_decision import decide_auto_flow_routing, enrich_route_on_plateau
 from nexus.research.local_sprint_mutator import generate_local_candidate, generate_local_companion_edits
 from nexus.research.sprint_service import SprintConfig, run_hyper_sprint, LLMCandidateGenerator, LLMCandidateError, _candidate_summaries
@@ -1633,7 +1634,7 @@ def run_auto_flow(
     nexus_usage_trace["capabilities"]["claim_probe_gate_passed"] = claim_probe["gate_passed"]
     capability_plan_payload = route.get("capability_plan") if isinstance(route.get("capability_plan"), dict) else None
     if capability_plan_payload is None:
-        capability_plan = CapabilityPlanner().plan(
+        capability_plan = CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
             task_desc=task_desc,
             task_type=task_type,
             route=route,
@@ -1650,7 +1651,7 @@ def run_auto_flow(
         task_desc=task_desc,
         task_type=task_type,
         recommended_flow=str(route.get("recommended_flow") or ""),
-        plan=CapabilityPlanner().plan(
+        plan=CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
             task_desc=task_desc,
             task_type=task_type,
             route=route,
