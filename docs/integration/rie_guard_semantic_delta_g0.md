@@ -88,7 +88,29 @@ rendered as explicit uncertainty, never as a direction.
   importing `repository_intelligence` under `nexus/`).
 - Output is a JSON artifact and step-summary markdown only. No required check,
   Planner capability, model selection, reviewer daemon, or Candidate state.
-- Not in this change (follow-up): `.github/workflows/` wiring, live PR run,
-  independent reviewer confirmation. The G2 projection is consumed by the
-  existing reviewer advisory path once a workflow step calls
-  `scripts/ops/rie_guard_delta_evidence.py`.
+- Not in this change (follow-up): live PR run evidence and independent
+  reviewer confirmation.
+
+## Workflow wiring
+
+`.github/workflows/repository-intelligence.yml` job `guard-delta` runs on every
+PR as an advisory, non-required job (`permissions: contents read,
+pull-requests read`, `timeout-minutes: 10`, every step `continue-on-error`).
+
+- Checks out Nexus-new with `fetch-depth: 0` and the RIE engine at the pinned
+  revision into `.rie-engine` (git-ignored); the engine is configured only if
+  `git -C .rie-engine rev-parse HEAD` equals the pin, otherwise the script fails
+  closed to `ADVISORY_INCOMPLETE` (exit 0).
+- Calls `scripts/ops/rie_guard_delta_evidence.py` with the PR base/head SHAs,
+  repository and PR number. Behavioral probes are NOT run in CI
+  (`--run-behavioral-probes` is never passed), so PR-head Python is never
+  executed; behavioral-witness-dependent changes therefore render as UNKNOWN.
+- Uploads `repository-intelligence-guard-delta-pr-<number>-<head sha>`
+  (JSON, 30-day retention).
+- The step summary shows the classification and reviewer-attention level,
+  reason codes, tightening/loosening witness refs, evidence gaps, the report
+  content hash, exact old/new identity and the claim ceiling
+  `RIE_GUARD_SEMANTIC_DELTA_PR_REVIEW_ADVISORY_ONLY`. Missing or incomplete
+  evidence is rendered as incomplete, never as UNCHANGED.
+- The job is not a required check and owns no policy, Candidate, or merge
+  authority.
