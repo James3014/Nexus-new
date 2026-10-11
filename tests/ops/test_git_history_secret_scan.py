@@ -417,3 +417,13 @@ def test_workflow_preserves_least_privilege_and_immutable_actions() -> None:
         ref = line.split("@", 1)[1].split()[0]
         assert len(ref) == 40
         assert all(char in "0123456789abcdef" for char in ref)
+
+
+def test_anthropic_api_key_is_blocking(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    anthropic_token = "sk-" + "ant-api03-" + "Q7x9mN2pR4sT6vW8yZ1aB3cD5eF7gH9jK2L_x-Yz"
+    _commit(repo, "add key", {"cfg.txt": f"ANTHROPIC={anthropic_token}\n"})
+    _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
+    receipt = scan_repository(repo)
+    assert receipt["status"] == "FAIL"
+    assert any(f["blocking"] for f in receipt["findings"])

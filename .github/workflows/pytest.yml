@@ -182,6 +182,21 @@ jobs:
       - name: Link persistent evidence directory
         run: ln -s "$RUNNER_TEMP/nexus-ci-impact" .ci-impact
 
+      - name: Extract exact-base impact classifier
+        id: trusted-impact
+        env:
+          BASE_SHA: ${{ steps.base.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # The regression verdict is computed by the exact-base classifier so a
+          # candidate cannot rewrite the code that classifies its own run (#1754).
+          trusted="$RUNNER_TEMP/trusted-impact-gate"
+          mkdir -p "$trusted/scripts/ops"
+          for f in scripts/__init__.py scripts/ops/__init__.py scripts/ops/pr_impact_gate.py scripts/ops/select_tests.py; do
+            git show "$BASE_SHA:$f" > "$trusted/$f"
+          done
+          echo "gate=$trusted/scripts/ops/pr_impact_gate.py" >> "$GITHUB_OUTPUT"
+
       - name: Build tiered exact-base impact plan
         env:
           BASE_SHA: ${{ steps.base.outputs.sha }}
@@ -312,7 +327,7 @@ jobs:
       - name: Classify exact-base regression
         run: |
           set -uo pipefail
-          .venv/bin/python scripts/ops/pr_impact_gate.py classify \
+          .venv/bin/python "${{ steps.trusted-impact.outputs.gate }}" classify \
             --base-result .ci-impact/base-result.json \
             --head-result .ci-impact/head-result.json \
             --output .ci-impact/classification.json

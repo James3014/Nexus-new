@@ -206,7 +206,9 @@ jobs:
         if: steps.impact.outputs.required == 'true'
         run: |
           set +e
-          .venv/bin/python scripts/ops/exact_base_tool_gate.py \
+          # Classify with the exact-base copy of the gate so a candidate cannot
+          # rewrite the classifier that judges it (#1754).
+          .venv/bin/python "${{ steps.revisions.outputs.base_worktree }}/scripts/ops/exact_base_tool_gate.py" \
             --tool ruff \
             --base .ci-ruff/base.json \
             --head .ci-ruff/head.json \
