@@ -58,12 +58,17 @@ jobs:
           [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]
 
+          # Partial clone: full commit/tree history (for the merge-base with main)
+          # without file contents; the few blobs the gate reads are fetched on
+          # demand from the same authenticated remote. Credentials stay in the
+          # environment of this step only, never in git config on disk.
           bare="$work/repo.git"
           git init --bare -q "$bare"
           auth="$(printf '%s' "x-access-token:$READ_TOKEN" | base64 | tr -d '\n')"
-          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: basic $auth" \
-            git -C "$bare" fetch -q --no-tags --depth=1 "https://github.com/$REPOSITORY.git" \
-              "$WORKFLOW_SHA" "$BASE_SHA" "+refs/pull/$PR_NUMBER/head:refs/nexus/pr-head"
+          export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: basic $auth"
+          git -C "$bare" remote add origin "https://github.com/$REPOSITORY.git"
+          git -C "$bare" fetch -q --no-tags --filter=blob:none origin \
+            "$WORKFLOW_SHA" "$BASE_SHA" "+refs/pull/$PR_NUMBER/head:refs/nexus/pr-head"
           [[ "$(git -C "$bare" rev-parse refs/nexus/pr-head)" == "$HEAD_SHA" ]]
           git -C "$bare" cat-file -e "$WORKFLOW_SHA^{commit}"
           git -C "$bare" cat-file -e "$BASE_SHA^{commit}"
@@ -135,7 +140,7 @@ jobs:
           if [[ "$APPROVE" == true ]]; then
             conclusion=success
             title="Owner-signed grant covers this head"
-            summary="Grant payload sha256 $PAYLOAD_SHA256 covers every change at $HEAD_SHA."
+            summary="Grant payload sha256 $PAYLOAD_SHA256 covers every changed path at $HEAD_SHA (base diff and merge-base diff)."
           else
             conclusion=failure
             title="Not covered by an Owner-signed grant"

@@ -678,3 +678,41 @@ def test_approval_cli_turns_unexpected_errors_into_no_approval(world, tmp_path):
     )
     assert proc.returncode == 0, proc.stderr
     assert json.loads(proc.stdout)["approve"] is False
+
+
+def test_a_merge_that_reverts_a_newer_protected_change_is_not_covered(world):
+    from scripts.ops.trusted_merge_lane_gate import approval_decision
+
+    repo = world["repo"]
+    (repo / "AGENTS.md").write_text("v0\n", encoding="utf-8")
+    stale_base = _commit(repo, "AGENTS v0")
+    subprocess.run(
+        ["git", "-C", str(repo), "checkout", "-q", "-b", "agent", stale_base], check=True
+    )
+    (repo / "src" / "feature.py").write_text("value = 2\n", encoding="utf-8")
+    _commit(repo, "agent feature")
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "main"], check=True)
+    (repo / "AGENTS.md").write_text("v1 owner change\n", encoding="utf-8")
+    main_tip = _commit(repo, "owner updates AGENTS")
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "agent"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "merge", "-q", "--no-commit", "--no-ff", main_tip], check=False
+    )
+    subprocess.run(["git", "-C", str(repo), "checkout", stale_base, "--", "AGENTS.md"], check=True)
+    head = _commit(repo, "merge main, keep old AGENTS")
+    # A two-dot diff against the stale base would not show AGENTS.md at all.
+    assert "AGENTS.md" not in _git(repo, "diff", "--name-only", stale_base, head).split()
+    world["base"] = stale_base
+    event = _event(world, head, _body(_envelope(world, _payload())))
+    event["workflow_sha"] = main_tip
+    decision = approval_decision(event, repo_root=repo, now=NOW)
+    assert decision["approve"] is False
+    assert decision["reason"] == "ATTESTATION_PROTECTED_PATH:AGENTS.md"
+
+
+def test_missing_history_for_the_merge_base_fails_closed(world):
+    head = _head(world, {"src/feature.py": "value = 2\n"})
+    event = _event(world, head, _body(_envelope(world, _payload())))
+    event["workflow_sha"] = "f" * 40
+    with pytest.raises(LaneBindingError):
+        validate_event(event, repo_root=world["repo"], now=NOW)

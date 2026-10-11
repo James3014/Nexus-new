@@ -42,7 +42,7 @@ the exact head**:
 
 The decision looks only at content, never at who sent the event. It approves:
 - only pull requests **authored by the granted agent**;
-- only when the grant covers the exact diff.
+- only when the grant covers every changed path (defined below).
 
 ## How a grant works
 
@@ -68,6 +68,13 @@ The decision looks only at content, never at who sent the event. It approves:
   - the signature verifies through root-owned `/usr/bin/openssl`;
   - the grant is inside its window;
   - every changed path matches a signed glob, and none is protected.
+- **Which paths count as changed.** The union of:
+  - `diff(base.sha, head)`;
+  - `diff(merge-base(main at the gate's revision, head), head)`.
+
+  The second diff closes a stale-`base.sha` hole: a head built on an old main
+  that would revert a newer protected change still shows that path as changed.
+  If the history for the merge-base cannot be read, the PR is refused.
 - **Protected paths.** No grant can cover these. This is a deny-list: it covers
   the files known to steer or run code on the Owner's machine, not every such
   file. Grant narrow paths.
@@ -131,6 +138,11 @@ The decision looks only at content, never at who sent the event. It approves:
    - Then verify it once: open a small agent pull request covered by a grant and
      confirm that it becomes mergeable only after `Owner grant` succeeds, and
      that a further push makes it unmergeable again.
+   - Also confirm that a check run named `Owner grant` posted by any other
+     source (for example a workflow using `GITHUB_TOKEN`) does **not** satisfy
+     the rule.
+   - Confirm that the `owner-grant-approver` environment refuses a job from a
+     branch other than `main`.
 
 5. **Granting work.**
 
@@ -168,6 +180,11 @@ The decision looks only at content, never at who sent the event. It approves:
 - **Validity is checked when the check is posted, not at merge time.** A head
   whose `Owner grant` succeeded stays mergeable after `expires_at`, until a new
   push.
+- **A success belongs to a commit, not to a pull request.** If a branch is
+  force-pushed back to a head that was already decided `success`, or a second
+  pull request uses the same head, that earlier check still counts. Its
+  decision was made against the base of that moment, so revoke a grant by
+  closing the pull request, not only by letting it expire.
 - **Issue binding is weak.** The Issue is matched against markers in the pull
   request body, which the agent writes. Treat a grant as reusable within its
   paths and window, and keep windows short.

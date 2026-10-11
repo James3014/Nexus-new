@@ -846,28 +846,41 @@ def verify_p256_signature(pem: str, message: bytes, signature_der: bytes) -> boo
     return proc.returncode == 0 and proc.stdout.strip() == "Verified OK"
 
 
-def _changed_paths(repo_root: Path, base_sha: str, head_sha: str) -> list[str]:
+def _diff_names(repo_root: Path, left: str, right: str) -> set[str]:
     proc = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(repo_root),
-            "diff",
-            "--name-only",
-            "--no-renames",
-            "-z",
-            base_sha,
-            head_sha,
-        ],
+        ["git", "-C", str(repo_root), "diff", "--name-only", "--no-renames", "-z", left, right],
         check=False,
         capture_output=True,
     )
     if proc.returncode != 0:
         raise LaneBindingError("ATTESTATION_CHANGED_PATHS_UNAVAILABLE")
-    paths = [part.decode("utf-8", errors="strict") for part in proc.stdout.split(b"\0") if part]
+    return {part.decode("utf-8", errors="strict") for part in proc.stdout.split(b"\0") if part}
+
+
+def _changed_paths(
+    repo_root: Path, base_sha: str, head_sha: str, trusted_revision: str
+) -> list[str]:
+    """Every path the head changes relative to the PR base *and* to current main.
+
+    The event's ``base.sha`` can be older than main commits the head merged in;
+    diffing against the merge-base with the trusted revision (main at the time
+    of the check) also surfaces protected files such a merge would revert.
+    """
+    proc = subprocess.run(
+        ["git", "-C", str(repo_root), "merge-base", trusted_revision, head_sha],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    merge_base = proc.stdout.strip()
+    if proc.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", merge_base):
+        raise LaneBindingError("ATTESTATION_MERGE_BASE_UNAVAILABLE")
+    paths = _diff_names(repo_root, base_sha, head_sha) | _diff_names(
+        repo_root, merge_base, head_sha
+    )
     if not paths:
         raise LaneBindingError("ATTESTATION_CHANGED_PATHS_EMPTY")
-    return paths
+    return sorted(paths)
 
 
 def _bound_issue_numbers(body: Any, binding: Mapping[str, Any]) -> set[int]:
@@ -1026,7 +1039,7 @@ def validate_event(
         owner_id=owner_id,
         agent_login=agent_actors[0],
         bound_issues=_bound_issue_numbers(pr.get("body"), binding),
-        changed_paths=_changed_paths(repo_root, base_sha, head_sha),
+        changed_paths=_changed_paths(repo_root, base_sha, head_sha, trusted_revision),
         pinned_keys=load_owner_signing_keys(repo_root, trusted_revision, owner_id),
         now=now or datetime.now(timezone.utc),
     )
@@ -1088,7 +1101,7 @@ def approval_decision(
             owner_id=owner_id,
             agent_login=agent_login,
             bound_issues=_bound_issue_numbers(pr.get("body"), binding),
-            changed_paths=_changed_paths(repo_root, base_sha, head_sha),
+            changed_paths=_changed_paths(repo_root, base_sha, head_sha, trusted_revision),
             pinned_keys=load_owner_signing_keys(repo_root, trusted_revision, owner_id),
             now=now or datetime.now(timezone.utc),
         )
