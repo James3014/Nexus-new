@@ -129,6 +129,79 @@ class LanceBeliefStore(BeliefStore):
         # an empty belief set from a failed read.
         self.last_read_status: str = "ok"
         self.last_read_error: str = ""
+        # "" (no write yet) | "ok" | "unavailable"; set by upsert_belief / set_belief_status.
+        self.last_write_status: str = ""
+        self.last_write_error: str = ""
+
+    _TABLE = "nexus_soul_palace"
+
+    def _open_table(self, create_rows: List[Dict[str, Any]] | None = None):
+        """Open the belief table; create it (nullable vector) from ``create_rows`` if missing."""
+        import lancedb
+        import pyarrow as pa
+
+        db_path = self.project_root / ".nexus" / "vector_db"
+        db_path.mkdir(parents=True, exist_ok=True)
+        db = lancedb.connect(str(db_path))
+        tables = db.list_tables()
+        names = tables if isinstance(tables, list) else (tables.tables if hasattr(tables, "tables") else tables)
+        if self._TABLE in names:
+            return db.open_table(self._TABLE)
+        if create_rows is None:
+            return None
+        text_cols = ("id", "type", "status", "content", "skill_id", "domain", "trust_level", "created_at", "updated_at")
+        fields = [pa.field(k, pa.string()) for k in text_cols]
+        # An all-null vector column cannot be created by lancedb; only add it when a vector exists.
+        if any(r.get("vector") for r in create_rows):
+            fields.append(pa.field("vector", pa.list_(pa.float32())))
+        schema = pa.schema(fields)
+        return db.create_table(self._TABLE, data=pa.Table.from_pylist(create_rows, schema=schema), schema=schema)
+
+    def upsert_belief(self, row: Dict[str, Any]) -> bool:
+        """Idempotently upsert a belief row by ``id``. Never raises; see ``last_write_status``."""
+        self.last_write_status = "ok"
+        self.last_write_error = ""
+        try:
+            import pyarrow as pa
+
+            table = self._open_table(create_rows=[row])
+            if table is None:
+                raise RuntimeError("belief table unavailable")
+            names = set(table.schema.names)
+            if "id" not in names:
+                raise ValueError("belief table has no id column")
+            missing = {k: "cast(NULL as string)" for k in ("type", "updated_at", "trust_level") if k not in names}
+            if missing:
+                table.add_columns(missing)
+            safe_id = str(row["id"]).replace("'", "")
+            table.delete(f"id = '{safe_id}'")
+            fields = table.schema.names
+            table.add(pa.Table.from_pylist([{k: row.get(k) for k in fields}], schema=table.schema))
+            return True
+        except Exception as exc:
+            self.last_write_status = "unavailable"
+            self.last_write_error = f"{type(exc).__name__}: {exc}"
+            logger.warning("LanceBeliefStore: belief write failed (nexus_soul_palace): %s", self.last_write_error)
+            return False
+
+    def set_belief_status(self, belief_id: str, status: str, updated_at: str) -> bool:
+        """Set ``status`` of an existing belief row. Never raises; False if the table is absent."""
+        self.last_write_status = "ok"
+        self.last_write_error = ""
+        try:
+            table = self._open_table()
+            if table is None:
+                return False
+            values = {"status": status}
+            if "updated_at" in table.schema.names:
+                values["updated_at"] = updated_at
+            table.update(where=f"id = '{str(belief_id).replace(chr(39), '')}'", values=values)
+            return True
+        except Exception as exc:
+            self.last_write_status = "unavailable"
+            self.last_write_error = f"{type(exc).__name__}: {exc}"
+            logger.warning("LanceBeliefStore: belief status write failed (nexus_soul_palace): %s", self.last_write_error)
+            return False
 
     def list_beliefs(self, status: str = "ACTIVE") -> List[Dict[str, Any]]:
         self.last_read_status = "ok"
@@ -144,8 +217,13 @@ class LanceBeliefStore(BeliefStore):
             if "nexus_soul_palace" not in table_names:
                 return []
             df = db.open_table("nexus_soul_palace").to_pandas()
+            # Only belief rows are beliefs; outcome artifacts and untyped legacy rows are not.
+            if "type" not in df.columns:
+                return []
+            df = df[df["type"].astype(str).str.lower() == "belief"]
             if status != "ALL" and "status" in df.columns:
-                df = df[df["status"].str.upper() == status.upper()]
+                df = df[df["status"].astype(str).str.upper() == status.upper()]
+            df = df.astype(object).where(df.notna(), None)
             return df.to_dict("records")
         except Exception as exc:
             self.last_read_status = "unavailable"
