@@ -28,9 +28,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.ops.trusted_merge_lane_gate import (  # noqa: E402
     ATTESTATION_MAX_LIFETIME,
+    ATTESTATION_MAX_PATH_LENGTH,
+    ATTESTATION_MAX_PATHS,
+    ATTESTATION_PROTECTED_PATTERNS,
     ATTESTATION_SCHEMA,
     LaneBindingError,
     _glob_regex,
+    _path_matches,
     canonical_attestation_bytes,
     render_attestation,
     signing_key_id,
@@ -41,8 +45,16 @@ DEFAULT_REPOSITORY = "James3014/Nexus-new"
 
 
 def _draft(args: argparse.Namespace) -> int:
+    if len(set(args.path)) > ATTESTATION_MAX_PATHS:
+        raise SystemExit(f"at most {ATTESTATION_MAX_PATHS} paths per grant")
     for pattern in args.path:
         _glob_regex(pattern)
+        if len(pattern) > ATTESTATION_MAX_PATH_LENGTH or any(
+            c in pattern.split("/", 1)[0] for c in "*?"
+        ):
+            raise SystemExit(f"path {pattern!r} is too broad or too long; name a directory first")
+        if _path_matches(pattern, ATTESTATION_PROTECTED_PATTERNS):
+            raise SystemExit(f"path {pattern!r} is protected and can never be granted")
     lifetime = timedelta(hours=args.hours)
     if lifetime <= timedelta(0) or lifetime > ATTESTATION_MAX_LIFETIME:
         raise SystemExit(

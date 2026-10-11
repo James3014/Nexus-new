@@ -81,12 +81,18 @@ func summary(of payload: Data) -> String {
         fail("not a nexus.owner_grant_attestation.v1 payload")
     }
     let repository = object["repository"] as? String ?? "?"
+    let owner = object["owner_id"] as? String ?? "?"
     let agent = object["agent_login"] as? String ?? "?"
     let issue = (object["issue_number"] as? NSNumber)?.stringValue ?? "?"
     let actions = (object["allowed_actions"] as? [String] ?? []).joined(separator: ", ")
-    let paths = (object["allowed_paths"] as? [String] ?? []).joined(separator: ", ")
+    let pathList = object["allowed_paths"] as? [String] ?? []
+    // The gate refuses more than 12 paths; refuse here too so nothing is hidden
+    // by a truncated prompt.
+    if pathList.isEmpty || pathList.count > 12 { fail("grant must name between 1 and 12 paths") }
+    let paths = pathList.joined(separator: ", ")
+    let issued = object["issued_at"] as? String ?? "?"
     let expires = object["expires_at"] as? String ?? "?"
-    return "grant \(agent) \(actions) on \(repository) issue #\(issue) for paths \(paths) until \(expires)"
+    return "\(owner) grants \(agent) \(actions) on \(repository) issue #\(issue), paths: \(paths), valid \(issued) to \(expires)"
 }
 
 func sign(path: String) {

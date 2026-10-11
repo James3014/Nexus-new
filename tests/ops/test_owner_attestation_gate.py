@@ -176,6 +176,7 @@ def _body(*envelopes, issue: int = ISSUE) -> str:
 def _event(world, head: str, body: str, *, author: str = AGENT, sender: str = AGENT):
     return {
         "event_name": "pull_request_target",
+        "workflow_sha": world["base"],
         "repository": {"full_name": REPOSITORY},
         "sender": {"login": sender},
         "pull_request": {
@@ -279,13 +280,38 @@ def test_head_cannot_add_its_own_signing_key(world):
         "governance/agent-identities.json",
         ".github/workflows/ci.yml",
         "scripts/ops/trusted_merge_lane_gate.py",
+        "scripts/ops/owner_attestation.py",
+        "tools/owner-signer/Sources/owner-signer/main.swift",
+        ".claude/settings.json",
+        "src/.claude/settings.json",
+        ".mcp.json",
         "AGENTS.md",
+        "src/AGENTS.md",
+        "src/CLAUDE.md",
+        "MUSE_PROTO.md",
+        "pyproject.toml",
+        "uv.lock",
+        "tasks/campaign/card.md",
     ],
 )
 def test_protected_paths_are_never_coverable(world, path):
     head = _head(world, {path: "changed\n"})
     with pytest.raises(LaneBindingError, match="ATTESTATION_PROTECTED_PATH"):
-        _validate(world, head, _body(_envelope(world, _payload(allowed_paths=["**"]))))
+        _validate(world, head, _body(_envelope(world, _payload(allowed_paths=[path]))))
+
+
+@pytest.mark.parametrize("pattern", ["**", "*", "**/*.py", "?rc/**", "*/feature.py"])
+def test_grants_cannot_start_with_a_wildcard(world, pattern):
+    head = _head(world, {"src/feature.py": "value = 2\n"})
+    with pytest.raises(LaneBindingError, match="ATTESTATION_PATH_TOO_BROAD"):
+        _validate(world, head, _body(_envelope(world, _payload(allowed_paths=[pattern]))))
+
+
+def test_grant_path_lists_are_bounded(world):
+    head = _head(world, {"src/feature.py": "value = 2\n"})
+    patterns = [f"src/p{i}/**" for i in range(13)]
+    with pytest.raises(LaneBindingError, match="ATTESTATION_PATHS_INVALID"):
+        _validate(world, head, _body(_envelope(world, _payload(allowed_paths=patterns))))
 
 
 def test_changes_outside_the_signed_paths_are_rejected(world):
@@ -343,11 +369,59 @@ def test_two_attestations_are_rejected(world):
 
 def test_without_pinned_keys_agent_prs_cannot_pass(world):
     repo = world["repo"]
-    (repo / "governance" / "owner-signing-keys.json").unlink()
-    world["base"] = _commit(repo, "remove keys")
+    (repo / "governance" / "owner-signing-keys.json").write_text(
+        json.dumps({"schema": "nexus.owner_signing_keys.v1", "owner_id": OWNER, "keys": []}),
+        encoding="utf-8",
+    )
+    world["base"] = _commit(repo, "no keys")
     head = _head(world, {"src/feature.py": "value = 2\n"})
     with pytest.raises(LaneBindingError, match="OWNER_SIGNING_KEY_NOT_CONFIGURED"):
         _validate(world, head, _body(_envelope(world, _payload())))
+
+
+@pytest.mark.parametrize(
+    ("missing", "reason"),
+    [
+        ("governance/agent-identities.json", "AGENT_IDENTITIES_MISSING"),
+        ("governance/owner-signing-keys.json", "OWNER_SIGNING_KEYS_MISSING"),
+    ],
+)
+def test_missing_trust_configuration_fails_closed_even_for_owner_prs(world, missing, reason):
+    repo = world["repo"]
+    (repo / missing).unlink()
+    world["base"] = _commit(repo, "drop config")
+    head = _head(world, {"src/feature.py": "value = 2\n"})
+    author = AGENT if "signing" in missing else OWNER
+    body = _body(_envelope(world, _payload())) if author == AGENT else _body()
+    with pytest.raises(LaneBindingError, match=reason):
+        _validate(world, head, body, author=author, sender=author)
+
+
+def test_trust_configuration_comes_from_the_gate_revision_not_the_pr_base(world):
+    repo = world["repo"]
+    stale_base = world["base"]
+    (repo / "governance" / "agent-identities.json").write_text(
+        json.dumps({"schema": "nexus.agent_identities.v1", "agents": []}), encoding="utf-8"
+    )
+    _commit(repo, "agent removed later")
+    world["base"] = stale_base
+    head = _head(world, {"src/feature.py": "value = 2\n"})
+    event = _event(world, head, _body())
+    event["workflow_sha"] = _git(repo, "rev-parse", "HEAD~1")
+    # The PR base still lists the agent, the gate revision does not: no attestation needed.
+    assert "owner_attestation" not in validate_event(event, repo_root=repo, now=NOW)
+    # And the reverse: gate revision lists the agent although the stale base did not.
+    event["workflow_sha"] = stale_base
+    with pytest.raises(LaneBindingError, match="AGENT_PR_REQUIRES_OWNER_ATTESTATION"):
+        validate_event(event, repo_root=repo, now=NOW)
+
+
+def test_gate_requires_the_trusted_revision(world):
+    head = _head(world, {"src/feature.py": "value = 2\n"})
+    event = _event(world, head, _body(), author=OWNER, sender=OWNER)
+    del event["workflow_sha"]
+    with pytest.raises(LaneBindingError, match="TRUSTED_CONFIG_REVISION"):
+        validate_event(event, repo_root=world["repo"], now=NOW)
 
 
 def test_a_non_p256_pinned_key_never_verifies(world):
@@ -462,3 +536,92 @@ def test_assemble_refuses_a_signature_that_does_not_verify(world):
             "--public-key",
             str(public_file),
         ])
+
+
+def _approve(world, head, body, **kwargs):
+    from scripts.ops.trusted_merge_lane_gate import approval_decision
+
+    return approval_decision(_event(world, head, body, **kwargs), repo_root=world["repo"], now=NOW)
+
+
+@pytest.mark.parametrize("sender", [AGENT, OWNER, "someone-else"])
+def test_approval_depends_on_content_not_on_who_sent_the_event(world, sender):
+    head = _head(world, {"src/feature.py": "value = 2\n"})
+    decision = _approve(
+        world, head, _body(_envelope(world, _payload())), author=OWNER, sender=sender
+    )
+    assert decision["approve"] is True
+    assert decision["head_sha"] == head
+
+
+@pytest.mark.parametrize("sender", [AGENT, OWNER])
+def test_owner_touching_the_pr_after_an_out_of_scope_push_never_earns_approval(world, sender):
+    # Reviewer's F1: an agent pushes outside the grant; a later Owner event must not turn it green.
+    head = _head(world, {"src/feature.py": "value = 2\n", ".github/workflows/x.yml": "on: push\n"})
+    decision = _approve(
+        world, head, _body(_envelope(world, _payload())), author=OWNER, sender=sender
+    )
+    assert decision["approve"] is False
+    assert decision["reason"].startswith("ATTESTATION_PROTECTED_PATH")
+
+
+def test_no_attestation_means_no_automatic_approval(world):
+    head = _head(world, {"src/feature.py": "value = 2\n"})
+    decision = _approve(world, head, _body(), author=OWNER, sender=OWNER)
+    assert decision == {**decision, "approve": False, "reason": "NO_OWNER_ATTESTATION"}
+
+
+def test_grant_for_an_unregistered_agent_is_not_approved(world):
+    head = _head(world, {"src/feature.py": "value = 2\n"})
+    decision = _approve(world, head, _body(_envelope(world, _payload(agent_login="unknown-bot"))))
+    assert decision["approve"] is False
+    assert decision["reason"] == "ATTESTATION_AGENT_NOT_REGISTERED"
+
+
+@pytest.mark.parametrize(
+    ("files", "overrides", "reason"),
+    [
+        ({"docs/notes.md": "x\n"}, {}, "ATTESTATION_PATH_OUT_OF_SCOPE"),
+        (
+            {"src/feature.py": "2\n"},
+            {"expires_at": (NOW - timedelta(seconds=1)).isoformat()},
+            "ATTESTATION_EXPIRED",
+        ),
+        (
+            {"src/feature.py": "2\n"},
+            {"allowed_actions": ["REPOSITORY_PUSH"]},
+            "ATTESTATION_MERGE_NOT_GRANTED",
+        ),
+    ],
+)
+def test_approval_is_withheld_for_anything_the_grant_does_not_cover(
+    world, files, overrides, reason
+):
+    head = _head(world, files)
+    decision = _approve(world, head, _body(_envelope(world, _payload(**overrides))))
+    assert decision["approve"] is False
+    assert decision["reason"].startswith(reason)
+
+
+def test_approval_cli_never_fails_the_job(world, tmp_path):
+    head = _head(world, {"src/feature.py": "value = 2\n"})
+    event = _event(world, head, "no markers at all")
+    event_file = tmp_path / "event.json"
+    event_file.write_text(json.dumps(event), encoding="utf-8")
+    proc = subprocess.run(
+        [
+            "python",
+            "scripts/ops/trusted_merge_lane_gate.py",
+            "--mode",
+            "approve",
+            "--event-json",
+            str(event_file),
+            "--repo-root",
+            str(world["repo"]),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=Path(__file__).resolve().parents[2],
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout)["approve"] is False

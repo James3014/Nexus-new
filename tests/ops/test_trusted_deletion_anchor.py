@@ -1107,6 +1107,10 @@ def _trusted_origin(
             script_path.symlink_to("hostile-target.py")
     lane_gate_path = source / "scripts/ops/trusted_merge_lane_gate.py"
     lane_gate_path.write_bytes((ROOT / "scripts/ops/trusted_merge_lane_gate.py").read_bytes())
+    # The lane gate reads its trust configuration from the same revision.
+    (source / "governance").mkdir(exist_ok=True)
+    for name in ("agent-identities.json", "owner-signing-keys.json"):
+        (source / "governance" / name).write_bytes((ROOT / "governance" / name).read_bytes())
     golden_script_path = source / "scripts/ops/trusted_golden_verifier.py"
     golden_script_path.write_bytes((ROOT / "scripts/ops/trusted_golden_verifier.py").read_bytes())
     evaluator_path = source / trusted_anchor.GOLDEN_EVALUATOR_PATH

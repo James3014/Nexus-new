@@ -610,9 +610,25 @@ ATTESTATION_PROTECTED_PATTERNS = (
     "governance/**",
     ".github/**",
     "scripts/ops/trusted_*",
+    "scripts/ops/owner_attestation.py",
+    "scripts/ops/__init__.py",
+    "tools/owner-signer/**",
+    "tasks/**",
+    ".claude/**",
+    "**/.claude/**",
+    ".mcp.json",
+    "**/.mcp.json",
     "AGENTS.md",
+    "**/AGENTS.md",
     "CLAUDE.md",
+    "**/CLAUDE.md",
+    "MUSE_PROTO.md",
+    "pyproject.toml",
+    "uv.lock",
+    "requirements/**",
 )
+ATTESTATION_MAX_PATHS = 12
+ATTESTATION_MAX_PATH_LENGTH = 120
 _GITHUB_LOGIN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?$")
 _PATH_PATTERN = re.compile(r"^[A-Za-z0-9._*?/-]{1,200}$")
 
@@ -689,24 +705,28 @@ def render_attestation(envelope: Mapping[str, Any]) -> str:
     )
 
 
-def _base_json(repo_root: Path, base_sha: str, path: str, label: str) -> dict[str, Any] | None:
+def _trusted_json(repo_root: Path, revision: str, path: str, label: str) -> dict[str, Any]:
+    """Read trust configuration from the revision the gate itself runs from.
+
+    A missing file is an error, never "not configured": the files ship with
+    the gate, and removing them is an Owner change to a protected path.
+    """
     proc = subprocess.run(
-        ["git", "-C", str(repo_root), "show", f"{base_sha}:{path}"],
+        ["git", "-C", str(repo_root), "show", f"{revision}:{path}"],
         check=False,
         capture_output=True,
     )
     if proc.returncode != 0:
-        return None
+        raise LaneBindingError(f"{label}_MISSING")
     try:
         return _exact_dict(json.loads(proc.stdout.decode("utf-8")), label)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise LaneBindingError(f"{label}_INVALID") from exc
 
 
-def load_agent_identities(repo_root: Path, base_sha: str) -> frozenset[str]:
-    config = _base_json(repo_root, base_sha, AGENT_IDENTITIES_PATH, "AGENT_IDENTITIES")
-    if config is None:
-        return frozenset()
+def load_agent_identities(repo_root: Path, revision: str) -> frozenset[str]:
+    # GitHub Apps appear in events as "<slug>[bot]" and must be listed that way.
+    config = _trusted_json(repo_root, revision, AGENT_IDENTITIES_PATH, "AGENT_IDENTITIES")
     if config.get("schema") != AGENT_IDENTITIES_SCHEMA:
         raise LaneBindingError("AGENT_IDENTITIES_SCHEMA_INVALID")
     agents = config.get("agents")
@@ -717,10 +737,8 @@ def load_agent_identities(repo_root: Path, base_sha: str) -> frozenset[str]:
     return frozenset(item.lower() for item in agents)
 
 
-def load_owner_signing_keys(repo_root: Path, base_sha: str, owner_id: str) -> dict[str, str]:
-    config = _base_json(repo_root, base_sha, SIGNING_KEYS_PATH, "OWNER_SIGNING_KEYS")
-    if config is None:
-        return {}
+def load_owner_signing_keys(repo_root: Path, revision: str, owner_id: str) -> dict[str, str]:
+    config = _trusted_json(repo_root, revision, SIGNING_KEYS_PATH, "OWNER_SIGNING_KEYS")
     if config.get("schema") != SIGNING_KEYS_SCHEMA or config.get("owner_id") != owner_id:
         raise LaneBindingError("OWNER_SIGNING_KEYS_SCHEMA_INVALID")
     keys = config.get("keys")
@@ -905,9 +923,15 @@ def verify_owner_attestation(
     if (
         not isinstance(patterns, list)
         or not patterns
-        or not all(isinstance(p, str) for p in patterns)
+        or len(patterns) > ATTESTATION_MAX_PATHS
+        or not all(isinstance(p, str) and len(p) <= ATTESTATION_MAX_PATH_LENGTH for p in patterns)
     ):
         raise LaneBindingError("ATTESTATION_PATHS_INVALID")
+    for pattern in patterns:
+        _glob_regex(pattern)
+        # A grant names a part of the tree; it never starts with a wildcard.
+        if any(char in pattern.split("/", 1)[0] for char in "*?"):
+            raise LaneBindingError("ATTESTATION_PATH_TOO_BROAD")
     _safe_id(payload.get("nonce"), "ATTESTATION_NONCE")
     issued_at = _parse_utc(payload.get("issued_at"), "ATTESTATION_ISSUED_AT")
     expires_at = _parse_utc(payload.get("expires_at"), "ATTESTATION_EXPIRES_AT")
@@ -956,7 +980,10 @@ def validate_event(
     head_sha = _sha(
         _exact_dict(pr.get("head"), "PULL_REQUEST_HEAD").get("sha"), "HEAD_SHA", size=40
     )
-    agents = load_agent_identities(repo_root, base_sha)
+    # Trust configuration comes from the revision the gate runs from, never
+    # from the PR's (possibly stale) base.
+    trusted_revision = _sha(root.get("workflow_sha"), "TRUSTED_CONFIG_REVISION", size=40)
+    agents = load_agent_identities(repo_root, trusted_revision)
     actors: set[str] = set()
     for holder in (pr.get("user"), root.get("sender")):
         if isinstance(holder, Mapping):
@@ -983,10 +1010,73 @@ def validate_event(
         agent_login=agent_actors[0],
         bound_issues=_bound_issue_numbers(pr.get("body"), binding),
         changed_paths=_changed_paths(repo_root, base_sha, head_sha),
-        pinned_keys=load_owner_signing_keys(repo_root, base_sha, owner_id),
+        pinned_keys=load_owner_signing_keys(repo_root, trusted_revision, owner_id),
         now=now or datetime.now(timezone.utc),
     )
     return {**result, "owner_attestation": attestation}
+
+
+def approval_decision(
+    event: Mapping[str, Any],
+    *,
+    repo_root: Path,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Decide whether the approver App may approve the PR's exact head.
+
+    Unlike the per-event lane check, this never looks at who sent the event:
+    the approval is pinned to ``head.sha`` and GitHub dismisses it on the next
+    push, so it can only ever vouch for content an Owner-signed grant covers.
+    """
+    root = _exact_dict(event, "EVENT")
+    if root.get("event_name") != "pull_request_target":
+        raise LaneBindingError("PULL_REQUEST_TARGET_REQUIRED")
+    repository = _exact_str(
+        _exact_dict(root.get("repository"), "REPOSITORY").get("full_name"), "REPOSITORY_FULL_NAME"
+    )
+    owner_id = repository.split("/", 1)[0]
+    pr = _exact_dict(root.get("pull_request"), "PULL_REQUEST")
+    pr_number = _exact_int(pr.get("number"), "PULL_REQUEST_NUMBER")
+    base_sha = _sha(
+        _exact_dict(pr.get("base"), "PULL_REQUEST_BASE").get("sha"), "BASE_SHA", size=40
+    )
+    head_sha = _sha(
+        _exact_dict(pr.get("head"), "PULL_REQUEST_HEAD").get("sha"), "HEAD_SHA", size=40
+    )
+    trusted_revision = _sha(root.get("workflow_sha"), "TRUSTED_CONFIG_REVISION", size=40)
+    decision: dict[str, Any] = {
+        "schema": "nexus.owner_attestation_approval.v1",
+        "pull_request_number": pr_number,
+        "head_sha": head_sha,
+        "approve": False,
+    }
+    envelope = extract_attestation(pr.get("body"))
+    if envelope is None:
+        return {**decision, "reason": "NO_OWNER_ATTESTATION"}
+    payload = _exact_dict(envelope.get("payload"), "ATTESTATION_PAYLOAD")
+    agent_login = str(payload.get("agent_login") or "").lower()
+    if agent_login not in load_agent_identities(repo_root, trusted_revision):
+        return {**decision, "reason": "ATTESTATION_AGENT_NOT_REGISTERED"}
+    binding = extract_binding(pr.get("body"))
+    try:
+        attestation = verify_owner_attestation(
+            envelope,
+            repository=repository,
+            owner_id=owner_id,
+            agent_login=agent_login,
+            bound_issues=_bound_issue_numbers(pr.get("body"), binding),
+            changed_paths=_changed_paths(repo_root, base_sha, head_sha),
+            pinned_keys=load_owner_signing_keys(repo_root, trusted_revision, owner_id),
+            now=now or datetime.now(timezone.utc),
+        )
+    except LaneBindingError as exc:
+        return {**decision, "reason": str(exc)}
+    return {
+        **decision,
+        "approve": True,
+        "reason": "OWNER_SIGNED_SCOPE_COVERS_HEAD",
+        "owner_attestation": attestation,
+    }
 
 
 def _validate_lane_event(
@@ -1194,8 +1284,21 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--event-json", required=True)
     parser.add_argument("--repo-root", required=True)
+    parser.add_argument("--mode", choices=("gate", "approve"), default="gate")
     args = parser.parse_args()
     event = json.loads(Path(args.event_json).read_text(encoding="utf-8"))
+    if args.mode == "approve":
+        # Never raises into a red check: the approver only acts on approve=true.
+        try:
+            decision = approval_decision(event, repo_root=Path(args.repo_root))
+        except LaneBindingError as exc:
+            decision = {
+                "schema": "nexus.owner_attestation_approval.v1",
+                "approve": False,
+                "reason": str(exc),
+            }
+        print(json.dumps(decision, sort_keys=True))
+        return
     try:
         result = validate_event(event, repo_root=Path(args.repo_root))
     except LaneBindingError as exc:

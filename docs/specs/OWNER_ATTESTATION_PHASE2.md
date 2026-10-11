@@ -1,7 +1,7 @@
 # Owner-signed grants for agent pull requests — Phase 2 (#1750)
 
-Status: implementation candidate. The CI enforcement is complete and tested; it
-stays inactive until the Owner completes the setup steps below.
+Status: implementation candidate. It stays inactive until the Owner completes
+the setup below.
 
 ## Why the enforcement point is GitHub
 
@@ -11,98 +11,146 @@ anything enforced on that machine. It can:
 - edit the local Nexus code;
 - act as the MCP host.
 
-A local check therefore cannot hold. Phase 2 enforces where the model cannot
-write: the trusted merge-lane gate. CI runs this gate from the base branch, so a
-pull request cannot change the code that judges it.
+Phase 2 therefore enforces where the agent cannot write, on GitHub:
+- in branch rules;
+- in trusted workflows that run code from the default branch, never from the pull
+  request.
 
-## How it works
+## Why approval, not a status check
 
-1. **The agent works under its own GitHub identity.** That identity (a bot
-   account or GitHub App) is listed in `governance/agent-identities.json`.
-2. **The Owner signs grants with Touch ID.**
-   - `tools/owner-signer` keeps a P-256 key inside the Mac's Secure Enclave.
-   - Every signature needs a fresh biometric check.
-   - The prompt shows the grant summary, parsed from the exact bytes being signed.
-3. **The grant is a signed scope.** It names:
-   - repository and Owner;
-   - the agent's login;
-   - one Issue;
-   - the allowed actions (must include `GITHUB_MERGE`);
-   - the allowed path globs;
-   - issue and expiry time (at most 7 days);
-   - a nonce.
-4. **The gate enforces it.** When the agent authored the pull request, or sent
-   the event, the gate requires one `NEXUS_OWNER_ATTESTATION_V1` block in the PR
-   body and checks all of the following:
-   - **Signature:** the key is pinned in `governance/owner-signing-keys.json` *on
-     the base revision*, the key is P-256, and the signature verifies through
-     root-owned `/usr/bin/openssl`.
-   - **Grant contents:** repository, Owner and agent match; the Issue is one the
-     PR is bound to; `GITHUB_MERGE` is granted; the grant is inside its validity
-     window.
-   - **Changed paths:** every path the PR changes matches a signed glob.
-   - **Protected paths:** no changed path is under `governance/**`, `.github/**`,
-     `scripts/ops/trusted_*`, `AGENTS.md` or `CLAUDE.md`. No grant can cover these.
-5. **Pull requests without agent involvement are unaffected.**
+A per-event check is not enough. GitHub tells a check who triggered *this* event,
+not who pushed the commits. The independent review showed the gap: after an
+agent pushes, any later event by someone else (an edit, a reopen, "Update branch")
+can re-evaluate the same head as non-agent and turn the check green.
 
-### Default state
+The control is therefore an **approval pinned to the exact head**:
 
-- **Fail closed.** With no pinned key, every agent pull request is refused.
-- **Inactive until configured.** With no agent identity listed, nothing changes.
-  The repository ships with both lists empty.
+1. The repository ruleset on `main` requires:
+   - one approving review;
+   - **dismissal of stale approvals** when new commits are pushed;
+   - **approval of the most recent reviewable push** by someone other than the
+     pusher.
+2. Only the Owner can bypass these rules.
+3. A dedicated **approver GitHub App** approves a head only when the workflow
+   `.github/workflows/owner-attestation-approver.yml` finds an Owner-signed grant
+   that covers it.
+4. Any new push dismisses that approval and the decision is taken again for the
+   new head.
+
+The approval decision (`trusted_merge_lane_gate.py --mode approve`) looks only at
+content: the signed grant and the changed paths. It never looks at who sent the
+event.
+
+## How a grant works
+
+- **Signing.** `tools/owner-signer` keeps a P-256 key inside the Mac's Secure
+  Enclave. Every signature needs a fresh Touch ID check. The prompt shows:
+  - Owner, agent, actions, repository and Issue;
+  - every path;
+  - the validity window, parsed from the exact bytes being signed.
+- **Grant contents.** A grant names:
+  - repository and Owner;
+  - the agent's login;
+  - one Issue;
+  - the allowed actions (must include `GITHUB_MERGE`);
+  - 1–12 path globs, none starting with a wildcard;
+  - issue and expiry time (at most 7 days);
+  - a nonce.
+- **Approval checks.** The approver approves a head only when all of these hold:
+  - the key is pinned in `governance/owner-signing-keys.json` and the agent is
+    listed in `governance/agent-identities.json`, both read **from the gate's own
+    revision**;
+  - the key is P-256;
+  - the signature verifies through root-owned `/usr/bin/openssl`;
+  - the grant is inside its window;
+  - every changed path matches a signed glob, and none is protected.
+- **Protected paths.** No grant can cover these:
+  - `governance/**`, `.github/**`, `tasks/**`, `requirements/**`;
+  - `scripts/ops/trusted_*`, `scripts/ops/owner_attestation.py`,
+    `scripts/ops/__init__.py`;
+  - `tools/owner-signer/**`;
+  - `.claude/**` and `.mcp.json`, at any depth;
+  - `AGENTS.md` and `CLAUDE.md`, at any depth;
+  - `MUSE_PROTO.md`, `pyproject.toml`, `uv.lock`.
+- **The per-event lane check.** The trusted merge-lane gate also refuses
+  agent-sent events without a valid grant. This is an extra signal; the approval
+  rule above is what decides merges.
+- **Missing trust files.** If either trust file is missing at the gate's
+  revision, every PR is refused.
 
 ## Owner setup
 
-1. **Build the signer on the Mac and create the key.**
+1. **Signing key on the Mac.**
 
    ```sh
    cd tools/owner-signer && swift build -c release
-   .build/release/owner-signer init > ~/owner.pem   # prints key_id on stderr
-   ```
-
-2. **Pin the public key.**
-
-   ```sh
+   cp .build/release/owner-signer /usr/local/bin/      # outside any repo
+   owner-signer init > ~/owner.pem                     # key_id on stderr
    python scripts/ops/owner_attestation.py pin --public-key ~/owner.pem
    ```
 
-   Add the printed entry to `governance/owner-signing-keys.json` in a pull
-   request that you open and merge yourself. The agent cannot change `governance/`.
+   Put the printed entry into `governance/owner-signing-keys.json` in a pull
+   request you open and merge yourself.
 
-3. **Create the agent's GitHub identity.** Use a bot account or GitHub App with
-   write access but no admin or bypass rights.
-   - Add its login to `governance/agent-identities.json`, again yourself.
-   - Give agents that identity's token instead of yours.
-4. **Branch protection on `main`.**
-   - Require the trusted gate check.
-   - Do not let the agent identity bypass rules.
-5. **Grant work.**
+2. **Agent identity.** Create a bot account, or a GitHub App, for the agent.
+   - Give it contents and pull-request write access only.
+   - Do **not** give it the Workflows permission, so it cannot push files under
+     `.github/workflows/` and run arbitrary workflows with secrets.
+   - Do **not** give it admin or bypass rights.
+   - List its login in `governance/agent-identities.json`. For an App, list the
+     login as it appears in events, `<slug>[bot]`.
+   - Agents get this identity's token, never yours.
+
+3. **Approver App.** Create a separate GitHub App with only "Pull requests: read
+   and write", installed on this repository.
+   - Store its ID as the secret `NEXUS_APPROVER_APP_ID`.
+   - Store its private key as the secret `NEXUS_APPROVER_PRIVATE_KEY`.
+   - Without them the approver does nothing.
+
+4. **Ruleset on `main`.**
+   - Require pull requests with one approval, dismissal of stale approvals, and
+     approval of the most recent push.
+   - Require the trusted checks.
+   - Bypass list: the Owner only.
+
+5. **Granting work.**
 
    ```sh
-   python scripts/ops/owner_attestation.py draft --agent <bot-login> --issue <N> \
+   python scripts/ops/owner_attestation.py draft --agent <agent-login> --issue <N> \
        --path 'nexus/orchestrator/**' --hours 24 --out grant.json
-   tools/owner-signer/.build/release/owner-signer sign grant.json > grant.sig   # Touch ID
+   owner-signer sign grant.json > grant.sig                     # Touch ID
    python scripts/ops/owner_attestation.py assemble --payload grant.json \
        --signature grant.sig --public-key ~/owner.pem
    ```
 
-   Paste the printed block into the agent's pull request body, or hand it to the
-   agent.
+   Paste the printed block into the agent's pull request body.
 
-## Limits
+## Limits (read before relying on this)
 
-- **The signer could not be compiled or run here.** It needs macOS with a
-  Secure Enclave. The Owner must test `init`, `pubkey` and `sign` on the Mac
-  before the key is pinned.
-- **GitHub cannot tell who clicks merge.** If the agent is still given the
-  Owner's own token, it acts as the Owner and nothing here applies. Setup step 3
-  is what makes the check meaningful.
-- **A grant is a scope, not a single commit.** Within its paths and validity
-  window, the agent may push several commits and open several PRs for the bound
-  Issue. Keep the windows short.
-- **Cloud sessions cannot sign.** By the Owner's decision they only use grants
-  signed on the Mac.
-- **Still open for a later phase.** The local gateway's grant tools,
-  `task_card_authority_switch`/`restore`, and the other model-supplied
-  confirmations listed in `OWNER_CONFIRMATION_PHASE1.md` are not yet tied to
-  these signatures.
+- **The agent must not run under your OS account with your credentials.** It must
+  run in a separate OS account, a VM or a cloud session, with only its own
+  identity's token. Otherwise it can use your token directly.
+  - It can also replace the signer binary or `grant.json`.
+  - It can call the Secure Enclave key with its own prompt text. Touch ID then
+    proves only that a finger was presented, not what was approved.
+  - Run the signer from a location the agent cannot write, such as
+    `/usr/local/bin` installed by you.
+- **The signer has not been built or run.** It needs macOS with a Secure Enclave
+  and was written without access to one. Test `init`, `pubkey` and `sign` on the
+  Mac before pinning the key.
+- **The approver workflow has not run on GitHub yet.** It was checked locally (YAML,
+  shell syntax, JWT construction, the decision logic), but the GitHub API calls
+  only run once the App and secrets exist.
+- **Validity is checked when the approval is given, not at merge time.** An
+  approved head stays approved after `expires_at` until a new push dismisses it.
+- **Issue binding is weak.** The Issue is matched against markers in the pull
+  request body, which the agent writes. Treat a grant as reusable within its
+  paths and window, and keep windows short.
+- **Owner merges are not restricted.** As the bypass actor, you can always merge.
+  Make sure only you hold bypass.
+- **Cloud sessions cannot sign.** By Owner decision they only use grants signed on
+  the Mac.
+- **Still open for a later phase.**
+  - The local gateway's grant tools.
+  - `task_card_authority_switch` and `task_card_authority_restore`.
+  - The other model-supplied confirmations in `OWNER_CONFIRMATION_PHASE1.md`.

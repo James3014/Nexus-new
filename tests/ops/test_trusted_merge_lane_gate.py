@@ -48,6 +48,14 @@ def _repo(tmp_path: Path, *, card_lane: str = "GOVERNED", change_card_on_head: b
         encoding="utf-8",
     )
     (repo / "README.md").write_text("base\n", encoding="utf-8")
+    (repo / "governance").mkdir()
+    (repo / "governance" / "agent-identities.json").write_text(
+        '{"schema": "nexus.agent_identities.v1", "agents": []}', encoding="utf-8"
+    )
+    (repo / "governance" / "owner-signing-keys.json").write_text(
+        '{"schema": "nexus.owner_signing_keys.v1", "owner_id": "James3014", "keys": []}',
+        encoding="utf-8",
+    )
     subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
     subprocess.run(
         ["git", "-C", str(repo), "commit", "-m", "base"], check=True, capture_output=True
@@ -76,6 +84,7 @@ def _event(
 ):
     return {
         "event_name": "pull_request_target",
+        "workflow_sha": base,
         "repository": {"full_name": REPOSITORY},
         "sender": {"login": sender},
         "pull_request": {
