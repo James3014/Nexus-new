@@ -31,8 +31,12 @@ def test_runtime_compatibility_binds_complete_nexus_planner_family():
     assert runtime_compat._RUNTIME.CanonicalPlanningBundle is CanonicalPlanningBundle
     assert runtime_compat._RUNTIME.CanonicalTaskContext is CanonicalTaskContext
     assert runtime_compat._RUNTIME.ExecutionReplanAuthorization is ExecutionReplanAuthorization
-    assert runtime_compat._RUNTIME.plan_canonical_task_bundle is plan_canonical_task_bundle
-    assert runtime_compat._RUNTIME.replan_canonical_task_bundle is replan_canonical_task_bundle
+    # The exports bind the repository root, so the seam functions are root-bound wrappers.
+    for exported, seam in (
+        (runtime_compat._RUNTIME.plan_canonical_task_bundle, plan_canonical_task_bundle),
+        (runtime_compat._RUNTIME.replan_canonical_task_bundle, replan_canonical_task_bundle),
+    ):
+        assert exported.__wrapped__ is seam
 
 
 def test_mainchain_entry_uses_runtime_forwarder_source():
