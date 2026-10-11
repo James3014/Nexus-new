@@ -35,8 +35,10 @@ from nexus.services.direct_operation_journal import TERMINAL_STATES
 
 EXACT_AGY_MODEL = "gemini-3.8-flash-medium"
 CANONICAL_AGY_DISPATCH_NAME = "nexus-agy-dispatch"
+# Defaults for new bindings only; the frozen binding file is the validation authority.
 CANONICAL_AGY_DISPATCH_SHA256 = "cd2b6a2bfdd4466434da529a5b6bb47914131c0fc4cb6c305c1a52a016c71037"
 CANONICAL_AGY_EXECUTION_GENERATION = "AGY_GEMINI_3_8_FLASH_MEDIUM_V11"
+AGY_EXECUTION_GENERATION_PATTERN = re.compile(r"^AGY_[A-Z0-9_]+_V\d+$")
 AGY_PROVIDER_TERMINAL_GRACE_SECONDS = 30.0
 MAX_AGY_PROVIDER_OUTPUT_BYTES = 5_000_000
 AGY_RAW_RECEIPT_SCHEMA = "nexus.hybrid_replication.agy_live_raw.v1"
@@ -386,9 +388,17 @@ def _load_binding(
         if provider == "agy":
             if str(online.get("requested_model") or "") != EXACT_AGY_MODEL:
                 raise ValueError("agy_requested_model_identity_drift")
-            if str(online.get("execution_generation") or "") != CANONICAL_AGY_EXECUTION_GENERATION:
+            generation = online.get("execution_generation")
+            if not isinstance(generation, str) or not AGY_EXECUTION_GENERATION_PATTERN.fullmatch(
+                generation
+            ):
                 raise ValueError("agy_execution_generation_identity_drift")
-            resolve_canonical_agy_dispatch_path(payload)
+            try:
+                resolve_canonical_agy_dispatch_path(payload)
+            except RuntimeError as exc:
+                if str(exc).startswith("agy_dispatch_hash_drift:"):
+                    raise ValueError("agy_dispatch_physical_identity_drift") from exc
+                raise
         elif provider == "codex" or "codex_executable_sha256" in online:
             if str(online.get("codex_executable_sha256") or "") != CODEX_EXECUTABLE_SHA256:
                 raise ValueError("codex_declared_executable_identity_drift")
@@ -492,14 +502,12 @@ def build_agy_identity_preflight_receipt(
         dict(frozen_receipt_sha256s) == FROZEN_RECEIPT_SHA256S
         and dict(declared_frozen_receipt_sha256s) == FROZEN_RECEIPT_SHA256S
     )
-    transport_identity_match = (
-        agy_dispatch_sha256 == CANONICAL_AGY_DISPATCH_SHA256
-        and expected_agy_dispatch_sha256 == CANONICAL_AGY_DISPATCH_SHA256
-    )
+    transport_identity_match = agy_dispatch_sha256 == expected_agy_dispatch_sha256
+
     strong_online_identity_match = (
         requested_provider == "agy"
         and requested_model == EXACT_AGY_MODEL
-        and execution_generation == CANONICAL_AGY_EXECUTION_GENERATION
+        and bool(AGY_EXECUTION_GENERATION_PATTERN.fullmatch(execution_generation))
     )
     provider_drift = jev_resolved_model != expected_jev_resolved_model
     generation_change = execution_generation != previous_execution_generation
@@ -1217,8 +1225,8 @@ def _expected_agy_dispatch_sha256(binding: Mapping[str, Any] | None) -> str:
         if expected is None and isinstance(agy, Mapping):
             expected = agy.get("dispatch_sha256")
     value = str(expected or CANONICAL_AGY_DISPATCH_SHA256)
-    if value != CANONICAL_AGY_DISPATCH_SHA256:
-        raise RuntimeError(f"agy_dispatch_generation_drift:{value}:{CANONICAL_AGY_DISPATCH_SHA256}")
+    if not re.fullmatch(r"[0-9a-f]{64}", value):
+        raise RuntimeError(f"agy_dispatch_declared_sha256_malformed:{value}")
     return value
 
 
@@ -1353,6 +1361,7 @@ def evaluate_agy_receipt(
     wall_time_seconds: float = 0.0,
     schema: str = AGY_RAW_RECEIPT_SCHEMA,
     extra_checks: Mapping[str, Any] | None = None,
+    expected_dispatch_sha256: str | None = None,
 ) -> dict[str, Any]:
     stdout_bytes = stdout_path.read_bytes() if (stdout_path and stdout_path.is_file()) else b""
     stderr_bytes = stderr_path.read_bytes() if (stderr_path and stderr_path.is_file()) else b""
@@ -1366,7 +1375,7 @@ def evaluate_agy_receipt(
 
     if dispatch_path.name == "agy":
         status = "UNEXPECTED_TRANSPORT_IDENTITY"
-    elif dispatch_sha256 != CANONICAL_AGY_DISPATCH_SHA256:
+    elif dispatch_sha256 != (expected_dispatch_sha256 or CANONICAL_AGY_DISPATCH_SHA256):
         status = "UNEXPECTED_TRANSPORT_IDENTITY"
     elif output_oversized:
         status = "OVERSIZED_PROVIDER_OUTPUT_REJECTED"
@@ -1752,6 +1761,7 @@ def _run_agy_b_fallback(
                 wall_time_seconds=wall,
                 schema=AGY_RAW_RECEIPT_SCHEMA,
                 extra_checks=extra_checks,
+                expected_dispatch_sha256=_expected_agy_dispatch_sha256(binding),
             )
             receipt["mode"] = "plan"
             receipt["repository_mutated"] = mutated
@@ -1821,6 +1831,7 @@ def _run_agy_candidate(
                 wall_time_seconds=wall,
                 schema=AGY_SHADOW_CANDIDATE_SCHEMA,
                 extra_checks=extra_checks,
+                expected_dispatch_sha256=_expected_agy_dispatch_sha256(binding),
             )
             receipt["mode"] = "accept-edits"
             receipt.update(sealing)
@@ -2456,11 +2467,7 @@ def _identity_preflight_main(binding_path: Path) -> int:
             frozen_receipt_sha256s=frozen_actual,
             declared_frozen_receipt_sha256s=frozen_declared,
             agy_dispatch_sha256=_sha256_file(dispatch_path),
-            expected_agy_dispatch_sha256=str(
-                online.get("agy_dispatch_sha256")
-                or binding.get("agy_dispatch_sha256")
-                or CANONICAL_AGY_DISPATCH_SHA256
-            ),
+            expected_agy_dispatch_sha256=_expected_agy_dispatch_sha256(binding),
             requested_provider=provider,
             requested_model=str(online.get("requested_model") or ""),
             execution_generation=str(online.get("execution_generation") or ""),

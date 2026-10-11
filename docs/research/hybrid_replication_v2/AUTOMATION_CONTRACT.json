@@ -25,6 +25,61 @@
     "required_status": "AUTOMATIC_CAPTURE_READY",
     "wave1_must_not_create_primary_scoring_boundary": true
   },
+  "fail_close": {
+    "protocol_loss_granularity": "TASK",
+    "task_disposition": "PROTOCOL_EVIDENCE_ONLY_DO_NOT_COUNT",
+    "generation_reset_only_for": [
+      "EXECUTION_IDENTITY_DRIFT",
+      "SYSTEMATIC_DEFECT_AFFECTING_ALL_TASKS"
+    ],
+    "generation_reset_for_single_task_protocol_loss": false
+  },
+  "primary_cohort_exclusions": {
+    "campaign_task_keys": [
+      "James3014/Nexus-new#1216",
+      "James3014/Nexus-new#1196"
+    ],
+    "campaign_markers": [
+      "#1216",
+      "#1196",
+      "NEXUS-HYBRID-REPLICATION",
+      "hybrid replication",
+      "hybrid-replication",
+      "hybrid_replication"
+    ],
+    "disposition": "CAMPAIGN_META_WORK_EXCLUDED"
+  },
+  "cohort_sizing": {
+    "decision": "D6_OPTION_B",
+    "decided_on": "2026-10-11",
+    "source": "docs/research/hybrid_replication_v2/DESIGN_REVIEW_20261011.md#6",
+    "primary_denominator": "GROUND_TRUTH_ELIGIBLE",
+    "ground_truth_eligible_definition": "ADMITTED_PRIMARY_FRESH_TASK with terminal_state CLOSED_WITH_MERGED_PR and non-empty changed files",
+    "target_ground_truth_scored_min": 56,
+    "target_dm1_applicable_min": 24,
+    "natural_mix_stop": {
+      "admitted_primary_tasks": 350,
+      "calendar_days_after_t_auto": 35,
+      "rule": "FIRST_REACHED"
+    },
+    "insufficient_coverage_declared_only_at_stop": true,
+    "checkpoint_day": 7,
+    "checkpoint_may_change": [
+      "COLLECTION_WINDOW_BY_OWNER_DECISION"
+    ],
+    "checkpoint_must_not_change": [
+      "THRESHOLDS",
+      "ROUTING",
+      "SCORING"
+    ],
+    "zero_failure_bound_rule": "RULE_OF_THREE_95"
+  },
+  "activation_manifest": {
+    "schema": "nexus.hybrid_replication.activation_manifest.v1",
+    "script": "scripts/ops/hybrid_replication_activation.py",
+    "runbook": "docs/research/hybrid_replication_v2/RUNBOOK.md",
+    "runtime_freeze_script": "scripts/ops/hybrid_replication_freeze_runtime.py"
+  },
   "superseded_provisional_boundary": {
     "utc": "2026-09-30T23:08:07Z",
     "status": "PRE_AUTOMATION_PROVISIONAL_GENERATION",

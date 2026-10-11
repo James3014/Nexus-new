@@ -303,6 +303,31 @@ def _evaluate_automatic_capture_readiness(
     }
 
 
+_DETERMINISTIC_CLOSURE_SCHEMA = "nexus.hybrid_replication.deterministic_dependency_closure.v1"
+
+
+def _control_reached_dm1(raw: dict[str, Any]) -> bool:
+    """True when the sealed control raw proves the DM1 intercept was reached.
+
+    Route B/C raw (``run_frozen_stack``) carries ``raw_response.dm1_decision`` with an
+    applicable decision and a choice (accepted, escalated, or fallback). Route A raw is
+    acceptable only with the deterministic closure receipt.
+    """
+    response = raw.get("raw_response")
+    if not isinstance(response, dict):
+        return False
+    if raw.get("route") == "A":
+        return bool(
+            response.get("schema") == _DETERMINISTIC_CLOSURE_SCHEMA
+            and response.get("receipt_sha256")
+        )
+    decision = response.get("dm1_decision")
+    if not isinstance(decision, dict):
+        return False
+    choice = decision.get("choice")
+    return decision.get("applicable") is True and isinstance(choice, str) and bool(choice)
+
+
 def evaluate_readiness_from_store(
     *,
     store: AutomaticReplicationStore,
@@ -311,6 +336,7 @@ def evaluate_readiness_from_store(
     control_task_key: str,
     launchd_label: str,
     service_observation: dict[str, Any],
+    allow_control_without_dm1: bool = False,
 ) -> dict[str, Any]:
     control_state = store.load_task(control_task_key)
     control_phase = str(control_state.get("phase")) if control_state else None
@@ -319,6 +345,7 @@ def evaluate_readiness_from_store(
     control_raw_valid = False
     control_raw_failures: list[str] = []
     control_raw_error: str | None = None
+    control_dm1_reached = False
     if control_phase == "SCORED":
         try:
             store.score_task(control_task_key)
@@ -330,6 +357,7 @@ def evaluate_readiness_from_store(
                 raw = store.load_sealed_raw(control_task_key)
                 control_raw_failures = [str(item) for item in raw.get("failures") or []]
                 control_raw_valid = not control_raw_failures
+                control_dm1_reached = _control_reached_dm1(raw)
             except (OSError, ValueError, json.JSONDecodeError) as exc:
                 control_raw_error = f"{type(exc).__name__}:{exc}"
 
@@ -366,6 +394,8 @@ def evaluate_readiness_from_store(
             blockers.append("CONTROL_RAW_INVALID")
         elif control_raw_failures:
             blockers.append("CONTROL_RAW_FAILURE_PRESENT")
+        if control_raw_error is None and not control_dm1_reached and not allow_control_without_dm1:
+            blockers.append("CONTROL_DM1_NOT_REACHED")
     result["blockers"] = blockers
     result["status"] = "AUTOMATIC_CAPTURE_READY" if not blockers else "NOT_READY"
     result["control_task_key"] = control_task_key
@@ -374,6 +404,8 @@ def evaluate_readiness_from_store(
     result["control_raw_valid"] = control_raw_valid
     result["control_raw_failures"] = control_raw_failures
     result["control_raw_error"] = control_raw_error
+    result["control_dm1_reached"] = control_dm1_reached
+    result["control_dm1_requirement"] = "WAIVED" if allow_control_without_dm1 else "REQUIRED"
     result["launchd_label"] = launchd_label
     result["service_observation"] = dict(service_observation)
     result["claim_ceiling"] = "READINESS_CONTROL_ONLY_NOT_PRIMARY_COHORT"
@@ -392,6 +424,11 @@ def main() -> int:
     parser.add_argument("--deferred-admission-control-task-key")
     parser.add_argument("--launchd-label", default="com.nexus.hybrid-replication")
     parser.add_argument("--service-observation")
+    parser.add_argument(
+        "--allow-control-without-dm1",
+        action="store_true",
+        help="Owner waiver: accept a readiness control that never reached the DM1 intercept.",
+    )
     args = parser.parse_args()
     if (
         args.readiness_control_task_key
@@ -433,6 +470,7 @@ def main() -> int:
             control_task_key=args.readiness_control_task_key,
             launchd_label=args.launchd_label,
             service_observation=service_observation,
+            allow_control_without_dm1=args.allow_control_without_dm1,
         )
         print(json.dumps(readiness_report, ensure_ascii=False, sort_keys=True, indent=2))
         if readiness_report["status"] != "AUTOMATIC_CAPTURE_READY":

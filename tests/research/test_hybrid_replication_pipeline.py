@@ -241,6 +241,60 @@ def test_opened_issue_is_admitted_automatically_at_event_time() -> None:
     assert result == "ADMITTED_PRIMARY_FRESH_TASK"
 
 
+def _campaign_snapshot(issue: int, *, title: str, body: str) -> TaskSnapshot:
+    return TaskSnapshot.create(
+        repository="James3014/Nexus-new",
+        issue_number=issue,
+        created_at="2026-10-01T00:00:00Z",
+        captured_at="2026-10-01T00:00:03Z",
+        issue_updated_at="2026-10-01T00:00:00Z",
+        title=title,
+        body=body,
+        pre_implementation_revision="1" * 40,
+        default_branch="main",
+        source_event_id=f"run:{issue}",
+    )
+
+
+def _campaign_policy() -> IssueAdmissionPolicy:
+    return IssueAdmissionPolicy(
+        prospective_boundary="2026-10-01T00:00:00Z",
+        experiment_control_task="James3014/Nexus-new#1216",
+        candidate_repositories=("James3014/Nexus-new",),
+    )
+
+
+def test_issue_referencing_campaign_in_body_is_meta_work_excluded() -> None:
+    snapshot = _campaign_snapshot(
+        1320, title="Repair the daemon", body="Follow-up of #1216 readiness."
+    )
+    assert classify_opened_issue(snapshot, _campaign_policy()) == "CAMPAIGN_META_WORK_EXCLUDED"
+
+
+def test_issue_with_campaign_title_is_meta_work_excluded() -> None:
+    snapshot = _campaign_snapshot(
+        1321,
+        title="Hybrid replication capture workflow copied eight times",
+        body="Deduplicate it.",
+    )
+    assert classify_opened_issue(snapshot, _campaign_policy()) == "CAMPAIGN_META_WORK_EXCLUDED"
+
+
+def test_normal_task_is_not_campaign_excluded_and_control_issue_wins() -> None:
+    policy = _campaign_policy()
+    normal = _campaign_snapshot(1322, title="Fix pagination", body="Off by one on page 2.")
+    assert classify_opened_issue(normal, policy) == "ADMITTED_PRIMARY_FRESH_TASK"
+    control = _campaign_snapshot(1216, title="Hybrid replication", body="#1216 #1196")
+    assert classify_opened_issue(control, policy) == "EXPERIMENT_CONTROL_ISSUE"
+
+
+def test_store_places_campaign_meta_work_in_captured_excluded(tmp_path: Path) -> None:
+    store = AutomaticReplicationStore(tmp_path)
+    state = store.capture(_snapshot(1323), admission_disposition="CAMPAIGN_META_WORK_EXCLUDED")
+    assert state["phase"] == "CAPTURED_EXCLUDED"
+    assert state["admission_disposition"] == "CAMPAIGN_META_WORK_EXCLUDED"
+
+
 def test_cross_repo_issue_is_preserved_but_not_primary_admitted() -> None:
     snapshot = TaskSnapshot.create(
         repository="James3014/Nexus-new",
