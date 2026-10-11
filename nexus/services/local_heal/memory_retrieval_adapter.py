@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
+from nexus.services.lancedb_roots import REPOSITORY, resolve_lancedb_root
 from nexus.services.local_heal.lesson_embedding import embed_text
 
 
@@ -478,7 +479,7 @@ class MemoryRepositoryLessonStore:
             return self.repository
         from nexus.services.memory_repository import MemoryRepository
 
-        self.repository = MemoryRepository(self.project_root / ".nexus" / "memory_repository")
+        self.repository = MemoryRepository(resolve_lancedb_root(REPOSITORY, self.project_root))
         return self.repository
 
     def query(self, *, query_text: str, limit: int) -> list[dict[str, Any]]:

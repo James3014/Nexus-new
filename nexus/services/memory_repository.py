@@ -20,6 +20,8 @@ OLLAMA_AAAK_ENV = "NEXUS_MEMORY_OLLAMA_AAAK"
 OLLAMA_ENDPOINT_ENV = "NEXUS_OLLAMA_ENDPOINT"
 OLLAMA_EMBED_MODEL_ENV = "NEXUS_MEMORY_EMBEDDING_MODEL"
 EMBEDDING_METADATA_COLUMNS = ("embedding_status", "embedding_provider", "embedding_reason")
+# Dual-mode metadata that semantic_dedup_ingest stamps on every row; old tables may predate it.
+INGEST_METADATA_COLUMNS = ("tenant_id", "drawer_id", "aaak_content")
 _TRUTHY = {"1", "true", "yes", "on"}
 
 
@@ -218,6 +220,10 @@ class MemoryRepository:
         # LanceDB rejects columns absent from the table schema; drop (visibly) rather than fail the write.
         self._evolve_table_schema(table, table_name, vector_col)
         columns = set(table.schema.names)
+        for key in INGEST_METADATA_COLUMNS:
+            if key in new_record and key not in columns:
+                logger.warning("Table %s has no %s column; field dropped, row stored without it", table_name, key)
+                new_record.pop(key, None)
         provider_name = str(new_record.get("embedding_provider", ""))
         for key in (vector_col, "embedding_status", "embedding_provider", "embedding_reason"):
             if key in new_record and key not in columns:
@@ -305,15 +311,20 @@ class MemoryRepository:
         return pa.schema(fields + extra)
 
     def _evolve_table_schema(self, table: Any, table_name: str, vector_col: str = "vector") -> bool:
-        """Add missing embedding metadata (and vector, when dimension is known) columns.
+        """Add missing embedding metadata, ingest metadata (tenant_id/drawer_id/aaak_content) and vector columns.
+
+        The vector column is added only when the embedding dimension is known.
 
         Uses LanceDB add_columns (all-null backfill; existing rows are never rewritten or dropped).
         On failure, records the reason and leaves the caller's warn-and-strip path in place.
         """
         missing = self._metadata_fields(vector_col, existing=table.schema)
+        have = set(table.schema.names)
+        import pyarrow as pa
+
+        missing += [pa.field(n, pa.string(), nullable=True) for n in INGEST_METADATA_COLUMNS if n not in have]
         if not missing:
             return True
-        import pyarrow as pa
 
         try:
             table.add_columns(pa.schema(missing))

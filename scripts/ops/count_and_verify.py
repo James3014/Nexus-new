@@ -23,7 +23,9 @@ def count_and_verify():
     
     # LanceDB vectors
     try:
-        db = lancedb.connect(str(root / ".nexus" / "memory" / "memory_index.lancedb"))
+        from nexus.services.lancedb_roots import MEMORY_INDEX, resolve_lancedb_root
+
+        db = lancedb.connect(str(resolve_lancedb_root(MEMORY_INDEX, root, honor_env=False)))
         table = db.open_table("memory_index")
         df = table.to_pandas()
         print(f"  [向量核心] LanceDB (memory_index): {len(df)} 筆高維度嵌入記憶向量")

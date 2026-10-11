@@ -41,6 +41,7 @@ from nexus.engine.repair_setup_service import RepairSetupService
 from nexus.engine.crystallization_service import CrystallizationService
 from nexus.engine.subagent_outcome_service import SubagentOutcomeService
 from nexus.engine.repair_loop_service import RepairLoopService
+from nexus.services.lancedb_roots import VECTOR_DB, resolve_lancedb_root
 from nexus.services.memory import MemoryService
 from nexus.services.continuous_learning import finalize_learning_loop
 from scripts.engine.nexus_transaction import TransactionManager
@@ -91,7 +92,7 @@ class NexusEngine:
         self.ash_selector = kwargs.get("ash_selector") or get_self_healing_selector(str(self.project_root), env="dev")
         self.memory = kwargs.get("memory") or MemoryService(self.project_root)
         self.federation = kwargs.get("federation") or FederationLayer(self.project_root)
-        self.vector_cache = kwargs.get("vector_cache") or VectorCache(self.project_root / ".nexus" / "vector_db")
+        self.vector_cache = kwargs.get("vector_cache") or VectorCache(resolve_lancedb_root(VECTOR_DB, self.project_root))
         self.sota_searcher = kwargs.get("sota_searcher") or SOTASearcher(self.vector_cache)
         self.neural_aggregator = kwargs.get("neural_aggregator") or NexusNeuralAggregator()
         self.swarm_planner = kwargs.get("swarm_planner") or HierarchicalGraphPlanner(self.project_root)

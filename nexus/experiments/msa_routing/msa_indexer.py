@@ -11,6 +11,7 @@ import logging
 import httpx
 from typing import List, Dict, Any, Optional
 from nexus.core.config import NexusGlobalConfig
+from nexus.services.lancedb_roots import MEMORY_INDEX, resolve_lancedb_root
 
 logger = logging.getLogger("nexus.msa_indexer")
 
@@ -136,7 +137,7 @@ def upsert_to_lancedb(repo_root: str, records: List[Dict[str, Any]]) -> bool:
     """Write indexed records into the msa_knowledge LanceDB table."""
     if not records:
         return False
-    db_path = os.path.join(repo_root, ".nexus/memory/memory_index.lancedb")
+    db_path = str(resolve_lancedb_root(MEMORY_INDEX, repo_root, honor_env=False))
     try:
         import lancedb
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
@@ -163,7 +164,7 @@ def upsert_to_lancedb(repo_root: str, records: List[Dict[str, Any]]) -> bool:
 class LanceDBRetriever:
     def __init__(self, repo_root: str = "."):
         self.repo_root = repo_root
-        self.db_path = os.path.join(repo_root, ".nexus/memory/memory_index.lancedb")
+        self.db_path = str(resolve_lancedb_root(MEMORY_INDEX, repo_root, honor_env=False))
 
     def retrieve(self, query: str) -> List[Any]:
         from nexus.experiments.msa_routing.msa_router_contract import MemoryCandidate

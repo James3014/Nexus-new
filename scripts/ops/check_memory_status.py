@@ -3,7 +3,9 @@ sys.path.append('.')
 import lancedb
 from pathlib import Path
 try:
-    db = lancedb.connect(".nexus/memory/memory_index.lancedb")
+    from nexus.services.lancedb_roots import MEMORY_INDEX, resolve_lancedb_root
+
+    db = lancedb.connect(str(resolve_lancedb_root(MEMORY_INDEX, Path("."), honor_env=False)))
     tables = db.list_tables()
     print(f"Tables: {tables}")
     for t in tables:
