@@ -118,3 +118,55 @@ def test_forecast_gate_without_escalation_trigger_is_policy_skip_not_not_impleme
     })
     assert receipt["skipped"] is True
     assert receipt["skip_reason"] == "SKIPPED_POLICY_NOT_TRIGGERED"
+
+
+def _forecast_context(tmp_path, planner: dict[str, Any] | None) -> dict[str, Any]:
+    context: dict[str, Any] = {
+        "task_id": "t-forecast-trigger",
+        "task_statement": "mainchain forecast gate trigger",
+        "workspace_root": str(tmp_path),
+        "risk_score": 10,
+        "target_files": ["a.py"],
+        "impact_map": {"a.py": ["b.py"]},
+        "steps": ["s1"],
+    }
+    if planner is not None:
+        context["planner"] = planner
+    return context
+
+
+def test_planner_selected_forecast_gate_executes_without_manual_trigger(tmp_path) -> None:
+    plan = _plan_dict("cross_module_refactor_swarm", risk=85, is_cross_module_task=True)
+    assert "forecast_gate" in plan["selected_capabilities"]
+    receipt = build_mainchain_capability_invokers()["forecast_gate"](
+        _forecast_context(tmp_path, plan)
+    )
+    assert receipt["skipped"] is False, receipt.get("skip_reason")
+    assert receipt["invoked"] is True
+    assert receipt["trigger_source"] == "planner_mainchain_gate_policy"
+    assert receipt["physical_callable"].startswith("capability_executor_registry:")
+
+
+def test_forecast_gate_not_selected_by_planner_still_skips(tmp_path) -> None:
+    invoker = build_mainchain_capability_invokers()["forecast_gate"]
+    unselected = _plan_dict("feature")
+    assert "forecast_gate" not in unselected["selected_capabilities"]
+    for planner in (None, unselected):
+        receipt = invoker(_forecast_context(tmp_path, planner))
+        assert receipt["skipped"] is True
+        assert receipt["skip_reason"] == "SKIPPED_POLICY_NOT_TRIGGERED"
+    # Selected for a non-mainchain reason: no planner mainchain trigger either.
+    other = {
+        "selected_capabilities": ["forecast_gate"],
+        "decision_trace": [{"capability": "forecast_gate", "reasons": ["other_reason"]}],
+    }
+    assert invoker(_forecast_context(tmp_path, other))["skipped"] is True
+
+
+def test_planner_mainchain_gate_trigger_is_limited_to_forecast_gate(tmp_path) -> None:
+    fake = {
+        "selected_capabilities": ["swarm"],
+        "decision_trace": [{"capability": "swarm", "reasons": ["mainchain_high_risk"]}],
+    }
+    invoker = build_mainchain_capability_invokers()["swarm"]
+    assert invoker(_forecast_context(tmp_path, fake))["skipped"] is True

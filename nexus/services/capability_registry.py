@@ -2380,6 +2380,37 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
     return invoke
 
 
+PLANNER_MAINCHAIN_GATE_TRIGGER_SOURCE = "planner_mainchain_gate_policy"
+# Decision-trace reasons emitted by the planner's #1737 mainchain gate policy.
+_PLANNER_MAINCHAIN_GATE_REASONS = frozenset(
+    {"mainchain_high_risk", "mainchain_multi_step", "mainchain_code_mutation_task_class"}
+)
+# Only these escalate-only executors are triggered by that policy selection.
+_PLANNER_MAINCHAIN_GATE_CAPABILITIES = frozenset({"forecast_gate"})
+
+
+def _planner_mainchain_gate_selected(name: str, context: Mapping[str, Any]) -> bool:
+    """True when the planner's mainchain gate policy explicitly selected ``name``."""
+    if name not in _PLANNER_MAINCHAIN_GATE_CAPABILITIES:
+        return False
+    planner = context.get("planner")
+    if not isinstance(planner, Mapping):
+        return False
+    selected = planner.get("selected_capabilities") or []
+    if not isinstance(selected, (list, tuple)) or name not in selected:
+        return False
+    trace = planner.get("decision_trace") or []
+    if not isinstance(trace, (list, tuple)):
+        return False
+    for item in trace:
+        if not isinstance(item, Mapping) or item.get("capability") != name:
+            continue
+        reasons = item.get("reasons") or []
+        if isinstance(reasons, (list, tuple)) and _PLANNER_MAINCHAIN_GATE_REASONS & set(reasons):
+            return True
+    return False
+
+
 def build_escalate_gated_invoker(
     capability_name: str,
     *,
@@ -2413,8 +2444,11 @@ def build_escalate_gated_invoker(
         return False
 
     def invoke(context: Mapping[str, Any]) -> dict[str, Any]:
+        planner_triggered = False
         if not _triggered(context):
-            return dict(skip_invoker(context))
+            if not _planner_mainchain_gate_selected(name, context):
+                return dict(skip_invoker(context))
+            planner_triggered = True
         if real_invoker is None:
             task_id = str(context.get("task_id") or "")
             return {
@@ -2435,7 +2469,10 @@ def build_escalate_gated_invoker(
                     "capability": name,
                 },
             }
-        return dict(real_invoker(context))
+        receipt = dict(real_invoker(context))
+        if planner_triggered:
+            receipt["trigger_source"] = PLANNER_MAINCHAIN_GATE_TRIGGER_SOURCE
+        return receipt
 
     return invoke
 
