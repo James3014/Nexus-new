@@ -146,7 +146,7 @@ jobs:
         shell: bash
         env:
           RIE_PIN: 88285acf570688befbc8e36eb73f46987171bd4e
-          GITHUB_REPOSITORY_ID: ${{ github.repository }}
+          RI_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -164,7 +164,7 @@ jobs:
           fi
           # Never pass --run-behavioral-probes: PR-head Python must not execute in CI.
           python3 scripts/ops/rie_guard_delta_evidence.py \
-            --repository "$GITHUB_REPOSITORY_ID" \
+            --repository "$RI_REPOSITORY" \
             --pr-number "$PR_NUMBER" \
             --base-sha "$BASE_SHA" \
             --head-sha "$HEAD_SHA" \
