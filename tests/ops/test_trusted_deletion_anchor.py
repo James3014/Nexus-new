@@ -2856,8 +2856,8 @@ def test_pr1796_dependency_snapshot_transition_is_exact_and_separate() -> None:
     assert trusted_anchor.TRUSTED_PR1796_DEPENDENCY_SNAPSHOT_TRANSITION == (
         1796,
         (
-            "16b2ee33278ec5fdf156b47f1d8f30bd167509616c3c8d506d358aa9bad1239d",
-            "0a50680697e7abbe0b26e6d3e6eef235d9c1e3244a5527b87ac47d57fe2f0015",
+            "96331173f3ce5c1c91f7a20d011f1af2d4a927602ede40eacf91c343a0453b9a",
+            "6df6eff22f2bb3dcddbd3c4fd16483a91aeac644ca1bc098ef0a7a153088e3e2",
             "16b2ee33278ec5fdf156b47f1d8f30bd167509616c3c8d506d358aa9bad1239d",
             "0a50680697e7abbe0b26e6d3e6eef235d9c1e3244a5527b87ac47d57fe2f0015",
         ),
