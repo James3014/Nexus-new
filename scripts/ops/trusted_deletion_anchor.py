@@ -997,6 +997,24 @@ def _git(repo: Path, *args: str, binary: bool = False) -> bytes | str:
     return result.stdout if binary else result.stdout.decode().strip()
 
 
+def _init_ephemeral_bare_repo(path: Path) -> None:
+    """Create a bare repo with background maintenance off.
+
+    Fetches otherwise trigger detached commit-graph/gc writes that can outlive
+    the command and race TemporaryDirectory cleanup ("commit-graphs" not empty).
+    """
+
+    subprocess.run(["git", "init", "--bare", str(path)], check=True, capture_output=True)
+    for key, value in (
+        ("gc.auto", "0"),
+        ("gc.autoDetach", "false"),
+        ("gc.writeCommitGraph", "false"),
+        ("fetch.writeCommitGraph", "false"),
+        ("maintenance.auto", "false"),
+    ):
+        _git(path, "config", key, value)
+
+
 def _canonical_raw_diff(repo: Path, base_sha: str, head_sha: str) -> bytes:
     """Return a raw diff whose object ids are independent of repository abbrev state."""
 
@@ -1022,7 +1040,7 @@ def _create_git_bundle(
 
     with tempfile.TemporaryDirectory(prefix="trusted-anchor-bundle-") as directory:
         ephemeral = Path(directory) / "repo.git"
-        subprocess.run(["git", "init", "--bare", str(ephemeral)], check=True, capture_output=True)
+        _init_ephemeral_bare_repo(ephemeral)
         _git(ephemeral, "fetch", "--no-tags", str(repo), base_sha, head_sha, workflow_sha)
         for ref, revision in (
             (BASE_REF, base_sha),
@@ -1441,7 +1459,7 @@ def _verifier(args: argparse.Namespace) -> None:
     git_bundle = (bundle / "git-objects.bundle").read_bytes()
     with tempfile.TemporaryDirectory(prefix="trusted-anchor-verify-") as directory:
         git_repo = Path(directory) / "repo.git"
-        subprocess.run(["git", "init", "--bare", str(git_repo)], check=True, capture_output=True)
+        _init_ephemeral_bare_repo(git_repo)
         subprocess.run(
             ["git", "bundle", "verify", str(bundle / "git-objects.bundle")],
             cwd=git_repo,
