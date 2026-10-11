@@ -169,6 +169,8 @@
 | tests/research/test_flow_leaf_modules.py | tests/research/test_flow_leaf_modules.py | active | medium | test_contract |
 | nexus/research/flow/auto_flow_decision.py | tests/research/test_auto_flow_decision.py | active | high | auto_flow_decision_engine_contract |
 | tests/research/test_auto_flow_decision.py | tests/research/test_auto_flow_decision.py | active | medium | test_contract |
+| nexus/research/flow/evidence_packer.py | tests/research/test_auto_nightshift_on_hyper_failure.py | active | high | auto_nightshift_on_hyper_failure_contract |
+| tests/research/test_auto_nightshift_on_hyper_failure.py | tests/research/test_auto_nightshift_on_hyper_failure.py | active | medium | test_contract |
 | tests/engine/test_asi_constraints.py | tests/engine/test_asi_constraints.py | active | medium | test_contract |
 | tests/benchmark/test_fixture_materialization.py | tests/benchmark/test_fixture_materialization.py | active | medium | test_contract |
 | docs/testing/test_impact_map.md | tests/ops/test_select_tests.py, tests/ops/test_ci_gate_report_trust_audit.py::test_run_changed_only_check_uses_selector_targets | active | high | jit_selector_contract |

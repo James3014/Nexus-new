@@ -70,6 +70,8 @@ from nexus.research.flow.evidence_packer import (
     _doc_scout_supports_specific_claim,
     _infer_research_role,
     _write_msa_receipt_reports,
+    apply_nightshift_auto_run,
+    maybe_run_nightshift_after_hyper_failure,
 )
 from nexus.research.flow.baseline_report import (
     baseline_report_from_meta,
@@ -1359,6 +1361,14 @@ def run_auto_flow(
                     else:
                         chosen_flow = "hyper_sprint"
                         strategy_path = "probe_then_hyper_guard_fallback_rejected"
+    nightshift_auto_run = maybe_run_nightshift_after_hyper_failure(
+        repo_root=repo_root,
+        result=result,
+        nightshift_recommended=nightshift_recommended,
+        task_desc=task_desc,
+        target_file=target_file,
+        test_file=test_file,
+    )
     phase_clock.mark("R")
 
     baseline_probe_for_report = None
@@ -1433,6 +1443,7 @@ def run_auto_flow(
         learning_trace=hyper_learning_trace,
         nightshift_recommended=nightshift_recommended,
     )
+    capability_evidence = apply_nightshift_auto_run(capability_evidence, nightshift_auto_run)
     capability_evidence = _augment_local_msa_bench_evidence(
         repo_root,
         task_id=task_id,
