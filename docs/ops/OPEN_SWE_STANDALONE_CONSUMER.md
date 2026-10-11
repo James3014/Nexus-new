@@ -36,6 +36,20 @@ not the wheel/archive SHA256. The service passes the same executable and module
 hash to semantic and worker consumers and derives their shared runtime state as
 `<host state_root>/open_swe_runtime`.
 
+The value is `artifact_identity.module_sha256`, the SHA256 of the installed
+`nexus_open_swe_runtime/cli.py`, and it changes whenever a runtime upgrade
+changes that file. The service fails closed with
+`OPEN_SWE_RUNTIME_ARTIFACT_MISMATCH` until the host JSON is updated. Upgrade the
+runtime and the hash together: install the new runtime, run
+`<installed executable> --identity`, copy `artifact_identity.module_sha256`
+into `open_swe_runtime_artifact_sha256`, then restart the service. Do not
+compute it by hand from a source checkout, and do not use `package_sha256` or
+`runtime_identity_sha256`; Nexus-new compares only `module_sha256`.
+For reference, `nexus-open-swe-runtime` PR #108 changed `cli.py`: runtimes
+before it report `6ba52e55f0fa6036a557fbfbff2999a96d8e2046c3ed173a26288e66c0c6eb82`,
+and main at `64656b98ef2027c630e5b5a6cf9856496223d550` reports
+`6cbab468c7be847c6c5bae176d57aecb930ce9f2096fbb1a9a792ea93866b133`.
+
 `open_swe_semantic_timeout_seconds` and `open_swe_worker_timeout_seconds`
 bound the overall deadline for their respective OpenSWE task operations. They
 default to 180 and 300 seconds for older host configurations and accept integer
