@@ -3962,7 +3962,7 @@ def test_gateway_owner_standing_grant_issue_accepts_exact_expired_predecessor(
         "params": {
             "name": "nexus_owner_standing_grant_issue",
             "arguments": {
-                        "repository": "James3014/Nexus-new",
+                "repository": "James3014/Nexus-new",
                 "coordinatorId": "chatgpt-primary",
                 "goalId": context.goal_id,
                 "coordinationScopeId": context.thread_id,
@@ -4026,7 +4026,7 @@ def test_gateway_owner_standing_grant_issue_rejects_revoked_structural_predecess
         "params": {
             "name": "nexus_owner_standing_grant_issue",
             "arguments": {
-                        "repository": "James3014/Nexus-new",
+                "repository": "James3014/Nexus-new",
                 "coordinatorId": "chatgpt-primary",
                 "goalId": context.goal_id,
                 "coordinationScopeId": context.thread_id,
@@ -4248,7 +4248,9 @@ def test_gateway_task_card_authority_switch_and_restore_workflow(monkeypatch, tm
     orig_receipt = StandingGrantReceipt.issue(grant_id="grant-orig", context=context)
     sg_store.write_keyed_standing_grant_receipt(orig_receipt)
 
-    gateway = UnifiedMCPGateway(service=FakeService())
+    gateway = UnifiedMCPGateway(
+        service=FakeService(), owner_confirmation_channel=_AcceptingOwnerChannel()
+    )
 
     # Switch using settled camelCase fields
     switch_res = gateway.handle({
@@ -4258,7 +4260,6 @@ def test_gateway_task_card_authority_switch_and_restore_workflow(monkeypatch, tm
         "params": {
             "name": "nexus_task_card_authority_switch",
             "arguments": {
-                "ownerConfirmation": True,
                 "attemptKey": "attempt-gw-switch",
                 "expectedCurrentReceiptHash": orig_receipt.receipt_hash,
                     "expectedCurrentGoalId": "goal-orig",
@@ -4324,7 +4325,9 @@ def test_gateway_task_card_authority_switch_and_restore_fail_closed(monkeypatch,
     orig_receipt = StandingGrantReceipt.issue(grant_id="grant-orig", context=context)
     sg_store.write_keyed_standing_grant_receipt(orig_receipt)
 
-    gateway = UnifiedMCPGateway(service=FakeService())
+    gateway = UnifiedMCPGateway(
+        service=FakeService(), owner_confirmation_channel=_AcceptingOwnerChannel()
+    )
 
     # Switch rejected without ownerConfirmation
     res = gateway.handle({
@@ -4334,7 +4337,7 @@ def test_gateway_task_card_authority_switch_and_restore_fail_closed(monkeypatch,
         "params": {
             "name": "nexus_task_card_authority_switch",
             "arguments": {
-                "ownerConfirmation": False,
+                "ownerConfirmation": True,
                 "attemptKey": "attempt-gw-fail-1",
                 "expectedCurrentReceiptHash": orig_receipt.receipt_hash,
                     "expectedCurrentGoalId": "goal-orig",
@@ -4346,7 +4349,7 @@ def test_gateway_task_card_authority_switch_and_restore_fail_closed(monkeypatch,
         },
     })
     assert res["result"]["isError"] is True
-    assert "OWNER_CONFIRMATION_REQUIRED" in res["result"]["structuredContent"]["error"]
+    assert "OWNER_CONFIRMATION_PARAMETER_REMOVED" in res["result"]["structuredContent"]["error"]
 
     # Switch rejected with ttlMinutes > 30
     res = gateway.handle({
@@ -4356,7 +4359,6 @@ def test_gateway_task_card_authority_switch_and_restore_fail_closed(monkeypatch,
         "params": {
             "name": "nexus_task_card_authority_switch",
             "arguments": {
-                "ownerConfirmation": True,
                 "attemptKey": "attempt-gw-fail-2",
                 "expectedCurrentReceiptHash": orig_receipt.receipt_hash,
                 "expectedCurrentGoalId": "goal-orig",
@@ -4381,7 +4383,6 @@ def test_gateway_task_card_authority_switch_and_restore_fail_closed(monkeypatch,
         ("extra_unrecognized_prop", "evil"),
     ):
         switch_args = {
-            "ownerConfirmation": True,
             "attemptKey": "attempt-gw-bad-field",
             "expectedCurrentReceiptHash": orig_receipt.receipt_hash,
             "expectedCurrentGoalId": "goal-orig",
@@ -4423,7 +4424,6 @@ def test_gateway_task_card_authority_switch_and_restore_fail_closed(monkeypatch,
     switch_schema = switch_spec["inputSchema"]
     assert switch_schema["additionalProperties"] is False
     assert set(switch_schema["required"]) == {
-        "ownerConfirmation",
         "attemptKey",
         "expectedCurrentReceiptHash",
             "expectedCurrentGoalId",

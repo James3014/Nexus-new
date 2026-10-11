@@ -157,7 +157,10 @@ def test_host_acceptance_issues_exactly_the_confirmed_draft(_isolated_grant_stor
         .read_text(encoding="utf-8")
         .splitlines()
     )
-    assert [json.loads(line)["evidence_hash"] for line in audit] == [confirmation["evidence_hash"]]
+    assert [json.loads(line)["evidence_hash"] for line in audit] == [
+        confirmation["evidence_hash"]
+    ] * 2
+    assert json.loads(audit[1])["outcome"] == "ISSUED"
 
 
 @pytest.mark.parametrize(
@@ -340,3 +343,131 @@ def test_each_request_has_a_fresh_identity():
 )
 def test_form_elicitation_capability_detection(version, capabilities, expected):
     assert client_supports_form_elicitation(version, capabilities) is expected
+
+
+class _CountingAcceptChannel:
+    def __init__(self) -> None:
+        self.requests: list[OwnerConfirmationRequest] = []
+
+    def confirm(self, request: OwnerConfirmationRequest):
+        from tests.nexus.orchestrator.test_unified_mcp_gateway import _AcceptingOwnerChannel
+
+        self.requests.append(request)
+        return _AcceptingOwnerChannel().confirm(request)
+
+
+def _handle_issue(
+    gateway: UnifiedMCPGateway, arguments: dict[str, Any], request_id: int
+) -> dict[str, Any]:
+    return gateway.handle(_issue(arguments, request_id))["result"]
+
+
+def test_owner_is_not_asked_for_a_replay_or_an_inadmissible_write(_isolated_grant_store):
+    channel = _CountingAcceptChannel()
+    gateway = UnifiedMCPGateway(service=FakeService(), owner_confirmation_channel=channel)
+    arguments = _grant_arguments()
+
+    first = _handle_issue(gateway, arguments, 10)
+    assert first["structuredContent"]["status"] == "ISSUED"
+    replay = _handle_issue(gateway, arguments, 11)
+    assert replay["structuredContent"]["status"] == "REPLAYED"
+    conflict = _handle_issue(gateway, {**arguments, "allowedActions": ["REPOSITORY_PUSH"]}, 12)
+    assert "CURRENT_RECEIPT_EXISTS_CAS_REQUIRED" in conflict["structuredContent"]["error"]
+    assert len(channel.requests) == 1
+
+    records = [
+        json.loads(line)
+        for line in (_isolated_grant_store / "owner-confirmations.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    evidence, outcome = records
+    assert evidence["draft"]["receiptHash"] == first["structuredContent"]["receipt_hash"]
+    assert outcome == {
+        "schema": "nexus.owner_confirmation_outcome.v1",
+        "evidence_hash": evidence["evidence_hash"],
+        "outcome": "ISSUED",
+        "receipt_hash": first["structuredContent"]["receipt_hash"],
+    }
+
+
+def test_task_card_switch_cannot_mint_authority_on_model_supplied_confirmation(
+    monkeypatch, tmp_path
+):
+    from nexus.contracts.autonomy_goal import AutonomyActionClass, StandingGrantContext
+
+    monkeypatch.setattr(sg_store, "DEFAULT_TRANSITIONS_DIR", tmp_path / "authority" / "transitions")
+    repository = RepositoryIdentity(
+        repository_id="James3014/Nexus-new",
+        canonical_remote="https://github.com/James3014/Nexus-new.git",
+    )
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    predecessor = sg_store.StandingGrantReceipt.issue(
+        grant_id="phase1-switch-predecessor",
+        context=StandingGrantContext.issue(
+            owner_id="James3014",
+            coordinator_id="owner-conversation",
+            repository=repository,
+            thread_id="thread-orig",
+            goal_id="goal-orig",
+            allowed_actions=(AutonomyActionClass.TASK_SUBMIT,),
+            issued_at=now - timedelta(minutes=1),
+            expires_at=now + timedelta(minutes=30),
+        ),
+    )
+    sg_store.write_keyed_standing_grant_receipt(predecessor)
+    switch = {
+        "attemptKey": "phase1-switch",
+        "expectedCurrentReceiptHash": predecessor.receipt_hash,
+        "expectedCurrentGoalId": "goal-orig",
+        "expectedCurrentThreadId": "thread-orig",
+        "successorGoalId": "goal-succ",
+        "successorThreadId": "thread-succ",
+        "ttlMinutes": 10,
+    }
+    successor_key = sg_store.StandingGrantKey(repository, "goal-succ", "thread-succ")
+    gateway = UnifiedMCPGateway(service=FakeService())
+
+    def call(arguments: dict[str, Any], request_id: int) -> dict[str, Any]:
+        return gateway.handle({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "tools/call",
+            "params": {"name": "nexus_task_card_authority_switch", "arguments": arguments},
+        })["result"]
+
+    forged = call({**switch, "ownerConfirmation": True}, 20)
+    assert "OWNER_CONFIRMATION_PARAMETER_REMOVED" in forged["structuredContent"]["error"]
+    unconfirmed = call(switch, 21)
+    assert "OWNER_CONFIRMATION_CHANNEL_UNAVAILABLE" in unconfirmed["structuredContent"]["error"]
+    assert sg_store.load_keyed_standing_grant_receipt(successor_key) is None
+
+
+def test_a_json_array_while_waiting_is_malformed():
+    _, responses = _run([
+        _initialize(),
+        _issue(_grant_arguments()),
+        lambda host: [{"jsonrpc": "2.0"}],
+    ])
+    assert "OWNER_CONFIRMATION_MALFORMED" in _tool_result(responses)["structuredContent"]["error"]
+    _assert_nothing_written()
+
+
+def test_a_nested_call_while_waiting_writes_nothing_for_its_own_key():
+    nested = _issue(_grant_arguments(goalId="nested-goal"), request_id=3)
+    _run([
+        _initialize(),
+        _issue(_grant_arguments()),
+        nested,
+        _answer({"action": "accept", "content": {"approve": True}}),
+    ])
+    nested_key = sg_store.StandingGrantKey(
+        RepositoryIdentity(
+            repository_id="James3014/Nexus-new",
+            canonical_remote="https://github.com/James3014/Nexus-new.git",
+        ),
+        "nested-goal",
+        SCOPE,
+    )
+    assert sg_store.load_keyed_standing_grant_receipt(nested_key) is None
+    assert sg_store.load_keyed_standing_grant_receipt(_key()) is not None

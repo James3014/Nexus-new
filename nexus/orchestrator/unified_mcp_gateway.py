@@ -3724,21 +3724,24 @@ class UnifiedMCPGateway:
             context=context,
             supersedes_grant_hash=expected_current,
         )
-        confirmation = self._confirm_with_owner(
-            tool="nexus_owner_standing_grant_issue",
-            draft={**request_identity, "ownerId": context.owner_id, "receiptHash": receipt.receipt_hash},
-            summary_lines=(
-                f"Repository: {GITHUB_REPOSITORY.repository_id}",
-                f"Goal: {goal_id}",
-                f"Coordination scope: {coordination_scope_id}",
-                f"Coordinator: {coordinator_id}",
-                f"Allowed actions: {', '.join(action.value for action in parsed_actions)}",
-                f"Valid: {issued_at.isoformat()} -> {expires_at.isoformat()}",
-                f"Supersedes: {expected_current or 'none'}",
-            ),
-            now=now,
-            not_after=expires_at,
-        )
+        def ask_owner() -> dict[str, Any]:
+            return self._confirm_with_owner(
+                tool="nexus_owner_standing_grant_issue",
+                draft={**request_identity, "ownerId": context.owner_id, "receiptHash": receipt.receipt_hash},
+                summary_lines=(
+                    f"Repository: {GITHUB_REPOSITORY.repository_id}",
+                    f"Goal: {goal_id}",
+                    f"Coordination scope: {coordination_scope_id}",
+                    f"Coordinator: {coordinator_id}",
+                    f"Allowed actions: {', '.join(action.value for action in parsed_actions)}",
+                    f"Valid: {issued_at.isoformat()} -> {expires_at.isoformat()}",
+                    f"Supersedes: {expected_current or 'none'}",
+                ),
+                now=now,
+                not_after=expires_at,
+            )
+
+        confirmation: dict[str, Any] | None = None
         key = StandingGrantKey(
             GITHUB_REPOSITORY,
             goal_id,
@@ -3769,6 +3772,9 @@ class UnifiedMCPGateway:
                     and current_hash != expected_current
                 ):
                     raise StandingGrantReceiptError("CAS_MISMATCH")
+                # Ask only once the write is otherwise admissible; the store
+                # re-checks the predecessor (CAS) when the write happens.
+                confirmation = ask_owner()
                 write_keyed_standing_grant_receipt(
                     receipt,
                     expected_receipt_hash=expected_current,
@@ -3777,6 +3783,14 @@ class UnifiedMCPGateway:
                 if rebound is None or rebound.receipt_hash != receipt.receipt_hash:
                     raise StandingGrantReceiptError("ISSUANCE_READBACK_MISMATCH")
                 status = "ISSUED"
+                self._append_owner_confirmation_audit(
+                    {
+                        "schema": "nexus.owner_confirmation_outcome.v1",
+                        "evidence_hash": confirmation["evidence_hash"],
+                        "outcome": status,
+                        "receipt_hash": receipt.receipt_hash,
+                    }
+                )
         except StandingGrantReceiptError as exc:
             raise GatewayInputError(str(exc)) from exc
 
@@ -3824,24 +3838,40 @@ class UnifiedMCPGateway:
             raise GatewayInputError(str(exc)) from exc
         if evidence.draft_hash != request.draft_hash or evidence.request_id != request.request_id:
             raise GatewayInputError("OWNER_CONFIRMATION_BINDING_MISMATCH")
-        record = {**evidence.to_dict(), "evidence_hash": evidence.evidence_hash}
-        audit_path = (
-            _standing_grant_store_module.DEFAULT_RECEIPT_PATH.parent / "owner-confirmations.jsonl"
-        )
+        record = {
+            **evidence.to_dict(),
+            "evidence_hash": evidence.evidence_hash,
+            # The draft carries the receipt hash, so the record names the exact
+            # grant the Owner was shown.
+            "draft": dict(request.draft),
+        }
+        self._append_owner_confirmation_audit(record)
+        return record
+
+    @staticmethod
+    def _append_owner_confirmation_audit(record: Mapping[str, Any]) -> None:
+        directory = _standing_grant_store_module.DEFAULT_RECEIPT_PATH.parent
         try:
-            audit_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            fd = os.open(str(audit_path), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+            _standing_grant_store_module._assert_dir_chain_safe(directory, create=True)
+            fd = os.open(
+                str(directory / "owner-confirmations.jsonl"),
+                os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW,
+                0o600,
+            )
             try:
-                os.write(fd, (json.dumps(record, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8"))
+                os.write(
+                    fd,
+                    (json.dumps(dict(record), sort_keys=True, ensure_ascii=False) + "\n").encode(
+                        "utf-8"
+                    ),
+                )
             finally:
                 os.close(fd)
-        except OSError as exc:
+        except (OSError, _standing_grant_store_module.StandingGrantReceiptError) as exc:
             raise GatewayInputError("OWNER_CONFIRMATION_AUDIT_WRITE_FAILED") from exc
-        return record
 
     def _task_card_authority_switch(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         allowed_keys = {
-            "ownerConfirmation",
             "attemptKey",
             "expectedCurrentReceiptHash",
             "expectedCurrentGoalId",
@@ -3850,12 +3880,13 @@ class UnifiedMCPGateway:
             "successorThreadId",
             "ttlMinutes",
         }
+        if "ownerConfirmation" in arguments:
+            # A switch writes a new grant at a new key, so it needs the same
+            # host-mediated Owner confirmation as issuance (#1750).
+            raise GatewayInputError("OWNER_CONFIRMATION_PARAMETER_REMOVED")
         unknown_keys = set(arguments.keys()) - allowed_keys
         if unknown_keys:
             raise GatewayInputError(f"unknown arguments: {', '.join(sorted(unknown_keys))}")
-        owner_confirmation = arguments.get("ownerConfirmation")
-        if owner_confirmation is not True:
-            raise GatewayInputError("OWNER_CONFIRMATION_REQUIRED")
         attempt_key = _text(arguments.get("attemptKey"), "attemptKey", max_length=128)
         expected_current_receipt_hash = _text(
             arguments.get("expectedCurrentReceiptHash"),
@@ -3890,6 +3921,30 @@ class UnifiedMCPGateway:
         if isinstance(raw_ttl, bool) or not isinstance(raw_ttl, int) or raw_ttl < 1 or raw_ttl > 30:
             raise GatewayInputError("ttlMinutes must be an integer between 1 and 30")
         ttl_minutes = raw_ttl
+        now = datetime.now(timezone.utc)
+        self._confirm_with_owner(
+            tool="nexus_task_card_authority_switch",
+            draft={
+                "repository": GITHUB_REPOSITORY.repository_id,
+                "attemptKey": attempt_key,
+                "expectedCurrentReceiptHash": expected_current_receipt_hash,
+                "expectedCurrentGoalId": expected_current_goal_id,
+                "expectedCurrentThreadId": expected_current_thread_id,
+                "successorGoalId": successor_goal_id,
+                "successorThreadId": successor_thread_id,
+                "allowedActions": ["TASK_CARD_COMMIT", "TASK_CARD_CREATE"],
+                "ttlMinutes": ttl_minutes,
+            },
+            summary_lines=(
+                f"Repository: {GITHUB_REPOSITORY.repository_id}",
+                f"From grant: {expected_current_receipt_hash} (goal {expected_current_goal_id})",
+                f"New task-card scope: goal {successor_goal_id}, thread {successor_thread_id}",
+                "Allowed actions: TASK_CARD_COMMIT, TASK_CARD_CREATE",
+                f"Valid for: {ttl_minutes} minutes (never beyond the current grant)",
+            ),
+            now=now,
+            not_after=now + timedelta(minutes=ttl_minutes),
+        )
 
         try:
             return switch_task_card_authority(
@@ -5302,12 +5357,11 @@ class UnifiedMCPGateway:
             },
             {
                 "name": "nexus_task_card_authority_switch",
-                "description": "Switch canonical standing grant to a bounded temporary task-card authority scope.",
+                "description": "Switch canonical standing grant to a bounded temporary task-card authority scope after the Owner confirms it through the host (MCP elicitation); fails closed when the host cannot ask.",
                 "inputSchema": {
                     "type": "object",
                     "additionalProperties": False,
                     "required": [
-                        "ownerConfirmation",
                         "attemptKey",
                         "expectedCurrentReceiptHash",
                         "expectedCurrentGoalId",
@@ -5317,7 +5371,6 @@ class UnifiedMCPGateway:
                         "ttlMinutes",
                     ],
                     "properties": {
-                        "ownerConfirmation": {"type": "boolean", "const": True},
                         "attemptKey": {"type": "string", "maxLength": 128},
                         "expectedCurrentReceiptHash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                         "expectedCurrentGoalId": {"type": "string", "maxLength": 128},
