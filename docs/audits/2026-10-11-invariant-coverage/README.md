@@ -275,10 +275,10 @@ These are candidates for follow-up only, not confirmed gaps:
 
 ## Reproducers
 
-They are in `repro/<repo>/` and are evidence only. They assume checkouts at `/home/user/<repo>`. For example:
+They are in `repro/<repo>/` and are evidence only. Python reproducers are stored as `.py.txt` so repository lint and type gates do not treat audit evidence as product code. They assume checkouts at `/home/user/<repo>`. For example:
 
 ```
-cd /tmp && python3 <path-to>/repro/Nexus-new/merge_lane_gate_governed_downgrade.py
+cd /tmp && python3 <path-to>/repro/Nexus-new/merge_lane_gate_governed_downgrade.py.txt
 ```
 
 The TypeScript devspace reproducers run with `npx tsx` from a devspace checkout after `npm ci`, with `DEVSPACE_SRC` set to that checkout's `src`.

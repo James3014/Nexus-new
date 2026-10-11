@@ -16,7 +16,8 @@ def _steps(workflow: str) -> list[dict]:
 
 def test_secret_audit_runs_scanner_from_exact_base() -> None:
     scan = next(
-        step for step in _steps("git-history-secret-audit.yml")
+        step
+        for step in _steps("git-history-secret-audit.yml")
         if step.get("name") == "Run full-history secret scan"
     )
     run = scan["run"]

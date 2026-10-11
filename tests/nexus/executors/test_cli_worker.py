@@ -723,7 +723,9 @@ def test_worker_cannot_reach_ambient_home_credentials(tmp_path: Path, monkeypatc
     )
     work = tmp_path / "work"
     work.mkdir()
-    res = run_cli_worker(CliWorkerRequest(executable=sys.executable, argv=("-c", code), cwd=str(work)))
+    res = run_cli_worker(
+        CliWorkerRequest(executable=sys.executable, argv=("-c", code), cwd=str(work))
+    )
     home, gh_dir, git_cfg, leaked = res.stdout.decode().split("\n")[:4]
     # HOME stays the worker's own (provider logins live there) ...
     assert home == str(fake_home)
@@ -748,7 +750,9 @@ def test_timeout_does_not_block_on_escaped_descendant(tmp_path: Path) -> None:
     work.mkdir()
     started = time.monotonic()
     res = run_cli_worker(
-        CliWorkerRequest(executable=sys.executable, argv=("-c", code), cwd=str(work), timeout_seconds=1.0)
+        CliWorkerRequest(
+            executable=sys.executable, argv=("-c", code), cwd=str(work), timeout_seconds=1.0
+        )
     )
     assert time.monotonic() - started < 6.0
     assert res.status is CliWorkerStatus.TIMED_OUT
