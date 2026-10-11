@@ -2775,3 +2775,60 @@ def test_ephemeral_bare_repo_disables_background_maintenance(tmp_path: Path) -> 
     assert config("gc.writeCommitGraph") == "false"
     assert config("fetch.writeCommitGraph") == "false"
     assert config("maintenance.auto") == "false"
+
+
+def test_pr1789_dependency_snapshot_transition_is_exact_and_separate() -> None:
+    assert trusted_anchor.TRUSTED_PR1789_DEPENDENCY_SNAPSHOT_TRANSITION == (
+        1789,
+        (
+            "ca23695a4cfbca27f64bc163655256ae45cb0b12933cffe7c07c5aff91da440d",
+            "2f5282586cbc972ad6990be39f5f7789efe1f7fcfa9b2b8eaa7508eccf03224f",
+            "69861ac2d0ca113319993f870d112a42e4819a0004883a1e634dc96c6b4c4222",
+            "2429ca1bebe0df8193bcaabb0225fa04233a0f1cd3a2552adc6d594c11403c89",
+        ),
+    )
+
+
+def test_pr1789_dependency_snapshot_transition_allows_only_exact_binding(monkeypatch) -> None:
+    values = [b"trusted pyproject\n", b"trusted lock\n", b"head pyproject\n", b"head lock\n"]
+    hashes = trusted_anchor.TRUSTED_PR1789_DEPENDENCY_SNAPSHOT_TRANSITION[1]
+    original_sha = trusted_anchor._sha
+    digest_by_value = dict(zip(values, hashes, strict=True))
+    monkeypatch.setattr(
+        trusted_anchor,
+        "_sha",
+        lambda value: digest_by_value.get(value, original_sha(value)),
+    )
+
+    trusted_anchor._validate_trusted_dependency_contract(
+        values[0],
+        values[2],
+        values[1],
+        values[3],
+        pull_request_number=1789,
+        head_product_init_is_regular=True,
+    )
+
+    for index in range(4):
+        tampered = list(values)
+        tampered[index] += b"tampered"
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                tampered[0],
+                tampered[2],
+                tampered[1],
+                tampered[3],
+                pull_request_number=1789,
+                head_product_init_is_regular=True,
+            )
+
+    for other_pr in (1788, 1790):
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                values[0],
+                values[2],
+                values[1],
+                values[3],
+                pull_request_number=other_pr,
+                head_product_init_is_regular=True,
+            )
