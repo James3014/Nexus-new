@@ -5,7 +5,7 @@ import pytest
 pytest.importorskip("lancedb")
 pa = pytest.importorskip("pyarrow")
 
-from nexus.services.memory_repository import MemoryRepository, NoEmbeddingProvider
+from nexus.services.memory_repository import MemoryRepository, NoEmbeddingProvider  # noqa: E402
 
 LONG = "findings card about semantic dedup of vectors " * 5
 
