@@ -3930,6 +3930,10 @@ class SelfHostedTaskService:
         active_provider: Optional[str] = None,
     ) -> None:
         """Re-read all governed identity immediately before provider-side work."""
+        if binding is None:
+            # Model execution always needs a fresh Workforce Admission binding,
+            # whatever the contract kind (#1761); untracked submits included.
+            raise RuntimeError("WORKFORCE_ADMISSION_BINDING_MISSING")
         state = self._read_state(task_id) or {}
         self._revalidate_tracked_dispatch_task_card(contract, request, state, binding)
         self._assert_persisted_workforce_dispatch(
