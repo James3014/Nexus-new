@@ -176,6 +176,8 @@ class CapabilitySelector:
                 "belief_confidence": signal_set.belief_confidence,
                 "impact_complexity": signal_set.impact_complexity,
                 "forbidden_rules": forbidden_rules,
+                "constraints_source": verdict.get("constraints_source", "ok"),
+                "constraints_unavailable_reason": verdict.get("constraints_unavailable_reason", ""),
                 "selection_authority": "CapabilityPlanner",
                 "canonical_selected_capabilities": list(planner_plan.selected_capabilities),
                 "execution_depth": planner_plan.execution_depth,
