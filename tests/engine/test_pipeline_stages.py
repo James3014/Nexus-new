@@ -5,10 +5,19 @@ from nexus.engine.pipeline_stages import PipelineStagesMixin
 from nexus.core.state_contracts import NexusState
 
 class MockPipeline(PipelineStagesMixin):
+    # Set per test by _isolate_run_dir; a MagicMock run_dir is path-like and
+    # made stages write "MagicMock/mock.run_dir/..." into the current directory.
+    default_run_dir = None
+
     def __init__(self):
         self.engine = MagicMock()
         self.engine.project_root = "/tmp"
-        self.engine.run_dir = MagicMock()
+        self.engine.run_dir = MockPipeline.default_run_dir
+
+@pytest.fixture(autouse=True)
+def _isolate_run_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(MockPipeline, "default_run_dir", tmp_path)
+
 
 @pytest.fixture
 def mock_ctx():
