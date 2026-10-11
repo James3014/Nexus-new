@@ -997,22 +997,21 @@ def _git(repo: Path, *args: str, binary: bool = False) -> bytes | str:
     return result.stdout if binary else result.stdout.decode().strip()
 
 
-# Repository-local overrides for Git work that can outlive the command that
-# triggered it (detached auto-gc/maintenance, commit-graph writes).  Ephemeral
-# repositories must be quiescent when their temporary directory is removed.
-EPHEMERAL_GIT_CONFIG = (
-    ("gc.auto", "0"),
-    ("gc.autoDetach", "false"),
-    ("maintenance.auto", "false"),
-    ("fetch.writeCommitGraph", "false"),
-)
-
-
 def _init_ephemeral_bare_repo(path: Path) -> None:
-    """Create a bare repository that performs no background Git work."""
+    """Create a bare repo with background maintenance off.
+
+    Fetches otherwise trigger detached commit-graph/gc writes that can outlive
+    the command and race TemporaryDirectory cleanup ("commit-graphs" not empty).
+    """
 
     subprocess.run(["git", "init", "--bare", str(path)], check=True, capture_output=True)
-    for key, value in EPHEMERAL_GIT_CONFIG:
+    for key, value in (
+        ("gc.auto", "0"),
+        ("gc.autoDetach", "false"),
+        ("gc.writeCommitGraph", "false"),
+        ("fetch.writeCommitGraph", "false"),
+        ("maintenance.auto", "false"),
+    ):
         _git(path, "config", key, value)
 
 

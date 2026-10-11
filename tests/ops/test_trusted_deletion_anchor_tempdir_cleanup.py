@@ -33,6 +33,14 @@ HOSTILE_GIT_CONFIG = """\
 \twriteCommitGraph = true
 """
 
+QUIESCENT_GIT_CONFIG = (
+    ("gc.auto", "0"),
+    ("gc.autoDetach", "false"),
+    ("gc.writeCommitGraph", "false"),
+    ("fetch.writeCommitGraph", "false"),
+    ("maintenance.auto", "false"),
+)
+
 
 @pytest.fixture
 def hostile_git_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -75,7 +83,7 @@ def test_ephemeral_bare_repo_disables_background_git_work(
 ) -> None:
     repo = tmp_path / "repo.git"
     trusted_anchor._init_ephemeral_bare_repo(repo)
-    for key, value in trusted_anchor.EPHEMERAL_GIT_CONFIG:
+    for key, value in QUIESCENT_GIT_CONFIG:
         assert _run_git(repo, "config", "--local", "--get", key) == value
         # Repository-local values must win over the hostile global defaults.
         assert _run_git(repo, "config", "--get", key) == value

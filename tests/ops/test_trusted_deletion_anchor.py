@@ -2755,3 +2755,23 @@ def test_canonical_raw_diff_ignores_git_abbrev_config(tmp_path: Path):
     metadata = nine.split(b"\0", 1)[0].split()
     assert len(metadata[2]) == 40
     assert len(metadata[3]) == 40
+
+
+def test_ephemeral_bare_repo_disables_background_maintenance(tmp_path: Path) -> None:
+    repo = tmp_path / "repo.git"
+    trusted_anchor._init_ephemeral_bare_repo(repo)
+
+    def config(key: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(repo), "config", "--get", key],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    assert config("core.bare") == "true"
+    assert config("gc.auto") == "0"
+    assert config("gc.autoDetach") == "false"
+    assert config("gc.writeCommitGraph") == "false"
+    assert config("fetch.writeCommitGraph") == "false"
+    assert config("maintenance.auto") == "false"
