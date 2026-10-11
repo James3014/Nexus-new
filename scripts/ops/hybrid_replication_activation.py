@@ -176,14 +176,12 @@ def push(
                 text=True,
             )
             if completed.returncode != 0:
-                failures.append(
-                    {
-                        "repository": repository,
-                        "variable": name,
-                        "returncode": completed.returncode,
-                        "stderr": (completed.stderr or "").strip(),
-                    }
-                )
+                failures.append({
+                    "repository": repository,
+                    "variable": name,
+                    "returncode": completed.returncode,
+                    "stderr": (completed.stderr or "").strip(),
+                })
     return failures
 
 
@@ -200,14 +198,12 @@ def readback(
             text=True,
         )
         if completed.returncode != 0:
-            drift.append(
-                {
-                    "repository": repository,
-                    "error": "gh_variable_list_failed",
-                    "returncode": completed.returncode,
-                    "stderr": (completed.stderr or "").strip(),
-                }
-            )
+            drift.append({
+                "repository": repository,
+                "error": "gh_variable_list_failed",
+                "returncode": completed.returncode,
+                "stderr": (completed.stderr or "").strip(),
+            })
             continue
         try:
             listed = json.loads(completed.stdout)
@@ -218,9 +214,12 @@ def readback(
         for name, want in expected.items():
             have = actual.get(name)
             if have != want:
-                drift.append(
-                    {"repository": repository, "variable": name, "expected": want, "actual": have}
-                )
+                drift.append({
+                    "repository": repository,
+                    "variable": name,
+                    "expected": want,
+                    "actual": have,
+                })
     return drift
 
 

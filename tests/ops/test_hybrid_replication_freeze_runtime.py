@@ -56,25 +56,23 @@ def source_repo(tmp_path: Path) -> tuple[Path, str]:
 def base_binding(tmp_path: Path) -> Path:
     path = tmp_path / "base_binding.json"
     path.write_text(
-        json.dumps(
-            {
-                "schema": "nexus.hybrid_replication.live_binding.v1",
-                "activation_state": "AUTOMATIC_CAPTURE_READY",
-                "agy_dispatch_path": "/stale/top/nexus-agy-dispatch",
-                "agy_dispatch_sha256": "0" * 64,
-                "agy": {
-                    "dispatch_path": "/stale/agy/nexus-agy-dispatch",
-                    "dispatch_sha256": "1" * 64,
-                    "keep": "me",
-                },
-                "strong_online": {
-                    "provider": "codex",
-                    "requested_model": "model-x",
-                    "previous_execution_generation": "AGY_OLD_V10",
-                },
-                "jev": {"requested_model": "jev"},
-            }
-        ),
+        json.dumps({
+            "schema": "nexus.hybrid_replication.live_binding.v1",
+            "activation_state": "AUTOMATIC_CAPTURE_READY",
+            "agy_dispatch_path": "/stale/top/nexus-agy-dispatch",
+            "agy_dispatch_sha256": "0" * 64,
+            "agy": {
+                "dispatch_path": "/stale/agy/nexus-agy-dispatch",
+                "dispatch_sha256": "1" * 64,
+                "keep": "me",
+            },
+            "strong_online": {
+                "provider": "codex",
+                "requested_model": "model-x",
+                "previous_execution_generation": "AGY_OLD_V10",
+            },
+            "jev": {"requested_model": "jev"},
+        }),
         encoding="utf-8",
     )
     return path
