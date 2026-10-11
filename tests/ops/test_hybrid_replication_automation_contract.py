@@ -94,3 +94,23 @@ def test_daemon_is_fail_closed_on_capture_and_admission_gaps() -> None:
     assert '"failures": failures' in text
     assert 'if advance_report["failures"]' in text
     assert '"task_key": task_key' in text
+
+
+def test_contract_records_d6_option_b_cohort_sizing() -> None:
+    contract = json.loads(
+        Path("docs/research/hybrid_replication_v2/AUTOMATION_CONTRACT.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    sizing = contract["cohort_sizing"]
+    assert sizing["decision"] == "D6_OPTION_B"
+    assert sizing["primary_denominator"] == "GROUND_TRUTH_ELIGIBLE"
+    assert sizing["target_ground_truth_scored_min"] == 56
+    assert sizing["target_dm1_applicable_min"] == 24
+    assert sizing["natural_mix_stop"] == {
+        "admitted_primary_tasks": 350,
+        "calendar_days_after_t_auto": 35,
+        "rule": "FIRST_REACHED",
+    }
+    assert sizing["insufficient_coverage_declared_only_at_stop"] is True
+    assert set(sizing["checkpoint_must_not_change"]) == {"THRESHOLDS", "ROUTING", "SCORING"}

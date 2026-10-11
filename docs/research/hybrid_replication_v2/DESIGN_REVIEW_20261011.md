@@ -183,10 +183,10 @@ likely pass and then be voided again by the next dispatcher commit.
 - Workload statistics: GitHub issues API, 8 repositories, created_at >= T0,
   446 issues, computed 2026-10-11.
 
-## 6. D6 proposal — cohort size in ground-truth units (Owner decision required)
+## 6. D6 — cohort size in ground-truth units
 
-Status: proposal only. Nothing in code or `AUTOMATION_CONTRACT.json` changes until
-the Owner picks an option.
+Status: Owner selected option B on 2026-10-11. Recorded in
+`AUTOMATION_CONTRACT.json` under `cohort_sizing`.
 
 ### Inputs (measured 2026-10-11)
 
