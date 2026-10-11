@@ -54,7 +54,7 @@ jobs:
   terminal:
     needs: snapshot
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -66,7 +66,7 @@ jobs:
         with:
           pr-number: ${{ github.event.pull_request.number }}
           expected-head-sha: ${{ github.event.pull_request.head.sha }}
-          timeout-seconds: "1500"
+          timeout-seconds: "2400"
           poll-seconds: "60"
           quiescence-seconds: "60"
 
