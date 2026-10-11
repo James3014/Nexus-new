@@ -17,7 +17,7 @@ logical_subject_id = "dependency/nexus-learning"
 evidence_kind = "resolved-dependency"
 requirement_mode = "REQUIRED"
 applicability = "APPLICABLE"
-expected_identity = "git-commit:1eb7229366b2856d6691c76236a50c5380dcf7d3"
+expected_identity = "git-commit:a48bd876b758069f4dd15c24d0d32f1f2486d319"
 
 [[materials]]
 id = "canonical-runtime"
@@ -27,7 +27,7 @@ logical_subject_id = "dependency/nexus-runtime"
 evidence_kind = "resolved-dependency"
 requirement_mode = "REQUIRED"
 applicability = "APPLICABLE"
-expected_identity = "git-commit:ece9bd30e57a02db2751575cfea3c22991451216"
+expected_identity = "git-commit:cfcb38d3b9e149dc6f8ae92f405fd91cc38fcfa9"
 
 [[verifiers]]
 id = "fast-l1"
