@@ -149,7 +149,7 @@ def test_runtime_identity_function_is_deterministic():
     assert first == second
 
 
-def test_http_owner_standing_grant_issue_is_exposed_and_fails_closed_without_host_confirmation(
+def test_http_owner_standing_grant_issue_is_exposed_idempotent_and_fail_closed(
     tmp_path, monkeypatch,
 ):
     """The loopback HTTP transport cannot ask the Owner, so it never issues (#1750)."""
