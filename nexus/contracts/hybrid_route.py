@@ -226,7 +226,9 @@ def validate_hybrid_route_decision(payload: Mapping[str, Any]) -> list[str]:
             blockers.append("local_only_executed_requires_selected_candidate_hash")
         if not str(payload.get("applied_patch_hash") or "").strip():
             blockers.append("local_only_executed_requires_applied_patch_hash")
-        if not bool(payload.get("selected_candidate_hash_matches_applied", False)):
+        if not bool(payload.get("selected_candidate_hash_matches_applied", False)) or str(
+            payload.get("selected_candidate_hash") or ""
+        ).strip() != str(payload.get("applied_patch_hash") or "").strip():
             blockers.append("local_only_executed_requires_hash_match")
 
     elif route_mode == RouteMode.CLOUD_ASSISTED_BY_LOCAL_TRACE_ONLY:
