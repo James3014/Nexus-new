@@ -12,11 +12,10 @@
 - #1757、#1758、#1760 等 invariant gap / PR #1768：2026-10-11 invariant 覆蓋稽核的修正，檢查進行中。
 
 ## 待確認（沒有 Issue 號）
-- #1733 的整合 PR #1767 已合併，但 issue #1733 仍 open；#1580 的 PR #1775 已合併，issue 仍 open——各自跑 `nexus-certify issue-check` 後再關。
-- forecast_gate 是 escalate_only executor：planner 選中它還需要 escalation trigger 才會真的執行，要接上需改 `nexus/services/capability_registry.py`。
-- findings LanceDB：表的第一列沒有向量時不會建立 vector 欄位；5 個 LanceDB 根目錄尚未收斂。
-- MemPalace `constraints_source` 尚未傳到 capability_constraints / prompt_builder。
-- 舊 open PR 長期無活動（如 #1437、#1447；#1583 與 #1584 head 是同一個 SHA），是否關閉待 Owner 決定。
+- #1733 已關閉（以 CI issue completion 證據；nexus-certify issue-init 因 EVIDENCE_UNIVERSE_STALE 無法使用）；#1580 需獨立 reviewer 與合併後 workflow 證據，留給 Owner。
+- forecast_gate planner 觸發、LanceDB 向量欄位/根目錄 resolver、MemPalace constraints_source 已接上；本地 nexus_runtime 舊於 pin（ece9bd30），相關測試以 CI 為準。
+- 後續：約 25 個檔案的 LanceDB 硬編碼路徑尚未改用 `nexus/services/lancedb_roots.py`；缺 tenant_id/drawer_id/aaak_content 的舊表仍無法寫入；`trigger_source` 是否進 sealed stage receipt 需改 nexus-runtime。
+- 舊 open PR 長期無活動（如 #1437、#1447；#1583 與 #1584 head 是同一個 SHA），是否關閉待 Owner 決定（建議：#1583 為 #1584 重複可關；#1437 v15 receipt 多半已被取代；#1447 待 Owner）。
 
 ## 卡住 / 注意
 - `nexus run` 現在只有在 delivery-gate receipt 同時符合本次 run_id 與目前 HEAD 時才是 VERIFIED（#1734）。執行 delivery gate 時要設定 `NEXUS_RUN_ID=<task_id>`，否則一律 UNVERIFIED。
