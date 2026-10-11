@@ -1149,7 +1149,15 @@ else:
     @click.option("--receipt", "receipt_path", default=".nexus/reports/delivery_gate.json", show_default=True, type=click.Path())
     def delivery_gate(evidence_path, router_benchmark, receipt_path):
         """🚪 Run fail-closed delivery verification before completion claims."""
-        cmd = [str(repo_root / "scripts/ops/nexus_delivery_gate.sh"), "--evidence", str(evidence_path), "--receipt", str(receipt_path)]
+        # The gate script runs from the repo root, so pass caller-relative paths as absolute paths.
+        cmd = [
+            "bash",
+            str(repo_root / "scripts/ops/nexus_delivery_gate.sh"),
+            "--evidence",
+            str(Path(evidence_path).resolve()),
+            "--receipt",
+            str(Path(receipt_path).resolve()),
+        ]
         if router_benchmark:
             cmd.append("--router-benchmark")
         result = subprocess.run(cmd)

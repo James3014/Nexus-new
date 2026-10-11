@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 set -euo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "$0")/../.." && pwd)"
@@ -6,6 +6,26 @@ cd "$REPO_ROOT"
 
 EVIDENCE_PATH=".nexus/reports/hallucination_evidence.json"
 RECEIPT_PATH=".nexus/reports/delivery_gate.json"
+
+# Fail closed on any argument this gate does not implement, instead of silently ignoring it.
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --evidence)
+      [[ $# -ge 2 ]] || { echo "❌ [FAIL] --evidence requires a path" >&2; exit 2; }
+      EVIDENCE_PATH="$2"
+      shift 2
+      ;;
+    --receipt)
+      [[ $# -ge 2 ]] || { echo "❌ [FAIL] --receipt requires a path" >&2; exit 2; }
+      RECEIPT_PATH="$2"
+      shift 2
+      ;;
+    *)
+      echo "❌ [FAIL] Unsupported delivery-gate argument: $1" >&2
+      exit 2
+      ;;
+  esac
+done
 BASELINE_PATH=".nexus/reports/baseline/baseline_manifest.json"
 ACCEPTANCE_REPORT_PATH=".nexus/reports/acceptance_check.json"
 AGENT_REPORT_PATH=".nexus/reports/agent_report.json"
@@ -144,6 +164,6 @@ python3 scripts/ops/write_delivery_receipt.py \
   --acceptance-primary "$ACC_PRIMARY"
 
 echo "[delivery-gate] appending lineage node..."
-python3 scripts/ops/append_lineage.py "delivery_gate_receipt" "$(cat $RECEIPT_PATH)"
+python3 scripts/ops/append_lineage.py "delivery_gate_receipt" "$(cat "$RECEIPT_PATH")"
 
 echo "[delivery-gate] PASS"
