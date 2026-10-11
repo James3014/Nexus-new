@@ -60,6 +60,18 @@ def test_evaluate_report_passes_valid_report():
     assert failures == []
 
 
+def test_evaluate_report_passes_valid_dry_run_report():
+    """A structurally valid dry-run report is no longer a pass (#1763): its only failure is that
+    a dry run verifies nothing."""
+    payload = _valid_report()
+    payload["status"] = "DRY_RUN_NOT_VERIFIED"
+    payload["gate_passed"] = False
+    passed, failures = ultra_gate.evaluate_report(payload)
+
+    assert passed is False
+    assert "dry_run_not_verified" in failures
+
+
 def test_evaluate_report_rejects_dry_run_reports_as_not_verified():
     for status in ("DRY_RUN_PASS", "DRY_RUN_NOT_VERIFIED"):
         payload = _valid_report()
