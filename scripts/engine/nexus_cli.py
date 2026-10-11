@@ -75,9 +75,8 @@ class AsyncProcessExecutor:
     async def run_async(self, cmd: list[str], log_path: Path) -> tuple[int, int, int]:
         import os
         env = os.environ.copy()
-        # Secure UV cache isolation to prevent permission collision
-        workspace_tmp = Path("/Users/jameschen/Workspace/nexus/.tmp/uv-cache")
-        env["UV_CACHE_DIR"] = str(workspace_tmp.resolve())
+        # Isolate the uv cache under this checkout unless the caller already chose one.
+        env.setdefault("UV_CACHE_DIR", str((REPO_ROOT / ".tmp" / "uv-cache").resolve()))
 
         try:
             p = await asyncio.create_subprocess_exec(
@@ -88,7 +87,12 @@ class AsyncProcessExecutor:
                 env=env
             )
         except Exception as exc:
-            # Safe recovery if process creation itself fails
+            # Record why the process could not start; callers read the log as the run output.
+            try:
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                log_path.write_text(f"subprocess_spawn_failed: {type(exc).__name__}: {exc}\n", encoding="utf-8")
+            except OSError:
+                pass
             return 1, 0, 0
 
         stdout_len = 0
