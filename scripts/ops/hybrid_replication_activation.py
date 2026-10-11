@@ -193,14 +193,12 @@ def push(
             if completed.returncode != 0 and not (
                 value == "" and _is_not_found(completed.stderr or "")
             ):
-                failures.append(
-                    {
-                        "repository": repository,
-                        "variable": name,
-                        "returncode": completed.returncode,
-                        "stderr": (completed.stderr or "").strip(),
-                    }
-                )
+                failures.append({
+                    "repository": repository,
+                    "variable": name,
+                    "returncode": completed.returncode,
+                    "stderr": (completed.stderr or "").strip(),
+                })
     return failures
 
 
@@ -217,14 +215,12 @@ def readback(
             text=True,
         )
         if completed.returncode != 0:
-            drift.append(
-                {
-                    "repository": repository,
-                    "error": "gh_variable_list_failed",
-                    "returncode": completed.returncode,
-                    "stderr": (completed.stderr or "").strip(),
-                }
-            )
+            drift.append({
+                "repository": repository,
+                "error": "gh_variable_list_failed",
+                "returncode": completed.returncode,
+                "stderr": (completed.stderr or "").strip(),
+            })
             continue
         try:
             listed = json.loads(completed.stdout)
@@ -236,14 +232,12 @@ def readback(
             have = actual.get(name)
             # An absent variable evaluates to "" in GitHub Actions (vars.X).
             if (have if have is not None else "") != want:
-                drift.append(
-                    {
-                        "repository": repository,
-                        "variable": name,
-                        "expected": want,
-                        "actual": have,
-                    }
-                )
+                drift.append({
+                    "repository": repository,
+                    "variable": name,
+                    "expected": want,
+                    "actual": have,
+                })
     return drift
 
 
