@@ -33,8 +33,12 @@ Placeholders used below:
 1. The branch carrying `hybrid_replication_freeze_runtime.py`, `RUNBOOK.md` and
    `activation/V11.manifest.json` is merged to `main`. Stop if not merged.
 2. The Owner has fixed the D6 numbers (primary denominator unit, stop count, expected
-   confidence interval). Stop if they are not recorded on #1216.
-3. A source SHA is chosen: the `main` commit whose runtime is to be frozen. After step 1 it
+   confidence interval; proposal in `DESIGN_REVIEW_20261011.md` section 6). Stop if they
+   are not recorded on #1216.
+3. All eight candidate repositories run the pinned reusable capture caller
+   (`capture_caller.template.yml`), so the D3 campaign exclusion applies everywhere.
+   Stop if any repository still has the old inline copy.
+4. A source SHA is chosen: the `main` commit whose runtime is to be frozen. After step 1 it
    no longer matters what `main` does.
 
 ```
@@ -165,8 +169,10 @@ uv run python scripts/ops/hybrid_replication_daemon.py \
   --launchd-label com.nexus.hybrid-replication
 ```
 
-`<frozen-policy-sha256>` is the incumbent frozen policy hash recorded by the Owner (no
-retuning, see `AUTOMATION_CONTRACT.json` `frozen_incumbent`).
+`<frozen-policy-sha256>` is the frozen policy file hash
+`70c86133c9dea9dcfb0f725aa13e5acdf3fb8686c69e311a5355465568d7cea8`, carried unchanged
+since V1 (#1216 comments on PR #1316 activation and on 2026-10-10 G-W3-0). It is not
+recomputed; a different value means the policy file drifted, so stop.
 
 Expected: exit 0 and a final report with
 `"status": "AUTOMATIC_CAPTURE_READY"`, `"blockers": []`, `"control_dm1_requirement":
