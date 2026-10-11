@@ -29,7 +29,11 @@ def test_hud_no_real_records(tmp_path, monkeypatch):
 
 
 def test_hud_real_invalid_and_unreadable(tmp_path, monkeypatch):
-    _write(tmp_path, "a_crystal.json", {"drone_id": "a", "status": "SUCCESS", "synthetic": False, "belief_score": 0.9})
+    _write(
+        tmp_path,
+        "a_crystal.json",
+        {"drone_id": "a", "status": "SUCCESS", "synthetic": False, "belief_score": 0.9},
+    )
     _write(tmp_path, "b_crystal.json", {"verified": True})
     _write(tmp_path, "c_crystal.json", "{not json")
     res = _hud(monkeypatch, tmp_path)
@@ -45,7 +49,9 @@ def test_drone_writes_crystal_on_failure_when_llm_unreachable(tmp_path):
     with patch("nexus.core.drone_engine.requests.post", side_effect=ConnectionError("down")):
         result = drone.sense_think_act("do something")
     assert result["outcome"] != "SUCCESS"
-    data = json.loads((tmp_path / ".nexus/reports/drones/dfail_crystal.json").read_text(encoding="utf-8"))
+    data = json.loads(
+        (tmp_path / ".nexus/reports/drones/dfail_crystal.json").read_text(encoding="utf-8")
+    )
     assert data["drone_id"] == "dfail"
     assert data["status"] == result["outcome"]
     assert data["synthetic"] is False
@@ -55,8 +61,12 @@ def test_drone_writes_crystal_on_failure_when_llm_unreachable(tmp_path):
 def test_cli_drone_run_fails_closed_when_llm_down(tmp_path, monkeypatch):
     monkeypatch.setattr(cli_mod, "repo_root", tmp_path)
     with patch("nexus.core.drone_engine.requests.get", side_effect=ConnectionError("down")):
-        res = CliRunner().invoke(cli_mod.nexus, ["nexus", "drone", "run", "--task", "t", "--drone-id", "dd"])
+        res = CliRunner().invoke(
+            cli_mod.nexus, ["nexus", "drone", "run", "--task", "t", "--drone-id", "dd"]
+        )
     assert res.exit_code == 1
-    data = json.loads((tmp_path / ".nexus/reports/drones/dd_crystal.json").read_text(encoding="utf-8"))
+    data = json.loads(
+        (tmp_path / ".nexus/reports/drones/dd_crystal.json").read_text(encoding="utf-8")
+    )
     assert data["status"] == "FAIL"
     assert data["synthetic"] is False
