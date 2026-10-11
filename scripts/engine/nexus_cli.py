@@ -138,6 +138,8 @@ if not _LEGACY_AVAILABLE:
             print("")
             print("Options:")
             print("  --help  Show this message and exit.")
+            print("")
+            print("  Legacy commands are unavailable: install them with `uv sync --extra legacy`.")
             sys.exit(0)
         sys.stderr.write("LEGACY_EXTRA_REQUIRED\n")
         sys.exit(78)
