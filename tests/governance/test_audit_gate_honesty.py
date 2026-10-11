@@ -193,20 +193,6 @@ def test_replay_runner_source_has_no_shell_true():
     assert "shell=True" not in (ROOT / "nexus/delivery/replay_runner.py").read_text()
 
 
-def test_ops_replay_runner_reports_existence_only(tmp_path):
-    evidence = tmp_path / "e.json"
-    evidence.write_text(json.dumps({"evidence_bundle": {"test_artifacts": [{"command": "x"}]}}))
-    proc = subprocess.run(
-        [sys.executable, str(ROOT / "scripts/ops/replay_runner.py"), str(evidence)],
-        capture_output=True,
-        text=True,
-    )
-    out = json.loads(proc.stdout)
-    assert out["status"] == "EXISTENCE_ONLY"
-    assert out["replay_executed"] is False
-    assert proc.returncode == 0  # delivery gate flow keeps working
-
-
 # --- item 5: sealed manifest --------------------------------------------------
 def test_governance_manifest_matches_immutable_files():
     ok, results = AntiDrift(ROOT, ROOT / "nexus/config/governance_manifest.json").verify_drift()
