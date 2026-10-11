@@ -148,7 +148,7 @@ def _binding(
     return value
 
 
-def test_pre_enforcement_pr_keeps_compatibility_only_for_pinned_head(tmp_path: Path):
+def test_pre_enforcement_pr_keeps_compatibility(tmp_path: Path):
     repo, base, head, _ = _repo(tmp_path)
     result = validate_event(
         _event(base=base, head=head, body=None, number=1060),
