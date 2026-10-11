@@ -173,7 +173,7 @@ likely pass and then be voided again by the next dispatcher commit.
 - Generation timeline: comments 5921338283, 5944577912, 5985023370, 6031838345,
   6036136679, 6094518130.
 - Keyword-gate defect and D0 dry-run: comment 6071272894.
-- Activation/readiness code: `.github/workflows/hybrid-replication-capture.yml`
+- Activation/readiness code: `.github/workflows/hybrid-replication-capture-reusable.yml`
   (gate at the `AUTOMATIC_CAPTURE_READY + T_auto` check),
   `scripts/ops/hybrid_replication_daemon.py` (`_evaluate_automatic_capture_readiness`),
   `nexus/research/hybrid_replication_live.py` (`_load_binding`, generation constant),

@@ -2,8 +2,9 @@
 """Single source of truth for the hybrid-replication activation variables.
 
 Authority: RESEARCH_OBSERVATION_ONLY. The manifest is the only place a human
-edits activation state; the five per-repository GitHub Actions variables read by
-``.github/workflows/hybrid-replication-capture.yml`` are derived from it, pushed
+edits activation state; the five per-repository GitHub Actions variables passed
+by the ``.github/workflows/hybrid-replication-capture.yml`` caller to the reusable
+workflow are derived from it, pushed
 with ``gh variable set`` and verified with ``gh variable list``.
 """
 

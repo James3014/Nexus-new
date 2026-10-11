@@ -85,9 +85,13 @@ def test_default_repositories_match_daemon_candidate_list() -> None:
 
 
 def test_variable_names_match_capture_workflow() -> None:
-    workflow = Path(".github/workflows/hybrid-replication-capture.yml").read_text(encoding="utf-8")
+    caller = Path(".github/workflows/hybrid-replication-capture.yml").read_text(encoding="utf-8")
+    template = Path("docs/research/hybrid_replication_v2/capture_caller.template.yml").read_text(
+        encoding="utf-8"
+    )
     for name in activation.VARIABLE_NAMES:
-        assert f"vars.{name}" in workflow
+        assert f"vars.{name}" in caller
+        assert f"vars.{name}" in template
 
 
 def test_render_derives_exclusion_hash_and_covers_every_repository(
