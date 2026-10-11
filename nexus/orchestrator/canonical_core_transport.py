@@ -35,8 +35,9 @@ from nexus.orchestrator.ambient_core import (
 
 _EXACT_GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
-# Core is consumed as the pinned installed `nexus-certify` package (see
-# pyproject.toml). A local Core checkout is placed ahead of the installed
+# `nexus-certify` is not a declared dependency of this package. When it is
+# installed in the environment (e.g. by CI tooling), its identity is read from
+# its direct_url.json. A local Core checkout is placed ahead of any installed
 # package only when explicitly configured via NEXUS_CORE_REPO_ROOT; no
 # developer-machine path is hardcoded. The ACTUAL executed identity is always
 # derived from the imported product module (see _resolve_core_source_root).
@@ -90,8 +91,9 @@ except ImportError as exc:
 
 
 # Owner-decided expected canonical nexus-core revision (NN-1). Single source of
-# truth for the runtime check; pyproject.toml pins the same commit for install
-# (a test asserts the two agree).
+# truth for the runtime check; it must equal the nexus-certify SHA pinned in
+# .github/workflows/nexus-core-issue-completion.yml (a test asserts the two
+# agree).
 CANONICAL_CORE_REVISION = "77c7fb8fdc8c68a85c771280decd4a1e01b55085"
 CANONICAL_CORE_DISTRIBUTION = "nexus-certify"
 CANONICAL_CORE_INTERFACE = "product.adapters.generic_verification.verify_generic_changeset"

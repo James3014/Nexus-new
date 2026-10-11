@@ -1575,11 +1575,6 @@ wheels = [
 ]
 
 [[package]]
-name = "nexus-certify"
-version = "0.2.0"
-source = { git = "https://github.com/James3014/nexus-core.git?rev=77c7fb8fdc8c68a85c771280decd4a1e01b55085#77c7fb8fdc8c68a85c771280decd4a1e01b55085" }
-
-[[package]]
 name = "nexus-learning"
 version = "0.1.0"
 source = { git = "https://github.com/James3014/nexus-learning.git?rev=1eb7229366b2856d6691c76236a50c5380dcf7d3#1eb7229366b2856d6691c76236a50c5380dcf7d3" }
@@ -1590,7 +1585,6 @@ version = "28.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
-    { name = "nexus-certify" },
     { name = "nexus-learning" },
     { name = "nexus-runtime" },
 ]
@@ -1669,7 +1663,6 @@ requires-dist = [
     { name = "huggingface-hub", marker = "extra == 'ml'", specifier = ">=0.16.0" },
     { name = "lancedb", marker = "extra == 'legacy'", specifier = ">=0.4.0" },
     { name = "networkx", marker = "extra == 'legacy'", specifier = ">=3.0,<4.0" },
-    { name = "nexus-certify", git = "https://github.com/James3014/nexus-core.git?rev=77c7fb8fdc8c68a85c771280decd4a1e01b55085" },
     { name = "nexus-learning", git = "https://github.com/James3014/nexus-learning.git?rev=1eb7229366b2856d6691c76236a50c5380dcf7d3" },
     { name = "nexus-runtime", git = "https://github.com/James3014/nexus-runtime.git?rev=0456b7847450991d7453284c380142545618c5e5" },
     { name = "opentelemetry-api", marker = "extra == 'legacy'", specifier = ">=1.15.0,<2.0.0" },
