@@ -1649,7 +1649,7 @@ else:
                 is_light = False
 
         if is_light:
-            click.echo("⚡ [Learn:Ingest] Autonomic Router triggered LIGHT_ROUTE. Skipping heavy ingestion.")
+            click.echo("⚡ [Learn:Ingest] LIGHT_ROUTE selected by CapabilityPlanner execution depth (not the retired Autonomic Router). Skipping heavy ingestion.")
             os.environ["NEXUS_LIGHT_ROUTE"] = "1"
             class LightResult:
                 def __init__(self):
@@ -1835,7 +1835,7 @@ else:
                 is_light = False
 
         if is_light:
-            click.echo("⚡ [Learn:Converge] Autonomic Router triggered LIGHT_ROUTE. Skipping heavy convergence.")
+            click.echo("⚡ [Learn:Converge] LIGHT_ROUTE selected by CapabilityPlanner execution depth (not the retired Autonomic Router). Skipping heavy convergence.")
             class LightResult:
                 def __init__(self):
                     self.payload = {
