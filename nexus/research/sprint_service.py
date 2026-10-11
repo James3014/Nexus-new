@@ -183,6 +183,7 @@ class SprintResult:
     error_codes: list[str] = field(default_factory=list)
     rejection_summary: dict[str, int] = field(default_factory=dict)
     learning_trace: dict[str, Any] = field(default_factory=dict)
+    codeintel_context: dict[str, Any] = field(default_factory=dict)
     unified_runtime_receipts: list[dict[str, Any]] = field(default_factory=list)
     candidates: list[CandidateEval] = field(default_factory=list)
     pytest_cmd: list[str] = field(default_factory=list)
@@ -351,12 +352,14 @@ class LLMCandidateGenerator:
         mutation_hint: str,
         seed: int,
         test_source: str = "",
+        codeintel_block: str = "",
     ) -> tuple[str, dict[str, Any]]:
         prompt_text = _build_llm_candidate_prompt(
             source_code=source_code,
             task=task,
             mutation_hint=mutation_hint,
             test_source=test_source,
+            codeintel_block=codeintel_block,
         )
         quota_backoffs = 0
         model_calls = 0
@@ -499,9 +502,12 @@ def _build_value_task_contract(*, source_code: str, task: str, test_source: str 
     return "[NEXUS VALUE CONTRACT]\n" + "\n".join(f"- {rule}" for rule in rules) + "\n"
 
 
-def _build_llm_candidate_prompt(*, source_code: str, task: str, mutation_hint: str, test_source: str = "") -> str:
+def _build_llm_candidate_prompt(
+    *, source_code: str, task: str, mutation_hint: str, test_source: str = "", codeintel_block: str = ""
+) -> str:
     compact = os.environ.get("NEXUS_GATEWAY_COMPACT_PROMPT", "").strip().lower() in {"1", "true", "yes"}
     contract_block = _build_value_task_contract(source_code=source_code, task=task, test_source=test_source)
+    contract_block += codeintel_block
     test_block = f"\nTests:\n{test_source}" if test_source else ""
     if compact:
         return (
@@ -941,6 +947,13 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             learn_slo_guard["reason"] = "benchmark_force_llm_despite_learn_slo"
     except Exception as exc:  # noqa: BLE001
         learn_slo_guard["reason"] = f"learn_slo_read_error:{exc}"
+
+    codeintel_block = ""
+    codeintel_status: dict[str, Any] = {"status": "skipped_local_only"}
+    if llm_mode_effective:
+        from nexus.research.flow.codeintel_context import sprint_codeintel_block
+
+        codeintel_block, codeintel_status = sprint_codeintel_block(repo_root, target_file=config.target_file)
 
     llm_generator: Optional[LLMCandidateGenerator] = (
         LLMCandidateGenerator(repo_root, config.safe_mode, target_file=config.target_file)
@@ -1473,6 +1486,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                         mutation_hint=hint,
                         seed=idx,
                         test_source=initial_test_source,
+                        codeintel_block=codeintel_block,
                     )
                     used_source = str(meta.get("source", "llm"))
                 except Exception as llm_exc:  # noqa: BLE001
@@ -1516,6 +1530,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                                     task=config.task,
                                     mutation_hint=hint,
                                     test_source=initial_test_source,
+                                    codeintel_block=codeintel_block,
                                 )
                             )
                             token_capture_statuses.add("estimated")
@@ -1704,6 +1719,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                         mutation_hint=f"{hint}\nself_heal_after_pytest_failed",
                         seed=idx + 10000,
                         test_source=test_source,
+                        codeintel_block=codeintel_block,
                     )
                     _record_llm_meta(repair_meta)
                     repair_guard_ok, repair_guard_reason = _semantic_guard(candidate_code, repair_code, config.task, "llm_self_heal")
@@ -1806,6 +1822,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
 
     if not candidates:
         return SprintResult(
+            codeintel_context=codeintel_status,
             status="FAILED",
             reason=SprintOutcome.GENERATION_FAIL.value,
             target_file=config.target_file,
@@ -1884,6 +1901,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             terminal_status="FAILED",
         )
         return SprintResult(
+            codeintel_context=codeintel_status,
             status="FAILED",
             reason="model_required_model_delivery_failed",
             target_file=config.target_file,
@@ -1944,6 +1962,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             terminal_status="FAILED",
         )
         return SprintResult(
+            codeintel_context=codeintel_status,
             status="FAILED",
             reason=SprintOutcome.STAGE1_NO_PASSING_CANDIDATE.value,
             target_file=config.target_file,
@@ -2047,6 +2066,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         receipt_kind="dayshift" if final_reason == "dayshift_improved" else "sprint",
     )
     return SprintResult(
+        codeintel_context=codeintel_status,
         status="SUCCESS",
         reason=final_reason,
         target_file=config.target_file,

@@ -875,7 +875,7 @@ def test_hidden_verifier_mode_omits_initial_test_source(monkeypatch, tmp_path: P
     captured: dict[str, str] = {}
 
     class FakeGenerator:
-        def generate(self, *, source_code, task, mutation_hint, seed, test_source=""):
+        def generate(self, *, source_code, task, mutation_hint, seed, test_source="", codeintel_block=""):
             captured["test_source"] = test_source
             raise RuntimeError("stop")
 
