@@ -397,9 +397,6 @@ def test_wave4_runtime_projection_reaches_worker_boundary_and_blocks_legacy_adap
         auto_reconcile=False,
         ephemeral=True,
     )
-    # This test exercises post-admission dispatch logic; the admission gate
-    # itself is covered by test_untracked_dispatch_without_admission_fails_closed.
-    monkeypatch.setattr(service, "_revalidate_provider_boundary", lambda *args, **kwargs: None)
     request = _real_request(tmp_path, task_id="wave4-runtime-effect-block")
     attempt_id = "attempt-wave4-runtime"
     operation_id = "operation-wave4-runtime"
@@ -6068,9 +6065,6 @@ def test_default_runner_escalates_after_failed_cheap_worker(tmp_path, monkeypatc
 
     registry = WorkerRegistry({provider: FakeAdapter(provider) for provider in ("codex", "gemini", "opencode", "mimo", "ollama")})
     service = SelfHostedTaskService(state_dir=tmp_path / "state", worker_registry=registry, auto_reconcile=False)
-    # This test exercises post-admission dispatch logic; the admission gate
-    # itself is covered by test_untracked_dispatch_without_admission_fails_closed.
-    monkeypatch.setattr(service, "_revalidate_provider_boundary", lambda *args, **kwargs: None)
     request = _request(tmp_path, worker="codex", fallback_worker="opencode", task_id="escalate-task")
     contract = service.build_contract(request)
     state = {"status": "SUBMITTED", "attempt_id": "a" * 32}
@@ -6223,9 +6217,6 @@ def test_empty_candidate_fails_closed_and_blocks_candidate_commit(tmp_path, monk
 
     registry = WorkerRegistry({"codex": FakeAdapter(), "gemini": FakeAdapter(), "opencode": FakeAdapter(), "mimo": FakeAdapter(), "ollama": FakeAdapter()})
     service = SelfHostedTaskService(state_dir=tmp_path / "state", worker_registry=registry, auto_reconcile=False)
-    # This test exercises post-admission dispatch logic; the admission gate
-    # itself is covered by test_untracked_dispatch_without_admission_fails_closed.
-    monkeypatch.setattr(service, "_revalidate_provider_boundary", lambda *args, **kwargs: None)
     request = _request(tmp_path, worker="codex", task_id="empty-cand-task")
     contract = service.build_contract(request)
     checkpoint_history = []
@@ -8610,10 +8601,8 @@ def test_w1_service_path_canary(tmp_path):
     target_root = tmp_path / "targets"
     target_root.mkdir()
 
-    # Verifier command that always passes
-    verifier_script = tmp_path / "verify.sh"
-    verifier_script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    verifier_script.chmod(0o755)
+    # Verifier command that always passes (no shell executable: #1753).
+    verifier_command = f"{sys.executable} -c 'raise SystemExit(0)'"
 
     request = {
         "task_id": "w1-svc-canary",
@@ -8626,7 +8615,7 @@ def test_w1_service_path_canary(tmp_path):
         "target_worktree_root": str(target_root),
         "allowed_files": ["src/"],
         "forbidden_files": [],
-        "verifier_commands": [f"/bin/sh {verifier_script}"],
+        "verifier_commands": [verifier_command],
         "protected_contracts": [],
         "worker": "codex",
     }
@@ -11060,7 +11049,17 @@ def test_untracked_dispatch_without_admission_fails_closed(tmp_path):
     request = _request(tmp_path, task_id="untracked-no-admission")
     assert validate_workforce_dispatch_binding(request) is None
     contract = service.build_contract(request)
+    governed_request = {**request, "execution_lane": "GOVERNED"}
     with pytest.raises(RuntimeError, match="WORKFORCE_ADMISSION_BINDING_MISSING"):
         service._revalidate_provider_boundary(
-            contract, request, "untracked-no-admission", None, active_provider="codex"
+            contract, governed_request, "untracked-no-admission", None, active_provider="codex"
         )
+
+
+def test_direct_untracked_dispatch_does_not_require_admission(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _request(tmp_path, task_id="direct-no-admission")
+    contract = service.build_contract(request)
+    service._revalidate_provider_boundary(
+        contract, request, "direct-no-admission", None, active_provider="codex"
+    )

@@ -1033,7 +1033,7 @@ def test_self_hosted_recover_verified_uncommitted_cli_command(tmp_path: Path, mo
     req = _valid_request(tmp_path, task_id=task_id, allowed_files=["README"], target_repo_root=str(tmp_path / "targets" / task_id), target_worktree_root=str(tmp_path / "targets"))
     contract = svc.build_contract(req)
     from nexus.orchestrator.worktree_manager import WorktreeManager
-    from nexus.orchestrator.candidate_verifier import VerifiedCandidateReceipt
+    from nexus.orchestrator.candidate_verifier import VerifiedCandidateReceipt, VerifierEvidence
 
     wm = WorktreeManager(root_dir=contract.target_worktree_root)
     lease = wm.create_lease(contract)
@@ -1056,7 +1056,17 @@ def test_self_hosted_recover_verified_uncommitted_cli_command(tmp_path: Path, mo
         public_claim_allowed=False,
         production_ready=False,
         failure_reasons=[],
-        verifier_evidence=(),
+        # A verified receipt must carry evidence for the contract's verifiers (#1760).
+        verifier_evidence=(
+            VerifierEvidence(
+                command=contract.verifier_commands[0],
+                status="PASS",
+                exit_code=0,
+                stdout_sha256="0" * 64,
+                stderr_sha256="0" * 64,
+                wall_time_ms=1,
+            ),
+        ),
         candidate_commit_created=False,
         merge_performed=False,
     )

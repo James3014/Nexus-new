@@ -314,6 +314,33 @@ def test_owner_inline_service_bind_and_integrate_use_nested_hash(
     assert FakeIntegrationManager.calls == 1
 
 
+def _receipt_hash(receipt: dict[str, object]) -> str:
+    return hashlib.sha256(
+        json.dumps(receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+
+
+def _verifier_evidence(command: str) -> list[dict[str, object]]:
+    executable = Path(command)
+    return [{
+        "command": command,
+        "status": "COMPLETED",
+        "exit_code": 0,
+        "executable_identity": str(executable),
+        "executable_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
+        "argv": [],
+        "env": bounded_environment_receipt({"PYTHONDONTWRITEBYTECODE": "1"}),
+        "timed_out": False,
+        "process_group_killed": False,
+    }]
+
+
+def _manifest(verified_receipt: dict[str, object], contract) -> list[dict[str, object]]:
+    return list(ControlledIntegrationManager._admitted_manifest(
+        {"verified_receipt": verified_receipt}, contract.model_dump(mode="json"),
+    ))
+
+
 def _verified_gate_proof(root: Path, contract) -> dict[str, object]:
     """Build the exact policy proof consumed by integration recheck."""
     gate = RepositoryContractGate(
@@ -624,9 +651,17 @@ def test_owner_finish_delegates_full_authorized_integration_then_cleanup(tmp_pat
         "controller_revision": base, "target_base_revision": base,
         "controller_repo_root": str(root), "target_repo_root": str(target),
         "target_worktree_root": str(target.parent), "allowed_files": ["value.txt"],
-        "verifier_commands": ["python -c pass"], "worker": "codex",
+        "verifier_commands": ["/usr/bin/true"], "worker": "codex",
     }
     contract = service.build_contract(request)
+    # Approval recomputes the verified receipt hash (#1758): bind a real one.
+    verified_receipt = {
+        **_verified_gate_proof(root, contract),
+        "verifier_evidence": _verifier_evidence("/usr/bin/true"),
+        "verified": True,
+    }
+    verified_receipt_hash = _receipt_hash(verified_receipt)
+    auth = replace(auth, candidate_receipt_hash=verified_receipt_hash)
     lease_id = WorktreeManager(root_dir=str(target.parent), create_root=False)._lease_id(
         contract, target, "nexus/task/task-1"
     )
@@ -635,11 +670,11 @@ def test_owner_finish_delegates_full_authorized_integration_then_cleanup(tmp_pat
         "promotion_status": "PENDING_HUMAN_APPROVAL", "request": request,
         "contract": contract.model_dump(mode="json"), "contract_hash": contract.contract_hash,
         "task_card_hash": "c" * 64,
-        "verified_receipt": _verified_gate_proof(root, contract),
+        "verified_receipt": verified_receipt, "integration_verifier_manifest": _manifest(verified_receipt, contract),
         "promotion_packet": {
             "candidate_commit_sha": candidate,
             "candidate_tree_sha": _git(root, "rev-parse", f"{candidate}^{{tree}}"),
-            "candidate_state_hash": "d" * 64, "verified_receipt_hash": "e" * 64,
+            "candidate_state_hash": "d" * 64, "verified_receipt_hash": verified_receipt_hash,
         },
         "candidate_ref": durable_ref,
         "lease": {
@@ -659,7 +694,7 @@ def test_owner_finish_delegates_full_authorized_integration_then_cleanup(tmp_pat
     result = service.owner_finish(
         "task-1", candidate_commit_sha=candidate,
         candidate_tree_sha=_git(root, "rev-parse", f"{candidate}^{{tree}}"),
-        candidate_state_hash="d" * 64, verified_receipt_hash="e" * 64,
+        candidate_state_hash="d" * 64, verified_receipt_hash=verified_receipt_hash,
         integration_branch="nexus/integration/canary", approval_context=context,
         external_acceptance=receipt.to_dict(), integration_authorization={
             **auth.to_dict(), "canonical_branch": "nexus/integration/canary",
@@ -791,21 +826,29 @@ def test_service_post_apply_failure_persists_physical_truth_and_blocks_cleanup(t
         "controller_revision": base, "target_base_revision": base,
         "controller_repo_root": str(root), "target_repo_root": str(target),
         "target_worktree_root": str(target.parent), "allowed_files": ["value.txt"],
-        "verifier_commands": ["python -c pass"], "worker": "codex",
+        "verifier_commands": ["/usr/bin/true"], "worker": "codex",
     }
     contract = service.build_contract(request)
+    # Approval recomputes the verified receipt hash (#1758): bind a real one.
+    verified_receipt = {
+        **_verified_gate_proof(root, contract),
+        "verifier_evidence": _verifier_evidence("/usr/bin/true"),
+        "verified": True,
+    }
+    verified_receipt_hash = _receipt_hash(verified_receipt)
+    auth = replace(auth, candidate_receipt_hash=verified_receipt_hash)
     lease_id = WorktreeManager(root_dir=str(target.parent), create_root=False)._lease_id(contract, target, "nexus/task/post-apply-task")
     packet = {
         "candidate_commit_sha": candidate,
         "candidate_tree_sha": _git(root, "rev-parse", f"{candidate}^{{tree}}"),
-        "candidate_state_hash": "d" * 64, "verified_receipt_hash": "e" * 64,
+        "candidate_state_hash": "d" * 64, "verified_receipt_hash": verified_receipt_hash,
     }
     service._write_state("post-apply-task", {
         "task_id": "post-apply-task", "attempt_id": "attempt-1",
         "status": "CANDIDATE_CAPTURED", "promotion_status": "PENDING_HUMAN_APPROVAL",
         "request": request, "contract": contract.model_dump(mode="json"),
         "contract_hash": contract.contract_hash, "task_card_hash": "c" * 64,
-        "verified_receipt": _verified_gate_proof(root, contract),
+        "verified_receipt": verified_receipt, "integration_verifier_manifest": _manifest(verified_receipt, contract),
         "promotion_packet": packet, "candidate_ref": durable_ref,
         "post_apply_commands": [["/bin/sh", "-c", "exit 1"]],
         "lease": {
@@ -827,7 +870,7 @@ def test_service_post_apply_failure_persists_physical_truth_and_blocks_cleanup(t
         service.owner_finish(
             "post-apply-task", candidate_commit_sha=candidate,
             candidate_tree_sha=packet["candidate_tree_sha"], candidate_state_hash="d" * 64,
-            verified_receipt_hash="e" * 64, integration_branch="nexus/integration/canary",
+            verified_receipt_hash=verified_receipt_hash, integration_branch="nexus/integration/canary",
             approval_context=context, external_acceptance=receipt.to_dict(),
             integration_authorization={**auth.to_dict(), "canonical_branch": "nexus/integration/canary", "cleanup_target_path": str(target), "durable_ref": durable_ref},
         )
@@ -951,20 +994,28 @@ def test_owner_finish_retains_real_dirty_target_with_typed_reason(tmp_path: Path
         "controller_revision": base, "target_base_revision": base,
         "controller_repo_root": str(root), "target_repo_root": str(target),
         "target_worktree_root": str(target.parent), "allowed_files": ["value.txt"],
-        "verifier_commands": ["python -c pass"], "worker": "codex",
+        "verifier_commands": ["/usr/bin/true"], "worker": "codex",
     }
     contract = service.build_contract(request)
+    # Approval recomputes the verified receipt hash (#1758): bind a real one.
+    verified_receipt = {
+        **_verified_gate_proof(root, contract),
+        "verifier_evidence": _verifier_evidence("/usr/bin/true"),
+        "verified": True,
+    }
+    verified_receipt_hash = _receipt_hash(verified_receipt)
+    auth = replace(auth, candidate_receipt_hash=verified_receipt_hash)
     lease_id = WorktreeManager(root_dir=str(target.parent), create_root=False)._lease_id(contract, target, "nexus/task/dirty-owner-finish")
-    packet = {"candidate_commit_sha": candidate, "candidate_tree_sha": _git(root, "rev-parse", f"{candidate}^{{tree}}"), "candidate_state_hash": "d" * 64, "verified_receipt_hash": "e" * 64}
+    packet = {"candidate_commit_sha": candidate, "candidate_tree_sha": _git(root, "rev-parse", f"{candidate}^{{tree}}"), "candidate_state_hash": "d" * 64, "verified_receipt_hash": verified_receipt_hash}
     service._write_state("dirty-owner-finish", {
-        "task_id": "dirty-owner-finish", "attempt_id": "attempt-1", "status": "CANDIDATE_CAPTURED", "promotion_status": "PENDING_HUMAN_APPROVAL", "request": request, "contract": contract.model_dump(mode="json"), "contract_hash": contract.contract_hash, "task_card_hash": "c" * 64, "verified_receipt": _verified_gate_proof(root, contract), "promotion_packet": packet, "candidate_ref": durable_ref,
+        "task_id": "dirty-owner-finish", "attempt_id": "attempt-1", "status": "CANDIDATE_CAPTURED", "promotion_status": "PENDING_HUMAN_APPROVAL", "request": request, "contract": contract.model_dump(mode="json"), "contract_hash": contract.contract_hash, "task_card_hash": "c" * 64, "verified_receipt": verified_receipt, "integration_verifier_manifest": _manifest(verified_receipt, contract), "promotion_packet": packet, "candidate_ref": durable_ref,
         "lease": {"schema": "nexus.target_worktree_lease.v1", "lease_id": lease_id, "task_id": "dirty-owner-finish", "controller_revision": base, "target_base_revision": base, "target_worktree": str(target), "target_branch": "nexus/task/dirty-owner-finish", "initial_head": base, "initial_status_sha256": "0" * 64, "controller_status_sha256": "0" * 64, "created_from_exact_revision": True, "commit_created": True, "merge_performed": False},
     })
     context = {"schema": "nexus.approval.v2", "approval_id": "approval-dirty-owner-finish", "approval_scope": "ALLOW_ACTION_ONCE", "contract_kind": "TRACKED_TASK_CARD", "contract_hash": "c" * 64, "task_card_hash": "c" * 64}
     result = service.owner_finish(
         "dirty-owner-finish", candidate_commit_sha=candidate,
         candidate_tree_sha=packet["candidate_tree_sha"], candidate_state_hash="d" * 64,
-        verified_receipt_hash="e" * 64, integration_branch="nexus/integration/canary",
+        verified_receipt_hash=verified_receipt_hash, integration_branch="nexus/integration/canary",
         approval_context=context, external_acceptance=receipt.to_dict(),
         integration_authorization={**auth.to_dict(), "canonical_branch": "nexus/integration/canary", "cleanup_target_path": str(target), "durable_ref": durable_ref},
     )

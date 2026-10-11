@@ -3930,9 +3930,10 @@ class SelfHostedTaskService:
         active_provider: Optional[str] = None,
     ) -> None:
         """Re-read all governed identity immediately before provider-side work."""
-        if binding is None:
-            # Model execution always needs a fresh Workforce Admission binding,
-            # whatever the contract kind (#1761); untracked submits included.
+        if binding is None and str(request.get("execution_lane") or "").strip().upper() == "GOVERNED":
+            # A GOVERNED attempt never reaches a model worker without a fresh
+            # Workforce Admission binding, whatever its contract kind (#1761).
+            # DIRECT lanes are exempt by the repository authority contract.
             raise RuntimeError("WORKFORCE_ADMISSION_BINDING_MISSING")
         state = self._read_state(task_id) or {}
         self._revalidate_tracked_dispatch_task_card(contract, request, state, binding)
@@ -10193,7 +10194,22 @@ class SelfHostedTaskService:
 
         clean_lease = {k: v for k, v in lease_dict.items() if k in lease_fields} if lease_fields else lease_dict
 
-        if isinstance(contract_dict, dict):
+        contract = None
+        if isinstance(contract_dict, dict) and contract_fields and contract_dict.get("contract_hash"):
+            # Restore the persisted contract exactly: rebuilding it through
+            # build_contract changes derived fields (and so contract_hash),
+            # which the receipt identity binding (#1760) rightly rejects.
+            try:
+                restored = ArchitectTaskContract.model_validate(
+                    {k: v for k, v in contract_dict.items() if k in contract_fields}
+                )
+            except Exception:  # noqa: BLE001 - fall back to the legacy rebuild
+                restored = None
+            if restored is not None and restored.contract_hash == contract_dict.get("contract_hash"):
+                contract = restored
+        if contract is not None:
+            pass
+        elif isinstance(contract_dict, dict):
             c_dict = contract_dict.copy()
             if not c_dict.get("what"):
                 c_dict["what"] = c_dict.get("objective", "Recover candidate")
