@@ -145,12 +145,14 @@ class BenchmarkTotalTimeout(RuntimeError):
     pass
 
 
-def _nexus_cli_subprocess_cmd(args: list[str]) -> list[str]:
+def _nexus_cli_subprocess_cmd(args: list[str], repo_root: Path | str | None = None) -> list[str]:
     python_bin = os.environ.get("NEXUS_BENCH_SUBPROCESS_PYTHON", "").strip()
     if not python_bin:
-        venv_python = Path(".venv/bin/python")
+        # Look for the venv where the subprocess will run (cwd=repo_root), not in this
+        # process's cwd; otherwise a relative path that exists here is missing there.
+        venv_python = Path(repo_root or ".") / ".venv" / "bin" / "python"
         if venv_python.exists():
-            python_bin = str(venv_python)
+            python_bin = str(venv_python.resolve())
     if python_bin:
         return [python_bin, "scripts/engine/nexus_cli.py", *args]
     return ["uv", "run", "scripts/engine/nexus_cli.py", *args]
@@ -2790,14 +2792,17 @@ def _extract_record(
         "capability_nightshift_recommended": bool(capabilities.get("nightshift_recommended", False)),
         "capability_nightshift_invoked": bool(capabilities.get("nightshift_invoked", False)),
         "capability_nightshift_recovered": bool(capabilities.get("nightshift_recovered", False)),
+        "capability_nightshift_synthetic": bool(nightshift_report.get("synthetic", False)),
         "capability_nightshift_report_path": str(capabilities.get("nightshift_report_path") or ""),
         "capability_nightshift_report_schema_version": str(nightshift_report.get("schema_version") or ""),
         "capability_nightshift_failure_reason": str(capabilities.get("nightshift_failure_reason") or nightshift_report.get("failure_reason") or ""),
         "capability_swarm_used": bool(capabilities.get("swarm_used", False)),
+        "capability_swarm_synthetic": bool(swarm_report.get("synthetic", False)),
         "capability_swarm_evidence_count": int(capabilities.get("swarm_evidence_count", 0) or 0),
         "capability_swarm_report_schema_version": str(swarm_report.get("schema_version") or ""),
         "capability_swarm_consensus": str(capabilities.get("swarm_consensus") or swarm_report.get("consensus") or ""),
         "capability_drone_used": bool(capabilities.get("drone_used", False)),
+        "capability_drone_synthetic": bool(drone_report.get("synthetic", False)),
         "capability_drone_invoked_count": int(capabilities.get("drone_invoked_count", 0) or 0),
         "capability_drone_report_schema_version": str(drone_report.get("schema_version") or ""),
         "capability_drone_artifact_path": str(capabilities.get("drone_artifact_path") or ""),
@@ -4019,7 +4024,7 @@ def _run_receipt_first_probe_payload(
     original_target = _read_preserved_target(target_file, materialize_missing=True)
     try:
         res = _run_process_group(
-            _nexus_cli_subprocess_cmd(args),
+            _nexus_cli_subprocess_cmd(args, repo_root),
             cwd=repo_root,
             env=env,
             timeout_sec=effective_timeout,
@@ -15036,7 +15041,7 @@ def run_with_nexus(
     runner: CliRunner | None = None
     receipt_first_payload: dict[str, Any] | None = None
     if runner_mode == "subprocess":
-        cmd = _nexus_cli_subprocess_cmd(args)
+        cmd = _nexus_cli_subprocess_cmd(args, repo_root)
         env = os.environ.copy()
         env["NEXUS_MEMORY_DB_PATH"] = str(_benchmark_memory_db_path(repo_root, task, start_wall).resolve())
         codeintel_cache_key = task.manifest_hash or "default"
@@ -15120,7 +15125,7 @@ def run_with_nexus(
         if runner_mode == "subprocess":
             try:
                 fallback_res = _run_process_group(
-                    _nexus_cli_subprocess_cmd(fallback_args),
+                    _nexus_cli_subprocess_cmd(fallback_args, repo_root),
                     cwd=repo_root,
                     env=env,
                     timeout_sec=effective_timeout_sec,
@@ -15332,7 +15337,7 @@ def run_with_nexus(
         rescue_start = time.monotonic()
         try:
             if runner_mode == "subprocess":
-                rescue_cmd = _nexus_cli_subprocess_cmd(rescue_args)
+                rescue_cmd = _nexus_cli_subprocess_cmd(rescue_args, repo_root)
                 rescue_res = _run_process_group(rescue_cmd, cwd=repo_root, env=env, timeout_sec=timeout_sec)
                 rescue_output = rescue_res.stdout or ""
             else:
@@ -15544,7 +15549,7 @@ def run_with_nexus(
                     try:
                         retry_output = ""
                         if runner_mode == "subprocess":
-                            retry_cmd = _nexus_cli_subprocess_cmd(retry_args)
+                            retry_cmd = _nexus_cli_subprocess_cmd(retry_args, repo_root)
                             retry_res = _run_process_group(
                                 retry_cmd,
                                 cwd=repo_root,

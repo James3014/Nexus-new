@@ -242,3 +242,44 @@ def test_multi_agent_submit_fails_closed_without_acceptance_receipt(tmp_path, mo
     result = CliRunner().invoke(nexus, ["nexus", "multi-agent", "submit", "--task-id", "T1"])
     assert result.exit_code != 0
     assert "Submission blocked" in result.output
+
+
+def test_acceptance_check_reports_claim_verify_failure_without_traceback(monkeypatch):
+    from scripts.engine.nexus_cli import nexus
+
+    class _Res:
+        def __init__(self, returncode):
+            self.returncode = returncode
+            self.stdout = b""
+            self.stderr = b""
+
+    def _fake_run(cmd, *args, **kwargs):
+        joined = " ".join(map(str, cmd))
+        return _Res(1 if "verify_report_claims.py" in joined else 0)
+
+    monkeypatch.setattr("scripts.engine.nexus_cli.check_hallucination", lambda *_a, **_k: True)
+    monkeypatch.setattr("scripts.engine.nexus_cli.subprocess.run", _fake_run)
+
+    result = CliRunner().invoke(nexus, ["nexus", "acceptance-check"])
+
+    assert result.exit_code == 1
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert "Report claim verification failed (verify_report_claims.py exit 1)" in result.output
+
+
+def test_contract_check_reports_failure_without_traceback(monkeypatch, tmp_path):
+    from scripts.engine.nexus_cli import nexus
+
+    contract = tmp_path / "contract.json"
+    contract.write_text("{}", encoding="utf-8")
+
+    class _Res:
+        returncode = 3
+
+    monkeypatch.setattr("scripts.engine.nexus_cli.subprocess.run", lambda *a, **k: _Res())
+
+    result = CliRunner().invoke(nexus, ["nexus", "contract-check", "--contract-file", str(contract)])
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert "Contract check failed (closeout_guard.py exit 3)" in result.output

@@ -3050,7 +3050,12 @@ def _exec_benchmark(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
     try:
         from nexus.services.benchmark_service import BenchmarkService
 
-        inst = BenchmarkService(project_root=".")
+        project_root, run_root, _run_id = _resolve_run_root(plan)
+        inst = BenchmarkService(project_root=str(project_root))
+        # Keep the generated report inside this run's root instead of the cwd/repo root.
+        inst.report_path = run_root / "dual_core_benchmark.md"
+        _assert_outputs_in_run_root([inst.report_path], run_root)
+        inst.report_path.parent.mkdir(parents=True, exist_ok=True)
         # Bounded: zero-task construct of run kwargs path without full suite.
         # Prefer a dry structural call: run with tasks_count=0 if accepted, else
         # reflect service readiness via class binding + method presence.
@@ -3528,9 +3533,13 @@ def _exec_xray(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRecei
         _assert_outputs_in_run_root(output_paths, run_root)
 
         inst = XRayService(project_root=str(project_root), report_path=str(report_path))
-        result = inst.run(targets=["nexus/services/capability_registry.py"], recursive=False, docker=False)
+        # Absolute target: XRayObserver silently skips paths that do not exist relative to cwd.
+        target = Path(project_root) / "nexus/services/capability_registry.py"
+        result = inst.run(targets=[str(target)], recursive=False, docker=False)
         elapsed = int((time.monotonic() - start) * 1000)
-        ok = result is not None
+        # run() always returns the report path, so success must come from the scan itself.
+        scanned = getattr(inst, "last_report", None)
+        ok = bool(target.exists() and report_path.exists() and scanned is not None and scanned.symbols)
         return _make_receipt(
             "xray",
             plan,

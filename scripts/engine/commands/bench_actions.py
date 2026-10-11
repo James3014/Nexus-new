@@ -9,7 +9,7 @@ from typing import Any, Protocol
 @dataclass(frozen=True)
 class EffortRoiRow:
     success_rate: float
-    avg_duration_sec: float
+    avg_duration_sec: float | None
     count: int
 
 
@@ -38,7 +38,9 @@ def get_effort_roi_report(
     return {
         str(level): EffortRoiRow(
             success_rate=float(data["success_rate"]),
-            avg_duration_sec=float(data["avg_duration_sec"]),
+            avg_duration_sec=(
+                None if data.get("avg_duration_sec") is None else float(data["avg_duration_sec"])
+            ),
             count=int(data["count"]),
         )
         for level, data in report.items()
@@ -53,7 +55,11 @@ def render_effort_roi_report(report: Mapping[str, EffortRoiRow]) -> list[str]:
                 "",
                 f"[{level.upper()}]",
                 f"  Success Rate: {data.success_rate:.2%}",
-                f"  Avg Duration: {data.avg_duration_sec:.1f}s",
+                (
+                    "  Avg Duration: n/a"
+                    if data.avg_duration_sec is None
+                    else f"  Avg Duration: {data.avg_duration_sec:.1f}s"
+                ),
                 f"  Count       : {data.count}",
             ]
         )

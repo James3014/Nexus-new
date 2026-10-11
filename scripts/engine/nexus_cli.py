@@ -75,9 +75,8 @@ class AsyncProcessExecutor:
     async def run_async(self, cmd: list[str], log_path: Path) -> tuple[int, int, int]:
         import os
         env = os.environ.copy()
-        # Secure UV cache isolation to prevent permission collision
-        workspace_tmp = Path("/Users/jameschen/Workspace/nexus/.tmp/uv-cache")
-        env["UV_CACHE_DIR"] = str(workspace_tmp.resolve())
+        # Isolate the uv cache under this checkout unless the caller already chose one.
+        env.setdefault("UV_CACHE_DIR", str((REPO_ROOT / ".tmp" / "uv-cache").resolve()))
 
         try:
             p = await asyncio.create_subprocess_exec(
@@ -88,7 +87,12 @@ class AsyncProcessExecutor:
                 env=env
             )
         except Exception as exc:
-            # Safe recovery if process creation itself fails
+            # Record why the process could not start; callers read the log as the run output.
+            try:
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                log_path.write_text(f"subprocess_spawn_failed: {type(exc).__name__}: {exc}\n", encoding="utf-8")
+            except OSError:
+                pass
             return 1, 0, 0
 
         stdout_len = 0
@@ -134,6 +138,8 @@ if not _LEGACY_AVAILABLE:
             print("")
             print("Options:")
             print("  --help  Show this message and exit.")
+            print("")
+            print("  Legacy commands are unavailable: install them with `uv sync --extra legacy`.")
             sys.exit(0)
         sys.stderr.write("LEGACY_EXTRA_REQUIRED\n")
         sys.exit(78)
@@ -1136,7 +1142,11 @@ else:
         ]
         if not allow_cold_start:
             verify_cmd.insert(4, "--require-acceptance-pass")
-        subprocess.run(verify_cmd, check=True)
+        verify_res = subprocess.run(verify_cmd)
+        if verify_res.returncode != 0:
+            raise click.ClickException(
+                f"Report claim verification failed (verify_report_claims.py exit {verify_res.returncode})."
+            )
 
         # 2. 執行幻覺審計 (always render; hard-fail only when explicit evidence gets REJECTED)
         if not check_hallucination(evidence_path):
@@ -1149,7 +1159,15 @@ else:
     @click.option("--receipt", "receipt_path", default=".nexus/reports/delivery_gate.json", show_default=True, type=click.Path())
     def delivery_gate(evidence_path, router_benchmark, receipt_path):
         """🚪 Run fail-closed delivery verification before completion claims."""
-        cmd = [str(repo_root / "scripts/ops/nexus_delivery_gate.sh"), "--evidence", str(evidence_path), "--receipt", str(receipt_path)]
+        # The gate script runs from the repo root, so pass caller-relative paths as absolute paths.
+        cmd = [
+            "bash",
+            str(repo_root / "scripts/ops/nexus_delivery_gate.sh"),
+            "--evidence",
+            str(Path(evidence_path).resolve()),
+            "--receipt",
+            str(Path(receipt_path).resolve()),
+        ]
         if router_benchmark:
             cmd.append("--router-benchmark")
         result = subprocess.run(cmd)
@@ -2185,7 +2203,9 @@ else:
     def contract_check(contract_file):
         """📜 [Governance] Validate task contract against physical state."""
         cmd = [sys.executable, str(repo_root / "scripts/ops/closeout_guard.py"), "--contract", contract_file]
-        subprocess.run(cmd, check=True)
+        res = subprocess.run(cmd)
+        if res.returncode != 0:
+            raise click.ClickException(f"Contract check failed (closeout_guard.py exit {res.returncode}).")
 
 
     @nexus_group.command(name="contract-snapshot")
@@ -2258,8 +2278,9 @@ else:
             click.echo("❌ Invalid task name: only alphanumeric, spaces, dashes, and underscores allowed.")
             sys.exit(1)
 
-        sanitized_task_name = SanitizedRunner.sanitize_arg(task_name)
-        res = SanitizedRunner.run_safe([sys.executable, str(repo_root / "scripts/ops/supervisor_engine.py"), sanitized_task_name], check=False)
+        # task_name is regex-validated and passed as one argv element (no shell), so it must
+        # not be shlex-quoted: quoting would embed literal quote characters in the task.
+        res = SanitizedRunner.run_safe([sys.executable, str(repo_root / "scripts/ops/supervisor_engine.py"), task_name], check=False)
         payload = build_completion_envelope(
             command_name="delegate",
             task_name=task_name,
@@ -3119,8 +3140,13 @@ else:
     )
     @click.pass_context
     def compat_research_sprint(ctx: click.Context):
-        """Compatibility alias for `nexus research:sprint`."""
-        _forward_to_nested_nexus(ctx, "research:sprint")
+        """Retired: the nested `nexus research:sprint` command no longer exists."""
+        # Forwarding would only reach "No such command"; say where Hyper/Sprint lives now.
+        raise click.UsageError(
+            "`research:sprint` is no longer a CLI command. Hyper/Sprint runs through "
+            "`nexus research:auto-flow` (route-selected hyper_sprint) or "
+            "nexus.services.mainchain_entry.run_mainchain."
+        )
 
 
     @nexus.command(
@@ -3426,6 +3452,13 @@ else:
             click.secho("❌ No mission found. Run 'nexus mission create' first.", fg="red")
             sys.exit(1)
 
+        if mission.status in (MissionStatus.COMPLETED, MissionStatus.ABORTED):
+            click.secho(
+                f"❌ Mission {mission.mission_id} is {mission.status.value}; create a new mission instead.",
+                fg="red",
+            )
+            sys.exit(1)
+
         # 1. 環境指紋與 preflight 檢查 (Environment Fingerprinting)
         if not mission.run_fingerprint_preflight(repo_root):
             click.secho("❌ [Environment Blocked] Preflight failed or Git SHA shifted.", fg="red", bold=True)
@@ -3447,7 +3480,8 @@ else:
 
         # 4. 呼叫實體戰役執行
         # 複用現有的 nexus run 命令子進程，以便完整使用自癒與 TDD 驗證
-        cmd = [sys.executable, str(repo_root / "scripts/engine/nexus_cli.py"), "nexus", "run", mission.mission_id]
+        # `nexus run` uses its argument as the task statement, so pass the objective, not the id.
+        cmd = [sys.executable, str(repo_root / "scripts/engine/nexus_cli.py"), "nexus", "run", mission.objective]
         res = subprocess.run(cmd, check=False)
 
         # 5. 更新結束後的狀態與 telemetry 統計
