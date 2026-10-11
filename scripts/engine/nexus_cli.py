@@ -3489,7 +3489,7 @@ else:
     def mission_start():
         """🚀 Run budget & fingerprint checks, switch state, and launch the loop."""
         import uuid
-        from nexus.core.mission_contracts import NexusMission, MissionStatus, MissionTransitionError, transition
+        from nexus.core.mission_contracts import MissionStatus, MissionTransitionError, NexusMission, transition
 
         mission = NexusMission.load(repo_root)
         if not mission:
@@ -3534,7 +3534,7 @@ else:
 
         # 5. 更新結束後的狀態與 telemetry 統計
         # 實作上可檢查報告判定完戰
-        mission = NexusMission.load(repo_root) # 重新載入，避免執行期間被子進程修改
+        mission = NexusMission.load(repo_root) or mission # 重新載入，避免執行期間被子進程修改
         if res.returncode == 0:
             # 完戰 gate 驗收: ACTIVE -> VERIFYING -> COMPLETED (or back to ACTIVE if not passed)
             transition(mission, MissionStatus.VERIFYING)
@@ -3580,7 +3580,7 @@ else:
     @mission_group.command(name="pause")
     def mission_pause():
         """⏸️ Force snapshot of current state and pause the campaign."""
-        from nexus.core.mission_contracts import NexusMission, MissionStatus, MissionTransitionError, transition
+        from nexus.core.mission_contracts import MissionStatus, MissionTransitionError, NexusMission, transition
         mission = NexusMission.load(repo_root)
         if not mission:
             click.echo("❌ No mission found.")
@@ -3608,7 +3608,7 @@ else:
     @mission_group.command(name="resume")
     def mission_resume():
         """🌬️ Check environment preflight, budget, and restore the loop from snapshot."""
-        from nexus.core.mission_contracts import NexusMission, MissionStatus, MissionTransitionError, transition
+        from nexus.core.mission_contracts import MissionStatus, MissionTransitionError, NexusMission, transition
         mission = NexusMission.load(repo_root)
         if not mission:
             click.echo("❌ No paused mission found.")
@@ -3655,7 +3655,7 @@ else:
     @mission_group.command(name="abort")
     def mission_abort():
         """🛑 Abort the campaign (terminal state)."""
-        from nexus.core.mission_contracts import NexusMission, MissionStatus, MissionTransitionError, transition
+        from nexus.core.mission_contracts import MissionStatus, MissionTransitionError, NexusMission, transition
         mission = NexusMission.load(repo_root)
         if not mission:
             click.echo("❌ No mission found.")

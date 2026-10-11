@@ -107,7 +107,9 @@ def test_resume_without_checkpoint_exits_nonzero(tmp_path: Path) -> None:
     runner = CliRunner()
     with (
         patch.object(cli_mod, "repo_root", tmp_path),
-        patch.object(metabolism, "stack_path", tmp_path / ".nexus" / "metabolism" / "task_stack.json"),
+        patch.object(
+            metabolism, "stack_path", tmp_path / ".nexus" / "metabolism" / "task_stack.json"
+        ),
     ):
         result = runner.invoke(nexus, ["nexus", "resume"])
     assert result.exit_code != 0
@@ -123,7 +125,10 @@ def test_resume_restores_checkpoint_into_mission(tmp_path: Path) -> None:
     )
     _mission(MissionStatus.PAUSED).persist(tmp_path)
     runner = CliRunner()
-    with patch.object(cli_mod, "repo_root", tmp_path), patch.object(metabolism, "stack_path", stack):
+    with (
+        patch.object(cli_mod, "repo_root", tmp_path),
+        patch.object(metabolism, "stack_path", stack),
+    ):
         result = runner.invoke(nexus, ["nexus", "resume"])
     assert result.exit_code == 0, result.output
     assert "T-42" in result.output

@@ -161,6 +161,7 @@
 | tests/learning/test_skill_route_taxonomy.py | tests/learning/test_skill_route_taxonomy.py::test_sf2_probe_verdict_catalog_characterizes_multicapability_fail_closed_shape, tests/learning/test_skill_route_taxonomy.py::test_sf2_bounded_probe_static_receipts_keep_runtime_and_benchmark_blocked, tests/learning/test_skill_route_taxonomy.py::test_sf2_completion_gate_closes_only_after_receipts_and_dispositions | active | medium | test_contract |
 | tests/test_skill_sharing.py | tests/test_skill_sharing.py | active | medium | test_contract |
 | tests/core/test_context_hub_strict_deps.py | tests/core/test_context_hub_strict_deps.py | active | medium | test_contract |
+| tests/core/test_mission_control.py | tests/core/test_mission_control.py | active | medium | test_contract |
 | tests/core/test_mission_transitions.py | tests/core/test_mission_transitions.py | active | medium | test_contract |
 | tests/contracts/test_s2t_contracts.py | tests/contracts/test_s2t_contracts.py | active | medium | test_contract |
 | tests/engine/test_sandbox_actions.py | tests/engine/test_sandbox_actions.py | active | medium | test_contract |
