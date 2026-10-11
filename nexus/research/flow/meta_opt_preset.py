@@ -4,6 +4,11 @@ Disabled unless ``NEXUS_APPLY_META_OPT_PRESET`` is truthy. When enabled and the
 report is a measured ``status == "ok"`` report with a selected preset, the
 preset's known keys override the matching ``research:auto-flow`` settings.
 Everything else leaves the settings untouched and records a reason.
+
+Scope (Owner decision, #1763): only the auto-flow timeout/ratio/history settings
+below are applied. Benchmark-only keys (ab_trials, max_wall_time_sec, ...) and
+Nightshift budgets are deliberately not consumed until meta-opt produces measured
+(non-simulated) selections; they are reported as ``ignored_keys``.
 """
 
 from __future__ import annotations
