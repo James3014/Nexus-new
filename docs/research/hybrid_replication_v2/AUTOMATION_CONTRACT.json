@@ -25,6 +25,30 @@
     "required_status": "AUTOMATIC_CAPTURE_READY",
     "wave1_must_not_create_primary_scoring_boundary": true
   },
+  "fail_close": {
+    "protocol_loss_granularity": "TASK",
+    "task_disposition": "PROTOCOL_EVIDENCE_ONLY_DO_NOT_COUNT",
+    "generation_reset_only_for": [
+      "EXECUTION_IDENTITY_DRIFT",
+      "SYSTEMATIC_DEFECT_AFFECTING_ALL_TASKS"
+    ],
+    "generation_reset_for_single_task_protocol_loss": false
+  },
+  "primary_cohort_exclusions": {
+    "campaign_task_keys": [
+      "James3014/Nexus-new#1216",
+      "James3014/Nexus-new#1196"
+    ],
+    "campaign_markers": [
+      "#1216",
+      "#1196",
+      "NEXUS-HYBRID-REPLICATION",
+      "hybrid replication",
+      "hybrid-replication",
+      "hybrid_replication"
+    ],
+    "disposition": "CAMPAIGN_META_WORK_EXCLUDED"
+  },
   "superseded_provisional_boundary": {
     "utc": "2026-09-30T23:08:07Z",
     "status": "PRE_AUTOMATION_PROVISIONAL_GENERATION",

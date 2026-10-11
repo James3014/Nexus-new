@@ -24,6 +24,51 @@ def test_automation_contract_does_not_activate_primary_cohort_in_wave1() -> None
     assert payload["frozen_incumbent"]["dm1_margin_min"] == 0.3
 
 
+def test_contract_records_task_granular_fail_close_and_campaign_exclusions() -> None:
+    payload = json.loads(
+        Path("docs/research/hybrid_replication_v2/AUTOMATION_CONTRACT.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert payload["fail_close"] == {
+        "protocol_loss_granularity": "TASK",
+        "task_disposition": "PROTOCOL_EVIDENCE_ONLY_DO_NOT_COUNT",
+        "generation_reset_only_for": [
+            "EXECUTION_IDENTITY_DRIFT",
+            "SYSTEMATIC_DEFECT_AFFECTING_ALL_TASKS",
+        ],
+        "generation_reset_for_single_task_protocol_loss": False,
+    }
+    exclusions = payload["primary_cohort_exclusions"]
+    assert exclusions["campaign_task_keys"] == [
+        "James3014/Nexus-new#1216",
+        "James3014/Nexus-new#1196",
+    ]
+    assert exclusions["campaign_markers"] == [
+        "#1216",
+        "#1196",
+        "NEXUS-HYBRID-REPLICATION",
+        "hybrid replication",
+        "hybrid-replication",
+        "hybrid_replication",
+    ]
+    assert exclusions["disposition"] == "CAMPAIGN_META_WORK_EXCLUDED"
+
+
+def test_contract_campaign_exclusions_match_pipeline_policy_defaults() -> None:
+    from nexus.research.hybrid_replication_pipeline import IssueAdmissionPolicy
+
+    payload = json.loads(
+        Path("docs/research/hybrid_replication_v2/AUTOMATION_CONTRACT.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    defaults = IssueAdmissionPolicy.__dataclass_fields__
+    exclusions = payload["primary_cohort_exclusions"]
+    assert tuple(exclusions["campaign_task_keys"]) == defaults["campaign_task_keys"].default
+    assert tuple(exclusions["campaign_markers"]) == defaults["campaign_markers"].default
+
+
 def test_daemon_is_fail_closed_on_capture_and_admission_gaps() -> None:
     text = Path("scripts/ops/hybrid_replication_daemon.py").read_text(encoding="utf-8")
     assert "return 3" in text
