@@ -162,7 +162,7 @@ the expected confidence interval at the chosen N up front.
 4. Collapse activation state to one manifest and one script (2.5), publish the
    capture workflow once.
 5. Add the DM1-reaching readiness control (2.4).
-6. Re-size the cohort target against observed yield (section 3).
+6. Re-size the cohort target against observed yield (section 3; proposal in section 6).
 
 Only then open V11. The readiness run for V11 under the current design would
 likely pass and then be voided again by the next dispatcher commit.
@@ -182,3 +182,56 @@ likely pass and then be voided again by the next dispatcher commit.
   `git log -- scripts/ops/nexus-agy-dispatch` (5 commits on 2026-10-10).
 - Workload statistics: GitHub issues API, 8 repositories, created_at >= T0,
   446 issues, computed 2026-10-11.
+
+## 6. D6 proposal — cohort size in ground-truth units (Owner decision required)
+
+Status: proposal only. Nothing in code or `AUTOMATION_CONTRACT.json` changes until
+the Owner picks an option.
+
+### Inputs (measured 2026-10-11)
+
+| Input | Value | Source |
+|---|---|---|
+| Issues created, 8 repos, since T0 | 40.5 / day | GitHub issues API |
+| Same, excluding campaign meta-work by title | 31.8 / day (39.7 / day over the last 7 days) | same |
+| Primary admissions observed in earlier generations | ~15–26 / day | V2: 44 tasks in ~3 days; V3: 47 in ~1.8 days |
+| Captured tasks with merged-PR changed-file ground truth | 18 / 100 | comment 6071272894 (lower bound; many were still open) |
+| Non-meta issues still open after up to 11 days | 28.6% | GitHub issues API |
+
+Planning assumption: about 15 primary admissions per day after the D3 exclusion,
+and about 18% of them reaching merged-PR ground truth, so about 2.7 ground-truth
+tasks per day.
+
+### Proposal
+
+1. **Unit.** The primary denominator becomes ground-truth-eligible tasks:
+   admitted primary tasks whose terminal state is `CLOSED_WITH_MERGED_PR` with a
+   non-empty changed-file list. All other admitted tasks stay in the census and in
+   the economics/safety observation, but do not count toward the target.
+2. **Target.** Keep the original strength: at least 56 ground-truth-eligible scored
+   tasks, of which at least 24 are DM1-applicable.
+3. **Stop.** Replace the 100-task natural-mix stop with 350 admitted primary tasks
+   or 35 calendar days after `T_auto`, whichever comes first.
+   `INSUFFICIENT_NATURAL_STRATUM_COVERAGE` is declared only at that stop.
+4. **Checkpoint.** On day 7 after `T_auto`, report the measured admission rate and
+   ground-truth yield. If they project past the stop, the Owner decides whether to
+   extend the window. The checkpoint never changes thresholds, routing, or scoring.
+
+### What each size can prove
+
+With zero observed failures, the 95% upper bound on the failure rate is about 3/N
+(rule of three).
+
+| Option | Ground-truth target | DM1-applicable | Bound on material false-safe rate at 0 failures | Expected collection time |
+|---|---|---|---|---|
+| A, faster | 40 | 24 | 7.5% | ~15 days |
+| B, recommended (original strength) | 56 | 24 | 5.4% | ~21 days |
+| C, stronger | 100 | 40 | 3.0% | ~37 days |
+
+With 24 DM1-applicable tasks and zero wrong confident accepts, the bound on the
+wrong-accept rate is 12.5%. Tightening that bound needs more DM1-applicable tasks,
+not more total tasks.
+
+Option B is recommended because it keeps the claim strength the Issue was written
+for and changes only the unit and the stop. The stop in proposal item 3 is sized
+for B: 350 admissions at 18% yield gives about 63 ground-truth tasks.
