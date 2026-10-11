@@ -42,11 +42,13 @@ def register(nexus_group, REPO_ROOT):
             # 設置一個極低的遞迴限制來模擬攔截
             sys.setrecursionlimit(25) 
             
+            # NOTE: this only exercises Python's own recursion limit. The NexusEngine
+            # instance above is never driven, so no Nexus SafeGuard is tested here.
             try:
                 result = recursive_mission(max_depth)
-                print(f"✅ [StressTest] Mission unexpectedly completed: {result}")
+                print(f"⚠️ [StressTest] SIMULATED: recursion completed without hitting the limit: {result}")
             except RecursionError as e:
-                print(f"✅ [SafeGuard] PROOF: Successfully intercepted A2A loop: {e}")
+                print(f"⚠️ [StressTest] SIMULATED: Python RecursionError raised ({e}); Nexus SafeGuard was not exercised.")
             
         except Exception as e:
             print(f"❌ [StressTest] Unexpected error: {e}")

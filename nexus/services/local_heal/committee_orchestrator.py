@@ -526,6 +526,7 @@ class CommitteeOrchestrator(HealOrchestrator):
                 "lane": receipt.lane,
                 "policy_version": receipt.policy_version,
             },
+            "retry_directive": dict(getattr(committee, "last_retry_directive", {}) or {}),
         }
 
         # --- Mark selected candidate state on snapshot ---
