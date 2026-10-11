@@ -2,15 +2,15 @@
 FROM python:3.12-slim
 
 WORKDIR /app
-COPY nexus-swarm/node/requirements.txt .
+# Build context is nexus_swarm/: docker build -f nexus_swarm/node/Dockerfile nexus_swarm
+COPY node/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY nexus-swarm/node/ .
-COPY nexus-swarm/api/proto/swarm_pb2.py .
-COPY nexus-swarm/api/proto/swarm_pb2_grpc.py .
+# swarm_pb2*.py are vendored inside node/
+COPY node/ .
 
 # 🛡️ Certs will be mounted via K8s Secret or copied here for local test
-# COPY nexus-swarm/certs/ca.crt nexus-swarm/certs/node.crt nexus-swarm/certs/node.key ./certs/
+# COPY certs/ca.crt certs/node.crt certs/node.key ./certs/
 
 RUN useradd -m -s /bin/bash nexus && chown -R nexus:nexus /app
 USER nexus

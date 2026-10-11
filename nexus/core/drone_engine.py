@@ -108,6 +108,9 @@ class TacticalDrone(DroneProtocol):
         self.timeout_sec = timeout_sec
         self.tracelog = []
         self.status = "INIT"
+        self.started_at: Optional[float] = None
+        self.finished_at: Optional[float] = None
+        self.task_intent = ""
         self.local_brain = LocalBonsaiBrain()
 
     def normalize_action(self, raw: str) -> str:
@@ -156,6 +159,8 @@ class TacticalDrone(DroneProtocol):
         """[A] 契約對齊：實施 Sprint 強化邏輯。"""
         logger.info(f"🐝 [Drone:{self.drone_id}] Starting cycle (Hardened-Logic v0.9.22)")
         start_time = time.time()
+        self.started_at = start_time
+        self.task_intent = task_intent
         
         sandbox_dir = self.project_root / ".nexus/tmp" / self.drone_id
         sandbox_dir.mkdir(parents=True, exist_ok=True)
@@ -329,7 +334,28 @@ class TacticalDrone(DroneProtocol):
                 break
         
         self.status = outcome
+        self._finish_mission()
         return {"drone_id": self.drone_id, "outcome": outcome, "belief_final": self.belief_score, "traces": self.tracelog, "metrics": metrics}
+
+    def crystal_path(self) -> Path:
+        return self.project_root / ".nexus" / "reports" / "drones" / f"{self.drone_id}_crystal.json"
+
+    def _finish_mission(self) -> None:
+        """Persist a real (non-synthetic) crystal for the HUD, on success or failure."""
+        self.finished_at = time.time()
+        try:
+            self.save_evolution_crystal(self.crystal_path())
+        except Exception as e:  # reporting must never mask the mission outcome
+            logger.warning(f"Drone crystal write failed: {e}")
+
+    def abort_unavailable(self, reason: str) -> Dict[str, Any]:
+        """Fail closed without running a mission (e.g. LLM endpoint down); still records a FAIL crystal."""
+        now = time.time()
+        self.started_at = self.started_at or now
+        self._log_trace("ERROR", reason)
+        self.status = "FAIL"
+        self._finish_mission()
+        return {"drone_id": self.drone_id, "outcome": "FAIL", "belief_final": self.belief_score, "traces": self.tracelog, "error": reason}
 
     def _log_trace(self, phase: str, message: str):
         self.tracelog.append({"timestamp": time.time(), "phase": phase, "message": message})
@@ -343,6 +369,10 @@ class TacticalDrone(DroneProtocol):
             "semantic_status": semantic_status,
             "runtime_classification": "verified_pass" if semantic_status == "VERIFIED" else "runtime_execution_failed",
             "belief_score": self.belief_score,
+            "synthetic": False,
+            "task": self.task_intent,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
             "tracelog": self.tracelog,
             "artifact_path": str(output_path),
         }
