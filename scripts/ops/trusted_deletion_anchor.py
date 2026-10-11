@@ -997,6 +997,25 @@ def _git(repo: Path, *args: str, binary: bool = False) -> bytes | str:
     return result.stdout if binary else result.stdout.decode().strip()
 
 
+# Repository-local overrides for Git work that can outlive the command that
+# triggered it (detached auto-gc/maintenance, commit-graph writes).  Ephemeral
+# repositories must be quiescent when their temporary directory is removed.
+EPHEMERAL_GIT_CONFIG = (
+    ("gc.auto", "0"),
+    ("gc.autoDetach", "false"),
+    ("maintenance.auto", "false"),
+    ("fetch.writeCommitGraph", "false"),
+)
+
+
+def _init_ephemeral_bare_repo(path: Path) -> None:
+    """Create a bare repository that performs no background Git work."""
+
+    subprocess.run(["git", "init", "--bare", str(path)], check=True, capture_output=True)
+    for key, value in EPHEMERAL_GIT_CONFIG:
+        _git(path, "config", key, value)
+
+
 def _canonical_raw_diff(repo: Path, base_sha: str, head_sha: str) -> bytes:
     """Return a raw diff whose object ids are independent of repository abbrev state."""
 
@@ -1022,7 +1041,7 @@ def _create_git_bundle(
 
     with tempfile.TemporaryDirectory(prefix="trusted-anchor-bundle-") as directory:
         ephemeral = Path(directory) / "repo.git"
-        subprocess.run(["git", "init", "--bare", str(ephemeral)], check=True, capture_output=True)
+        _init_ephemeral_bare_repo(ephemeral)
         _git(ephemeral, "fetch", "--no-tags", str(repo), base_sha, head_sha, workflow_sha)
         for ref, revision in (
             (BASE_REF, base_sha),
@@ -1439,9 +1458,14 @@ def _verifier(args: argparse.Namespace) -> None:
     if identity.get("run_id") != args.expected_run_id:
         raise SystemExit(1)
     git_bundle = (bundle / "git-objects.bundle").read_bytes()
-    with tempfile.TemporaryDirectory(prefix="trusted-anchor-verify-") as directory:
+    # Every verification decision below is made inside the block and raises
+    # before cleanup; a cleanup error must neither fail a PASS nor replace a
+    # failure, so it is ignored as a backstop to the quiescent repository.
+    with tempfile.TemporaryDirectory(
+        prefix="trusted-anchor-verify-", ignore_cleanup_errors=True
+    ) as directory:
         git_repo = Path(directory) / "repo.git"
-        subprocess.run(["git", "init", "--bare", str(git_repo)], check=True, capture_output=True)
+        _init_ephemeral_bare_repo(git_repo)
         subprocess.run(
             ["git", "bundle", "verify", str(bundle / "git-objects.bundle")],
             cwd=git_repo,
