@@ -2,8 +2,8 @@
 
 The runtime package is the implementation owner for execution coordination and
 state symbols exposed here. Nexus-new remains the current Planner route/
-capability authority and therefore injects the complete planner-domain family
-explicitly. Resolution is eager so a missing dependency fails at startup instead
+capability authority; the planner-domain modules under ``nexus.*`` are aliases
+of the runtime copies, so only the explicit shared-playbook root is injected. Resolution is eager so a missing dependency fails at startup instead
 of silently selecting a legacy implementation.
 """
 
@@ -15,6 +15,7 @@ from typing import Any
 from nexus_runtime import build_runtime_exports
 
 from nexus.contracts.hybrid_route import hybrid_route_decision_from_payload
+from nexus.core.repo_root import REPO_ROOT
 from nexus.services.capability_registry import build_real_executor_invoker
 from nexus.services.local_heal.capability_adapter import advisory_route_from_local_response
 from nexus.services.local_heal.memory_retrieval_adapter import (
@@ -56,28 +57,15 @@ _MEMORY_INVOKER = build_real_executor_invoker("memory")
 
 
 def build_host_runtime_exports():
-    """Build Runtime with one complete Nexus-new-owned planner-domain binding.
+    """Build Runtime with the packaged planner family plus host-owned inputs.
 
-    The six planner-domain symbols are intentionally injected as one family.
-    Runtime executes the resulting plan but does not become a second route/
-    capability authority merely because it hosts execution coordination.
+    The planner-domain modules under ``nexus.*`` are aliases of the runtime
+    modules (D2), so no planner factory needs injecting; the host supplies the
+    explicit shared-playbook root, policy path and capability adapters.
     """
-    from nexus.contracts.canonical_execution import CanonicalPlanningBundle, CanonicalTaskContext
-    from nexus.engine.canonical_execution import (
-        plan_canonical_task_bundle,
-        replan_canonical_task_bundle,
-    )
-    from nexus.engine.capability_contracts import ExecutionReplanAuthorization
-    from nexus.engine.capability_planner import CapabilityPlanner
-
     return build_runtime_exports(
         online_context_projection=False,
-        planner_factory=CapabilityPlanner,
-        canonical_planning_bundle_factory=CanonicalPlanningBundle,
-        canonical_task_context_factory=CanonicalTaskContext,
-        execution_replan_authorization_factory=ExecutionReplanAuthorization,
-        plan_canonical_task_bundle_factory=plan_canonical_task_bundle,
-        replan_canonical_task_bundle_factory=replan_canonical_task_bundle,
+        shared_playbook_root=REPO_ROOT,
         policy_path=Path(__file__).resolve().parents[1] / "config" / "model_workforce.yaml",
         advisory_route_from_local_response=advisory_route_from_local_response,
         hybrid_route_decision_from_payload=hybrid_route_decision_from_payload,

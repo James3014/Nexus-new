@@ -23,7 +23,11 @@ def test_runtime_compatibility_binds_complete_nexus_planner_family():
 
     assert runtime_compat.PLANNER_AUTHORITY_OWNER == "James3014/Nexus-new"
     assert len(runtime_compat.PLANNER_BINDING_SURFACES) == 6
-    assert runtime_compat._RUNTIME.CapabilityPlanner is CapabilityPlanner
+    # Runtime wraps the (aliased) packaged planner so it carries the explicit shared_playbook root.
+    bound = runtime_compat._RUNTIME.CapabilityPlanner
+    assert issubclass(bound, CapabilityPlanner)
+    assert bound.__qualname__ == CapabilityPlanner.__qualname__
+    assert bound()._shared_playbook_root == runtime_compat.REPO_ROOT
     assert runtime_compat._RUNTIME.CanonicalPlanningBundle is CanonicalPlanningBundle
     assert runtime_compat._RUNTIME.CanonicalTaskContext is CanonicalTaskContext
     assert runtime_compat._RUNTIME.ExecutionReplanAuthorization is ExecutionReplanAuthorization
