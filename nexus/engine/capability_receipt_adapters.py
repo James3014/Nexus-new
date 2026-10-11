@@ -150,6 +150,23 @@ def selected_failure_reason(*, selected: bool, invoked: bool, evidence_refs: lis
     return ""
 
 
+SYNTHETIC_BENCH_RECEIPT = "synthetic_bench_receipt"
+
+
+def _synthetic_bench_receipt(name: str) -> CapabilityReceipt:
+    """A local-MSA bench receipt that no runner produced is never an invocation."""
+    return merge_capability_receipt(
+        name=name,
+        selected=True,
+        invoked=False,
+        evidence_refs=[],
+        gate_passed=False,
+        outcome_contributed=False,
+        executor_id=name,
+        failure_reason=SYNTHETIC_BENCH_RECEIPT,
+    )
+
+
 def _as_bool(value: Any) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "pass", "passed", "verified"}
@@ -784,6 +801,8 @@ class SwarmReceiptAdapter:
 
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
         report = payload.get("swarm_report") if isinstance(payload.get("swarm_report"), dict) else {}
+        if report.get("synthetic") is True:
+            return _synthetic_bench_receipt(self.name)
         evidence_count = as_int(report.get("evidence_count", payload.get("swarm_evidence_count", 0)))
         invoked = bool(payload.get("swarm_used", False))
         refs = [str(item) for item in report.get("evidence_refs", []) or [] if str(item).strip()]
@@ -964,6 +983,8 @@ class DroneReceiptAdapter:
 
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
         report = payload.get("drone_report") if isinstance(payload.get("drone_report"), dict) else {}
+        if report.get("synthetic") is True:
+            return _synthetic_bench_receipt(self.name)
         invoked_count = as_int(report.get("artifact_count", payload.get("drone_invoked_count", 0)))
         invoked = bool(payload.get("drone_used", False) or invoked_count > 0)
         refs = [f"artifact:{item}" for item in report.get("artifact_paths", []) or [] if str(item).strip()]
@@ -1000,6 +1021,8 @@ class NightshiftReceiptAdapter:
 
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
         report = payload.get("nightshift_report") if isinstance(payload.get("nightshift_report"), dict) else {}
+        if report.get("synthetic") is True:
+            return _synthetic_bench_receipt(self.name)
         invoked = bool(report.get("invoked", payload.get("nightshift_invoked", False)))
         recovered = bool(report.get("recovered", payload.get("nightshift_recovered", False)))
         report_path = str(report.get("report_path") or payload.get("nightshift_report_path") or "").strip()

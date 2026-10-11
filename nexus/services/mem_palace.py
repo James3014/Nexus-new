@@ -55,22 +55,44 @@ class MemPalace:
         """🔄 SYNC: Sync memory with Arweave/Registry and refresh blacklist."""
         blacklist_path = self.project_root / "nexus/config/ethical_blacklist.json"
         blacklist = []
+        blacklist_source = "missing"
         if blacklist_path.exists():
             try:
                 with open(blacklist_path, 'r') as f:
                     blacklist = json.load(f).get("patterns", [])
+                blacklist_source = "file"
             except Exception as e:
+                blacklist_source = "unreadable"
                 logger.error(f"❌ [MemPalace] Failed to load blacklist: {e}")
+        else:
+            logger.warning("⚠️ [MemPalace] Ethical blacklist file missing: %s", blacklist_path)
 
         self.cache.delete("nexus:ethical_blacklist")
         if blacklist:
             self.cache.sadd("nexus:ethical_blacklist", *blacklist)
-        return {"status": "SUCCESS", "synced_patterns": len(blacklist)}
+        self._blacklist_synced = True
+        return {
+            "status": "SUCCESS",
+            "synced_patterns": len(blacklist),
+            "blacklist_source": blacklist_source,
+        }
+
+    def _active_blacklist(self) -> set:
+        """Blacklist patterns, loading them from disk on first use in this process.
+
+        The cache is in-process only, so verifying without a prior sync() would
+        otherwise check against an empty blacklist even when the file exists.
+        """
+        patterns = self.cache.smembers("nexus:ethical_blacklist")
+        if not patterns and not getattr(self, "_blacklist_synced", False):
+            self.sync()
+            patterns = self.cache.smembers("nexus:ethical_blacklist")
+        return patterns
 
     def verify(self, candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """🛡️ VERIFY: Filter candidates against ethical blacklist."""
         if not candidates: return []
-        blacklist = self.cache.smembers("nexus:ethical_blacklist")
+        blacklist = self._active_blacklist()
         clean_candidates = []
         for cand in candidates:
             content = str(cand)
@@ -80,7 +102,7 @@ class MemPalace:
 
     def verify_context(self, context: str) -> Dict[str, Any]:
         """[TD-2] Quick contextual check against blacklist."""
-        blacklist = self.cache.smembers("nexus:ethical_blacklist")
+        blacklist = self._active_blacklist()
         for pattern in blacklist:
             if pattern in context:
                 return {"status": "BLOCKED", "reason": pattern}

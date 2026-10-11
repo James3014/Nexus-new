@@ -57,6 +57,41 @@ class BenchmarkRunner:
         logger.info(f"✅ [Benchmark] Production Truth generated at: {report_path}")
         return report
 
+    def generate_effort_roi_report(self) -> Dict[str, Dict[str, Any]]:
+        """Success rate per effort level from recorded skill outcome events.
+
+        Outcome events carry no duration, so avg_duration_sec is None unless an
+        event provides duration_sec; it is never estimated.
+        """
+        from nexus.core.skill_outcomes import EVENTS_REL_PATH
+
+        events_path = self.project_root / EVENTS_REL_PATH
+        buckets: Dict[str, Dict[str, Any]] = {}
+        if not events_path.exists():
+            return {}
+        for line in events_path.read_text(encoding="utf-8").splitlines():
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            level = str(event.get("effort_level") or "unknown")
+            bucket = buckets.setdefault(level, {"count": 0, "passed": 0, "durations": []})
+            bucket["count"] += 1
+            bucket["passed"] += 1 if event.get("pass") is True else 0
+            duration = event.get("duration_sec")
+            if isinstance(duration, (int, float)) and not isinstance(duration, bool):
+                bucket["durations"].append(float(duration))
+        return {
+            level: {
+                "success_rate": b["passed"] / b["count"],
+                "avg_duration_sec": (sum(b["durations"]) / len(b["durations"])) if b["durations"] else None,
+                "count": b["count"],
+            }
+            for level, b in sorted(buckets.items())
+        }
+
     def get_latest_report(self) -> Optional[Dict[str, Any]]:
         """檢索最新的度量報表"""
         reports = sorted(list(self.runs_dir.glob("benchmark_report_*.json")), reverse=True)

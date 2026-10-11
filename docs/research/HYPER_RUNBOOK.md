@@ -18,13 +18,14 @@ uv run scripts/engine/nexus_cli.py nexus research:auto-flow \
 
 ### 2. 困難併發問題 (Gladiator Mode)
 ```bash
-uv run scripts/engine/nexus_cli.py nexus research:sprint \
-  --task "Fix deadlock between DB and Cache" \
+uv run scripts/engine/nexus_cli.py nexus research:auto-flow \
+  --task-desc "Fix deadlock between DB and Cache" \
   --target-file "nexus/db/sync.py" \
   --test-file "tests/test_deadlock.py" \
-  --candidate-count 3 \
-  --max-rounds 3
+  --task-type bug \
+  --candidate-count 3
 ```
+`research:sprint` 已不是 CLI 命令；Hyper/Sprint 由 `research:auto-flow` 依路由選入（`hyper_sprint`）。
 
 ## 🚨 故障處理 (Troubleshooting)
 

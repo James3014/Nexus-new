@@ -85,6 +85,9 @@ def capability_evidence(
     }
 
 
+# Receipts produced below are synthesized from task text plus a verified artifact;
+# no swarm, drone or nightshift runner executes. They carry "synthetic": True so
+# receipt adapters and benchmark metrics never count them as real invocations.
 def augment_local_msa_bench_evidence(
     repo_root: Path,
     *,
@@ -127,6 +130,7 @@ def augment_local_msa_bench_evidence(
         updated["swarm_report"] = {
             "schema_version": "nexus_swarm_receipt_v1",
             "source": "local_msa_bench_executor",
+            "synthetic": True,
             "evidence_count": 2,
             "consensus": "pass",
             "evidence_refs": [
@@ -142,6 +146,7 @@ def augment_local_msa_bench_evidence(
         artifact = {
             "schema_version": "nexus_drone_artifact_v1",
             "owner": "local_msa_bench_executor",
+            "synthetic": True,
             "task_id": task_id or slug,
             "artifact_path": str(artifact_path),
             "verified": True,
@@ -153,6 +158,7 @@ def augment_local_msa_bench_evidence(
         updated["drone_report"] = {
             "schema_version": "nexus_drone_receipt_v1",
             "source": "local_msa_bench_executor",
+            "synthetic": True,
             "artifact_paths": [str(artifact_path)],
             "artifact_count": 1,
         }
@@ -164,6 +170,7 @@ def augment_local_msa_bench_evidence(
         updated["nightshift_report"] = {
             "schema_version": "nexus_nightshift_receipt_v1",
             "source": "local_msa_bench_executor",
+            "synthetic": True,
             "recommended": True,
             "invoked": True,
             "recovered": True,

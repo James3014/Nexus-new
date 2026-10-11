@@ -85,3 +85,41 @@ def test_mission_cli_workflow(tmp_path: Path) -> None:
             res = runner.invoke(nexus, ["nexus", "mission", "resume"])
             assert res.exit_code == 0
             assert "Resuming mission" in res.output
+
+
+def _start_with_fake_run(tmp_path: Path, mission: NexusMission):
+    import scripts.engine.nexus_cli as cli_mod
+
+    mission.persist(tmp_path)
+    calls = []
+
+    def _fake_run(cmd, *args, **kwargs):
+        calls.append(cmd)
+        return MagicMock(returncode=1)
+
+    with patch.object(cli_mod, "repo_root", tmp_path), \
+         patch.object(cli_mod.subprocess, "run", _fake_run), \
+         patch.object(NexusMission, "run_fingerprint_preflight", return_value=True):
+        result = CliRunner().invoke(nexus, ["nexus", "mission", "start"])
+    return result, calls
+
+
+def test_mission_start_passes_objective_to_run(tmp_path: Path) -> None:
+    mission = NexusMission(mission_id="MSN-OBJ", objective="Fix deadlock in transfer")
+
+    result, calls = _start_with_fake_run(tmp_path, mission)
+
+    run_cmds = [c for c in calls if "run" in c]
+    assert run_cmds, result.output
+    assert run_cmds[0][-1] == "Fix deadlock in transfer"
+    assert "MSN-OBJ" not in run_cmds[0]
+
+
+def test_mission_start_refuses_completed_mission(tmp_path: Path) -> None:
+    mission = NexusMission(mission_id="MSN-DONE", objective="x", status=MissionStatus.COMPLETED)
+
+    result, calls = _start_with_fake_run(tmp_path, mission)
+
+    assert result.exit_code == 1
+    assert "is completed" in result.output
+    assert calls == []
