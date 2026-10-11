@@ -267,3 +267,4 @@
 | tests/core/test_constraints_source_propagation.py | tests/core/test_constraints_source_propagation.py | active | medium | test_contract |
 | tests/core/test_selector_constraints_source_trace.py | tests/core/test_selector_constraints_source_trace.py | active | medium | test_contract |
 | tests/services/test_forecast_gate_mainchain_e2e.py | tests/services/test_forecast_gate_mainchain_e2e.py | active | medium | test_contract |
+| tests/core/test_mempalace_belief_writer_path.py | tests/core/test_mempalace_belief_writer_path.py | active | medium | test_contract |
