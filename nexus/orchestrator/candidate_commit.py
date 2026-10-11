@@ -106,6 +106,14 @@ class CandidateCommitter:
     ) -> PromotionApprovalPacket:
         if not receipt.verified or not receipt.candidate_commit_allowed:
             raise RuntimeError("Verified Candidate Receipt is required before candidate commit")
+        if (
+            receipt.task_id != contract.task_id
+            or receipt.contract_hash != contract.contract_hash
+            or receipt.lease_id != lease.lease_id
+        ):
+            raise RuntimeError("verified receipt identity does not bind to this contract and lease")
+        if contract.verifier_commands and not receipt.verifier_evidence:
+            raise RuntimeError("verified receipt carries no verifier evidence for this contract")
         if receipt.core_provenance_required:
             if (
                 receipt.core_verification_status != "VERIFIED"

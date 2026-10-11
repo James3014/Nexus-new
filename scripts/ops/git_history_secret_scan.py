@@ -27,6 +27,7 @@ PROVIDER_PATTERNS: tuple[tuple[str, re.Pattern[bytes]], ...] = (
         "github_token",
         re.compile(rb"(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,})"),
     ),
+    ("anthropic_api_key", re.compile(rb"sk-ant-[A-Za-z0-9_-]{20,}")),
     (
         "openai_api_key",
         re.compile(rb"(?:sk-proj-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{20,})"),

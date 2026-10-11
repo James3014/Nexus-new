@@ -21,7 +21,9 @@ def test_local_heal_receipt_adapter_legacy_payload() -> None:
     assert receipt.invoked is True
     assert receipt.gate_passed is True
     assert receipt.evidence_present is True
-    assert receipt.outcome_contributed is True
+    # Payload booleans carry no verifier artifact or source hash (#453, #1757).
+    assert receipt.outcome_contributed is False
+    assert receipt.public_claim_safe is False
     assert receipt.telemetries["reasoning_mode"] == "INTUITIVE"
     assert "hybrid_route_mode" not in receipt.telemetries
 

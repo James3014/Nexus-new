@@ -8,9 +8,71 @@ import json
 import re
 import subprocess
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
 ENFORCEMENT_START_PR_NUMBER = 1061
+# Pre-enforcement compatibility is pinned to the exact head each still-open
+# legacy PR had at cut-over (#1749). A new head pushed to an old PR number is
+# enforced like any other PR instead of inheriting the exemption.
+LEGACY_PR_HEAD_ALLOWLIST: Mapping[int, str] = MappingProxyType({
+    113: "dd41f999c738a2928ad6f7297b48baa28e6903f7",
+    242: "631179d175f1f656c7b957eb7d872e30ce057d84",
+    271: "61765f15e9f768cdfeeca18ecc9e97c19efd2e42",
+    296: "7d973c4efb76e5ff4062c2d31fbdb3372872cb3b",
+    335: "0f9583553c5d7d1d3fb75b61943e3b0fee34dcee",
+    353: "b48b04885e67b5ab31e9539537ea0082f87408da",
+    399: "eb843222b3800781088c7b566e077ca5cc18e89e",
+    402: "f37242f8e58f09826fa6b0e817b6e97b6a5bf5f1",
+    407: "d512057d54f4d451ba62da07da4173f90e9ad966",
+    410: "c901877cacb8f12998fee80983c59f0a1cad42fd",
+    421: "a51f16ee0a1d7225e2a2c1f0850dea646c134fa3",
+    425: "055889065f2f5d4e2bb8c6521a11d1bb21a24006",
+    429: "cdb0491e52b6ee54a6afe985eb9e1418cf1f7d9d",
+    486: "448db7e4a32b33d9b5f1d23cd7063204011f1800",
+    496: "7c7160ce252b7078acfeb5d023de31ec023d658c",
+    511: "01147758578e2fc47ee25c1ca1c5a834aab4ed8f",
+    519: "5b4b53ffece35512de06221c88d76d1420acbb5b",
+    521: "ef59ea5a935faf486cfd5de3d5445cc92ab11632",
+    529: "17f0ad064aceca5cd128904b46d921a3345a3cce",
+    534: "d936bd41c249e1efe712e0691dd207ec2cef34f1",
+    537: "4b6fa2bfd8aa89dd4e2eaafe5c23a8b38ac7d0a3",
+    551: "bdd83c080e96fd6c4816ecda12f277a1230c80bc",
+    565: "67b897e6f0de435d664f2c4a1fcda19c5e411d44",
+    591: "110d910b7b6cb083825804510e169aa5ac41c375",
+    606: "71f4298787b248b99b4b07cc6b8a96384472659c",
+    616: "878e752cdc7b0f6c89373c2e90b4cf660734db5c",
+    620: "9c19bb6ba697c3de2fb3fcc6d4fd3e02dad37af7",
+    622: "08f762fd59d211855a4c276fbbd0c61f415023d7",
+    623: "34625010e07f66ee944f92fd70660dc809ce6dc8",
+    627: "1b652c251ceb9f45db2d41a67f7ce608b83cf6c3",
+    629: "53a99d83a26b32eabcc94e8206585c000b59f83a",
+    630: "785b865816a51ed2e39ebd101fe06e995410c77a",
+    633: "a985b3158260c0cff42eebe75c651a2fb182eba5",
+    634: "53306681d41fffbbbc483fc5247814ba97ec0683",
+    635: "362a9a85ed4576c10df40da47ddf6678305bf7a4",
+    654: "ab33952caebb2ee9ba51bb576746f13f468feabf",
+    677: "12a97a9502965c7cae6778f3a7a896de67cde6ac",
+    687: "abf34007f856a2ff11fdd037901e7f87253f7ce9",
+    689: "c66b400137f10dbfddc3c5068497ec854eccea1b",
+    791: "d2bd29073c489ae3b1676bf82c8d9ca0d405ce99",
+    794: "931d1969da39433f2123ccc61591461e783b5cb3",
+    795: "e47392ebf82a24e2292dda3a3acd1edb37823987",
+    817: "d79afac8548405395ecf0b05a3158e0d3b617264",
+    818: "1c9c19dc4e8b42dce7935021798339311157187b",
+    847: "4ad900be248ede97fd4569853c714482d80b39c9",
+    904: "2fe2d6e7aa88304f30c7ec4babc5e6c53447055d",
+    961: "f1b147063c6575a2a6ea3fed7e0d94a5ada769be",
+    1017: "c7ac9d99c8b3bea22fa6ad3968be1fe815a03138",
+})
+_TERMINAL_CARD_STATUS_PREFIXES = (
+    "SUPERSEDED",
+    "COMPLETED",
+    "CLOSED",
+    "RETIRED",
+    "CANCELLED",
+    "ABANDONED",
+)
 BINDING_SCHEMA = "nexus.merge_lane_binding.v1"
 REBIND_SCHEMA = "nexus.owner_execution_lane_rebind.v1"
 DIRECT_LANES = {"DIRECT_CANONICAL", "DIRECT_DELEGATED"}
@@ -359,6 +421,57 @@ def _git_show(repo_root: Path, revision: str, path: str) -> bytes:
     return proc.stdout
 
 
+def _card_references_issue(path: str, text: str, issue_number: int) -> bool:
+    number = str(issue_number)
+    if re.search(rf"(?:^|/)(?:github-)?issue-{number}(?:[-/.]|$)", path):
+        return True
+    if re.search(rf"(?m)^task_id:\s*`?(?:github-)?issue-{number}(?:[-_`]|\s*$)", text):
+        return True
+    for match in re.finditer(
+        r"(?m)^(?:issue|issue_number|github_issue|source_issue)\s*:\s*(.+)$", text
+    ):
+        if re.search(rf"(?:^|[^0-9])#?{number}(?:[^0-9]|$)", match.group(1).replace("`", "")):
+            return True
+    return False
+
+
+def _active_governed_cards_for_issues(
+    repo_root: Path, base_sha: str, issue_numbers: Sequence[int]
+) -> list[str]:
+    """Return tracked GOVERNED Task Cards at ``base_sha`` that are bound to the Issues."""
+    if not issue_numbers:
+        return []
+    proc = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo_root),
+            "grep",
+            "-l",
+            "-E",
+            r"^execution_lane:[[:space:]]*`?GOVERNED`?[[:space:]]*$",
+            base_sha,
+            "--",
+            "tasks",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode not in (0, 1):
+        raise LaneBindingError("GOVERNED_CARD_LOOKUP_FAILED")
+    bound: list[str] = []
+    for line in proc.stdout.splitlines():
+        path = line.split(":", 1)[1] if line.startswith(f"{base_sha}:") else line
+        text = _git_show(repo_root, base_sha, path).decode("utf-8", errors="replace")
+        status = re.search(r"(?m)^status:\s*`?([A-Za-z_]+)", text)
+        if status and status.group(1).upper().startswith(_TERMINAL_CARD_STATUS_PREFIXES):
+            continue
+        if any(_card_references_issue(path, text, number) for number in issue_numbers):
+            bound.append(path)
+    return sorted(bound)
+
+
 def _candidate_commit_messages(repo_root: Path, *, base_sha: str, head_sha: str) -> str:
     proc = subprocess.run(
         [
@@ -474,6 +587,7 @@ def validate_event(
     *,
     repo_root: Path,
     enforcement_start_pr_number: int = ENFORCEMENT_START_PR_NUMBER,
+    legacy_pr_heads: Mapping[int, str] = LEGACY_PR_HEAD_ALLOWLIST,
 ) -> dict[str, Any]:
     root = _exact_dict(event, "EVENT")
     if root.get("event_name") != "pull_request_target":
@@ -487,7 +601,7 @@ def validate_event(
     base_sha = _sha(base.get("sha"), "BASE_SHA", size=40)
     head_sha = _sha(head.get("sha"), "HEAD_SHA", size=40)
 
-    if pr_number < enforcement_start_pr_number:
+    if pr_number < enforcement_start_pr_number and legacy_pr_heads.get(pr_number) == head_sha:
         return {
             "schema": "nexus.trusted_merge_lane_gate_result.v1",
             "status": "PASS",
@@ -564,6 +678,15 @@ def validate_event(
         ):
             if binding[field] is not None:
                 raise LaneBindingError("OWNER_INLINE_TRACKED_FIELDS_FORBIDDEN")
+        closing_issues = [
+            item["issue_number"]
+            for item in intent_result.get("intents", [])
+            if item.get("on_merge") == ON_MERGE_CLOSE
+        ]
+        # An Owner-inline DIRECT binding cannot silently replace a GOVERNED
+        # Task Card that already owns the Issue this PR closes.
+        if _active_governed_cards_for_issues(repo_root, base_sha, closing_issues):
+            raise LaneBindingError("OWNER_INLINE_CANNOT_REPLACE_GOVERNED_TASK_CARD")
         return {
             "schema": "nexus.trusted_merge_lane_gate_result.v1",
             "status": "PASS",
@@ -642,6 +765,11 @@ def validate_event(
         requested_lane=lane,
         owner_id=owner_id,
     )
+    sender = root.get("sender")
+    if not isinstance(sender, Mapping) or sender.get("login") != owner_id:
+        # The rebind record is an unkeyed self-hash; only the Owner acting on
+        # the PR event can make it an Owner decision.
+        raise LaneBindingError("OWNER_LANE_REBIND_SENDER_NOT_OWNER")
     return {
         "schema": "nexus.trusted_merge_lane_gate_result.v1",
         "status": "PASS",

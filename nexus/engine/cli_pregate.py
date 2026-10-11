@@ -1,11 +1,15 @@
+"""CLI Pre-Gate：在 A 階段之前，用 exit code 做一次機械性驗證"""
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-"""CLI Pre-Gate：在 A 階段之前，用 exit code 做一次機械性驗證"""
-import subprocess
 import logging
 import os
+import re
+import shlex
+import shutil
+import subprocess
 import sys
 import json
+from types import SimpleNamespace
 from nexus.engine.target_env_context import TargetEnvContext
 
 logger = logging.getLogger(__name__)
@@ -25,6 +29,54 @@ def _get_venv_python(project_root: Path) -> str:
         return str(python_bin)
     
     return sys.executable
+
+_PREGATE_OPERATORS = frozenset({";", "&&", "||", "|", "<", ">", "&", ">>", "2>", "&>"})
+_PREGATE_SHELL_RE = re.compile(
+    r"(sh|bash|zsh|dash|ash|ksh|csh|tcsh|fish|busybox|env|xargs|nohup|setsid|timeout|command|exec)(\.exe)?"
+)
+_PREGATE_PYTHON_RE = re.compile(r"python[0-9.]*(\.exe)?")
+_PREGATE_ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_PREGATE_ENV_ALLOWLIST = frozenset({"LANG", "LC_ALL", "PATH", "PYTHONPATH", "TMPDIR", "VIRTUAL_ENV"})
+
+
+def _build_pregate_request(cmd: str, cwd: Path, env_overlay: dict, timeout: float = 60.0):
+    """Tokenize ``cmd`` WITHOUT a shell and build a governed CliWorkerRequest.
+
+    The request goes through the same no-shell launcher, forbidden-subcommand
+    denylist, GitHub credential stripping and isolated HOME as every other
+    verifier/worker spawn.  Raises ValueError when the command needs a shell.
+    """
+    from nexus.executors.cli_worker import CliWorkerRequest
+
+    tokens = list(shlex.split(cmd))
+    # ``2>&1`` is the only redirection used by generated commands; stderr is
+    # captured separately by the launcher, so it is dropped rather than shelled.
+    tokens = [token for token in tokens if token != "2>&1"]
+    if not tokens:
+        raise ValueError("empty pregate command")
+    if any(_PREGATE_ENV_ASSIGNMENT_RE.match(token) for token in tokens[:1]):
+        raise ValueError("environment assignments are not allowed in pregate commands")
+    executable, args = tokens[0], tokens[1:]
+    name = Path(executable).name.lower()
+    if _PREGATE_SHELL_RE.fullmatch(name):
+        raise ValueError("shell and shell-forwarding executables are not allowed")
+    python_code = _PREGATE_PYTHON_RE.fullmatch(name) is not None
+    for index, token in enumerate(args):
+        if token in _PREGATE_OPERATORS:
+            raise ValueError("shell operators are not allowed in pregate commands")
+        exempt = python_code and index > 0 and args[index - 1] == "-c"
+        if "\x00" in token or (any(ch in token for ch in ";&|<>()$`") and not exempt):
+            raise ValueError("shell metacharacters are not allowed in pregate arguments")
+    path = env_overlay.get("PATH")
+    resolved = shutil.which(executable, path=path) if path else None
+    return CliWorkerRequest(
+        executable=resolved or executable,
+        argv=tuple(args),
+        cwd=str(cwd),
+        timeout_seconds=float(timeout),
+        env=env_overlay,
+    )
+
 
 def run_cli_pregate(
     project_root: Path | str | TargetEnvContext,
@@ -63,7 +115,7 @@ def run_cli_pregate(
         sanitized_commands.append(cmd)
     commands = sanitized_commands
     
-    env = os.environ.copy()
+    env = {key: value for key, value in os.environ.items() if key in _PREGATE_ENV_ALLOWLIST}
     if target_venv:
         # Mac/Linux
         venv_bin = target_venv / "bin"
@@ -83,16 +135,39 @@ def run_cli_pregate(
     for cmd in commands:
         try:
             logger.info("🧪 [Pre-Gate] 執行驗證: %s", cmd)
-            proc = subprocess.run(
-                cmd,
-                shell=True,
-                cwd=target_repo_root,
-                capture_output=True,
-                text=True,
-                timeout=timeout_per_cmd,
-                env=env,
+            from nexus.executors.cli_worker import CliWorkerStatus, run_cli_worker
+
+            try:
+                request = _build_pregate_request(cmd, target_repo_root, env, timeout_per_cmd)
+            except ValueError as exc:
+                results.append({
+                    "cmd": cmd,
+                    "exit_code": -1,
+                    "passed": False,
+                    "stderr_tail": f"pregate command rejected: {exc}",
+                })
+                all_passed = False
+                logger.warning("❌ CLI Pre-Gate REJECTED: %s (%s)", cmd, exc)
+                continue
+            worker = run_cli_worker(request)
+            if worker.status is CliWorkerStatus.TIMED_OUT:
+                raise subprocess.TimeoutExpired(cmd, timeout_per_cmd)
+            if worker.status is CliWorkerStatus.START_FAILED or worker.exit_code is None:
+                results.append({
+                    "cmd": cmd,
+                    "exit_code": -1,
+                    "passed": False,
+                    "stderr_tail": worker.stderr.decode("utf-8", errors="replace")[-500:],
+                })
+                all_passed = False
+                continue
+
+            proc = SimpleNamespace(
+                returncode=worker.exit_code,
+                stdout=worker.stdout.decode("utf-8", errors="replace"),
+                stderr=worker.stderr.decode("utf-8", errors="replace"),
             )
-            
+
             # ⚖️ 治理門檻調整 (Adaptive Gating):
             # rc == 2 (Usage error/Path not found in Sandbox) 不再視為 Soft Fail (passed)。
             is_env_error = (proc.returncode == 2)

@@ -434,3 +434,28 @@ def test_candidate_commit_fails_closed_when_git_home_unresolvable(tmp_path, monk
 
     with pytest.raises(RuntimeError, match="Failed to resolve safe Git HOME"):
         CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"task_id": "other-task"},
+        {"contract_hash": "0" * 64},
+        {"lease_id": "other-lease"},
+    ],
+)
+def test_candidate_commit_rejects_receipt_minted_for_another_identity(tmp_path, params):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    foreign = replace(verified, **params)
+
+    with pytest.raises(RuntimeError, match="identity does not bind"):
+        CandidateCommitter(manager).create_candidate_commit(contract, lease, foreign)
+
+
+def test_candidate_commit_rejects_receipt_without_verifier_evidence(tmp_path):
+    contract, lease, verified, manager = _scenario(tmp_path)
+    assert contract.verifier_commands
+    empty = replace(verified, verifier_evidence=())
+
+    with pytest.raises(RuntimeError, match="no verifier evidence"):
+        CandidateCommitter(manager).create_candidate_commit(contract, lease, empty)

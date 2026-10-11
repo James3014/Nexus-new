@@ -1422,7 +1422,7 @@ class LocalHealReceiptAdapter:
                 "hybrid_route_fallback_block_reason": str(fallback_block_reason),
             }
             
-            outcome_contributed = bool(gate_passed and claim_verified)
+            outcome_contributed = _verified_outcome_contributed(gate_passed, claim_verified, payload)
             
             return merge_capability_receipt(
                 name=self.name,
@@ -1460,7 +1460,7 @@ class LocalHealReceiptAdapter:
                 invoked=invoked,
                 evidence_refs=refs,
                 gate_passed=gate_passed,
-                outcome_contributed=bool(gate_passed and claim_verified),
+                outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
                 executor_id="local_heal_battlesuit",
                 telemetries=telemetries,
             )
@@ -1472,18 +1472,21 @@ class LocalModelExecutorReceiptAdapter:
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
         rc = payload.get("local_executor_receipt")
         if rc is not None:
-            # If dict, reconstruct CapabilityReceipt
+            # A caller-supplied receipt is a claim, not verifier authority: rebuild it
+            # through the semantic invariants and the #453 contribution gate.
             if isinstance(rc, dict):
-                return CapabilityReceipt(
-                    name=rc.get("name", self.name),
+                gate_passed = bool(rc.get("gate_passed", False))
+                return merge_capability_receipt(
+                    name=self.name,
                     selected=bool(rc.get("selected", True)),
                     invoked=bool(rc.get("invoked", False)),
-                    evidence_present=bool(rc.get("evidence_present", False)),
-                    gate_passed=bool(rc.get("gate_passed", False)),
-                    outcome_contributed=bool(rc.get("outcome_contributed", False)),
+                    evidence_refs=list(rc.get("evidence_refs", []) or []),
+                    gate_passed=gate_passed,
+                    outcome_contributed=_verified_outcome_contributed(
+                        gate_passed, claim_verified, payload
+                    ),
                     selection_source=rc.get("selection_source", "planner"),
                     executor_id=rc.get("executor_id", self.name),
-                    evidence_refs=tuple(rc.get("evidence_refs", [])),
                     failure_reason=rc.get("failure_reason", ""),
                     telemetries=rc.get("telemetries", {}),
                 )

@@ -48,3 +48,28 @@ def test_auto_detect_node(tmp_path):
     cmds = _auto_detect_verify_commands(tmp_path)
     assert len(cmds) == 1
     assert "npm test" in cmds[0]
+
+
+def test_pregate_runs_without_shell_and_without_github_credentials(tmp_path, monkeypatch):
+    monkeypatch.setenv("GH_TOKEN", "ghp_OWNERTOKEN_must_not_leak")
+    code = "import os;print('GH_TOKEN' in os.environ)"
+    all_passed, results = run_cli_pregate(tmp_path, [f"python3 -c \"{code}\""])
+    assert all_passed is True
+    assert results[0]["stdout_tail"].strip() == "False"
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        'echo a; git push origin HEAD:main',
+        "echo a && touch PWNED",
+        "sh -c 'touch PWNED'",
+        "git -C . push origin HEAD:main",
+        "echo $(touch PWNED)",
+    ],
+)
+def test_pregate_rejects_shell_constructs_and_forbidden_commands(tmp_path, cmd):
+    all_passed, results = run_cli_pregate(tmp_path, [cmd])
+    assert all_passed is False
+    assert results[0]["passed"] is False
+    assert not (tmp_path / "PWNED").exists()

@@ -2019,6 +2019,45 @@ def test_assist_submit_is_durable_and_task_wait_reads_result(monkeypatch, tmp_pa
     assert result["artifacts"]["stdout"]
 
 
+@pytest.mark.parametrize("patch_value", ["", None, "I cannot help with that."])
+def test_assist_degenerate_patch_fails_closed_with_retry_required(monkeypatch, tmp_path, patch_value):
+    class FakePopen:
+        pid = 54901
+
+        def __init__(self, command, *, stdout, stderr, **kwargs):
+            self._returncode = 0
+            stdout.write(json.dumps({"type": "run_result", "text": json.dumps({"patch": patch_value})}) + "\n")
+            stdout.flush()
+
+        def poll(self):
+            return self._returncode
+
+    service = FakeService()
+    service.state_dir = tmp_path
+    monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", FakePopen)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    gateway = UnifiedMCPGateway(service=service)
+    gateway._assist_submit({"task_id": "degenerate-1", "what": "Suggest a patch", "why": "degenerate", "allowed_files": ["README.md"], "model": "glm-5.2"})
+    job = gateway._assist_refresh("degenerate-1")
+    assert job["status"] == "FAILED"
+    assert job["result"] is None
+    assert job["retry_required"] is True
+    response = gateway._assist_response(job)
+    assert response["status"] == "FAILED"
+    assert response["retry_required"] is True
+    assert response["next_action"] == "nexus_task_retry"
+
+
+def test_assist_patch_substantive_check_and_schema_min_length():
+    assert UnifiedMCPGateway._assist_patch_is_substantive("diff --git a/a b/a\n")
+    for bad in ("", "   ", None, 3, "I cannot help with that."):
+        assert not UnifiedMCPGateway._assist_patch_is_substantive(bad)
+    schema = {"type": "object", "required": ["patch"], "properties": {"patch": {"type": "string", "minLength": 1}}}
+    assert UnifiedMCPGateway._validate_output_schema({"patch": ""}, schema)[0] is False
+    assert UnifiedMCPGateway._validate_output_schema({"patch": "diff --git a b"}, schema)[0] is True
+
+
 def test_assist_apply_is_ignored_and_cannot_install_mutation_runners():
     import inspect
 

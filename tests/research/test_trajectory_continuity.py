@@ -2184,3 +2184,25 @@ def test_registered_refresh_persists_ready_to_reaudit_without_auto_chain(
     TestRegisteredRefreshWithFiveFamilies().test_five_family_refresh_ready_no_auto_chain(
         tmp_path, monkeypatch
     )
+
+
+@pytest.mark.parametrize(
+    "secret",
+    [
+        "ghp_" + "A" * 36,
+        "sk-ant-api03-" + "A" * 40,
+        "sk-proj-" + "B" * 40,
+        "github_pat_11ABCDEFG0" + "C" * 60,
+        '{"access_token": "ya29.' + "D" * 30 + '"}',
+        "AIza" + "E" * 35,
+        "AKIA" + "F" * 16,
+    ],
+)
+def test_redaction_covers_common_secret_formats(secret):
+    from nexus.research.clm_system_one.trajectory_continuity import _redact_value
+
+    out = _redact_value({"stdout": f"before\n{secret}\nafter"})["stdout"]
+    assert "[REDACTED]" in out
+    body = secret.split('"')[-2] if secret.startswith("{") else secret
+    assert body[-20:] not in out
+    assert "before" in out and "after" in out  # benign text preserved

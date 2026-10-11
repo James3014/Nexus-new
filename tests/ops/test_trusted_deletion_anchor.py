@@ -19,6 +19,7 @@ import pytest
 import yaml
 
 import scripts.ops.trusted_deletion_anchor as trusted_anchor
+import scripts.ops.trusted_merge_lane_gate as lane_gate
 from scripts.ops.trusted_deletion_anchor import (
     SCHEMA_VERSION,
     _json,
@@ -1183,6 +1184,23 @@ def _acquisition_environment(
     event["workflow_sha"] = workflow_sha
     event["pull_request"]["base"]["sha"] = workflow_sha  # type: ignore[index]
     event["pull_request"]["head"]["sha"] = head_sha  # type: ignore[index]
+    # Legacy PR numbers are no longer exempt by number alone (#1749); carry a
+    # genuine Owner-inline DIRECT binding so the lane gate step passes.
+    event["pull_request"]["number"] = lane_gate.ENFORCEMENT_START_PR_NUMBER  # type: ignore[index]
+    binding = {
+        "schema": lane_gate.BINDING_SCHEMA,
+        "execution_lane": "DIRECT_CANONICAL",
+        "contract_kind": "OWNER_INLINE",
+        "owner_id": "James3014",
+        "issue_number": None,
+        "task_id": None,
+        "attempt_id": None,
+        "task_card_path": None,
+        "task_card_sha256": None,
+        "owner_lane_rebind": None,
+    }
+    binding["binding_hash"] = lane_gate.canonical_hash(binding)
+    event["pull_request"]["body"] = lane_gate.render_binding(binding)  # type: ignore[index]
     path, argv_log = _git_logging_path(run_root)
     _synthetic_runtime(
         run_root,
