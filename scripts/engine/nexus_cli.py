@@ -2273,11 +2273,29 @@ else:
     def resume():
         """🌬️ [Metabolism] Resume task from last physical checkpoint."""
         from nexus.services.metabolism_engine import metabolism
+        from nexus.core.mission_contracts import MissionStatus, MissionTransitionError, NexusMission, transition
         checkpoint = metabolism.load_checkpoint()
-        if not checkpoint:
+        if not checkpoint or not checkpoint.get("task_id"):
             click.echo("❌ No checkpoint found.")
-            return
+            sys.exit(1)
         click.echo(f"🌬️ Resuming Task: {checkpoint['task_id']}")
+        click.echo(f"- Last active step: {checkpoint.get('last_active_step')}")
+        click.echo(f"- Pending steps: {len(checkpoint.get('pending_steps') or [])}")
+        # Restore: bind the mission to the checkpoint and re-activate it if it was paused/blocked.
+        mission = NexusMission.load(repo_root)
+        if mission is not None:
+            stack_path = Path(metabolism.stack_path)
+            try:
+                mission.last_snapshot_path = str(stack_path.relative_to(repo_root))
+            except ValueError:
+                mission.last_snapshot_path = str(stack_path)
+            if mission.status in (MissionStatus.PAUSED, MissionStatus.BLOCKED):
+                try:
+                    transition(mission, MissionStatus.ACTIVE)
+                except MissionTransitionError as exc:
+                    click.secho(f"❌ {exc}", fg="red")
+                    sys.exit(1)
+            mission.persist(repo_root)
 
     @nexus_group.command(name="delegate")
     @click.argument("task_name")
@@ -3471,7 +3489,7 @@ else:
     def mission_start():
         """🚀 Run budget & fingerprint checks, switch state, and launch the loop."""
         import uuid
-        from nexus.core.mission_contracts import NexusMission, MissionStatus
+        from nexus.core.mission_contracts import NexusMission, MissionStatus, MissionTransitionError, transition
 
         mission = NexusMission.load(repo_root)
         if not mission:
@@ -3496,7 +3514,11 @@ else:
             sys.exit(1)
 
         # 3. 激活狀態並開啟戰役
-        mission.status = MissionStatus.ACTIVE
+        try:
+            transition(mission, MissionStatus.ACTIVE)
+        except MissionTransitionError as exc:
+            click.secho(f"❌ {exc}", fg="red")
+            sys.exit(1)
         run_id = "RUN-" + uuid.uuid4().hex[:6].upper()
         mission.current_run_id = run_id
         mission.run_history.append(run_id)
@@ -3514,19 +3536,22 @@ else:
         # 實作上可檢查報告判定完戰
         mission = NexusMission.load(repo_root) # 重新載入，避免執行期間被子進程修改
         if res.returncode == 0:
-            # 完戰 gate 驗收
+            # 完戰 gate 驗收: ACTIVE -> VERIFYING -> COMPLETED (or back to ACTIVE if not passed)
+            transition(mission, MissionStatus.VERIFYING)
+            mission.persist(repo_root)
+            passed = False
             acceptance_report = repo_root / ".nexus" / "reports" / "acceptance_check.json"
             if acceptance_report.exists():
                 try:
                     data = json.loads(acceptance_report.read_text(encoding="utf-8"))
-                    if data.get("status") == "PASS" and data.get("gate_passed") is True:
-                        mission.status = MissionStatus.COMPLETED
+                    passed = data.get("status") == "PASS" and data.get("gate_passed") is True
                 except Exception:
-                    pass
+                    passed = False
+            transition(mission, MissionStatus.COMPLETED if passed else MissionStatus.ACTIVE)
         else:
             mission.accumulated_usage["retries"] += 1
             if mission.accumulated_usage["retries"] >= mission.budget.get("max_retries", 10.0):
-                mission.status = MissionStatus.BLOCKED
+                transition(mission, MissionStatus.BLOCKED)
 
         mission.persist(repo_root)
         click.echo(f"🏁 Campaign execution terminated. Status: {mission.status.value}")
@@ -3555,20 +3580,27 @@ else:
     @mission_group.command(name="pause")
     def mission_pause():
         """⏸️ Force snapshot of current state and pause the campaign."""
-        from nexus.core.mission_contracts import NexusMission, MissionStatus
+        from nexus.core.mission_contracts import NexusMission, MissionStatus, MissionTransitionError, transition
         mission = NexusMission.load(repo_root)
         if not mission:
             click.echo("❌ No mission found.")
             return
 
-        mission.status = MissionStatus.PAUSED
+        try:
+            transition(mission, MissionStatus.PAUSED)
+        except MissionTransitionError as exc:
+            click.secho(f"❌ {exc}", fg="red")
+            sys.exit(1)
 
         # 呼叫現有 metabolism 引擎保存實體 checkpoint 快照
         from nexus.services.metabolism_engine import metabolism
         checkpoint = metabolism.load_checkpoint()
         if checkpoint:
-            # 假設以當前 checkpoint 作為 resume 還原點
-            mission.last_snapshot_path = ".nexus/metabolism/mission_complete.json"
+            stack_path = Path(metabolism.stack_path)
+            try:
+                mission.last_snapshot_path = str(stack_path.relative_to(repo_root))
+            except ValueError:
+                mission.last_snapshot_path = str(stack_path)
 
         mission.persist(repo_root)
         click.secho(f"⏸️ Mission {mission.mission_id} successfully paused.", fg="yellow", bold=True)
@@ -3576,11 +3608,18 @@ else:
     @mission_group.command(name="resume")
     def mission_resume():
         """🌬️ Check environment preflight, budget, and restore the loop from snapshot."""
-        from nexus.core.mission_contracts import NexusMission, MissionStatus
+        from nexus.core.mission_contracts import NexusMission, MissionStatus, MissionTransitionError, transition
         mission = NexusMission.load(repo_root)
         if not mission:
             click.echo("❌ No paused mission found.")
             return
+
+        if mission.status in (MissionStatus.COMPLETED, MissionStatus.ABORTED):
+            click.secho(
+                f"❌ Mission {mission.mission_id} is {mission.status.value}; create a new mission instead.",
+                fg="red",
+            )
+            sys.exit(1)
 
         # 1. 環境指紋校對 (Environment Fingerprinting)
         if not mission.run_fingerprint_preflight(repo_root):
@@ -3593,14 +3632,41 @@ else:
             sys.exit(1)
 
         # 3. 切換狀態並恢復
-        mission.status = MissionStatus.ACTIVE
+        try:
+            transition(mission, MissionStatus.ACTIVE)
+        except MissionTransitionError as exc:
+            click.secho(f"❌ {exc}", fg="red")
+            sys.exit(1)
         mission.persist(repo_root)
 
         click.secho(f"🌬️ Resuming mission: {mission.mission_id}", fg="green", bold=True)
 
-        # 4. 呼叫 metabolism 實體 resume 恢復機制
+        # 4. 呼叫 metabolism 實體 resume 恢復機制; failure (e.g. no checkpoint) re-pauses the mission
         cmd = [sys.executable, str(repo_root / "scripts/engine/nexus_cli.py"), "nexus", "resume"]
-        subprocess.run(cmd, check=False)
+        res = subprocess.run(cmd, check=False)
+        if res.returncode != 0:
+            mission = NexusMission.load(repo_root) or mission
+            if mission.status == MissionStatus.ACTIVE:
+                transition(mission, MissionStatus.PAUSED)
+                mission.persist(repo_root)
+            click.secho("❌ Resume failed: no restorable checkpoint.", fg="red", bold=True)
+            sys.exit(1)
+
+    @mission_group.command(name="abort")
+    def mission_abort():
+        """🛑 Abort the campaign (terminal state)."""
+        from nexus.core.mission_contracts import NexusMission, MissionStatus, MissionTransitionError, transition
+        mission = NexusMission.load(repo_root)
+        if not mission:
+            click.echo("❌ No mission found.")
+            sys.exit(1)
+        try:
+            transition(mission, MissionStatus.ABORTED)
+        except MissionTransitionError as exc:
+            click.secho(f"❌ {exc}", fg="red")
+            sys.exit(1)
+        mission.persist(repo_root)
+        click.secho(f"🛑 Mission {mission.mission_id} aborted.", fg="yellow", bold=True)
 
 
     @nexus_group.group(name="self-hosted")
