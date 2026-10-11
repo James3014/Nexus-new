@@ -2,20 +2,24 @@ import base64
 import gzip
 import hashlib
 import json
+import re
 import subprocess
 from pathlib import Path
 
 import pytest
 
 from nexus.research.hybrid_replication_live import (
+    CANONICAL_AGY_DISPATCH_NAME,
     CANONICAL_AGY_DISPATCH_SHA256,
     CANONICAL_AGY_EXECUTION_GENERATION,
     EXACT_AGY_MODEL,
     FROZEN_RECEIPT_SHA256S,
     _c_prompt,
+    _expected_agy_dispatch_sha256,
     _load_binding,
     _run_agy_b_fallback,
     _run_agy_candidate,
+    _sha256_file,
     _valid_probability_distribution,
     audit_post_terminal_revisions,
     build_agy_identity_preflight_receipt,
@@ -1252,12 +1256,152 @@ def test_agy_identity_preflight_passes_new_generation(
     assert receipt["transport_identity_match"] is True
 
 
-def test_canonical_agy_dispatch_identity_matches_source() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    dispatch_path = repo_root / "scripts" / "ops" / "nexus-agy-dispatch"
+def test_canonical_agy_constants_are_binding_defaults_only() -> None:
+    assert re.fullmatch(r"[0-9a-f]{64}", CANONICAL_AGY_DISPATCH_SHA256)
+    assert re.fullmatch(r"AGY_[A-Z0-9_]+_V\d+", CANONICAL_AGY_EXECUTION_GENERATION)
 
-    assert hashlib.sha256(dispatch_path.read_bytes()).hexdigest() == CANONICAL_AGY_DISPATCH_SHA256
-    assert CANONICAL_AGY_EXECUTION_GENERATION == "AGY_GEMINI_3_8_FLASH_MEDIUM_V11"
+
+def _write_pinned_agy_binding(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    generation: str = "AGY_GEMINI_3_8_FLASH_MEDIUM_V12",
+    declared_sha256: str | None = None,
+    physical_content: str = "#!/bin/sh\n# pinned copy\n",
+) -> tuple[Path, Path, str]:
+    dispatch = tmp_path / "pinned" / CANONICAL_AGY_DISPATCH_NAME
+    dispatch.parent.mkdir()
+    dispatch.write_text(physical_content, encoding="utf-8")
+    physical_sha = hashlib.sha256(dispatch.read_bytes()).hexdigest()
+    assert physical_sha != CANONICAL_AGY_DISPATCH_SHA256
+    real_sha256_file = _sha256_file
+    binding_path = _write_loadable_agy_binding(
+        tmp_path, monkeypatch, activation_state="AUTOMATIC_CAPTURE_READY"
+    )
+    monkeypatch.setattr(
+        "nexus.research.hybrid_replication_live._sha256_file",
+        lambda path: (
+            "cca215a2de82996c072f958159541a93d58b1482af3430d93f537c58ddafa2f9"
+            if str(path).endswith("d0_impl.py")
+            else "f04fdeea8ddb8cbaa2216aa783a7fe510da7c2f8625f50763a0d59d5e2234eee"
+            if str(path).endswith("D0_V2_FROZEN.json")
+            else real_sha256_file(path)
+        ),
+    )
+    # Use the real dispatcher resolver so the physical pinned file is hashed.
+    monkeypatch.setattr(
+        "nexus.research.hybrid_replication_live.resolve_canonical_agy_dispatch_path",
+        resolve_canonical_agy_dispatch_path,
+    )
+    payload = json.loads(binding_path.read_text(encoding="utf-8"))
+    payload["strong_online"]["execution_generation"] = generation
+    payload["strong_online"]["agy_dispatch_path"] = str(dispatch)
+    payload["strong_online"]["agy_dispatch_sha256"] = declared_sha256 or physical_sha
+    binding_path.write_text(json.dumps(payload), encoding="utf-8")
+    return binding_path, dispatch, physical_sha
+
+
+def test_load_binding_accepts_dispatcher_pinned_by_binding_not_module_constant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binding_path, dispatch, physical_sha = _write_pinned_agy_binding(tmp_path, monkeypatch)
+
+    loaded = _load_binding(binding_path)
+
+    assert loaded["strong_online"]["agy_dispatch_sha256"] == physical_sha
+    assert loaded["strong_online"]["execution_generation"] == "AGY_GEMINI_3_8_FLASH_MEDIUM_V12"
+    assert resolve_canonical_agy_dispatch_path(loaded) == dispatch
+    receipt = build_agy_identity_preflight_receipt(
+        d0_sha256="cca215a2de82996c072f958159541a93d58b1482af3430d93f537c58ddafa2f9",
+        d0_freeze_sha256="f04fdeea8ddb8cbaa2216aa783a7fe510da7c2f8625f50763a0d59d5e2234eee",
+        frozen_receipt_sha256s=FROZEN_RECEIPT_SHA256S,
+        declared_frozen_receipt_sha256s=FROZEN_RECEIPT_SHA256S,
+        agy_dispatch_sha256=_sha256_file(dispatch),
+        expected_agy_dispatch_sha256=_expected_agy_dispatch_sha256(loaded),
+        requested_provider="agy",
+        requested_model=EXACT_AGY_MODEL,
+        execution_generation=loaded["strong_online"]["execution_generation"],
+        previous_execution_generation=CANONICAL_AGY_EXECUTION_GENERATION,
+        jev_requested_model="jev-latest",
+        jev_resolved_model="jev-1.13.0",
+        expected_jev_resolved_model="jev-1.13.0",
+        jev_status="VALID",
+        jev_usage={},
+        jev_latency_ms=1.0,
+        created_at_utc="2026-10-11T13:00:00Z",
+    )
+    assert receipt["activation_allowed"] is True
+    assert receipt["status"] == "PASS_NEW_EXECUTION_GENERATION"
+    assert receipt["transport_identity_match"] is True
+    assert receipt["expected_agy_dispatch_sha256"] == physical_sha
+
+
+def test_load_binding_rejects_physical_dispatcher_differing_from_declared_pin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binding_path, _, _ = _write_pinned_agy_binding(tmp_path, monkeypatch, declared_sha256="e" * 64)
+
+    with pytest.raises(ValueError, match="agy_dispatch_physical_identity_drift"):
+        _load_binding(binding_path)
+
+
+@pytest.mark.parametrize(
+    "generation",
+    ["", "V12", "agy_gemini_v12", "AGY_GEMINI_V", "AGY_GEMINI_V12_EXTRA", "AGY__V1 "],
+)
+def test_load_binding_rejects_malformed_execution_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, generation: str
+) -> None:
+    binding_path, _, _ = _write_pinned_agy_binding(tmp_path, monkeypatch, generation=generation)
+
+    with pytest.raises(ValueError, match="agy_execution_generation_identity_drift"):
+        _load_binding(binding_path)
+
+
+def test_agy_identity_preflight_blocks_physical_vs_declared_sha_mismatch() -> None:
+    receipt = build_agy_identity_preflight_receipt(
+        d0_sha256="cca215a2de82996c072f958159541a93d58b1482af3430d93f537c58ddafa2f9",
+        d0_freeze_sha256="f04fdeea8ddb8cbaa2216aa783a7fe510da7c2f8625f50763a0d59d5e2234eee",
+        frozen_receipt_sha256s=FROZEN_RECEIPT_SHA256S,
+        declared_frozen_receipt_sha256s=FROZEN_RECEIPT_SHA256S,
+        agy_dispatch_sha256=CANONICAL_AGY_DISPATCH_SHA256,
+        expected_agy_dispatch_sha256="d" * 64,
+        requested_provider="agy",
+        requested_model=EXACT_AGY_MODEL,
+        execution_generation=CANONICAL_AGY_EXECUTION_GENERATION,
+        previous_execution_generation=CANONICAL_AGY_EXECUTION_GENERATION,
+        jev_requested_model="jev-latest",
+        jev_resolved_model="jev-1.13.0",
+        expected_jev_resolved_model="jev-1.13.0",
+        jev_status="VALID",
+        jev_usage={},
+        jev_latency_ms=1.0,
+        created_at_utc="2026-10-11T13:00:00Z",
+    )
+    assert receipt["transport_identity_match"] is False
+    assert receipt["status"] == "BLOCKED_IDENTITY_OR_PROVIDER_DRIFT"
+
+
+def test_expected_agy_dispatch_sha256_prefers_binding_then_constant() -> None:
+    assert _expected_agy_dispatch_sha256(None) == CANONICAL_AGY_DISPATCH_SHA256
+    assert _expected_agy_dispatch_sha256({"strong_online": {}}) == CANONICAL_AGY_DISPATCH_SHA256
+    assert _expected_agy_dispatch_sha256({"strong_online": {"agy_dispatch_sha256": "a" * 64}}) == (
+        "a" * 64
+    )
+    with pytest.raises(RuntimeError, match="agy_dispatch_declared_sha256_malformed"):
+        _expected_agy_dispatch_sha256({"strong_online": {"agy_dispatch_sha256": "nope"}})
+
+
+def test_evaluate_agy_receipt_uses_expected_dispatch_sha256_parameter(tmp_path: Path) -> None:
+    dispatch = tmp_path / CANONICAL_AGY_DISPATCH_NAME
+    dispatch.write_text("#!/bin/sh\n# other copy\n", encoding="utf-8")
+    sha = hashlib.sha256(dispatch.read_bytes()).hexdigest()
+
+    pinned = evaluate_agy_receipt(None, dispatch_path=dispatch, expected_dispatch_sha256=sha)
+    default = evaluate_agy_receipt(None, dispatch_path=dispatch)
+
+    assert pinned["status"] != "UNEXPECTED_TRANSPORT_IDENTITY"
+    assert default["status"] == "UNEXPECTED_TRANSPORT_IDENTITY"
 
 
 def test_agy_identity_preflight_rejects_model_or_transport_drift(
