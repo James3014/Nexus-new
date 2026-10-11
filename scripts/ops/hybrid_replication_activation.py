@@ -5,7 +5,8 @@ Authority: RESEARCH_OBSERVATION_ONLY. The manifest is the only place a human
 edits activation state; the five per-repository GitHub Actions variables passed
 by the ``.github/workflows/hybrid-replication-capture.yml`` caller to the reusable
 workflow are derived from it, pushed
-with ``gh variable set`` (empty values: ``gh variable delete``) and verified with ``gh variable list``.
+with ``gh variable set`` (empty values: ``gh variable delete``) and verified
+with ``gh variable list``.
 """
 
 from __future__ import annotations
