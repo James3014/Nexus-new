@@ -1,4 +1,5 @@
 import hashlib
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -376,6 +377,20 @@ def _candidate_state(repo: Path, base: str, candidate: str, tree: str):
     state["integration_verifier_manifest"] = list(
         ControlledIntegrationManager._admitted_manifest(state, state["contract"])
     )
+    state["verified_receipt"]["verified"] = True
+    state["approved_binding"]["approval_grant"] = {"approval_id": "grant", "consumed_at": "now"}
+    state["external_acceptance"] = {"passed": True}
+    return _bind_verified_receipt(state)
+
+
+def _bind_verified_receipt(state):
+    receipt_hash = hashlib.sha256(
+        json.dumps(
+            state["verified_receipt"], sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+    ).hexdigest()
+    state["promotion_packet"]["verified_receipt_hash"] = receipt_hash
+    state["approved_binding"]["verified_receipt_hash"] = receipt_hash
     return state
 
 
@@ -487,6 +502,7 @@ def test_controlled_integration_rolls_back_failed_verifier(tmp_path):
     state["integration_verifier_manifest"] = list(
         ControlledIntegrationManager._admitted_manifest(state, state["contract"])
     )
+    _bind_verified_receipt(state)
 
     with pytest.raises(RuntimeError, match="staging verifier failed"):
         ControlledIntegrationManager(integration_root=tmp_path / "integrations").integrate_task_state(
@@ -495,3 +511,49 @@ def test_controlled_integration_rolls_back_failed_verifier(tmp_path):
 
     assert _git(repo, "rev-parse", "nexus/integration/test") == base
     assert not (tmp_path / "integrations" / "integration-task").exists()
+
+
+def _authorized_candidate_repo(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.name", "Test")
+    _git(repo, "config", "user.email", "test@example.com")
+    (repo / "README").write_text("base\n")
+    _git(repo, "add", "README")
+    _git(repo, "commit", "-m", "base")
+    base = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "branch", "nexus/integration", base)
+    _git(repo, "branch", "nexus/task/integration-task", base)
+    target = tmp_path / "target"
+    _git(repo, "worktree", "add", str(target), "nexus/task/integration-task")
+    (target / "change.txt").write_text("candidate\n")
+    _git(target, "add", "change.txt")
+    _git(target, "commit", "-m", "candidate")
+    candidate = _git(target, "rev-parse", "HEAD")
+    tree = _git(target, "rev-parse", "HEAD^{tree}")
+    return repo, base, _candidate_state(repo, base, candidate, tree)
+
+
+@pytest.mark.parametrize(
+    ("tamper", "message"),
+    [
+        (lambda state: state.pop("external_acceptance"), "external acceptance"),
+        (lambda state: state["approved_binding"].pop("approval_grant"), "consumed approval grant"),
+        (lambda state: state["verified_receipt"].update(verified=False), "verified candidate receipt"),
+        (
+            lambda state: state["verified_receipt"].update(extra="tampered"),
+            "verified receipt hash",
+        ),
+    ],
+)
+def test_controlled_integration_requires_authority_at_sink(tmp_path, tamper, message):
+    repo, base, state = _authorized_candidate_repo(tmp_path)
+    tamper(state)
+
+    with pytest.raises(RuntimeError, match=message):
+        ControlledIntegrationManager(integration_root=tmp_path / "integrations").integrate_task_state(
+            state
+        )
+
+    assert _git(repo, "rev-parse", "nexus/integration") == base

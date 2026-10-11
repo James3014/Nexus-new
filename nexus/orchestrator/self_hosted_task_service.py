@@ -1576,6 +1576,17 @@ def resolve_execution_lane(
 DEFAULT_MAXIMUM_ATTEMPTS_PER_TASK = 5
 
 
+def _require_verified_receipt_binding(receipt: Any, packet: Mapping[str, Any]) -> None:
+    """Consumers recompute the verified receipt hash instead of trusting the packet."""
+    if not isinstance(receipt, Mapping) or receipt.get("verified") is not True:
+        raise RuntimeError("APPROVAL_UNVERIFIED_CANDIDATE: verified receipt is missing or not verified")
+    canonical = json.dumps(
+        _jsonable(receipt), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    if hashlib.sha256(canonical).hexdigest() != str(packet.get("verified_receipt_hash") or ""):
+        raise RuntimeError("APPROVAL_VERIFIED_RECEIPT_HASH_MISMATCH")
+
+
 class SelfHostedTaskService:
     _CUSTOM_RUNNER_FORBIDDEN_EVIDENCE_FIELDS = frozenset(
         {
@@ -9811,6 +9822,9 @@ class SelfHostedTaskService:
 
         valid = bool(packet) and not any(packet.get(k) != v for k, v in expected.items())
         status = "APPROVED" if valid else "APPROVAL_INVALIDATED"
+        if approval_context is None:
+            # Models and callers cannot mint approval; every surface needs a grant.
+            raise RuntimeError("APPROVAL_GRANT_REQUIRED: candidate approval requires an approval grant")
         grant = dict(approval_context or {}) if approval_context is not None else None
         if grant is not None and (
             grant.get("claim_ceiling") == "CLAIM_PROTOCOL_CANDIDATE_PR_ONLY"
@@ -9910,6 +9924,8 @@ class SelfHostedTaskService:
                 external_acceptance = acceptance_obj.to_dict()
                 integration_authorization = authorization_obj.to_dict()
                 integration_authorization["authorization_hash"] = authorization_obj.authorization_hash
+        if valid:
+            _require_verified_receipt_binding(state.get("verified_receipt"), packet)
         now = _utc_now()
         duplicate = False
         initial_status = state.get("status")

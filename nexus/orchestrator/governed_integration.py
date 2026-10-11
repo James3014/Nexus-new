@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import shlex
@@ -321,6 +322,26 @@ class ControlledIntegrationManager:
                     f"stderr_sha256={result.stderr_sha256}"
                 )
 
+    @staticmethod
+    def _require_integration_authority(
+        state: Mapping[str, Any], approved: Mapping[str, Any], packet: Mapping[str, Any]
+    ) -> None:
+        """Re-establish acceptance, consumed grant and verified receipt at the sink."""
+        acceptance = state.get("external_acceptance")
+        if not isinstance(acceptance, Mapping) or not acceptance.get("passed"):
+            raise RuntimeError("external acceptance is required before integration")
+        grant = state.get("integration_approval_grant") or approved.get("approval_grant")
+        if not isinstance(grant, Mapping) or not grant.get("consumed_at"):
+            raise RuntimeError("consumed approval grant is required before integration")
+        receipt = state.get("verified_receipt")
+        if not isinstance(receipt, Mapping) or receipt.get("verified") is not True:
+            raise RuntimeError("verified candidate receipt is required before integration")
+        canonical = json.dumps(
+            receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+        if hashlib.sha256(canonical).hexdigest() != str(packet.get("verified_receipt_hash") or ""):
+            raise RuntimeError("verified receipt hash does not bind to promotion packet")
+
     def integrate_task_state(
         self,
         state: Mapping[str, Any],
@@ -351,6 +372,7 @@ class ControlledIntegrationManager:
             approved.get(field) != packet.get(field) for field in binding_fields
         ):
             raise RuntimeError("exact approved binding is required")
+        self._require_integration_authority(state, approved, packet)
         if not _SHA.fullmatch(candidate_sha) or not _SHA.fullmatch(target_base_revision):
             raise RuntimeError("candidate and target base revisions must be exact Git SHAs")
         if not source_branch:
@@ -367,6 +389,8 @@ class ControlledIntegrationManager:
         if self._git(["rev-parse", f"{target_base_revision}^{{commit}}"], controller_root) != target_base_revision:
             raise RuntimeError("target base revision is not present")
         admitted_verifiers = self._bound_manifest(state, contract)
+        if not admitted_verifiers:
+            raise RuntimeError("integration requires at least one admitted verifier")
 
         self.integration_root.mkdir(parents=True, exist_ok=True)
         integration_path = self.integration_root / task_id

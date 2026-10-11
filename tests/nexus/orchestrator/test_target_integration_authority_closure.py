@@ -78,7 +78,7 @@ def test_direct_service_approval_uses_nested_owner_inline_hash(
         "candidate_commit_sha": "b" * 40,
         "candidate_tree_sha": "c" * 40,
         "candidate_state_hash": "d" * 64,
-        "verified_receipt_hash": "e" * 64,
+        "verified_receipt_hash": hashlib.sha256(b'{"verified":true}').hexdigest(),
     }
     service = SelfHostedTaskService(
         state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=False
@@ -95,6 +95,7 @@ def test_direct_service_approval_uses_nested_owner_inline_hash(
         "owner_inline_contract": inline,
         "request": {},
         "promotion_packet": packet,
+        "verified_receipt": {"verified": True},
     })
     now = datetime.now(timezone.utc)
     approval = {
@@ -623,7 +624,7 @@ def test_owner_finish_delegates_full_authorized_integration_then_cleanup(tmp_pat
         "controller_revision": base, "target_base_revision": base,
         "controller_repo_root": str(root), "target_repo_root": str(target),
         "target_worktree_root": str(target.parent), "allowed_files": ["value.txt"],
-        "verifier_commands": [], "worker": "codex",
+        "verifier_commands": ["python -c pass"], "worker": "codex",
     }
     contract = service.build_contract(request)
     lease_id = WorktreeManager(root_dir=str(target.parent), create_root=False)._lease_id(
@@ -790,7 +791,7 @@ def test_service_post_apply_failure_persists_physical_truth_and_blocks_cleanup(t
         "controller_revision": base, "target_base_revision": base,
         "controller_repo_root": str(root), "target_repo_root": str(target),
         "target_worktree_root": str(target.parent), "allowed_files": ["value.txt"],
-        "verifier_commands": [], "worker": "codex",
+        "verifier_commands": ["python -c pass"], "worker": "codex",
     }
     contract = service.build_contract(request)
     lease_id = WorktreeManager(root_dir=str(target.parent), create_root=False)._lease_id(contract, target, "nexus/task/post-apply-task")
@@ -950,7 +951,7 @@ def test_owner_finish_retains_real_dirty_target_with_typed_reason(tmp_path: Path
         "controller_revision": base, "target_base_revision": base,
         "controller_repo_root": str(root), "target_repo_root": str(target),
         "target_worktree_root": str(target.parent), "allowed_files": ["value.txt"],
-        "verifier_commands": [], "worker": "codex",
+        "verifier_commands": ["python -c pass"], "worker": "codex",
     }
     contract = service.build_contract(request)
     lease_id = WorktreeManager(root_dir=str(target.parent), create_root=False)._lease_id(contract, target, "nexus/task/dirty-owner-finish")

@@ -84,6 +84,16 @@ from nexus.services.model_workforce_policy import WorkforcePolicyLoader
 from nexus.services.runtime_workforce_admission import evaluate_runtime_workforce_admission
 
 
+def _verified_receipt_hash(receipt):
+    """Hash a persisted verified receipt the way approval/integration consumers do (#1758)."""
+    return hashlib.sha256(
+        json.dumps(receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+
+
+_VERIFIED_RECEIPT = {"verified": True}
+_VERIFIED_RECEIPT_HASH = _verified_receipt_hash(_VERIFIED_RECEIPT)
+
 def _core_required_local_receipt(task_id="ambient-core-task"):
     return VerifiedCandidateReceipt(
         schema="nexus.verified_candidate_receipt.v1",
@@ -2775,6 +2785,7 @@ def test_submit_rejects_raw_prompt_and_unknown_worker(tmp_path):
 def test_approval_is_hash_bound_and_does_not_merge(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", ephemeral=True)
     request = _request(tmp_path)
+    grant = {"schema": "nexus.approval.v2", "approval_id": "p", "approved_by": "owner", "approval_scope": "ALLOW_ACTION_ONCE"}
 
     service._write_state(
         request["task_id"],
@@ -2785,42 +2796,82 @@ def test_approval_is_hash_bound_and_does_not_merge(tmp_path):
                 "candidate_commit_sha": "c" * 40,
                 "candidate_tree_sha": "d" * 40,
                 "candidate_state_hash": "e" * 64,
-                "verified_receipt_hash": "f" * 64,
+                "verified_receipt_hash": _VERIFIED_RECEIPT_HASH,
             },
+            "verified_receipt": dict(_VERIFIED_RECEIPT),
             "promotion_status": "PENDING_HUMAN_APPROVAL",
             "merge_performed": False,
             "push_performed": False,
         },
     )
 
-    approved = service.approve_promotion(
-        request["task_id"],
-        candidate_commit_sha="c" * 40,
-        candidate_tree_sha="d" * 40,
-        candidate_state_hash="e" * 64,
-        verified_receipt_hash="f" * 64,
-    )
-
-    assert approved["promotion_status"] == "APPROVED"
-    assert approved["merge_performed"] is False
-    assert approved["push_performed"] is False
+    with pytest.raises(RuntimeError, match="APPROVAL_GRANT_REQUIRED"):
+        service.approve_promotion(
+            request["task_id"],
+            candidate_commit_sha="c" * 40,
+            candidate_tree_sha="d" * 40,
+            candidate_state_hash="e" * 64,
+            verified_receipt_hash=_VERIFIED_RECEIPT_HASH,
+        )
 
     invalid = service.approve_promotion(
         request["task_id"],
         candidate_commit_sha="c" * 40,
         candidate_tree_sha="0" * 40,
         candidate_state_hash="e" * 64,
-        verified_receipt_hash="f" * 64,
+        verified_receipt_hash=_VERIFIED_RECEIPT_HASH,
+        approval_context=dict(grant),
     )
     assert invalid["status"] == "APPROVAL_INVALIDATED"
     assert invalid["task_action"]["action_state"] == "ACTION_REQUIRED"
+
+    approved = service.approve_promotion(
+        request["task_id"],
+        candidate_commit_sha="c" * 40,
+        candidate_tree_sha="d" * 40,
+        candidate_state_hash="e" * 64,
+        verified_receipt_hash=_VERIFIED_RECEIPT_HASH,
+        approval_context=dict(grant),
+    )
+
+    assert approved["promotion_status"] == "APPROVED"
+    assert approved["merge_performed"] is False
+    assert approved["push_performed"] is False
+
+
+def test_approval_rejects_unverified_or_rehashed_receipt(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", ephemeral=True)
+    grant = {"schema": "nexus.approval.v2", "approval_id": "p", "approved_by": "owner", "approval_scope": "ALLOW_ACTION_ONCE"}
+    cases = (
+        ({"verified": False}, _verified_receipt_hash({"verified": False}), "APPROVAL_UNVERIFIED_CANDIDATE"),
+        (dict(_VERIFIED_RECEIPT), "f" * 64, "APPROVAL_VERIFIED_RECEIPT_HASH_MISMATCH"),
+    )
+    for index, (receipt, receipt_hash, code) in enumerate(cases):
+        task_id = f"unverified-{index}"
+        packet = {
+            "candidate_commit_sha": "c" * 40,
+            "candidate_tree_sha": "d" * 40,
+            "candidate_state_hash": "e" * 64,
+            "verified_receipt_hash": receipt_hash,
+        }
+        service._write_state(task_id, {
+            "task_id": task_id,
+            "status": "CANDIDATE_COMMITTED",
+            "promotion_status": "PENDING_HUMAN_APPROVAL",
+            "promotion_packet": packet,
+            "verified_receipt": receipt,
+        })
+        with pytest.raises(RuntimeError, match=code):
+            service.approve_promotion(task_id, **packet, approval_context=dict(grant))
+        assert service._read_state(task_id)["promotion_status"] == "PENDING_HUMAN_APPROVAL"
 
 
 def test_marked_authority_approval_requires_exact_nested_ack_and_persists(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
     task_id = "authority-ack"
-    packet = {"candidate_commit_sha": "c"*40, "candidate_tree_sha": "d"*40, "candidate_state_hash": "e"*64, "verified_receipt_hash": "f"*64, "authority_change_required": True, "authority_findings_sha256": "a"*64}
-    service._write_state(task_id, {"task_id": task_id, "attempt_id": "attempt-1", "status": "CANDIDATE_COMMITTED", "promotion_status": "PENDING_HUMAN_APPROVAL", "promotion_packet": packet, "verified_receipt": {"authority_change_required": True, "authority_findings_sha256": "a"*64}})
+    receipt = {"verified": True, "authority_change_required": True, "authority_findings_sha256": "a"*64}
+    packet = {"candidate_commit_sha": "c"*40, "candidate_tree_sha": "d"*40, "candidate_state_hash": "e"*64, "verified_receipt_hash": _verified_receipt_hash(receipt), "authority_change_required": True, "authority_findings_sha256": "a"*64}
+    service._write_state(task_id, {"task_id": task_id, "attempt_id": "attempt-1", "status": "CANDIDATE_COMMITTED", "promotion_status": "PENDING_HUMAN_APPROVAL", "promotion_packet": packet, "verified_receipt": receipt})
     with pytest.raises(RuntimeError, match="OWNER_ARCHITECTURE_APPROVAL_REQUIRED"):
         service.approve_promotion(task_id, **{k: packet[k] for k in ("candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash")}, approval_context={"schema":"nexus.approval.v2", "approval_id":"p", "approved_by":"owner", "approval_scope":"ALLOW_ACTION_ONCE"})
     now = datetime.now(timezone.utc)
@@ -2868,7 +2919,7 @@ def test_versioned_allow_action_once_is_consumed_atomically_and_replay_is_idempo
         "candidate_commit_sha": "c" * 40,
         "candidate_tree_sha": "d" * 40,
         "candidate_state_hash": "e" * 64,
-        "verified_receipt_hash": "f" * 64,
+        "verified_receipt_hash": _VERIFIED_RECEIPT_HASH,
     }
     service._write_state(task_id, {
         "task_id": task_id,
@@ -2876,6 +2927,7 @@ def test_versioned_allow_action_once_is_consumed_atomically_and_replay_is_idempo
         "status": "PENDING_HUMAN_APPROVAL",
         "promotion_status": "PENDING_HUMAN_APPROVAL",
         "promotion_packet": packet,
+        "verified_receipt": dict(_VERIFIED_RECEIPT),
     })
     grant = {
         "schema": "nexus.approval.v2",
@@ -3067,6 +3119,7 @@ def test_approval_mismatch_returns_action_required_envelope(tmp_path):
         candidate_tree_sha="0" * 40,
         candidate_state_hash="e" * 64,
         verified_receipt_hash="f" * 64,
+        approval_context={"schema": "nexus.approval.v2", "approval_id": "p", "approved_by": "owner", "approval_scope": "ALLOW_ACTION_ONCE"},
     )
 
     assert result["status"] == "APPROVAL_INVALIDATED"
@@ -5412,13 +5465,14 @@ def test_owner_finish_ten_candidate_matrix_archives_each_terminal(tmp_path, monk
             "candidate_commit_sha": f"{index + 1:040x}",
             "candidate_tree_sha": f"{index + 101:040x}",
             "candidate_state_hash": f"{index + 201:064x}",
-            "verified_receipt_hash": f"{index + 301:064x}",
+            "verified_receipt_hash": _verified_receipt_hash({"verified": True, "index": index}),
         }
         service._write_state(task_id, {
             "task_id": task_id,
             "status": "CANDIDATE_CAPTURED",
             "promotion_status": "PENDING_HUMAN_APPROVAL",
             "promotion_packet": binding,
+            "verified_receipt": {"verified": True, "index": index},
             "request": {},
             "attempt_id": f"attempt-{index}",
             "attempts": [{"attempt_id": f"attempt-{index}"}],
@@ -8179,7 +8233,7 @@ def test_lc3_service_path_canary(tmp_path, monkeypatch):
         "target_worktree_root": str(target_root),
         "allowed_files": ["src/"],
         "forbidden_files": [],
-        "verifier_commands": [],
+        "verifier_commands": ["python -c pass"],
         "protected_contracts": [],
         "worker": "codex",
     }
