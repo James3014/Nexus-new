@@ -121,26 +121,22 @@ class _ImportCollector(ast.NodeVisitor):
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
-            self.records.append(
-                {
-                    "module": alias.name,
-                    "name": None,
-                    "bound": alias.asname or alias.name.split(".")[0],
-                    "lineno": node.lineno,
-                }
-            )
+            self.records.append({
+                "module": alias.name,
+                "name": None,
+                "bound": alias.asname or alias.name.split(".")[0],
+                "lineno": node.lineno,
+            })
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         module = ("." * node.level) + (node.module or "")
         for alias in node.names:
-            self.records.append(
-                {
-                    "module": module,
-                    "name": alias.name,
-                    "bound": alias.asname or alias.name,
-                    "lineno": node.lineno,
-                }
-            )
+            self.records.append({
+                "module": module,
+                "name": alias.name,
+                "bound": alias.asname or alias.name,
+                "lineno": node.lineno,
+            })
 
 
 def _span(node: ast.AST) -> tuple[int, int]:
@@ -166,28 +162,44 @@ def build_definitions(tree: ast.Module) -> list[dict[str, Any]]:
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             start, end = _span(node)
-            defs.append({"name": node.name, "kind": "function", "node": node, "start": start, "end": end})
+            defs.append({
+                "name": node.name,
+                "kind": "function",
+                "node": node,
+                "start": start,
+                "end": end,
+            })
         elif isinstance(node, ast.ClassDef):
             start, end = _span(node)
-            defs.append({"name": node.name, "kind": "class", "node": node, "start": start, "end": end})
+            defs.append({
+                "name": node.name,
+                "kind": "class",
+                "node": node,
+                "start": start,
+                "end": end,
+            })
             if node.name == SERVICE_CLASS:
                 for item in node.body:
                     if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
                         s, e = _span(item)
-                        defs.append(
-                            {
-                                "name": f"{SERVICE_CLASS}.{item.name}",
-                                "kind": "method",
-                                "node": item,
-                                "start": s,
-                                "end": e,
-                            }
-                        )
+                        defs.append({
+                            "name": f"{SERVICE_CLASS}.{item.name}",
+                            "kind": "method",
+                            "node": item,
+                            "start": s,
+                            "end": e,
+                        })
         elif isinstance(node, (ast.Assign, ast.AnnAssign)):
             names = _assign_names(node)
             if names:
                 start, end = _span(node)
-                defs.append({"name": names[0], "kind": "constant", "node": node, "start": start, "end": end})
+                defs.append({
+                    "name": names[0],
+                    "kind": "constant",
+                    "node": node,
+                    "start": start,
+                    "end": end,
+                })
     return defs
 
 
@@ -195,9 +207,7 @@ def analyse(tree: ast.Module, text: str) -> dict[str, Any]:
     # Module-level import table (name -> module) and all imports (any scope).
     collector = _ImportCollector()
     collector.visit(tree)
-    top_level_linenos = {
-        n.lineno for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))
-    }
+    top_level_linenos = {n.lineno for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))}
     module_table: dict[str, str] = {}
     imports_by_module: dict[str, dict[str, Any]] = {}
     for rec in collector.records:
@@ -216,16 +226,14 @@ def analyse(tree: ast.Module, text: str) -> dict[str, Any]:
     imports = []
     for module in sorted(imports_by_module):
         entry = imports_by_module[module]
-        imports.append(
-            {
-                "classification": classify_module(module),
-                "first_line": min(entry["lines"]),
-                "module": module,
-                "names": sorted(entry["names"]),
-                "scopes": sorted(entry["scopes"]),
-                "sovereign_category": sovereign_category(module),
-            }
-        )
+        imports.append({
+            "classification": classify_module(module),
+            "first_line": min(entry["lines"]),
+            "module": module,
+            "names": sorted(entry["names"]),
+            "scopes": sorted(entry["scopes"]),
+            "sovereign_category": sovereign_category(module),
+        })
 
     raw_defs = build_definitions(tree)
     module_def_names = {d["name"] for d in raw_defs if d["kind"] != "method"}
@@ -257,29 +265,32 @@ def analyse(tree: ast.Module, text: str) -> dict[str, Any]:
             ):
                 in_module.add(f"{SERVICE_CLASS}.{sub.attr}")
         modules = sorted({table[n] for n in ext_names})
-        kinds: dict[str, list[str]] = {"nexus-new": [], "nexus_runtime": [], "stdlib": [], "third-party": []}
+        kinds: dict[str, list[str]] = {
+            "nexus-new": [],
+            "nexus_runtime": [],
+            "stdlib": [],
+            "third-party": [],
+        }
         for m in modules:
             kinds[classify_module(m)].append(m)
         sovereign = sorted({m for m in kinds["nexus-new"] if sovereign_category(m)})
         simple = d["name"].split(".")[-1]
-        definitions.append(
-            {
-                "end_line": d["end"],
-                "external_names": sorted(ext_names),
-                "in_module_refs": sorted(in_module),
-                "kind": d["kind"],
-                "lines": d["end"] - d["start"] + 1,
-                "mcp_projection": bool(MCP_NAME_RE.search(simple)),
-                "name": d["name"],
-                "sovereign_by_name": bool(SOVEREIGN_NAME_RE.search(simple)),
-                "nexus_modules": sorted(kinds["nexus-new"]),
-                "nexus_runtime_modules": sorted(kinds["nexus_runtime"]),
-                "sovereign_modules": sovereign,
-                "start_line": d["start"],
-                "stdlib_modules": sorted(kinds["stdlib"]),
-                "third_party_modules": sorted(kinds["third-party"]),
-            }
-        )
+        definitions.append({
+            "end_line": d["end"],
+            "external_names": sorted(ext_names),
+            "in_module_refs": sorted(in_module),
+            "kind": d["kind"],
+            "lines": d["end"] - d["start"] + 1,
+            "mcp_projection": bool(MCP_NAME_RE.search(simple)),
+            "name": d["name"],
+            "sovereign_by_name": bool(SOVEREIGN_NAME_RE.search(simple)),
+            "nexus_modules": sorted(kinds["nexus-new"]),
+            "nexus_runtime_modules": sorted(kinds["nexus_runtime"]),
+            "sovereign_modules": sovereign,
+            "start_line": d["start"],
+            "stdlib_modules": sorted(kinds["stdlib"]),
+            "third_party_modules": sorted(kinds["third-party"]),
+        })
 
     assign_clusters(definitions)
     clusters = summarise_clusters(definitions)
@@ -311,7 +322,9 @@ def assign_clusters(definitions: list[dict[str, Any]]) -> None:
     for d in definitions:
         d["cluster"] = None
         d["reason"] = ""
-    clusterable = [d for d in definitions if not (d["kind"] == "class" and d["name"] == SERVICE_CLASS)]
+    clusterable = [
+        d for d in definitions if not (d["kind"] == "class" and d["name"] == SERVICE_CLASS)
+    ]
 
     # reaches_sovereign: transitive over the in-module reference graph.
     reach = {
@@ -403,14 +416,12 @@ def string_patch_sites(repo: Path) -> list[dict[str, Any]]:
     for path, lineno, text in _git_grep(repo, pattern, pathspecs):
         for match in re.finditer(pattern, text):
             target = match.group(0)[1:-1]
-            sites.append(
-                {
-                    "attribute": target[len(MODULE_NAME) + 1 :],
-                    "file": path,
-                    "line": lineno,
-                    "target": target,
-                }
-            )
+            sites.append({
+                "attribute": target[len(MODULE_NAME) + 1 :],
+                "file": path,
+                "line": lineno,
+                "target": target,
+            })
     return sites
 
 
@@ -424,7 +435,10 @@ def parallel_implementations(repo: Path) -> dict[str, Any]:
     for label, cfg in PARALLEL_CANDIDATES.items():
         own = subprocess.run(
             ["git", "ls-files", "--", cfg["pathspec"]],
-            cwd=repo, capture_output=True, text=True, check=False,
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=False,
         ).stdout.split()
         own_dirs = tuple(p for p in own)
         alt = "|".join(re.escape(m) for m in cfg["modules"])
@@ -507,11 +521,17 @@ def render_markdown(d: dict[str, Any]) -> str:
         "`bridge_candidate` = at most 2 nexus-new modules, none sovereign; `runtime_candidate` = "
         "only stdlib, `nexus_runtime`, and other runtime candidates.\n"
     )
-    out.append("## Top 15 largest definitions\n\n| # | definition | lines | cluster |\n|---:|---|---:|---|")
-    top = sorted((x for x in d["definitions"] if x["cluster"]), key=lambda x: (-x["lines"], x["name"]))[:15]
+    out.append(
+        "## Top 15 largest definitions\n\n| # | definition | lines | cluster |\n|---:|---|---:|---|"
+    )
+    top = sorted(
+        (x for x in d["definitions"] if x["cluster"]), key=lambda x: (-x["lines"], x["name"])
+    )[:15]
     for i, x in enumerate(top, 1):
         out.append(f"| {i} | `{x['name']}` | {x['lines']} | {x['cluster']} |")
-    out.append("\n## Sovereign modules (derived from the import list)\n\n| module | category |\n|---|---|")
+    out.append(
+        "\n## Sovereign modules (derived from the import list)\n\n| module | category |\n|---|---|"
+    )
     for m in d["sovereign_modules"]:
         out.append(f"| `{m['module']}` | {m['category']} |")
     out.append(
@@ -530,7 +550,9 @@ def render_markdown(d: dict[str, Any]) -> str:
         "| candidate | importers non-test | importers test |\n|---|---:|---:|"
     )
     for k, v in d["parallel_implementations"].items():
-        out.append(f"| `{k}` | {v['importer_counts']['non_test']} | {v['importer_counts']['test']} |")
+        out.append(
+            f"| `{k}` | {v['importer_counts']['non_test']} | {v['importer_counts']['test']} |"
+        )
     out.append("\n## Recommended 5b-1 first slice: status sets\n")
     sets = [x for x in d["definitions"] if x["name"].endswith("_STATUSES")]
     out.append(
@@ -538,7 +560,11 @@ def render_markdown(d: dict[str, Any]) -> str:
         "| definition | lines | in-module consumers |\n|---|---:|---:|"
     )
     for x in sets:
-        n = sum(1 for y in d["definitions"] if x["name"] in y["in_module_refs"] and y["name"] != SERVICE_CLASS)
+        n = sum(
+            1
+            for y in d["definitions"]
+            if x["name"] in y["in_module_refs"] and y["name"] != SERVICE_CLASS
+        )
         out.append(f"| `{x['name']}` | {x['lines']} | {n} |")
     out.append(
         f"\nTotal: {sum(x['lines'] for x in sets)} lines. The source has no standalone transition "
@@ -559,7 +585,9 @@ def main(argv: list[str] | None = None) -> int:
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--stdout", action="store_true", help="print JSON instead of writing")
     group.add_argument("--check", action="store_true", help="exit 1 if committed JSON+MD drifted")
-    group.add_argument("--write", action="store_true", help="refresh committed JSON and MD (default)")
+    group.add_argument(
+        "--write", action="store_true", help="refresh committed JSON and MD (default)"
+    )
     args = parser.parse_args(argv)
     data = build_map()
     out = render(data)
