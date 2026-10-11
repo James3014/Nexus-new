@@ -31,14 +31,9 @@ def test_planner_shims_point_at_runtime(nexus_module, runtime_module):
     assert "if TYPE_CHECKING:" in text  # static re-export for type checkers
 
 
-@pytest.mark.parametrize(("nexus_module", "runtime_module"), DIVERGENT_PAIRS)
-def test_divergent_pairs_are_not_yet_equivalent(nexus_module, runtime_module):
-    """Nexus-new is ahead of the runtime copy; flips (and must be re-gated) once runtime catches up."""
-    path = ROOT / (nexus_module.replace(".", "/") + ".py")
-    assert "install_alias" not in path.read_text(encoding="utf-8")
-    assert _normalize(path.read_text(encoding="utf-8")) != _normalize(
-        _runtime_source(runtime_module)
-    )
+def test_no_divergent_pairs_remain():
+    """Phase 4b is complete: every pair is an alias, so nothing may stay a full copy."""
+    assert DIVERGENT_PAIRS == []
 
 
 def test_pair_table_covers_27_modules():
