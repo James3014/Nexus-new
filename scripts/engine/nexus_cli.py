@@ -2266,8 +2266,9 @@ else:
             click.echo("❌ Invalid task name: only alphanumeric, spaces, dashes, and underscores allowed.")
             sys.exit(1)
 
-        sanitized_task_name = SanitizedRunner.sanitize_arg(task_name)
-        res = SanitizedRunner.run_safe([sys.executable, str(repo_root / "scripts/ops/supervisor_engine.py"), sanitized_task_name], check=False)
+        # task_name is regex-validated and passed as one argv element (no shell), so it must
+        # not be shlex-quoted: quoting would embed literal quote characters in the task.
+        res = SanitizedRunner.run_safe([sys.executable, str(repo_root / "scripts/ops/supervisor_engine.py"), task_name], check=False)
         payload = build_completion_envelope(
             command_name="delegate",
             task_name=task_name,
