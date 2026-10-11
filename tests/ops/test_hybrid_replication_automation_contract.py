@@ -53,10 +53,16 @@ def test_contract_records_task_granular_fail_close_and_campaign_exclusions() -> 
         "hybrid_replication",
     ]
     assert exclusions["disposition"] == "CAMPAIGN_META_WORK_EXCLUDED"
-    assert payload["activation_manifest"] == {
+    manifest_block = payload["activation_manifest"]
+    assert manifest_block == {
         "schema": "nexus.hybrid_replication.activation_manifest.v1",
         "script": "scripts/ops/hybrid_replication_activation.py",
+        "runbook": "docs/research/hybrid_replication_v2/RUNBOOK.md",
+        "runtime_freeze_script": "scripts/ops/hybrid_replication_freeze_runtime.py",
     }
+    assert Path(manifest_block["script"]).is_file()
+    assert Path(manifest_block["runbook"]).is_file()
+    assert Path(manifest_block["runtime_freeze_script"]).is_file()
 
 
 def test_contract_campaign_exclusions_match_pipeline_policy_defaults() -> None:

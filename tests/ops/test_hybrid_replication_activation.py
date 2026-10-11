@@ -298,3 +298,20 @@ def test_contract_points_to_activation_script() -> None:
         contract["activation_manifest"]["script"] == "scripts/ops/hybrid_replication_activation.py"
     )
     assert Path(contract["activation_manifest"]["script"]).is_file()
+
+
+def test_first_generation_manifest_is_valid_and_not_ready() -> None:
+    path = Path("docs/research/hybrid_replication_v2/activation/V11.manifest.json")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    manifest = activation.parse_manifest(payload)
+    assert manifest.generation == "AGY_GEMINI_3_8_FLASH_MEDIUM_V11"
+    assert manifest.activation_state == "NOT_READY"
+    assert manifest.t_auto is None
+    assert manifest.excluded_tasks == ()
+    assert manifest.readiness_control_token == ""
+    assert manifest.repositories == activation.CANDIDATE_REPOSITORIES
+    rendered = activation.render(manifest)
+    assert len(rendered) == 8
+    for variables in rendered.values():
+        assert variables[activation.VAR_ACTIVATION_STATE] == "NOT_READY"
+        assert variables[activation.VAR_T_AUTO] == ""

@@ -51,7 +51,9 @@
   },
   "activation_manifest": {
     "schema": "nexus.hybrid_replication.activation_manifest.v1",
-    "script": "scripts/ops/hybrid_replication_activation.py"
+    "script": "scripts/ops/hybrid_replication_activation.py",
+    "runbook": "docs/research/hybrid_replication_v2/RUNBOOK.md",
+    "runtime_freeze_script": "scripts/ops/hybrid_replication_freeze_runtime.py"
   },
   "superseded_provisional_boundary": {
     "utc": "2026-09-30T23:08:07Z",
