@@ -200,6 +200,18 @@ TRUSTED_PR1637_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, s
     ),
 )
 
+# Exact one-use, four-way binding for Owner-authorized PR #1789 (Issue #1788
+# Phase 4b planner aliasing + Phase 5b-1; nexus-runtime 0456b78 -> 758132f).
+TRUSTED_PR1789_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1789,
+    (
+        "ca23695a4cfbca27f64bc163655256ae45cb0b12933cffe7c07c5aff91da440d",
+        "2f5282586cbc972ad6990be39f5f7789efe1f7fcfa9b2b8eaa7508eccf03224f",
+        "69861ac2d0ca113319993f870d112a42e4819a0004883a1e634dc96c6b4c4222",
+        "2429ca1bebe0df8193bcaabb0225fa04233a0f1cd3a2552adc6d594c11403c89",
+    ),
+)
+
 REQUIRED_EVIDENCE_KEYS = {
     "schema_version",
     "status",
@@ -285,6 +297,7 @@ def _validate_trusted_dependency_contract(
         TRUSTED_PR1545_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR1661_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR1637_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1789_DEPENDENCY_SNAPSHOT_TRANSITION,
     )
     for authorized_transition_record in authorized_transition_records:
         if authorized_transition_record is None:
