@@ -1,6 +1,6 @@
 # HANDOFF
 
-更新：2026-10-11 · by Claude · HEAD `ba1cc6a71`
+更新：2026-10-11 · by Claude · HEAD `d8d7a842f`
 <!-- 規則見 docs/agents/HANDOFF_PROTOCOL.md。上限 150 行；過期內容移到 docs/archive/HANDOFF-YYYY-MM.md。 -->
 
 ## ▶ 下一步（只放一件，必須帶 #Issue）
@@ -10,16 +10,12 @@
 - #1773 / PR #1774：修正已提出，待檢查轉綠後合併。
 - #1216：V11（`AGY_GEMINI_3_8_FLASH_MEDIUM_V11`）step 0–2 通過、凍結 SHA `895e5388`，等 #1773 修好後從 step 3 續跑。
 - #1757、#1758、#1760 等 invariant gap / PR #1768：2026-10-11 invariant 覆蓋稽核的修正，檢查進行中。
-- #1763 / PR #1784：第 6–9 項（Belief v0.2、Swarm 部署路徑、Drone HUD、meta-opt preset 消費端）已實作，CI 綠，待合併。
 
 ## 待確認（沒有 Issue 號）
 - #1733 的整合 PR #1767 已合併，但 issue #1733 仍 open；#1580 的 PR #1775 已合併，issue 仍 open——各自跑 `nexus-certify issue-check` 後再關。
 - forecast_gate 是 escalate_only executor：planner 選中它還需要 escalation trigger 才會真的執行，要接上需改 `nexus/services/capability_registry.py`。
 - findings LanceDB：表的第一列沒有向量時不會建立 vector 欄位；5 個 LanceDB 根目錄尚未收斂。
 - MemPalace `constraints_source` 尚未傳到 capability_constraints / prompt_builder。
-- `nexus_swarm/cmd/swarm-manager` 舊 demo 用到已移除的 proto 欄位，目前以 build tag `legacy_v18_demo` 排除；重寫或退役待決定（README 與 scripts/test_local_swarm.sh 仍指向它）。
-- meta-opt preset（`NEXUS_APPLY_META_OPT_PRESET=1`）只套用 research:auto-flow 的 timeout/ratio/history；ab_trials、max_wall_time_sec、Nightshift budget 是否也套用待決定。
-- Belief v0.2：edge 方向採 belief→artifact、depends_on 觸發失效（規格未定方向）；反向傳播、版本歷史、接入路由未做。
 - 舊 open PR 長期無活動（如 #1437、#1447；#1583 與 #1584 head 是同一個 SHA），是否關閉待 Owner 決定。
 
 ## 卡住 / 注意

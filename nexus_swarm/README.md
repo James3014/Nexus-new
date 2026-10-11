@@ -5,15 +5,15 @@
 它展示了如何使用 **Go (指揮官)** 跨過 HTTP/JSON 協議，同時調度多個 **v17 (執行節點)**。
 
 ## 🏗️ 核心組件
-1. **Swarm Manager (Go)**: 位於 `cmd/swarm-manager/`，負責任務分發。
+1. **Swarm Manager (Go)**: 位於 `manager/`，負責任務分發（部署用 `manager/Dockerfile`）。
+   - `cmd/swarm-manager/` 是已退役的 v18 demo：它用到已從 proto 移除的訊息，以 build tag `legacy_v18_demo` 排除在建置之外。
 2. **Idempotency Engine (Go)**: 位於 `pkg/index/`，保證全球一致性。
 3. **v17 Node (Python)**: `scripts/nexus_cli.py --swarm-mode`，接收並執行任務。
 
-## 🚀 如何執行 Demo
-在專案根目錄執行：
+## 🚀 如何建置
+v18 demo 腳本 `scripts/test_local_swarm.sh` 已退役。建置現行 manager：
 ```bash
-chmod +x scripts/test_local_swarm.sh
-./scripts/test_local_swarm.sh
+cd nexus_swarm && go build ./manager
 ```
 
 ## 📊 觀察重點
