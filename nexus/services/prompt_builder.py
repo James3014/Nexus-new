@@ -167,6 +167,11 @@ Rules:
             if constraints["prefer"]:
                 sections.append("💡 [PREFER/優先]\n" + "\n".join([f"- {c}" for c in constraints["prefer"]]))
             
+            if constraints.get("constraints_source") == "unavailable":
+                reason = constraints.get("constraints_unavailable_reason") or "belief_store_unavailable"
+                sections.append(f"⚠️ Belief constraints unavailable: {reason}")
+                if len(sections) == 1:
+                    return sections[0]
             return "\n\n".join(sections) if sections else "None (Constitutional Firewall Clean)"
         except Exception as e:
             return f"Error retrieving constraints: {e}"

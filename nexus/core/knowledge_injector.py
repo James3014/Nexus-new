@@ -1,4 +1,7 @@
+import logging
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 class KnowledgeInjector:
     """
@@ -39,6 +42,11 @@ class KnowledgeInjector:
         if self.mem_palace:
             candidates = self.mem_palace.verify(candidates)
             constraints = self.mem_palace.get_skill_constraints()
+            if constraints.get("constraints_source") == "unavailable":
+                logger.warning(
+                    "Belief constraints unavailable: %s",
+                    constraints.get("constraints_unavailable_reason") or "belief_store_unavailable",
+                )
             
             _STOPWORDS = {"禁止", "使用", "不能", "不可", "禁用", "避免", "forbid", "不允許", "優先", "必須", "require", "prefer"}
             

@@ -257,8 +257,11 @@
 | tests/test_v18_legacy_delivery.py | No direct import of core/services/engine found |
 | tests/test_llm_token_regex.py | No direct import of core/services/engine found |
 | tests/services/test_findings_embedding.py | tests/services/test_findings_embedding.py | active | medium | test_contract |
+| tests/services/test_memory_repository_schema.py | tests/services/test_memory_repository_schema.py | active | medium | test_contract |
+| tests/services/test_lancedb_roots.py | tests/services/test_lancedb_roots.py | active | medium | test_contract |
 | nexus_swarm | tests/ops/test_swarm_deploy_path.py | active | medium | swarm_deploy_path_contract |
 | nexus-swarm-v22-prod | tests/ops/test_swarm_deploy_path.py | active | medium | swarm_archived_fork_contract |
 | tests/ops/test_swarm_deploy_path.py | tests/ops/test_swarm_deploy_path.py | active | medium | test_contract |
 | scripts/test_local_swarm.sh | tests/ops/test_swarm_deploy_path.py | active | medium | swarm_deploy_path_contract |
 | nexus-belief-artifact-v0.2-spec.md | tests/core/test_belief_v02.py | active | medium | belief_v02_spec_contract |
+| tests/core/test_constraints_source_propagation.py | tests/core/test_constraints_source_propagation.py | active | medium | test_contract |
