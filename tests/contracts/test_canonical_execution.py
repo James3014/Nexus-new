@@ -647,8 +647,17 @@ def test_execution_decision_requires_planner_identity_fields(monkeypatch, field_
 
 
 def test_canonical_seam_has_one_planner_call_and_no_forbidden_runtime_dependencies():
-    source_path = Path(__file__).parents[2] / "nexus/engine/canonical_execution.py"
-    source = source_path.read_text(encoding="utf-8")
+    # nexus.engine.canonical_execution is an alias shim (D2); the seam source lives in nexus-runtime.
+    import importlib.util
+    import re
+
+    spec = importlib.util.find_spec("nexus_runtime.support.engine.canonical_execution")
+    assert spec is not None and spec.origin
+    source = re.sub(
+        r"\bnexus_runtime\.(?:planning|support)\.",
+        "nexus.",
+        Path(spec.origin).read_text(encoding="utf-8"),
+    )
     tree = ast.parse(source)
     imported_modules = {
         alias.name
