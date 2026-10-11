@@ -321,9 +321,7 @@ def test_expected_core_revision_is_owner_decided_pin():
     from nexus.orchestrator import canonical_core_transport as transport
 
     assert transport.CANONICAL_CORE_REVISION == EXPECTED_CORE_REVISION
-    workflow = (
-        REPO_ROOT / ".github" / "workflows" / "nexus-core-issue-completion.yml"
-    ).read_text()
+    workflow = (REPO_ROOT / ".github" / "workflows" / "nexus-core-issue-completion.yml").read_text()
     pinned = re.findall(r"nexus-certify-ref:\s*[\"']?([0-9a-f]{40})[\"']?", workflow)
     assert pinned, "workflow must pin nexus-certify to an exact SHA"
     assert set(pinned) == {transport.CANONICAL_CORE_REVISION}
