@@ -16,6 +16,7 @@ import subprocess
 import time
 from typing import Any, Callable, Mapping
 
+from nexus.core.repo_root import REPO_ROOT
 from nexus.contracts.canonical_execution import validate_canonical_execution_identity
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.services.local_heal.isolated_verifier import (
@@ -1226,7 +1227,7 @@ class LocalAssistService:
 
 def build_planner_snapshot(*, task_statement: str, model: str, topology: str = "single_local_model") -> dict[str, Any]:
     """Build an explicit planner snapshot for callers that have enabled the gate."""
-    plan = CapabilityPlanner().plan(
+    plan = CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
         task_desc=task_statement,
         task_type="local_assist",
         route={"difficulty": "medium", "pillar_signals": {}},

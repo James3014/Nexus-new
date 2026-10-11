@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from nexus.core.repo_root import REPO_ROOT
+
 
 @dataclass(frozen=True)
 class CapabilityDecision:
@@ -54,7 +56,7 @@ class CapabilityRouter:
         seed_acceleration = ["ddtree"] if candidate_factory_ready and estimated_candidates >= 3 else []
         if any(str(target_file or "").startswith(prefix) for prefix in self.HIGH_RISK_PREFIXES):
             route_features = {**route_features, "has_hard_signal": True}
-        plan = CapabilityPlanner().plan(
+        plan = CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
             task_desc=task_desc,
             task_type=task_type,
             route={

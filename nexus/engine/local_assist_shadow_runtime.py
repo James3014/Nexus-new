@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from nexus.core.repo_root import REPO_ROOT
 from nexus.engine.capability_planner import CapabilityPlanner
 
 
@@ -132,7 +133,7 @@ def record_shadow_decision(
     """Record a recommendation and independently supplied Agent choice."""
     if agent_actual_choice not in _ACTIONS:
         raise ValueError("invalid_agent_actual_choice")
-    plan = CapabilityPlanner().plan(
+    plan = CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
         task_desc=task_desc,
         task_type=task_type,
         route=dict(route),
