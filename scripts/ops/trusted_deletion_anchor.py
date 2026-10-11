@@ -41,7 +41,7 @@ TRUSTED_EXTERNAL_RUNTIME_PACKAGES: tuple[tuple[str, str, str, str], ...] = (
         "nexus-learning",
         "nexus_learning",
         "https://github.com/James3014/nexus-learning.git",
-        "33acad4332b382fac1196c8ea8a8d0f5b543661e",
+        "a48bd876b758069f4dd15c24d0d32f1f2486d319",
     ),
     (
         "nexus-runtime",
@@ -223,6 +223,17 @@ TRUSTED_PR1796_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, s
         "0a50680697e7abbe0b26e6d3e6eef235d9c1e3244a5527b87ac47d57fe2f0015",
     ),
 )
+# Exact one-use, four-way binding for Owner-authorized PR #1804 (Issue #1803
+# canonical nexus-learning 1eb7229 -> a48bd87).
+TRUSTED_PR1804_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1804,
+    (
+        "16b2ee33278ec5fdf156b47f1d8f30bd167509616c3c8d506d358aa9bad1239d",
+        "0a50680697e7abbe0b26e6d3e6eef235d9c1e3244a5527b87ac47d57fe2f0015",
+        "91745c8beac9a1363e18b3dd13e743590c754a98d27dc2f0bff97874a94f0257",
+        "e605aa1109b70d6c99c124e30997f0acf45b72300624a155b4499cc8e2632f52",
+    ),
+)
 
 REQUIRED_EVIDENCE_KEYS = {
     "schema_version",
@@ -311,6 +322,7 @@ def _validate_trusted_dependency_contract(
         TRUSTED_PR1637_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR1789_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR1796_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1804_DEPENDENCY_SNAPSHOT_TRANSITION,
     )
     for authorized_transition_record in authorized_transition_records:
         if authorized_transition_record is None:
