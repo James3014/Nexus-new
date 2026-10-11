@@ -47,6 +47,16 @@ class ExternalSkillLoader:
                     report.skipped += 1
         return report
 
+    def sync_all(self) -> Tuple[int, int]:
+        """Scan and register external skills; return (added, updated) counts."""
+        before = {row["id"] for row in self.registry.list_all()}
+        report = self.scan_and_register()
+        for error in report.errors:
+            logger.warning("skill_sync_error: %s", error)
+        after = {row["id"] for row in self.registry.list_all()}
+        added = len(after - before)
+        return added, max(report.new_skills - added, 0)
+
     def _parse_skill_md(self, path: Path) -> Optional[SkillFrontmatter]:
         """解析 SKILL.md 並轉化為 Nexus 標準模型"""
         try:
