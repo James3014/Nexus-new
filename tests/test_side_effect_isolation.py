@@ -249,3 +249,18 @@ def test_two_task_ids_do_not_overwrite(tmp_path: Path) -> None:
         for pa in op_a:
             for pb in op_b:
                 assert pa != pb, f"task_a and task_b collided on {pa}"
+
+
+def test_executor_benchmark_writes_report_inside_run_root(tmp_path: Path, monkeypatch) -> None:
+    """The benchmark report must land in run_root, never in the cwd/repo root."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    run_root = tmp_path / "runtime" / "t_bench"
+    plan = _make_plan("t_bench", project_root=str(tmp_path), run_root=str(run_root))
+
+    get_executor("benchmark")(plan, "test")
+
+    assert not (cwd / "dual_core_benchmark.md").exists()
+    assert not (tmp_path / "dual_core_benchmark.md").exists()
+    assert (run_root / "dual_core_benchmark.md").exists()

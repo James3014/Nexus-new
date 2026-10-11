@@ -3050,7 +3050,12 @@ def _exec_benchmark(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
     try:
         from nexus.services.benchmark_service import BenchmarkService
 
-        inst = BenchmarkService(project_root=".")
+        project_root, run_root, _run_id = _resolve_run_root(plan)
+        inst = BenchmarkService(project_root=str(project_root))
+        # Keep the generated report inside this run's root instead of the cwd/repo root.
+        inst.report_path = run_root / "dual_core_benchmark.md"
+        _assert_outputs_in_run_root([inst.report_path], run_root)
+        inst.report_path.parent.mkdir(parents=True, exist_ok=True)
         # Bounded: zero-task construct of run kwargs path without full suite.
         # Prefer a dry structural call: run with tasks_count=0 if accepted, else
         # reflect service readiness via class binding + method presence.
