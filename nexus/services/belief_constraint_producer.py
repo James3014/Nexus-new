@@ -104,7 +104,8 @@ class BeliefConstraintProducer:
             domain = outcome_domain(payload)
             key = f"{skill_id}\x1f{domain}"
             state = self._load_state()
-            entry = state.get(key) if isinstance(state.get(key), dict) else {}
+            raw_entry = state.get(key)
+            entry: Dict[str, Any] = raw_entry if isinstance(raw_entry, dict) else {}
             streak = int(entry.get("streak", 0))
             active = bool(entry.get("active", False))
             stamp = self._now().isoformat()

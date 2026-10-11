@@ -7,6 +7,19 @@ from nexus.infrastructure.storage_interfaces import MemoryStorage, CacheStore, J
 
 logger = logging.getLogger(__name__)
 
+
+def _lancedb_table_names(db: Any) -> List[str]:
+    """Table names across lancedb versions (list, or a response with ``.tables``)."""
+    tables: Any = db.list_tables()
+    if not isinstance(tables, list):
+        tables = getattr(tables, "tables", tables)
+    return [str(name) for name in tables]
+
+
+def _is_missing(value: Any) -> bool:
+    """True for None and float NaN (pandas' marker for a null cell)."""
+    return value is None or (isinstance(value, float) and value != value)
+
 class LanceDBStorage(MemoryStorage):
     def __init__(self, project_root: Path, tenant_id: str | None = None, audit_events: list[dict[str, Any]] | None = None):
         self.project_root = project_root
@@ -143,9 +156,7 @@ class LanceBeliefStore(BeliefStore):
         db_path = self.project_root / ".nexus" / "vector_db"
         db_path.mkdir(parents=True, exist_ok=True)
         db = lancedb.connect(str(db_path))
-        tables = db.list_tables()
-        names = tables if isinstance(tables, list) else (tables.tables if hasattr(tables, "tables") else tables)
-        if self._TABLE in names:
+        if self._TABLE in _lancedb_table_names(db):
             return db.open_table(self._TABLE)
         if create_rows is None:
             return None
@@ -212,19 +223,19 @@ class LanceBeliefStore(BeliefStore):
             if not db_path.exists():
                 return []
             db = lancedb.connect(str(db_path))
-            tables = db.list_tables()
-            table_names = tables if isinstance(tables, list) else (tables.tables if hasattr(tables, "tables") else tables)
-            if "nexus_soul_palace" not in table_names:
+            if "nexus_soul_palace" not in _lancedb_table_names(db):
                 return []
-            df = db.open_table("nexus_soul_palace").to_pandas()
-            # Only belief rows are beliefs; outcome artifacts and untyped legacy rows are not.
-            if "type" not in df.columns:
-                return []
-            df = df[df["type"].astype(str).str.lower() == "belief"]
-            if status != "ALL" and "status" in df.columns:
-                df = df[df["status"].astype(str).str.upper() == status.upper()]
-            df = df.astype(object).where(df.notna(), None)
-            return df.to_dict("records")
+            records = db.open_table("nexus_soul_palace").to_pandas().to_dict("records")
+            beliefs: List[Dict[str, Any]] = []
+            for raw in records:
+                row = {str(k): (None if _is_missing(v) else v) for k, v in raw.items()}
+                # Only belief rows are beliefs; outcome artifacts and untyped legacy rows are not.
+                if str(row.get("type") or "").lower() != "belief":
+                    continue
+                if status != "ALL" and "status" in row and str(row.get("status")).upper() != status.upper():
+                    continue
+                beliefs.append(row)
+            return beliefs
         except Exception as exc:
             self.last_read_status = "unavailable"
             self.last_read_error = f"{type(exc).__name__}: {exc}"
