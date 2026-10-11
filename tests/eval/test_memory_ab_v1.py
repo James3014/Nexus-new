@@ -127,6 +127,13 @@ def test_v2_fixtures_are_red():
     assert all(r["red"] and r["within_budget"] for r in results), results
 
 
+def test_v3_fixtures_are_red():
+    v3_dir = EVAL_DIR / "memory_ab_tasks_v3"
+    results = verify_fixtures.verify_all(v3_dir)
+    assert len(results) == 24
+    assert all(r["red"] and r["within_budget"] for r in results), results
+
+
 def test_fixture_verifier_rejects_green_repro(tmp_path):
     task_dir = make_tasks(tmp_path, 1) / "toy-0"
     (task_dir / "m.py").write_text(FIXED, encoding="utf-8")

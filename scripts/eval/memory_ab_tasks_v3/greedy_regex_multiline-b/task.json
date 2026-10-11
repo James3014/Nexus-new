@@ -1,0 +1,8 @@
+{
+  "id": "greedy_regex_multiline-b",
+  "bug_class": "greedy_regex_multiline",
+  "variant": "b",
+  "problem_statement": "placeholders() returns a name that starts at a '{{' left unclosed on one line and runs into the next line: 'oops\\nHi {{ name' for 'Dear {{ oops\\nHi {{ name }}'. Expected: a placeholder must close on its own line, and each name is stripped of spaces.",
+  "target_file": "templates.py",
+  "repro_file": "repro.py"
+}

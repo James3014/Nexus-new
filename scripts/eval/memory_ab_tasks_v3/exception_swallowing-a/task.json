@@ -1,0 +1,8 @@
+{
+  "id": "exception_swallowing-a",
+  "bug_class": "exception_swallowing",
+  "variant": "a",
+  "problem_statement": "load_port('80a') returns 8080 instead of raising an error, and load_port('70000') does the same. Expected: a blank or missing value gives 8080, a number from 1 to 65535 is returned, and anything else raises ValueError.",
+  "target_file": "settings.py",
+  "repro_file": "repro.py"
+}

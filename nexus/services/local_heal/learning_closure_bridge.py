@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import os
 import urllib.request
@@ -9,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from nexus.services.local_heal.candidate_envelope import CandidateEnvelope
+from nexus.services.local_heal.lesson_embedding import embed_model_name, embed_text
 from nexus.services.local_heal.memory_trace import MemoryTrace
 
 INTERNAL_CLASSIFICATIONS = {
@@ -95,7 +97,13 @@ def _reflect_canonical_episode(project_root: Path, episode: dict[str, Any]) -> d
                     payload = json.loads(response.read().decode("utf-8"))
                 return str(payload["response"])
 
-        lessons = reflect_episodes([episode], judge=judge, model_name=model_name)
+        reflect_kwargs: dict[str, Any] = {"judge": judge, "model_name": model_name}
+        accepted = inspect.signature(reflect_episodes).parameters
+        if "embed" in accepted:
+            reflect_kwargs["embed"] = embed_text
+        if "embed_model" in accepted:
+            reflect_kwargs["embed_model"] = embed_model_name()
+        lessons = reflect_episodes([episode], **reflect_kwargs)
         store = LessonStore(LearningStateRoot.from_project_root(project_root))
         lesson_ids = [str(lesson["lesson_id"]) for lesson in lessons if store.append(lesson)]
         if not lessons:
@@ -275,6 +283,17 @@ def _terminal_evidence(op: Any) -> dict[str, Any]:
     return result
 
 
+def _add_patch_excerpt(op: Any, terminal_evidence: dict[str, Any], terminal: str) -> None:
+    """Attach a bounded patch excerpt for SUCCEEDED episodes (only when absent)."""
+    if terminal != "SUCCEEDED" or terminal_evidence.get("patch_excerpt"):
+        return
+    patch = str(
+        getattr(op, "final_patch", "") or getattr(op, "pre_verification_final_patch", "") or ""
+    )
+    if patch.strip():
+        terminal_evidence["patch_excerpt"] = patch[:1500]
+
+
 def _verifier_receipt_fields(op: Any) -> tuple[str, str]:
     """Return (verifier_status, receipt_id) from the op's bound verifier receipt."""
     receipt = getattr(op, "verifier_receipt", None)
@@ -431,6 +450,7 @@ class LearningClosureBridge:
             # Explicit measured verifier status so a parked attempt with a
             # verifier failure counts as measured evidence (never as success).
             terminal_evidence["verifier_status"] = bound_verifier_status
+        _add_patch_excerpt(op, terminal_evidence, lineage["terminal_outcome"])
         episode_error = ""
         episode_write_status = "failed"
         persisted_episode: dict[str, Any] | None = None
@@ -580,6 +600,11 @@ class LearningClosureBridge:
             # Explicit measured verifier status so a parked attempt with a
             # verifier failure counts as measured evidence (never as success).
             terminal_evidence["verifier_status"] = bound_verifier_status
+        _add_patch_excerpt(
+            op,
+            terminal_evidence,
+            "SUCCEEDED" if selected and verifier_result == "pass" else "",
+        )
         episode_error = ""
         episode_write_status = "failed"
         persisted_episode: dict[str, Any] | None = None

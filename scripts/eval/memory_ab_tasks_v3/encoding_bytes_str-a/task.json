@@ -1,0 +1,8 @@
+{
+  "id": "encoding_bytes_str-a",
+  "bug_class": "encoding_bytes_str",
+  "variant": "a",
+  "problem_statement": "sign() raises TypeError when the body is a str, although the signature should cover the UTF-8 bytes of the body. Expected: body and secret may each be str (UTF-8 encoded) or bytes (used unchanged), and the lowercase hex HMAC-SHA256 is returned.",
+  "target_file": "webhook_sig.py",
+  "repro_file": "repro.py"
+}

@@ -1,0 +1,8 @@
+{
+  "id": "recursive_base_case-b",
+  "bug_class": "recursive_base_case",
+  "variant": "b",
+  "problem_statement": "tree_depth({'name': 'Settings', 'children': []}) raises ValueError instead of returning 1. Expected: a node with no children, whether the key is missing or empty, has depth 1, and None has depth 0.",
+  "target_file": "menu_tree.py",
+  "repro_file": "repro.py"
+}
