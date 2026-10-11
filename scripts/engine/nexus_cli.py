@@ -1136,7 +1136,11 @@ else:
         ]
         if not allow_cold_start:
             verify_cmd.insert(4, "--require-acceptance-pass")
-        subprocess.run(verify_cmd, check=True)
+        verify_res = subprocess.run(verify_cmd)
+        if verify_res.returncode != 0:
+            raise click.ClickException(
+                f"Report claim verification failed (verify_report_claims.py exit {verify_res.returncode})."
+            )
 
         # 2. 執行幻覺審計 (always render; hard-fail only when explicit evidence gets REJECTED)
         if not check_hallucination(evidence_path):
@@ -2193,7 +2197,9 @@ else:
     def contract_check(contract_file):
         """📜 [Governance] Validate task contract against physical state."""
         cmd = [sys.executable, str(repo_root / "scripts/ops/closeout_guard.py"), "--contract", contract_file]
-        subprocess.run(cmd, check=True)
+        res = subprocess.run(cmd)
+        if res.returncode != 0:
+            raise click.ClickException(f"Contract check failed (closeout_guard.py exit {res.returncode}).")
 
 
     @nexus_group.command(name="contract-snapshot")
