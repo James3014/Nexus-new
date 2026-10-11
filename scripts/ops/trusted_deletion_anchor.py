@@ -1470,7 +1470,12 @@ def _verifier(args: argparse.Namespace) -> None:
     if identity.get("run_id") != args.expected_run_id:
         raise SystemExit(1)
     git_bundle = (bundle / "git-objects.bundle").read_bytes()
-    with tempfile.TemporaryDirectory(prefix="trusted-anchor-verify-") as directory:
+    # Every verification decision below is made inside the block and raises
+    # before cleanup; a cleanup error must neither fail a PASS nor replace a
+    # failure, so it is ignored as a backstop to the quiescent repository.
+    with tempfile.TemporaryDirectory(
+        prefix="trusted-anchor-verify-", ignore_cleanup_errors=True
+    ) as directory:
         git_repo = Path(directory) / "repo.git"
         _init_ephemeral_bare_repo(git_repo)
         subprocess.run(
