@@ -102,3 +102,47 @@ def test_schema_evolution_failure_falls_back_to_strip_with_reason(tmp_path, monk
     assert repo.last_schema_evolution["reason"].startswith("schema_evolution_failed")
     assert repo.last_embedding["reason"] == "table_has_no_vector_column"
     assert set(repo.get_all_rows("t")["id"]) == {"old", "new"}
+
+
+def _pre_governance_row():
+    """Row shaped like a table created before tenant_id/drawer_id/aaak_content existed."""
+    return {"id": "old", "content": "pre-governance row", "updated_at": 1.0}
+
+
+def test_old_table_missing_tenant_drawer_aaak_accepts_new_row_after_evolution(tmp_path):
+    import lancedb
+
+    lancedb.connect(tmp_path / "db").create_table("t", data=[_pre_governance_row()])
+
+    repo = MemoryRepository(tmp_path / "db", embedding_provider=NoEmbeddingProvider())
+    assert repo.semantic_dedup_ingest("t", {"id": "new", "content": LONG}, tenant_id="acme").startswith("NEW")
+    assert repo.last_schema_evolution["status"] == "added"
+    assert {"tenant_id", "drawer_id", "aaak_content"} <= set(repo.last_schema_evolution["columns"])
+
+    df = repo.get_all_rows("t")
+    assert set(df["id"]) == {"old", "new"}
+    old = df.loc[df["id"] == "old"].iloc[0]
+    assert old["content"] == "pre-governance row"
+    assert old["tenant_id"] is None or old["tenant_id"] != old["tenant_id"]
+    new = df.loc[df["id"] == "new"].iloc[0]
+    assert new["tenant_id"] == "acme"
+    assert new["drawer_id"]
+    assert new["aaak_content"]
+
+
+def test_governance_column_evolution_failure_records_reason_and_still_writes(tmp_path, monkeypatch):
+    import lancedb
+
+    lancedb.connect(tmp_path / "db").create_table("t", data=[_pre_governance_row()])
+    repo = MemoryRepository(tmp_path / "db", embedding_provider=NoEmbeddingProvider())
+
+    def _boom(self, *args, **kwargs):
+        raise NotImplementedError("no add_columns")
+
+    monkeypatch.setattr(type(repo._get_db().open_table("t")), "add_columns", _boom)
+    repo.semantic_dedup_ingest("t", {"id": "new", "content": LONG})
+    assert repo.last_schema_evolution["status"] == "failed"
+    assert repo.last_schema_evolution["reason"].startswith("schema_evolution_failed")
+    df = repo.get_all_rows("t")
+    assert set(df["id"]) == {"old", "new"}
+    assert "tenant_id" not in df.columns
