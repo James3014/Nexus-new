@@ -7,7 +7,7 @@ def _valid_report(diff_path="/tmp/nexus-ultra/changes.diff", git_status_path="/t
     return {
         "schema_version": "ultra-review.v1",
         "run_id": "ultra-review-test",
-        "status": "DRY_RUN_PASS",
+        "status": "VERIFIED",
         "gate_passed": True,
         "mode": "dry-run",
         "project_root": "/tmp/project",
@@ -53,11 +53,20 @@ def _valid_report(diff_path="/tmp/nexus-ultra/changes.diff", git_status_path="/t
     }
 
 
-def test_evaluate_report_passes_valid_dry_run_report():
+def test_evaluate_report_passes_valid_report():
     passed, failures = ultra_gate.evaluate_report(_valid_report())
 
     assert passed is True
     assert failures == []
+
+
+def test_evaluate_report_rejects_dry_run_reports_as_not_verified():
+    for status in ("DRY_RUN_PASS", "DRY_RUN_NOT_VERIFIED"):
+        payload = _valid_report()
+        payload["status"] = status
+        passed, failures = ultra_gate.evaluate_report(payload)
+        assert passed is False
+        assert "dry_run_not_verified" in failures
 
 
 def test_evaluate_report_blocks_high_verified_finding():

@@ -52,6 +52,9 @@ def evaluate_report(
         failures.append("schema_version_mismatch")
     if payload.get("gate_passed") is not True:
         failures.append("gate_not_passed")
+    if str(payload.get("status", "")) in {"DRY_RUN_PASS", "DRY_RUN_NOT_VERIFIED"}:
+        # Dry-run checks nothing (legacy DRY_RUN_PASS is a fake pass): never verified.
+        failures.append("dry_run_not_verified")
     if payload.get("mode") != "dry-run":
         failures.append("unsupported_mode")
     if not payload.get("sandbox_path"):
