@@ -2,6 +2,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import json
 import logging
+import warnings
+
+warnings.warn(
+    "nexus.services.aos_oracle has no production caller and is kept as lab-only "
+    "(the aos_oracle executor uses nexus.services.aos_service; see #1740).",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 
 logger = logging.getLogger(__name__)
 

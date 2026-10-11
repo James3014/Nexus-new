@@ -2,6 +2,15 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from nexus.engine.contracts.replay import ReplayArtifact
+import warnings
+
+warnings.warn(
+    "nexus.engine.replay_runner has no production caller and is kept as lab-only "
+    "(see #1740).",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 
 logger = logging.getLogger(__name__)
 
