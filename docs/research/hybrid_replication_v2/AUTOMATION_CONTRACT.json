@@ -49,6 +49,10 @@
     ],
     "disposition": "CAMPAIGN_META_WORK_EXCLUDED"
   },
+  "activation_manifest": {
+    "schema": "nexus.hybrid_replication.activation_manifest.v1",
+    "script": "scripts/ops/hybrid_replication_activation.py"
+  },
   "superseded_provisional_boundary": {
     "utc": "2026-09-30T23:08:07Z",
     "status": "PRE_AUTOMATION_PROVISIONAL_GENERATION",
