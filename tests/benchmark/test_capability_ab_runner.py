@@ -33549,3 +33549,17 @@ def test_nexus_with_local_model_adapter_alone_no_call(tmp_path, monkeypatch):
     assert ad["route_mode"] == "cloud_assisted_by_local_trace_only"
 
 
+
+
+def test_nexus_cli_subprocess_cmd_resolves_venv_against_subprocess_repo_root(monkeypatch, tmp_path):
+    """The venv must be looked up where the subprocess runs (cwd=repo_root)."""
+    monkeypatch.delenv("NEXUS_BENCH_SUBPROCESS_PYTHON", raising=False)
+    without_venv = tmp_path / "no_venv"
+    without_venv.mkdir()
+    with_venv = tmp_path / "with_venv"
+    venv_python = with_venv / ".venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("", encoding="utf-8")
+
+    assert _nexus_cli_subprocess_cmd(["task"], without_venv)[:2] == ["uv", "run"]
+    assert _nexus_cli_subprocess_cmd(["task"], with_venv)[0] == str(venv_python.resolve())
