@@ -3128,8 +3128,13 @@ else:
     )
     @click.pass_context
     def compat_research_sprint(ctx: click.Context):
-        """Compatibility alias for `nexus research:sprint`."""
-        _forward_to_nested_nexus(ctx, "research:sprint")
+        """Retired: the nested `nexus research:sprint` command no longer exists."""
+        # Forwarding would only reach "No such command"; say where Hyper/Sprint lives now.
+        raise click.UsageError(
+            "`research:sprint` is no longer a CLI command. Hyper/Sprint runs through "
+            "`nexus research:auto-flow` (route-selected hyper_sprint) or "
+            "nexus.services.mainchain_entry.run_mainchain."
+        )
 
 
     @nexus.command(
