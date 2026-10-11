@@ -114,6 +114,9 @@
 | scripts/eval | tests/eval/test_memory_ab_v1.py | active | medium | memory_ab_eval_harness_contract |
 | scripts/engine/commands/research_actions.py | tests/engine/test_research_actions.py | active | medium | research_cli_action_contract |
 | scripts/engine/commands/sandbox_actions.py | tests/engine/test_sandbox_actions.py | active | medium | sandbox_cli_action_and_physical_runner_contract |
+| scripts/engine/commands/stress_test.py | tests/engine/test_simulated_evaluation_honesty.py | active | medium | simulated_evaluation_honesty_contract |
+| scripts/ui-validator.py | tests/engine/test_simulated_evaluation_honesty.py | active | medium | simulated_evaluation_honesty_contract |
+| tests/engine/test_simulated_evaluation_honesty.py | tests/engine/test_simulated_evaluation_honesty.py | active | medium | test_contract |
 | scripts/ops/ci_gate.py | tests/ops/test_ci_gate_report_trust_audit.py, tests/ops/test_ci_gate_closeout_contract.py, tests/ops/test_ci_gate_wiki_sync_block.py | active | high | governance |
 | scripts/ops/_nexus_enforced_briefing.sh | tests/ops/test_nexus_enforced_briefing.py | active | high | enforced_agent_briefing_contract |
 | scripts/ops/run_gemini_nexus_round.sh | tests/ops/test_nexus_enforced_briefing.py | active | high | enforced_agent_briefing_contract |

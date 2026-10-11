@@ -2943,7 +2943,11 @@ else:
                 try:
                     report_payload = json.loads(run_report.read_text(encoding="utf-8"))
                     agg = report_payload.get("aggregates", {})
-                    if isinstance(agg, dict):
+                    if isinstance(report_payload, dict) and report_payload.get("simulated") is True:
+                        # A simulated child report carries no measured signal; never rank it.
+                        status = "simulated_report"
+                        error = "child benchmark report is simulated, not measured"
+                    elif isinstance(agg, dict):
                         aggregates["algorithm_success_rate"] = float(
                             agg.get("algorithm_success_rate", agg.get("success_rate", 0.0)) or 0.0
                         )

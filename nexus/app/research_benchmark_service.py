@@ -13,6 +13,12 @@ from nexus.research.local_sprint_mutator import generate_local_candidate
 from nexus.research.sprint_service import SprintConfig, run_hyper_sprint, LLMCandidateGenerator
 from nexus.research.unified_evaluator import UnifiedEvaluator
 
+# Neither mode below executes the cases yet: gladiator scores every case with a
+# constant placeholder and A/B writes a fixed summary. Reports are tagged so no
+# consumer (meta-opt, dashboards) can mistake them for measured results.
+SIMULATED_EVIDENCE = "placeholder_not_executed"
+
+
 class ResearchBenchmarkService:
     def __init__(self, repo_root: Path):
         self.repo_root = repo_root
@@ -35,18 +41,22 @@ class ResearchBenchmarkService:
         
         r_path.parent.mkdir(parents=True, exist_ok=True)
         report_data = {
-            "mode": "gladiator", 
-            "results": results, 
+            "mode": "gladiator",
+            "simulated": True,
+            "evidence": SIMULATED_EVIDENCE,
+            "results": results,
             "total_cases": len(results),
             "research_chosen_cases": len(results),
             "success_cases": sum(1 for r in results if r.get("score", 0) >= 1.0)
         }
         r_path.write_text(json.dumps(report_data, indent=2), encoding="utf-8")
-        click.echo(f"📊 Benchmark Complete: {len(results)} cases. Report: {report_file}")
+        click.echo(f"📊 Benchmark Complete (SIMULATED, cases not executed): {len(results)} cases. Report: {report_file}")
 
     def run_ab_benchmark(self, manifest_file, report_path, timeout_sec, max_wall_time_sec, ab_trials, ab_llm_mode, llm_baseline):
         summary = {
             "mode": "ab",
+            "simulated": True,
+            "evidence": SIMULATED_EVIDENCE,
             "ab_trials": ab_trials,
             "aggregates": {"success_rate": 1.0, "algorithm_success_rate": 1.0, "infra_blocked_rate": 0.0}, 
             "per_case": [{
@@ -57,4 +67,4 @@ class ResearchBenchmarkService:
         }
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-        click.echo(f"📊 A/B Benchmark Complete: 1 cases. Report: {report_path}")
+        click.echo(f"📊 A/B Benchmark Complete (SIMULATED, fixed summary): 1 cases. Report: {report_path}")
