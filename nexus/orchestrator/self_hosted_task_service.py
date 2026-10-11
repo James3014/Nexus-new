@@ -24,6 +24,18 @@ from typing import Any, Callable, Iterable, Iterator, Mapping, Optional, Sequenc
 from uuid import uuid4
 
 from nexus_runtime.execution_state import ExecutionStateStore
+from nexus_runtime.task_lifecycle import (
+    ACTIVE_EXECUTION_STATUSES,
+    DIRECT_EXECUTION_STATUSES,
+    DURABLE_SELF_HOSTED_STATUSES,
+    INTEGRATION_INTERMEDIATE_STATUSES,
+    INVALID_STATE_STATUSES,
+    KNOWN_SELF_HOSTED_STATUSES,
+    PENDING_CANDIDATE_STATUSES,
+    RESUMABLE_STATUSES,
+    RETRYABLE_TASK_STATUSES,
+    TERMINAL_STATUSES,
+)
 
 from nexus.contracts.autonomy_goal import AutonomyActionClass, AutonomyGoalGrant
 from nexus.contracts.collaboration_realm import CollaborationExecutionRealm
@@ -129,29 +141,6 @@ Runner = Callable[
     [ArchitectTaskContract, Mapping[str, Any], Callable[[str, dict[str, Any]], None]],
     dict[str, Any],
 ]
-TERMINAL_STATUSES = frozenset(
-    {
-        "FINAL_BLOCK",
-        "RETAINED_FOR_REVIEW",
-        "REJECTED",
-        "SUPERSEDED",
-        "INTEGRATED",
-        "INTEGRATION_FAILED",
-        "CANCELLED",
-        "REHEARSAL_VERIFIED",
-        "DIRECT_COMPLETED",
-        "DIRECT_RECONCILE_REQUIRED",
-        "INTEGRATED_AND_CLEANED",
-    }
-)
-PENDING_CANDIDATE_STATUSES = frozenset(
-    {
-        "PENDING_HUMAN_APPROVAL",
-        "APPROVED",
-        "APPROVAL_INVALIDATED",
-        "INTEGRATING",
-    }
-)
 _LEGACY_V1_NEGATIVE_OMISSION_SET = frozenset(
     {
         "candidate_status",
@@ -178,62 +167,7 @@ _PROJECT_ENTRY_AUTHORITY_HINTS = frozenset(
         "required_action_family",
     }
 )
-RESUMABLE_STATUSES = frozenset(
-    {
-        "WORKER_COMPLETED",
-        "WORKER_ESCALATING",
-        "CANDIDATE_CAPTURED",
-        "VERIFIED",
-    }
-)
-ACTIVE_EXECUTION_STATUSES = frozenset(
-    {
-        "ADOPTING",
-        "SUBMITTED",
-        "TARGET_LEASED",
-        "WORKER_RUNNING",
-        "CANDIDATE_COMMITTED",
-        "CANDIDATE_REF_PROTECTED",
-        "TARGET_CLEANED",
-    }
-)
 _EXTERNAL_ADOPTION_CLAIM_CEILING = ("CANDIDATE_ADOPTED_PENDING_HUMAN_APPROVAL_ONLY",)
-INTEGRATION_INTERMEDIATE_STATUSES = frozenset(
-    {
-        "INTEGRATION_FAILED_PRE_APPLY",
-        "INTEGRATION_VERIFY_FAILED_AFTER_APPLY",
-        "INTEGRATED_TARGET_RETAINED",
-    }
-)
-DIRECT_EXECUTION_STATUSES = frozenset(
-    {
-        "DIRECT_INTENT_RECORDED",
-        "DIRECT_STARTED",
-        "DIRECT_APPLIED",
-        "DIRECT_VERIFIED",
-        "DIRECT_COMMITTED",
-    }
-)
-INVALID_STATE_STATUSES = frozenset(
-    {
-        "BLOCKED_INVALID_STATE",
-    }
-)
-DURABLE_SELF_HOSTED_STATUSES = frozenset(
-    TERMINAL_STATUSES
-    | PENDING_CANDIDATE_STATUSES
-    | RESUMABLE_STATUSES
-    | ACTIVE_EXECUTION_STATUSES
-    | INTEGRATION_INTERMEDIATE_STATUSES
-    | DIRECT_EXECUTION_STATUSES
-)
-KNOWN_SELF_HOSTED_STATUSES = frozenset(DURABLE_SELF_HOSTED_STATUSES | INVALID_STATE_STATUSES)
-RETRYABLE_TASK_STATUSES = frozenset(
-    {
-        "FINAL_BLOCK",
-        "CANCELLED",
-    }
-)
 
 
 def _temporary_state_roots() -> tuple[Path, ...]:

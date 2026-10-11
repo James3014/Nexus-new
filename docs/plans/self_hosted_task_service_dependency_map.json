@@ -98,19 +98,10 @@
       "total_lines": 5502
     },
     "runtime_candidate": {
-      "count": 87,
+      "count": 77,
       "definitions": [
-        "ACTIVE_EXECUTION_STATUSES",
         "CANONICAL_SOURCE_BRANCH",
         "DEFAULT_MAXIMUM_ATTEMPTS_PER_TASK",
-        "DIRECT_EXECUTION_STATUSES",
-        "DURABLE_SELF_HOSTED_STATUSES",
-        "INTEGRATION_INTERMEDIATE_STATUSES",
-        "INVALID_STATE_STATUSES",
-        "KNOWN_SELF_HOSTED_STATUSES",
-        "PENDING_CANDIDATE_STATUSES",
-        "RESUMABLE_STATUSES",
-        "RETRYABLE_TASK_STATUSES",
         "SelfHostedTaskService._approval_requirements",
         "SelfHostedTaskService._archive_root",
         "SelfHostedTaskService._archive_state_candidates",
@@ -175,7 +166,6 @@
         "SelfHostedTaskService.state_root_inventory",
         "SelfHostedTaskService.validate_work_claim",
         "SelfHostedTaskService.wait_task",
-        "TERMINAL_STATUSES",
         "_EXTERNAL_ADOPTION_CLAIM_CEILING",
         "_LEGACY_V1_NEGATIVE_OMISSION_SET",
         "_PROJECT_ENTRY_AUTHORITY_HINTS",
@@ -188,7 +178,7 @@
         "_temporary_state_roots",
         "_utc_now"
       ],
-      "total_lines": 1875
+      "total_lines": 1797
     },
     "stay": {
       "count": 25,
@@ -225,7 +215,7 @@
   "definitions": [
     {
       "cluster": "bridge_candidate",
-      "end_line": 131,
+      "end_line": 143,
       "external_names": [
         "Any",
         "ArchitectTaskContract",
@@ -245,7 +235,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 128,
+      "start_line": 140,
       "stdlib_modules": [
         "typing"
       ],
@@ -253,45 +243,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 146,
-      "external_names": [],
-      "in_module_refs": [],
-      "kind": "constant",
-      "lines": 15,
-      "mcp_projection": false,
-      "name": "TERMINAL_STATUSES",
-      "nexus_modules": [],
-      "nexus_runtime_modules": [],
-      "reaches_sovereign_transitively": false,
-      "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
-      "sovereign_by_name": false,
-      "sovereign_modules": [],
-      "start_line": 132,
-      "stdlib_modules": [],
-      "third_party_modules": []
-    },
-    {
-      "cluster": "runtime_candidate",
-      "end_line": 154,
-      "external_names": [],
-      "in_module_refs": [],
-      "kind": "constant",
-      "lines": 8,
-      "mcp_projection": false,
-      "name": "PENDING_CANDIDATE_STATUSES",
-      "nexus_modules": [],
-      "nexus_runtime_modules": [],
-      "reaches_sovereign_transitively": false,
-      "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
-      "sovereign_by_name": false,
-      "sovereign_modules": [],
-      "start_line": 147,
-      "stdlib_modules": [],
-      "third_party_modules": []
-    },
-    {
-      "cluster": "runtime_candidate",
-      "end_line": 166,
+      "end_line": 155,
       "external_names": [],
       "in_module_refs": [],
       "kind": "constant",
@@ -304,13 +256,13 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 155,
+      "start_line": 144,
       "stdlib_modules": [],
       "third_party_modules": []
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 180,
+      "end_line": 169,
       "external_names": [],
       "in_module_refs": [],
       "kind": "constant",
@@ -323,51 +275,13 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 167,
+      "start_line": 156,
       "stdlib_modules": [],
       "third_party_modules": []
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 188,
-      "external_names": [],
-      "in_module_refs": [],
-      "kind": "constant",
-      "lines": 8,
-      "mcp_projection": false,
-      "name": "RESUMABLE_STATUSES",
-      "nexus_modules": [],
-      "nexus_runtime_modules": [],
-      "reaches_sovereign_transitively": false,
-      "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
-      "sovereign_by_name": false,
-      "sovereign_modules": [],
-      "start_line": 181,
-      "stdlib_modules": [],
-      "third_party_modules": []
-    },
-    {
-      "cluster": "runtime_candidate",
-      "end_line": 199,
-      "external_names": [],
-      "in_module_refs": [],
-      "kind": "constant",
-      "lines": 11,
-      "mcp_projection": false,
-      "name": "ACTIVE_EXECUTION_STATUSES",
-      "nexus_modules": [],
-      "nexus_runtime_modules": [],
-      "reaches_sovereign_transitively": false,
-      "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
-      "sovereign_by_name": false,
-      "sovereign_modules": [],
-      "start_line": 189,
-      "stdlib_modules": [],
-      "third_party_modules": []
-    },
-    {
-      "cluster": "runtime_candidate",
-      "end_line": 200,
+      "end_line": 170,
       "external_names": [],
       "in_module_refs": [],
       "kind": "constant",
@@ -380,137 +294,13 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 200,
+      "start_line": 170,
       "stdlib_modules": [],
       "third_party_modules": []
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 207,
-      "external_names": [],
-      "in_module_refs": [],
-      "kind": "constant",
-      "lines": 7,
-      "mcp_projection": false,
-      "name": "INTEGRATION_INTERMEDIATE_STATUSES",
-      "nexus_modules": [],
-      "nexus_runtime_modules": [],
-      "reaches_sovereign_transitively": false,
-      "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
-      "sovereign_by_name": false,
-      "sovereign_modules": [],
-      "start_line": 201,
-      "stdlib_modules": [],
-      "third_party_modules": []
-    },
-    {
-      "cluster": "runtime_candidate",
-      "end_line": 216,
-      "external_names": [],
-      "in_module_refs": [],
-      "kind": "constant",
-      "lines": 9,
-      "mcp_projection": false,
-      "name": "DIRECT_EXECUTION_STATUSES",
-      "nexus_modules": [],
-      "nexus_runtime_modules": [],
-      "reaches_sovereign_transitively": false,
-      "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
-      "sovereign_by_name": false,
-      "sovereign_modules": [],
-      "start_line": 208,
-      "stdlib_modules": [],
-      "third_party_modules": []
-    },
-    {
-      "cluster": "runtime_candidate",
-      "end_line": 221,
-      "external_names": [],
-      "in_module_refs": [],
-      "kind": "constant",
-      "lines": 5,
-      "mcp_projection": false,
-      "name": "INVALID_STATE_STATUSES",
-      "nexus_modules": [],
-      "nexus_runtime_modules": [],
-      "reaches_sovereign_transitively": false,
-      "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
-      "sovereign_by_name": false,
-      "sovereign_modules": [],
-      "start_line": 217,
-      "stdlib_modules": [],
-      "third_party_modules": []
-    },
-    {
-      "cluster": "runtime_candidate",
-      "end_line": 229,
-      "external_names": [],
-      "in_module_refs": [
-        "ACTIVE_EXECUTION_STATUSES",
-        "DIRECT_EXECUTION_STATUSES",
-        "INTEGRATION_INTERMEDIATE_STATUSES",
-        "PENDING_CANDIDATE_STATUSES",
-        "RESUMABLE_STATUSES",
-        "TERMINAL_STATUSES"
-      ],
-      "kind": "constant",
-      "lines": 8,
-      "mcp_projection": false,
-      "name": "DURABLE_SELF_HOSTED_STATUSES",
-      "nexus_modules": [],
-      "nexus_runtime_modules": [],
-      "reaches_sovereign_transitively": false,
-      "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
-      "sovereign_by_name": false,
-      "sovereign_modules": [],
-      "start_line": 222,
-      "stdlib_modules": [],
-      "third_party_modules": []
-    },
-    {
-      "cluster": "runtime_candidate",
-      "end_line": 230,
-      "external_names": [],
-      "in_module_refs": [
-        "DURABLE_SELF_HOSTED_STATUSES",
-        "INVALID_STATE_STATUSES"
-      ],
-      "kind": "constant",
-      "lines": 1,
-      "mcp_projection": false,
-      "name": "KNOWN_SELF_HOSTED_STATUSES",
-      "nexus_modules": [],
-      "nexus_runtime_modules": [],
-      "reaches_sovereign_transitively": false,
-      "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
-      "sovereign_by_name": false,
-      "sovereign_modules": [],
-      "start_line": 230,
-      "stdlib_modules": [],
-      "third_party_modules": []
-    },
-    {
-      "cluster": "runtime_candidate",
-      "end_line": 236,
-      "external_names": [],
-      "in_module_refs": [],
-      "kind": "constant",
-      "lines": 6,
-      "mcp_projection": false,
-      "name": "RETRYABLE_TASK_STATUSES",
-      "nexus_modules": [],
-      "nexus_runtime_modules": [],
-      "reaches_sovereign_transitively": false,
-      "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
-      "sovereign_by_name": false,
-      "sovereign_modules": [],
-      "start_line": 231,
-      "stdlib_modules": [],
-      "third_party_modules": []
-    },
-    {
-      "cluster": "runtime_candidate",
-      "end_line": 265,
+      "end_line": 199,
       "external_names": [
         "Path",
         "os"
@@ -528,7 +318,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 239,
+      "start_line": 173,
       "stdlib_modules": [
         "os",
         "pathlib"
@@ -537,7 +327,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 275,
+      "end_line": 209,
       "external_names": [
         "Path"
       ],
@@ -552,7 +342,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 268,
+      "start_line": 202,
       "stdlib_modules": [
         "pathlib"
       ],
@@ -560,7 +350,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 313,
+      "end_line": 247,
       "external_names": [
         "Any",
         "ContractKind",
@@ -581,7 +371,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 278,
+      "start_line": 212,
       "stdlib_modules": [
         "typing"
       ],
@@ -589,7 +379,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 329,
+      "end_line": 263,
       "external_names": [
         "Any",
         "Enum",
@@ -608,7 +398,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 316,
+      "start_line": 250,
       "stdlib_modules": [
         "dataclasses",
         "enum",
@@ -618,7 +408,7 @@
     },
     {
       "cluster": "stay",
-      "end_line": 353,
+      "end_line": 287,
       "external_names": [
         "Any",
         "AutonomyGoalGrant",
@@ -644,7 +434,7 @@
         "nexus.contracts.autonomy_goal",
         "nexus.orchestrator.autonomy_policy"
       ],
-      "start_line": 332,
+      "start_line": 266,
       "stdlib_modules": [
         "typing"
       ],
@@ -652,7 +442,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 357,
+      "end_line": 291,
       "external_names": [
         "datetime",
         "timezone"
@@ -668,7 +458,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 356,
+      "start_line": 290,
       "stdlib_modules": [
         "datetime"
       ],
@@ -676,7 +466,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 362,
+      "end_line": 296,
       "external_names": [
         "Any"
       ],
@@ -691,7 +481,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 360,
+      "start_line": 294,
       "stdlib_modules": [
         "typing"
       ],
@@ -699,7 +489,7 @@
     },
     {
       "cluster": "stay",
-      "end_line": 381,
+      "end_line": 315,
       "external_names": [
         "Any",
         "Mapping"
@@ -715,7 +505,7 @@
       "reason": "workforce/acceptance/autonomy/capability by name",
       "sovereign_by_name": true,
       "sovereign_modules": [],
-      "start_line": 365,
+      "start_line": 299,
       "stdlib_modules": [
         "typing"
       ],
@@ -723,7 +513,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 392,
+      "end_line": 326,
       "external_names": [
         "Any",
         "ContractKind",
@@ -743,7 +533,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 384,
+      "start_line": 318,
       "stdlib_modules": [
         "typing"
       ],
@@ -751,7 +541,7 @@
     },
     {
       "cluster": "stay",
-      "end_line": 438,
+      "end_line": 372,
       "external_names": [
         "Any",
         "Mapping",
@@ -768,7 +558,7 @@
       "reason": "workforce/acceptance/autonomy/capability by name",
       "sovereign_by_name": true,
       "sovereign_modules": [],
-      "start_line": 395,
+      "start_line": 329,
       "stdlib_modules": [
         "json",
         "typing"
@@ -777,7 +567,7 @@
     },
     {
       "cluster": "stay",
-      "end_line": 556,
+      "end_line": 490,
       "external_names": [
         "Any",
         "Mapping",
@@ -808,7 +598,7 @@
         "nexus.services.model_workforce_policy",
         "nexus.services.runtime_workforce_admission"
       ],
-      "start_line": 441,
+      "start_line": 375,
       "stdlib_modules": [
         "typing"
       ],
@@ -816,7 +606,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 677,
+      "end_line": 611,
       "external_names": [
         "Any",
         "Mapping",
@@ -840,7 +630,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 559,
+      "start_line": 493,
       "stdlib_modules": [
         "typing"
       ],
@@ -848,7 +638,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 686,
+      "end_line": 620,
       "external_names": [
         "Optional",
         "datetime"
@@ -864,7 +654,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 680,
+      "start_line": 614,
       "stdlib_modules": [
         "datetime",
         "typing"
@@ -873,7 +663,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 693,
+      "end_line": 627,
       "external_names": [
         "ArchitectTaskContract",
         "Optional"
@@ -893,7 +683,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 689,
+      "start_line": 623,
       "stdlib_modules": [
         "typing"
       ],
@@ -901,7 +691,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 801,
+      "end_line": 735,
       "external_names": [
         "Any",
         "LifecycleActionEnvelope",
@@ -925,7 +715,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 696,
+      "start_line": 630,
       "stdlib_modules": [
         "typing"
       ],
@@ -933,7 +723,7 @@
     },
     {
       "cluster": "stay",
-      "end_line": 853,
+      "end_line": 787,
       "external_names": [
         "Any",
         "AutonomyActionClass",
@@ -956,7 +746,7 @@
       "sovereign_modules": [
         "nexus.contracts.autonomy_goal"
       ],
-      "start_line": 804,
+      "start_line": 738,
       "stdlib_modules": [
         "typing"
       ],
@@ -964,7 +754,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 866,
+      "end_line": 800,
       "external_names": [
         "Any",
         "Mapping"
@@ -982,7 +772,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 856,
+      "start_line": 790,
       "stdlib_modules": [
         "typing"
       ],
@@ -990,7 +780,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 930,
+      "end_line": 864,
       "external_names": [
         "Any",
         "LifecycleActionEnvelope",
@@ -1013,7 +803,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 869,
+      "start_line": 803,
       "stdlib_modules": [
         "json",
         "typing",
@@ -1023,7 +813,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 946,
+      "end_line": 880,
       "external_names": [
         "Any",
         "Mapping",
@@ -1040,7 +830,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 933,
+      "start_line": 867,
       "stdlib_modules": [
         "json",
         "typing"
@@ -1049,7 +839,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 971,
+      "end_line": 905,
       "external_names": [
         "Any",
         "Mapping"
@@ -1069,7 +859,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 949,
+      "start_line": 883,
       "stdlib_modules": [
         "typing"
       ],
@@ -1077,7 +867,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 1114,
+      "end_line": 1048,
       "external_names": [
         "Any",
         "Mapping",
@@ -1099,7 +889,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 974,
+      "start_line": 908,
       "stdlib_modules": [
         "datetime",
         "os",
@@ -1110,7 +900,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 1169,
+      "end_line": 1103,
       "external_names": [
         "Any",
         "Mapping"
@@ -1128,7 +918,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1117,
+      "start_line": 1051,
       "stdlib_modules": [
         "typing"
       ],
@@ -1136,7 +926,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 1193,
+      "end_line": 1127,
       "external_names": [
         "Any",
         "Mapping",
@@ -1156,7 +946,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1172,
+      "start_line": 1106,
       "stdlib_modules": [
         "pathlib",
         "typing"
@@ -1165,7 +955,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 1239,
+      "end_line": 1173,
       "external_names": [
         "Any",
         "Mapping"
@@ -1183,7 +973,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1196,
+      "start_line": 1130,
       "stdlib_modules": [
         "typing"
       ],
@@ -1191,15 +981,15 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 1289,
+      "end_line": 1223,
       "external_names": [
         "Any",
         "Mapping",
         "Optional",
+        "RETRYABLE_TASK_STATUSES",
         "canonical_request_hash"
       ],
       "in_module_refs": [
-        "RETRYABLE_TASK_STATUSES",
         "_terminal_retry_semantic_payload"
       ],
       "kind": "function",
@@ -1209,12 +999,14 @@
       "nexus_modules": [
         "nexus.contracts.lifecycle_action"
       ],
-      "nexus_runtime_modules": [],
+      "nexus_runtime_modules": [
+        "nexus_runtime.task_lifecycle"
+      ],
       "reaches_sovereign_transitively": true,
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1242,
+      "start_line": 1176,
       "stdlib_modules": [
         "typing"
       ],
@@ -1222,7 +1014,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 1327,
+      "end_line": 1261,
       "external_names": [
         "CANONICAL_SOURCE_ROOT",
         "Optional",
@@ -1242,7 +1034,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1292,
+      "start_line": 1226,
       "stdlib_modules": [
         "os",
         "pathlib",
@@ -1252,7 +1044,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 1376,
+      "end_line": 1310,
       "external_names": [
         "Any",
         "ArchitectTaskContract",
@@ -1277,7 +1069,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1330,
+      "start_line": 1264,
       "stdlib_modules": [
         "pathlib",
         "typing"
@@ -1286,7 +1078,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 1452,
+      "end_line": 1386,
       "external_names": [
         "Any",
         "ArchitectTaskContract",
@@ -1314,7 +1106,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1379,
+      "start_line": 1313,
       "stdlib_modules": [
         "hashlib",
         "pathlib",
@@ -1326,7 +1118,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 1463,
+      "end_line": 1397,
       "external_names": [
         "CANONICAL_SOURCE_ROOT",
         "Path"
@@ -1344,7 +1136,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1455,
+      "start_line": 1389,
       "stdlib_modules": [
         "pathlib"
       ],
@@ -1352,7 +1144,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 1467,
+      "end_line": 1401,
       "external_names": [
         "Any",
         "ArchitectTaskContract",
@@ -1373,7 +1165,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1466,
+      "start_line": 1400,
       "stdlib_modules": [
         "typing"
       ],
@@ -1381,7 +1173,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 1496,
+      "end_line": 1430,
       "external_names": [
         "Any",
         "ArchitectTaskContract",
@@ -1401,7 +1193,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1470,
+      "start_line": 1404,
       "stdlib_modules": [
         "typing"
       ],
@@ -1409,7 +1201,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 1499,
+      "end_line": 1433,
       "external_names": [],
       "in_module_refs": [],
       "kind": "constant",
@@ -1422,13 +1214,13 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1499,
+      "start_line": 1433,
       "stdlib_modules": [],
       "third_party_modules": []
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 1572,
+      "end_line": 1506,
       "external_names": [
         "Any",
         "CANONICAL_SOURCE_ROOT",
@@ -1451,7 +1243,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1502,
+      "start_line": 1436,
       "stdlib_modules": [
         "pathlib",
         "subprocess",
@@ -1461,7 +1253,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 1576,
+      "end_line": 1510,
       "external_names": [],
       "in_module_refs": [],
       "kind": "constant",
@@ -1474,14 +1266,15 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1576,
+      "start_line": 1510,
       "stdlib_modules": [],
       "third_party_modules": []
     },
     {
       "cluster": null,
-      "end_line": 12119,
+      "end_line": 12053,
       "external_names": [
+        "ACTIVE_EXECUTION_STATUSES",
         "AcceptanceProfile",
         "AmbientCoreControlPort",
         "Any",
@@ -1501,12 +1294,14 @@
         "CollaborationRealmVerifier",
         "ContractKind",
         "ControlledIntegrationManager",
+        "DURABLE_SELF_HOSTED_STATUSES",
         "DevelopmentGoal",
         "ExecutionStateStore",
         "ExpectedEvidenceUniverse",
         "ExternalAcceptanceReceipt",
         "ExternalCandidateAdoptionRequest",
         "HumanApprovalPolicy",
+        "INVALID_STATE_STATUSES",
         "IndependentReviewReceipt",
         "IntegrationAuthorizationEnvelope",
         "IntegrationExecutionError",
@@ -1519,13 +1314,17 @@
         "NexusEventBus",
         "OperatorOutcomeReceipt",
         "Optional",
+        "PENDING_CANDIDATE_STATUSES",
         "Path",
+        "RESUMABLE_STATUSES",
+        "RETRYABLE_TASK_STATUSES",
         "RepositoryContractGate",
         "RuntimeCoordinationBridge",
         "RuntimeStateBridge",
         "SUPPORTED_WORKER_PROVIDERS",
         "SelfHostedDevelopmentController",
         "Sequence",
+        "TERMINAL_STATUSES",
         "TargetIntegrationLifecycle",
         "TargetWorktreeLease",
         "VerifiedCandidateReceipt",
@@ -1591,14 +1390,8 @@
         "validate_owner_inline_contract"
       ],
       "in_module_refs": [
-        "ACTIVE_EXECUTION_STATUSES",
         "CANONICAL_SOURCE_BRANCH",
         "DEFAULT_MAXIMUM_ATTEMPTS_PER_TASK",
-        "DURABLE_SELF_HOSTED_STATUSES",
-        "INVALID_STATE_STATUSES",
-        "PENDING_CANDIDATE_STATUSES",
-        "RESUMABLE_STATUSES",
-        "RETRYABLE_TASK_STATUSES",
         "Runner",
         "SelfHostedTaskService._ambient_core_required",
         "SelfHostedTaskService._approval_requirements",
@@ -1698,7 +1491,6 @@
         "SelfHostedTaskService.reconcile_tasks",
         "SelfHostedTaskService.recover_work_claim",
         "SelfHostedTaskService.rehydrate_task_continuation",
-        "TERMINAL_STATUSES",
         "_EXTERNAL_ADOPTION_CLAIM_CEILING",
         "_LEGACY_V1_NEGATIVE_OMISSION_SET",
         "_bounded_failure_text",
@@ -1770,7 +1562,8 @@
       ],
       "nexus_runtime_modules": [
         "nexus_runtime.execution_state",
-        "nexus_runtime.task_context"
+        "nexus_runtime.task_context",
+        "nexus_runtime.task_lifecycle"
       ],
       "reaches_sovereign_transitively": true,
       "reason": "",
@@ -1784,7 +1577,7 @@
         "nexus.services.runtime_workforce_admission",
         "nexus.services.unified_runtime"
       ],
-      "start_line": 1579,
+      "start_line": 1513,
       "stdlib_modules": [
         "base64",
         "contextlib",
@@ -1809,7 +1602,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 1611,
+      "end_line": 1545,
       "external_names": [
         "Path",
         "os",
@@ -1826,7 +1619,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1598,
+      "start_line": 1532,
       "stdlib_modules": [
         "os",
         "pathlib",
@@ -1836,7 +1629,7 @@
     },
     {
       "cluster": "stay",
-      "end_line": 1654,
+      "end_line": 1588,
       "external_names": [
         "AmbientCoreControlPort",
         "Any",
@@ -1870,7 +1663,7 @@
       "reason": ">2 nexus-new modules",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1613,
+      "start_line": 1547,
       "stdlib_modules": [
         "pathlib",
         "threading",
@@ -1880,7 +1673,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 1657,
+      "end_line": 1591,
       "external_names": [
         "Path"
       ],
@@ -1895,7 +1688,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1656,
+      "start_line": 1590,
       "stdlib_modules": [
         "pathlib"
       ],
@@ -1903,7 +1696,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 1674,
+      "end_line": 1608,
       "external_names": [
         "Any",
         "Mapping"
@@ -1919,7 +1712,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1659,
+      "start_line": 1593,
       "stdlib_modules": [
         "typing"
       ],
@@ -1927,7 +1720,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 1677,
+      "end_line": 1611,
       "external_names": [
         "Path"
       ],
@@ -1942,7 +1735,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1676,
+      "start_line": 1610,
       "stdlib_modules": [
         "pathlib"
       ],
@@ -1950,7 +1743,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 1680,
+      "end_line": 1614,
       "external_names": [
         "Path"
       ],
@@ -1967,7 +1760,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1679,
+      "start_line": 1613,
       "stdlib_modules": [
         "pathlib"
       ],
@@ -1975,7 +1768,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 1683,
+      "end_line": 1617,
       "external_names": [
         "Path"
       ],
@@ -1990,7 +1783,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1682,
+      "start_line": 1616,
       "stdlib_modules": [
         "pathlib"
       ],
@@ -1998,7 +1791,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 1688,
+      "end_line": 1622,
       "external_names": [
         "Any",
         "Mapping",
@@ -2015,7 +1808,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1685,
+      "start_line": 1619,
       "stdlib_modules": [
         "typing"
       ],
@@ -2023,7 +1816,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 1703,
+      "end_line": 1637,
       "external_names": [],
       "in_module_refs": [
         "SelfHostedTaskService._read_state"
@@ -2038,13 +1831,13 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1690,
+      "start_line": 1624,
       "stdlib_modules": [],
       "third_party_modules": []
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 1733,
+      "end_line": 1667,
       "external_names": [
         "Any",
         "Mapping",
@@ -2064,7 +1857,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1705,
+      "start_line": 1639,
       "stdlib_modules": [
         "hashlib",
         "typing"
@@ -2073,7 +1866,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 1739,
+      "end_line": 1673,
       "external_names": [
         "Any",
         "Mapping",
@@ -2092,7 +1885,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1735,
+      "start_line": 1669,
       "stdlib_modules": [
         "typing"
       ],
@@ -2100,7 +1893,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 1775,
+      "end_line": 1709,
       "external_names": [
         "Any",
         "Mapping"
@@ -2116,7 +1909,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1741,
+      "start_line": 1675,
       "stdlib_modules": [
         "typing"
       ],
@@ -2124,32 +1917,34 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 1911,
+      "end_line": 1845,
       "external_names": [
-        "Any",
-        "Mapping"
-      ],
-      "in_module_refs": [
         "ACTIVE_EXECUTION_STATUSES",
+        "Any",
         "DURABLE_SELF_HOSTED_STATUSES",
         "INVALID_STATE_STATUSES",
+        "Mapping",
         "PENDING_CANDIDATE_STATUSES",
         "RESUMABLE_STATUSES",
-        "SelfHostedTaskService._candidate_commit",
-        "SelfHostedTaskService._settled_candidate_less_final_block",
         "TERMINAL_STATUSES"
+      ],
+      "in_module_refs": [
+        "SelfHostedTaskService._candidate_commit",
+        "SelfHostedTaskService._settled_candidate_less_final_block"
       ],
       "kind": "method",
       "lines": 135,
       "mcp_projection": false,
       "name": "SelfHostedTaskService._task_action_envelope",
       "nexus_modules": [],
-      "nexus_runtime_modules": [],
+      "nexus_runtime_modules": [
+        "nexus_runtime.task_lifecycle"
+      ],
       "reaches_sovereign_transitively": false,
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1777,
+      "start_line": 1711,
       "stdlib_modules": [
         "typing"
       ],
@@ -2157,7 +1952,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 1917,
+      "end_line": 1851,
       "external_names": [
         "Any"
       ],
@@ -2174,7 +1969,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1913,
+      "start_line": 1847,
       "stdlib_modules": [
         "typing"
       ],
@@ -2182,7 +1977,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2111,
+      "end_line": 2045,
       "external_names": [
         "Any",
         "Mapping",
@@ -2199,7 +1994,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 1919,
+      "start_line": 1853,
       "stdlib_modules": [
         "re",
         "typing"
@@ -2208,7 +2003,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2140,
+      "end_line": 2074,
       "external_names": [
         "Any",
         "Path",
@@ -2227,7 +2022,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2113,
+      "start_line": 2047,
       "stdlib_modules": [
         "pathlib",
         "typing"
@@ -2236,7 +2031,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2160,
+      "end_line": 2094,
       "external_names": [
         "Any",
         "Path",
@@ -2255,7 +2050,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2142,
+      "start_line": 2076,
       "stdlib_modules": [
         "json",
         "pathlib",
@@ -2265,14 +2060,14 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2232,
+      "end_line": 2166,
       "external_names": [
         "Any",
+        "DURABLE_SELF_HOSTED_STATUSES",
         "Mapping",
         "Path"
       ],
       "in_module_refs": [
-        "DURABLE_SELF_HOSTED_STATUSES",
         "SelfHostedTaskService._invalid_state_status",
         "SelfHostedTaskService._state_error_receipt",
         "SelfHostedTaskService._with_task_action"
@@ -2282,12 +2077,14 @@
       "mcp_projection": false,
       "name": "SelfHostedTaskService._validate_state_payload",
       "nexus_modules": [],
-      "nexus_runtime_modules": [],
+      "nexus_runtime_modules": [
+        "nexus_runtime.task_lifecycle"
+      ],
       "reaches_sovereign_transitively": false,
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2162,
+      "start_line": 2096,
       "stdlib_modules": [
         "pathlib",
         "typing"
@@ -2296,7 +2093,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2241,
+      "end_line": 2175,
       "external_names": [
         "Any",
         "ExecutionStateStore",
@@ -2319,7 +2116,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2234,
+      "start_line": 2168,
       "stdlib_modules": [
         "pathlib",
         "typing"
@@ -2328,7 +2125,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2246,
+      "end_line": 2180,
       "external_names": [
         "Any",
         "Optional",
@@ -2345,7 +2142,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2243,
+      "start_line": 2177,
       "stdlib_modules": [
         "pathlib",
         "typing"
@@ -2354,7 +2151,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2249,
+      "end_line": 2183,
       "external_names": [
         "Path"
       ],
@@ -2369,7 +2166,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2248,
+      "start_line": 2182,
       "stdlib_modules": [
         "pathlib"
       ],
@@ -2377,7 +2174,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2254,
+      "end_line": 2188,
       "external_names": [
         "Iterator",
         "contextmanager"
@@ -2393,7 +2190,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2251,
+      "start_line": 2185,
       "stdlib_modules": [
         "contextlib",
         "typing"
@@ -2402,7 +2199,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2257,
+      "end_line": 2191,
       "external_names": [
         "Any"
       ],
@@ -2417,7 +2214,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2256,
+      "start_line": 2190,
       "stdlib_modules": [
         "typing"
       ],
@@ -2425,7 +2222,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2262,
+      "end_line": 2196,
       "external_names": [
         "Any",
         "Mapping"
@@ -2444,7 +2241,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2259,
+      "start_line": 2193,
       "stdlib_modules": [
         "typing"
       ],
@@ -2452,7 +2249,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2266,
+      "end_line": 2200,
       "external_names": [
         "Any"
       ],
@@ -2470,7 +2267,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2264,
+      "start_line": 2198,
       "stdlib_modules": [
         "typing"
       ],
@@ -2478,7 +2275,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2278,
+      "end_line": 2212,
       "external_names": [
         "Any"
       ],
@@ -2499,7 +2296,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2268,
+      "start_line": 2202,
       "stdlib_modules": [
         "typing"
       ],
@@ -2507,7 +2304,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2288,
+      "end_line": 2222,
       "external_names": [
         "Any",
         "Optional"
@@ -2528,7 +2325,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2280,
+      "start_line": 2214,
       "stdlib_modules": [
         "typing"
       ],
@@ -2536,7 +2333,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2298,
+      "end_line": 2232,
       "external_names": [
         "Any",
         "Optional"
@@ -2552,7 +2349,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2290,
+      "start_line": 2224,
       "stdlib_modules": [
         "typing"
       ],
@@ -2560,7 +2357,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 2461,
+      "end_line": 2395,
       "external_names": [
         "Any",
         "Mapping",
@@ -2583,7 +2380,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2300,
+      "start_line": 2234,
       "stdlib_modules": [
         "typing"
       ],
@@ -2591,7 +2388,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 2520,
+      "end_line": 2454,
       "external_names": [
         "Any",
         "ArchitectTaskContract",
@@ -2616,7 +2413,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2463,
+      "start_line": 2397,
       "stdlib_modules": [
         "pathlib",
         "subprocess",
@@ -2626,7 +2423,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2529,
+      "end_line": 2463,
       "external_names": [
         "Any",
         "json"
@@ -2648,7 +2445,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2522,
+      "start_line": 2456,
       "stdlib_modules": [
         "json",
         "typing"
@@ -2657,7 +2454,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2535,
+      "end_line": 2469,
       "external_names": [
         "Any",
         "Callable",
@@ -2676,7 +2473,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2531,
+      "start_line": 2465,
       "stdlib_modules": [
         "typing"
       ],
@@ -2684,7 +2481,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2575,
+      "end_line": 2509,
       "external_names": [
         "Any",
         "Mapping",
@@ -2704,7 +2501,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2542,
+      "start_line": 2476,
       "stdlib_modules": [
         "hashlib",
         "json",
@@ -2714,7 +2511,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2579,
+      "end_line": 2513,
       "external_names": [
         "Any",
         "Mapping",
@@ -2734,7 +2531,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2577,
+      "start_line": 2511,
       "stdlib_modules": [
         "hashlib",
         "json",
@@ -2744,7 +2541,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 2587,
+      "end_line": 2521,
       "external_names": [
         "Any",
         "Mapping",
@@ -2765,7 +2562,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2581,
+      "start_line": 2515,
       "stdlib_modules": [
         "typing",
         "uuid"
@@ -2774,7 +2571,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2604,
+      "end_line": 2538,
       "external_names": [
         "Any",
         "Mapping"
@@ -2792,7 +2589,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2589,
+      "start_line": 2523,
       "stdlib_modules": [
         "typing"
       ],
@@ -2800,7 +2597,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2624,
+      "end_line": 2558,
       "external_names": [
         "Any",
         "Mapping"
@@ -2816,7 +2613,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2606,
+      "start_line": 2540,
       "stdlib_modules": [
         "typing"
       ],
@@ -2824,7 +2621,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2651,
+      "end_line": 2585,
       "external_names": [
         "Any",
         "Mapping"
@@ -2845,7 +2642,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2626,
+      "start_line": 2560,
       "stdlib_modules": [
         "typing"
       ],
@@ -2853,10 +2650,11 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 2723,
+      "end_line": 2657,
       "external_names": [
         "Any",
         "Mapping",
+        "TERMINAL_STATUSES",
         "json"
       ],
       "in_module_refs": [
@@ -2866,7 +2664,6 @@
         "SelfHostedTaskService._validate_claim_enclosure",
         "SelfHostedTaskService._validate_claim_record",
         "SelfHostedTaskService._write_state_locked",
-        "TERMINAL_STATUSES",
         "_utc_now"
       ],
       "kind": "method",
@@ -2874,12 +2671,14 @@
       "mcp_projection": false,
       "name": "SelfHostedTaskService.acquire_work_claim",
       "nexus_modules": [],
-      "nexus_runtime_modules": [],
+      "nexus_runtime_modules": [
+        "nexus_runtime.task_lifecycle"
+      ],
       "reaches_sovereign_transitively": true,
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2653,
+      "start_line": 2587,
       "stdlib_modules": [
         "json",
         "typing"
@@ -2888,7 +2687,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2799,
+      "end_line": 2733,
       "external_names": [
         "Any",
         "Mapping",
@@ -2913,7 +2712,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2727,
+      "start_line": 2661,
       "stdlib_modules": [
         "json",
         "typing"
@@ -2922,7 +2721,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2809,
+      "end_line": 2743,
       "external_names": [
         "Any",
         "Mapping",
@@ -2943,7 +2742,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2801,
+      "start_line": 2735,
       "stdlib_modules": [
         "json",
         "typing"
@@ -2952,7 +2751,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2818,
+      "end_line": 2752,
       "external_names": [
         "Any",
         "Mapping",
@@ -2974,7 +2773,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2811,
+      "start_line": 2745,
       "stdlib_modules": [
         "json",
         "typing"
@@ -2983,7 +2782,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2831,
+      "end_line": 2765,
       "external_names": [
         "Any",
         "Mapping",
@@ -3007,7 +2806,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2820,
+      "start_line": 2754,
       "stdlib_modules": [
         "json",
         "typing"
@@ -3016,7 +2815,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2887,
+      "end_line": 2821,
       "external_names": [
         "Any",
         "Mapping",
@@ -3035,7 +2834,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2835,
+      "start_line": 2769,
       "stdlib_modules": [
         "hashlib",
         "typing"
@@ -3044,7 +2843,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2950,
+      "end_line": 2884,
       "external_names": [
         "Any",
         "Mapping",
@@ -3066,7 +2865,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2889,
+      "start_line": 2823,
       "stdlib_modules": [
         "json",
         "typing"
@@ -3075,7 +2874,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 2997,
+      "end_line": 2931,
       "external_names": [
         "Any",
         "Mapping",
@@ -3096,7 +2895,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 2954,
+      "start_line": 2888,
       "stdlib_modules": [
         "json",
         "typing"
@@ -3105,7 +2904,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 3015,
+      "end_line": 2949,
       "external_names": [
         "Any",
         "hashlib"
@@ -3124,7 +2923,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3001,
+      "start_line": 2935,
       "stdlib_modules": [
         "hashlib",
         "typing"
@@ -3133,7 +2932,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 3026,
+      "end_line": 2960,
       "external_names": [
         "Any",
         "Mapping",
@@ -3157,7 +2956,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3017,
+      "start_line": 2951,
       "stdlib_modules": [
         "typing"
       ],
@@ -3165,7 +2964,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 3139,
+      "end_line": 3073,
       "external_names": [
         "Any",
         "Mapping",
@@ -3187,7 +2986,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3028,
+      "start_line": 2962,
       "stdlib_modules": [
         "typing"
       ],
@@ -3195,7 +2994,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 3163,
+      "end_line": 3097,
       "external_names": [
         "Any",
         "Mapping",
@@ -3216,7 +3015,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3141,
+      "start_line": 3075,
       "stdlib_modules": [
         "pathlib",
         "typing"
@@ -3225,7 +3024,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 3172,
+      "end_line": 3106,
       "external_names": [
         "Any",
         "events_from_attempt_records"
@@ -3246,7 +3045,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3165,
+      "start_line": 3099,
       "stdlib_modules": [
         "typing"
       ],
@@ -3254,7 +3053,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 3274,
+      "end_line": 3208,
       "external_names": [
         "Any",
         "Mapping",
@@ -3287,7 +3086,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3174,
+      "start_line": 3108,
       "stdlib_modules": [
         "typing"
       ],
@@ -3295,7 +3094,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 3290,
+      "end_line": 3224,
       "external_names": [
         "Any",
         "Mapping",
@@ -3315,7 +3114,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3276,
+      "start_line": 3210,
       "stdlib_modules": [
         "typing"
       ],
@@ -3323,7 +3122,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 3307,
+      "end_line": 3241,
       "external_names": [
         "Any",
         "Iterable",
@@ -3347,7 +3146,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3292,
+      "start_line": 3226,
       "stdlib_modules": [
         "typing"
       ],
@@ -3355,7 +3154,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 3313,
+      "end_line": 3247,
       "external_names": [
         "Any",
         "Mapping",
@@ -3373,7 +3172,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3309,
+      "start_line": 3243,
       "stdlib_modules": [
         "hashlib",
         "json",
@@ -3383,7 +3182,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 3340,
+      "end_line": 3274,
       "external_names": [
         "Any",
         "Optional"
@@ -3403,7 +3202,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3315,
+      "start_line": 3249,
       "stdlib_modules": [
         "typing"
       ],
@@ -3411,7 +3210,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 3344,
+      "end_line": 3278,
       "external_names": [
         "Any",
         "Optional"
@@ -3429,7 +3228,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3342,
+      "start_line": 3276,
       "stdlib_modules": [
         "typing"
       ],
@@ -3437,18 +3236,18 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 3467,
+      "end_line": 3401,
       "external_names": [
         "Any",
         "Mapping",
         "Optional",
+        "TERMINAL_STATUSES",
         "build_runtime_development_mapping",
         "time"
       ],
       "in_module_refs": [
         "SelfHostedTaskService._emit_bound_attempt_transition",
         "SelfHostedTaskService._mutate_state",
-        "TERMINAL_STATUSES",
         "_jsonable",
         "_parse_time",
         "_utc_now"
@@ -3460,12 +3259,14 @@
       "nexus_modules": [
         "nexus.contracts.unified_runtime_receipt"
       ],
-      "nexus_runtime_modules": [],
+      "nexus_runtime_modules": [
+        "nexus_runtime.task_lifecycle"
+      ],
       "reaches_sovereign_transitively": false,
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3346,
+      "start_line": 3280,
       "stdlib_modules": [
         "time",
         "typing"
@@ -3474,7 +3275,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 3477,
+      "end_line": 3411,
       "external_names": [
         "json",
         "threading"
@@ -3493,7 +3294,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3469,
+      "start_line": 3403,
       "stdlib_modules": [
         "json",
         "threading"
@@ -3502,12 +3303,12 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 3485,
+      "end_line": 3419,
       "external_names": [
-        "Any"
+        "Any",
+        "TERMINAL_STATUSES"
       ],
       "in_module_refs": [
-        "TERMINAL_STATUSES",
         "_utc_now"
       ],
       "kind": "method",
@@ -3515,12 +3316,14 @@
       "mcp_projection": false,
       "name": "SelfHostedTaskService._touch_owned_state",
       "nexus_modules": [],
-      "nexus_runtime_modules": [],
+      "nexus_runtime_modules": [
+        "nexus_runtime.task_lifecycle"
+      ],
       "reaches_sovereign_transitively": false,
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3479,
+      "start_line": 3413,
       "stdlib_modules": [
         "typing"
       ],
@@ -3528,7 +3331,7 @@
     },
     {
       "cluster": "stay",
-      "end_line": 3665,
+      "end_line": 3599,
       "external_names": [
         "AcceptanceProfile",
         "Any",
@@ -3567,7 +3370,7 @@
       "reason": ">2 nexus-new modules",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3487,
+      "start_line": 3421,
       "stdlib_modules": [
         "pathlib",
         "subprocess",
@@ -3578,7 +3381,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 3709,
+      "end_line": 3643,
       "external_names": [
         "Any",
         "ArchitectTaskContract",
@@ -3603,7 +3406,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3667,
+      "start_line": 3601,
       "stdlib_modules": [
         "pathlib",
         "subprocess",
@@ -3613,7 +3416,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 3718,
+      "end_line": 3652,
       "external_names": [
         "Any",
         "ArchitectTaskContract",
@@ -3634,7 +3437,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3711,
+      "start_line": 3645,
       "stdlib_modules": [
         "typing"
       ],
@@ -3642,7 +3445,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 3733,
+      "end_line": 3667,
       "external_names": [
         "ArchitectTaskContract"
       ],
@@ -3659,20 +3462,20 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3720,
+      "start_line": 3654,
       "stdlib_modules": [],
       "third_party_modules": []
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 3741,
+      "end_line": 3675,
       "external_names": [
         "Any",
-        "Optional"
+        "Optional",
+        "TERMINAL_STATUSES"
       ],
       "in_module_refs": [
         "SelfHostedTaskService._mutate_state",
-        "TERMINAL_STATUSES",
         "_utc_now"
       ],
       "kind": "method",
@@ -3680,12 +3483,14 @@
       "mcp_projection": false,
       "name": "SelfHostedTaskService._set_child_pgid",
       "nexus_modules": [],
-      "nexus_runtime_modules": [],
+      "nexus_runtime_modules": [
+        "nexus_runtime.task_lifecycle"
+      ],
       "reaches_sovereign_transitively": false,
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3735,
+      "start_line": 3669,
       "stdlib_modules": [
         "typing"
       ],
@@ -3693,7 +3498,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 3747,
+      "end_line": 3681,
       "external_names": [
         "Any",
         "Mapping",
@@ -3712,7 +3517,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3743,
+      "start_line": 3677,
       "stdlib_modules": [
         "typing"
       ],
@@ -3720,7 +3525,7 @@
     },
     {
       "cluster": "stay",
-      "end_line": 3760,
+      "end_line": 3694,
       "external_names": [
         "Any",
         "ArchitectTaskContract",
@@ -3743,7 +3548,7 @@
       "reason": ">2 nexus-new modules",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3749,
+      "start_line": 3683,
       "stdlib_modules": [
         "typing"
       ],
@@ -3751,7 +3556,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 3773,
+      "end_line": 3707,
       "external_names": [
         "Any",
         "Mapping",
@@ -3771,7 +3576,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3762,
+      "start_line": 3696,
       "stdlib_modules": [
         "typing"
       ],
@@ -3779,7 +3584,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 3783,
+      "end_line": 3717,
       "external_names": [
         "ArchitectTaskContract",
         "Optional",
@@ -3799,7 +3604,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3775,
+      "start_line": 3709,
       "stdlib_modules": [
         "typing"
       ],
@@ -3807,7 +3612,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 3799,
+      "end_line": 3733,
       "external_names": [
         "Any",
         "ArchitectTaskContract",
@@ -3826,7 +3631,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3785,
+      "start_line": 3719,
       "stdlib_modules": [
         "typing"
       ],
@@ -3834,7 +3639,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 3815,
+      "end_line": 3749,
       "external_names": [
         "Callable",
         "Optional",
@@ -3856,7 +3661,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3801,
+      "start_line": 3735,
       "stdlib_modules": [
         "typing"
       ],
@@ -3864,7 +3669,7 @@
     },
     {
       "cluster": "stay",
-      "end_line": 3857,
+      "end_line": 3791,
       "external_names": [
         "Any",
         "Mapping",
@@ -3884,7 +3689,7 @@
       "reason": "workforce/acceptance/autonomy/capability by name",
       "sovereign_by_name": true,
       "sovereign_modules": [],
-      "start_line": 3817,
+      "start_line": 3751,
       "stdlib_modules": [
         "typing"
       ],
@@ -3892,7 +3697,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 3910,
+      "end_line": 3844,
       "external_names": [
         "Any",
         "ArchitectTaskContract",
@@ -3919,7 +3724,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3859,
+      "start_line": 3793,
       "stdlib_modules": [
         "typing"
       ],
@@ -3927,7 +3732,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 3929,
+      "end_line": 3863,
       "external_names": [
         "Any",
         "ArchitectTaskContract",
@@ -3951,7 +3756,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3912,
+      "start_line": 3846,
       "stdlib_modules": [
         "typing"
       ],
@@ -3959,7 +3764,7 @@
     },
     {
       "cluster": "stay",
-      "end_line": 3951,
+      "end_line": 3885,
       "external_names": [
         "ArchitectTaskContract",
         "Mapping",
@@ -3984,7 +3789,7 @@
       "reason": ">2 nexus-new modules",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 3931,
+      "start_line": 3865,
       "stdlib_modules": [
         "inspect",
         "typing"
@@ -3993,7 +3798,7 @@
     },
     {
       "cluster": "stay",
-      "end_line": 4174,
+      "end_line": 4108,
       "external_names": [
         "Any",
         "ArchitectTaskContract",
@@ -4032,7 +3837,7 @@
         "nexus.services.runtime_workforce_admission",
         "nexus.services.unified_runtime"
       ],
-      "start_line": 3953,
+      "start_line": 3887,
       "stdlib_modules": [
         "pathlib",
         "typing"
@@ -4041,7 +3846,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 4193,
+      "end_line": 4127,
       "external_names": [
         "Any",
         "ArchitectTaskContract",
@@ -4063,7 +3868,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 4176,
+      "start_line": 4110,
       "stdlib_modules": [
         "typing"
       ],
@@ -4071,7 +3876,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 4202,
+      "end_line": 4136,
       "external_names": [],
       "in_module_refs": [
         "SelfHostedTaskService._read_state",
@@ -4087,13 +3892,13 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 4195,
+      "start_line": 4129,
       "stdlib_modules": [],
       "third_party_modules": []
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 4205,
+      "end_line": 4139,
       "external_names": [
         "Any",
         "Mapping",
@@ -4112,7 +3917,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 4204,
+      "start_line": 4138,
       "stdlib_modules": [
         "typing"
       ],
@@ -4120,7 +3925,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 4229,
+      "end_line": 4163,
       "external_names": [
         "Any",
         "Mapping",
@@ -4141,7 +3946,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 4207,
+      "start_line": 4141,
       "stdlib_modules": [
         "typing"
       ],
@@ -4149,7 +3954,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 4257,
+      "end_line": 4191,
       "external_names": [
         "Any",
         "Mapping",
@@ -4170,7 +3975,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 4231,
+      "start_line": 4165,
       "stdlib_modules": [
         "typing"
       ],
@@ -4178,7 +3983,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 4301,
+      "end_line": 4235,
       "external_names": [
         "Any",
         "Mapping",
@@ -4204,7 +4009,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 4259,
+      "start_line": 4193,
       "stdlib_modules": [
         "dataclasses",
         "typing"
@@ -4213,7 +4018,7 @@
     },
     {
       "cluster": "stay",
-      "end_line": 4475,
+      "end_line": 4409,
       "external_names": [
         "Any",
         "Mapping",
@@ -4247,7 +4052,7 @@
       "reason": ">2 nexus-new modules",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 4303,
+      "start_line": 4237,
       "stdlib_modules": [
         "hashlib",
         "json",
@@ -4259,7 +4064,7 @@
     },
     {
       "cluster": "stay",
-      "end_line": 4661,
+      "end_line": 4595,
       "external_names": [
         "AttemptResolutionVerdict",
         "CandidateCommitter",
@@ -4298,7 +4103,7 @@
       "reason": ">2 nexus-new modules",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 4477,
+      "start_line": 4411,
       "stdlib_modules": [
         "dataclasses",
         "time",
@@ -4308,7 +4113,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 4787,
+      "end_line": 4721,
       "external_names": [
         "Any",
         "WorktreeManager"
@@ -4332,7 +4137,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 4663,
+      "start_line": 4597,
       "stdlib_modules": [
         "typing"
       ],
@@ -4340,7 +4145,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 4794,
+      "end_line": 4728,
       "external_names": [
         "RuntimeCoordinationBridge"
       ],
@@ -4357,13 +4162,13 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 4789,
+      "start_line": 4723,
       "stdlib_modules": [],
       "third_party_modules": []
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 4805,
+      "end_line": 4739,
       "external_names": [
         "time"
       ],
@@ -4380,7 +4185,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 4796,
+      "start_line": 4730,
       "stdlib_modules": [
         "time"
       ],
@@ -4388,7 +4193,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 4816,
+      "end_line": 4750,
       "external_names": [
         "Any",
         "Optional",
@@ -4408,7 +4213,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 4807,
+      "start_line": 4741,
       "stdlib_modules": [
         "pathlib",
         "typing"
@@ -4417,7 +4222,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 4826,
+      "end_line": 4760,
       "external_names": [
         "os"
       ],
@@ -4432,7 +4237,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 4818,
+      "start_line": 4752,
       "stdlib_modules": [
         "os"
       ],
@@ -4440,7 +4245,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 4842,
+      "end_line": 4776,
       "external_names": [
         "Optional",
         "os",
@@ -4460,7 +4265,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 4828,
+      "start_line": 4762,
       "stdlib_modules": [
         "os",
         "signal",
@@ -4471,7 +4276,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 4884,
+      "end_line": 4818,
       "external_names": [
         "Any",
         "CANONICAL_SOURCE_ROOT",
@@ -4496,7 +4301,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 4844,
+      "start_line": 4778,
       "stdlib_modules": [
         "json",
         "pathlib",
@@ -4507,7 +4312,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 5009,
+      "end_line": 4943,
       "external_names": [
         "Any",
         "CANONICAL_SOURCE_ROOT",
@@ -4533,7 +4338,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 4886,
+      "start_line": 4820,
       "stdlib_modules": [
         "pathlib",
         "subprocess",
@@ -4543,7 +4348,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 5165,
+      "end_line": 5099,
       "external_names": [
         "Any",
         "LifecycleActionType",
@@ -4567,7 +4372,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 5011,
+      "start_line": 4945,
       "stdlib_modules": [
         "hashlib",
         "json",
@@ -4577,7 +4382,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 5214,
+      "end_line": 5148,
       "external_names": [
         "Any",
         "Mapping"
@@ -4598,7 +4403,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 5167,
+      "start_line": 5101,
       "stdlib_modules": [
         "typing"
       ],
@@ -4606,7 +4411,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 5253,
+      "end_line": 5187,
       "external_names": [
         "Any",
         "Mapping",
@@ -4628,7 +4433,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 5216,
+      "start_line": 5150,
       "stdlib_modules": [
         "base64",
         "hashlib",
@@ -4639,7 +4444,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 5293,
+      "end_line": 5227,
       "external_names": [
         "Path",
         "hashlib",
@@ -4658,7 +4463,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 5255,
+      "start_line": 5189,
       "stdlib_modules": [
         "hashlib",
         "os",
@@ -4670,7 +4475,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 5422,
+      "end_line": 5356,
       "external_names": [
         "Any",
         "ExternalCandidateAdoptionRequest",
@@ -4694,7 +4499,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 5295,
+      "start_line": 5229,
       "stdlib_modules": [
         "hashlib",
         "json",
@@ -4704,19 +4509,20 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 5638,
+      "end_line": 5572,
       "external_names": [
         "Any",
         "Optional",
+        "PENDING_CANDIDATE_STATUSES",
         "Path",
+        "RESUMABLE_STATUSES",
+        "TERMINAL_STATUSES",
         "TargetWorktreeLease",
         "WorktreeManager",
         "hashlib",
         "time"
       ],
       "in_module_refs": [
-        "PENDING_CANDIDATE_STATUSES",
-        "RESUMABLE_STATUSES",
         "SelfHostedTaskService._checkpoint",
         "SelfHostedTaskService._contract_from_state",
         "SelfHostedTaskService._launch_worker",
@@ -4730,7 +4536,6 @@
         "SelfHostedTaskService._resume_external_adoption",
         "SelfHostedTaskService._terminate_owned_processes",
         "SelfHostedTaskService._with_task_action",
-        "TERMINAL_STATUSES",
         "_parse_time",
         "_utc_now"
       ],
@@ -4741,12 +4546,14 @@
       "nexus_modules": [
         "nexus.orchestrator.worktree_manager"
       ],
-      "nexus_runtime_modules": [],
+      "nexus_runtime_modules": [
+        "nexus_runtime.task_lifecycle"
+      ],
       "reaches_sovereign_transitively": true,
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 5424,
+      "start_line": 5358,
       "stdlib_modules": [
         "hashlib",
         "pathlib",
@@ -4757,7 +4564,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 5681,
+      "end_line": 5615,
       "external_names": [
         "Any",
         "Path",
@@ -4782,7 +4589,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 5640,
+      "start_line": 5574,
       "stdlib_modules": [
         "pathlib",
         "typing"
@@ -4791,7 +4598,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 5691,
+      "end_line": 5625,
       "external_names": [
         "Any"
       ],
@@ -4808,7 +4615,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 5683,
+      "start_line": 5617,
       "stdlib_modules": [
         "typing"
       ],
@@ -4816,13 +4623,13 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 5710,
+      "end_line": 5644,
       "external_names": [
         "Any",
-        "Optional"
+        "Optional",
+        "RESUMABLE_STATUSES"
       ],
       "in_module_refs": [
-        "RESUMABLE_STATUSES",
         "SelfHostedTaskService._bridge_validate_claim",
         "SelfHostedTaskService._launch_worker",
         "SelfHostedTaskService._read_state",
@@ -4834,12 +4641,14 @@
       "mcp_projection": false,
       "name": "SelfHostedTaskService.resume_task",
       "nexus_modules": [],
-      "nexus_runtime_modules": [],
+      "nexus_runtime_modules": [
+        "nexus_runtime.task_lifecycle"
+      ],
       "reaches_sovereign_transitively": true,
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 5693,
+      "start_line": 5627,
       "stdlib_modules": [
         "typing"
       ],
@@ -4847,7 +4656,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 5785,
+      "end_line": 5719,
       "external_names": [
         "Any",
         "Optional",
@@ -4869,7 +4678,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 5712,
+      "start_line": 5646,
       "stdlib_modules": [
         "time",
         "typing"
@@ -4878,7 +4687,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 5812,
+      "end_line": 5746,
       "external_names": [
         "Any"
       ],
@@ -4896,7 +4705,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 5787,
+      "start_line": 5721,
       "stdlib_modules": [
         "typing"
       ],
@@ -4904,7 +4713,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 5823,
+      "end_line": 5757,
       "external_names": [
         "Any"
       ],
@@ -4921,7 +4730,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 5814,
+      "start_line": 5748,
       "stdlib_modules": [
         "typing"
       ],
@@ -4929,7 +4738,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 5842,
+      "end_line": 5776,
       "external_names": [
         "Any"
       ],
@@ -4946,7 +4755,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 5825,
+      "start_line": 5759,
       "stdlib_modules": [
         "typing"
       ],
@@ -4954,7 +4763,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 5860,
+      "end_line": 5794,
       "external_names": [
         "Any",
         "Mapping"
@@ -4972,7 +4781,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 5844,
+      "start_line": 5778,
       "stdlib_modules": [
         "typing"
       ],
@@ -4980,7 +4789,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 5875,
+      "end_line": 5809,
       "external_names": [
         "Any",
         "Optional",
@@ -5003,7 +4812,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 5862,
+      "start_line": 5796,
       "stdlib_modules": [
         "pathlib",
         "typing"
@@ -5012,7 +4821,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 5935,
+      "end_line": 5869,
       "external_names": [
         "Any",
         "Mapping",
@@ -5032,7 +4841,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 5877,
+      "start_line": 5811,
       "stdlib_modules": [
         "hashlib",
         "json",
@@ -5042,7 +4851,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 5953,
+      "end_line": 5887,
       "external_names": [
         "Any",
         "Optional",
@@ -5065,7 +4874,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 5937,
+      "start_line": 5871,
       "stdlib_modules": [
         "pathlib",
         "typing"
@@ -5074,7 +4883,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 5972,
+      "end_line": 5906,
       "external_names": [
         "Any",
         "Optional",
@@ -5097,7 +4906,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 5955,
+      "start_line": 5889,
       "stdlib_modules": [
         "pathlib",
         "typing"
@@ -5106,7 +4915,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 5991,
+      "end_line": 5925,
       "external_names": [
         "Any",
         "Mapping",
@@ -5129,7 +4938,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 5974,
+      "start_line": 5908,
       "stdlib_modules": [
         "typing"
       ],
@@ -5137,7 +4946,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 6062,
+      "end_line": 5996,
       "external_names": [
         "Any",
         "Optional",
@@ -5161,7 +4970,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 5993,
+      "start_line": 5927,
       "stdlib_modules": [
         "pathlib",
         "typing"
@@ -5170,7 +4979,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 6244,
+      "end_line": 6178,
       "external_names": [
         "Any",
         "CANONICAL_SOURCE_ROOT",
@@ -5202,7 +5011,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 6064,
+      "start_line": 5998,
       "stdlib_modules": [
         "typing",
         "uuid"
@@ -5211,7 +5020,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 6335,
+      "end_line": 6269,
       "external_names": [
         "Any",
         "CANONICAL_SOURCE_ROOT",
@@ -5239,7 +5048,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 6246,
+      "start_line": 6180,
       "stdlib_modules": [
         "pathlib",
         "subprocess",
@@ -5249,13 +5058,14 @@
     },
     {
       "cluster": "stay",
-      "end_line": 6485,
+      "end_line": 6419,
       "external_names": [
         "Any",
         "CANONICAL_SOURCE_ROOT",
         "CandidateVerifier",
         "Mapping",
         "Optional",
+        "TERMINAL_STATUSES",
         "WorktreeManager",
         "hashlib",
         "json",
@@ -5265,7 +5075,6 @@
       "in_module_refs": [
         "CANONICAL_SOURCE_BRANCH",
         "SelfHostedTaskService._workspace_task_states",
-        "TERMINAL_STATUSES",
         "_jsonable",
         "resolve_execution_lane"
       ],
@@ -5278,12 +5087,14 @@
         "nexus.orchestrator.canonical_source_root",
         "nexus.orchestrator.worktree_manager"
       ],
-      "nexus_runtime_modules": [],
+      "nexus_runtime_modules": [
+        "nexus_runtime.task_lifecycle"
+      ],
       "reaches_sovereign_transitively": false,
       "reason": ">2 nexus-new modules",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 6337,
+      "start_line": 6271,
       "stdlib_modules": [
         "hashlib",
         "json",
@@ -5295,7 +5106,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 6509,
+      "end_line": 6443,
       "external_names": [
         "Any",
         "Mapping",
@@ -5314,7 +5125,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 6487,
+      "start_line": 6421,
       "stdlib_modules": [
         "typing"
       ],
@@ -5322,7 +5133,7 @@
     },
     {
       "cluster": "stay",
-      "end_line": 7238,
+      "end_line": 7172,
       "external_names": [
         "Any",
         "AutonomyGoalGrant",
@@ -5333,7 +5144,10 @@
         "LifecycleActionType",
         "Mapping",
         "Optional",
+        "PENDING_CANDIDATE_STATUSES",
         "Path",
+        "RETRYABLE_TASK_STATUSES",
+        "TERMINAL_STATUSES",
         "WorktreeManager",
         "_source_identity",
         "canonical_request_hash",
@@ -5346,8 +5160,6 @@
         "uuid4"
       ],
       "in_module_refs": [
-        "PENDING_CANDIDATE_STATUSES",
-        "RETRYABLE_TASK_STATUSES",
         "SelfHostedTaskService._claim_hash",
         "SelfHostedTaskService._create_state",
         "SelfHostedTaskService._launch_worker",
@@ -5367,7 +5179,6 @@
         "SelfHostedTaskService.build_contract",
         "SelfHostedTaskService.reconcile_task",
         "SelfHostedTaskService.recover_work_claim",
-        "TERMINAL_STATUSES",
         "_jsonable",
         "_resolve_task_card_path",
         "_terminal_retry_pre_provider_state_allowed",
@@ -5397,7 +5208,9 @@
         "nexus.orchestrator.lifecycle_guards",
         "nexus.orchestrator.worktree_manager"
       ],
-      "nexus_runtime_modules": [],
+      "nexus_runtime_modules": [
+        "nexus_runtime.task_lifecycle"
+      ],
       "reaches_sovereign_transitively": true,
       "reason": "references sovereign module(s)",
       "sovereign_by_name": false,
@@ -5405,7 +5218,7 @@
         "nexus.contracts.autonomy_goal",
         "nexus.orchestrator.autonomy_policy"
       ],
-      "start_line": 6511,
+      "start_line": 6445,
       "stdlib_modules": [
         "datetime",
         "json",
@@ -5417,7 +5230,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 7241,
+      "end_line": 7175,
       "external_names": [
         "Any",
         "retry_task_via_runtime"
@@ -5435,7 +5248,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 7240,
+      "start_line": 7174,
       "stdlib_modules": [
         "typing"
       ],
@@ -5443,7 +5256,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 7357,
+      "end_line": 7291,
       "external_names": [
         "Any",
         "Mapping",
@@ -5464,7 +5277,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 7243,
+      "start_line": 7177,
       "stdlib_modules": [
         "re",
         "typing"
@@ -5473,7 +5286,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 7409,
+      "end_line": 7343,
       "external_names": [
         "Any",
         "Mapping",
@@ -5494,7 +5307,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 7359,
+      "start_line": 7293,
       "stdlib_modules": [
         "typing"
       ],
@@ -5502,7 +5315,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 7569,
+      "end_line": 7503,
       "external_names": [
         "Any",
         "ArchitectTaskContract",
@@ -5535,7 +5348,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 7411,
+      "start_line": 7345,
       "stdlib_modules": [
         "hashlib",
         "json",
@@ -5545,7 +5358,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 7618,
+      "end_line": 7552,
       "external_names": [
         "Any",
         "Mapping"
@@ -5565,7 +5378,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 7571,
+      "start_line": 7505,
       "stdlib_modules": [
         "typing"
       ],
@@ -5573,7 +5386,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 7633,
+      "end_line": 7567,
       "external_names": [
         "Any",
         "Mapping"
@@ -5589,7 +5402,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 7620,
+      "start_line": 7554,
       "stdlib_modules": [
         "typing"
       ],
@@ -5597,7 +5410,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 7655,
+      "end_line": 7589,
       "external_names": [
         "Any",
         "Mapping"
@@ -5613,7 +5426,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 7635,
+      "start_line": 7569,
       "stdlib_modules": [
         "typing"
       ],
@@ -5621,7 +5434,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 7735,
+      "end_line": 7669,
       "external_names": [
         "Any",
         "Mapping"
@@ -5641,7 +5454,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 7657,
+      "start_line": 7591,
       "stdlib_modules": [
         "typing"
       ],
@@ -5649,7 +5462,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 7903,
+      "end_line": 7837,
       "external_names": [
         "Any",
         "ArchitectTaskContract",
@@ -5684,7 +5497,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 7737,
+      "start_line": 7671,
       "stdlib_modules": [
         "hashlib",
         "json",
@@ -5698,7 +5511,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 7919,
+      "end_line": 7853,
       "external_names": [
         "Any",
         "Mapping"
@@ -5716,7 +5529,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 7905,
+      "start_line": 7839,
       "stdlib_modules": [
         "typing"
       ],
@@ -5724,7 +5537,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 8011,
+      "end_line": 7945,
       "external_names": [
         "hashlib",
         "os",
@@ -5742,7 +5555,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 7921,
+      "start_line": 7855,
       "stdlib_modules": [
         "hashlib",
         "os",
@@ -5753,7 +5566,7 @@
     },
     {
       "cluster": "stay",
-      "end_line": 8438,
+      "end_line": 8372,
       "external_names": [
         "Any",
         "CANONICAL_SOURCE_ROOT",
@@ -5799,7 +5612,7 @@
       "reason": ">2 nexus-new modules",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 8013,
+      "start_line": 7947,
       "stdlib_modules": [
         "base64",
         "dataclasses",
@@ -5812,7 +5625,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 8636,
+      "end_line": 8570,
       "external_names": [
         "Any",
         "Path",
@@ -5839,7 +5652,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 8440,
+      "start_line": 8374,
       "stdlib_modules": [
         "pathlib",
         "typing"
@@ -5848,7 +5661,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 8653,
+      "end_line": 8587,
       "external_names": [
         "Any"
       ],
@@ -5866,7 +5679,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 8640,
+      "start_line": 8574,
       "stdlib_modules": [
         "typing"
       ],
@@ -5874,28 +5687,30 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 8673,
+      "end_line": 8607,
       "external_names": [
-        "Any"
+        "Any",
+        "TERMINAL_STATUSES"
       ],
       "in_module_refs": [
         "SelfHostedTaskService._checkpoint",
         "SelfHostedTaskService._pid_alive",
         "SelfHostedTaskService._read_state",
-        "SelfHostedTaskService.cleanup_tasks",
-        "TERMINAL_STATUSES"
+        "SelfHostedTaskService.cleanup_tasks"
       ],
       "kind": "method",
       "lines": 19,
       "mcp_projection": false,
       "name": "SelfHostedTaskService.cancel_task",
       "nexus_modules": [],
-      "nexus_runtime_modules": [],
+      "nexus_runtime_modules": [
+        "nexus_runtime.task_lifecycle"
+      ],
       "reaches_sovereign_transitively": true,
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 8655,
+      "start_line": 8589,
       "stdlib_modules": [
         "typing"
       ],
@@ -5903,27 +5718,29 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 8699,
+      "end_line": 8633,
       "external_names": [
         "Any",
         "Mapping",
-        "Path"
+        "Path",
+        "TERMINAL_STATUSES"
       ],
       "in_module_refs": [
-        "SelfHostedTaskService._read_state_snapshot",
-        "TERMINAL_STATUSES"
+        "SelfHostedTaskService._read_state_snapshot"
       ],
       "kind": "method",
       "lines": 25,
       "mcp_projection": false,
       "name": "SelfHostedTaskService.lifecycle_status",
       "nexus_modules": [],
-      "nexus_runtime_modules": [],
+      "nexus_runtime_modules": [
+        "nexus_runtime.task_lifecycle"
+      ],
       "reaches_sovereign_transitively": false,
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 8675,
+      "start_line": 8609,
       "stdlib_modules": [
         "pathlib",
         "typing"
@@ -5932,7 +5749,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 8776,
+      "end_line": 8710,
       "external_names": [
         "Any",
         "ExternalAcceptanceReceipt",
@@ -5957,7 +5774,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 8701,
+      "start_line": 8635,
       "stdlib_modules": [
         "pathlib",
         "typing"
@@ -5966,7 +5783,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 8839,
+      "end_line": 8773,
       "external_names": [
         "Any",
         "ArchitectTaskContract",
@@ -5987,7 +5804,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 8778,
+      "start_line": 8712,
       "stdlib_modules": [
         "re",
         "typing"
@@ -5996,11 +5813,12 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 9128,
+      "end_line": 9062,
       "external_names": [
         "Any",
         "Optional",
         "Path",
+        "TERMINAL_STATUSES",
         "TargetWorktreeLease",
         "WorktreeManager",
         "asdict",
@@ -6018,7 +5836,6 @@
         "SelfHostedTaskService._read_state_snapshot",
         "SelfHostedTaskService._state_path",
         "SelfHostedTaskService.build_contract",
-        "TERMINAL_STATUSES",
         "_utc_now"
       ],
       "kind": "method",
@@ -6028,12 +5845,14 @@
       "nexus_modules": [
         "nexus.orchestrator.worktree_manager"
       ],
-      "nexus_runtime_modules": [],
+      "nexus_runtime_modules": [
+        "nexus_runtime.task_lifecycle"
+      ],
       "reaches_sovereign_transitively": true,
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 8841,
+      "start_line": 8775,
       "stdlib_modules": [
         "dataclasses",
         "hashlib",
@@ -6045,7 +5864,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 9183,
+      "end_line": 9117,
       "external_names": [
         "Any",
         "Path",
@@ -6066,7 +5885,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 9130,
+      "start_line": 9064,
       "stdlib_modules": [
         "hashlib",
         "json",
@@ -6078,7 +5897,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 9190,
+      "end_line": 9124,
       "external_names": [
         "Any",
         "Optional"
@@ -6096,7 +5915,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 9185,
+      "start_line": 9119,
       "stdlib_modules": [
         "typing"
       ],
@@ -6104,7 +5923,7 @@
     },
     {
       "cluster": "stay",
-      "end_line": 9219,
+      "end_line": 9153,
       "external_names": [
         "Any",
         "Optional",
@@ -6130,7 +5949,7 @@
       "sovereign_modules": [
         "nexus.orchestrator.autonomy_policy"
       ],
-      "start_line": 9192,
+      "start_line": 9126,
       "stdlib_modules": [
         "typing"
       ],
@@ -6138,7 +5957,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 9305,
+      "end_line": 9239,
       "external_names": [
         "Any",
         "Optional"
@@ -6157,7 +5976,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 9221,
+      "start_line": 9155,
       "stdlib_modules": [
         "typing"
       ],
@@ -6165,7 +5984,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 9320,
+      "end_line": 9254,
       "external_names": [
         "Any",
         "Optional"
@@ -6183,7 +6002,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 9307,
+      "start_line": 9241,
       "stdlib_modules": [
         "typing"
       ],
@@ -6191,7 +6010,7 @@
     },
     {
       "cluster": "runtime_candidate",
-      "end_line": 9374,
+      "end_line": 9308,
       "external_names": [
         "Optional",
         "Path",
@@ -6210,7 +6029,7 @@
       "reason": "stdlib/nexus_runtime and runtime_candidate refs only",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 9322,
+      "start_line": 9256,
       "stdlib_modules": [
         "hashlib",
         "os",
@@ -6222,7 +6041,7 @@
     },
     {
       "cluster": "stay",
-      "end_line": 9399,
+      "end_line": 9333,
       "external_names": [
         "Any",
         "CandidateAcceptanceRequest",
@@ -6246,7 +6065,7 @@
       "sovereign_modules": [
         "nexus.orchestrator.acceptance_loop"
       ],
-      "start_line": 9376,
+      "start_line": 9310,
       "stdlib_modules": [
         "typing"
       ],
@@ -6254,7 +6073,7 @@
     },
     {
       "cluster": "stay",
-      "end_line": 9422,
+      "end_line": 9356,
       "external_names": [
         "Any",
         "CandidateAcceptanceRequest",
@@ -6278,7 +6097,7 @@
       "sovereign_modules": [
         "nexus.orchestrator.acceptance_loop"
       ],
-      "start_line": 9401,
+      "start_line": 9335,
       "stdlib_modules": [
         "typing"
       ],
@@ -6286,7 +6105,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 9777,
+      "end_line": 9711,
       "external_names": [
         "Any",
         "CandidateVerifier",
@@ -6314,7 +6133,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 9424,
+      "start_line": 9358,
       "stdlib_modules": [
         "hashlib",
         "json",
@@ -6327,7 +6146,7 @@
     },
     {
       "cluster": "stay",
-      "end_line": 10009,
+      "end_line": 9943,
       "external_names": [
         "Any",
         "ContractKind",
@@ -6361,7 +6180,7 @@
       "reason": ">2 nexus-new modules",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 9779,
+      "start_line": 9713,
       "stdlib_modules": [
         "json",
         "typing"
@@ -6370,7 +6189,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 10135,
+      "end_line": 10069,
       "external_names": [
         "Any",
         "Mapping",
@@ -6400,7 +6219,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 10011,
+      "start_line": 9945,
       "stdlib_modules": [
         "hashlib",
         "json",
@@ -6411,7 +6230,7 @@
     },
     {
       "cluster": "stay",
-      "end_line": 10230,
+      "end_line": 10164,
       "external_names": [
         "Any",
         "ArchitectTaskContract",
@@ -6442,7 +6261,7 @@
       "reason": ">2 nexus-new modules",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 10137,
+      "start_line": 10071,
       "stdlib_modules": [
         "dataclasses",
         "pathlib",
@@ -6452,7 +6271,7 @@
     },
     {
       "cluster": "stay",
-      "end_line": 10781,
+      "end_line": 10715,
       "external_names": [
         "Any",
         "ArchitectTaskContract",
@@ -6498,7 +6317,7 @@
       "reason": ">2 nexus-new modules",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 10232,
+      "start_line": 10166,
       "stdlib_modules": [
         "hashlib",
         "json",
@@ -6511,7 +6330,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 10854,
+      "end_line": 10788,
       "external_names": [
         "Any",
         "ExternalAcceptanceReceipt",
@@ -6534,7 +6353,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 10783,
+      "start_line": 10717,
       "stdlib_modules": [
         "typing"
       ],
@@ -6542,7 +6361,7 @@
     },
     {
       "cluster": "stay",
-      "end_line": 11435,
+      "end_line": 11369,
       "external_names": [
         "Any",
         "ArchitectTaskContract",
@@ -6600,7 +6419,7 @@
         "nexus.contracts.workforce_admission",
         "nexus.services.runtime_workforce_admission"
       ],
-      "start_line": 10856,
+      "start_line": 10790,
       "stdlib_modules": [
         "hashlib",
         "json",
@@ -6612,7 +6431,7 @@
     },
     {
       "cluster": "stay",
-      "end_line": 11728,
+      "end_line": 11662,
       "external_names": [
         "Any",
         "ArchitectTaskContract",
@@ -6664,7 +6483,7 @@
         "nexus.contracts.workforce_admission",
         "nexus.services.runtime_workforce_admission"
       ],
-      "start_line": 11437,
+      "start_line": 11371,
       "stdlib_modules": [
         "dataclasses",
         "datetime",
@@ -6679,7 +6498,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 11751,
+      "end_line": 11685,
       "external_names": [
         "Any",
         "Mapping",
@@ -6700,7 +6519,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 11730,
+      "start_line": 11664,
       "stdlib_modules": [
         "typing"
       ],
@@ -6708,7 +6527,7 @@
     },
     {
       "cluster": "bridge_candidate",
-      "end_line": 12010,
+      "end_line": 11944,
       "external_names": [
         "Any",
         "IntegrationAuthorizationEnvelope",
@@ -6738,7 +6557,7 @@
       "reason": "<=2 nexus-new modules, none sovereign",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 11753,
+      "start_line": 11687,
       "stdlib_modules": [
         "hashlib",
         "json",
@@ -6749,7 +6568,7 @@
     },
     {
       "cluster": "stay",
-      "end_line": 12119,
+      "end_line": 12053,
       "external_names": [
         "Any",
         "ArchitectTaskContract",
@@ -6779,7 +6598,7 @@
       "reason": ">2 nexus-new modules",
       "sovereign_by_name": false,
       "sovereign_modules": [],
-      "start_line": 12015,
+      "start_line": 11949,
       "stdlib_modules": [
         "dataclasses",
         "pathlib",
@@ -6895,7 +6714,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 28,
+      "first_line": 40,
       "module": "nexus.contracts.autonomy_goal",
       "names": [
         "AutonomyActionClass",
@@ -6908,7 +6727,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 6495,
+      "first_line": 6429,
       "module": "nexus.contracts.canonical_execution",
       "names": [
         "validate_canonical_execution_identity"
@@ -6920,7 +6739,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 29,
+      "first_line": 41,
       "module": "nexus.contracts.collaboration_realm",
       "names": [
         "CollaborationExecutionRealm"
@@ -6932,7 +6751,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 30,
+      "first_line": 42,
       "module": "nexus.contracts.lifecycle_action",
       "names": [
         "ContractKind",
@@ -6950,7 +6769,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 39,
+      "first_line": 51,
       "module": "nexus.contracts.operator_outcome_receipt",
       "names": [
         "OperatorOutcomeReceipt",
@@ -6963,7 +6782,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 43,
+      "first_line": 55,
       "module": "nexus.contracts.target_integration_lifecycle",
       "names": [
         "ExternalAcceptanceReceipt",
@@ -6976,7 +6795,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 47,
+      "first_line": 59,
       "module": "nexus.contracts.unified_runtime_receipt",
       "names": [
         "build_runtime_development_mapping"
@@ -6988,7 +6807,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 48,
+      "first_line": 60,
       "module": "nexus.contracts.workforce_admission",
       "names": [
         "WorkforceDemand"
@@ -7000,7 +6819,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 49,
+      "first_line": 61,
       "module": "nexus.core.task_continuity",
       "names": [
         "build_rehydration_projection",
@@ -7014,7 +6833,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 54,
+      "first_line": 66,
       "module": "nexus.engine.canonical_task_seam",
       "names": [
         "CanonicalDispatchEnvelope",
@@ -7027,7 +6846,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 58,
+      "first_line": 70,
       "module": "nexus.events.contracts",
       "names": [
         "build_attempt_transition_event"
@@ -7039,7 +6858,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 59,
+      "first_line": 71,
       "module": "nexus.events.transport",
       "names": [
         "NexusEventBus"
@@ -7051,7 +6870,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 60,
+      "first_line": 72,
       "module": "nexus.executors.worker_contract",
       "names": [
         "AttemptResolutionVerdict",
@@ -7066,7 +6885,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 66,
+      "first_line": 78,
       "module": "nexus.executors.worker_registry",
       "names": [
         "WorkerRegistry"
@@ -7078,7 +6897,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 67,
+      "first_line": 79,
       "module": "nexus.orchestrator.acceptance_loop",
       "names": [
         "CandidateAcceptanceRequest",
@@ -7093,7 +6912,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 73,
+      "first_line": 85,
       "module": "nexus.orchestrator.ambient_core",
       "names": [
         "AmbientCoreControlPort",
@@ -7109,7 +6928,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 80,
+      "first_line": 92,
       "module": "nexus.orchestrator.autonomy_policy",
       "names": [
         "AutonomySubmissionBinding",
@@ -7122,7 +6941,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 84,
+      "first_line": 96,
       "module": "nexus.orchestrator.candidate_commit",
       "names": [
         "CandidateCommitter"
@@ -7134,7 +6953,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 85,
+      "first_line": 97,
       "module": "nexus.orchestrator.candidate_verifier",
       "names": [
         "CandidateVerifier",
@@ -7147,7 +6966,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 86,
+      "first_line": 98,
       "module": "nexus.orchestrator.canonical_source_root",
       "names": [
         "CANONICAL_SOURCE_ROOT"
@@ -7159,7 +6978,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 87,
+      "first_line": 99,
       "module": "nexus.orchestrator.collaboration_realm",
       "names": [
         "CollaborationRealmVerifier"
@@ -7171,7 +6990,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 88,
+      "first_line": 100,
       "module": "nexus.orchestrator.governed_integration",
       "names": [
         "ControlledIntegrationManager",
@@ -7186,7 +7005,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 92,
+      "first_line": 104,
       "module": "nexus.orchestrator.lifecycle_guards",
       "names": [
         "pre_action_guard",
@@ -7201,7 +7020,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 98,
+      "first_line": 110,
       "module": "nexus.orchestrator.repository_contract_gate",
       "names": [
         "RepositoryContractGate"
@@ -7213,7 +7032,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 4185,
+      "first_line": 4119,
       "module": "nexus.orchestrator.runtime_coordination_bridge",
       "names": [
         "RuntimeCoordinationBridge"
@@ -7225,7 +7044,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 99,
+      "first_line": 111,
       "module": "nexus.orchestrator.runtime_retry_bridge",
       "names": [
         "project_candidate_acceptance_for_runtime_repair",
@@ -7238,7 +7057,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 103,
+      "first_line": 115,
       "module": "nexus.orchestrator.runtime_state_bridge",
       "names": [
         "RuntimeStateBridge"
@@ -7250,7 +7069,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 104,
+      "first_line": 116,
       "module": "nexus.orchestrator.self_hosted_controller",
       "names": [
         "SelfHostedDevelopmentController"
@@ -7262,7 +7081,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 105,
+      "first_line": 117,
       "module": "nexus.orchestrator.target_integration_lifecycle",
       "names": [
         "TargetIntegrationLifecycle"
@@ -7274,7 +7093,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 106,
+      "first_line": 118,
       "module": "nexus.orchestrator.task_contract",
       "names": [
         "AcceptanceProfile",
@@ -7293,7 +7112,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 114,
+      "first_line": 126,
       "module": "nexus.orchestrator.worker_escalation",
       "names": [
         "WorkerEscalationPolicy"
@@ -7305,7 +7124,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 115,
+      "first_line": 127,
       "module": "nexus.orchestrator.worktree_manager",
       "names": [
         "TargetWorktreeLease",
@@ -7320,7 +7139,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 4333,
+      "first_line": 4267,
       "module": "nexus.research.clm_system_one.candidate_evidence_collector",
       "names": [
         "collect_candidate_group"
@@ -7332,7 +7151,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 4320,
+      "first_line": 4254,
       "module": "nexus.research.clm_system_one.research_evidence_root",
       "names": [
         "explicit_research_evidence_root_configured"
@@ -7344,7 +7163,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 4336,
+      "first_line": 4270,
       "module": "nexus.research.clm_system_one.trajectory_continuity",
       "names": [
         "bind_trajectory_outcome",
@@ -7359,7 +7178,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 3989,
+      "first_line": 3923,
       "module": "nexus.services.mainchain_entry",
       "names": [
         "build_mainchain_capability_invokers"
@@ -7371,7 +7190,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 121,
+      "first_line": 133,
       "module": "nexus.services.model_workforce_policy",
       "names": [
         "WorkforcePolicyLoader"
@@ -7383,7 +7202,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 122,
+      "first_line": 134,
       "module": "nexus.services.runtime_workforce_admission",
       "names": [
         "_binding_payload",
@@ -7397,7 +7216,7 @@
     },
     {
       "classification": "nexus-new",
-      "first_line": 3990,
+      "first_line": 3924,
       "module": "nexus.services.unified_runtime",
       "names": [
         "materialize_selected_capability_evidence"
@@ -7421,7 +7240,7 @@
     },
     {
       "classification": "nexus_runtime",
-      "first_line": 3984,
+      "first_line": 3918,
       "module": "nexus_runtime.task_context",
       "names": [
         "append_model_context_to_prompt",
@@ -7429,6 +7248,27 @@
       ],
       "scopes": [
         "function-local"
+      ],
+      "sovereign_category": null
+    },
+    {
+      "classification": "nexus_runtime",
+      "first_line": 27,
+      "module": "nexus_runtime.task_lifecycle",
+      "names": [
+        "ACTIVE_EXECUTION_STATUSES",
+        "DIRECT_EXECUTION_STATUSES",
+        "DURABLE_SELF_HOSTED_STATUSES",
+        "INTEGRATION_INTERMEDIATE_STATUSES",
+        "INVALID_STATE_STATUSES",
+        "KNOWN_SELF_HOSTED_STATUSES",
+        "PENDING_CANDIDATE_STATUSES",
+        "RESUMABLE_STATUSES",
+        "RETRYABLE_TASK_STATUSES",
+        "TERMINAL_STATUSES"
+      ],
+      "scopes": [
+        "module"
       ],
       "sovereign_category": null
     },
@@ -7662,9 +7502,9 @@
     }
   },
   "source": {
-    "lines": 12119,
+    "lines": 12053,
     "path": "nexus/orchestrator/self_hosted_task_service.py",
-    "sha256": "d17e5940937f6affbccfbb1f670bdb7041b77846a6d171a65b79f1ed9d563d98"
+    "sha256": "39528f8cdde20edcc4ee0747dac3c9af09518df65f858c088e98f29cb04ff20d"
   },
   "sovereign_categories_without_import": [
     "gateway",
@@ -7705,8 +7545,14 @@
       "module": "nexus.services.unified_runtime"
     }
   ],
-  "string_patch_site_count": 81,
+  "string_patch_site_count": 82,
   "string_patch_sites": [
+    {
+      "attribute": "CANONICAL_SOURCE_ROOT",
+      "file": "tests/engine/test_canonical_task_seam.py",
+      "line": 718,
+      "target": "nexus.orchestrator.self_hosted_task_service.CANONICAL_SOURCE_ROOT"
+    },
     {
       "attribute": "resolve_execution_lane",
       "file": "tests/nexus/orchestrator/test_autonomy_goal_policy.py",
