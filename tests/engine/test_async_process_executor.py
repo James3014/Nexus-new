@@ -27,7 +27,9 @@ def test_run_async_respects_caller_uv_cache(monkeypatch, tmp_path):
 def test_run_async_records_spawn_failure(tmp_path):
     log = tmp_path / "out.log"
 
-    rc, _, _ = asyncio.run(cli_mod.AsyncProcessExecutor().run_async([str(tmp_path / "missing-binary")], log))
+    rc, _, _ = asyncio.run(
+        cli_mod.AsyncProcessExecutor().run_async([str(tmp_path / "missing-binary")], log)
+    )
 
     assert rc == 1
     assert "subprocess_spawn_failed: FileNotFoundError" in log.read_text()

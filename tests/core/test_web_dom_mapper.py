@@ -1,9 +1,11 @@
+from pathlib import Path
+
 import pytest
+
+from nexus.core.web_dom_mapper import WebDomMapper
 
 # playwright is in the optional `browser` extra; skip instead of aborting collection.
 async_playwright = pytest.importorskip("playwright.async_api").async_playwright
-from pathlib import Path
-from nexus.core.web_dom_mapper import WebDomMapper
 
 @pytest.mark.asyncio
 async def test_web_dom_mapper_basic():

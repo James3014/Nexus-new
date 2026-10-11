@@ -11,7 +11,7 @@ def test_crystallize_appends_fixed_belief_once(tmp_path):
     crystallize(tmp_path)
     crystallize(tmp_path)
 
-    beliefs = [json.loads(l) for l in (knowledge / "beliefs.jsonl").read_text().splitlines()]
+    beliefs = [json.loads(line) for line in (knowledge / "beliefs.jsonl").read_text().splitlines()]
     proposals = (knowledge / "reconciliation_proposals.jsonl").read_text().splitlines()
     assert [b["belief_id"] for b in beliefs] == ["B-FED-SINGULARITY-001"]
     assert len(proposals) == 1

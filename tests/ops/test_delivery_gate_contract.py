@@ -231,7 +231,9 @@ def test_delivery_gate_physical_freshness_decision_bearing(tmp_path):
 
 def test_delivery_gate_shebang_does_not_require_zsh():
     """The gate must be executable on hosts without zsh (Linux CI, containers)."""
-    first_line = (ROOT / "scripts/ops/nexus_delivery_gate.sh").read_text(encoding="utf-8").splitlines()[0]
+    first_line = (
+        (ROOT / "scripts/ops/nexus_delivery_gate.sh").read_text(encoding="utf-8").splitlines()[0]
+    )
     assert first_line == "#!/usr/bin/env bash"
 
 
