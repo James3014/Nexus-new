@@ -511,6 +511,25 @@ class IssueAdmissionPolicy:
     experiment_control_task: str
     candidate_repositories: tuple[str, ...]
     excluded_task_keys: tuple[str, ...] = ()
+    campaign_task_keys: tuple[str, ...] = (
+        "James3014/Nexus-new#1216",
+        "James3014/Nexus-new#1196",
+    )
+    campaign_markers: tuple[str, ...] = (
+        "#1216",
+        "#1196",
+        "NEXUS-HYBRID-REPLICATION",
+        "hybrid replication",
+        "hybrid-replication",
+        "hybrid_replication",
+    )
+
+
+def _references_campaign(snapshot: TaskSnapshot, policy: IssueAdmissionPolicy) -> bool:
+    if snapshot.task_key in set(policy.campaign_task_keys):
+        return True
+    text = f"{snapshot.title}\n{snapshot.body}".lower()
+    return any(marker.lower() in text for marker in policy.campaign_markers)
 
 
 def classify_opened_issue(
@@ -527,6 +546,8 @@ def classify_opened_issue(
         return "EXPERIMENT_CONTROL_ISSUE"
     if snapshot.task_key in set(policy.excluded_task_keys):
         return "CONTAMINATION_EXCLUDED"
+    if _references_campaign(snapshot, policy):
+        return "CAMPAIGN_META_WORK_EXCLUDED"
     if snapshot.created_at < policy.prospective_boundary:
         return "EXCLUDED_PRE_BOUNDARY"
     if tracked_parent_created_at is not None:
@@ -863,6 +884,7 @@ class AutomaticReplicationStore:
             "EXCLUDED_PRE_BOUNDARY",
             "CROSS_REPO_SCOPE_GAP",
             "CONTAMINATION_EXCLUDED",
+            "CAMPAIGN_META_WORK_EXCLUDED",
             "UNTRACKED_WORK_ITEM_SCOPE_GAP",
             "EXCLUDE_PARENT_TASK_PRE_BOUNDARY",
             "PARENT_TASK_SCOPE_GAP",

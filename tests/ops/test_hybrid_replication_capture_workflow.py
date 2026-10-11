@@ -43,3 +43,15 @@ def test_capture_workflow_has_no_routing_or_merge_authority() -> None:
     assert "contents: write" not in text
     assert "actions: write" not in text
     assert "issues: write" in text
+
+
+def test_capture_workflow_excludes_campaign_meta_work_in_disposition_chain() -> None:
+    text = WORKFLOW.read_text(encoding="utf-8")
+    chain = text[text.index('disposition = "CONTAMINATION_EXCLUDED"') :]
+    chain = chain[: chain.index('disposition = "EXCLUDED_PRE_BOUNDARY"')]
+
+    assert 'disposition = "CAMPAIGN_META_WORK_EXCLUDED"' in chain
+    assert "CAMPAIGN_MARKERS" in chain
+    assert '"NEXUS-HYBRID-REPLICATION"' in text
+    assert '"#1216"' in text
+    assert '"#1196"' in text

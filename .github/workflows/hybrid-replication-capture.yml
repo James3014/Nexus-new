@@ -60,6 +60,14 @@ jobs:
               "James3014/nexus-runtime",
               "James3014/nexus-opencli-reviewer",
           )
+          CAMPAIGN_MARKERS = (
+              "#1216",
+              "#1196",
+              "NEXUS-HYBRID-REPLICATION",
+              "hybrid replication",
+              "hybrid-replication",
+              "hybrid_replication",
+          )
 
           token = os.environ["GH_TOKEN"]
           repository = os.environ["REPOSITORY"]
@@ -251,6 +259,11 @@ jobs:
                       disposition = "EXPERIMENT_CONTROL_ISSUE"
                   elif task_key in excluded:
                       disposition = "CONTAMINATION_EXCLUDED"
+                  elif any(
+                      marker.lower() in f"{title}\n{body}".lower()
+                      for marker in CAMPAIGN_MARKERS
+                  ):
+                      disposition = "CAMPAIGN_META_WORK_EXCLUDED"
                   elif str(current_issue["created_at"]) < t_auto:
                       disposition = "EXCLUDED_PRE_BOUNDARY"
                   elif parent_ambiguous:
