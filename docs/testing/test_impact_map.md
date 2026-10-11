@@ -177,6 +177,7 @@
 | tests/core/test_context_hub_strict_deps.py | tests/core/test_context_hub_strict_deps.py | active | medium | test_contract |
 | tests/core/test_mission_control.py | tests/core/test_mission_control.py | active | medium | test_contract |
 | tests/core/test_mission_transitions.py | tests/core/test_mission_transitions.py | active | medium | test_contract |
+| tests/core/test_drone_hud_and_run.py | tests/core/test_drone_hud_and_run.py | active | medium | test_contract |
 | tests/contracts/test_s2t_contracts.py | tests/contracts/test_s2t_contracts.py | active | medium | test_contract |
 | tests/engine/test_sandbox_actions.py | tests/engine/test_sandbox_actions.py | active | medium | test_contract |
 | tests/app/test_research_s2t_runtime.py | tests/app/test_research_s2t_runtime.py | active | medium | test_contract |
