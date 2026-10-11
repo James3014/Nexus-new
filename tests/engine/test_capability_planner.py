@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from nexus.core.repo_root import REPO_ROOT
 from nexus.engine.capability_contracts import (
     CapabilityPlan,
     ExecutionReplanAuthorization,
@@ -900,7 +901,7 @@ def test_capability_planner_emits_planned_skill_mount_contract_for_curated_skill
         encoding="utf-8",
     )
 
-    plan = CapabilityPlanner().plan(
+    plan = CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
         task_desc="Prepare public benchmark promotion report.",
         task_type="benchmark",
         route={
@@ -965,7 +966,7 @@ def test_capability_planner_allows_reference_skill_only_for_ablation(tmp_path):
         encoding="utf-8",
     )
 
-    plan = CapabilityPlanner().plan(
+    plan = CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
         task_desc="Repair code with external skill ablation.",
         task_type="benchmark",
         route={"recommended_flow": "baseline", "route_features": {"risk_score": 20, "candidate_count": 1}},
@@ -1032,7 +1033,7 @@ def test_capability_planner_uses_sf_runtime_policy_overlay_for_selected_capabili
         encoding="utf-8",
     )
 
-    plan = CapabilityPlanner().plan(
+    plan = CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
         task_desc="Forecast plan risk before execution.",
         task_type="planning",
         route={"recommended_flow": "baseline", "route_features": {"risk_score": 75, "candidate_count": 1}},
@@ -1115,7 +1116,7 @@ def test_capability_planner_uses_sf_runtime_policy_assembly_overlay(tmp_path):
         encoding="utf-8",
     )
 
-    plan = CapabilityPlanner().plan(
+    plan = CapabilityPlanner(shared_playbook_root=REPO_ROOT).plan(
         task_desc="Scan implementation impact before editing.",
         task_type="code_change",
         route={"recommended_flow": "baseline", "route_features": {"risk_score": 40}},
