@@ -153,6 +153,7 @@
 | tests/research/test_auto_flow_executor.py | tests/research/test_auto_flow_executor.py, tests/app/test_research_flow_service.py::test_forced_hyper_skips_baseline_probe, tests/app/test_research_flow_service.py::test_hyper_guard_fallback_preserves_gateway_token_source, tests/app/test_research_flow_service.py::test_cross_module_hyper_failure_can_rescue_with_original_artifact_verification | active | high | auto_flow_executor_accounting_contract |
 | tests/engine/test_learn_actions.py | tests/engine/test_learn_actions.py | active | medium | test_contract |
 | tests/engine/test_multi_agent_actions.py | tests/engine/test_multi_agent_actions.py | active | medium | test_contract |
+| tests/engine/test_delegate_completion_contract.py | tests/engine/test_delegate_completion_contract.py | active | medium | test_contract |
 | tests/engine/test_registry_actions.py | tests/engine/test_registry_actions.py | active | medium | test_contract |
 | tests/engine/test_research_actions.py | tests/engine/test_research_actions.py | active | medium | test_contract |
 | tests/learning/test_skill_fit_data_shape_pregate.py | tests/learning/test_skill_fit_data_shape_pregate.py | active | medium | test_contract |
