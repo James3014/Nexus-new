@@ -1,0 +1,8 @@
+{
+  "id": "shallow_copy_nested-b",
+  "bug_class": "shallow_copy_nested",
+  "variant": "b",
+  "problem_statement": "After a snapshot is taken and then the board changes, the snapshot changes too: with board[0][0] set to 'o' afterwards, snapshot(board)[0][0] reads 'o' rather than the 'x' it held. Undo history is affected the same way.",
+  "target_file": "board.py",
+  "repro_file": "repro.py"
+}

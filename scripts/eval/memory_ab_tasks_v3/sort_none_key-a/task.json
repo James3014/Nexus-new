@@ -1,0 +1,8 @@
+{
+  "id": "sort_none_key-a",
+  "bug_class": "sort_none_key",
+  "variant": "a",
+  "problem_statement": "rank() raises TypeError when one entry has no score (None). Expected: scored entries come first, highest score first; unscored entries follow in input order; tied scores keep their input order.",
+  "target_file": "leaderboard.py",
+  "repro_file": "repro.py"
+}

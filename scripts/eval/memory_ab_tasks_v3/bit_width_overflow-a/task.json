@@ -1,0 +1,8 @@
+{
+  "id": "bit_width_overflow-a",
+  "bug_class": "bit_width_overflow",
+  "variant": "a",
+  "problem_statement": "fnv1a32(b'a') returns a value above 2**32 instead of 3826002220, and fnv1a32(b'foobar') returns a number wider than 32 bits. Expected: an unsigned 32-bit value that matches the standard FNV-1a 32-bit hash.",
+  "target_file": "fnv.py",
+  "repro_file": "repro.py"
+}

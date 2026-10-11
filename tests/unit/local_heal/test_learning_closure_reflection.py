@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from nexus.services.local_heal import lesson_embedding
 from nexus.services.local_heal.learning_closure_bridge import (
     LearningClosureBridge,
     _reflect_canonical_episode,
@@ -115,14 +116,13 @@ class _FakeResponse:
 
 
 def test_ollama_judge_failure_falls_back_to_deterministic(tmp_path: Path, monkeypatch) -> None:
-    import urllib.request
 
     monkeypatch.setenv("NEXUS_LEARNING_REFLECT_JUDGE", "ollama")
 
     def _raise(*args, **kwargs):
         raise OSError("connection refused")
 
-    monkeypatch.setattr(urllib.request, "urlopen", _raise)
+    monkeypatch.setattr(lesson_embedding, "_open", _raise)
 
     closure = write_learning_closure(_qualified_op(), bridge=_bridge(tmp_path))
 
@@ -132,7 +132,6 @@ def test_ollama_judge_failure_falls_back_to_deterministic(tmp_path: Path, monkey
 
 
 def test_ollama_judge_output_is_used_when_valid(tmp_path: Path, monkeypatch) -> None:
-    import urllib.request
 
     monkeypatch.setenv("NEXUS_LEARNING_REFLECT_JUDGE", "ollama")
     judge_output = (
@@ -147,8 +146,8 @@ def test_ollama_judge_output_is_used_when_valid(tmp_path: Path, monkeypatch) -> 
         + "\n```"
     )
     monkeypatch.setattr(
-        urllib.request,
-        "urlopen",
+        lesson_embedding,
+        "_open",
         lambda *args, **kwargs: _FakeResponse({"response": judge_output}),
     )
 
@@ -178,7 +177,6 @@ def test_writeback_disabled_skips_reflection_and_ledger(tmp_path: Path, monkeypa
 def test_ollama_judge_request_is_json_mode_with_instruction_and_problem_summary(
     tmp_path: Path, monkeypatch
 ) -> None:
-    import urllib.request
 
     monkeypatch.setenv("NEXUS_LEARNING_REFLECT_JUDGE", "ollama")
     sent: list[dict] = []
@@ -194,7 +192,7 @@ def test_ollama_judge_request_is_json_mode_with_instruction_and_problem_summary(
         sent.append(json.loads(request.data.decode("utf-8")))
         return _FakeResponse({"response": judge_output})
 
-    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(lesson_embedding, "_open", _fake_urlopen)
 
     write_learning_closure(
         _qualified_op(
@@ -214,3 +212,59 @@ def test_ollama_judge_request_is_json_mode_with_instruction_and_problem_summary(
         "Respond with a single JSON object only; keys: title, lesson, applies_when"
     )
     assert "fix the parser crash on empty input" in body["prompt"]
+
+
+def _capture_reflect(monkeypatch, *, with_embed: bool) -> dict:
+    captured: dict = {}
+
+    if with_embed:
+
+        def fake(episodes, *, judge=None, model_name="", max_lessons=1, embed=None, embed_model=""):
+            captured.update(episodes=episodes, embed=embed, embed_model=embed_model)
+            return []
+
+    else:
+
+        def fake(episodes, *, judge=None, model_name="", max_lessons=1):
+            captured.update(episodes=episodes)
+            return []
+
+    import nexus.learning.lessons as lessons_mod
+
+    monkeypatch.setattr(lessons_mod, "reflect_episodes", fake)
+    return captured
+
+
+def test_succeeded_closure_adds_patch_excerpt(tmp_path: Path, monkeypatch) -> None:
+    captured = _capture_reflect(monkeypatch, with_embed=True)
+    write_learning_closure(_qualified_op(final_patch="x" * 3000), bridge=_bridge(tmp_path))
+    evidence = captured["episodes"][0]["terminal_evidence"]
+    assert evidence["patch_excerpt"] == "x" * 1500
+
+
+def test_no_patch_excerpt_without_patch_or_success(tmp_path: Path, monkeypatch) -> None:
+    captured = _capture_reflect(monkeypatch, with_embed=True)
+    write_learning_closure(_qualified_op(final_patch=""), bridge=_bridge(tmp_path))
+    assert "patch_excerpt" not in captured["episodes"][0]["terminal_evidence"]
+    write_learning_closure(
+        _qualified_op(
+            terminal_outcome="FAILED", solve_eligible=False, failure_reason="verifier_fail"
+        ),
+        bridge=_bridge(tmp_path),
+    )
+    assert "patch_excerpt" not in captured["episodes"][0]["terminal_evidence"]
+
+
+def test_reflect_passes_embed_when_supported(tmp_path: Path, monkeypatch) -> None:
+    from nexus.services.local_heal.lesson_embedding import embed_text
+
+    captured = _capture_reflect(monkeypatch, with_embed=True)
+    write_learning_closure(_qualified_op(), bridge=_bridge(tmp_path))
+    assert captured["embed"] is embed_text
+    assert captured["embed_model"]
+
+
+def test_reflect_omits_embed_when_unsupported(tmp_path: Path, monkeypatch) -> None:
+    captured = _capture_reflect(monkeypatch, with_embed=False)
+    write_learning_closure(_qualified_op(), bridge=_bridge(tmp_path))
+    assert captured["episodes"]

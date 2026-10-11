@@ -1,0 +1,8 @@
+{
+  "id": "greedy_regex_multiline-a",
+  "bug_class": "greedy_regex_multiline",
+  "variant": "a",
+  "problem_statement": "section_names() returns a single name that swallows several lines, such as 'core]\\nname = x\\n[net' for an INI text with [core] and [net] headers. Expected: each header line '[name]' yields its own name, and brackets inside a key's value are not headers.",
+  "target_file": "ini_sections.py",
+  "repro_file": "repro.py"
+}

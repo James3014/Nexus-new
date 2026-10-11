@@ -572,3 +572,63 @@ def test_normal_retry_memory_off_appends_nothing(tmp_path, monkeypatch):
 
     assert ctx.op.user_prompt == "BASE"
     assert not getattr(ctx.op, "_memory_prompt_injected_ids", None)
+
+
+def _patch_retrieve(monkeypatch, *, with_embedding: bool) -> dict:
+    import nexus_learning.lessons as lessons_mod
+
+    captured: dict = {}
+    real = lessons_mod.retrieve_lessons
+
+    if with_embedding:
+
+        def fake(lessons, *, query_text, limit=3, require_physical=True, query_embedding=None):
+            captured["query_embedding"] = query_embedding
+            return real(lessons, query_text=query_text, limit=limit, require_physical=True)
+
+    else:
+
+        def fake(lessons, *, query_text, limit=3, require_physical=True):
+            captured["called"] = True
+            return real(lessons, query_text=query_text, limit=limit, require_physical=True)
+
+    monkeypatch.setattr(lessons_mod, "retrieve_lessons", fake)
+    return captured
+
+
+def test_canonical_query_passes_query_embedding_when_supported(tmp_path, monkeypatch):
+    import nexus.services.local_heal.memory_retrieval_adapter as adapter_mod
+
+    phys = _write(tmp_path, "physical", "Empty list indexing guard")
+    captured = _patch_retrieve(monkeypatch, with_embedding=True)
+    monkeypatch.setattr(adapter_mod, "embed_text", lambda text: [1.0, 0.0])
+    rows = CanonicalLessonStore(project_root=tmp_path).query(
+        query_text="empty list indexing", limit=3
+    )
+    assert captured["query_embedding"] == [1.0, 0.0]
+    assert [r["lesson_id"] for r in rows] == [phys]
+
+
+def test_canonical_query_still_returns_rows_when_embed_is_none(tmp_path, monkeypatch):
+    import nexus.services.local_heal.memory_retrieval_adapter as adapter_mod
+
+    phys = _write(tmp_path, "physical", "Empty list indexing guard")
+    captured = _patch_retrieve(monkeypatch, with_embedding=True)
+    monkeypatch.setattr(adapter_mod, "embed_text", lambda text: None)
+    rows = CanonicalLessonStore(project_root=tmp_path).query(
+        query_text="empty list indexing", limit=3
+    )
+    assert captured["query_embedding"] is None
+    assert [r["lesson_id"] for r in rows] == [phys]
+
+
+def test_canonical_query_omits_embedding_when_unsupported(tmp_path, monkeypatch):
+    import nexus.services.local_heal.memory_retrieval_adapter as adapter_mod
+
+    phys = _write(tmp_path, "physical", "Empty list indexing guard")
+    captured = _patch_retrieve(monkeypatch, with_embedding=False)
+    monkeypatch.setattr(adapter_mod, "embed_text", lambda text: [1.0])
+    rows = CanonicalLessonStore(project_root=tmp_path).query(
+        query_text="empty list indexing", limit=3
+    )
+    assert captured["called"] and [r["lesson_id"] for r in rows] == [phys]

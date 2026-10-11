@@ -1,0 +1,8 @@
+{
+  "id": "float_money_rounding-a",
+  "bug_class": "float_money_rounding",
+  "variant": "a",
+  "problem_statement": "invoice_total(['0.03'], '0.5') returns '0.04' where '0.05' is expected: the 0.015 tax on 0.03 is 0.02 once rounded to the cent.",
+  "target_file": "invoice.py",
+  "repro_file": "repro.py"
+}

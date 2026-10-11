@@ -1,0 +1,8 @@
+{
+  "id": "off_by_one_half_open-b",
+  "bug_class": "off_by_one_half_open",
+  "variant": "b",
+  "problem_statement": "page_slice(10, 4, 1) returns (0, 3) instead of (0, 4), so the fourth item of each full page is missing from the slice. Expected: a 1-indexed page gives the half-open (start, stop) slice of items on that page, and a page past the end gives the empty slice (total, total).",
+  "target_file": "paging.py",
+  "repro_file": "repro.py"
+}
