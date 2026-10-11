@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import base64
+import gzip
 import json
 from pathlib import Path
 
 import pytest
 
 from nexus.research import hybrid_replication_prospective as prospective
+from nexus.research.hybrid_replication_live import _snapshot_from_capture_payload
 from nexus.research.hybrid_replication_pipeline import (
     AdmissionReceipt,
     AutomaticReplicationStore,
     TaskSnapshot,
+    _canonical_bytes,
+    _sha256,
     build_admission_comment,
 )
 from nexus.research.hybrid_replication_prospective import (
@@ -304,3 +309,36 @@ def test_synchronous_effect_restart_never_replays_unreconcilable_request(
 
     loss = json.loads(guard.protocol_loss_path.read_text(encoding="utf-8"))
     assert loss["reason"] == "UNRECONCILABLE_SYNCHRONOUS_EFFECT_RESTART"
+
+
+def test_stack_snapshot_keeps_workflow_capture_identity(tmp_path: Path) -> None:
+    base = _snapshot(1604)
+    body = base.body
+    # The capture workflow's zlib yields different gzip bytes than the local default.
+    body_b64 = base64.b64encode(
+        gzip.compress(body.encode("utf-8"), compresslevel=1, mtime=0)
+    ).decode("ascii")
+    assert body_b64 != base.body_gzip_base64
+    payload = base.to_capture_payload()
+    payload.pop("capture_sha256")
+    payload["body_gzip_base64"] = body_b64
+    payload["capture_sha256"] = _sha256(_canonical_bytes(payload))
+    assert payload["capture_sha256"] != base.capture_sha256
+
+    snapshot = _snapshot_from_capture_payload(payload)
+
+    assert snapshot.capture_sha256 == payload["capture_sha256"]
+    assert snapshot.body_gzip_base64 == body_b64
+    AutomaticReplicationStore(tmp_path).capture(
+        snapshot, admission_disposition="PRE_AUTOMATION_PROVISIONAL_CAPTURE"
+    )
+    guard = ProspectiveExecutionGuard(store_root=tmp_path, snapshot=snapshot)
+    task_dir = guard.task_dir
+    state_path = task_dir / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["capture_sha256"] == payload["capture_sha256"]
+    state["admission_disposition"] = "ADMITTED_PRIMARY_FRESH_TASK"
+    state["admission_receipt_sha256"] = "f" * 64
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    assert guard._load_state()["capture_sha256"] == payload["capture_sha256"]
