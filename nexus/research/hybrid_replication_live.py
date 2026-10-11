@@ -301,21 +301,9 @@ def resolve_ground_truth_payload(
 
 
 def _snapshot_from_capture_payload(payload: Mapping[str, Any]) -> TaskSnapshot:
-    body = gzip.decompress(
-        base64.b64decode(str(payload["body_gzip_base64"]).encode("ascii"))
-    ).decode("utf-8")
-    return TaskSnapshot.create(
-        repository=str(payload["repository"]),
-        issue_number=int(payload["issue_number"]),
-        created_at=str(payload["created_at"]),
-        captured_at=str(payload["captured_at"]),
-        issue_updated_at=str(payload["issue_updated_at"]),
-        title=str(payload["title"]),
-        body=body,
-        pre_implementation_revision=str(payload["pre_implementation_revision"]),
-        default_branch=str(payload["default_branch"]),
-        source_event_id=str(payload["source_event_id"]),
-    )
+    # Keep the captured body_gzip_base64 and hashes: re-gzipping locally yields different
+    # bytes than the capture workflow's zlib and breaks capture identity.
+    return TaskSnapshot.from_capture_payload(payload)
 
 
 def _frozen_receipt_hashes(
