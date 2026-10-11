@@ -455,59 +455,26 @@ class RuntimeCoordinationBridge:
         self.service = service
 
     def _coordinator(self, task_id, attempt_id, *, request=None, update=None):
+        # Nexus-new pins one exact nexus-runtime, whose ExecutionCoordinator always
+        # takes the preparation port and the model-call gate; no version sniffing.
         processes = _Processes()
         processes.service = self.service
         finalization = _Finalization(
             self.service, update=update, task_id=task_id, attempt_id=attempt_id
         )
-        args = [
+        return ExecutionCoordinator(
             _State(self.service, request=request, update=update),
             _Contract(self.service),
             _Worker(self.service),
             _Target(self.service),
             processes,
             finalization,
-        ]
-        sig = inspect.signature(ExecutionCoordinator.__init__)
-        has_var_positional = any(
-            p.kind == inspect.Parameter.VAR_POSITIONAL for p in sig.parameters.values()
+            preparation=_Preparation(self.service),
+            model_call_gate=_WorkerInvocationModelCallGate(),
         )
-        if "preparation" in sig.parameters or len(sig.parameters) > 7 or has_var_positional:
-            args.append(_Preparation(self.service))
-        if "model_call_gate" in sig.parameters:
-            return ExecutionCoordinator(
-                *args,
-                model_call_gate=_WorkerInvocationModelCallGate(),
-            )
-        return ExecutionCoordinator(*args)
-
-    def _ensure_preparation_compat(self, task_id, attempt_id, *, request=None):
-        sig = inspect.signature(ExecutionCoordinator.__init__)
-        has_var_positional = any(
-            p.kind == inspect.Parameter.VAR_POSITIONAL for p in sig.parameters.values()
-        )
-        if "preparation" in sig.parameters or len(sig.parameters) > 7 or has_var_positional:
-            return
-        state = self.service._read_state(task_id) or {}
-        req = request or state.get("request") or {}
-        if not state.get("lease"):
-            return
-        try:
-            contract = self.service._contract_from_state(state)
-        except Exception:
-            return
-        if not self.service._ambient_core_required(contract, req):
-            return
-        if not state.get("host_preparation"):
-            lease = self.service._lease_from_state(state)
-            prep = self.service._prepare_ambient_core(
-                contract, req, lease, state, task_id=task_id, attempt_id=attempt_id
-            )
-            self.service._mutate_state(task_id, lambda s: s.update({"host_preparation": prep}))
 
     def run_owned_attempt(self, task_id, attempt_id, custom_runner=None):
         self.service._bridge_validate_claim(task_id, attempt_id, operation="RUN_OWNED_ATTEMPT")
-        self._ensure_preparation_compat(task_id, attempt_id)
         return self._coordinator(task_id, attempt_id).run_owned_attempt(
             task_id, attempt_id, custom_runner
         )
@@ -523,7 +490,6 @@ class RuntimeCoordinationBridge:
 
     def execute(self, task_id, attempt_id, *, contract=None, request=None, update=None):
         self.service._bridge_validate_claim(task_id, attempt_id, operation="EXECUTE")
-        self._ensure_preparation_compat(task_id, attempt_id, request=request)
         return self._coordinator(
             task_id, attempt_id, request=request, update=update
         ).execute_attempt(task_id, attempt_id, contract=contract, request=request)
