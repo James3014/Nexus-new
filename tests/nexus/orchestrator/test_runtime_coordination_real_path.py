@@ -276,6 +276,35 @@ def test_runtime_bridge_binds_observation_model_call_gate_when_supported(tmp_pat
     }
 
 
+def test_runtime_bridge_preserves_legacy_constructor_without_model_call_gate(tmp_path, monkeypatch):
+    """A coordinator without the model-call gate is no longer adapted; it fails loudly.
+
+    The name is kept so the exact-base impact gate can compare this case; the
+    pinned runtime always takes ``preparation`` and ``model_call_gate``.
+    """
+
+    class LegacyCoordinator:
+        def __init__(
+            self,
+            state,
+            contract,
+            worker,
+            target,
+            processes,
+            finalization,
+            preparation=None,
+        ):
+            raise AssertionError("must not be constructed without model_call_gate")
+
+    monkeypatch.setattr(bridge, "ExecutionCoordinator", LegacyCoordinator)
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", ephemeral=True, auto_reconcile=False
+    )
+
+    with pytest.raises(TypeError, match="model_call_gate"):
+        bridge.RuntimeCoordinationBridge(service)._coordinator("task", "attempt")
+
+
 def test_runtime_bridge_binds_the_pinned_coordinator_without_signature_sniffing():
     """Nexus-new pins one exact runtime, so the bridge binds its constructor directly."""
     import inspect
