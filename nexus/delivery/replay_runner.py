@@ -1,3 +1,4 @@
+import shlex
 import subprocess
 import hashlib
 import time
@@ -5,6 +6,25 @@ import sys
 import os
 from pathlib import Path
 from typing import Dict, List, Any
+
+_SHELL_METACHARS = set(";|&$`<>")
+
+
+def _parse_command(cmd: Any) -> List[str]:
+    """Parse an evidence command into an argv list; raise ValueError if unsafe."""
+    if not isinstance(cmd, str) or not cmd.strip():
+        raise ValueError("invalid_command: command must be a non-empty string")
+    bad = sorted(ch for ch in _SHELL_METACHARS if ch in cmd)
+    if bad:
+        raise ValueError(f"unsafe_command: shell metacharacters not allowed: {''.join(bad)}")
+    try:
+        argv = shlex.split(cmd)
+    except ValueError as exc:
+        raise ValueError(f"invalid_command: {exc}") from exc
+    if not argv:
+        raise ValueError("invalid_command: command must be a non-empty string")
+    return argv
+
 
 class ReplayRunner:
     """
@@ -38,8 +58,18 @@ class ReplayRunner:
             
             start_time = time.time()
             try:
+                argv = _parse_command(cmd)
+            except ValueError as e:
+                overall_passed = False
+                replay_results.append({
+                    "command": cmd if isinstance(cmd, str) else repr(cmd),
+                    "error": str(e),
+                    "passed": False
+                })
+                continue
+            try:
                 result = subprocess.run(
-                    cmd, shell=True, cwd=self.project_root,
+                    argv, cwd=self.project_root,
                     capture_output=True, text=True, timeout=60
                 )
                 duration = int((time.time() - start_time) * 1000)

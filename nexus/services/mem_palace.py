@@ -117,7 +117,16 @@ class MemPalace:
     def get_skill_constraints(self) -> Dict[str, Any]:
         """🛡️ 從活躍且高信任度的信念中提取技能約束規則 (v24.0 Hardened)。"""
         beliefs = self.list_beliefs(status="ACTIVE")
-        constraints = {"require": [], "forbid": [], "prefer": []}
+        constraints: Dict[str, Any] = {"require": [], "forbid": [], "prefer": []}
+        # Make a failed belief read visible: empty constraints != "no constraints".
+        store_status = getattr(self.belief_store, "last_read_status", "ok")
+        if getattr(self, "_belief_read_failed", False) or store_status == "unavailable":
+            constraints["constraints_source"] = "unavailable"
+            constraints["constraints_unavailable_reason"] = (
+                getattr(self, "_belief_read_error", "") or getattr(self.belief_store, "last_read_error", "") or "belief_store_unavailable"
+            )
+        else:
+            constraints["constraints_source"] = "ok"
         now = datetime.now(timezone.utc)
         
         for b in beliefs:
@@ -147,9 +156,13 @@ class MemPalace:
 
     def list_beliefs(self, status: str = "ACTIVE") -> List[Dict[str, Any]]:
         """🕍 列出指定狀態的所有信念節點。"""
+        self._belief_read_failed = False
+        self._belief_read_error = ""
         try:
             return self.belief_store.list_beliefs(status=status)
         except Exception as e:
+            self._belief_read_failed = True
+            self._belief_read_error = f"{type(e).__name__}: {e}"
             logger.warning(f"🕍 [MemPalace] list_beliefs failed: {e}")
             return []
 

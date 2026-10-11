@@ -1,10 +1,12 @@
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
 from click.testing import CliRunner
 
 import scripts.engine.nexus_cli as cli_mod
+from nexus.delivery.receipt import write_delivery_receipt
 
 
 class _RuntimeResult(SimpleNamespace):
@@ -37,6 +39,43 @@ def _runtime_result(*, ok: bool = True):
         execution_decision_authority="CapabilityPlanner",
         production_ingress_count=1,
         production_runtime_entry_count=1,
+    )
+
+
+def _seed_delivery_receipt(repo: Path, task_id: str) -> None:
+    """Commit a file and write a real delivery receipt (via the writer) bound to task_id and HEAD."""
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+    subprocess.run([*git, "init", "-q"], cwd=repo, check=True)
+    (repo / "seed.txt").write_text("seed", encoding="utf-8")
+    subprocess.run([*git, "add", "seed.txt"], cwd=repo, check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "seed"], cwd=repo, check=True)
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+    evidence, baseline, acceptance = (repo / "gate" / name for name in ("e.json", "b.json", "a.json"))
+    evidence.parent.mkdir()
+    evidence.write_text(json.dumps({"evidence_bundle": {"test_artifacts": ["verified"]}}), encoding="utf-8")
+    baseline.write_text(json.dumps({"version": "1"}), encoding="utf-8")
+    acceptance.write_text(
+        json.dumps(
+            {
+                "status": "PASS",
+                "gate_passed": True,
+                "criteria": [{"name": "report_claim_integrity", "passed": True, "detail": {"passed": True}}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    write_delivery_receipt(
+        receipt_path=repo / ".nexus" / "reports" / "delivery_gate.json",
+        evidence_path=evidence,
+        baseline_path=baseline,
+        acceptance_report=acceptance,
+        acceptance_policy="dev",
+        acceptance_exit_code=0,
+        acceptance_status="PASS",
+        acceptance_gate=True,
+        acceptance_primary="none",
+        run_id=task_id,
+        head_sha=head,
     )
 
 
@@ -74,6 +113,7 @@ def test_run_fails_fast_when_task_requests_file_output_without_output_file():
 def test_run_writes_output_file_when_explicit_path_provided(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_mod, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(cli_mod, "execute_canonical_product_task", lambda *_args, **_kwargs: _runtime_result())
+    _seed_delivery_receipt(tmp_path, "simple-task")
 
     out_path = tmp_path / "out" / "task_result.json"
     report_path = tmp_path / "reports" / "run_report.json"
@@ -114,6 +154,7 @@ def test_run_uses_canonical_single_task_executor(monkeypatch, tmp_path):
         return _runtime_result()
 
     monkeypatch.setattr(cli_mod, "execute_canonical_product_task", _fake_execute)
+    _seed_delivery_receipt(tmp_path, "fix canonical seam")
     runner = CliRunner()
     res = runner.invoke(cli_mod.nexus, ["nexus", "run", "fix canonical seam"])
     assert res.exit_code == 0, res.output

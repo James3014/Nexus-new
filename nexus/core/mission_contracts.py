@@ -16,6 +16,43 @@ class MissionStatus(str, Enum):
     COMPLETED = "completed" # 成功封印 (Manifest sealed)
     ABORTED = "aborted"     # 撤退
 
+class MissionTransitionError(ValueError):
+    """Raised when a mission status change is not in MISSION_TRANSITIONS."""
+
+
+# Legal mission status transitions. Terminal states (COMPLETED, ABORTED) have no exits.
+# ACTIVE->ACTIVE / BLOCKED->BLOCKED are idempotent re-entries (restart after a crashed run,
+# repeated preflight failure).
+MISSION_TRANSITIONS: Dict[MissionStatus, frozenset] = {
+    MissionStatus.DRAFT: frozenset({MissionStatus.ACTIVE, MissionStatus.BLOCKED, MissionStatus.ABORTED}),
+    MissionStatus.ACTIVE: frozenset({
+        MissionStatus.ACTIVE, MissionStatus.PAUSED, MissionStatus.BLOCKED,
+        MissionStatus.VERIFYING, MissionStatus.ABORTED,
+    }),
+    MissionStatus.PAUSED: frozenset({MissionStatus.ACTIVE, MissionStatus.BLOCKED, MissionStatus.ABORTED}),
+    MissionStatus.BLOCKED: frozenset({
+        MissionStatus.ACTIVE, MissionStatus.BLOCKED, MissionStatus.PAUSED, MissionStatus.ABORTED,
+    }),
+    MissionStatus.VERIFYING: frozenset({
+        MissionStatus.COMPLETED, MissionStatus.ACTIVE, MissionStatus.BLOCKED, MissionStatus.ABORTED,
+    }),
+    MissionStatus.COMPLETED: frozenset(),
+    MissionStatus.ABORTED: frozenset(),
+}
+
+
+def transition(mission: "NexusMission", new_status: MissionStatus) -> MissionStatus:
+    """Move ``mission`` to ``new_status`` or raise MissionTransitionError if illegal."""
+    new_status = MissionStatus(new_status)
+    current = MissionStatus(mission.status)
+    if new_status not in MISSION_TRANSITIONS[current]:
+        raise MissionTransitionError(
+            f"illegal mission transition: {current.value} -> {new_status.value}"
+        )
+    mission.status = new_status
+    return new_status
+
+
 class NexusMission(BaseModel):
     mission_id: str
     objective: str
@@ -92,6 +129,15 @@ class NexusMission(BaseModel):
                 return False
         return True
 
+    def _block(self, project_root: Path) -> bool:
+        """Move to BLOCKED via the transition table; terminal missions stay untouched."""
+        try:
+            transition(self, MissionStatus.BLOCKED)
+        except MissionTransitionError:
+            return False
+        self.persist(project_root)
+        return True
+
     def run_fingerprint_preflight(self, project_root: Path) -> bool:
         """
         [Environment Fingerprinting 防禦]
@@ -103,8 +149,7 @@ class NexusMission(BaseModel):
         if preflight_script.exists():
             res = subprocess.run(["bash", str(preflight_script)], cwd=str(project_root), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if res.returncode != 0:
-                self.status = MissionStatus.BLOCKED
-                self.persist(project_root)
+                self._block(project_root)
                 return False
 
         # 2. 獲取當前 Git SHA
@@ -115,8 +160,7 @@ class NexusMission(BaseModel):
 
         if self.git_fingerprint and current_sha and self.git_fingerprint != current_sha:
             # Git SHA 發生偏離，疑似環境被修改
-            self.status = MissionStatus.BLOCKED
-            self.persist(project_root)
+            self._block(project_root)
             return False
 
         if current_sha and not self.git_fingerprint:

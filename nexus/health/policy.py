@@ -1,11 +1,14 @@
 from __future__ import annotations
+import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 
 from nexus.core.state_contracts import NexusState
 
 from .models import HealthSnapshot, HealthTrigger
+
+logger = logging.getLogger(__name__)
 
 
 class HealthTriggerPolicy:
@@ -88,7 +91,11 @@ class HealthTriggerPolicy:
             from nexus.governance.learning_gate import evaluate_learning_gate
             run_dir = project_root / ".nexus" / "runs" / state.task_id
             gate_result = evaluate_learning_gate(run_dir, project_root)
-            if not gate_result.passed:
+            if getattr(gate_result, "status", "") == "UNVERIFIED":
+                # Missing evidence is "not verified", not a violation: warn without restricting trust.
+                cast("Dict[str, Any]", state.metadata)["learning_gate_status"] = "UNVERIFIED"
+                logger.warning("Learning gate UNVERIFIED (%s); trust level unchanged.", ", ".join(gate_result.failure_reasons))
+            elif not gate_result.passed:
                 state.trust_level = "restricted"
                 triggers.append(
                     HealthTrigger(
