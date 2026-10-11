@@ -13,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from nexus.app import research_flow_service
+from nexus.core.repo_root import REPO_ROOT
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.learning.skill_fit_closure import read_json, write_json
 
@@ -96,7 +97,7 @@ def build_heep_runtime_apply_gate(
             for skill_id in skill_ids
         ]
         budget = {"skill_status_report": skill_status_report}
-        planned = CapabilityPlanner._build_skill_mount_evidence(
+        planned = CapabilityPlanner(shared_playbook_root=REPO_ROOT)._build_skill_mount_evidence(
             skills=requests,
             budget=budget,
             selected_capabilities=[capability],
