@@ -47,7 +47,7 @@ TRUSTED_EXTERNAL_RUNTIME_PACKAGES: tuple[tuple[str, str, str, str], ...] = (
         "nexus-runtime",
         "nexus_runtime",
         "https://github.com/James3014/nexus-runtime.git",
-        "0456b7847450991d7453284c380142545618c5e5",
+        "ece9bd30e57a02db2751575cfea3c22991451216",
     ),
 )
 UV_VERSION = "uv 0.9.2"
@@ -201,14 +201,14 @@ TRUSTED_PR1637_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, s
 )
 
 # Exact one-use, four-way binding for Owner-authorized PR #1789 (Issue #1788
-# Phase 4b planner aliasing + Phase 5b-1; nexus-runtime 0456b78 -> 758132f).
+# Phase 4b planner aliasing + Phase 5b-1; nexus-runtime 0456b78 -> ece9bd3).
 TRUSTED_PR1789_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
     1789,
     (
         "ca23695a4cfbca27f64bc163655256ae45cb0b12933cffe7c07c5aff91da440d",
         "2f5282586cbc972ad6990be39f5f7789efe1f7fcfa9b2b8eaa7508eccf03224f",
-        "69861ac2d0ca113319993f870d112a42e4819a0004883a1e634dc96c6b4c4222",
-        "2429ca1bebe0df8193bcaabb0225fa04233a0f1cd3a2552adc6d594c11403c89",
+        "96331173f3ce5c1c91f7a20d011f1af2d4a927602ede40eacf91c343a0453b9a",
+        "6df6eff22f2bb3dcddbd3c4fd16483a91aeac644ca1bc098ef0a7a153088e3e2",
     ),
 )
 
