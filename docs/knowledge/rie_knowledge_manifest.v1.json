@@ -1,0 +1,67 @@
+{
+  "schema": "nexus.rie_knowledge_manifest.v1",
+  "revision": "895e53883b098b8bfcb9fb7981fc5e39dff825da",
+  "claim_ceiling": "REPOSITORY_KNOWLEDGE_MANIFEST_DECLARATION_ONLY",
+  "notes": "Owner-declared, not derived. Each entry names a repo-owned document intended as model context and the source files that document explicitly names. sha256 values are git blob content hashes at `revision`. Re-hashing is an owner act asserting the document was reviewed against the new source. See docs/integration/rie_knowledge_applicability_codeintel_g0.md.",
+  "entries": [
+    {
+      "id": "rie-guard-semantic-delta-g0",
+      "path": "docs/integration/rie_guard_semantic_delta_g0.md",
+      "source_refs": [
+        {
+          "path": "scripts/ops/canonical_owner_guard.py",
+          "expected_content_sha256": "7262ef5cb91b186fb2f99ae5734fd16dd203def7878da21f81126cc7e0d46888"
+        },
+        {
+          "path": "scripts/ops/rie_guard_delta_evidence.py",
+          "expected_content_sha256": "da6c1057ae67aa1927801ef39f250ce90c08987683fdcf5b57fe45d50d90c239"
+        }
+      ],
+      "covers": [
+        "tests/ops/test_canonical_owner_guard.py"
+      ],
+      "in_scope": true
+    },
+    {
+      "id": "rie-knowledge-applicability-codeintel-g0",
+      "path": "docs/integration/rie_knowledge_applicability_codeintel_g0.md",
+      "source_refs": [
+        {
+          "path": "nexus/services/rie_knowledge_applicability.py",
+          "expected_content_sha256": "0a98fc64358dd6219d5a4daa78ad1b6bc94ee363d9fa7ece7cb9e77f085618cb"
+        }
+      ],
+      "covers": [
+        "tests/services/test_rie_knowledge_applicability_codeintel.py"
+      ],
+      "in_scope": true
+    },
+    {
+      "id": "m5-rdc-local-bridge",
+      "path": "docs/integration/m5_rdc_local_bridge.md",
+      "source_refs": [
+        {
+          "path": "nexus/services/m5_local/deterministic_fallback.py",
+          "expected_content_sha256": "3d431d1066f0a46109774f80264a1a37568bf9ca1de8ba5082aab3e0748b8514"
+        },
+        {
+          "path": "nexus/services/m5_local/host_inventory.py",
+          "expected_content_sha256": "05e156109d58746971309823b57cccae8d2e5d9cae65db8a03d15620714d4f11"
+        },
+        {
+          "path": "nexus/services/m5_local/telemetry.py",
+          "expected_content_sha256": "00cdb27a753f59255378f528cda2a37fab586ce1bc0950ac94dc5f8d22b64cd0"
+        },
+        {
+          "path": "nexus/services/m5_local/cli.py",
+          "expected_content_sha256": "5fd96a670fe9a86f447dfef3dc0b88a173d21515f15a630d70df22eeec86e8af"
+        }
+      ],
+      "covers": [
+        "nexus/services/m5_local/*.py",
+        "tests/services/m5_local/test_negative_matrix.py"
+      ],
+      "in_scope": true
+    }
+  ]
+}
