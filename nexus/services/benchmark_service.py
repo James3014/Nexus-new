@@ -8,7 +8,11 @@ import re
 logger = logging.getLogger(__name__)
 
 class BenchmarkService:
-    """🚀 [Phase L6] Benchmark Service: 全量 JSONL 串流處理與物理雙核消融模擬 (v23)"""
+    """🚀 [Phase L6] Benchmark Service: 全量 JSONL 串流處理與物理雙核消融模擬 (v23)
+
+    All metrics below are produced by a random simulation, not by executing tasks.
+    Results are tagged ``simulated`` and the report makes no measured-quality claims.
+    """
     
     def __init__(self, project_root: str):
         self.project_root = Path(project_root)
@@ -30,7 +34,8 @@ class BenchmarkService:
         stats = {
             "single": {"success": 0, "fail": 0, "phantom_fp": 0, "tokens": 0},
             "dual": {"success": 0, "fail": 0, "phantom_fp": 0, "tokens": 0},
-            "total_tasks": 0
+            "total_tasks": 0,
+            "simulated": True,
         }
 
         # 🚀 執行模擬並收集 CSV 數據
@@ -55,9 +60,10 @@ class BenchmarkService:
                         "health": str(health),
                         "drift": str(drift),
                         "lowest_phase_health": str(health - 2.0),
-                        "token_capture_status": "CAPTURED",
+                        "token_capture_status": "SIMULATED",
                         "token_raw_model": str(tokens),
-                        "status": "PASS"
+                        "status": "SIMULATED",
+                        "simulated": "true",
                     })
                     
                     # --- 1. 單腦模擬 (Single Brain) ---
@@ -79,7 +85,7 @@ class BenchmarkService:
                             stats["dual"]["fail"] += 1
         
         # 🛡️ 物理結晶化：寫入 CSV (為 CI Gate 提供證據)
-        if output_csv:
+        if output_csv and csv_rows:
             import csv
             with open(output_csv, "w", encoding="utf-8", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=csv_rows[0].keys())
@@ -94,27 +100,26 @@ class BenchmarkService:
         """產出消融實驗深度報告"""
         total = stats["total_tasks"]
         with open(self.report_path, "w") as f:
-            f.write(f"# 🏆 AOS v23 L6 全量壓測報告\n\n")
+            f.write(f"# AOS v23 L6 雙核消融模擬報告（SIMULATED）\n\n")
+            f.write("> [!WARNING]\n")
+            f.write("> 本報告的數字全部來自隨機模擬（`random`），沒有實際執行任何任務，\n")
+            f.write("> 不能當作修復率、幻覺率或系統純度的量測證據。\n\n")
             f.write(f"- **數據集**: {dataset}\n")
-            f.write(f"- **總嘗試次數**: {total} (樣本 x {repeat} 回合)\n")
-            f.write(f"- **治理狀態**: {'物理雙核已啟用' if total > 0 else '未定義'}\n\n")
-            
-            f.write("## 1. 核心治理指標 (Single vs Dual)\n\n")
-            f.write("| 指標 | 單腦模式 (Current) | 物理雙核模式 (Hardened) | 治理增益 |\n")
-            f.write("| :--- | :--- | :--- | :--- |\n")
-            
+            f.write(f"- **模擬次數**: {total} (樣本 x {repeat} 回合)\n\n")
+
+            f.write("## 模擬指標 (Single vs Dual)\n\n")
+            f.write("| 指標 | 單腦模擬 | 雙核模擬 |\n")
+            f.write("| :--- | :--- | :--- |\n")
+
             s_succ = stats["single"]["success"]
             s_fp = stats["single"]["phantom_fp"]
             d_succ = stats["dual"]["success"]
-            
+            d_fp = stats["dual"]["phantom_fp"]
+
             s_purity = (s_succ - s_fp) / s_succ if s_succ > 0 else 0
-            f.write(f"| 真實修復率 | {(s_succ - s_fp) / total:.2%} | {d_succ / total:.2%} | +0% (純度提升) |\n")
-            f.write(f"| 幻覺誤報率 (FP) | {s_fp / total:.2%} | **0.00%** | **-100% 物理消除** |\n")
-            f.write(f"| 系統純度 (Purity) | {s_purity:.2%} | **100.00%** | **結晶化鎖定** |\n")
-            
-            f.write("\n## 2. 物理否決分析 (Veto Logs)\n")
-            f.write(f"> [!NOTE]\n")
-            f.write(f"> 物理門禁在全量壓測中識別出 {stats['dual']['fail']} 次潛在風險（包含安全風險與 TODO 佔位符），並成功切斷其進入生產分支的路徑。\n\n")
-            
-            f.write("## 3. AOS SOTA 結論\n")
-            f.write("AOS 152 驗證通過。系統在極限壓力下展現出**零幻覺容忍度**，符合 L6 Eternal Neural Swarm 生產規格。\n")
+            d_purity = (d_succ - d_fp) / d_succ if d_succ > 0 else 0
+            if total > 0:
+                f.write(f"| 模擬修復率 | {(s_succ - s_fp) / total:.2%} | {(d_succ - d_fp) / total:.2%} |\n")
+                f.write(f"| 模擬誤報率 (FP) | {s_fp / total:.2%} | {d_fp / total:.2%} |\n")
+            f.write(f"| 模擬純度 | {s_purity:.2%} | {d_purity:.2%} |\n")
+            f.write(f"\n雙核模擬中被判定失敗的任務數：{stats['dual']['fail']}\n")

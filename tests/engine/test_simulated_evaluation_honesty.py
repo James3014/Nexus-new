@@ -1,0 +1,152 @@
+"""Simulated evaluations must say so, and never ship baked-in credentials (#1733 batch 3)."""
+
+import asyncio
+import csv
+import importlib.util
+import json
+from pathlib import Path
+from unittest.mock import patch
+
+from click.testing import CliRunner
+
+from nexus.app.research_benchmark_service import ResearchBenchmarkService
+from nexus.services.benchmark_service import BenchmarkService
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+UI_VALIDATOR = REPO_ROOT / "scripts" / "ui-validator.py"
+
+
+def _load_ui_validator():
+    spec = importlib.util.spec_from_file_location("ui_validator_under_test", UI_VALIDATOR)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+LOGIN_DOM = "\n".join([
+    '[1] <input> placeholder: "Enter Operator ID"',
+    '[2] <input> placeholder: "Passcode"',
+    '[3] <button> text: "Authenticate"',
+])
+
+
+def test_ui_validator_source_has_no_baked_in_credentials():
+    source = UI_VALIDATOR.read_text(encoding="utf-8")
+    assert "nexus_admin" not in source
+    assert "singularity" not in source
+
+
+def test_ui_validator_stops_at_login_without_configured_credentials(monkeypatch):
+    module = _load_ui_validator()
+    monkeypatch.delenv(module.USER_ENV_VAR, raising=False)
+    monkeypatch.delenv(module.PASSWORD_ENV_VAR, raising=False)
+    action = json.loads(asyncio.run(module.agent_get_action("login", LOGIN_DOM)))
+    assert action == {"action": "finish", "value": module.FINISH_NO_CREDENTIALS}
+    assert action["value"] != module.FINISH_SUCCESS
+
+
+def test_ui_validator_types_operator_supplied_credentials(monkeypatch):
+    module = _load_ui_validator()
+    monkeypatch.setenv(module.USER_ENV_VAR, "op-user")
+    monkeypatch.setenv(module.PASSWORD_ENV_VAR, "op-pass")
+    first = json.loads(asyncio.run(module.agent_get_action("login", LOGIN_DOM)))
+    assert first == {"action": "type", "target_id": "1", "value": "op-user"}
+    second = json.loads(asyncio.run(module.agent_get_action("login", LOGIN_DOM + "\nop-user")))
+    assert second == {"action": "type", "target_id": "2", "value": "op-pass"}
+
+
+def test_benchmark_service_tags_simulation_and_makes_no_quality_claims(tmp_path):
+    service = BenchmarkService(project_root=str(tmp_path))
+    out_csv = tmp_path / "bench.csv"
+    stats = service.run(
+        dataset="missing",
+        repeat=1,
+        dual_core_physical=True,
+        ablation=False,
+        tasks_count=3,
+        output_csv=str(out_csv),
+    )
+    assert stats["simulated"] is True
+    report = service.report_path.read_text(encoding="utf-8")
+    assert "SIMULATED" in report
+    assert "零幻覺" not in report
+    rows = list(csv.DictReader(out_csv.open(encoding="utf-8")))
+    assert rows and all(row["status"] == "SIMULATED" for row in rows)
+
+
+def test_benchmark_service_report_handles_zero_tasks(tmp_path):
+    service = BenchmarkService(project_root=str(tmp_path))
+    stats = service.run(
+        dataset="missing", repeat=1, dual_core_physical=False, ablation=False, tasks_count=0
+    )
+    assert stats["total_tasks"] == 0
+    assert "SIMULATED" in service.report_path.read_text(encoding="utf-8")
+
+
+def test_research_benchmark_reports_are_tagged_simulated(tmp_path):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"cases": [{"id": "c1"}]}), encoding="utf-8")
+    service = ResearchBenchmarkService(tmp_path)
+
+    gladiator = tmp_path / "gladiator.json"
+    service.run_benchmark("gladiator", str(manifest), str(gladiator), 1.0, 5, 0, 1, False, False)
+    ab = tmp_path / "ab.json"
+    service.run_benchmark("ab", str(manifest), str(ab), 1.0, 5, 0, 1, False, False)
+
+    for path in (gladiator, ab):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        assert payload["simulated"] is True
+        assert payload["evidence"] == "placeholder_not_executed"
+
+
+def _run_meta_opt(tmp_path, child_report):
+    from scripts.engine.nexus_cli import nexus
+
+    presets = tmp_path / "presets.json"
+    presets.write_text(
+        json.dumps([{"name": "p1", "timeout_sec": 1, "ab_trials": 1}]), encoding="utf-8"
+    )
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"cases": []}), encoding="utf-8")
+    report = tmp_path / "meta.json"
+
+    async def fake_run_async(*args, **_kwargs):
+        cmd = args[1] if len(args) > 2 else args[0]
+        log_path = args[2] if len(args) > 2 else args[1]
+        run_report = Path(cmd[cmd.index("--report-file") + 1])
+        run_report.parent.mkdir(parents=True, exist_ok=True)
+        run_report.write_text(json.dumps(child_report), encoding="utf-8")
+        log_path.write_text("", encoding="utf-8")
+        return 0, 0, 0
+
+    with patch("scripts.engine.nexus_cli.AsyncProcessExecutor.run_async", new=fake_run_async):
+        result = CliRunner().invoke(
+            nexus,
+            [
+                "nexus",
+                "research:meta-opt",
+                "--manifest-file",
+                str(manifest),
+                "--presets-file",
+                str(presets),
+                "--report-file",
+                str(report),
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    return json.loads(report.read_text(encoding="utf-8"))
+
+
+MEASURED_AGGREGATES = {"success_rate": 1.0, "regression_rate": 0.0, "infra_blocked_rate": 0.0}
+
+
+def test_meta_opt_never_selects_a_simulated_child_report(tmp_path):
+    result = _run_meta_opt(tmp_path, {"simulated": True, "aggregates": MEASURED_AGGREGATES})
+    assert result["status"] == "no_eligible_preset"
+    assert result["rankings"][0]["status"] == "simulated_report"
+
+
+def test_meta_opt_still_selects_a_measured_child_report(tmp_path):
+    result = _run_meta_opt(tmp_path, {"aggregates": MEASURED_AGGREGATES})
+    assert result["status"] == "ok"
+    assert result["selected_preset"]["preset_name"] == "p1"
