@@ -1,11 +1,13 @@
 name: Owner attestation approver
 
-# Approves a pull request's exact head when an Owner-signed grant (#1750 phase 2)
-# covers every change in it. The approval is pinned to head.sha; a ruleset that
-# dismisses stale approvals and requires approval of the most recent push makes
-# any later push need a fresh decision. Nothing from the pull request is
-# executed: the gate script comes from the trusted workflow revision and the
-# head is fetched only as git objects for the diff.
+# Reports, as the approver GitHub App, whether an Owner-signed grant (#1750
+# phase 2) covers every change at a pull request's exact head. The result is a
+# check run named "Owner grant" on head.sha; the ruleset on main requires that
+# check *from the approver App*, so nobody else can satisfy it and a new push
+# (a new head) has no passing check until it is decided again.
+#
+# Nothing from the pull request is executed: the gate script comes from the
+# trusted workflow revision and the head is fetched only as git objects.
 
 on:
   pull_request_target:
@@ -18,13 +20,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  decide-and-approve:
-    name: Owner attestation approver
+  decide:
+    name: Decide Owner grant coverage
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+    outputs:
+      approve: ${{ steps.decide.outputs.approve }}
+      head_sha: ${{ steps.decide.outputs.head_sha }}
+      reason: ${{ steps.decide.outputs.reason }}
+      payload_sha256: ${{ steps.decide.outputs.payload_sha256 }}
     steps:
-      - name: Decide from the trusted gate and approve the exact head
+      - name: Run the trusted gate in approval mode
+        id: decide
         env:
           EVENT_JSON: ${{ toJSON(github.event) }}
           EVENT_NAME: ${{ github.event_name }}
@@ -36,12 +44,10 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           READ_TOKEN: ${{ github.token }}
-          APPROVER_APP_ID: ${{ secrets.NEXUS_APPROVER_APP_ID }}
-          APPROVER_PRIVATE_KEY: ${{ secrets.NEXUS_APPROVER_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           umask 077
-          work="$RUNNER_TEMP/owner-attestation-approver"
+          work="$RUNNER_TEMP/owner-grant-decide"
           trap 'rm -rf -- "$work"' EXIT
           mkdir -p "$work"
           workflow_path='.github/workflows/owner-attestation-approver.yml'
@@ -52,35 +58,63 @@ jobs:
           [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]
 
-          if [ -z "$APPROVER_APP_ID" ] || [ -z "$APPROVER_PRIVATE_KEY" ]; then
-            echo "approver App is not configured; nothing to do"
-            exit 0
-          fi
-
-          # Git objects only: trusted gate from WORKFLOW_SHA, base and head trees for the diff.
           bare="$work/repo.git"
           git init --bare -q "$bare"
           auth="$(printf '%s' "x-access-token:$READ_TOKEN" | base64 | tr -d '\n')"
           GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: basic $auth" \
             git -C "$bare" fetch -q --no-tags --depth=1 "https://github.com/$REPOSITORY.git" \
               "$WORKFLOW_SHA" "$BASE_SHA" "+refs/pull/$PR_NUMBER/head:refs/nexus/pr-head"
-          test "$(git -C "$bare" rev-parse refs/nexus/pr-head)" = "$HEAD_SHA"
+          [[ "$(git -C "$bare" rev-parse refs/nexus/pr-head)" == "$HEAD_SHA" ]]
           git -C "$bare" cat-file -e "$WORKFLOW_SHA^{commit}"
           git -C "$bare" cat-file -e "$BASE_SHA^{commit}"
-          git -C "$bare" cat-file -e "$HEAD_SHA^{commit}"
           git -C "$bare" cat-file blob "$WORKFLOW_SHA:scripts/ops/trusted_merge_lane_gate.py" > "$work/gate.py"
 
-          python3 -c 'import json, os; e=json.loads(os.environ["EVENT_JSON"]); e.update(event_name=os.environ["EVENT_NAME"], workflow_sha=os.environ["WORKFLOW_SHA"]); json.dump(e, open(os.environ["RUNNER_TEMP"] + "/owner-attestation-approver/event.json", "w"))'
+          python3 -c 'import json, os; e=json.loads(os.environ["EVENT_JSON"]); e.update(event_name=os.environ["EVENT_NAME"], workflow_sha=os.environ["WORKFLOW_SHA"]); json.dump(e, open(os.environ["RUNNER_TEMP"] + "/owner-grant-decide/event.json", "w"))'
           python3 -I "$work/gate.py" --mode approve --event-json "$work/event.json" --repo-root "$bare" > "$work/decision.json"
           cat "$work/decision.json"
-          approve="$(jq -r '.approve' "$work/decision.json")"
-          decided_head="$(jq -r '.head_sha // empty' "$work/decision.json")"
-          if [ "$approve" != true ] || [ "$decided_head" != "$HEAD_SHA" ]; then
-            echo "no automatic approval: $(jq -r '.reason' "$work/decision.json")"
+          approve="$(jq -r 'if .approve == true then "true" else "false" end' "$work/decision.json")"
+          decided_head="$(jq -r '.head_sha // ""' "$work/decision.json")"
+          if [[ "$decided_head" != "$HEAD_SHA" ]]; then
+            approve=false
+          fi
+          {
+            echo "approve=$approve"
+            echo "head_sha=$HEAD_SHA"
+            echo "reason=$(jq -r '.reason // "UNKNOWN"' "$work/decision.json" | tr -cd 'A-Za-z0-9_:./-' | cut -c1-200)"
+            echo "payload_sha256=$(jq -r '.owner_attestation.payload_sha256 // ""' "$work/decision.json" | tr -cd '0-9a-f')"
+          } >> "$GITHUB_OUTPUT"
+
+  report:
+    name: Report Owner grant
+    needs: decide
+    runs-on: ubuntu-24.04
+    # Secrets live in this environment; restrict it to the default branch.
+    environment: owner-grant-approver
+    permissions: {}
+    steps:
+      - name: Post the Owner grant check run as the approver App
+        env:
+          APPROVE: ${{ needs.decide.outputs.approve }}
+          HEAD_SHA: ${{ needs.decide.outputs.head_sha }}
+          REASON: ${{ needs.decide.outputs.reason }}
+          PAYLOAD_SHA256: ${{ needs.decide.outputs.payload_sha256 }}
+          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPOSITORY: ${{ github.repository }}
+          APPROVER_APP_ID: ${{ secrets.NEXUS_APPROVER_APP_ID }}
+          APPROVER_PRIVATE_KEY: ${{ secrets.NEXUS_APPROVER_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          work="$RUNNER_TEMP/owner-grant-report"
+          trap 'rm -rf -- "$work"' EXIT
+          mkdir -p "$work"
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$HEAD_SHA" == "$EVENT_HEAD_SHA" ]]
+          if [[ -z "$APPROVER_APP_ID" || -z "$APPROVER_PRIVATE_KEY" ]]; then
+            echo "approver App is not configured; nothing to report"
             exit 0
           fi
 
-          # Approver App token: RS256 JWT signed with the App key, then an installation token.
           printf '%s\n' "$APPROVER_PRIVATE_KEY" > "$work/app.pem"
           b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
           now="$(date +%s)"
@@ -94,23 +128,22 @@ jobs:
           [[ "$installation" =~ ^[0-9]+$ ]]
           token="$(api -X POST -H "Authorization: Bearer $jwt" \
             "https://api.github.com/app/installations/$installation/access_tokens" \
-            -d "{\"repositories\":[\"${REPOSITORY#*/}\"],\"permissions\":{\"pull_requests\":\"write\"}}" | jq -r '.token')"
-          test -n "$token" && test "$token" != null
+            -d "{\"repositories\":[\"${REPOSITORY#*/}\"],\"permissions\":{\"checks\":\"write\"}}" | jq -r '.token')"
+          [[ -n "$token" && "$token" != null ]]
           echo "::add-mask::$token"
-          app_login="$(api -H "Authorization: Bearer $jwt" "https://api.github.com/app" | jq -r '.slug')[bot]"
 
-          # Re-check the head right before approving; skip if this App already approved it.
-          current_head="$(api -H "Authorization: Bearer $token" "https://api.github.com/repos/$REPOSITORY/pulls/$PR_NUMBER" | jq -r '.head.sha')"
-          test "$current_head" = "$HEAD_SHA"
-          already="$(api -H "Authorization: Bearer $token" "https://api.github.com/repos/$REPOSITORY/pulls/$PR_NUMBER/reviews?per_page=100" \
-            | jq --arg login "$app_login" --arg sha "$HEAD_SHA" '[.[] | select(.user.login == $login and .commit_id == $sha and .state == "APPROVED")] | length')"
-          if [ "$already" != 0 ]; then
-            echo "already approved at $HEAD_SHA"
-            exit 0
+          if [[ "$APPROVE" == true ]]; then
+            conclusion=success
+            title="Owner-signed grant covers this head"
+            summary="Grant payload sha256 $PAYLOAD_SHA256 covers every change at $HEAD_SHA."
+          else
+            conclusion=failure
+            title="Not covered by an Owner-signed grant"
+            summary="Reason: $REASON. Only the Owner can merge this head."
           fi
-          payload_sha="$(jq -r '.owner_attestation.payload_sha256' "$work/decision.json")"
-          jq -n --arg sha "$HEAD_SHA" --arg body "Owner-signed grant covers every change at $HEAD_SHA (grant payload sha256 $payload_sha)." \
-            '{commit_id: $sha, event: "APPROVE", body: $body}' > "$work/review.json"
+          jq -n --arg sha "$HEAD_SHA" --arg conclusion "$conclusion" --arg title "$title" --arg summary "$summary" \
+            '{name: "Owner grant", head_sha: $sha, status: "completed", conclusion: $conclusion, output: {title: $title, summary: $summary}}' \
+            > "$work/check.json"
           api -X POST -H "Authorization: Bearer $token" \
-            "https://api.github.com/repos/$REPOSITORY/pulls/$PR_NUMBER/reviews" --data @"$work/review.json" > /dev/null
-          echo "approved $HEAD_SHA"
+            "https://api.github.com/repos/$REPOSITORY/check-runs" --data @"$work/check.json" > /dev/null
+          echo "reported $conclusion for $HEAD_SHA"

@@ -626,6 +626,23 @@ ATTESTATION_PROTECTED_PATTERNS = (
     "pyproject.toml",
     "uv.lock",
     "requirements/**",
+    "GEMINI.md",
+    "**/GEMINI.md",
+    ".cursorrules",
+    "**/.cursorrules",
+    ".agents/**",
+    "**/.agents/**",
+    ".gemini/**",
+    "**/.gemini/**",
+    ".vscode/**",
+    "**/.vscode/**",
+    ".gitmodules",
+    ".gitattributes",
+    "**/.gitattributes",
+    ".nexus-core/**",
+    ".cargo/**",
+    "conftest.py",
+    "**/conftest.py",
 )
 ATTESTATION_MAX_PATHS = 12
 ATTESTATION_MAX_PATH_LENGTH = 120
@@ -1024,9 +1041,10 @@ def approval_decision(
 ) -> dict[str, Any]:
     """Decide whether the approver App may approve the PR's exact head.
 
-    Unlike the per-event lane check, this never looks at who sent the event:
-    the approval is pinned to ``head.sha`` and GitHub dismisses it on the next
-    push, so it can only ever vouch for content an Owner-signed grant covers.
+    Unlike the per-event lane check, this never looks at who sent the event.
+    The approver App reports the result as a check run on ``head.sha``; a new
+    push has no such check, so the result can only ever vouch for the exact
+    content an Owner-signed grant covers.
     """
     root = _exact_dict(event, "EVENT")
     if root.get("event_name") != "pull_request_target":
@@ -1057,6 +1075,11 @@ def approval_decision(
     agent_login = str(payload.get("agent_login") or "").lower()
     if agent_login not in load_agent_identities(repo_root, trusted_revision):
         return {**decision, "reason": "ATTESTATION_AGENT_NOT_REGISTERED"}
+    author = pr.get("user")
+    author_login = author.get("login") if isinstance(author, Mapping) else None
+    if not isinstance(author_login, str) or author_login.lower() != agent_login:
+        # Grants are visible in PR bodies; only the granted agent's own PRs qualify.
+        return {**decision, "reason": "PR_NOT_AUTHORED_BY_GRANTED_AGENT"}
     binding = extract_binding(pr.get("body"))
     try:
         attestation = verify_owner_attestation(
@@ -1296,6 +1319,12 @@ def main() -> None:
                 "schema": "nexus.owner_attestation_approval.v1",
                 "approve": False,
                 "reason": str(exc),
+            }
+        except Exception as exc:  # noqa: BLE001 - any failure is simply "not approved"
+            decision = {
+                "schema": "nexus.owner_attestation_approval.v1",
+                "approve": False,
+                "reason": f"APPROVAL_DECISION_ERROR:{type(exc).__name__}",
             }
         print(json.dumps(decision, sort_keys=True))
         return

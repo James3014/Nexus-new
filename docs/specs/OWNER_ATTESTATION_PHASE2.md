@@ -16,30 +16,33 @@ Phase 2 therefore enforces where the agent cannot write, on GitHub:
 - in trusted workflows that run code from the default branch, never from the pull
   request.
 
-## Why approval, not a status check
+## Why a check pinned to the approver App
 
-A per-event check is not enough. GitHub tells a check who triggered *this* event,
-not who pushed the commits. The independent review showed the gap: after an
-agent pushes, any later event by someone else (an edit, a reopen, "Update branch")
-can re-evaluate the same head as non-agent and turn the check green.
+A per-event check is not enough. GitHub tells a check who triggered *this*
+event, not who pushed the commits. After an agent pushes, any later event by
+someone else (an edit, a reopen, "Update branch") can re-evaluate the same head
+as non-agent. Ordinary approvals are not enough either: the agent identity has
+write access, so its own approval counts as soon as someone else pushed last.
 
-The control is therefore an **approval pinned to the exact head**:
+The control is therefore a **status check pinned to the approver App and to
+the exact head**:
 
-1. The repository ruleset on `main` requires:
-   - one approving review;
-   - **dismissal of stale approvals** when new commits are pushed;
-   - **approval of the most recent reviewable push** by someone other than the
-     pusher.
-2. Only the Owner can bypass these rules.
-3. A dedicated **approver GitHub App** approves a head only when the workflow
-   `.github/workflows/owner-attestation-approver.yml` finds an Owner-signed grant
-   that covers it.
-4. Any new push dismisses that approval and the decision is taken again for the
-   new head.
+1. The workflow `.github/workflows/owner-attestation-approver.yml` decides
+   coverage with the trusted gate (`--mode approve`) in a job with no secrets.
+2. A second job posts a check run named **`Owner grant`** on `head.sha`, as the
+   approver App:
+   - `success` only when an Owner-signed grant covers every change;
+   - `failure` otherwise.
+3. The ruleset on `main` requires `Owner grant` **from the approver App**.
+   Nobody else, including the agent, can produce that check.
+4. A new push is a new head with no `Owner grant` yet, so it cannot merge until
+   it is decided again. There is no approval to dismiss and no race between
+   push and approval.
+5. Only the Owner can bypass the ruleset.
 
-The approval decision (`trusted_merge_lane_gate.py --mode approve`) looks only at
-content: the signed grant and the changed paths. It never looks at who sent the
-event.
+The decision looks only at content, never at who sent the event. It approves:
+- only pull requests **authored by the granted agent**;
+- only when the grant covers the exact diff.
 
 ## How a grant works
 
@@ -56,7 +59,8 @@ event.
   - 1–12 path globs, none starting with a wildcard;
   - issue and expiry time (at most 7 days);
   - a nonce.
-- **Approval checks.** The approver approves a head only when all of these hold:
+- **Coverage checks.** `Owner grant` succeeds for a head only when the pull
+  request was opened by the granted agent and all of these hold:
   - the key is pinned in `governance/owner-signing-keys.json` and the agent is
     listed in `governance/agent-identities.json`, both read **from the gate's own
     revision**;
@@ -64,17 +68,22 @@ event.
   - the signature verifies through root-owned `/usr/bin/openssl`;
   - the grant is inside its window;
   - every changed path matches a signed glob, and none is protected.
-- **Protected paths.** No grant can cover these:
+- **Protected paths.** No grant can cover these. This is a deny-list: it covers
+  the files known to steer or run code on the Owner's machine, not every such
+  file. Grant narrow paths.
   - `governance/**`, `.github/**`, `tasks/**`, `requirements/**`;
   - `scripts/ops/trusted_*`, `scripts/ops/owner_attestation.py`,
     `scripts/ops/__init__.py`;
   - `tools/owner-signer/**`;
   - `.claude/**` and `.mcp.json`, at any depth;
   - `AGENTS.md` and `CLAUDE.md`, at any depth;
+  - `GEMINI.md`, `.cursorrules`, `.agents/**`, `.gemini/**`, `.vscode/**` and
+    `conftest.py`, at any depth;
+  - `.gitmodules`, `.gitattributes`, `.nexus-core/**`, `.cargo/**`;
   - `MUSE_PROTO.md`, `pyproject.toml`, `uv.lock`.
 - **The per-event lane check.** The trusted merge-lane gate also refuses
-  agent-sent events without a valid grant. This is an extra signal; the approval
-  rule above is what decides merges.
+  agent-sent events without a valid grant. This is only an extra signal; the
+  required `Owner grant` check is what decides merges.
 - **Missing trust files.** If either trust file is missing at the gate's
   revision, every PR is refused.
 
@@ -84,34 +93,44 @@ event.
 
    ```sh
    cd tools/owner-signer && swift build -c release
-   cp .build/release/owner-signer /usr/local/bin/      # outside any repo
+   sudo install -o root -g wheel -m 0755 .build/release/owner-signer /usr/local/bin/
    owner-signer init > ~/owner.pem                     # key_id on stderr
    python scripts/ops/owner_attestation.py pin --public-key ~/owner.pem
    ```
 
+   Install the signer root-owned. On some Macs `/usr/local/bin` is
+   user-writable, so it must be the `sudo install -o root` copy that you run.
    Put the printed entry into `governance/owner-signing-keys.json` in a pull
-   request you open and merge yourself.
+   request that you open and merge yourself.
 
 2. **Agent identity.** Create a bot account, or a GitHub App, for the agent.
    - Give it contents and pull-request write access only.
    - Do **not** give it the Workflows permission, so it cannot push files under
-     `.github/workflows/` and run arbitrary workflows with secrets.
+     `.github/workflows/` and run arbitrary workflows.
    - Do **not** give it admin or bypass rights.
    - List its login in `governance/agent-identities.json`. For an App, list the
      login as it appears in events, `<slug>[bot]`.
    - Agents get this identity's token, never yours.
 
-3. **Approver App.** Create a separate GitHub App with only "Pull requests: read
-   and write", installed on this repository.
-   - Store its ID as the secret `NEXUS_APPROVER_APP_ID`.
-   - Store its private key as the secret `NEXUS_APPROVER_PRIVATE_KEY`.
-   - Without them the approver does nothing.
+3. **Approver App.** Create a separate GitHub App with only **"Checks: read and
+   write"**, installed on this repository.
+   - Create an environment named `owner-grant-approver`, restricted to the `main`
+     branch.
+   - Store the App ID as the environment secret `NEXUS_APPROVER_APP_ID`.
+   - Store the App's private key as the environment secret
+     `NEXUS_APPROVER_PRIVATE_KEY`.
+   - Without them the approver posts nothing, and agent pull requests cannot
+     merge.
 
 4. **Ruleset on `main`.**
-   - Require pull requests with one approval, dismissal of stale approvals, and
-     approval of the most recent push.
-   - Require the trusted checks.
+   - Require a pull request.
+   - Require the status check `Owner grant`, with its source set to the approver
+     App.
+   - Require the existing trusted checks.
    - Bypass list: the Owner only.
+   - Then verify it once: open a small agent pull request covered by a grant and
+     confirm that it becomes mergeable only after `Owner grant` succeeds, and
+     that a further push makes it unmergeable again.
 
 5. **Granting work.**
 
@@ -133,16 +152,22 @@ event.
   - It can also replace the signer binary or `grant.json`.
   - It can call the Secure Enclave key with its own prompt text. Touch ID then
     proves only that a finger was presented, not what was approved.
-  - Run the signer from a location the agent cannot write, such as
-    `/usr/local/bin` installed by you.
+  - Run the signer only from the root-owned copy installed with
+    `sudo install -o root`.
 - **The signer has not been built or run.** It needs macOS with a Secure Enclave
   and was written without access to one. Test `init`, `pubkey` and `sign` on the
   Mac before pinning the key.
-- **The approver workflow has not run on GitHub yet.** It was checked locally (YAML,
-  shell syntax, JWT construction, the decision logic), but the GitHub API calls
-  only run once the App and secrets exist.
-- **Validity is checked when the approval is given, not at merge time.** An
-  approved head stays approved after `expires_at` until a new push dismisses it.
+- **The approver workflow has not run on GitHub yet.** Local checks:
+  - YAML and shell syntax;
+  - JWT construction;
+  - a simulated run of the decide job against a local repository.
+
+  The GitHub API calls and the ruleset's handling of the App-pinned check run
+  only once the App, the environment and the ruleset exist. That is what the
+  verification in setup step 4 is for.
+- **Validity is checked when the check is posted, not at merge time.** A head
+  whose `Owner grant` succeeded stays mergeable after `expires_at`, until a new
+  push.
 - **Issue binding is weak.** The Issue is matched against markers in the pull
   request body, which the agent writes. Treat a grant as reusable within its
   paths and window, and keep windows short.

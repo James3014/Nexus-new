@@ -548,7 +548,7 @@ def _approve(world, head, body, **kwargs):
 def test_approval_depends_on_content_not_on_who_sent_the_event(world, sender):
     head = _head(world, {"src/feature.py": "value = 2\n"})
     decision = _approve(
-        world, head, _body(_envelope(world, _payload())), author=OWNER, sender=sender
+        world, head, _body(_envelope(world, _payload())), author=AGENT, sender=sender
     )
     assert decision["approve"] is True
     assert decision["head_sha"] == head
@@ -559,7 +559,7 @@ def test_owner_touching_the_pr_after_an_out_of_scope_push_never_earns_approval(w
     # Reviewer's F1: an agent pushes outside the grant; a later Owner event must not turn it green.
     head = _head(world, {"src/feature.py": "value = 2\n", ".github/workflows/x.yml": "on: push\n"})
     decision = _approve(
-        world, head, _body(_envelope(world, _payload())), author=OWNER, sender=sender
+        world, head, _body(_envelope(world, _payload())), author=AGENT, sender=sender
     )
     assert decision["approve"] is False
     assert decision["reason"].startswith("ATTESTATION_PROTECTED_PATH")
@@ -618,6 +618,59 @@ def test_approval_cli_never_fails_the_job(world, tmp_path):
             str(event_file),
             "--repo-root",
             str(world["repo"]),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=Path(__file__).resolve().parents[2],
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout)["approve"] is False
+
+
+@pytest.mark.parametrize("author", [OWNER, "someone-else"])
+def test_a_copied_grant_does_not_approve_someone_elses_pr(world, author):
+    head = _head(world, {"src/feature.py": "value = 2\n"})
+    decision = _approve(
+        world, head, _body(_envelope(world, _payload())), author=author, sender=author
+    )
+    assert decision["approve"] is False
+    assert decision["reason"] == "PR_NOT_AUTHORED_BY_GRANTED_AGENT"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "GEMINI.md",
+        "src/.vscode/tasks.json",
+        ".nexus-core/config.toml",
+        "src/conftest.py",
+        ".gitattributes",
+    ],
+)
+def test_more_files_that_run_on_the_owner_machine_are_protected(world, path):
+    head = _head(world, {path: "x\n"})
+    with pytest.raises(LaneBindingError, match="ATTESTATION_PROTECTED_PATH"):
+        _validate(world, head, _body(_envelope(world, _payload(allowed_paths=[path]))))
+
+
+def test_approval_cli_turns_unexpected_errors_into_no_approval(world, tmp_path):
+    repo = world["repo"]
+    weird = repo / "src" / b"bad-\xff.py".decode("utf-8", "surrogateescape")
+    weird.write_bytes(b"x = 1\n")
+    head = _commit(repo, "non-utf8 path")
+    event = _event(world, head, _body(_envelope(world, _payload())))
+    event_file = tmp_path / "event.json"
+    event_file.write_text(json.dumps(event), encoding="utf-8")
+    proc = subprocess.run(
+        [
+            "python",
+            "scripts/ops/trusted_merge_lane_gate.py",
+            "--mode",
+            "approve",
+            "--event-json",
+            str(event_file),
+            "--repo-root",
+            str(repo),
         ],
         capture_output=True,
         text=True,
