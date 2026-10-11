@@ -3446,6 +3446,13 @@ else:
             click.secho("❌ No mission found. Run 'nexus mission create' first.", fg="red")
             sys.exit(1)
 
+        if mission.status in (MissionStatus.COMPLETED, MissionStatus.ABORTED):
+            click.secho(
+                f"❌ Mission {mission.mission_id} is {mission.status.value}; create a new mission instead.",
+                fg="red",
+            )
+            sys.exit(1)
+
         # 1. 環境指紋與 preflight 檢查 (Environment Fingerprinting)
         if not mission.run_fingerprint_preflight(repo_root):
             click.secho("❌ [Environment Blocked] Preflight failed or Git SHA shifted.", fg="red", bold=True)
@@ -3467,7 +3474,8 @@ else:
 
         # 4. 呼叫實體戰役執行
         # 複用現有的 nexus run 命令子進程，以便完整使用自癒與 TDD 驗證
-        cmd = [sys.executable, str(repo_root / "scripts/engine/nexus_cli.py"), "nexus", "run", mission.mission_id]
+        # `nexus run` uses its argument as the task statement, so pass the objective, not the id.
+        cmd = [sys.executable, str(repo_root / "scripts/engine/nexus_cli.py"), "nexus", "run", mission.objective]
         res = subprocess.run(cmd, check=False)
 
         # 5. 更新結束後的狀態與 telemetry 統計
