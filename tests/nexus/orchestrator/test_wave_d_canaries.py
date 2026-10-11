@@ -181,6 +181,7 @@ def test_canary_1_chatgpt_primary_managed_direct_mutation(tmp_path: Path):
         execution_lane=ManagedExecutionLane.DIRECT_CANONICAL.value,
         core_envelope_required=True,
         allowed_files=["src/"],
+        verifier_commands=("python -c pass",),
     )
     receipt = launcher.launch_managed_agent(req)
 
@@ -222,6 +223,7 @@ def test_canary_2_chatgpt_devspace_delegated_worker_mutation(tmp_path: Path):
         execution_lane=ManagedExecutionLane.DIRECT_DELEGATED.value,
         core_envelope_required=True,
         allowed_files=["src/"],
+        verifier_commands=("python -c pass",),
     )
     receipt = launcher.launch_managed_agent(req)
 
@@ -256,6 +258,7 @@ def test_canary_3_owner_managed_local_agent_mutation(tmp_path: Path):
         execution_lane=ManagedExecutionLane.GOVERNED.value,
         core_envelope_required=True,
         allowed_files=["src/"],
+        verifier_commands=("python -c pass",),
     )
     receipt = launcher.launch_managed_agent(req)
 

@@ -8,6 +8,7 @@ import os
 import shutil
 import signal
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -30,6 +31,8 @@ _FORBIDDEN_SUBCOMMANDS = (
     ("git", "merge"),
     ("git", "push"),
     ("git", "rebase"),
+    ("git", "update-ref"),
+    ("git", "tag"),
     ("gh", "issue", "create"),
     ("gh", "issue", "comment"),
     ("gh", "issue", "close"),
@@ -54,11 +57,37 @@ _FORBIDDEN_SUBCOMMANDS = (
     ("gh", "pr", "revert"),
     ("gh", "pr", "update-branch"),
     ("gh", "repo", "fork"),
+    ("gh", "repo", "delete"),
+    ("gh", "repo", "create"),
+    ("gh", "repo", "edit"),
+    ("gh", "repo", "rename"),
+    ("gh", "repo", "archive"),
+    ("gh", "release"),
+    ("gh", "workflow"),
+    ("gh", "secret"),
+    ("gh", "variable"),
+    ("gh", "auth"),
     ("gh", "api"),
 )
 
-_GLOBAL_FLAGS_WITH_VALUES = frozenset({"--config", "--hostname", "--repo", "-r", "-R"})
+# Compared after lower-casing, so "-r"/"-R" collapse to "-r".
+_GLOBAL_FLAGS_WITH_VALUES = frozenset({"--config", "--hostname", "--repo", "-r"})
+# git global options that consume the next token; only honoured for git so
+# e.g. `python -c <code>` keeps scanning the code token.
+_GIT_GLOBAL_FLAGS_WITH_VALUES = frozenset({
+    "-c",
+    "--git-dir",
+    "--work-tree",
+    "--namespace",
+    "--exec-path",
+    "--super-prefix",
+    "--config-env",
+})
 
+# HOME stays inherited because model worker CLIs keep their own provider login
+# there; the GitHub credential channels (gh config dir, git global config and
+# its credential helper) are redirected per request instead. See
+# _isolated_github_credential_environment.
 _INHERITED_ENV_ALLOWLIST = frozenset({
     "HOME",
     "LANG",
@@ -114,12 +143,15 @@ def _validate_worker_argv(argv: Tuple[str, ...]) -> None:
     # comment`) before matching a forbidden verb sequence.  Options after the
     # verb are naturally irrelevant because the verb sequence has already
     # matched.
+    value_flags = _GLOBAL_FLAGS_WITH_VALUES
+    if normalized[0] == "git":
+        value_flags = value_flags | _GIT_GLOBAL_FLAGS_WITH_VALUES
     filtered_items = []
     index = 0
     while index < len(normalized):
         item = normalized[index]
         if item.startswith("-"):
-            if "=" not in item and item in _GLOBAL_FLAGS_WITH_VALUES:
+            if "=" not in item and item in value_flags:
                 index += 2
             else:
                 index += 1
@@ -151,6 +183,31 @@ def _reject_github_credentials(environment: Optional[Mapping[str, str]]) -> None
         raise ValueError(
             "worker environment cannot carry GitHub credentials: " + ", ".join(present)
         )
+
+
+_POST_KILL_DRAIN_SECONDS = 2.0
+
+
+def _isolated_github_credential_environment(
+    config_root: str, supplied: Optional[Mapping[str, str]]
+) -> dict[str, str]:
+    """Point GitHub credential lookups at an empty per-request directory.
+
+    gh reads ``GH_CONFIG_DIR`` and git only reaches ``~/.git-credentials`` through
+    a credential helper configured in global/system config, so both channels are
+    cut without moving the worker's own provider login out of ``HOME``. Keys
+    explicitly supplied through ``request.env`` (already GitHub-credential
+    checked) win.
+    """
+    isolated = {
+        "GH_CONFIG_DIR": os.path.join(config_root, "gh"),
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+    for key in supplied or ():
+        isolated.pop(str(key), None)
+    return isolated
 
 
 def _hash_file(path: str) -> str:
@@ -366,6 +423,9 @@ def run_cli_worker(
     if request.env is not None:
         environment.update({str(key): str(value) for key, value in request.env.items()})
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    isolated_home = tempfile.mkdtemp(prefix="nexus-cli-worker-home-")
+    for key, value in _isolated_github_credential_environment(isolated_home, request.env).items():
+        environment[key] = value
 
     # ------------------------------------------------------------------
     # Passive trajectory telemetry seam (pre-Popen)
@@ -400,7 +460,25 @@ def run_cli_worker(
             status = CliWorkerStatus.COMPLETED
         except subprocess.TimeoutExpired as exc:
             group_killed = _kill_process_group(process)
-            stdout, stderr = process.communicate()
+            try:
+                stdout, stderr = process.communicate(timeout=_POST_KILL_DRAIN_SECONDS)
+            except subprocess.TimeoutExpired as drain_exc:
+                # A descendant escaped the process group (setsid) and still
+                # holds the pipes: do not block the controller, and record the
+                # kill as not clean.
+                group_killed = False
+                stdout = drain_exc.stdout or b""
+                stderr = drain_exc.stderr or b""
+                for pipe in (process.stdout, process.stderr):
+                    try:
+                        if pipe is not None:
+                            pipe.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+                try:
+                    process.wait(timeout=_POST_KILL_DRAIN_SECONDS)
+                except subprocess.TimeoutExpired:
+                    pass
             if exc.stdout:
                 stdout = (exc.stdout or b"") + stdout
             if exc.stderr:
@@ -420,6 +498,7 @@ def run_cli_worker(
     finally:
         if on_process_group is not None:
             on_process_group(None)
+        shutil.rmtree(isolated_home, ignore_errors=True)
 
     wall_time_ms = max(0, int((time.monotonic() - started) * 1000))
     result = CliWorkerResult(

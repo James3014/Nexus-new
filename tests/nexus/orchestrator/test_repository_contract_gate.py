@@ -97,7 +97,7 @@ def test_repository_contract_gate_records_shadow_findings_without_blocking(tmp_p
             ".github/workflows/new.yml",
             "docs/arch/module-inventory.generated.json",
         ],
-        verifier_commands=[],
+        verifier_commands=["python -c pass"],
     )
     controller, lease = _prepare(contract, target_root)
     target = Path(lease.target_worktree)
@@ -112,8 +112,10 @@ def test_repository_contract_gate_records_shadow_findings_without_blocking(tmp_p
     current = controller.collect_candidate(contract, lease)
     candidate = replace(current, contract_hash="0" * 64)
 
+    # Contracts can no longer be constructed with an empty verifier manifest
+    # (#1759); keep covering the gate's defensive finding via an unvalidated copy.
     receipt = RepositoryContractGate(controller.worktree_manager).evaluate(
-        contract=contract,
+        contract=contract.model_copy(update={"verifier_commands": []}),
         lease=lease,
         candidate=candidate,
         current=current,
@@ -560,7 +562,7 @@ def test_committed_authority_change_requires_exact_approval_and_replay_is_blocke
     target_sha, controller_sha = _init_repo(controller_root, with_policy_inputs=False)
     contract = _contract(
         controller_root, target_root, task_id="committed-authority", target_sha=target_sha,
-        controller_sha=controller_sha, allowed_files=["bounded.txt", "nexus/core/planner.py"], verifier_commands=[]
+        controller_sha=controller_sha, allowed_files=["bounded.txt", "nexus/core/planner.py"], verifier_commands=["python -c pass"]
     ).model_copy(update={"protected_contracts": ["repository-authority-change.v1"]})
     controller, lease = _prepare(contract, target_root)
     target = Path(lease.target_worktree)
@@ -599,7 +601,7 @@ def test_identity_recheck_blocks_candidate_head_drift(tmp_path):
     target_sha, controller_sha = _init_repo(controller_root, with_policy_inputs=False)
     contract = _contract(
         controller_root, target_root, task_id="identity-recheck", target_sha=target_sha,
-        controller_sha=controller_sha, allowed_files=["bounded.txt"], verifier_commands=[],
+        controller_sha=controller_sha, allowed_files=["bounded.txt"], verifier_commands=["python -c pass"],
     )
     controller, lease = _prepare(contract, target_root)
     current = controller.collect_candidate(contract, lease)
@@ -674,7 +676,7 @@ def test_tampered_topology_bypass_remains_blocked(tmp_path):
         target_sha=target_sha,
         controller_sha=controller_sha,
         allowed_files=["nexus/config/execution_topology.yaml"],
-        verifier_commands=[],
+        verifier_commands=["python -c pass"],
     )
     controller, lease = _prepare(contract, target_root)
     path = Path(lease.target_worktree, "nexus/config/execution_topology.yaml")

@@ -151,7 +151,7 @@ def _request(
         "target_worktree_root": str(execution_root),
         "target_repo_root": str(execution_root / task_id),
         "allowed_files": ["nexus/"],
-        "verifier_commands": [],
+        "verifier_commands": ["python -c pass"],
     }
     if collaboration_realm is not None:
         request["collaboration_realm"] = collaboration_realm

@@ -2407,6 +2407,14 @@ class UnifiedMCPGateway:
                 return f"output_schema_type:{path}:{expected}"
             if "enum" in shape and current not in shape.get("enum", []):
                 return f"output_schema_enum:{path}"
+            min_length = shape.get("minLength")
+            if (
+                isinstance(current, str)
+                and isinstance(min_length, int)
+                and not isinstance(min_length, bool)
+                and len(current.strip()) < min_length
+            ):
+                return f"output_schema_min_length:{path}:{min_length}"
             if isinstance(current, Mapping):
                 missing = [str(field) for field in shape.get("required", []) or [] if str(field) not in current]
                 if missing:
@@ -2520,12 +2528,27 @@ class UnifiedMCPGateway:
             blocker = "ASSIST_PROVIDER_PRINT_TIMEOUT"
             provider_error = "provider print timeout while turn remained in progress"
         else:
-            status = "COMPLETED" if returncode == 0 and parsed is not None and schema_valid else "FAILED"
+            degenerate_patch = bool(
+                not is_model_probe
+                and returncode == 0
+                and parsed is not None
+                and not self._assist_patch_is_substantive(parsed.get("patch"))
+            )
+            status = (
+                "COMPLETED"
+                if returncode == 0 and parsed is not None and schema_valid and not degenerate_patch
+                else "FAILED"
+            )
             blocker = (
-                "ASSIST_PROVIDER_MALFORMED_OUTPUT"
+                "ASSIST_PROVIDER_DEGENERATE_OUTPUT"
+                if degenerate_patch
+                else "ASSIST_PROVIDER_MALFORMED_OUTPUT"
                 if returncode == 0 and (parsed is None or not schema_valid)
                 else ("ASSIST_PROVIDER_FAILED" if returncode != 0 else None)
             )
+            if degenerate_patch:
+                parsed = None
+                schema_error = "degenerate_patch"
             provider_error = "provider process failed" if returncode != 0 else ""
         job.update({
             "status": status,
@@ -2535,6 +2558,7 @@ class UnifiedMCPGateway:
             "model_response_verified": model_response_verified,
             "model_response_provenance": response_provenance,
             "blocker": blocker,
+            "retry_required": blocker == "ASSIST_PROVIDER_DEGENERATE_OUTPUT",
             "schema_error": schema_error,
             "schema_validation_level": "bounded_subset",
             "provider_error": provider_error,
@@ -2579,6 +2603,13 @@ class UnifiedMCPGateway:
         return self._assist_write(job)
 
     @staticmethod
+    def _assist_patch_is_substantive(patch: Any) -> bool:
+        """A patch must be a non-empty unified diff, never null/empty/refusal prose."""
+        return isinstance(patch, str) and bool(
+            re.match(r"\s*(diff --git |--- |Index: )", patch)
+        )
+
+    @staticmethod
     def _assist_action(job: Mapping[str, Any]) -> dict[str, Any]:
         """Project one Assisted job into current action and pending-count state."""
         status = str(job.get("status") or "UNKNOWN")
@@ -2616,6 +2647,7 @@ class UnifiedMCPGateway:
             "attempt_id": job.get("attempt_id"),
             "attempt_history": job.get("attempt_history", []),
             "status": status,
+            "retry_required": bool(job.get("retry_required")) or action["next_action"] == "nexus_task_retry",
             "execution_lane": "ASSISTED_CANONICAL",
             "candidate_only": True,
             "apply_requested": bool(job.get("apply_requested")),
@@ -2750,7 +2782,11 @@ class UnifiedMCPGateway:
             "filesystem_after": None,
             "filesystem_delta": {"created": [], "removed": [], "changed": []},
             "process_cleanup": False,
-            "output_schema": {"type": "object", "required": ["patch"]},
+            "output_schema": {
+                "type": "object",
+                "required": ["patch"],
+                "properties": {"patch": {"type": "string", "minLength": 1}},
+            },
             "result_artifact": str(self._assist_path(task_id)),
             "provider": provider,
             "model": model if "/" in model else f"cline-pass/{model}",

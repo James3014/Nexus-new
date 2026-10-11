@@ -63,11 +63,17 @@ _FORBIDDEN_PRE_ACTION_KEYS = {
 # over accidental secret leakage.
 _SECRET_PATTERNS: list[re.Pattern[str]] = [
     re.compile(
-        r"(?i)(password|passwd|secret|token|api[_\-]?key|private[_\-]?key|auth[_\-]?key)\s*[=:]\s*\S+"
+        r"(?i)(password|passwd|secret|token|api[_\-]?key|private[_\-]?key|auth[_\-]?key)[\"']?\s*[=:]\s*[\"']?\S+"
     ),
     re.compile(r"(?i)bearer\s+[A-Za-z0-9\-._~+/]+=*"),
     re.compile(r"(?i)(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}"),
     re.compile(r"sk-[A-Za-z0-9]{20,}"),
+    # Provider key formats with separators in the body (sk-ant-api03-..., sk-proj-...).
+    re.compile(r"sk-(?:ant|proj|svcacct|admin)-[A-Za-z0-9_\-]{16,}"),
+    re.compile(r"github_pat_[A-Za-z0-9_]{20,}"),
+    re.compile(r"AIza[0-9A-Za-z_\-]{35}"),
+    re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
+    re.compile(r"xox[abposr]-[A-Za-z0-9\-]{10,}"),
     re.compile(r"(?i)-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
     # curl -u / --user basic-auth: -u user:password or --user user:password
     re.compile(r"(?i)(?:--user|-u)\s+\S+:\S+"),

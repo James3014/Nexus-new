@@ -679,3 +679,77 @@ def test_multiple_step_index_values_chain_correctly(tmp_path):
     # "missing_step_result" should appear (trajectory integrity is intact).
     integrity_problems = [p for p in problems if p != "missing_step_result"]
     assert not integrity_problems, f"Trajectory chain integrity problems: {integrity_problems}"
+
+
+# ---------------------------------------------------------------------------
+# Containment regressions (#1752)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "executable,argv",
+    [
+        ("git", ("-C", ".", "push", "origin", "HEAD:main")),
+        ("git", ("-c", "core.x=y", "push", "origin", "HEAD:main")),
+        ("git", ("-c", "a=b", "commit", "-m", "x")),
+        ("git", ("--git-dir", ".git", "push")),
+        ("git", ("update-ref", "refs/heads/main", "deadbeef")),
+        ("gh", ("repo", "delete", "o/r", "--yes")),
+        ("gh", ("release", "create", "v9")),
+        ("gh", ("workflow", "run", "x.yml")),
+        ("gh", ("secret", "set", "X")),
+        ("gh", ("-R", "o/r", "pr", "merge", "1")),
+    ],
+)
+def test_forbidden_worker_argv_bypasses_rejected(tmp_path: Path, executable, argv) -> None:
+    with pytest.raises(ValueError, match="cannot invoke"):
+        CliWorkerRequest(executable=executable, argv=argv, cwd=str(tmp_path))
+
+
+def test_worker_cannot_reach_ambient_home_credentials(tmp_path: Path, monkeypatch) -> None:
+    fake_home = tmp_path / "ownerhome"
+    (fake_home / ".config" / "gh").mkdir(parents=True)
+    (fake_home / ".config" / "gh" / "hosts.yml").write_text("oauth_token: secret\n")
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(fake_home / ".config"))
+    monkeypatch.setenv("GH_CONFIG_DIR", str(fake_home / ".config" / "gh"))
+    (fake_home / ".gitconfig").write_text("[credential]\n\thelper = store\n")
+    (fake_home / ".git-credentials").write_text("https://owner:secret@github.com\n")
+    code = (
+        "import os,subprocess;h=os.environ['HOME'];"
+        "print(h);print(os.environ['GH_CONFIG_DIR']);print(os.environ['GIT_CONFIG_GLOBAL']);"
+        "r=subprocess.run(['git','credential','fill'],input='protocol=https\\nhost=github.com\\n\\n',"
+        "capture_output=True,text=True);print('secret' in r.stdout)"
+    )
+    work = tmp_path / "work"
+    work.mkdir()
+    res = run_cli_worker(CliWorkerRequest(executable=sys.executable, argv=("-c", code), cwd=str(work)))
+    home, gh_dir, git_cfg, leaked = res.stdout.decode().split("\n")[:4]
+    # HOME stays the worker's own (provider logins live there) ...
+    assert home == str(fake_home)
+    # ... but gh and git credential lookups no longer resolve the Owner's tokens.
+    assert str(fake_home) not in gh_dir
+    assert not Path(gh_dir).exists()
+    assert git_cfg == "/dev/null"
+    assert leaked == "False"
+
+
+def test_timeout_does_not_block_on_escaped_descendant(tmp_path: Path) -> None:
+    import time
+
+    marker = tmp_path / "marker"
+    code = (
+        "import os,time\n"
+        "if os.fork()==0:\n"
+        "    os.setsid(); time.sleep(8); open(%r,'w').write('x'); os._exit(0)\n"
+        "time.sleep(60)\n"
+    ) % str(marker)
+    work = tmp_path / "work"
+    work.mkdir()
+    started = time.monotonic()
+    res = run_cli_worker(
+        CliWorkerRequest(executable=sys.executable, argv=("-c", code), cwd=str(work), timeout_seconds=1.0)
+    )
+    assert time.monotonic() - started < 6.0
+    assert res.status is CliWorkerStatus.TIMED_OUT
+    assert res.process_group_killed is False  # escape is not a clean kill

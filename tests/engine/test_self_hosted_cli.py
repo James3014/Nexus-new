@@ -79,6 +79,7 @@ def _valid_request(tmp_path: Path, **overrides) -> dict:
         "target_repo_root": str(target_root / "test-sh-001"),
         "target_worktree_root": str(target_root),
         "allowed_files": "file1.py,file2.py",
+        "verifier_commands": ["python -c pass"],
         "worker": "codex",
     }
     req.update(overrides)
@@ -154,6 +155,7 @@ def test_self_hosted_submit_and_status_success(tmp_path: Path):
         "--target-repo-root", req["target_repo_root"],
         "--target-worktree-root", req["target_worktree_root"],
         "--allowed-files", req["allowed_files"],
+        "--verifier-commands", "python -c pass",
         "--worker", req["worker"],
         "--state-dir", state_dir,
     ]
@@ -383,6 +385,7 @@ def test_self_hosted_cli_subgroup_invocation(tmp_path: Path):
         "--target-repo-root", req["target_repo_root"],
         "--target-worktree-root", req["target_worktree_root"],
         "--allowed-files", req["allowed_files"],
+        "--verifier-commands", "python -c pass",
         "--worker", req["worker"],
         "--state-dir", state_dir,
     ]
@@ -409,6 +412,7 @@ def test_self_hosted_wait_success(tmp_path: Path):
         "--target-repo-root", req["target_repo_root"],
         "--target-worktree-root", req["target_worktree_root"],
         "--allowed-files", req["allowed_files"],
+        "--verifier-commands", "python -c pass",
         "--worker", req["worker"],
         "--state-dir", state_dir,
     ]
@@ -471,6 +475,7 @@ def test_self_hosted_list_actionable_empty_and_populated(tmp_path: Path):
         "--target-repo-root", req["target_repo_root"],
         "--target-worktree-root", req["target_worktree_root"],
         "--allowed-files", req["allowed_files"],
+        "--verifier-commands", "python -c pass",
         "--worker", req["worker"],
         "--state-dir", state_dir,
     ]
@@ -543,6 +548,7 @@ def test_self_hosted_approve_exact_binding_and_mismatch(tmp_path: Path):
         "--target-repo-root", req["target_repo_root"],
         "--target-worktree-root", req["target_worktree_root"],
         "--allowed-files", req["allowed_files"],
+        "--verifier-commands", "python -c pass",
         "--worker", req["worker"],
         "--state-dir", state_dir,
     ]
@@ -614,6 +620,7 @@ def test_self_hosted_integrate_requires_approved(tmp_path: Path):
         "--target-repo-root", req["target_repo_root"],
         "--target-worktree-root", req["target_worktree_root"],
         "--allowed-files", req["allowed_files"],
+        "--verifier-commands", "python -c pass",
         "--worker", req["worker"],
         "--state-dir", state_dir,
     ]
@@ -653,6 +660,7 @@ def test_self_hosted_dispose_candidate(tmp_path: Path):
         "--target-repo-root", req["target_repo_root"],
         "--target-worktree-root", req["target_worktree_root"],
         "--allowed-files", req["allowed_files"],
+        "--verifier-commands", "python -c pass",
         "--worker", req["worker"],
         "--state-dir", state_dir,
     ]
@@ -698,6 +706,7 @@ def test_self_hosted_cancel_task(tmp_path: Path):
         "--target-repo-root", req["target_repo_root"],
         "--target-worktree-root", req["target_worktree_root"],
         "--allowed-files", req["allowed_files"],
+        "--verifier-commands", "python -c pass",
         "--worker", req["worker"],
         "--state-dir", state_dir,
     ]
