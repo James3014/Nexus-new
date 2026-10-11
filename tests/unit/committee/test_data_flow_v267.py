@@ -27,6 +27,24 @@ class TestDataFlowRefinement(unittest.TestCase):
         receipt = ctrl.process_proposals(proposals)
         self.assertIsNone(receipt.winner_id)
         self.assertEqual(receipt.failure_bucket, "selection_low_confidence")
+        # AdaptiveResampler 的決策被保留下來，而不是只印出後丟棄
+        self.assertEqual(ctrl.last_retry_directive["mode"], "WAIT")
+        self.assertEqual(ctrl.last_retry_directive["modified_params"]["diversity_score"], 1.0)
+
+    def test_low_diversity_abstention_requests_exploration(self):
+        """驗證：棄權且候選幾乎相同時，AdaptiveResampler 要求多樣化重採樣"""
+        ctrl = CommitteeControllerV263("test-task")
+        proposals = [
+            {"model": "7B", "attempt": 1, "raw_label": "r:0", "artifacts": ["pd.DataFrame()"]},
+            {"model": "7B", "attempt": 2, "raw_label": "r:0", "artifacts": ["pd.DataFrame()"]},
+        ]
+        receipt = ctrl.process_proposals(proposals)
+        if not receipt.abstained:
+            self.skipTest("selection did not abstain for identical candidates")
+        directive = ctrl.last_retry_directive
+        self.assertTrue(directive["should_retry"])
+        self.assertEqual(directive["mode"], "EXPLORE")
+        self.assertTrue(directive["modified_params"]["variant_shuffling"])
 
     def test_abstention_policy_integration(self):
         """驗證：AbstentionPolicy 是否正確參與最終決策"""

@@ -1,5 +1,6 @@
 import unittest
-from nexus.search.sampler import AdaptiveResampler
+from nexus.search.sampler import AdaptiveResampler, directive_to_dict
+from nexus.retry_policy.policy import RetryAction
 
 class TestAdaptiveResampler(unittest.TestCase):
     def test_coverage_failure_trigger(self):
@@ -23,6 +24,31 @@ class TestAdaptiveResampler(unittest.TestCase):
         )
         self.assertTrue(action.should_retry)
         self.assertTrue(action.modified_params["variant_shuffling"])
+
+    def test_verifier_feedback_takes_priority(self):
+        """[T10] 驗證：Verifier 反饋經 FeedbackRouter/RetryPolicy 產出重試指令"""
+        feedback = RetryAction(action="RESAMPLE", strategies=["include_common_imports"], temperature=0.8)
+        action = AdaptiveResampler().evaluate_and_decide(
+            failure_bucket="coverage_low",
+            candidate_contents=["pd.DataFrame()"],
+            current_k=1,
+            feedback_action=feedback,
+            pattern_codes=["IMPORT_ERROR"],
+        )
+        self.assertTrue(action.should_retry)
+        self.assertEqual(action.mode, "EXPLOIT")
+        self.assertEqual(action.modified_params["source"], "verifier_feedback")
+        self.assertEqual(action.modified_params["patterns"], ["IMPORT_ERROR"])
+        self.assertIn("include_common_imports", action.modified_params["strategies"])
+
+    def test_no_signal_waits(self):
+        action = AdaptiveResampler().evaluate_and_decide(
+            failure_bucket=None,
+            candidate_contents=["alpha beta", "gamma delta"],
+            current_k=2,
+        )
+        self.assertFalse(action.should_retry)
+        self.assertEqual(directive_to_dict(action)["mode"], "WAIT")
 
 if __name__ == "__main__":
     unittest.main()
