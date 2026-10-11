@@ -35,13 +35,17 @@ from nexus.orchestrator.ambient_core import (
 
 _EXACT_GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
-# The Core worktree actually imported by this transport process. The legacy
-# hardcoded CORE_REPO_ROOT pointed at a developer machine path that does not
-# exist here; keep it as the configured expectation (never as executed truth)
-# and derive the ACTUAL executed identity from the imported product module.
-CORE_REPO_ROOT = Path("/Users/jameschen/Workspace/nexus-core").resolve()
-if str(CORE_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(CORE_REPO_ROOT))
+# `nexus-certify` is not a declared dependency of this package. When it is
+# installed in the environment (e.g. by CI tooling), its identity is read from
+# its direct_url.json. A local Core checkout is placed ahead of any installed
+# package only when explicitly configured via NEXUS_CORE_REPO_ROOT; no
+# developer-machine path is hardcoded. The ACTUAL executed identity is always
+# derived from the imported product module (see _resolve_core_source_root).
+_configured_core_root = os.environ.get("NEXUS_CORE_REPO_ROOT", "").strip()
+if _configured_core_root:
+    _core_repo_root = Path(_configured_core_root).expanduser().resolve()
+    if str(_core_repo_root) not in sys.path:
+        sys.path.insert(0, str(_core_repo_root))
 
 try:
     from product.adapters.generic_verification import verify_generic_changeset
@@ -86,7 +90,12 @@ except ImportError as exc:
     _IMPORTED_CORE_PACKAGE = None  # type: ignore[assignment]
 
 
-CANONICAL_CORE_REVISION = "fde015797672b0aac5dca7b41c7e5a0b901698d4"
+# Owner-decided expected canonical nexus-core revision (NN-1). Single source of
+# truth for the runtime check; it must equal the nexus-certify SHA pinned in
+# .github/workflows/nexus-core-issue-completion.yml (a test asserts the two
+# agree).
+CANONICAL_CORE_REVISION = "77c7fb8fdc8c68a85c771280decd4a1e01b55085"
+CANONICAL_CORE_DISTRIBUTION = "nexus-certify"
 CANONICAL_CORE_INTERFACE = "product.adapters.generic_verification.verify_generic_changeset"
 
 
@@ -103,11 +112,67 @@ def _resolve_core_source_root() -> Path | None:
     return root if (root / "product").is_dir() else None
 
 
-def read_observed_core_identity(core_root: Path | None = None) -> dict[str, Any]:
-    """Bind ACTUAL executed Core commit+tree (INT-8 provenance).
+def _read_installed_core_identity(root: Path) -> dict[str, Any] | None:
+    """Identity of the installed `nexus-certify` distribution (PEP 610).
 
-    Unreadable identity returns available=False explicitly — callers fail
-    closed, never substituting expected == observed.
+    Returns None when `root` (the imported Core source root) is not that
+    distribution's installed location, so the caller falls back to the
+    checkout/git identity path. Otherwise returns a result that is either
+    available (commit from `direct_url.json` `vcs_info.commit_id`) or an
+    explicit fail-closed reason; the expectation is never substituted.
+    """
+    from importlib import metadata
+
+    try:
+        dist = metadata.distribution(CANONICAL_CORE_DISTRIBUTION)
+    except metadata.PackageNotFoundError:
+        return None
+    try:
+        installed_init = Path(str(dist.locate_file("product/__init__.py"))).resolve()
+        if installed_init != (root / "product" / "__init__.py").resolve():
+            return None
+    except Exception:
+        return None
+    base: dict[str, Any] = {
+        "available": False,
+        "expected_revision": CANONICAL_CORE_REVISION,
+        "observed_commit": None,
+        "observed_tree": None,
+        "source_root": str(root),
+        "identity_source": "direct_url.json",
+    }
+    try:
+        raw = dist.read_text("direct_url.json")
+    except Exception:
+        raw = None
+    if not raw:
+        return {**base, "reason": "CORE_DIRECT_URL_MISSING"}
+    try:
+        info = json.loads(raw)
+    except ValueError:
+        return {**base, "reason": "CORE_DIRECT_URL_MALFORMED"}
+    vcs_info = info.get("vcs_info") if isinstance(info, dict) else None
+    if not isinstance(vcs_info, dict) or vcs_info.get("vcs") != "git":
+        return {**base, "reason": "CORE_DIRECT_URL_NOT_GIT_VCS"}
+    commit = vcs_info.get("commit_id")
+    if not isinstance(commit, str) or not _EXACT_GIT_SHA_RE.fullmatch(commit):
+        return {**base, "reason": "CORE_IDENTITY_MALFORMED"}
+    return {
+        **base,
+        "available": True,
+        "observed_commit": commit,
+        "revision_match": commit == CANONICAL_CORE_REVISION,
+    }
+
+
+def read_observed_core_identity(core_root: Path | None = None) -> dict[str, Any]:
+    """Bind ACTUAL executed Core identity (INT-8 provenance).
+
+    Installed `nexus-certify` package: commit from its `direct_url.json`
+    (no tree available). Explicit/checkout Core root (e.g.
+    NEXUS_CORE_REPO_ROOT): commit+tree via git. Unreadable identity returns
+    available=False explicitly — callers fail closed, never substituting
+    expected == observed.
     """
     root = core_root if core_root is not None else _resolve_core_source_root()
     base: dict[str, Any] = {
@@ -118,6 +183,10 @@ def read_observed_core_identity(core_root: Path | None = None) -> dict[str, Any]
     }
     if root is None:
         return {**base, "reason": "CORE_SOURCE_UNAVAILABLE"}
+    if core_root is None:
+        installed = _read_installed_core_identity(root)
+        if installed is not None:
+            return installed
     try:
         commit = subprocess.check_output(
             ["git", "rev-parse", "HEAD"],
