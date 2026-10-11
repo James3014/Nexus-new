@@ -1,8 +1,11 @@
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict, List
 from datetime import datetime, timezone
 from nexus.infrastructure.storage_interfaces import MemoryStorage, CacheStore, JsonlStore, BeliefStore, ConfigStore
+
+logger = logging.getLogger(__name__)
 
 class LanceDBStorage(MemoryStorage):
     def __init__(self, project_root: Path, tenant_id: str | None = None, audit_events: list[dict[str, Any]] | None = None):
@@ -122,8 +125,14 @@ class FileJsonlStore(JsonlStore):
 class LanceBeliefStore(BeliefStore):
     def __init__(self, project_root: Path):
         self.project_root = project_root
+        # "ok" | "unavailable"; set by every list_beliefs call so callers can tell
+        # an empty belief set from a failed read.
+        self.last_read_status: str = "ok"
+        self.last_read_error: str = ""
 
     def list_beliefs(self, status: str = "ACTIVE") -> List[Dict[str, Any]]:
+        self.last_read_status = "ok"
+        self.last_read_error = ""
         try:
             import lancedb
             db_path = self.project_root / ".nexus" / "vector_db"
@@ -138,7 +147,10 @@ class LanceBeliefStore(BeliefStore):
             if status != "ALL" and "status" in df.columns:
                 df = df[df["status"].str.upper() == status.upper()]
             return df.to_dict("records")
-        except Exception:
+        except Exception as exc:
+            self.last_read_status = "unavailable"
+            self.last_read_error = f"{type(exc).__name__}: {exc}"
+            logger.warning("LanceBeliefStore: belief read failed (nexus_soul_palace): %s", self.last_read_error)
             return []
 
     def semantic_weight_for(self, evidence_refs: List[str]) -> float:

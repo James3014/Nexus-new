@@ -71,7 +71,12 @@ def test_mission_cli_workflow(tmp_path: Path) -> None:
         assert "Fixing memory leaks" in res.output
         assert "draft" in res.output
 
-        # 3. 暫停戰役
+        # 3. 啟動後才能暫停 (DRAFT -> PAUSED is not a legal transition)
+        with patch("subprocess.check_output", return_value=b"A1B2C3D4\n"), \
+             patch("subprocess.run") as mock_start_run:
+            mock_start_run.return_value = MagicMock(returncode=1)
+            res = runner.invoke(nexus, ["nexus", "mission", "start"])
+            assert res.exit_code == 0
         res = runner.invoke(nexus, ["nexus", "mission", "pause"])
         assert res.exit_code == 0
         assert "paused" in res.output

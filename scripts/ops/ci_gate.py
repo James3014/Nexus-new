@@ -557,6 +557,8 @@ def run_ultra_review_check() -> bool:
         print(truncate_output(gate.stdout, label="ultra_gate_stdout"))
     if gate.returncode != 0:
         print(truncate_output(gate.stderr, label="ultra_gate_stderr"))
+        if "dry_run_not_verified" in (gate.stdout or "") + (gate.stderr or ""):
+            print("❌ Ultra Review NOT VERIFIED: report is a dry-run (nothing was actually checked)")
         print(f"❌ Ultra Review Gate FAILED (RC: {gate.returncode})")
         return False
     print("✅ Ultra Review Gate PASSED")
