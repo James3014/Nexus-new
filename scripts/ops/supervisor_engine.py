@@ -1,3 +1,9 @@
+"""LAB-ONLY synthetic demo (#1739). Not a delegation backend.
+
+It replays a fixed fake mission and is reachable only via `--synthetic-demo --root DIR`.
+`nexus delegate` is retired and no longer calls this module; real multi-agent work
+uses `nexus multi-agent create-task|start|submit|verify`.
+"""
 import json, sys, os
 from pathlib import Path
 from datetime import datetime
@@ -64,7 +70,8 @@ def main(argv: list[str]) -> int:
     task = " ".join(argv) or "<none>"
     sys.stderr.write(
         "DELEGATION_BACKEND_UNAVAILABLE: supervisor_engine only replays a fixed synthetic demo "
-        f"and cannot delegate task {task!r}. Use `nexus multi-agent` for real worktree delegation.\n"
+        f"and cannot delegate task {task!r}. This module is LAB-ONLY (#1739); `nexus delegate` is retired. "
+        "Use `nexus multi-agent create-task|start|submit|verify` for real worktree delegation.\n"
     )
     return EXIT_NO_DELEGATION_BACKEND
 

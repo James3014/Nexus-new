@@ -19,6 +19,17 @@ except ImportError:
     _LEGACY_AVAILABLE = False
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# `nexus delegate` retirement (#1739): fail closed (EX_CONFIG) and point at the real orchestrator.
+DELEGATE_RETIRED_EXIT_CODE = 78
+DELEGATE_RETIRED_MESSAGE = (
+    "DELEGATION_BACKEND_UNAVAILABLE: `nexus delegate` is retired (#1739) and does not delegate work.\n"
+    "Use the multi-agent orchestrator instead:\n"
+    "  nexus multi-agent create-task --task-id ID --owner OWNER --allowed-files a.py,b.py\n"
+    "  nexus multi-agent start --task-id ID\n"
+    "  nexus multi-agent submit --task-id ID\n"
+    "  nexus multi-agent verify --task-id ID"
+)
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -2273,34 +2284,45 @@ else:
     @click.option("--report-file", default=".nexus/reports/delegate/delegate_report.json", show_default=True, type=click.Path())
     @click.option("--output-json", is_flag=True)
     def delegate(task_name, report_file, output_json):
-        """📡 [Supervisor] Decompose and delegate task to fleet."""
+        """📡 [RETIRED #1739] Use `nexus multi-agent` instead (always exits 78).
+
+        `nexus delegate` is retired and never delegates work: its only backend was a
+        synthetic demo. Real multi-agent flow:
+
+        \b
+          nexus multi-agent create-task --task-id ID --owner OWNER --allowed-files a.py,b.py
+          nexus multi-agent start --task-id ID
+          nexus multi-agent submit --task-id ID
+          nexus multi-agent verify --task-id ID
+        """
         if not SanitizedRunner.validate_task_name(task_name):
             click.echo("❌ Invalid task name: only alphanumeric, spaces, dashes, and underscores allowed.")
             sys.exit(1)
 
-        # task_name is regex-validated and passed as one argv element (no shell), so it must
-        # not be shlex-quoted: quoting would embed literal quote characters in the task.
-        res = SanitizedRunner.run_safe([sys.executable, str(repo_root / "scripts/ops/supervisor_engine.py"), task_name], check=False)
+        # Retired (#1739): fail closed without invoking any backend (no supervisor_engine).
         payload = build_completion_envelope(
             command_name="delegate",
             task_name=task_name,
-            runtime_ok=(res.returncode == 0),
-            execution_path="cli->supervisor_engine",
+            runtime_ok=False,
+            execution_path="retired",
+            semantic_failures=["delegate_retired_1739"],
+            semantic_status="BLOCKED",
+            retryable=False,
+            blocker_type="governance",
+            next_action="use_nexus_multi_agent",
         )
         out_path = write_completion_envelope(repo_root, report_file, payload)
         if output_json:
             click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         else:
-            click.echo(f"{'✅' if payload['status'] == 'SUCCESS' else '❌'} Delegated task: {task_name}")
+            click.echo(DELEGATE_RETIRED_MESSAGE)
             click.echo(f"Report: {out_path}")
         try:
             ensure_verified_completion(payload, context="delegate")
-        except CompletionEnforcementError as exc:
-            handoff = _persist_completion_handoff(payload, context="delegate", report_file=out_path)
+        except CompletionEnforcementError:
+            _persist_completion_handoff(payload, context="delegate", report_file=out_path)
             out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-            if not output_json:
-                click.echo(f"Next Action: {handoff}")
-            raise click.ClickException(str(exc))
+            sys.exit(DELEGATE_RETIRED_EXIT_CODE)
 
 
     @nexus_group.command(name="research:route")
