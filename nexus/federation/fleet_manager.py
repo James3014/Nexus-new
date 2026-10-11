@@ -3,6 +3,15 @@ import subprocess
 import os
 import argparse
 import random
+import warnings
+
+warnings.warn(
+    "nexus.federation.fleet_manager has no production caller and is kept as lab-only "
+    "(see #1740).",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 
 def get_node_id(port: int, region: str) -> str:
     return f"node-{port}-{region}"

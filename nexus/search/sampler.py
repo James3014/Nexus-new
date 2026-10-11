@@ -3,6 +3,15 @@ from nexus.search.contracts import RetryDirective
 from nexus.search.diversity import DiversityMeter
 from nexus.search.feedback_router import FeedbackRouter
 from nexus.verifiers.contracts import VerifierVerdict
+import warnings
+
+warnings.warn(
+    "nexus.search.sampler has no production caller and is kept as lab-only "
+    "(see #1740).",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 
 class AdaptiveResampler:
     """

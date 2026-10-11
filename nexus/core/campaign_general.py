@@ -2,6 +2,9 @@
 """
 🧬 Nexus L4 Campaign-General (Macro-Planning & DAG Orchestration)
 負責將模糊意圖拆解為任務圖 (DAG)，並管理 L4->L3 的神經銜接與環境屏障。
+
+Lab-only: no production entry point reaches this module (#1740); it is kept
+for the core/e2e tests and bench scripts that exercise it directly.
 """
 
 import os
