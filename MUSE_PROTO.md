@@ -1,1 +1,1 @@
-/Users/jameschen/Downloads/obsidian/MUSE_PROTO.md
+nexus_wiki_vault/01_System/MUSE_PROTO.md
