@@ -206,8 +206,9 @@ def test_runtime_bridge_installs_ambient_core_preparation_port(tmp_path, monkeyp
     captured = {}
 
     class FakeCoordinator:
-        def __init__(self, *args):
+        def __init__(self, *args, **kwargs):
             captured["args"] = args
+            captured["kwargs"] = kwargs
 
     monkeypatch.setattr(bridge, "ExecutionCoordinator", FakeCoordinator)
     service = SelfHostedTaskService(
@@ -216,8 +217,9 @@ def test_runtime_bridge_installs_ambient_core_preparation_port(tmp_path, monkeyp
     coordinator = bridge.RuntimeCoordinationBridge(service)._coordinator("task", "attempt")
 
     assert isinstance(coordinator, FakeCoordinator)
-    assert len(captured["args"]) == 7
-    assert isinstance(captured["args"][-1], bridge._Preparation)
+    assert len(captured["args"]) == 6
+    assert isinstance(captured["kwargs"]["preparation"], bridge._Preparation)
+    assert isinstance(captured["kwargs"]["model_call_gate"], bridge._WorkerInvocationModelCallGate)
 
 
 def test_runtime_bridge_binds_observation_model_call_gate_when_supported(tmp_path, monkeypatch):
@@ -274,40 +276,16 @@ def test_runtime_bridge_binds_observation_model_call_gate_when_supported(tmp_pat
     }
 
 
-def test_runtime_bridge_preserves_legacy_constructor_without_model_call_gate(tmp_path, monkeypatch):
-    captured = {}
+def test_runtime_bridge_binds_the_pinned_coordinator_without_signature_sniffing():
+    """Nexus-new pins one exact runtime, so the bridge binds its constructor directly."""
+    import inspect
 
-    class LegacyCoordinator:
-        def __init__(
-            self,
-            state,
-            contract,
-            worker,
-            target,
-            processes,
-            finalization,
-            preparation=None,
-        ):
-            captured["args"] = (
-                state,
-                contract,
-                worker,
-                target,
-                processes,
-                finalization,
-                preparation,
-            )
-
-    monkeypatch.setattr(bridge, "ExecutionCoordinator", LegacyCoordinator)
-    service = SelfHostedTaskService(
-        state_dir=tmp_path / "state", ephemeral=True, auto_reconcile=False
-    )
-
-    coordinator = bridge.RuntimeCoordinationBridge(service)._coordinator("task", "attempt")
-
-    assert isinstance(coordinator, LegacyCoordinator)
-    assert len(captured["args"]) == 7
-    assert isinstance(captured["args"][-1], bridge._Preparation)
+    source = inspect.getsource(bridge.RuntimeCoordinationBridge)
+    assert "inspect.signature(ExecutionCoordinator" not in source
+    assert "_ensure_preparation_compat" not in source
+    parameters = inspect.signature(bridge.ExecutionCoordinator.__init__).parameters
+    assert "preparation" in parameters
+    assert "model_call_gate" in parameters
 
 
 def test_ambient_core_required_path_fails_closed_without_control_port(tmp_path):
