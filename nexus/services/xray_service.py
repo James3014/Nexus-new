@@ -20,6 +20,7 @@ class XRayService:
             
         observer = XRayObserver(targets)
         report = observer.scan(recursive=recursive)
+        self.last_report = report
         
         self.report_path.parent.mkdir(parents=True, exist_ok=True)
         

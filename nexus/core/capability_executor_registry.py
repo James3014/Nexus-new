@@ -3528,9 +3528,13 @@ def _exec_xray(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRecei
         _assert_outputs_in_run_root(output_paths, run_root)
 
         inst = XRayService(project_root=str(project_root), report_path=str(report_path))
-        result = inst.run(targets=["nexus/services/capability_registry.py"], recursive=False, docker=False)
+        # Absolute target: XRayObserver silently skips paths that do not exist relative to cwd.
+        target = Path(project_root) / "nexus/services/capability_registry.py"
+        result = inst.run(targets=[str(target)], recursive=False, docker=False)
         elapsed = int((time.monotonic() - start) * 1000)
-        ok = result is not None
+        # run() always returns the report path, so success must come from the scan itself.
+        scanned = getattr(inst, "last_report", None)
+        ok = bool(target.exists() and report_path.exists() and scanned is not None and scanned.symbols)
         return _make_receipt(
             "xray",
             plan,

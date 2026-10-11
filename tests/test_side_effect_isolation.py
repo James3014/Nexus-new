@@ -39,6 +39,13 @@ def _make_plan(task_id: str, **constraints: object) -> CapabilityExecutionPlan:
     )
 
 
+def _write_xray_target(project_root: Path) -> None:
+    """The xray executor scans nexus/services/capability_registry.py under project_root."""
+    target = project_root / "nexus" / "services" / "capability_registry.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("def scanned_symbol():\n    return 1\n")
+
+
 # ── X-Ray isolation ──────────────────────────────────────────────
 
 
@@ -134,6 +141,7 @@ def test_executor_xray_sentinel_unchanged(tmp_path: Path) -> None:
     sentinel = tmp_path / "xray_report_full.md"
     sentinel.write_text("SENTINEL")
     sentinel_before = _file_hash(sentinel)
+    _write_xray_target(tmp_path)
     plan = _make_plan(
         "t_xray_nc",
         project_root=str(tmp_path),
@@ -144,6 +152,17 @@ def test_executor_xray_sentinel_unchanged(tmp_path: Path) -> None:
     receipt = executor(plan, "test")
     assert receipt.gate_passed, receipt.outcome.get("error", "")
     assert _file_hash(sentinel) == sentinel_before
+
+
+def test_executor_xray_fails_when_scan_target_missing(tmp_path: Path) -> None:
+    """XRayService.run always returns a path; an empty scan must not pass the gate."""
+    plan = _make_plan(
+        "t_xray_missing",
+        project_root=str(tmp_path),
+        run_root=str(tmp_path / "runtime" / "t_xray_missing"),
+    )
+    receipt = get_executor("xray")(plan, "test")
+    assert receipt.gate_passed is False
 
 
 def test_executor_learn_mode_sentinels_unchanged(tmp_path: Path) -> None:
@@ -187,6 +206,7 @@ def test_executor_learn_phase_slo_sentinels_unchanged(tmp_path: Path) -> None:
 
 
 def test_executor_receipt_has_runtime_metadata(tmp_path: Path) -> None:
+    _write_xray_target(tmp_path)
     plan = _make_plan(
         "t_meta",
         project_root=str(tmp_path),
@@ -206,6 +226,7 @@ def test_executor_receipt_has_runtime_metadata(tmp_path: Path) -> None:
 
 
 def test_two_task_ids_do_not_overwrite(tmp_path: Path) -> None:
+    _write_xray_target(tmp_path)
     plan_a = _make_plan(
         "task_a",
         project_root=str(tmp_path),
