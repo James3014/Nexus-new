@@ -42,6 +42,10 @@ from nexus_runtime.task_lifecycle import (
 from nexus_runtime.task_lifecycle import (
     KNOWN_SELF_HOSTED_STATUSES as KNOWN_SELF_HOSTED_STATUSES,
 )
+from nexus_runtime.task_retry import (
+    DEFAULT_MAXIMUM_ATTEMPTS_PER_TASK as DEFAULT_MAXIMUM_ATTEMPTS_PER_TASK,
+)
+from nexus_runtime.task_retry import mint_retry_identity
 
 from nexus.contracts.autonomy_goal import AutonomyActionClass, AutonomyGoalGrant
 from nexus.contracts.collaboration_realm import CollaborationExecutionRealm
@@ -812,17 +816,11 @@ def _retry_request(state: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(raw_request, Mapping):
         raise ValueError("RETRY_REQUEST_MISSING")
     request = json.loads(json.dumps(dict(raw_request)))
-    task_id = str(state.get("task_id") or request.get("task_id") or "").strip()
-    if not task_id:
-        raise ValueError("RETRY_TASK_ID_MISSING")
-
-    token = uuid4().hex
-    attempt_id = f"attempt-{token}"
-    action_id = f"action-{token}"
-    previous_key = str(state.get("idempotency_key") or request.get("idempotency_key") or task_id)
-    base_key = previous_key.split(":retry-", 1)[0]
-    suffix = f":retry-{token}"
-    idempotency_key = f"{base_key[: max(1, 256 - len(suffix))]}{suffix}"
+    identity = mint_retry_identity(state, request, token=uuid4().hex)
+    task_id = identity.task_id
+    attempt_id = identity.attempt_id
+    action_id = identity.action_id
+    idempotency_key = identity.idempotency_key
 
     raw_action = request.get("action")
     if isinstance(raw_action, Mapping):
@@ -1512,8 +1510,6 @@ def resolve_execution_lane(
     }
 
 
-# Attempt budget applied when a request carries no explicit maximum_attempts_per_task.
-DEFAULT_MAXIMUM_ATTEMPTS_PER_TASK = 5
 
 
 def _require_verified_receipt_binding(receipt: Any, packet: Mapping[str, Any]) -> None:
