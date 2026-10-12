@@ -2633,7 +2633,7 @@ class UnifiedMCPGateway:
             job["probe_evidence_path"] = str(self._probe_evidence_read_root() / (identity + ".json"))
         return self._assist_write(job)
 
-    _ASSIST_HUNK_HEADER_RE = re.compile(r"^@@ -\d+(,\d+)? \+\d+(,\d+)? @@")
+    _ASSIST_HUNK_HEADER_RE = re.compile(r"^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@")
     _ASSIST_GIT_HEADER_RE = re.compile(r"^diff --git \S.* \S.*$")
     # Git extended header lines. The first group needs no hunk to be a real change.
     _ASSIST_GIT_CHANGE_RE = re.compile(
@@ -2662,19 +2662,40 @@ class UnifiedMCPGateway:
             line = lines[index]
             if line.startswith("--- ") and index + 1 < count and lines[index + 1].startswith("+++ "):
                 index += 2
-                while index < count and cls._ASSIST_HUNK_HEADER_RE.match(lines[index]):
+                while index < count:
+                    header = cls._ASSIST_HUNK_HEADER_RE.match(lines[index])
+                    if header is None:
+                        break
+                    # Consume the hunk by its header counts (like git apply), so removed or
+                    # added lines that look like `--- `/`+++ ` are body, not file headers.
+                    old_left = 1 if header.group(1) is None else int(header.group(1))
+                    new_left = 1 if header.group(2) is None else int(header.group(2))
+                    changed = False
                     index += 1
-                    while index < count:
+                    while old_left > 0 or new_left > 0:
+                        if index >= count:
+                            return False
                         body = lines[index]
-                        if (
-                            cls._ASSIST_HUNK_HEADER_RE.match(body)
-                            or body.startswith("--- ")
-                            or body.startswith("diff --git ")
-                        ):
-                            break
-                        if body[:1] in ("+", "-"):
-                            return True
+                        marker = body[:1]
+                        if marker == "\\":
+                            index += 1
+                            continue
+                        if marker in ("", " ") and old_left > 0 and new_left > 0:
+                            old_left -= 1
+                            new_left -= 1
+                        elif marker == "-" and old_left > 0:
+                            old_left -= 1
+                            changed = True
+                        elif marker == "+" and new_left > 0:
+                            new_left -= 1
+                            changed = True
+                        else:
+                            return False
                         index += 1
+                    while index < count and lines[index].startswith("\\"):
+                        index += 1
+                    if changed:
+                        return True
                 continue
             if cls._ASSIST_GIT_HEADER_RE.match(line):
                 index += 1

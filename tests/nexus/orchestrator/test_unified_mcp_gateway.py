@@ -2070,6 +2070,16 @@ def test_assist_degenerate_patch_fails_closed_with_retry_required(monkeypatch, t
         "diff --git i/x w/x\nnew file mode 100644\n",
         "--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@\n a\n\n-b\n+c\n",
         "--- a/x\n+++ b/x\n@@ -1 +1 @@\n unchanged\n@@ -5 +5 @@\n-a\n+b\n",
+        # Removed/added lines whose content starts with "-- " render as "--- "/"+++ " inside a hunk.
+        "diff --git a/q.sql b/q.sql\nindex e617967..8da9161 100644\n--- a/q.sql\n+++ b/q.sql\n@@ -1,2 +1,2 @@\n--- old comment\n+-- new comment\n select 1;\n",
+        "diff --git a/r.sql b/r.sql\nindex db94d6e..6af1197 100644\n--- a/r.sql\n+++ b/r.sql\n@@ -1,3 +1,2 @@\n -- keep\n--- drop me\n select 2;\n",
+        "diff --git a/m.lua b/m.lua\nindex 5d5fcf7..7f33518 100644\n--- a/m.lua\n+++ b/m.lua\n@@ -1,3 +1,2 @@\n local x = 1\n--- todo remove\n return x\n",
+        "diff --git a/m.lua b/m.lua\n--- a/m.lua\n+++ b/m.lua\n@@ -1,3 +1,2 @@\n local x = 1\n--- todo remove\n return x\n"
+        "diff --git a/q.sql b/q.sql\n--- a/q.sql\n+++ b/q.sql\n@@ -1,2 +1,2 @@\n--- old comment\n+-- new comment\n select 1;\n"
+        "diff --git a/r.sql b/r.sql\n--- a/r.sql\n+++ b/r.sql\n@@ -1,3 +1,2 @@\n -- keep\n--- drop me\n select 2;\n",
+        # A real file header right after the previous hunk's counts are exhausted.
+        "--- a/x\n+++ b/x\n@@ -1 +1 @@\n ctx\n--- a/y\n+++ b/y\n@@ -1 +1 @@\n-a\n+b\n",
+        "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n\\ No newline at end of file\n",
     ],
 )
 def test_assist_patch_is_substantive_accepts_valid_diffs(patch):
@@ -2094,6 +2104,11 @@ def test_assist_patch_is_substantive_accepts_valid_diffs(patch):
         "diff --git a/x b/x\nsorry, cannot do this\nrename from y\n",
         "diff --git a/x b/x\nnew file mode banana\n",
         "diff --git a/x b/x\nnew file mode 100\n",
+        # Counts claim more lines than are present.
+        "--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@\n-a\n+b\n",
+        "--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n ctx\n ctx2\n--- a/y\n+++ b/y\n",
+        # Prose inside a hunk.
+        "--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n-a\nsorry, I cannot do that\n+b\n",
     ],
 )
 def test_assist_patch_is_substantive_rejects_non_diffs(patch):
