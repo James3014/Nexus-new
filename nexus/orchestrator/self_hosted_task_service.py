@@ -3867,6 +3867,9 @@ class SelfHostedTaskService:
     ) -> None:
         """Re-read all governed identity immediately before provider-side work."""
         state = self._read_state(task_id) or {}
+        if state.get("status") == "BLOCKED_INVALID_STATE" or state.get("state_valid") is False:
+            # An unreadable persisted state cannot prove the task is untracked.
+            raise RuntimeError("WORKFORCE_ADMISSION_BINDING_MISSING: persisted state invalid")
         if binding is None and _tracked_dispatch_required(request, state):
             # Tracked (Task Card) dispatch never reaches a model worker without
             # a fresh Workforce Admission binding, on any execution lane.

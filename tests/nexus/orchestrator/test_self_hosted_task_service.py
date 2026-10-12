@@ -11072,6 +11072,18 @@ def test_tracked_dispatch_without_admission_fails_closed_on_every_lane(tmp_path,
         )
 
 
+def test_provider_boundary_fails_closed_on_invalid_persisted_state(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _request(tmp_path, task_id="invalid-state", execution_lane="ISOLATED_TARGET")
+    contract = service.build_contract(request)
+    # A state without a valid status reads back as BLOCKED_INVALID_STATE.
+    service._write_state("invalid-state", {"task_id": "invalid-state"})
+    with pytest.raises(RuntimeError, match="WORKFORCE_ADMISSION_BINDING_MISSING"):
+        service._revalidate_provider_boundary(
+            contract, request, "invalid-state", None, active_provider="codex"
+        )
+
+
 def test_tracked_isolated_submit_without_admission_never_calls_provider(tmp_path):
     class RecordingRegistry:
         calls: list = []
