@@ -942,7 +942,6 @@ CASES: tuple[GoldenCase, ...] = (
         "stale_state",
         "Live Gateway verification must bind current loaded source, action manifest, permission policy, worker identity, and negative controls.",
         ("https://github.com/James3014/Nexus-new/issues/12",),
-        finding_probe="gb077_live_gateway_identity",
         status="finding",
         finding_id="GBF-002",
     ),

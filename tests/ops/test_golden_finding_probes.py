@@ -240,9 +240,11 @@ def test_probe_registry_is_classified_and_bound_only_to_findings() -> None:
     assert set(evaluator.PROBES) == set(evaluator.PROBE_CLASSES)
     assert set(evaluator.PROBE_CLASSES.values()) <= evaluator.PROBE_CLASS_VALUES
     bound = {case.case_id: case for case in CASES if case.finding_probe}
-    assert {case_id: case.finding_probe for case_id, case in bound.items()} == {
-        "GB-077": "gb077_live_gateway_identity",
-    }
+    # Stage 1 of 2: no corpus case is bound yet (the base-branch evaluator used by
+    # the trusted gate does not know these probe ids); GB-077 is bound in the
+    # follow-up PR.
+    assert {case_id: case.finding_probe for case_id, case in bound.items()} == {}
+    assert "gb077_live_gateway_identity" in evaluator.PROBES
     # GB-079 was reconciled to covered; its replay probe stays registered but
     # unbound, which validate_corpus permits (it only checks bound probe ids).
     assert "gb079_continuity_replay" in evaluator.PROBES
@@ -268,6 +270,13 @@ def test_validate_corpus_rejects_unclassified_or_covered_probe_binding(monkeypat
 
 def test_include_findings_stays_nonzero_even_when_probe_passes(monkeypatch, capsys) -> None:
     monkeypatch.setitem(evaluator.PROBES, "gb077_live_gateway_identity", lambda: (True, "pass"))
+    bound_cases = tuple(
+        dataclasses.replace(case, finding_probe="gb077_live_gateway_identity")
+        if case.case_id == "GB-077"
+        else case
+        for case in evaluator.CASES
+    )
+    monkeypatch.setattr(evaluator, "CASES", bound_cases)
     monkeypatch.setattr(
         sys,
         "argv",
