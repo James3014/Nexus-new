@@ -304,3 +304,27 @@ def test_claim_gate_unchanged_by_binding_validation() -> None:
     )
     assert receipt.gate_passed is False
     assert receipt.failure_reason == "unbound_verifier_proof"
+
+
+def test_explicit_failing_status_is_not_overridden_by_artifact() -> None:
+    extra = {
+        "verifier_status": "fail",
+        "verifier_artifact": "sha256:" + "d" * 64,
+        "source_hash": _GOOD_HASH,
+    }
+    for receipt in _sink_receipts(extra):
+        assert receipt.gate_passed is False, receipt.name
+        assert receipt.failure_reason == "verifier_not_passed", receipt.name
+
+
+def test_non_string_binding_values_are_rejected() -> None:
+    class S(str):
+        pass
+
+    for extra in (
+        {"verifier_status": S("pass"), "source_hash": _GOOD_HASH},
+        {"verifier_status": "pass", "source_hash": S(_GOOD_HASH)},
+        {"verifier_artifact": S("sha256:" + "d" * 64), "source_hash": _GOOD_HASH},
+    ):
+        for receipt in _sink_receipts(extra):
+            assert receipt.gate_passed is False, (extra, receipt.name)

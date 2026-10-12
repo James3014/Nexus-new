@@ -249,15 +249,25 @@ def _claim_gate_binding_reasons(payload: dict[str, Any]) -> list[str]:
     requires _gate_verifier_ok. Empty list means the binding is satisfied.
     """
     reasons: list[str] = []
-    artifact_ok = _looks_like_verifier_artifact(payload.get("verifier_artifact"))
+    artifact = payload.get("verifier_artifact")
+    artifact_ok = type(artifact) is str and _looks_like_verifier_artifact(artifact)
     status = payload.get("verifier_status")
-    status_text = str(status).strip().lower() if status is not None else ""
+    if status is None:
+        status_text = ""
+    elif type(status) is str:
+        status_text = status.strip().lower()
+    else:
+        status_text = "non_string"
     status_ok = status_text in _PASSING_VERIFIER_STATUSES
-    if not artifact_ok and not status_ok:
-        reasons.append("verifier_not_passed" if status_text else "missing_verifier_artifact")
-    if not payload.get("source_hash"):
+    if status_text and not status_ok:
+        # An explicit non-passing status is never overridden by an artifact.
+        reasons.append("verifier_not_passed")
+    elif not artifact_ok and not status_ok:
+        reasons.append("missing_verifier_artifact")
+    source_hash = payload.get("source_hash")
+    if not source_hash:
         reasons.append("missing_source_hash")
-    elif not _looks_like_source_hash(payload.get("source_hash")):
+    elif type(source_hash) is not str or not _looks_like_source_hash(source_hash):
         reasons.append("invalid_source_hash")
     return reasons
 
