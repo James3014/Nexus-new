@@ -2077,6 +2077,9 @@ def test_assist_degenerate_patch_fails_closed_with_retry_required(monkeypatch, t
         "diff --git a/m.lua b/m.lua\n--- a/m.lua\n+++ b/m.lua\n@@ -1,3 +1,2 @@\n local x = 1\n--- todo remove\n return x\n"
         "diff --git a/q.sql b/q.sql\n--- a/q.sql\n+++ b/q.sql\n@@ -1,2 +1,2 @@\n--- old comment\n+-- new comment\n select 1;\n"
         "diff --git a/r.sql b/r.sql\n--- a/r.sql\n+++ b/r.sql\n@@ -1,3 +1,2 @@\n -- keep\n--- drop me\n select 2;\n",
+        # Miscounted hunks are accepted like `git apply --recount`.
+        "--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@\n c\n-a\n+b\n",
+        "--- a/x\n+++ b/x\n@@ -1,5 +1,5 @@\n c\n--- a/y\n+++ b/y\n@@ -1 +1 @@\n-a\n+b\n",
         # A real file header right after the previous hunk's counts are exhausted.
         "--- a/x\n+++ b/x\n@@ -1 +1 @@\n ctx\n--- a/y\n+++ b/y\n@@ -1 +1 @@\n-a\n+b\n",
         "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n\\ No newline at end of file\n",
@@ -2104,8 +2107,10 @@ def test_assist_patch_is_substantive_accepts_valid_diffs(patch):
         "diff --git a/x b/x\nsorry, cannot do this\nrename from y\n",
         "diff --git a/x b/x\nnew file mode banana\n",
         "diff --git a/x b/x\nnew file mode 100\n",
-        # Counts claim more lines than are present.
-        "--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@\n-a\n+b\n",
+        # Miscounted hunks fall back to --recount semantics, but still need a change line.
+        "--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@\n c\n",
+        "--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@\n c\n--- a/y\n+++ b/y\n@@ -1 +1 @@\n d\n",
+        "--- a/x\n+++ b/x\n@@ -1," + "9" * 5000 + " +1 @@\n-a\n",
         "--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n ctx\n ctx2\n--- a/y\n+++ b/y\n",
         # Prose inside a hunk.
         "--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n-a\nsorry, I cannot do that\n+b\n",
@@ -2113,6 +2118,32 @@ def test_assist_patch_is_substantive_accepts_valid_diffs(patch):
 )
 def test_assist_patch_is_substantive_rejects_non_diffs(patch):
     assert not UnifiedMCPGateway._assist_patch_is_substantive(patch)
+
+
+def test_assist_patch_huge_hunk_count_does_not_raise_and_fails_closed_end_to_end(monkeypatch, tmp_path):
+    patch = "--- a/x\n+++ b/x\n@@ -1," + "9" * 5000 + " +1 @@\n-a\n"
+    assert UnifiedMCPGateway._assist_patch_is_substantive(patch) is False
+
+    class FakePopen:
+        pid = 54903
+
+        def __init__(self, command, *, stdout, stderr, **kwargs):
+            stdout.write(json.dumps({"type": "run_result", "text": json.dumps({"patch": patch})}) + "\n")
+            stdout.flush()
+
+        def poll(self):
+            return 0
+
+    service = FakeService()
+    service.state_dir = tmp_path
+    monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", FakePopen)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    gateway = UnifiedMCPGateway(service=service)
+    gateway._assist_submit({"task_id": "bigdigits-1", "what": "x", "why": "y", "allowed_files": ["README.md"], "model": "glm-5.2"})
+    job = gateway._assist_refresh("bigdigits-1")
+    assert job["status"] == "FAILED"
+    assert job["retry_required"] is True
 
 
 def test_assist_patch_is_substantive_is_linear_on_repeated_file_headers():
