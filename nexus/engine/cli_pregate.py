@@ -31,9 +31,6 @@ def _get_venv_python(project_root: Path) -> str:
     return sys.executable
 
 _PREGATE_OPERATORS = frozenset({";", "&&", "||", "|", "<", ">", "&", ">>", "2>", "&>"})
-_PREGATE_SHELL_RE = re.compile(
-    r"(sh|bash|zsh|dash|ash|ksh|csh|tcsh|fish|busybox|env|xargs|nohup|setsid|timeout|command|exec)(\.exe)?"
-)
 _PREGATE_PYTHON_RE = re.compile(r"python[0-9.]*(\.exe)?")
 _PREGATE_ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _PREGATE_ENV_ALLOWLIST = frozenset({"LANG", "LC_ALL", "PATH", "PYTHONPATH", "TMPDIR", "VIRTUAL_ENV"})
@@ -47,6 +44,7 @@ def _build_pregate_request(cmd: str, cwd: Path, env_overlay: dict, timeout: floa
     verifier/worker spawn.  Raises ValueError when the command needs a shell.
     """
     from nexus.executors.cli_worker import CliWorkerRequest
+    from nexus.executors.exec_policy import is_forwarder_executable
 
     tokens = list(shlex.split(cmd))
     # ``2>&1`` is the only redirection used by generated commands; stderr is
@@ -58,7 +56,7 @@ def _build_pregate_request(cmd: str, cwd: Path, env_overlay: dict, timeout: floa
         raise ValueError("environment assignments are not allowed in pregate commands")
     executable, args = tokens[0], tokens[1:]
     name = Path(executable).name.lower()
-    if _PREGATE_SHELL_RE.fullmatch(name):
+    if is_forwarder_executable(executable):
         raise ValueError("shell and shell-forwarding executables are not allowed")
     python_code = _PREGATE_PYTHON_RE.fullmatch(name) is not None
     for index, token in enumerate(args):
