@@ -210,14 +210,75 @@ def test_selector_off_equals_no_predictor_path(monkeypatch):
 # ---------------------------------------------------------- repair attempt
 
 
-def test_lewm_archived_module_and_toggle_absent():
-    assert not hasattr(toggle, "LEWM_PREDICTOR")
-    assert not hasattr(RepairAttemptService, "_run_lewm_sim")
+def _repair():
+    return RepairAttemptService(project_root="/tmp/x")
+
+
+def _lewm_state():
     state = NexusState(task_id="r1")
     state.metadata["sim_lewm"] = True
-    # sim_lewm no longer has any consumer: the attempt never consults a simulator.
-    assert "lewm_cls" not in RepairAttemptService.__init__.__code__.co_varnames
-    assert "predictor_influence" not in state.metadata
+    state.metadata["task_description"] = "touch NexusState serialization"
+    return state
+
+
+# LeWM was archived 2026-10-12: the three historical node ids below now assert the
+# module-absent path (never consulted, never aborts) regardless of any switch.
+
+
+def test_lewm_on_reject_aborts_and_records_change():
+    state = _lewm_state()
+    assert _repair()._run_lewm_sim(state) is None
+    entry = _only(state, toggle.LEWM_PREDICTOR)
+    assert entry["consulted"] is False and entry["changed_decision"] is False
+    assert entry["before"] == "continue" and entry["after"] == "continue"
+    assert not hasattr(RepairAttemptService, "lewm_cls")
+
+
+def test_lewm_on_passed_does_not_change_decision():
+    state = _lewm_state()
+    assert _repair()._run_lewm_sim(state) is None
+    entry = _only(state, toggle.LEWM_PREDICTOR)
+    assert entry["consulted"] is False and entry["changed_decision"] is False
+    assert "lewm_sim_status" not in state.metadata
+
+
+def test_lewm_off_matches_sim_lewm_unset(monkeypatch):
+    monkeypatch.setenv("NEXUS_LEWM_PREDICTOR", "off")
+    off_state = _lewm_state()
+    assert _repair()._run_lewm_sim(off_state) is None
+
+    monkeypatch.delenv("NEXUS_LEWM_PREDICTOR")
+    on_state = _lewm_state()
+    assert _repair()._run_lewm_sim(on_state) is None
+    plain = NexusState(task_id="r1")
+    plain.metadata["task_description"] = "touch NexusState serialization"
+    assert _repair()._run_lewm_sim(plain) is None
+
+    # The switch is inert: on and off record the identical module-absent entry.
+    assert _only(off_state, toggle.LEWM_PREDICTOR) == _only(on_state, toggle.LEWM_PREDICTOR)
+    assert "lewm_sim_status" not in off_state.metadata
+    assert "predictor_influence" not in plain.metadata
+
+
+def test_lewm_module_not_imported_by_engine_sites():
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    code = (
+        "import sys\n"
+        "import nexus.engine.bootstrap, nexus.engine.repair_attempt_service\n"
+        "print('LEWM_LOADED' if 'nexus.learning.lewm_predictor' in sys.modules else 'LEWM_ABSENT')\n"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert out.returncode == 0, out.stderr
+    assert "LEWM_ABSENT" in out.stdout
 
 
 # ------------------------------------------------ capability executor receipt

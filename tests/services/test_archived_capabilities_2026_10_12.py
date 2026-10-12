@@ -156,13 +156,21 @@ def test_no_live_code_imports_archived_modules():
     assert not offenders, offenders
 
 
-def test_lewm_toggle_and_module_are_unreachable_from_engine():
+def test_lewm_switch_is_inert_and_latent_switch_is_kept(monkeypatch):
+    from nexus.core.state_contracts import NexusState
+    from nexus.engine.repair_attempt_service import RepairAttemptService
     from nexus.learning import predictor_toggle
 
-    assert not hasattr(predictor_toggle, "LEWM_PREDICTOR")
     assert predictor_toggle.env_name(predictor_toggle.LATENT_PREDICTOR) == "NEXUS_LATENT_PREDICTOR"
-    with pytest.raises(KeyError):
-        predictor_toggle.env_name("lewm_predictor")
+    entries = []
+    for value in ("on", "off"):
+        monkeypatch.setenv("NEXUS_LEWM_PREDICTOR", value)
+        state = NexusState(task_id="arch-3")
+        state.metadata["sim_lewm"] = True
+        assert RepairAttemptService(project_root="/tmp/x")._run_lewm_sim(state) is None
+        entries.append(state.metadata["predictor_influence"])
+    assert entries[0] == entries[1]
+    assert entries[0][0]["consulted"] is False
 
 
 def test_nexus_benchmark_cli_fails_closed():

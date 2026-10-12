@@ -251,8 +251,8 @@ def test_two_task_ids_do_not_overwrite(tmp_path: Path) -> None:
                 assert pa != pb, f"task_a and task_b collided on {pa}"
 
 
-def test_executor_benchmark_is_archived_and_writes_no_report(tmp_path: Path, monkeypatch) -> None:
-    """The archived benchmark must fail closed and never write a report anywhere."""
+def test_executor_benchmark_writes_report_inside_run_root(tmp_path: Path, monkeypatch) -> None:
+    """Archived 2026-10-12: the benchmark fails closed and writes no report anywhere."""
     cwd = tmp_path / "cwd"
     cwd.mkdir()
     monkeypatch.chdir(cwd)

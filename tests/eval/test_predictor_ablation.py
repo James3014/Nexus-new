@@ -14,13 +14,7 @@ EVAL_DIR = REPO / "scripts" / "eval"
 if str(EVAL_DIR) not in sys.path:
     sys.path.insert(0, str(EVAL_DIR))
 
-try:
-    import run_predictor_ablation as ablation  # noqa: E402
-except AttributeError as exc:  # pragma: no cover - depends on archived lewm_predictor
-    pytest.skip(
-        f"ablation harness needs the lewm_predictor switch archived 2026-10-12: {exc}",
-        allow_module_level=True,
-    )
+import run_predictor_ablation as ablation  # noqa: E402
 
 LATENT_ENV = "NEXUS_LATENT_PREDICTOR"
 LEWM_ENV = "NEXUS_LEWM_PREDICTOR"
@@ -106,11 +100,11 @@ def test_probe_only_main_writes_rows_and_scorecard(tmp_path):
     assert [r["predictor_arm"] for r in rows] == list(ablation.PREDICTOR_ARMS)
     card = json.loads((artifacts / "t1" / "scorecard.json").read_text())
     influence = card["predictor_influence"]
-    # The probe forces sim_lewm, so LeWM is consulted whenever its switch is on.
-    assert influence["both_on"]["lewm_predictor"]["consulted"] == 1
+    # The probe forces sim_lewm, but LeWM was archived 2026-10-12: it is never consulted.
+    assert influence["both_on"]["lewm_predictor"]["consulted"] == 0
     assert influence["both_off"]["lewm_predictor"]["consulted"] == 0
     assert influence["both_off"]["latent_predictor_v20"]["consulted"] == 0
-    assert influence["latent_off"]["lewm_predictor"]["consulted"] == 1
+    assert influence["latent_off"]["lewm_predictor"]["consulted"] == 0
     assert influence["lewm_off"]["latent_predictor_v20"]["consulted"] >= 1
 
 

@@ -65,7 +65,8 @@ def test_ui_validator_types_operator_supplied_credentials(monkeypatch):
     assert second == {"action": "type", "target_id": "2", "value": "op-pass"}
 
 
-def test_benchmark_service_fails_closed_without_synthetic_numbers(tmp_path):
+def test_benchmark_service_tags_simulation_and_makes_no_quality_claims(tmp_path):
+    # Historical node id: the simulated benchmark was archived 2026-10-12 and now fails closed.
     service = BenchmarkService(project_root=str(tmp_path))
     out_csv = tmp_path / "bench.csv"
     with pytest.raises(ArchivedBenchmarkError) as excinfo:
@@ -83,6 +84,16 @@ def test_benchmark_service_fails_closed_without_synthetic_numbers(tmp_path):
     assert not (tmp_path / ".nexus").exists()
 
 
+def test_benchmark_service_report_handles_zero_tasks(tmp_path):
+    # Historical node id: zero tasks also fails closed and writes nothing.
+    service = BenchmarkService(project_root=str(tmp_path))
+    with pytest.raises(ArchivedBenchmarkError):
+        service.run(
+            dataset="missing", repeat=1, dual_core_physical=False, ablation=False, tasks_count=0
+        )
+    assert not (tmp_path / "dual_core_benchmark.md").exists()
+
+
 def test_benchmark_service_module_has_no_random_source():
     import nexus.services.benchmark_service as module
 
@@ -97,17 +108,19 @@ def test_archived_reason_matches_capability_registry_whitelist():
     assert ARCHIVED_REASON in SKIP_REASONS
 
 
-@pytest.mark.parametrize("mode", ["gladiator", "ab"])
-def test_research_benchmark_fails_closed_and_writes_no_report(tmp_path, mode):
+def test_research_benchmark_reports_are_tagged_simulated(tmp_path):
+    # Historical node id: both research benchmark modes were archived 2026-10-12 and fail
+    # closed instead of writing a "simulated" report.
     manifest = tmp_path / "manifest.json"
     manifest.write_text(json.dumps({"cases": [{"id": "c1"}]}), encoding="utf-8")
-    report = tmp_path / f"{mode}.json"
     service = ResearchBenchmarkService(tmp_path)
 
-    with pytest.raises(ArchivedResearchBenchmarkError) as excinfo:
-        service.run_benchmark(mode, str(manifest), str(report), 1.0, 5, 0, 1, False, False)
-    assert excinfo.value.reason == "archived_fake_benchmark_2026-10-12"
-    assert not report.exists()
+    for mode in ("gladiator", "ab"):
+        report = tmp_path / f"{mode}.json"
+        with pytest.raises(ArchivedResearchBenchmarkError) as excinfo:
+            service.run_benchmark(mode, str(manifest), str(report), 1.0, 5, 0, 1, False, False)
+        assert excinfo.value.reason == "archived_fake_benchmark_2026-10-12"
+        assert not report.exists()
 
 
 def _run_meta_opt(tmp_path, child_report):

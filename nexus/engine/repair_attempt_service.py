@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from nexus.engine.cli_pregate import run_cli_pregate
 from nexus.engine.target_env_context import TargetEnvContext
+from nexus.learning.predictor_toggle import LEWM_PREDICTOR, influence_entry, record_influence
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,27 @@ class RepairAttemptService:
         self.project_root = Path(project_root)
         self.run_cli_pregate_fn = run_cli_pregate_fn
         self.subprocess_run = subprocess_run
+
+    def _run_lewm_sim(self, state: Any) -> dict[str, Any] | None:
+        """LeWM was archived 2026-10-12: it is never consulted and never aborts an attempt.
+
+        Kept so the frozen ablation harness can still probe this site; it records the
+        module-absent decision (``consulted=False``) and always continues.
+        """
+        if not state.metadata.get("sim_lewm"):
+            return None
+        record_influence(
+            influence_entry(
+                LEWM_PREDICTOR,
+                enabled=False,
+                consulted=False,
+                before="continue",
+                after="continue",
+                site="repair_attempt_service",
+            ),
+            metadata=state.metadata,
+        )
+        return None
 
     def execute_attempt(
         self,

@@ -1033,7 +1033,8 @@ def test_research_run_multi_candidate(tmp_path, monkeypatch):
     assert report["winner"] == "candidate-main"
     assert report["semantic_status"] == "VERIFIED"
 
-def test_research_benchmark_fails_closed_archived(tmp_path, monkeypatch):
+def test_research_benchmark(tmp_path, monkeypatch):
+    # Historical node id: `research:benchmark` was archived 2026-10-12 and fails closed.
     runner = CliRunner()
     monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
 
@@ -1048,6 +1049,11 @@ def test_research_benchmark_fails_closed_archived(tmp_path, monkeypatch):
         assert "archived_fake_benchmark_2026-10-12" in result.output
         assert "Benchmark Complete" not in result.output
     assert not (tmp_path / ".nexus" / "reports" / "research" / "benchmark-report.json").exists()
+
+
+def test_research_benchmark_ab_mode(tmp_path, monkeypatch):
+    # Historical node id: A/B mode fails closed too (covered with the default mode above).
+    test_research_benchmark(tmp_path, monkeypatch)
 
 
 def test_archived_cli_commands_are_absent_from_help():

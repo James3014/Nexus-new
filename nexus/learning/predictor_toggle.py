@@ -4,8 +4,10 @@
 of ``0``, ``false``, ``no`` or ``off`` turns the predictor off, and the call site then
 takes the path it would take if the predictor module were absent.
 
-The ``lewm_predictor`` module and its ``NEXUS_LEWM_PREDICTOR`` switch were archived on
-2026-10-12 (see ``ARCHIVED_2026-10-12.md``).
+The ``lewm_predictor`` module was archived on 2026-10-12 (see ``ARCHIVED_2026-10-12.md``):
+nothing consults it any more. ``LEWM_PREDICTOR`` and its env name remain only so the
+frozen predictor-ablation harness (``scripts/eval/run_predictor_ablation.py``) still
+imports; ``NEXUS_LEWM_PREDICTOR`` has no effect on any call site.
 """
 
 from __future__ import annotations
@@ -16,9 +18,11 @@ from collections import deque
 from typing import Any
 
 LATENT_PREDICTOR = "latent_predictor_v20"
+LEWM_PREDICTOR = "lewm_predictor"  # archived 2026-10-12; inert, see module docstring
 
 _ENV_BY_PREDICTOR = {
     LATENT_PREDICTOR: "NEXUS_LATENT_PREDICTOR",
+    LEWM_PREDICTOR: "NEXUS_LEWM_PREDICTOR",
 }
 _OFF_VALUES = {"0", "false", "no", "off"}
 

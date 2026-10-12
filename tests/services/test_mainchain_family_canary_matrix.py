@@ -1629,15 +1629,19 @@ def test_retired_integration_reference_proof_rejects_false_green() -> None:
     )
 
 
-# Archived 2026-10-12 nodes fail closed by design (see
-# tests/services/test_archived_capabilities_2026_10_12.py); the promotable denominator
-# of 53 and the REAL contract denominator stay pinned until they are re-based.
-@pytest.mark.parametrize(
-    "name",
-    [n for n in _promotable_names() if n not in ARCHIVED_CAPABILITY_REASONS],
-)
+@pytest.mark.parametrize("name", _promotable_names())
 def test_promotable_family_canary_mainchain_entry(name: str) -> None:
     """Each promotable node: pos+neg via MainchainEntry path, consumer proof, no false green."""
+    if name in ARCHIVED_CAPABILITY_REASONS:
+        # Archived 2026-10-12: the only acceptable outcome is an explicit skip. The
+        # promotable denominator (53) and the REAL contract denominator (34) stay pinned
+        # until they are re-based with the nexus-runtime planner retirement.
+        pos = _run_family_canary(name, positive=True)
+        assert pos["mainchain_entry"] is True
+        assert pos["planner_selected"] is True
+        assert pos["invoked"] is False and pos["skipped"] is True
+        assert pos["public_claim_allowed"] is False
+        return
     pos = _run_family_canary(name, positive=True)
     neg = _run_family_canary(name, positive=False)
     contract = PLANNER_EXECUTION_CONTRACTS[name]
