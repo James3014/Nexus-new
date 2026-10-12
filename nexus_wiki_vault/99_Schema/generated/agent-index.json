@@ -2,11 +2,11 @@
   "schema": "nexus.wiki.agent-index.v1",
   "authority": "derived_non_authoritative",
   "authority_manifest": "99_Schema/WIKI_AUTHORITY_MANIFEST.yaml",
-  "source_fingerprint": "45f93b34450a69e08281f827ac6fffaf582c53a0460644e3fec18c4bfdf50cfd",
-  "included_page_count": 251,
+  "source_fingerprint": "2d7fa59f64deb649d97293d81121d053ccdc2ac51df2738fc3ebfb221109a963",
+  "included_page_count": 253,
   "excluded_page_count": 38,
   "canonical_page_count": 12,
-  "unresolved_link_count": 312,
+  "unresolved_link_count": 316,
   "exclusion_rules": [
     "Dir: .nexus",
     "Dir: .obsidian",
@@ -139,9 +139,22 @@
       "is_canonical": true,
       "canonical_key": "current_state",
       "one_sentence_summary": "> **Freshness notice (2026-10-08):** The source-bound snapshot below supersedes the 2026-07-13 architecture/status narrative for present-day navigation. The retained legacy sections are historical observations, not a live-system readiness verdict. Do not promote commit, CI or documentation evidence into runtime or acceptance truth.",
-      "content_sha256": "4dfd135ed9d1407cafaadbec8cc5d1cf78b967aeb4ecc2efc03b99ffcd0429b1",
-      "outgoing_links": [],
-      "unresolved_links": [],
+      "content_sha256": "a3cbd95bc918b57fcbbafbd56171ab59b3540a45d933ef347140078cca97a6f8",
+      "outgoing_links": [
+        [
+          "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+          "markdown"
+        ]
+      ],
+      "unresolved_links": [
+        {
+          "source": "page:00_Home/CURRENT_STATE.md",
+          "source_path": "00_Home/CURRENT_STATE.md",
+          "raw_target": "../08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12",
+          "syntax": "markdown",
+          "reason": "missing"
+        }
+      ],
       "content_verified_against_commit": "a2ae57ab96a9ddb0243858f4f2c1776709511af5",
       "document_updated_in_commit": "fecda71e417c453a7ea2ae0229478784921c362a",
       "verified_at": "2026-07-13",
@@ -486,7 +499,7 @@
       "is_canonical": true,
       "canonical_key": "wiki_index",
       "one_sentence_summary": "這是 Nexus Wiki 的主索引與 coverage 對位頁，提供入口、任務主線與目錄對位的整體導航。",
-      "content_sha256": "764777a151a3aadb9ec3ae2c045f35dbe5d51687132f401706a75d484a55dc40",
+      "content_sha256": "a585c6b5b7f4599d7a8341c97f0111da8076971bb92cda7a18e85473a1b8d28c",
       "outgoing_links": [
         [
           "canonical:current_state",
@@ -578,6 +591,14 @@
         ],
         [
           "page:08_Diffs/Code_to_Wiki_Alignment_Matrix.md",
+          "wikilink"
+        ],
+        [
+          "page:08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12).md",
+          "wikilink"
+        ],
+        [
+          "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
           "wikilink"
         ],
         [
@@ -709,7 +730,7 @@
       "is_canonical": true,
       "canonical_key": "system_map",
       "one_sentence_summary": "The main components of Nexus, their responsibilities, authority levels, and known limitations. Every code path in this page has been physically verified against the repository.",
-      "content_sha256": "7c4b45895c79531cf342e2135cfef8e9f61f47cef9c910da79d4d85f0f6b020c",
+      "content_sha256": "512a3575571fc12624f28c9e9dc952626bdcb1633f9553ece58cbb9d0dbb674f",
       "outgoing_links": [
         [
           "canonical:task_router",
@@ -726,9 +747,21 @@
         [
           "canonical:current_state",
           "markdown"
+        ],
+        [
+          "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+          "markdown"
         ]
       ],
-      "unresolved_links": [],
+      "unresolved_links": [
+        {
+          "source": "page:00_Home/SYSTEM_MAP.md",
+          "source_path": "00_Home/SYSTEM_MAP.md",
+          "raw_target": "../08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12",
+          "syntax": "markdown",
+          "reason": "missing"
+        }
+      ],
       "content_verified_against_commit": "a2ae57ab96a9ddb0243858f4f2c1776709511af5",
       "document_updated_in_commit": "fecda71e417c453a7ea2ae0229478784921c362a",
       "verified_at": "2026-07-13",
@@ -752,7 +785,7 @@
       "is_canonical": true,
       "canonical_key": "glossary",
       "one_sentence_summary": "Canonical definitions for key Nexus terms. Each entry states what the term means, what it is NOT the same as, where it comes from, and any legacy aliases.",
-      "content_sha256": "5070e9ef1bd644cfdb3d7cf5e23b0e4939ba2d76f91432b8a4c78ef5daaceb97",
+      "content_sha256": "a0c5220bca7485b8ad5ef340d01a05eac1af18637d798d0dc09ed186f91df873",
       "outgoing_links": [],
       "unresolved_links": [],
       "content_verified_against_commit": "a2ae57ab96a9ddb0243858f4f2c1776709511af5",
@@ -3791,7 +3824,7 @@
       "is_canonical": false,
       "canonical_key": "",
       "one_sentence_summary": "本頁提供 Nexus 核心術語的單一語義定義，降低多代理協作中的用詞歧義與規約誤解。 [Source: 00_Home/System Overview.md]",
-      "content_sha256": "43b8c16a3f903aba77bb65d7442fdda50fb6515d16fbe8dcce8ea2c1945348bd",
+      "content_sha256": "9d4e797a783799dbf8eb4c377581564eedc90ebdc7537b654b8373346cf04ea6",
       "outgoing_links": [
         [
           "canonical:architecture",
@@ -3839,6 +3872,10 @@
         ],
         [
           "page:Reference/task.md",
+          "markdown"
+        ],
+        [
+          "canonical:glossary",
           "markdown"
         ],
         [
@@ -4076,7 +4113,7 @@
       "is_canonical": false,
       "canonical_key": "",
       "one_sentence_summary": "本頁彙整所有待解決的治理爭議、架構決策與需要人類授權的高風險問題。 [Source: 00_Home/System Overview.md]",
-      "content_sha256": "cf3a8ba8137d619c43ca8460ec1c07fad8c4421ff5d250d826647b023791ee46",
+      "content_sha256": "c80ed6234b4d8e81c24704147194c299c242cd74ac3b437ffaa528d107359bad",
       "outgoing_links": [
         [
           "canonical:system_overview",
@@ -4279,7 +4316,7 @@
       "is_canonical": false,
       "canonical_key": "",
       "one_sentence_summary": "本頁登記 Wiki 映射層中發現的規格與代碼漂移 (Drift)、未解決的架構衝突以及版本代溝。 [Source: 00_Home/System Overview.md]",
-      "content_sha256": "b219d0b729eae0dd709e7eaf081f98a1c05b591acbe5fe89fa0a3f7b0ce60db6",
+      "content_sha256": "10c7ac3f2012c677d801c125d515d2a526af4f254173578ce0575191223a7177",
       "outgoing_links": [
         [
           "canonical:architecture",
@@ -6080,7 +6117,7 @@
       "is_canonical": false,
       "canonical_key": "",
       "one_sentence_summary": "本頁定義 Nexus 三系統（LanceDB / Memory / MemPalace）與技能選取、學習回寫之間的完整閉環資料流，是 Phase 13 Autonomic Routing Intelligence 的架構存根。",
-      "content_sha256": "ca62b018be2aec3fc9c20c9471b99901a4c86e7ec1802aaf9ae8e8a5e71dd227",
+      "content_sha256": "21e6cfd59b98ac1b4b5e364608c036d048af8d2c5c169d987717c2f87ff46e2a",
       "outgoing_links": [
         [
           "canonical:system_overview",
@@ -6096,6 +6133,10 @@
         ],
         [
           "page:02_Modules/Module - Policy and Learning Governance.md",
+          "markdown"
+        ],
+        [
+          "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
           "markdown"
         ],
         [
@@ -7156,7 +7197,7 @@
       "is_canonical": false,
       "canonical_key": "",
       "one_sentence_summary": "本頁記錄 Django #31505 事件的修復里程碑與性能回報，作為高難跨模組修復的基準案例。",
-      "content_sha256": "40b40082bd77b830d70007a1b3e54a0f19675de54cb423549c588956ba12f1c7",
+      "content_sha256": "a368a8e0b2ad1d974e5d0c4b803ed180dd3c5cfa4c07dd16d9574d48c01f9b6e",
       "outgoing_links": [
         [
           "page:01_Specs/Spec - Nexus L1-L7 Realization.md",
@@ -7165,9 +7206,156 @@
         [
           "canonical:system_overview",
           "wikilink"
+        ],
+        [
+          "page:04_Research/Nexus Combat History Ledger.md",
+          "markdown"
+        ],
+        [
+          "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+          "markdown"
         ]
       ],
       "unresolved_links": [],
+      "content_verified_against_commit": "",
+      "document_updated_in_commit": "",
+      "verified_at": "",
+      "last_verified": "",
+      "last_audit": ""
+    },
+    {
+      "id": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "path": "04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "title": "CAPABILITY_EVIDENCE_LEDGER_2026-10-12",
+      "type": "report",
+      "status": "active",
+      "lifecycle": "unclassified",
+      "classification": "active",
+      "authority": "",
+      "owner": "agent",
+      "confidence": "high",
+      "source_of_truth": "docs/benchmark/benchmark_claim_policy.md; nexus_wiki_vault/10_Analysis_Scans/nexus_am3_post_al_capability_reaudit_20260621.md; nexus-learning repo docs/experiments/2026-10-memory-ab (external)",
+      "aliases": [
+        "Capability Evidence Ledger",
+        "Citability Ledger 2026-10"
+      ],
+      "tags": [
+        "state",
+        "evidence",
+        "benchmark",
+        "citability",
+        "ledger"
+      ],
+      "is_canonical": false,
+      "canonical_key": "",
+      "one_sentence_summary": "本頁逐條登記 Wiki 內出現的每個標題數字（benchmark、成功率、token 節省）在 2026-10-12 的可引用性判定，依據是舊 repo 自己的 `benchmark_claim_policy.md`、AM3 再稽核、競爭力現實檢查，以及拆分後 nexus-learning 的記憶 A/B。 [Source: docs/benchmark/benchmark_claim_policy.md] [Source: nexus_wiki_vault/10_Analysis_Scans/nexus_am3_post_al_capability_reaudit_20260621.md]",
+      "content_sha256": "d5af79c1fb60fe18912f3b5938b4923a977d1c165003385faa85cb540c8b2def",
+      "outgoing_links": [
+        [
+          "canonical:system_overview",
+          "wikilink"
+        ],
+        [
+          "page:06_Ops/Ops - Truth Claims Register.md",
+          "markdown"
+        ],
+        [
+          "page:04_State/NEXUS_FINAL_ACCEPTANCE_MATRIX_2026-05-06.md",
+          "markdown"
+        ],
+        [
+          "page:06_Ops/Ops - Wisdom Layer v22 Architecture.md",
+          "markdown"
+        ],
+        [
+          "page:09_Roadmap/NEXUS_EVOLUTION_HISTORY_v9_to_v28.md",
+          "markdown"
+        ],
+        [
+          "page:09_Roadmap/NEXUS_EVOLUTION_HISTORY_v9_to_v28.md",
+          "markdown"
+        ],
+        [
+          "page:06_Ops/Ops - Performance Benchmarks.md",
+          "markdown"
+        ],
+        [
+          "page:04_Research/Meta-Evolution - The 18 Rings Convergence.md",
+          "markdown"
+        ],
+        [
+          "page:04_Research/SOTA Milestone - Django Death Issue Fix.md",
+          "markdown"
+        ],
+        [
+          "page:02_Modules/Module - Skill Memory Closed Loop.md",
+          "markdown"
+        ],
+        [
+          "page:09_Roadmap/CAPABILITY_ROUTING_MIGRATION_PLAN_2026-04-29.md",
+          "markdown"
+        ],
+        [
+          "page:10_Analysis_Scans/NEXUS_MAY_BENCHMARK_ROUTING_ANALYSIS.md",
+          "markdown"
+        ],
+        [
+          "page:01_System/ADR/ADR-2026-05-07-teacher-student-sweep-plan.md",
+          "markdown"
+        ],
+        [
+          "page:04_Research/MSA_Routing_Architecture.md",
+          "markdown"
+        ],
+        [
+          "page:10_Analysis_Scans/NEXUS_MAY_BENCHMARK_ROUTING_ANALYSIS.md",
+          "markdown"
+        ],
+        [
+          "page:10_Analysis_Scans/nexus_ag1_ag5_local_portfolio_final_report.md",
+          "markdown"
+        ],
+        [
+          "page:10_Analysis_Scans/nexus-competitive-reality-check.md",
+          "markdown"
+        ],
+        [
+          "page:06_Ops/Ops - Truth Claims Register.md",
+          "markdown"
+        ],
+        [
+          "page:04_State/NEXUS_FINAL_ACCEPTANCE_MATRIX_2026-05-06.md",
+          "markdown"
+        ],
+        [
+          "page:00_Product/Investor Deck.md",
+          "markdown"
+        ],
+        [
+          "page:05_Commercial/Go-to-Market.md",
+          "markdown"
+        ],
+        [
+          "canonical:system_overview",
+          "markdown"
+        ]
+      ],
+      "unresolved_links": [
+        {
+          "source": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+          "source_path": "04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+          "raw_target": "../08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12",
+          "syntax": "markdown",
+          "reason": "missing"
+        },
+        {
+          "source": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+          "source_path": "04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+          "raw_target": "../08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12",
+          "syntax": "markdown",
+          "reason": "missing"
+        }
+      ],
       "content_verified_against_commit": "",
       "document_updated_in_commit": "",
       "verified_at": "",
@@ -8139,8 +8327,8 @@
       ],
       "is_canonical": false,
       "canonical_key": "",
-      "one_sentence_summary": "",
-      "content_sha256": "625e0bb61578316dc1eba821cde9df4a51c4ba8ec36a89981c232700edb424fd",
+      "one_sentence_summary": "> [!warning] Contradiction registered (2026-10-12)",
+      "content_sha256": "33035d61949e12297c9c407f6173334c9757e2b71110c0472fa6465cfd1a5c98",
       "outgoing_links": [
         [
           "page:02_Modules/Module - Core Orchestrator.md",
@@ -8149,6 +8337,14 @@
         [
           "page:05_Protocols/Protocol - Evidence Chain.md",
           "wikilink"
+        ],
+        [
+          "page:04_Research/SOTA Milestone - Django Death Issue Fix.md",
+          "markdown"
+        ],
+        [
+          "page:01_System/System - Unknowns and Conflicts.md",
+          "markdown"
         ],
         [
           "page:02_Modules/Module - Core Orchestrator.md",
@@ -10293,7 +10489,7 @@
       "is_canonical": false,
       "canonical_key": "",
       "one_sentence_summary": "說明 Wisdom Layer 在高難任務前如何建立實驗模式，將感知、調參與鎖定行為轉為可稽核步驟。",
-      "content_sha256": "fa0148e96a01a1e34b07d544301498df3fda0724ab4cae6512b09aa776fd5bfe",
+      "content_sha256": "885618ecf30803dc80a675f8b250e3fc4502c8f6c62106cd6825be84d53557e2",
       "outgoing_links": [
         [
           "page:02_Modules/Module - Core Orchestrator.md",
@@ -10302,6 +10498,10 @@
         [
           "canonical:system_overview",
           "wikilink"
+        ],
+        [
+          "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+          "markdown"
         ]
       ],
       "unresolved_links": [],
@@ -10831,6 +11031,99 @@
         [
           "canonical:system_overview",
           "wikilink"
+        ]
+      ],
+      "unresolved_links": [],
+      "content_verified_against_commit": "",
+      "document_updated_in_commit": "",
+      "verified_at": "",
+      "last_verified": "",
+      "last_audit": ""
+    },
+    {
+      "id": "page:08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12).md",
+      "path": "08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12).md",
+      "title": "Diff - Legacy Monolith vs Split Repo Family (2026-10-12)",
+      "type": "diff",
+      "status": "active",
+      "lifecycle": "unclassified",
+      "classification": "active",
+      "authority": "",
+      "owner": "agent",
+      "confidence": "high",
+      "source_of_truth": "James3014/Nexus-new@0fb15f3e1, James3014/nexus-runtime@cfcb38d, James3014/nexus-learning@9a0eadf, James3014/nexus-core@f0909e9 (origin/main, observed 2026-10-12)",
+      "aliases": [
+        "Split Repo Diff",
+        "Legacy vs Split Family",
+        "Capability Disposition 2026-10"
+      ],
+      "tags": [
+        "diff",
+        "split",
+        "repo-family",
+        "capability",
+        "regression"
+      ],
+      "is_canonical": false,
+      "canonical_key": "",
+      "one_sentence_summary": "本頁以 2026-10-12 的實體程式碼稽核為準，逐一對照舊單體 (`nexus/` 套件) 的每項能力在拆分後的 repo 家族 (Nexus-new / nexus-runtime / nexus-learning / nexus-core) 中「住在哪裡、有沒有接線、有沒有量測」，並登記四個拆分後真正退步的點。 [Source: nexus_wiki_vault/08_Diffs/Code_to_Wiki_Alignment_Matrix.md] [Code: nexus/core/capability_executor_registry.py]",
+      "content_sha256": "b2db227084cba2dbc8425d1660c58b7c9168658243c97b7f168f2715dec1548d",
+      "outgoing_links": [
+        [
+          "canonical:system_overview",
+          "wikilink"
+        ],
+        [
+          "page:08_Diffs/Diff - v17.1 vs v22 vs v23.md",
+          "markdown"
+        ],
+        [
+          "page:08_Diffs/Code_to_Wiki_Alignment_Matrix.md",
+          "markdown"
+        ],
+        [
+          "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+          "markdown"
+        ],
+        [
+          "canonical:current_state",
+          "markdown"
+        ],
+        [
+          "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+          "markdown"
+        ],
+        [
+          "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+          "markdown"
+        ],
+        [
+          "canonical:current_state",
+          "markdown"
+        ],
+        [
+          "page:08_Diffs/Diff - v17.1 vs v22 vs v23.md",
+          "markdown"
+        ],
+        [
+          "page:02_Modules/nexus_能力盤點_2026-02-20後新增.md",
+          "markdown"
+        ],
+        [
+          "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+          "markdown"
+        ],
+        [
+          "page:01_System/System - Unknowns and Conflicts.md",
+          "markdown"
+        ],
+        [
+          "page:01_System/System - Next Questions for Human.md",
+          "markdown"
+        ],
+        [
+          "canonical:system_overview",
+          "markdown"
         ]
       ],
       "unresolved_links": [],
@@ -11937,7 +12230,7 @@
       "is_canonical": false,
       "canonical_key": "",
       "one_sentence_summary": "本頁是 Wiki 之上的權威文檔索引，補齊了所有核心規格與代碼文件的相對路徑，作為 Path Verification 的權威對照表。 [Source: 00_Home/System Overview.md]]]",
-      "content_sha256": "530cdf0331b6a05b5e3f1681f8a90ed596c2c30582ffc9c290348c846fff9470",
+      "content_sha256": "2fe398938e7331e6254cb16d47dbdd900ddbc7538b38f5334bfebb2e224a1b68",
       "outgoing_links": [
         [
           "canonical:system_overview",
@@ -12328,7 +12621,7 @@
       "is_canonical": false,
       "canonical_key": "",
       "one_sentence_summary": "**[PHYSICAL_STATUS: AUTO_SYNC_ENABLED | AUDIT_ENHANCED]**",
-      "content_sha256": "c5ce333c6f89f8d5d98e50a6f19601bf53f659156a0c7e348b292e2c6f35f114",
+      "content_sha256": "9601e48ab036569c523d13731416f792c6be1aac62f004912386d4d2a16f950f",
       "outgoing_links": [],
       "unresolved_links": [],
       "content_verified_against_commit": "",

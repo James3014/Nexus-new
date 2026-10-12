@@ -16,6 +16,10 @@ version_scope: '[v24.2, v26]'
 
 # SOTA Milestone: Conquering the Django Death Issue (#31505)
 
+> [!warning] Evidence status (2026-10-12)
+> 本里程碑為 n=1 單一案例，「世界主流 ~20%」無來源；同批核心任務在 [Nexus Combat History Ledger](Nexus Combat History Ledger.md) 多為 FAILED。登記為 `CREDIBLE_UNVERIFIED`，引用時須附 n=1。見 [CAPABILITY_EVIDENCE_LEDGER_2026-10-12](../04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md) #9。
+
+
 ## One-sentence summary
 本頁記錄 Django #31505 事件的修復里程碑與性能回報，作為高難跨模組修復的基準案例。
 

@@ -20,6 +20,10 @@ version_scope: v22
 
 # Wisdom Layer (v22.2.1) - Task-as-Experiment Specification
 
+> [!warning] Evidence status (2026-10-12)
+> 本頁的 SWE-bench Pro 87.1% / GPQA 97.8% / OSWorld 89.3% 表格無 run ID、無 harness 輸出，已登記為 `NOT_CITABLE`。保留作設計說明，不得作為能力宣稱。見 [CAPABILITY_EVIDENCE_LEDGER_2026-10-12](../04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md) #1。
+
+
 ## One-sentence summary
 說明 Wisdom Layer 在高難任務前如何建立實驗模式，將感知、調參與鎖定行為轉為可稽核步驟。
 
