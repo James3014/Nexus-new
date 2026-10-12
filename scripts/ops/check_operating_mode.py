@@ -316,7 +316,11 @@ def evaluate_operating_mode(path: str | Path) -> dict[str, Any]:
     except UnicodeDecodeError as exc:
         return _result([_reason(MODE_FILE_NOT_UTF8, str(exc))], None, digest)
     try:
-        doc = yaml.load(text, Loader=_StrictLoader)  # noqa: S506 - SafeLoader subclass
+        loader = _StrictLoader(text)
+        try:
+            doc = loader.get_single_data()
+        finally:
+            loader.dispose()
     except _DuplicateKeyError as exc:
         return _result([_reason(DUPLICATE_KEY, str(exc))], None, digest)
     except yaml.YAMLError as exc:
