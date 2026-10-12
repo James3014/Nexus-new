@@ -111,7 +111,7 @@ The `gemini` CLI is no longer usable (not installed). The lane now reaches Gemin
 The with-Nexus model call goes through `sprint_service` and the unified runtime. In this checkout every such call is refused before any provider call:
 `workforce_admission_overall_decision_not_allow`, reason "demand_online: workforce_bindings must be an object mapping", no resolved worker, `provider_call_count=0`.
 `nexus/config/model_workforce.yaml` also registers only `agy_flash` (3.6 high), `agy_flash_medium` (3.6 medium) and `agy_flash_37_medium`, no Gemini 3.8 Flash worker.
-Admitting the lane is a Workforce governance change and was not attempted. The rows show up as `model_call_without_tokens` (the row still records `model_calls=1` because the
+Admitting the lane is a Workforce governance change and was not attempted here (since done in #1836; the bindings input is addressed in the 2026-10-12 rerun section below). The rows show up as `model_call_without_tokens` (the row still records `model_calls=1` because the
 runner counts the attempt before the runtime refuses; no provider call was made). Only tasks that the deterministic local path solves without a model complete, and those are exactly the `deterministic_rescue` rows.
 
 ## Smoke result
@@ -137,6 +137,48 @@ Dry mode, 12 tasks, with-Nexus arm, `--with-llm-mode off --strict-llm-baseline`:
 
 Without the strict flag the dry run would report a 100% solve rate with no model involved, the effect the ADRs warned about.
 
+## Rerun with the workforce_bindings fix (issue #1844, 2026-10-12)
+
+Cause of `workforce_bindings must be an object mapping`: the with-Nexus model path (`LLMCandidateGenerator._ask_unified_candidate` in
+`nexus/research/sprint_service.py`) builds its route with `build_online_route(...)`, which carries no `workforce_bindings`, and the unified runtime
+(`nexus_runtime` `runtime_workforce_admission`, exact per-channel lookup, no default or inference) refuses a route whose bindings are not a mapping.
+Since #1836 registered `agy_flash_38` the only missing input was lane-side.
+
+Fix (no admission bypass, no worker id supplied by the lane):
+
+- `scripts/bench/agy_provider.configure_agy_lane_env` now also sets `NEXUS_OAUTH_PROVIDER=agy` (the with-Nexus subprocess gateway otherwise auto-selects the uninstalled `gemini` CLI)
+  and `NEXUS_BENCH_WORKFORCE_BINDINGS_JSON={"online": {"provider": "agy", "model": "<NEXUS_AGY_MODEL>", "controls": [task_card, allowed_files, mandatory_commands, parser, verifier, independent_verification]}}`.
+- `sprint_service` forwards that mapping as `route["workforce_bindings"]` when the env var is set (no other behavior change). Admission resolves the exact provider+model identity to `agy_flash_38`.
+  An unregistered model id is BLOCKed by admission; it is never substituted.
+- Test: `tests/benchmark/test_ab_lane_with_nexus_agy.py` (fake `agy` executable): with the bindings the row is `ALLOW`, resolves `agy_flash_38`, `provider_call_count >= 1`, and the fake agy receives `--model gemini-3.8-flash-medium`;
+  without them the runtime still refuses with the mapping reason before any provider call.
+
+Result of the exact 12x1 strict command (same command as above, `NEXUS_AGY_MODEL=gemini-3.8-flash-medium`). Report: `.nexus/reports/bench/ab_revival_agy_20261012_full` (gitignored).
+
+| Arm | Rows | Eligible | Verified (counted solves) | `deterministic_rescue` | Infra invalid | Avg model calls | Avg wall | Avg tokens |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| bare agy Gemini 3.8 Flash | 12 | 12 | 7 (58.3%) | 0 | 0 | 1.0 | 65.5 s | 29,689 |
+| with_nexus | 12 | 2 | 0 | 2 | 10 (`model_call_without_tokens`, see below) | 0.0 | 10.1 s | n/a |
+
+The with-Nexus arm is still blocked, now one stage later and for a reason outside the lane. For all 10 model-required rows Workforce Admission returns
+`ALLOW` ("demand_online: All constraints and required controls passed"), and the gateway then refuses the call with Online execution authorization
+`online_denied_by_workspace_or_default` (`nexus/services/online_execution_policy.py`: no `.nexus/online_execution_policy.json` and no task-level `auto|require`, so the fail-closed default is deny).
+`provider_call_count=0`; the rows record `model_calls=1` because the runner counts the attempt before the refusal. Granting Online authorization is an owner decision
+(workspace policy file, or the operator override `NEXUS_EXTERNAL_RUNTIME_AUTHORIZED=1`); it was not set or worked around here, and no other model was used.
+
+Capabilities recorded by the with-Nexus receipts (`capability_receipts` in the evidence bundle rows; `real` = `claim_boundary.simulated=false`):
+
+| Task | Status | Invoked with a gate pass | Invoked, gate failed or not passed (simulated) | Selected, not invoked |
+| --- | --- | --- | --- | --- |
+| repair-001, repair-002 | SUCCESS, rescue | `delivery_gate` (real), `hyper` (real), `codeintel`, `harness_preflight_sensor`, `hyper` (simulated); repair-002 also `memory` | `artifact_gate`, `claim_gate`, `delivery_gate`, `mempalace_gate` | `repair_loop`, `research_route` |
+| hidden-001, hidden-002 | FAILED | `harness_preflight_sensor` (simulated) | `artifact_gate`, `claim_gate`, `delivery_gate`, `mempalace_gate` | none |
+| context-001, context-002 | FAILED | `codeintel` (real), `harness_preflight_sensor` (simulated) | `artifact_gate`, `claim_gate`, `delivery_gate`, `mempalace_gate` | context-002: `direct_mode`, `memory`, `research_route` |
+| evidence-001, evidence-002, trust-001, trust-002, gov-001, gov-002 | FAILED | `codeintel`, `harness_preflight_sensor` (both simulated) | `artifact_gate`, `claim_gate`, `delivery_gate`, `mempalace_gate` | `hyper`, `research_route`, `plan_quality_gate`, `pregate`, plus per task `acceptance_check`, `jit_validation`, `learn_mode`, `learn_phase_slo`, `sandbox`, `ultra_review`, `semantic_searcher` |
+
+Only the repair rows contain real (non-simulated) capability invocations (`delivery_gate`, `hyper`), and they made no model call. In every failed row the model never ran, so
+`expected_capabilities` coverage reports `claim_gate`/`delivery_gate` as missing (`missing_verifier_artifact;missing_source_hash`). This is a smoke run: no public uplift claim,
+and no same-model uplift can be read until Online authorization lets the with-Nexus arm reach the model.
+
 ## Comparison against May
 
 | Run | Date | Nexus | Bare | Strict baseline | Source |
@@ -146,6 +188,7 @@ Without the strict flag the dry run would report a 100% solve rate with no model
 | Pro 18x3 | 2026-04 | 54/54 | 51/54 | no | same routing analysis |
 | Revival smoke, no LLM | 2026-10-12 | 0 counted (12 rescues) | not run | yes | this document |
 | Revival smoke, Gemini 3.8 Flash via agy, 12x1 | 2026-10-12 | 0 counted (arm blocked by Workforce Admission, 2 rescues) | 6/12 (50.0%) | yes | this document |
+| Rerun after the bindings fix, Gemini 3.8 Flash via agy, 12x1 | 2026-10-12 | 0 counted (admission ALLOW, then Online authorization denied, 2 rescues) | 7/12 (58.3%) | yes | this document |
 
 The May rows were produced without `--strict-llm-baseline`, and the publication summary records 0.9 s per row for Nexus,
 which is consistent with a large share of `model_calls=0` rescues. They are also a different model (Gemini 3 Flash preview) and 2 repeats. They are not comparable with strict-baseline numbers until the with-Nexus arm can reach the model.

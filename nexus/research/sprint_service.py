@@ -31,6 +31,26 @@ from .runtime.runtime_resilience import (
     get_retry_delay,
 )
 
+BENCH_WORKFORCE_BINDINGS_ENV = "NEXUS_BENCH_WORKFORCE_BINDINGS_JSON"
+
+
+def _bench_workforce_bindings_from_env() -> dict[str, Any] | None:
+    """Return the lane-declared Workforce bindings (channel -> binding), or None.
+
+    The A/B lane (scripts/bench/agy_provider.py) declares the identity it runs
+    (provider + exact model) and the controls it physically supplies. The mapping is only
+    forwarded to the runtime; Workforce Admission still decides ALLOW/BLOCK. A malformed
+    value is ignored so admission fails closed with its own reason.
+    """
+    raw = str(os.environ.get(BENCH_WORKFORCE_BINDINGS_ENV, "") or "").strip()
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        return None
+    return value if isinstance(value, dict) and value else None
+
 
 def _truncate_redundant_tests(test_source: str, task_desc: str) -> str:
     """
@@ -286,16 +306,20 @@ class LLMCandidateGenerator:
             }
 
         gateway_provider = str(getattr(self.gateway, "oauth_provider", "") or "").strip().lower()
+        route = build_online_route(
+            recommended_flow="hybrid" if local_request is not None else "direct",
+            gateway_provider=gateway_provider,
+            local_enabled=local_request is not None,
+        )
+        bench_bindings = _bench_workforce_bindings_from_env()
+        if bench_bindings is not None:
+            route["workforce_bindings"] = bench_bindings
         request = UnifiedRuntimeRequest(
             task_id=task_id,
             workspace_revision=revision,
             task_statement=task,
             task_type="repair",
-            route=build_online_route(
-                recommended_flow="hybrid" if local_request is not None else "direct",
-                gateway_provider=gateway_provider,
-                local_enabled=local_request is not None,
-            ),
+            route=route,
             online_prompt=prompt,
             online_payload=payload,
             online_phase="R",
