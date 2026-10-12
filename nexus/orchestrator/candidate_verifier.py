@@ -9,7 +9,7 @@ import shlex
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Optional
+from typing import Iterable, Mapping, Optional
 
 from nexus.executors.cli_worker import (
     CliWorkerRequest,
@@ -363,6 +363,19 @@ class CandidateVerifier:
         return not failures, tuple(evidence), failures
 
     @staticmethod
+    def effective_verifier_manifest(commands: Iterable[str]) -> tuple[str, ...]:
+        """Return the exact ordered commands the verifier executes for a contract."""
+        return CandidateVerifier._deduplicate_verifier_commands(tuple(commands))
+
+    @staticmethod
+    def verifier_manifest_sha256(commands: Iterable[str]) -> str:
+        """Hash the effective verifier manifest (single source for producer and sink)."""
+        manifest = CandidateVerifier.effective_verifier_manifest(commands)
+        return hashlib.sha256(
+            json.dumps(manifest, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+
+    @staticmethod
     def _deduplicate_verifier_commands(commands: tuple[str, ...]) -> tuple[str, ...]:
         """Merge overlapping pytest manifests while preserving other commands."""
         ordered: list[tuple[str, str | tuple[str, ...]]] = []
@@ -494,9 +507,6 @@ class CandidateVerifier:
         failures.extend(verifier_state_failures)
         failures.extend(repository_contract.blocking_reasons)
         verified = not failures
-        verifier_manifest = CandidateVerifier._deduplicate_verifier_commands(
-            tuple(contract.verifier_commands)
-        )
         return VerifiedCandidateReceipt(
             schema="nexus.verified_candidate_receipt.v1",
             task_id=contract.task_id,
@@ -526,9 +536,9 @@ class CandidateVerifier:
             repository_contract_findings=repository_contract.findings,
             authority_change_required=repository_contract.authority_change_required,
             authority_findings_sha256=repository_contract.authority_findings_sha256,
-            verifier_manifest_sha256=hashlib.sha256(
-                json.dumps(verifier_manifest, separators=(",", ":")).encode("utf-8")
-            ).hexdigest(),
+            verifier_manifest_sha256=CandidateVerifier.verifier_manifest_sha256(
+                contract.verifier_commands
+            ),
             verification_wall_time_ms=max(0, int((time.monotonic() - verification_started) * 1000)),
             collaboration_gate_passed=collaboration_passed,
             collaboration_provenance=post_verifier.collaboration_provenance,

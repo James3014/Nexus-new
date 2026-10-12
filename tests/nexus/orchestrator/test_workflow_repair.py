@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 
 from nexus.orchestrator.candidate_commit import CandidateCommitter
-from nexus.orchestrator.candidate_verifier import VerifiedCandidateReceipt
+from nexus.orchestrator.candidate_verifier import (
+    CandidateVerifier,
+    VerifiedCandidateReceipt,
+    VerifierEvidence,
+)
 from nexus.orchestrator.self_hosted_task_service import (
     SelfHostedTaskService,
     check_fast_lane_eligible,
@@ -22,6 +26,27 @@ from nexus.orchestrator.worktree_manager import WorktreeManager
 def _git(cwd: Path, *args: str) -> str:
     result = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", *args], cwd=cwd, check=True, capture_output=True, text=True)
     return result.stdout.strip()
+
+
+def _verifier_binding(contract):
+    """Receipt fields a real verifier run produces for the contract's verifiers (#1760)."""
+    commands = CandidateVerifier.effective_verifier_manifest(contract.verifier_commands)
+    return {
+        "verifier_manifest_sha256": CandidateVerifier.verifier_manifest_sha256(
+            contract.verifier_commands
+        ),
+        "verifier_evidence": tuple(
+            VerifierEvidence(
+                command=command,
+                status="COMPLETED",
+                exit_code=0,
+                stdout_sha256="0" * 64,
+                stderr_sha256="0" * 64,
+                wall_time_ms=1,
+            )
+            for command in commands
+        ),
+    }
 
 
 def _scenario(tmp_path: Path):
@@ -63,11 +88,7 @@ def _scenario(tmp_path: Path):
 
 
 def test_recover_verified_uncommitted_candidate_without_model_recall(tmp_path, monkeypatch):
-    contract, lease, candidate, manager, controller_root, target_root = _scenario(tmp_path)
-    state_dir = tmp_path / "state"
-    state_dir.mkdir()
-    monkeypatch.setenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", str(state_dir))
-    svc = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+    svc, contract, lease, candidate = _service_recovery_scenario(tmp_path, monkeypatch)
 
     verified_receipt = VerifiedCandidateReceipt(
         schema="nexus.verified_candidate_receipt.v1",
@@ -91,7 +112,7 @@ def test_recover_verified_uncommitted_candidate_without_model_recall(tmp_path, m
         production_ready=False,
         merge_performed=False,
         failure_reasons=[],
-        verifier_evidence=[],
+        **_verifier_binding(contract),
     )
 
     state = {
@@ -109,7 +130,7 @@ def test_recover_verified_uncommitted_candidate_without_model_recall(tmp_path, m
             "outcome": "EXECUTION_COMPLETED",
             "provider_calls": 1,
         },
-        "verified_receipt": verified_receipt.model_dump(mode="json") if hasattr(verified_receipt, "model_dump") else verified_receipt.__dict__,
+        "verified_receipt": asdict(verified_receipt),
         "contract": contract.model_dump(mode="json"),
         "lease": asdict(lease),
         "candidate_state_hash": candidate.candidate_state_hash,
@@ -135,6 +156,120 @@ def test_recover_verified_uncommitted_candidate_without_model_recall(tmp_path, m
     svc._write_state(contract.task_id, state_ver)
     with pytest.raises(RuntimeError, match="not eligible for uncommitted recovery"):
         svc.recover_verified_uncommitted_candidate(contract.task_id)
+
+
+def _service_recovery_scenario(tmp_path, monkeypatch):
+    """Task state whose contract was built by the service, as in production recovery."""
+    controller, targets = tmp_path / "controller", tmp_path / "targets"
+    controller.mkdir()
+    targets.mkdir()
+    monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(targets))
+    _git(controller, "init", "-b", "main")
+    _git(controller, "config", "user.email", "test@example.test")
+    _git(controller, "config", "user.name", "Test")
+    (controller / "bounded.txt").write_text("base\n", encoding="utf-8")
+    _git(controller, "add", "bounded.txt")
+    _git(controller, "commit", "-m", "base")
+    head = _git(controller, "rev-parse", "HEAD")
+    svc = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    task_id = "recovery-binding-1760"
+    contract = svc.build_contract(
+        {
+            "task_id": task_id,
+            "what": "Recovery binding test",
+            "why": "Verify verifier binding on recovery",
+            "allowed_files": ["bounded.txt"],
+            "verifier_commands": ["python3 -c 'print(\"pass\")'", "python3 -c 'print(\"second\")'"],
+            "controller_repo_root": str(controller),
+            "target_repo_root": str(targets / task_id),
+            "target_worktree_root": str(targets),
+            "controller_revision": head,
+            "target_base_revision": head,
+            "allow_unbound_test_identity": True,
+        }
+    )
+    manager = WorktreeManager(root_dir=contract.target_worktree_root)
+    lease = manager.create_lease(contract)
+    (Path(lease.target_worktree) / "bounded.txt").write_text("modified\n", encoding="utf-8")
+    candidate = manager.capture_candidate(contract, lease)
+    return svc, contract, lease, candidate
+
+
+def _recovery_state(svc, contract, lease, candidate, receipt_dict):
+    state = {
+        "schema": "nexus.self_hosted_task_state.v1",
+        "task_id": contract.task_id,
+        "status": "RETAINED_FOR_REVIEW",
+        "attempt_id": "attempt-1",
+        "attempt_resolution": {"verdict": "PROVEN", "verified": True, "candidate_non_empty": True,
+                               "candidate_state_hash": candidate.candidate_state_hash},
+        "execution": {"outcome": "EXECUTION_COMPLETED", "provider_calls": 1},
+        "verified_receipt": receipt_dict,
+        "contract": contract.model_dump(mode="json"),
+        "lease": asdict(lease),
+        "candidate_state_hash": candidate.candidate_state_hash,
+        "promotion_status": "NOT_CREATED",
+    }
+    svc._write_state(contract.task_id, state)
+
+
+def _recovery_receipt_dict(contract, lease, candidate):
+    return asdict(
+        VerifiedCandidateReceipt(
+            schema="nexus.verified_candidate_receipt.v1",
+            task_id=contract.task_id,
+            contract_hash=contract.contract_hash,
+            lease_id=lease.lease_id,
+            candidate_state_hash=candidate.candidate_state_hash,
+            verified=True,
+            verifier_gate_passed=True,
+            controller_gate_passed=True,
+            scope_gate_passed=True,
+            deletion_gate_passed=True,
+            protected_contract_gate_passed=True,
+            candidate_commit_allowed=True,
+            candidate_commit_created=False,
+            public_claim_allowed=False,
+            production_ready=False,
+            merge_performed=False,
+            failure_reasons=[],
+            **_verifier_binding(contract),
+        )
+    )
+
+
+def test_recovery_accepts_receipt_bound_to_contract_verifiers(tmp_path, monkeypatch):
+    svc, contract, lease, candidate = _service_recovery_scenario(tmp_path, monkeypatch)
+    _recovery_state(svc, contract, lease, candidate, _recovery_receipt_dict(contract, lease, candidate))
+
+    result = svc.recover_verified_uncommitted_candidate(contract.task_id)
+
+    assert result["status"] == "PENDING_HUMAN_APPROVAL"
+    assert len(result["candidate_commit_sha"]) == 40
+
+
+def test_recovery_refuses_receipt_with_tampered_verifier_manifest(tmp_path, monkeypatch):
+    svc, contract, lease, candidate = _service_recovery_scenario(tmp_path, monkeypatch)
+    receipt = _recovery_receipt_dict(contract, lease, candidate)
+    receipt["verifier_manifest_sha256"] = "deadbeef"
+    _recovery_state(svc, contract, lease, candidate, receipt)
+    head = _git(Path(lease.target_worktree), "rev-parse", "HEAD")
+
+    with pytest.raises(RuntimeError, match="verifier manifest does not bind"):
+        svc.recover_verified_uncommitted_candidate(contract.task_id)
+    assert _git(Path(lease.target_worktree), "rev-parse", "HEAD") == head
+
+
+def test_recovery_refuses_receipt_with_tampered_verifier_evidence(tmp_path, monkeypatch):
+    svc, contract, lease, candidate = _service_recovery_scenario(tmp_path, monkeypatch)
+    receipt = _recovery_receipt_dict(contract, lease, candidate)
+    receipt["verifier_evidence"][0]["command"] = "python3 -c pass"
+    _recovery_state(svc, contract, lease, candidate, receipt)
+    head = _git(Path(lease.target_worktree), "rev-parse", "HEAD")
+
+    with pytest.raises(RuntimeError, match="does not cover the contract verifier commands"):
+        svc.recover_verified_uncommitted_candidate(contract.task_id)
+    assert _git(Path(lease.target_worktree), "rev-parse", "HEAD") == head
 
 
 def test_candidate_commit_ignores_user_global_hooks(tmp_path, monkeypatch):
@@ -171,7 +306,7 @@ def test_candidate_commit_ignores_user_global_hooks(tmp_path, monkeypatch):
         production_ready=False,
         merge_performed=False,
         failure_reasons=[],
-        verifier_evidence=[],
+        **_verifier_binding(contract),
     )
 
     packet = CandidateCommitter(manager).create_candidate_commit(contract, lease, verified_receipt)
@@ -1038,7 +1173,7 @@ def test_recovery_surface_zero_model_calls_and_maximum_returned_status(tmp_path,
         public_claim_allowed=False,
         production_ready=False,
         failure_reasons=[],
-        verifier_evidence=(),
+        **_verifier_binding(contract),
         candidate_commit_created=False,
         merge_performed=False,
     )
@@ -1049,7 +1184,7 @@ def test_recovery_surface_zero_model_calls_and_maximum_returned_status(tmp_path,
         "status": "RETAINED_FOR_REVIEW",
         "promotion_status": "NOT_CREATED",
         "candidate_state_hash": current.candidate_state_hash,
-        "verified_receipt": receipt.__dict__,
+        "verified_receipt": asdict(receipt),
         "lease": lease.__dict__,
         "contract": contract.model_dump(mode="json"),
         "request": req,
