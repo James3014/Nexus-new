@@ -211,6 +211,6 @@ In the dry run the 12 "real" rows come from backfilled `claim_gate`/`delivery_ga
 deterministic path with no model, so they remain `deterministic_rescue`, never uplift.
 
 May 2026 reports (the 24/24 results): no `with_nexus_*.jsonl`/`summary*.json` report directory from May exists on this host
-(`find` over Nexus-new and nexus found only `.nexus/reports/bench/wave34/wave34_run_1789877609.json`, a September stub with no rows; `.nexus/` is gitignored).
+(`find` over Nexus-new and nexus found only `.nexus/reports/bench/wave34/wave34_run_1789877609.json`, a 2026-09-20 `--with-llm-mode off` run summary, not a May report, with no per-row receipts; `.nexus/` is gitignored).
 They cannot be reclassified here; by the mechanism above any run on the pinned runtime had simulated receipts for the engine-built capabilities, so their with-Nexus figures should be
 read as not capability-attributed until re-read with `--reclassify` against a surviving report.
