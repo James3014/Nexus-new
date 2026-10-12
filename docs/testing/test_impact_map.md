@@ -114,6 +114,7 @@
 | nexus_dag_workflow.py | tests/test_async_dag_workflow.py | active | medium | workflow_contract |
 | scripts/engine/nexus_cli.py | tests/test_cli_learn_mode.py, tests/test_cli_commands.py, tests/engine/test_cli_semantic_contract_audit.py, tests/engine/test_cli_artifact_gate_audit.py, tests/engine/test_bench_actions.py, tests/engine/test_code_actions.py, tests/engine/test_multi_agent_actions.py, tests/engine/test_learn_actions.py, tests/engine/test_research_actions.py, tests/engine/test_sandbox_actions.py, tests/engine/test_registry_actions.py | active | high | governance |
 | tests/engine/test_run_delivery_closeout.py | tests/engine/test_run_delivery_closeout.py | active | medium | test_contract |
+| nexus/delivery/status_report.py | tests/ops/test_nexus_status_honesty.py | active | high | delivery_contract |
 | nexus/delivery/receipt.py | tests/delivery/test_receipt.py, tests/engine/test_run_delivery_closeout.py, tests/ops/test_delivery_gate_contract.py | active | high | delivery_contract |
 | tests/test_cli_output_contract.py | tests/test_cli_output_contract.py | active | medium | test_contract |
 | scripts/engine/commands/bench_actions.py | tests/engine/test_bench_actions.py | active | medium | bench_cli_action_contract |
@@ -126,6 +127,8 @@
 | scripts/engine/commands/research_actions.py | tests/engine/test_research_actions.py | active | medium | research_cli_action_contract |
 | scripts/engine/commands/sandbox_actions.py | tests/engine/test_sandbox_actions.py | active | medium | sandbox_cli_action_and_physical_runner_contract |
 | scripts/engine/commands/stress_test.py | tests/engine/test_simulated_evaluation_honesty.py | active | medium | simulated_evaluation_honesty_contract |
+| scripts/engine/commands/swarm.py | tests/services/test_distill_swarm_honesty.py, tests/test_swarm_command_delivery.py | active | medium | swarm_tag_opt_in_contract |
+| tests/test_metabolism.py | tests/test_metabolism.py | active | medium | test_contract |
 | scripts/ui-validator.py | tests/engine/test_simulated_evaluation_honesty.py | active | medium | simulated_evaluation_honesty_contract |
 | tests/engine/test_simulated_evaluation_honesty.py | tests/engine/test_simulated_evaluation_honesty.py | active | medium | test_contract |
 | tests/engine/test_mainchain_gate_selection.py | tests/engine/test_mainchain_gate_selection.py | active | medium | test_contract |
@@ -141,7 +144,7 @@
 | scripts/ops/trusted_deletion_anchor.py | tests/ops/test_trusted_deletion_anchor.py, tests/ops/test_trusted_deletion_anchor_pr960.py, tests/ops/test_trusted_deletion_anchor_tempdir_cleanup.py | active | high | trusted_deletion_anchor_verifier_contract |
 | tests/ops/test_trusted_deletion_anchor_tempdir_cleanup.py | tests/ops/test_trusted_deletion_anchor_tempdir_cleanup.py | active | high | test_contract |
 | nexus/config/governance_manifest.json | tests/governance/test_audit_gate_honesty.py, tests/test_iron_gate_governance.py | active | high | governance_seal_manifest |
-| nexus/delivery/replay_runner.py | tests/governance/test_audit_gate_honesty.py, tests/test_iron_gate_governance.py | active | high | replay_runner_no_shell |
+| nexus/delivery/replay_runner.py | tests/governance/test_audit_gate_honesty.py, tests/governance/test_replay_runner_allowlist.py, tests/test_iron_gate_governance.py | active | high | replay_runner_allowlist |
 | nexus/governance/learning_gate.py | tests/governance/test_audit_gate_honesty.py, tests/health | active | high | learning_gate_unverified_contract |
 | nexus/infrastructure/storage_implementations.py | tests/governance/test_audit_gate_honesty.py, tests/core/test_mempalace_belief_writer_path.py | active | medium | belief_store_read_status |
 | nexus/services/belief_constraint_producer.py | tests/core/test_mempalace_belief_writer_path.py | active | medium | belief_constraint_producer_contract |
@@ -162,6 +165,9 @@
 | nexus/learning/skill_fit_followup.py | tests/learning/test_skill_fit_ablation.py::test_skill_fit_row_index_groups_baselines_catalog_and_skill_rows_for_rca_and_cost, tests/learning/test_skill_fit_ablation.py::test_skill_fit_row_level_rca_recommends_targeted_replay_for_promising_governance_skill, tests/learning/test_skill_fit_ablation.py::test_skill_fit_cost_phase_contract_separates_cost_from_delivery_claims | active | high | skill_fit_row_index_contract |
 | tests/ops/test_ci_gate_report_trust_audit.py | tests/ops/test_ci_gate_report_trust_audit.py | active | medium | test_contract |
 | tests/governance/test_audit_gate_honesty.py | tests/governance/test_audit_gate_honesty.py | active | medium | test_contract |
+| tests/governance/test_replay_runner_allowlist.py | tests/governance/test_replay_runner_allowlist.py | active | medium | test_contract |
+| tests/ops/test_stage_b_replay.py | tests/ops/test_stage_b_replay.py | active | medium | test_contract |
+| tests/test_iron_gate_governance.py | tests/test_iron_gate_governance.py | active | medium | test_contract |
 | tests/ops/test_repository_secret_hygiene.py | tests/ops/test_repository_secret_hygiene.py, tests/ops/test_select_tests.py | active | high | repository_secret_hygiene_contract |
 | tests/ops/test_select_tests.py | tests/ops/test_select_tests.py | active | medium | test_contract |
 | tests/ops/test_nexus_enforced_briefing.py | tests/ops/test_nexus_enforced_briefing.py | active | high | enforced_agent_briefing_contract |
@@ -271,3 +277,7 @@
 | tests/core/test_selector_constraints_source_trace.py | tests/core/test_selector_constraints_source_trace.py | active | medium | test_contract |
 | tests/services/test_forecast_gate_mainchain_e2e.py | tests/services/test_forecast_gate_mainchain_e2e.py | active | medium | test_contract |
 | tests/core/test_mempalace_belief_writer_path.py | tests/core/test_mempalace_belief_writer_path.py | active | medium | test_contract |
+| tests/ops/test_nexus_status_honesty.py | tests/ops/test_nexus_status_honesty.py | active | medium | test_contract |
+| scripts/ops/closeout_guard.py | tests/ops/test_closeout_guard.py, tests/ops/test_contract_snapshot_attestation.py | active | high | governance |
+| tests/ops/test_contract_snapshot_attestation.py | tests/ops/test_contract_snapshot_attestation.py | active | medium | test_contract |
+| tests/services/test_distill_swarm_honesty.py | tests/services/test_distill_swarm_honesty.py | active | medium | test_contract |

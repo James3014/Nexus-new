@@ -814,12 +814,14 @@ else:
     @nexus_group.command(name="status")
     @click.option("--json", "as_json", is_flag=True)
     def status(as_json):
-        """📊 Show system status and trust scores."""
+        """📊 Show observed repo/evidence facts (no fabricated metrics; not a health claim)."""
+        from nexus.delivery.status_report import build_status_report, render_status_report
+
+        report = build_status_report(repo_root)
         if as_json:
-            res = {"status": "OPERATIONAL", "version": "v23.7", "fleet_size": 50, "mcp": "READY"}
-            click.echo(json.dumps(res, indent=2))
+            click.echo(json.dumps(report, indent=2))
         else:
-            subprocess.run([sys.executable, str(repo_root / "scripts/ops/enterprise_audit_v22.py")], check=True)
+            click.echo(render_status_report(report))
 
 
     @nexus_group.group(name="code")
@@ -2306,24 +2308,40 @@ else:
     @nexus_group.command(name="contract-snapshot")
     @click.option("--output", "output_path", default=".nexus/reports/closeout_contract.json", show_default=True, type=click.Path())
     @click.option("--task-id", default="runtime-closeout", show_default=True)
-    @click.option("--tests-passed/--no-tests-passed", default=True, show_default=True)
-    @click.option("--linter-exit-code", default=0, show_default=True, type=int)
-    @click.option("--ci-gate-exit-code", default=0, show_default=True, type=int)
-    def contract_snapshot(output_path, task_id, tests_passed, linter_exit_code, ci_gate_exit_code):
-        """🧾 Emit a runtime closeout contract for the current HEAD."""
+    @click.option("--tests-passed/--no-tests-passed", default=None, help="Caller-supplied test result. Omitted means NOT_RUN (unknown).")
+    @click.option("--linter-exit-code", default=None, type=int, help="Caller-supplied linter exit code. Omitted means NOT_RUN (unknown).")
+    @click.option("--ci-gate-exit-code", default=None, type=int, help="Caller-supplied CI gate exit code. Omitted means NOT_RUN (unknown).")
+    @click.option(
+        "--evidence-ref",
+        default=None,
+        type=click.Path(exists=True, dir_okay=False),
+        help="Path to the receipt/log that measured the supplied results. Without it supplied values are only caller_supplied and contract-check rejects them.",
+    )
+    @click.option("--base-ref", default="origin/main", show_default=True, help="Base branch for changed_files (merge-base diff).")
+    def contract_snapshot(output_path, task_id, tests_passed, linter_exit_code, ci_gate_exit_code, evidence_ref, base_ref):
+        """🧾 Emit a runtime closeout contract for the current HEAD (never self-attests unrun results)."""
         head = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=repo_root).decode().strip()
-        changed_raw = subprocess.check_output(
-            ["git", "show", "--name-only", "--format=", "HEAD"],
-            cwd=repo_root,
-        ).decode()
-        changed_files = [line.strip() for line in changed_raw.splitlines() if line.strip()]
+        from scripts.ops.closeout_guard import build_attestation, compute_changed_files
+
+        changed_files, changed_base = compute_changed_files(repo_root, base_ref)
+        evidence_path = Path(evidence_ref).resolve() if evidence_ref else None
+
+        def _attest(value):
+            return build_attestation(value, evidence_path, repo_root)
+
         payload = {
             "task_id": task_id,
             "commit_sha": head,
-            "linter_exit_code": int(linter_exit_code),
-            "ci_gate_exit_code": int(ci_gate_exit_code),
-            "required_tests_passed": bool(tests_passed),
+            "linter_exit_code": None if linter_exit_code is None else int(linter_exit_code),
+            "ci_gate_exit_code": None if ci_gate_exit_code is None else int(ci_gate_exit_code),
+            "required_tests_passed": None if tests_passed is None else bool(tests_passed),
+            "attestation": {
+                "linter_exit_code": _attest(linter_exit_code),
+                "ci_gate_exit_code": _attest(ci_gate_exit_code),
+                "required_tests_passed": _attest(tests_passed),
+            },
             "changed_files": changed_files,
+            "changed_files_base": changed_base,
             "done_criteria": [
                 "delivery gate passed",
                 "contract check passed",
@@ -2333,7 +2351,18 @@ else:
         out = out if out.is_absolute() else (repo_root / out).resolve()
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        click.echo(json.dumps({"ok": True, "output": str(out), "commit_sha": head}, indent=2, ensure_ascii=False))
+        click.echo(
+            json.dumps(
+                {
+                    "ok": True,
+                    "output": str(out),
+                    "commit_sha": head,
+                    "attestation": {k: v["source"] for k, v in payload["attestation"].items()},
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
 
     @nexus_group.command(name="distill")
     @click.option("--report-file", default=".nexus/reports/metabolism/distill_report.json", show_default=True, type=click.Path())
@@ -2341,15 +2370,18 @@ else:
     def distill(report_file, output_json):
         """🌬️ [Metabolism] Distill session essence."""
         from nexus.services.metabolism_engine import metabolism
-        tx = metabolism.distill({"goal": "v23.7 Recovery", "done": ["Wiki Sync"], "todo": ["Command Recovery"]})
-        payload = {"status": "SUCCESS", "tx": tx}
+        payload = metabolism.distill_local()
         out_path = (repo_root / report_file).resolve()
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         if output_json:
             click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         else:
-            click.echo(f"💎 Session distilled. Arweave TX: {tx}")
+            click.echo(f"💎 Local seed written (status: {payload['status']}): {payload['seed_path']}")
+            click.echo(f"Upload: {payload['upload']} (no Arweave transaction)")
+            click.echo(f"Context source: {payload['context_source']}")
+            if payload["objective"] is None:
+                click.echo("Objective: none recorded (no mission or checkpoint found)")
             click.echo(f"Report: {out_path}")
 
     # --- v23.7 艦隊指揮 ---

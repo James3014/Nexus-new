@@ -12,6 +12,11 @@ WIKI_COMPLIANCE_DIR = REPO_ROOT / "nexus_wiki_vault" / "07_Compliance"
 REPORTS_DIR = REPO_ROOT / ".nexus" / "reports"
 KNOWLEDGE_DIR = REPO_ROOT / ".nexus" / "knowledge"
 
+def _ratio_text(value):
+    if isinstance(value, (int, float)):
+        return f"{value * 100}%"
+    return "NOT_MEASURED"
+
 def transform_enterprise_audit():
     print("🚀 Transforming Enterprise Audit report...")
     report_file = REPORTS_DIR / "enterprise_audit.json"
@@ -28,14 +33,15 @@ def transform_enterprise_audit():
     md_content = f"""# 🛡️ Compliance Status: Nexus Enterprise v22.5
 - **Timestamp**: {timestamp_str}
 - **Commit SHA**: `{data.get("commit_sha", "N/A")}`
-- **Nexus Participation Ratio**: {data.get("nexus_participation_ratio", 0.0) * 100}%
+- **Report Status**: {data.get("status", "UNKNOWN")} (semantic: {data.get("semantic_status", "UNKNOWN")}; simulated: {data.get("simulated", False)})
+- **Nexus Participation Ratio**: {_ratio_text(data.get("nexus_participation_ratio"))}
 
 ## 🔍 Core Audit Dimensions (SOC2-like)
 | Dimension | Status | Metrics |
 |-----------|--------|---------|
 """
     for res in results:
-        status_emoji = "✅ PASS" if res["status"] == "PASS" else "❌ FAIL"
+        status_emoji = {"PASS": "✅ PASS", "SIMULATED": "⚠️ SIMULATED (not measured)"}.get(res["status"], "❌ FAIL")
         metrics = ", ".join([f"{k}: {v}" for k, v in res.items() if k not in ["name", "status"]])
         md_content += f"| {res['name']} | {status_emoji} | {metrics} |\n"
 

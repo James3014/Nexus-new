@@ -1824,13 +1824,15 @@ def _exec_metabolism_resume(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
             "capability_executor",
             ["resume_after_distill"],
         )
-        transaction_id = inst.distill(
+        distill_result = inst.distill_local(
             {
                 "goal": str(task_desc or plan.task_id),
                 "done": [],
                 "errors": [],
+                "context_source": "CAPABILITY_PLAN",
             }
         )
+        transaction_id = distill_result["tx"]
         checkpoint = inst.load_checkpoint()
         checkpoint_hash = hashlib.sha256(
             json.dumps(checkpoint, sort_keys=True, default=str).encode("utf-8")
@@ -1838,7 +1840,7 @@ def _exec_metabolism_resume(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
         seed_path = workspace_root / ".nexus" / "metabolism" / "session_seed.json"
         seed_hash = hashlib.sha256(seed_path.read_bytes()).hexdigest()
         passed = bool(
-            transaction_id
+            distill_result["status"] == "LOCAL_ONLY"
             and checkpoint.get("task_id") == plan.task_id
             and seed_path.is_file()
         )
@@ -1864,7 +1866,9 @@ def _exec_metabolism_resume(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
                     "checkpoint_path": str(inst.stack_path),
                     "seed_path": str(seed_path),
                     "seed_hash": seed_hash,
-                    "transaction_id": str(transaction_id),
+                    "transaction_id": transaction_id,
+                    "upload": distill_result["upload"],
+                    "distill_status": distill_result["status"],
                     "resume_available": bool(checkpoint),
                     "pending_steps": list(checkpoint.get("pending_steps") or []),
                 },

@@ -40,8 +40,9 @@ def register(nexus_group, REPO_ROOT):
     @click.option("--verbose-prompt", is_flag=True, help="Display injected self-awareness prompt")
     @click.option("--delivery-mode", default="standard", help="Execution priority: low|standard|high")
     @click.option("--report-file", default=None, type=click.Path(path_type=Path), help="Optional completion envelope path.")
+    @click.option("--tag", "create_tag", is_flag=True, help="Opt in to git tagging of high-scoring spec packs (off by default; only tags verified runs).")
     @click.option("--output-json", is_flag=True)
-    def swarm_run(task_name, verbose_prompt, delivery_mode, report_file, output_json):
+    def swarm_run(task_name, verbose_prompt, delivery_mode, report_file, create_tag, output_json):
         """🚀 Initiate swarm mission with cognitive awareness."""
         # 🛡️ 物理化任務 ID 安全化 (防止檔名衝突與特殊字元)
         import hashlib
@@ -63,6 +64,12 @@ def register(nexus_group, REPO_ROOT):
                 print("--------------------------------------------")
             except (ImportError, AttributeError) as e:
                 print(f"⚠️  [Nexus:Swarm] Self-Awareness injection failed: {e}")
+
+        import os
+        if create_tag:
+            os.environ["NEXUS_SPEC_AUTO_TAG"] = "1"
+        else:
+            os.environ.pop("NEXUS_SPEC_AUTO_TAG", None)
 
         report_target = report_file or f".nexus/reports/swarm/{safe_task_id}.json"
 

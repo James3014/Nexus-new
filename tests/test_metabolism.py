@@ -9,9 +9,10 @@ def test_metabolism():
     
     # Test 3: Distillation Snap
     essence = {"manifest": "V25_GOVERNANCE", "step": 36}
-    tx_id = metabolism.distill(essence)
-    assert "ar_tx_distilled" in tx_id
-    print(f"✅ Metabolism Verification Passed. TX: {tx_id}")
+    seed_ref = metabolism.distill(essence)
+    assert "ar_tx_distilled" not in seed_ref  # no fake transaction id
+    assert seed_ref.endswith("session_seed.json")
+    print(f"✅ Metabolism Verification Passed. Seed: {seed_ref}")
 
 if __name__ == "__main__":
     test_metabolism()

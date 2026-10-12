@@ -46,9 +46,13 @@ class MemPalace:
             return []
 
     def trigger_arweave_distillation(self, data: Dict[str, Any]) -> str:
-        """🔄 v25.5 Infinite Context Loop: 模擬 Arweave 永久化。"""
-        mock_tx_id = f"ARW-{os.urandom(8).hex()}"
-        logger.info(f"🌐 [Arweave] Distillation Complete. TX: {mock_tx_id}")
+        """SIMULATED Arweave permanence: nothing is uploaded.
+
+        The returned id is a random placeholder prefixed ``SIMULATED-`` so it can
+        never be mistaken for a real transaction.
+        """
+        mock_tx_id = f"SIMULATED-ARW-{os.urandom(8).hex()}"
+        logger.info(f"[Arweave] SIMULATED distillation (NOT uploaded). Placeholder id: {mock_tx_id}")
         return mock_tx_id
 
     def sync(self) -> Dict[str, Any]:
