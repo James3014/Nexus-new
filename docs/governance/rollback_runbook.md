@@ -25,6 +25,11 @@ nexus_self_hosted_dispose_candidate
 nexus_self_hosted_cancel_task
 ```
 
+The legacy `nexus_self_hosted_approve_promotion` MCP tool and the CLI `self-hosted
+approve` command carry no approval grant, so they fail closed with
+`APPROVAL_GRANT_REQUIRED`. Approve a candidate through the gateway approve path
+(`candidate_approve`) with a bound approval grant.
+
 Before Target cleanup, verify that the candidate commit, candidate tree,
 candidate packet, verified receipt, and exact durable candidate ref all
 resolve. Cleanup must fail closed for an active process, an unprotected
