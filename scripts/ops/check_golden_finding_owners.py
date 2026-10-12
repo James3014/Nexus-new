@@ -175,7 +175,7 @@ def build_report(corpus_path: Path, fetcher: Fetcher = gh_fetcher) -> dict[str, 
 
 
 def main(argv: list[str] | None = None, *, fetcher: Fetcher = gh_fetcher) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").partition("\n")[0])
     parser.add_argument("--corpus", type=Path, default=ROOT / CORPUS_PATH)
     parser.add_argument(
         "--strict",

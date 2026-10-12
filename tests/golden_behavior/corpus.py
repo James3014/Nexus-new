@@ -1200,13 +1200,12 @@ CASES: tuple[GoldenCase, ...] = (
     ),
     _c(
         "GB-095",
-        "Standing-grant CAS has one successor",
+        "Standing-grant CAS rejects stale writers and replays once",
         "invariant",
         "recovery",
-        "Concurrent standing-grant CAS writers yield exactly one successor, stale writers cannot revive or overwrite, and crash replay after CAS completes without a duplicate CAS.",
+        "A stale standing-grant CAS writer cannot revive or overwrite the current grant, and crash replay after a completed CAS succeeds without a duplicate CAS.",
         ("docs/agents/TASK_EXECUTION_CONTRACT.md#Governed discovery and authority",),
         (
-            "tests/nexus/orchestrator/test_standing_grant_store.py::test_interprocess_cas_race_allows_exactly_one_successor",
             "tests/nexus/orchestrator/test_standing_grant_store.py::test_stale_writer_cas_rejects_revive_overwrite",
             "tests/nexus/orchestrator/test_standing_grant_store.py::test_switch_crash_after_cas_replay_succeeds_without_duplicate_cas",
             "tests/nexus/orchestrator/test_standing_grant_store.py::test_restore_crash_after_cas_replay_succeeds_without_duplicate_cas",
