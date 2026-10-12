@@ -1229,10 +1229,14 @@ CASES: tuple[GoldenCase, ...] = (
         "Authority-text witnesses track AGENTS.md",
         "regression",
         "stale_state",
-        "The bootstrap authority-text tests that witness the operating-mode fail-closed and Project Entry rules must pass against the current AGENTS.md and MUSE_PROTO.md.",
+        "The bootstrap authority-text tests pin the operating-mode fail-closed and Project Entry rules to the current AGENTS.md wording, and the root MUSE_PROTO.md stays a response-only overlay with no stale startup authority.",
         ("AGENTS.md#Authority bootstrap",),
-        status="finding",
-        finding_id="GBF-006",
+        (
+            "tests/ops/test_bootstrap_authority_files.py::test_bootstrap_files_use_current_worktree_authority",
+            "tests/ops/test_bootstrap_authority_files.py::test_current_operating_mode_bootstrap_is_direct_first_and_fail_closed",
+            "tests/ops/test_bootstrap_authority_files.py::test_first_issue_bound_action_requires_project_entry_before_governed_effects",
+            "tests/ops/test_bootstrap_context_budget.py::test_muse_remains_response_overlay_only",
+        ),
     ),
     _c(
         "GB-098",
@@ -1285,7 +1289,6 @@ FINDINGS = {
     "GBF-003": "Issue #29 states same-task Online consumption of exact Local evidence remains unproven.",
     "GBF-004": "Owner Issue #31 was closed as completed on 2026-08-16 (its former blocker #7 closed on 2026-08-13), but as of 2026-10-12 the corpus still has no revision-bound executable probe for canonical retained-state compaction/resume, so this case stays a finding pending re-adjudication under #117.",
     "GBF-005": "Issue #40 proved the World A final-response enforcement gap; READY Issue #49 remains blocked on #29 before bounded implementation.",
-    "GBF-006": "As of 2026-10-12, after the AGENTS.md wording drift was reconciled in tests/ops/test_bootstrap_authority_files.py (assertions repinned to current AGENTS.md / docs/agents/TASK_EXECUTION_CONTRACT.md wording), test_bootstrap_files_use_current_worktree_authority still fails on two MUSE_PROTO.md assertions: the FORBIDDEN_TOKENS check (MUSE_PROTO.md now resolves to nexus_wiki_vault/01_System/MUSE_PROTO.md, whose recovery sequence still mandates `view_file ./STATE.yaml` and `nexus-sync [session_id] poll 5`) and the missing canonical overlay line containing 'MUSE_PROTO.md` is only'; restoring a canonical root overlay is an open Owner decision from #1725 / PR #1731.",
     "GBF-007": "As of 2026-10-12, nexus_task_card_create and nexus_owner_standing_grant_issue in nexus/orchestrator/unified_mcp_gateway.py neither require nor check a prior nexus_project_entry result and project_binding_hash has no consumer, so the #842 Project Entry precondition is agent instruction only (owner #1750 defers project-entry binding to Phase 2).",
     "GBF-008": "As of 2026-10-12, no runtime code parses or validates docs/governance/current_operating_mode.yaml (nexus/orchestrator/canonical_core_transport.py only hashes its bytes into provenance), so the missing/invalid/ambiguous fail-closed rule is unenforced.",
 }
