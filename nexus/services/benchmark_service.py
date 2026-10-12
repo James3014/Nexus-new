@@ -10,16 +10,18 @@ original lives on branch ``archive/2026-10-12-first-batch``; see
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import click
+
 ARCHIVED_REASON = "archived_fake_benchmark_2026-10-12"
 
 
-class ArchivedBenchmarkError(RuntimeError):
-    """Raised instead of returning synthetic benchmark numbers."""
+class ArchivedBenchmarkError(click.ClickException):
+    """Raised instead of returning synthetic benchmark numbers (CLI exit code 1)."""
 
     reason = ARCHIVED_REASON
 
     def __init__(self) -> None:
-        super().__init__(ARCHIVED_REASON)
+        super().__init__(f"BLOCKED: {ARCHIVED_REASON} (simulated benchmark archived 2026-10-12)")
 
 
 class BenchmarkService:

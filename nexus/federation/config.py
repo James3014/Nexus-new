@@ -3,15 +3,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import os
 import json
 
-import warnings as _archived_warnings
-
-_archived_warnings.warn(
-    "ARCHIVED 2026-10-12 (#1850): stub federation package; see ARCHIVED_2026-10-12.md. "
-    "Scheduled for deletion; do not import.",
-    DeprecationWarning,
-    stacklevel=2,
-)
-
 FEDERATION_CONFIG = "workspaces/federation_config.json"
 
 def get_federation_config(project_root: Optional[Path] = None) -> Dict[str, List[str]]:

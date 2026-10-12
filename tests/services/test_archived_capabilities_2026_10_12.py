@@ -35,14 +35,9 @@ ARCHIVED_MODULES = {
     "nexus.learning.federated_rag": "nexus/learning/federated_rag.py",
     "nexus.learning.lewm_predictor": "nexus/learning/lewm_predictor.py",
     "nexus.engine.federation": "nexus/engine/federation.py",
-    "nexus.federation": "nexus/federation/__init__.py",
-    "nexus.federation.config": "nexus/federation/config.py",
     "nexus.federation.fleet_manager": "nexus/federation/fleet_manager.py",
-    "nexus.federation.node_launcher": "nexus/federation/node_launcher.py",
-    "nexus.federation.node_registry": "nexus/federation/node_registry.py",
     "nexus.core.self_evolve_engine": "nexus/core/self_evolve_engine.py",
     "nexus.services.aos_oracle": "nexus/services/aos_oracle.py",
-    "nexus.oracle.promote": "nexus/oracle/promote.py",
     "nexus.engine.red_team_audit": "nexus/engine/red_team_audit.py",
 }
 
@@ -129,7 +124,10 @@ def _imported_modules(path: Path) -> set[str]:
 
 def test_no_live_code_imports_archived_modules():
     archived_files = {ROOT / rel for rel in ARCHIVED_MODULES.values()}
-    archived_files |= {ROOT / "nexus/federation" / p for p in ("__init__.py",)}
+    archived_files |= {
+        ROOT / "nexus/federation" / name
+        for name in ("__init__.py", "config.py", "node_launcher.py", "node_registry.py")
+    } | {ROOT / "nexus/oracle/promote.py"}
     archived_files |= {
         ROOT / "scripts/ops/federated_engine_v09.py",
         ROOT / "scripts/ops/evolution_engine_v08.py",
@@ -137,6 +135,11 @@ def test_no_live_code_imports_archived_modules():
         ROOT / "scripts/engine/commands/ui_explorer.py",
     }
     archived = set(ARCHIVED_MODULES) | {
+        "nexus.federation",
+        "nexus.federation.config",
+        "nexus.federation.node_launcher",
+        "nexus.federation.node_registry",
+        "nexus.oracle.promote",
         "scripts.ops.federated_engine_v09",
         "scripts.ops.evolution_engine_v08",
         "scripts.engine.commands.stress_test",
@@ -160,3 +163,14 @@ def test_lewm_toggle_and_module_are_unreachable_from_engine():
     assert predictor_toggle.env_name(predictor_toggle.LATENT_PREDICTOR) == "NEXUS_LATENT_PREDICTOR"
     with pytest.raises(KeyError):
         predictor_toggle.env_name("lewm_predictor")
+
+
+def test_nexus_benchmark_cli_fails_closed():
+    from click.testing import CliRunner
+
+    from nexus.cli.commands.core import benchmark
+
+    result = CliRunner().invoke(benchmark, ["--tasks", "1"])
+    assert result.exit_code == 1
+    assert "archived_fake_benchmark_2026-10-12" in result.output
+    assert "Complete" not in result.output
