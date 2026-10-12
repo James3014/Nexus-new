@@ -2,7 +2,7 @@
   "schema": "nexus.wiki.agent-index.v1",
   "authority": "derived_non_authoritative",
   "authority_manifest": "99_Schema/WIKI_AUTHORITY_MANIFEST.yaml",
-  "source_fingerprint": "b33309b2c46eb0a88747e906959a32eddb19961dd587be63748ead75d097c23c",
+  "source_fingerprint": "45f93b34450a69e08281f827ac6fffaf582c53a0460644e3fec18c4bfdf50cfd",
   "included_page_count": 251,
   "excluded_page_count": 38,
   "canonical_page_count": 12,
@@ -10593,7 +10593,7 @@
       "classification": "active",
       "authority": "",
       "owner": "agent",
-      "confidence": "high",
+      "confidence": "low",
       "source_of_truth": "07_Compliance/Compliance_Dashboard.md",
       "aliases": [],
       "tags": [
@@ -10604,7 +10604,7 @@
       "is_canonical": false,
       "canonical_key": "",
       "one_sentence_summary": "本頁彙整最新合規交付狀態與關鍵門禁結果，作為治理決策的即時快照。 [Source: 07_Compliance/Compliance_Dashboard.md]",
-      "content_sha256": "a4e989d17b030c045812d2635afc6f603f72866134e6506db99adcdf7b5fa605",
+      "content_sha256": "8eed06b445a21b25226e2082212dc63686b0f3cb2e5280ff26c74ab6456acc10",
       "outgoing_links": [
         [
           "canonical:system_overview",
