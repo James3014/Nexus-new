@@ -1,0 +1,5 @@
+{
+  "formal_judge_votes": [{"judge": "wiring-judge-1", "verdict": "PASS", "score": 0.9}],
+  "formal_verification": [{"check": "pytest", "status": "PASS"}],
+  "formal_route_receipts": [{"capability": "pregate", "evidence_present": true, "gate_passed": true}]
+}
