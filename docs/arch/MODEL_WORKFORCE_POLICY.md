@@ -9,7 +9,7 @@
 **Machine source:** `nexus/config/model_workforce.yaml`
 
 **Benchmark matrix:** `nexus/config/model_three_arm_matrix.yaml`
-**Last verified:** 2026-08-17
+**Last verified:** 2026-10-12
 
 This file defines workforce eligibility: which model workers Nexus may admit,
 the context each worker may receive, its autonomy ceiling, and the conditions
@@ -322,3 +322,15 @@ The Owner-approved MiMo cumulative calibration / governance writeback amendment 
 ## 12. Pending v2 collaboration proposal
 
 `NEXUS_MULTI_MODEL_COLLABORATION_STANDARD_v2.0_20260728` remains `PROPOSED_FOR_OWNER_APPROVAL`. Its proposed changes—including Ling at read-only L0—are recorded as review inputs, not active authority. This policy and `nexus/config/model_workforce.yaml` remain current until James explicitly approves a replacement or amendment.
+
+## 13. Dated amendment — 2026-10-12 (M5 inference host alignment)
+
+All local model inference runs on the M5 host (64 GB); the 16 GB M4 no longer hosts models. The Ollama-compatible gateway (tunnel `127.0.0.1:11434`) and raw Ollama (`:11435`) serve exactly `qwen2.5-coder:14b-instruct-q3_K_M`, `qwen2.5-coder:7b`, `qwen2.5-coder:7b-instruct`, `qwen3.5:9b` and `nomic-embed-text:latest`; the gateway additionally maps `incoai/Qwen3.6-35B-A3B-Splash` to Splash on M5. `nexus/config/model_workforce.yaml` was aligned accordingly (`last_verified` 2026-10-12; `benchmark_snapshot` unchanged):
+
+- **Added `local_splash_qwen36`** (`incoai/Qwen3.6-35B-A3B-Splash`): `LOCAL_CONDITIONAL`, L1, `bounded_code_candidate` and `bounded_reasoning_candidate`, same requirements and forbidden actions as `local_coder_7b`. Full-agent autonomy stays NOT_ADMITTED per lineage `qwen-3.6-35b-a3b` (CONDITIONAL/WATCH). Evidence: lineage waves in #1412 and 72 bounded local-heal repair attempts at about 50% calibrated solve (nexus-learning memory A/B rounds 8-9).
+- **Added `local_splash_qwen38_27b`** (`incoai/Qwen3.8-27B-Splash`): `EXPERIMENT_ONLY`, L0. Installed on M5 but not served and not mapped by the gateway; lineage config `qwen3.8-27b-splash-q4-opencode-64k-wave3` shows tool-loop smoke PASS but full-agent T01 `STACK_UNQUALIFIED`.
+- **Added `agy_flash_38`** (Gemini 3.8 Flash via agy, `gemini-3.8-flash-medium`): `REGISTERED_CONDITIONAL`, roles and autonomy copied from `agy_flash_37_medium`, not the default route. The model id is taken from the dsh-agy-adapter model catalog and is not yet attested by a live agy run.
+- **`local_advisor_3b`, `local_deepseek67b`, `local_qwythos9b`** are not present on M5 Ollama: state `INSTALLED_NOT_CONNECTED`, reason `not_present_on_m5_ollama_2026-10-12`, roles kept for history. `routing.local_first` entries naming `local_advisor_3b` are unchanged and need a separate routing decision.
+- **`local_qwen14b`** stays `DISABLED_RESOURCE_RISK`; the reason is now `no_semantic_uplift_over_7b; resource note superseded by m5_64gb_host_2026-10-12` (the 16 GB-host latency rationale is stale, the no-uplift finding stands).
+
+The planner source copy of the YAML is `src/nexus_runtime/planning/config/model_workforce.yaml` in nexus-runtime and must stay byte-identical; this repository's copy aligns with the runtime package after the next runtime pin bump.

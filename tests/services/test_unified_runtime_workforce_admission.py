@@ -966,8 +966,8 @@ def test_escalate_stops_before_all_downstream_invocations(tmp_path: Path) -> Non
         _demands(
             _demand(
                 "local",
-                role="compact_diagnosis",
-                autonomy="L0.5",
+                role="bounded_reasoning_candidate",
+                autonomy="L1",
                 context="nexus_full",
                 mutation=False,
             )
@@ -999,8 +999,8 @@ def test_escalate_stops_before_all_downstream_invocations(tmp_path: Path) -> Non
                 "workforce_admission_enabled": True,
                 "workforce_bindings": {
                     "local": {
-                        "worker_id": "local_advisor_3b",
-                        "controls": ["fixed_schema", "compact_context", "deterministic_consumer"],
+                        "worker_id": "local_qwen3_8b",
+                        "controls": ["bounded_context", "parser", "focused_tests", "external_verifier"],
                     }
                 },
             },

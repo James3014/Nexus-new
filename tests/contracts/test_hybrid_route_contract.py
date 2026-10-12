@@ -331,3 +331,17 @@ def test_local_only_executed_missing_fields_fails() -> None:
             applied_patch_hash="",
             selected_candidate_hash_matches_applied=True,
         )
+
+
+@pytest.fixture(autouse=True)
+def _pre_m5_advisor_policy(request, monkeypatch, tmp_path) -> None:
+    # These witnesses delegate to the GB019 advisory tests, which need the
+    # pre-M5 advisor policy (see apply_pre_m5_advisor_policy).
+    if request.node.originalname in {
+        "test_advisory_guard_cannot_block_delivery_yet",
+        "test_gb019_advisory_failure_does_not_block_delivery_or_claim",
+        "test_gb019_blocking_override_fails_closed",
+    }:
+        from tests.services.test_unified_runtime import apply_pre_m5_advisor_policy
+
+        apply_pre_m5_advisor_policy(monkeypatch, tmp_path)
