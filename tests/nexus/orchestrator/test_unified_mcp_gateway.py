@@ -2019,7 +2019,10 @@ def test_assist_submit_is_durable_and_task_wait_reads_result(monkeypatch, tmp_pa
     assert result["artifacts"]["stdout"]
 
 
-@pytest.mark.parametrize("patch_value", ["", None, "I cannot help with that."])
+@pytest.mark.parametrize(
+    "patch_value",
+    ["", None, "I cannot help with that.", "   \n\t", ["diff --git a/a b/a"], {"diff": "x"}, 0, False],
+)
 def test_assist_degenerate_patch_fails_closed_with_retry_required(monkeypatch, tmp_path, patch_value):
     class FakePopen:
         pid = 54901
@@ -2047,6 +2050,31 @@ def test_assist_degenerate_patch_fails_closed_with_retry_required(monkeypatch, t
     assert response["status"] == "FAILED"
     assert response["retry_required"] is True
     assert response["next_action"] == "nexus_task_retry"
+
+
+def test_assist_real_unified_diff_completes(monkeypatch, tmp_path):
+    patch = "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-a\n+b\n"
+
+    class FakePopen:
+        pid = 54902
+
+        def __init__(self, command, *, stdout, stderr, **kwargs):
+            stdout.write(json.dumps({"type": "run_result", "text": json.dumps({"patch": patch})}) + "\n")
+            stdout.flush()
+
+        def poll(self):
+            return 0
+
+    service = FakeService()
+    service.state_dir = tmp_path
+    monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", FakePopen)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    gateway = UnifiedMCPGateway(service=service)
+    gateway._assist_submit({"task_id": "honest-1", "what": "Suggest a patch", "why": "x", "allowed_files": ["README.md"], "model": "glm-5.2"})
+    job = gateway._assist_refresh("honest-1")
+    assert job["status"] == "COMPLETED"
+    assert job["retry_required"] is False
 
 
 def test_assist_patch_substantive_check_and_schema_min_length():

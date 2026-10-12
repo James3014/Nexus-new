@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from pathlib import Path
 
 import yaml
 
-WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
+ROOT = Path(__file__).resolve().parents[2]
+WORKFLOWS = ROOT / ".github" / "workflows"
 
 
 def _steps(workflow: str) -> list[dict]:
@@ -46,3 +50,84 @@ def test_bandit_and_pyright_impact_cover_runtime_code() -> None:
         assert "'nexus/**/*.py'" in text, workflow
         assert "'scripts/ops/**/*.py'" in text, workflow
         assert "-- 'nexus/core/*.py' 'nexus/core/**/*.py'" not in text, workflow
+
+
+def _git_in(repo: Path, *args: str) -> str:
+    return subprocess.check_output(["git", "-C", str(repo), *args], text=True).strip()
+
+
+def _init_scan_repo(repo: Path) -> None:
+    _git_in(repo, "init", "-q", "-b", "main")
+    _git_in(repo, "config", "user.email", "t@t")
+    _git_in(repo, "config", "user.name", "t")
+
+
+def test_secret_audit_step_blocks_pat_even_when_candidate_patches_scanner(tmp_path) -> None:
+    """The base-revision scanner still blocks a token when the candidate patches its own copy."""
+    scanner_src = (ROOT / "scripts/ops/git_history_secret_scan.py").read_text(encoding="utf-8")
+    repo = tmp_path / "r"
+    (repo / "scripts/ops").mkdir(parents=True)
+    _init_scan_repo(repo)
+    (repo / "scripts/ops/git_history_secret_scan.py").write_text(scanner_src)
+    _git_in(repo, "add", "-A")
+    _git_in(repo, "commit", "-qm", "base")
+    base = _git_in(repo, "rev-parse", "HEAD")
+    (repo / "leak.txt").write_text("tok=ghp_" + "Z" * 36 + "\n")
+    (repo / "scripts/ops/git_history_secret_scan.py").write_text(
+        scanner_src.replace(
+            "blocking = [item for item in ordered if item.blocking]", "blocking = []"
+        )
+    )
+    _git_in(repo, "add", "-A")
+    _git_in(repo, "commit", "-qm", "head")
+    _git_in(repo, "remote", "add", "origin", str(repo))
+    _git_in(repo, "update-ref", "refs/remotes/origin/pr", "HEAD")
+    trusted = tmp_path / "trusted_scan.py"
+    trusted.write_text(
+        _git_in(repo, "show", f"{base}:scripts/ops/git_history_secret_scan.py") + "\n"
+    )
+    out = tmp_path / "scan.json"
+    subprocess.run(
+        [sys.executable, str(trusted), "--repo", str(repo), "--output", str(out)],
+        capture_output=True,
+    )
+    payload = json.loads(out.read_text())
+    assert payload["status"] != "PASS" and payload["blocking_finding_count"] >= 1
+    # The candidate's own patched copy would have passed, so the check is sensitive.
+    subprocess.run(
+        [
+            sys.executable,
+            str(repo / "scripts/ops/git_history_secret_scan.py"),
+            "--repo",
+            str(repo),
+            "--output",
+            str(out),
+        ],
+        capture_output=True,
+    )
+    assert json.loads(out.read_text())["blocking_finding_count"] == 0
+
+
+def test_scanner_blocks_anthropic_key_in_history(tmp_path) -> None:
+    repo = tmp_path / "r"
+    repo.mkdir()
+    _init_scan_repo(repo)
+    (repo / "cfg.txt").write_text("ANTHROPIC=sk-" + "ant-api03-" + "Q" * 90 + "AA\n")
+    _git_in(repo, "add", "-A")
+    _git_in(repo, "commit", "-qm", "k")
+    _git_in(repo, "remote", "add", "origin", str(repo))
+    _git_in(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    out = tmp_path / "scan.json"
+    subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/ops/git_history_secret_scan.py"),
+            "--repo",
+            str(repo),
+            "--output",
+            str(out),
+        ],
+        capture_output=True,
+    )
+    payload = json.loads(out.read_text())
+    assert payload["status"] != "PASS" and payload["blocking_finding_count"] >= 1

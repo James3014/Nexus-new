@@ -2206,3 +2206,21 @@ def test_redaction_covers_common_secret_formats(secret):
     body = secret.split('"')[-2] if secret.startswith("{") else secret
     assert body[-20:] not in out
     assert "before" in out and "after" in out  # benign text preserved
+
+
+@pytest.mark.parametrize(
+    "secret",
+    [
+        "sk-ant-admin01-" + "A" * 40,
+        "sk-svcacct-" + "B" * 40,
+        "ASIA" + "F" * 16,
+        "ghs_" + "E" * 36,
+        "xo" + "xb-1234-5678-" + "L" * 24,
+        '{"refresh_token": "1//0g' + "G" * 40 + '"}',
+        '{"client_secret": "GOCSPX-' + "H" * 28 + '"}',
+        '{ "access_token" : "' + "J" * 30 + '" }',
+    ],
+)
+def test_redaction_covers_provider_family_variants(secret):
+    redacted = _redact_value({"stdout": f"before\n{secret}\nafter"})["stdout"]
+    assert secret.rstrip('"} ')[-12:] not in redacted

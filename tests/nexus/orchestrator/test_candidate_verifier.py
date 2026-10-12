@@ -800,3 +800,17 @@ def test_verifier_cannot_reach_shell_via_forwarder(tmp_path, command):
 def test_verifier_forwarder_error_message_preserved(tmp_path, command):
     with pytest.raises(ValueError, match="shell and shell-forwarding executables are not allowed"):
         CandidateVerifier._build_verifier_request(command, str(tmp_path))
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "/bin/bash -c 'touch PWNED'",
+        "dash -c 'touch PWNED'",
+        "nohup sh -c 'touch PWNED'",
+        "BASH -c 'touch PWNED'",
+    ],
+)
+def test_verifier_rejects_additional_shell_spellings(tmp_path, command):
+    with pytest.raises(ValueError):
+        CandidateVerifier._build_verifier_request(command, str(tmp_path))
