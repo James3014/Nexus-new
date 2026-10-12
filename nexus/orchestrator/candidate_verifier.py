@@ -18,6 +18,7 @@ from nexus.executors.cli_worker import (
     bounded_environment_receipt,
     run_cli_worker,
 )
+from nexus.executors.exec_policy import is_forwarder_executable
 from nexus.orchestrator.code_integrity_verifier import run_code_integrity_v1
 from nexus.orchestrator.repository_contract_gate import (
     RepositoryContractFinding,
@@ -98,10 +99,6 @@ class VerifiedCandidateReceipt:
     core_verification_result_hash: str = ""
 
 
-_VERIFIER_SHELL_EXECUTABLE_RE = re.compile(
-    r"(sh|bash|zsh|dash|ash|ksh|csh|tcsh|fish|busybox|env|xargs|nohup|setsid|timeout|command|exec)"
-    r"(\.exe)?"
-)
 _VERIFIER_PYTHON_EXECUTABLE_RE = re.compile(r"python[0-9.]*(\.exe)?")
 
 
@@ -191,7 +188,7 @@ class CandidateVerifier:
         ):
             raise ValueError("verifier command must contain a safe executable")
         executable_path = Path(executable)
-        if _VERIFIER_SHELL_EXECUTABLE_RE.fullmatch(executable_path.name.lower()):
+        if is_forwarder_executable(executable):
             raise ValueError("shell and shell-forwarding executables are not allowed as verifiers")
         if ".." in executable_path.parts:
             raise ValueError("verifier executable path traversal is not allowed")

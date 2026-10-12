@@ -17,7 +17,11 @@ Covers:
 from __future__ import annotations
 
 import hashlib
+import os
+import shutil
+import subprocess
 import sys
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -226,10 +230,12 @@ def test_run_cli_worker_also_fails_closed_on_gh_token_env(tmp_path):
 
 
 def test_shell_wrapper_cannot_bypass_publication_boundary(tmp_path):
-    with pytest.raises(ValueError, match="gh"):
+    # A shell is a forwarder and is rejected outright (#1752); the old test
+    # relied on the denylist scanning every token of a non-gh executable.
+    with pytest.raises(ValueError, match="forwarder"):
         CliWorkerRequest(
-            executable=sys.executable,
-            argv=("-c", "gh", "pr", "create", "--title", "x", "--repo", "acme/demo"),
+            executable="sh",
+            argv=("-c", "gh pr create --title x --repo acme/demo"),
             cwd=str(tmp_path),
         )
 
@@ -756,4 +762,200 @@ def test_timeout_does_not_block_on_escaped_descendant(tmp_path: Path) -> None:
     )
     assert time.monotonic() - started < 6.0
     assert res.status is CliWorkerStatus.TIMED_OUT
-    assert res.process_group_killed is False  # escape is not a clean kill
+    # The tagged-descendant sweep now kills the escaped child, so the kill is
+    # clean and the side effect never lands (#1752).
+    assert res.process_group_killed is True
+    time.sleep(1.0)
+    assert not marker.exists()
+
+
+# ---------------------------------------------------------------------------
+# #1752 exec policy: bypass families rejected at construction
+# ---------------------------------------------------------------------------
+
+
+def _git_exec_path() -> str:
+    return subprocess.run(
+        ["git", "--exec-path"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+@pytest.mark.parametrize(
+    "executable,argv",
+    [
+        ("git", ("tag", "v1")),
+        ("git", ("--work-tree", ".", "push")),
+        ("git", ("--namespace=x", "push")),
+        ("git", ("-C.", "push")),
+        ("git", ("-C", ".", "push")),
+        ("gh", ("auth", "token")),
+        ("gh", ("variable", "set", "X")),
+        ("gh", ("repo", "edit", "--visibility", "public")),
+        ("gh", ("--repo=o/r", "pr", "merge", "1")),
+        ("git", ("-c", "alias.p=push", "p", "origin", "HEAD:main")),
+        ("git", ("-c", "alias.ur=update-ref", "ur", "refs/heads/main", "deadbeef")),
+        ("git", ("-c", "alias.x=!touch PWNED", "x")),
+        ("git", ("send-pack", "origin", "HEAD:main")),
+        ("git", ("branch", "-f", "main", "deadbeef")),
+        ("git", ("cherry-pick", "deadbeef")),
+        ("git", ("am", "x.patch")),
+        ("git", ("revert", "deadbeef")),
+        ("env", ("git", "-C", ".", "push", "origin", "HEAD:main")),
+        ("nice", ("sh", "-c", "touch PWNED")),
+        ("sh", ("-c", "git push")),
+        ("find", (".", "-maxdepth", "0", "-exec", "sh", "-c", "touch PWNED", "{}", "+")),
+        ("gh", ("run", "rerun", "1")),
+        ("gh", ("label", "delete", "x")),
+        ("gh", ("gist", "create", "f")),
+        ("gh", ("cache", "delete", "x")),
+        ("gh", ("alias", "set", "a", "b")),
+    ],
+)
+def test_exec_policy_bypass_family_rejected_at_construction(tmp_path, executable, argv):
+    with pytest.raises(ValueError):
+        CliWorkerRequest(executable=executable, argv=argv, cwd=str(tmp_path))
+
+
+@pytest.mark.skipif(shutil.which("time") is None, reason="/usr/bin/time unavailable")
+def test_exec_policy_rejects_usr_bin_time_shell(tmp_path):
+    with pytest.raises(ValueError, match="forwarder"):
+        CliWorkerRequest(
+            executable=shutil.which("time"), argv=("sh", "-c", "touch PWNED"), cwd=str(tmp_path)
+        )
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git unavailable")
+@pytest.mark.parametrize("kind", ["dashed", "renamed"])
+def test_exec_policy_git_identity_by_binary_not_basename(tmp_path, kind):
+    if kind == "dashed":
+        exe = os.path.join(_git_exec_path(), "git-push")
+        argv = ("origin", "HEAD:main")
+    else:
+        exe = str(tmp_path / "xgit")
+        os.symlink(shutil.which("git"), exe)
+        argv = ("push", "origin", "HEAD:main")
+    if not os.path.exists(exe):
+        pytest.skip("no dashed builtin on this git")
+    with pytest.raises(ValueError):
+        CliWorkerRequest(executable=exe, argv=argv, cwd=str(tmp_path))
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git unavailable")
+def test_exec_policy_git_alias_push_never_reaches_bare_remote(tmp_path):
+    def g(*a, cwd=None):
+        return subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True, text=True)
+
+    bare, wt = tmp_path / "bare.git", tmp_path / "wt"
+    g("init", "--bare", "-b", "main", str(bare))
+    g("clone", str(bare), str(wt))
+    g("-c", "user.email=a@b", "-c", "user.name=a", "commit", "--allow-empty", "-m", "c", cwd=wt)
+    with pytest.raises(ValueError):
+        run_cli_worker(
+            CliWorkerRequest(
+                executable="git",
+                argv=("-c", "alias.p=push", "p", "origin", "HEAD:main"),
+                cwd=str(wt),
+            )
+        )
+    refs = g("for-each-ref", cwd=bare).stdout
+    assert "refs/heads/main" not in refs
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git unavailable")
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("status", "--short"),
+        ("-C", ".", "diff", "--stat"),
+        ("--no-pager", "log", "-1"),
+        ("-C.", "rev-parse", "HEAD"),
+        ("add", "-A"),
+        ("restore", "--staged", "x"),
+        ("version",),
+    ],
+)
+def test_exec_policy_allowed_git_forms_construct(tmp_path, argv):
+    CliWorkerRequest(executable="git", argv=argv, cwd=str(tmp_path))
+
+
+@pytest.mark.skipif(shutil.which("gh") is None, reason="gh unavailable")
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("pr", "view", "1"),
+        ("--repo", "o/r", "pr", "list"),
+        ("-R", "o/r", "issue", "view", "3"),
+        ("--repo=o/r", "run", "view", "9"),
+        ("repo", "view"),
+        ("search", "issues", "x"),
+        ("status",),
+    ],
+)
+def test_exec_policy_allowed_gh_forms_construct(tmp_path, argv):
+    CliWorkerRequest(executable="gh", argv=argv, cwd=str(tmp_path))
+
+
+# --- timeout honesty ----------------------------------------------------------
+_ESCAPE = (
+    "import os,time\n"
+    "if os.fork()==0:\n"
+    "    os.setsid(){detach}; time.sleep(3); open({marker!r},'w').write('x'); os._exit(0)\n"
+    "time.sleep(60)\n"
+)
+_DETACH = ";fd=os.open(os.devnull,os.O_RDWR);[os.dup2(fd,i) for i in (0,1,2)]"
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="fork required")
+@pytest.mark.parametrize("detach", ["", _DETACH])
+def test_timeout_kills_setsid_descendant_and_receipt_is_clean(tmp_path, detach):
+    marker = tmp_path / "m"
+    work = tmp_path / "w"
+    work.mkdir()
+    code = _ESCAPE.format(detach=detach, marker=str(marker))
+    res = run_cli_worker(
+        CliWorkerRequest(
+            executable=sys.executable, argv=("-c", code), cwd=str(work), timeout_seconds=1.0
+        )
+    )
+    time.sleep(4)
+    assert res.status is CliWorkerStatus.TIMED_OUT
+    assert not marker.exists()
+    assert res.process_group_killed is True
+
+
+def test_timeout_receipt_not_clean_when_survivor_remains(tmp_path, monkeypatch):
+    import nexus.executors.cli_worker as module
+
+    monkeypatch.setattr(module, "_sweep_tagged_processes", lambda tag: False)
+    res = run_cli_worker(
+        _python_request(tmp_path, "import time; time.sleep(30)", timeout_seconds=0.2)
+    )
+    assert res.status is CliWorkerStatus.TIMED_OUT
+    assert res.process_group_killed is False
+
+
+def test_timeout_sweep_exception_is_not_clean(monkeypatch):
+    import nexus.executors.cli_worker as module
+
+    def boom(tag):
+        raise OSError("no ps")
+
+    monkeypatch.setattr(module, "_tagged_pids", boom)
+    assert module._sweep_tagged_processes("x" * 32) is False
+
+
+def test_completed_run_does_not_sweep(tmp_path, monkeypatch):
+    import nexus.executors.cli_worker as module
+
+    def fail(tag):
+        raise AssertionError("sweep must not run on normal completion")
+
+    monkeypatch.setattr(module, "_sweep_tagged_processes", fail)
+    res = run_cli_worker(_python_request(tmp_path, "print('ok')"))
+    assert res.status is CliWorkerStatus.COMPLETED
+
+
+def test_run_tag_is_unique_per_run_and_in_child_env(tmp_path):
+    code = "import os;print(os.environ.get('NEXUS_CLI_WORKER_RUN_TAG',''))"
+    tags = {run_cli_worker(_python_request(tmp_path, code)).stdout.strip() for _ in range(2)}
+    assert len(tags) == 2 and all(len(t) == 32 for t in tags)

@@ -772,3 +772,31 @@ def test_empty_verifier_manifest_fails_closed(tmp_path):
         CandidateVerifier.validate_static_contract(empty, str(tmp_path))
     passed, evidence, failures = CandidateVerifier._run_verifiers(empty, str(tmp_path), None)
     assert passed is False and evidence == () and failures == ["verifier_manifest_empty"]
+
+
+# --- #1753: forwarders/alias cannot reach a shell ----------------------------
+_NOSHELL_COMMANDS = [
+    "nice sh -c 'touch PWNED'",
+    "/usr/bin/time sh -c 'touch PWNED'",
+    "find . -maxdepth 0 -exec sh -c 'touch PWNED' {} +",
+    "git -c 'alias.x=!touch PWNED' x",
+    "env git -C . push",
+    "/bin/sh -c 'touch PWNED'",
+    "busybox sh -c 'touch PWNED'",
+    "timeout 5 sh -c 'touch PWNED'",
+]
+
+
+@pytest.mark.parametrize("command", _NOSHELL_COMMANDS)
+def test_verifier_cannot_reach_shell_via_forwarder(tmp_path, command):
+    from nexus.executors.cli_worker import run_cli_worker
+
+    with pytest.raises(ValueError):
+        run_cli_worker(CandidateVerifier._build_verifier_request(command, str(tmp_path)))
+    assert not (tmp_path / "PWNED").exists()
+
+
+@pytest.mark.parametrize("command", ["nice sh -c 'x'", "env git status", "sudo ls"])
+def test_verifier_forwarder_error_message_preserved(tmp_path, command):
+    with pytest.raises(ValueError, match="shell and shell-forwarding executables are not allowed"):
+        CandidateVerifier._build_verifier_request(command, str(tmp_path))
