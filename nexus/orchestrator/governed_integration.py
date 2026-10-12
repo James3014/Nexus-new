@@ -334,16 +334,15 @@ class ControlledIntegrationManager:
         """Acceptance must pass and name this task, attempt and candidate commit."""
         if not isinstance(acceptance, Mapping) or not acceptance.get("passed"):
             raise RuntimeError("external acceptance is required before integration")
-        try:
-            ExternalAcceptanceReceipt(
-                **{
-                    key: acceptance.get(key)
-                    for key in (
-                        "schema", "task_id", "attempt_id", "candidate_commit",
-                        "receipt_hash", "reviewer_id", "passed", "verifier_artifact",
-                    )
-                }
+        fields: dict[str, Any] = {
+            key: acceptance.get(key)
+            for key in (
+                "schema", "task_id", "attempt_id", "candidate_commit",
+                "receipt_hash", "reviewer_id", "passed", "verifier_artifact",
             )
+        }
+        try:
+            ExternalAcceptanceReceipt(**fields)
         except (TypeError, ValueError) as exc:
             raise RuntimeError("external acceptance is not bound to this task and candidate") from exc
         attempt_id = str(state.get("attempt_id") or "")
