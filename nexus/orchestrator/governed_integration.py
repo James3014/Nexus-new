@@ -13,7 +13,10 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from nexus.contracts.lifecycle_action import ContractKind, LifecycleActionType
-from nexus.contracts.target_integration_lifecycle import IntegrationAuthorizationEnvelope
+from nexus.contracts.target_integration_lifecycle import (
+    ExternalAcceptanceReceipt,
+    IntegrationAuthorizationEnvelope,
+)
 from nexus.executors.cli_worker import (
     CliWorkerRequest,
     CliWorkerStatus,
@@ -331,6 +334,18 @@ class ControlledIntegrationManager:
         """Acceptance must pass and name this task, attempt and candidate commit."""
         if not isinstance(acceptance, Mapping) or not acceptance.get("passed"):
             raise RuntimeError("external acceptance is required before integration")
+        try:
+            ExternalAcceptanceReceipt(
+                **{
+                    key: acceptance.get(key)
+                    for key in (
+                        "schema", "task_id", "attempt_id", "candidate_commit",
+                        "receipt_hash", "reviewer_id", "passed", "verifier_artifact",
+                    )
+                }
+            )
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("external acceptance is not bound to this task and candidate") from exc
         attempt_id = str(state.get("attempt_id") or "")
         if (
             not task_id

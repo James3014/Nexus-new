@@ -396,13 +396,20 @@ def require_bound_approval_grant(
     if (
         str(grant["bound_task_id"]) != task_id
         or str(grant["bound_action_type"]) != action_type
-        or (attempt_id and bound_attempt and bound_attempt != attempt_id)
+        or (attempt_id and bound_attempt != attempt_id)
     ):
         raise LifecycleGuardError(
             "APPROVAL_BINDING_MISMATCH", "approval is bound to a different task attempt or action"
         )
     if str(grant.get("approval_scope") or "ALLOW_ACTION_ONCE") != "ALLOW_ACTION_ONCE":
         raise LifecycleGuardError("APPROVAL_SCOPE_UNSUPPORTED", "only ALLOW_ACTION_ONCE is supported")
+    if grant.get("expires_at") and not (allow_consumed and grant.get("consumed_at")):
+        try:
+            expires = datetime.fromisoformat(str(grant["expires_at"]).replace("Z", "+00:00"))
+        except (TypeError, ValueError) as exc:
+            raise LifecycleGuardError("APPROVAL_EXPIRY_INVALID", "approval expiry is not an ISO timestamp") from exc
+        if expires.tzinfo is None or expires <= datetime.now(timezone.utc):
+            raise LifecycleGuardError("APPROVAL_EXPIRED", "approval grant has expired")
 
 
 def _repo_relative(path: str, *, root: Path) -> Path:

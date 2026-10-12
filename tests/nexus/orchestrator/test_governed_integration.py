@@ -696,3 +696,37 @@ def test_authorized_integration_rejects_acceptance_for_another_task(tmp_path):
             state, integration_branch=branch, staging_root=tmp_path / "staging"
         )
     assert _git(repo, "rev-parse", branch) == base
+
+
+def test_sink_rejects_grant_without_attempt_when_state_has_attempt(tmp_path):
+    def mutate(state):
+        state["attempt_id"] = "attempt-9"
+        state["external_acceptance"]["attempt_id"] = "attempt-9"
+
+    _assert_sink_rejects(tmp_path, mutate, "approval grant is not bound")
+
+
+def test_sink_accepts_grant_with_matching_attempt(tmp_path):
+    repo, base, state = _authorized_candidate_repo(tmp_path)
+    state["attempt_id"] = "attempt-9"
+    state["external_acceptance"]["attempt_id"] = "attempt-9"
+    state["approved_binding"]["approval_grant"]["bound_attempt_id"] = "attempt-9"
+    receipt = ControlledIntegrationManager(
+        integration_root=tmp_path / "integrations"
+    ).integrate_task_state(state)
+    assert receipt.verifier_passed
+
+
+@pytest.mark.parametrize("drop", ["schema", "reviewer_id", "verifier_artifact"])
+def test_sink_rejects_acceptance_failing_receipt_model(tmp_path, drop):
+    def mutate(state):
+        state["external_acceptance"].pop(drop)
+
+    _assert_sink_rejects(tmp_path, mutate, "external acceptance is not bound")
+
+
+def test_sink_rejects_acceptance_with_malformed_receipt_hash(tmp_path):
+    def mutate(state):
+        state["external_acceptance"]["receipt_hash"] = "not-a-hash"
+
+    _assert_sink_rejects(tmp_path, mutate, "external acceptance is not bound")

@@ -11217,3 +11217,36 @@ def test_legacy_cli_approve_requires_grant(tmp_path):
     with pytest.raises(NexusCliActionError, match="APPROVAL_GRANT_REQUIRED"):
         run_self_hosted_approve("cli-approve", service=service, **_APPROVE_PACKET)
     assert service._read_state("cli-approve")["promotion_status"] == "PENDING_HUMAN_APPROVAL"
+
+
+def test_service_approval_rejects_grant_without_attempt_when_state_has_attempt(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    _pending_approval_state(service, "no-attempt")
+    with pytest.raises(RuntimeError, match="APPROVAL_BINDING_MISMATCH"):
+        service.approve_promotion(
+            "no-attempt", **_APPROVE_PACKET, approval_context=_bound_approval("no-attempt")
+        )
+    assert service._read_state("no-attempt")["promotion_status"] == "PENDING_HUMAN_APPROVAL"
+
+
+def test_service_approval_untracked_grant_may_omit_attempt_only_without_state_attempt(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    _pending_approval_state(service, "no-state-attempt", attempt_id=None)
+    result = service.approve_promotion(
+        "no-state-attempt", **_APPROVE_PACKET, approval_context=_bound_approval("no-state-attempt")
+    )
+    assert result["promotion_status"] == "APPROVED"
+
+
+def test_service_approval_rejects_expired_untracked_grant(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    _pending_approval_state(service, "expired")
+    grant = _bound_approval(
+        "expired",
+        "attempt-1",
+        issued_at="2020-01-01T00:00:00+00:00",
+        expires_at="2020-01-02T00:00:00+00:00",
+    )
+    with pytest.raises(RuntimeError, match="APPROVAL_EXPIRED"):
+        service.approve_promotion("expired", **_APPROVE_PACKET, approval_context=grant)
+    assert service._read_state("expired")["promotion_status"] == "PENDING_HUMAN_APPROVAL"
