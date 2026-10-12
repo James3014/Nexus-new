@@ -138,6 +138,11 @@
 | scripts/ops/capability_invocation_index.py | tests/ops/test_capability_invocation_matrix.py::test_capability_invocation_arm_index_preserves_jsonl_diagnostics, tests/ops/test_capability_invocation_matrix.py::test_invocation_matrix_fails_closed_on_missing_model_receipt | active | medium | capability_invocation_matrix_contract |
 | scripts/ops/ultra_gate.py | tests/ops/test_ultra_gate.py | active | high | governance |
 | scripts/ops/trusted_deletion_anchor.py | tests/ops/test_trusted_deletion_anchor.py, tests/ops/test_trusted_deletion_anchor_pr960.py, tests/ops/test_trusted_deletion_anchor_tempdir_cleanup.py | active | high | trusted_deletion_anchor_verifier_contract |
+| scripts/ops/trusted_merge_lane_gate.py | tests/ops/test_owner_attestation_gate.py, tests/ops/test_trusted_merge_lane_gate.py, tests/ops/test_trusted_deletion_anchor.py | active | high | owner_grant_attestation_contract |
+| scripts/ops/owner_attestation.py | tests/ops/test_owner_attestation_gate.py | active | high | owner_grant_attestation_contract |
+| governance/owner-signing-keys.json | tests/ops/test_owner_attestation_gate.py, tests/ops/test_trusted_merge_lane_gate.py | active | high | owner_grant_attestation_contract |
+| governance/agent-identities.json | tests/ops/test_owner_attestation_gate.py, tests/ops/test_trusted_merge_lane_gate.py | active | high | owner_grant_attestation_contract |
+| tools/owner-signer | tests/ops/test_owner_attestation_gate.py | active | high | owner_grant_attestation_contract |
 | tests/ops/test_trusted_deletion_anchor_tempdir_cleanup.py | tests/ops/test_trusted_deletion_anchor_tempdir_cleanup.py | active | high | test_contract |
 | nexus/config/governance_manifest.json | tests/governance/test_audit_gate_honesty.py, tests/test_iron_gate_governance.py | active | high | governance_seal_manifest |
 | nexus/delivery/replay_runner.py | tests/governance/test_audit_gate_honesty.py, tests/test_iron_gate_governance.py | active | high | replay_runner_no_shell |
