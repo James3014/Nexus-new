@@ -113,6 +113,8 @@ def classify_infra_invalid_reason(
         or "auth_confirmation_required" in combined
     ):
         return "auth_failed"
+    if gateway_error == "agy_missing":
+        return "agy_missing"
     if gateway_error == "binary_missing":
         return "cli_missing"
     if gateway_error == "parse_failure":
