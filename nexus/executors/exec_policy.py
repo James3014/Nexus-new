@@ -25,9 +25,13 @@ GIT_ALLOWED_SUBCOMMANDS = frozenset(
     describe show-ref merge-base name-rev shortlog add rm mv restore apply
     check-ignore check-attr version""".split()
 )
-_GIT_FLAG_GLOBALS = frozenset(
-    {"--no-pager", "-P", "--no-optional-locks", "--literal-pathspecs", "--no-replace-objects"}
-)
+_GIT_FLAG_GLOBALS = frozenset({
+    "--no-pager",
+    "-P",
+    "--no-optional-locks",
+    "--literal-pathspecs",
+    "--no-replace-objects",
+})
 _GIT_FORBIDDEN_ANYWHERE_PREFIXES = (
     "-O",
     "--open-files-in-pager",
@@ -40,25 +44,31 @@ _GIT_FORBIDDEN_ANYWHERE_PREFIXES = (
 )
 
 _GH_GLOBAL_WITH_VALUE = frozenset({"--repo", "-R", "--hostname"})
-_GH_ALLOWED = frozenset(
-    {
-        ("pr", "view"),
-        ("pr", "list"),
-        ("pr", "diff"),
-        ("pr", "checks"),
-        ("pr", "status"),
-        ("issue", "view"),
-        ("issue", "list"),
-        ("issue", "status"),
-        ("repo", "view"),
-        ("run", "view"),
-        ("run", "list"),
-    }
-)
+_GH_ALLOWED = frozenset({
+    ("pr", "view"),
+    ("pr", "list"),
+    ("pr", "diff"),
+    ("pr", "checks"),
+    ("pr", "status"),
+    ("issue", "view"),
+    ("issue", "list"),
+    ("issue", "status"),
+    ("repo", "view"),
+    ("run", "view"),
+    ("run", "list"),
+})
 
-FIND_FORBIDDEN_ARGS = frozenset(
-    {"-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls"}
-)
+FIND_FORBIDDEN_ARGS = frozenset({
+    "-exec",
+    "-execdir",
+    "-ok",
+    "-okdir",
+    "-delete",
+    "-fprint",
+    "-fprint0",
+    "-fprintf",
+    "-fls",
+})
 
 
 def _normalise(name: str) -> str:

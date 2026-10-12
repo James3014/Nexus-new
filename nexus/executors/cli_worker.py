@@ -37,17 +37,15 @@ class CliWorkerStatus(str, Enum):
 # there; the GitHub credential channels (gh config dir, git global config and
 # its credential helper) are redirected per request instead. See
 # _isolated_github_credential_environment.
-_INHERITED_ENV_ALLOWLIST = frozenset(
-    {
-        "HOME",
-        "LANG",
-        "LC_ALL",
-        "PATH",
-        "PYTHONPATH",
-        "TMPDIR",
-        "VIRTUAL_ENV",
-    }
-)
+_INHERITED_ENV_ALLOWLIST = frozenset({
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "PATH",
+    "PYTHONPATH",
+    "TMPDIR",
+    "VIRTUAL_ENV",
+})
 
 
 _ENV_KEY_PRESENT_SENTINEL = "present"
