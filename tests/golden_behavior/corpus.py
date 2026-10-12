@@ -944,6 +944,7 @@ CASES: tuple[GoldenCase, ...] = (
         ("https://github.com/James3014/Nexus-new/issues/12",),
         status="finding",
         finding_id="GBF-002",
+        finding_probe="gb077_live_gateway_identity",
     ),
     _c(
         "GB-078",
