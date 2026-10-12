@@ -16838,8 +16838,8 @@ def _append_x1_readiness_history(
     max_entries: int = 20,
 ) -> list[dict[str, Any]]:
     history = _load_x1_readiness_history(path)
-    history.append(entry)
-    history = history[-max(1, int(max_entries)):]
+    history = [*history, entry][-max(1, int(max_entries)):]
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(history, indent=2, ensure_ascii=False), encoding="utf-8")
     return history
 
@@ -19305,6 +19305,20 @@ def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Pat
     return report
 
 
+def _summarize_with_strict_baseline(rows: list[dict[str, Any]], *, strict: bool) -> dict[str, dict[str, Any]]:
+    """Summarize rows; under --strict-llm-baseline model_calls==0 successes are not solves."""
+    from scripts.bench.strict_llm_baseline import (
+        apply_strict_llm_baseline_classification,
+        apply_strict_llm_baseline_to_summary,
+    )
+
+    summary = _summarize_benchmark_rows(rows)
+    if strict:
+        apply_strict_llm_baseline_classification(rows)
+        apply_strict_llm_baseline_to_summary(rows, summary)
+    return summary
+
+
 def main() -> int:
     global persistent_worker_proc
     parser = argparse.ArgumentParser(description="Run capability A/B benchmark: with_nexus vs without_nexus.")
@@ -19734,7 +19748,9 @@ def main() -> int:
             row["history_policy"] = history_policy
             row["learn_slo_policy"] = "forced_ready" if args.force_learn_slo_ready else "repo_state"
             row["hidden_verifier_mode"] = hidden_verifier_mode
-        benchmark_summary = _summarize_benchmark_rows([*with_rows, *without_rows])
+        benchmark_summary = _summarize_with_strict_baseline(
+            [*with_rows, *without_rows], strict=bool(args.strict_llm_baseline)
+        )
         with_path = out_dir / f"with_nexus_{ts}.jsonl"
         without_path = out_dir / f"without_nexus_{ts}.jsonl"
         write_jsonl(with_path, with_rows)
@@ -20192,7 +20208,9 @@ def main() -> int:
         row["learn_slo_policy"] = "forced_ready" if args.force_learn_slo_ready else "repo_state"
         row["disable_promoted_route_cost_policy"] = bool(args.disable_promoted_route_cost_policy)
         row["hidden_verifier_mode"] = hidden_verifier_mode
-    benchmark_summary = _summarize_benchmark_rows([*with_rows, *without_rows])
+    benchmark_summary = _summarize_with_strict_baseline(
+        [*with_rows, *without_rows], strict=bool(args.strict_llm_baseline)
+    )
 
     with_path = out_dir / f"with_nexus_{ts}.jsonl"
     without_path = out_dir / f"without_nexus_{ts}.jsonl"
