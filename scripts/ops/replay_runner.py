@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
+import importlib.util
 import json
 import sys
 from pathlib import Path
 
 # Reuse the allowlisted, shell-free replay implementation (single source of truth).
+# Load the module file directly: importing the `nexus.delivery` package would pull in
+# pydantic, and this script runs under a bare python3 (stdlib only) in the delivery gate.
 REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO_ROOT))
-from nexus.delivery.replay_runner import ReplayRunner  # noqa: E402
+_spec = importlib.util.spec_from_file_location(
+    "nexus_delivery_replay_runner", REPO_ROOT / "nexus" / "delivery" / "replay_runner.py"
+)
+assert _spec is not None and _spec.loader is not None
+_module = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_module)
+ReplayRunner = _module.ReplayRunner
 
 def run_replay(evidence_path: str, allow_no_replay: bool = False):
     p = Path(evidence_path)

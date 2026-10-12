@@ -89,7 +89,10 @@ class SessionMetabolism:
             )
         except (OSError, subprocess.SubprocessError):
             return None
-        return out.stdout.strip() or None
+        stdout = getattr(out, "stdout", None)
+        if getattr(out, "returncode", 1) != 0 or not isinstance(stdout, str):
+            return None
+        return stdout.strip() or None
 
     def distill_local(self, session_context: Dict[str, Any] | None = None, p_manager: Any | None = None) -> Dict[str, Any]:
         """Write the local session seed and report honestly what happened.

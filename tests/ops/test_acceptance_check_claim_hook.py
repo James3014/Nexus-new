@@ -156,11 +156,21 @@ def test_contract_snapshot_writes_current_head(tmp_path, monkeypatch):
     def _fake_check_output(cmd, cwd=None):
         if cmd[:3] == ["git", "rev-parse", "--short"]:
             return b"abc123\n"
-        if cmd[:4] == ["git", "show", "--name-only", "--format="]:
-            return b"nexus/orchestrator/orchestrator.py\ntests/nexus/orchestrator/test_task_contract.py\n"
         raise AssertionError(f"unexpected command: {cmd}")
 
+    def _fake_changed_files(root, base_ref="origin/main"):
+        # changed_files is a diff against merge-base(HEAD, base_ref), not the last commit's files.
+        assert root == tmp_path
+        return (
+            [
+                "nexus/orchestrator/orchestrator.py",
+                "tests/nexus/orchestrator/test_task_contract.py",
+            ],
+            "merge-base(origin/main)=abc123",
+        )
+
     monkeypatch.setattr("scripts.engine.nexus_cli.subprocess.check_output", _fake_check_output)
+    monkeypatch.setattr("scripts.ops.closeout_guard.compute_changed_files", _fake_changed_files)
     out = tmp_path / ".nexus" / "reports" / "closeout_contract.json"
     result = CliRunner().invoke(nexus, ["nexus", "contract-snapshot", "--output", str(out)])
     assert result.exit_code == 0
