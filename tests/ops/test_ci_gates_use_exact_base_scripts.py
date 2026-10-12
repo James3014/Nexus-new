@@ -80,7 +80,7 @@ def test_secret_audit_scanner_comes_from_base_sha_with_pr_head_binding() -> None
     assert '"$scanner_rev:$script_path"' in scan["run"]
     assert "scripts/ops/git_history_secret_scan.py" in scan["run"]
     assert 'cat-file blob "$script_blob_id"' in scan["run"]
-    assert '100644 blob $script_blob_id' in scan["run"]
+    assert "100644 blob $script_blob_id" in scan["run"]
     assert "published ref collides with PR head data ref" in fetch["run"]
     assert fetch["run"].index("show-ref --verify") < fetch["run"].index("refs/pull/$PR_NUMBER/head")
     assert 'p["source_revision"] == sys.argv[1]' in scan["run"]
