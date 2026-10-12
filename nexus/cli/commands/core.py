@@ -33,8 +33,12 @@ def probe(test_spec):
 @click.option("--ablation", is_flag=True)
 def benchmark(dataset, repeat, tasks_count, output_csv, dual_core_physical, ablation):
     """🚀 [Phase E/V] AOS 消融實驗 (Service 化)"""
-    from nexus.services.benchmark_service import BenchmarkService
-    BenchmarkService(REPO_ROOT).run(dataset, repeat, dual_core_physical, ablation, tasks_count, output_csv)
+    from nexus.services.benchmark_service import ArchivedBenchmarkError, BenchmarkService
+    try:
+        BenchmarkService(REPO_ROOT).run(dataset, repeat, dual_core_physical, ablation, tasks_count, output_csv)
+    except ArchivedBenchmarkError as exc:
+        click.echo(f"BLOCKED: {exc.reason} (simulated benchmark archived 2026-10-12)", err=True)
+        raise SystemExit(1)
     click.echo("✅ [Benchmark] Complete.")
 
 @click.command(name="learning-sync")

@@ -14,7 +14,13 @@ EVAL_DIR = REPO / "scripts" / "eval"
 if str(EVAL_DIR) not in sys.path:
     sys.path.insert(0, str(EVAL_DIR))
 
-import run_predictor_ablation as ablation  # noqa: E402
+try:
+    import run_predictor_ablation as ablation  # noqa: E402
+except AttributeError as exc:  # pragma: no cover - depends on archived lewm_predictor
+    pytest.skip(
+        f"ablation harness needs the lewm_predictor switch archived 2026-10-12: {exc}",
+        allow_module_level=True,
+    )
 
 LATENT_ENV = "NEXUS_LATENT_PREDICTOR"
 LEWM_ENV = "NEXUS_LEWM_PREDICTOR"

@@ -24,6 +24,7 @@ import pytest
 
 from nexus.evidence.receipt_base import audit_product_receipt_coverage
 from nexus.services.capability_registry import (
+    ARCHIVED_CAPABILITY_REASONS,
     EXECUTION_CLASS_CONTROL_PLANE_REFERENCE,
     EXECUTION_CLASS_EXPERIMENTAL_NOT_PROMOTED,
     EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
@@ -126,6 +127,10 @@ def _promotable_names() -> list[str]:
     for name in list_planner_capability_names():
         mat = _node_meta(name)["maturity"].lower()
         if mat in {"experimental", "deprecated", "legacy_alias", "unknown", "prototype"}:
+            continue
+        if name in ARCHIVED_CAPABILITY_REASONS:
+            # Archived 2026-10-12: fail-closed behavior is covered by
+            # tests/services/test_archived_capabilities_2026_10_12.py.
             continue
         out.append(name)
     return out

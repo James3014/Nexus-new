@@ -3,6 +3,15 @@ import subprocess
 import click
 import os
 
+import warnings as _archived_warnings
+
+_archived_warnings.warn(
+    "ARCHIVED 2026-10-12 (#1850): CLI ui-validator removed; see ARCHIVED_2026-10-12.md. "
+    "Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 def register(nexus_group, REPO_ROOT):
     """
     🔗 為 Nexus 指令群組註冊 ui-validator。

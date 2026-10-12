@@ -1,9 +1,11 @@
 """Per-predictor on/off switches and the ``predictor_influence`` receipt entry.
 
-``NEXUS_LATENT_PREDICTOR`` gates ``latent_predictor_v20`` and
-``NEXUS_LEWM_PREDICTOR`` gates ``lewm_predictor``. Both default to on. A value of
-``0``, ``false``, ``no`` or ``off`` turns the predictor off, and the call site then
+``NEXUS_LATENT_PREDICTOR`` gates ``latent_predictor_v20`` and defaults to on. A value
+of ``0``, ``false``, ``no`` or ``off`` turns the predictor off, and the call site then
 takes the path it would take if the predictor module were absent.
+
+The ``lewm_predictor`` module and its ``NEXUS_LEWM_PREDICTOR`` switch were archived on
+2026-10-12 (see ``ARCHIVED_2026-10-12.md``).
 """
 
 from __future__ import annotations
@@ -14,11 +16,9 @@ from collections import deque
 from typing import Any
 
 LATENT_PREDICTOR = "latent_predictor_v20"
-LEWM_PREDICTOR = "lewm_predictor"
 
 _ENV_BY_PREDICTOR = {
     LATENT_PREDICTOR: "NEXUS_LATENT_PREDICTOR",
-    LEWM_PREDICTOR: "NEXUS_LEWM_PREDICTOR",
 }
 _OFF_VALUES = {"0", "false", "no", "off"}
 

@@ -3,6 +3,15 @@ import json
 import os
 from pathlib import Path
 
+import warnings as _archived_warnings
+
+_archived_warnings.warn(
+    "ARCHIVED 2026-10-12 (#1850): only patches a hard-coded oracle_test.py, CLI oracle:apply removed; see ARCHIVED_2026-10-12.md. "
+    "Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 def promote_shadow_patch(project_root: Path, shadow_tid: str) -> bool:
     shadow_log = project_root / ".nexus" / "shadow_runs" / f"{shadow_tid}.json"
     if not shadow_log.exists(): return False

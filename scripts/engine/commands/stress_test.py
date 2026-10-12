@@ -3,6 +3,15 @@ import sys
 import click
 from pathlib import Path
 
+import warnings as _archived_warnings
+
+_archived_warnings.warn(
+    "ARCHIVED 2026-10-12 (#1850): never calls the engine, CLI stress-test removed; see ARCHIVED_2026-10-12.md. "
+    "Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 def register(nexus_group, REPO_ROOT):
     """
     🛡️ 註冊防禦壓力測試模組。

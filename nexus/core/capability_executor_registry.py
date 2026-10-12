@@ -345,6 +345,31 @@ def _auth_blocked_receipt(
     )
 
 
+def _archived_receipt(
+    cap_name: str, plan: CapabilityExecutionPlan, task_desc: str = ""
+) -> CapabilityReceipt:
+    """Receipt-visible fail-closed result for a capability archived 2026-10-12."""
+    from nexus.services.capability_registry import ARCHIVED_CAPABILITY_REASONS
+
+    reason = ARCHIVED_CAPABILITY_REASONS[cap_name]
+    return _make_receipt(
+        cap_name,
+        plan,
+        invoked=False,
+        gate_passed=False,
+        wall_time_ms=0,
+        outcome=_structured_outcome(
+            action="archived",
+            semantic_status="BLOCKED",
+            error=reason,
+            evidence_refs=[f"ev_archived_{cap_name}_{plan.task_id}"],
+            skip_reason=reason,
+            archived=True,
+            task_hint=str(task_desc or "")[:80],
+        ),
+    )
+
+
 def _resolve_run_root(plan: CapabilityExecutionPlan) -> tuple[Path, Path, str]:
     constraints = plan.constraints or {}
     project_root = Path(str(constraints.get("project_root", ".")))
@@ -1758,20 +1783,8 @@ def _exec_ultra_review(plan: CapabilityExecutionPlan, task_desc: str) -> Capabil
 
 
 def _exec_learning_closure(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    start = time.monotonic()
-    cls = _try_import_class("nexus.services.local_heal.learning_closure_bridge", "LearningClosureBridge")
-    if cls is None:
-        return _make_receipt("learning_closure", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "LearningClosureBridge not importable"})
-    try:
-        inst = cls()
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("learning_closure", plan, wall_time_ms=elapsed,
-                             outcome={"class_instantiated": True})
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt("learning_closure", plan, invoked=False, gate_passed=False, wall_time_ms=elapsed,
-                             outcome={"error": str(exc)})
+    """ARCHIVED 2026-10-12: fail closed with an explicit receipt reason."""
+    return _archived_receipt("learning_closure", plan, task_desc)
 
 
 def _exec_metabolism_resume(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
@@ -3052,75 +3065,8 @@ def _exec_asi_constraint_extractor(
 
 
 def _exec_benchmark(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    start = time.monotonic()
-    try:
-        from nexus.services.benchmark_service import BenchmarkService
-
-        project_root, run_root, _run_id = _resolve_run_root(plan)
-        inst = BenchmarkService(project_root=str(project_root))
-        # Keep the generated report inside this run's root instead of the cwd/repo root.
-        inst.report_path = run_root / "dual_core_benchmark.md"
-        _assert_outputs_in_run_root([inst.report_path], run_root)
-        inst.report_path.parent.mkdir(parents=True, exist_ok=True)
-        # Bounded: zero-task construct of run kwargs path without full suite.
-        # Prefer a dry structural call: run with tasks_count=0 if accepted, else
-        # reflect service readiness via class binding + method presence.
-        if not hasattr(inst, "run") or not callable(inst.run):
-            raise RuntimeError("BenchmarkService.run missing")
-        try:
-            result = inst.run(
-                dataset="structural_bind",
-                repeat=1,
-                dual_core_physical=False,
-                ablation=False,
-                tasks_count=1,
-            )
-        except Exception as exc:
-            # Still count as physical entry when method was invoked.
-            elapsed = int((time.monotonic() - start) * 1000)
-            return _make_receipt(
-                "benchmark",
-                plan,
-                wall_time_ms=elapsed,
-                gate_passed=False,
-                outcome=_structured_outcome(
-                    action="run",
-                    semantic_status="FAILED",
-                    error=str(exc)[:300],
-                    evidence_refs=[f"ev_benchmark_{plan.task_id}"],
-                    physical_callable="nexus.services.benchmark_service.BenchmarkService.run",
-                ),
-            )
-        elapsed = int((time.monotonic() - start) * 1000)
-        ok = isinstance(result, Mapping)
-        return _make_receipt(
-            "benchmark",
-            plan,
-            wall_time_ms=elapsed,
-            gate_passed=ok,
-            outcome=_structured_outcome(
-                action="run",
-                semantic_status="SUCCEEDED" if ok else "FAILED",
-                evidence_refs=[f"ev_benchmark_{plan.task_id}"],
-                result=result if isinstance(result, Mapping) else {"value": str(result)[:200]},
-                physical_callable="nexus.services.benchmark_service.BenchmarkService.run",
-                task_hint=str(task_desc or "")[:80],
-            ),
-        )
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt(
-            "benchmark",
-            plan,
-            invoked=True,
-            gate_passed=False,
-            wall_time_ms=elapsed,
-            outcome=_structured_outcome(
-                action="run",
-                semantic_status="FAILED",
-                error=str(exc)[:300],
-            ),
-        )
+    """ARCHIVED 2026-10-12: fail closed with an explicit receipt reason."""
+    return _archived_receipt("benchmark", plan, task_desc)
 
 
 def _exec_committee(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
@@ -3707,42 +3653,8 @@ def _exec_registry_sync(plan: CapabilityExecutionPlan, task_desc: str) -> Capabi
 
 
 def _exec_stress_test(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    start = time.monotonic()
-    try:
-        from nexus.engine.red_team_audit import RedTeamAudit
-
-        result = RedTeamAudit(project_root=".").stress_test(
-            patch=f"# structural stress bind for {plan.task_id}\n{str(task_desc or '')[:200]}\n"
-        )
-        elapsed = int((time.monotonic() - start) * 1000)
-        ok = isinstance(result, Mapping)
-        return _make_receipt(
-            "stress_test",
-            plan,
-            wall_time_ms=elapsed,
-            gate_passed=ok,
-            outcome=_structured_outcome(
-                action="stress_test",
-                semantic_status="SUCCEEDED" if ok else "FAILED",
-                evidence_refs=[f"ev_stress_test_{plan.task_id}"],
-                result=result if isinstance(result, Mapping) else {"value": str(result)[:200]},
-                physical_callable="nexus.engine.red_team_audit.RedTeamAudit.stress_test",
-            ),
-        )
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt(
-            "stress_test",
-            plan,
-            invoked=True,
-            gate_passed=False,
-            wall_time_ms=elapsed,
-            outcome=_structured_outcome(
-                action="stress_test",
-                semantic_status="FAILED",
-                error=str(exc)[:300],
-            ),
-        )
+    """ARCHIVED 2026-10-12: fail closed with an explicit receipt reason."""
+    return _archived_receipt("stress_test", plan, task_desc)
 
 
 def _exec_meta_opt(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
@@ -3894,89 +3806,18 @@ def _exec_prompt_compression(
 
 
 def _exec_federation(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    """EXPERIMENTAL_NOT_PROMOTED — real module, not production-promoted."""
-    start = time.monotonic()
-    try:
-        from nexus.engine.federation import FederationLayer
-
-        layer = FederationLayer(project_root=".")
-        result = layer.load_registry()
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt(
-            "federation",
-            plan,
-            wall_time_ms=elapsed,
-            gate_passed=True,
-            outcome=_structured_outcome(
-                action="load_registry",
-                semantic_status="SUCCEEDED",
-                evidence_refs=[f"ev_federation_{plan.task_id}"],
-                result=result if isinstance(result, Mapping) else {"value": str(result)[:200]},
-                physical_callable="nexus.engine.federation.FederationLayer.load_registry",
-                experimental_not_promoted=True,
-            ),
-        )
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _make_receipt(
-            "federation",
-            plan,
-            invoked=True,
-            gate_passed=False,
-            wall_time_ms=elapsed,
-            outcome=_structured_outcome(
-                action="load_registry",
-                semantic_status="FAILED",
-                error=str(exc)[:300],
-                experimental_not_promoted=True,
-            ),
-        )
+    """ARCHIVED 2026-10-12: fail closed with an explicit receipt reason."""
+    return _archived_receipt("federation", plan, task_desc)
 
 
 def _exec_oracle_shadow(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    """EXPERIMENTAL_NOT_PROMOTED — no independent promotion evidence."""
-    start = time.monotonic()
-    elapsed = int((time.monotonic() - start) * 1000)
-    return _make_receipt(
-        "oracle_shadow",
-        plan,
-        wall_time_ms=elapsed if elapsed is not None else None,
-        gate_passed=False,
-        invoked=True,
-        outcome=_structured_outcome(
-            action="experimental_hold",
-            semantic_status="BLOCKED",
-            error="EXPERIMENTAL_NOT_PROMOTED",
-            evidence_refs=[f"ev_oracle_shadow_{plan.task_id}"],
-            experimental_not_promoted=True,
-            task_hint=str(task_desc or "")[:80],
-        ),
-    )
+    """ARCHIVED 2026-10-12: fail closed with an explicit receipt reason."""
+    return _archived_receipt("oracle_shadow", plan, task_desc)
 
 
 def _exec_ui_validator(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
-    start = time.monotonic()
-    if not _provider_auth_allowed(require_external=True):
-        elapsed = int((time.monotonic() - start) * 1000)
-        return _auth_blocked_receipt(
-            "ui_validator",
-            plan,
-            wall_time_ms=elapsed,
-            reason="BLOCKED_EXTERNAL_AUTH:browser_connector",
-        )
-    elapsed = int((time.monotonic() - start) * 1000)
-    return _make_receipt(
-        "ui_validator",
-        plan,
-        wall_time_ms=elapsed,
-        gate_passed=False,
-        outcome=_structured_outcome(
-            action="browser_validate",
-            semantic_status="BLOCKED",
-            error="BLOCKED_EXTERNAL_AUTH:no_live_browser_session",
-            evidence_refs=[f"ev_ui_validator_{plan.task_id}"],
-        ),
-    )
+    """ARCHIVED 2026-10-12: fail closed with an explicit receipt reason."""
+    return _archived_receipt("ui_validator", plan, task_desc)
 
 
 def _exec_external_doc_scout(

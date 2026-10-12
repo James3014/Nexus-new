@@ -6,7 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from nexus.services.capability_registry import LOCAL_STAGE_CAPABILITIES
+from nexus.services.capability_registry import (
+    ARCHIVED_CAPABILITY_REASONS,
+    LOCAL_STAGE_CAPABILITIES,
+)
 from nexus.services.product_capability_closure import (
     EVIDENCE_INCOMPLETE,
     PRODUCT_CAPABILITIES,
@@ -172,7 +175,13 @@ def test_online_native_denominator_is_exactly_28() -> None:
     assert set(ONLINE_NATIVE) | STAGE_OWNED | LOCAL_NATIVE == set(PRODUCT_CAPABILITIES)
 
 
-@pytest.mark.parametrize("capability", ONLINE_NATIVE)
+# Archived 2026-10-12 (benchmark, stress_test): they now fail closed by design, see
+# tests/services/test_archived_capabilities_2026_10_12.py. The pinned denominator of 28
+# above still counts them until the governance denominator is re-based.
+@pytest.mark.parametrize(
+    "capability",
+    [c for c in ONLINE_NATIVE if c not in ARCHIVED_CAPABILITY_REASONS],
+)
 def test_online_native_canary_is_structurally_valid_but_not_live_claimable(
     capability: str,
     tmp_path: Path,

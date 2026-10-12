@@ -200,103 +200,6 @@ class NexusSwarmOrchestrator:
         print("🧪 [Swarm:Tester] Verifying fix...")
         return repair_result.get("status", "FAIL")
 
-class FederatedSwarmOrchestrator(NexusSwarmOrchestrator):
-    def __init__(self, engine: Any, task: str, model: Optional[str] = None):
-        super().__init__(engine, task, model)
-        self.node_registry = None
-        if self.tls_enabled and self.tls_provider:
-            # Assuming nodes.db lives in .nexus/federation
-            registry_db = self.tls_provider.certs_dir.parent / "federation" / "nodes.db"
-            try:
-                from nexus.federation.node_registry import NodeRegistry
-                self.node_registry = NodeRegistry(registry_db)
-                if self.secure_sync:
-                    self.secure_sync.node_registry = self.node_registry
-            except ImportError:
-                logger.warning("Federation package not available.")
-
-    def _select_executor(self, required_capability: str = "coder") -> Optional[Any]:
-        if not self.node_registry:
-            return None
-        nodes = self.node_registry.discover()
-        best_node = None
-        lowest_load = float('inf')
-        for node in nodes:
-            if node.node_id == self.node_id:
-                continue
-            if required_capability in node.capabilities or not node.capabilities:
-                if node.load < lowest_load:
-                    lowest_load = node.load
-                    best_node = node
-        return best_node
-
-    # ─── Sprint 11e: Federation Security Boundary ───────────────────────────
-    # POLICY: Only "verify" (read-only / sandbox inspection) may be dispatched
-    # to remote federation nodes. "repair" and "coder" are FORBIDDEN remotely
-    # to prevent Remote Code Execution (RCE) state contamination.
-    # This is enforced here (client side) AND at protocol level in _dispatch_remote.
-    _ALLOWED_REMOTE_PHASES = frozenset({"verify"})
-
-    def _dispatch_remote(self, node: Any, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        phase = payload.get("phase", "")
-        if phase not in self._ALLOWED_REMOTE_PHASES:
-            logger.warning(
-                "🔒 [Federation:BLOCKED] Refusing to dispatch phase '%s' to remote node %s. "
-                "Only %s phases are permitted remotely.",
-                phase, node.node_id, self._ALLOWED_REMOTE_PHASES,
-            )
-            return None
-        # Execute remote dispatch via mTLS
-        logger.info(f"🚀 [Federation] Dispatching task to remote node {node.node_id} ({node.host}:{node.port})")
-        if not self.tls_provider:
-            return None
-        context = self.tls_provider.get_client_context()
-        try:
-            with socket.create_connection((node.host, node.port), timeout=300) as sock:
-                with context.wrap_socket(sock, server_hostname=node.host) as ssock:
-                    f = ssock.makefile("rwb")
-                    req = {
-                        "action": "execute_phase",
-                        "payload": payload
-                    }
-                    f.write((json.dumps(req) + "\n").encode("utf-8"))
-                    f.flush()
-                    
-                    resp_line = f.readline().decode("utf-8")
-                    if not resp_line:
-                        return None
-                    resp = json.loads(resp_line)
-                    if resp.get("status") == "ok":
-                        return resp.get("result")
-                    return None
-        except Exception as e:
-            logger.warning(f"❌ [Federation] Remote dispatch failed: {e}")
-            return None
-
-    def _repair(self, plan: str) -> Dict[str, Any]:
-        # "repair" is a write-path phase — ALWAYS run locally.
-        # Do NOT attempt remote dispatch; fall straight through to local execution.
-        logger.info("🏠 [Federation] repair phase is write-path — executing locally (policy enforced).")
-        return super()._repair(plan)
-
-    def _verify(self, repair_result: Dict[str, Any]) -> str:
-        """Attempt federated verify before falling back to local."""
-        remote_node = self._select_executor("verify")
-        if remote_node:
-            print(f"🌐 [Federation] Offloading verify to {remote_node.node_id} (Load: {remote_node.load:.2f})")
-            payload = {
-                "phase": "verify",
-                "repair_result": repair_result,
-                "task": self.task,
-                "model": self.model,
-            }
-            res = self._dispatch_remote(remote_node, payload)
-            if res:
-                self.total_tokens += res.get("tokens_used", 0)
-                return res.get("status", "FAIL")
-            print("⚠️ [Federation] Remote verify failed. Falling back to local.")
-        return super()._verify(repair_result)
-
 class PeerSwarmOrchestrator(NexusSwarmOrchestrator):
     """🐝 [P2P] Swarm-Together Peer Orchestrator (Claude-Together Absorption)"""
     def __init__(self, engine, task, model=None, peer_id=None):
@@ -348,6 +251,4 @@ class SwarmFactory:
         mode = os.environ.get("NEXUS_SWARM_MODE", "sequential")
         if mode == "p2p":
             return PeerSwarmOrchestrator(engine, task, model)
-        if os.environ.get("NEXUS_FEDERATION_ENABLED", "0") == "1":
-            return FederatedSwarmOrchestrator(engine, task, model)
         return NexusSwarmOrchestrator(engine, task, model)
