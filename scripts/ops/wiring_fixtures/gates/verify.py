@@ -1,4 +1,7 @@
+import sys
+
 from target import gates_target
 
-assert gates_target() == "verified"
+if gates_target() != "verified":
+    sys.exit(1)
 print("wiring-gates-verifier-pass")

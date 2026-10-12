@@ -1576,7 +1576,7 @@ def build_ultra_review(ws: Path, variant: str) -> Scenario:
     _git(ws, "add", "app.py")
     _git(ws, "commit", "-q", "-m", "baseline")
     if variant == "positive":
-        shutil.copyfile(ws / "planted_patch.py", ws / "app.py")
+        shutil.copyfile(ws / "planted_patch.txt", ws / "app.py")
 
     def check(_ws: Path, obs: Obs) -> list[Check]:
         res = _result(obs)
@@ -1619,7 +1619,7 @@ def probe_ultra_review(ws: Path) -> dict[str, Any]:
     _git(ws, "init", "-q")
     _git(ws, "add", "app.py")
     _git(ws, "commit", "-q", "-m", "baseline")
-    shutil.copyfile(ws / "planted_patch.py", ws / "app.py")
+    shutil.copyfile(ws / "planted_patch.txt", ws / "app.py")
     service = UltraReviewService(project_root=ws)
     diff = service._capture_diff("HEAD")  # noqa: SLF001
     findings = service._scan_security_observations(diff)  # noqa: SLF001
