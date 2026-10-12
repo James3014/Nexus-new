@@ -114,6 +114,7 @@
 | nexus_dag_workflow.py | tests/test_async_dag_workflow.py | active | medium | workflow_contract |
 | scripts/engine/nexus_cli.py | tests/test_cli_learn_mode.py, tests/test_cli_commands.py, tests/engine/test_cli_semantic_contract_audit.py, tests/engine/test_cli_artifact_gate_audit.py, tests/engine/test_bench_actions.py, tests/engine/test_code_actions.py, tests/engine/test_multi_agent_actions.py, tests/engine/test_learn_actions.py, tests/engine/test_research_actions.py, tests/engine/test_sandbox_actions.py, tests/engine/test_registry_actions.py | active | high | governance |
 | tests/engine/test_run_delivery_closeout.py | tests/engine/test_run_delivery_closeout.py | active | medium | test_contract |
+| nexus/delivery/status_report.py | tests/ops/test_nexus_status_honesty.py | active | high | delivery_contract |
 | nexus/delivery/receipt.py | tests/delivery/test_receipt.py, tests/engine/test_run_delivery_closeout.py, tests/ops/test_delivery_gate_contract.py | active | high | delivery_contract |
 | tests/test_cli_output_contract.py | tests/test_cli_output_contract.py | active | medium | test_contract |
 | scripts/engine/commands/bench_actions.py | tests/engine/test_bench_actions.py | active | medium | bench_cli_action_contract |
@@ -271,3 +272,4 @@
 | tests/core/test_selector_constraints_source_trace.py | tests/core/test_selector_constraints_source_trace.py | active | medium | test_contract |
 | tests/services/test_forecast_gate_mainchain_e2e.py | tests/services/test_forecast_gate_mainchain_e2e.py | active | medium | test_contract |
 | tests/core/test_mempalace_belief_writer_path.py | tests/core/test_mempalace_belief_writer_path.py | active | medium | test_contract |
+| tests/ops/test_nexus_status_honesty.py | tests/ops/test_nexus_status_honesty.py | active | medium | test_contract |

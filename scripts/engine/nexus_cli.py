@@ -814,12 +814,14 @@ else:
     @nexus_group.command(name="status")
     @click.option("--json", "as_json", is_flag=True)
     def status(as_json):
-        """📊 Show system status and trust scores."""
+        """📊 Show observed repo/evidence facts (no fabricated metrics; not a health claim)."""
+        from nexus.delivery.status_report import build_status_report, render_status_report
+
+        report = build_status_report(repo_root)
         if as_json:
-            res = {"status": "OPERATIONAL", "version": "v23.7", "fleet_size": 50, "mcp": "READY"}
-            click.echo(json.dumps(res, indent=2))
+            click.echo(json.dumps(report, indent=2))
         else:
-            subprocess.run([sys.executable, str(repo_root / "scripts/ops/enterprise_audit_v22.py")], check=True)
+            click.echo(render_status_report(report))
 
 
     @nexus_group.group(name="code")
