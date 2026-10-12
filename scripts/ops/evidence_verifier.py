@@ -37,6 +37,8 @@ def verify_evidence(evidence_path: str, allow_no_replay: bool = False):
         "status": status,
         "overall_trust": "HIGH" if status == "VERIFIED" else "LOW",
         "replay": replay_data,
+        # Replay status UNVERIFIED means nothing replayable was present; surface it explicitly.
+        "replay_verified": replay_data.get("status") == "PASS",
         "hallucination_index": analysis
     }
 
