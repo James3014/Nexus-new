@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 from typing import Any, Protocol
@@ -222,6 +223,19 @@ def _gate_verifier_ok(payload: dict[str, Any]) -> bool:
     Fails closed until an authenticated upstream verifier authority is bound.
     """
     return False
+
+
+def _claim_gate_binding_reasons(payload: dict[str, Any]) -> list[str]:
+    """Reasons the claim-gate verifier-artifact/source-hash binding is unmet (#1757).
+
+    Same conditions ClaimGateReceiptAdapter uses; empty list means bound.
+    """
+    reasons: list[str] = []
+    if not payload.get("verifier_artifact") and not payload.get("verifier_status"):
+        reasons.append("missing_verifier_artifact")
+    if not payload.get("source_hash"):
+        reasons.append("missing_source_hash")
+    return reasons
 
 
 def _verified_outcome_contributed(gate_passed: bool, claim_verified: bool, payload: dict[str, Any]) -> bool:
@@ -535,11 +549,7 @@ class ClaimGateReceiptAdapter:
         refs = refs or _fail_closed_ref(payload, "claim_gate_invoked", "claim:gate_failed")
         invoked = bool(claim_verified or refs or _explicit_bool(payload, "claim_gate_invoked"))
 
-        reasons = []
-        if not payload.get("verifier_artifact") and not payload.get("verifier_status"):
-            reasons.append("missing_verifier_artifact")
-        if not payload.get("source_hash"):
-            reasons.append("missing_source_hash")
+        reasons = _claim_gate_binding_reasons(payload)
         verifier_ok = _gate_verifier_ok(payload)
         if not verifier_ok and not reasons:
             reasons.append("unbound_verifier_proof")
@@ -1400,8 +1410,9 @@ class LocalHealReceiptAdapter:
             else:
                 if route_mode == RouteMode.LOCAL_ONLY_EXECUTED:
                     invoked = True
-                    gate_passed = True
-                    failure_reason = ""
+                    binding_reasons = _claim_gate_binding_reasons(payload)
+                    gate_passed = not binding_reasons
+                    failure_reason = ";".join(binding_reasons)
                 elif route_mode == RouteMode.LOCAL_ONLY_BLOCKED:
                     invoked = bool(local_model_called or payload.get("invoked") or refs)
                     gate_passed = False
@@ -1474,23 +1485,45 @@ class LocalModelExecutorReceiptAdapter:
         if rc is not None:
             # A caller-supplied receipt is a claim, not verifier authority: rebuild it
             # through the semantic invariants and the #453 contribution gate.
-            if isinstance(rc, dict):
-                gate_passed = bool(rc.get("gate_passed", False))
+            if not isinstance(rc, dict):
+                to_dict = getattr(rc, "to_dict", None)
+                try:
+                    if callable(to_dict):
+                        rc = to_dict()
+                    elif dataclasses.is_dataclass(rc) and not isinstance(rc, type):
+                        rc = dataclasses.asdict(rc)
+                except Exception:
+                    rc = None
+            if not isinstance(rc, dict):
+                # Not convertible: fail closed, never return the caller object verbatim.
                 return merge_capability_receipt(
                     name=self.name,
-                    selected=bool(rc.get("selected", True)),
-                    invoked=bool(rc.get("invoked", False)),
-                    evidence_refs=list(rc.get("evidence_refs", []) or []),
-                    gate_passed=gate_passed,
-                    outcome_contributed=_verified_outcome_contributed(
-                        gate_passed, claim_verified, payload
-                    ),
-                    selection_source=rc.get("selection_source", "planner"),
-                    executor_id=rc.get("executor_id", self.name),
-                    failure_reason=rc.get("failure_reason", ""),
-                    telemetries=rc.get("telemetries", {}),
+                    selected=True,
+                    invoked=False,
+                    gate_passed=False,
+                    outcome_contributed=False,
+                    executor_id=self.name,
+                    failure_reason="unconvertible_local_executor_receipt",
                 )
-            return rc
+            binding_reasons = _claim_gate_binding_reasons(payload)
+            gate_passed = bool(rc.get("gate_passed", False)) and not binding_reasons
+            failure_reason = rc.get("failure_reason", "")
+            if binding_reasons and rc.get("gate_passed"):
+                failure_reason = ";".join(binding_reasons)
+            return merge_capability_receipt(
+                name=self.name,
+                selected=bool(rc.get("selected", True)),
+                invoked=bool(rc.get("invoked", False)),
+                evidence_refs=list(rc.get("evidence_refs", []) or []),
+                gate_passed=gate_passed,
+                outcome_contributed=_verified_outcome_contributed(
+                    gate_passed, claim_verified, payload
+                ),
+                selection_source=rc.get("selection_source", "planner"),
+                executor_id=rc.get("executor_id", self.name),
+                failure_reason=failure_reason,
+                telemetries=rc.get("telemetries", {}),
+            )
             
         refs = _as_refs(payload.get("evidence_refs"))
         invoked = bool(payload.get("local_model_called") or refs)
