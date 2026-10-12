@@ -1,0 +1,10 @@
+{
+  "intent_pass": true,
+  "risk_score": 10,
+  "target_files": ["app/service.py"],
+  "impact_map": {"app/service.py": ["app/api.py"]},
+  "acceptance_criteria": ["compute_total keeps rounding to 2 decimals"],
+  "deliverables": ["patched app/service.py"],
+  "steps": ["inspect compute_total", "patch", "verify"],
+  "handoff_readiness": 1.0
+}

@@ -1,0 +1,10 @@
+{
+  "task_id": "wiring-meta-opt-ep",
+  "task_type": "codeintel",
+  "task_desc": "wiring audit episode",
+  "solved": true,
+  "wall_duration_sec": 1.5,
+  "total_tokens_used": 1200,
+  "receipts": [{"capability_name": "codeintel", "selected": true, "invoked": true, "gate_passed": true}],
+  "ab_lift_value": 0.1
+}
