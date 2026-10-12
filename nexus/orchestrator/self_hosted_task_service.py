@@ -3866,12 +3866,14 @@ class SelfHostedTaskService:
         active_provider: Optional[str] = None,
     ) -> None:
         """Re-read all governed identity immediately before provider-side work."""
-        if binding is None and str(request.get("execution_lane") or "").strip().upper() == "GOVERNED":
-            # A GOVERNED attempt never reaches a model worker without a fresh
-            # Workforce Admission binding, whatever its contract kind (#1761).
-            # DIRECT lanes are exempt by the repository authority contract.
-            raise RuntimeError("WORKFORCE_ADMISSION_BINDING_MISSING")
         state = self._read_state(task_id) or {}
+        if binding is None and _tracked_dispatch_required(request, state):
+            # Tracked (Task Card) dispatch never reaches a model worker without
+            # a fresh Workforce Admission binding, on any execution lane.
+            # Untracked ISOLATED_TARGET dispatch has no admission path yet
+            # (known gap, see WORKFORCE_EXECUTION_OVERLAY.md); DIRECT_CANONICAL
+            # is Owner-exempt per AGENTS.md (#1761).
+            raise RuntimeError("WORKFORCE_ADMISSION_BINDING_MISSING")
         self._revalidate_tracked_dispatch_task_card(contract, request, state, binding)
         self._assert_persisted_workforce_dispatch(
             state,
