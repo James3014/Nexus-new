@@ -1,0 +1,5 @@
+[
+  {"candidate_id": "A", "text": "Patch with a regression test and evidence pytest pass", "score": 0.9, "evidence_refs": ["pytest:pass"]},
+  {"candidate_id": "B", "text": "Patch without any test", "score": 0.5, "evidence_refs": []},
+  {"candidate_id": "C", "text": "Rewrite the whole module", "score": 0.2, "evidence_refs": []}
+]

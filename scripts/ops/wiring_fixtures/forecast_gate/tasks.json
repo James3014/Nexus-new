@@ -1,0 +1,4 @@
+{
+  "low_risk": {"forecast_roi_score": 0.95, "forecast_tokens": 500, "forecast_reject_prob": 0.02},
+  "high_risk": {"forecast_roi_score": 0.01, "forecast_tokens": 900000, "forecast_reject_prob": 0.99}
+}
