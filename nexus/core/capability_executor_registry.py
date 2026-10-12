@@ -3321,13 +3321,18 @@ def _exec_forecast_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabi
         from nexus.engine.forecast_gate_service import ForecastGateService
         from nexus.engine.self_healing_selector import get_self_healing_selector
         from nexus.learning.latent_predictor_v20 import LatentPredictorV20
+        from nexus.learning.predictor_toggle import LATENT_PREDICTOR, predictor_enabled
 
         constraints = dict(plan.constraints or {})
         root = Path(
             str(constraints.get("workspace_root") or "/tmp/nexus-forecast")
         ).expanduser().resolve()
         root.mkdir(parents=True, exist_ok=True)
-        latent = LatentPredictorV20(workspace_root=root)
+        latent = (
+            LatentPredictorV20(workspace_root=root)
+            if predictor_enabled(LATENT_PREDICTOR)
+            else None
+        )
         gate_eval = GateEvaluator()
         state_io = StateIO(str(root), run_dir=str(root / ".nexus" / "forecast" / plan.task_id))
         inst = ForecastGateService(
@@ -3395,6 +3400,7 @@ def _exec_forecast_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabi
                 ash_strategy=ash_strategy,
                 state_persisted=persisted,
                 state_path=state_path,
+                predictor_influence=list(state.metadata.get("predictor_influence") or []),
             ),
         )
     except Exception as exc:
