@@ -182,3 +182,55 @@ def test_local_heal_local_only_route_with_binding_keeps_gate_passed() -> None:
     assert receipt.gate_passed is True
     assert receipt.failure_reason == ""
     assert receipt.outcome_contributed is False
+
+
+_HEAL_FLAT = {"solve_eligible": True, "verification_passed": True, "invoked": True}
+_EXEC_FLAT = {
+    "local_model_called": True,
+    "evidence_refs": ["ref:1"],
+    "local_model_executor_summary": {"delivery_gate_count": 1},
+}
+
+
+def test_local_heal_non_hybrid_gate_requires_verifier_artifact_and_source_hash() -> None:
+    receipt = RECEIPT_ADAPTERS["local_heal"].build(claim_verified=True, payload=dict(_HEAL_FLAT))
+    assert receipt.gate_passed is False
+    assert receipt.failure_reason == "missing_verifier_artifact;missing_source_hash"
+
+
+def test_local_heal_non_hybrid_gate_with_binding_keeps_gate_passed() -> None:
+    receipt = RECEIPT_ADAPTERS["local_heal"].build(
+        claim_verified=True, payload={**_HEAL_FLAT, **_BINDING}
+    )
+    assert receipt.gate_passed is True
+    assert receipt.outcome_contributed is False
+
+
+def test_local_heal_non_hybrid_original_condition_still_required() -> None:
+    receipt = RECEIPT_ADAPTERS["local_heal"].build(
+        claim_verified=True, payload={"solve_eligible": True, **_BINDING}
+    )
+    assert receipt.gate_passed is False
+
+
+def test_executor_fallthrough_gate_requires_verifier_artifact_and_source_hash() -> None:
+    receipt = RECEIPT_ADAPTERS["local_model_executor"].build(
+        claim_verified=True, payload=dict(_EXEC_FLAT)
+    )
+    assert receipt.gate_passed is False
+    assert receipt.failure_reason == "missing_verifier_artifact;missing_source_hash"
+
+
+def test_executor_fallthrough_gate_with_binding_keeps_gate_passed() -> None:
+    receipt = RECEIPT_ADAPTERS["local_model_executor"].build(
+        claim_verified=True, payload={**_EXEC_FLAT, **_BINDING}
+    )
+    assert receipt.gate_passed is True
+    assert receipt.outcome_contributed is False
+
+
+def test_executor_fallthrough_original_condition_still_required() -> None:
+    receipt = RECEIPT_ADAPTERS["local_model_executor"].build(
+        claim_verified=True, payload={"local_model_called": True, **_BINDING}
+    )
+    assert receipt.gate_passed is False

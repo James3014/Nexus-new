@@ -1456,7 +1456,10 @@ class LocalHealReceiptAdapter:
             refs = [str(r) for r in refs if r]
             
             invoked = bool(payload.get("invoked") or refs)
-            gate_passed = bool(payload.get("solve_eligible") and payload.get("verification_passed"))
+            base_gate = bool(payload.get("solve_eligible") and payload.get("verification_passed"))
+            binding_reasons = _claim_gate_binding_reasons(payload)
+            gate_passed = base_gate and not binding_reasons
+            failure_reason = ";".join(binding_reasons) if base_gate and binding_reasons else ""
             
             telemetries = {
                 "reasoning_mode": payload.get("reasoning_mode", "INTUITIVE"),
@@ -1473,6 +1476,7 @@ class LocalHealReceiptAdapter:
                 gate_passed=gate_passed,
                 outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
                 executor_id="local_heal_battlesuit",
+                failure_reason=failure_reason,
                 telemetries=telemetries,
             )
 
@@ -1527,7 +1531,10 @@ class LocalModelExecutorReceiptAdapter:
             
         refs = _as_refs(payload.get("evidence_refs"))
         invoked = bool(payload.get("local_model_called") or refs)
-        gate_passed = bool(payload.get("local_model_executor_summary", {}).get("delivery_gate_count") == 1)
+        base_gate = bool(payload.get("local_model_executor_summary", {}).get("delivery_gate_count") == 1)
+        binding_reasons = _claim_gate_binding_reasons(payload)
+        gate_passed = base_gate and not binding_reasons
+        failure_reason = ";".join(binding_reasons) if base_gate and binding_reasons else ""
         return merge_capability_receipt(
             name=self.name,
             selected=True,
@@ -1537,6 +1544,7 @@ class LocalModelExecutorReceiptAdapter:
             outcome_contributed=False,
             selection_source="CapabilityPlanner",
             executor_id="local_model_executor",
+            failure_reason=failure_reason,
             telemetries={
                 "candidate_hash": payload.get("candidate_hash", ""),
                 **{
