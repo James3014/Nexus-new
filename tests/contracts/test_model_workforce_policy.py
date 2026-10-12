@@ -192,7 +192,9 @@ def test_local_workers_have_evidence_specific_context_and_autonomy_boundaries() 
     workers = _manifest()["workers"]
 
     advisor = workers["local_advisor_3b"]
-    assert advisor["state"] == "LOCAL_CONDITIONAL"
+    # Not present on the M5 Ollama host as of 2026-10-12; roles kept for history.
+    assert advisor["state"] == "INSTALLED_NOT_CONNECTED"
+    assert advisor["reason"] == "not_present_on_m5_ollama_2026-10-12"
     assert advisor["preferred_context"] == "nexus_bounded"
     assert {"code_mutation", "full_context_assignment", "claim_authority"} <= set(
         advisor["forbidden_actions"]
@@ -633,3 +635,42 @@ def test_campaign_route_resolution_open_swe_resident_canary() -> None:
         )
         == "agy_flash_37_medium"
     )
+
+
+def test_m5_host_alignment_2026_10_12_admission() -> None:
+    manifest = _manifest()
+    workers = manifest["workers"]
+    assert manifest["last_verified"] == "2026-10-12"
+
+    for worker_id in ("local_deepseek67b", "local_qwythos9b"):
+        assert workers[worker_id]["state"] == "INSTALLED_NOT_CONNECTED"
+        assert workers[worker_id]["reason"] == "not_present_on_m5_ollama_2026-10-12"
+        assert workers[worker_id]["roles"]
+
+    qwen14b = workers["local_qwen14b"]
+    assert qwen14b["state"] == "DISABLED_RESOURCE_RISK"
+    assert "m5_64gb_host_2026-10-12" in qwen14b["reason"]
+
+    splash = workers["local_splash_qwen36"]
+    assert splash["model"] == "incoai/Qwen3.6-35B-A3B-Splash"
+    assert splash["state"] == "LOCAL_CONDITIONAL"
+    assert splash["autonomy"] == "L1"
+    assert splash["roles"] == ["bounded_code_candidate", "bounded_reasoning_candidate"]
+    assert splash["requires"] == workers["local_coder_7b"]["requires"]
+    assert splash["forbidden_actions"] == workers["local_coder_7b"]["forbidden_actions"]
+
+    big = workers["local_splash_qwen38_27b"]
+    assert big["state"] == "EXPERIMENT_ONLY"
+    assert big["autonomy"] == "L0"
+    assert big["reason"] == "installed_on_m5_not_served_gateway_unmapped"
+
+    agy = workers["agy_flash_38"]
+    reference = workers["agy_flash_37_medium"]
+    assert agy["provider"] == "agy"
+    assert agy["state"] == "REGISTERED_CONDITIONAL"
+    assert agy["roles"] == reference["roles"]
+    assert agy["autonomy"] == reference["autonomy"]
+    assert agy["default_route"] is False
+
+    policy = POLICY_PATH.read_text(encoding="utf-8")
+    assert "Dated amendment — 2026-10-12 (M5 inference host alignment)" in policy
