@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -2206,3 +2207,139 @@ def test_redaction_covers_common_secret_formats(secret):
     body = secret.split('"')[-2] if secret.startswith("{") else secret
     assert body[-20:] not in out
     assert "before" in out and "after" in out  # benign text preserved
+
+
+def _redaction_leaks(secret: str, tail: str) -> bool:
+    out = _redact_value({"stdout": f"before\n{secret}\nafter"})["stdout"]
+    return tail in out
+
+
+@pytest.mark.parametrize(
+    "secret",
+    [
+        "sk-ant-admin01-" + "A" * 40,
+        "sk-svcacct-" + "B" * 40,
+        "ASIA" + "F" * 16,
+        "ghs_" + "E" * 36,
+        "xo" + "xb-1234-5678-" + "L" * 24,
+        '{"refresh_token": "1//0g' + "G" * 40 + '"}',
+        '{"client_secret": "GOCSPX-' + "H" * 28 + '"}',
+        '{ "access_token" : "' + "J" * 30 + '" }',
+    ],
+)
+def test_redaction_covers_provider_family_variants(secret):
+    assert not _redaction_leaks(secret, secret.rstrip('"} ')[-12:])
+
+
+@pytest.mark.parametrize(
+    ("secret", "tail"),
+    [
+        ("sk_live_" + "N" * 24, "N" * 12),
+        ("rk_live_" + "N" * 24, "N" * 12),
+        (
+            "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0B" + "T" * 40 + "\n"
+            "-----END PRIVATE KEY-----",
+            "T" * 12,
+        ),
+        (
+            "-----BEGIN RSA PRIVATE KEY-----\nMIIEow" + "T" * 40 + "\nZZZZ\n"
+            "-----END RSA PRIVATE KEY-----",
+            "ZZZZ",
+        ),
+        (
+            "-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIIFH" + "T" * 40 + "\n"
+            "-----END ENCRYPTED PRIVATE KEY-----",
+            "T" * 12,
+        ),
+        (
+            "aws_secret_access_key = " + "wJalrXUtnFEMI/" + "K7MDENG/bPxRfiC" + "YEXAMPLEKEY",
+            "EXAMPLEKEY",
+        ),
+        (
+            '{"SecretAccessKey": "' + "wJalrXUtnFEMI/" + "K7MDENG/bPxRfiC" + "YEXAMPLEKEY" + '"}',
+            "EXAMPLEKEY",
+        ),
+        ("ya29." + "K" * 60, "K" * 12),
+        ("hf_" + "O" * 34, "O" * 12),
+        ("glpat-" + "P" * 20, "P" * 12),
+        ("npm_" + "Q" * 36, "Q" * 12),
+        ("xapp-1-A0-" + "M" * 30, "M" * 12),
+        ("eyJ" + "a" * 20 + ".eyJ" + "b" * 20 + "." + "c" * 30, "c" * 12),
+        ("Authorization: Basic dXNlcjpwYXNzd29yZA==", "cjpwYXNzd29yZA=="),
+        ("Authorization: Bearer " + "V" * 30, "V" * 12),
+        ("--token " + "U" * 40, "U" * 12),
+        ("--token=" + "U" * 40, "U" * 12),
+        ("--password " + "W" * 20, "W" * 12),
+        ("--password=" + "W" * 20, "W" * 12),
+    ],
+)
+def test_redaction_formerly_open_formats(secret, tail):
+    out = _redact_value({"stdout": f"before\n{secret}\nafter"})["stdout"]
+    assert tail not in out
+    assert "[REDACTED]" in out
+    assert out.startswith("before\n") and out.endswith("\nafter")
+
+
+def test_redaction_pem_block_does_not_swallow_text_after_end():
+    pem = "-----BEGIN PRIVATE KEY-----\nAAAA" + "T" * 30 + "\n-----END PRIVATE KEY-----"
+    out = _redact_value("keep-this\n" + pem + "\nkeep-that")
+    assert out == "keep-this\n[REDACTED]\nkeep-that"
+
+
+def test_redaction_unterminated_pem_block_redacts_through_end():
+    out = _redact_value("before\n-----BEGIN PRIVATE KEY-----\nMIIEvQ" + "T" * 40)
+    assert out == "before\n[REDACTED]"
+
+
+def test_redaction_leaves_benign_prose_untouched():
+    text = "basic information about tokens; use --verbose and --tokenizer-path ./x"
+    assert _redact_value(text) == text
+
+
+def _load_secret_scanner():
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[2] / "scripts" / "ops" / "git_history_secret_scan.py"
+    spec = importlib.util.spec_from_file_location("_git_history_secret_scan_drift", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclasses needs the module registered
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(spec.name, None)
+    return module
+
+
+# One sample per scanner detector. The scanner must stay a standalone single file
+# (CI runs it extracted from the base revision), so the detector set cannot be
+# imported here; this table is the drift guard instead.
+_SCANNER_DETECTOR_SAMPLES = {
+    "google_api_key": "AIza" + "a" * 35,
+    "aws_access_key": "AKIA" + "B" * 16,
+    "github_token": "gh" + "p_" + "C" * 36,
+    "anthropic_api_key": "sk-" + "ant-api03-" + "D" * 30,
+    "openai_api_key": "sk-" + "E" * 30,
+    "slack_token": "xo" + "xb-" + "1234567890-" + "F" * 12,
+    "stripe_live_key": "sk_" + "live_" + "G" * 24,
+}
+
+
+def test_redaction_covers_every_git_history_scanner_detector():
+    scanner = _load_secret_scanner()
+    names = {name for name, _ in scanner.PROVIDER_PATTERNS}
+    assert names == set(_SCANNER_DETECTOR_SAMPLES), (
+        "scanner detector set changed: add/remove a sample here and extend "
+        "_SECRET_PATTERNS in trajectory_continuity.py"
+    )
+    for name, pattern in scanner.PROVIDER_PATTERNS:
+        sample = _SCANNER_DETECTOR_SAMPLES[name]
+        assert pattern.search(sample.encode()), f"sample does not trigger {name}"
+        out = _redact_value({"stdout": f"before {sample} after"})["stdout"]
+        assert out == "before [REDACTED] after", f"{name} not redacted"
+    pem = (
+        "-----BEGIN " + "RSA PRIVATE KEY-----\n" + "H" * 40 + "\n-----END " + "RSA PRIVATE KEY-----"
+    )
+    assert scanner.PEM_PATTERN.search(pem.encode())
+    assert _redact_value("a\n" + pem + "\nb") == "a\n[REDACTED]\nb"
+    assignment = "aws_secret_access_key = " + "I" * 30
+    assert _redact_value(assignment).count("I" * 12) == 0

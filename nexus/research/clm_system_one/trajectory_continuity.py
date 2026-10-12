@@ -74,6 +74,31 @@ _SECRET_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"AIza[0-9A-Za-z_\-]{35}"),
     re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
     re.compile(r"xox[abposr]-[A-Za-z0-9\-]{10,}"),
+    # Full PEM private-key block (BEGIN..END inclusive); an unterminated block
+    # (truncated evidence) is redacted through the end of the string.
+    re.compile(
+        r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----"
+        r"(?:.*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----|.*\Z)",
+        re.DOTALL,
+    ),
+    # Stripe live keys (mirrors scripts/ops/git_history_secret_scan.py).
+    re.compile(r"(?:sk|rk)_live_[A-Za-z0-9]{16,}"),
+    # AWS secret access key assignments (env/ini style and JSON "SecretAccessKey").
+    re.compile(r"(?i)secret[_\-]?access[_\-]?key[\"']?\s*[=:]\s*[\"']?[^\s\"',}]+"),
+    # Bare provider tokens.
+    re.compile(r"ya29\.[A-Za-z0-9_\-.]{20,}"),
+    re.compile(r"\bhf_[A-Za-z0-9]{30,}"),
+    re.compile(r"glpat-[A-Za-z0-9_\-]{20,}"),
+    re.compile(r"\bnpm_[A-Za-z0-9]{30,}"),
+    re.compile(r"xapp-[A-Za-z0-9\-]{10,}"),
+    # JWT: three base64url segments, header and payload start with eyJ ({"...).
+    re.compile(r"\beyJ[A-Za-z0-9_\-]{5,}\.eyJ[A-Za-z0-9_\-]{5,}\.[A-Za-z0-9_\-]+"),
+    # Authorization header values (Bearer is covered above).
+    re.compile(r"(?i)authorization[\"']?\s*[:=]\s*[\"']?(?:basic|digest|negotiate)\s+[^\s\"']+"),
+    # CLI flags carrying credentials: --token X / --token=X / --password X ...
+    re.compile(
+        r"(?i)--(?:token|access-token|auth-token|password|passwd|secret|api-key)(?:=|\s+)\S+"
+    ),
     re.compile(r"(?i)-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
     # curl -u / --user basic-auth: -u user:password or --user user:password
     re.compile(r"(?i)(?:--user|-u)\s+\S+:\S+"),
