@@ -2633,12 +2633,40 @@ class UnifiedMCPGateway:
             job["probe_evidence_path"] = str(self._probe_evidence_read_root() / (identity + ".json"))
         return self._assist_write(job)
 
+    _ASSIST_HUNK_HEADER_RE = re.compile(r"^@@ -\d+(,\d+)? \+\d+(,\d+)? @@")
+    _ASSIST_GIT_HEADER_RE = re.compile(r"^diff --git a/\S.* b/\S.*$")
+    _ASSIST_GIT_EXTENDED_RE = re.compile(
+        r"^(new file mode |deleted file mode |rename from |rename to |old mode |new mode |"
+        r"Binary files .* differ$|GIT binary patch$)"
+    )
+
     @staticmethod
     def _assist_patch_is_substantive(patch: Any) -> bool:
-        """A patch must be a non-empty unified diff, never null/empty/refusal prose."""
-        return isinstance(patch, str) and bool(
-            re.match(r"\s*(diff --git |--- |Index: )", patch)
-        )
+        """A patch must be a structurally valid unified diff, never null/empty/refusal prose.
+
+        Accepts a `--- `/`+++ ` file section with a hunk header followed by at least one
+        change/context line, or a `diff --git` section whose extended header needs no hunk
+        (new/deleted file, rename, mode change, binary).
+        """
+        if not isinstance(patch, str):
+            return False
+        lines = patch.splitlines()
+        hunk_re = UnifiedMCPGateway._ASSIST_HUNK_HEADER_RE
+        for index, line in enumerate(lines):
+            if line.startswith("--- ") and index + 1 < len(lines) and lines[index + 1].startswith("+++ "):
+                for hunk_index in range(index + 2, len(lines)):
+                    if hunk_re.match(lines[hunk_index]):
+                        following = lines[hunk_index + 1] if hunk_index + 1 < len(lines) else ""
+                        if following[:1] in ("+", "-", " "):
+                            return True
+                        break
+            elif UnifiedMCPGateway._ASSIST_GIT_HEADER_RE.match(line):
+                for header_line in lines[index + 1 :]:
+                    if header_line.startswith(("diff --git ", "--- ", "@@ ")):
+                        break
+                    if UnifiedMCPGateway._ASSIST_GIT_EXTENDED_RE.match(header_line):
+                        return True
+        return False
 
     @staticmethod
     def _assist_action(job: Mapping[str, Any]) -> dict[str, Any]:

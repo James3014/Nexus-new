@@ -1984,7 +1984,7 @@ def test_assist_submit_is_durable_and_task_wait_reads_result(monkeypatch, tmp_pa
             self.pid = FakePopen._next_pid
             FakePopen._next_pid += 1
             self._returncode = 0
-            stdout.write(json.dumps({"type": "run_result", "text": json.dumps({"patch": "diff --git a/README.md b/README.md"})}) + "\n")
+            stdout.write(json.dumps({"type": "run_result", "text": json.dumps({"patch": "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-a\n+b\n"})}) + "\n")
             stdout.flush()
 
         def poll(self):
@@ -2019,7 +2019,10 @@ def test_assist_submit_is_durable_and_task_wait_reads_result(monkeypatch, tmp_pa
     assert result["artifacts"]["stdout"]
 
 
-@pytest.mark.parametrize("patch_value", ["", None, "I cannot help with that."])
+@pytest.mark.parametrize(
+    "patch_value",
+    ["", None, "I cannot help with that.", "--- I cannot help with that.", "Index: I cannot help with that.", "diff --git "],
+)
 def test_assist_degenerate_patch_fails_closed_with_retry_required(monkeypatch, tmp_path, patch_value):
     class FakePopen:
         pid = 54901
@@ -2049,8 +2052,45 @@ def test_assist_degenerate_patch_fails_closed_with_retry_required(monkeypatch, t
     assert response["next_action"] == "nexus_task_retry"
 
 
+@pytest.mark.parametrize(
+    "patch",
+    [
+        "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1,2 +1,2 @@\n ctx\n-a\n+b\n",
+        "--- a/a\n+++ b/a\n@@ -1 +1 @@\n-a\n+b\n",
+        "\n  \ndiff --git a/n b/n\nnew file mode 100644\n--- /dev/null\n+++ b/n\n@@ -0,0 +1 @@\n+x\n",
+        "diff --git a/n b/n\nnew file mode 100644\nindex 0000000..e69de29\n",
+        "diff --git a/o b/o\ndeleted file mode 100644\n",
+        "diff --git a/o b/p\nsimilarity index 100%\nrename from o\nrename to p\n",
+        "diff --git a/o b/o\nold mode 100644\nnew mode 100755\n",
+        "diff --git a/i.png b/i.png\nBinary files a/i.png and b/i.png differ\n",
+        "diff --git a/i.png b/i.png\nindex 1..2 100644\nGIT binary patch\nliteral 1\nIcmZ\n",
+    ],
+)
+def test_assist_patch_is_substantive_accepts_valid_diffs(patch):
+    assert UnifiedMCPGateway._assist_patch_is_substantive(patch)
+
+
+@pytest.mark.parametrize(
+    "patch",
+    [
+        "diff --git a/a b/a\n",
+        "diff --git a/a b/a\nindex 1..2 100644\n",
+        "diff --git a/a b/a\n--- a/a\n+++ b/a\n",
+        "--- a/a\n+++ b/a\n@@ -1 +1 @@\n",
+        "--- a/a\n@@ -1 +1 @@\n-a\n+b\n",
+        "--- a/a\n+++ b/a\nnot a hunk\n+b\n",
+        "--- I cannot help with that.",
+        "Index: I cannot help with that.",
+        "diff --git ",
+        "I cannot help with that.\nrename from nothing\n",
+    ],
+)
+def test_assist_patch_is_substantive_rejects_non_diffs(patch):
+    assert not UnifiedMCPGateway._assist_patch_is_substantive(patch)
+
+
 def test_assist_patch_substantive_check_and_schema_min_length():
-    assert UnifiedMCPGateway._assist_patch_is_substantive("diff --git a/a b/a\n")
+    assert UnifiedMCPGateway._assist_patch_is_substantive("diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-a\n+b\n")
     for bad in ("", "   ", None, 3, "I cannot help with that."):
         assert not UnifiedMCPGateway._assist_patch_is_substantive(bad)
     schema = {"type": "object", "required": ["patch"], "properties": {"patch": {"type": "string", "minLength": 1}}}
