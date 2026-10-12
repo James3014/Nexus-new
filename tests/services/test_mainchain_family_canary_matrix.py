@@ -128,10 +128,6 @@ def _promotable_names() -> list[str]:
         mat = _node_meta(name)["maturity"].lower()
         if mat in {"experimental", "deprecated", "legacy_alias", "unknown", "prototype"}:
             continue
-        if name in ARCHIVED_CAPABILITY_REASONS:
-            # Archived 2026-10-12: fail-closed behavior is covered by
-            # tests/services/test_archived_capabilities_2026_10_12.py.
-            continue
         out.append(name)
     return out
 
@@ -1231,6 +1227,14 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
         ):
             # nexus-runtime #171: an honestly unselected retired node is not a structural failure.
             final_status = "RETIRED_NOT_SELECTED"
+        archived = name in ARCHIVED_CAPABILITY_REASONS
+        if archived and final_status != "RETIRED_NOT_SELECTED":
+            # Archived 2026-10-12: the only acceptable result is an explicit skip.
+            final_status = (
+                "ARCHIVED_FAIL_CLOSED"
+                if pos.get("skipped") and not pos.get("invoked")
+                else "FAIL"
+            )
         if pos.get("action") in _SHALLOW_ACTIONS and pos.get("gate_passed"):
             probe_only += 1
         phys = str(pos.get("physical_callable") or "")
@@ -1238,6 +1242,7 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
             fixture_count += 1
         if (
             name in promotable
+            and not archived
             and contract["execution_class"] in REAL_EXECUTION_CLASSES
             and pos["final_status"] in {"FAIL", "PROBE", "IMPLEMENTATION_FAILURE"}
         ):
@@ -1296,7 +1301,11 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
         for n in promotable
         if PLANNER_EXECUTION_CONTRACTS[n]["execution_class"] == EXECUTION_CLASS_MISSING_ENGINE
     ]
-    blockers = [r for r in per_cap if r["final_status"] not in {"OK", "ALIAS_NORMALIZED"}]
+    blockers = [
+        r
+        for r in per_cap
+        if r["final_status"] not in {"OK", "ALIAS_NORMALIZED", "ARCHIVED_FAIL_CLOSED"}
+    ]
     structural_blockers = [
         r for r in per_cap if r["final_status"] in {"FAIL", "PROBE", "IMPLEMENTATION_FAILURE"}
     ]
@@ -1306,7 +1315,7 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
         if r["promotable"]
         and r["execution_class"]
         in {*REAL_EXECUTION_CLASSES, EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED}
-        and r["final_status"] != "OK"
+        and r["final_status"] not in {"OK", "ARCHIVED_FAIL_CLOSED"}
     ]
     structural = (
         len(list_planner_capability_names()) == 57
@@ -1622,7 +1631,13 @@ def test_retired_integration_reference_proof_rejects_false_green() -> None:
     )
 
 
-@pytest.mark.parametrize("name", _promotable_names())
+# Archived 2026-10-12 nodes fail closed by design (see
+# tests/services/test_archived_capabilities_2026_10_12.py); the promotable denominator
+# of 53 and the REAL contract denominator stay pinned until they are re-based.
+@pytest.mark.parametrize(
+    "name",
+    [n for n in _promotable_names() if n not in ARCHIVED_CAPABILITY_REASONS],
+)
 def test_promotable_family_canary_mainchain_entry(name: str) -> None:
     """Each promotable node: pos+neg via MainchainEntry path, consumer proof, no false green."""
     pos = _run_family_canary(name, positive=True)
