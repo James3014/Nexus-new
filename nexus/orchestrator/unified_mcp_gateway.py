@@ -2634,10 +2634,14 @@ class UnifiedMCPGateway:
         return self._assist_write(job)
 
     _ASSIST_HUNK_HEADER_RE = re.compile(r"^@@ -\d+(,\d+)? \+\d+(,\d+)? @@")
-    _ASSIST_GIT_HEADER_RE = re.compile(r"^diff --git a/\S.* b/\S.*$")
-    _ASSIST_GIT_EXTENDED_RE = re.compile(
-        r"^(new file mode |deleted file mode |rename from |rename to |old mode |new mode |"
-        r"Binary files .* differ$|GIT binary patch$)"
+    _ASSIST_GIT_HEADER_RE = re.compile(r"^diff --git \S.* \S.*$")
+    # Git extended header lines. The first group needs no hunk to be a real change.
+    _ASSIST_GIT_CHANGE_RE = re.compile(
+        r"^(new file mode [0-7]{6}|deleted file mode [0-7]{6}|old mode [0-7]{6}|new mode [0-7]{6}|"
+        r"rename from \S.*|rename to \S.*|Binary files .* differ|GIT binary patch)$"
+    )
+    _ASSIST_GIT_OTHER_RE = re.compile(
+        r"^(index \S+( [0-7]{6})?|similarity index \d+%|dissimilarity index \d+%|copy from \S.*|copy to \S.*)$"
     )
 
     @staticmethod
@@ -2645,27 +2649,44 @@ class UnifiedMCPGateway:
         """A patch must be a structurally valid unified diff, never null/empty/refusal prose.
 
         Accepts a `--- `/`+++ ` file section with a hunk header followed by at least one
-        change/context line, or a `diff --git` section whose extended header needs no hunk
-        (new/deleted file, rename, mode change, binary).
+        `+`/`-` change line, or a `diff --git` section whose extended header needs no hunk
+        (new/deleted file, rename, mode change, binary). Single linear pass.
         """
         if not isinstance(patch, str):
             return False
+        cls = UnifiedMCPGateway
         lines = patch.splitlines()
-        hunk_re = UnifiedMCPGateway._ASSIST_HUNK_HEADER_RE
-        for index, line in enumerate(lines):
-            if line.startswith("--- ") and index + 1 < len(lines) and lines[index + 1].startswith("+++ "):
-                for hunk_index in range(index + 2, len(lines)):
-                    if hunk_re.match(lines[hunk_index]):
-                        following = lines[hunk_index + 1] if hunk_index + 1 < len(lines) else ""
-                        if following[:1] in ("+", "-", " "):
+        count = len(lines)
+        index = 0
+        while index < count:
+            line = lines[index]
+            if line.startswith("--- ") and index + 1 < count and lines[index + 1].startswith("+++ "):
+                index += 2
+                while index < count and cls._ASSIST_HUNK_HEADER_RE.match(lines[index]):
+                    index += 1
+                    while index < count:
+                        body = lines[index]
+                        if (
+                            cls._ASSIST_HUNK_HEADER_RE.match(body)
+                            or body.startswith("--- ")
+                            or body.startswith("diff --git ")
+                        ):
+                            break
+                        if body[:1] in ("+", "-"):
                             return True
-                        break
-            elif UnifiedMCPGateway._ASSIST_GIT_HEADER_RE.match(line):
-                for header_line in lines[index + 1 :]:
-                    if header_line.startswith(("diff --git ", "--- ", "@@ ")):
-                        break
-                    if UnifiedMCPGateway._ASSIST_GIT_EXTENDED_RE.match(header_line):
+                        index += 1
+                continue
+            if cls._ASSIST_GIT_HEADER_RE.match(line):
+                index += 1
+                while index < count:
+                    header = lines[index]
+                    if cls._ASSIST_GIT_CHANGE_RE.match(header):
                         return True
+                    if not cls._ASSIST_GIT_OTHER_RE.match(header):
+                        break
+                    index += 1
+                continue
+            index += 1
         return False
 
     @staticmethod

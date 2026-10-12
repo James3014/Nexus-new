@@ -2064,6 +2064,12 @@ def test_assist_degenerate_patch_fails_closed_with_retry_required(monkeypatch, t
         "diff --git a/o b/o\nold mode 100644\nnew mode 100755\n",
         "diff --git a/i.png b/i.png\nBinary files a/i.png and b/i.png differ\n",
         "diff --git a/i.png b/i.png\nindex 1..2 100644\nGIT binary patch\nliteral 1\nIcmZ\n",
+        "diff --git n n\nnew file mode 100644\n",
+        "diff --git o p\nrename from o\nrename to p\n",
+        "diff --git o o\nold mode 100644\nnew mode 100755\n",
+        "diff --git i/x w/x\nnew file mode 100644\n",
+        "--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@\n a\n\n-b\n+c\n",
+        "--- a/x\n+++ b/x\n@@ -1 +1 @@\n unchanged\n@@ -5 +5 @@\n-a\n+b\n",
     ],
 )
 def test_assist_patch_is_substantive_accepts_valid_diffs(patch):
@@ -2083,10 +2089,24 @@ def test_assist_patch_is_substantive_accepts_valid_diffs(patch):
         "Index: I cannot help with that.",
         "diff --git ",
         "I cannot help with that.\nrename from nothing\n",
+        "--- a/x\n+++ b/x\n@@ -1 +1 @@\n unchanged\n",
+        "--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n unchanged\n\n",
+        "diff --git a/x b/x\nsorry, cannot do this\nrename from y\n",
+        "diff --git a/x b/x\nnew file mode banana\n",
+        "diff --git a/x b/x\nnew file mode 100\n",
     ],
 )
 def test_assist_patch_is_substantive_rejects_non_diffs(patch):
     assert not UnifiedMCPGateway._assist_patch_is_substantive(patch)
+
+
+def test_assist_patch_is_substantive_is_linear_on_repeated_file_headers():
+    import time
+
+    patch = "--- a\n+++ b\n" * 25000
+    started = time.monotonic()
+    assert not UnifiedMCPGateway._assist_patch_is_substantive(patch)
+    assert time.monotonic() - started < 1.0
 
 
 def test_assist_patch_substantive_check_and_schema_min_length():
