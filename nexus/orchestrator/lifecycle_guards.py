@@ -315,6 +315,96 @@ def validate_approval_grant(
     }
 
 
+_UNTRACKED_GRANT_IDENTITY_FIELDS = (
+    "approval_id",
+    "approved_by",
+    "bound_task_id",
+    "bound_action_type",
+)
+
+
+def require_bound_approval_grant(
+    grant: Any,
+    *,
+    task_id: str,
+    attempt_id: str,
+    action_type: str,
+    task_card_hash: Optional[str],
+    contract_kind: str,
+    contract_hash: Optional[str],
+    owner_inline_contract: Optional[Mapping[str, Any]] = None,
+    allow_consumed: bool = False,
+) -> None:
+    """Require an approval grant that names its approver and binds task and action.
+
+    Tracked-card and Owner Inline tasks use the full ``validate_approval_grant``
+    contract.  A task with no card or inline contract cannot carry a contract
+    hash binding, so it still needs approver identity plus task, attempt and
+    action binding; a bare ``{"schema": ...}`` or ``{"consumed_at": ...}`` is
+    never authority.  Runtime hashes cannot be re-derived outside the gateway,
+    so they are checked for presence and taken from the grant itself.
+    """
+    if not isinstance(grant, Mapping):
+        raise LifecycleGuardError("APPROVAL_GRANT_REQUIRED", "an approval grant is required")
+    full = (
+        contract_kind == ContractKind.OWNER_INLINE.value
+        or bool(task_card_hash)
+        or all(
+            str(grant.get(field) or "").strip()
+            for field in (
+                "bound_task_id", "bound_attempt_id", "bound_action_type", "contract_kind",
+                "contract_hash", "tool_manifest_hash", "full_tool_schema_hash",
+                "permission_policy_hash", "lifecycle_revision", "server_instance_id",
+            )
+        )
+    )
+    if full:
+        try:
+            validate_approval_grant(
+                grant,
+                task_id=task_id,
+                attempt_id=attempt_id,
+                action_type=action_type,
+                task_card_hash=task_card_hash,
+                contract_kind=contract_kind,
+                contract_hash=contract_hash,
+                owner_inline_contract=owner_inline_contract,
+                tool_manifest_hash=str(grant.get("tool_manifest_hash") or ""),
+                full_tool_schema_hash=str(grant.get("full_tool_schema_hash") or ""),
+                permission_policy_hash=str(grant.get("permission_policy_hash") or ""),
+                lifecycle_revision=str(grant.get("lifecycle_revision") or ""),
+                server_instance_id=str(grant.get("server_instance_id") or ""),
+                allow_consumed=allow_consumed,
+            )
+        except LifecycleGuardError as exc:
+            # A consumed grant was validated, including expiry, when it was consumed.
+            if not (exc.code == "APPROVAL_EXPIRED" and allow_consumed and grant.get("consumed_at")):
+                raise
+        return
+    missing = [
+        field
+        for field in _UNTRACKED_GRANT_IDENTITY_FIELDS
+        if not str(grant.get(field) or "").strip()
+    ]
+    if missing:
+        raise LifecycleGuardError(
+            "APPROVAL_BINDING_INCOMPLETE",
+            "approval grant is missing approver or binding identity",
+            details={"missing": missing},
+        )
+    bound_attempt = str(grant.get("bound_attempt_id") or "")
+    if (
+        str(grant["bound_task_id"]) != task_id
+        or str(grant["bound_action_type"]) != action_type
+        or (attempt_id and bound_attempt and bound_attempt != attempt_id)
+    ):
+        raise LifecycleGuardError(
+            "APPROVAL_BINDING_MISMATCH", "approval is bound to a different task attempt or action"
+        )
+    if str(grant.get("approval_scope") or "ALLOW_ACTION_ONCE") != "ALLOW_ACTION_ONCE":
+        raise LifecycleGuardError("APPROVAL_SCOPE_UNSUPPORTED", "only ALLOW_ACTION_ONCE is supported")
+
+
 def _repo_relative(path: str, *, root: Path) -> Path:
     candidate = Path(str(path))
     if candidate.is_absolute() or ".." in candidate.parts or ".git" in candidate.parts:

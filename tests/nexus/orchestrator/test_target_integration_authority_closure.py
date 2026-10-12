@@ -805,6 +805,22 @@ def test_post_apply_physical_truth_is_typed_and_persistable(tmp_path: Path):
     assert raised.value.integration_result_sha == raised.value.branch_head_after
 
 
+def _bound_tracked_approval(task_id: str, contract_hash: str) -> dict:
+    """Full versioned grant naming its approver, bound to task, attempt and action (#1758)."""
+    now = datetime.now(timezone.utc)
+    return {
+        "schema": "nexus.approval.v2", "approval_id": f"approval-{task_id}",
+        "approved_by": "owner", "issued_at": now.isoformat(),
+        "expires_at": (now + timedelta(minutes=5)).isoformat(),
+        "bound_task_id": task_id, "bound_attempt_id": "attempt-1",
+        "bound_action_type": "CANDIDATE_APPROVE", "approval_scope": "ALLOW_ACTION_ONCE",
+        "contract_kind": "TRACKED_TASK_CARD", "contract_hash": contract_hash, "task_card_hash": "c" * 64,
+        "tool_manifest_hash": "1" * 64, "full_tool_schema_hash": "2" * 64,
+        "permission_policy_hash": "3" * 64, "lifecycle_revision": "test-lifecycle-revision",
+        "server_instance_id": "test-server",
+    }
+
+
 def test_service_post_apply_failure_persists_physical_truth_and_blocks_cleanup(tmp_path: Path):
     root, base, candidate = _repo(tmp_path)
     receipt = replace(_acceptance(candidate), task_id="post-apply-task")
@@ -861,11 +877,7 @@ def test_service_post_apply_failure_persists_physical_truth_and_blocks_cleanup(t
             "merge_performed": False,
         },
     })
-    context = {
-        "schema": "nexus.approval.v2", "approval_id": "approval-post-apply-task",
-        "approval_scope": "ALLOW_ACTION_ONCE", "contract_kind": "TRACKED_TASK_CARD",
-        "contract_hash": "c" * 64, "task_card_hash": "c" * 64,
-    }
+    context = _bound_tracked_approval("post-apply-task", contract.contract_hash)
     with pytest.raises(RuntimeError, match="post-apply verification failed"):
         service.owner_finish(
             "post-apply-task", candidate_commit_sha=candidate,
@@ -1011,7 +1023,7 @@ def test_owner_finish_retains_real_dirty_target_with_typed_reason(tmp_path: Path
         "task_id": "dirty-owner-finish", "attempt_id": "attempt-1", "status": "CANDIDATE_CAPTURED", "promotion_status": "PENDING_HUMAN_APPROVAL", "request": request, "contract": contract.model_dump(mode="json"), "contract_hash": contract.contract_hash, "task_card_hash": "c" * 64, "verified_receipt": verified_receipt, "integration_verifier_manifest": _manifest(verified_receipt, contract), "promotion_packet": packet, "candidate_ref": durable_ref,
         "lease": {"schema": "nexus.target_worktree_lease.v1", "lease_id": lease_id, "task_id": "dirty-owner-finish", "controller_revision": base, "target_base_revision": base, "target_worktree": str(target), "target_branch": "nexus/task/dirty-owner-finish", "initial_head": base, "initial_status_sha256": "0" * 64, "controller_status_sha256": "0" * 64, "created_from_exact_revision": True, "commit_created": True, "merge_performed": False},
     })
-    context = {"schema": "nexus.approval.v2", "approval_id": "approval-dirty-owner-finish", "approval_scope": "ALLOW_ACTION_ONCE", "contract_kind": "TRACKED_TASK_CARD", "contract_hash": "c" * 64, "task_card_hash": "c" * 64}
+    context = _bound_tracked_approval("dirty-owner-finish", contract.contract_hash)
     result = service.owner_finish(
         "dirty-owner-finish", candidate_commit_sha=candidate,
         candidate_tree_sha=packet["candidate_tree_sha"], candidate_state_hash="d" * 64,
