@@ -1,6 +1,6 @@
 # Capability wiring audit (2026-10)
 
-Issue #1852. Base: origin/main 929a953d0. Claim ceiling: `WIRING_AUDIT_EVIDENCE_ONLY` (no benchmark scored, no routing/admission change).
+Issue #1852 (batch 1 fixes: #1862). Original run base: origin/main 929a953d0; current matrix: post-batch-1 on origin/main 4dbac7875 plus #1862. Claim ceiling: `WIRING_AUDIT_EVIDENCE_ONLY` (no benchmark scored, no routing/admission change).
 
 ## Question
 
@@ -23,42 +23,42 @@ Script: `scripts/ops/capability_wiring_audit.py` (fixtures `scripts/ops/wiring_f
 - `SIMULATED`: executor runs but its inputs are hard-coded or fixture-provided. `STUB`: constant outcome, input-independent outcome, or gate passes without any checkable effect. `BLOCKED_<exact reason>`, `NOT_SELECTABLE`, `RETIRING`, `MODEL_UNAVAILABLE` as specified.
 - `claim_boundary.simulated` is recorded in column `receipt_claims_simulated` and is **not** an execution signal: `CapabilityReceipt.to_dict()` emits `claim_boundary` without `simulated`, `ClaimBoundary` defaults it to true, and nothing in nexus-runtime or Nexus-new sets it false for capability receipts. All 29 executed rows say true.
 
-## Result matrix (verbatim, run 20261012T080857Z on 929a953d0)
+## Result matrix (post batch 1, run 2026-10-12T12:54:06.355699+00:00, origin/main 4dbac7875 + #1862)
 
-Verdict counts: `{json.dumps(m["verdict_counts"])}`. Full (untruncated) reason strings are in the JSON.
+Verdict counts: `{"BLOCKED": 7, "MODEL_UNAVAILABLE": 2, "REAL": 17, "REAL_UNATTESTED": 3, "RETIRING": 6, "STUB": 1}` (was, at 929a953d0: 14 REAL_UNATTESTED, 4 STUB, 3 SIMULATED, 9 BLOCKED, 6 RETIRING, 0 REAL). Receipts are the attested receipts (see "Batch 1 fixes"), which is why `receipt_claims_simulated` is now false for executed rows. `artifact_gate`, `claim_gate`, `delivery_gate` stay REAL_UNATTESTED: their receipts are produced by the runtime postflight invoker, not the Nexus-side executor receipt, so the Nexus-side attestation does not reach them (runtime producer fix still needed). `local_model_executor` and `repair_loop` are MODEL_UNAVAILABLE in this run: the M5 tunnel (`127.0.0.1:11434`) timed out on the probe (intermittent, nothing was started locally); their last measured verdict is BLOCKED (929a953d0, see the backlog below). federation, oracle_shadow, stress_test, ui_validator and benchmark are retired at planner level in the pinned runtime (`CapabilityNode.maturity='retired'`, terminal `_enforce_retired_capabilities` gate forces them `forbidden`), so RETIRING is now the planner's own state, not only an audit annotation; learning_closure is an executor, not a planner node. Full strings are in the `.matrix.json`.
 
 | capability | verdict | executor-level verdict (product path blocked) | production default, selected but untriggered | executor (function @ file:line) | reached via | switches needed | receipt_claims_simulated |
 |---|---|---|---|---|---|---|---|
-| codeintel | REAL_UNATTESTED | - | - | _exec_codeintel @ nexus/core/capability_executor_registry.py:732 | EXECUTOR_REGISTRY | none | True |
-| research | STUB | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_research @ nexus/core/capability_executor_registry.py:850 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | none; route.escalate_triggered=True | True |
-| research_route | BLOCKED_execution_contract_violation:missing_outcome_field:control_plane_reference | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_research @ nexus/core/capability_executor_registry.py:850 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | none; route.escalate_triggered=True | True |
-| hyper | BLOCKED_execution_contract_violation:missing_evidence_field:evidence_refs,missing_outcome_field:evidence_refs,missing... | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_hyper_sprint @ nexus/core/capability_executor_registry.py:1245 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | NEXUS_LOCAL_MODEL_CALL_ALLOWED=1; route.escalate_triggered=True | True |
-| nightshift | BLOCKED_semantic_status=BLOCKED(terminal_status=FAILED):console:❌ [NightShift] Blocked by Phase Policy: PassRate=0.0%... | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_nightshift @ nexus/core/capability_executor_registry.py:1400 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | NEXUS_LOCAL_MODEL_CALL_ALLOWED=1; route.escalate_triggered=True | True |
-| swarm | BLOCKED_EXECUTOR_UNAVAILABLE:import_construct_not_execution | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_swarm_multi_agent @ nexus/core/capability_executor_registry.py:1296 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | NEXUS_LOCAL_MODEL_CALL_ALLOWED=1; route.escalate_triggered=True | True |
-| multi_agent | BLOCKED_EXECUTOR_UNAVAILABLE:import_construct_not_execution | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_swarm_multi_agent @ nexus/core/capability_executor_registry.py:1296 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | NEXUS_LOCAL_MODEL_CALL_ALLOWED=1; route.escalate_triggered=True | True |
-| drone | STUB | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_drone @ nexus/core/capability_executor_registry.py:1341 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | none; route.escalate_triggered=True | True |
-| ultra_review | BLOCKED_workforce_admission_blocked: demand_online: Requested role 'independent_review' is outside admitted roles for... | STUB | MISSING | _exec_ultra_review @ nexus/core/capability_executor_registry.py:1700 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | none; route.escalate_triggered=True | True |
-| autoreason | SIMULATED | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_autoreason @ nexus/core/capability_executor_registry.py:1154 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | NEXUS_EXTERNAL_RUNTIME_AUTHORIZED=1; route.escalate_triggered=True | True |
-| ddtree | SIMULATED | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_ddtree @ nexus/core/capability_executor_registry.py:2402 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | NEXUS_EXTERNAL_RUNTIME_AUTHORIZED=1; route.escalate_triggered=True | True |
-| lancedb | REAL_UNATTESTED | - | - | _exec_lancedb @ nexus/core/capability_executor_registry.py:807 | EXECUTOR_REGISTRY | none | True |
-| memory | STUB | - | - | _exec_memory @ nexus/core/capability_executor_registry.py:1973 | EXECUTOR_REGISTRY | none | True |
-| mempalace_gate | REAL_UNATTESTED | - | - | _exec_mempalace @ nexus/core/capability_executor_registry.py:370 | EXECUTOR_REGISTRY | none | True |
-| belief | REAL_UNATTESTED | - | - | _exec_belief @ nexus/core/capability_executor_registry.py:1057 | EXECUTOR_REGISTRY | none | True |
-| artifact_gate | REAL_UNATTESTED | - | - | evaluate_postflight_gate @ nexus_runtime/support/services/online_nexus_context.py:858 | POSTFLIGHT_INVOKER | none | True |
-| claim_gate | REAL_UNATTESTED | - | - | evaluate_postflight_gate @ nexus_runtime/support/services/online_nexus_context.py:858 | POSTFLIGHT_INVOKER | none | True |
-| delivery_gate | REAL_UNATTESTED | - | - | evaluate_postflight_gate @ nexus_runtime/support/services/online_nexus_context.py:858 | POSTFLIGHT_INVOKER | none | True |
-| acceptance_check | REAL_UNATTESTED | - | - | _exec_acceptance_check @ nexus/core/capability_executor_registry.py:2576 | EXECUTOR_REGISTRY | none | True |
-| pregate | REAL_UNATTESTED | - | - | _exec_pregate @ nexus/core/capability_executor_registry.py:2166 | EXECUTOR_REGISTRY | none | True |
-| forecast_gate | REAL_UNATTESTED | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_forecast_gate @ nexus/core/capability_executor_registry.py:3316 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | none; route.escalate_triggered=True | True |
-| plan_quality_gate | REAL_UNATTESTED | - | - | _exec_plan_quality_gate @ nexus/core/capability_executor_registry.py:2029 | EXECUTOR_REGISTRY | none | True |
-| sandbox | REAL_UNATTESTED | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_sandbox_runner @ nexus/core/capability_executor_registry.py:1409 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | none; route.escalate_triggered=True | True |
-| harness_preflight_sensor | STUB | - | - | _exec_harness_preflight_sensor @ nexus/core/capability_executor_registry.py:2234 | EXECUTOR_REGISTRY | none | True |
-| committee | BLOCKED_canonical_context_rejected: canonical_context_route_override_forbidden:codeintel.committee_proposals[].model | BLOCKED_semantic_status=FAILED | MISSING | _exec_committee @ nexus/core/capability_executor_registry.py:3126 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | NEXUS_LOCAL_MODEL_CALL_ALLOWED=1,NEXUS_USE_COMMITTEE=1; route.escalate_trigge... | True |
-| xray | SIMULATED | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_xray @ nexus/core/capability_executor_registry.py:3537 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | none; route.escalate_triggered=True | True |
-| metabolism | REAL_UNATTESTED | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_metabolism_resume @ nexus/core/capability_executor_registry.py:1777 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | none; route.escalate_triggered=True | True |
-| meta_opt | REAL_UNATTESTED | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_meta_opt @ nexus/core/capability_executor_registry.py:3748 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | none; route.escalate_triggered=True | True |
-| local_model_executor | BLOCKED_SELECTED_NOT_EXECUTED:planner_selected_no_runtime_executor:local_stage[local_output_not_delivered,candidate_n... | - | - | LocalModelExecutor.run @ nexus/services/local_heal/local_model_executor.py:1065 | LOCAL_STAGE | NEXUS_LOCAL_MODEL_CALL_ALLOWED=1 | True |
-| repair_loop | BLOCKED_local_model_executor_not_proven,missing_candidate_hash,candidate_hash_not_applied,verifier_not_passed,local_r... | - | - | LocalModelExecutor.run @ nexus/services/local_heal/local_model_executor.py:1065 | LOCAL_STAGE | NEXUS_LOCAL_MODEL_CALL_ALLOWED=1 | True |
+| codeintel | REAL | - | - | _exec_codeintel @ nexus/core/capability_executor_registry.py:733 | EXECUTOR_REGISTRY | none | False |
+| research | REAL | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_research @ nexus/core/capability_executor_registry.py:851 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | none; route.escalate_triggered=True | False |
+| research_route | BLOCKED_execution_contract_violation:missing_outcome_field:control_plane_reference | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_research @ nexus/core/capability_executor_registry.py:851 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | none; route.escalate_triggered=True | False |
+| hyper | BLOCKED_semantic_status=FAILED | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_hyper_sprint @ nexus/core/capability_executor_registry.py:1266 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | NEXUS_LOCAL_MODEL_CALL_ALLOWED=1; route.escalate_triggered=True | False |
+| nightshift | BLOCKED_semantic_status=BLOCKED(terminal_status=FAILED):console:❌ [NightShift] Blocked by Phase Policy: PassRate=0.0%... | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_nightshift @ nexus/core/capability_executor_registry.py:1465 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | NEXUS_LOCAL_MODEL_CALL_ALLOWED=1; route.escalate_triggered=True | True |
+| swarm | BLOCKED_EXECUTOR_UNAVAILABLE:import_construct_not_execution | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_swarm_multi_agent @ nexus/core/capability_executor_registry.py:1361 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | NEXUS_LOCAL_MODEL_CALL_ALLOWED=1; route.escalate_triggered=True | True |
+| multi_agent | BLOCKED_EXECUTOR_UNAVAILABLE:import_construct_not_execution | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_swarm_multi_agent @ nexus/core/capability_executor_registry.py:1361 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | NEXUS_LOCAL_MODEL_CALL_ALLOWED=1; route.escalate_triggered=True | True |
+| drone | STUB | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_drone @ nexus/core/capability_executor_registry.py:1406 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | none; route.escalate_triggered=True | False |
+| ultra_review | BLOCKED_workforce_admission_blocked: demand_online: Requested role 'independent_review' is outside admitted roles for... | STUB | MISSING | _exec_ultra_review @ nexus/core/capability_executor_registry.py:1765 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | none; route.escalate_triggered=True | False |
+| autoreason | REAL | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_autoreason @ nexus/core/capability_executor_registry.py:1173 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | NEXUS_EXTERNAL_RUNTIME_AUTHORIZED=1; route.escalate_triggered=True | False |
+| ddtree | REAL | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_ddtree @ nexus/core/capability_executor_registry.py:2469 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | NEXUS_EXTERNAL_RUNTIME_AUTHORIZED=1; route.escalate_triggered=True | False |
+| lancedb | REAL | - | - | _exec_lancedb @ nexus/core/capability_executor_registry.py:808 | EXECUTOR_REGISTRY | none | False |
+| memory | REAL | - | - | _exec_memory @ nexus/core/capability_executor_registry.py:2038 | EXECUTOR_REGISTRY | none | False |
+| mempalace_gate | REAL | - | - | _exec_mempalace @ nexus/core/capability_executor_registry.py:371 | EXECUTOR_REGISTRY | none | False |
+| belief | REAL | - | - | _exec_belief @ nexus/core/capability_executor_registry.py:1076 | EXECUTOR_REGISTRY | none | False |
+| artifact_gate | REAL_UNATTESTED | - | - | evaluate_postflight_gate @ .venv/lib/python3.14/site-packages/nexus_runtime/support/ser... | POSTFLIGHT_INVOKER | none | True |
+| claim_gate | REAL_UNATTESTED | - | - | evaluate_postflight_gate @ .venv/lib/python3.14/site-packages/nexus_runtime/support/ser... | POSTFLIGHT_INVOKER | none | True |
+| delivery_gate | REAL_UNATTESTED | - | - | evaluate_postflight_gate @ .venv/lib/python3.14/site-packages/nexus_runtime/support/ser... | POSTFLIGHT_INVOKER | none | True |
+| acceptance_check | REAL | - | - | _exec_acceptance_check @ nexus/core/capability_executor_registry.py:2643 | EXECUTOR_REGISTRY | none | False |
+| pregate | REAL | - | - | _exec_pregate @ nexus/core/capability_executor_registry.py:2233 | EXECUTOR_REGISTRY | none | False |
+| forecast_gate | REAL | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_forecast_gate @ nexus/core/capability_executor_registry.py:3383 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | none; route.escalate_triggered=True | False |
+| plan_quality_gate | REAL | - | - | _exec_plan_quality_gate @ nexus/core/capability_executor_registry.py:2096 | EXECUTOR_REGISTRY | none | False |
+| sandbox | REAL | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_sandbox_runner @ nexus/core/capability_executor_registry.py:1474 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | none; route.escalate_triggered=True | False |
+| harness_preflight_sensor | REAL | - | - | _exec_harness_preflight_sensor @ nexus/core/capability_executor_registry.py:2301 | EXECUTOR_REGISTRY | none | False |
+| committee | BLOCKED_canonical_context_rejected: canonical_context_route_override_forbidden:codeintel.committee_proposals[].model | BLOCKED_semantic_status=FAILED | MISSING | _exec_committee @ nexus/core/capability_executor_registry.py:3193 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | NEXUS_LOCAL_MODEL_CALL_ALLOWED=1,NEXUS_USE_COMMITTEE=1; route.escalate_trigge... | False |
+| xray | REAL | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_xray @ nexus/core/capability_executor_registry.py:3604 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | none; route.escalate_triggered=True | False |
+| metabolism | REAL | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_metabolism_resume @ nexus/core/capability_executor_registry.py:1842 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | none; route.escalate_triggered=True | False |
+| meta_opt | REAL | - | SKIPPED_POLICY_NOT_TRIGGERED | _exec_meta_opt @ nexus/core/capability_executor_registry.py:3825 | EXECUTOR_REGISTRY via build_escalate_gated_invoker | none; route.escalate_triggered=True | False |
+| local_model_executor | MODEL_UNAVAILABLE | - | - | LocalModelExecutor.run @ nexus/services/local_heal/local_model_executor.py:1065 | LOCAL_STAGE | none | None |
+| repair_loop | MODEL_UNAVAILABLE | - | - | LocalModelExecutor.run @ nexus/services/local_heal/local_model_executor.py:1065 | LOCAL_STAGE | none | None |
 | federation | RETIRING | - | - | - | - | none | None |
 | oracle_shadow | RETIRING | - | - | - | - | none | None |
 | stress_test | RETIRING | - | - | - | - | none | None |
@@ -68,43 +68,42 @@ Verdict counts: `{json.dumps(m["verdict_counts"])}`. Full (untruncated) reason s
 
 | capability | verdict reason | failed assertions / notes |
 |---|---|---|
-| codeintel | executor_ran_and_artifact_passed_but_receipt_claims_simulated_true |  |
-| research | outcome_independent_of_fixture_input | failed: task_text_reached_handler, findings_reference_the_question, negative_control:different_question_gives_different_result |
-| research_route | executor_or_runtime_blocked | failed: task_text_reached_handler, findings_reference_the_question, negative_control:different_question_gives_different_result |
-| hyper | executor_or_runtime_blocked | failed: sprint_status_success, sprint_produced_at_least_two_candidates |
+| codeintel | invoked_with_evidence_and_artifact_assertions_passed |  |
+| research | invoked_with_evidence_and_artifact_assertions_passed |  |
+| research_route | executor_or_runtime_blocked |  |
+| hyper | executor_or_runtime_blocked | failed: sprint_status_success |
 | nightshift | executor_or_runtime_blocked | failed: recovery_report_written, terminal_success |
 | swarm | executor_or_runtime_blocked | failed: swarm_executed_workers, no_construct_only_rejection |
 | multi_agent | executor_or_runtime_blocked | failed: swarm_executed_workers, no_construct_only_rejection |
 | drone | outcome_independent_of_fixture_input | failed: subtask_artifact_written, action_normalized_from_task, negative_control:different_task_gives_different_result |
 | ultra_review | capability_never_invoked | failed: planted_eval_input_flagged |
-| autoreason | executor_uses_hard_coded_inputs:"id": "c0"@nexus/core/capability_executor_registry.py:1179 | failed: ranked_three_seeded_candidates, scores_not_constant |
-| ddtree | executor_uses_hard_coded_inputs:"candidate_id": "c0"@nexus/core/capability_executor_registry.py:2426 | failed: pruned_five_candidate_pool, recorded_pruned_count_ge_2 |
-| lancedb | executor_ran_and_artifact_passed_but_receipt_claims_simulated_true |  |
-| memory | outcome_independent_of_fixture_input | failed: seeded_insight_retrieved, negative_control:unrelated_query_has_no_hits |
-| mempalace_gate | executor_ran_and_artifact_passed_but_receipt_claims_simulated_true |  |
-| belief | executor_ran_and_artifact_passed_but_receipt_claims_simulated_true |  |
+| autoreason | invoked_with_evidence_and_artifact_assertions_passed |  |
+| ddtree | invoked_with_evidence_and_artifact_assertions_passed |  |
+| lancedb | invoked_with_evidence_and_artifact_assertions_passed |  |
+| memory | invoked_with_evidence_and_artifact_assertions_passed |  |
+| mempalace_gate | invoked_with_evidence_and_artifact_assertions_passed |  |
+| belief | invoked_with_evidence_and_artifact_assertions_passed |  |
 | artifact_gate | executor_ran_and_artifact_passed_but_receipt_claims_simulated_true |  |
 | claim_gate | executor_ran_and_artifact_passed_but_receipt_claims_simulated_true |  |
 | delivery_gate | executor_ran_and_artifact_passed_but_receipt_claims_simulated_true |  |
-| acceptance_check | executor_ran_and_artifact_passed_but_receipt_claims_simulated_true |  |
-| pregate | executor_ran_and_artifact_passed_but_receipt_claims_simulated_true |  |
-| forecast_gate | executor_ran_and_artifact_passed_but_receipt_claims_simulated_true |  |
-| plan_quality_gate | executor_ran_and_artifact_passed_but_receipt_claims_simulated_true |  |
-| sandbox | executor_ran_and_artifact_passed_but_receipt_claims_simulated_true |  |
-| harness_preflight_sensor | gate_passed_without_checkable_effect:sensor_saw_planned_selection | failed: sensor_saw_planned_selection |
+| acceptance_check | invoked_with_evidence_and_artifact_assertions_passed |  |
+| pregate | invoked_with_evidence_and_artifact_assertions_passed |  |
+| forecast_gate | invoked_with_evidence_and_artifact_assertions_passed |  |
+| plan_quality_gate | invoked_with_evidence_and_artifact_assertions_passed |  |
+| sandbox | invoked_with_evidence_and_artifact_assertions_passed |  |
+| harness_preflight_sensor | invoked_with_evidence_and_artifact_assertions_passed |  |
 | committee | capability_never_invoked | failed: verdicts_recorded, winner_or_abstain, negative_control:single_candidate_blocks |
-| xray | executor_uses_hard_coded_inputs:"nexus/services/capability_registry.py"@nexus/core/capability_executor_registry.py:3549 |  |
-| metabolism | executor_ran_and_artifact_passed_but_receipt_claims_simulated_true |  |
-| meta_opt | executor_ran_and_artifact_passed_but_receipt_claims_simulated_true |  |
-| local_model_executor | executor_or_runtime_blocked | failed: candidate_delivered_to_runtime |
-| repair_loop | executor_or_runtime_blocked | failed: candidate_delivered_to_runtime, verifier_passed_on_candidate |
+| xray | invoked_with_evidence_and_artifact_assertions_passed |  |
+| metabolism | invoked_with_evidence_and_artifact_assertions_passed |  |
+| meta_opt | invoked_with_evidence_and_artifact_assertions_passed |  |
+| local_model_executor | TimeoutError: timed out |  |
+| repair_loop | TimeoutError: timed out |  |
 | federation | federation (archive PR) |  |
 | oracle_shadow | aos_oracle / oracle promote (archive PR) |  |
 | stress_test | stress_test + _exec_stress_test (archive PR) |  |
 | ui_validator | ui_explorer / ui-validator + _exec_ui_validator (archive PR) |  |
 | benchmark | benchmark_service + _exec_benchmark (archive PR) |  |
 | learning_closure | _exec_learning_closure (archive PR; executor only, not a planner node) |  |
-
 
 ## REAL_UNATTESTED today (eligible for re-measurement)
 
@@ -137,3 +136,32 @@ Not audited: nothing skipped except the RETIRING rows (federation, oracle_shadow
 
 - On this host the smoke first failed closed with exit 78 (`LEGACY_EXTRA_REQUIRED`: bench subprocess used `uv run` without the legacy extra). Re-run with `NEXUS_BENCH_SUBPROCESS_PYTHON` set: **fails** (`passed: false`; route_oracles 8/8 rows fail with `evidence_without_gate_pass` / `selected_without_invocation` / `missing_verifier_artifact;missing_source_hash`; 14 of 15 task rows fail overall).
 - It does **not** read `simulated`: its validators (and `capability_receipt_policy.py`, `gemini_nexus_report.py`) contain zero references. A synthetic with-Nexus row whose receipts all carry `claim_boundary.simulated=true` passes the row validator with no failures (`audit.smoke_probe`, covered by a test). So it fails here for gate/evidence reasons, but would pass on simulated receipts that look successful.
+
+
+## Batch 1 fixes
+
+Issue #1862 (stacks on #1861). Seven rows re-run with the same switches as the main audit (`uv run --extra legacy python scripts/ops/capability_wiring_audit.py --only research,memory,autoreason,ddtree,hyper,xray,harness_preflight_sensor`; M5 tunnel `127.0.0.1:11434`, model `qwen2.5-coder:7b-instruct`, nothing started locally). Before: run `2026-10-12T08:40:11.324859+00:00` on origin/main 1324a1e1e. After: run `2026-10-12T11:20:15.817191+00:00` on this branch. Verdict counts before `{"BLOCKED": 1, "SIMULATED": 3, "STUB": 3}`, after `{"BLOCKED": 1, "REAL": 6}`.
+
+The audit scenarios now supply the request inputs the fixed executors read (`codeintel.autoreason_candidates`, `ddtree_candidates`, `xray_targets`, `hyper_*`, `memory_query`), because the executors no longer invent them. Unit tests: `tests/services/test_capability_wiring_fixes_batch1.py`.
+
+| capability | before | after | receipt simulated before -> after | note |
+|---|---|---|---|---|
+| research | STUB | REAL | True -> False | executor passes `task` (handler key) plus `task_statement`; per-task run dir `.nexus/research/<task_id>` (was shared `/tmp`, whose `researchpack.json` cache returned one task's pack for all); gate fails on empty task or provider `status=FAIL`. The positive run reached the external chub provider over the network. |
+| memory | STUB | REAL | True -> False | `memory_query` now read from `codeintel`; when only a task statement exists, retrieval mirrors local_heal (exact query, then de-duplicated per-keyword lookups, oracle contract text stripped); read-only FindingsMemory episode count reported as `findings_hit_count`; empty query stays blocked. |
+| autoreason | SIMULATED | REAL | True -> False | candidate pool from `codeintel.autoreason_candidates` (or `candidate_pool`) via the registry allowlist; no pool -> `skip_reason=no_candidate_pool`, never a fabricated `c0`. |
+| ddtree | SIMULATED | REAL | True -> False | pool from `codeintel.ddtree_candidates`, `max_candidates` from `ddtree_max_candidates`; same `no_candidate_pool` skip. |
+| hyper | BLOCKED_execution_contract_violation:missing_evidence_field:evidenc... | BLOCKED_semantic_status=FAILED | True -> False | candidate_count / target file / test file / llm_mode / repo root from the request (`hyper_*`, `target_file(s)`, `workspace_root`); outcome now has `semantic_status`, `evidence_refs`, sprint status, attempt_count; contract passes. The sprint itself still FAILS on the README fixture (`stage1_no_passing_candidate`, 3 deterministic attempts, llm_mode off by default), so the row stays blocked on `semantic_status=FAILED`, no longer on the contract. |
+| xray | SIMULATED | REAL | True -> False | targets from `xray_targets` / `target_file(s)` resolved under `workspace_root`; repo root fallback; gate requires every target to exist. |
+| harness_preflight_sensor | STUB | REAL | True -> False | `selected_capabilities` / `pending_capabilities` taken from the planner stage in the runtime context; a non-empty pending list now fails the gate. |
+
+### Receipt attestation (Nexus-new side)
+
+The pinned `nexus_runtime` `CapabilityReceipt.to_dict()` hard-codes `claim_boundary={"public_claim_allowed": False}` (belief receipt: plus `claim_eligible`), takes no argument, and `ClaimBoundary.from_dict` is not reachable from it, so there is no hook. Nexus-new therefore re-projects `receipt_base` with `project_child_receipt_base(..., claim_boundary=<evaluated ClaimBoundary>)` in `nexus/engine/capability_receipts.py` (`attested_receipt_dict`, `evaluate_receipt_claim_boundary`, `build_attested_trace_receipts`); `nexus/core/router.py` uses it for executor receipts, and the wiring audit uses it for `receipt_claims_simulated`. `simulated=False` only when the receipt is `invoked`, has evidence refs, and the outcome is not an auth block / skip / import-construct result / error; otherwise it stays true. `public_claim_allowed` stays false (`ClaimBoundary.evaluate` never unlocks it); `receipt_hash` is recomputed because it covers the boundary. Trace receipts built by `build_trace_receipts` stay `simulated=true` unless the caller passes executor outcomes. The runtime producer still needs a fix (`to_dict` should accept a claim boundary); this is a Nexus-new post-processing step until it lands. Because REAL is defined by `simulated=false`, the six rows above are REAL rather than REAL_UNATTESTED; the audit now reads the attested receipt, so rows that were REAL_UNATTESTED above (codeintel, lancedb, ...) would re-measure as REAL; they were not re-run in this batch and the main matrix above is left as the historical 929a953d0 record.
+
+### Not changed
+
+research still depends on an external provider (provider `auto`: the `chub` CLI against its public CDN with no credential in the code path, falling back to `npx @willh/felo-cli`, which would use `FELO_API_KEY` from the environment; the positive audit run used chub); the REAL verdict needs network access and writes the handler's LanceDB cache under `~/.openclaw`. swarm / multi_agent, committee, ultra_review, nightshift and the Local stage empty `candidate_patch` are out of scope for this batch.
+
+### Containment and authorization
+
+The registry forwards `workspace_root` to hyper/xray only from the runtime context or route, never from request `codeintel`; research takes no root and uses the project root. Every request-named hyper target/test file and xray target must resolve inside that root and exist (else blocked `path_outside_workspace`); with no xray target the legacy `nexus/services/capability_registry.py` (if present) or the root is scanned. hyper `llm_mode` from the request still requires `NEXUS_LOCAL_MODEL_CALL_ALLOWED=1`; constraint flags such as `allow_fixture_model_boundary` are not on any allowlist and do not authorize autoreason/ddtree.

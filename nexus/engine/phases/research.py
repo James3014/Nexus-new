@@ -12,6 +12,14 @@ from nexus.core.state_contracts import NexusState
 logger = logging.getLogger(__name__)
 
 
+def _provider_timeout_sec() -> float:
+    """Bound each external research provider call (the handler used to wait forever)."""
+    try:
+        return max(1.0, float(os.getenv("NEXUS_RESEARCH_PROVIDER_TIMEOUT_SEC", "60")))
+    except ValueError:
+        return 60.0
+
+
 class ResearchPhaseHandler(BasePhaseHandler):
     """
     🌐 Phase X: Research
@@ -137,9 +145,23 @@ class ResearchPhaseHandler(BasePhaseHandler):
         os.makedirs(chub_home, exist_ok=True)
         env["CHUB_HOME"] = chub_home
 
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, check=False, env=env
-        )
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+                timeout=_provider_timeout_sec(),
+            )
+        except subprocess.TimeoutExpired:
+            return {
+                "findings": [],
+                "source": "chub",
+                "status": "FAIL",
+                "tokens_used": 0,
+                "error": "chub_timeout",
+            }
         stdout = (result.stdout or "").strip()
         stderr = (result.stderr or "").strip()
         if result.returncode != 0:
@@ -183,7 +205,22 @@ class ResearchPhaseHandler(BasePhaseHandler):
 
     def _run_felo(self, query: str) -> Dict[str, Any]:
         cmd = ["npx", "-y", "@willh/felo-cli", "--json", query]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=_provider_timeout_sec(),
+            )
+        except subprocess.TimeoutExpired:
+            return {
+                "findings": [],
+                "source": "Felo-CLI",
+                "status": "FAIL",
+                "tokens_used": 0,
+                "error": "felo_timeout",
+            }
         stdout = (result.stdout or "").strip()
         stderr = (result.stderr or "").strip()
         if result.returncode != 0:
