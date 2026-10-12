@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import subprocess
 from pathlib import Path
@@ -12,6 +13,9 @@ from nexus.services.readability_gate import ReadabilityGate
 from nexus.services.wisdom_synthesizer import WisdomSynthesizer
 from nexus.services.mem_palace import MemPalace
 from nexus.services.wisdom_augmenter import WisdomAugmenter
+
+logger = logging.getLogger(__name__)
+
 
 class ImplementationPackGenerator:
     """
@@ -30,7 +34,12 @@ class ImplementationPackGenerator:
         self.palace = MemPalace(str(project_root))
         self.augmenter = augmenter or WisdomAugmenter(project_root)
 
-    def generate(self, planner_output: Dict[str, Any]) -> Dict[str, Any]:
+    def generate(
+        self,
+        planner_output: Dict[str, Any],
+        auto_tag: bool | None = None,
+        verified_run: bool = False,
+    ) -> Dict[str, Any]:
         """
         執行全量編譯、智慧增強與 v25.5 記憶閉環。
         """
@@ -96,27 +105,55 @@ class ImplementationPackGenerator:
 
         # 💎 結晶化 (Crystallization)
         if audit_report["readability_score"] >= 95:
-            # 🔄 [Arweave] Trigger Metabolism
+            # [Arweave] SIMULATED: MemPalace does not upload anything.
             tx_id = self.palace.trigger_arweave_distillation(i_pack)
             results["arweave_tx"] = tx_id
-            
-            self.wisdom.synthesize_template(self.task_id, i_pack, audit_report["readability_score"])
-            self._execute_auto_tag(audit_report["readability_score"])
+            results["arweave_status"] = "SIMULATED"
+            print("[Arweave] SIMULATED distillation (NOT uploaded); placeholder id only.")
 
+            self.wisdom.synthesize_template(self.task_id, i_pack, audit_report["readability_score"])
+            results["score_basis"] = "READABILITY_LINT_HEURISTIC"
+            results["tag"] = self._execute_auto_tag(
+                audit_report["readability_score"], auto_tag=auto_tag, verified_run=verified_run
+            )
+
+        with open(self.run_dir / "spec_side_effects.json", "w", encoding="utf-8") as fh:
+            json.dump(
+                {k: results.get(k) for k in ("arweave_tx", "arweave_status", "score_basis", "tag")},
+                fh,
+                indent=2,
+                ensure_ascii=False,
+            )
         return results
 
-    def _execute_auto_tag(self, score: float):
+    def _execute_auto_tag(
+        self,
+        score: float,
+        auto_tag: bool | None = None,
+        verified_run: bool = False,
+    ) -> Dict[str, Any]:
+        """Create git tag spec-v1.<score> only when explicitly opted in AND verified.
+
+        Opt-in: ``auto_tag=True`` or env ``NEXUS_SPEC_AUTO_TAG=1`` (swarm run --tag).
+        The score is a readability lint over the spec text, not a verified-run
+        result, so the tag is refused unless the caller passes ``verified_run=True``.
         """
-        執行 git tag spec-vX.Y。
-        """
+        if auto_tag is None:
+            auto_tag = os.environ.get("NEXUS_SPEC_AUTO_TAG", "") == "1"
+        if not auto_tag:
+            return {"status": "NOT_PERFORMED", "reason": "tagging not requested (opt-in via --tag)"}
+        if not verified_run:
+            print("[Auto-Tag] SKIPPED: score is a readability-lint heuristic, not a verified run.")
+            return {"status": "NOT_PERFORMED", "reason": "score not derived from a verified run"}
         try:
-            # 獲取當前版本號（簡化處理，實際可能從 config 讀取）
             tag_name = f"spec-v1.{int(score)}"
-            subprocess.run(["git", "tag", "-a", tag_name, "-m", f"High Quality I-Pack (Score: {score})"], 
+            subprocess.run(["git", "tag", "-a", tag_name, "-m", f"High Quality I-Pack (Score: {score})"],
                            cwd=str(self.project_root), check=True)
-            print(f"✅ [Auto-Tag] {tag_name} created.")
+            print(f"[Auto-Tag] {tag_name} created.")
+            return {"status": "CREATED", "tag": tag_name}
         except Exception as e:
-            print(f"⚠️ [Auto-Tag:Error] {e}")
+            print(f"[Auto-Tag:Error] {e}")
+            return {"status": "ERROR", "reason": str(e)}
 
 if __name__ == "__main__":
     # 測試

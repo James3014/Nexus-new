@@ -1,6 +1,6 @@
-import os
 import json
 import logging
+import subprocess
 from pathlib import Path
 from typing import Dict, Any, List
 from datetime import datetime, timezone
@@ -42,20 +42,75 @@ class SessionMetabolism:
         """Compatibility gate used by legacy metabolism tests."""
         return int(token_usage or 0) >= int(self.token_limit * self.threshold)
 
-    def distill(self, session_context: Dict[str, Any], p_manager: Any | None = None) -> str:
-        """📉 語義壓縮：將繁雜的對話提煉為結晶 Seed。"""
-        logger.info("🧪 [Metabolism:DISTILLING] Crystallizing session essence...")
+    def build_session_context(self) -> Dict[str, Any]:
+        """Build the distill context from real, on-disk session data only.
+
+        Sources (in order): mission state (.nexus/mission.json), metabolism
+        checkpoint (task_stack.json). Nothing is invented: when neither exists
+        ``goal`` is None and ``context_source`` is ``NONE``.
+        """
+        sources: List[str] = []
+        goal: str | None = None
+        done: List[str] = []
+        pending: List[str] = []
+        try:
+            from nexus.core.mission_contracts import NexusMission
+
+            mission = NexusMission.load(self.project_root)
+        except Exception:
+            mission = None
+        if mission is not None and str(mission.objective or "").strip():
+            goal = str(mission.objective)
+            done = [str(r) for r in (mission.run_history or [])]
+            sources.append("mission:.nexus/mission.json")
+        checkpoint = self.load_checkpoint()
+        if checkpoint.get("task_id"):
+            sources.append("checkpoint:.nexus/metabolism/task_stack.json")
+            pending = [str(x) for x in (checkpoint.get("pending_steps") or [])]
+            if goal is None:
+                goal = f"checkpoint task {checkpoint['task_id']} at {checkpoint.get('last_active_step')}"
+        return {
+            "goal": goal,
+            "done": done,
+            "todo": pending,
+            "errors": [],
+            "context_source": "+".join(sources) if sources else "NONE",
+        }
+
+    def _git_head(self) -> str | None:
+        try:
+            out = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=str(self.project_root),
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return out.stdout.strip() or None
+
+    def distill_local(self, session_context: Dict[str, Any] | None = None, p_manager: Any | None = None) -> Dict[str, Any]:
+        """Write the local session seed and report honestly what happened.
+
+        No upload is performed: ``tx`` is always None and status is LOCAL_ONLY.
+        """
+        logger.info("[Metabolism:DISTILLING] Writing local session seed (no upload).")
         if p_manager is not None:
             try:
                 from nexus.core.p_loop_manager import PPhase
                 p_manager.transition_to(PPhase.P4_METABOLIZE, {"action": "metabolism.distill"})
             except Exception:
                 pass
+        if session_context is None:
+            session_context = self.build_session_context()
         essence = {
             "version": "v23.7-FLEET-COMMAND",
-            "last_commit": os.popen("git rev-parse --short HEAD").read().strip(),
+            "last_commit": self._git_head(),
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "current_objective": session_context.get("goal", "Continuous Evolution"),
+            "current_objective": session_context.get("goal"),
+            "context_source": session_context.get("context_source", "CALLER_SUPPLIED"),
             "completed_tasks": session_context.get("done", []),
             "errors": session_context.get("errors", []),
             "checkpoint": self.load_checkpoint(),
@@ -67,7 +122,21 @@ class SessionMetabolism:
         seed_path.parent.mkdir(parents=True, exist_ok=True)
         with open(seed_path, 'w', encoding='utf-8') as f:
             json.dump(essence, f, indent=2, ensure_ascii=False)
-        return f"ar_tx_distilled_{int(datetime.now().timestamp())}"
+        return {
+            "status": "LOCAL_ONLY",
+            "seed_path": str(seed_path),
+            "tx": None,
+            "upload": "NOT_PERFORMED",
+            "context_source": essence["context_source"],
+            "objective": essence["current_objective"],
+        }
+
+    def distill(self, session_context: Dict[str, Any], p_manager: Any | None = None) -> str:
+        """Compatibility wrapper: writes the local seed and returns its path.
+
+        This no longer returns a (fake) Arweave transaction id; nothing is uploaded.
+        """
+        return self.distill_local(session_context, p_manager=p_manager)["seed_path"]
 
     def _get_active_beliefs(self) -> list:
         beliefs_path = self.project_root / ".nexusknowledge" / "beliefs.jsonl"

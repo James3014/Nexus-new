@@ -2370,15 +2370,18 @@ else:
     def distill(report_file, output_json):
         """🌬️ [Metabolism] Distill session essence."""
         from nexus.services.metabolism_engine import metabolism
-        tx = metabolism.distill({"goal": "v23.7 Recovery", "done": ["Wiki Sync"], "todo": ["Command Recovery"]})
-        payload = {"status": "SUCCESS", "tx": tx}
+        payload = metabolism.distill_local()
         out_path = (repo_root / report_file).resolve()
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         if output_json:
             click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         else:
-            click.echo(f"💎 Session distilled. Arweave TX: {tx}")
+            click.echo(f"💎 Local seed written (status: {payload['status']}): {payload['seed_path']}")
+            click.echo(f"Upload: {payload['upload']} (no Arweave transaction)")
+            click.echo(f"Context source: {payload['context_source']}")
+            if payload["objective"] is None:
+                click.echo("Objective: none recorded (no mission or checkpoint found)")
             click.echo(f"Report: {out_path}")
 
     # --- v23.7 艦隊指揮 ---
