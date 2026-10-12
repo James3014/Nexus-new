@@ -1231,9 +1231,7 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
         if archived and final_status != "RETIRED_NOT_SELECTED":
             # Archived 2026-10-12: the only acceptable result is an explicit skip.
             final_status = (
-                "ARCHIVED_FAIL_CLOSED"
-                if pos.get("skipped") and not pos.get("invoked")
-                else "FAIL"
+                "ARCHIVED_FAIL_CLOSED" if pos.get("skipped") and not pos.get("invoked") else "FAIL"
             )
         if pos.get("action") in _SHALLOW_ACTIONS and pos.get("gate_passed"):
             probe_only += 1
