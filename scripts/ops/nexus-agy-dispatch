@@ -1859,6 +1859,15 @@ TEMP_COMMAND_DENY = [
     "command(rsync)",
 ]
 
+# NO_TOOL_PACKET runs replace (never inherit) the lease account's persisted
+# allow/deny lists: a stale persisted ``command(*)`` would otherwise stay active.
+NO_TOOL_DENY = [
+    "command(*)",
+    "read_file(*)",
+    "write_file(*)",
+]
+NO_TOOL_PROFILE_VIOLATION = "NO_TOOL_PROFILE_VIOLATION"
+
 _UNSAFE_PERMISSION_RULES = {
     "command(*)",
     "read_file(*)",
@@ -2096,6 +2105,9 @@ def build_effective_permission_profile(
             kind = "READ_ONLY_RESEARCH"
         elif not effective_allow:
             kind = "NO_TOOL_PACKET"
+            for r in NO_TOOL_DENY:
+                if r not in effective_deny:
+                    effective_deny.append(r)
         else:
             kind = "CUSTOM"
 
@@ -3159,10 +3171,14 @@ def dispatch_run(
     active_provider_pid: int | None = None
     active_provider_pgid: int | None = None
 
+    attempt_tool_event_count = 0
+
     def _inner_operation_hook(event: dict[str, Any] | None = None, **kwargs: Any) -> None:
-        nonlocal active_provider_pid, active_provider_pgid
+        nonlocal active_provider_pid, active_provider_pgid, attempt_tool_event_count
         merged = dict(event or {})
         merged.update(kwargs)
+        if isinstance(merged.get("tool_event_count"), int):
+            attempt_tool_event_count = max(attempt_tool_event_count, merged["tool_event_count"])
         if isinstance(merged.get("provider_pid"), int):
             active_provider_pid = merged["provider_pid"]
         if isinstance(merged.get("provider_pgid"), int):
@@ -3391,11 +3407,16 @@ def dispatch_run(
                 except OSError:
                     provider_log_attempt_offset = None
             permission_token = None
+            attempt_tool_event_count = 0
             try:
                 allow_rules = list(effective_permissions.get("allow") or [])
                 deny_rules = list(effective_permissions.get("deny") or [])
                 replace_allow_deny = bool(
-                    mode == "accept-edits" or allow_rules or deny_rules or temp_command_permissions
+                    mode == "accept-edits"
+                    or allow_rules
+                    or deny_rules
+                    or temp_command_permissions
+                    or permission_profile_kind == "NO_TOOL_PACKET"
                 )
                 allow_unsafe_legacy = bool(temp_command_permissions or "command(*)" in allow_rules)
                 if allow_rules or deny_rules or replace_allow_deny:
@@ -3517,12 +3538,16 @@ def dispatch_run(
                 observed_changed_paths=attempt_changed_paths,
             )
             scope_blocked = bool(write_paths and scope_state == "VIOLATION_OUT_OF_SCOPE")
+            no_tool_violation = bool(
+                permission_profile_kind == "NO_TOOL_PACKET" and attempt_tool_event_count > 0
+            )
 
             if (
                 code == 0
                 and not timed_out
                 and not permission_blocked
                 and not scope_blocked
+                and not no_tool_violation
                 and not provider_terminal_quota
             ):
                 sys.stdout.write(out)
@@ -3543,7 +3568,7 @@ def dispatch_run(
 
             kind = (
                 AccountFailureKind.PERMISSION_OR_SCOPE_ERROR
-                if (permission_blocked or scope_blocked)
+                if (permission_blocked or scope_blocked or no_tool_violation)
                 else AccountFailureKind.QUOTA_EXHAUSTED
                 if provider_terminal_quota
                 else classify_failure(code, out, err, timed_out)
@@ -3552,7 +3577,12 @@ def dispatch_run(
             provider_effect_observed: bool | None = False
             reconciliation_required = False
 
-            if permission_blocked and (provider_headless_denial or semantic_headless_denial):
+            if no_tool_violation:
+                # Quarantine: a no-tool packet must not report success after tool use.
+                last_kind = NO_TOOL_PROFILE_VIOLATION
+                provider_effect_observed = True if attempt_changed_paths else None
+                reconciliation_required = True
+            elif permission_blocked and (provider_headless_denial or semantic_headless_denial):
                 last_kind = "HEADLESS_TOOL_PERMISSION_DENIED"
                 if attempt_changed_paths:
                     provider_effect_observed = True
