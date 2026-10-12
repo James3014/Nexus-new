@@ -287,3 +287,6 @@
 | scripts/ops/evidence_verifier.py | tests/ops/test_evidence_verifier_replay_required.py, tests/ops/test_stage_b_replay.py, tests/governance/test_replay_runner_allowlist.py | active | high | replay_runner_allowlist |
 | nexus/delivery/evidence_verifier.py | tests/ops/test_evidence_verifier_replay_required.py, tests/test_iron_gate_governance.py | active | high | replay_runner_allowlist |
 | tests/ops/test_evidence_verifier_replay_required.py | tests/ops/test_evidence_verifier_replay_required.py | active | medium | test_contract |
+| compliance/sla/metrics/stability_poc_v22.json | tests/ops/test_nexus_status_honesty.py | active | medium | compliance_artifact |
+| nexus_wiki_vault/07_Compliance/Current_Compliance_Status.md | tests/ops/test_nexus_status_honesty.py | active | medium | compliance_artifact |
+| tests/ops/test_stage_f_flow.py | tests/ops/test_stage_f_flow.py | active | medium | test_contract |
