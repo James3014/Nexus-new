@@ -3,6 +3,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from nexus.learning.predictor_toggle import (
+    LATENT_PREDICTOR,
+    influence_entry,
+    predictor_enabled,
+    record_influence,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +45,33 @@ class ForecastGateService:
             "reject_prob": state.metadata.get("reject_prob", 0.0),
         }
 
-        if forecast["roi_score"] == 0.0:
-            forecast = self.latent_forecaster.forecast_roi(task_desc)
-            risk = self.latent_forecaster.predict_risk(task_desc)
+        needs_predictor = forecast["roi_score"] == 0.0
+        forecaster = self.latent_forecaster if predictor_enabled(LATENT_PREDICTOR) else None
+        enabled = forecaster is not None
+        if needs_predictor and not enabled:
+            # Predictor absent: there is no forecast to gate on, so the preflight passes.
+            influence = record_influence(
+                influence_entry(
+                    LATENT_PREDICTOR,
+                    enabled=False,
+                    consulted=False,
+                    before={"proceed": True},
+                    after={"proceed": True},
+                    site="forecast_gate",
+                ),
+                metadata=state.metadata,
+            )
+            return {
+                "proceed": True,
+                "reason": "latent_predictor_disabled",
+                "forecast": {},
+                "risk": {},
+                "predictor_influence": influence,
+            }
+
+        if needs_predictor and forecaster is not None:
+            forecast = forecaster.forecast_roi(task_desc)
+            risk = forecaster.predict_risk(task_desc)
 
         est_tokens = _as_float(forecast.get("est_tokens", 0), 0.0)
         roi_score = _as_float(forecast.get("roi_score", 0.0), 0.0)
@@ -54,13 +84,28 @@ class ForecastGateService:
         if not proceed:
             logger.error("🚨 [Gate:Reject] %s! Triggering Adaptive Self-Healing...", reason)
             repair_plan = self.ash_selector.trigger_ash(task_id, task_desc, str(risk))
+            ash_influence = getattr(self.ash_selector, "last_influence", None)
+            if isinstance(ash_influence, dict):
+                state.metadata.setdefault("predictor_influence", []).append(ash_influence)
             state.metadata["last_rejection_reason"] = reason
             state.metadata["ash_selected_strategy"] = str((repair_plan or {}).get("selected_strategy", ""))
             self.state_io.save_global_state(state)
 
+        influence = record_influence(
+            influence_entry(
+                LATENT_PREDICTOR,
+                enabled=enabled,
+                consulted=needs_predictor,
+                before={"proceed": True},
+                after={"proceed": bool(proceed)},
+                site="forecast_gate",
+            ),
+            metadata=state.metadata,
+        )
         return {
             "proceed": bool(proceed),
             "reason": str(reason),
             "forecast": forecast,
             "risk": risk,
+            "predictor_influence": influence,
         }
