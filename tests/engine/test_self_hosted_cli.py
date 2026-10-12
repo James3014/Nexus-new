@@ -1121,3 +1121,34 @@ def test_self_hosted_recover_verified_uncommitted_fail_closed_non_verified(tmp_p
         )
         assert result.exit_code == 1
         assert "status must be RETAINED_FOR_REVIEW or FINAL_BLOCK" in result.output
+
+
+def test_cli_approve_requires_grant(tmp_path):
+    from scripts.engine.commands.self_hosted_actions import run_self_hosted_approve
+
+    receipt = {"verified": True, "verifier_gate_passed": True, "verifier_evidence": []}
+    receipt_hash = hashlib.sha256(
+        json.dumps(receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
+    packet = {
+        "candidate_commit_sha": "c" * 40,
+        "candidate_tree_sha": "d" * 40,
+        "candidate_state_hash": "e" * 64,
+        "verified_receipt_hash": receipt_hash,
+    }
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    service._write_state(
+        "cli-approve",
+        {
+            "task_id": "cli-approve",
+            "status": "CANDIDATE_COMMITTED",
+            "promotion_status": "PENDING_HUMAN_APPROVAL",
+            "promotion_packet": dict(packet),
+            "verified_receipt": dict(receipt),
+            "merge_performed": False,
+            "push_performed": False,
+        },
+    )
+    with pytest.raises(NexusCliActionError, match="APPROVAL_GRANT_REQUIRED"):
+        run_self_hosted_approve("cli-approve", service=service, **packet)
+    assert service._read_state("cli-approve")["promotion_status"] == "PENDING_HUMAN_APPROVAL"
