@@ -47,7 +47,7 @@ TRUSTED_EXTERNAL_RUNTIME_PACKAGES: tuple[tuple[str, str, str, str], ...] = (
         "nexus-runtime",
         "nexus_runtime",
         "https://github.com/James3014/nexus-runtime.git",
-        "cfcb38d3b9e149dc6f8ae92f405fd91cc38fcfa9",
+        "29a8dcfe31a1f2204ade501e7c6d04a26e08279a",
     ),
 )
 UV_VERSION = "uv 0.9.2"
@@ -234,6 +234,17 @@ TRUSTED_PR1804_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, s
         "e605aa1109b70d6c99c124e30997f0acf45b72300624a155b4499cc8e2632f52",
     ),
 )
+# Exact one-use, four-way binding for Owner-authorized PR #1857 (Issue #1853
+# External Intelligence ChatGPT Web consumer route; nexus-runtime cfcb38d -> 29a8dcf).
+TRUSTED_PR1857_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    1857,
+    (
+        "91745c8beac9a1363e18b3dd13e743590c754a98d27dc2f0bff97874a94f0257",
+        "e605aa1109b70d6c99c124e30997f0acf45b72300624a155b4499cc8e2632f52",
+        "57e07fd5272cb64774464bec61e3d8b475898782bcfd048d6930b873336afd75",
+        "7808d62f2eaf6ab80a4b56c74563c5053ebe2764d64591f46a5c30b7c4a96068",
+    ),
+)
 
 REQUIRED_EVIDENCE_KEYS = {
     "schema_version",
@@ -323,6 +334,7 @@ def _validate_trusted_dependency_contract(
         TRUSTED_PR1789_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR1796_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR1804_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR1857_DEPENDENCY_SNAPSHOT_TRANSITION,
     )
     for authorized_transition_record in authorized_transition_records:
         if authorized_transition_record is None:
