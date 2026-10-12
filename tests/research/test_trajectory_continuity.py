@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -2231,6 +2232,9 @@ def test_redaction_covers_provider_family_variants(secret):
     assert not _redaction_leaks(secret, secret.rstrip('"} ')[-12:])
 
 
+_AWS_SECRET_SAMPLE = "wJalrXUtnFEMI/" + "K7MDENG/bPxRfiC" + "YEXAMPLEKEY"
+
+
 @pytest.mark.parametrize(
     ("secret", "tail"),
     [
@@ -2251,14 +2255,8 @@ def test_redaction_covers_provider_family_variants(secret):
             "-----END ENCRYPTED PRIVATE KEY-----",
             "T" * 12,
         ),
-        (
-            "aws_secret_access_key = " + "wJalrXUtnFEMI/" + "K7MDENG/bPxRfiC" + "YEXAMPLEKEY",
-            "EXAMPLEKEY",
-        ),
-        (
-            '{"SecretAccessKey": "' + "wJalrXUtnFEMI/" + "K7MDENG/bPxRfiC" + "YEXAMPLEKEY" + '"}',
-            "EXAMPLEKEY",
-        ),
+        ("aws_secret_access_key = " + _AWS_SECRET_SAMPLE, "EXAMPLEKEY"),
+        ('{"SecretAccessKey": ' + '"' + _AWS_SECRET_SAMPLE + '"}', "EXAMPLEKEY"),
         ("ya29." + "K" * 60, "K" * 12),
         ("hf_" + "O" * 34, "O" * 12),
         ("glpat-" + "P" * 20, "P" * 12),
@@ -2310,18 +2308,42 @@ def _load_secret_scanner():
     return module
 
 
-# One sample per scanner detector. The scanner must stay a standalone single file
-# (CI runs it extracted from the base revision), so the detector set cannot be
-# imported here; this table is the drift guard instead.
+# One or more samples per scanner detector, covering each alternation branch of
+# its pattern. The scanner must stay a standalone single file (CI runs it
+# extracted from the base revision), so the detector set cannot be imported
+# here; this table is the drift guard instead.
 _SCANNER_DETECTOR_SAMPLES = {
-    "google_api_key": "AIza" + "a" * 35,
-    "aws_access_key": "AKIA" + "B" * 16,
-    "github_token": "gh" + "p_" + "C" * 36,
-    "anthropic_api_key": "sk-" + "ant-api03-" + "D" * 30,
-    "openai_api_key": "sk-" + "E" * 30,
-    "slack_token": "xo" + "xb-" + "1234567890-" + "F" * 12,
-    "stripe_live_key": "sk_" + "live_" + "G" * 24,
+    "google_api_key": ["AIza" + "a" * 35],
+    "aws_access_key": ["AKIA" + "B" * 16, "ASIA" + "B" * 16],
+    "github_token": ["gh" + p + "_" + "C" * 36 for p in "pousr"] + ["github_pat_" + "C" * 36],
+    "anthropic_api_key": ["sk-" + "ant-api03-" + "D" * 30],
+    "openai_api_key": ["sk-" + "proj-" + "E" * 30, "sk-" + "E" * 30],
+    "slack_token": ["xo" + "x" + t + "-1234567890-" + "F" * 12 for t in "baprs"],
+    "stripe_live_key": ["sk_" + "live_" + "G" * 24, "rk_" + "live_" + "G" * 24],
 }
+
+# Keys of the scanner's ASSIGNMENT_PATTERN (regex source -> concrete sample name).
+_SCANNER_ASSIGNMENT_KEY_SAMPLES = {
+    "api[_-]?key": ["api_key", "api-key", "apikey"],
+    "access[_-]?token": ["access_token", "access-token"],
+    "auth[_-]?token": ["auth_token"],
+    "client[_-]?secret": ["client_secret"],
+    "password": ["password"],
+    "secret[_-]?access[_-]?key": ["secret_access_key", "secret-access-key"],
+    "secret[_-]?key": ["secret_key"],
+    "private[_-]?key": ["private_key"],
+}
+_SCANNER_ENV_SUFFIXES = [
+    "API_KEY",
+    "ACCESS_TOKEN",
+    "AUTH_TOKEN",
+    "CLIENT_SECRET",
+    "PASSWORD",
+    "SECRET_ACCESS_KEY",
+    "SECRET_KEY",
+    "PRIVATE_KEY",
+]
+_ASSIGNMENT_VALUE = "x9Kq2LmP7vR4tW8yZ3bN6c" + "Tz5Uh1Jd"
 
 
 def test_redaction_covers_every_git_history_scanner_detector():
@@ -2332,14 +2354,131 @@ def test_redaction_covers_every_git_history_scanner_detector():
         "_SECRET_PATTERNS in trajectory_continuity.py"
     )
     for name, pattern in scanner.PROVIDER_PATTERNS:
-        sample = _SCANNER_DETECTOR_SAMPLES[name]
-        assert pattern.search(sample.encode()), f"sample does not trigger {name}"
-        out = _redact_value({"stdout": f"before {sample} after"})["stdout"]
-        assert out == "before [REDACTED] after", f"{name} not redacted"
+        for sample in _SCANNER_DETECTOR_SAMPLES[name]:
+            assert pattern.search(sample.encode()), f"sample does not trigger {name}"
+            out = _redact_value({"stdout": f"before {sample} after"})["stdout"]
+            assert out == "before [REDACTED] after", f"{name} not redacted: {sample[:8]}"
     pem = (
         "-----BEGIN " + "RSA PRIVATE KEY-----\n" + "H" * 40 + "\n-----END " + "RSA PRIVATE KEY-----"
     )
     assert scanner.PEM_PATTERN.search(pem.encode())
     assert _redact_value("a\n" + pem + "\nb") == "a\n[REDACTED]\nb"
-    assignment = "aws_secret_access_key = " + "I" * 30
-    assert _redact_value(assignment).count("I" * 12) == 0
+
+    labels = ["", "RSA ", "EC ", "DSA ", "OPENSSH "]
+    for label in labels:
+        block = "-----BEGIN " + label + "PRIVATE KEY-----\n" + "H" * 40 + "\n-----END "
+        block += label + "PRIVATE KEY-----"
+        assert scanner.PEM_PATTERN.search(block.encode())
+        assert _redact_value("a\n" + block + "\nb") == "a\n[REDACTED]\nb"
+
+
+def test_redaction_covers_every_git_history_scanner_assignment_key():
+    scanner = _load_secret_scanner()
+    source = scanner.ASSIGNMENT_PATTERN.pattern.decode()
+    lower = re.search(r"\(\?i:([^)]*)\)", source).group(1).split("|")
+    env = re.search(r"_\(\?:([A-Z_|]+)\)\)", source).group(1).split("|")
+    assert set(lower) == set(_SCANNER_ASSIGNMENT_KEY_SAMPLES), "scanner assignment keys drifted"
+    assert set(env) == set(_SCANNER_ENV_SUFFIXES), "scanner env-style assignment keys drifted"
+    keys = [k for group in _SCANNER_ASSIGNMENT_KEY_SAMPLES.values() for k in group]
+    keys += ["APP_" + suffix for suffix in _SCANNER_ENV_SUFFIXES]
+    for key in keys:
+        for line in (
+            f"{key}={_ASSIGNMENT_VALUE}",
+            f"{key}: {_ASSIGNMENT_VALUE}",
+            f'{{"{key}": "{_ASSIGNMENT_VALUE}"}}',
+            f"export {key}='{_ASSIGNMENT_VALUE}'",
+        ):
+            assert scanner.ASSIGNMENT_PATTERN.search(line.encode()), f"scanner misses: {key}"
+            assert _ASSIGNMENT_VALUE not in _redact_value(line), f"leaks via key: {key}"
+
+
+_PEM_BODY = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC" + "Q" * 20 + "LEAKBODY"
+
+
+def _pem(label: str, nl: str = "\n") -> str:
+    return (
+        "-----BEGIN " + label + "-----" + nl + _PEM_BODY + nl + "-----END " + label + "-----" + nl
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '{"type": "service_account", "private_key": "'
+        + _pem("PRIVATE KEY").replace("\n", "\\n")
+        + '", "client_email": "a@b"}',
+        '{"type": "service_account", "private_key": "' + _pem("PRIVATE KEY") + '"}',
+        "private_key: " + _pem("RSA PRIVATE KEY"),
+        'PRIVATE_KEY="' + _pem("EC PRIVATE KEY") + '"',
+        "SSH_PRIVATE_KEY=" + _pem("OPENSSH PRIVATE KEY"),
+        _pem("PRIVATE KEY", "\r\n"),
+        _pem("DSA PRIVATE KEY"),
+        _pem("PGP PRIVATE KEY BLOCK"),
+    ],
+)
+def test_redaction_keyed_and_variant_pem_blocks_do_not_leak_body(text):
+    out = _redact_value({"stdout": "pre\n" + text + "\npost"})["stdout"]
+    assert "LEAKBODY" not in out
+    assert "QQQQQQQQ" not in out
+    assert out.startswith("pre\n") and out.endswith("\npost")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "SECRET_KEY=" + "x9Kq2LmP7vR4tW8yZ3bN6c",
+        "DJANGO_SECRET_KEY=" + "x9Kq2LmP7vR4tW8yZ3bN6c",
+        "STRIPE_SECRET_KEY=" + "x9Kq2LmP7vR4tW8yZ3bN6c",
+        "secret_key: " + "x9Kq2LmP7vR4tW8yZ3bN6c",
+        '{"secret_key": "' + "x9Kq2LmP7vR4tW8yZ3bN6c" + '"}',
+        "export SECRET_KEY='" + "x9Kq2LmP7vR4tW8yZ3bN6c" + "'",
+        "CLIENT_SECRET=" + "x9Kq2LmP7vR4tW8yZ3bN6c",
+        "SERVICE_AUTH_TOKEN=" + "x9Kq2LmP7vR4tW8yZ3bN6c",
+        "GITHUB_ACCESS_TOKEN=" + "x9Kq2LmP7vR4tW8yZ3bN6c",
+        'password = "a b c ' + "x9Kq2LmP7vR4tW8yZ3bN6c" + '" next',
+        "password: 'correct horse " + "x9Kq2LmP7vR4tW8yZ3bN6c" + "' next",
+        '--token "abc def ' + "x9Kq2LmP7vR4tW8yZ3bN6c" + '" next',
+        "--password 'abc def " + "x9Kq2LmP7vR4tW8yZ3bN6c" + "' next",
+    ],
+)
+def test_redaction_assignment_keys_and_quoted_values(text):
+    out = _redact_value("pre " + text)
+    assert "x9Kq2LmP7vR4tW8yZ3bN6c" not in out
+    assert "[REDACTED]" in out
+    if text.endswith(" next"):
+        assert out.endswith(" next")  # redaction stops at the closing quote
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "0123456789abcdef0123456789abcdef01234567",
+        "sha256:" + "ab" * 32,
+        '{"manifest_sha256": "' + "ab" * 32 + '"}',
+        "--tokenizer ./tok.json --token-budget 5 --password-file /run/pw --password-stdin",
+        "token_count: 5 and tokens=12",
+        "123e4567-e89b-12d3-a456-426614174000",
+        "https://example.com/path:with@colon-free",
+    ],
+)
+def test_redaction_keeps_non_secret_identifiers(text):
+    assert _redact_value(text) == text
+
+
+def test_redaction_url_credentials_still_redacted():
+    out = _redact_value("clone https://alice:s3cr3tLEAKBODY@example.com/x now")
+    assert "LEAKBODY" not in out and "alice" not in out
+    out = _redact_value("https://x-access-token:" + "ghs_" + "a" * 30 + "@github.com/o/r.git")
+    assert "aaaaaaaa" not in out
+
+
+@pytest.mark.parametrize(
+    "payload",
+    ["a" * 1_000_000, "a-" * 500_000, "https://" + "a-" * 300_000, "://" * 300_000],
+)
+def test_redaction_is_linear_on_adversarial_strings(payload):
+    import time
+
+    start = time.monotonic()
+    _redact_value(payload)
+    assert time.monotonic() - start < 1.0

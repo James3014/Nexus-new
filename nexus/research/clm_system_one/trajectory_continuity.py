@@ -61,9 +61,24 @@ _FORBIDDEN_PRE_ACTION_KEYS = {
 # Patterns used to detect and redact credentials/secrets from step payloads
 # before hashing or persistence.  Conservative: prefer false-positive redaction
 # over accidental secret leakage.
+_URL_CREDENTIAL_PATTERN = re.compile(
+    r"(?i)\b[a-z][a-z0-9+.\-]{0,31}://[^/@\s:]{0,256}:[^/@\s]{1,512}@"
+)
 _SECRET_PATTERNS: list[re.Pattern[str]] = [
+    # Full PEM private-key block (BEGIN..END inclusive). Must run first so a keyed
+    # PEM (private_key: -----BEGIN ...) is not truncated by the generic assignment
+    # pattern; an unterminated block
+    # (truncated evidence) is redacted through the end of the string.
     re.compile(
-        r"(?i)(password|passwd|secret|token|api[_\-]?key|private[_\-]?key|auth[_\-]?key)[\"']?\s*[=:]\s*[\"']?\S+"
+        r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----"
+        r"(?:.*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----|.*\Z)",
+        re.DOTALL,
+    ),
+    # Quoted values (which may contain spaces) are redacted to the closing quote.
+    re.compile(
+        r"(?i)(password|passwd|secret|token|api[_\-]?key|private[_\-]?key|auth[_\-]?key"
+        r"|secret[_\-]?key|client[_\-]?secret|access[_\-]?token|auth[_\-]?token)"
+        r"[\"']?\s*[=:]\s*(?:\"[^\"]*\"|'[^']*'|[\"']?\S+)"
     ),
     re.compile(r"(?i)bearer\s+[A-Za-z0-9\-._~+/]+=*"),
     re.compile(r"(?i)(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}"),
@@ -74,13 +89,6 @@ _SECRET_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"AIza[0-9A-Za-z_\-]{35}"),
     re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
     re.compile(r"xox[abposr]-[A-Za-z0-9\-]{10,}"),
-    # Full PEM private-key block (BEGIN..END inclusive); an unterminated block
-    # (truncated evidence) is redacted through the end of the string.
-    re.compile(
-        r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----"
-        r"(?:.*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----|.*\Z)",
-        re.DOTALL,
-    ),
     # Stripe live keys (mirrors scripts/ops/git_history_secret_scan.py).
     re.compile(r"(?:sk|rk)_live_[A-Za-z0-9]{16,}"),
     # AWS secret access key assignments (env/ini style and JSON "SecretAccessKey").
@@ -97,13 +105,15 @@ _SECRET_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"(?i)authorization[\"']?\s*[:=]\s*[\"']?(?:basic|digest|negotiate)\s+[^\s\"']+"),
     # CLI flags carrying credentials: --token X / --token=X / --password X ...
     re.compile(
-        r"(?i)--(?:token|access-token|auth-token|password|passwd|secret|api-key)(?:=|\s+)\S+"
+        r"(?i)--(?:token|access-token|auth-token|password|passwd|secret|api-key)"
+        r"(?:=|\s+)(?:\"[^\"]*\"|'[^']*'|\S+)"
     ),
     re.compile(r"(?i)-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
     # curl -u / --user basic-auth: -u user:password or --user user:password
     re.compile(r"(?i)(?:--user|-u)\s+\S+:\S+"),
     # URL-embedded credentials: scheme://user:password@host
-    re.compile(r"(?i)[a-z][a-z0-9+\-.]*://[^/@\s]+:[^/@\s]+@"),
+    # Bounded quantifiers keep this linear on adversarial input (see _redact_string).
+    _URL_CREDENTIAL_PATTERN,
 ]
 _REDACTED_SENTINEL = "[REDACTED]"
 
@@ -242,6 +252,8 @@ def _redact_string(value: str) -> str:
     """Redact known secret patterns from a string value."""
     result = value
     for pattern in _SECRET_PATTERNS:
+        if pattern is _URL_CREDENTIAL_PATTERN and "://" not in result:
+            continue
         result = pattern.sub(_REDACTED_SENTINEL, result)
     return result
 
