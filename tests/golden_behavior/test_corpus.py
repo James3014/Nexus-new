@@ -152,10 +152,7 @@ def test_stale_owner_findings_are_refreshed_but_not_promoted() -> None:
     assert case.status == "finding"
     assert case.finding_id == "GBF-002"
     assert case.automated_tests == ()
-    # Stage 1 of 2: the trusted gate evaluates a PR's corpus with the base
-    # evaluator, which does not know this probe yet. GB-077 is bound to
-    # gb077_live_gateway_identity in the follow-up PR once the evaluator is on main.
-    assert case.finding_probe is None
+    assert case.finding_probe == "gb077_live_gateway_identity"
     finding = FINDINGS["GBF-002"]
     for fragment in (
         "2026-08-17",
