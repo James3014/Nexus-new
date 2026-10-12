@@ -574,14 +574,10 @@ class TestPreActionStateForbiddenKeys:
 
 class TestExistingPathsUnaffected:
     def test_abort_on_sim_lewm_rejected(self, tmp_path):
+        # LeWM was archived 2026-10-12: sim_lewm is inert and never aborts an attempt
+        # (historical node id kept for exact-base impact evidence).
         run_cli = MagicMock(return_value=(True, [{"passed": True}]))
-        lewm_instance = MagicMock()
-        lewm_instance.simulate.return_value = {"status": "REJECTED", "cost": 7}
-        svc = RepairAttemptService(
-            project_root=tmp_path,
-            run_cli_pregate_fn=run_cli,
-            lewm_cls=MagicMock(return_value=lewm_instance),
-        )
+        svc = RepairAttemptService(project_root=tmp_path, run_cli_pregate_fn=run_cli)
         state = _make_state("r-1")
         state.metadata["task_description"] = "fix"
         state.metadata["sim_lewm"] = True
@@ -596,9 +592,9 @@ class TestExistingPathsUnaffected:
             skip_pregate_for_isolated_workspace=False,
         )
 
-        assert out["status"] == "abort"
-        assert out["passed"] is False
-        run_cli.assert_not_called()
+        assert out["status"] != "abort"
+        assert "lewm_sim_status" not in state.metadata
+        run_cli.assert_called_once()
 
     def test_synthetic_pass_for_isolated_skip(self, tmp_path):
         run_cli = MagicMock(return_value=(False, []))

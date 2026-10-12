@@ -18,6 +18,7 @@ from nexus.services.capability_evidence_bundle import (
     verify_capability_evidence_bundle,
 )
 from nexus.services.capability_registry import (
+    ARCHIVED_CAPABILITY_REASONS,
     ESCALATE_ONLY,
     EXECUTOR_REGISTRY_ALIASES,
     build_default_mainchain_invokers,
@@ -167,6 +168,9 @@ def test_runtime_eligible_production_beta_physical_executor_success() -> None:
         if not row.get("runtime_eligible"):
             continue
         name = str(row["canonical_id"])
+        if name in ARCHIVED_CAPABILITY_REASONS:
+            # Archived 2026-10-12: fail-closed by design (see test_archived_capabilities_2026_10_12).
+            continue
         maturity = str(row.get("maturity") or "").lower()
         if maturity in {"experimental", "deprecated", "legacy_alias"}:
             failures.append(f"{name}:eligible_but_maturity={maturity}")

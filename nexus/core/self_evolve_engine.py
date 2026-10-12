@@ -6,6 +6,15 @@ from nexus.core.parity_audit import ParityAuditor
 from nexus.core.planner_executor import Planner, Executor
 from nexus.core.ci_healer import CIHealer
 
+import warnings as _archived_warnings
+
+_archived_warnings.warn(
+    "ARCHIVED 2026-10-12 (#1850): stub engine, zero non-test importers; see ARCHIVED_2026-10-12.md. "
+    "Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 logger = logging.getLogger(__name__)
 
 class SelfEvolveEngine:
