@@ -76,7 +76,8 @@ def test_mission_cli_workflow(tmp_path: Path) -> None:
              patch("subprocess.run") as mock_start_run:
             mock_start_run.return_value = MagicMock(returncode=1)
             res = runner.invoke(nexus, ["nexus", "mission", "start"])
-            assert res.exit_code == 0
+            # The campaign run (mocked returncode=1) failed, so start must exit non-zero.
+            assert res.exit_code == 1
         res = runner.invoke(nexus, ["nexus", "mission", "pause"])
         assert res.exit_code == 0
         assert "paused" in res.output

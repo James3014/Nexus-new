@@ -549,7 +549,7 @@ def test_get_multi_agent_task_status_reports_missing_task():
         orchestrator_factory=lambda: FakeOrchestrator(FakeStateStore({})),
     )
 
-    assert view == TaskStatusView(text_lines=["Task missing not found."])
+    assert view == TaskStatusView(text_lines=["Task missing not found."], found=False)
 
 
 def test_get_multi_agent_task_audit_renders_evidence_chain_without_click():
@@ -583,7 +583,7 @@ def test_get_multi_agent_task_audit_reports_missing_task():
         orchestrator_factory=lambda: FakeOrchestrator(FakeStateStore({})),
     )
 
-    assert view == TaskAuditView(text_lines=["Task missing not found."])
+    assert view == TaskAuditView(text_lines=["Task missing not found."], found=False)
 
 
 def test_verify_multi_agent_task_runs_gate_without_click():
