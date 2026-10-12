@@ -61,15 +61,20 @@ def test_muse_remains_response_overlay_only():
 
 
 def test_context_budget_is_bounded_by_bytes_and_semantics():
+    # AGENTS.md is loaded at every agent start; 12 KB keeps it well inside the
+    # 24 KB rule-file loader limit (#1341).
     assert (ROOT / "AGENTS.md").stat().st_size <= 12_000
-    overlay_bytes = sum(
-        (ROOT / "docs/agents" / name).stat().st_size
-        for name in (
-            "TASK_EXECUTION_CONTRACT.md",
-            "WORKFORCE_EXECUTION_OVERLAY.md",
-            "CLAIM_AND_RECEIPT_OVERLAY.md",
-            "LEARNING_WRITEBACK_OVERLAY.md",
-        )
-    )
-    assert overlay_bytes <= 24_000
+    # Overlays are read on demand per the load map, not loaded at start, so the
+    # loader limit does not apply. These caps only stop unbounded growth:
+    # current size plus about 10% headroom, set by Owner decision in #1858.
+    overlay_caps = {
+        "TASK_EXECUTION_CONTRACT.md": 36_000,
+        "WORKFORCE_EXECUTION_OVERLAY.md": 4_000,
+        "CLAIM_AND_RECEIPT_OVERLAY.md": 4_000,
+        "LEARNING_WRITEBACK_OVERLAY.md": 4_000,
+    }
+    sizes = {name: (ROOT / "docs/agents" / name).stat().st_size for name in overlay_caps}
+    for name, cap in overlay_caps.items():
+        assert sizes[name] <= cap, (name, sizes[name], cap)
+    assert sum(sizes.values()) <= 42_000
     assert "active Git-tracked Task Card" in _read("AGENTS.md")

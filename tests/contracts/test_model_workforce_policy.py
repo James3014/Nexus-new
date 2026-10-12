@@ -214,7 +214,14 @@ def test_local_workers_have_evidence_specific_context_and_autonomy_boundaries() 
     assert qwen35["state"] == "LOCAL_CONDITIONAL"
     assert qwen35["model"] == "qwen3.5:9b"
     assert qwen35["preferred_context"] == "nexus_bounded"
-    assert qwen35["roles"] == ["bounded_reasoning_candidate", "counterexample_search"]
+    assert qwen35["roles"] == [
+        "bounded_reasoning_candidate",
+        "counterexample_search",
+        "classification",
+        "extraction",
+        "compression",
+        "compact_diagnosis",
+    ]
     assert qwen35["requires"] == [
         "bounded_context",
         "parser",
@@ -269,10 +276,10 @@ def test_routing_is_deterministic_first_bounded_first_and_fail_closed() -> None:
     assert routing["experiment_only_models_require_explicit_authorization"] is True
 
     assert routing["local_first"] == {
-        "classification": "local_advisor_3b",
-        "extraction": "local_advisor_3b",
-        "compression": "local_advisor_3b",
-        "compact_diagnosis": "local_advisor_3b",
+        "classification": "local_qwen35_9b",
+        "extraction": "local_qwen35_9b",
+        "compression": "local_qwen35_9b",
+        "compact_diagnosis": "local_qwen35_9b",
         "bounded_code_candidate": "local_coder_7b",
         "bounded_reasoning_shadow": "local_qwen3_8b",
     }

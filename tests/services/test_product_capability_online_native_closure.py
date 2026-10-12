@@ -6,7 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from nexus.services.capability_registry import LOCAL_STAGE_CAPABILITIES
+from nexus.services.capability_registry import (
+    ARCHIVED_CAPABILITY_REASONS,
+    LOCAL_STAGE_CAPABILITIES,
+)
 from nexus.services.product_capability_closure import (
     EVIDENCE_INCOMPLETE,
     PRODUCT_CAPABILITIES,
@@ -163,6 +166,10 @@ def _production_canary_runner(task, *, evidence_mode: str = ""):
 
 
 
+# nexus-runtime #171 (RETIRED_2026_10_12_FIRST_BATCH) planner nodes that are still product capabilities.
+RETIRED_ONLINE_NATIVE = frozenset({"benchmark", "federation", "oracle_shadow", "stress_test", "ui_validator"})
+
+
 def test_online_native_denominator_is_exactly_28() -> None:
     assert len(ONLINE_NATIVE) == 28
     assert set(ONLINE_NATIVE) | STAGE_OWNED | LOCAL_NATIVE == set(PRODUCT_CAPABILITIES)
@@ -173,6 +180,19 @@ def test_online_native_canary_is_structurally_valid_but_not_live_claimable(
     capability: str,
     tmp_path: Path,
 ) -> None:
+    if capability in ARCHIVED_CAPABILITY_REASONS:
+        # Archived 2026-10-12 (benchmark, stress_test): they fail closed by design, so the
+        # structural canary must see an explicit skip. The pinned denominator of 28 above
+        # still counts them until the governance denominator is re-based.
+        from nexus.core.belief_contracts import CapabilityExecutionPlan
+        from nexus.core.capability_executor_registry import get_executor
+
+        receipt = get_executor(capability)(
+            CapabilityExecutionPlan(plan_id="p", task_id="t", constraints={}), "canary"
+        )
+        assert receipt.invoked is False and receipt.gate_passed is False
+        assert receipt.outcome["skip_reason"] == ARCHIVED_CAPABILITY_REASONS[capability]
+        return
     task = _online_task(capability, tmp_path / "workspace")
     row = run_closure_task(
         task,
@@ -180,6 +200,17 @@ def test_online_native_canary_is_structurally_valid_but_not_live_claimable(
         output_dir=tmp_path / "runs",
     )
     verdict = row["closure_verdict"]
+    if capability in RETIRED_ONLINE_NATIVE:
+        # nexus-runtime #171 retired these planner nodes: the planner never selects them, so the canary
+        # cannot execute them and the closure verdict is an honest NOT_TESTED (never live-claimable).
+        mainchain = row["record"]["evidence_refs"][0]["payload"]["mainchain_result"]
+        assert mainchain["planner_selected"] is False
+        assert mainchain["invoked"] is False
+        assert verdict["status"] == "NOT_TESTED", (capability, verdict)
+        assert verdict["live_pass"] is False
+        assert row["harness_consistency_errors"] == []
+        assert row["public_claim_allowed"] is False
+        return
     assert verdict["status"] == EVIDENCE_INCOMPLETE, (capability, verdict)
     assert verdict["live_pass"] is False
     assert "non_live_evidence_mode:canary" in verdict["missing_evidence_reasons"]

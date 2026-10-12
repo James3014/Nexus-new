@@ -764,7 +764,7 @@ def test_empty_verifier_manifest_fails_closed(tmp_path):
         SelfHostedTaskContract(verifier_commands=[], **kwargs)
     with pytest.raises(ValueError, match="verifier_commands must be non-empty"):
         SelfHostedTaskContract(**kwargs)
-    contract = SelfHostedTaskContract(verifier_commands=["python -c pass"], **kwargs)
+    contract = SelfHostedTaskContract(verifier_commands=["python3 -c pass"], **kwargs)
     CandidateVerifier.validate_static_contract(contract, str(tmp_path))
     # Defensive sink check: an unvalidated empty manifest must not pass vacuously.
     empty = contract.model_copy(update={"verifier_commands": []})
@@ -799,4 +799,18 @@ def test_verifier_cannot_reach_shell_via_forwarder(tmp_path, command):
 @pytest.mark.parametrize("command", ["nice sh -c 'x'", "env git status", "sudo ls"])
 def test_verifier_forwarder_error_message_preserved(tmp_path, command):
     with pytest.raises(ValueError, match="shell and shell-forwarding executables are not allowed"):
+        CandidateVerifier._build_verifier_request(command, str(tmp_path))
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "/bin/bash -c 'touch PWNED'",
+        "dash -c 'touch PWNED'",
+        "nohup sh -c 'touch PWNED'",
+        "BASH -c 'touch PWNED'",
+    ],
+)
+def test_verifier_rejects_additional_shell_spellings(tmp_path, command):
+    with pytest.raises(ValueError):
         CandidateVerifier._build_verifier_request(command, str(tmp_path))

@@ -5,8 +5,8 @@ import logging
 import warnings
 
 warnings.warn(
-    "nexus.services.aos_oracle has no production caller and is kept as lab-only "
-    "(the aos_oracle executor uses nexus.services.aos_service; see #1740).",
+    "ARCHIVED 2026-10-12 (#1850; was lab-only #1740): hard-coded history and prediction; "
+    "see ARCHIVED_2026-10-12.md. Scheduled for deletion; do not import.",
     DeprecationWarning,
     stacklevel=2,
 )

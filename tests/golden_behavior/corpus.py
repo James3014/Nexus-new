@@ -1229,13 +1229,15 @@ CASES: tuple[GoldenCase, ...] = (
         "Authority-text witnesses track AGENTS.md",
         "regression",
         "stale_state",
-        "The bootstrap authority-text tests pin the operating-mode fail-closed and Project Entry rules to the current AGENTS.md wording, and the root MUSE_PROTO.md stays a response-only overlay with no stale startup authority.",
+        "The bootstrap authority-text tests pin the operating-mode fail-closed and Project Entry rules to the current AGENTS.md wording, the root MUSE_PROTO.md stays a response-only overlay with no stale startup authority, and the AGENTS.md, overlay and per-task-class context byte budgets hold on every change.",
         ("AGENTS.md#Authority bootstrap",),
         (
             "tests/ops/test_bootstrap_authority_files.py::test_bootstrap_files_use_current_worktree_authority",
             "tests/ops/test_bootstrap_authority_files.py::test_current_operating_mode_bootstrap_is_direct_first_and_fail_closed",
             "tests/ops/test_bootstrap_authority_files.py::test_first_issue_bound_action_requires_project_entry_before_governed_effects",
             "tests/ops/test_bootstrap_context_budget.py::test_muse_remains_response_overlay_only",
+            "tests/ops/test_bootstrap_context_budget.py::test_context_budget_is_bounded_by_bytes_and_semantics",
+            "tests/ops/test_codex_task_context_index.py::test_canonical_index_is_valid_complete_and_bounded",
         ),
     ),
     _c(
@@ -1256,13 +1258,21 @@ CASES: tuple[GoldenCase, ...] = (
         "Operating-mode file is validated fail-closed",
         "invariant",
         "malformed_input",
-        "A missing, invalid, or ambiguous operating-mode file must fail closed to an explicit current Owner lane decision.",
+        "The operating-mode file is validated fail-closed: a missing, unreadable, non-UTF-8, malformed, ambiguous (duplicate-key, merge-key or unknown-key) or contract-violating file yields OWNER_LANE_DECISION_REQUIRED with no lane selected, and the checked-in file validates.",
         (
             "AGENTS.md#Authority bootstrap",
             "docs/governance/current_operating_mode.yaml",
         ),
-        status="finding",
-        finding_id="GBF-008",
+        (
+            "tests/ops/test_check_operating_mode.py::test_checked_in_operating_mode_file_is_valid",
+            "tests/ops/test_check_operating_mode.py::test_evaluated_keys_still_exist_in_real_file",
+            "tests/ops/test_check_operating_mode.py::test_missing_file_requires_owner_lane_decision",
+            "tests/ops/test_check_operating_mode.py::test_yaml_parse_error_requires_owner_lane_decision",
+            "tests/ops/test_check_operating_mode.py::test_duplicate_nested_lane_key_is_ambiguous",
+            "tests/ops/test_check_operating_mode.py::test_unknown_top_level_key_is_ambiguous",
+            "tests/ops/test_check_operating_mode.py::test_multiple_violations_are_all_reported_without_lane_selection",
+            "tests/ops/test_check_operating_mode.py::test_cli_exits_two_when_owner_lane_decision_required",
+        ),
     ),
     _c(
         "GB-100",
@@ -1290,5 +1300,4 @@ FINDINGS = {
     "GBF-004": "Owner Issue #31 was closed as completed on 2026-08-16 (its former blocker #7 closed on 2026-08-13), but as of 2026-10-12 the corpus still has no revision-bound executable probe for canonical retained-state compaction/resume, so this case stays a finding pending re-adjudication under #117.",
     "GBF-005": "Issue #40 proved the World A final-response enforcement gap; READY Issue #49 remains blocked on #29 before bounded implementation.",
     "GBF-007": "As of 2026-10-12, nexus_task_card_create and nexus_owner_standing_grant_issue in nexus/orchestrator/unified_mcp_gateway.py neither require nor check a prior nexus_project_entry result and project_binding_hash has no consumer, so the #842 Project Entry precondition is agent instruction only (owner #1750 defers project-entry binding to Phase 2).",
-    "GBF-008": "As of 2026-10-12, no runtime code parses or validates docs/governance/current_operating_mode.yaml (nexus/orchestrator/canonical_core_transport.py only hashes its bytes into provenance), so the missing/invalid/ambiguous fail-closed rule is unenforced.",
 }

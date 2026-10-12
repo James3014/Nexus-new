@@ -24,6 +24,7 @@ import pytest
 
 from nexus.evidence.receipt_base import audit_product_receipt_coverage
 from nexus.services.capability_registry import (
+    ARCHIVED_CAPABILITY_REASONS,
     EXECUTION_CLASS_CONTROL_PLANE_REFERENCE,
     EXECUTION_CLASS_EXPERIMENTAL_NOT_PROMOTED,
     EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED,
@@ -1198,7 +1199,11 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
     SCRATCH.mkdir(parents=True, exist_ok=True)
     root = Path(__file__).resolve().parents[2]
     catalog = build_capability_catalog(repo_root=root)
-    promotable = _promotable_names()
+    # nexus-runtime #171 retired nodes stay parametrized (honest not-selected
+    # canary) but are never promotable.
+    promotable = [
+        name for name in _promotable_names() if _node_meta(name)["maturity"].lower() != "retired"
+    ]
     per_cap: list[dict[str, Any]] = []
     probe_only = 0
     fixture_count = 0
@@ -1213,6 +1218,21 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
         final_status = str(pos["final_status"])
         if neg["final_status"] != "OK":
             final_status = neg["final_status"]
+        if (
+            _node_meta(name)["maturity"].lower() == "retired"
+            and first_broken == "not_selected_by_planner"
+            and not pos["planner_selected"]
+            and not pos["invoked"]
+            and not neg["invoked"]
+        ):
+            # nexus-runtime #171: an honestly unselected retired node is not a structural failure.
+            final_status = "RETIRED_NOT_SELECTED"
+        archived = name in ARCHIVED_CAPABILITY_REASONS
+        if archived and final_status != "RETIRED_NOT_SELECTED":
+            # Archived 2026-10-12: the only acceptable result is an explicit skip.
+            final_status = (
+                "ARCHIVED_FAIL_CLOSED" if pos.get("skipped") and not pos.get("invoked") else "FAIL"
+            )
         if pos.get("action") in _SHALLOW_ACTIONS and pos.get("gate_passed"):
             probe_only += 1
         phys = str(pos.get("physical_callable") or "")
@@ -1220,6 +1240,7 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
             fixture_count += 1
         if (
             name in promotable
+            and not archived
             and contract["execution_class"] in REAL_EXECUTION_CLASSES
             and pos["final_status"] in {"FAIL", "PROBE", "IMPLEMENTATION_FAILURE"}
         ):
@@ -1278,7 +1299,11 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
         for n in promotable
         if PLANNER_EXECUTION_CONTRACTS[n]["execution_class"] == EXECUTION_CLASS_MISSING_ENGINE
     ]
-    blockers = [r for r in per_cap if r["final_status"] not in {"OK", "ALIAS_NORMALIZED"}]
+    blockers = [
+        r
+        for r in per_cap
+        if r["final_status"] not in {"OK", "ALIAS_NORMALIZED", "ARCHIVED_FAIL_CLOSED"}
+    ]
     structural_blockers = [
         r for r in per_cap if r["final_status"] in {"FAIL", "PROBE", "IMPLEMENTATION_FAILURE"}
     ]
@@ -1288,7 +1313,7 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
         if r["promotable"]
         and r["execution_class"]
         in {*REAL_EXECUTION_CLASSES, EXECUTION_CLASS_EXTERNAL_AUTH_REQUIRED}
-        and r["final_status"] != "OK"
+        and r["final_status"] not in {"OK", "ARCHIVED_FAIL_CLOSED"}
     ]
     structural = (
         len(list_planner_capability_names()) == 57
@@ -1455,7 +1480,7 @@ def test_generate_closure_receipt_required() -> None:
     assert RECEIPT_PATH.is_file()
     assert RECEIPT_TMP.is_file()
     assert receipt["planner_contract_count"] == 57
-    assert receipt["promotable_count"] == 53
+    assert receipt["promotable_count"] == 50
     assert receipt["promotable_missing_engine_count"] == 0
     assert receipt["probe_only_success_count"] == 0
     assert receipt["fixture_callable_count"] == 0
@@ -1607,10 +1632,32 @@ def test_retired_integration_reference_proof_rejects_false_green() -> None:
 @pytest.mark.parametrize("name", _promotable_names())
 def test_promotable_family_canary_mainchain_entry(name: str) -> None:
     """Each promotable node: pos+neg via MainchainEntry path, consumer proof, no false green."""
+    if name in ARCHIVED_CAPABILITY_REASONS:
+        # Archived 2026-10-12: the only acceptable outcome is an explicit skip. The
+        # promotable denominator (53) and the REAL contract denominator (34) stay pinned
+        # until they are re-based with the nexus-runtime planner retirement.
+        pos = _run_family_canary(name, positive=True)
+        # The pinned runtime retires these nodes at planner level (maturity=retired), so
+        # they may be honestly unselected; if selected they must be an explicit skip.
+        assert pos["invoked"] is False
+        if pos["planner_selected"]:
+            assert pos["skipped"] is True
+        assert pos["public_claim_allowed"] is False
+        return
     pos = _run_family_canary(name, positive=True)
     neg = _run_family_canary(name, positive=False)
     contract = PLANNER_EXECUTION_CONTRACTS[name]
     assert pos["mainchain_entry"] is True
+    if _node_meta(name)["maturity"].lower() == "retired":
+        # nexus-runtime #171 (RETIRED_2026_10_12_FIRST_BATCH): retired nodes are never planner-selected
+        # and never execute; the canary must show an honest not-selected state, not a false green.
+        assert pos["planner_selected"] is False
+        assert pos["first_broken_edge"] == "not_selected_by_planner"
+        assert pos["invoked"] is False
+        assert pos["public_claim_allowed"] is False
+        assert neg["planner_selected"] is False
+        assert neg["invoked"] is False
+        return
     assert pos["planner_selected"] is True
     assert pos["public_claim_allowed"] is False
     auth_local = os.environ.get("NEXUS_LOCAL_MODEL_CALL_ALLOWED", "").strip() == "1"

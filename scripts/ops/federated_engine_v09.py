@@ -2,6 +2,15 @@ import json, random, yaml, os, numpy as np
 from pathlib import Path
 from datetime import datetime, timezone
 
+import warnings as _archived_warnings
+
+_archived_warnings.warn(
+    "ARCHIVED 2026-10-12 (#1850): stub engine, CLI fed-init/fed-run removed; see ARCHIVED_2026-10-12.md. "
+    "Scheduled for deletion; do not import.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 class FederatedEngineV09:
     """🛡️ v0.9 Federated Engine: FedAvg + DP-SGD."""
     def __init__(self, repo_root, epsilon=1.0):

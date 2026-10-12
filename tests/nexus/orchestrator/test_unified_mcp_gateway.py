@@ -1477,13 +1477,17 @@ def test_calibration_plan_action_fails_closed_on_unknown_material_change():
     assert payload["required_trials"] == []
 
 
-def test_calibration_actions_never_call_provider_or_submit_tasks(monkeypatch):
+def test_calibration_actions_never_call_provider_or_submit_tasks(monkeypatch, tmp_path):
     def _fail(*args, **kwargs):
         raise AssertionError("calibration actions must never spawn a provider subprocess")
 
     monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", _fail)
     monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.run", _fail)
     service = FakeService()
+    # #1429 binds the gateway's MutationAdmissionStore to service.state_dir and
+    # otherwise discovers the canonical state dir via `git rev-parse`; give the
+    # fake service an explicit isolated root so no subprocess is needed.
+    service.state_dir = tmp_path
     gateway = UnifiedMCPGateway(service=service)
     gateway.handle({"jsonrpc": "2.0", "id": 906, "method": "tools/call", "params": {"name": "nexus_model_calibration_evidence", "arguments": {"lineage_id": "deepseek-v4-flash"}}})
     gateway.handle({"jsonrpc": "2.0", "id": 907, "method": "tools/call", "params": {"name": "nexus_model_calibration_plan", "arguments": {"provider": "opencode", "model": "opencode-go/deepseek-v4-flash", "target_role": "compact_code_candidate", "change_kind": "alias_only"}}})
@@ -1907,7 +1911,16 @@ def test_gateway_stdio_round_trip():
     assert response["result"]["tools"][0]["name"] == "nexus_gateway_status"
 
 
-def test_cline_runner_uses_provider_qualified_model_and_decodes_event_stream(monkeypatch):
+def _fake_provider_executable(tmp_path: Path, name: str) -> str:
+    """Hermetic stand-in for an installed provider CLI (subprocess.run is faked)."""
+    candidate = tmp_path / "provider-bin" / name
+    candidate.parent.mkdir(parents=True, exist_ok=True)
+    candidate.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    candidate.chmod(0o755)
+    return str(candidate)
+
+
+def test_cline_runner_uses_provider_qualified_model_and_decodes_event_stream(monkeypatch, tmp_path):
     captured = {}
 
     def fake_run(command, **kwargs):
@@ -1918,7 +1931,7 @@ def test_cline_runner_uses_provider_qualified_model_and_decodes_event_stream(mon
         }
         return SimpleNamespace(returncode=0, stdout=json.dumps(event) + "\n", stderr="")
 
-    monkeypatch.setenv("NEXUS_CLINE_BIN", "/Users/jameschen/.npm-global/lib/node_modules/cline/bin/.cline")
+    monkeypatch.setenv("NEXUS_CLINE_BIN", _fake_provider_executable(tmp_path, ".cline"))
     monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.run", fake_run)
     result = UnifiedMCPGateway._run_agy_plan(
         prompt="Return a patch",
@@ -1936,25 +1949,25 @@ def test_cline_runner_uses_provider_qualified_model_and_decodes_event_stream(mon
     assert "--yolo" not in captured["command"]
 
 
-def test_cline_runner_timeout_fails_closed(monkeypatch):
+def test_cline_runner_timeout_fails_closed(monkeypatch, tmp_path):
     def timeout_run(command, **kwargs):
         raise __import__("subprocess").TimeoutExpired(command, kwargs["timeout"])
 
-    monkeypatch.setenv("NEXUS_CLINE_BIN", "/Users/jameschen/.npm-global/lib/node_modules/cline/bin/.cline")
+    monkeypatch.setenv("NEXUS_CLINE_BIN", _fake_provider_executable(tmp_path, ".cline"))
     monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.run", timeout_run)
     result = UnifiedMCPGateway._run_agy_plan(prompt="Return a patch", allowed_files=["README.md"], provider="cline", model="glm-5.2")
     assert result["blocker"] == "ASSIST_PROVIDER_TIMEOUT"
     assert result["tool_policy_enforcement"].startswith("cline_plan_auto_approve_false")
 
 
-def test_grok_runner_uses_positional_prompt(monkeypatch):
+def test_grok_runner_uses_positional_prompt(monkeypatch, tmp_path):
     captured = {}
 
     def fake_run(command, **kwargs):
         captured["command"] = command
         return SimpleNamespace(returncode=0, stdout=json.dumps({"patch": "diff --git a/a b/a"}), stderr="")
 
-    monkeypatch.setenv("NEXUS_GROK_BIN", "/Users/jameschen/.grok/bin/grok")
+    monkeypatch.setenv("NEXUS_GROK_BIN", _fake_provider_executable(tmp_path, "grok"))
     monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.run", fake_run)
     result = UnifiedMCPGateway._run_agy_plan(
         prompt="Return a patch",
@@ -1984,7 +1997,7 @@ def test_assist_submit_is_durable_and_task_wait_reads_result(monkeypatch, tmp_pa
             self.pid = FakePopen._next_pid
             FakePopen._next_pid += 1
             self._returncode = 0
-            stdout.write(json.dumps({"type": "run_result", "text": json.dumps({"patch": "diff --git a/README.md b/README.md"})}) + "\n")
+            stdout.write(json.dumps({"type": "run_result", "text": json.dumps({"patch": "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-a\n+b\n"})}) + "\n")
             stdout.flush()
 
         def poll(self):
@@ -2019,7 +2032,10 @@ def test_assist_submit_is_durable_and_task_wait_reads_result(monkeypatch, tmp_pa
     assert result["artifacts"]["stdout"]
 
 
-@pytest.mark.parametrize("patch_value", ["", None, "I cannot help with that."])
+@pytest.mark.parametrize(
+    "patch_value",
+    ["", None, "I cannot help with that.", "--- I cannot help with that.", "Index: I cannot help with that.", "diff --git "],
+)
 def test_assist_degenerate_patch_fails_closed_with_retry_required(monkeypatch, tmp_path, patch_value):
     class FakePopen:
         pid = 54901
@@ -2049,8 +2065,111 @@ def test_assist_degenerate_patch_fails_closed_with_retry_required(monkeypatch, t
     assert response["next_action"] == "nexus_task_retry"
 
 
+@pytest.mark.parametrize(
+    "patch",
+    [
+        "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1,2 +1,2 @@\n ctx\n-a\n+b\n",
+        "--- a/a\n+++ b/a\n@@ -1 +1 @@\n-a\n+b\n",
+        "\n  \ndiff --git a/n b/n\nnew file mode 100644\n--- /dev/null\n+++ b/n\n@@ -0,0 +1 @@\n+x\n",
+        "diff --git a/n b/n\nnew file mode 100644\nindex 0000000..e69de29\n",
+        "diff --git a/o b/o\ndeleted file mode 100644\n",
+        "diff --git a/o b/p\nsimilarity index 100%\nrename from o\nrename to p\n",
+        "diff --git a/o b/o\nold mode 100644\nnew mode 100755\n",
+        "diff --git a/i.png b/i.png\nBinary files a/i.png and b/i.png differ\n",
+        "diff --git a/i.png b/i.png\nindex 1..2 100644\nGIT binary patch\nliteral 1\nIcmZ\n",
+        "diff --git n n\nnew file mode 100644\n",
+        "diff --git o p\nrename from o\nrename to p\n",
+        "diff --git o o\nold mode 100644\nnew mode 100755\n",
+        "diff --git i/x w/x\nnew file mode 100644\n",
+        "--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@\n a\n\n-b\n+c\n",
+        "--- a/x\n+++ b/x\n@@ -1 +1 @@\n unchanged\n@@ -5 +5 @@\n-a\n+b\n",
+        # Removed/added lines whose content starts with "-- " render as "--- "/"+++ " inside a hunk.
+        "diff --git a/q.sql b/q.sql\nindex e617967..8da9161 100644\n--- a/q.sql\n+++ b/q.sql\n@@ -1,2 +1,2 @@\n--- old comment\n+-- new comment\n select 1;\n",
+        "diff --git a/r.sql b/r.sql\nindex db94d6e..6af1197 100644\n--- a/r.sql\n+++ b/r.sql\n@@ -1,3 +1,2 @@\n -- keep\n--- drop me\n select 2;\n",
+        "diff --git a/m.lua b/m.lua\nindex 5d5fcf7..7f33518 100644\n--- a/m.lua\n+++ b/m.lua\n@@ -1,3 +1,2 @@\n local x = 1\n--- todo remove\n return x\n",
+        "diff --git a/m.lua b/m.lua\n--- a/m.lua\n+++ b/m.lua\n@@ -1,3 +1,2 @@\n local x = 1\n--- todo remove\n return x\n"
+        "diff --git a/q.sql b/q.sql\n--- a/q.sql\n+++ b/q.sql\n@@ -1,2 +1,2 @@\n--- old comment\n+-- new comment\n select 1;\n"
+        "diff --git a/r.sql b/r.sql\n--- a/r.sql\n+++ b/r.sql\n@@ -1,3 +1,2 @@\n -- keep\n--- drop me\n select 2;\n",
+        # Miscounted hunks are accepted like `git apply --recount`.
+        "--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@\n c\n-a\n+b\n",
+        "--- a/x\n+++ b/x\n@@ -1,5 +1,5 @@\n c\n--- a/y\n+++ b/y\n@@ -1 +1 @@\n-a\n+b\n",
+        # A real file header right after the previous hunk's counts are exhausted.
+        "--- a/x\n+++ b/x\n@@ -1 +1 @@\n ctx\n--- a/y\n+++ b/y\n@@ -1 +1 @@\n-a\n+b\n",
+        "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n\\ No newline at end of file\n",
+    ],
+)
+def test_assist_patch_is_substantive_accepts_valid_diffs(patch):
+    assert UnifiedMCPGateway._assist_patch_is_substantive(patch)
+
+
+@pytest.mark.parametrize(
+    "patch",
+    [
+        "diff --git a/a b/a\n",
+        "diff --git a/a b/a\nindex 1..2 100644\n",
+        "diff --git a/a b/a\n--- a/a\n+++ b/a\n",
+        "--- a/a\n+++ b/a\n@@ -1 +1 @@\n",
+        "--- a/a\n@@ -1 +1 @@\n-a\n+b\n",
+        "--- a/a\n+++ b/a\nnot a hunk\n+b\n",
+        "--- I cannot help with that.",
+        "Index: I cannot help with that.",
+        "diff --git ",
+        "I cannot help with that.\nrename from nothing\n",
+        "--- a/x\n+++ b/x\n@@ -1 +1 @@\n unchanged\n",
+        "--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n unchanged\n\n",
+        "diff --git a/x b/x\nsorry, cannot do this\nrename from y\n",
+        "diff --git a/x b/x\nnew file mode banana\n",
+        "diff --git a/x b/x\nnew file mode 100\n",
+        # Miscounted hunks fall back to --recount semantics, but still need a change line.
+        "--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@\n c\n",
+        "--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@\n c\n--- a/y\n+++ b/y\n@@ -1 +1 @@\n d\n",
+        "--- a/x\n+++ b/x\n@@ -1," + "9" * 5000 + " +1 @@\n-a\n",
+        "--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n ctx\n ctx2\n--- a/y\n+++ b/y\n",
+        # Prose inside a hunk.
+        "--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n-a\nsorry, I cannot do that\n+b\n",
+    ],
+)
+def test_assist_patch_is_substantive_rejects_non_diffs(patch):
+    assert not UnifiedMCPGateway._assist_patch_is_substantive(patch)
+
+
+def test_assist_patch_huge_hunk_count_does_not_raise_and_fails_closed_end_to_end(monkeypatch, tmp_path):
+    patch = "--- a/x\n+++ b/x\n@@ -1," + "9" * 5000 + " +1 @@\n-a\n"
+    assert UnifiedMCPGateway._assist_patch_is_substantive(patch) is False
+
+    class FakePopen:
+        pid = 54903
+
+        def __init__(self, command, *, stdout, stderr, **kwargs):
+            stdout.write(json.dumps({"type": "run_result", "text": json.dumps({"patch": patch})}) + "\n")
+            stdout.flush()
+
+        def poll(self):
+            return 0
+
+    service = FakeService()
+    service.state_dir = tmp_path
+    monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", FakePopen)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    gateway = UnifiedMCPGateway(service=service)
+    gateway._assist_submit({"task_id": "bigdigits-1", "what": "x", "why": "y", "allowed_files": ["README.md"], "model": "glm-5.2"})
+    job = gateway._assist_refresh("bigdigits-1")
+    assert job["status"] == "FAILED"
+    assert job["retry_required"] is True
+
+
+def test_assist_patch_is_substantive_is_linear_on_repeated_file_headers():
+    import time
+
+    patch = "--- a\n+++ b\n" * 25000
+    started = time.monotonic()
+    assert not UnifiedMCPGateway._assist_patch_is_substantive(patch)
+    assert time.monotonic() - started < 1.0
+
+
 def test_assist_patch_substantive_check_and_schema_min_length():
-    assert UnifiedMCPGateway._assist_patch_is_substantive("diff --git a/a b/a\n")
+    assert UnifiedMCPGateway._assist_patch_is_substantive("diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-a\n+b\n")
     for bad in ("", "   ", None, 3, "I cannot help with that."):
         assert not UnifiedMCPGateway._assist_patch_is_substantive(bad)
     schema = {"type": "object", "required": ["patch"], "properties": {"patch": {"type": "string", "minLength": 1}}}

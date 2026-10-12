@@ -100,11 +100,11 @@ def test_probe_only_main_writes_rows_and_scorecard(tmp_path):
     assert [r["predictor_arm"] for r in rows] == list(ablation.PREDICTOR_ARMS)
     card = json.loads((artifacts / "t1" / "scorecard.json").read_text())
     influence = card["predictor_influence"]
-    # The probe forces sim_lewm, so LeWM is consulted whenever its switch is on.
-    assert influence["both_on"]["lewm_predictor"]["consulted"] == 1
+    # The probe forces sim_lewm, but LeWM was archived 2026-10-12: it is never consulted.
+    assert influence["both_on"]["lewm_predictor"]["consulted"] == 0
     assert influence["both_off"]["lewm_predictor"]["consulted"] == 0
     assert influence["both_off"]["latent_predictor_v20"]["consulted"] == 0
-    assert influence["latent_off"]["lewm_predictor"]["consulted"] == 1
+    assert influence["latent_off"]["lewm_predictor"]["consulted"] == 0
     assert influence["lewm_off"]["latent_predictor_v20"]["consulted"] >= 1
 
 

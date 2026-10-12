@@ -3,7 +3,8 @@
 The legacy ``gemini`` CLI is no longer usable, so the lane reaches Gemini through
 the ``agy`` print-mode CLI (``agy --print ... --model ... --output-format json``).
 The bare arm calls :func:`ask_direct_agy_patch`. The with-Nexus arm model path reaches agy
-through the unified runtime, which currently blocks it at Workforce Admission (see docs/benchmark/ab_lane_revival_2026-10.md).
+through the unified runtime using the Workforce binding declared by :func:`configure_agy_lane_env`
+(see docs/benchmark/ab_lane_revival_2026-10.md).
 
 Containment: agy runs with ``--mode plan`` (no auto-approve), ``--new-project``
 (no carried conversation) and an empty temporary working directory, so it has no
@@ -48,12 +49,36 @@ def resolve_agy_bin(env: Mapping[str, str] | None = None) -> str | None:
     return AGY_FALLBACK_BIN if Path(AGY_FALLBACK_BIN).is_file() else None
 
 
+AGY_WORKFORCE_BINDINGS_ENV = "NEXUS_BENCH_WORKFORCE_BINDINGS_JSON"
+# Controls the lane physically supplies to the candidate generator: the task fixture, the single
+# target file, a mandatory pytest command, the edit parser, a response-contract verifier and the
+# hidden verifier run after the model call.
+AGY_LANE_CONTROLS = (
+    "task_card",
+    "allowed_files",
+    "mandatory_commands",
+    "parser",
+    "verifier",
+    "independent_verification",
+)
+
+
+def agy_workforce_bindings(model: str) -> dict[str, Any]:
+    """Channel -> binding mapping for the unified runtime (exact provider + model identity)."""
+    return {"online": {"provider": "agy", "model": model, "controls": list(AGY_LANE_CONTROLS)}}
+
+
 def configure_agy_lane_env(environ: MutableMapping[str, str]) -> str:
     """Bind both arms to one agy model id (same-model check). Returns the model id."""
     model = agy_model(environ)
     environ["NEXUS_AGY_MODEL"] = model
     environ["NEXUS_GEMINI_MODEL_NAME"] = model
     environ["NEXUS_DIRECT_GEMINI_MODEL"] = model
+    # With-Nexus arm (issue #1844): route the in-process gateway to agy and declare the
+    # Workforce binding for that exact identity. Admission resolves it (agy_flash_38 for
+    # gemini-3.8-flash-medium); an unregistered model id is BLOCKed, never substituted.
+    environ["NEXUS_OAUTH_PROVIDER"] = "agy"
+    environ[AGY_WORKFORCE_BINDINGS_ENV] = json.dumps(agy_workforce_bindings(model), sort_keys=True)
     return model
 
 

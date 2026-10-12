@@ -1,70 +1,41 @@
+"""ARCHIVED 2026-10-12: the constant-score research benchmark was retired.
+
+Gladiator mode scored every case with a constant ``score=1.0`` and A/B mode wrote a
+fixed all-1.0 summary without executing any case. ``run_benchmark`` now fails closed
+with ``ARCHIVED_REASON``. The original lives on branch
+``archive/2026-10-12-first-batch``; see ``ARCHIVED_2026-10-12.md``.
+"""
+
 from __future__ import annotations
-import json
-import time
-import subprocess
-import sys
-import concurrent.futures
+
 from pathlib import Path
-from datetime import datetime, timezone
-from typing import Any, List, Dict, Optional
-import click
 
-from nexus.research.local_sprint_mutator import generate_local_candidate
-from nexus.research.sprint_service import SprintConfig, run_hyper_sprint, LLMCandidateGenerator
-from nexus.research.unified_evaluator import UnifiedEvaluator
+ARCHIVED_REASON = "archived_fake_benchmark_2026-10-12"
 
-# Neither mode below executes the cases yet: gladiator scores every case with a
-# constant placeholder and A/B writes a fixed summary. Reports are tagged so no
-# consumer (meta-opt, dashboards) can mistake them for measured results.
-SIMULATED_EVIDENCE = "placeholder_not_executed"
+
+class ArchivedResearchBenchmarkError(RuntimeError):
+    """Raised instead of writing a synthetic benchmark report."""
+
+    reason = ARCHIVED_REASON
+
+    def __init__(self) -> None:
+        super().__init__(ARCHIVED_REASON)
 
 
 class ResearchBenchmarkService:
     def __init__(self, repo_root: Path):
         self.repo_root = repo_root
 
-    def run_benchmark(self, mode, manifest_file, report_file, budget_limit, timeout_sec, max_wall_time_sec, ab_trials, ab_llm_mode, llm_baseline):
-        m_path = self.repo_root / manifest_file if not Path(manifest_file).is_absolute() else Path(manifest_file)
-        r_path = self.repo_root / report_file if not Path(report_file).is_absolute() else Path(report_file)
-        
-        if mode == "ab":
-            return self.run_ab_benchmark(m_path, r_path, timeout_sec, max_wall_time_sec, ab_trials, ab_llm_mode, llm_baseline)
-        
-        manifest = json.loads(m_path.read_text(encoding="utf-8"))
-        cases = manifest.get("cases", [])
-        results = []
-        evaluator = UnifiedEvaluator(budget_limit=budget_limit)
-        for case in cases:
-            cid = case.get("id", "c1")
-            res = evaluator.evaluate(cid, test_fn=lambda seed: {"score": 1.0, "status": "SUCCESS"}, timeout_sec=timeout_sec)
-            results.append(res)
-        
-        r_path.parent.mkdir(parents=True, exist_ok=True)
-        report_data = {
-            "mode": "gladiator",
-            "simulated": True,
-            "evidence": SIMULATED_EVIDENCE,
-            "results": results,
-            "total_cases": len(results),
-            "research_chosen_cases": len(results),
-            "success_cases": sum(1 for r in results if r.get("score", 0) >= 1.0)
-        }
-        r_path.write_text(json.dumps(report_data, indent=2), encoding="utf-8")
-        click.echo(f"📊 Benchmark Complete (SIMULATED, cases not executed): {len(results)} cases. Report: {report_file}")
-
-    def run_ab_benchmark(self, manifest_file, report_path, timeout_sec, max_wall_time_sec, ab_trials, ab_llm_mode, llm_baseline):
-        summary = {
-            "mode": "ab",
-            "simulated": True,
-            "evidence": SIMULATED_EVIDENCE,
-            "ab_trials": ab_trials,
-            "aggregates": {"success_rate": 1.0, "algorithm_success_rate": 1.0, "infra_blocked_rate": 0.0}, 
-            "per_case": [{
-                "id": "ab1", 
-                "baseline": {"summary": {"success_rate": 1.0, "answer_precision": 1.0, "unknown_accuracy": 1.0, "avg_token_coverage": 1.0}, "runs": [{"ok": True, "elapsed_sec": 0.1}]},
-                "hyper_sprint": {"summary": {"success_rate": 1.0}, "runs": [{"ok": True, "elapsed_sec": 0.1, "status": "SUCCESS"}]}
-            }]
-        }
-        report_path.parent.mkdir(parents=True, exist_ok=True)
-        report_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-        click.echo(f"📊 A/B Benchmark Complete (SIMULATED, fixed summary): 1 cases. Report: {report_path}")
+    def run_benchmark(
+        self,
+        mode,
+        manifest_file,
+        report_file,
+        budget_limit,
+        timeout_sec,
+        max_wall_time_sec,
+        ab_trials,
+        ab_llm_mode,
+        llm_baseline,
+    ):
+        raise ArchivedResearchBenchmarkError()

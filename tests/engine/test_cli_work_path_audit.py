@@ -32,7 +32,6 @@ WORK_COMMANDS = (
     "research:meta-opt",
     "learn:phase-policy",
     "learn:benchmark",
-    "oracle:apply",
 )
 
 

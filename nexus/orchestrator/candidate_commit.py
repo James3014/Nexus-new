@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Optional
 
-from nexus.orchestrator.candidate_verifier import VerifiedCandidateReceipt
+from nexus.orchestrator.candidate_verifier import CandidateVerifier, VerifiedCandidateReceipt
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
 from nexus.orchestrator.worktree_manager import (
     TargetWorktreeLease,
@@ -71,6 +71,31 @@ class CandidateCommitter:
         return hashlib.sha256(canonical).hexdigest()
 
     @staticmethod
+    def _require_verifier_binding(
+        contract: SelfHostedTaskContract, receipt: VerifiedCandidateReceipt
+    ) -> None:
+        """Bind the receipt's verifier manifest and evidence to the contract (#1760)."""
+        expected = CandidateVerifier.effective_verifier_manifest(contract.verifier_commands)
+        if receipt.verifier_manifest_sha256 != CandidateVerifier.verifier_manifest_sha256(
+            contract.verifier_commands
+        ):
+            raise RuntimeError("verified receipt verifier manifest does not bind to this contract")
+        evidence = tuple(receipt.verifier_evidence or ())
+        if len(evidence) != len(expected):
+            raise RuntimeError(
+                "verified receipt verifier evidence does not cover the contract verifier commands"
+            )
+        for command, entry in zip(expected, evidence):
+            # Recovery rebuilds receipts from state JSON, so entries may be mappings.
+            get = entry.get if isinstance(entry, dict) else lambda k, _e=entry: getattr(_e, k, None)
+            if get("command") != command:
+                raise RuntimeError(
+                    "verified receipt verifier evidence does not cover the contract verifier commands"
+                )
+            if get("status") != "COMPLETED" or get("exit_code") != 0:
+                raise RuntimeError("verified receipt verifier evidence is not a passing result")
+
+    @staticmethod
     def _resolve_git_home() -> str:
         env_git_home = os.environ.get("NEXUS_GIT_HOME")
         if env_git_home is not None and env_git_home.strip() != "":
@@ -114,6 +139,7 @@ class CandidateCommitter:
             raise RuntimeError("verified receipt identity does not bind to this contract and lease")
         if contract.verifier_commands and not receipt.verifier_evidence:
             raise RuntimeError("verified receipt carries no verifier evidence for this contract")
+        self._require_verifier_binding(contract, receipt)
         if receipt.core_provenance_required:
             if (
                 receipt.core_verification_status != "VERIFIED"

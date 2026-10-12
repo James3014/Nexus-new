@@ -1,0 +1,7 @@
+[
+  {"candidate_id": "c1", "text": "alpha", "score": 0.95, "evidence_refs": []},
+  {"candidate_id": "c2", "text": "beta", "score": 0.85, "evidence_refs": []},
+  {"candidate_id": "c3", "text": "gamma", "score": 0.75, "evidence_refs": []},
+  {"candidate_id": "c4", "text": "delta", "score": 0.40, "evidence_refs": []},
+  {"candidate_id": "c5", "text": "epsilon", "score": 0.20, "evidence_refs": []}
+]
