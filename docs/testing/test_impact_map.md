@@ -276,3 +276,5 @@
 | tests/services/test_forecast_gate_mainchain_e2e.py | tests/services/test_forecast_gate_mainchain_e2e.py | active | medium | test_contract |
 | tests/core/test_mempalace_belief_writer_path.py | tests/core/test_mempalace_belief_writer_path.py | active | medium | test_contract |
 | tests/ops/test_nexus_status_honesty.py | tests/ops/test_nexus_status_honesty.py | active | medium | test_contract |
+| scripts/ops/closeout_guard.py | tests/ops/test_closeout_guard.py, tests/ops/test_contract_snapshot_attestation.py | active | high | governance |
+| tests/ops/test_contract_snapshot_attestation.py | tests/ops/test_contract_snapshot_attestation.py | active | medium | test_contract |
