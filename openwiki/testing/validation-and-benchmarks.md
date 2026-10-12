@@ -6,7 +6,7 @@ tags: [testing, validation, contracts, benchmarks, pytest, ci]
 openwiki:
   roles: [architecture, operations, testing]
   change_kinds: [public-api, testing]
-  source_paths: [tests/, pyproject.toml]
+  source_paths: [tests/, pyproject.toml, docs/benchmark/benchmark_claim_policy.md, scripts/eval/run_memory_ab_v1.py, scripts/bench/with_nexus_runner.py]
   symbols: [pytest, SWE-bench, benchmark]
   test_paths: [tests/engine/test_runtime_phase_contract.py, tests/engine/test_capability_planner.py, tests/nexus/orchestrator/test_self_hosted_task_service.py, tests/nexus/orchestrator/test_acceptance_loop.py, tests/ops/test_openwiki_source_contract.py]
   invariants: [Prefer focused revision-bound tests before broad suites. Test evidence proves the tested contract and does not by itself prove production wiring.]
@@ -100,6 +100,22 @@ Benchmark evidence remains a benchmark/runtime-surface claim only unless an inde
 The current `Nexus Pytest CI` workflow does more than run an undifferentiated full suite on every event. For non-manual/non-scheduled events it first runs an **Exact-base impact gate**, checks out the exact head, resolves the comparison base/head, and uses repository impact/test-selection tooling before downstream verification.
 
 Treat CI results as revision-bound evidence. Do not reuse a passing run after the Candidate/head, base, workflow, or selected test set has drifted.
+
+---
+
+## 📒 Evidence Ledger & Memory A/B Outcome (observed 2026-10-12)
+
+Benchmark numbers that circulate in historical Nexus documents are not uniformly citable. The governed Wiki keeps the authoritative citability ledger at `nexus_wiki_vault/04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md`; this section only summarizes what current repository evidence supports.
+
+| Claim family | Current-source status | Evidence basis |
+| :--- | :--- | :--- |
+| Token A/B 180 runs, Differential Eval 300 tasks, Observation Cycles | Not citable | `docs/benchmark/benchmark_claim_policy.md` §2 lists them as simulated or `MagicMock`-driven |
+| `research:benchmark` / `benchmark_service.py` outputs | Not citable | Nexus-new issue #1762: random-number scores and a constant `score=1.0` |
+| Gemini same-model Nexus-vs-bare lanes (May 2026) | Credible, strict-baseline unverified | Runner `scripts/bench/with_nexus_runner.py` last changed 2026-05-23; no report after 2026-08; legacy ADRs require `--strict-llm-baseline` to exclude `model_calls=0` rescues |
+| Lesson memory on/off (nexus-learning, Oct 2026) | Neutral | `scripts/eval/run_memory_ab_v1.py`; nine configurations all `adoption=DEFER`; best round off 36/72 vs on 33/72 (sign test p=0.77); all receipts `with_nexus_armor=false` |
+| Learning closure uplift | Negative | nexus-learning `BOUNDARY.md`: 91 episodes, 40 retrieved, 0 applied, 0 uplift as of 2026-10-08 |
+
+> **Evidence ceiling:** the memory A/B bypasses `CapabilityPlanner` (see [Capability Execution Status](../routing/capability-execution-status.md)), so its neutral result bounds a bare local model plus memory toggle, not the capability graph.
 
 ---
 

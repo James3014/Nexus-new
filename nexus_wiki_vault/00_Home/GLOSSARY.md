@@ -219,3 +219,51 @@ Canonical definitions for key Nexus terms. Each entry states what the term means
 **Code/document source**: `nexus_wiki_vault/01_System/CLAIM_TAXONOMY.md`
 
 **Legacy aliases**: (none)
+
+---
+
+### MSA (ambiguous acronym)
+
+**Definition**: Two unrelated expansions coexist in this vault. (a) **Multi-System Alignment** — the spiritual-governance model translated into `HallucinationGuard` / `CompletionEnvelope` interlocks (`01_System/ADR-042_MSA_Physical_Hallucination_Interlock.md`). (b) **Memory Sparse Attention** — the LanceDB-indexed fail-closed routing layer with 0.75 threshold and quarantine write-back (`04_Research/MSA_Routing_Architecture.md`, `02_Modules/Module - Capability Matrix.md`). Always state which one is meant.
+
+**Not the same as**: Each other; neither is a CLI command.
+
+**Code/document source**: `nexus/core/hallucination_guard.py` (a); `nexus/research/msa_indexer.py`, `nexus/research/router.py` (b)
+
+**Legacy aliases**: (a) MSA governance; (b) MSA Routing, 記憶稀疏注意路由. Registered as conflict C-10 in `01_System/System - Unknowns and Conflicts.md` (2026-10-12).
+
+---
+
+### PXDRAC / S-P-X-D-R-A-C (phase letters)
+
+**Definition**: The canonical runtime phase order per the authority page `01_System/SYSTEM_ARCHITECTURE_BLUEPRINT.md` (normative) is **P → X → D → R → A → C** with X = eXplore, D = Diagnose, R = Repair, A = Audit/Acceptance, C = Crystallize; the planner-level pre-phase **S** (Scope: file_lock, mempalace_gate, pregate) yields the seven-letter S-P-X-D-R-A-C used in routing analyses. The body of `01_System/Supreme_Master_Loop_Spec.md` assigns different meanings (X = eXecute, D = Document, R = Review, C = Closeout) and the Nexus-new `openwiki/architecture/overview.md` reports the current-source order as S → P → D → X → R → A → C. These are **not** interchangeable.
+
+**Not the same as**: v9/v17.1 PDRAC (Planning → Doing → Reviewing → Acting → Checking).
+
+**Code/document source**: `nexus/engine/runtime_phase_contract.py` (current source order); `03_Flows/Flow - PXDRAC Runtime.md` (vault design order)
+
+**Legacy aliases**: PDRAC, 六相位. Registered as conflict C-11 (2026-10-12); authority per `99_Schema/WIKI_AUTHORITY_MANIFEST.yaml` is `SYSTEM_ARCHITECTURE_BLUEPRINT.md`, and the current-source contract is the code.
+
+---
+
+### Meta-Evolution Rings (9 Rings / 18 Rings)
+
+**Definition**: Two parameter sets both described as "converged after 20 rounds of meta-evolution". They disagree on values (e.g. `global_nas_aggression` 0.85 vs 0.88, `system_entropy_tolerance` 25.0 vs 22.0, `backpressure_nerve_threshold` 0.25 vs 0.22) and 18 Rings adds `max_risk_prob`, `drift_max`, `poll_interval`. No benchmark result is tied to either set.
+
+**Not the same as**: A measured tuning result; see `04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md` #8 (`NOT_CITABLE`).
+
+**Code/document source**: `.nexus/governance_policy.yaml`; `04_Research/Meta-Evolution - The 9 Rings Convergence.md`, `04_Research/Meta-Evolution - The 18 Rings Convergence.md`
+
+**Legacy aliases**: 九環, 十八環. Registered as conflict C-12 (2026-10-12).
+
+---
+
+### Five Pillars (五位一體) / Soul Pentad
+
+**Definition**: The context plane between S and P. ADR-042 lists five elements (LanceDB, Memory, MemPalace, Belief, Artifact); `02_Modules/Module - Capability Matrix.md` lists six rows by adding **Claim** as the verification dimension. Treat the set as five pillars plus Claim as the gate they feed; do not cite "五位一體" as proof that Claim is a pillar.
+
+**Not the same as**: The "三系統" (LanceDB / Memory / MemPalace) of `Module - Skill Memory Closed Loop.md`, which folds Belief into MemPalace.
+
+**Code/document source**: `01_System/ADR-042_MSA_Physical_Hallucination_Interlock.md`; `02_Modules/Module - Capability Matrix.md`; `nexus/core/capability_executor_registry.py` (`_exec_lancedb`, `_exec_mempalace`, `_exec_belief`, `_exec_artifact_gate`, `_exec_claim_gate`)
+
+**Legacy aliases**: 靈魂五位一體, Soul Pentad, Five-in-One. Count discrepancy registered as conflict C-13 note (2026-10-12).

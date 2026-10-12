@@ -16,6 +16,8 @@ confidence: mixed
 
 > **Freshness notice (2026-10-08):** The source-bound snapshot below supersedes the 2026-07-13 architecture/status narrative for present-day navigation. The retained legacy sections are historical observations, not a live-system readiness verdict. Do not promote commit, CI or documentation evidence into runtime or acceptance truth.
 
+> **Capability reconciliation (2026-10-12):** a read-only audit compared the legacy monolith with the split repo family. The split deleted no capability code, but four concrete regressions were found (runtime executor binding dead; experiments run armor-off; the Gemini same-model A/B lane dormant since 2026-05-23; LAB_ONLY freeze without measurement) and most headline numbers in this vault are not citable. See [Diff - Legacy Monolith vs Split Repo Family (2026-10-12)](../08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12).md) and [CAPABILITY_EVIDENCE_LEDGER_2026-10-12](../04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md). Observed revisions on 2026-10-12: Nexus-new `0fb15f3e1`, nexus-runtime `cfcb38d`, nexus-learning `9a0eadf`, nexus-core `f0909e9`.
+
 ## Current repository evidence (2026-10-08, source-only)
 
 The following are exact observed default-branch revision identities, **not** claims of deployment, continuous readiness, independent acceptance or production certification. Nexus spans separately governed repositories; each must be checked at its own revision.
