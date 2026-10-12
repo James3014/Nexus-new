@@ -1262,13 +1262,20 @@ CASES: tuple[GoldenCase, ...] = (
     ),
     _c(
         "GB-100",
-        "Projection-only claim metadata resolves to manual dispatch",
+        "Public work claims are repository-enforced and read-only",
         "security",
         "malformed_input",
-        "Claim metadata whose enforcement state is PROJECTION_ONLY or UNKNOWN must resolve to MANUAL_DISPATCH and never be reported as repository-enforced.",
-        ("AGENTS.md#Repository collaboration authority (GitHub)",),
-        status="finding",
-        finding_id="GBF-009",
+        "Public work claims are projected only from the fenced repository claim store and report REPO_ENFORCED with a read-only ceiling; reads never mint, transfer or release ownership, and tampered records or fencing tokens fail closed.",
+        (
+            "AGENTS.md#Repository collaboration authority (GitHub)",
+            "docs/agents/TASK_EXECUTION_CONTRACT.md#GitHub collaboration and local lifecycle domains",
+        ),
+        (
+            "tests/nexus/orchestrator/test_work_claim_public_read_surface.py::test_read_work_claim_exposes_all_required_contract_fields",
+            "tests/nexus/orchestrator/test_work_claim_public_read_surface.py::test_read_claim_is_strictly_read_only_and_never_mints_ownership",
+            "tests/nexus/orchestrator/test_work_claim_public_read_surface.py::test_read_work_claim_fails_closed_on_tampered_stored_record",
+            "tests/nexus/orchestrator/test_work_claim_public_read_surface.py::test_read_and_list_fail_closed_on_tampered_fencing_token",
+        ),
     ),
 )
 
@@ -1281,5 +1288,4 @@ FINDINGS = {
     "GBF-006": "As of 2026-10-12 on main 1d80602f0, tests/ops/test_bootstrap_authority_files.py reports 9 failed and 13 passed because AGENTS.md and MUSE_PROTO.md wording changed without reconciling these authority-text tests, which are the textual witnesses for the operating-mode fail-closed and Project Entry rules.",
     "GBF-007": "As of 2026-10-12, nexus_task_card_create and nexus_owner_standing_grant_issue in nexus/orchestrator/unified_mcp_gateway.py neither require nor check a prior nexus_project_entry result and project_binding_hash has no consumer, so the #842 Project Entry precondition is agent instruction only (owner #1750 defers project-entry binding to Phase 2).",
     "GBF-008": "As of 2026-10-12, no runtime code parses or validates docs/governance/current_operating_mode.yaml (nexus/orchestrator/canonical_core_transport.py only hashes its bytes into provenance), so the missing/invalid/ambiguous fail-closed rule is unenforced.",
-    "GBF-009": "As of 2026-10-12, no code resolves claim_intent/claim_enforcement_state/claim_mode, and nexus/orchestrator/self_hosted_task_service.py:2805 hardcodes claim_enforcement_state REPO_ENFORCED, so the PROJECTION_ONLY/UNKNOWN to MANUAL_DISPATCH rule is unimplemented.",
 }
