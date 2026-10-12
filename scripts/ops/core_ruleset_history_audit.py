@@ -3,6 +3,7 @@
 
 This is a diagnostic checker, never a permission, issuer or merge authority.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -26,7 +27,16 @@ def evaluate(snapshot: object) -> list[str]:
         failures.append("INVALID_BRANCH_TARGET")
     else:
         refs = snapshot["conditions"].get("ref_name")
-        if not isinstance(refs, dict) or not ({ "~DEFAULT_BRANCH", "refs/heads/main" } & set(refs.get("include", []))) or "refs/heads/main" in refs.get("exclude", []):
+        include = refs.get("include") if isinstance(refs, dict) else None
+        exclude = refs.get("exclude") if isinstance(refs, dict) else None
+        if (
+            not isinstance(include, list)
+            or not all(isinstance(ref, str) for ref in include)
+            or not isinstance(exclude, list)
+            or not all(isinstance(ref, str) for ref in exclude)
+            or not any(ref in include for ref in ("~DEFAULT_BRANCH", "refs/heads/main"))
+            or any(ref in exclude for ref in ("~DEFAULT_BRANCH", "refs/heads/main"))
+        ):
             failures.append("DEFAULT_BRANCH_NOT_INCLUDED")
     rules = snapshot.get("rules")
     if not isinstance(rules, list):
@@ -39,19 +49,27 @@ def evaluate(snapshot: object) -> list[str]:
             params = rule.get("parameters")
             if isinstance(params, dict) and isinstance(params.get("required_status_checks"), list):
                 checks.extend(params["required_status_checks"])
-    core_checks = [check for check in checks if isinstance(check, dict) and check.get("context") == CONTEXT]
+    core_checks = [
+        check for check in checks if isinstance(check, dict) and check.get("context") == CONTEXT
+    ]
     if not core_checks:
         failures.append("CORE_CHECK_MISSING")
     elif any(check.get("integration_id") is None for check in core_checks):
         failures.append("CORE_CHECK_ISSUER_UNBOUND")
-    elif len(core_checks) != 1 or type(core_checks[0].get("integration_id")) is not int or core_checks[0]["integration_id"] != TRUSTED_APP_ID:
+    elif (
+        len(core_checks) != 1
+        or type(core_checks[0].get("integration_id")) is not int
+        or core_checks[0]["integration_id"] != TRUSTED_APP_ID
+    ):
         failures.append("CORE_CHECK_WRONG_ISSUER")
     return failures
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("snapshots", nargs="+", help="Local JSON snapshots; never fetched or changed")
+    parser.add_argument(
+        "snapshots", nargs="+", help="Local JSON snapshots; never fetched or changed"
+    )
     args = parser.parse_args(argv)
     results = []
     for name in args.snapshots:
@@ -61,9 +79,15 @@ def main(argv: list[str] | None = None) -> int:
             violations = ["SNAPSHOT_UNREADABLE"]
         else:
             violations = evaluate(content)
-        results.append({"path": name, "status": "FAIL" if violations else "PASS", "reason_codes": violations})
+        results.append({
+            "path": name,
+            "status": "FAIL" if violations else "PASS",
+            "reason_codes": violations,
+        })
     failed = any(row["status"] == "FAIL" for row in results)
-    print(json.dumps({"status": "FAIL" if failed else "PASS", "snapshots": results}, sort_keys=True))
+    print(
+        json.dumps({"status": "FAIL" if failed else "PASS", "snapshots": results}, sort_keys=True)
+    )
     return 1 if failed else 0
 
 
