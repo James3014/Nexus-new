@@ -110,12 +110,18 @@ def test_current_operating_mode_bootstrap_is_direct_first_and_fail_closed():
         assert required in escalation
 
     assert "read `docs/governance/current_operating_mode.yaml`" in agents.lower()
-    assert "Existing active work keeps its\ncurrent execution contract until completion" in agents
-    assert "does not switch lanes mid-task" in agents
+    assert (
+        "Existing active work keeps its\ncurrent execution contract; no mid-task lane switch."
+        in agents
+    )
     assert "fail closed to an\nexplicit current Owner lane decision" in agents
     assert "cannot select\nor override a `CapabilityPlanner` route/capability" in agents
     assert "Current self-hosting stabilization semantics" in agents
-    assert "does not by itself change the repository default\nexecution lane" in agents
+    assert "G10 alone does not change the default\nexecution lane" in agents
+    assert (
+        "It is not inferred from G10, tests, an agent, a Task Card, CI, or runtime state"
+        in _norm(agents)
+    )
     assert "must never silently downgrade that attempt" in agents
     assert "`NEXUS_GOVERNANCE_DEFAULT_READY` is an Owner-only transition decision" in agents
     assert "Self-hosting stabilization and future default transition" in contract
@@ -218,8 +224,11 @@ def test_execution_domains_and_candidate_namespaces_are_unambiguous():
     assert "does not select local lifecycle" in agents
     assert "A GitHub PR Candidate" in agents
     assert "a local lifecycle Candidate" in agents
-    assert "never substitutes for program correctness" in _norm(agents)
-    assert "Reviewer block/card omission is not\n  terminal `REJECTED`" in agents
+    assert "a Task Card never replaces program correctness" in _norm(agents)
+    assert (
+        "Reviewer block/card omission is not\n  `REJECTED`; only an authorized decision-maker may"
+        " reject" in agents
+    )
 
     assert "GitHub collaboration and local lifecycle domains" in contract
     assert "does not enter local lifecycle merely because it is\ndelegated" in contract
@@ -240,7 +249,7 @@ def test_ready_issue_claim_contract_is_worker_neutral_and_fail_closed():
     contract = (ROOT / "docs/agents/TASK_EXECUTION_CONTRACT.md").read_text(encoding="utf-8")
 
     assert "eligible governed worker" in agents
-    assert "Provider/model names are not normative" in agents
+    assert "Provider/model names are not ownership identities" in _norm(agents)
     for token in (
         "claim_intent",
         "claim_enforcement_state",
@@ -275,7 +284,10 @@ def test_protected_merge_requires_exact_owner_slot_not_standing_grant():
     assert "DIRECT uses `git_merge_pull_request`" in normalized_agents
     assert "no Task Card, third-party approval, acceptance receipt/hash" in normalized_agents
     assert "GOVERNED retains independent acceptance" in normalized_agents
-    assert "It grants no delegated-worker merge authority" in agents
+    assert (
+        "non-transferable Owner standing grant for bounded Ready Issues in one durable scope"
+        " grants no delegated-worker merge authority" in normalized_agents
+    )
     assert "For `DIRECT_CANONICAL`, the primary coordinator may use" in contract
     assert "Neither direct lane requires a third-party GitHub `APPROVED` review" in contract
     workflow = (ROOT / ".github/workflows/trusted-deletion-anchor.yml").read_text(encoding="utf-8")
@@ -285,7 +297,10 @@ def test_protected_merge_requires_exact_owner_slot_not_standing_grant():
     assert "nexus.owner_execution_lane_rebind.v1" in contract
     assert "scripts/ops/trusted_merge_lane_gate.py" in agents
     assert "scripts/ops/trusted_merge_lane_gate.py" in contract
-    assert "Starting with PR #1061" in agents
+    assert (
+        "From PR #1061, protected-merge PRs carry `nexus.merge_lane_binding.v1`"
+        in normalized_agents
+    )
     assert "Starting with PR #1061" in contract
     assert "Trusted verifier (default branch)" in agents
     assert "Trusted verifier (default branch)" in contract
@@ -401,7 +416,13 @@ def test_direct_delegated_contract_is_explicit_and_bounded():
     combined = _norm(" ".join(texts.values()))
 
     assert "DIRECT_DELEGATED" in agents
-    assert "exactly one bounded external worker" in agents
+    assert (
+        "approved non-Nexus control plane -> one bounded external worker -> independent"
+        " verification" in agents
+    )
+    assert "exactly one bounded external implementation worker" in _norm(
+        texts["docs/agents/TASK_EXECUTION_CONTRACT.md"]
+    )
     assert "No Nexus Task Card, Nexus lifecycle, CapabilityPlanner routing" in agents
     assert "delegation alone does not escalate" in agents
     assert "independently inspects the physical diff" in agents
@@ -486,7 +507,7 @@ def test_semantic_authority_delta_contract_is_fail_closed_future_only_and_lane_p
     assert "does not approve" in contract.lower()
     assert "future-only after this contract is integrated into `main`" in contract
     assert "future-only after independent acceptance" not in contract
-    assert "after this contract is integrated into `main`" in agents
+    assert "applies only to future classifications after integration into `main`" in agents
     assert "MERGE_INTENT" in texts["AGENTS.md"]
 
 
@@ -500,7 +521,7 @@ def test_first_issue_bound_action_requires_project_entry_before_governed_effects
     )
     assert "`continue ... #N`, `處理 #N`, `幫我修 #N`" in agents
     assert "If Project Entry is not `READY_TO_EXECUTE`" in normalized
-    assert "STOP the governed effect path" in normalized
+    assert "surface its single canonical blocker and STOP governed effects" in normalized
     assert "Do not jump directly to `nexus_task_card_create`" in normalized
     assert "Switching repository or Issue invalidates the prior Project Entry binding" in normalized
     assert "Direct lanes remain governed by their existing lane rules" in normalized
@@ -537,7 +558,8 @@ def test_main_movement_invalidates_merge_attempt_not_candidate_by_default():
         assert "current main" in text.lower() or "current `main`" in text
 
     assert "does **not** by itself invalidate the Candidate" in texts["AGENTS.md"]
-    assert "Do not create a new PR generation merely to refresh the base SHA" in agents
+    assert "If every dimension is `REUSE_UNAFFECTED`, keep the same Candidate and PR head" in agents
+    assert "`REUSE_UNAFFECTED`: preserve the same Candidate/PR/head" in contract
     assert "`base != current main` alone is never sufficient evidence" in agents
     assert "plain base inequality may not" in contract
     assert "mechanical PR reconstruction" in contract
