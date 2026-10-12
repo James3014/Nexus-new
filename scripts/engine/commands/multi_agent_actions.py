@@ -42,11 +42,13 @@ CommitShaProvider = Callable[[], str]
 class TaskStatusView:
     text_lines: list[str]
     json_text: str | None = None
+    found: bool = True
 
 
 @dataclass(frozen=True)
 class TaskAuditView:
     text_lines: list[str]
+    found: bool = True
 
 
 @dataclass(frozen=True)
@@ -180,7 +182,7 @@ def get_multi_agent_task_status(
     if task_id:
         task = orchestrator.state_store.load_task(task_id)
         if not task:
-            return TaskStatusView(text_lines=[f"Task {task_id} not found."])
+            return TaskStatusView(text_lines=[f"Task {task_id} not found."], found=False)
         return TaskStatusView(
             text_lines=[f"Task: {task.task_id} | Status: {task.current_status} | Owner: {task.owner}"],
             json_text=task.model_dump_json(indent=2),
@@ -209,7 +211,7 @@ def get_multi_agent_task_audit(
     orchestrator = (orchestrator_factory or _default_orchestrator_factory)()
     task = orchestrator.state_store.load_task(task_id)
     if not task:
-        return TaskAuditView(text_lines=[f"Task {task_id} not found."])
+        return TaskAuditView(text_lines=[f"Task {task_id} not found."], found=False)
 
     lines = [
         f"🔍 Auditing Task {task_id} (Owner: {task.owner})",

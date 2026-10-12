@@ -3442,14 +3442,19 @@ else:
         view = get_multi_agent_task_status(task_id)
         for line in render_multi_agent_task_status(view, output_json=output_json):
             click.echo(line)
+        if not view.found:
+            sys.exit(1)
 
     @multi_agent_group.command(name="verify")
     @click.option("--task-id", required=True)
     @translate_action_exceptions
     def verify_task_cmd(task_id):
         """✅ Run verification gates for a task."""
-        for line in render_multi_agent_task_verification(verify_multi_agent_task(task_id)):
+        view = verify_multi_agent_task(task_id)
+        for line in render_multi_agent_task_verification(view):
             click.echo(line)
+        if not view.passed:
+            sys.exit(1)
 
     @multi_agent_group.command(name="close")
     @click.option("--task-id", required=True)
@@ -3475,8 +3480,11 @@ else:
     @translate_action_exceptions
     def audit_task_cmd(task_id):
         """🔍 Audit task evidence chain."""
-        for line in render_multi_agent_task_audit(get_multi_agent_task_audit(task_id)):
+        view = get_multi_agent_task_audit(task_id)
+        for line in render_multi_agent_task_audit(view):
             click.echo(line)
+        if not view.found:
+            sys.exit(1)
 
     @multi_agent_group.command(name="metrics")
     @click.option("--json", "output_json", is_flag=True)
@@ -3495,8 +3503,11 @@ else:
     @translate_action_exceptions
     def submit_task_cmd(task_id):
         """🚀 Submit task with full verification & protocol evidence."""
-        for line in render_multi_agent_task_submission(submit_multi_agent_task(task_id, repo_root=repo_root)):
+        view = submit_multi_agent_task(task_id, repo_root=repo_root)
+        for line in render_multi_agent_task_submission(view):
             click.echo(line)
+        if not view.submitted:
+            sys.exit(1)
 
 
     # --- v4.0: Skills & Registry Management ---
@@ -3573,6 +3584,8 @@ else:
         )
         for line in render_sandbox_run_result(result):
             click.secho(line, fg="cyan")
+        if not result.success:
+            sys.exit(1)
 
 
     # --- v26 Mission Control (持久化編排戰役) ---
@@ -3676,6 +3689,9 @@ else:
 
         mission.persist(repo_root)
         click.echo(f"🏁 Campaign execution terminated. Status: {mission.status.value}")
+        if res.returncode != 0:
+            click.secho(f"❌ Campaign run failed (exit {res.returncode}).", fg="red")
+            sys.exit(1)
 
     @mission_group.command(name="status")
     def mission_status():
@@ -3684,7 +3700,7 @@ else:
         mission = NexusMission.load(repo_root)
         if not mission:
             click.echo("❌ No active mission registered.")
-            return
+            sys.exit(1)
 
         click.secho(f"🛡️ [Mission Control Status: {mission.mission_id}]", fg="cyan", bold=True)
         click.echo(f"- Objective: {mission.objective}")
@@ -3710,7 +3726,7 @@ else:
         mission = NexusMission.load(repo_root)
         if not mission:
             click.echo("❌ No mission found.")
-            return
+            sys.exit(1)
 
         try:
             transition(mission, MissionStatus.PAUSED)
@@ -3743,7 +3759,7 @@ else:
         mission = NexusMission.load(repo_root)
         if not mission:
             click.echo("❌ No paused mission found.")
-            return
+            sys.exit(1)
 
         if mission.status in (MissionStatus.COMPLETED, MissionStatus.ABORTED):
             click.secho(
