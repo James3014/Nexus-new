@@ -398,7 +398,8 @@ def test_git_error_fails_closed(tmp_path: Path) -> None:
 
 def test_workflow_enforces_continuous_repository_coverage() -> None:
     workflow = Path(".github/workflows/git-history-secret-audit.yml").read_text(encoding="utf-8")
-    pull_request_block = workflow.split("  pull_request:\n", 1)[1].split("  push:\n", 1)[0]
+    assert "  pull_request:\n" not in workflow
+    pull_request_block = workflow.split("  pull_request_target:\n", 1)[1].split("  push:\n", 1)[0]
     assert "branches: [main]" in pull_request_block
     assert "paths:" not in pull_request_block
     assert "  push:\n    branches: [main]\n" in workflow
