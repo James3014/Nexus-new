@@ -1857,9 +1857,7 @@ def test_read_only_research_tool_events_are_not_no_tool_violation(tmp_path: Path
     )
 
     assert code == 0
-    assert not any(
-        e.get("failure_kind") == dispatch.NO_TOOL_PROFILE_VIOLATION for e in events
-    )
+    assert not any(e.get("failure_kind") == dispatch.NO_TOOL_PROFILE_VIOLATION for e in events)
 
 
 def test_accept_edits_permission_refusal_exit_zero_is_failure(tmp_path: Path) -> None:
