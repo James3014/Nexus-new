@@ -11116,3 +11116,74 @@ def test_direct_untracked_dispatch_does_not_require_admission(tmp_path):
     service._revalidate_provider_boundary(
         contract, request, "direct-no-admission", None, active_provider="codex"
     )
+
+
+@pytest.mark.parametrize("verifiers", [None, [], ["   "]])
+def test_build_contract_rejects_missing_or_blank_verifier_manifest(tmp_path, verifiers):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    request = _request(tmp_path)
+    request.pop("verifier_commands")
+    if verifiers is not None:
+        request["verifier_commands"] = verifiers
+    with pytest.raises(ValueError):
+        service.build_contract(request)
+
+
+def test_legacy_mcp_submit_without_verifiers_is_rejected_before_dispatch(tmp_path):
+    from nexus.orchestrator.self_hosted_mcp import NexusSelfHostedMCPServer
+
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    launched = []
+    service._launch_worker = lambda *a, **k: launched.append(a)
+    server = NexusSelfHostedMCPServer(service=service)
+    request = _request(tmp_path, task_id="t-nover", execution_lane="ISOLATED_TARGET")
+    request.pop("verifier_commands")
+    response = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "nexus_self_hosted_submit_task", "arguments": request},
+        }
+    )
+    text = json.dumps(response)
+    assert "verifier_commands" in text and ("error" in response or '"isError": true' in text)
+    assert launched == []
+    assert service._read_state("t-nover") is None
+
+
+def test_legacy_mcp_approve_promotion_requires_grant(tmp_path):
+    from nexus.orchestrator.self_hosted_mcp import NexusSelfHostedMCPServer
+
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    packet = {
+        "candidate_commit_sha": "c" * 40,
+        "candidate_tree_sha": "d" * 40,
+        "candidate_state_hash": "e" * 64,
+        "verified_receipt_hash": _VERIFIED_RECEIPT_HASH,
+    }
+    service._write_state(
+        "mcp-approve",
+        {
+            "task_id": "mcp-approve",
+            "status": "CANDIDATE_COMMITTED",
+            "promotion_status": "PENDING_HUMAN_APPROVAL",
+            "promotion_packet": dict(packet),
+            "verified_receipt": dict(_VERIFIED_RECEIPT),
+            "merge_performed": False,
+            "push_performed": False,
+        },
+    )
+    response = NexusSelfHostedMCPServer(service=service).handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "nexus_self_hosted_approve_promotion",
+                "arguments": {"task_id": "mcp-approve", **packet},
+            },
+        }
+    )
+    assert "APPROVAL_GRANT_REQUIRED" in json.dumps(response)
+    assert service._read_state("mcp-approve")["promotion_status"] == "PENDING_HUMAN_APPROVAL"

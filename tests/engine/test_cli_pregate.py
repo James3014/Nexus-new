@@ -96,3 +96,12 @@ def test_pregate_cannot_reach_shell_via_forwarder(tmp_path, command):
     all_passed, _ = run_cli_pregate(tmp_path, [command], timeout_per_cmd=10)
     assert all_passed is False
     assert not (tmp_path / "PWNED").exists()
+
+
+def test_pregate_env_is_allowlisted_for_all_github_credential_keys(tmp_path, monkeypatch):
+    for key in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_PAT"):
+        monkeypatch.setenv(key, "gh" + "p_must_not_leak")
+    code = "import os;print(sorted(k for k in os.environ if k.endswith('_TOKEN') or k == 'GITHUB_PAT'))"
+    ok, results = run_cli_pregate(tmp_path, [f'python3 -c "{code}"'])
+    assert ok is True
+    assert results[0]["stdout_tail"].strip() == "[]"

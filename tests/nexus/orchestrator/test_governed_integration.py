@@ -557,3 +557,16 @@ def test_controlled_integration_requires_authority_at_sink(tmp_path, tamper, mes
         )
 
     assert _git(repo, "rev-parse", "nexus/integration") == base
+
+
+def test_competition_integration_requires_admitted_verifier(tmp_path):
+    repo, base, state = _authorized_candidate_repo(tmp_path)
+    state["contract"]["verifier_commands"] = []
+    state["integration_verifier_manifest"] = []
+
+    with pytest.raises(RuntimeError, match="at least one admitted verifier"):
+        ControlledIntegrationManager(integration_root=tmp_path / "integrations").integrate_task_state(
+            state
+        )
+
+    assert _git(repo, "rev-parse", "nexus/integration") == base
