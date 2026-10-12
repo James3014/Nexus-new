@@ -1,16 +1,26 @@
 """Simulated evaluations must say so, and never ship baked-in credentials (#1733 batch 3)."""
 
 import asyncio
-import csv
 import importlib.util
 import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from click.testing import CliRunner
 
-from nexus.app.research_benchmark_service import ResearchBenchmarkService
-from nexus.services.benchmark_service import BenchmarkService
+from nexus.app.research_benchmark_service import (
+    ARCHIVED_REASON as ResearchArchivedReason,
+)
+from nexus.app.research_benchmark_service import (
+    ArchivedResearchBenchmarkError,
+    ResearchBenchmarkService,
+)
+from nexus.services.benchmark_service import (
+    ARCHIVED_REASON,
+    ArchivedBenchmarkError,
+    BenchmarkService,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 UI_VALIDATOR = REPO_ROOT / "scripts" / "ui-validator.py"
@@ -56,47 +66,61 @@ def test_ui_validator_types_operator_supplied_credentials(monkeypatch):
 
 
 def test_benchmark_service_tags_simulation_and_makes_no_quality_claims(tmp_path):
+    # Historical node id: the simulated benchmark was archived 2026-10-12 and now fails closed.
     service = BenchmarkService(project_root=str(tmp_path))
     out_csv = tmp_path / "bench.csv"
-    stats = service.run(
-        dataset="missing",
-        repeat=1,
-        dual_core_physical=True,
-        ablation=False,
-        tasks_count=3,
-        output_csv=str(out_csv),
-    )
-    assert stats["simulated"] is True
-    report = service.report_path.read_text(encoding="utf-8")
-    assert "SIMULATED" in report
-    assert "零幻覺" not in report
-    rows = list(csv.DictReader(out_csv.open(encoding="utf-8")))
-    assert rows and all(row["status"] == "SIMULATED" for row in rows)
+    with pytest.raises(ArchivedBenchmarkError) as excinfo:
+        service.run(
+            dataset="missing",
+            repeat=1,
+            dual_core_physical=True,
+            ablation=False,
+            tasks_count=3,
+            output_csv=str(out_csv),
+        )
+    assert excinfo.value.reason == "archived_fake_benchmark_2026-10-12"
+    assert not out_csv.exists()
+    assert not (tmp_path / "dual_core_benchmark.md").exists()
+    assert not (tmp_path / ".nexus").exists()
 
 
 def test_benchmark_service_report_handles_zero_tasks(tmp_path):
+    # Historical node id: zero tasks also fails closed and writes nothing.
     service = BenchmarkService(project_root=str(tmp_path))
-    stats = service.run(
-        dataset="missing", repeat=1, dual_core_physical=False, ablation=False, tasks_count=0
-    )
-    assert stats["total_tasks"] == 0
-    assert "SIMULATED" in service.report_path.read_text(encoding="utf-8")
+    with pytest.raises(ArchivedBenchmarkError):
+        service.run(
+            dataset="missing", repeat=1, dual_core_physical=False, ablation=False, tasks_count=0
+        )
+    assert not (tmp_path / "dual_core_benchmark.md").exists()
+
+
+def test_benchmark_service_module_has_no_random_source():
+    import nexus.services.benchmark_service as module
+
+    source = Path(module.__file__).read_text(encoding="utf-8")
+    assert "import random" not in source
+
+
+def test_archived_reason_matches_capability_registry_whitelist():
+    from nexus.services.capability_registry import ARCHIVED_FAKE_BENCHMARK, SKIP_REASONS
+
+    assert ARCHIVED_REASON == ARCHIVED_FAKE_BENCHMARK == ResearchArchivedReason
+    assert ARCHIVED_REASON in SKIP_REASONS
 
 
 def test_research_benchmark_reports_are_tagged_simulated(tmp_path):
+    # Historical node id: both research benchmark modes were archived 2026-10-12 and fail
+    # closed instead of writing a "simulated" report.
     manifest = tmp_path / "manifest.json"
     manifest.write_text(json.dumps({"cases": [{"id": "c1"}]}), encoding="utf-8")
     service = ResearchBenchmarkService(tmp_path)
 
-    gladiator = tmp_path / "gladiator.json"
-    service.run_benchmark("gladiator", str(manifest), str(gladiator), 1.0, 5, 0, 1, False, False)
-    ab = tmp_path / "ab.json"
-    service.run_benchmark("ab", str(manifest), str(ab), 1.0, 5, 0, 1, False, False)
-
-    for path in (gladiator, ab):
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        assert payload["simulated"] is True
-        assert payload["evidence"] == "placeholder_not_executed"
+    for mode in ("gladiator", "ab"):
+        report = tmp_path / f"{mode}.json"
+        with pytest.raises(ArchivedResearchBenchmarkError) as excinfo:
+            service.run_benchmark(mode, str(manifest), str(report), 1.0, 5, 0, 1, False, False)
+        assert excinfo.value.reason == "archived_fake_benchmark_2026-10-12"
+        assert not report.exists()
 
 
 def _run_meta_opt(tmp_path, child_report):

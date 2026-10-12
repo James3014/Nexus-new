@@ -24,6 +24,24 @@ SKIP_CALLER_OMITTED = "caller_omitted_auto_skip"
 SKIP_POLICY_NOT_TRIGGERED = "SKIPPED_POLICY_NOT_TRIGGERED"
 BLOCKED_EXECUTOR_UNAVAILABLE = "BLOCKED_EXECUTOR_UNAVAILABLE"
 
+# Capabilities archived 2026-10-12 (ARCHIVED_2026-10-12.md): fail closed with an
+# explicit receipt reason instead of returning synthetic or hollow results.
+ARCHIVED_FAKE_BENCHMARK = "archived_fake_benchmark_2026-10-12"
+ARCHIVED_HOLLOW_STRESS_TEST = "archived_hollow_stress_test_2026-10-12"
+ARCHIVED_UI_VALIDATOR = "archived_ui_validator_2026-10-12"
+ARCHIVED_HOLLOW_LEARNING_CLOSURE = "archived_hollow_learning_closure_2026-10-12"
+ARCHIVED_FEDERATION = "archived_federation_2026-10-12"
+ARCHIVED_ORACLE_SHADOW = "archived_oracle_shadow_2026-10-12"
+
+ARCHIVED_CAPABILITY_REASONS: dict[str, str] = {
+    "benchmark": ARCHIVED_FAKE_BENCHMARK,
+    "stress_test": ARCHIVED_HOLLOW_STRESS_TEST,
+    "ui_validator": ARCHIVED_UI_VALIDATOR,
+    "learning_closure": ARCHIVED_HOLLOW_LEARNING_CLOSURE,
+    "federation": ARCHIVED_FEDERATION,
+    "oracle_shadow": ARCHIVED_ORACLE_SHADOW,
+}
+
 SKIP_REASONS = frozenset(
     {
         SKIP_NOT_IMPLEMENTED,
@@ -34,6 +52,7 @@ SKIP_REASONS = frozenset(
         SKIP_CALLER_OMITTED,
         SKIP_POLICY_NOT_TRIGGERED,
         BLOCKED_EXECUTOR_UNAVAILABLE,
+        *ARCHIVED_CAPABILITY_REASONS.values(),
     }
 )
 
@@ -2568,6 +2587,12 @@ def build_default_mainchain_invokers(
         if name in LOCAL_STAGE_CAPABILITIES:
             # Production LocalModelExecutor path (not explicit_skip theater).
             invokers[name] = build_local_model_executor_invoker()
+            continue
+        if name in ARCHIVED_CAPABILITY_REASONS:
+            # Archived 2026-10-12: always an explicit, receipt-visible skip.
+            invokers[name] = build_explicit_skip_invoker(
+                name, skip_reason=ARCHIVED_CAPABILITY_REASONS[name]
+            )
             continue
         real = build_real_executor_invoker(name)
         # Escalation-only / probe-only reclass: untriggered → policy skip; triggered → real or BLOCKED.

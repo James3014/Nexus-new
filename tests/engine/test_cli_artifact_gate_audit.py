@@ -46,12 +46,8 @@ MUTATING_COMMANDS_REQUIRING_ARTIFACTS = {
     "research:run": ("report_file", "semantic_status", "write_text("),
     "research:benchmark": ("report_file", "ResearchBenchmarkService"),
     "research:meta-opt": ("report_file", "write_text("),
-    "fed-init": ("report_file", "write_text("),
-    "fed-run": ("report_file", "write_text("),
-    "meta-run": ("report_file", "write_text("),
     "run-bug": ("report_file",),
     "learn:benchmark": ("output", "write_learn_precision_benchmark_output"),
-    "oracle:apply": ("report_file", "write_text("),
 }
 
 ACTION_CONTRACT_SOURCES = {

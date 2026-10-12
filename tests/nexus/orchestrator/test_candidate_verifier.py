@@ -764,7 +764,7 @@ def test_empty_verifier_manifest_fails_closed(tmp_path):
         SelfHostedTaskContract(verifier_commands=[], **kwargs)
     with pytest.raises(ValueError, match="verifier_commands must be non-empty"):
         SelfHostedTaskContract(**kwargs)
-    contract = SelfHostedTaskContract(verifier_commands=["python -c pass"], **kwargs)
+    contract = SelfHostedTaskContract(verifier_commands=["python3 -c pass"], **kwargs)
     CandidateVerifier.validate_static_contract(contract, str(tmp_path))
     # Defensive sink check: an unvalidated empty manifest must not pass vacuously.
     empty = contract.model_copy(update={"verifier_commands": []})

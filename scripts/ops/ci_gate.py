@@ -311,10 +311,8 @@ def run_integrity_check():
     """🛡️ [CI-Gate] Physical Integrity Check (Life-Sign Scan)"""
     print("\n🚀 [CI-Gate] Running Physical Integrity Check...")
     required_sigs = {
-        "scripts/ops/evolution_engine_v08.py": ["class EvolutionEngineV08"],
-        "scripts/ops/federated_engine_v09.py": ["class FederatedEngineV09", "def fed_sync"],
         "scripts/ops/supervisor_engine.py": ["class SupervisorEngine", "def run_swarm_mission"],
-        "scripts/engine/nexus_cli.py": ["def fed_run", "def meta_run", "def delegate"]
+        "scripts/engine/nexus_cli.py": ["def delegate"]
     }
     
     for path, sigs in required_sigs.items():

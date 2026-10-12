@@ -9,12 +9,10 @@ from nexus.core.policy_loader import PolicyLoader
 from nexus.core.gate_evaluator import GateEvaluator
 from nexus.core.metrics_aggregator import MetricsAggregator
 from nexus.governance.hardened_validator import NexusHardenedValidator
-from nexus.learning.lewm_predictor import LeWMPredictor
 from nexus.services.lancedb_roots import VECTOR_DB, resolve_lancedb_root
 from nexus.services.memory import MemoryService
 from nexus.engine.hub import NexusHub
 from nexus.learning.skill_registry import SkillRegistry
-from nexus.engine.federation import FederationLayer
 from nexus.learning.vector_cache import VectorCache
 from nexus.learning.sota_searcher import SOTASearcher
 from nexus.core.neural_aggregator import NexusNeuralAggregator
@@ -128,7 +126,6 @@ def build_engine_components(config: Any, kwargs: Dict[str, Any]) -> Dict[str, An
         "reporter": kwargs.get("reporter", hub),
         "phase_executors": phase_executors,
         "phases": kwargs.get("phases", phase_executors),
-        "federation": FederationLayer(project_root),
         "vector_cache": VectorCache(resolve_lancedb_root(VECTOR_DB, project_root)),
         "neural_aggregator": NexusNeuralAggregator(),
         "hardened_validator": NexusHardenedValidator(),

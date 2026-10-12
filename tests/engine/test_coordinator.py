@@ -20,7 +20,6 @@ def _build_engine(config: EngineConfig, reporter: MagicMock | None = None):
         "ash_selector": stack.enter_context(patch("nexus.engine.coordinator.get_self_healing_selector")),
         "memory_cls": stack.enter_context(patch("nexus.engine.coordinator.MemoryService")),
         "hub_cls": stack.enter_context(patch("nexus.engine.hub.NexusHub")),
-        "federation_cls": stack.enter_context(patch("nexus.engine.coordinator.FederationLayer")),
         "vector_cache_cls": stack.enter_context(patch("nexus.engine.coordinator.VectorCache")),
         "sota_searcher_cls": stack.enter_context(patch("nexus.engine.coordinator.SOTASearcher")),
         "aggregator_cls": stack.enter_context(patch("nexus.engine.coordinator.NexusNeuralAggregator")),
