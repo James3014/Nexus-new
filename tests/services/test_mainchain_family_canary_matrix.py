@@ -1198,7 +1198,11 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
     SCRATCH.mkdir(parents=True, exist_ok=True)
     root = Path(__file__).resolve().parents[2]
     catalog = build_capability_catalog(repo_root=root)
-    promotable = _promotable_names()
+    # nexus-runtime #171 retired nodes stay parametrized (honest not-selected
+    # canary) but are never promotable.
+    promotable = [
+        name for name in _promotable_names() if _node_meta(name)["maturity"].lower() != "retired"
+    ]
     per_cap: list[dict[str, Any]] = []
     probe_only = 0
     fixture_count = 0
@@ -1455,7 +1459,7 @@ def test_generate_closure_receipt_required() -> None:
     assert RECEIPT_PATH.is_file()
     assert RECEIPT_TMP.is_file()
     assert receipt["planner_contract_count"] == 57
-    assert receipt["promotable_count"] == 53
+    assert receipt["promotable_count"] == 50
     assert receipt["promotable_missing_engine_count"] == 0
     assert receipt["probe_only_success_count"] == 0
     assert receipt["fixture_callable_count"] == 0
