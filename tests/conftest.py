@@ -451,3 +451,50 @@ try:
     import irys_sdk  # type: ignore # noqa: F401
 except Exception:
     _install_irys_stub()
+
+
+import pytest  # noqa: E402
+
+_PRE_M5_ADVISOR_POLICY_TESTS = frozenset({
+    "test_gateway_unified_hybrid_uses_real_local_assist_and_shared_planner",
+    "test_gb019_advisory_verifier_failure_keeps_public_delivery",
+    "test_gb019_fail_closed_override_blocks_public_online",
+    "test_gb019_public_guard_negative_controls",
+    "test_advisory_guard_cannot_block_delivery_yet",
+    "test_gb019_advisory_failure_does_not_block_delivery_or_claim",
+    "test_gb019_blocking_override_fails_closed",
+})
+
+
+@pytest.fixture(autouse=True)
+def _pre_m5_advisor_policy(request, monkeypatch, tmp_path):
+    """Serve GB019 advisory witnesses a policy where the 3B advisor is admitted.
+
+    The planner emits the non-mutating ``compact_diagnosis`` role, whose only
+    admitted worker was ``local_advisor_3b``. The live policy marks that worker
+    ``INSTALLED_NOT_CONNECTED`` (not present on M5 Ollama, 2026-10-12), so the
+    advisory-delivery behaviour these witnesses verify runs against a temporary
+    copy of the live policy with only that worker's state and reason reverted.
+    The live policy file is never modified.
+    """
+    if getattr(request.node, "originalname", None) not in _PRE_M5_ADVISOR_POLICY_TESTS:
+        return
+    import yaml
+    from nexus_runtime.planning.services import model_workforce_policy as mwp
+
+    live = REPO_ROOT / "nexus" / "config" / "model_workforce.yaml"
+    data = yaml.safe_load(live.read_text(encoding="utf-8"))
+    advisor = data["workers"]["local_advisor_3b"]
+    advisor["state"] = "LOCAL_CONDITIONAL"
+    advisor.pop("reason", None)
+    patched = tmp_path / "model_workforce_pre_m5_advisor.yaml"
+    patched.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    original_init = mwp.WorkforcePolicyLoader.__init__
+
+    def init(self, policy_path=None):
+        if policy_path is not None and Path(policy_path).resolve() == live.resolve():
+            policy_path = patched
+        original_init(self, policy_path)
+
+    monkeypatch.setattr(mwp.WorkforcePolicyLoader, "__init__", init)
