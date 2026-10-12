@@ -355,7 +355,7 @@ class TacticalDrone(DroneProtocol):
         self._log_trace("ERROR", reason)
         self.status = "FAIL"
         self._finish_mission()
-        return {"drone_id": self.drone_id, "outcome": "FAIL", "belief_final": self.belief_score, "traces": self.tracelog, "error": reason}
+        return {"drone_id": self.drone_id, "outcome": "FAIL", "belief_final": None, "traces": self.tracelog, "error": reason}
 
     def _log_trace(self, phase: str, message: str):
         self.tracelog.append({"timestamp": time.time(), "phase": phase, "message": message})
@@ -363,12 +363,21 @@ class TacticalDrone(DroneProtocol):
 
     def save_evolution_crystal(self, output_path: Path):
         semantic_status = "VERIFIED" if str(self.status).upper() == "SUCCESS" else "UNVERIFIED"
+        # A confident score is only meaningful when the run succeeded on real evidence
+        # (successful tool action + 1-bit gate verdict). Failed/unverified runs carry no score.
+        if semantic_status == "VERIFIED":
+            belief_score: Optional[float] = self.belief_score
+            belief_reason = "computed from tool-action outcomes and 1-bit gate verdict"
+        else:
+            belief_score = None
+            belief_reason = f"no verified evidence: run status {self.status}"
         payload = {
             "drone_id": self.drone_id,
             "status": self.status,
             "semantic_status": semantic_status,
             "runtime_classification": "verified_pass" if semantic_status == "VERIFIED" else "runtime_execution_failed",
-            "belief_score": self.belief_score,
+            "belief_score": belief_score,
+            "belief_score_reason": belief_reason,
             "synthetic": False,
             "task": self.task_intent,
             "started_at": self.started_at,

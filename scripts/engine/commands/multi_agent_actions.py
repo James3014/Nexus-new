@@ -162,15 +162,27 @@ def get_multi_agent_metrics(
     return dict(aggregator.compute_metrics())
 
 
+def _format_rate(value: Any) -> str:
+    if value is None:
+        return "N/A"
+    try:
+        return f"{float(value):.1%}"
+    except (TypeError, ValueError):
+        return "N/A"
+
+
 def render_multi_agent_metrics(metrics: Mapping[str, Any]) -> list[str]:
-    return [
+    lines = [
         "📊 Nexus Multi-Agent Metrics",
         f"Total Tasks: {metrics.get('total_tasks', 0)}",
-        f"Success Rate: {float(metrics.get('success_rate', 0) or 0):.1%}",
-        f"Conflict Rate: {float(metrics.get('conflict_rate', 0) or 0):.1%}",
-        f"Gate Failure Rate: {float(metrics.get('gate_failure_rate', 0) or 0):.1%}",
-        f"Avg Lead Time: {metrics.get('avg_lead_time_sec', 0)}s",
+        f"Success Rate: {_format_rate(metrics.get('success_rate'))}",
+        f"Conflict Rate: {_format_rate(metrics.get('conflict_rate'))}",
+        f"Gate Failure Rate: {_format_rate(metrics.get('gate_failure_rate'))}",
     ]
+    if "gate_failure_events" in metrics:
+        lines.append(f"Gate Failure Events: {metrics['gate_failure_events']}")
+    lines.append(f"Avg Lead Time: {metrics.get('avg_lead_time_sec', 0)}s")
+    return lines
 
 
 def get_multi_agent_task_status(

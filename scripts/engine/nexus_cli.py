@@ -763,12 +763,13 @@ else:
                 continue
             drone_id = data["drone_id"]
             status = data["status"]
+            raw_belief = data.get("belief_score")
             try:
-                belief = float(data.get("belief_score", 0.0))
+                belief_text = "N/A" if raw_belief is None else f"{float(raw_belief):.2f}"
             except (TypeError, ValueError):
-                belief = 0.0
+                belief_text = "N/A"
             color = "green" if status == "SUCCESS" else "red" if status in ["FAIL", "CRASH"] else "yellow"
-            click.secho(f"\n🐝 Drone: {drone_id} | Status: {status} | Belief: {belief:.2f}", fg=color, bold=True)
+            click.secho(f"\n🐝 Drone: {drone_id} | Status: {status} | Belief: {belief_text}", fg=color, bold=True)
 
             traces = data.get("tracelog", [])
             traces = traces[-3:] if isinstance(traces, list) else []  # Show last 3
