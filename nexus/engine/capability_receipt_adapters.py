@@ -225,16 +225,40 @@ def _gate_verifier_ok(payload: dict[str, Any]) -> bool:
     return False
 
 
-def _claim_gate_binding_reasons(payload: dict[str, Any]) -> list[str]:
-    """Reasons the claim-gate verifier-artifact/source-hash binding is unmet (#1757).
+_PASSING_VERIFIER_STATUSES = frozenset({"pass", "passed", "verified"})
 
-    Same conditions ClaimGateReceiptAdapter uses; empty list means bound.
+
+def _looks_like_source_hash(value: Any) -> bool:
+    """sha256:<64 hex>, bare 64-hex, or bare 40-hex (git object id)."""
+    if not isinstance(value, str):
+        return False
+    lower = value.strip().lower()
+    if lower.startswith("sha256:"):
+        lower = lower[7:]
+    return len(lower) in (40, 64) and all(c in "0123456789abcdef" for c in lower) and (
+        len(lower) == 64 or not value.strip().lower().startswith("sha256:")
+    )
+
+
+def _claim_gate_binding_reasons(payload: dict[str, Any]) -> list[str]:
+    """Reasons the verifier-artifact/source-hash binding is unmet (#1757).
+
+    Content-validated: a passing verifier_status or a sha256-shaped
+    verifier_artifact, plus a well-formed source_hash. This is only the
+    binding part of the claim gate; ClaimGateReceiptAdapter additionally
+    requires _gate_verifier_ok. Empty list means the binding is satisfied.
     """
     reasons: list[str] = []
-    if not payload.get("verifier_artifact") and not payload.get("verifier_status"):
-        reasons.append("missing_verifier_artifact")
+    artifact_ok = _looks_like_verifier_artifact(payload.get("verifier_artifact"))
+    status = payload.get("verifier_status")
+    status_text = str(status).strip().lower() if status is not None else ""
+    status_ok = status_text in _PASSING_VERIFIER_STATUSES
+    if not artifact_ok and not status_ok:
+        reasons.append("verifier_not_passed" if status_text else "missing_verifier_artifact")
     if not payload.get("source_hash"):
         reasons.append("missing_source_hash")
+    elif not _looks_like_source_hash(payload.get("source_hash")):
+        reasons.append("invalid_source_hash")
     return reasons
 
 

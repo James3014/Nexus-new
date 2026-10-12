@@ -93,6 +93,7 @@ def test_local_only_executed_route_never_contributes_without_bound_verifier() ->
 
 
 _BINDING = {"verifier_status": "pass", "source_hash": "sha256:" + "c" * 64}
+_ARTIFACT_BINDING = {"verifier_artifact": "sha256:" + "d" * 64, "source_hash": "e" * 40}
 
 
 def test_local_executor_receipt_object_is_rebuilt_not_passed_through() -> None:
@@ -234,3 +235,72 @@ def test_executor_fallthrough_original_condition_still_required() -> None:
         claim_verified=True, payload={"local_model_called": True, **_BINDING}
     )
     assert receipt.gate_passed is False
+
+
+def _sink_receipts(extra):
+    heal_hybrid = {"hybrid_route": _local_only_route()}
+    heal_flat = dict(_HEAL_FLAT)
+    exec_dict = {
+        "local_executor_receipt": {
+            "invoked": True,
+            "gate_passed": True,
+            "evidence_refs": ["ref:1"],
+            "telemetries": _TELEMETRY,
+        }
+    }
+    return [
+        RECEIPT_ADAPTERS["local_heal"].build(claim_verified=True, payload={**heal_hybrid, **extra}),
+        RECEIPT_ADAPTERS["local_heal"].build(claim_verified=True, payload={**heal_flat, **extra}),
+        RECEIPT_ADAPTERS["local_model_executor"].build(
+            claim_verified=True, payload={**exec_dict, **extra}
+        ),
+        RECEIPT_ADAPTERS["local_model_executor"].build(
+            claim_verified=True, payload={**_EXEC_FLAT, **extra}
+        ),
+    ]
+
+
+_GOOD_HASH = "sha256:" + "c" * 64
+
+
+def test_all_sinks_reject_malformed_binding() -> None:
+    bad = [
+        {"verifier_status": "fail", "source_hash": _GOOD_HASH},
+        {"verifier_status": "   ", "source_hash": _GOOD_HASH},
+        {"verifier_status": "pass", "source_hash": "   "},
+        {"verifier_status": "pass", "source_hash": "x"},
+        {"verifier_artifact": "x", "source_hash": _GOOD_HASH},
+        {"verifier_artifact": "x", "source_hash": "x"},
+        {"verifier_artifact": "   ", "source_hash": _GOOD_HASH},
+    ]
+    for extra in bad:
+        for receipt in _sink_receipts(extra):
+            assert receipt.gate_passed is False, (extra, receipt.name)
+            assert receipt.failure_reason, (extra, receipt.name)
+
+
+def test_all_sinks_accept_well_formed_binding() -> None:
+    for extra in (
+        _BINDING,
+        _ARTIFACT_BINDING,
+        {"verifier_status": " PASSED ", "source_hash": _GOOD_HASH},
+    ):
+        for receipt in _sink_receipts(extra):
+            assert receipt.gate_passed is True, (extra, receipt.name)
+            assert receipt.outcome_contributed is False
+
+
+def test_binding_reason_codes() -> None:
+    heal = RECEIPT_ADAPTERS["local_heal"]
+    r = heal.build(
+        claim_verified=True, payload={**_HEAL_FLAT, "verifier_status": "fail", "source_hash": "x"}
+    )
+    assert r.failure_reason == "verifier_not_passed;invalid_source_hash"
+
+
+def test_claim_gate_unchanged_by_binding_validation() -> None:
+    receipt = RECEIPT_ADAPTERS["claim_gate"].build(
+        claim_verified=True, payload={"claim_refs": ["x"], **_BINDING}
+    )
+    assert receipt.gate_passed is False
+    assert receipt.failure_reason == "unbound_verifier_proof"
