@@ -48,7 +48,9 @@ def test_stage_b():
         assert res.returncode == 0
         assert data["status"] == "VERIFIED"
         assert data["overall_trust"] == "HIGH"
-        assert data["replay"]["status"] == "PASS"
+        # Note-only artifacts replay nothing: honest UNVERIFIED, never a false PASS.
+        assert data["replay"]["status"] == "UNVERIFIED"
+        assert data["replay_verified"] is False
 
         print("✅ Stage B Validation PASS")
 

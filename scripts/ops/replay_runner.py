@@ -3,6 +3,11 @@ import json
 import sys
 from pathlib import Path
 
+# Reuse the allowlisted, shell-free replay implementation (single source of truth).
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
+from nexus.delivery.replay_runner import ReplayRunner  # noqa: E402
+
 def run_replay(evidence_path: str, allow_no_replay: bool = False):
     p = Path(evidence_path)
     if not p.exists():
@@ -13,7 +18,9 @@ def run_replay(evidence_path: str, allow_no_replay: bool = False):
     except Exception as e:
         return {"status": "FAIL", "reason": f"PARSE_ERROR: {e}"}
 
-    bundle = data.get("evidence_bundle", {})
+    bundle = data.get("evidence_bundle", {}) if isinstance(data, dict) else {}
+    if not isinstance(bundle, dict):
+        return {"status": "FAIL", "reason": "INVALID_EVIDENCE_BUNDLE"}
     test_artifacts = bundle.get("test_artifacts", [])
     
     if not test_artifacts:
@@ -22,9 +29,21 @@ def run_replay(evidence_path: str, allow_no_replay: bool = False):
         else:
             return {"status": "FAIL", "reason": "NO_TEST_ARTIFACTS_REJECTED"}
             
-    # In a real scenario, this would re-run the tests or verify their logs/hashes.
-    # For now, we strictly enforce existence.
-    return {"status": "PASS", "replay_count": len(test_artifacts)}
+    # Statuses: PASS only when at least one allowlisted command was really replayed and
+    # every replayed command matched; FAIL when a command was rejected/failed;
+    # UNVERIFIED when nothing replayable was present (notes only) -- never a false PASS.
+    report = ReplayRunner(REPO_ROOT).run_replay(bundle)
+    summary = {
+        "replay_count": report.get("replay_count", 0),
+        "rejected_count": report.get("rejected_count", 0),
+        "non_replayable_count": report.get("non_replayable_count", 0),
+        "replay_results": report.get("replay_results", []),
+    }
+    if not report.get("passed"):
+        return {"status": "FAIL", "reason": "REPLAY_" + str(report.get("status")), **summary}
+    if summary["replay_count"] == 0:
+        return {"status": "UNVERIFIED", "reason": "NO_REPLAYABLE_COMMANDS", **summary}
+    return {"status": "PASS", **summary}
 
 if __name__ == "__main__":
     import argparse
@@ -35,4 +54,8 @@ if __name__ == "__main__":
     
     result = run_replay(args.evidence, args.allow_no_replay)
     print(json.dumps(result))
-    sys.exit(0 if result["status"] in ["PASS", "PARTIAL"] else 1)
+    # UNVERIFIED (nothing replayed) only exits 0 when the caller explicitly allows no replay.
+    ok = result["status"] in ["PASS", "PARTIAL"] or (
+        result["status"] == "UNVERIFIED" and args.allow_no_replay
+    )
+    sys.exit(0 if ok else 1)

@@ -142,7 +142,7 @@
 | scripts/ops/trusted_deletion_anchor.py | tests/ops/test_trusted_deletion_anchor.py, tests/ops/test_trusted_deletion_anchor_pr960.py, tests/ops/test_trusted_deletion_anchor_tempdir_cleanup.py | active | high | trusted_deletion_anchor_verifier_contract |
 | tests/ops/test_trusted_deletion_anchor_tempdir_cleanup.py | tests/ops/test_trusted_deletion_anchor_tempdir_cleanup.py | active | high | test_contract |
 | nexus/config/governance_manifest.json | tests/governance/test_audit_gate_honesty.py, tests/test_iron_gate_governance.py | active | high | governance_seal_manifest |
-| nexus/delivery/replay_runner.py | tests/governance/test_audit_gate_honesty.py, tests/test_iron_gate_governance.py | active | high | replay_runner_no_shell |
+| nexus/delivery/replay_runner.py | tests/governance/test_audit_gate_honesty.py, tests/governance/test_replay_runner_allowlist.py, tests/test_iron_gate_governance.py | active | high | replay_runner_allowlist |
 | nexus/governance/learning_gate.py | tests/governance/test_audit_gate_honesty.py, tests/health | active | high | learning_gate_unverified_contract |
 | nexus/infrastructure/storage_implementations.py | tests/governance/test_audit_gate_honesty.py, tests/core/test_mempalace_belief_writer_path.py | active | medium | belief_store_read_status |
 | nexus/services/belief_constraint_producer.py | tests/core/test_mempalace_belief_writer_path.py | active | medium | belief_constraint_producer_contract |
@@ -163,6 +163,9 @@
 | nexus/learning/skill_fit_followup.py | tests/learning/test_skill_fit_ablation.py::test_skill_fit_row_index_groups_baselines_catalog_and_skill_rows_for_rca_and_cost, tests/learning/test_skill_fit_ablation.py::test_skill_fit_row_level_rca_recommends_targeted_replay_for_promising_governance_skill, tests/learning/test_skill_fit_ablation.py::test_skill_fit_cost_phase_contract_separates_cost_from_delivery_claims | active | high | skill_fit_row_index_contract |
 | tests/ops/test_ci_gate_report_trust_audit.py | tests/ops/test_ci_gate_report_trust_audit.py | active | medium | test_contract |
 | tests/governance/test_audit_gate_honesty.py | tests/governance/test_audit_gate_honesty.py | active | medium | test_contract |
+| tests/governance/test_replay_runner_allowlist.py | tests/governance/test_replay_runner_allowlist.py | active | medium | test_contract |
+| tests/ops/test_stage_b_replay.py | tests/ops/test_stage_b_replay.py | active | medium | test_contract |
+| tests/test_iron_gate_governance.py | tests/test_iron_gate_governance.py | active | medium | test_contract |
 | tests/ops/test_repository_secret_hygiene.py | tests/ops/test_repository_secret_hygiene.py, tests/ops/test_select_tests.py | active | high | repository_secret_hygiene_contract |
 | tests/ops/test_select_tests.py | tests/ops/test_select_tests.py | active | medium | test_contract |
 | tests/ops/test_nexus_enforced_briefing.py | tests/ops/test_nexus_enforced_briefing.py | active | high | enforced_agent_briefing_contract |
