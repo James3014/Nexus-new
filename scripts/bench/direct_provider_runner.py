@@ -43,7 +43,7 @@ class DirectProviderAttemptResult:
 
 
 def direct_provider_for_mode(mode: str) -> str:
-    if mode in {"codex", "gemini"}:
+    if mode in {"codex", "gemini", "agy"}:
         return mode
     raise ValueError(f"mode must be a direct provider mode, got {mode!r}")
 
@@ -52,6 +52,8 @@ def direct_provider_model_label(provider: str, env: Mapping[str, str] | None = N
     values = env if env is not None else os.environ
     if provider == "codex":
         return values.get("NEXUS_DIRECT_CODEX_MODEL") or values.get("NEXUS_CODEX_MODEL_NAME") or "Codex"
+    if provider == "agy":
+        return values.get("NEXUS_AGY_MODEL") or values.get("NEXUS_DIRECT_GEMINI_MODEL") or "agy"
     if provider == "gemini":
         return values.get("NEXUS_DIRECT_GEMINI_MODEL") or values.get("NEXUS_GEMINI_MODEL_NAME") or "Gemini"
     raise ValueError(f"unknown direct provider: {provider!r}")
@@ -152,7 +154,7 @@ def normalize_direct_provider_response(
     token_capture_status = "unknown"
 
     if isinstance(out, dict):
-        if str(out.get("error_category", "") or "") == "binary_missing":
+        if str(out.get("error_category", "") or "") in {"binary_missing", "agy_missing"}:
             model_calls = 0
         patch = str(out.get("patch") or "")
         gateway_error_category = str(out.get("error_category", "") or "")
