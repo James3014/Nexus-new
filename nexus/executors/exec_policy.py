@@ -10,7 +10,8 @@ command-executing and file-writing actions.
 from __future__ import annotations
 
 import os
-from typing import Iterable, Sequence
+import subprocess
+from typing import Iterable, Mapping, Sequence
 
 FORWARDER_NAMES = frozenset(
     """sh bash zsh dash ash ksh csh tcsh fish busybox toybox env xargs nohup setsid
@@ -31,6 +32,8 @@ _GIT_FORBIDDEN_ANYWHERE_PREFIXES = (
     "-O",
     "--open-files-in-pager",
     "--ext-diff",
+    "--textconv",
+    "--show-signature",
     "--upload-pack",
     "--receive-pack",
     "--exec",
@@ -151,3 +154,101 @@ def validate_exec(executable: str, argv: Iterable[str]) -> None:
         for token in args:
             if token in FIND_FORBIDDEN_ARGS:
                 raise ValueError(f"worker command cannot invoke find {token}")
+
+
+def is_git_executable(executable: str) -> bool:
+    """True when ``executable`` is recognised as git by name or real path."""
+    return "git" in program_names(executable)
+
+
+def git_target_directory(args: Sequence[str], cwd: str) -> str:
+    """Directory git will operate in: successive ``-C`` options applied to ``cwd``."""
+    target = cwd
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token == "-C" and index + 1 < len(args):
+            value, index = args[index + 1], index + 2
+        elif token.startswith("-C") and len(token) > 2:
+            value, index = token[2:], index + 1
+        elif token in _GIT_FLAG_GLOBALS:
+            index += 1
+            continue
+        else:
+            break
+        if value:
+            target = os.path.normpath(os.path.join(target, value))
+    return target
+
+
+# Keys that make an otherwise allowlisted git verb execute repository-defined
+# programs.  Git lowercases section and variable names; subsection names keep
+# their case, hence ``.+`` there.
+_GIT_EXECUTABLE_CONFIG_REGEX = (
+    r"^(core\.(fsmonitor|pager|hookspath)"
+    r"|diff\.external"
+    r"|diff\..+\.(command|textconv)"
+    r"|filter\..+\.(clean|smudge|process)"
+    r"|merge\..+\.driver"
+    r"|gpg\.program"
+    r"|gpg\..+\.program"
+    r"|log\.showsignature"
+    r"|include\.path"
+    r"|includeif\..+\.path)$"
+)
+_GIT_CONFIG_INSPECT_TIMEOUT_SECONDS = 5.0
+
+
+def assert_git_repo_config_safe(
+    target: str, env: Mapping[str, str], git_executable: str = "git"
+) -> None:
+    """Fail closed when ``target``'s git config defines executable drivers.
+
+    Global/system config are neutralised by the caller's ``env``; the
+    repository's own config (and anything it includes) is not.  Only key names
+    are ever reported, never values.
+    """
+    refusal = "worker git command refused: "
+    try:
+        completed = subprocess.run(
+            [
+                git_executable,
+                "-C",
+                target,
+                "config",
+                "--includes",
+                "-z",
+                "--get-regexp",
+                _GIT_EXECUTABLE_CONFIG_REGEX,
+            ],
+            env=dict(env),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=_GIT_CONFIG_INSPECT_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise ValueError(refusal + "repository config could not be inspected") from None
+    if completed.returncode == 1:
+        return
+    if completed.returncode == 0:
+        keys = set()
+        for record in completed.stdout.split(b"\0"):
+            if not record:
+                continue
+            key, _, value = record.partition(b"\n")
+            # Hooks disabled outright (core.hooksPath=/dev/null) is hardening,
+            # not an executable driver.
+            if key == b"core.hookspath" and value == os.devnull.encode():
+                continue
+            keys.add(key.decode("utf-8", "replace"))
+        if not keys:
+            return
+        keys = sorted(keys)
+        raise ValueError(
+            refusal + "repository config defines executable drivers: " + ", ".join(keys)
+        )
+    if completed.returncode == 128 and b"not a git repository" in completed.stderr.lower():
+        return
+    raise ValueError(refusal + "repository config could not be inspected")

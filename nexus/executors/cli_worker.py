@@ -16,7 +16,12 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Tuple
 
-from nexus.executors.exec_policy import validate_exec
+from nexus.executors.exec_policy import (
+    assert_git_repo_config_safe,
+    git_target_directory,
+    is_git_executable,
+    validate_exec,
+)
 from nexus.services.agy_account_pool import GITHUB_CREDENTIAL_KEYS
 
 _logger = logging.getLogger(__name__)
@@ -406,6 +411,19 @@ def run_cli_worker(
     isolated_home = tempfile.mkdtemp(prefix="nexus-cli-worker-home-")
     for key, value in _isolated_github_credential_environment(isolated_home, request.env).items():
         environment[key] = value
+
+    if is_git_executable(request.executable):
+        # Global/system config is neutralised above, but the target repository's
+        # own config and .gitattributes would still run repo-defined programs.
+        try:
+            assert_git_repo_config_safe(
+                git_target_directory(request.argv, request.cwd),
+                environment,
+                request.executable,
+            )
+        except ValueError:
+            shutil.rmtree(isolated_home, ignore_errors=True)
+            raise
 
     # ------------------------------------------------------------------
     # Passive trajectory telemetry seam (pre-Popen)

@@ -58,6 +58,9 @@ def test_dashed_git_builtin_rejected():
         ("send-pack", "o"),
         ("cherry-pick", "abc"),
         ("diff", "--ext-diff"),
+        ("diff", "--textconv"),
+        ("log", "--show-signature"),
+        ("show", "--textconv"),
         ("log", "-Ovim"),
         ("grep", "--open-files-in-pager=sh", "x"),
         ("status", "--upload-pack=x"),
@@ -149,3 +152,79 @@ def test_find_action_flags_rejected(flag):
 def test_plain_find_and_python_allowed():
     validate_exec("find", (".", "-name", "*.py"))
     validate_exec("python3", ("-c", "print(1)"))
+
+
+# --- repository-config inspection (#1752, #1753) ---------------------------
+
+import subprocess as _subprocess  # noqa: E402
+
+from nexus.executors.exec_policy import (  # noqa: E402
+    assert_git_repo_config_safe,
+    git_target_directory,
+)
+
+_ISOLATED = {
+    **{k: v for k, v in os.environ.items() if k in {"PATH", "HOME", "SYSTEMROOT"}},
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_CONFIG_NOSYSTEM": "1",
+}
+
+
+def _repo(path, *config):
+    path.mkdir(parents=True, exist_ok=True)
+    _subprocess.run(["git", "init", "-q", str(path)], check=True, env=_ISOLATED)
+    for key, value in config:
+        _subprocess.run(["git", "-C", str(path), "config", key, value], check=True, env=_ISOLATED)
+    return path
+
+
+def test_clean_repo_and_non_repo_are_safe(tmp_path):
+    assert_git_repo_config_safe(str(_repo(tmp_path / "r")), _ISOLATED)
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert_git_repo_config_safe(str(plain), _ISOLATED)
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "core.fsmonitor",
+        "core.pager",
+        "core.hooksPath",
+        "diff.external",
+        "diff.x.command",
+        "diff.x.textconv",
+        "filter.x.clean",
+        "filter.x.smudge",
+        "filter.x.process",
+        "merge.x.driver",
+        "gpg.program",
+        "gpg.x.program",
+        "log.showSignature",
+        "include.path",
+        "includeIf.gitdir:/x/.path",
+    ],
+)
+def test_executable_config_keys_refused_without_leaking_value(tmp_path, key):
+    repo = _repo(tmp_path / "r", (key, "SECRETVALUE-123"))
+    with pytest.raises(ValueError, match="executable drivers") as info:
+        assert_git_repo_config_safe(str(repo), _ISOLATED)
+    assert "SECRETVALUE-123" not in str(info.value)
+    assert key.split(".")[0].lower() in str(info.value).lower()
+
+
+def test_uninspectable_config_fails_closed(tmp_path):
+    with pytest.raises(ValueError, match="could not be inspected"):
+        assert_git_repo_config_safe(str(tmp_path), _ISOLATED, "/nonexistent/git")
+
+
+def test_git_target_directory_applies_c_cumulatively(tmp_path):
+    base = str(tmp_path)
+    assert git_target_directory(["status"], base) == base
+    assert git_target_directory(["-C", "a", "-Cb", "status"], base) == os.path.join(base, "a", "b")
+    assert git_target_directory(["-C", "a", "-C", "/abs", "status"], base) == "/abs"
+
+
+def test_hooks_path_devnull_is_hardening_not_a_driver(tmp_path):
+    repo = _repo(tmp_path / "r", ("core.hooksPath", os.devnull))
+    assert_git_repo_config_safe(str(repo), _ISOLATED)

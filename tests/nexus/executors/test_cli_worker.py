@@ -959,3 +959,92 @@ def test_run_tag_is_unique_per_run_and_in_child_env(tmp_path):
     code = "import os;print(os.environ.get('NEXUS_CLI_WORKER_RUN_TAG',''))"
     tags = {run_cli_worker(_python_request(tmp_path, code)).stdout.strip() for _ in range(2)}
     assert len(tags) == 2 and all(len(t) == 32 for t in tags)
+
+
+# --- target-repository config containment (#1752, #1753) --------------------
+
+_GIT_ISOLATED = {
+    **{k: v for k, v in os.environ.items() if k in {"PATH", "HOME", "SYSTEMROOT"}},
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_CONFIG_NOSYSTEM": "1",
+}
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(repo), *args], check=True, env=_GIT_ISOLATED, capture_output=True
+    )
+
+
+def _git_repo(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q", str(path)], check=True, env=_GIT_ISOLATED)
+    (path / "f.txt").write_text("x\n", encoding="utf-8")
+    return path
+
+
+def _run_git(cwd: Path, *argv: str):
+    git = shutil.which("git")
+    assert git
+    return run_cli_worker(
+        CliWorkerRequest(executable=git, argv=argv, cwd=str(cwd), timeout_seconds=20)
+    )
+
+
+def _marker_cmd(tmp_path: Path) -> tuple[str, Path]:
+    marker = tmp_path / "marker"
+    return f"touch {marker} ; cat", marker
+
+
+def test_git_diff_with_diff_command_driver_refused(tmp_path):
+    cmd, marker = _marker_cmd(tmp_path)
+    repo = _git_repo(tmp_path / "r")
+    _git(repo, "config", "diff.evil.command", cmd)
+    (repo / ".gitattributes").write_text("* diff=evil\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="executable drivers: diff.evil.command") as info:
+        _run_git(repo, "diff")
+    assert cmd not in str(info.value)
+    assert not marker.exists()
+
+
+def test_git_add_with_filter_clean_refused(tmp_path):
+    cmd, marker = _marker_cmd(tmp_path)
+    repo = _git_repo(tmp_path / "r")
+    _git(repo, "config", "filter.evil.clean", cmd)
+    (repo / ".gitattributes").write_text("f.txt filter=evil\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="filter.evil.clean"):
+        _run_git(repo, "add", "f.txt")
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("key", ["core.fsmonitor", "diff.evil.textconv", "include.path"])
+def test_git_other_executable_config_refused(tmp_path, key):
+    cmd, marker = _marker_cmd(tmp_path)
+    repo = _git_repo(tmp_path / "r")
+    _git(repo, "config", key, cmd)
+    with pytest.raises(ValueError, match="executable drivers"):
+        _run_git(repo, "status")
+    assert not marker.exists()
+
+
+def test_clean_repo_git_commands_complete(tmp_path):
+    repo = _git_repo(tmp_path / "r")
+    for argv in (("status",), ("diff", "--check"), ("add", "f.txt")):
+        assert _run_git(repo, *argv).status is CliWorkerStatus.COMPLETED
+
+
+def test_dash_c_target_is_the_inspected_repo(tmp_path):
+    cmd, marker = _marker_cmd(tmp_path)
+    clean = _git_repo(tmp_path / "clean")
+    poisoned = _git_repo(tmp_path / "poisoned")
+    _git(poisoned, "config", "core.fsmonitor", cmd)
+    with pytest.raises(ValueError, match="core.fsmonitor"):
+        _run_git(clean, "-C", str(poisoned), "status")
+    assert not marker.exists()
+    assert _run_git(poisoned, "-C", str(clean), "status").status is CliWorkerStatus.COMPLETED
+
+
+def test_git_outside_repo_proceeds(tmp_path):
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert _run_git(plain, "version").status is CliWorkerStatus.COMPLETED
