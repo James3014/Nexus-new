@@ -309,7 +309,8 @@ def test_a_broad_grant_does_not_cover_authority_documents_under_it(world):
     # Reproduces the #1817 review: docs/** used to cover docs/governance/.
     head = _head(world, {"docs/governance/current_operating_mode.yaml": "mode: open\n"})
     with pytest.raises(
-        LaneBindingError, match="ATTESTATION_PROTECTED_PATH:docs/governance/current_operating_mode.yaml"
+        LaneBindingError,
+        match="ATTESTATION_PROTECTED_PATH:docs/governance/current_operating_mode.yaml",
     ):
         _validate(world, head, _body(_envelope(world, _payload(allowed_paths=["docs/**"]))))
 
