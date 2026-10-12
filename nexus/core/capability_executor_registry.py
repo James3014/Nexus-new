@@ -921,9 +921,11 @@ def _exec_research(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityR
         # Real physical run path — not should_run probe alone.
         # ResearchPhaseHandler.run reads context["task"]; "task_statement" is kept
         # for callers that still key on the old name.
-        # URLs in the request are data, never fetch targets (the handler would route them to the
-        # UCC reach router), so they are removed before the task reaches the handler.
-        research_task = _strip_urls(str(task_desc or "")).strip()
+        # The task is an opaque payload.  The handler would scan it for URLs and route them to
+        # the UCC reach router, so URL extraction is removed from this executor entirely (no
+        # parsing of request text for endpoints); providers use their own configured endpoint.
+        inst._extract_urls = lambda text: []  # type: ignore[method-assign]
+        research_task = str(task_desc or "").strip()
         result = inst.run(
             state,
             {
@@ -4208,10 +4210,3 @@ def _memory_findings_hits(root: Path, query: str, *, limit: int) -> list[dict[st
         return FindingsMemoryLessonStore(project_root=root).query(query_text=head, limit=limit)
     except Exception:
         return []
-
-
-_URL_RE = re.compile(r"(?i)\b(?:https?|ftp|file)://\S+|\bwww\.\S+")
-
-
-def _strip_urls(text: str) -> str:
-    return _URL_RE.sub("[url removed]", text)

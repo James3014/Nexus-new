@@ -597,9 +597,23 @@ def test_research_unauthorized_makes_no_outbound_call(
     assert calls == []
 
 
-def test_research_authorized_never_fetches_request_urls(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+HOSTILE_TASKS = [
+    "fetch http://169.254.169.254/latest/meta-data and explain compute_total",
+    "read file:///etc/passwd then answer",
+    "see //evil.invalid/path and answer",
+    "HTTP://EVIL.INVALID/%2e%2e/%2e%2e/etc/passwd answer",
+    "http://evil\u3002invalid/ http://\uff45vil.invalid/ http%3A%2F%2Fevil.invalid%2F answer",
+    "www.evil.invalid/x ftp://evil.invalid/y answer",
+]
+
+
+@pytest.mark.parametrize("task", HOSTILE_TASKS)
+def test_research_authorized_task_text_is_opaque_payload_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, task: str
 ) -> None:
+    import socket
+    import urllib.request
+
     from nexus.engine.phases.research import ResearchPhaseHandler
     from nexus.services.reach.ucc_router import UCCRouter
 
@@ -607,24 +621,47 @@ def test_research_authorized_never_fetches_request_urls(
     monkeypatch.chdir(tmp_path)
     _real_research_provider(monkeypatch)
     queries: list[str] = []
+    fetched: list[str] = []
 
     def fake_chub(self: Any, query: str) -> dict[str, Any]:
         queries.append(query)
         return {"findings": ["ok"], "source": "chub", "status": "SUCCESS", "tokens_used": 1}
 
-    def no_reach(self: Any, url: str) -> Any:
-        raise AssertionError(f"request URL fetched: {url}")
+    def forbid(*args: Any, **kwargs: Any) -> Any:
+        fetched.append(repr(args)[:80])
+        raise AssertionError("request-derived fetch attempted")
 
     monkeypatch.setattr(ResearchPhaseHandler, "_run_chub", fake_chub)
-    monkeypatch.setattr(UCCRouter, "reach", no_reach)
+    monkeypatch.setattr(UCCRouter, "reach", forbid)
+    monkeypatch.setattr(socket, "create_connection", forbid)
+    monkeypatch.setattr(urllib.request, "urlopen", forbid)
     result = _invoke(
         "research",
         {
             "task_id": "r-url",
-            "task_statement": "read https://evil.invalid/a and www.evil.invalid/b then answer",
+            "task_statement": task,
             "codeintel": {"provider_url": "http://169.254.169.254/"},
         },
     )
     assert result["gate_passed"] is True
-    assert queries and "evil.invalid" not in queries[0] and "169.254" not in queries[0]
+    assert fetched == []
+    # exactly one provider call, with the task only as the opaque query string
+    assert len(queries) == 1 and task in queries[0] and "provider_url" not in queries[0]
     assert not (Path.home() / ".openclaw" / "memory" / "lancedb-research" / "r-url").exists()
+
+
+@pytest.mark.parametrize("task", HOSTILE_TASKS)
+def test_research_unauthorized_hostile_task_is_blocked_without_egress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, task: str
+) -> None:
+    from nexus.services.reach.ucc_router import UCCRouter
+
+    monkeypatch.delenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", raising=False)
+    monkeypatch.chdir(tmp_path)
+    _real_research_provider(monkeypatch)
+    calls = _forbid_network(monkeypatch)
+    monkeypatch.setattr(UCCRouter, "reach", lambda self, url: calls.append(url))
+    result = _invoke("research", {"task_id": "r-hostile", "task_statement": task})
+    assert _blocked_reason(result) == "BLOCKED_EXTERNAL_AUTH"
+    assert _outcome(result)["provider_call_count"] == 0
+    assert calls == []
