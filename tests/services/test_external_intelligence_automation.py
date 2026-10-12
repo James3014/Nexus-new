@@ -2348,3 +2348,97 @@ def test_opencli_chatgpt_canary_transport_incompatible_substitution_blocks_befor
     assert c.transport.attempted_workers[0]["worker_id"] == "opencli_chatgpt_balanced_web"
     assert c.transport.attempted_workers[0]["provider"] == "opencli_chatgpt"
     assert c.transport.attempted_workers[0]["model"] == "opencli_chatgpt/balanced"
+
+
+def _setup_no_campaign_integration_repo(tmp_path: Path):
+    """Task card with no Campaign line whose text mentions "integration"."""
+    repo, card, _, _, store = _setup(tmp_path)
+    card.write_text(
+        card.read_text(encoding="utf-8")
+        + "\n## Notes\n- Wire the integration helper into the candidate.\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "."], cwd=repo, capture_output=True, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "add integration note"],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+    )
+    main_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", main_sha],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+    )
+    contract = _contract("tasks/x.md", _sha(card), main_sha=main_sha)
+    return repo, _body(contract), store
+
+
+class _OpenSWEShapedChatGPTWebTransport:
+    """Mirrors OpenSWEWorkerTransport.bind_worker for provider opencli_chatgpt / model balanced."""
+
+    provider_id = "opencli_chatgpt"
+    model_id = "balanced"
+
+    def __init__(self):
+        self.bound_workers = []
+
+    def bind_worker(self, selected_worker: dict) -> None:
+        model = str(selected_worker.get("model") or "").strip()
+        provider = str(selected_worker.get("provider") or "").strip()
+        selected_model = model.split("/", 1)[1] if "/" in model else model
+        selected_provider = model.split("/", 1)[0] if "/" in model else provider
+        if selected_provider != self.provider_id or selected_model != self.model_id:
+            raise RuntimeError("MODEL_SUBSTITUTION_FORBIDDEN")
+        self.bound_workers.append(dict(selected_worker))
+
+
+class _ChatGPTWebC(FakeC):
+    def __init__(self):
+        super().__init__()
+        self.transport = _OpenSWEShapedChatGPTWebTransport()
+
+
+def test_external_intelligence_consumer_binds_chatgpt_web_without_campaign(tmp_path: Path) -> None:
+    repo, body, store = _setup_no_campaign_integration_repo(tmp_path)
+    sidecar = FakeSidecar(store)
+    c = _ChatGPTWebC()
+    automation = ExternalIntelligenceAutomation(
+        repository_root=repo,
+        state_store=AutomationStateStore(tmp_path / "state"),
+        intelligence_store=store,
+        sidecar=sidecar,
+        c_runtime=c,
+        d_runtime=FakeD(),
+        workforce_consumer="external_intelligence",
+    )
+    result = automation.run_issue("o/r", 901, "eia consumer issue", body)
+
+    assert result["state"] == "COMPLETE"
+    assert result["worker_binding"]["worker_id"] == "opencli_chatgpt_balanced_web"
+    assert result["worker_binding"]["provider"] == "opencli_chatgpt"
+    assert result["worker_binding"]["model"] == "opencli_chatgpt/balanced"
+    assert [w["worker_id"] for w in c.transport.bound_workers] == ["opencli_chatgpt_balanced_web"]
+
+
+def test_default_consumer_without_campaign_is_rejected_by_chatgpt_web_transport(
+    tmp_path: Path,
+) -> None:
+    repo, body, store = _setup_no_campaign_integration_repo(tmp_path)
+    sidecar = FakeSidecar(store)
+    c = _ChatGPTWebC()
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c)
+    assert automation.workforce_consumer == ""
+    result = automation.run_issue("o/r", 902, "eia global route issue", body)
+
+    assert result["state"] == "BLOCKED"
+    assert result["semantic_dispatched"] is False
+    assert sidecar.calls == []
+    assert c.calls == []
+    assert "CANONICAL_WORKER_TRANSPORT_BINDING_INVALID:MODEL_SUBSTITUTION_FORBIDDEN" in str(
+        result.get("error", "")
+    )
