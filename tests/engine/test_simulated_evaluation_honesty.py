@@ -11,6 +11,8 @@ from click.testing import CliRunner
 
 from nexus.app.research_benchmark_service import (
     ARCHIVED_REASON as ResearchArchivedReason,
+)
+from nexus.app.research_benchmark_service import (
     ArchivedResearchBenchmarkError,
     ResearchBenchmarkService,
 )

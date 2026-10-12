@@ -11,9 +11,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from nexus.core.decorators import nexus_metabolize
 
-import warnings as _archived_warnings
-
-_archived_warnings.warn(
+__import__("warnings").warn(
     "ARCHIVED 2026-10-12 (#1850): always BLOCKED no_live_browser_session, CLI ui-validator removed; see ARCHIVED_2026-10-12.md. "
     "Scheduled for deletion; do not import.",
     DeprecationWarning,

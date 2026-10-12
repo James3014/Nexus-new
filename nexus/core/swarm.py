@@ -3,7 +3,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import os
 import logging
 import json
-import socket
 from nexus.services.reviewer import GatewayReviewLoop
 from nexus.security.tls_provider import TLSProvider
 from nexus.security.secure_sync import SecureRegistrySync

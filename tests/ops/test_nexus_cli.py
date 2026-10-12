@@ -1,10 +1,8 @@
 import json
 
-import pytest
 from click.testing import CliRunner
 
 import scripts.engine.nexus_cli as cli_module
-from nexus.core.exit_codes import NexusExitCode
 
 
 def test_workforce_status_is_compact_read_only_and_policy_bound() -> None:
