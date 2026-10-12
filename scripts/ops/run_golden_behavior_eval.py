@@ -37,9 +37,6 @@ SCENARIOS = {
 STATUSES = {"covered", "finding"}
 
 
-PROBES: dict[str, Callable[[], tuple[bool, str]]] = {}
-
-
 def _load_corpus(root: Path) -> None:
     """Load corpus data from the already validated source root."""
 
@@ -264,6 +261,431 @@ def execute_witnesses(nodeids: Iterable[str]) -> tuple[dict[str, dict[str, Any]]
     return evidence, completed.returncode
 
 
+# ---------------------------------------------------------------------------
+# Issue #117 finding probes.
+#
+# A probe is revision/identity-bound evidence for one unresolved finding.  It
+# never changes a case's ``status``; finding -> covered requires a separate,
+# justified corpus reconciliation.  ``--include-findings`` stays nonzero for
+# every selected finding even when its probe passes.
+# ---------------------------------------------------------------------------
+
+PROBE_CLASS_VALUES = frozenset({
+    "SOURCE_CONTRACT_PROBE",
+    "RUNTIME_IDENTITY_PROBE",
+    "CROSS_EXECUTION_EVIDENCE_PROBE",
+    "CONTINUITY_REPLAY_PROBE",
+    "CLAIM_DELIVERY_PROBE",
+    "HUMAN_ISSUE_EVIDENCE_ONLY",
+})
+
+# Loopback-only /health of the single Nexus MCP gateway
+# (scripts/ops/nexus_mcp_gateway_http.py DEFAULT_HOST/DEFAULT_PORT; the
+# LaunchAgent com.nexus.mcp.gateway.direct serves it).  Not overridable, so a
+# caller cannot substitute a different endpoint.
+GATEWAY_HEALTH_URL = "http://127.0.0.1:8766/health"
+GATEWAY_SERVER_NAME = "nexus-mcp-gateway"
+_GATEWAY_HEAD_FIELDS = ("git_head", "repo_head_at_start", "repo_head_current")
+_GATEWAY_IDENTITY_FIELDS = (
+    "repo_root",
+    "server_instance_id",
+    "tool_manifest_revision",
+    "permission_policy_hash",
+    "full_tool_schema_hash",
+)
+
+
+def _is_object_id(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 40
+        and all(char in "0123456789abcdef" for char in value)
+    )
+
+
+def _probe_detail(probe_class: str, reasons: list[str], observed: dict[str, Any]) -> str:
+    return json.dumps(
+        {
+            "probe_class": probe_class,
+            "result": "PASS" if not reasons else "FAIL",
+            "reasons": reasons,
+            "observed": observed,
+            "promotes_status": False,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _fetch_gateway_health(url: str = GATEWAY_HEALTH_URL, timeout: float = 2.0) -> Any:
+    """Read-only unauthenticated GET; never starts, stops or reloads anything."""
+    import urllib.request
+
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    request = urllib.request.Request(url, method="GET")
+    with opener.open(request, timeout=timeout) as response:
+        if response.status != 200:
+            raise OSError(f"gateway health HTTP {response.status}")
+        return json.loads(response.read(1024 * 1024).decode("utf-8"))
+
+
+def _evaluated_source_identity() -> tuple[str | None, bool | None]:
+    revision = _git("rev-parse", "HEAD")
+    status = _git("status", "--porcelain")
+    head = revision.stdout.strip() if revision.returncode == 0 else None
+    dirty = bool(status.stdout.strip()) if status.returncode == 0 else None
+    return head, dirty
+
+
+def probe_gb077_live_gateway_identity(
+    *,
+    fetch_health: Callable[[], Any] | None = None,
+    evaluated_identity: Callable[[], tuple[str | None, bool | None]] | None = None,
+) -> tuple[bool, str]:
+    """RUNTIME_IDENTITY_PROBE for GB-077 / GBF-002 (owner #12).
+
+    Compares the locally loaded gateway's start/current source identity with
+    the exact evaluated source revision.  CI cannot witness a live gateway, so
+    a PASS is host-local evidence only and never promotes the finding.
+    """
+    probe_class = "RUNTIME_IDENTITY_PROBE"
+    reasons: list[str] = []
+    observed: dict[str, Any] = {"endpoint": GATEWAY_HEALTH_URL}
+    evaluated, dirty = (evaluated_identity or _evaluated_source_identity)()
+    observed["evaluated_revision"] = evaluated
+    observed["evaluated_source_dirty"] = dirty
+    if not _is_object_id(evaluated):
+        reasons.append("evaluated_revision_unavailable")
+    if dirty is not False:
+        reasons.append("evaluated_source_not_clean")
+    try:
+        health = (fetch_health or _fetch_gateway_health)()
+    except Exception as exc:  # noqa: BLE001 - every transport failure fails closed
+        reasons.append(f"gateway_unreachable:{type(exc).__name__}")
+        return False, _probe_detail(probe_class, reasons, observed)
+    if not isinstance(health, dict):
+        reasons.append("gateway_health_not_object")
+        return False, _probe_detail(probe_class, reasons, observed)
+    for name in ("status", "server", "reload_required", *_GATEWAY_HEAD_FIELDS):
+        observed[name] = health.get(name)
+    observed["server_instance_id"] = health.get("server_instance_id")
+    observed["repo_root"] = health.get("repo_root")
+    if health.get("server") != GATEWAY_SERVER_NAME:
+        reasons.append("gateway_server_identity_mismatch")
+    if health.get("status") != "ok":
+        reasons.append("gateway_status_not_ok")
+    if health.get("reload_required") is not False:
+        reasons.append(
+            "gateway_reload_required_missing"
+            if "reload_required" not in health
+            else "gateway_reload_required_not_false"
+        )
+    for name in _GATEWAY_HEAD_FIELDS:
+        if name not in health:
+            reasons.append(f"gateway_field_missing:{name}")
+        elif not _is_object_id(health[name]):
+            reasons.append(f"gateway_field_malformed:{name}")
+    for name in _GATEWAY_IDENTITY_FIELDS:
+        value = health.get(name)
+        if name not in health:
+            reasons.append(f"gateway_field_missing:{name}")
+        elif not isinstance(value, str) or not value.strip():
+            reasons.append(f"gateway_field_malformed:{name}")
+    heads = {name: health.get(name) for name in _GATEWAY_HEAD_FIELDS}
+    if all(_is_object_id(value) for value in heads.values()):
+        if len(set(heads.values())) != 1:
+            reasons.append("gateway_loaded_source_drift")
+        if _is_object_id(evaluated) and heads["repo_head_at_start"] != evaluated:
+            reasons.append("gateway_loaded_revision_not_evaluated_revision")
+    return not reasons, _probe_detail(probe_class, reasons, observed)
+
+
+def _continuity_api() -> dict[str, Any]:
+    continuity = importlib.import_module("nexus.core.task_continuity")
+    contracts = importlib.import_module("nexus.events.contracts")
+    log_store = importlib.import_module("nexus.events.log_store")
+    return {
+        "ContinuityEvent": continuity.ContinuityEvent,
+        "events_from_attempt_records": continuity.events_from_attempt_records,
+        "project": continuity.project,
+        "resume": continuity.resume,
+        "build_attempt_transition_event": contracts.build_attempt_transition_event,
+        "JsonlEventLogStore": log_store.JsonlEventLogStore,
+    }
+
+
+def probe_gb079_continuity_replay(*, api: dict[str, Any] | None = None) -> tuple[bool, str]:
+    """CONTINUITY_REPLAY_PROBE for GB-079 (owner #31 after #7).
+
+    GB-079 was later reconciled to ``covered`` by exact pytest witnesses, so
+    this probe is registered but unbound; it remains an independent replay
+    check and never changes any case status.
+
+    Replays one task through the evaluated revision's canonical attempt-event
+    JSONL store -> record decoder -> projection -> resume path.  It requires a
+    deterministic positive replay (full replay == snapshot + tail with zero
+    protected-field loss) and that stale, tampered, substituted and cross-task
+    inputs are each rejected.  It does not exercise a live runtime or a
+    cross-agent model canary.
+    """
+    import copy
+
+    probe_class = "CONTINUITY_REPLAY_PROBE"
+    reasons: list[str] = []
+    observed: dict[str, Any] = {}
+    try:
+        api = api or _continuity_api()
+        event_cls = api["ContinuityEvent"]
+        decode, project, resume = (
+            api["events_from_attempt_records"],
+            api["project"],
+            api["resume"],
+        )
+        build = api["build_attempt_transition_event"]
+    except Exception as exc:  # noqa: BLE001
+        reasons.append(f"continuity_api_unavailable:{type(exc).__name__}")
+        return False, _probe_detail(probe_class, reasons, observed)
+
+    task, attempt, other_task = "gb079-task", "attempt-1", "gb079-foreign-task"
+    src, contract = "a" * 40, "contract-r1"
+    expected = {
+        "do_not_repeat": ("strategy-A",),
+        "evidence_refs": ("evidence-plan", "evidence-verifier-fail"),
+        "unresolved_risks": ("risk-flaky-oracle",),
+        "unknowns": ("unknown-upstream-version",),
+        "next_action": "finish with strategy-B",
+        "claim_ceiling": "bounded-continuity-evidence-only",
+    }
+
+    def transitions(task_id: str) -> list[Any]:
+        return [
+            build(
+                task_id=task_id,
+                attempt_id=attempt,
+                sequence=1,
+                state="PLANNED",
+                continuity_event_type="PLAN_FORMED",
+                next_action="try strategy-A",
+                claim_ceiling=expected["claim_ceiling"],
+                evidence_refs=("evidence-plan",),
+                source_revision=src,
+                contract_revision=contract,
+            ),
+            build(
+                task_id=task_id,
+                attempt_id=attempt,
+                sequence=2,
+                state="REJECTED",
+                continuity_event_type="ATTEMPT_REJECTED",
+                reason="verifier failed",
+                strategy_delta="switch strategy-A -> strategy-B",
+                do_not_repeat=expected["do_not_repeat"],
+                evidence_refs=("evidence-verifier-fail",),
+                unresolved_risks=expected["unresolved_risks"],
+                unknowns=expected["unknowns"],
+                next_action="try strategy-B",
+                source_revision=src,
+                contract_revision=contract,
+            ),
+            build(
+                task_id=task_id,
+                attempt_id=attempt,
+                sequence=3,
+                state="RUNNING",
+                continuity_event_type="OBSERVATION_RECORDED",
+                observation="strategy-B passes",
+                next_action=expected["next_action"],
+                source_revision=src,
+                contract_revision=contract,
+            ),
+        ]
+
+    def expect_rejected(name: str, needle: str, action: Callable[[], Any]) -> None:
+        try:
+            action()
+        except ValueError as exc:
+            if needle not in str(exc):
+                reasons.append(f"negative_rejected_for_wrong_reason:{name}:{exc}")
+            return
+        except Exception as exc:  # noqa: BLE001
+            reasons.append(f"negative_unexpected_error:{name}:{type(exc).__name__}")
+            return
+        reasons.append(f"negative_accepted:{name}")
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="nexus-gb079-") as tmpdir:
+            store = api["JsonlEventLogStore"]()
+            store.configure(Path(tmpdir))
+            mine, foreign = transitions(task), transitions(other_task)
+            for index in range(3):  # interleaved foreign attempt in the same log
+                for event in (mine[index], foreign[index]):
+                    store.append_record({
+                        "event_type": "attempt_transition",
+                        "payload": event.to_dict(),
+                    })
+            records = store.read_recent(event_type="attempt_transition", limit=10_000)
+
+            def select(task_id: str) -> list[dict[str, Any]]:
+                return [r for r in records if r["payload"]["task_id"] == task_id]
+
+            events = decode(select(task), task_id=task, attempt_id=attempt)
+            foreign_events = decode(select(other_task), task_id=other_task, attempt_id=attempt)
+            full = project(events)
+            observed["event_count"] = len(events)
+            observed["decoded_types"] = [event.event_type for event in events]
+            if project(decode(select(task), task_id=task, attempt_id=attempt)) != full:
+                reasons.append("positive_replay_not_deterministic")
+            snapshot = project(events[:2])
+            resumed = resume(
+                snapshot,
+                events[2:],
+                task_id=task,
+                attempt_id=attempt,
+                source_revision=src,
+                contract_revision=contract,
+                snapshot_hash=snapshot.snapshot_hash,
+            )
+            if resumed.snapshot != full:
+                reasons.append("positive_snapshot_plus_tail_differs_from_full_replay")
+            if observed["decoded_types"][1] != "ATTEMPT_REJECTED":
+                reasons.append("positive_rejected_attempt_collapsed")
+            protected = {
+                "do_not_repeat": tuple(resumed.do_not_repeat),
+                "evidence_refs": tuple(resumed.evidence_refs),
+                "unresolved_risks": tuple(resumed.unresolved_risks),
+                "unknowns": tuple(resumed.snapshot.unknowns),
+                "next_action": resumed.next_action,
+                "claim_ceiling": resumed.claim_ceiling,
+            }
+            lost = sorted(name for name, value in expected.items() if protected[name] != value)
+            observed["protected_field_loss"] = lost
+            reasons.extend(f"positive_protected_field_lost:{name}" for name in lost)
+            observed["snapshot_hash"] = snapshot.snapshot_hash
+
+            def resume_with(snap: Any, tail: list[Any], **overrides: Any) -> Any:
+                kwargs = {
+                    "task_id": task,
+                    "attempt_id": attempt,
+                    "source_revision": src,
+                    "contract_revision": contract,
+                    **overrides,
+                }
+                return resume(snap, tail, **kwargs)
+
+            expect_rejected(
+                "stale_snapshot_source",
+                "stale",
+                lambda: resume_with(snapshot, events[2:], source_revision="b" * 40),
+            )
+            expect_rejected(
+                "stale_snapshot_contract",
+                "stale",
+                lambda: resume_with(snapshot, events[2:], contract_revision="contract-r2"),
+            )
+            drift_tail = event_cls(
+                task_id=task,
+                attempt_id=attempt,
+                sequence=3,
+                event_type="OBSERVATION_RECORDED",
+                summary="RUNNING",
+                observation="x",
+                source_revision="b" * 40,
+                contract_revision=contract,
+                previous_hash=snapshot.event_root,
+            )
+            expect_rejected(
+                "stale_tail_revision", "drift", lambda: resume_with(snapshot, [drift_tail])
+            )
+            tampered_snapshot = copy.copy(snapshot)
+            object.__setattr__(tampered_snapshot, "rejected_strategies", ())
+            expect_rejected(
+                "tampered_snapshot_protected_field",
+                "tampered",
+                lambda: resume_with(tampered_snapshot, events[2:]),
+            )
+            tampered_event = copy.copy(events[1])
+            object.__setattr__(tampered_event, "do_not_repeat", ())
+            expect_rejected(
+                "tampered_event",
+                "tampered",
+                lambda: project([events[0], tampered_event, events[2]]),
+            )
+            tampered_record = copy.deepcopy(select(task))
+            tampered_record[1]["payload"]["do_not_repeat"] = []
+            expect_rejected(
+                "tampered_record",
+                "tampered",
+                lambda: decode(tampered_record, task_id=task, attempt_id=attempt),
+            )
+            reordered = select(task)
+            expect_rejected(
+                "reordered_records",
+                "parent",
+                lambda: decode([reordered[0], reordered[2]], task_id=task, attempt_id=attempt),
+            )
+            log_path = Path(tmpdir) / ".nexus" / "events" / "event_log.jsonl"
+            lines = log_path.read_text(encoding="utf-8").splitlines()
+            persisted = json.loads(lines[2])
+            persisted["payload"]["next_action"] = "forged"
+            lines[2] = json.dumps(persisted)
+            log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            expect_rejected(
+                "tampered_persisted_log",
+                "tampered",
+                lambda: store.read_recent(event_type="attempt_transition", limit=10_000),
+            )
+            foreign_snapshot = project(foreign_events[:2])
+            expect_rejected(
+                "substituted_snapshot_hash",
+                "hash mismatch",
+                lambda: resume_with(
+                    snapshot, events[2:], snapshot_hash=foreign_snapshot.snapshot_hash
+                ),
+            )
+            expect_rejected(
+                "substituted_foreign_snapshot",
+                "identity mismatch",
+                lambda: resume_with(foreign_snapshot, events[2:]),
+            )
+            foreign_tail = event_cls(
+                task_id=other_task,
+                attempt_id=attempt,
+                sequence=3,
+                event_type="OBSERVATION_RECORDED",
+                summary="RUNNING",
+                observation="x",
+                source_revision=src,
+                contract_revision=contract,
+                previous_hash=snapshot.event_root,
+            )
+            expect_rejected(
+                "cross_task_tail", "foreign", lambda: resume_with(snapshot, [foreign_tail])
+            )
+            expect_rejected(
+                "cross_task_records",
+                "foreign",
+                lambda: decode(select(other_task), task_id=task, attempt_id=attempt),
+            )
+            expect_rejected(
+                "non_extending_tail",
+                "does not extend",
+                lambda: resume_with(snapshot, events[1:]),
+            )
+    except Exception as exc:  # noqa: BLE001 - positive path must not error
+        reasons.append(f"positive_replay_error:{type(exc).__name__}:{exc}")
+    return not reasons, _probe_detail(probe_class, reasons, observed)
+
+
+PROBES: dict[str, Callable[[], tuple[bool, str]]] = {
+    "gb077_live_gateway_identity": probe_gb077_live_gateway_identity,
+    "gb079_continuity_replay": probe_gb079_continuity_replay,
+}
+PROBE_CLASSES: dict[str, str] = {
+    "gb077_live_gateway_identity": "RUNTIME_IDENTITY_PROBE",
+    "gb079_continuity_replay": "CONTINUITY_REPLAY_PROBE",
+}
+
+
 def validate_corpus() -> list[str]:
     errors: list[str] = []
     ids = [case.case_id for case in CASES]
@@ -295,6 +717,10 @@ def validate_corpus() -> list[str]:
                 errors.append(f"{case.case_id}:missing_finding")
         if case.finding_probe and case.finding_probe not in PROBES:
             errors.append(f"{case.case_id}:unknown_finding_probe")
+        if case.finding_probe and PROBE_CLASSES.get(case.finding_probe) not in PROBE_CLASS_VALUES:
+            errors.append(f"{case.case_id}:unclassified_finding_probe")
+        if case.finding_probe and case.status != "finding":
+            errors.append(f"{case.case_id}:finding_probe_on_non_finding")
         for nodeid in case.automated_tests:
             path = ROOT / nodeid.split("::", 1)[0]
             if not path.exists():
@@ -473,9 +899,16 @@ def main() -> int:
                 exit_code = 1
                 continue
             passed, detail = PROBES[case.finding_probe]()
-            probe_results[case.case_id] = {"passed": passed, "detail": detail}
-            if not passed:
-                exit_code = 1
+            probe_results[case.case_id] = {
+                "probe": case.finding_probe,
+                "probe_class": PROBE_CLASSES[case.finding_probe],
+                "passed": passed,
+                "detail": detail,
+                "finding_unresolved": True,
+            }
+            # A passing probe is evidence only; it never promotes the finding,
+            # so the run stays nonzero while any selected finding is unresolved.
+            exit_code = 1
         result["finding_probe_results"] = probe_results
 
     if pytest_exit_code is not None:

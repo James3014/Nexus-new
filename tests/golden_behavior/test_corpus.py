@@ -148,13 +148,46 @@ def test_corpus_extension_gb084_to_gb100_is_bound() -> None:
 
 def test_stale_owner_findings_are_refreshed_but_not_promoted() -> None:
     by_id = {case.case_id: case for case in CASES}
-    for case_id, finding_id, closed in (
-        ("GB-077", "GBF-002", "2026-08-17"),
-        ("GB-079", "GBF-004", "2026-08-16"),
+    case = by_id["GB-077"]
+    assert case.status == "finding"
+    assert case.finding_id == "GBF-002"
+    assert case.automated_tests == ()
+    # Stage 1 of 2: the trusted gate evaluates a PR's corpus with the base
+    # evaluator, which does not know this probe yet. GB-077 is bound to
+    # gb077_live_gateway_identity in the follow-up PR once the evaluator is on main.
+    assert case.finding_probe is None
+    finding = FINDINGS["GBF-002"]
+    for fragment in (
+        "2026-08-17",
+        "#117",
+        "gb077_live_gateway_identity",
+        "RUNTIME_IDENTITY_PROBE",
+        "Latest host observation 2026-10-13",
     ):
-        assert by_id[case_id].status == "finding"
-        assert by_id[case_id].finding_id == finding_id
-        assert closed in FINDINGS[finding_id]
-        assert "#117" in FINDINGS[finding_id]
-    assert "remains open" not in FINDINGS["GBF-002"]
-    assert "is blocked on #7" not in FINDINGS["GBF-004"]
+        assert fragment in finding
+    assert "remains open" not in finding
+
+
+def test_gb079_reconciled_to_covered_with_exact_negative_witnesses() -> None:
+    case = next(case for case in CASES if case.case_id == "GB-079")
+    assert case.status == "covered"
+    assert case.finding_id is None
+    assert case.finding_probe is None
+    assert "GBF-004" not in FINDINGS
+    assert "https://github.com/James3014/Nexus-new/issues/31" in case.authority_sources
+    prefix = "tests/core/test_task_continuity.py::"
+    required = {
+        "test_snapshot_tail_matches_projection",
+        "test_canonical_attempt_records_round_trip_protected_continuity_fields",
+        "test_resume_rejects_stale_snapshot_source_or_contract_revision[source_revision-src-stale]",
+        "test_resume_rejects_stale_snapshot_source_or_contract_revision[contract_revision-contract-stale]",
+        "test_resume_rejects_substituted_snapshot_hash_with_correct_identity",
+        "test_resume_rejects_cross_task_or_attempt_tail_event[cross_task]",
+        "test_resume_rejects_cross_task_or_attempt_tail_event[cross_attempt]",
+        "test_project_rejects_event_hash_tamper",
+        "test_forged_snapshot_is_rejected_without_optional_hash",
+        "test_resume_rejects_tail_revision_drift[source_revision]",
+        "test_resume_rejects_tail_revision_drift[contract_revision]",
+    }
+    assert {prefix + name for name in required} <= set(case.automated_tests)
+    assert len(case.automated_tests) == len(set(case.automated_tests)) == 20
