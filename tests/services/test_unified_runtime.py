@@ -119,13 +119,19 @@ def _admit_gateway_request(
     )
     if request.local_enabled:
         local_worker = (
-            "local_advisor_3b"
+            "local_qwen35_9b"
             if route.get("mutation_requested") is False
             else "local_coder_7b"
         )
         local_controls = (
-            ["fixed_schema", "compact_context", "deterministic_consumer"]
-            if local_worker == "local_advisor_3b"
+            [
+                "bounded_context",
+                "parser",
+                "external_verifier",
+                "counterexample_suite",
+                "role_specific_suite",
+            ]
+            if local_worker == "local_qwen35_9b"
             else [
                 "small_scope",
                 "parser",
@@ -780,7 +786,7 @@ def test_gateway_unified_hybrid_uses_real_local_assist_and_shared_planner(monkey
         provider=InjectedLocalModelProvider(
             lambda _request: "local diagnosis: inspect candidate",
             provider_identity="ollama",
-            model_identity="qwen2.5-s2t-advisor:3b",
+            model_identity="qwen3.5:9b",
         )
     )
     task_id = "hybrid-runtime-test-001"
@@ -868,7 +874,7 @@ def test_gb019_advisory_verifier_failure_keeps_public_delivery(monkeypatch, tmp_
                 provider=InjectedLocalModelProvider(
                     self._generate,
                     provider_identity="ollama",
-                    model_identity="qwen2.5-s2t-advisor:3b",
+                    model_identity="qwen3.5:9b",
                 )
             )
 
@@ -971,7 +977,7 @@ def test_gb019_fail_closed_override_blocks_public_online(monkeypatch, tmp_path: 
                 provider=InjectedLocalModelProvider(
                     self._generate,
                     provider_identity="ollama",
-                    model_identity="qwen2.5-s2t-advisor:3b",
+                    model_identity="qwen3.5:9b",
                 )
             )
 
@@ -1082,7 +1088,7 @@ def test_gb019_public_guard_negative_controls(monkeypatch, tmp_path: Path, tampe
     class Service:
         def __init__(self) -> None:
             self.calls = 0
-            self.inner = LocalAssistService(provider=InjectedLocalModelProvider(self.generate, provider_identity="ollama", model_identity="qwen2.5-s2t-advisor:3b"))
+            self.inner = LocalAssistService(provider=InjectedLocalModelProvider(self.generate, provider_identity="ollama", model_identity="qwen3.5:9b"))
 
         def generate(self, _request) -> str:
             self.calls += 1
@@ -4973,48 +4979,3 @@ def test_process_evidence_oserror_records_not_invoked(tmp_path):
     assert evidence["process_started"] is False
     assert evidence["returncode"] is None
     assert res["error"] == "provider_not_invoked"
-
-
-_PRE_M5_ADVISOR_POLICY_TESTS = frozenset({
-    "test_gateway_unified_hybrid_uses_real_local_assist_and_shared_planner",
-    "test_gb019_advisory_verifier_failure_keeps_public_delivery",
-    "test_gb019_fail_closed_override_blocks_public_online",
-    "test_gb019_public_guard_negative_controls",
-})
-
-
-def apply_pre_m5_advisor_policy(monkeypatch, tmp_path: Path) -> None:
-    """Serve GB019 advisory witnesses a policy where the 3B advisor is admitted.
-
-    The planner emits the non-mutating ``compact_diagnosis`` role, whose only
-    admitted worker was ``local_advisor_3b``. The live policy marks that worker
-    ``INSTALLED_NOT_CONNECTED`` (not present on M5 Ollama, 2026-10-12), so the
-    advisory-delivery behaviour these witnesses verify runs against a temporary
-    copy of the live policy with only that worker's state and reason reverted.
-    The live policy file is never modified.
-    """
-    import yaml
-    from nexus_runtime.planning.services import model_workforce_policy as mwp
-
-    live = ROOT / "nexus" / "config" / "model_workforce.yaml"
-    data = yaml.safe_load(live.read_text(encoding="utf-8"))
-    advisor = data["workers"]["local_advisor_3b"]
-    advisor["state"] = "LOCAL_CONDITIONAL"
-    advisor.pop("reason", None)
-    patched = tmp_path / "model_workforce_pre_m5_advisor.yaml"
-    patched.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
-
-    original_init = mwp.WorkforcePolicyLoader.__init__
-
-    def init(self, policy_path=None):
-        if policy_path is not None and Path(policy_path).resolve() == live.resolve():
-            policy_path = patched
-        original_init(self, policy_path)
-
-    monkeypatch.setattr(mwp.WorkforcePolicyLoader, "__init__", init)
-
-
-@pytest.fixture(autouse=True)
-def _pre_m5_advisor_policy(request, monkeypatch, tmp_path: Path) -> None:
-    if request.node.originalname in _PRE_M5_ADVISOR_POLICY_TESTS:
-        apply_pre_m5_advisor_policy(monkeypatch, tmp_path)
