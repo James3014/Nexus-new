@@ -1723,6 +1723,143 @@ def test_plan_explicit_deny_replaces_stale_allow_policy_and_restores_exact_bytes
     assert coordinator.claim.released is True
 
 
+def test_plan_no_tool_packet_replaces_stale_command_wildcard_and_restores_exact_bytes(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+    settings = home / ".gemini" / "antigravity-cli" / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    original = (
+        '{\n  "profile": "keep-me",\n  "permissions": {\n'
+        '    "allow": ["read_file(/stale/i1339/**)", "write_file(/s/f.py)", "command(*)"],\n'
+        '    "deny": ["command(git push)", "command(curl)"]\n  }\n}\n'
+    ).encode("utf-8")
+    settings.write_bytes(original)
+    events: list[dict[str, object]] = []
+
+    def runner(**_kwargs):
+        data = json.loads(settings.read_text(encoding="utf-8"))
+        permissions = data["permissions"]
+        assert data["profile"] == "keep-me"
+        assert permissions["allow"] == []
+        assert permissions["deny"] == dispatch.NO_TOOL_DENY
+        return 0, "answer without tools", "", False, 1
+
+    code = dispatch.dispatch_run(
+        prompt="no-tools packet",
+        cwd=str(work),
+        mode="plan",
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+
+    assert code == 0
+    assert settings.read_bytes() == original
+    assert coordinator.claim.released is True
+    profile = [e for e in events if e.get("permission_profile_kind") == "NO_TOOL_PACKET"]
+    assert profile and profile[0]["effective_permissions"] == {
+        "allow": [],
+        "deny": sorted(dispatch.NO_TOOL_DENY),
+    }
+    assert not any(event.get("failure_kind") for event in events)
+
+
+def test_plan_no_tool_packet_without_persisted_settings_removes_temp_file(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+    settings = home / ".gemini" / "antigravity-cli" / "settings.json"
+
+    def runner(**_kwargs):
+        data = json.loads(settings.read_text(encoding="utf-8"))
+        assert data["permissions"] == {"allow": [], "deny": dispatch.NO_TOOL_DENY}
+        return 0, "ok", "", False, 1
+
+    code = dispatch.dispatch_run(
+        prompt="no-tools packet",
+        cwd=str(tmp_path),
+        mode="plan",
+        coordinator=coordinator,
+        run_agy_fn=runner,
+    )
+
+    assert code == 0
+    assert settings.exists() is False
+    assert coordinator.claim.released is True
+
+
+def test_plan_no_tool_packet_with_tool_events_is_quarantined_not_completed(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+    settings = home / ".gemini" / "antigravity-cli" / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    original = b'{"permissions": {"allow": ["command(*)"], "deny": []}}\n'
+    settings.write_bytes(original)
+    events: list[dict[str, object]] = []
+    calls = 0
+
+    def runner(*, operation_hook, **_kwargs):
+        nonlocal calls
+        calls += 1
+        operation_hook(tool_event_count=105)
+        return 0, "answer copied from host file", "", False, 1
+
+    code = dispatch.dispatch_run(
+        prompt="no-tools packet",
+        cwd=str(work),
+        mode="plan",
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+
+    assert code == 1
+    assert calls == 1
+    assert settings.read_bytes() == original
+    assert coordinator.claim.released is True
+    classified = [e for e in events if e.get("phase") == "CLASSIFYING_FAILURE"]
+    assert classified and classified[-1]["failure_kind"] == dispatch.NO_TOOL_PROFILE_VIOLATION
+    assert classified[-1]["reconciliation_required"] is True
+
+
+def test_read_only_research_tool_events_are_not_no_tool_violation(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    coordinator = _WriteScopeCoordinator(home)
+    events: list[dict[str, object]] = []
+
+    def runner(*, operation_hook, **_kwargs):
+        operation_hook(tool_event_count=3)
+        return 0, "ok", "", False, 1
+
+    code = dispatch.dispatch_run(
+        prompt="read the repo",
+        cwd=str(work),
+        mode="plan",
+        allow=[f"read_file({work.resolve()}/**)"],
+        coordinator=coordinator,
+        run_agy_fn=runner,
+        operation_hook=events.append,
+    )
+
+    assert code == 0
+    assert not any(e.get("failure_kind") == dispatch.NO_TOOL_PROFILE_VIOLATION for e in events)
+
+
 def test_accept_edits_permission_refusal_exit_zero_is_failure(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -4880,7 +5017,7 @@ def test_quota_preflight_progress_projects_admission_state(tmp_path: Path, monke
         internal_id = "test-acct"
         account_alias_hash = "abcdef012345"
         lease_id_hash = "123456abcdef"
-        lease = type("L", (), {"execution_env": {}})()
+        lease = type("L", (), {"execution_env": {"HOME": str(tmp_path)}})()
 
     class FakeCoordinator:
         def acquire_claim(self, **kwargs):
@@ -5091,7 +5228,7 @@ def test_dispatch_run_forwards_exclude_accounts_to_lease_coordinator(
         internal_id = "test-acct"
         account_alias_hash = "abcdef012345"
         lease_id_hash = "123456abcdef"
-        lease = type("L", (), {"execution_env": {}})()
+        lease = type("L", (), {"execution_env": {"HOME": str(tmp_path)}})()
 
         def release(self) -> None:
             pass

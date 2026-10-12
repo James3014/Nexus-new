@@ -144,6 +144,9 @@ def action_command_for_task(
     base = [sys.executable, "-m", "scripts.engine.nexus_cli", "self-hosted"]
     missing: list[str] = []
     if recommended_tool == "nexus_self_hosted_approve_promotion":
+        # Legacy approve surface: this CLI command carries no approval grant and
+        # fails closed with APPROVAL_GRANT_REQUIRED. Approval must go through the
+        # gateway approve path (candidate_approve) with a bound grant.
         candidate = action.get("candidate") or {}
         required = [
             "candidate_commit_sha",
