@@ -25,7 +25,12 @@ FIXTURE_KEYS = {"kind", "network", "secrets"}
 FIXTURE_KINDS = {"recorded_fixture", "clean_cache", "local_fixture_only", "no_mutation"}
 COMMANDS = {"bash", "git", "python3"}
 CONTEXT_FILE_LIMIT = 4
-CONTEXT_BYTE_LIMIT = 16_000
+# Per-task-class context budget. Context files are read on demand, not loaded at
+# agent start, so this only stops unbounded growth. Owner decision (option C):
+# aligned with the 36 KB Task Execution Contract cap in
+# tests/ops/test_bootstrap_context_budget.py; enforced on every PR through the
+# Golden corpus (GB-097).
+CONTEXT_BYTE_LIMIT = 36_000
 INDEX_BYTE_LIMIT = 8_000
 
 

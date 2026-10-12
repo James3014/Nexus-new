@@ -730,3 +730,16 @@ def test_sink_rejects_acceptance_with_malformed_receipt_hash(tmp_path):
         state["external_acceptance"]["receipt_hash"] = "not-a-hash"
 
     _assert_sink_rejects(tmp_path, mutate, "external acceptance is not bound")
+
+
+def test_competition_integration_requires_admitted_verifier(tmp_path):
+    repo, base, state = _authorized_candidate_repo(tmp_path)
+    state["contract"]["verifier_commands"] = []
+    state["integration_verifier_manifest"] = []
+
+    with pytest.raises(RuntimeError, match="at least one admitted verifier"):
+        ControlledIntegrationManager(integration_root=tmp_path / "integrations").integrate_task_state(
+            state
+        )
+
+    assert _git(repo, "rev-parse", "nexus/integration") == base

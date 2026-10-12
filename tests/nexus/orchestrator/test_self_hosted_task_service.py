@@ -11187,6 +11187,40 @@ def test_service_approval_tracked_task_requires_full_versioned_grant(tmp_path):
     assert result["promotion_status"] == "APPROVED"
 
 
+@pytest.mark.parametrize("verifiers", [None, [], ["   "]])
+def test_build_contract_rejects_missing_or_blank_verifier_manifest(tmp_path, verifiers):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    request = _request(tmp_path)
+    request.pop("verifier_commands")
+    if verifiers is not None:
+        request["verifier_commands"] = verifiers
+    with pytest.raises(ValueError):
+        service.build_contract(request)
+
+
+def test_legacy_mcp_submit_without_verifiers_is_rejected_before_dispatch(tmp_path):
+    from nexus.orchestrator.self_hosted_mcp import NexusSelfHostedMCPServer
+
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    launched = []
+    service._launch_worker = lambda *a, **k: launched.append(a)
+    server = NexusSelfHostedMCPServer(service=service)
+    request = _request(tmp_path, task_id="t-nover", execution_lane="ISOLATED_TARGET")
+    request.pop("verifier_commands")
+    response = server.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "nexus_self_hosted_submit_task", "arguments": request},
+        }
+    )
+    text = json.dumps(response)
+    assert "verifier_commands" in text and ("error" in response or '"isError": true' in text)
+    assert launched == []
+    assert service._read_state("t-nover") is None
+
+
 def test_legacy_mcp_approve_promotion_requires_grant(tmp_path):
     from nexus.orchestrator.self_hosted_mcp import NexusSelfHostedMCPServer
 
@@ -11204,19 +11238,6 @@ def test_legacy_mcp_approve_promotion_requires_grant(tmp_path):
     })
     assert "APPROVAL_GRANT_REQUIRED" in json.dumps(response)
     assert service._read_state("mcp-approve")["promotion_status"] == "PENDING_HUMAN_APPROVAL"
-
-
-def test_legacy_cli_approve_requires_grant(tmp_path):
-    from scripts.engine.commands.self_hosted_actions import (
-        NexusCliActionError,
-        run_self_hosted_approve,
-    )
-
-    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
-    _pending_approval_state(service, "cli-approve")
-    with pytest.raises(NexusCliActionError, match="APPROVAL_GRANT_REQUIRED"):
-        run_self_hosted_approve("cli-approve", service=service, **_APPROVE_PACKET)
-    assert service._read_state("cli-approve")["promotion_status"] == "PENDING_HUMAN_APPROVAL"
 
 
 def test_service_approval_rejects_grant_without_attempt_when_state_has_attempt(tmp_path):

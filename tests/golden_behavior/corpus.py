@@ -1229,13 +1229,15 @@ CASES: tuple[GoldenCase, ...] = (
         "Authority-text witnesses track AGENTS.md",
         "regression",
         "stale_state",
-        "The bootstrap authority-text tests pin the operating-mode fail-closed and Project Entry rules to the current AGENTS.md wording, and the root MUSE_PROTO.md stays a response-only overlay with no stale startup authority.",
+        "The bootstrap authority-text tests pin the operating-mode fail-closed and Project Entry rules to the current AGENTS.md wording, the root MUSE_PROTO.md stays a response-only overlay with no stale startup authority, and the AGENTS.md, overlay and per-task-class context byte budgets hold on every change.",
         ("AGENTS.md#Authority bootstrap",),
         (
             "tests/ops/test_bootstrap_authority_files.py::test_bootstrap_files_use_current_worktree_authority",
             "tests/ops/test_bootstrap_authority_files.py::test_current_operating_mode_bootstrap_is_direct_first_and_fail_closed",
             "tests/ops/test_bootstrap_authority_files.py::test_first_issue_bound_action_requires_project_entry_before_governed_effects",
             "tests/ops/test_bootstrap_context_budget.py::test_muse_remains_response_overlay_only",
+            "tests/ops/test_bootstrap_context_budget.py::test_context_budget_is_bounded_by_bytes_and_semantics",
+            "tests/ops/test_codex_task_context_index.py::test_canonical_index_is_valid_complete_and_bounded",
         ),
     ),
     _c(

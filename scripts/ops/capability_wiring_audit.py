@@ -529,7 +529,9 @@ def make_obs(
     exec_dict: dict[str, Any] = {}
     if executor_receipt is not None and hasattr(executor_receipt, "to_dict"):
         try:
-            exec_dict = executor_receipt.to_dict()
+            from nexus.engine.capability_receipts import attested_receipt_dict
+
+            exec_dict = attested_receipt_dict(executor_receipt)
         except Exception as exc:  # noqa: BLE001 - recorded, not fatal
             exec_dict = {"to_dict_error": f"{type(exc).__name__}: {exc}"[:200]}
     return Obs(
@@ -1467,7 +1469,8 @@ def neg_research(pos: Obs, neg: Obs) -> Check:
 
 def build_hyper(ws: Path, variant: str) -> Scenario:
     def check(_ws: Path, obs: Obs) -> list[Check]:
-        text = str(obs.outcome.get("result") or "")
+        result = _result(obs)
+        text = f"SprintResult(status={result.get('status')!r}, attempt_count={result.get('attempt_count')})"
         attempts = re.search(r"attempt_count=(\d+)", text)
         return [
             Check(
@@ -1485,6 +1488,7 @@ def build_hyper(ws: Path, variant: str) -> Scenario:
     return Scenario(
         statement="Improve the README wording of the hyper fixture",
         task_type="research",
+        codeintel={"hyper_candidate_count": 3, "hyper_target_file": "README.md"},
         check=check,
     )
 
@@ -1653,7 +1657,10 @@ def build_autoreason(ws: Path, variant: str) -> Scenario:
         ]
 
     return Scenario(
-        statement="Choose the best patch candidate for the fixture", task_type="repair", check=check
+        statement="Choose the best patch candidate for the fixture",
+        task_type="repair",
+        codeintel={"autoreason_candidates": _load_candidates(ws, "candidates.json")},
+        check=check,
     )
 
 
@@ -1692,7 +1699,13 @@ def build_ddtree(ws: Path, variant: str) -> Scenario:
         ]
 
     return Scenario(
-        statement="Prune the candidate pool for the fixture", task_type="repair", check=check
+        statement="Prune the candidate pool for the fixture",
+        task_type="repair",
+        codeintel={
+            "ddtree_candidates": _load_candidates(ws, "candidates.json"),
+            "ddtree_max_candidates": 3,
+        },
+        check=check,
     )
 
 
@@ -2278,6 +2291,7 @@ def build_xray(ws: Path, variant: str) -> Scenario:
     return Scenario(
         statement="Deep scan the dependency graph of the xray fixture",
         task_type="research",
+        codeintel={"xray_targets": ["nexus/services/capability_registry.py"]},
         check=check,
     )
 
@@ -2555,8 +2569,9 @@ _SPEC_LIST: list[CapSpec] = [
         "research",
         build_research,
         negative_check=neg_research,
+        policies=(POLICY_PRODUCTION, POLICY_EXTERNAL_FLAG),
         gaps=(
-            "capability_executor_registry._exec_research passes context key 'task_statement'; ResearchPhaseHandler.run reads context['task'], so the handler always returns 'Empty research task.'",
+            "(fixed in #1862) the executor passes the task under 'task'; outbound provider calls need NEXUS_EXTERNAL_RUNTIME_AUTHORIZED=1",
         ),
     ),
     CapSpec(
@@ -2564,6 +2579,7 @@ _SPEC_LIST: list[CapSpec] = [
         "research",
         build_research,
         negative_check=neg_research,
+        policies=(POLICY_PRODUCTION, POLICY_EXTERNAL_FLAG),
         gaps=(
             "selected on every run (required node) but the invoker skips unless escalate-triggered; when triggered it reuses the research executor (same 'task_statement' vs 'task' key mismatch)",
         ),
