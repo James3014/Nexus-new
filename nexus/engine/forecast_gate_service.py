@@ -46,7 +46,8 @@ class ForecastGateService:
         }
 
         needs_predictor = forecast["roi_score"] == 0.0
-        enabled = predictor_enabled(LATENT_PREDICTOR) and self.latent_forecaster is not None
+        forecaster = self.latent_forecaster if predictor_enabled(LATENT_PREDICTOR) else None
+        enabled = forecaster is not None
         if needs_predictor and not enabled:
             # Predictor absent: there is no forecast to gate on, so the preflight passes.
             influence = record_influence(
@@ -68,9 +69,9 @@ class ForecastGateService:
                 "predictor_influence": influence,
             }
 
-        if needs_predictor:
-            forecast = self.latent_forecaster.forecast_roi(task_desc)
-            risk = self.latent_forecaster.predict_risk(task_desc)
+        if needs_predictor and forecaster is not None:
+            forecast = forecaster.forecast_roi(task_desc)
+            risk = forecaster.predict_risk(task_desc)
 
         est_tokens = _as_float(forecast.get("est_tokens", 0), 0.0)
         roi_score = _as_float(forecast.get("roi_score", 0.0), 0.0)

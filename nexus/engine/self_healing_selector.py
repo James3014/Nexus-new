@@ -32,7 +32,8 @@ class SelfHealingSelector:
         logger.info("📡 [ASH:v24] Ranking self-healing strategies for failure: %s", task_desc[:50])
         
         ranked = []
-        use_predictor = predictor_enabled(LATENT_PREDICTOR) and self.predictor is not None
+        predictor = self.predictor if predictor_enabled(LATENT_PREDICTOR) else None
+        use_predictor = predictor is not None
         baseline = []
         context = {"env": env, "task_desc": task_desc, "failure_context": failure_context}
         
@@ -46,7 +47,7 @@ class SelfHealingSelector:
                 continue
 
             baseline.append({"strategy": s_id, "success_prob": round(strat.success_base, 2)})
-            if not use_predictor:
+            if predictor is None:
                 # Predictor absent: rank by the matrix prior alone.
                 ranked.append({
                     "strategy": s_id,
@@ -58,11 +59,11 @@ class SelfHealingSelector:
                 continue
 
             # 2. 物理對位：預測 ROI
-            prediction = self.predictor.forecast_roi(f"Self-heal via {s_id}: {task_desc}")
+            prediction = predictor.forecast_roi(f"Self-heal via {s_id}: {task_desc}")
             success_prob = strat.success_base * prediction["roi_score"]
             
             # 3. 風險懲罰內容及其性質分析。內容、及性能。
-            risk = self.predictor.predict_risk(failure_context)
+            risk = predictor.predict_risk(failure_context)
             if risk["status"] == "CAUTION":
                 success_prob *= (1.0 - risk["reject_prob"])
                 
