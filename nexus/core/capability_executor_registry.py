@@ -808,6 +808,7 @@ def _exec_lancedb(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRe
     start = time.monotonic()
     try:
         from pathlib import Path
+        from nexus.services.lancedb_roots import KNOWLEDGE, resolve_lancedb_root
         from nexus.services.memory_repository import MemoryRepository
 
         constraints = dict(plan.constraints or {})
@@ -815,7 +816,7 @@ def _exec_lancedb(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRe
         query = str(constraints.get("search_query") or task_desc or "").strip()
         table = str(constraints.get("search_table") or "policy").strip()
         limit = max(1, min(20, int(constraints.get("search_limit") or 5)))
-        repository = MemoryRepository(root / ".nexus" / "knowledge" / "lancedb")
+        repository = MemoryRepository(resolve_lancedb_root(KNOWLEDGE, root, honor_env=False))
         frame = repository.search_fts(
             table,
             query,
@@ -1823,13 +1824,15 @@ def _exec_metabolism_resume(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
             "capability_executor",
             ["resume_after_distill"],
         )
-        transaction_id = inst.distill(
+        distill_result = inst.distill_local(
             {
                 "goal": str(task_desc or plan.task_id),
                 "done": [],
                 "errors": [],
+                "context_source": "CAPABILITY_PLAN",
             }
         )
+        transaction_id = distill_result["tx"]
         checkpoint = inst.load_checkpoint()
         checkpoint_hash = hashlib.sha256(
             json.dumps(checkpoint, sort_keys=True, default=str).encode("utf-8")
@@ -1837,7 +1840,7 @@ def _exec_metabolism_resume(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
         seed_path = workspace_root / ".nexus" / "metabolism" / "session_seed.json"
         seed_hash = hashlib.sha256(seed_path.read_bytes()).hexdigest()
         passed = bool(
-            transaction_id
+            distill_result["status"] == "LOCAL_ONLY"
             and checkpoint.get("task_id") == plan.task_id
             and seed_path.is_file()
         )
@@ -1863,7 +1866,9 @@ def _exec_metabolism_resume(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
                     "checkpoint_path": str(inst.stack_path),
                     "seed_path": str(seed_path),
                     "seed_hash": seed_hash,
-                    "transaction_id": str(transaction_id),
+                    "transaction_id": transaction_id,
+                    "upload": distill_result["upload"],
+                    "distill_status": distill_result["status"],
                     "resume_available": bool(checkpoint),
                     "pending_steps": list(checkpoint.get("pending_steps") or []),
                 },
@@ -2122,6 +2127,7 @@ def _exec_semantic_searcher(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
         )
     try:
         from pathlib import Path
+        from nexus.services.lancedb_roots import KNOWLEDGE, resolve_lancedb_root
         from nexus.services.memory_repository import MemoryRepository
 
         constraints = dict(plan.constraints or {})
@@ -2129,7 +2135,7 @@ def _exec_semantic_searcher(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
         query = str(constraints.get("search_query") or task_desc or "").strip()
         table = str(constraints.get("search_table") or "policy").strip()
         limit = max(1, min(20, int(constraints.get("search_limit") or 5)))
-        repository = MemoryRepository(root / ".nexus" / "knowledge" / "lancedb")
+        repository = MemoryRepository(resolve_lancedb_root(KNOWLEDGE, root, honor_env=False))
         inst = cls(repository)
         hits = list(inst.search(query=query, table_name=table, limit=limit) or [])[:limit]
         elapsed = int((time.monotonic() - start) * 1000)
@@ -3319,13 +3325,18 @@ def _exec_forecast_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabi
         from nexus.engine.forecast_gate_service import ForecastGateService
         from nexus.engine.self_healing_selector import get_self_healing_selector
         from nexus.learning.latent_predictor_v20 import LatentPredictorV20
+        from nexus.learning.predictor_toggle import LATENT_PREDICTOR, predictor_enabled
 
         constraints = dict(plan.constraints or {})
         root = Path(
             str(constraints.get("workspace_root") or "/tmp/nexus-forecast")
         ).expanduser().resolve()
         root.mkdir(parents=True, exist_ok=True)
-        latent = LatentPredictorV20(workspace_root=root)
+        latent = (
+            LatentPredictorV20(workspace_root=root)
+            if predictor_enabled(LATENT_PREDICTOR)
+            else None
+        )
         gate_eval = GateEvaluator()
         state_io = StateIO(str(root), run_dir=str(root / ".nexus" / "forecast" / plan.task_id))
         inst = ForecastGateService(
@@ -3393,6 +3404,7 @@ def _exec_forecast_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabi
                 ash_strategy=ash_strategy,
                 state_persisted=persisted,
                 state_path=state_path,
+                predictor_influence=list(state.metadata.get("predictor_influence") or []),
             ),
         )
     except Exception as exc:

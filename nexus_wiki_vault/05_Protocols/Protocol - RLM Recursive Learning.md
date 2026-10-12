@@ -25,6 +25,10 @@ version_scope:
 
 # Protocol - RLM Recursive Learning (v26 Hardened)
 
+> [!warning] Contradiction registered (2026-10-12)
+> 本頁 Bayesian Cooling（失敗後降溫）與 [SOTA Milestone - Django Death Issue Fix](../04_Research/SOTA Milestone - Django Death Issue Fix.md)、9 Rings `creativity_gradient_slope`（失敗後升溫）方向相反，已登記為 C-13 於 [System - Unknowns and Conflicts](../01_System/System - Unknowns and Conflicts.md)。未裁定前請勿引用任一方向為既定行為。
+
+
 ## 🧬 定義與核心概念
 **RLM (Recursive Learning Machine)** 是 Nexus v2Singularity 的核心遞迴修正引擎。它將傳統的「一次性生成」轉化為「有預算約束的遞迴演進」。
 

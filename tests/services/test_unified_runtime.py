@@ -119,13 +119,19 @@ def _admit_gateway_request(
     )
     if request.local_enabled:
         local_worker = (
-            "local_advisor_3b"
+            "local_qwen35_9b"
             if route.get("mutation_requested") is False
             else "local_coder_7b"
         )
         local_controls = (
-            ["fixed_schema", "compact_context", "deterministic_consumer"]
-            if local_worker == "local_advisor_3b"
+            [
+                "bounded_context",
+                "parser",
+                "external_verifier",
+                "counterexample_suite",
+                "role_specific_suite",
+            ]
+            if local_worker == "local_qwen35_9b"
             else [
                 "small_scope",
                 "parser",
@@ -780,7 +786,7 @@ def test_gateway_unified_hybrid_uses_real_local_assist_and_shared_planner(monkey
         provider=InjectedLocalModelProvider(
             lambda _request: "local diagnosis: inspect candidate",
             provider_identity="ollama",
-            model_identity="qwen2.5-s2t-advisor:3b",
+            model_identity="qwen3.5:9b",
         )
     )
     task_id = "hybrid-runtime-test-001"
@@ -868,7 +874,7 @@ def test_gb019_advisory_verifier_failure_keeps_public_delivery(monkeypatch, tmp_
                 provider=InjectedLocalModelProvider(
                     self._generate,
                     provider_identity="ollama",
-                    model_identity="qwen2.5-s2t-advisor:3b",
+                    model_identity="qwen3.5:9b",
                 )
             )
 
@@ -971,7 +977,7 @@ def test_gb019_fail_closed_override_blocks_public_online(monkeypatch, tmp_path: 
                 provider=InjectedLocalModelProvider(
                     self._generate,
                     provider_identity="ollama",
-                    model_identity="qwen2.5-s2t-advisor:3b",
+                    model_identity="qwen3.5:9b",
                 )
             )
 
@@ -1082,7 +1088,7 @@ def test_gb019_public_guard_negative_controls(monkeypatch, tmp_path: Path, tampe
     class Service:
         def __init__(self) -> None:
             self.calls = 0
-            self.inner = LocalAssistService(provider=InjectedLocalModelProvider(self.generate, provider_identity="ollama", model_identity="qwen2.5-s2t-advisor:3b"))
+            self.inner = LocalAssistService(provider=InjectedLocalModelProvider(self.generate, provider_identity="ollama", model_identity="qwen3.5:9b"))
 
         def generate(self, _request) -> str:
             self.calls += 1

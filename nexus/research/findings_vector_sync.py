@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from nexus.services.lancedb_roots import MEMORY_INDEX, resolve_lancedb_root
 from nexus.services.memory_repository_lifecycle import ScopedMemoryRepositoryRegistry
 
 # Shared across syncs so the registry's repository cache (keyed by root/db/table) is actually reused.
@@ -37,8 +38,7 @@ class MemoryRepositoryFindingsVectorSync:
         if not _sync_enabled():
             return False
 
-        db_path = os.environ.get("NEXUS_MEMORY_DB_PATH")
-        resolved_db_path = Path(db_path) if db_path else self.project_root / ".nexus" / "memory" / "memory_index.lancedb"
+        resolved_db_path = resolve_lancedb_root(MEMORY_INDEX, self.project_root)
         registry = self.registry or _SHARED_REGISTRY
         repo = registry.repository_for(
             project_root=self.project_root,

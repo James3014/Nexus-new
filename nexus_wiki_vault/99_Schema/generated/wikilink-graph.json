@@ -1,7 +1,7 @@
 {
   "schema": "nexus.wiki.wikilink-graph.v1",
   "authority": "derived_non_authoritative",
-  "source_fingerprint": "b33309b2c46eb0a88747e906959a32eddb19961dd587be63748ead75d097c23c",
+  "source_fingerprint": "2d7fa59f64deb649d97293d81121d053ccdc2ac51df2738fc3ebfb221109a963",
   "nodes": [
     {
       "id": "canonical:entry",
@@ -1140,6 +1140,14 @@
       "authority": ""
     },
     {
+      "id": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "path": "04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "title": "CAPABILITY_EVIDENCE_LEDGER_2026-10-12",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
       "id": "page:04_State/NEXUS_ALWAYS_ON_LOOP9_STATUS_2026-05-07.md",
       "path": "04_State/NEXUS_ALWAYS_ON_LOOP9_STATUS_2026-05-07.md",
       "title": "NEXUS_ALWAYS_ON_LOOP9_STATUS_2026-05-07",
@@ -1620,6 +1628,14 @@
       "authority": ""
     },
     {
+      "id": "page:08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12).md",
+      "path": "08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12).md",
+      "title": "Diff - Legacy Monolith vs Split Repo Family (2026-10-12)",
+      "classification": "active",
+      "is_canonical": false,
+      "authority": ""
+    },
+    {
       "id": "page:08_Diffs/Diff - v17.1 vs v22 vs v23.md",
       "path": "08_Diffs/Diff - v17.1 vs v22 vs v23.md",
       "title": "Diff - v17.1 vs v22 vs v23",
@@ -2086,6 +2102,12 @@
       "syntax": "markdown"
     },
     {
+      "source": "canonical:current_state",
+      "target": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
       "source": "canonical:system_overview",
       "target": "page:00_Home/README_Product.md",
       "type": "explicit_link",
@@ -2423,6 +2445,18 @@
     },
     {
       "source": "canonical:wiki_index",
+      "target": "page:08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12).md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "canonical:wiki_index",
+      "target": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "canonical:wiki_index",
       "target": "canonical:system_overview",
       "type": "explicit_link",
       "syntax": "wikilink"
@@ -2496,6 +2530,12 @@
     {
       "source": "canonical:system_map",
       "target": "canonical:current_state",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "canonical:system_map",
+      "target": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
       "type": "explicit_link",
       "syntax": "markdown"
     },
@@ -3126,6 +3166,12 @@
     {
       "source": "page:01_System/Nexus Glossary.md",
       "target": "page:Reference/task.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:01_System/Nexus Glossary.md",
+      "target": "canonical:glossary",
       "type": "explicit_link",
       "syntax": "markdown"
     },
@@ -3947,6 +3993,12 @@
     },
     {
       "source": "page:02_Modules/Module - Skill Memory Closed Loop.md",
+      "target": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:02_Modules/Module - Skill Memory Closed Loop.md",
       "target": "page:02_Modules/Module - Core Orchestrator Deep Dive.md",
       "type": "explicit_link",
       "syntax": "markdown"
@@ -4226,6 +4278,126 @@
       "target": "canonical:system_overview",
       "type": "explicit_link",
       "syntax": "wikilink"
+    },
+    {
+      "source": "page:04_Research/SOTA Milestone - Django Death Issue Fix.md",
+      "target": "page:04_Research/Nexus Combat History Ledger.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:04_Research/SOTA Milestone - Django Death Issue Fix.md",
+      "target": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "target": "canonical:system_overview",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "target": "page:06_Ops/Ops - Truth Claims Register.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "target": "page:04_State/NEXUS_FINAL_ACCEPTANCE_MATRIX_2026-05-06.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "target": "page:06_Ops/Ops - Wisdom Layer v22 Architecture.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "target": "page:09_Roadmap/NEXUS_EVOLUTION_HISTORY_v9_to_v28.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "target": "page:06_Ops/Ops - Performance Benchmarks.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "target": "page:04_Research/Meta-Evolution - The 18 Rings Convergence.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "target": "page:04_Research/SOTA Milestone - Django Death Issue Fix.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "target": "page:02_Modules/Module - Skill Memory Closed Loop.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "target": "page:09_Roadmap/CAPABILITY_ROUTING_MIGRATION_PLAN_2026-04-29.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "target": "page:10_Analysis_Scans/NEXUS_MAY_BENCHMARK_ROUTING_ANALYSIS.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "target": "page:01_System/ADR/ADR-2026-05-07-teacher-student-sweep-plan.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "target": "page:04_Research/MSA_Routing_Architecture.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "target": "page:10_Analysis_Scans/nexus_ag1_ag5_local_portfolio_final_report.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "target": "page:10_Analysis_Scans/nexus-competitive-reality-check.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "target": "page:00_Product/Investor Deck.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "target": "page:05_Commercial/Go-to-Market.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "target": "canonical:system_overview",
+      "type": "explicit_link",
+      "syntax": "markdown"
     },
     {
       "source": "page:04_State/State - Lifecycle.md",
@@ -4556,6 +4728,18 @@
       "target": "page:05_Protocols/Protocol - Evidence Chain.md",
       "type": "explicit_link",
       "syntax": "wikilink"
+    },
+    {
+      "source": "page:05_Protocols/Protocol - RLM Recursive Learning.md",
+      "target": "page:04_Research/SOTA Milestone - Django Death Issue Fix.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:05_Protocols/Protocol - RLM Recursive Learning.md",
+      "target": "page:01_System/System - Unknowns and Conflicts.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
     },
     {
       "source": "page:05_Protocols/Protocol - RLM Recursive Learning.md",
@@ -5266,6 +5450,12 @@
       "syntax": "wikilink"
     },
     {
+      "source": "page:06_Ops/Ops - Wisdom Layer v22 Architecture.md",
+      "target": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
       "source": "page:06_Ops/Ops - Wisdom Layer.md",
       "target": "canonical:architecture",
       "type": "explicit_link",
@@ -5474,6 +5664,60 @@
       "target": "canonical:system_overview",
       "type": "explicit_link",
       "syntax": "wikilink"
+    },
+    {
+      "source": "page:08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12).md",
+      "target": "canonical:system_overview",
+      "type": "explicit_link",
+      "syntax": "wikilink"
+    },
+    {
+      "source": "page:08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12).md",
+      "target": "page:08_Diffs/Diff - v17.1 vs v22 vs v23.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12).md",
+      "target": "page:08_Diffs/Code_to_Wiki_Alignment_Matrix.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12).md",
+      "target": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12).md",
+      "target": "canonical:current_state",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12).md",
+      "target": "page:02_Modules/nexus_能力盤點_2026-02-20後新增.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12).md",
+      "target": "page:01_System/System - Unknowns and Conflicts.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12).md",
+      "target": "page:01_System/System - Next Questions for Human.md",
+      "type": "explicit_link",
+      "syntax": "markdown"
+    },
+    {
+      "source": "page:08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12).md",
+      "target": "canonical:system_overview",
+      "type": "explicit_link",
+      "syntax": "markdown"
     },
     {
       "source": "page:08_Diffs/Diff - v17.1 vs v22 vs v23.md",
@@ -5983,6 +6227,13 @@
       "reason": "missing"
     },
     {
+      "source": "page:00_Home/CURRENT_STATE.md",
+      "source_path": "00_Home/CURRENT_STATE.md",
+      "raw_target": "../08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12",
+      "syntax": "markdown",
+      "reason": "missing"
+    },
+    {
       "source": "page:00_Home/Wiki Index and Coverage Map.md",
       "source_path": "00_Home/Wiki Index and Coverage Map.md",
       "raw_target": "99_Schema/WIKI_AUTHORITY_MANIFEST",
@@ -6009,6 +6260,13 @@
       "raw_target": "../../docs/arch/NEXUS_ROUTING_LONG_PLAN_V2.md",
       "syntax": "markdown",
       "reason": "outside_vault"
+    },
+    {
+      "source": "page:00_Home/SYSTEM_MAP.md",
+      "source_path": "00_Home/SYSTEM_MAP.md",
+      "raw_target": "../08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12",
+      "syntax": "markdown",
+      "reason": "missing"
     },
     {
       "source": "page:00_Home/Agent Boot Sequence.md",
@@ -6687,6 +6945,20 @@
       "source_path": "04_Research/Research - DeepScientist Integration.md",
       "raw_target": "DEEPSCIENTIST",
       "syntax": "wikilink",
+      "reason": "missing"
+    },
+    {
+      "source": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "source_path": "04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "raw_target": "../08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12",
+      "syntax": "markdown",
+      "reason": "missing"
+    },
+    {
+      "source": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "source_path": "04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "raw_target": "../08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12",
+      "syntax": "markdown",
       "reason": "missing"
     },
     {

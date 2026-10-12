@@ -10,6 +10,7 @@ from nexus.core.gate_evaluator import GateEvaluator
 from nexus.core.metrics_aggregator import MetricsAggregator
 from nexus.governance.hardened_validator import NexusHardenedValidator
 from nexus.learning.lewm_predictor import LeWMPredictor
+from nexus.services.lancedb_roots import VECTOR_DB, resolve_lancedb_root
 from nexus.services.memory import MemoryService
 from nexus.engine.hub import NexusHub
 from nexus.learning.skill_registry import SkillRegistry
@@ -128,7 +129,7 @@ def build_engine_components(config: Any, kwargs: Dict[str, Any]) -> Dict[str, An
         "phase_executors": phase_executors,
         "phases": kwargs.get("phases", phase_executors),
         "federation": FederationLayer(project_root),
-        "vector_cache": VectorCache(project_root / ".nexus" / "vector_db"),
+        "vector_cache": VectorCache(resolve_lancedb_root(VECTOR_DB, project_root)),
         "neural_aggregator": NexusNeuralAggregator(),
         "hardened_validator": NexusHardenedValidator(),
         "swarm_planner": HierarchicalGraphPlanner(project_root),

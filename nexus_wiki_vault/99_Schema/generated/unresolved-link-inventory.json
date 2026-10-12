@@ -1,8 +1,8 @@
 {
   "schema": "nexus.wiki.unresolved-link-inventory.v1",
   "authority": "derived_non_authoritative",
-  "source_fingerprint": "b33309b2c46eb0a88747e906959a32eddb19961dd587be63748ead75d097c23c",
-  "total_unresolved": 312,
+  "source_fingerprint": "2d7fa59f64deb649d97293d81121d053ccdc2ac51df2738fc3ebfb221109a963",
+  "total_unresolved": 316,
   "category_counts": {
     "repo_source": 0,
     "excluded_wiki_target": 0,
@@ -11,7 +11,7 @@
     "exact_alias_match": 0,
     "mechanical_path_error": 0,
     "ambiguous": 0,
-    "missing": 226,
+    "missing": 230,
     "unsupported": 0
   },
   "entries": [
@@ -20,6 +20,33 @@
       "source_path": "README.md",
       "source_classification": "current",
       "raw_target": "99_Schema/WIKI_AUTHORITY_MANIFEST.yaml",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
+    },
+    {
+      "source_id": "page:00_Home/CURRENT_STATE.md",
+      "source_path": "00_Home/CURRENT_STATE.md",
+      "source_classification": "current",
+      "raw_target": "../08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12",
       "syntax": "markdown",
       "original_reason": "missing",
       "category": "missing",
@@ -130,6 +157,33 @@
       "raw_target": "../../docs/arch/NEXUS_ROUTING_LONG_PLAN_V2.md",
       "syntax": "markdown",
       "original_reason": "outside_vault",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
+    },
+    {
+      "source_id": "page:00_Home/SYSTEM_MAP.md",
+      "source_path": "00_Home/SYSTEM_MAP.md",
+      "source_classification": "current",
+      "raw_target": "../08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12",
+      "syntax": "markdown",
+      "original_reason": "missing",
       "category": "missing",
       "evidence": {
         "candidate_paths": [],
@@ -2748,6 +2802,60 @@
       "source_classification": "active",
       "raw_target": "DEEPSCIENTIST",
       "syntax": "wikilink",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
+    },
+    {
+      "source_id": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "source_path": "04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "source_classification": "active",
+      "raw_target": "../08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12",
+      "syntax": "markdown",
+      "original_reason": "missing",
+      "category": "missing",
+      "evidence": {
+        "candidate_paths": [],
+        "repo_path_exists": false,
+        "exact_alias": "",
+        "mechanical_transform": ""
+      },
+      "repairable": false,
+      "proposed_target": "",
+      "batch_id": "",
+      "governance": {
+        "status": "governed",
+        "disposition": "accepted_missing_debt",
+        "reason": "No exact destination exists in the committed vault; approximation and fuzzy matching are forbidden.",
+        "owner": "wiki-governance",
+        "policy": "missing-link-debt-v1",
+        "category": "missing",
+        "gate": "governed"
+      }
+    },
+    {
+      "source_id": "page:04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "source_path": "04_State/CAPABILITY_EVIDENCE_LEDGER_2026-10-12.md",
+      "source_classification": "active",
+      "raw_target": "../08_Diffs/Diff - Legacy Monolith vs Split Repo Family (2026-10-12",
+      "syntax": "markdown",
       "original_reason": "missing",
       "category": "missing",
       "evidence": {
@@ -8528,15 +8636,15 @@
   },
   "governance_summary": {
     "status": "PASS",
-    "total_entries": 312,
-    "governed_entries": 312,
+    "total_entries": 316,
+    "governed_entries": 316,
     "ungoverned_entries": 0,
     "fail_closed_entries": 0,
     "repairable_count": 0,
     "unreviewed_ambiguous_count": 0,
     "unsupported_undispositioned_count": 0,
     "by_disposition": {
-      "accepted_missing_debt": 226,
+      "accepted_missing_debt": 230,
       "accepted_placeholder_debt": 57,
       "documented_legacy_reference": 29
     },

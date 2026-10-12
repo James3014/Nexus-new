@@ -12,11 +12,10 @@ Scope: all coding agents.
 
 - Repository authority: root `AGENTS.md`.
 - Direct authority: an explicit current Owner request may authorize a bounded
-  `DIRECT_CANONICAL` change that does not require a Task Card or lifecycle state.
-- Direct delegated authority: an explicit current Owner request may authorize one
-  bounded `DIRECT_DELEGATED` milestone through an approved non-Nexus control
-  plane, without a Task Card or Nexus lifecycle state solely because a worker is
-  delegated.
+  `DIRECT_CANONICAL` change that does not require a Task Card or lifecycle state,
+  or one bounded `DIRECT_DELEGATED` milestone through an approved non-Nexus
+  control plane, without a Task Card or Nexus lifecycle state solely because a
+  worker is delegated.
 - Governed authority: the active Git-tracked Task Card under `tasks/<campaign-id>/`.
 - `MUSE_PROTO.md` is response/domain overlay, never mutation authority.
 
@@ -99,8 +98,7 @@ inferred from G10, tests, an agent, a Task Card, CI, or runtime state.
 
 ## Repository baseline
 
-- Before mutation record root, branch, HEAD, dirty state, and worktree topology
-  (`git rev-parse --show-toplevel`, `git worktree list --porcelain`). Preserve unrelated dirty state.
+- Before mutation record root, branch, HEAD, dirty state, and worktree topology. Preserve unrelated dirty state.
 
 ## Governance boundary
 
@@ -158,8 +156,8 @@ Admission, or Candidate lifecycle is required solely for this lane. The worker
 cannot approve, merge, push protected refs, or verify itself.
 `AUTO_CHAIN=false`. The primary coordinator independently inspects the
 physical diff and reruns the applicable verifier; worker PASS is implementation
-evidence only. Fail closed with `DIRECT_DELEGATED_BLOCKED` beyond these boundaries. Details: `docs/agents/TASK_EXECUTION_CONTRACT.md`,
-`docs/agents/WORKFORCE_EXECUTION_OVERLAY.md`.
+evidence only. Fail closed with `DIRECT_DELEGATED_BLOCKED` beyond these boundaries; details in
+`docs/agents/TASK_EXECUTION_CONTRACT.md`.
 
 ### GOVERNED
 
@@ -171,10 +169,10 @@ replaces program correctness.
 
 ## Conditional load map
 
-- Nexus model/provider selection, delegation, or routing: compact Workforce
+- Nexus model/provider selection, delegation, or routing: compact machine Workforce
   Admission receipt first; full policy/YAML only for policy changes,
   onboarding, audit, or an authority dispute. See `docs/agents/WORKFORCE_EXECUTION_OVERLAY.md`.
-- Claim/release/benchmark/audit/verifier work: `docs/agents/CLAIM_AND_RECEIPT_OVERLAY.md`.
+- Claim/release/benchmark/audit/verifier work, or Issue-bound `nexus-certify` completion evidence: `docs/agents/CLAIM_AND_RECEIPT_OVERLAY.md`.
 - Novel repeatable failure with a prevention rule: `docs/agents/LEARNING_WRITEBACK_OVERLAY.md`.
 
 ## Authority invariants
@@ -186,15 +184,4 @@ replaces program correctness.
 - Missing verifier artifact/status or source hash fails claim gates closed.
 - Follow `MUSE_PROTO.md` for response tags. On degenerate output, stop
   mutation and report `retry_required=true`.
-
-
-## Nexus Core issue-bound completion evidence
-
-- This repository is enrolled in the standalone `nexus-certify` Golden Path through `.nexus-core/config.toml`.
-- For mutation work tracked by a repository-local GitHub Issue, run `nexus-certify issue-init --issue <N>` before relying on Issue-bound completion evidence, and run `nexus-certify issue-check --issue <N>` before claiming engineering completion.
-- This binding is Evidence Trust + Completion only. It does not select the execution lane, route, worker/model, Candidate acceptance, merge, release, deployment, or production authority.
-- DIRECT work remains transport-neutral. A Core mutation session is not required solely because repository files are being changed.
-
-## Handoff
-
-Read root `HANDOFF.md` at session start; maintain it per `docs/agents/HANDOFF_PROTOCOL.md`. State only; grants no authority.
+- Read root `HANDOFF.md` at session start; maintain it per `docs/agents/HANDOFF_PROTOCOL.md`. State only; grants no authority.

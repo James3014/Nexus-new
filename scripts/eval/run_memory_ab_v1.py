@@ -10,15 +10,24 @@ independent re-run of repro.py in the attempt's work dir, not by the pipeline.
 Outputs under <artifact_root>/<run_id>/: rows.jsonl (one canonical row per
 attempt, appended as each completes), scorecard.json, validation.json.
 
+Armor axis (#1821): --armor off (default) runs the bare HealPipeline exactly as before.
+--armor on plans the task with CapabilityPlanner and runs it through run_mainchain
+(with_nexus_armor=True, local-only route, LocalAssistService -> LocalModelExecutor) at the
+requested --armor-profile (default FULL). Every row and the scorecard record which capabilities
+were selected and which have real invocation evidence in the receipt.
+
 Exit codes: 0 ok, 2 preflight failed (model/Ollama/learning-writeback), 3 state leak.
 """
 
 from __future__ import annotations
 
 import argparse
+import ast
+import contextlib
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -26,9 +35,11 @@ import sys
 import threading
 import time
 import urllib.request
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from types import SimpleNamespace
+from typing import Any, Callable, Iterator
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -86,6 +97,23 @@ ARMS: dict[str, tuple[str, bool, str]] = {
     "on": ("nexus_memory_on", True, "memory_on"),
 }
 
+ARMOR_MODES = ("off", "on")
+ARMOR_PROFILES = ("LITE", "STANDARD", "FULL")
+DEFAULT_ARMOR_PROFILE = "FULL"
+ARMOR_PROFILE_NONE = "none"
+# Capabilities whose local-path executors report invoked=True with an empty candidate pool
+# (advisory stubs in the localheal_pipeline topology); they count only with candidate evidence.
+STUB_PRONE_CAPABILITIES = frozenset({"ddtree", "autoreason"})
+# Physical callables that are explicit skips or stubs, never real invocation evidence.
+STUB_CALLABLE_MARKERS = ("explicit_skip", "stub")
+ARMOR_ROW_KEYS = (
+    "armor",
+    "armor_profile",
+    "capabilities_selected",
+    "capabilities_invoked",
+    "committee_invoked",
+    "with_nexus_armor",
+)
 # Paths whose files must not change during a run.
 STATE_WATCH_ROOTS: list[Path] = [
     REPO_ROOT / ".nexus",
@@ -420,6 +448,517 @@ def read_episode(state_root: Path, task_id: str, attempt_id: str) -> dict[str, A
     return match
 
 
+# ------------------------------------------------------------ armor axis
+
+
+def derive_target_symbol(task: dict[str, Any], source_text: str) -> str:
+    """Task-declared symbol, else the top-level function the problem statement names."""
+    explicit = str(task.get("target_symbol") or "").strip()
+    if explicit:
+        return explicit
+    try:
+        tree = ast.parse(source_text)
+    except SyntaxError:
+        return ""
+    names = [
+        node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    statement = str(task.get("problem_statement") or "")
+    for name in names:
+        if re.search(rf"\b{re.escape(name)}\b", statement):
+            return name
+    return names[0] if names else ""
+
+
+@contextlib.contextmanager
+def armor_environment(model: str, profile: str, armor_root: Path) -> Iterator[None]:
+    """Supported authorization/placement switches for a local-model armor attempt.
+
+    FULL uses NEXUS_FORCE_FULL_ARMOR. LITE sets NEXUS_FAST_MODE (the resolver's LITE precondition);
+    STANDARD sets nothing. For LITE and STANDARD the planner's own signals still decide, so the
+    observed profile is checked against the request after the attempt.
+    The model endpoint is whatever NEXUS_OLLAMA_URL / 127.0.0.1:11434 resolves to (the M5 tunnel).
+    """
+    updates: dict[str, str | None] = {
+        "NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1",
+        "NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR": "1",
+        "NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY": "localheal_pipeline",
+        "NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER": "ollama",
+        "NEXUS_LOCAL_MODEL_EXECUTOR_MODEL": model,
+        "NEXUS_LOCAL_MODEL_NAME": model,
+        "NEXUS_ARMOR_ARTIFACT_ROOT": str(armor_root),
+        "NEXUS_FORCE_FULL_ARMOR": "1" if profile == "FULL" else None,
+        "NEXUS_FAST_MODE": "1" if profile == "LITE" else None,
+    }
+    saved = {key: os.environ.get(key) for key in updates}
+    try:
+        for key, value in updates.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def build_armor_service(
+    apply_parent: Path,
+    executor_sink: dict[str, Any],
+    executor_runner: Callable[..., Any] | None = None,
+) -> Any:
+    """LocalAssistService whose candidate isolation lives under apply_parent.
+
+    LocalAssistService strips the executor's raw_model_metadata from its response, so the executor
+    call is wrapped and the metadata (armor profile, committee, ddtree/autoreason results) is kept in
+    executor_sink. executor_runner defaults to LocalModelExecutor.run; tests inject a fake.
+    """
+    from nexus.services.local_assist_service import LocalAssistService
+    from nexus.services.local_heal.isolated_workspace_apply import run_isolated_workspace_apply
+    from nexus.services.local_heal.local_model_executor import LocalModelExecutor
+
+    apply_parent.mkdir(parents=True, exist_ok=True)
+    inner = executor_runner or LocalModelExecutor.run
+
+    def apply(request: Any) -> Any:
+        return run_isolated_workspace_apply(replace(request, work_dir=str(apply_parent)))
+
+    def recording_executor(request: Any, **kwargs: Any) -> Any:
+        response = inner(request, **kwargs)
+        meta = getattr(response, "raw_model_metadata", None)
+        executor_sink["meta"] = dict(meta) if isinstance(meta, dict) else {}
+        executor_sink["selected_capabilities"] = [str(c) for c in request.selected_capabilities]
+        return response
+
+    return LocalAssistService(executor_runner=recording_executor, apply_runner=apply)
+
+
+def build_armor_snapshot(task: dict[str, Any], model: str) -> dict[str, Any]:
+    """CapabilityPlanner snapshot for the local request.
+
+    UnifiedRuntime re-plans and keeps only topology, protocol_mode and model_call_allowed from this
+    snapshot, so capability selection and the armor profile signals stay planner-owned.
+    """
+    from nexus.services.local_assist_service import build_planner_snapshot
+
+    snapshot = build_planner_snapshot(
+        task_statement=task["problem_statement"], model=model, topology="localheal_pipeline"
+    )
+    snapshot.update({
+        "model_call_allowed": True,
+        "mutation_allowed": True,
+        "verifier_allowed": True,
+    })
+    return snapshot
+
+
+def resolve_armor_worker(model: str) -> dict[str, Any]:
+    """Workforce-admitted local worker for model, or ModelUnavailable.
+
+    Armor-on runs through Workforce Admission, which pins the local model per worker. A model with
+    no admitted bounded_code_candidate worker cannot run on the armor path; nothing is substituted.
+    """
+    from nexus.services.model_workforce_policy import WorkforcePolicyLoader
+
+    workers = WorkforcePolicyLoader().load().workers
+    admitted = {
+        w.model: w
+        for w in workers.values()
+        if w.provider == "ollama"
+        and "bounded_code_candidate" in w.roles
+        and w.availability == "AVAILABLE"
+    }
+    if model not in admitted:
+        raise ModelUnavailable(
+            f"--armor on needs a workforce-admitted local worker for model {model!r}; "
+            f"admitted bounded_code_candidate models: {sorted(admitted)}"
+        )
+    worker = admitted[model]
+    return {"worker_id": worker.worker_id, "controls": list(worker.requires)}
+
+
+def probe_memory_hits(task: dict[str, Any], symbol: str, enabled: bool) -> tuple[int, str]:
+    """Real lesson count the planner sees as its memory signal. The off arm never queries memory."""
+    if not enabled:
+        return 0, "memory_arm_off"
+    try:
+        from nexus.services.local_heal.memory_retrieval_adapter import MemoryRetrievalAdapter
+
+        lessons = MemoryRetrievalAdapter(enabled=True).retrieve_reranked(
+            query_text=task["problem_statement"],
+            anchor_symbol=symbol,
+            anchor_file=task["target_file"],
+            limit=3,
+            max_chars=800,
+            task_id=task["id"],
+            current_state={"runtime_identity": "memory_ab_armor"},
+        )
+    except Exception as exc:  # noqa: BLE001 - a failed probe is recorded, not fatal
+        return 0, f"memory_probe_failed:{type(exc).__name__}"
+    return len(lessons or []), "ok"
+
+
+def run_armor_mainchain(
+    *,
+    task: dict[str, Any],
+    work_dir: Path,
+    run_root: Path,
+    arm: str,
+    attempt_id: str,
+    model: str,
+    profile: str,
+    git_rev: str,
+    python: str,
+    patch_timeout: int,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """One armor-on attempt: CapabilityPlanner -> run_mainchain(with_nexus_armor=True) -> local heal.
+
+    Local-only route: the planner-selected capabilities run through the mainchain executor registry,
+    the local model runs through LocalAssistService -> LocalModelExecutor at the armor profile.
+    Returns (UnifiedRuntime receipt, executor metadata sink). Tests monkeypatch build_armor_service.
+    """
+    from nexus.services.local_assist_service import REQUEST_SCHEMA, LocalAssistRequest
+    from nexus.services.mainchain_entry import build_mainchain_capability_invokers, run_mainchain
+    from nexus.services.runtime_compat import UnifiedRuntimeRequest
+
+    _, memory_enabled, _ = ARMS[arm]
+    task_id = task["id"]
+    target_file = task["target_file"]
+    symbol = derive_target_symbol(task, (work_dir / target_file).read_text(encoding="utf-8"))
+    evidence = (f"memory_ab:{attempt_id}:request",)
+    receipt_path = run_root / "armor_receipts" / f"{arm}__{task_id}.json"
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    armor_root = run_root / "armor_artifacts"
+    worker = resolve_armor_worker(model)
+    memory_hits, memory_probe = probe_memory_hits(task, symbol, memory_enabled)
+    executor_sink: dict[str, Any] = {"memory_hits": memory_hits, "memory_probe": memory_probe}
+
+    with armor_environment(model, profile, armor_root):
+        snapshot = build_armor_snapshot(task, model)
+        local_request = LocalAssistRequest(
+            schema=REQUEST_SCHEMA,
+            task_id=task_id,
+            parent_task_id=task_id,
+            workspace_root=str(work_dir),
+            workspace_revision=git_rev,
+            task_statement=task["problem_statement"],
+            action="verified-subtask",
+            allowed_files=(target_file,),
+            target_file=target_file,
+            target_symbol=symbol,
+            evidence_refs=evidence,
+            verifier_command=(python, task["repro_file"]),
+            time_budget=float(patch_timeout),
+            requested_role="candidate",
+            planner_snapshot=snapshot,
+        )
+        codeintel = {
+            "workspace_root": str(work_dir),
+            "target_file": target_file,
+            "target_symbol": symbol,
+        }
+        request = UnifiedRuntimeRequest(
+            task_id=task_id,
+            workspace_revision=git_rev,
+            task_statement=task["problem_statement"],
+            task_type="repair",
+            route={
+                "recommended_flow": "local_only",
+                "workforce_admission_enabled": True,
+                "workforce_bindings": {"local": worker},
+                "route_features": {
+                    "memory_hits": memory_hits,
+                    "findings_hits": 0,
+                    # repro.py is a deterministic verifier; the planner picks localheal_pipeline from it
+                    "deterministic_verifier_available": True,
+                },
+                "target_file": target_file,
+                "workspace_root": str(work_dir),
+            },
+            online_enabled=False,
+            local_enabled=True,
+            online_prompt=task["problem_statement"],
+            evidence_refs=evidence,
+            local_request=local_request,
+            codeintel=codeintel,
+        )
+
+        def online_disabled(_context: Any) -> dict[str, Any]:
+            raise RuntimeError("online channel is disabled for the armor A/B")
+
+        receipt = run_mainchain(
+            request,
+            online_invoker=online_disabled,
+            local_service=build_armor_service(armor_root / "isolated", executor_sink),
+            capability_invokers=build_mainchain_capability_invokers(codeintel=codeintel),
+            verifier=None,
+            learning=None,
+            receipt_path=receipt_path,
+            with_nexus_armor=True,
+        )
+    return receipt, executor_sink
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _ledger_profile(receipt: dict[str, Any]) -> str:
+    """Execution profile the provider ledger recorded for the last model call."""
+    ledger = _local_exec_receipt(receipt).get("provider_call_ledger") or []
+    for record in reversed(ledger):
+        profile = _as_dict(record).get("execution_profile")
+        if profile:
+            return str(profile)
+    return ""
+
+
+def empty_armor_evidence(source: str = "no_receipt") -> dict[str, Any]:
+    """Armor evidence for an attempt that produced no unified receipt (exception or timeout)."""
+    return {
+        "capabilities_selected": [],
+        "capabilities_invoked": [],
+        "advisory_stub_capabilities": [],
+        "committee_invoked": False,
+        "with_nexus_armor": False,
+        "armor_profile_observed": "",
+        "executor_pipeline_failure": "",
+        "executor_failure_class": "",
+        "executor_world_c_failure": "",
+        "semantic_retry_invoked": False,
+        "patch_attempt_count": 0,
+        "local_selected_capabilities": [],
+        "memory_selected_ids": [],
+        "memory_signal_hits": 0,
+        "memory_probe": "",
+        "memory_prompt_included": False,
+        "capability_status": {},
+        "local_stage_status": "",
+        "model_calls": 0,
+        "candidate_isolation_status": "",
+        "local_verifier_status": "",
+        "planner_decision_id": "",
+        "unified_receipt_terminal_status": "",
+        "evidence_source": source,
+    }
+
+
+def extract_armor_evidence(
+    receipt: dict[str, Any], executor_sink: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Receipt-backed capability evidence for an armor-on attempt (no advisory stubs)."""
+    local_stage = _as_dict(receipt.get("local"))
+    response = _as_dict(local_stage.get("response"))
+    outputs = _as_dict(response.get("local_outputs"))
+    meta = _as_dict(_as_dict(executor_sink).get("meta"))
+    model_calls = int(response.get("model_call_count") or response.get("provider_call_count") or 0)
+
+    selected = [str(c) for c in receipt.get("selected_capabilities") or []]
+    invoked: list[str] = []
+    stubs: list[str] = []
+    per_capability: dict[str, dict[str, Any]] = {}
+    for entry in receipt.get("capabilities") or []:
+        entry = _as_dict(entry)
+        name = str(entry.get("name") or "")
+        if not name:
+            continue
+        callable_name = str(entry.get("physical_callable") or "")
+        per_capability[name] = {
+            "status": entry.get("status"),
+            "invoked": bool(entry.get("invoked")),
+            "skipped": bool(entry.get("skipped")),
+            "gate_passed": bool(entry.get("gate_passed")),
+            "physical_callable": callable_name,
+        }
+        is_stub = any(marker in callable_name for marker in STUB_CALLABLE_MARKERS)
+        real = (
+            entry.get("invoked") is True
+            and not entry.get("skipped")
+            and entry.get("evidence_present") is True
+            and str(entry.get("status") or "") in {"INVOKED", "SUCCEEDED"}
+            and not is_stub
+        )
+        if real:
+            invoked.append(name)
+        elif is_stub and entry.get("invoked"):
+            stubs.append(name)
+
+    # The local stage runs the executor itself; its own causal usage map is evidence too.
+    executor_ran = bool(response.get("executor_invoked")) and model_calls > 0
+    usage = _as_dict(outputs.get("capability_usage_status"))
+    if executor_ran:
+        invoked.append("local_model_executor")
+        if meta.get("localheal_pipeline_run_called") is True:
+            invoked.append("repair_loop")
+    for name, status in usage.items():
+        if status != "used" or not executor_ran:
+            continue
+        if name in STUB_PRONE_CAPABILITIES:
+            continue
+        invoked.append(str(name))
+    ddtree = _as_dict(meta.get("ddtree_result"))
+    if ddtree.get("invoked"):
+        count = int(_as_dict(ddtree.get("telemetries")).get("candidate_count") or 0)
+        (invoked if count > 0 else stubs).append("ddtree")
+    autoreason = _as_dict(meta.get("autoreason_result"))
+    if autoreason.get("invoked"):
+        judged = int(_as_dict(autoreason.get("telemetries")).get("judge_count") or 0)
+        (invoked if judged > 0 else stubs).append("autoreason")
+    committee = bool(meta.get("p4_committee_invoked") is True)
+    if committee:
+        invoked.append("committee")
+
+    ordered = [c for c in selected if c in invoked]
+    ordered += sorted({c for c in invoked if c not in selected})
+    candidate = _as_dict(response.get("candidate_summary"))
+    verifier = _as_dict(response.get("verifier_summary"))
+    receipt_base = _as_dict(receipt.get("receipt_base"))
+    return {
+        "capabilities_selected": selected,
+        "capabilities_invoked": ordered,
+        "advisory_stub_capabilities": sorted(set(stubs)),
+        "committee_invoked": committee,
+        "with_nexus_armor": receipt_base.get("with_nexus_armor") is True,
+        "armor_profile_observed": str(
+            meta.get("final_execution_profile")
+            or meta.get("initial_execution_profile")
+            or _ledger_profile(receipt)
+        ),
+        "executor_pipeline_failure": str(meta.get("pipeline_failure_reason") or "")[:200],
+        "executor_failure_class": str(meta.get("failure_class") or "")[:100],
+        "executor_world_c_failure": str(meta.get("path_a_failure_reason") or "")[:300],
+        "semantic_retry_invoked": bool(meta.get("semantic_retry_invoked")),
+        "patch_attempt_count": int(meta.get("patch_attempt_count") or 0),
+        "local_selected_capabilities": [
+            str(c)
+            for c in _as_dict(executor_sink).get("selected_capabilities")
+            or outputs.get("selected_capabilities")
+            or []
+        ],
+        "memory_selected_ids": [str(c) for c in meta.get("memory_selected_ids") or []],
+        "memory_signal_hits": int(_as_dict(executor_sink).get("memory_hits") or 0),
+        "memory_probe": str(_as_dict(executor_sink).get("memory_probe") or ""),
+        "memory_prompt_included": bool(meta.get("memory_prompt_included")),
+        "capability_status": per_capability,
+        "local_stage_status": str(local_stage.get("status") or ""),
+        "model_calls": model_calls,
+        "candidate_isolation_status": str(candidate.get("isolation_status") or ""),
+        "local_verifier_status": str(verifier.get("verifier_status") or ""),
+        "planner_decision_id": str(receipt.get("planner_decision_id") or ""),
+        "unified_receipt_terminal_status": str(receipt.get("terminal_status") or ""),
+        "evidence_source": "unified_runtime_receipt",
+    }
+
+
+def extract_heal_receipt_evidence(receipt_path: str) -> dict[str, Any]:
+    """Receipt-backed evidence for an armor-off attempt, read from the HealPipeline receipt.json."""
+    empty = {
+        "capabilities_selected": [],
+        "capabilities_invoked": [],
+        "advisory_stub_capabilities": [],
+        "committee_invoked": False,
+        "with_nexus_armor": False,
+        "evidence_source": "missing",
+    }
+    path = Path(str(receipt_path or ""))
+    if not path.is_file():
+        return empty
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return empty
+    receipt_base = _as_dict(receipt.get("receipt_base"))
+    chain = [_as_dict(item) for item in receipt_base.get("consumption_chain") or []]
+    selected = [str(c["capability"]) for c in chain if c.get("capability") and c.get("selected")]
+    invoked = [
+        str(c["capability"])
+        for c in chain
+        if c.get("capability") and c.get("selected") and c.get("evidence_present")
+    ]
+    return {
+        "capabilities_selected": selected,
+        "capabilities_invoked": invoked,
+        "advisory_stub_capabilities": [],
+        "committee_invoked": receipt.get("p4_committee_invoked") is True,
+        "with_nexus_armor": receipt_base.get("with_nexus_armor") is True,
+        "evidence_source": "local_heal_receipt",
+    }
+
+
+def materialize_candidate(receipt: dict[str, Any], work_dir: Path, target_file: str) -> str:
+    """Copy the isolated, hash-matched candidate result into work_dir so the repro rerun judges it.
+
+    The executor never edits the real workspace; without this the independent verdict would always
+    see the original bug. Returns a status string recorded in armor_evidence.
+    """
+    response = _as_dict(_as_dict(receipt.get("local")).get("response"))
+    candidate = _as_dict(response.get("candidate_summary"))
+    if not candidate.get("selected"):
+        return "no_candidate"
+    if candidate.get("isolation_status") != "isolated":
+        return "candidate_not_isolated"
+    if not candidate.get("selected_candidate_hash_matches_applied"):
+        return "candidate_hash_not_proven"
+    patched = Path(str(candidate.get("isolated_workspace") or "")) / target_file
+    if not patched.is_file():
+        return "isolated_target_missing"
+    shutil.copyfile(patched, work_dir / target_file)
+    return "applied"
+
+
+def apply_armor_overrides(
+    row: dict[str, Any], armor: str, armor_profile: str, evidence: dict[str, Any]
+) -> None:
+    """Flat armor columns on every row, plus the armor_evidence sibling with the detail."""
+    row["armor"] = armor
+    row["armor_profile"] = armor_profile
+    row["capabilities_selected"] = list(evidence["capabilities_selected"])
+    row["capabilities_invoked"] = list(evidence["capabilities_invoked"])
+    row["committee_invoked"] = bool(evidence["committee_invoked"])
+    row["with_nexus_armor"] = bool(evidence["with_nexus_armor"])
+    row["armor_evidence"] = evidence
+
+
+def build_armor_axis(rows: list[dict[str, Any]], armor: str, armor_profile: str) -> dict[str, Any]:
+    """Scorecard block: per-attempt armor evidence and rollups."""
+    attempts = [
+        {
+            "attempt_id": r["attempt_id"],
+            "task_id": r["task_id"],
+            "workflow": r["workflow"],
+            "terminal_outcome": r["terminal_outcome"],
+            **{key: r[key] for key in ARMOR_ROW_KEYS},
+        }
+        for r in rows
+    ]
+    invoked_union = sorted({c for r in rows for c in r["capabilities_invoked"]})
+    return {
+        "schema": "memory_ab_v1.armor_axis.v1",
+        "armor": armor,
+        "armor_profile": armor_profile,
+        "attempts": attempts,
+        "capabilities_invoked_union": invoked_union,
+        "attempts_with_nexus_armor": sum(1 for r in rows if r["with_nexus_armor"]),
+        "attempts_with_committee": sum(1 for r in rows if r["committee_invoked"]),
+        "attempts_with_capability_evidence": sum(1 for r in rows if r["capabilities_invoked"]),
+        "claim_ceiling": "which capabilities left receipt evidence; not an effectiveness claim",
+    }
+
+
+def _local_exec_receipt(receipt: dict[str, Any]) -> dict[str, Any]:
+    """LocalAssistService execution_receipt.json on disk ({} when absent)."""
+    response = _as_dict(_as_dict(receipt.get("local")).get("response"))
+    path = Path(str(response.get("receipt_path") or ""))
+    try:
+        return _as_dict(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
 def _unique_ids(values: Any) -> list[str]:
     out: list[str] = []
     for value in values or []:
@@ -441,6 +980,8 @@ def run_attempt(
     git_tree: str,
     python: str,
     state_root: Path,
+    armor: str = "off",
+    armor_profile: str = DEFAULT_ARMOR_PROFILE,
 ) -> dict[str, Any]:
     nexus_arm, memory_enabled, row_arm = ARMS[arm]
     task_id = task["id"]
@@ -450,7 +991,21 @@ def run_attempt(
     shutil.copytree(task["dir"], work_dir, ignore=shutil.ignore_patterns("__pycache__"))
     attempt_id = f"{run_id}:{nexus_arm}:{task_id}"
 
-    ctx = build_ctx(task, work_dir, arm, attempt_id, run_root, python)
+    if armor == "on":
+        # No legacy HealContext on the armor path; the same attributes are filled from the receipt.
+        ctx: Any = SimpleNamespace(
+            memory_enabled=None,
+            memory_arm=None,
+            receipt_path="",
+            model_decisions=[],
+            user_prompt="",
+            solve_eligible=False,
+            _memory_influence_trace=None,
+        )
+    else:
+        ctx = build_ctx(task, work_dir, arm, attempt_id, run_root, python)
+    armor_receipt: dict[str, Any] = {}
+    executor_sink: dict[str, Any] = {}
     counter = ModelCallCounter(model)
     pipeline_status = "ok"
     failure_reason = ""
@@ -466,7 +1021,21 @@ def run_attempt(
     try:
         if use_alarm:
             signal.setitimer(signal.ITIMER_REAL, float(patch_timeout))
-        run_pipeline(ctx, counter)
+        if armor == "on":
+            armor_receipt, executor_sink = run_armor_mainchain(
+                task=task,
+                work_dir=work_dir,
+                run_root=run_root,
+                arm=arm,
+                attempt_id=attempt_id,
+                model=model,
+                profile=armor_profile,
+                git_rev=git_rev,
+                python=python,
+                patch_timeout=patch_timeout,
+            )
+        else:
+            run_pipeline(ctx, counter)
     except AttemptTimeout as exc:
         pipeline_status = "timeout"
         failure_reason = str(exc)
@@ -480,6 +1049,36 @@ def run_attempt(
             signal.setitimer(signal.ITIMER_REAL, 0)
             signal.signal(signal.SIGALRM, old_handler)
     pipeline_elapsed = time.monotonic() - started
+
+    armor_materialized = ""
+    if armor == "on":
+        armor_evidence = (
+            extract_armor_evidence(armor_receipt, executor_sink)
+            if armor_receipt
+            else empty_armor_evidence()
+        )
+        counter.calls = int(armor_evidence.get("model_calls") or 0)
+        if armor_receipt:
+            armor_materialized = materialize_candidate(armor_receipt, work_dir, task["target_file"])
+            # The planner owns capability selection; the arm controls the memory signal it sees and
+            # the off arm must never reach the executor with memory selected.
+            flag_applied = (
+                memory_enabled or "memory" not in armor_evidence["local_selected_capabilities"]
+            )
+            ctx.memory_enabled = memory_enabled if flag_applied else not memory_enabled
+            ctx.memory_arm = nexus_arm if flag_applied else "unapplied"
+            ctx.receipt_path = str(armor_receipt.get("receipt_path") or "")
+            ctx.solve_eligible = armor_evidence["local_verifier_status"] == "pass"
+            ctx.user_prompt = str(_local_exec_receipt(armor_receipt).get("prompt_hash") or "")
+        armor_evidence["candidate_materialized"] = armor_materialized
+        armor_evidence["armor_profile_requested"] = armor_profile
+        if armor_receipt and not armor_evidence["with_nexus_armor"]:
+            ineligible.append("armor_not_applied")
+        observed_profile = armor_evidence.get("armor_profile_observed", "")
+        if observed_profile and observed_profile != armor_profile:
+            ineligible.append("armor_profile_not_applied")
+        elif not observed_profile and armor_evidence["model_calls"] > 0:
+            ineligible.append("armor_profile_unobserved")
 
     # ctx is only synced from the operational context when the pipeline returns,
     # so the flag check is meaningful only for completed runs.
@@ -518,6 +1117,10 @@ def run_attempt(
     episode = read_episode(state_root, task_id, attempt_id)
     retrieved = _unique_ids(episode.get("retrieved_lesson_ids") if episode else [])
     applied = _unique_ids(episode.get("applied_lesson_ids") if episode else [])
+    if armor == "on" and episode is None and armor_receipt:
+        # The executor retrieves lessons itself; its receipt is the evidence on the armor path.
+        retrieved = _unique_ids(armor_evidence["memory_selected_ids"])
+        applied = list(retrieved) if armor_evidence["memory_prompt_included"] else []
     applied = [lesson for lesson in applied if lesson in retrieved]
 
     # Retrieval receipt: explicit disabled receipt for the off arm, trace-backed for the on arm.
@@ -620,6 +1223,11 @@ def run_attempt(
         "prompt_sha256": sha256_bytes(prompt.encode("utf-8")) if prompt else "",
         "work_dir": str(work_dir),
     }
+    if armor != "on":
+        armor_evidence = extract_heal_receipt_evidence(str(getattr(ctx, "receipt_path", "") or ""))
+    apply_armor_overrides(
+        row, armor, armor_profile if armor == "on" else ARMOR_PROFILE_NONE, armor_evidence
+    )
     normalize_attempt_row(row)  # fail loudly if the row is not contract-valid
     return row
 
@@ -659,8 +1267,15 @@ def build_workflow_rows(rows: list[dict[str, Any]], model: str) -> list[dict[str
     return out
 
 
-def build_scorecard(rows: list[dict[str, Any]], task_count: int, model: str) -> dict[str, Any]:
+def build_scorecard(
+    rows: list[dict[str, Any]],
+    task_count: int,
+    model: str,
+    armor: str = "off",
+    armor_profile: str = ARMOR_PROFILE_NONE,
+) -> dict[str, Any]:
     scorecard = replay_scorecard(rows)
+    scorecard["armor_axis"] = build_armor_axis(rows, armor, armor_profile)
     scorecard["quality_gate"] = compare_workflows_at_required_quality(
         build_workflow_rows(rows, model),
         required_quality_floor=0.0,
@@ -680,6 +1295,8 @@ def build_validation(
     state_root: Path,
     reflect_judge: str,
     leaks: list[str],
+    armor: str = "off",
+    armor_profile: str = ARMOR_PROFILE_NONE,
 ) -> dict[str, Any]:
     model_calls = sum(int(r["model_calls"]) for r in rows)
     prompts: dict[str, dict[str, str]] = {}
@@ -708,6 +1325,11 @@ def build_validation(
         "retrieved_lesson_count": sum(len(r["retrieved_lesson_ids"]) for r in rows),
         "applied_lesson_count": sum(len(r["applied_attributed_lesson_ids"]) for r in rows),
         "reflect_judge": reflect_judge,
+        "armor": armor,
+        "armor_profile": armor_profile,
+        "with_nexus_armor_verified": all(r["with_nexus_armor"] for r in rows)
+        if rows and armor == "on"
+        else False,
         "state_root": str(state_root),
         "state_leaks": leaks,
         "claim_ceiling": "internal observational A/B on synthetic fixtures; no public, training or production claim",
@@ -743,7 +1365,25 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--artifact-root", type=Path, default=DEFAULT_ARTIFACT_ROOT)
     parser.add_argument("--reflect-judge", choices=["none", "ollama"], default="none")
+    parser.add_argument(
+        "--armor",
+        choices=list(ARMOR_MODES),
+        default="off",
+        help="off: bare HealPipeline (default, unchanged). on: CapabilityPlanner + run_mainchain "
+        "with_nexus_armor + local heal at --armor-profile",
+    )
+    parser.add_argument(
+        "--armor-profile",
+        choices=list(ARMOR_PROFILES),
+        default=None,
+        help=f"local armor execution profile when --armor on (default {DEFAULT_ARMOR_PROFILE})",
+    )
     args = parser.parse_args(argv)
+    if args.armor == "off" and args.armor_profile is not None:
+        parser.error("--armor-profile requires --armor on")
+    args.armor_profile = (
+        (args.armor_profile or DEFAULT_ARMOR_PROFILE) if args.armor == "on" else ARMOR_PROFILE_NONE
+    )
     args.arms = [a.strip() for a in args.arms.split(",") if a.strip()]
     args.task_ids = [t.strip() for t in args.task_ids.split(",") if t.strip()] or None
     if not args.arms or any(a not in ARMS for a in args.arms):
@@ -762,6 +1402,8 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         preflight_model(args.model)
+        if args.armor == "on":
+            resolve_armor_worker(args.model)
     except ModelUnavailable as exc:
         print(f"PREFLIGHT_FAILED: {exc}", file=sys.stderr)
         return EXIT_PREFLIGHT
@@ -803,6 +1445,8 @@ def main(argv: list[str] | None = None) -> int:
                 git_tree=git_tree,
                 python=python,
                 state_root=state_root,
+                armor=args.armor,
+                armor_profile=args.armor_profile,
             )
             append_row(rows_path, row)
             rows.append(row)
@@ -810,12 +1454,13 @@ def main(argv: list[str] | None = None) -> int:
                 f"[{arm}] {task['id']:32} {row['terminal_outcome']:9} "
                 f"pipeline={row['pipeline_status']} t={row['wall_duration_sec']}s "
                 f"calls={row['model_calls']} retrieved={row['retrieved_lesson_ids']} "
-                f"applied={row['applied_attributed_lesson_ids']}",
+                f"applied={row['applied_attributed_lesson_ids']} armor={row['armor']} "
+                f"invoked={row['capabilities_invoked']}",
                 flush=True,
             )
 
     leaks = guard.leaks()
-    scorecard = build_scorecard(rows, len(tasks), args.model)
+    scorecard = build_scorecard(rows, len(tasks), args.model, args.armor, args.armor_profile)
     (run_root / "scorecard.json").write_text(
         json.dumps(scorecard, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -828,6 +1473,8 @@ def main(argv: list[str] | None = None) -> int:
         state_root=state_root,
         reflect_judge=args.reflect_judge,
         leaks=leaks,
+        armor=args.armor,
+        armor_profile=args.armor_profile,
     )
     (run_root / "validation.json").write_text(
         json.dumps(validation, indent=2, sort_keys=True) + "\n", encoding="utf-8"

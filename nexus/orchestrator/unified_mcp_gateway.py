@@ -2633,12 +2633,109 @@ class UnifiedMCPGateway:
             job["probe_evidence_path"] = str(self._probe_evidence_read_root() / (identity + ".json"))
         return self._assist_write(job)
 
+    _ASSIST_HUNK_HEADER_RE = re.compile(r"^@@ -\d{1,9}(?:,(\d{1,9}))? \+\d{1,9}(?:,(\d{1,9}))? @@")
+    _ASSIST_GIT_HEADER_RE = re.compile(r"^diff --git \S.* \S.*$")
+    # Git extended header lines. The first group needs no hunk to be a real change.
+    _ASSIST_GIT_CHANGE_RE = re.compile(
+        r"^(new file mode [0-7]{6}|deleted file mode [0-7]{6}|old mode [0-7]{6}|new mode [0-7]{6}|"
+        r"rename from \S.*|rename to \S.*|Binary files .* differ|GIT binary patch)$"
+    )
+    _ASSIST_GIT_OTHER_RE = re.compile(
+        r"^(index \S+( [0-7]{6})?|similarity index \d+%|dissimilarity index \d+%|copy from \S.*|copy to \S.*)$"
+    )
+
     @staticmethod
     def _assist_patch_is_substantive(patch: Any) -> bool:
-        """A patch must be a non-empty unified diff, never null/empty/refusal prose."""
-        return isinstance(patch, str) and bool(
-            re.match(r"\s*(diff --git |--- |Index: )", patch)
-        )
+        """A patch must be a structurally valid unified diff, never null/empty/refusal prose.
+
+        Accepts a `--- `/`+++ ` file section with a hunk header followed by at least one
+        `+`/`-` change line, or a `diff --git` section whose extended header needs no hunk
+        (new/deleted file, rename, mode change, binary). Single linear pass.
+        """
+        if not isinstance(patch, str):
+            return False
+        cls = UnifiedMCPGateway
+        lines = patch.splitlines()
+        count = len(lines)
+        index = 0
+        while index < count:
+            line = lines[index]
+            if line.startswith("--- ") and index + 1 < count and lines[index + 1].startswith("+++ "):
+                index += 2
+                while index < count:
+                    header = cls._ASSIST_HUNK_HEADER_RE.match(lines[index])
+                    if header is None:
+                        break
+                    # Consume the hunk by its header counts (like git apply), so removed or
+                    # added lines that look like `--- `/`+++ ` are body, not file headers.
+                    try:
+                        old_left = 1 if header.group(1) is None else int(header.group(1))
+                        new_left = 1 if header.group(2) is None else int(header.group(2))
+                    except ValueError:
+                        return False
+                    index += 1
+                    body_start = index
+                    changed = False
+                    counted = True
+                    while old_left > 0 or new_left > 0:
+                        if index >= count:
+                            counted = False
+                            break
+                        body = lines[index]
+                        marker = body[:1]
+                        if marker == "\\":
+                            index += 1
+                            continue
+                        if marker in ("", " ") and old_left > 0 and new_left > 0:
+                            old_left -= 1
+                            new_left -= 1
+                        elif marker == "-" and old_left > 0:
+                            old_left -= 1
+                            changed = True
+                        elif marker == "+" and new_left > 0:
+                            new_left -= 1
+                            changed = True
+                        else:
+                            counted = False
+                            break
+                        index += 1
+                    if counted:
+                        while index < count and lines[index].startswith("\\"):
+                            index += 1
+                    else:
+                        # Counts not satisfied: the applier uses `git apply --recount`, so
+                        # re-read this hunk by line shape up to the next real section header.
+                        index = body_start
+                        changed = False
+                        while index < count:
+                            body = lines[index]
+                            if body.startswith(("diff --git ", "@@ ")) or (
+                                body.startswith("--- ")
+                                and index + 1 < count
+                                and lines[index + 1].startswith("+++ ")
+                            ):
+                                break
+                            marker = body[:1]
+                            if marker in ("+", "-"):
+                                changed = True
+                            elif marker not in ("", " ", "\\"):
+                                return False
+                            index += 1
+                    if changed:
+                        return True
+                continue
+            if cls._ASSIST_GIT_HEADER_RE.match(line):
+                index += 1
+                while index < count:
+                    header = lines[index]
+                    if cls._ASSIST_GIT_CHANGE_RE.match(header):
+                        return True
+                    if not cls._ASSIST_GIT_OTHER_RE.match(header):
+                        break
+                    index += 1
+                continue
+            index += 1
+        return False
 
     @staticmethod
     def _assist_action(job: Mapping[str, Any]) -> dict[str, Any]:

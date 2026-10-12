@@ -155,9 +155,11 @@ def test_replay_runner_runs_argv_without_shell(tmp_path, monkeypatch):
         return MagicMock(returncode=0, stdout="ok", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    report = ReplayRunner(tmp_path).run_replay({"test_artifacts": [{"command": "echo 'a b' c"}]})
+    report = ReplayRunner(tmp_path).run_replay({
+        "test_artifacts": [{"command": "pytest -k 'a b' c"}]
+    })
     assert report["passed"] is True
-    assert seen["argv"] == ["echo", "a b", "c"]
+    assert seen["argv"] == ["pytest", "-k", "a b", "c"]
     assert not seen["kwargs"].get("shell")
 
 

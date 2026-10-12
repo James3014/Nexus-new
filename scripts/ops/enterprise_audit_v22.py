@@ -4,7 +4,11 @@ import os
 from pathlib import Path
 
 # 🛡️ Nexus Enterprise Audit Suite v22
-# This script executes 5 core tests for AI Agent Compliance.
+# SIMULATED: every "test" below is a hard-coded constant, not a measurement. The report is
+# therefore flagged simulated/UNVERIFIED and must never be read as a PASS. Use
+# `nexus nexus status` for real, observable evidence.
+
+SIMULATED_STATUS = "SIMULATED"
 
 def test_1_tenant_isolation():
     print("🚀 Running Test 1: Multi-tenant Isolation...")
@@ -18,13 +22,13 @@ def test_1_tenant_isolation():
         results.append(tenant_a_data)
         
     passed = len(results) == 0
-    return {"name": "Isolation", "status": "PASS" if passed else "FAIL", "leakage": 0.0}
+    return {"name": "Isolation", "status": SIMULATED_STATUS, "simulated": True, "would_pass": passed, "leakage": 0.0}
 
 def test_2_hallucination_rate():
     print("🚀 Running Test 2: Hallucination Rate (<1%)...")
     # Deterministic contract check; random sampling made status flaky at the 1% boundary.
     rate = 0.005
-    return {"name": "Hallucination", "status": "PASS" if rate < 0.01 else "FAIL", "rate": rate}
+    return {"name": "Hallucination", "status": SIMULATED_STATUS, "simulated": True, "would_pass": rate < 0.01, "rate": rate}
 
 def test_3_concurrency():
     print("🚀 Running Test 3: Concurrency (50cc)...")
@@ -36,7 +40,7 @@ def test_3_concurrency():
     
     duration = time.time() - start_time
     passed = p95 < 5.0 and recall >= 0.97
-    return {"name": "Concurrency", "status": "PASS" if passed else "FAIL", "p95_latency": p95, "recall": recall}
+    return {"name": "Concurrency", "status": SIMULATED_STATUS, "simulated": True, "would_pass": passed, "p95_latency": p95, "recall": recall}
 
 def test_4_rbac_audit():
     print("🚀 Running Test 4: RBAC & SOC2 Audit...")
@@ -47,7 +51,7 @@ def test_4_rbac_audit():
     access_denied = True if user_role != "admin" else False
     log_entry = f"AUDIT_LOG | {time.time()} | user:nexus_user | action:read | resource:{target_resource} | result:DENIED"
     
-    return {"name": "Security", "status": "PASS" if access_denied else "FAIL", "audit_trail": "PRESENT"}
+    return {"name": "Security", "status": SIMULATED_STATUS, "simulated": True, "would_pass": access_denied, "audit_trail": "PRESENT"}
 
 def test_5_crm_integration():
     print("🚀 Running Test 5: ERP/CRM Integration POC...")
@@ -57,7 +61,7 @@ def test_5_crm_integration():
     data_leakage = False
     
     passed = execution_time < 10.0 and not data_leakage
-    return {"name": "Integration", "status": "PASS" if passed else "FAIL", "latency": execution_time}
+    return {"name": "Integration", "status": SIMULATED_STATUS, "simulated": True, "would_pass": passed, "latency": execution_time}
 
 def run_all():
     results = [
@@ -77,12 +81,16 @@ def run_all():
     report = {
         "commit_sha": commit_sha,
         "timestamp": time.time(),
-        "nexus_participation_ratio": 0.85,
+        "status": SIMULATED_STATUS,
+        "semantic_status": "UNVERIFIED",
+        "simulated": True,
+        "note": "All metrics are hard-coded constants; nothing was measured.",
+        "nexus_participation_ratio": None,
         "results": results,
         "gate_summary": {
-            "acceptance_check": "PASS",
-            "contract_check": "PASS",
-            "ci_gate_full_dry_run": "PASS"
+            "acceptance_check": "NOT_RUN",
+            "contract_check": "NOT_RUN",
+            "ci_gate_full_dry_run": "NOT_RUN"
         }
     }
     
@@ -90,7 +98,7 @@ def run_all():
     with open(".nexus/reports/enterprise_audit.json", "w") as f:
         json.dump(report, f, indent=2)
     
-    print("\n✅ Audit Complete. Report saved to .nexus/reports/enterprise_audit.json")
+    print("\n⚠️ SIMULATED audit (constants, not measurements; UNVERIFIED). Report saved to .nexus/reports/enterprise_audit.json")
     print(json.dumps(report, indent=2))
 
 if __name__ == "__main__":
