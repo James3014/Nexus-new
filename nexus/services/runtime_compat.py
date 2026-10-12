@@ -9,6 +9,7 @@ of silently selecting a legacy implementation.
 
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 from typing import Any
 
@@ -74,6 +75,32 @@ def build_host_runtime_exports():
             {"memory": _MEMORY_INVOKER} if _MEMORY_INVOKER is not None else {}
         ),
     )
+
+
+_EXECUTOR_BINDING_MODULE = "nexus_runtime.support.services.executor_binding"
+
+
+def _resolve_physical_executor(key: str) -> Any | None:
+    # Lazy: the executor registry imports most of the host, so import on first call.
+    from nexus.core.capability_executor_registry import get_executor
+
+    return get_executor(key)
+
+
+def register_executor_resolver_if_available() -> bool:
+    """Register the host executor registry with the runtime's executor seam.
+
+    A no-op returning False when the installed runtime predates the seam.
+    """
+    try:
+        binding = importlib.import_module(_EXECUTOR_BINDING_MODULE)
+    except ImportError:
+        return False
+    binding.register_executor_resolver(_resolve_physical_executor)
+    return True
+
+
+register_executor_resolver_if_available()
 
 
 _RUNTIME = build_host_runtime_exports()
