@@ -129,12 +129,12 @@ def test_corpus_extension_gb084_to_gb100_is_bound() -> None:
     assert len(CASES) == 100
     assert ids == [f"GB-{index:03d}" for index in range(1, 101)]
     by_id = {case.case_id: case for case in CASES}
-    for index in (*range(84, 98), 100):
+    for index in (*range(84, 98), 99, 100):
         case = by_id[f"GB-{index:03d}"]
         assert case.status == "covered"
         assert case.finding_id is None
         assert case.automated_tests
-    new_findings = {f"GB-{index:03d}": f"GBF-{index - 91:03d}" for index in range(98, 100)}
+    new_findings = {"GB-098": "GBF-007"}
     for case_id, finding_id in new_findings.items():
         case = by_id[case_id]
         assert case.status == "finding"
@@ -142,6 +142,7 @@ def test_corpus_extension_gb084_to_gb100_is_bound() -> None:
         assert case.automated_tests == ()
         assert "2026-10-12" in FINDINGS[finding_id]
     assert "GBF-006" not in FINDINGS
+    assert "GBF-008" not in FINDINGS
     assert "GBF-009" not in FINDINGS
 
 
