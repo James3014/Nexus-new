@@ -103,7 +103,10 @@ def test_local_qwen35_9b_blocks():
     assert result.records[0].decision["decision"] == "BLOCK"
 
 
-def test_local_qwen3_8b_nexus_full_escalates():
+def test_local_advisor_nexus_full_escalates():
+    # Node id kept stable for the exact-base impact gate. local_advisor_3b is now
+    # INSTALLED_NOT_CONNECTED (BLOCK), so the local nexus_full ESCALATE case is
+    # exercised with local_qwen3_8b, which has an observed full-context regression.
     result = evaluate(
         demands(
             demand(
