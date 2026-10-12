@@ -449,6 +449,9 @@ def test_default_capability_nodes_cover_core_space():
 
 def test_default_capability_nodes_cover_full_nexus_capability_registry():
     nodes = default_capability_nodes()
+    # nexus-runtime #171 retired benchmark/federation/oracle_shadow/stress_test/ui_validator; they stay
+    # registered (as maturity="retired") but are excluded from the live-capability expectation below.
+    retired = {"benchmark", "federation", "oracle_shadow", "stress_test", "ui_validator"}
     expected = {
         "direct_mode",
         "memory",
@@ -465,7 +468,6 @@ def test_default_capability_nodes_cover_full_nexus_capability_registry():
         "delivery_gate",
         "acceptance_check",
         "sandbox",
-        "benchmark",
         "meta_opt",
         "autonomic_router",
         "pregate",
@@ -476,19 +478,16 @@ def test_default_capability_nodes_cover_full_nexus_capability_registry():
         "multi_agent",
         "file_lock",
         "integration_manager",
-        "ui_validator",
-        "stress_test",
         "registry_sync",
         "metabolism",
-        "oracle_shadow",
-        "federation",
     }
 
     assert expected <= set(nodes)
+    assert retired <= set(nodes)
+    assert all(nodes[name].maturity == "retired" for name in retired)
     assert nodes["delivery_gate"].default_state == "required"
     assert nodes["memory"].category == "memory"
     assert nodes["autonomic_router"].maturity == "prototype"
-    assert nodes["oracle_shadow"].maturity == "experimental"
     assert "gate_verdict" in nodes["delivery_gate"].evidence_outputs
     assert "policy_verdict" in nodes["mempalace_gate"].evidence_outputs
 
@@ -784,10 +783,10 @@ def test_capability_planner_selects_second_wave_platform_capabilities():
         "integration_manager",
         "registry_sync",
         "metabolism",
-        "benchmark",
-        "oracle_shadow",
-        "stress_test",
     } <= selected
+    # nexus-runtime #171: retired nodes are never selected and are forced into forbidden_capabilities.
+    assert not {"benchmark", "oracle_shadow", "stress_test"} & selected
+    assert {"benchmark", "oracle_shadow", "stress_test"} <= set(plan["forbidden_capabilities"])
 
 
 def test_capability_planner_selects_acceptance_xray_forecast_and_research_control_gap_capabilities():
@@ -931,7 +930,8 @@ def test_capability_planner_emits_planned_skill_mount_contract_for_curated_skill
                 "skill_catalog:nexus-benchmark-public-report",
                 "skill_path:/repo/.agents/skills/nexus-benchmark-public-report/SKILL.md",
             ],
-            "planner_selected_capability": True,
+            # nexus-runtime #171 retired the benchmark capability, so it is no longer planner-selected.
+            "planner_selected_capability": False,
         }
     ]
     assert snapshot["skill_mount_violations"] == [
@@ -2630,7 +2630,10 @@ def test_capability_planner_harness_lite_lane_slims_seeded_high_cost_capabilitie
     policy = plan["signal_snapshot"]["harness_cost_lane_policy"]
     assert policy["cost_lane"] == "lite"
     assert policy["applied"] is True
-    assert {"swarm", "nightshift", "ultra_review", "benchmark"} <= set(policy["downgraded"])
+    assert {"swarm", "nightshift", "ultra_review"} <= set(policy["downgraded"])
+    # nexus-runtime #171: benchmark is retired, so it is forbidden up front rather than lite-lane downgraded.
+    assert "benchmark" not in policy["downgraded"]
+    assert "benchmark" in plan["forbidden_capabilities"]
     trace = {item["capability"]: item for item in plan["decision_trace"]}
     assert "harness_lite_lane_cost_slimming" in trace["swarm"]["reasons"]
 

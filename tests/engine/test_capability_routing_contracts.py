@@ -324,9 +324,10 @@ def test_planner_composes_core_capabilities_from_commercial_lane_signals():
         "swarm",
         "drone",
         "nightshift",
-        "stress_test",
-        "benchmark",
     } <= selected
+    # nexus-runtime #171: stress_test/benchmark are retired, never selected, and forced into forbidden.
+    assert not ({"stress_test", "benchmark"} & selected)
+    assert {"stress_test", "benchmark"} <= set(plan.forbidden_capabilities)
     assert not ({"swarm", "drone", "nightshift"} & set(plan.pending_capabilities))
 
 

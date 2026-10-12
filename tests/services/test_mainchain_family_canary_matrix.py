@@ -1198,7 +1198,11 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
     SCRATCH.mkdir(parents=True, exist_ok=True)
     root = Path(__file__).resolve().parents[2]
     catalog = build_capability_catalog(repo_root=root)
-    promotable = _promotable_names()
+    # nexus-runtime #171 retired nodes stay parametrized (honest not-selected
+    # canary) but are never promotable.
+    promotable = [
+        name for name in _promotable_names() if _node_meta(name)["maturity"].lower() != "retired"
+    ]
     per_cap: list[dict[str, Any]] = []
     probe_only = 0
     fixture_count = 0
@@ -1213,6 +1217,15 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
         final_status = str(pos["final_status"])
         if neg["final_status"] != "OK":
             final_status = neg["final_status"]
+        if (
+            _node_meta(name)["maturity"].lower() == "retired"
+            and first_broken == "not_selected_by_planner"
+            and not pos["planner_selected"]
+            and not pos["invoked"]
+            and not neg["invoked"]
+        ):
+            # nexus-runtime #171: an honestly unselected retired node is not a structural failure.
+            final_status = "RETIRED_NOT_SELECTED"
         if pos.get("action") in _SHALLOW_ACTIONS and pos.get("gate_passed"):
             probe_only += 1
         phys = str(pos.get("physical_callable") or "")
@@ -1455,7 +1468,7 @@ def test_generate_closure_receipt_required() -> None:
     assert RECEIPT_PATH.is_file()
     assert RECEIPT_TMP.is_file()
     assert receipt["planner_contract_count"] == 57
-    assert receipt["promotable_count"] == 53
+    assert receipt["promotable_count"] == 50
     assert receipt["promotable_missing_engine_count"] == 0
     assert receipt["probe_only_success_count"] == 0
     assert receipt["fixture_callable_count"] == 0
@@ -1611,6 +1624,16 @@ def test_promotable_family_canary_mainchain_entry(name: str) -> None:
     neg = _run_family_canary(name, positive=False)
     contract = PLANNER_EXECUTION_CONTRACTS[name]
     assert pos["mainchain_entry"] is True
+    if _node_meta(name)["maturity"].lower() == "retired":
+        # nexus-runtime #171 (RETIRED_2026_10_12_FIRST_BATCH): retired nodes are never planner-selected
+        # and never execute; the canary must show an honest not-selected state, not a false green.
+        assert pos["planner_selected"] is False
+        assert pos["first_broken_edge"] == "not_selected_by_planner"
+        assert pos["invoked"] is False
+        assert pos["public_claim_allowed"] is False
+        assert neg["planner_selected"] is False
+        assert neg["invoked"] is False
+        return
     assert pos["planner_selected"] is True
     assert pos["public_claim_allowed"] is False
     auth_local = os.environ.get("NEXUS_LOCAL_MODEL_CALL_ALLOWED", "").strip() == "1"

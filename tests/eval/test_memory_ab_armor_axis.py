@@ -244,7 +244,8 @@ def test_armor_on_rejects_model_without_admitted_worker(harness, capsys):
         "--tasks-dir", str(make_tasks(harness["root"])),
         "--run-id", "bad-model",
         "--artifact-root", str(harness["root"] / "art"),
-        "--model", "incoai/Qwen3.6-35B-A3B-Splash",
+        # Not a YAML worker: incoai/Qwen3.6-35B-A3B-Splash became admitted (local_splash_qwen36) in nexus-runtime #165.
+        "--model", "wiring-audit/not-a-worker:0b",
         "--armor", "on",
     ]  # fmt: skip
     assert runner.main(args) == runner.EXIT_PREFLIGHT

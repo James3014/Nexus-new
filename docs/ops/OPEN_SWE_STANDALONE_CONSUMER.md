@@ -30,6 +30,11 @@ requires the accepted local ChatGPT compatibility correction, including
 model-picker hydration handling and exact JSON whitespace readback; this
 overlay does not install or activate that correction.
 
+With `worker_backend=open_swe` the service requests Workforce routing as consumer
+`external_intelligence`, which the runtime policy routes to
+`opencli_chatgpt_balanced_web` (owner decision 2026-10-12). The `opencode`
+rollback backend sends no consumer and keeps the global route.
+
 `open_swe_runtime_artifact_sha256` is the independently supplied SHA256 of the
 runtime identity module reported by the executable's identity response. It is
 not the wheel/archive SHA256. The service passes the same executable and module
