@@ -1611,6 +1611,16 @@ def test_promotable_family_canary_mainchain_entry(name: str) -> None:
     neg = _run_family_canary(name, positive=False)
     contract = PLANNER_EXECUTION_CONTRACTS[name]
     assert pos["mainchain_entry"] is True
+    if _node_meta(name)["maturity"].lower() == "retired":
+        # nexus-runtime #171 (RETIRED_2026_10_12_FIRST_BATCH): retired nodes are never planner-selected
+        # and never execute; the canary must show an honest not-selected state, not a false green.
+        assert pos["planner_selected"] is False
+        assert pos["first_broken_edge"] == "not_selected_by_planner"
+        assert pos["invoked"] is False
+        assert pos["public_claim_allowed"] is False
+        assert neg["planner_selected"] is False
+        assert neg["invoked"] is False
+        return
     assert pos["planner_selected"] is True
     assert pos["public_claim_allowed"] is False
     auth_local = os.environ.get("NEXUS_LOCAL_MODEL_CALL_ALLOWED", "").strip() == "1"

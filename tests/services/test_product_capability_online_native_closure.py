@@ -163,6 +163,10 @@ def _production_canary_runner(task, *, evidence_mode: str = ""):
 
 
 
+# nexus-runtime #171 (RETIRED_2026_10_12_FIRST_BATCH) planner nodes that are still product capabilities.
+RETIRED_ONLINE_NATIVE = frozenset({"benchmark", "federation", "oracle_shadow", "stress_test", "ui_validator"})
+
+
 def test_online_native_denominator_is_exactly_28() -> None:
     assert len(ONLINE_NATIVE) == 28
     assert set(ONLINE_NATIVE) | STAGE_OWNED | LOCAL_NATIVE == set(PRODUCT_CAPABILITIES)
@@ -180,6 +184,17 @@ def test_online_native_canary_is_structurally_valid_but_not_live_claimable(
         output_dir=tmp_path / "runs",
     )
     verdict = row["closure_verdict"]
+    if capability in RETIRED_ONLINE_NATIVE:
+        # nexus-runtime #171 retired these planner nodes: the planner never selects them, so the canary
+        # cannot execute them and the closure verdict is an honest NOT_TESTED (never live-claimable).
+        mainchain = row["record"]["evidence_refs"][0]["payload"]["mainchain_result"]
+        assert mainchain["planner_selected"] is False
+        assert mainchain["invoked"] is False
+        assert verdict["status"] == "NOT_TESTED", (capability, verdict)
+        assert verdict["live_pass"] is False
+        assert row["harness_consistency_errors"] == []
+        assert row["public_claim_allowed"] is False
+        return
     assert verdict["status"] == EVIDENCE_INCOMPLETE, (capability, verdict)
     assert verdict["live_pass"] is False
     assert "non_live_evidence_mode:canary" in verdict["missing_evidence_reasons"]
