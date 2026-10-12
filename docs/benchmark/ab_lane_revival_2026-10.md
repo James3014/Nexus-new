@@ -192,3 +192,68 @@ and no same-model uplift can be read until Online authorization lets the with-Ne
 
 The May rows were produced without `--strict-llm-baseline`, and the publication summary records 0.9 s per row for Nexus,
 which is consistent with a large share of `model_calls=0` rescues. They are also a different model (Gemini 3 Flash preview) and 2 repeats. They are not comparable with strict-baseline numbers until the with-Nexus arm can reach the model.
+
+## Strict mode v2: simulated capabilities do not count
+
+Issue #1856. `--strict-llm-baseline` already refused to count a `model_calls == 0` success as a model solve. v2 does the same for capabilities:
+a with-Nexus row only counts as "Nexus-exercised" when at least one capability receipt is real.
+
+### Rule
+
+For every with-Nexus row, each selected capability receipt in `capability_receipts` is classified (`scripts/bench/strict_llm_baseline.py`):
+
+- `selected_not_invoked`: selected by the planner, `invoked` is false.
+- `real`: invoked, `claim_boundary.simulated` is not true, and `evidence_refs` is non-empty.
+- `simulated`: any other invoked receipt (`simulated == true`, or no evidence refs).
+
+`claim_boundary` is read from `receipt_base.claim_boundary` (or a top-level `claim_boundary`). A receipt with no claim_boundary at all makes no simulated claim,
+so it is counted `real` when it has evidence refs, but its name is also listed in `capabilities_real_unattested` and the summary reports
+`attested_real_capability_rows_n` (rows with a real capability that carries an explicit `simulated=false`) next to `real_capability_rows_n`.
+Such receipts come from runner-side telemetry backfill and `deterministic_receipt_lite`, not from the receipt engine.
+
+Row fields: `capabilities_real`, `capabilities_real_unattested`, `capabilities_simulated`, `capabilities_selected_not_invoked`,
+`capability_not_exercised` (`capabilities_real` is empty), `solve_without_capability` (verified model solve with `capability_not_exercised`).
+Row `status` and `solve_classification` are never rewritten.
+
+With-Nexus arm summary fields: `real_capability_rows_n`, `attested_real_capability_rows_n`, `simulated_only_rows_n` (no real capability, at least one simulated),
+`capability_not_exercised_rows_n`, `capability_tally` (`{capability: {real, simulated, selected_not_invoked}}`), `solves_with_real_capability_n`,
+`solve_without_capability_n`, `nexus_uplift_solved_n` / `nexus_uplift_solve_rate` (verified model solves with a real capability, over eligible rows).
+`solved_n` keeps its meaning. Tallies cover all with-Nexus rows including infra-invalid ones (they still tell what the receipts were); solve figures cover eligible rows.
+Nothing changes without `--strict-llm-baseline`, and the without-Nexus arm gets no capability fields.
+
+### Why receipts are simulated
+
+Not a runner switch. `claim_boundary.simulated` defaults to `True` (fail-closed) in `nexus_runtime.planning.evidence.claim_boundary.ClaimBoundary`
+(`nexus/evidence/claim_boundary.py` aliases it). In the bench path the receipts come from `build_trace_receipts` (`nexus/engine/capability_receipts.py`) ->
+`CapabilityReceipt.to_dict()` in `nexus_runtime.planning.engine.capability_contracts` (pin `cfcb38d`), which always projects `receipt_base` with
+`claim_boundary={"public_claim_allowed": False}`; `ClaimBoundary.from_dict` fills every other field from its defaults, so `simulated=true`, `receipt_present=false`,
+`claim_eligible=false`, `model_calls=0` for every receipt it emits, whatever the runner flags. The receipt's own `invoked`, `gate_passed` and `evidence_refs` are independent of that field.
+`nexus/engine/capability_receipt_adapters.py`, `with_nexus_runner.py` and `capability_ab_runner.py` never set `simulated`. The only `simulated=False` producers in Nexus-new are
+`nexus/delivery/report_claims.py`, `nexus/evidence/dedupe_aggregator.py` and `formal_fused_projection`, none on this path.
+The policy/switch candidates were checked and are not the cause: `capability_runtime_policy`/`dry_run` appears only as `capability_plan_mode="dry_run"` (planner mode, a plan field),
+`NEXUS_ULTRA_REVIEW_DRY_GATE=1` is set at `capability_ab_runner.py:4023` for the ultra_review gate only, and `--with-llm-mode off` does not touch it
+(the dry-mode run below has the same simulated receipts as the agy run). Making receipts carry `simulated=false` would need the receipt producer
+(nexus-runtime `CapabilityReceipt.to_dict`) to pass an evaluated claim boundary; that behavior was not changed here.
+
+### Re-reading historical reports
+
+`python scripts/bench/strict_llm_baseline.py --reclassify <report_dir>` re-reads `*.jsonl` rows and prints the strict tallies as JSON (no rerun, no provider call).
+
+| Report | With-Nexus rows | Real cap. rows | of which explicit `simulated=false` | Simulated-only rows | Counted model solves | Uplift solves |
+| --- | --- | --- | --- | --- | --- | --- |
+| agy 12x1 (`ab_revival_agy_20261012_full`) | 12 | 4 (repair-001/002: `delivery_gate`+`hyper`; context-001/002: `codeintel`) | 0 | 8 | 0 (2 `deterministic_rescue`) | 0 |
+| dry, `--with-llm-mode off` (`ab_revival_dry_20261012T115733`) | 12 | 12 | 0 | 0 | 0 (12 `deterministic_rescue`) | 0 |
+
+Agy run per-capability `{real, simulated, selected_not_invoked}`: `artifact_gate` {0,12,0}, `claim_gate` {0,12,0}, `harness_preflight_sensor` {0,12,0}, `mempalace_gate` {0,12,0},
+`delivery_gate` {2,10,0}, `codeintel` {2,8,0}, `hyper` {2,0,6}, `research_route` {0,0,9}, `acceptance_check`/`jit_validation`/`plan_quality_gate`/`pregate` {0,0,4} each,
+`repair_loop`/`sandbox`/`ultra_review` {0,0,2} each, `memory` {0,1,1}, and one selected-not-invoked each for `direct_mode`, `learn_mode`, `learn_phase_slo`, `semantic_searcher`.
+All 4 "real" rows are backfill receipts without any claim_boundary; none of the 12 rows has a capability receipt that explicitly attests `simulated=false`.
+The 4 context/repair `codeintel` and `hyper` receipts are real in the sense of carrying evidence refs (scan reports, hidden verifier), and codeintel on the two context rows
+is real even though those rows FAILED at the model step; this is why real-capability rows are not the same as solves.
+In the dry run the 12 "real" rows come from backfilled `claim_gate`/`delivery_gate`/`artifact_gate`/`mempalace_gate`/`codeintel`/`memory`/`hyper` receipts on rows solved by the
+deterministic path with no model, so they remain `deterministic_rescue`, never uplift.
+
+May 2026 reports (the 24/24 results): no `with_nexus_*.jsonl`/`summary*.json` report directory from May exists on this host
+(`find` over Nexus-new and nexus found only `.nexus/reports/bench/wave34/wave34_run_1789877609.json`, a 2026-09-20 `--with-llm-mode off` run summary, not a May report, with no per-row receipts; `.nexus/` is gitignored).
+They cannot be reclassified here; by the mechanism above any run on the pinned runtime had simulated receipts for the engine-built capabilities, so their with-Nexus figures should be
+read as not capability-attributed until re-read with `--reclassify` against a surviving report.
