@@ -24,12 +24,10 @@ def _env() -> dict[str, str]:
 def _run(tmp_path: Path, test_artifacts: list, *extra: str) -> tuple[int, dict]:
     evidence = tmp_path / "evidence.json"
     evidence.write_text(
-        json.dumps(
-            {
-                "final_response": "The task is ready for review.",
-                "evidence_bundle": {"code_artifacts": ["app.py"], "test_artifacts": test_artifacts},
-            }
-        ),
+        json.dumps({
+            "final_response": "The task is ready for review.",
+            "evidence_bundle": {"code_artifacts": ["app.py"], "test_artifacts": test_artifacts},
+        }),
         encoding="utf-8",
     )
     proc = subprocess.run(
