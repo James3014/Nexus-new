@@ -1477,13 +1477,17 @@ def test_calibration_plan_action_fails_closed_on_unknown_material_change():
     assert payload["required_trials"] == []
 
 
-def test_calibration_actions_never_call_provider_or_submit_tasks(monkeypatch):
+def test_calibration_actions_never_call_provider_or_submit_tasks(monkeypatch, tmp_path):
     def _fail(*args, **kwargs):
         raise AssertionError("calibration actions must never spawn a provider subprocess")
 
     monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", _fail)
     monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.run", _fail)
     service = FakeService()
+    # #1429 binds the gateway's MutationAdmissionStore to service.state_dir and
+    # otherwise discovers the canonical state dir via `git rev-parse`; give the
+    # fake service an explicit isolated root so no subprocess is needed.
+    service.state_dir = tmp_path
     gateway = UnifiedMCPGateway(service=service)
     gateway.handle({"jsonrpc": "2.0", "id": 906, "method": "tools/call", "params": {"name": "nexus_model_calibration_evidence", "arguments": {"lineage_id": "deepseek-v4-flash"}}})
     gateway.handle({"jsonrpc": "2.0", "id": 907, "method": "tools/call", "params": {"name": "nexus_model_calibration_plan", "arguments": {"provider": "opencode", "model": "opencode-go/deepseek-v4-flash", "target_role": "compact_code_candidate", "change_kind": "alias_only"}}})
@@ -1907,7 +1911,16 @@ def test_gateway_stdio_round_trip():
     assert response["result"]["tools"][0]["name"] == "nexus_gateway_status"
 
 
-def test_cline_runner_uses_provider_qualified_model_and_decodes_event_stream(monkeypatch):
+def _fake_provider_executable(tmp_path: Path, name: str) -> str:
+    """Hermetic stand-in for an installed provider CLI (subprocess.run is faked)."""
+    candidate = tmp_path / "provider-bin" / name
+    candidate.parent.mkdir(parents=True, exist_ok=True)
+    candidate.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    candidate.chmod(0o755)
+    return str(candidate)
+
+
+def test_cline_runner_uses_provider_qualified_model_and_decodes_event_stream(monkeypatch, tmp_path):
     captured = {}
 
     def fake_run(command, **kwargs):
@@ -1918,7 +1931,7 @@ def test_cline_runner_uses_provider_qualified_model_and_decodes_event_stream(mon
         }
         return SimpleNamespace(returncode=0, stdout=json.dumps(event) + "\n", stderr="")
 
-    monkeypatch.setenv("NEXUS_CLINE_BIN", "/Users/jameschen/.npm-global/lib/node_modules/cline/bin/.cline")
+    monkeypatch.setenv("NEXUS_CLINE_BIN", _fake_provider_executable(tmp_path, ".cline"))
     monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.run", fake_run)
     result = UnifiedMCPGateway._run_agy_plan(
         prompt="Return a patch",
@@ -1936,25 +1949,25 @@ def test_cline_runner_uses_provider_qualified_model_and_decodes_event_stream(mon
     assert "--yolo" not in captured["command"]
 
 
-def test_cline_runner_timeout_fails_closed(monkeypatch):
+def test_cline_runner_timeout_fails_closed(monkeypatch, tmp_path):
     def timeout_run(command, **kwargs):
         raise __import__("subprocess").TimeoutExpired(command, kwargs["timeout"])
 
-    monkeypatch.setenv("NEXUS_CLINE_BIN", "/Users/jameschen/.npm-global/lib/node_modules/cline/bin/.cline")
+    monkeypatch.setenv("NEXUS_CLINE_BIN", _fake_provider_executable(tmp_path, ".cline"))
     monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.run", timeout_run)
     result = UnifiedMCPGateway._run_agy_plan(prompt="Return a patch", allowed_files=["README.md"], provider="cline", model="glm-5.2")
     assert result["blocker"] == "ASSIST_PROVIDER_TIMEOUT"
     assert result["tool_policy_enforcement"].startswith("cline_plan_auto_approve_false")
 
 
-def test_grok_runner_uses_positional_prompt(monkeypatch):
+def test_grok_runner_uses_positional_prompt(monkeypatch, tmp_path):
     captured = {}
 
     def fake_run(command, **kwargs):
         captured["command"] = command
         return SimpleNamespace(returncode=0, stdout=json.dumps({"patch": "diff --git a/a b/a"}), stderr="")
 
-    monkeypatch.setenv("NEXUS_GROK_BIN", "/Users/jameschen/.grok/bin/grok")
+    monkeypatch.setenv("NEXUS_GROK_BIN", _fake_provider_executable(tmp_path, "grok"))
     monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.run", fake_run)
     result = UnifiedMCPGateway._run_agy_plan(
         prompt="Return a patch",
