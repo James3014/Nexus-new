@@ -821,7 +821,7 @@ def _bound_tracked_approval(task_id: str, contract_hash: str) -> dict:
     }
 
 
-def test_service_post_apply_failure_persists_physical_truth_and_blocks_cleanup(tmp_path: Path):
+def test_service_post_apply_failure_persists_physical_truth_and_blocks_cleanup(tmp_path: Path, monkeypatch):
     root, base, candidate = _repo(tmp_path)
     receipt = replace(_acceptance(candidate), task_id="post-apply-task")
     auth = replace(
@@ -836,6 +836,9 @@ def test_service_post_apply_failure_persists_physical_truth_and_blocks_cleanup(t
     _git(target, "merge", "--ff-only", candidate)
     durable_ref = "refs/nexus-candidate/post-apply-task"
     _git(root, "update-ref", durable_ref, candidate)
+    # Paths under /tmp are rewritten to the default target root; pin it so the
+    # persisted contract keeps the real target the lease was created for.
+    monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(target.parent))
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     request = {
         "task_id": "post-apply-task", "what": "post apply truth", "why": "closure",
@@ -985,7 +988,7 @@ def test_owner_finish_never_deletes_task_branch_or_candidate_ref(tmp_path: Path)
     assert _git(root, "show-ref", "--verify", durable_ref)
 
 
-def test_owner_finish_retains_real_dirty_target_with_typed_reason(tmp_path: Path):
+def test_owner_finish_retains_real_dirty_target_with_typed_reason(tmp_path: Path, monkeypatch):
     root, base, candidate = _repo(tmp_path)
     receipt = replace(_acceptance(candidate), task_id="dirty-owner-finish")
     auth = replace(
@@ -1000,6 +1003,9 @@ def test_owner_finish_retains_real_dirty_target_with_typed_reason(tmp_path: Path
     durable_ref = "refs/nexus-candidate/dirty-owner-finish"
     _git(root, "update-ref", durable_ref, candidate)
     (target / "untracked.txt").write_text("must retain\n", encoding="utf-8")
+    # Paths under /tmp are rewritten to the default target root; pin it so the
+    # persisted contract keeps the real target the lease was created for.
+    monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(target.parent))
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     request = {
         "task_id": "dirty-owner-finish", "what": "dirty retention", "why": "closure",
