@@ -317,7 +317,9 @@ class SkillsRouter:
         receipt_dicts = []
         for receipt in receipts:
             if hasattr(receipt, "to_dict"):
-                receipt_dicts.append(receipt.to_dict())
+                from nexus.engine.capability_receipts import attested_receipt_dict
+
+                receipt_dicts.append(attested_receipt_dict(receipt))
             elif hasattr(receipt, "__dict__"):
                 receipt_dicts.append(dict(vars(receipt)))
             elif isinstance(receipt, dict):

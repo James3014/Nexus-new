@@ -196,8 +196,8 @@ def test_default_flags_detect_stub_and_fixture_provider() -> None:
 def test_scan_hard_coded_finds_literal_in_executor_source() -> None:
     from nexus.core.capability_executor_registry import _exec_ddtree
 
-    found = audit.scan_hard_coded(_exec_ddtree, ['"candidate_id": "c0"', "pattern-that-is-absent"])
-    assert [item["pattern"] for item in found] == ['"candidate_id": "c0"']
+    found = audit.scan_hard_coded(_exec_ddtree, ["_candidate_pool(plan)", "pattern-that-is-absent"])
+    assert [item["pattern"] for item in found] == ["_candidate_pool(plan)"]
     assert found[0]["line"] > 0 and found[0]["file"].endswith("capability_executor_registry.py")
 
 
@@ -291,7 +291,7 @@ def e2e_matrix(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
 
 def test_end_to_end_mempalace_gate_blocks_the_blacklisted_tool(e2e_matrix: dict[str, Any]) -> None:
     row = e2e_matrix["rows"]["mempalace_gate"]
-    assert row["verdict"] == audit.REAL_UNATTESTED, row.get("checks")
+    assert row["verdict"] == audit.REAL, row.get("checks")
     assert row["path"] == "e2e" and row["product_path_reachable"] is True
     by_name = {check["name"]: check for check in row["checks"]}
     assert by_name["roundtrip_verified"]["passed"] and by_name["shard_written_to_disk"]["passed"]
@@ -307,7 +307,7 @@ def test_end_to_end_sandbox_returns_stdout_from_an_isolated_workspace(
     e2e_matrix: dict[str, Any],
 ) -> None:
     row = e2e_matrix["rows"]["sandbox"]
-    assert row["verdict"] == audit.REAL_UNATTESTED, row.get("checks")
+    assert row["verdict"] == audit.REAL, row.get("checks")
     by_name = {check["name"]: check for check in row["checks"]}
     assert (
         by_name["stdout_token_in_result_file"]["passed"]
@@ -320,9 +320,8 @@ def test_end_to_end_sandbox_returns_stdout_from_an_isolated_workspace(
 
 def test_end_to_end_records_flag_receipts_and_retiring_rows(e2e_matrix: dict[str, Any]) -> None:
     matrix, rows, out = e2e_matrix["matrix"], e2e_matrix["rows"], e2e_matrix["out"]
-    assert (
-        rows["mempalace_gate"]["receipt_claims_simulated"] is True
-    )  # fail-closed default, not a measurement
+    # the audit reads the Nexus-side attested receipt (invoked + evidence refs => simulated=false)
+    assert rows["mempalace_gate"]["receipt_claims_simulated"] is False
     assert rows["federation"]["verdict"] == audit.RETIRING
     saved = json.loads((out / "matrix.json").read_text(encoding="utf-8"))
     assert saved["schema"] == audit.SCHEMA and {r["capability"] for r in saved["rows"]} == {
@@ -331,7 +330,7 @@ def test_end_to_end_records_flag_receipts_and_retiring_rows(e2e_matrix: dict[str
         "federation",
     }
     assert (out / "receipts" / "sandbox.json").is_file() and (out / "matrix.md").is_file()
-    assert matrix["verdict_counts"].get("REAL_UNATTESTED") == 2
+    assert matrix["verdict_counts"].get("REAL") == 2
 
 
 def test_route_smoke_row_validator_ignores_the_simulated_flag(tmp_path: Path) -> None:

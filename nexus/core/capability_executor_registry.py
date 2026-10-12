@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import dataclasses
 import hashlib
 import json
 import logging
@@ -890,19 +891,78 @@ def _exec_research(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityR
     try:
         from nexus.core.state_contracts import NexusState
 
-        inst = cls(project_root=".", run_dir="/tmp")
+        try:
+            research_root = _scoped_workspace(plan.constraints, Path(".").resolve())
+        except _ScopeError as scope:
+            return _scope_blocked_receipt("research", plan, str(scope), start)
+        # Per-task run dir: the handler caches researchpack.json there, so a shared
+        # directory would return one task's pack for every other task.
+        research_dir = research_root / ".nexus" / "research" / _safe_run_id(plan.task_id)
+        research_dir.mkdir(parents=True, exist_ok=True)
+        inst = cls(project_root=research_root, run_dir=research_dir)
+        # The handler's default LanceDB cache lives under ~/.openclaw; keep cache writes in the
+        # per-task run dir (researchpack.json) instead.
+        inst._get_lancedb = lambda: None  # type: ignore[method-assign]
+        # Outbound calls (chub CLI / felo) only with the operator switch; authorization is
+        # env-only, never a request constraint.  The providers are blocked at the egress
+        # methods, so a stubbed provider (tests) still runs hermetically.
+        research_authorized = _provider_auth_allowed(require_external=True)
+        if not research_authorized:
+            blocked_pack = {
+                "findings": [],
+                "source": "BLOCKED_EXTERNAL_AUTH",
+                "status": "FAIL",
+                "tokens_used": 0,
+                "error": "BLOCKED_EXTERNAL_AUTH",
+            }
+            inst._run_chub = lambda query: dict(blocked_pack)  # type: ignore[method-assign]
+            inst._run_felo = lambda query: dict(blocked_pack)  # type: ignore[method-assign]
         state = NexusState(task_id=plan.task_id, metadata={})
         # Real physical run path — not should_run probe alone.
+        # ResearchPhaseHandler.run reads context["task"]; "task_statement" is kept
+        # for callers that still key on the old name.
+        # The task is an opaque payload.  The handler would scan it for URLs and route them to
+        # the UCC reach router, so URL extraction is removed from this executor entirely (no
+        # parsing of request text for endpoints); providers use their own configured endpoint.
+        inst._extract_urls = lambda text: []  # type: ignore[method-assign]
+        research_task = str(task_desc or "").strip()
         result = inst.run(
             state,
             {
-                "task_statement": str(task_desc or plan.task_id),
+                "task": research_task,
+                "task_statement": research_task,
                 "dry_run": True,
                 "bounded": True,
             },
         )
         elapsed = int((time.monotonic() - start) * 1000)
-        ok = isinstance(result, Mapping) and not result.get("error")
+        if (
+            not research_authorized
+            and isinstance(result, Mapping)
+            and "BLOCKED_EXTERNAL_AUTH" in str(result.get("error") or "")
+        ):
+            return _make_receipt(
+                "research",
+                plan,
+                invoked=True,
+                gate_passed=False,
+                wall_time_ms=elapsed,
+                outcome=_structured_outcome(
+                    action="auth_gate",
+                    semantic_status="BLOCKED",
+                    error="BLOCKED_EXTERNAL_AUTH",
+                    evidence_refs=["ev_auth_block_research"],
+                    auth_required=True,
+                    provider_call_count=0,
+                ),
+            )
+        ok = (
+            isinstance(result, Mapping)
+            and not result.get("error")
+            and result.get("status") != "FAIL"
+            and bool(research_task)
+            and list(result.get("findings") or []) != ["Empty research task."]
+        )
         return _make_receipt(
             "research",
             plan,
@@ -1200,8 +1260,10 @@ def _exec_autoreason(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
             ),
         )
     try:
+        candidates = _candidate_pool(plan)
+        if not candidates:
+            return _no_candidate_pool_receipt("autoreason", plan, start)
         inst = cls()
-        candidates = [{"id": "c0", "text": str(task_desc or plan.task_id), "score": 1.0}]
         result = inst.run(candidates=candidates, task_desc=str(task_desc or plan.task_id))
         elapsed = int((time.monotonic() - start) * 1000)
         ok = isinstance(result, Mapping) and not result.get("error")
@@ -1285,26 +1347,70 @@ def _exec_hyper_sprint(plan: CapabilityExecutionPlan, task_desc: str) -> Capabil
         return _make_receipt("hyper_sprint", plan, invoked=False, gate_passed=False,
                              outcome={"error": "run_hyper_sprint not importable"})
     try:
-        from pathlib import Path
         from nexus.research.sprint_service import SprintConfig
+        hyper = dict(plan.constraints or {})
+        try:
+            hyper_root = _scoped_workspace(hyper, Path(".").resolve())
+            hyper_target = str(hyper.get("hyper_target_file") or "").strip()
+            if not hyper_target:
+                hyper_target = _first_task_file(hyper) or "README.md"
+            _scoped_path(hyper_root, hyper_target)
+            hyper_test = str(hyper.get("hyper_test_file") or "").strip()
+            if hyper_test:
+                _scoped_path(hyper_root, hyper_test)
+        except _ScopeError as scope:
+            return _scope_blocked_receipt("hyper_sprint", plan, str(scope), start)
+        try:
+            hyper_candidates = max(1, int(hyper.get("hyper_candidate_count") or 1))
+        except (TypeError, ValueError):
+            hyper_candidates = 1
+        # LLM candidates are opt-in per request; the default stays deterministic.
+        hyper_llm = _truthy(hyper.get("hyper_llm_mode"))
+        if hyper_llm and not _provider_auth_allowed(require_local_model=True):
+            # A request flag is never authorization: llm_mode needs the local-model switch.
+            return _auth_blocked_receipt(
+                "hyper_sprint",
+                plan,
+                wall_time_ms=int((time.monotonic() - start) * 1000),
+                reason="BLOCKED_EXTERNAL_AUTH:local_model",
+            )
         cfg = SprintConfig(
             task=str(task_desc or plan.task_id),
-            target_file="README.md",
-            candidate_count=1,
+            target_file=hyper_target,
+            test_file=hyper_test or None,
+            candidate_count=hyper_candidates,
             max_rounds=1,
             timeout_sec=10,
             safe_mode=True,
-            llm_mode=False,
+            llm_mode=bool(hyper_llm),
             stage1_max_parallel=1,
             stage1_timeout_sec=5,
         )
-        result = fn(repo_root=Path(".").resolve(), config=cfg)
+        result = fn(repo_root=hyper_root, config=cfg)
         elapsed = int((time.monotonic() - start) * 1000)
+        sprint_status = str(getattr(result, "status", "") or "").upper()
+        sprint_ok = sprint_status in {"SUCCESS", "SUCCEEDED"}
         return _make_receipt(
             "hyper_sprint",
             plan,
             wall_time_ms=elapsed,
-            outcome={"action": "run_hyper_sprint", "result": str(result)[:200]},
+            gate_passed=sprint_ok,
+            outcome=_structured_outcome(
+                action="run_hyper_sprint",
+                semantic_status="SUCCEEDED" if sprint_ok else "FAILED",
+                evidence_refs=[f"ev_hyper_sprint_{plan.task_id}"],
+                result=(
+                    dataclasses.asdict(result)
+                    if dataclasses.is_dataclass(result) and not isinstance(result, type)
+                    else str(result)[:200]
+                ),
+                sprint_status=sprint_status,
+                target_file=hyper_target,
+                candidate_count=hyper_candidates,
+                llm_mode=bool(hyper_llm),
+                attempt_count=getattr(result, "attempt_count", None),
+                physical_callable="nexus.research.sprint_service.run_hyper_sprint",
+            ),
         )
     except Exception as exc:
         elapsed = int((time.monotonic() - start) * 1000)
@@ -2014,7 +2120,8 @@ def _exec_memory(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
                 ),
             )
         inst = cls(root)
-        hits = list(inst.search(query) or [])[:5]
+        hits = _memory_retrieve(inst, query, limit=5)
+        findings_hits = _memory_findings_hits(root, query, limit=5)
         elapsed = int((time.monotonic() - start) * 1000)
         return _make_receipt(
             "memory",
@@ -2027,6 +2134,7 @@ def _exec_memory(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
                 result={"hit_count": len(hits), "root": str(root)},
                 query=query[:200],
                 hit_count=len(hits),
+                findings_hit_count=len(findings_hits),
                 search_performed=True,
                 physical_callable="nexus.core.memory_manager.ProjectMemoryManager.search",
             ),
@@ -2433,18 +2541,18 @@ def _exec_ddtree(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
             ),
         )
     try:
+        candidates = _candidate_pool(plan)
+        if not candidates:
+            return _no_candidate_pool_receipt("ddtree", plan, start)
         inst = cls()
-        candidates = [
-            {
-                "candidate_id": "c0",
-                "text": str(task_desc or plan.task_id),
-                "score": 1.0,
-            }
-        ]
+        try:
+            max_candidates = max(1, int((plan.constraints or {}).get("ddtree_max_candidates") or 2))
+        except (TypeError, ValueError):
+            max_candidates = 2
         result = inst.plan(
             candidates,
             enabled=True,
-            max_candidates=2,
+            max_candidates=max_candidates,
             task_desc=str(task_desc or ""),
         )
         elapsed = int((time.monotonic() - start) * 1000)
@@ -3491,13 +3599,22 @@ def _exec_xray(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRecei
         _assert_outputs_in_run_root(output_paths, run_root)
 
         inst = XRayService(project_root=str(project_root), report_path=str(report_path))
-        # Absolute target: XRayObserver silently skips paths that do not exist relative to cwd.
-        target = Path(project_root) / "nexus/services/capability_registry.py"
-        result = inst.run(targets=[str(target)], recursive=False, docker=False)
+        # Absolute targets: XRayObserver silently skips paths that do not exist relative to cwd.
+        # Targets come from the request (task files); fall back to the repo root.
+        try:
+            targets = _xray_targets(plan, Path(project_root))
+        except _ScopeError as scope:
+            return _scope_blocked_receipt("xray", plan, str(scope), start)
+        result = inst.run(targets=[str(t) for t in targets], recursive=False, docker=False)
         elapsed = int((time.monotonic() - start) * 1000)
         # run() always returns the report path, so success must come from the scan itself.
         scanned = getattr(inst, "last_report", None)
-        ok = bool(target.exists() and report_path.exists() and scanned is not None and scanned.symbols)
+        ok = bool(
+            all(t.exists() for t in targets)
+            and report_path.exists()
+            and scanned is not None
+            and scanned.symbols
+        )
         return _make_receipt(
             "xray",
             plan,
@@ -3508,6 +3625,7 @@ def _exec_xray(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRecei
                 semantic_status="SUCCEEDED" if ok else "FAILED",
                 evidence_refs=[f"ev_xray_{plan.task_id}"],
                 result={"report_type": type(result).__name__, "report_preview": str(result)[:200]},
+                scan_targets=[str(t) for t in targets][:8],
                 physical_callable="nexus.services.xray_service.XRayService.run",
                 run_id=run_id,
                 resolved_run_root=str(run_root),
@@ -3927,3 +4045,168 @@ EXECUTOR_REGISTRY: dict[str, CapabilityExecutor] = {
 
 def get_executor(cap_name: str) -> CapabilityExecutor | None:
     return EXECUTOR_REGISTRY.get(cap_name)
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def _safe_run_id(task_id: Any) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(task_id or "")).strip("._")
+    return cleaned[:96] or "task"
+
+
+def _task_files(constraints: Mapping[str, Any], *keys: str) -> list[str]:
+    """Task files named by the request, in key order, de-duplicated."""
+    out: list[str] = []
+    for key in keys:
+        raw = constraints.get(key)
+        if isinstance(raw, (str, os.PathLike)):
+            items = [raw]
+        elif isinstance(raw, (list, tuple)):
+            items = list(raw)
+        else:
+            items = []
+        for item in items:
+            text = str(item or "").strip()
+            if text and text not in out:
+                out.append(text)
+    return out
+
+
+def _first_task_file(constraints: Mapping[str, Any]) -> str:
+    files = _task_files(constraints, "hyper_target_file", "target_file", "target_files")
+    return files[0] if files else ""
+
+
+class _ScopeError(Exception):
+    """Request-supplied path or root escapes the trusted project root."""
+
+
+def _scoped_workspace(constraints: Mapping[str, Any] | None, project_root: Path) -> Path:
+    """Executor root: the runtime-supplied ``workspace_root`` constraint, else the project root.
+
+    The registry only forwards ``workspace_root`` from the runtime context / route, never from
+    request ``codeintel``, so a request cannot move an executor; request files are then
+    checked against this root by ``_scoped_path``.
+    """
+    raw = str((constraints or {}).get("workspace_root") or "").strip()
+    return Path(raw).resolve() if raw else project_root.resolve()
+
+
+def _scoped_path(root: Path, raw: str) -> Path:
+    """Resolve a request path under ``root``; it must stay inside and exist."""
+    resolved = (root / raw).resolve() if not Path(raw).is_absolute() else Path(raw).resolve()
+    if not resolved.is_relative_to(root.resolve()) or not resolved.exists():
+        raise _ScopeError("path_outside_workspace")
+    return resolved
+
+
+def _scope_blocked_receipt(
+    cap_name: str, plan: CapabilityExecutionPlan, reason: str, start: float
+) -> CapabilityReceipt:
+    return _make_receipt(
+        cap_name,
+        plan,
+        invoked=True,
+        gate_passed=False,
+        wall_time_ms=int((time.monotonic() - start) * 1000),
+        outcome=_structured_outcome(
+            action="scope_gate",
+            semantic_status="BLOCKED",
+            error=reason,
+            evidence_refs=[f"ev_scope_block_{cap_name}_{plan.task_id}"],
+        ),
+    )
+
+
+def _xray_targets(plan: CapabilityExecutionPlan, project_root: Path) -> list[Path]:
+    """Scan targets from the request, contained in the project root; root as fallback."""
+    constraints = dict(plan.constraints or {})
+    root = _scoped_workspace(constraints, project_root)
+    named = _task_files(constraints, "xray_targets", "target_file", "target_files")[:16]
+    if not named:
+        legacy = root / "nexus" / "services" / "capability_registry.py"
+        return [legacy if legacy.exists() else root]
+    return [_scoped_path(root, n) for n in named]
+
+
+NO_CANDIDATE_POOL = "no_candidate_pool"
+
+
+def _candidate_pool(plan: CapabilityExecutionPlan) -> list[dict[str, Any]]:
+    """Real candidate pool from the plan constraints (fed from request.codeintel)."""
+    raw = (plan.constraints or {}).get("candidate_pool")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return []
+    if not isinstance(raw, (list, tuple)):
+        return []
+    return [dict(item) for item in raw if isinstance(item, Mapping)]
+
+
+def _no_candidate_pool_receipt(
+    cap_name: str, plan: CapabilityExecutionPlan, start: float
+) -> CapabilityReceipt:
+    """Explicit skip: never fabricate a single placeholder candidate."""
+    return _make_receipt(
+        cap_name,
+        plan,
+        invoked=False,
+        gate_passed=False,
+        wall_time_ms=int((time.monotonic() - start) * 1000),
+        outcome=_structured_outcome(
+            action="skip",
+            semantic_status="SKIPPED",
+            skip_reason=NO_CANDIDATE_POOL,
+            evidence_refs=[f"ev_{cap_name}_skip_{NO_CANDIDATE_POOL}_{plan.task_id}"],
+        ),
+    )
+
+
+def _memory_retrieve(manager: Any, query: str, *, limit: int) -> list[Any]:
+    """Project-memory retrieval: whole query first, then per-keyword (local_heal pattern).
+
+    ProjectMemoryManager.search is a SQL LIKE substring, so a whole task statement
+    only hits when an insight contains it verbatim. Mirror the local_heal retrieval
+    adapter: exact query, and when empty, de-duplicated per-keyword lookups.
+    """
+    hits = list(manager.search(query) or [])
+    if hits:
+        return hits[:limit]
+    head = query.split("Nexus route oracle contract", 1)[0]
+    seen: set[tuple[Any, ...]] = set()
+    for token in [t for t in re.split(r"[_\W]+", head.lower()) if len(t) >= 3][:8]:
+        if token in _MEMORY_STOPWORDS:
+            continue
+        for row in manager.search(token) or []:
+            key = tuple(row)
+            if key in seen:
+                continue
+            seen.add(key)
+            hits.append(row)
+            if len(hits) >= limit:
+                return hits
+    return hits
+
+
+_MEMORY_STOPWORDS = frozenset(
+    {"the", "and", "for", "with", "that", "this", "from", "into", "what", "how", "recall", "find"}
+)
+
+
+def _memory_findings_hits(root: Path, query: str, *, limit: int) -> list[dict[str, Any]]:
+    """Episode cards from the local_heal FindingsMemoryStore (read-only; none if never created)."""
+    if not (root / ".nexus" / "memory").is_dir():
+        return []
+    try:
+        from nexus.services.local_heal.memory_retrieval_adapter import FindingsMemoryLessonStore
+
+        head = query.split("Nexus route oracle contract", 1)[0]
+        return FindingsMemoryLessonStore(project_root=root).query(query_text=head, limit=limit)
+    except Exception:
+        return []
