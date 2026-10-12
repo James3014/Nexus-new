@@ -1217,6 +1217,15 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
         final_status = str(pos["final_status"])
         if neg["final_status"] != "OK":
             final_status = neg["final_status"]
+        if (
+            _node_meta(name)["maturity"].lower() == "retired"
+            and first_broken == "not_selected_by_planner"
+            and not pos["planner_selected"]
+            and not pos["invoked"]
+            and not neg["invoked"]
+        ):
+            # nexus-runtime #171: an honestly unselected retired node is not a structural failure.
+            final_status = "RETIRED_NOT_SELECTED"
         if pos.get("action") in _SHALLOW_ACTIONS and pos.get("gate_passed"):
             probe_only += 1
         phys = str(pos.get("physical_callable") or "")
