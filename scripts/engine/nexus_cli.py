@@ -1246,7 +1246,8 @@ else:
     @click.option("--evidence", "evidence_path", type=click.Path(exists=True), required=True)
     @click.option("--router-benchmark", is_flag=True, help="Run router benchmark as part of delivery verification.")
     @click.option("--receipt", "receipt_path", default=".nexus/reports/delivery_gate.json", show_default=True, type=click.Path())
-    def delivery_gate(evidence_path, router_benchmark, receipt_path):
+    @click.option("--allow-no-replay", "allow_no_replay", is_flag=True, help="Explicitly accept notes-only evidence (no replayed command); labelled replay_waived.")
+    def delivery_gate(evidence_path, router_benchmark, receipt_path, allow_no_replay):
         """🚪 Run fail-closed delivery verification before completion claims."""
         # The gate script runs from the repo root, so pass caller-relative paths as absolute paths.
         cmd = [
@@ -1259,6 +1260,8 @@ else:
         ]
         if router_benchmark:
             cmd.append("--router-benchmark")
+        if allow_no_replay:
+            cmd.append("--allow-no-replay")
         result = subprocess.run(cmd)
         if result.returncode != 0:
             raise click.ClickException("Delivery gate failed.")

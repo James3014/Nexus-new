@@ -9,6 +9,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from nexus.core.hallucination_guard import HallucinationGuard
 
 def verify_evidence(evidence_path: str, allow_no_replay: bool = False):
+    """Verify an evidence file.
+
+    VERIFIED requires a real passing replay (replay status PASS: at least one allowlisted
+    command was actually re-executed and matched). Notes-only evidence (replay UNVERIFIED /
+    NO_REPLAYABLE_COMMANDS) is returned as UNVERIFIED with a non-zero CLI exit.
+    ``allow_no_replay`` (CLI: --allow-no-replay) is the explicit waiver: the verdict may then
+    be VERIFIED, but it is labelled ``replay_waived: true`` / ``replay_verified: false`` and
+    trust is capped at MEDIUM.
+    """
     p = Path(evidence_path)
     if not p.exists():
         return {"status": "REJECTED", "reason": "MISSING_EVIDENCE"}
@@ -33,20 +42,51 @@ def verify_evidence(evidence_path: str, allow_no_replay: bool = False):
         analysis["verdict"] = "🔴 重做 (Replay Failed)"
         analysis["score"] = 10.0
 
-    return {
+    replay_verified = replay_data.get("status") == "PASS"
+    replay_waived = False
+    reason = None
+    if status == "VERIFIED" and not replay_verified:
+        if allow_no_replay:
+            replay_waived = True
+        else:
+            # Notes-only evidence (nothing replayed) must never be VERIFIED.
+            status = "UNVERIFIED"
+            reason = "NO_REPLAYABLE_COMMANDS" if replay_data.get("status") == "UNVERIFIED" else "REPLAY_NOT_PASSED"
+
+    if status == "VERIFIED":
+        trust = "MEDIUM" if replay_waived else "HIGH"
+    else:
+        trust = "LOW"
+    result = {
         "status": status,
-        "overall_trust": "HIGH" if status == "VERIFIED" else "LOW",
+        "overall_trust": trust,
         "replay": replay_data,
         # Replay status UNVERIFIED means nothing replayable was present; surface it explicitly.
-        "replay_verified": replay_data.get("status") == "PASS",
+        "replay_verified": replay_verified,
+        "replay_waived": replay_waived,
         "hallucination_index": analysis
     }
+    if reason:
+        result["reason"] = reason
+        result["message"] = (
+            "No allowlisted test command was replayed; evidence is not verified. "
+            "Provide a replayable test_artifacts command or pass --allow-no-replay explicitly."
+        )
+    if replay_waived:
+        result["message"] = "Replay explicitly waived via --allow-no-replay; evidence was NOT replay-verified."
+    return result
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("evidence")
-    parser.add_argument("--allow-no-replay", action="store_true", default=False)
+    parser.add_argument(
+        "--allow-no-replay",
+        action="store_true",
+        default=False,
+        help="Explicitly waive the replay requirement: notes-only evidence may then be VERIFIED "
+        "but is labelled replay_waived=true and capped at MEDIUM trust.",
+    )
     args = parser.parse_args()
     
     result = verify_evidence(args.evidence, args.allow_no_replay)

@@ -20,7 +20,14 @@ class EvidenceVerifier:
         self.replay_runner = ReplayRunner(self.project_root)
         self.anti_drift = AntiDrift(self.project_root, self.project_root / "nexus/config/governance_manifest.json")
     
-    def verify(self, evidence_bundle: dict) -> dict:
+    def verify(self, evidence_bundle: dict, allow_no_replay: bool = False) -> dict:
+        """Verify an evidence bundle.
+
+        Without at least one really replayed (allowlisted) command, the bundle is returned as
+        UNVERIFIED / LOW (reason ``no_replayable_commands``): replay status SKIPPED or
+        NOT_REPLAYED is not verification. ``allow_no_replay=True`` is the explicit waiver; the
+        result is then labelled ``replay_waived`` and trust is capped at MEDIUM.
+        """
         reject_reasons = []
         try:
             # T1: Schema 契約化驗證
@@ -54,7 +61,23 @@ class EvidenceVerifier:
                     "replay_report": replay_report,
                 }
 
+            replay_executed = int(replay_report.get("replay_count", 0) or 0) > 0
+            if not replay_executed and not allow_no_replay:
+                return {
+                    "overall_trust": "LOW",
+                    "status": "UNVERIFIED",
+                    "reason": "no_replayable_commands",
+                    "replay_verified": False,
+                    "replay_waived": False,
+                    "replay_report": replay_report,
+                    "reject_reasons": ["no_replayable_commands"],
+                    "code_artifacts_verified": {"all_exist": False},
+                    "test_commands_verified": {"all_executed": False},
+                }
+
             results = {
+                "replay_verified": replay_executed,
+                "replay_waived": not replay_executed,
                 "code_artifacts_verified": self._verify_code_artifacts(
                     evidence_bundle.get("code_artifacts", [])
                 ),
@@ -87,6 +110,9 @@ class EvidenceVerifier:
             else:
                 results["overall_trust"] = "LOW"
             
+            if results["replay_waived"] and results["overall_trust"] == "HIGH":
+                results["overall_trust"] = "MEDIUM"
+
             return results
         except Exception as e:
             # T2: 強制 Fail-Closed

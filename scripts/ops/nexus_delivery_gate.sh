@@ -6,6 +6,9 @@ cd "$REPO_ROOT"
 
 EVIDENCE_PATH=".nexus/reports/hallucination_evidence.json"
 RECEIPT_PATH=".nexus/reports/delivery_gate.json"
+# Evidence must contain a really replayable (allowlisted) test command to be VERIFIED.
+# --allow-no-replay is the explicit waiver for notes-only evidence (labelled replay_waived).
+VERIFIER_ARGS=()
 
 # Fail closed on any argument this gate does not implement, instead of silently ignoring it.
 while [[ $# -gt 0 ]]; do
@@ -19,6 +22,10 @@ while [[ $# -gt 0 ]]; do
       [[ $# -ge 2 ]] || { echo "❌ [FAIL] --receipt requires a path" >&2; exit 2; }
       RECEIPT_PATH="$2"
       shift 2
+      ;;
+    --allow-no-replay)
+      VERIFIER_ARGS+=("--allow-no-replay")
+      shift
       ;;
     *)
       echo "❌ [FAIL] Unsupported delivery-gate argument: $1" >&2
@@ -57,7 +64,7 @@ fi
 
 # --- STEP 4: Evidence Verifier (Replay) ---
 echo "== Step 4: Evidence Verifier (Replay) =="
-if ! python3 scripts/ops/evidence_verifier.py "$EVIDENCE_PATH"; then
+if ! python3 scripts/ops/evidence_verifier.py "$EVIDENCE_PATH" ${VERIFIER_ARGS[@]+"${VERIFIER_ARGS[@]}"}; then
   echo "❌ [FAIL] Evidence verification failed (Replay/Hallucination rejection)!" >&2
   exit 13
 fi
