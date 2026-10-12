@@ -479,6 +479,8 @@ jobs:
         run: uv run pytest tests/ -v --timeout=300 --junitxml="$RUNNER_TEMP/full-regression.xml"
         env:
           NEXUS_TEST_MODE: CI
+          # Explicit, reviewed quarantine list: tests/nightly_quarantine.toml (#1897).
+          NEXUS_NIGHTLY_QUARANTINE: "1"
           PYTHONPATH: .
       - name: Install gitlink metadata for checkout post-cleanup
         if: always()

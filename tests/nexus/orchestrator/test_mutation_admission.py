@@ -309,7 +309,9 @@ def _admission(
 ) -> dict[str, object]:
     store = MutationAdmissionStore(
         state_root,
-        now_provider=lambda: datetime(2026, 10, 5, tzinfo=timezone.utc),
+        # Issue at the real clock: the integration gate validates expiry against
+        # wall time, so a fixed issue date becomes a time bomb once the TTL elapses.
+        now_provider=lambda: datetime.now(timezone.utc),
     )
     scope = allowed_paths or ["allowed.txt"]
     effect: dict[str, object] = {

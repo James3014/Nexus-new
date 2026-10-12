@@ -5,6 +5,7 @@ from click.testing import CliRunner
 
 import scripts.engine.nexus_cli as cli_mod
 
+_REPO_ROOT = str(Path(__file__).resolve().parents[2])
 
 def test_research_auto_flow_cli_uses_service_seam(monkeypatch, tmp_path):
     captured = {}
@@ -401,7 +402,7 @@ def test_research_benchmark_cli_uses_service_seam(monkeypatch, tmp_path):
 
 
 def test_research_run_does_not_route_through_legacy_run_seam():
-    source = Path("/Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py").read_text(encoding="utf-8")
+    source = Path(f"{_REPO_ROOT}/scripts/engine/nexus_cli.py").read_text(encoding="utf-8")
     start = source.index('@nexus_group.command(name="research:run")')
     end = source.index('@nexus_group.command(name="research:benchmark")')
     block = source[start:end]
