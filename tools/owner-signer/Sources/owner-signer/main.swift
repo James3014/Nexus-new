@@ -74,25 +74,44 @@ func initKey() {
 }
 
 func summary(of payload: Data) -> String {
+    // Parse strictly: any field the prompt cannot show exactly is refused, so
+    // the Owner never approves bytes that say more than the prompt does.
     guard
         let object = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
         object["schema"] as? String == "nexus.owner_grant_attestation.v1"
     else {
         fail("not a nexus.owner_grant_attestation.v1 payload")
     }
-    let repository = object["repository"] as? String ?? "?"
-    let owner = object["owner_id"] as? String ?? "?"
-    let agent = object["agent_login"] as? String ?? "?"
-    let issue = (object["issue_number"] as? NSNumber)?.stringValue ?? "?"
-    let actions = (object["allowed_actions"] as? [String] ?? []).joined(separator: ", ")
-    let pathList = object["allowed_paths"] as? [String] ?? []
+    func text(_ key: String) -> String {
+        guard let value = object[key] as? String, !value.isEmpty else { fail("field \(key) must be a non-empty string") }
+        return value
+    }
+    func names(_ key: String, max: Int) -> [String] {
+        guard let raw = object[key] as? [Any], !raw.isEmpty, raw.count <= max else {
+            fail("field \(key) must list between 1 and \(max) entries")
+        }
+        let values = raw.compactMap { $0 as? String }
+        if values.count != raw.count || Set(values).count != values.count || values.contains(where: \.isEmpty) {
+            fail("field \(key) must hold distinct non-empty strings only")
+        }
+        return values
+    }
+    guard let issueNumber = object["issue_number"] as? NSNumber,
+          CFGetTypeID(issueNumber) == CFNumberGetTypeID(),
+          issueNumber.intValue > 0, issueNumber.doubleValue == Double(issueNumber.intValue)
+    else {
+        fail("field issue_number must be a positive integer")
+    }
+    let actions = names("allowed_actions", max: 8)
+    if actions.contains(where: { $0.range(of: "^[A-Z][A-Z0-9_]{0,63}$", options: .regularExpression) == nil }) {
+        fail("allowed_actions must be upper-case names such as GITHUB_MERGE")
+    }
     // The gate refuses more than 12 paths; refuse here too so nothing is hidden
     // by a truncated prompt.
-    if pathList.isEmpty || pathList.count > 12 { fail("grant must name between 1 and 12 paths") }
-    let paths = pathList.joined(separator: ", ")
-    let issued = object["issued_at"] as? String ?? "?"
-    let expires = object["expires_at"] as? String ?? "?"
-    return "\(owner) grants \(agent) \(actions) on \(repository) issue #\(issue), paths: \(paths), valid \(issued) to \(expires)"
+    let paths = names("allowed_paths", max: 12)
+    return "\(text("owner_id")) grants \(text("agent_login")) \(actions.joined(separator: ", ")) "
+        + "on \(text("repository")) issue #\(issueNumber.intValue), paths: \(paths.joined(separator: ", ")), "
+        + "valid \(text("issued_at")) to \(text("expires_at"))"
 }
 
 func sign(path: String) {

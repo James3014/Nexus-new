@@ -27,6 +27,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.ops.trusted_merge_lane_gate import (  # noqa: E402
+    ATTESTATION_ACTION,
+    ATTESTATION_MAX_ACTIONS,
     ATTESTATION_MAX_LIFETIME,
     ATTESTATION_MAX_PATH_LENGTH,
     ATTESTATION_MAX_PATHS,
@@ -55,6 +57,11 @@ def _draft(args: argparse.Namespace) -> int:
             raise SystemExit(f"path {pattern!r} is too broad or too long; name a directory first")
         if _path_matches(pattern, ATTESTATION_PROTECTED_PATTERNS):
             raise SystemExit(f"path {pattern!r} is protected and can never be granted")
+    actions = sorted(set(args.action))
+    if len(actions) > ATTESTATION_MAX_ACTIONS or not all(
+        ATTESTATION_ACTION.fullmatch(action) for action in actions
+    ):
+        raise SystemExit("actions must be upper-case names such as GITHUB_MERGE")
     lifetime = timedelta(hours=args.hours)
     if lifetime <= timedelta(0) or lifetime > ATTESTATION_MAX_LIFETIME:
         raise SystemExit(
@@ -67,7 +74,7 @@ def _draft(args: argparse.Namespace) -> int:
         "owner_id": args.repository.split("/", 1)[0],
         "agent_login": args.agent,
         "issue_number": args.issue,
-        "allowed_actions": sorted(set(args.action)),
+        "allowed_actions": actions,
         "allowed_paths": sorted(set(args.path)),
         "issued_at": issued_at.isoformat(),
         "expires_at": (issued_at + lifetime).isoformat(),

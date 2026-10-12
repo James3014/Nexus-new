@@ -643,7 +643,15 @@ ATTESTATION_PROTECTED_PATTERNS = (
     ".cargo/**",
     "conftest.py",
     "**/conftest.py",
+    # Authority-bearing documents and the tests and test selection that guard
+    # this gate (#1817 review).
+    "docs/governance/**",
+    "docs/testing/test_impact_map.md",
+    "tests/ops/test_owner_attestation_gate.py",
+    "tests/ops/test_trusted_*",
 )
+ATTESTATION_ACTION = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+ATTESTATION_MAX_ACTIONS = 8
 ATTESTATION_MAX_PATHS = 12
 ATTESTATION_MAX_PATH_LENGTH = 120
 _GITHUB_LOGIN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?$")
@@ -937,17 +945,29 @@ def verify_owner_attestation(
     }
     if set(payload) != expected_fields or payload.get("schema") != ATTESTATION_SCHEMA:
         raise LaneBindingError("ATTESTATION_PAYLOAD_SCHEMA_INVALID")
-    if payload.get("repository") != repository:
+    if _exact_str(payload.get("repository"), "ATTESTATION_REPOSITORY") != repository:
         raise LaneBindingError("ATTESTATION_REPOSITORY_MISMATCH")
-    if payload.get("owner_id") != owner_id:
+    if _exact_str(payload.get("owner_id"), "ATTESTATION_OWNER_ID") != owner_id:
         raise LaneBindingError("ATTESTATION_OWNER_MISMATCH")
-    if str(payload.get("agent_login") or "").lower() != agent_login.lower():
+    if _exact_str(payload.get("agent_login"), "ATTESTATION_AGENT_LOGIN").lower() != (
+        agent_login.lower()
+    ):
         raise LaneBindingError("ATTESTATION_AGENT_MISMATCH")
     issue = _exact_int(payload.get("issue_number"), "ATTESTATION_ISSUE_NUMBER")
     if issue not in bound_issues:
         raise LaneBindingError("ATTESTATION_ISSUE_NOT_BOUND_TO_PR")
     actions = payload.get("allowed_actions")
-    if not isinstance(actions, list) or "GITHUB_MERGE" not in actions:
+    # The signer prompt shows these names verbatim, so anything it could not
+    # show exactly (a non-string, a duplicate, an empty list) is refused.
+    if (
+        type(actions) is not list
+        or not actions
+        or len(actions) > ATTESTATION_MAX_ACTIONS
+        or not all(type(a) is str and ATTESTATION_ACTION.fullmatch(a) for a in actions)
+        or len(set(actions)) != len(actions)
+    ):
+        raise LaneBindingError("ATTESTATION_ACTIONS_INVALID")
+    if "GITHUB_MERGE" not in actions:
         raise LaneBindingError("ATTESTATION_MERGE_NOT_GRANTED")
     patterns = payload.get("allowed_paths")
     if (

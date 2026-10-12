@@ -55,7 +55,9 @@ The decision looks only at content, never at who sent the event. It approves:
   - repository and Owner;
   - the agent's login;
   - one Issue;
-  - the allowed actions (must include `GITHUB_MERGE`);
+  - the allowed actions: 1–8 distinct upper-case names, which must include
+    `GITHUB_MERGE`. The gate and the signer both refuse any other shape, so the
+    Touch ID prompt always shows exactly what is signed;
   - 1–12 path globs, none starting with a wildcard;
   - issue and expiry time (at most 7 days);
   - a nonce.
@@ -88,6 +90,9 @@ The decision looks only at content, never at who sent the event. It approves:
     `conftest.py`, at any depth;
   - `.gitmodules`, `.gitattributes`, `.nexus-core/**`, `.cargo/**`;
   - `MUSE_PROTO.md`, `pyproject.toml`, `uv.lock`.
+  - `docs/governance/**` and `docs/testing/test_impact_map.md`;
+  - this gate's own tests: `tests/ops/test_owner_attestation_gate.py` and
+    `tests/ops/test_trusted_*`.
 - **The per-event lane check.** The trusted merge-lane gate also refuses
   agent-sent events without a valid grant. This is only an extra signal; the
   required `Owner grant` check is what decides merges.

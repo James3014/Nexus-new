@@ -292,12 +292,54 @@ def test_head_cannot_add_its_own_signing_key(world):
         "pyproject.toml",
         "uv.lock",
         "tasks/campaign/card.md",
+        "docs/governance/current_operating_mode.yaml",
+        "docs/governance/OWNER_REPRESENTATION.md",
+        "docs/testing/test_impact_map.md",
+        "tests/ops/test_owner_attestation_gate.py",
+        "tests/ops/test_trusted_merge_lane_gate.py",
     ],
 )
 def test_protected_paths_are_never_coverable(world, path):
     head = _head(world, {path: "changed\n"})
     with pytest.raises(LaneBindingError, match="ATTESTATION_PROTECTED_PATH"):
         _validate(world, head, _body(_envelope(world, _payload(allowed_paths=[path]))))
+
+
+def test_a_broad_grant_does_not_cover_authority_documents_under_it(world):
+    # Reproduces the #1817 review: docs/** used to cover docs/governance/.
+    head = _head(world, {"docs/governance/current_operating_mode.yaml": "mode: open\n"})
+    with pytest.raises(
+        LaneBindingError, match="ATTESTATION_PROTECTED_PATH:docs/governance/current_operating_mode.yaml"
+    ):
+        _validate(world, head, _body(_envelope(world, _payload(allowed_paths=["docs/**"]))))
+
+
+@pytest.mark.parametrize(
+    "actions",
+    [
+        ["GITHUB_MERGE", 9001],
+        ["GITHUB_MERGE", None],
+        ["GITHUB_MERGE", ["GITHUB_MERGE"]],
+        ["GITHUB_MERGE", "GITHUB_MERGE"],
+        ["GITHUB_MERGE", "github merge"],
+        "GITHUB_MERGE",
+        [],
+    ],
+)
+def test_signed_actions_must_be_a_strict_list_of_action_names(world, actions):
+    # Reproduces the #1817 review: a mixed-type list was accepted by the gate
+    # while the signer prompt would have shown no actions at all.
+    head = _head(world, {"src/feature.py": "value = 2\n"})
+    with pytest.raises(LaneBindingError, match="ATTESTATION_ACTIONS_INVALID"):
+        _validate(world, head, _body(_envelope(world, _payload(allowed_actions=actions))))
+
+
+@pytest.mark.parametrize("field", ["repository", "owner_id", "agent_login"])
+@pytest.mark.parametrize("value", [123, None, ["x"]])
+def test_signed_identity_fields_must_be_strings(world, field, value):
+    head = _head(world, {"src/feature.py": "value = 2\n"})
+    with pytest.raises(LaneBindingError, match="_INVALID"):
+        _validate(world, head, _body(_envelope(world, _payload(**{field: value}))))
 
 
 @pytest.mark.parametrize("pattern", ["**", "*", "**/*.py", "?rc/**", "*/feature.py"])
