@@ -541,3 +541,90 @@ def test_research_ignores_request_workspace_root(
         )
     assert not (tmp_path / ".nexus").exists()
     assert (ws / ".nexus" / "research" / "research-esc").is_dir()
+
+
+# 9. research egress gate and request URLs (security review on #1870) ------------------------
+
+
+def _forbid_network(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    import socket
+    import subprocess
+    import urllib.request
+
+    calls: list[str] = []
+
+    def boom(*args: Any, **kwargs: Any) -> Any:
+        calls.append(repr(args)[:80])
+        raise AssertionError("network or subprocess egress attempted")
+
+    monkeypatch.setattr(socket, "create_connection", boom)
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    monkeypatch.setattr(subprocess, "run", boom)
+    return calls
+
+
+def _real_research_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nexus.engine.phases.research import ResearchPhaseHandler
+
+    monkeypatch.setattr(
+        ResearchPhaseHandler,
+        "_run_external_research",
+        ResearchPhaseHandler._real_run_external_research,  # type: ignore[attr-defined]
+    )
+
+
+def test_research_unauthorized_makes_no_outbound_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", raising=False)
+    monkeypatch.chdir(tmp_path)
+    _real_research_provider(monkeypatch)
+    calls = _forbid_network(monkeypatch)
+    result = _invoke(
+        "research",
+        {
+            "task_id": "r-auth",
+            "task_statement": "look at https://example.invalid/x and explain compute_total",
+            "codeintel": {
+                "provider_url": "http://169.254.169.254/latest",
+                "research_url": "http://x.invalid",
+            },
+        },
+    )
+    assert result["gate_passed"] is False
+    assert _blocked_reason(result) == "BLOCKED_EXTERNAL_AUTH"
+    assert _outcome(result)["provider_call_count"] == 0
+    assert calls == []
+
+
+def test_research_authorized_never_fetches_request_urls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nexus.engine.phases.research import ResearchPhaseHandler
+    from nexus.services.reach.ucc_router import UCCRouter
+
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.chdir(tmp_path)
+    _real_research_provider(monkeypatch)
+    queries: list[str] = []
+
+    def fake_chub(self: Any, query: str) -> dict[str, Any]:
+        queries.append(query)
+        return {"findings": ["ok"], "source": "chub", "status": "SUCCESS", "tokens_used": 1}
+
+    def no_reach(self: Any, url: str) -> Any:
+        raise AssertionError(f"request URL fetched: {url}")
+
+    monkeypatch.setattr(ResearchPhaseHandler, "_run_chub", fake_chub)
+    monkeypatch.setattr(UCCRouter, "reach", no_reach)
+    result = _invoke(
+        "research",
+        {
+            "task_id": "r-url",
+            "task_statement": "read https://evil.invalid/a and www.evil.invalid/b then answer",
+            "codeintel": {"provider_url": "http://169.254.169.254/"},
+        },
+    )
+    assert result["gate_passed"] is True
+    assert queries and "evil.invalid" not in queries[0] and "169.254" not in queries[0]
+    assert not (Path.home() / ".openclaw" / "memory" / "lancedb-research" / "r-url").exists()

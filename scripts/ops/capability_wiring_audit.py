@@ -2569,8 +2569,9 @@ _SPEC_LIST: list[CapSpec] = [
         "research",
         build_research,
         negative_check=neg_research,
+        policies=(POLICY_PRODUCTION, POLICY_EXTERNAL_FLAG),
         gaps=(
-            "capability_executor_registry._exec_research passes context key 'task_statement'; ResearchPhaseHandler.run reads context['task'], so the handler always returns 'Empty research task.'",
+            "(fixed in #1862) the executor passes the task under 'task'; outbound provider calls need NEXUS_EXTERNAL_RUNTIME_AUTHORIZED=1",
         ),
     ),
     CapSpec(
@@ -2578,6 +2579,7 @@ _SPEC_LIST: list[CapSpec] = [
         "research",
         build_research,
         negative_check=neg_research,
+        policies=(POLICY_PRODUCTION, POLICY_EXTERNAL_FLAG),
         gaps=(
             "selected on every run (required node) but the invoker skips unless escalate-triggered; when triggered it reuses the research executor (same 'task_statement' vs 'task' key mismatch)",
         ),

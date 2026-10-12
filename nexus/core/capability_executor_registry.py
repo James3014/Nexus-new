@@ -900,11 +900,30 @@ def _exec_research(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityR
         research_dir = research_root / ".nexus" / "research" / _safe_run_id(plan.task_id)
         research_dir.mkdir(parents=True, exist_ok=True)
         inst = cls(project_root=research_root, run_dir=research_dir)
+        # The handler's default LanceDB cache lives under ~/.openclaw; keep cache writes in the
+        # per-task run dir (researchpack.json) instead.
+        inst._get_lancedb = lambda: None  # type: ignore[method-assign]
+        # Outbound calls (chub CLI / felo) only with the operator switch; authorization is
+        # env-only, never a request constraint.  The providers are blocked at the egress
+        # methods, so a stubbed provider (tests) still runs hermetically.
+        research_authorized = _provider_auth_allowed(require_external=True)
+        if not research_authorized:
+            blocked_pack = {
+                "findings": [],
+                "source": "BLOCKED_EXTERNAL_AUTH",
+                "status": "FAIL",
+                "tokens_used": 0,
+                "error": "BLOCKED_EXTERNAL_AUTH",
+            }
+            inst._run_chub = lambda query: dict(blocked_pack)  # type: ignore[method-assign]
+            inst._run_felo = lambda query: dict(blocked_pack)  # type: ignore[method-assign]
         state = NexusState(task_id=plan.task_id, metadata={})
         # Real physical run path — not should_run probe alone.
         # ResearchPhaseHandler.run reads context["task"]; "task_statement" is kept
         # for callers that still key on the old name.
-        research_task = str(task_desc or "").strip()
+        # URLs in the request are data, never fetch targets (the handler would route them to the
+        # UCC reach router), so they are removed before the task reaches the handler.
+        research_task = _strip_urls(str(task_desc or "")).strip()
         result = inst.run(
             state,
             {
@@ -915,6 +934,26 @@ def _exec_research(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityR
             },
         )
         elapsed = int((time.monotonic() - start) * 1000)
+        if (
+            not research_authorized
+            and isinstance(result, Mapping)
+            and "BLOCKED_EXTERNAL_AUTH" in str(result.get("error") or "")
+        ):
+            return _make_receipt(
+                "research",
+                plan,
+                invoked=True,
+                gate_passed=False,
+                wall_time_ms=elapsed,
+                outcome=_structured_outcome(
+                    action="auth_gate",
+                    semantic_status="BLOCKED",
+                    error="BLOCKED_EXTERNAL_AUTH",
+                    evidence_refs=["ev_auth_block_research"],
+                    auth_required=True,
+                    provider_call_count=0,
+                ),
+            )
         ok = (
             isinstance(result, Mapping)
             and not result.get("error")
@@ -4169,3 +4208,10 @@ def _memory_findings_hits(root: Path, query: str, *, limit: int) -> list[dict[st
         return FindingsMemoryLessonStore(project_root=root).query(query_text=head, limit=limit)
     except Exception:
         return []
+
+
+_URL_RE = re.compile(r"(?i)\b(?:https?|ftp|file)://\S+|\bwww\.\S+")
+
+
+def _strip_urls(text: str) -> str:
+    return _URL_RE.sub("[url removed]", text)

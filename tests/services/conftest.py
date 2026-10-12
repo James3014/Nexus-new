@@ -24,5 +24,12 @@ def _hermetic_research_provider(monkeypatch: pytest.MonkeyPatch) -> None:
             "tokens_used": 0,
         }
 
+    # keep the real egress path reachable for tests that exercise the authorization gate
+    monkeypatch.setattr(
+        ResearchPhaseHandler,
+        "_real_run_external_research",
+        ResearchPhaseHandler._run_external_research,
+        raising=False,
+    )
     monkeypatch.setattr(ResearchPhaseHandler, "_run_external_research", offline_provider)
     monkeypatch.setattr(ResearchPhaseHandler, "_get_lancedb", lambda self: None)

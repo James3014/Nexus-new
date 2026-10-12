@@ -1,12 +1,21 @@
 {
   "schema": "nexus.capability_wiring_audit.v1",
-  "generated_at": "2026-10-12T12:54:06.355699+00:00",
-  "git_head": "4dbac7875071284f27dfd747c290cca35439703b",
+  "generated_at": "2026-10-12T13:19:36.836246+00:00",
+  "git_head": "ac1c19bab17efe4f8d099df94d8b9cc79be9cfd3",
   "model_probe": {
-    "available": false,
+    "available": true,
     "url": "http://127.0.0.1:11434",
-    "reason": "TimeoutError: timed out",
-    "models": []
+    "model": "qwen2.5-coder:7b-instruct",
+    "models": [
+      "incoai/Qwen3.6-35B-A3B-Splash",
+      "incoai/Qwen3.8-27B-Splash",
+      "nomic-embed-text:latest",
+      "qwen2.5-coder:14b-instruct-q3_K_M",
+      "qwen2.5-coder:7b",
+      "qwen2.5-coder:7b-instruct",
+      "qwen3.5:9b"
+    ],
+    "reason": ""
   },
   "policies": {
     "production_default": {
@@ -95,7 +104,7 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_codeintel_a1786304"
+        "ev_cap_codeintel_747e12fb"
       ],
       "physical_callable": "capability_executor_registry:codeintel",
       "console_tail": [],
@@ -165,7 +174,7 @@
         "physical_callable": "nexus.services.codeintel.skeleton_provider.PythonCodeSkeletonProvider.lookup_implementation"
       },
       "receipt_path": "receipts/codeintel.json",
-      "audit_seconds": 8.38
+      "audit_seconds": 8.42
     },
     {
       "capability": "research",
@@ -178,7 +187,7 @@
         "line": 851
       },
       "gaps": [
-        "capability_executor_registry._exec_research passes context key 'task_statement'; ResearchPhaseHandler.run reads context['task'], so the handler always returns 'Empty research task.'"
+        "(fixed in #1862) the executor passes the task under 'task'; outbound provider calls need NEXUS_EXTERNAL_RUNTIME_AUTHORIZED=1"
       ],
       "untriggered_production_default": {
         "status": "SKIPPED",
@@ -209,6 +218,15 @@
         {
           "policy": "production_default",
           "env": {},
+          "status": "BLOCKED",
+          "path": "e2e",
+          "block_reason": "BLOCKED_EXTERNAL_AUTH"
+        },
+        {
+          "policy": "external_runtime_authorized_flag",
+          "env": {
+            "NEXUS_EXTERNAL_RUNTIME_AUTHORIZED": "1"
+          },
           "status": "SUCCEEDED",
           "path": "e2e",
           "block_reason": ""
@@ -222,13 +240,15 @@
           "demand_online: All constraints and required controls passed"
         ]
       },
-      "policy_switches_needed": {},
-      "policy_used": "production_default",
+      "policy_switches_needed": {
+        "NEXUS_EXTERNAL_RUNTIME_AUTHORIZED": "1"
+      },
+      "policy_used": "external_runtime_authorized_flag",
       "path": "e2e",
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_research_380d1710"
+        "ev_cap_research_849e26e6"
       ],
       "physical_callable": "capability_executor_registry:research",
       "console_tail": [],
@@ -259,11 +279,12 @@
       ],
       "verdict": "REAL",
       "verdict_reason": "invoked_with_evidence_and_artifact_assertions_passed",
+      "verdict_production_default": "BLOCKED_EXTERNAL_AUTH",
       "outcome_excerpt": {
         "action": "run",
         "semantic_status": "SUCCEEDED",
         "evidence_refs": [
-          "ev_research_wiring-research-pos_production_default"
+          "ev_research_wiring-research-pos_external_runtime_authorized_flag"
         ],
         "result": {
           "findings": [
@@ -279,7 +300,7 @@
         "physical_callable": "nexus.engine.phases.research.ResearchPhaseHandler.run"
       },
       "receipt_path": "receipts/research.json",
-      "audit_seconds": 22.32
+      "audit_seconds": 24.3
     },
     {
       "capability": "research_route",
@@ -323,6 +344,15 @@
           "env": {},
           "status": "BLOCKED",
           "path": "e2e",
+          "block_reason": "BLOCKED_EXTERNAL_AUTH"
+        },
+        {
+          "policy": "external_runtime_authorized_flag",
+          "env": {
+            "NEXUS_EXTERNAL_RUNTIME_AUTHORIZED": "1"
+          },
+          "status": "BLOCKED",
+          "path": "e2e",
           "block_reason": "execution_contract_violation:missing_outcome_field:control_plane_reference"
         }
       ],
@@ -334,13 +364,15 @@
           "demand_online: All constraints and required controls passed"
         ]
       },
-      "policy_switches_needed": {},
-      "policy_used": "production_default",
+      "policy_switches_needed": {
+        "NEXUS_EXTERNAL_RUNTIME_AUTHORIZED": "1"
+      },
+      "policy_used": "external_runtime_authorized_flag",
       "path": "e2e",
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_research_0929e53d"
+        "ev_cap_research_71fdae63"
       ],
       "physical_callable": "capability_executor_registry:research",
       "console_tail": [],
@@ -371,11 +403,12 @@
       ],
       "verdict": "BLOCKED_execution_contract_violation:missing_outcome_field:control_plane_reference",
       "verdict_reason": "executor_or_runtime_blocked",
+      "verdict_production_default": "BLOCKED_EXTERNAL_AUTH",
       "outcome_excerpt": {
         "action": "run",
         "semantic_status": "SUCCEEDED",
         "evidence_refs": [
-          "ev_research_wiring-research_route-pos_production_default"
+          "ev_research_wiring-research_route-pos_external_runtime_authorized_flag"
         ],
         "result": {
           "findings": [
@@ -391,7 +424,7 @@
         "physical_callable": "nexus.engine.phases.research.ResearchPhaseHandler.run"
       },
       "receipt_path": "receipts/research_route.json",
-      "audit_seconds": 17.91
+      "audit_seconds": 22.44
     },
     {
       "capability": "hyper",
@@ -401,7 +434,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_hyper_sprint",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1266
+        "line": 1305
       },
       "gaps": [
         "executor config fixes candidate_count=1, target_file=README.md, llm_mode=False; outcome carries no semantic_status/evidence_refs so the invoker contract check always rejects it"
@@ -465,7 +498,7 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_hyper_sprint_f23cb86c"
+        "ev_cap_hyper_sprint_b69bfc3e"
       ],
       "physical_callable": "capability_executor_registry:hyper_sprint",
       "console_tail": [
@@ -499,7 +532,7 @@
           "target_file": "README.md",
           "winner_source": "local",
           "final_score": 0.0,
-          "elapsed_sec": 3.1705,
+          "elapsed_sec": 7.4767,
           "attempt_count": 3,
           "model_calls": 0,
           "quota_backoffs": 0,
@@ -527,7 +560,7 @@
         "physical_callable": "nexus.research.sprint_service.run_hyper_sprint"
       },
       "receipt_path": "receipts/hyper.json",
-      "audit_seconds": 17.52
+      "audit_seconds": 18.05
     },
     {
       "capability": "nightshift",
@@ -537,7 +570,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_nightshift",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1465
+        "line": 1504
       },
       "gaps": [
         "AutoResearchNightShift runs one round with a bare task string; the phase policy denies research at PassRate=0% so no recovery report is written"
@@ -603,7 +636,7 @@
       "receipt_claims_simulated": true,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_nightshift_runner_service_3b40e63d"
+        "ev_cap_nightshift_runner_service_f76925ba"
       ],
       "physical_callable": "capability_executor_registry:nightshift",
       "console_tail": [
@@ -642,7 +675,7 @@
         "terminal_success": false
       },
       "receipt_path": "receipts/nightshift.json",
-      "audit_seconds": 13.7
+      "audit_seconds": 10.29
     },
     {
       "capability": "swarm",
@@ -652,7 +685,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_swarm_multi_agent",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1361
+        "line": 1400
       },
       "gaps": [
         "executor only constructs BattleSwarm and calls cleanup() with empty lists; the P4 shallow-action guard then rejects it as import_construct_not_execution"
@@ -719,7 +752,7 @@
       "receipt_claims_simulated": true,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_swarm_multi_agent_5f601ab7"
+        "ev_cap_swarm_multi_agent_f8b1ba8f"
       ],
       "physical_callable": "capability_executor_registry:swarm_multi_agent",
       "console_tail": [],
@@ -746,7 +779,7 @@
         "detail": "physical method call required; import/construct alone is insufficient"
       },
       "receipt_path": "receipts/swarm.json",
-      "audit_seconds": 14.05
+      "audit_seconds": 11.53
     },
     {
       "capability": "multi_agent",
@@ -756,7 +789,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_swarm_multi_agent",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1361
+        "line": 1400
       },
       "gaps": [
         "alias of swarm_multi_agent (same executor)"
@@ -821,7 +854,7 @@
       "receipt_claims_simulated": true,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_swarm_multi_agent_223712cb"
+        "ev_cap_swarm_multi_agent_14734a7c"
       ],
       "physical_callable": "capability_executor_registry:swarm_multi_agent",
       "console_tail": [],
@@ -848,7 +881,7 @@
         "detail": "physical method call required; import/construct alone is insufficient"
       },
       "receipt_path": "receipts/multi_agent.json",
-      "audit_seconds": 23.59
+      "audit_seconds": 11.86
     },
     {
       "capability": "drone",
@@ -858,7 +891,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_drone",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1406
+        "line": 1445
       },
       "gaps": [
         "executor calls TacticalDrone.repair_response_schema/normalize_action on the task text only; no sub-task is dispatched and gate_passed is true for any task"
@@ -913,7 +946,7 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_drone_8981573c"
+        "ev_cap_drone_34e5f0fa"
       ],
       "physical_callable": "capability_executor_registry:drone",
       "console_tail": [],
@@ -960,7 +993,7 @@
         "physical_callable": "nexus.core.drone_engine.TacticalDrone.repair_response_schema"
       },
       "receipt_path": "receipts/drone.json",
-      "audit_seconds": 15.27
+      "audit_seconds": 10.96
     },
     {
       "capability": "ultra_review",
@@ -970,7 +1003,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_ultra_review",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1765
+        "line": 1804
       },
       "gaps": [
         "executor captures git diff HEAD and counts changed files only; _scan_security_observations / the dry-run fleet are never called, so a planted eval(input()) is not flagged"
@@ -1025,7 +1058,7 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_ultra_review_8c85e3fb"
+        "ev_cap_ultra_review_834b4aab"
       ],
       "physical_callable": "capability_executor_registry:ultra_review",
       "console_tail": [],
@@ -1073,10 +1106,10 @@
         "semantic_status": "SUCCEEDED",
         "evidence_refs": [
           "ev_ultra_review_wiring-ultra_review-pos_production_default_reg",
-          "run_id:ultra-review-20261012125009759138"
+          "run_id:ultra-review-20261012131507694191"
         ],
         "result": {
-          "run_id": "ultra-review-20261012125009759138",
+          "run_id": "ultra-review-20261012131507694191",
           "diff_bytes": 215,
           "changed_files_count": 1,
           "task": "Review the working tree diff for unsafe calls\n\nNexus route oracle contract:\n- Expected capability receipts: ultra_review",
@@ -1085,7 +1118,7 @@
         "physical_callable": "nexus.engine.ultra_review_service.UltraReviewService._capture_diff"
       },
       "receipt_path": "receipts/ultra_review.json",
-      "audit_seconds": 26.2
+      "audit_seconds": 25.37
     },
     {
       "capability": "autoreason",
@@ -1095,7 +1128,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_autoreason",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1173
+        "line": 1212
       },
       "gaps": [
         "executor ranks one hard-coded candidate {'id': 'c0', 'score': 1.0}; context cannot carry candidates (no allowlisted constraint)"
@@ -1162,7 +1195,7 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_autoreason_828671ef"
+        "ev_cap_autoreason_f8dbc450"
       ],
       "physical_callable": "capability_executor_registry:autoreason",
       "console_tail": [],
@@ -1351,7 +1384,7 @@
         "physical_callable": "nexus.engine.autoreason_service.AutoreasonService.run"
       },
       "receipt_path": "receipts/autoreason.json",
-      "audit_seconds": 14.89
+      "audit_seconds": 12.11
     },
     {
       "capability": "ddtree",
@@ -1361,7 +1394,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_ddtree",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 2469
+        "line": 2508
       },
       "gaps": [
         "executor plans one hard-coded candidate c0 with max_candidates=2, so nothing can be pruned (pruned_count is always 0)"
@@ -1429,7 +1462,7 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_ddtree_6af85e7a"
+        "ev_cap_ddtree_6efda241"
       ],
       "physical_callable": "capability_executor_registry:ddtree",
       "console_tail": [],
@@ -1510,7 +1543,7 @@
         "physical_callable": "nexus.engine.ddtree_adapter.DDTreeAdapter.plan"
       },
       "receipt_path": "receipts/ddtree.json",
-      "audit_seconds": 15.87
+      "audit_seconds": 18.27
     },
     {
       "capability": "lancedb",
@@ -1568,7 +1601,7 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_lancedb_45f815c5"
+        "ev_cap_lancedb_1de238a1"
       ],
       "physical_callable": "capability_executor_registry:lancedb",
       "console_tail": [],
@@ -1626,7 +1659,7 @@
         "physical_callable": "nexus.services.memory_repository.MemoryRepository.search_fts"
       },
       "receipt_path": "receipts/lancedb.json",
-      "audit_seconds": 7.54
+      "audit_seconds": 7.77
     },
     {
       "capability": "memory",
@@ -1636,7 +1669,7 @@
         "reached_via": "EXECUTOR_REGISTRY",
         "function": "_exec_memory",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 2038
+        "line": 2077
       },
       "gaps": [
         "the memory_query constraint is never fed (UnifiedRuntime context has no memory_query); the executor searches with the whole task statement as a LIKE pattern, so a hit needs a stored insight containing that entire text"
@@ -1684,7 +1717,7 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_memory_4925c203"
+        "ev_cap_memory_f85bd836"
       ],
       "physical_callable": "capability_executor_registry:memory",
       "console_tail": [],
@@ -1738,7 +1771,7 @@
         "physical_callable": "nexus.core.memory_manager.ProjectMemoryManager.search"
       },
       "receipt_path": "receipts/memory.json",
-      "audit_seconds": 7.1
+      "audit_seconds": 6.95
     },
     {
       "capability": "mempalace_gate",
@@ -1798,7 +1831,7 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_mempalace_19506286"
+        "ev_cap_mempalace_3bcbb622"
       ],
       "physical_callable": "capability_executor_registry:mempalace",
       "console_tail": [],
@@ -1842,7 +1875,7 @@
         ],
         "result": {
           "artifact_id": "wiring-clean-001",
-          "stored_aaak_id": "capability_evidence-1791809467",
+          "stored_aaak_id": "capability_evidence-1791810965",
           "retrieved_count": 1
         },
         "ingest_performed": true,
@@ -1852,7 +1885,7 @@
         "physical_callable": "nexus.services.mem_palace.MemPalace.ingest_to_shards+retrieve_from_shards+verify"
       },
       "receipt_path": "receipts/mempalace_gate.json",
-      "audit_seconds": 6.85
+      "audit_seconds": 8.02
     },
     {
       "capability": "belief",
@@ -1862,7 +1895,7 @@
         "reached_via": "EXECUTOR_REGISTRY",
         "function": "_exec_belief",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1076
+        "line": 1115
       },
       "gaps": [
         "read-only: assess_confidence on the task statement; no outcome update path exists in the registry executor"
@@ -1910,7 +1943,7 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_belief_01f5eb4c"
+        "ev_cap_belief_ca166dba"
       ],
       "physical_callable": "capability_executor_registry:belief",
       "console_tail": [],
@@ -1956,7 +1989,7 @@
         "physical_callable": "nexus.core.belief_engine.BeliefEngine.assess_confidence"
       },
       "receipt_path": "receipts/belief.json",
-      "audit_seconds": 7.49
+      "audit_seconds": 8.21
     },
     {
       "capability": "artifact_gate",
@@ -2077,7 +2110,7 @@
           "verifier_gate_passed": true,
           "online_invoked": true,
           "local_invoked": false,
-          "bundle_hash": "19065a82ecf64abf7f5c217d36bc8472e7fecafe8e057be71f02760bb9a8d62b",
+          "bundle_hash": "8923fc09d181d9263af4004289cad1d558090deea7d8f56e8cd3e7cce8fbb761",
           "context_task_id": "wiring-artifact_gate-pos_production_default"
         },
         "public_claim_allowed": false,
@@ -2106,7 +2139,7 @@
         }
       },
       "receipt_path": "receipts/artifact_gate.json",
-      "audit_seconds": 6.54
+      "audit_seconds": 7.41
     },
     {
       "capability": "claim_gate",
@@ -2229,7 +2262,7 @@
           "verifier_gate_passed": true,
           "online_invoked": true,
           "local_invoked": false,
-          "bundle_hash": "fd9288b6f6110e2504b2d8bf9e64a7d2232c7db590769e2b58ee915ab84eca88",
+          "bundle_hash": "5c4de739441f46a165975f56c196f551dce3c14c1ca63cf4af53a0c622a73cc7",
           "context_task_id": "wiring-claim_gate-pos_production_default"
         },
         "public_claim_allowed": false,
@@ -2258,7 +2291,7 @@
         }
       },
       "receipt_path": "receipts/claim_gate.json",
-      "audit_seconds": 7.01
+      "audit_seconds": 8.45
     },
     {
       "capability": "delivery_gate",
@@ -2375,7 +2408,7 @@
           "verifier_gate_passed": true,
           "online_invoked": true,
           "local_invoked": false,
-          "bundle_hash": "eb053fad8cdf72170b7cb70398acec2adc0d19c5f66d5f12b8218a817d313e1c",
+          "bundle_hash": "eee049506222a17d52ba993b21e15cec45326953f7a728e953908bca0523fd7b",
           "context_task_id": "wiring-delivery_gate-pos_production_default"
         },
         "public_claim_allowed": false,
@@ -2404,7 +2437,7 @@
         }
       },
       "receipt_path": "receipts/delivery_gate.json",
-      "audit_seconds": 7.04
+      "audit_seconds": 8.06
     },
     {
       "capability": "acceptance_check",
@@ -2414,7 +2447,7 @@
         "reached_via": "EXECUTOR_REGISTRY (run after the verifier stage)",
         "function": "_exec_acceptance_check",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 2643
+        "line": 2682
       },
       "gaps": [],
       "trigger_switch": null,
@@ -2465,7 +2498,7 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_acceptance_check_762b419a"
+        "ev_cap_acceptance_check_96382f53"
       ],
       "physical_callable": "capability_executor_registry:acceptance_check",
       "console_tail": [],
@@ -2515,7 +2548,7 @@
         "task_id": "wiring-acceptance_check-pos_production_default"
       },
       "receipt_path": "receipts/acceptance_check.json",
-      "audit_seconds": 6.9
+      "audit_seconds": 8.57
     },
     {
       "capability": "pregate",
@@ -2525,7 +2558,7 @@
         "reached_via": "EXECUTOR_REGISTRY",
         "function": "_exec_pregate",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 2233
+        "line": 2272
       },
       "gaps": [],
       "trigger_switch": null,
@@ -2573,7 +2606,7 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_pregate_3c9c13f8"
+        "ev_cap_pregate_90d5a039"
       ],
       "physical_callable": "capability_executor_registry:pregate",
       "console_tail": [],
@@ -2636,7 +2669,7 @@
         "physical_callable": "nexus.engine.cli_pregate.run_cli_pregate"
       },
       "receipt_path": "receipts/pregate.json",
-      "audit_seconds": 7.26
+      "audit_seconds": 7.01
     },
     {
       "capability": "forecast_gate",
@@ -2646,7 +2679,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_forecast_gate",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 3383
+        "line": 3422
       },
       "gaps": [],
       "untriggered_production_default": {
@@ -2698,7 +2731,7 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_forecast_gate_c14ce983"
+        "ev_cap_forecast_gate_df258cbf"
       ],
       "physical_callable": "capability_executor_registry:forecast_pregate",
       "console_tail": [
@@ -2796,7 +2829,7 @@
         ]
       },
       "receipt_path": "receipts/forecast_gate.json",
-      "audit_seconds": 15.87
+      "audit_seconds": 10.64
     },
     {
       "capability": "plan_quality_gate",
@@ -2806,7 +2839,7 @@
         "reached_via": "EXECUTOR_REGISTRY",
         "function": "_exec_plan_quality_gate",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 2096
+        "line": 2135
       },
       "gaps": [],
       "trigger_switch": null,
@@ -2854,7 +2887,7 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_plan_quality_gate_58f0c7e5"
+        "ev_cap_plan_quality_gate_97f76930"
       ],
       "physical_callable": "capability_executor_registry:plan_quality_gate",
       "console_tail": [],
@@ -2907,7 +2940,7 @@
         "physical_callable": "nexus.core.plan_quality_gate.PlanQualityGate.evaluate"
       },
       "receipt_path": "receipts/plan_quality_gate.json",
-      "audit_seconds": 7.71
+      "audit_seconds": 7.39
     },
     {
       "capability": "sandbox",
@@ -2917,7 +2950,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_sandbox_runner",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1474
+        "line": 1513
       },
       "gaps": [],
       "untriggered_production_default": {
@@ -2970,7 +3003,7 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_sandbox_runner_e0d98b58"
+        "ev_cap_sandbox_runner_936c4a33"
       ],
       "physical_callable": "capability_executor_registry:sandbox_runner",
       "console_tail": [],
@@ -2991,7 +3024,7 @@
         {
           "name": "workspace_isolated_copy",
           "passed": true,
-          "detail": "effective_cwd=ult/.nexus/sandbox/runs/run_1791809545247_dc3b9489/workspace"
+          "detail": "effective_cwd=ult/.nexus/sandbox/runs/run_1791811042717_c7b0d4bc/workspace"
         },
         {
           "name": "exit_code_zero",
@@ -3018,9 +3051,9 @@
           "ev_sandbox_run_wiring-sandbox-pos_production_default"
         ],
         "result": {
-          "run_id": "run_1791809545247_dc3b9489",
-          "report_path": "<audit-out>/workspaces/sandbox__pos_production_default/.nexus/sandbox/runs/run_179180",
-          "duration_sec": 0.08216309547424316
+          "run_id": "run_1791811042717_c7b0d4bc",
+          "report_path": "<audit-out>/workspaces/sandbox__pos_production_default/.nexus/sandbox/runs/run_179181",
+          "duration_sec": 0.1171419620513916
         },
         "sandbox_executed": true,
         "workspace_isolated": true,
@@ -3030,7 +3063,7 @@
         "physical_callable": "nexus.engine.sandbox_runner.SandboxRunner.run_task"
       },
       "receipt_path": "receipts/sandbox.json",
-      "audit_seconds": 14.72
+      "audit_seconds": 10.78
     },
     {
       "capability": "harness_preflight_sensor",
@@ -3040,7 +3073,7 @@
         "reached_via": "EXECUTOR_REGISTRY",
         "function": "_exec_harness_preflight_sensor",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 2301
+        "line": 2340
       },
       "gaps": [
         "pending_capabilities/selected_capabilities are not in the UnifiedRuntime capability_context, so the sensor evaluates empty lists and passes vacuously"
@@ -3089,7 +3122,7 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_harness_preflight_sensor_4c2990be"
+        "ev_cap_harness_preflight_sensor_f94475c6"
       ],
       "physical_callable": "capability_executor_registry:harness_preflight_sensor",
       "console_tail": [],
@@ -3175,7 +3208,7 @@
         ]
       },
       "receipt_path": "receipts/harness_preflight_sensor.json",
-      "audit_seconds": 7.83
+      "audit_seconds": 7.43
     },
     {
       "capability": "committee",
@@ -3185,7 +3218,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_committee",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 3193
+        "line": 3232
       },
       "gaps": [
         "each proposal needs a 'model' key but the canonical context seam forbids any key containing 'model' under codeintel, so proposals cannot reach the executor through UnifiedRuntime; the controller is also off unless NEXUS_USE_COMMITTEE=1"
@@ -3263,7 +3296,7 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_committee_b0e201c7"
+        "ev_cap_committee_94c166ec"
       ],
       "physical_callable": "capability_executor_registry:committee",
       "console_tail": [],
@@ -3321,7 +3354,7 @@
         "explicit_abstain": false
       },
       "receipt_path": "receipts/committee.json",
-      "audit_seconds": 42.74
+      "audit_seconds": 37.19
     },
     {
       "capability": "xray",
@@ -3331,7 +3364,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_xray",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 3604
+        "line": 3643
       },
       "gaps": [
         "scan target is hard-coded to <project_root>/nexus/services/capability_registry.py regardless of the task"
@@ -3385,7 +3418,7 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_xray_9c15a87f"
+        "ev_cap_xray_c7bac194"
       ],
       "physical_callable": "capability_executor_registry:xray",
       "console_tail": [],
@@ -3437,7 +3470,7 @@
         ]
       },
       "receipt_path": "receipts/xray.json",
-      "audit_seconds": 14.3
+      "audit_seconds": 10.07
     },
     {
       "capability": "metabolism",
@@ -3447,7 +3480,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_metabolism_resume",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1842
+        "line": 1881
       },
       "gaps": [],
       "untriggered_production_default": {
@@ -3499,7 +3532,7 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_metabolism_resume_f863050a"
+        "ev_cap_metabolism_resume_b17fc06d"
       ],
       "physical_callable": "capability_executor_registry:metabolism_resume",
       "console_tail": [],
@@ -3520,7 +3553,7 @@
         {
           "name": "seed_on_disk_hash_matches",
           "passed": true,
-          "detail": "seed_hash=779290ee7af6"
+          "detail": "seed_hash=97c2bcebe26b"
         },
         {
           "name": "threshold_crossed",
@@ -3547,10 +3580,10 @@
           "token_limit": 128000,
           "threshold_crossed": true,
           "checkpoint_before_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-          "checkpoint_after_hash": "4d1703b5bc8a9d4e53c0dcfb200cc2d1edf70428e7d0012959a3f3567823da3f",
+          "checkpoint_after_hash": "c449ae4dd139155287d45204033ca9076caecb8b12d36a0d3dab488a53c76feb",
           "checkpoint_path": "<audit-out>/workspaces/metabolism__pos_production_default/.nexus/metabolism/task_stac",
           "seed_path": "<audit-out>/workspaces/metabolism__pos_production_default/.nexus/metabolism/session_s",
-          "seed_hash": "779290ee7af65ec61d0d21474547798072b13e8fa7ab7f76cf560ab98864454b",
+          "seed_hash": "97c2bcebe26bc9393d1aeeeba8541d93b477ba5deabef5ed9a3acd75f389ce6a",
           "transaction_id": null,
           "upload": "NOT_PERFORMED",
           "distill_status": "LOCAL_ONLY",
@@ -3562,7 +3595,7 @@
         "physical_callable": "nexus.services.metabolism_engine.SessionMetabolism.distill"
       },
       "receipt_path": "receipts/metabolism.json",
-      "audit_seconds": 15.73
+      "audit_seconds": 10.04
     },
     {
       "capability": "meta_opt",
@@ -3572,7 +3605,7 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_meta_opt",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 3825
+        "line": 3864
       },
       "gaps": [],
       "untriggered_production_default": {
@@ -3623,7 +3656,7 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_meta_opt_60539b77"
+        "ev_cap_meta_opt_eb3cfc2a"
       ],
       "physical_callable": "capability_executor_registry:benchmark_meta_opt",
       "console_tail": [],
@@ -3678,7 +3711,7 @@
         "physical_callable": "nexus.learning.outcome_memory.OutcomeMemoryManager.save_episode_and_tune_sync"
       },
       "receipt_path": "receipts/meta_opt.json",
-      "audit_seconds": 14.73
+      "audit_seconds": 10.37
     },
     {
       "capability": "local_model_executor",
@@ -3693,15 +3726,98 @@
       "gaps": [
         "without Local-stage proof the registry invoker falls back to a fixture provider (_FixtureLocalProvider returns canned text); the real path is the Local stage"
       ],
-      "verdict": "MODEL_UNAVAILABLE",
-      "verdict_reason": "TimeoutError: timed out",
-      "model": {
-        "available": false,
-        "url": "http://127.0.0.1:11434",
-        "reason": "TimeoutError: timed out",
-        "models": []
+      "trigger_switch": null,
+      "planner": {
+        "selected": true,
+        "state": "required",
+        "reasons": [
+          "route_oracle_expected_capability",
+          "route_oracle_expected_receipt_required"
+        ],
+        "selected_capabilities": [
+          "harness_preflight_sensor",
+          "repair_loop",
+          "research_route",
+          "delivery_gate",
+          "pregate",
+          "plan_quality_gate",
+          "mempalace_gate",
+          "artifact_gate",
+          "claim_gate",
+          "local_model_executor"
+        ],
+        "plan_hash": "ea3fdb3d025406330b8770dff38a59816d2caf6c5b540d9542fb5ea02bff621c",
+        "forcing": "route-oracle line 'Expected capability receipts: local_model_executor' in task_statement"
       },
-      "audit_seconds": 0.02
+      "policy_attempts": [
+        {
+          "policy": "local_model_call_allowed",
+          "env": {
+            "NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1"
+          },
+          "status": "BLOCKED",
+          "path": "e2e",
+          "block_reason": "SELECTED_NOT_EXECUTED:planner_selected_no_runtime_executor:local_stage[local_output_not_delivered,candidate_not_isolated,verifier_not_passed; executor_invoked=True; model_call_count=7]"
+        }
+      ],
+      "product_path_reachable": true,
+      "receipt_terminal_status": "INCOMPLETE",
+      "workforce_admission": {
+        "decision": "ALLOW",
+        "reasons": [
+          "demand_local: All constraints and required controls passed"
+        ]
+      },
+      "policy_switches_needed": {
+        "NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1"
+      },
+      "policy_used": "local_model_call_allowed",
+      "path": "e2e",
+      "receipt_claims_simulated": true,
+      "claim_boundary_simulated_source": "UnifiedRuntime receipt.receipt_base.claim_boundary (ClaimBoundary default)",
+      "evidence_refs": [
+        "local:wiring-local_model_executor-pos_local_model_call_allowed:formal_runtime:local_output_not_delivered"
+      ],
+      "physical_callable": "LocalModelExecutor.run",
+      "console_tail": [],
+      "hard_coded_inputs": [],
+      "checks": [
+        {
+          "name": "executor_invoked",
+          "passed": true,
+          "detail": "executor_invoked=True"
+        },
+        {
+          "name": "model_really_called",
+          "passed": true,
+          "detail": "local_model_invoked=True model_call_count=7"
+        },
+        {
+          "name": "provider_ledger_has_ollama_metrics_for_audit_model",
+          "passed": true,
+          "detail": "ledger phases=['spec_gen', 'patch', 'retry', 'spec_gen', 'retry', 'spec_gen', 'retry']"
+        },
+        {
+          "name": "candidate_edit_materialized_in_isolated_world",
+          "passed": true,
+          "detail": "world-C calc.py files=['.armor/workspaces/world-c-wiring-local_model_executor-pos_-q6_z7rax/calc.py']"
+        },
+        {
+          "name": "candidate_delivered_to_runtime",
+          "passed": false,
+          "detail": "output_delivered=False blockers=['local_output_not_delivered', 'candidate_not_isolated', 'verifier_not_passed']"
+        },
+        {
+          "name": "source_file_untouched_by_isolated_apply",
+          "passed": true,
+          "detail": "calc.py hash unchanged"
+        }
+      ],
+      "verdict": "BLOCKED_SELECTED_NOT_EXECUTED:planner_selected_no_runtime_executor:local_stage[local_output_not_delivered,candidate_not_isolated,verifier_not_passed; executor_invoked=True; model_call_count=7]",
+      "verdict_reason": "executor_or_runtime_blocked",
+      "outcome_excerpt": {},
+      "receipt_path": "receipts/local_model_executor.json",
+      "audit_seconds": 28.39
     },
     {
       "capability": "repair_loop",
@@ -3714,15 +3830,122 @@
         "line": 1065
       },
       "gaps": [],
-      "verdict": "MODEL_UNAVAILABLE",
-      "verdict_reason": "TimeoutError: timed out",
-      "model": {
-        "available": false,
-        "url": "http://127.0.0.1:11434",
-        "reason": "TimeoutError: timed out",
-        "models": []
+      "trigger_switch": null,
+      "planner": {
+        "selected": true,
+        "state": "required",
+        "reasons": [
+          "route_oracle_expected_capability",
+          "repair_or_self_heal_signal",
+          "route_oracle_expected_receipt_required"
+        ],
+        "selected_capabilities": [
+          "harness_preflight_sensor",
+          "repair_loop",
+          "research_route",
+          "delivery_gate",
+          "pregate",
+          "plan_quality_gate",
+          "mempalace_gate",
+          "artifact_gate",
+          "claim_gate"
+        ],
+        "plan_hash": "cba773d79aee0ae9017a97b13c02dd20e83dd04db736cdc7a3587a279b663879",
+        "forcing": "route-oracle line 'Expected capability receipts: repair_loop' in task_statement"
       },
-      "audit_seconds": 0.0
+      "policy_attempts": [
+        {
+          "policy": "local_model_call_allowed",
+          "env": {
+            "NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1"
+          },
+          "status": "BLOCKED",
+          "path": "e2e",
+          "block_reason": "local_model_executor_not_proven,missing_candidate_hash,candidate_hash_not_applied,verifier_not_passed,local_receipt_incomplete"
+        }
+      ],
+      "product_path_reachable": true,
+      "receipt_terminal_status": "INCOMPLETE",
+      "workforce_admission": {
+        "decision": "ALLOW",
+        "reasons": [
+          "demand_local: All constraints and required controls passed"
+        ]
+      },
+      "policy_switches_needed": {
+        "NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1"
+      },
+      "policy_used": "local_model_call_allowed",
+      "path": "e2e",
+      "receipt_claims_simulated": true,
+      "claim_boundary_simulated_source": "UnifiedRuntime receipt.receipt_base.claim_boundary (ClaimBoundary default)",
+      "evidence_refs": [
+        "wiring-audit:wiring-repair_loop-pos_local_model_call_allowed:request"
+      ],
+      "physical_callable": "LocalModelExecutor.run",
+      "console_tail": [],
+      "hard_coded_inputs": [],
+      "checks": [
+        {
+          "name": "executor_invoked",
+          "passed": true,
+          "detail": "executor_invoked=True"
+        },
+        {
+          "name": "model_really_called",
+          "passed": true,
+          "detail": "local_model_invoked=True model_call_count=7"
+        },
+        {
+          "name": "provider_ledger_has_ollama_metrics_for_audit_model",
+          "passed": true,
+          "detail": "ledger phases=['spec_gen', 'patch', 'retry', 'spec_gen', 'retry', 'spec_gen', 'retry']"
+        },
+        {
+          "name": "candidate_edit_materialized_in_isolated_world",
+          "passed": true,
+          "detail": "world-C calc.py files=['.armor/workspaces/world-c-wiring-repair_loop-pos_local_mod-mjb7go9w/calc.py']"
+        },
+        {
+          "name": "candidate_delivered_to_runtime",
+          "passed": false,
+          "detail": "output_delivered=False blockers=['local_output_not_delivered', 'candidate_not_isolated', 'verifier_not_passed']"
+        },
+        {
+          "name": "source_file_untouched_by_isolated_apply",
+          "passed": true,
+          "detail": "calc.py hash unchanged"
+        },
+        {
+          "name": "verifier_passed_on_candidate",
+          "passed": false,
+          "detail": "verifier_status=not_run"
+        }
+      ],
+      "verdict": "BLOCKED_local_model_executor_not_proven,missing_candidate_hash,candidate_hash_not_applied,verifier_not_passed,local_receipt_incomplete",
+      "verdict_reason": "executor_or_runtime_blocked",
+      "outcome_excerpt": {
+        "action": "verified_local_repair",
+        "semantic_status": "BLOCKED",
+        "evidence_refs": [
+          "wiring-audit:wiring-repair_loop-pos_local_model_call_allowed:request"
+        ],
+        "candidate_hash": "",
+        "hash_matched": false,
+        "verifier_passed": false,
+        "settlement_decision": "incomplete",
+        "receipt_path": "<audit-out>/workspaces/repair_loop__pos_local_model_call_allowed/.nexus/reports/local_assist/wiring-repair_loop-pos_local_model_call_allowed/execution_receipt.json",
+        "blockers": [
+          "local_model_executor_not_proven",
+          "missing_candidate_hash",
+          "candidate_hash_not_applied",
+          "verifier_not_passed",
+          "local_receipt_incomplete"
+        ],
+        "physical_callable": "LocalModelExecutor.run"
+      },
+      "receipt_path": "receipts/repair_loop.json",
+      "audit_seconds": 27.08
     },
     {
       "capability": "federation",
@@ -3781,10 +4004,9 @@
   ],
   "verdict_counts": {
     "REAL": 17,
-    "BLOCKED": 7,
+    "BLOCKED": 9,
     "STUB": 1,
     "REAL_UNATTESTED": 3,
-    "MODEL_UNAVAILABLE": 2,
     "RETIRING": 6
   },
   "route_smoke_probe": {
