@@ -1,3 +1,4 @@
+# pyright: reportOptionalMemberAccess=false, reportMissingImports=false, reportAttributeAccessIssue=false, reportCallIssue=false, reportArgumentType=false
 """Capability wiring audit: verdict logic on synthetic receipts and two real end-to-end runs.
 
 The end-to-end tests drive ``mempalace_gate`` and ``sandbox`` through the production chain

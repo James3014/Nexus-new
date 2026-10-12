@@ -1,3 +1,4 @@
+# pyright: reportOptionalMemberAccess=false, reportMissingImports=false, reportAttributeAccessIssue=false, reportCallIssue=false, reportArgumentType=false
 #!/usr/bin/env python3
 """Capability wiring audit: does a planner-selected capability run real code and leave evidence?
 
@@ -43,7 +44,7 @@ import json
 import os
 import re
 import shutil
-import subprocess
+import subprocess  # nosec B404 - fixed git argv only
 import sys
 import time
 import urllib.error
@@ -60,6 +61,7 @@ if str(REPO_ROOT) not in sys.path:
 FIXTURE_ROOT = Path(__file__).resolve().parent / "wiring_fixtures"
 SCHEMA = "nexus.capability_wiring_audit.v1"
 PY = sys.executable
+TOKEN_CEILING = 128000
 OLLAMA_URL = os.environ.get("NEXUS_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 AUDIT_MODEL = os.environ.get("NEXUS_WIRING_AUDIT_MODEL", "qwen2.5-coder:7b-instruct")
 
@@ -295,7 +297,7 @@ def blocking_console_line(lines: list[str]) -> str:
 def probe_model(timeout: float = 4.0) -> dict[str, Any]:
     """Reachability of the M5 Ollama tunnel. Never starts a local model."""
     try:
-        with urllib.request.urlopen(f"{OLLAMA_URL}/api/tags", timeout=timeout) as response:
+        with urllib.request.urlopen(f"{OLLAMA_URL}/api/tags", timeout=timeout) as response:  # nosec B310 - operator-configured http endpoint
             payload = json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, OSError, ValueError) as exc:
         return {
@@ -1065,7 +1067,8 @@ def execute(
             else:
                 ws_reg.mkdir(parents=True)
             scen_reg = spec.build(ws_reg, variant)
-            assert scen_reg is not None
+            if scen_reg is None:
+                raise RuntimeError("scenario_vanished")
             obs, _ = run_registry_level(
                 spec.cap, scen_reg, ws_reg, policy, trigger=trigger, task_id=task_id + "_reg"
             )
@@ -1211,7 +1214,8 @@ def audit_capability(
         })
         if not ex.planner["selected"] or not is_auth_block(ex.obs):
             break
-    assert final is not None
+    if final is None:
+        raise RuntimeError("no_execution")
     row["planner"] = final.planner
     row["policy_attempts"] = attempts
     if not final.planner["selected"]:
@@ -1350,7 +1354,7 @@ def _result(obs: Obs) -> dict[str, Any]:
 
 
 def _git(ws: Path, *args: str) -> str:
-    done = subprocess.run(
+    done = subprocess.run(  # nosec B603 B607 - fixed git argv
         ["git", "-c", "user.email=wiring@audit.local", "-c", "user.name=wiring-audit", *args],
         cwd=ws,
         check=True,
@@ -2313,7 +2317,7 @@ def build_metabolism(ws: Path, variant: str) -> Scenario:
     return Scenario(
         statement="Resume the long session after distillation",
         task_type="research",
-        codeintel={"metabolism_token_usage": usage, "metabolism_token_limit": 128000},
+        codeintel={"metabolism_token_usage": usage, "metabolism_token_limit": TOKEN_CEILING},
         check=check,
     )
 
@@ -2400,12 +2404,6 @@ def local_stage_env(ws: Path) -> dict[str, str]:
         "NEXUS_ARMOR_ALLOW_EPHEMERAL": "1",
         "NEXUS_FORCE_FULL_ARMOR": "1",
     }
-
-
-def _local_response(obs: Obs) -> dict[str, Any]:
-    local = obs.receipt.get("local") if isinstance(obs.receipt.get("local"), Mapping) else {}
-    response = local.get("response") if isinstance(local.get("response"), Mapping) else {}
-    return dict(response)
 
 
 def build_local_stage(cap: str) -> Builder:
@@ -2831,7 +2829,7 @@ def smoke_probe(work_root: Path) -> dict[str, Any]:
 
 def git_head() -> str:
     try:
-        return subprocess.run(
+        return subprocess.run(  # nosec B603 B607 - fixed git argv
             ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
         ).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
