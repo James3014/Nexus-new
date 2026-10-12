@@ -289,4 +289,5 @@
 | tests/ops/test_evidence_verifier_replay_required.py | tests/ops/test_evidence_verifier_replay_required.py | active | medium | test_contract |
 | compliance/sla/metrics/stability_poc_v22.json | tests/ops/test_nexus_status_honesty.py | active | medium | compliance_artifact |
 | nexus_wiki_vault/07_Compliance/Current_Compliance_Status.md | tests/ops/test_nexus_status_honesty.py | active | medium | compliance_artifact |
+| nexus_wiki_vault/99_Schema/generated/ | tests/ops/test_build_wiki_agent_index.py, tests/ops/test_wiki_committed_reproducibility.py, tests/ops/test_classify_wiki_unresolved_links.py | active | medium | wiki_generated_artifacts |
 | tests/ops/test_stage_f_flow.py | tests/ops/test_stage_f_flow.py | active | medium | test_contract |
