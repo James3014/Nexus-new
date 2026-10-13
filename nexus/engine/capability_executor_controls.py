@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from nexus.contracts.planner_snapshot_binding import register_planner_snapshot
 from nexus.engine.capability_contracts import CapabilityExecutionPlan, CapabilityPlan, PHASES
 
 
@@ -63,7 +64,10 @@ def _planner_route_context(plan: CapabilityPlan | dict[str, Any]) -> dict[str, A
         return None
     if not isinstance(snapshot, dict) or not snapshot:
         return None
-    return {"signal_snapshot": dict(snapshot)}
+    passed_snapshot = dict(snapshot)
+    # In-process origin binding: consumers reject route_context snapshots not registered here.
+    register_planner_snapshot(passed_snapshot)
+    return {"signal_snapshot": passed_snapshot}
 
 
 def build_execution_plan(plan: CapabilityPlan | dict[str, Any]) -> CapabilityExecutionPlan:

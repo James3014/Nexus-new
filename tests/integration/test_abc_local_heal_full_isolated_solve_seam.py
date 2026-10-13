@@ -15,23 +15,14 @@ from nexus.engine.capability_executor_controls import build_execution_plan
 from nexus.engine.capability_planner import CapabilityPlanner
 
 
-# #1924: the adapter reads its mode switches only from CapabilityPlanner's signal_snapshot,
-# passed through build_execution_plan() as route_context. The fixture projects the test's
-# env opt-ins onto that real planner snapshot; mutation/verifier grants stay the planner's.
-_ENV_MODE_OPT_INS = {
-    "isolated_solve_enabled": "NEXUS_LOCAL_SOLVE_ISOLATED_ENABLE",
-    "fail_closed_enabled": "NEXUS_LOCAL_GUARD_FAIL_CLOSED_ENABLE",
-}
-
-
+# #1924: controls come from a real CapabilityPlanner.plan() passed through build_execution_plan(),
+# whose planner-bound route_context must not be edited. Isolated solve is reachable only once the
+# planner itself grants it (quarantined until then).
 def _planned_controls(**fixture_controls: object) -> dict:
     plan = CapabilityPlanner().plan(task_desc="fix code", task_type="repair", route={"local_enabled": True})
     controls = dict(build_execution_plan(plan).executor_controls)
-    snapshot = dict(controls["route_context"]["signal_snapshot"])
-    assert snapshot["planner_version"] == "capability_planner_v1"
-    assert snapshot["mutation_allowed"] is True and snapshot["verifier_allowed"] is True
-    snapshot.update({flag: os.environ.get(env) == "1" for flag, env in _ENV_MODE_OPT_INS.items()})
-    return {**controls, "route_context": {"signal_snapshot": snapshot}, **fixture_controls}
+    assert controls["route_context"]["signal_snapshot"]["planner_version"] == "capability_planner_v1"
+    return {**controls, **fixture_controls}
 
 
 def test_abc_local_heal_full_isolated_solve_seam() -> None:

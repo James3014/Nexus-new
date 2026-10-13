@@ -18,30 +18,20 @@ from nexus.services.local_heal.capability_adapter import (
     LocalHealCapabilityRequest,
 )
 
-# Permissions CapabilityPlanner.plan() must have granted before this fixture lane
-# may request the isolated-solve mode (#1924). The lane never grants them itself.
-_ISOLATED_SOLVE_PLANNER_GRANTS = ("candidate_enabled", "mutation_allowed", "verifier_allowed")
-
-
 def plan_fixture_executor_controls(problem_statement: str) -> dict:
     """Obtain executor controls from the canonical planning seam (#1924).
 
-    The route is decided by CapabilityPlanner.plan(); build_execution_plan() passes the
-    planner's signal_snapshot through as ``route_context``. The only addition is the
-    isolated-solve mode request, and only when the planner already granted every
-    permission it needs; otherwise the adapter fails closed on the planner's snapshot.
+    The route and every LocalHeal mode grant come from CapabilityPlanner.plan(); the
+    planner-bound route_context is passed through by build_execution_plan() unchanged.
+    This lane never grants a mode itself: isolated solve stays unreachable until the
+    planner emits an isolated_solve grant.
     """
     plan = CapabilityPlanner().plan(
         task_desc=problem_statement,
         task_type="repair",
         route={"local_enabled": True},
     )
-    controls = dict(build_execution_plan(plan).executor_controls)
-    route_context = controls.get("route_context")
-    snapshot = route_context.get("signal_snapshot") if isinstance(route_context, dict) else None
-    if isinstance(snapshot, dict) and all(snapshot.get(key) is True for key in _ISOLATED_SOLVE_PLANNER_GRANTS):
-        controls["route_context"] = {"signal_snapshot": {**snapshot, "isolated_solve_enabled": True}}
-    return controls
+    return dict(build_execution_plan(plan).executor_controls)
 
 
 def main() -> int:

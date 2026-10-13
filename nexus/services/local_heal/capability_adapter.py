@@ -255,6 +255,9 @@ class LocalHealCapabilityAdapter:
                 capability_payload=capability_payload,
             )
 
+        # #1924: the snapshot must be the one build_execution_plan passed through in-process.
+        if not _snapshot_is_planner_bound(signal_snapshot):
+            return _planner_binding_rejection(request)
         enable_local_heal = bool(controls.get("enable_local_heal", False))
         local_heal_mode = controls.get("local_heal_mode", "disabled")
         
@@ -701,3 +704,37 @@ class LocalHealCapabilityAdapter:
             hybrid_route=decision,
             capability_payload=capability_payload,
         )
+
+
+def _snapshot_is_planner_bound(signal_snapshot: object) -> bool:
+    from nexus.contracts.planner_snapshot_binding import is_planner_bound
+
+    return is_planner_bound(signal_snapshot)
+
+
+def _planner_binding_rejection(request: LocalHealCapabilityRequest) -> LocalHealCapabilityResponse:
+    from nexus.contracts.planner_snapshot_binding import ROUTE_CONTEXT_NOT_PLANNER_BOUND
+
+    payload = build_hybrid_route_decision(
+        route_mode=RouteMode.LOCAL_ONLY_BLOCKED,
+        public_claim_allowed=False,
+        production_ready=False,
+        adapter_output_is_route_truth=False,
+        route_truth_source="CapabilityPlanner",
+        behavior_changed=False,
+        authority=Authority.FAIL_CLOSED,
+        local_model_called=False,
+        verifier_result=VerifierResult.NOT_RUN,
+        evidence_refs=request.evidence_refs,
+        fallback_block_reason=ROUTE_CONTEXT_NOT_PLANNER_BOUND,
+        metadata={"error": "route_context signal_snapshot was not passed through build_execution_plan"},
+    )
+    decision = hybrid_route_decision_from_payload(payload)
+    capability_payload = capability_payload_from_hybrid_route(decision)
+    capability_payload["adapter_invoked"] = False
+    return LocalHealCapabilityResponse(
+        task_id=request.task_id,
+        invoked=False,
+        hybrid_route=decision,
+        capability_payload=capability_payload,
+    )

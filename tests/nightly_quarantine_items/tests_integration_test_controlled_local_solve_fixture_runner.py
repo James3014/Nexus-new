@@ -2,5 +2,16 @@
 
 from __future__ import annotations
 
-# Tombstone (#1924): all ids pass again; LocalHeal planner snapshot pass-through fixed per the Owner decision (Q1, 2026-10-13).
-ENTRY = None
+ENTRY: dict[str, object] = {
+    "file": "tests/integration/test_controlled_local_solve_fixture_runner.py",
+    "disposition": "quarantine",
+    "issue": "#1924",
+    "cause": "needs planner-owned isolated_solve grant (nexus-runtime) and ISOLATED_TARGET admission (#1886)",
+    "tests": (
+        "test_fixture_diff_normalization_success",
+        "test_fixture_function_return_replacement",
+        "test_fixture_outside_locked_span_blocked",
+        "test_fixture_single_line_replacement",
+        "test_fixture_verifier_fail_blocked",
+    ),
+}

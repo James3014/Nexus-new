@@ -106,6 +106,8 @@ def run_isolated_local_solve_loop(request: IsolatedLocalSolveRequest) -> Isolate
     )
     
     has_constraint_blockers = False
+    pre_verify_source_hash = ""
+    source_hash_blocker = ""
     loop_blockers = []
     
     if "source_anchor_missing" in anchor.blockers:
@@ -211,7 +213,10 @@ def run_isolated_local_solve_loop(request: IsolatedLocalSolveRequest) -> Isolate
             verifier_command=request.verifier_command,
             verifier_allowed=request.verifier_allowed,
         )
+        pre_verify_source_hash = _verified_source_hash(apply_receipt)
         verifier_receipt = run_isolated_verifier(verifier_req)
+        if pre_verify_source_hash and _verified_source_hash(apply_receipt) != pre_verify_source_hash:
+            source_hash_blocker = "VERIFIED_SOURCE_CHANGED_DURING_VERIFICATION"
         
     vr_mapped = VerifierResult.NOT_RUN
     if verifier_receipt.verifier_status == "pass":
@@ -252,6 +257,8 @@ def run_isolated_local_solve_loop(request: IsolatedLocalSolveRequest) -> Isolate
             
     if verifier_receipt.verifier_status == "fail":
         blockers.append("VERIFIER_FAIL")
+    if source_hash_blocker:
+        blockers.append(source_hash_blocker)
         
     if (
         apply_receipt.patch_apply_status == "applied"
@@ -297,11 +304,10 @@ def run_isolated_local_solve_loop(request: IsolatedLocalSolveRequest) -> Isolate
         "still_within_locked_span": repair_receipt.still_within_locked_span,
     })
     capability_payload["metadata"] = metadata
-    # #1757/#1924: bind the verifier verdict and the verified bytes for the receipt claim gate.
+    # #1757/#1924: bind the verifier verdict and the bytes hashed before verification ran.
     capability_payload["verifier_status"] = verifier_receipt.verifier_status
-    verified_source_hash = _verified_source_hash(apply_receipt)
-    if verified_source_hash:
-        capability_payload["source_hash"] = verified_source_hash
+    if pre_verify_source_hash and not source_hash_blocker:
+        capability_payload["source_hash"] = pre_verify_source_hash
 
     return IsolatedLocalSolveResponse(
         patch_envelope=envelope,
