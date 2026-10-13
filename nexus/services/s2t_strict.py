@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
-import datetime
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 
 from nexus.contracts.s2t_policy import S2TCandidate, S2TSelector, S2TStrictGate
+from nexus.engine.semantic_adapter import ModelOutputNotObjectError, parse_model_json_object
 
 
 @dataclass(frozen=True)
@@ -20,67 +21,46 @@ class S2TStrictDecision:
     advisor_selected_candidate_id: str = ""
     advisor_outcome_status: str = "not_run"
 
+
 def robust_json_parse(response: str) -> dict:
-    """Robustly parse Qwen model response, translating between JSON/Python dict and handling null/None/true/False."""
-    # 1. 嘗試直接 json.loads
-    try:
-        return json.loads(response)
-    except Exception:
-        pass
+    """Parse a Qwen advisor response into a dict via the sanctioned SemanticAdapter parser.
 
-    import re
-
-    # 2. 轉換為 JSON 標準格式 (最優解：單引號轉雙引號，以標準 JSON parser 解析，防止破壞字串內部的關鍵詞)
-    try:
-        cleaned = response.replace("'", '"')
-        cleaned = re.sub(r'\bNone\b', 'null', cleaned)
-        cleaned = re.sub(r'\bTrue\b', 'true', cleaned)
-        cleaned = re.sub(r'\bFalse\b', 'false', cleaned)
-        return json.loads(cleaned)
-    except Exception:
-        pass
-
-    # 3. 作為 fallback，使用 ast.literal_eval
-    try:
-        import ast
-        py_str = response
-        py_str = re.sub(r'\bnull\b', 'None', py_str)
-        py_str = re.sub(r'\btrue\b', 'True', py_str)
-        py_str = re.sub(r'\bfalse\b', 'False', py_str)
-        parsed = ast.literal_eval(py_str)
-        if isinstance(parsed, dict):
-            return parsed
-        raise ValueError("Parsed object is not a dictionary")
-    except Exception as e:
-        raise ValueError(f"Failed to parse response: {e}")
+    Kept as the public name used by benches and tests; raises ``ValueError``
+    (``ModelOutputParseError``) for anything that is not a JSON object.
+    """
+    return parse_model_json_object(response)
 
 
 def _verify_adapter_provenance(adapter_path: str) -> None:
     path = Path(adapter_path).resolve()
     adapter_id = path.name
-    
+
     # 尋找專案根目錄下的 registry
     project_root = Path(__file__).resolve().parents[2]
     registry_file = project_root / ".nexus" / "registry" / "s2t_adapters" / f"{adapter_id}.json"
-    
+
     if not registry_file.exists():
-        raise ValueError(f"Provenance Lock Fail: Adapter {adapter_id} is not registered in registry {registry_file}")
-        
+        raise ValueError(
+            f"Provenance Lock Fail: Adapter {adapter_id} is not registered in registry {registry_file}"
+        )
+
     with open(registry_file, "r", encoding="utf-8") as f:
         registry_data = json.load(f)
-        
+
     for filename, file_meta in registry_data.get("files", {}).items():
         file_path = path / filename
         if not file_path.exists():
-            raise FileNotFoundError(f"Provenance Lock Fail: Required registered file {filename} is missing in {path}")
-            
+            raise FileNotFoundError(
+                f"Provenance Lock Fail: Required registered file {filename} is missing in {path}"
+            )
+
         # 計算實體雜湊
         sha256 = hashlib.sha256()
         with open(file_path, "rb") as bf:
             while chunk := bf.read(8192):
                 sha256.update(chunk)
         real_hash = sha256.hexdigest()
-        
+
         expected_hash = file_meta.get("sha256")
         if real_hash != expected_hash:
             raise ValueError(
@@ -97,7 +77,7 @@ class S2T3BAdvisor:
         self,
         base_model_path: str = "Qwen/Qwen2.5-3B-Instruct",
         adapter_path: str = "training/adapters/qwen3b_s2t_adapter_v2",
-        force_simulation: bool = False
+        force_simulation: bool = False,
     ) -> None:
         self.base_model_path = base_model_path
         self.adapter_path = adapter_path
@@ -114,13 +94,14 @@ class S2T3BAdvisor:
         if self.force_simulation:
             self._use_simulation = True
             return
-            
+
         # 1. Kill Switch 檢查
         import os
+
         if os.environ.get("NEXUS_S2T_3B_ADVISOR_ENABLED") == "0":
             self._load_error = "advisor_disabled"
             return
-            
+
         # 2. Provenance Lock 註冊與完整性檢查
         try:
             _verify_adapter_provenance(self.adapter_path)
@@ -129,16 +110,19 @@ class S2T3BAdvisor:
             return
 
         try:
-            import torch
-            from transformers import AutoModelForCausalLM, AutoTokenizer
-            from peft import PeftModel
             import logging
-            
+
+            import torch
+            from peft import PeftModel
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+
             if not Path(self.adapter_path).exists():
                 raise FileNotFoundError(f"Adapter path {self.adapter_path} not found")
 
-            self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_path, trust_remote_code=True)
-            
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.base_model_path, trust_remote_code=True
+            )
+
             try:
                 # 優先嘗試預設 fp16 + device_map="auto"
                 device_map = "auto"
@@ -152,7 +136,7 @@ class S2T3BAdvisor:
                     self.base_model_path,
                     device_map=device_map,
                     torch_dtype=torch_dtype,
-                    trust_remote_code=True
+                    trust_remote_code=True,
                 )
                 self.model = PeftModel.from_pretrained(self.model, self.adapter_path)
                 self.model.eval()
@@ -163,9 +147,7 @@ class S2T3BAdvisor:
                 )
                 # Fallback to pure CPU and float32 loading (proven stable on macOS CPU/MPS)
                 self.model = AutoModelForCausalLM.from_pretrained(
-                    self.base_model_path,
-                    torch_dtype=torch.float32,
-                    trust_remote_code=True
+                    self.base_model_path, torch_dtype=torch.float32, trust_remote_code=True
                 )
                 self.model = PeftModel.from_pretrained(self.model, self.adapter_path)
                 self.model.eval()
@@ -175,26 +157,28 @@ class S2T3BAdvisor:
 
     def advise(self, risk_tier: str, candidates: list[S2TCandidate], task_id: str = "") -> dict:
         import os
-        
+
         # 模式：NEXUS_S2T_3B_USE_OLLAMA 預設為 "1" (啟用)
         use_ollama = os.environ.get("NEXUS_S2T_3B_USE_OLLAMA", "1") == "1"
         if use_ollama:
             result = self._advise_via_ollama(risk_tier, candidates)
         else:
             result = self._advise_via_transformers(risk_tier, candidates)
-        
+
         # PACT dual-output: shadow mode
         if os.environ.get("NEXUS_S2T_PACT_ENABLED", "0") == "1":
             from nexus.contracts.pact import pact_from_advisor_output
-            
+
             # Skill memory injection (Slice B)
             skill_hints = []
             memory_hints = []
             if os.environ.get("NEXUS_S2T_SKILL_MEMORY_ENABLED", "0") == "1":
-                from nexus.learning.skill_memory_index import SkillMemoryIndex
                 from pathlib import Path
+
+                from nexus.learning.skill_memory_index import SkillMemoryIndex
+
                 index = SkillMemoryIndex(Path(__file__).resolve().parents[2])
-                
+
                 # Query skill history for each candidate
                 for c in candidates:
                     skill_id = c.candidate_id if hasattr(c, "candidate_id") else c.get("id", "")
@@ -203,26 +187,31 @@ class S2T3BAdvisor:
                         if record.reuse_count > 0:
                             skill_hints.append(f"{skill_id}:{record.recent_success_rate:.0%}")
                         if record.recent_failure_modes:
-                            memory_hints.append(f"{skill_id}:failures={','.join(record.recent_failure_modes[:2])}")
-            
+                            memory_hints.append(
+                                f"{skill_id}:failures={','.join(record.recent_failure_modes[:2])}"
+                            )
+
             pact = pact_from_advisor_output(
-                task_id, risk_tier, candidates, result,
+                task_id,
+                risk_tier,
+                candidates,
+                result,
                 skill_hints=skill_hints,
                 memory_hints=memory_hints,
             )
             result["_pact"] = pact.to_dict()
-        
+
         return result
 
     def _advise_via_ollama(self, risk_tier: str, candidates: list[S2TCandidate]) -> dict:
-        import urllib.request
         import json
         import os
         import re
-        
+        import urllib.request
+
         endpoint = os.getenv("NEXUS_OLLAMA_ENDPOINT", "http://localhost:11434").rstrip("/")
         model_name = os.getenv("NEXUS_S2T_3B_OLLAMA_MODEL", "qwen2.5-s2t-advisor:3b")
-        
+
         candidate_summaries = [
             {
                 "id": c.candidate_id,
@@ -246,7 +235,7 @@ class S2T3BAdvisor:
             "'required_verifier', 'abstain_reason'. The 'required_verifier' field MUST be null or one of the following "
             "allowed verifiers: ['pytest', 'claim_gate', 'delivery_gate', 'hidden_verifier']."
         )
-        
+
         request_payload = {
             "model": model_name,
             "system": system_prompt,
@@ -256,29 +245,32 @@ class S2T3BAdvisor:
             "options": {
                 "temperature": 0.0,
                 "top_p": 0.1,
-            }
+            },
         }
-        
+
         try:
             req = urllib.request.Request(
                 f"{endpoint}/api/generate",
                 data=json.dumps(request_payload).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
-                method="POST"
+                method="POST",
             )
             timeout_val = int(os.getenv("NEXUS_S2T_3B_OLLAMA_TIMEOUT_SEC", "120"))
             with urllib.request.urlopen(req, timeout=timeout_val) as resp:
                 raw_body = resp.read().decode("utf-8", errors="replace")
                 payload = json.loads(raw_body)
                 output_text = str(payload.get("response") or "").strip()
-                
+
             # 剔除 possible markdown
             if output_text.startswith("```json"):
                 output_text = output_text.split("```json")[1].split("```")[0].strip()
             elif output_text.startswith("```"):
                 output_text = output_text.split("```")[1].split("```")[0].strip()
-                
-            parsed = robust_json_parse(output_text)
+
+            try:
+                parsed = robust_json_parse(output_text)
+            except ModelOutputNotObjectError:
+                parsed = None
             if isinstance(parsed, dict) and "selected_candidate_id" in parsed:
                 # 測量 thought/answer token 比例
                 thought_len = 0
@@ -292,7 +284,12 @@ class S2T3BAdvisor:
                     "total_duration_ms": payload.get("total_duration", 0) / 1_000_000.0,
                     "model_load_time_ms": payload.get("load_duration", 0) / 1_000_000.0,
                     "ttft_ms": payload.get("prompt_eval_duration", 0) / 1_000_000.0,
-                    "steady_state_tps": (payload.get("eval_count", 0) / (payload.get("eval_duration", 1) / 1_000_000_000.0)) if payload.get("eval_duration") else 0.0,
+                    "steady_state_tps": (
+                        payload.get("eval_count", 0)
+                        / (payload.get("eval_duration", 1) / 1_000_000_000.0)
+                    )
+                    if payload.get("eval_duration")
+                    else 0.0,
                     "eval_count": payload.get("eval_count", 0),
                     "thought_token_ratio": thought_ratio,
                 }
@@ -305,8 +302,9 @@ class S2T3BAdvisor:
             return self._advise_via_transformers(risk_tier, candidates)
 
     def _advise_via_transformers(self, risk_tier: str, candidates: list[S2TCandidate]) -> dict:
-        import time
         import re
+        import time
+
         t_start_load = time.perf_counter()
         is_first_load = not self._is_loaded
         self._lazy_load()
@@ -317,7 +315,7 @@ class S2T3BAdvisor:
                 return {"abstain_reason": "no_candidates"}
             return {
                 "selected_candidate_id": candidates[0].candidate_id,
-                "selection_reason_codes": ["matches_route_decision"]
+                "selection_reason_codes": ["matches_route_decision"],
             }
 
         if not self._is_loaded or self.model is None or self.tokenizer is None:
@@ -352,31 +350,39 @@ class S2T3BAdvisor:
             )
             messages = [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": input_str}
+                {"role": "user", "content": input_str},
             ]
-            text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            text = self.tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
             model_inputs = self.tokenizer([text], return_tensors="pt").to(self.model.device)
-            
+
             import torch
+
             t_start_gen = time.perf_counter()
             with torch.no_grad():
                 generated_ids = self.model.generate(**model_inputs, max_new_tokens=128)
             gen_time_sec = time.perf_counter() - t_start_gen
             gen_time_ms = gen_time_sec * 1000.0
-            
+
             generated_ids = [
-                output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
+                output_ids[len(input_ids) :]
+                for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
             ]
-            response = self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
-            
+            response = self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[
+                0
+            ].strip()
+
             # 剔除可能存在的 markdown
             if response.startswith("```json"):
                 response = response.split("```json")[1].split("```")[0].strip()
             elif response.startswith("```"):
                 response = response.split("```")[1].split("```")[0].strip()
-            
+
             try:
                 response_json = robust_json_parse(response)
+            except ModelOutputNotObjectError:
+                return {"abstain_reason": "invalid_schema"}
             except Exception:
                 return {"abstain_reason": "fail_parse"}
 
@@ -391,7 +397,11 @@ class S2T3BAdvisor:
                 thought_len = len(thought_match.group(1))
             thought_ratio = thought_len / total_len if total_len > 0 else 0.0
 
-            generated_len = generated_ids[0].shape[0] if hasattr(generated_ids[0], "shape") else len(generated_ids[0])
+            generated_len = (
+                generated_ids[0].shape[0]
+                if hasattr(generated_ids[0], "shape")
+                else len(generated_ids[0])
+            )
             response_json["_overhead_stats"] = {
                 "total_duration_ms": gen_time_ms + load_time_ms,
                 "model_load_time_ms": load_time_ms,
@@ -415,7 +425,7 @@ class S2TStrictRuntimeGate:
         gate: S2TStrictGate | None = None,
         advisor_enabled: bool = True,
         advisor: S2T3BAdvisor | None = None,
-        evidence_log_path: str | Path = ".nexus/metrics/s2t_runtime_adoption_evidence.jsonl"
+        evidence_log_path: str | Path = ".nexus/metrics/s2t_runtime_adoption_evidence.jsonl",
     ) -> None:
         self.selector = selector or S2TSelector()
         self.gate = gate or S2TStrictGate()
@@ -440,15 +450,17 @@ class S2TStrictRuntimeGate:
             verifier_result=verifier_result,
             verifier_evidence_ref=verifier_evidence_ref,
         )
-        
+
         # 2. 顧問分流與環境策略讀取 (Rollout Control)
         import os
 
         # 模式列舉與初始狀態
         # [off, observation, dry_run, low_risk, medium_observation]
         assisted_mode = os.environ.get("NEXUS_S2T_3B_ASSISTED_MODE", "0").lower()
-        if assisted_mode in ("0", "false"): assisted_mode = "off"
-        elif assisted_mode in ("1", "true"): assisted_mode = "low_risk"
+        if assisted_mode in ("0", "false"):
+            assisted_mode = "off"
+        elif assisted_mode in ("1", "true"):
+            assisted_mode = "low_risk"
 
         canary_rate = int(os.environ.get("NEXUS_S2T_3B_CANARY_RATE", "10"))
         env_enabled = os.environ.get("NEXUS_S2T_3B_ADVISOR_ENABLED") != "0"
@@ -463,7 +475,7 @@ class S2TStrictRuntimeGate:
         if env_enabled and (task_id or env_force):
             is_in_rate_bucket = False
             if task_id:
-                h_val = int(hashlib.md5(task_id.encode('utf-8')).hexdigest(), 16)
+                h_val = int(hashlib.md5(task_id.encode("utf-8")).hexdigest(), 16)
                 if (h_val % 100) < canary_rate:
                     is_in_rate_bucket = True
 
@@ -491,12 +503,14 @@ class S2TStrictRuntimeGate:
                 raw_id = res.get("selected_candidate_id", "")
                 if raw_id:
                     # 🔍 Phase A3: Post-processing Semantic Safety Gate
-                    matched_cand = next((c for c in candidates if str(c.candidate_id) == str(raw_id)), None)
+                    matched_cand = next(
+                        (c for c in candidates if str(c.candidate_id) == str(raw_id)), None
+                    )
 
                     # 嚴格校驗：必須存在、必須通過、必須有證據
                     is_safe = (
-                        matched_cand is not None 
-                        and matched_cand.verifier_result == "pass" 
+                        matched_cand is not None
+                        and matched_cand.verifier_result == "pass"
                         and bool(matched_cand.evidence_refs)
                     )
 
@@ -516,9 +530,6 @@ class S2TStrictRuntimeGate:
         # 4. 決策融合與風險限制 (Assisted Mode Decision)
         final_selected_id = selection.selected_candidate_id
         assisted_decision_applied = False
-
-        # 風控邊界
-        allowed_risk = os.environ.get("NEXUS_S2T_3B_ALLOWED_RISK", "low")
 
         # 決策執行邏輯
         if run_advisor and advisor_selected_id:
@@ -542,17 +553,23 @@ class S2TStrictRuntimeGate:
         # 計算 e2e_latency_delta 與 short_task_penalty
         total_duration_ms = overhead_stats.get("total_duration_ms", 0.0)
         e2e_latency_delta_ms = total_duration_ms
-        
+
         is_short_task_penalty = (
-            run_advisor 
+            run_advisor
             and advisor_selected_id != ""
             and selection.selected_candidate_id == advisor_selected_id
             and total_duration_ms > 1500.0
         )
 
         # 5. 記錄 Per-row Evidence (B0 Monitoring)
-        if run_advisor or (task_id and (env_force or (int(hashlib.md5(task_id.encode('utf-8')).hexdigest(), 16) % 100) < canary_rate)):
-            trust_mismatch = (verifier_result != "pass")
+        if run_advisor or (
+            task_id
+            and (
+                env_force
+                or (int(hashlib.md5(task_id.encode("utf-8")).hexdigest(), 16) % 100) < canary_rate
+            )
+        ):
+            trust_mismatch = verifier_result != "pass"
             evidence_row = {
                 "task_id": task_id,
                 "risk_tier": risk_tier,
@@ -570,18 +587,18 @@ class S2TStrictRuntimeGate:
                 "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 "e2e_latency_delta_ms": e2e_latency_delta_ms,
                 "short_task_penalty": is_short_task_penalty,
-                "overhead_stats": overhead_stats
+                "overhead_stats": overhead_stats,
             }
             if run_advisor and isinstance(res, dict) and "_pact" in res:
                 evidence_row["pact_record"] = res["_pact"]
-                
+
             try:
                 self.evidence_log_path.parent.mkdir(parents=True, exist_ok=True)
                 with self.evidence_log_path.open("a", encoding="utf-8") as f:
                     f.write(json.dumps(evidence_row) + "\n")
             except Exception:
                 pass
-                
+
         return S2TStrictDecision(
             passed=gate_result.gate_passed,
             selected_candidate_id=final_selected_id,

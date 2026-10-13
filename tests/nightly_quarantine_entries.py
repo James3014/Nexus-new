@@ -402,7 +402,7 @@ QUARANTINE: tuple[dict[str, object], ...] = (
         "file": "tests/integration/test_legacy_path_blocked.py",
         "disposition": "quarantine-product-bug?",
         "issue": "#1923",
-        "cause": "assertion encodes a safety/boundary invariant that the product currently violates; possible real product bug, file a new Issue before fixing",
+        "cause": "real product violations: s2t_strict is fixed, but the AST check still flags json.loads on model output in campaign_general, cloud_agent_cli_adapter, committee_orchestrator (x2), local_heal/planner and apple_fm_adapter; un-quarantine once those route through the sanctioned parser",
         "tests": ("TestLegacyPathBlocked::test_no_json_loads_on_model_response",),
     },
     {
