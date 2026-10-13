@@ -657,7 +657,7 @@ class BattlesuitGateway:
                     admitted_provider,
                     command=route.get("online_command") or route.get("command"),
                     model_name=admitted_model,
-                    timeout_sec=float(route.get("timeout_sec", 120.0)),
+                    timeout_sec=_online_route_timeout_sec(route),
                 )
             except (TypeError, ValueError, OSError) as exc:
                 return normalize_online_invoker_payload(
@@ -701,10 +701,10 @@ class BattlesuitGateway:
                         binding.provider,
                         command=command,
                         model_name=request.online_model_name,
-                        timeout_sec=(
-                            float(route.get("timeout_sec", 120.0))
+                        timeout_sec=_online_route_timeout_sec(
+                            route
                             if isinstance(route, Mapping)
-                            else 120.0
+                            else None
                         ),
                     )
                 except (TypeError, ValueError, OSError) as exc:
@@ -1567,3 +1567,30 @@ class BattlesuitGateway:
                 category="parse_failure",
                 telemetry=gateway_telemetry if isinstance(gateway_telemetry, dict) else None,
             ), raw_text
+
+
+ONLINE_ROUTE_DEFAULT_TIMEOUT_SEC = 120.0
+GATEWAY_TIMEOUT_ENV = "NEXUS_GATEWAY_TIMEOUT_SEC"
+
+
+def _online_route_timeout_sec(route: Mapping[str, Any] | None) -> float:
+    """Timeout for the registered-CLI Online invoker.
+
+    Order: explicit ``route["timeout_sec"]``, then the configured gateway timeout
+    (``NEXUS_GATEWAY_TIMEOUT_SEC``, the knob ``ask_structured`` and the bench already
+    honor), and 120 s only as the last-resort default.
+    """
+    if isinstance(route, Mapping) and route.get("timeout_sec") not in (None, ""):
+        try:
+            value = float(route["timeout_sec"])
+            if value > 0:
+                return value
+        except (TypeError, ValueError):
+            pass
+    configured = str(os.getenv(GATEWAY_TIMEOUT_ENV) or "").strip()
+    if configured:
+        try:
+            return float(max(5, int(configured)))
+        except ValueError:
+            pass
+    return ONLINE_ROUTE_DEFAULT_TIMEOUT_SEC
