@@ -1003,15 +1003,15 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_ultra_review",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 1831
+        "line": 1606
       },
       "gaps": [
-        "executor captures git diff HEAD and counts changed files only; _scan_security_observations / the dry-run fleet are never called, so a planted eval(input()) is not flagged"
+        "fixed 2026-10-13 (group D): executor runs UltraReviewService.run(dry_run=False) in a sandbox git worktree; lanes run bandit + ruff S rules (added lines), py_compile + ruff correctness rules and pytest on mapped tests; untracked new files are overlaid but not part of the reviewed diff"
       ],
       "untriggered_production_default": {
-        "status": "MISSING",
-        "skip_reason": "",
-        "reached": false
+        "status": "SKIPPED",
+        "skip_reason": "SKIPPED_POLICY_NOT_TRIGGERED",
+        "reached": true
       },
       "trigger_switch": "route.escalate_triggered=True (set by product_capability_canary_helper; not by nexus run)",
       "planner": {
@@ -1040,85 +1040,132 @@
           "policy": "production_default",
           "env": {},
           "status": "SUCCEEDED",
-          "path": "registry",
+          "path": "e2e",
           "block_reason": ""
         }
       ],
-      "product_path_reachable": false,
+      "product_path_reachable": true,
       "receipt_terminal_status": "INCOMPLETE",
       "workforce_admission": {
-        "decision": "ESCALATE",
+        "decision": "ALLOW",
         "reasons": [
-          "demand_online: Requested role 'independent_review' is outside admitted roles for worker 'agy_flash_37_medium': ['bounded_candidate_generation', 'fast_bounded_implementation', 'focused_verification']"
+          "demand_online: All constraints and required controls passed"
         ]
       },
       "policy_switches_needed": {},
       "policy_used": "production_default",
-      "path": "registry",
+      "path": "e2e",
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_ultra_review_7cf9bdc3"
+        "ev_cap_ultra_review_8971decc"
       ],
       "physical_callable": "capability_executor_registry:ultra_review",
       "console_tail": [],
       "negative_control": {
-        "name": "negative_control:clean_tree_has_empty_diff",
+        "name": "negative_control:planted_eval_and_failing_test_fail_the_gate",
         "passed": true,
-        "detail": "diff_bytes pos=215 neg=0; gate pos=True neg=True",
-        "negative_status": "SUCCEEDED",
-        "negative_block_reason": ""
+        "detail": "gate pos=True neg=False; neg status=FAIL rules=['ghost_regression:regression_test_failed', 'security_sentry:bandit:B307']",
+        "negative_status": "BLOCKED",
+        "negative_block_reason": "semantic_status=FAILED"
       },
       "hard_coded_inputs": [],
       "checks": [
         {
           "name": "diff_captured",
           "passed": true,
-          "detail": "diff_bytes=215"
+          "detail": "diff_bytes=230"
         },
         {
-          "name": "changed_file_listed",
+          "name": "every_lane_executed_real_checks",
           "passed": true,
-          "detail": "changed_files_count=1"
+          "detail": "executed_checks=['bandit', 'diff-pattern-scan', 'path-containment', 'py_compile', 'ruff-correctness', 'ruff-security', 'test-harness-guard', 'tests/test_app.py', 'ultra_logic_repro.py']"
         },
         {
-          "name": "planted_eval_input_flagged",
-          "passed": false,
-          "detail": "no review finding in the executor outcome"
-        },
-        {
-          "name": "negative_control:clean_tree_has_empty_diff",
+          "name": "benign_diff_passes",
           "passed": true,
-          "detail": "diff_bytes pos=215 neg=0; gate pos=True neg=True"
+          "detail": "gate=True review_status=PASS findings=[]"
+        },
+        {
+          "name": "negative_control:planted_eval_and_failing_test_fail_the_gate",
+          "passed": true,
+          "detail": "gate pos=True neg=False; neg status=FAIL rules=['ghost_regression:regression_test_failed', 'security_sentry:bandit:B307']"
         }
       ],
-      "verdict": "BLOCKED_workforce_admission_blocked: demand_online: Requested role 'independent_review' is outside admitted roles for worker 'agy_flash_37_medium': ['bounded_candidate_generation', 'fast_bounded_implementation', 'focused_verification']",
-      "verdict_reason": "capability_never_invoked",
-      "executor_level_verdict": "STUB",
-      "executor_level_reason": "gate_passed_without_checkable_effect:planted_eval_input_flagged",
+      "verdict": "REAL",
+      "verdict_reason": "invoked_with_evidence_and_artifact_assertions_passed",
       "component_probe": {
-        "ok": false,
-        "finding_rule_ids": [],
-        "note": "UltraReviewService._scan_security_observations flags the planted eval(input()) when called directly; the registry executor never calls it (it only captures the diff)"
+        "ok": true,
+        "status": "FAIL",
+        "finding_rule_ids": [
+          "bandit:B307",
+          "regression_test_failed"
+        ],
+        "note": "UltraReviewService.run(dry_run=False) called directly on the planted diff"
       },
       "outcome_excerpt": {
-        "action": "capture_diff",
+        "action": "review",
         "semantic_status": "SUCCEEDED",
         "evidence_refs": [
-          "ev_ultra_review_wiring-ultra_review-pos_production_default_reg",
-          "run_id:ultra-review-20261012225632688629"
+          "ev_ultra_review_wiring-ultra_review-pos_production_default",
+          "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupD/wt/artifacts/runtime/wiring_audit/20261013T053442Z/workspaces/ultra_review__pos_production_default/.nexus/reports/ultra_review/wiring-ultra_review-pos_production_default_capability_report.json",
+          "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupD/wt/artifacts/runtime/wiring_audit/20261013T053442Z/workspaces/ultra_review__pos_production_default/.nexus/reports/ultra_review/capability_sandboxes/ultra-review-20261013053442896394/changes.diff"
         ],
         "result": {
-          "run_id": "ultra-review-20261012225632688629",
-          "diff_bytes": 215,
+          "run_id": "ultra-review-20261013053442896394",
+          "review_status": "PASS",
+          "mode": "review",
+          "diff_bytes": 230,
           "changed_files_count": 1,
-          "task": "Review the working tree diff for unsafe calls\n\nNexus route oracle contract:\n- Expected capability receipts: ultra_review",
-          "dry_run_supported": true
+          "verified_findings": 0
         },
-        "physical_callable": "nexus.engine.ultra_review_service.UltraReviewService._capture_diff"
+        "lanes": {
+          "security_sentry": {
+            "status": "PASS",
+            "executed_checks": [
+              "diff-pattern-scan",
+              "bandit",
+              "ruff-security"
+            ],
+            "unavailable_checks": []
+          },
+          "logic_breaker": {
+            "status": "PASS",
+            "executed_checks": [
+              "ultra_logic_repro.py",
+              "path-containment",
+              "test-harness-guard",
+              "py_compile",
+              "ruff-correctness"
+            ],
+            "unavailable_checks": []
+          },
+          "ghost_regression": {
+            "status": "PASS",
+            "executed_checks": [
+              "tests/test_app.py"
+            ],
+            "unavailable_checks": []
+          }
+        },
+        "executed_checks": [
+          "bandit",
+          "diff-pattern-scan",
+          "path-containment",
+          "py_compile",
+          "ruff-correctness",
+          "ruff-security",
+          "test-harness-guard",
+          "tests/test_app.py",
+          "ultra_logic_repro.py"
+        ],
+        "findings": [],
+        "blocked_reason": "",
+        "report_path": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupD/wt/artifacts/runtime/wiring_audit/20261013T053442Z/workspaces/ultra_review__pos_production_default/.nexus/reports/ultra_review/wiring-ultra_review-pos_production_default_capability_report.json",
+        "physical_callable": "nexus.engine.ultra_review_service.UltraReviewService.run"
       },
       "receipt_path": "receipts/ultra_review.json",
-      "audit_seconds": 1.71
+      "audit_seconds": 2.65
     },
     {
       "capability": "autoreason",
@@ -4755,16 +4802,16 @@
     },
     {
       "capability": "architecture_scout",
-      "fixture": null,
+      "fixture": "scripts/ops/wiring_fixtures/architecture_scout",
       "executor": {
         "registry_key": "architecture_scout",
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_architecture_scout",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 3056
+        "line": 2845
       },
       "gaps": [
-        "executor passes plateau={\"reason\": \"mainchain_bind\", \"task_id\": ...} without \"detected\", so DistantScoutPlanner.plan always returns SKIPPED plateau_not_detected, and gate_passed=isinstance(result, Mapping) passes it"
+        "fixed 2026-10-13 (group D): plateau comes from nexus.research.flow.runtime_decision.detect_plateau over the request's asi_failure_records; nothing in nexus run feeds that ledger to the node yet (the research flow feeds its own HistorySignalStore ledger)"
       ],
       "untriggered_production_default": {
         "status": "SKIPPED",
@@ -4781,6 +4828,7 @@
         ],
         "selected_capabilities": [
           "harness_preflight_sensor",
+          "repair_loop",
           "research_route",
           "architecture_scout",
           "delivery_gate",
@@ -4788,7 +4836,7 @@
           "artifact_gate",
           "claim_gate"
         ],
-        "plan_hash": "77c147b36fd9156390692aac71891358b1a9baf4b879399f8142a06f21c7ea09",
+        "plan_hash": "325bf83fa398dbc5fdb8e069c5a875e257ea18fa607a2502cd01a7a3c8bf268c",
         "forcing": "route-oracle line 'Expected capability receipts: architecture_scout' in task_statement"
       },
       "policy_attempts": [
@@ -4827,48 +4875,116 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_architecture_scout_7f4e0110"
+        "ev_cap_architecture_scout_e7e74363"
       ],
       "physical_callable": "capability_executor_registry:architecture_scout",
       "console_tail": [],
       "negative_control": {
-        "name": "negative_control:different_task_changes_status",
-        "passed": false,
-        "detail": "status pos='SKIPPED' neg='SKIPPED'",
-        "negative_status": "SUCCEEDED",
-        "negative_block_reason": ""
+        "name": "negative_control:mixed_ledger_has_no_plateau",
+        "passed": true,
+        "detail": "pos.gate=True neg.gate=False neg.error=PLATEAU_NOT_DETECTED:status_not_all_discard",
+        "negative_status": "BLOCKED",
+        "negative_block_reason": "PLATEAU_NOT_DETECTED:status_not_all_discard"
       },
       "hard_coded_inputs": [],
       "checks": [
         {
-          "name": "scout_plan_ready",
-          "passed": false,
-          "detail": "status=SKIPPED reason=plateau_not_detected"
+          "name": "plateau_detected_from_seeded_ledger",
+          "passed": true,
+          "detail": "plateau_detected=True error=None"
         },
         {
-          "name": "negative_control:different_task_changes_status",
-          "passed": false,
-          "detail": "status pos='SKIPPED' neg='SKIPPED'"
+          "name": "scout_plan_ready",
+          "passed": true,
+          "detail": "status=READY reason=discard_streak_same_family_low_variance family=flow:architecture_timeout_policy_seam"
+        },
+        {
+          "name": "forbidden_family_is_plateau_family",
+          "passed": true,
+          "detail": "forbidden_families=['flow:retry_wrapper']"
+        },
+        {
+          "name": "negative_control:mixed_ledger_has_no_plateau",
+          "passed": true,
+          "detail": "pos.gate=True neg.gate=False neg.error=PLATEAU_NOT_DETECTED:status_not_all_discard"
         }
       ],
-      "verdict": "STUB",
-      "verdict_reason": "outcome_independent_of_fixture_input",
+      "verdict": "REAL",
+      "verdict_reason": "invoked_with_evidence_and_artifact_assertions_passed",
       "outcome_excerpt": {
         "action": "plan",
         "semantic_status": "SUCCEEDED",
         "evidence_refs": [
-          "ev_architecture_scout_wiring-architecture_scout-pos_production_default"
+          "ev_architecture_scout_wiring-architecture_scout-pos_production_default",
+          "asi:run-1",
+          "asi:run-2",
+          "asi:run-3",
+          "asi:run-4"
         ],
         "result": {
           "schema": "nexus_distant_scout_plan_v1",
-          "status": "SKIPPED",
-          "reason": "plateau_not_detected",
-          "architecture_actions": []
+          "status": "READY",
+          "reason": "discard_streak_same_family_low_variance",
+          "forbidden_families": [
+            "flow:retry_wrapper"
+          ],
+          "recommended_family": "flow:architecture_timeout_policy_seam",
+          "target_boundary": "repair_timeout_policy",
+          "affected_files": [
+            "nexus/app/research_flow_service.py",
+            "nexus/research/sprint_service.py"
+          ],
+          "architecture_actions": [
+            "identify_component_boundary",
+            "introduce_testable_seam",
+            "move_retry_or_timeout_policy_behind_interface",
+            "verify_with_regression_test_before_patch_acceptance"
+          ],
+          "bounded_refactor": {
+            "max_files": 2,
+            "allowed_files": [
+              "nexus/app/research_flow_service.py",
+              "nexus/research/sprint_service.py"
+            ],
+            "requires_new_test": true,
+            "requires_rollback_plan": true
+          },
+          "rollback_plan": {
+            "strategy": "preserve_target_then_apply_bounded_seam",
+            "restore_points": [
+              "nexus/app/research_flow_service.py",
+              "nexus/research/sprint_service.py"
+            ],
+            "abort_if": [
+              "verification_command_fails",
+              "blast_radius_expands_beyond_target_boundary",
+              "recommended_family_matches_forbidden_family"
+            ]
+          },
+          "gate_passed": true,
+          "failure_signatures": [
+            "timeout retry still flaky",
+            "retry budget exhausted"
+          ],
+          "verification_commands": [
+            "uv run pytest -q",
+            "uv run python scripts/ops/capability_route_smoke.py --print-only"
+          ]
         },
+        "plateau_detected": true,
+        "plateau": {
+          "detected": true,
+          "reason": "discard_streak_same_family_low_variance",
+          "family": "flow:retry_wrapper",
+          "metric_span": 0.02,
+          "next_lane": "DISTANT_SCOUT"
+        },
+        "plan_status": "READY",
+        "ledger_records": 4,
         "physical_callable": "nexus.research.architecture_scout.DistantScoutPlanner.plan"
       },
       "receipt_path": "receipts/architecture_scout.json",
-      "audit_seconds": 0.63
+      "audit_seconds": 8.75
     },
     {
       "capability": "formal_report",
@@ -5561,11 +5677,11 @@
         "line": null
       },
       "gaps": [
-        "execution contract physical_callable=None; executor key direct_master_loop is not in EXECUTOR_REGISTRY. nexus run uses nexus.engine.direct_mode.evaluate_direct_mode_completion outside the planner node"
+        "execution contract physical_callable=None; executor key direct_master_loop is not in EXECUTOR_REGISTRY. nexus run uses nexus.engine.direct_mode.evaluate_direct_mode_completion outside the planner node; since group D the receipt says NOT_EXECUTABLE:control_plane_reference"
       ],
       "untriggered_production_default": {
         "status": "SKIPPED",
-        "skip_reason": "SKIPPED_POLICY_NOT_TRIGGERED",
+        "skip_reason": "NOT_EXECUTABLE:control_plane_reference",
         "reached": true
       },
       "trigger_switch": "route.escalate_triggered=True (set by product_capability_canary_helper; not by nexus run)",
@@ -5594,9 +5710,9 @@
         {
           "policy": "production_default",
           "env": {},
-          "status": "BLOCKED",
+          "status": "SKIPPED",
           "path": "e2e",
-          "block_reason": "BLOCKED_EXECUTOR_UNAVAILABLE"
+          "block_reason": ""
         }
       ],
       "production_default_selection": {
@@ -5626,19 +5742,25 @@
       "receipt_claims_simulated": true,
       "claim_boundary_simulated_source": "UnifiedRuntime receipt.receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "capability:direct_mode:wiring-direct_mode-pos_production_default:blocked_unavailable"
+        "capability:direct_mode:wiring-direct_mode-pos_production_default:skipped:NOT_EXECUTABLE:control_plane_reference"
       ],
-      "physical_callable": "capability_registry.escalate_unavailable:direct_mode",
+      "physical_callable": "",
       "console_tail": [],
       "hard_coded_inputs": [],
-      "checks": [],
+      "checks": [
+        {
+          "name": "receipt_states_not_executable",
+          "passed": true,
+          "detail": "skip_reason='NOT_EXECUTABLE:control_plane_reference' invoked=False outcome_contributed=False"
+        }
+      ],
       "verdict": "NOT_EXECUTABLE:control_plane_reference",
       "verdict_reason": "execution_contract_has_no_runnable_physical_callable",
-      "observed_verdict": "BLOCKED_EXECUTOR_UNAVAILABLE",
-      "observed_verdict_reason": "executor_or_runtime_blocked",
+      "observed_verdict": "BLOCKED_NOT_EXECUTABLE:control_plane_reference",
+      "observed_verdict_reason": "explicit_skip_receipt",
       "outcome_excerpt": {},
       "receipt_path": "receipts/direct_mode.json",
-      "audit_seconds": 0.44
+      "audit_seconds": 7.2
     },
     {
       "capability": "msa_router",
@@ -5651,11 +5773,11 @@
         "line": null
       },
       "gaps": [
-        "execution contract physical_callable=None; no msa_router key in EXECUTOR_REGISTRY"
+        "execution contract physical_callable=None; no msa_router key in EXECUTOR_REGISTRY; since group D the receipt says NOT_EXECUTABLE:control_plane_reference (an executor is an MSA design task, not a wiring fix)"
       ],
       "untriggered_production_default": {
         "status": "SKIPPED",
-        "skip_reason": "SKIPPED_POLICY_NOT_TRIGGERED",
+        "skip_reason": "NOT_EXECUTABLE:control_plane_reference",
         "reached": true
       },
       "trigger_switch": "route.escalate_triggered=True (set by product_capability_canary_helper; not by nexus run)",
@@ -5684,9 +5806,9 @@
         {
           "policy": "production_default",
           "env": {},
-          "status": "BLOCKED",
+          "status": "SKIPPED",
           "path": "e2e",
-          "block_reason": "BLOCKED_EXECUTOR_UNAVAILABLE"
+          "block_reason": ""
         }
       ],
       "production_default_selection": {
@@ -5716,19 +5838,25 @@
       "receipt_claims_simulated": true,
       "claim_boundary_simulated_source": "UnifiedRuntime receipt.receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "capability:msa_router:wiring-msa_router-pos_production_default:blocked_unavailable"
+        "capability:msa_router:wiring-msa_router-pos_production_default:skipped:NOT_EXECUTABLE:control_plane_reference"
       ],
-      "physical_callable": "capability_registry.escalate_unavailable:msa_router",
+      "physical_callable": "",
       "console_tail": [],
       "hard_coded_inputs": [],
-      "checks": [],
+      "checks": [
+        {
+          "name": "receipt_states_not_executable",
+          "passed": true,
+          "detail": "skip_reason='NOT_EXECUTABLE:control_plane_reference' invoked=False outcome_contributed=False"
+        }
+      ],
       "verdict": "NOT_EXECUTABLE:control_plane_reference",
       "verdict_reason": "execution_contract_has_no_runnable_physical_callable",
-      "observed_verdict": "BLOCKED_EXECUTOR_UNAVAILABLE",
-      "observed_verdict_reason": "executor_or_runtime_blocked",
+      "observed_verdict": "BLOCKED_NOT_EXECUTABLE:control_plane_reference",
+      "observed_verdict_reason": "explicit_skip_receipt",
       "outcome_excerpt": {},
       "receipt_path": "receipts/msa_router.json",
-      "audit_seconds": 0.41
+      "audit_seconds": 7.46
     },
     {
       "capability": "research_control_plane",
@@ -5741,11 +5869,11 @@
         "line": null
       },
       "gaps": [
-        "execution contract physical_callable=None; no research_control_plane key in EXECUTOR_REGISTRY (real code nexus/research/experiment_scheduler.py is reachable only via the research:run CLI)"
+        "execution contract physical_callable=None; no research_control_plane key in EXECUTOR_REGISTRY (real code nexus/research/experiment_scheduler.py is reachable only via the research:run CLI); since group D the receipt says NOT_EXECUTABLE:control_plane_reference"
       ],
       "untriggered_production_default": {
         "status": "SKIPPED",
-        "skip_reason": "SKIPPED_POLICY_NOT_TRIGGERED",
+        "skip_reason": "NOT_EXECUTABLE:control_plane_reference",
         "reached": true
       },
       "trigger_switch": "route.escalate_triggered=True (set by product_capability_canary_helper; not by nexus run)",
@@ -5775,9 +5903,9 @@
         {
           "policy": "production_default",
           "env": {},
-          "status": "BLOCKED",
+          "status": "SKIPPED",
           "path": "e2e",
-          "block_reason": "BLOCKED_EXECUTOR_UNAVAILABLE"
+          "block_reason": ""
         }
       ],
       "production_default_selection": {
@@ -5806,19 +5934,25 @@
       "receipt_claims_simulated": true,
       "claim_boundary_simulated_source": "UnifiedRuntime receipt.receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "capability:research_control_plane:wiring-research_control_plane-pos_production_default:blocked_unavailable"
+        "capability:research_control_plane:wiring-research_control_plane-pos_production_default:skipped:NOT_EXECUTABLE:control_plane_reference"
       ],
-      "physical_callable": "capability_registry.escalate_unavailable:research_control_plane",
+      "physical_callable": "",
       "console_tail": [],
       "hard_coded_inputs": [],
-      "checks": [],
+      "checks": [
+        {
+          "name": "receipt_states_not_executable",
+          "passed": true,
+          "detail": "skip_reason='NOT_EXECUTABLE:control_plane_reference' invoked=False outcome_contributed=False"
+        }
+      ],
       "verdict": "NOT_EXECUTABLE:control_plane_reference",
       "verdict_reason": "execution_contract_has_no_runnable_physical_callable",
-      "observed_verdict": "BLOCKED_EXECUTOR_UNAVAILABLE",
-      "observed_verdict_reason": "executor_or_runtime_blocked",
+      "observed_verdict": "BLOCKED_NOT_EXECUTABLE:control_plane_reference",
+      "observed_verdict_reason": "explicit_skip_receipt",
       "outcome_excerpt": {},
       "receipt_path": "receipts/research_control_plane.json",
-      "audit_seconds": 0.42
+      "audit_seconds": 6.36
     },
     {
       "capability": "swarm_quiet_moment",
@@ -5959,16 +6093,16 @@
     },
     {
       "capability": "judge_panel",
-      "fixture": null,
+      "fixture": "scripts/ops/wiring_fixtures/judge_panel",
       "executor": {
         "registry_key": "judge_panel",
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_judge_panel",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 2952
+        "line": 2700
       },
       "gaps": [
-        "providers come only from NEXUS_LLM_JUDGE_PROVIDERS (fake, or gemini/codex command CLIs); there is no Ollama/M5 provider, so the M5 tunnel cannot serve it; the executor ranks one hard-coded candidate c0 = the task text"
+        "fixed 2026-10-13 (group D): ranks the request's candidate_pool (codeintel.judge_panel_candidates) with OllamaJudgeProvider (Workforce local_first.classification worker, M5 tunnel) under NEXUS_LOCAL_MODEL_CALL_ALLOWED=1; no provider at production default; nexus run does not yet feed a candidate pool to the node"
       ],
       "untriggered_production_default": {
         "status": "SKIPPED",
@@ -5994,7 +6128,7 @@
           "artifact_gate",
           "claim_gate"
         ],
-        "plan_hash": "2dd420491b154c4b504dee8ac3d33c5905f935bbe264d4f9f9a328924061b3f5",
+        "plan_hash": "14c20c7d9b2489318604bb2053623bbfe5598964c482252572de52623b1006cf",
         "forcing": "route-oracle line 'Expected capability receipts: judge_panel' in task_statement"
       },
       "policy_attempts": [
@@ -6006,13 +6140,13 @@
           "block_reason": "BLOCKED_EXTERNAL_AUTH"
         },
         {
-          "policy": "external_runtime_authorized_flag",
+          "policy": "local_model_call_allowed",
           "env": {
-            "NEXUS_EXTERNAL_RUNTIME_AUTHORIZED": "1"
+            "NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1"
           },
-          "status": "BLOCKED",
+          "status": "SUCCEEDED",
           "path": "e2e",
-          "block_reason": "BLOCKED_EXTERNAL_AUTH:no_judge_provider_configured"
+          "block_reason": ""
         }
       ],
       "production_default_selection": {
@@ -6037,40 +6171,100 @@
         ]
       },
       "policy_switches_needed": {
-        "NEXUS_EXTERNAL_RUNTIME_AUTHORIZED": "1"
+        "NEXUS_LOCAL_MODEL_CALL_ALLOWED": "1"
       },
-      "policy_used": "external_runtime_authorized_flag",
+      "policy_used": "local_model_call_allowed",
       "path": "e2e",
-      "receipt_claims_simulated": true,
+      "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_judge_panel_e9ba18df"
+        "ev_cap_judge_panel_ea00a81d"
       ],
       "physical_callable": "capability_executor_registry:judge_panel",
       "console_tail": [],
-      "hard_coded_inputs": [
+      "negative_control": {
+        "name": "negative_control:swapped_content_moves_the_winner",
+        "passed": true,
+        "detail": "winner pos='cand-b' neg='cand-a' (negative swaps the summaries of the two ids)",
+        "negative_status": "SUCCEEDED",
+        "negative_block_reason": ""
+      },
+      "hard_coded_inputs": [],
+      "checks": [
         {
-          "pattern": "id=\"c0\"",
-          "file": "nexus/core/capability_executor_registry.py",
-          "line": 2980,
-          "text": "id=\"c0\","
+          "name": "ranked_the_plan_candidates",
+          "passed": true,
+          "detail": "ranking=['cand-b', 'cand-a', 'cand-c'] candidate_count=3"
+        },
+        {
+          "name": "local_ollama_judge_called",
+          "passed": true,
+          "detail": "provider=ollama model=qwen3.5:9b"
+        },
+        {
+          "name": "winner_is_the_real_fix",
+          "passed": true,
+          "detail": "winner=cand-b"
+        },
+        {
+          "name": "negative_control:swapped_content_moves_the_winner",
+          "passed": true,
+          "detail": "winner pos='cand-b' neg='cand-a' (negative swaps the summaries of the two ids)"
         }
       ],
-      "checks": [],
-      "verdict": "BLOCKED_EXTERNAL_AUTH:no_judge_provider_configured",
-      "verdict_reason": "executor_or_runtime_blocked",
+      "verdict": "REAL",
+      "verdict_reason": "invoked_with_evidence_and_artifact_assertions_passed",
       "verdict_production_default": "BLOCKED_EXTERNAL_AUTH",
       "outcome_excerpt": {
-        "action": "auth_gate",
-        "semantic_status": "BLOCKED",
+        "action": "rank",
+        "semantic_status": "SUCCEEDED",
         "evidence_refs": [
-          "ev_auth_block_judge_panel"
+          "ev_judge_panel_wiring-judge_panel-pos_local_model_call_allowed",
+          "judge_response_sha256:af26be016a76bcecb41009fbf8ee7ba2e0913bbf04a9408654a35a650209fba3"
         ],
-        "error": "BLOCKED_EXTERNAL_AUTH:no_judge_provider_configured",
-        "auth_required": true
+        "result": {
+          "judge": "ollama",
+          "provider": "ollama",
+          "model": "qwen3.5:9b",
+          "worker_id": "local_qwen35_9b",
+          "endpoint": "http://127.0.0.1:11434",
+          "ranking": [
+            "cand-b",
+            "cand-a",
+            "cand-c"
+          ],
+          "winner": "cand-b",
+          "model_ranking": [
+            "cand-b",
+            "cand-a",
+            "cand-c"
+          ],
+          "unknown_ids_dropped": [],
+          "omitted_by_model": [],
+          "reason": "Candidate b is the best fix because it addresses the root cause of floating-point precision errors by rounding to two decimal places, which matches standard currency handling and allows all tests (inc",
+          "latency_ms": 10049,
+          "response_sha256": "af26be016a76bcecb41009fbf8ee7ba2e0913bbf04a9408654a35a650209fba3",
+          "eval_count": 128,
+          "discarded_response_sha256": []
+        },
+        "candidate_count": 3,
+        "candidate_ids": [
+          "cand-a",
+          "cand-b",
+          "cand-c"
+        ],
+        "ranking": [
+          "cand-b",
+          "cand-a",
+          "cand-c"
+        ],
+        "winner": "cand-b",
+        "physical_callable": "nexus.engine.llm_judge_providers.OllamaJudgeProvider.rank",
+        "provider": "ollama",
+        "judge_model": "qwen3.5:9b"
       },
       "receipt_path": "receipts/judge_panel.json",
-      "audit_seconds": 1.72
+      "audit_seconds": 33.35
     },
     {
       "capability": "llm_judge_panel",
@@ -6090,14 +6284,14 @@
         "reached_via": "EXECUTOR_REGISTRY via build_escalate_gated_invoker (skipped unless escalate-triggered)",
         "function": "_exec_external_doc_scout",
         "file": "nexus/core/capability_executor_registry.py",
-        "line": 3941
+        "line": 3712
       },
       "gaps": [
-        "execution contract physical_callable=None; the executor is an auth gate that, once authorized, returns BLOCKED_EXTERNAL_AUTH:no_live_connector without calling anything"
+        "execution contract physical_callable=None; the EXECUTOR_REGISTRY entry is an auth gate with nothing behind it; since group D the planner-node invoker never calls it and the receipt says NOT_EXECUTABLE:no_live_connector"
       ],
       "untriggered_production_default": {
         "status": "SKIPPED",
-        "skip_reason": "SKIPPED_POLICY_NOT_TRIGGERED",
+        "skip_reason": "NOT_EXECUTABLE:no_live_connector",
         "reached": true
       },
       "trigger_switch": "route.escalate_triggered=True (set by product_capability_canary_helper; not by nexus run)",
@@ -6113,29 +6307,22 @@
           "research_route",
           "external_doc_scout",
           "delivery_gate",
+          "pregate",
+          "plan_quality_gate",
           "mempalace_gate",
           "artifact_gate",
           "claim_gate"
         ],
-        "plan_hash": "881b9089d16824c1333321b0afd1382db6a7f1874b885fca0f2b65e839657ce9",
+        "plan_hash": "b7e0697314126cb4f27726c6527414dc3c5dd6ed0ff45ee718e1584eff5e876d",
         "forcing": "route-oracle line 'Expected capability receipts: external_doc_scout' in task_statement"
       },
       "policy_attempts": [
         {
           "policy": "production_default",
           "env": {},
-          "status": "BLOCKED",
+          "status": "SKIPPED",
           "path": "e2e",
-          "block_reason": "BLOCKED_EXTERNAL_AUTH:doc_connector"
-        },
-        {
-          "policy": "external_runtime_authorized_flag",
-          "env": {
-            "NEXUS_EXTERNAL_RUNTIME_AUTHORIZED": "1"
-          },
-          "status": "BLOCKED",
-          "path": "e2e",
-          "block_reason": "BLOCKED_EXTERNAL_AUTH:no_live_connector"
+          "block_reason": ""
         }
       ],
       "production_default_selection": {
@@ -6159,35 +6346,31 @@
           "demand_online: All constraints and required controls passed"
         ]
       },
-      "policy_switches_needed": {
-        "NEXUS_EXTERNAL_RUNTIME_AUTHORIZED": "1"
-      },
-      "policy_used": "external_runtime_authorized_flag",
+      "policy_switches_needed": {},
+      "policy_used": "production_default",
       "path": "e2e",
       "receipt_claims_simulated": true,
-      "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
+      "claim_boundary_simulated_source": "UnifiedRuntime receipt.receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_external_doc_scout_1af08de8"
+        "capability:external_doc_scout:wiring-external_doc_scout-pos_production_default:skipped:NOT_EXECUTABLE:no_live_connector"
       ],
-      "physical_callable": "capability_executor_registry:external_doc_scout",
+      "physical_callable": "",
       "console_tail": [],
       "hard_coded_inputs": [],
-      "checks": [],
+      "checks": [
+        {
+          "name": "receipt_states_not_executable",
+          "passed": true,
+          "detail": "skip_reason='NOT_EXECUTABLE:no_live_connector' invoked=False outcome_contributed=False"
+        }
+      ],
       "verdict": "NOT_EXECUTABLE:no_live_connector",
       "verdict_reason": "execution_contract_has_no_runnable_physical_callable",
-      "verdict_production_default": "BLOCKED_EXTERNAL_AUTH:doc_connector",
-      "observed_verdict": "BLOCKED_EXTERNAL_AUTH:no_live_connector",
-      "observed_verdict_reason": "executor_or_runtime_blocked",
-      "outcome_excerpt": {
-        "action": "scout_docs",
-        "semantic_status": "BLOCKED",
-        "evidence_refs": [
-          "ev_external_doc_scout_wiring-external_doc_scout-pos_external_runtime_authorized_flag"
-        ],
-        "error": "BLOCKED_EXTERNAL_AUTH:no_live_connector"
-      },
+      "observed_verdict": "BLOCKED_NOT_EXECUTABLE:no_live_connector",
+      "observed_verdict_reason": "explicit_skip_receipt",
+      "outcome_excerpt": {},
       "receipt_path": "receipts/external_doc_scout.json",
-      "audit_seconds": 1.76
+      "audit_seconds": 6.38
     },
     {
       "capability": "learn_scheduler",
@@ -6502,13 +6685,13 @@
     }
   ],
   "verdict_counts": {
-    "REAL": 27,
-    "BLOCKED": 11,
-    "STUB": 2,
-    "REAL_UNATTESTED": 4,
-    "SIMULATED": 1,
+    "BLOCKED": 9,
     "NOT_EXECUTABLE": 4,
-    "RETIRING": 9
+    "REAL": 30,
+    "REAL_UNATTESTED": 4,
+    "RETIRING": 9,
+    "SIMULATED": 1,
+    "STUB": 1
   },
   "executor_only": {
     "keys": {
@@ -6837,6 +7020,48 @@
         "reason": ""
       },
       "reason": "second-batch wiring fixes: rows replaced in place; no model call (nightshift is denied by the phase policy before any model call)"
+    },
+    {
+      "generated_at": "2026-10-13T04:52:33.902428+00:00",
+      "git_head": "fe29afcee2cb4109046f93b4d3e5dcb3ba938bc2",
+      "tree": "origin/main fe29afcee + group D wiring fixes (#1981) working tree",
+      "only": [
+        "architecture_scout",
+        "direct_mode",
+        "external_doc_scout",
+        "judge_panel",
+        "msa_router",
+        "research_control_plane",
+        "ultra_review"
+      ],
+      "model_probe": {
+        "available": true,
+        "url": "http://127.0.0.1:11434"
+      },
+      "judge_model": "qwen3.5:9b (Workforce routing.local_first.classification -> local_qwen35_9b, M5 tunnel)",
+      "reason": "group D (DECISION.md KEEP/FIX 8-11): rows replaced in place",
+      "verdicts_before": {
+        "ultra_review": "BLOCKED_workforce_admission_blocked: demand_online: Requested role 'independent_review' is outside admitted roles for worker 'agy_flash_37_medium': ['bounded_candidate_generation', 'fast_bounded_implementation', 'focused_verification']",
+        "architecture_scout": "STUB",
+        "direct_mode": "NOT_EXECUTABLE:control_plane_reference",
+        "msa_router": "NOT_EXECUTABLE:control_plane_reference",
+        "research_control_plane": "NOT_EXECUTABLE:control_plane_reference",
+        "judge_panel": "BLOCKED_EXTERNAL_AUTH:no_judge_provider_configured",
+        "external_doc_scout": "NOT_EXECUTABLE:no_live_connector"
+      }
+    },
+    {
+      "generated_at": "2026-10-13T05:34:44.843294+00:00",
+      "git_head": "9b40f7dc92b04d909204c58801a070634fd79a70",
+      "tree": "group D tree + sandboxed lanes (sandbox-exec barrier denying $HOME reads, python -I tools, path containment)",
+      "only": [
+        "ultra_review"
+      ],
+      "model_probe": {
+        "available": false,
+        "reason": "--no-model"
+      },
+      "reason": "ultra_review row re-run after lane subprocesses moved behind the OS sandbox"
     }
   ]
 }

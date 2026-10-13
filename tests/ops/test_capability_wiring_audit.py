@@ -487,7 +487,10 @@ def test_end_to_end_learn_mode_ignores_project_claims(extension_matrix: dict[str
 def test_end_to_end_control_plane_node_is_not_executable(extension_matrix: dict[str, Any]) -> None:
     row = extension_matrix["direct_mode"]
     assert row["verdict"] == "NOT_EXECUTABLE:control_plane_reference"
-    assert "BLOCKED_EXECUTOR_UNAVAILABLE" in row["observed_verdict"]
+    # Since group D the receipt itself says NOT_EXECUTABLE (explicit skip, never invoked).
+    assert "NOT_EXECUTABLE:control_plane_reference" in row["observed_verdict"]
+    honest = {c["name"]: c["passed"] for c in row["checks"]}
+    assert honest == {"receipt_states_not_executable": True}
     assert row["production_default_selection"]["trigger_route_keys_dropped_by_seam"] == [
         "recommended_flow"
     ]
@@ -497,3 +500,12 @@ def test_end_to_end_asi_extractor_depends_on_its_records(extension_matrix: dict[
     row = extension_matrix["asi_constraint_extractor"]
     assert row["verdict"] == audit.REAL, row.get("checks")
     assert row["negative_control"]["passed"] is True
+
+
+def test_not_executable_specs_match_the_registry_receipt_reasons() -> None:
+    from nexus.services.capability_registry import NOT_EXECUTABLE_CAPABILITY_REASONS
+
+    flagged = {cap: spec.not_executable for cap, spec in audit.SPECS.items() if spec.not_executable}
+    assert {cap: f"NOT_EXECUTABLE:{reason}" for cap, reason in flagged.items()} == dict(
+        NOT_EXECUTABLE_CAPABILITY_REASONS
+    )

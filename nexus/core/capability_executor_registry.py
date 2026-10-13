@@ -1626,6 +1626,13 @@ def _exec_claim_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
 
 
 def _exec_ultra_review(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
+    """Run the three ultra-review lanes on the workspace diff in a sandbox worktree.
+
+    Review mode (not dry-run): security_sentry (diff pattern scan + bandit + ruff S rules on
+    added lines), logic_breaker (mirror integrity + py_compile + ruff correctness rules) and
+    ghost_regression (pytest re-run of mapped tests).  gate_passed is the service's gate; an
+    empty diff or a missing check tool fails closed with the service's blocked_reason.
+    """
     start = time.monotonic()
     cls = _try_port("ultra_review.UltraReviewService")
     if cls is None:
@@ -1635,54 +1642,97 @@ def _exec_ultra_review(plan: CapabilityExecutionPlan, task_desc: str) -> Capabil
             invoked=False,
             gate_passed=False,
             outcome=_structured_outcome(
-                action="capture_diff",
+                action="review",
                 semantic_status="FAILED",
                 error=_port_error("ultra_review.UltraReviewService"),
             ),
         )
+    constraints = dict(plan.constraints or {})
+    project_root = Path(str(constraints.get("workspace_root") or ".")).expanduser()
+    safe_id = re.sub(r"[^a-zA-Z0-9_-]", "_", str(plan.task_id))[:120] or "task"
     try:
-        inst = cls(project_root=".")
-        # Bounded production methods — full dry_run fleet is multi-second and
-        # may fail closed on dirty trees; capture_diff + changed_files is real work.
-        diff_text = inst._capture_diff("HEAD")  # noqa: SLF001 — public run path uses same
-        changed = inst._changed_files(diff_text)  # noqa: SLF001
-        run_id = inst._run_id()  # noqa: SLF001
-        elapsed = int((time.monotonic() - start) * 1000)
-        ok = isinstance(diff_text, str)
-        return _make_receipt(
-            "ultra_review",
-            plan,
-            wall_time_ms=elapsed,
-            gate_passed=ok,
-            outcome=_structured_outcome(
-                action="capture_diff",
-                semantic_status="SUCCEEDED" if ok else "FAILED",
-                evidence_refs=[f"ev_ultra_review_{plan.task_id}", f"run_id:{run_id}"],
-                result={
-                    "run_id": str(run_id),
-                    "diff_bytes": len(diff_text.encode("utf-8")) if isinstance(diff_text, str) else 0,
-                    "changed_files_count": len(changed or []),
-                    "task": str(task_desc or plan.task_id)[:120],
-                    "dry_run_supported": True,
-                },
-                physical_callable="nexus.engine.ultra_review_service.UltraReviewService._capture_diff",
-            ),
+        payload = cls(project_root=project_root).run(
+            dry_run=False,
+            task=str(task_desc or plan.task_id)[:500],
+            base_ref="HEAD",
+            report_path=f".nexus/reports/ultra_review/{safe_id}_capability_report.json",
+            sandbox_root=".nexus/reports/ultra_review/capability_sandboxes",
         )
-    except Exception as exc:
-        elapsed = int((time.monotonic() - start) * 1000)
+    except Exception as exc:  # noqa: BLE001 - executor boundary must fail closed
         return _make_receipt(
             "ultra_review",
             plan,
             invoked=True,
             gate_passed=False,
-            wall_time_ms=elapsed,
+            wall_time_ms=int((time.monotonic() - start) * 1000),
             outcome=_structured_outcome(
-                action="capture_diff",
+                action="review",
                 semantic_status="FAILED",
                 error=str(exc)[:300],
                 evidence_refs=[f"ev_ultra_review_err_{plan.task_id}"],
             ),
         )
+    elapsed = int((time.monotonic() - start) * 1000)
+    status = str(payload.get("status") or "")
+    gate_passed = bool(payload.get("gate_passed")) and status == "PASS"
+    semantic = {"PASS": "SUCCEEDED", "FAIL": "FAILED", "BLOCKED": "BLOCKED"}.get(status, "FAILED")
+    fleet = [item for item in payload.get("fleet") or [] if isinstance(item, Mapping)]
+    lanes = {
+        str(item.get("lane")): {
+            "status": item.get("status"),
+            "executed_checks": list(item.get("executed_checks") or [])[:12],
+            "unavailable_checks": [
+                str(u.get("check")) for u in item.get("unavailable_checks") or [] if isinstance(u, Mapping)
+            ],
+        }
+        for item in fleet
+    }
+    findings = [
+        {
+            "lane": f.get("lane"),
+            "rule_id": f.get("rule_id"),
+            "state": f.get("state"),
+            "severity": f.get("severity"),
+            "file": f.get("file"),
+            "line": f.get("line"),
+            "summary": str(f.get("summary") or "")[:160],
+        }
+        for f in (payload.get("findings") or [])[:20]
+        if isinstance(f, Mapping)
+    ]
+    diff = payload.get("diff") if isinstance(payload.get("diff"), Mapping) else {}
+    artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), Mapping) else {}
+    evidence = [f"ev_ultra_review_{plan.task_id}"]
+    for ref in (payload.get("report_path"), artifacts.get("diff")):
+        if ref:
+            evidence.append(str(ref))
+    return _make_receipt(
+        "ultra_review",
+        plan,
+        invoked=True,
+        gate_passed=gate_passed,
+        wall_time_ms=elapsed,
+        outcome=_structured_outcome(
+            action="review",
+            semantic_status=semantic,
+            evidence_refs=evidence,
+            error=(str(payload.get("blocked_reason") or "") or None) if status == "BLOCKED" else None,
+            result={
+                "run_id": str(payload.get("run_id") or ""),
+                "review_status": status,
+                "mode": payload.get("mode"),
+                "diff_bytes": int(diff.get("bytes") or 0),
+                "changed_files_count": len(diff.get("changed_files") or []),
+                "verified_findings": sum(1 for f in findings if f.get("state") == "VERIFIED_FINDING"),
+            },
+            lanes=lanes,
+            executed_checks=sorted({c for lane in lanes.values() for c in lane["executed_checks"]}),
+            findings=findings,
+            blocked_reason=str(payload.get("blocked_reason") or ""),
+            report_path=str(payload.get("report_path") or ""),
+            physical_callable="nexus.engine.ultra_review_service.UltraReviewService.run",
+        ),
+    )
 
 
 def _exec_learning_closure(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
@@ -2680,62 +2730,121 @@ def _exec_bdd_acceptance_skill(
 
 
 def _exec_judge_panel(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
+    """Rank the plan's real candidate pool with a judge provider.
+
+    Candidates come from ``candidate_pool`` (request ``codeintel.judge_panel_candidates`` /
+    ``candidate_pool``); nothing is fabricated.  Providers: ``NEXUS_LLM_JUDGE_PROVIDERS``
+    (fake / gemini / codex / ollama).  With ``NEXUS_LOCAL_MODEL_CALL_ALLOWED=1`` and no
+    configured provider the Ollama judge (Workforce local worker, M5 tunnel) is used; a local
+    authorization alone never admits a remote command provider.
+    """
     start = time.monotonic()
     allow_fixture = bool((plan.constraints or {}).get("allow_fixture_model_boundary"))
-    if not _provider_auth_allowed(require_external=True) and not allow_fixture:
+    external_ok = _provider_auth_allowed(require_external=True)
+    local_ok = _provider_auth_allowed(require_local_model=True)
+    if not (external_ok or local_ok or allow_fixture):
         elapsed = int((time.monotonic() - start) * 1000)
         return _auth_blocked_receipt("judge_panel", plan, wall_time_ms=elapsed)
+    candidates_raw = _candidate_pool(plan)
+    if not candidates_raw:
+        return _no_candidate_pool_receipt("judge_panel", plan, start)
     try:
         AutoreasonCandidate = resolve_port("autoreason.AutoreasonCandidate")
         DeterministicFakeJudgeProvider = resolve_port("judge.DeterministicFakeJudgeProvider")
+        JudgeProviderUnavailable = resolve_port("judge.JudgeProviderUnavailable")
+        OllamaJudgeProvider = resolve_port("judge.OllamaJudgeProvider")
         build_judge_providers_from_env = resolve_port("judge.build_judge_providers_from_env")
 
-        providers = list(build_judge_providers_from_env() or [])
-        if not providers:
-            if allow_fixture:
+        candidates = [
+            AutoreasonCandidate.from_mapping(dict(item), index)
+            for index, item in enumerate(candidates_raw)
+        ]
+        ids = [c.candidate_id for c in candidates]
+        if len(candidates) < 2 or len(set(ids)) != len(ids):
+            return _make_receipt(
+                "judge_panel",
+                plan,
+                invoked=True,
+                gate_passed=False,
+                wall_time_ms=int((time.monotonic() - start) * 1000),
+                outcome=_structured_outcome(
+                    action="rank",
+                    semantic_status="BLOCKED",
+                    error="JUDGE_REQUIRES_TWO_DISTINCT_CANDIDATES",
+                    evidence_refs=[f"ev_judge_panel_blocked_{plan.task_id}"],
+                    candidate_count=len(candidates),
+                ),
+            )
+        try:
+            providers = list(build_judge_providers_from_env() or [])
+            if not external_ok:
+                # Local-only authorization: no remote command judges.
+                providers = [
+                    p
+                    for p in providers
+                    if isinstance(p, (OllamaJudgeProvider, DeterministicFakeJudgeProvider))
+                ]
+            if not providers and local_ok:
+                providers = [OllamaJudgeProvider.from_policy()]
+            if not providers and allow_fixture:
                 providers = [DeterministicFakeJudgeProvider()]
-            else:
-                elapsed = int((time.monotonic() - start) * 1000)
-                return _auth_blocked_receipt(
-                    "judge_panel",
-                    plan,
-                    wall_time_ms=elapsed,
-                    reason="BLOCKED_EXTERNAL_AUTH:no_judge_provider_configured",
-                )
+        except JudgeProviderUnavailable as exc:
+            return _auth_blocked_receipt(
+                "judge_panel",
+                plan,
+                wall_time_ms=int((time.monotonic() - start) * 1000),
+                reason=f"BLOCKED_PROVIDER_UNAVAILABLE:{str(exc)[:200]}",
+            )
+        if not providers:
+            elapsed = int((time.monotonic() - start) * 1000)
+            return _auth_blocked_receipt(
+                "judge_panel",
+                plan,
+                wall_time_ms=elapsed,
+                reason="BLOCKED_EXTERNAL_AUTH:no_judge_provider_configured",
+            )
         provider = providers[0]
         try:
-            cand = AutoreasonCandidate(
-                id="c0",
-                text=str(task_desc or plan.task_id),
-                score=1.0,
+            result = provider.rank(task_desc=str(task_desc or plan.task_id), candidates=candidates)
+        except JudgeProviderUnavailable as exc:
+            return _auth_blocked_receipt(
+                "judge_panel",
+                plan,
+                wall_time_ms=int((time.monotonic() - start) * 1000),
+                reason=f"BLOCKED_PROVIDER_UNAVAILABLE:{str(exc)[:200]}",
             )
-            candidates = [cand]
-        except Exception:
-            try:
-                cand = AutoreasonCandidate(
-                    candidate_id="c0",
-                    summary=str(task_desc or plan.task_id),
-                    evidence_refs=[],
-                    score=1.0,
-                )
-                candidates = [cand]
-            except Exception:
-                candidates = []
-        result = provider.rank(task_desc=str(task_desc or plan.task_id), candidates=candidates)
         elapsed = int((time.monotonic() - start) * 1000)
-        ok = isinstance(result, Mapping) and bool(result.get("ranking") is not None or result)
+        ranking = (
+            [str(item) for item in result.get("ranking") or []]
+            if isinstance(result, Mapping)
+            else []
+        )
+        ok = sorted(ranking) == sorted(ids)
+        provider_name = str(getattr(provider, "name", type(provider).__name__))
         return _make_receipt(
             "judge_panel",
             plan,
             wall_time_ms=elapsed,
             gate_passed=ok,
+            model_calls=1 if provider_name == "ollama" else 0,
             outcome=_structured_outcome(
                 action="rank",
                 semantic_status="SUCCEEDED" if ok else "FAILED",
-                evidence_refs=[f"ev_judge_panel_{plan.task_id}"],
+                error=None if ok else "JUDGE_RANKING_NOT_A_PERMUTATION_OF_CANDIDATES",
+                evidence_refs=[f"ev_judge_panel_{plan.task_id}"]
+                + (
+                    [f"judge_response_sha256:{result.get('response_sha256')}"]
+                    if isinstance(result, Mapping) and result.get("response_sha256")
+                    else []
+                ),
                 result=result if isinstance(result, Mapping) else {"value": str(result)[:200]},
+                candidate_count=len(candidates),
+                candidate_ids=ids,
+                ranking=ranking,
+                winner=ranking[0] if ranking else "",
                 physical_callable=f"{type(provider).__module__}.{type(provider).__name__}.rank",
-                provider=getattr(provider, "name", type(provider).__name__),
+                provider=provider_name,
+                judge_model=str(result.get("model") or "") if isinstance(result, Mapping) else "",
             ),
         )
     except Exception as exc:
@@ -2750,6 +2859,7 @@ def _exec_judge_panel(plan: CapabilityExecutionPlan, task_desc: str) -> Capabili
                 action="rank",
                 semantic_status="FAILED",
                 error=str(exc)[:300],
+                evidence_refs=[f"ev_judge_panel_err_{plan.task_id}"],
             ),
         )
 
@@ -2763,17 +2873,60 @@ def _exec_llm_judge_panel(plan: CapabilityExecutionPlan, task_desc: str) -> Capa
 
 
 def _exec_architecture_scout(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
+    """Distant-scout pivot plan, only when the real plateau detector fires.
+
+    The ASI ledger comes from the plan (``asi_failure_records``, the same channel as
+    asi_constraint_extractor); ``runtime_decision.detect_plateau`` is the detector the
+    research flow uses.  No ledger / no plateau fails closed with the detector's reason
+    instead of passing a SKIPPED plan.
+    """
     start = time.monotonic()
     try:
         from nexus.research.architecture_scout import DistantScoutPlanner
+        from nexus.research.flow.runtime_decision import detect_plateau
 
+        constraints = dict(plan.constraints or {})
+        ledger = [
+            dict(row)
+            for row in constraints.get("asi_failure_records", []) or []
+            if isinstance(row, Mapping)
+        ]
+        plateau = dict(detect_plateau(ledger))
+        detected = bool(plateau.get("detected"))
+        evidence = [f"ev_architecture_scout_{plan.task_id}"] + [
+            f"asi:{row.get('run_id')}" for row in ledger[-4:] if row.get("run_id")
+        ]
+        if not detected:
+            reason = str(plateau.get("reason") or "plateau_not_detected")
+            return _make_receipt(
+                "architecture_scout",
+                plan,
+                invoked=True,
+                gate_passed=False,
+                wall_time_ms=int((time.monotonic() - start) * 1000),
+                outcome=_structured_outcome(
+                    action="detect_plateau",
+                    semantic_status="BLOCKED",
+                    error=f"PLATEAU_NOT_DETECTED:{reason}",
+                    evidence_refs=evidence,
+                    result=plateau,
+                    plateau_detected=False,
+                    plan_status="NOT_PLANNED",
+                    ledger_records=len(ledger),
+                    physical_callable="nexus.research.flow.runtime_decision.detect_plateau",
+                ),
+            )
         result = DistantScoutPlanner().plan(
             task_desc=str(task_desc or plan.task_id),
-            plateau={"reason": "mainchain_bind", "task_id": plan.task_id},
-            asi_ledger=[],
+            plateau=plateau,
+            asi_ledger=ledger,
         )
         elapsed = int((time.monotonic() - start) * 1000)
-        ok = isinstance(result, Mapping)
+        ok = (
+            isinstance(result, Mapping)
+            and result.get("status") == "READY"
+            and result.get("gate_passed") is True
+        )
         return _make_receipt(
             "architecture_scout",
             plan,
@@ -2782,8 +2935,12 @@ def _exec_architecture_scout(plan: CapabilityExecutionPlan, task_desc: str) -> C
             outcome=_structured_outcome(
                 action="plan",
                 semantic_status="SUCCEEDED" if ok else "FAILED",
-                evidence_refs=[f"ev_architecture_scout_{plan.task_id}"],
+                evidence_refs=evidence,
                 result=result if isinstance(result, Mapping) else {"value": str(result)[:200]},
+                plateau_detected=True,
+                plateau=plateau,
+                plan_status=str(result.get("status") if isinstance(result, Mapping) else ""),
+                ledger_records=len(ledger),
                 physical_callable="nexus.research.architecture_scout.DistantScoutPlanner.plan",
             ),
         )

@@ -57,8 +57,49 @@ def test_exec_dual_loop_runs() -> None:
     _assert_retired("dual_loop")
 
 
-def test_exec_ultra_review_runs() -> None:
-    _test_executor("ultra_review")
+def test_exec_ultra_review_runs(tmp_path) -> None:
+    # ultra_review reviews a real diff (2026-10-13): a git workspace with one benign change.
+    import subprocess
+
+    def git(*args: str) -> None:
+        subprocess.run(
+            ["git", "-c", "user.email=t@example.com", "-c", "user.name=t", *args],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+        )
+
+    (tmp_path / "target.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_target.py").write_text(
+        "from target import f\n\n\ndef test_f():\n    assert f() == 1\n", encoding="utf-8"
+    )
+    git("init", "-q")
+    git("add", "target.py", "tests/test_target.py")
+    git("commit", "-q", "-m", "base")
+    (tmp_path / "target.py").write_text(
+        "def f():\n    return 1\n\n\ndef g():\n    return f() + 1\n", encoding="utf-8"
+    )
+    fn = EXECUTOR_REGISTRY["ultra_review"]
+    plan = CapabilityExecutionPlan(
+        plan_id="test-n26",
+        task_id="n26",
+        phases=["R"],
+        constraints={"workspace_root": str(tmp_path)},
+    )
+    r = fn(plan, "test task")
+    assert r.invoked
+    assert r.telemetries["wall_time_ms"] > 0
+    assert {"bandit", "ruff-security", "py_compile"} <= set(r.outcome["executed_checks"])
+    from nexus.engine.ultra_review_service import os_sandbox_available
+
+    if os_sandbox_available():
+        assert r.gate_passed, r.outcome
+        assert "tests/test_target.py" in r.outcome["executed_checks"]
+    else:
+        # PR tests run only behind an OS barrier; elsewhere the review fails closed.
+        assert r.gate_passed is False
+        assert r.outcome["error"] == "ghost_regression_not_executed:no_os_barrier"
 
 
 def test_exec_learning_closure_runs() -> None:

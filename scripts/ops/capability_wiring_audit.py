@@ -1678,14 +1678,20 @@ def neg_drone(pos: Obs, neg: Obs) -> Check:
 
 
 def build_ultra_review(ws: Path, variant: str) -> Scenario:
+    """Positive: a benign diff the review must pass with every lane executed.
+
+    Negative: the planted diff (``eval(input())`` plus a behaviour change that breaks
+    ``tests/test_app.py``) that the same path must fail with both findings.
+    """
     _git(ws, "init", "-q")
-    _git(ws, "add", "app.py")
+    _git(ws, "add", "app.py", "tests/test_app.py")
     _git(ws, "commit", "-q", "-m", "baseline")
-    if variant == "positive":
-        shutil.copyfile(ws / "planted_patch.txt", ws / "app.py")
+    patch = "benign_patch.txt" if variant == "positive" else "planted_patch.txt"
+    shutil.copyfile(ws / patch, ws / "app.py")
 
     def check(_ws: Path, obs: Obs) -> list[Check]:
         res = _result(obs)
+        executed = list(obs.outcome.get("executed_checks") or [])
         return [
             Check(
                 "diff_captured",
@@ -1693,29 +1699,46 @@ def build_ultra_review(ws: Path, variant: str) -> Scenario:
                 f"diff_bytes={res.get('diff_bytes')}",
             ),
             Check(
-                "changed_file_listed",
-                int(res.get("changed_files_count") or 0) >= 1,
-                f"changed_files_count={res.get('changed_files_count')}",
+                "every_lane_executed_real_checks",
+                {"bandit", "ruff-security", "py_compile", "ruff-correctness", "tests/test_app.py"}
+                <= set(executed),
+                f"executed_checks={executed}",
             ),
             Check(
-                "planted_eval_input_flagged",
-                "eval" in json.dumps(obs.outcome, default=str).lower()
-                and "finding" in json.dumps(obs.outcome, default=str).lower(),
-                "no review finding in the executor outcome",
+                "benign_diff_passes",
+                obs.gate_passed is True and res.get("review_status") == "PASS",
+                f"gate={obs.gate_passed} review_status={res.get('review_status')} findings={obs.outcome.get('findings')}",
             ),
         ]
 
+    # The forcing line names a review capability, so the planner demands Workforce role
+    # independent_review; the audit binds that route's worker (still the no-model stand-in).
     return Scenario(
-        statement="Review the working tree diff for unsafe calls", task_type="review", check=check
+        statement="Review the working tree diff for unsafe calls",
+        task_type="review",
+        check=check,
+        online_route="independent_review",
     )
 
 
 def neg_ultra_review(pos: Obs, neg: Obs) -> Check:
-    differs = _result(pos).get("diff_bytes") != _result(neg).get("diff_bytes")
+    findings = [f for f in neg.outcome.get("findings") or [] if isinstance(f, Mapping)]
+    rules = sorted({f"{f.get('lane')}:{f.get('rule_id')}" for f in findings})
+    eval_flagged = any(
+        r in rules for r in ("security_sentry:bandit:B307", "security_sentry:ruff:S307")
+    )
+    test_flagged = "ghost_regression:regression_test_failed" in rules
+    ok = (
+        pos.gate_passed is True
+        and neg.gate_passed is False
+        and _result(neg).get("review_status") == "FAIL"
+        and eval_flagged
+        and test_flagged
+    )
     return Check(
-        "negative_control:clean_tree_has_empty_diff",
-        differs and pos.gate_passed == neg.gate_passed,
-        f"diff_bytes pos={_result(pos).get('diff_bytes')} neg={_result(neg).get('diff_bytes')}; gate pos={pos.gate_passed} neg={neg.gate_passed}",
+        "negative_control:planted_eval_and_failing_test_fail_the_gate",
+        ok,
+        f"gate pos={pos.gate_passed} neg={neg.gate_passed}; neg status={_result(neg).get('review_status')} rules={rules}",
     )
 
 
@@ -1723,19 +1746,20 @@ def probe_ultra_review(ws: Path) -> dict[str, Any]:
     from nexus.engine.ultra_review_service import UltraReviewService
 
     _git(ws, "init", "-q")
-    _git(ws, "add", "app.py")
+    _git(ws, "add", "app.py", "tests/test_app.py")
     _git(ws, "commit", "-q", "-m", "baseline")
     shutil.copyfile(ws / "planted_patch.txt", ws / "app.py")
-    service = UltraReviewService(project_root=ws)
-    diff = service._capture_diff("HEAD")  # noqa: SLF001
-    findings = service._scan_security_observations(diff)  # noqa: SLF001
+    with chdir(ws):
+        payload = UltraReviewService(project_root=ws).run(
+            dry_run=False,
+            report_path=".nexus/reports/ultra_review/probe.json",
+            sandbox_root=".nexus/reports/ultra_review/probe_sandboxes",
+        )
     return {
-        "ok": any(
-            "eval" in str(f.get("rule_id")) or "eval" in str(f.get("matched_text"))
-            for f in findings
-        ),
-        "finding_rule_ids": [f.get("rule_id") for f in findings],
-        "note": "UltraReviewService._scan_security_observations flags the planted eval(input()) when called directly; the registry executor never calls it (it only captures the diff)",
+        "ok": payload.get("status") == "FAIL" and payload.get("gate_passed") is False,
+        "status": payload.get("status"),
+        "finding_rule_ids": [f.get("rule_id") for f in payload.get("findings") or []],
+        "note": "UltraReviewService.run(dry_run=False) called directly on the planted diff",
     }
 
 
@@ -2928,26 +2952,52 @@ def neg_asi(pos: Obs, neg: Obs) -> Check:
 
 
 def build_architecture_scout(ws: Path, variant: str) -> Scenario:
-    statement = (
-        "Plan a seam for the billing module plateau"
-        if variant == "positive"
-        else "Plan a seam for the logging helper"
-    )
+    records = read_json(ws / "records.json")[variant]
+    statement = "Plan a seam for the flaky retry timeout in the billing module"
 
     def check(_ws: Path, obs: Obs) -> list[Check]:
         res = _result(obs)
+        out = obs.outcome
         return [
+            Check(
+                "plateau_detected_from_seeded_ledger",
+                out.get("plateau_detected") is True,
+                f"plateau_detected={out.get('plateau_detected')} error={out.get('error')}",
+            ),
             Check(
                 "scout_plan_ready",
                 res.get("status") == "READY" and bool(res.get("recommended_family")),
-                f"status={res.get('status')} reason={res.get('reason')}",
-            )
+                f"status={res.get('status')} reason={res.get('reason')} family={res.get('recommended_family')}",
+            ),
+            Check(
+                "forbidden_family_is_plateau_family",
+                list(res.get("forbidden_families") or []) == ["flow:retry_wrapper"],
+                f"forbidden_families={res.get('forbidden_families')}",
+            ),
         ]
 
     # The forcing line contains the node name, and "architecture" is a complex-task keyword, so
     # the planner demands role main_engineering; the audit binds that route's worker.
     return Scenario(
-        statement=statement, task_type="research", check=check, online_route="main_engineering"
+        statement=statement,
+        task_type="research",
+        codeintel={"asi_failure_records": records},
+        check=check,
+        online_route="main_engineering",
+    )
+
+
+def neg_architecture_scout(pos: Obs, neg: Obs) -> Check:
+    ok = (
+        pos.gate_passed
+        and not neg.gate_passed
+        and neg.outcome.get("plateau_detected") is False
+        and str(neg.outcome.get("error") or "").startswith("PLATEAU_NOT_DETECTED")
+    )
+    return Check(
+        "negative_control:mixed_ledger_has_no_plateau",
+        ok,
+        f"pos.gate={pos.gate_passed} neg.gate={neg.gate_passed} neg.error={neg.outcome.get('error')}",
     )
 
 
@@ -3172,9 +3222,23 @@ def probe_file_lock(ws: Path) -> dict[str, Any]:
     return out
 
 
-def build_control_plane(statement: str) -> Builder:
+def build_control_plane(
+    statement: str, expected_reason: str = "control_plane_reference"
+) -> Builder:
     def build(ws: Path, variant: str) -> Scenario:
-        return Scenario(statement=statement, task_type="code_change")
+        def check(_ws: Path, obs: Obs) -> list[Check]:
+            stage = obs.stage or obs.row
+            return [
+                Check(
+                    "receipt_states_not_executable",
+                    obs.skip_reason == f"{NOT_EXECUTABLE}:{expected_reason}"
+                    and not obs.invoked
+                    and not bool(stage.get("outcome_contributed")),
+                    f"skip_reason={obs.skip_reason!r} invoked={obs.invoked} outcome_contributed={stage.get('outcome_contributed')}",
+                )
+            ]
+
+        return Scenario(statement=statement, task_type="code_change", check=check)
 
     return build
 
@@ -3200,11 +3264,52 @@ def neg_autonomic_router(pos: Obs, neg: Obs) -> Check:
 
 
 def build_judge_panel(ws: Path, variant: str) -> Scenario:
-    return Scenario(statement="Rank the candidate fixes for target.py", task_type="code_change")
+    fixture = read_json(ws / "candidates.json")
+    candidates = list(fixture[variant])
+
+    def check(_ws: Path, obs: Obs) -> list[Check]:
+        out = obs.outcome
+        ids = sorted(str(c["candidate_id"]) for c in candidates)
+        ranking = [str(item) for item in out.get("ranking") or []]
+        return [
+            Check(
+                "ranked_the_plan_candidates",
+                sorted(ranking) == ids and int(out.get("candidate_count") or 0) == len(ids),
+                f"ranking={ranking} candidate_count={out.get('candidate_count')}",
+            ),
+            Check(
+                "local_ollama_judge_called",
+                out.get("provider") == "ollama" and bool(out.get("judge_model")),
+                f"provider={out.get('provider')} model={out.get('judge_model')}",
+            ),
+            Check(
+                "winner_is_the_real_fix",
+                out.get("winner") == "cand-b",
+                f"winner={out.get('winner')}",
+            ),
+        ]
+
+    return Scenario(
+        statement=str(fixture["task"]),
+        task_type="code_change",
+        codeintel={"judge_panel_candidates": candidates},
+        check=check,
+    )
 
 
-def build_external_doc_scout(ws: Path, variant: str) -> Scenario:
-    return Scenario(statement="Check the vendor docs for the refund API", task_type="research")
+def neg_judge_panel(pos: Obs, neg: Obs) -> Check:
+    pw, nw = pos.outcome.get("winner"), neg.outcome.get("winner")
+    return Check(
+        "negative_control:swapped_content_moves_the_winner",
+        pw == "cand-b" and nw == "cand-a",
+        f"winner pos={pw!r} neg={nw!r} (negative swaps the summaries of the two ids)",
+    )
+
+
+def build_external_doc_scout(ws: Path, variant: str) -> Scenario | None:
+    return build_control_plane(
+        "Check the vendor docs for the refund API", expected_reason="no_live_connector"
+    )(ws, variant)
 
 
 def build_learn_scheduler(ws: Path, variant: str) -> Scenario:
@@ -3777,7 +3882,7 @@ _SPEC_LIST: list[CapSpec] = [
         negative_check=neg_ultra_review,
         probe=probe_ultra_review,
         gaps=(
-            "executor captures git diff HEAD and counts changed files only; _scan_security_observations / the dry-run fleet are never called, so a planted eval(input()) is not flagged",
+            "fixed 2026-10-13 (group D): executor runs UltraReviewService.run(dry_run=False) in a sandbox git worktree; lanes run bandit + ruff S rules (added lines), py_compile + ruff correctness rules and pytest on mapped tests; untracked new files are overlaid but not part of the reviewed diff",
         ),
     ),
     CapSpec(
@@ -3959,11 +4064,11 @@ _SPEC_LIST += [
     ),
     CapSpec(
         "architecture_scout",
-        None,
+        "architecture_scout",
         build_architecture_scout,
-        negative_check=neg_status_changes("status"),
+        negative_check=neg_architecture_scout,
         gaps=(
-            'executor passes plateau={"reason": "mainchain_bind", "task_id": ...} without "detected", so DistantScoutPlanner.plan always returns SKIPPED plateau_not_detected, and gate_passed=isinstance(result, Mapping) passes it',
+            "fixed 2026-10-13 (group D): plateau comes from nexus.research.flow.runtime_decision.detect_plateau over the request's asi_failure_records; nothing in nexus run feeds that ledger to the node yet (the research flow feeds its own HistorySignalStore ledger)",
         ),
     ),
     CapSpec(
@@ -4011,7 +4116,7 @@ _SPEC_LIST += [
         build_control_plane("Update target.py to round totals"),
         not_executable="control_plane_reference",
         gaps=(
-            "execution contract physical_callable=None; executor key direct_master_loop is not in EXECUTOR_REGISTRY. nexus run uses nexus.engine.direct_mode.evaluate_direct_mode_completion outside the planner node",
+            "execution contract physical_callable=None; executor key direct_master_loop is not in EXECUTOR_REGISTRY. nexus run uses nexus.engine.direct_mode.evaluate_direct_mode_completion outside the planner node; since group D the receipt says NOT_EXECUTABLE:control_plane_reference",
         ),
     ),
     CapSpec(
@@ -4019,7 +4124,9 @@ _SPEC_LIST += [
         None,
         build_control_plane("Update target.py to round totals"),
         not_executable="control_plane_reference",
-        gaps=("execution contract physical_callable=None; no msa_router key in EXECUTOR_REGISTRY",),
+        gaps=(
+            "execution contract physical_callable=None; no msa_router key in EXECUTOR_REGISTRY; since group D the receipt says NOT_EXECUTABLE:control_plane_reference (an executor is an MSA design task, not a wiring fix)",
+        ),
     ),
     CapSpec(
         "research_control_plane",
@@ -4027,7 +4134,7 @@ _SPEC_LIST += [
         build_control_plane("Update target.py to round totals"),
         not_executable="control_plane_reference",
         gaps=(
-            "execution contract physical_callable=None; no research_control_plane key in EXECUTOR_REGISTRY (real code nexus/research/experiment_scheduler.py is reachable only via the research:run CLI)",
+            "execution contract physical_callable=None; no research_control_plane key in EXECUTOR_REGISTRY (real code nexus/research/experiment_scheduler.py is reachable only via the research:run CLI); since group D the receipt says NOT_EXECUTABLE:control_plane_reference",
         ),
     ),
     CapSpec(
@@ -4041,12 +4148,14 @@ _SPEC_LIST += [
     ),
     CapSpec(
         "judge_panel",
-        None,
+        "judge_panel",
         build_judge_panel,
-        policies=(POLICY_PRODUCTION, POLICY_EXTERNAL_FLAG),
+        policies=(POLICY_PRODUCTION, POLICY_LOCAL_MODEL),
+        needs_model=True,
         hard_coded=('id="c0"',),
+        negative_check=neg_judge_panel,
         gaps=(
-            "providers come only from NEXUS_LLM_JUDGE_PROVIDERS (fake, or gemini/codex command CLIs); there is no Ollama/M5 provider, so the M5 tunnel cannot serve it; the executor ranks one hard-coded candidate c0 = the task text",
+            "fixed 2026-10-13 (group D): ranks the request's candidate_pool (codeintel.judge_panel_candidates) with OllamaJudgeProvider (Workforce local_first.classification worker, M5 tunnel) under NEXUS_LOCAL_MODEL_CALL_ALLOWED=1; no provider at production default; nexus run does not yet feed a candidate pool to the node",
         ),
     ),
     CapSpec(
@@ -4056,7 +4165,7 @@ _SPEC_LIST += [
         policies=(POLICY_PRODUCTION, POLICY_EXTERNAL_FLAG),
         not_executable="no_live_connector",
         gaps=(
-            "execution contract physical_callable=None; the executor is an auth gate that, once authorized, returns BLOCKED_EXTERNAL_AUTH:no_live_connector without calling anything",
+            "execution contract physical_callable=None; the EXECUTOR_REGISTRY entry is an auth gate with nothing behind it; since group D the planner-node invoker never calls it and the receipt says NOT_EXECUTABLE:no_live_connector",
         ),
     ),
     CapSpec(

@@ -22,6 +22,7 @@ from typing import Any, Mapping
 
 import pytest
 
+from nexus.engine.ultra_review_service import os_sandbox_available
 from nexus.evidence.receipt_base import audit_product_receipt_coverage
 from nexus.services.capability_registry import (
     ARCHIVED_CAPABILITY_REASONS,
@@ -31,6 +32,7 @@ from nexus.services.capability_registry import (
     EXECUTION_CLASS_LEGACY_ALIAS,
     EXECUTION_CLASS_MISSING_ENGINE,
     LOCAL_STAGE_CAPABILITIES,
+    NOT_EXECUTABLE_CAPABILITY_REASONS,
     PLANNER_EXECUTION_CONTRACTS,
     REAL_EXECUTION_CLASSES,
     _node_meta,
@@ -405,6 +407,47 @@ def _run_family_canary(
         ),
         encoding="utf-8",
     )
+    if positive and name == "ultra_review":
+        # ultra_review reviews a real diff: commit the canary target as the baseline (once),
+        # then leave one benign working-tree change for the lanes to check.
+        def _canary_git(*args: str) -> None:
+            subprocess.run(
+                ["git", "-c", "user.email=canary@nexus.local", "-c", "user.name=canary", *args],
+                cwd=canary_root,
+                check=True,
+                capture_output=True,
+            )
+
+        if not (canary_root / ".git").exists():
+            _canary_git("init", "-q")
+        canary_test = canary_root / "tests" / "test_target.py"
+        canary_test.parent.mkdir(parents=True, exist_ok=True)
+        canary_test.write_text(
+            "from target import family_canary_target\n\n\n"
+            "def test_family_canary_target():\n"
+            "    assert family_canary_target() == 'verified'\n",
+            encoding="utf-8",
+        )
+        _canary_git("add", "target.py", "tests/test_target.py")
+        if (
+            subprocess.run(
+                ["git", "diff", "--cached", "--quiet"], cwd=canary_root, check=False
+            ).returncode
+            != 0
+            or subprocess.run(
+                ["git", "rev-parse", "--verify", "-q", "HEAD"],
+                cwd=canary_root,
+                check=False,
+                capture_output=True,
+            ).returncode
+            != 0
+        ):
+            _canary_git("commit", "-q", "-m", "canary baseline")
+        canary_target.write_text(
+            canary_target.read_text(encoding="utf-8")
+            + "\n\ndef family_canary_reviewed():\n    return family_canary_target()\n",
+            encoding="utf-8",
+        )
     if positive and name in {"semantic_searcher", "lancedb"}:
         from nexus.services.memory_repository import MemoryRepository
 
@@ -604,6 +647,22 @@ def _run_family_canary(
                         "rollback_reason": "same verifier mismatch",
                         "evidence": f"asi:{name}:failure:2",
                         "run_id": f"{task_id}:2",
+                    },
+                    # Four same-family discards: the window detect_plateau needs
+                    # (architecture_scout only plans after a real plateau).
+                    {
+                        "status": "discard",
+                        "family": "family_canary_repeated_failure",
+                        "rollback_reason": "same verifier mismatch",
+                        "evidence": f"asi:{name}:failure:3",
+                        "run_id": f"{task_id}:3",
+                    },
+                    {
+                        "status": "discard",
+                        "family": "family_canary_repeated_failure",
+                        "rollback_reason": "same verifier mismatch",
+                        "evidence": f"asi:{name}:failure:4",
+                        "run_id": f"{task_id}:4",
                     },
                 ],
                 "forecast_roi_score": 0.9,
@@ -899,7 +958,25 @@ def _run_family_canary(
         final_status = "PROBE"
 
     if positive:
-        if name == "integration_manager" and ec == EXECUTION_CLASS_CONTROL_PLANE_REFERENCE:
+        if name in NOT_EXECUTABLE_CAPABILITY_REASONS:
+            # Control-plane-only node (no physical callable): the only honest receipt is an
+            # explicit NOT_EXECUTABLE skip that claims no execution and no contribution.
+            not_exec_reason = str(cap_row.get("skip_reason") or stage.get("skip_reason") or "")
+            if (
+                final_status == "OK"
+                and skipped
+                and not invoked
+                and not outcome_contributed
+                and not_exec_reason == NOT_EXECUTABLE_CAPABILITY_REASONS[name]
+            ):
+                first_broken = None
+                final_status = "NOT_EXECUTABLE"
+            else:
+                first_broken = (
+                    first_broken or f"not_executable_receipt_not_honest:{not_exec_reason}"
+                )
+                final_status = "FAIL"
+        elif name == "integration_manager" and ec == EXECUTION_CLASS_CONTROL_PLANE_REFERENCE:
             if _retired_integration_reference_proven(
                 invoked=invoked,
                 skipped=skipped,
@@ -1229,6 +1306,18 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
         ):
             # nexus-runtime #171: an honestly unselected retired node is not a structural failure.
             final_status = "RETIRED_NOT_SELECTED"
+        no_barrier_fail_closed = (
+            name == "ultra_review"
+            and not os_sandbox_available()
+            and pos["invoked"]
+            and pos.get("gate_passed") is False
+            and pos["final_status"] == "FAIL"
+            and neg["final_status"] == "OK"
+        )
+        if no_barrier_fail_closed:
+            # Without an OS barrier (Linux CI) the review refuses to run PR tests and fails
+            # closed by design; that is not a wiring failure. Still not OK (semantic blocker).
+            final_status = "FAIL_CLOSED_NO_OS_BARRIER"
         archived = name in ARCHIVED_CAPABILITY_REASONS
         if archived and final_status != "RETIRED_NOT_SELECTED":
             # Archived 2026-10-12 / 2026-10-13: the only acceptable result is an explicit
@@ -1247,6 +1336,7 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
         if (
             name in promotable
             and not archived
+            and not no_barrier_fail_closed
             and contract["execution_class"] in REAL_EXECUTION_CLASSES
             and pos["final_status"] in {"FAIL", "PROBE", "IMPLEMENTATION_FAILURE"}
         ):
@@ -1668,7 +1758,14 @@ def test_promotable_family_canary_mainchain_entry(name: str) -> None:
     assert pos["public_claim_allowed"] is False
     auth_local = os.environ.get("NEXUS_LOCAL_MODEL_CALL_ALLOWED", "").strip() == "1"
     auth_ext = os.environ.get("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "").strip() == "1"
-    if name in {"claim_gate", "delivery_gate"}:
+    if name in NOT_EXECUTABLE_CAPABILITY_REASONS:
+        expected_positive_statuses = {"NOT_EXECUTABLE"}
+    elif name == "ultra_review" and not os_sandbox_available():
+        # The review re-runs PR tests only behind an OS sandbox; elsewhere it fails closed.
+        assert pos["final_status"] == "FAIL", pos
+        assert neg["final_status"] == "OK", (name, neg["first_broken_edge"], neg)
+        return
+    elif name in {"claim_gate", "delivery_gate"}:
         # Offline: NOT_EXERCISED; with external auth: OK if postflight real, else honest FAIL
         if auth_ext:
             expected_positive_statuses = {"OK", "FAIL", "NOT_EXERCISED_OFFLINE"}

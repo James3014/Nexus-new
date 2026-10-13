@@ -1,5 +1,5 @@
 def handler(value: str) -> str:
-    return value.strip()
+    return value
 
 
 def unsafe() -> object:

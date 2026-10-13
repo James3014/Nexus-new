@@ -2863,7 +2863,12 @@ else:
             click.echo(json.dumps(payload, ensure_ascii=False))
         else:
             click.echo(f"{'✅' if payload.get('gate_passed') else '❌'} Ultra Review: {payload.get('status')}")
+            if payload.get("blocked_reason"):
+                click.echo(f"Blocked: {payload.get('blocked_reason')}")
             click.echo(f"Report: {report_file}")
+        # Review mode is a gate: a failed or blocked review exits non-zero (dry-run stays advisory).
+        if not dry_run and not payload.get("gate_passed"):
+            raise SystemExit(2 if payload.get("status") == "BLOCKED" else 1)
 
 
 

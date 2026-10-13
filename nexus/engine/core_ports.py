@@ -33,6 +33,14 @@ CORE_ENGINE_PORTS: dict[str, tuple[str, str]] = {
         "nexus.engine.llm_judge_providers",
         "DeterministicFakeJudgeProvider",
     ),
+    "judge.JudgeProviderUnavailable": (
+        "nexus.engine.llm_judge_providers",
+        "JudgeProviderUnavailable",
+    ),
+    "judge.OllamaJudgeProvider": (
+        "nexus.engine.llm_judge_providers",
+        "OllamaJudgeProvider",
+    ),
     "judge.build_judge_providers_from_env": (
         "nexus.engine.llm_judge_providers",
         "build_judge_providers_from_env",
