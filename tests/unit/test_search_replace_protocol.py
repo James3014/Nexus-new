@@ -2,6 +2,17 @@ import pytest
 from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol, PatchIntent, SyntaxGate
 from nexus.services.local_heal.errors import PatchErrorKind
 
+
+@pytest.fixture(autouse=True)
+def _standard_protocol_mode(monkeypatch):
+    """Pin the protocol mode: validate() reads NEXUS_PROTOCOL_MODE from the process env.
+
+    LocalHealPipelineCapabilityExecutor does os.environ.setdefault("NEXUS_PROTOCOL_MODE",
+    "anchored_edit") without restoring it, so an earlier test in the same process can
+    otherwise flip these standard-mode tests into anchored_edit.
+    """
+    monkeypatch.delenv("NEXUS_PROTOCOL_MODE", raising=False)
+
 def test_protocol_parse_valid_block():
     raw = "FILE: test.py\n<<<<<<< SEARCH\nold_code()\n=======\nnew_code()\n>>>>>>> REPLACE"
     protocol = SolidSearchReplaceProtocol()
@@ -87,13 +98,24 @@ def test_syntax_gate_invalid_python():
     assert res.error.kind == PatchErrorKind.SYNTAX_ERROR
     assert "SyntaxError" in res.error.message
 
-def test_protocol_validate_match_chain_fallback():
+def test_protocol_validate_match_chain_fallback(monkeypatch):
     # 建立一個因縮排漂移而無法 verbatim match 的 intent
     intent = PatchIntent("test.py", "def foo():\n  return 42", "def foo():\n  return 100")
     source = "def foo():\n    return 42\n"  # 縮排是 4 個空格而非 2 個
     protocol = SolidSearchReplaceProtocol()
+
+    # Standard mode (T1.3B): a fuzzy candidate is recorded but deliberately does NOT pass
+    # the gate and the model's SEARCH is not rewritten ("requires canonical authority").
+    res = protocol.validate(intent, source)
+    assert not res.is_valid
+    assert res.error.kind == PatchErrorKind.SEARCH_MISMATCH
+    assert res.error.telemetry["requires_authority"] is True
+    assert res.error.closest_match == "def foo():\n    return 42\n"
+    assert intent.search == "def foo():\n  return 42"
+
+    # Only the control-plane mode may auto-heal SEARCH to the verbatim source span.
+    monkeypatch.setenv("NEXUS_PROTOCOL_MODE", "control_plane_search_model_replace")
     res = protocol.validate(intent, source)
     assert res.is_valid
     # 驗證 intent.search 是否被 auto-heal 為 verbatim 原始碼 (4空格縮排，且包含尾部換行符)
     assert intent.search == "def foo():\n    return 42\n"
-

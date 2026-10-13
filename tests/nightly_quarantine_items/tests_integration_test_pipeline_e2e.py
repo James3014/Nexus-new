@@ -6,6 +6,6 @@ ENTRY: dict[str, object] = {
     "file": "tests/integration/test_pipeline_e2e.py",
     "disposition": "quarantine",
     "issue": "#1924",
-    "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
+    "cause": "legacy NexusEngine (archived 2026-10-13, scheduled for deletion): after fixing the phase mocks the R stage routes to the swarm proxy / local repair and the audit loop never approves; no production caller, so not worth re-mocking",
     "tests": ("test_full_chain_cli_to_engine",),
 }

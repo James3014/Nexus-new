@@ -9,6 +9,23 @@ import pytest
 from scripts.bench.capability_ab_runner import CapabilityTask, _finalize_with_nexus_row
 
 
+def _committee_signal_snapshot() -> dict:
+    """Planner snapshot satisfying the fail-closed local_committee_only contract."""
+    return {
+        "execution_topology": "local_committee_only",
+        "planner_decision_id": "plan-armor-smoke",
+        "protocol_mode": "anchored_edit",
+        "model_call_allowed": True,
+        "executor_provider": "ollama",
+        "executor_model": "qwen2.5-coder:7b",
+        "judge_model": "qwen2.5:3b",
+        "proposer_specs": [
+            {"model": "qwen2.5-coder:7b", "role": "primary"},
+            {"model": "deepseek-coder:6.7b-instruct", "role": "secondary"},
+        ],
+    }
+
+
 def _make_mock_isolated_solve_response():
     """Build a mock IsolatedLocalSolveResponse for deterministic smoke."""
     from nexus.services.local_heal.isolated_local_solve_loop import (
@@ -96,6 +113,8 @@ def _run_single_task(
     monkeypatch.setenv("NEXUS_LOCAL_MODEL_EXECUTOR_DRY_RUN", "0")
     monkeypatch.setenv("NEXUS_LOCAL_MODEL_CALL_ALLOWED", "1")
     monkeypatch.setenv("NEXUS_PROTOCOL_MODE", "anchored_edit")
+    # World C refuses OS-temp source roots unless explicitly allowed (fail-closed gate).
+    monkeypatch.setenv("NEXUS_ARMOR_ALLOW_EPHEMERAL", "1")
 
     resolved_path = tmp_path.resolve()
     target_dir = resolved_path / target_file.rsplit("/", 1)[0] if "/" in target_file else resolved_path
@@ -134,7 +153,7 @@ def _run_single_task(
         "target_symbol": target_symbol,
         "locked_search": locked_search,
         "candidate_generate_fn": lambda req: "mock",
-        "signal_snapshot": {"execution_topology": "local_committee_only"},
+        "signal_snapshot": _committee_signal_snapshot(),
     }
     if previous_failure:
         row["previous_failure"] = previous_failure
@@ -260,6 +279,8 @@ def test_finalize_with_nexus_row_capability_execution_smoke(monkeypatch, tmp_pat
     monkeypatch.setenv("NEXUS_LOCAL_MODEL_EXECUTOR_DRY_RUN", "0")
     monkeypatch.setenv("NEXUS_LOCAL_MODEL_CALL_ALLOWED", "1")
     monkeypatch.setenv("NEXUS_PROTOCOL_MODE", "anchored_edit")
+    # World C refuses OS-temp source roots unless explicitly allowed (fail-closed gate).
+    monkeypatch.setenv("NEXUS_ARMOR_ALLOW_EPHEMERAL", "1")
 
     resolved_path = tmp_path.resolve()
     target_dir = resolved_path / "pkg"
@@ -328,7 +349,7 @@ def test_finalize_with_nexus_row_capability_execution_smoke(monkeypatch, tmp_pat
         "evidence_refs": ["cap-exec-ref"], "verifier_command": ["echo", "ok"],
         "target_symbol": "func", "locked_search": "def func():\n    pass",
         "candidate_generate_fn": lambda req: "mock",
-        "signal_snapshot": {"execution_topology": "local_committee_only"},
+        "signal_snapshot": _committee_signal_snapshot(),
     }
 
     finalized = _finalize_with_nexus_row(

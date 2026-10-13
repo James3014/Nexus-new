@@ -23,6 +23,8 @@ def test_deterministic_full_capability_solve(monkeypatch, tmp_path):
     monkeypatch.setenv("NEXUS_LOCAL_MODEL_EXECUTOR_DRY_RUN", "0")
     monkeypatch.setenv("NEXUS_LOCAL_MODEL_CALL_ALLOWED", "1")
     monkeypatch.setenv("NEXUS_PROTOCOL_MODE", "anchored_edit")
+    # World C refuses OS-temp source roots unless explicitly allowed (fail-closed gate).
+    monkeypatch.setenv("NEXUS_ARMOR_ALLOW_EPHEMERAL", "1")
 
     resolved_path = tmp_path.resolve()
     target_dir = resolved_path / "pkg"
@@ -87,8 +89,13 @@ def test_deterministic_full_capability_solve(monkeypatch, tmp_path):
         "capability_plan_selected": ["local_model_executor", "ddtree", "autoreason", "artifact_gate", "claim_gate", "delivery_gate"],
         "evidence_refs": ["full-cap-ref"], "verifier_command": ["echo", "ok"],
         "target_symbol": "func", "locked_search": "def func():\n    pass",
-        "candidate_generate_fn": lambda req: "mock",
+        "candidate_generate_fn": lambda req: (
+            "FILE: pkg/mod.py\n<<<<<<< SEARCH\ndef func():\n    pass\n=======\n"
+            "def func():\n    return 1\n>>>>>>> REPLACE"
+        ),
         "signal_snapshot": {
+            # The World C receipt gate is fail-closed on a missing planner decision id.
+            "planner_decision_id": "plan-full-capability-solve",
             "execution_topology": "localheal_pipeline",
             "protocol_mode": "anchored_edit",
             "model_call_allowed": True,

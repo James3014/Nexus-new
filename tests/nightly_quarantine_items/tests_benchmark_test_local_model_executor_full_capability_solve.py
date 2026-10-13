@@ -2,10 +2,5 @@
 
 from __future__ import annotations
 
-ENTRY: dict[str, object] = {
-    "file": "tests/benchmark/test_local_model_executor_full_capability_solve.py",
-    "disposition": "quarantine",
-    "issue": "#1924",
-    "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
-    "tests": ("test_deterministic_full_capability_solve",),
-}
+# Tombstone (#1924): all ids un-quarantined (snapshot now carries planner_decision_id and a valid SSRP candidate; ephemeral root allowed explicitly).
+ENTRY = None

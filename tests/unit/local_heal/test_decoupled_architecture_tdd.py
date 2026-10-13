@@ -34,7 +34,8 @@ class DummyLLMClient(ILLMClient):
         model: str,
         timeout: int | None = None,
         options: Dict[str, Any] | None = None,
-        api_type: str = "generate"
+        api_type: str = "generate",
+        phase: str = "",
     ) -> str:
         self.calls.append({
             "system": system_prompt,
@@ -42,7 +43,8 @@ class DummyLLMClient(ILLMClient):
             "model": model,
             "timeout": timeout,
             "options": options,
-            "api_type": api_type
+            "api_type": api_type,
+            "phase": phase,
         })
         return self.response_text
 
@@ -230,7 +232,7 @@ def test_planning_phase_execute_prioritizes_route_context_target_symbol():
     assert "solve" in ctx.op.plan.search_symbols
 
 
-def test_localization_phase_execute_injects_target_file_hint():
+def test_localization_phase_execute_injects_target_file_hint(tmp_path):
     from nexus.services.local_heal.context import HealContext, OperationalContext, GovernanceContext
     from nexus.services.local_heal.interface import RepairPlan
 
@@ -238,9 +240,16 @@ def test_localization_phase_execute_injects_target_file_hint():
         def __init__(self):
             self.queries = []
 
-        def rank_files(self, query: str, repo_dir: Path, search_symbols: List[str] = None):
+        # A route-context target_file is the canonical, fail-closed path: the
+        # file must exist under repo_dir and is localized directly (no ranking),
+        # so the injected hint reaches the localizer through localize().
+        def localize(self, path: str, content: str, query: str):
             self.queries.append(query)
-            return super().rank_files(query, repo_dir, search_symbols)
+            return super().localize(path, content, query)
+
+    target = tmp_path / "toy" / "math_util.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("def double(x):\n    return x + x\n", encoding="utf-8")
 
     localizer = RecordingLocalizer()
     budget_mgr = StubBudgetManager()
@@ -249,7 +258,7 @@ def test_localization_phase_execute_injects_target_file_hint():
     ctx = HealContext(
         op=OperationalContext(
             instance_id="loc-target-file",
-            repo_dir=Path("/tmp/repo"),
+            repo_dir=tmp_path,
             problem_statement="Fix toy math bug",
             repro_evidence="AssertionError",
             plan=RepairPlan(search_symbols=["double"], repair_strategy="fix"),

@@ -2,14 +2,5 @@
 
 from __future__ import annotations
 
-ENTRY: dict[str, object] = {
-    "file": "tests/unit/test_search_replace_protocol.py",
-    "disposition": "quarantine",
-    "issue": "#1924",
-    "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
-    "tests": (
-        "test_protocol_validate_match_chain_fallback",
-        "test_protocol_validate_placeholder_in_replace",
-        "test_protocol_validate_placeholder_in_search",
-    ),
-}
+# Tombstone (#1924): all ids un-quarantined (pinned NEXUS_PROTOCOL_MODE; fuzzy match is now a documented requires_authority rejection in standard mode).
+ENTRY = None

@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+from unittest.mock import patch
 
 from nexus.engine.pipeline import NexusPipeline
 
@@ -87,6 +88,36 @@ class _DummyResearch:
         return {"status": "SUCCESS", "findings": [], "tokens_used": 0}
 
 
+class _DummyDiagnose:
+    """D is required before R by the fail-closed runtime phase contract (S->P->D->R)."""
+
+    def __init__(self):
+        self.name = "D"
+        self.priority = 25
+
+    def should_run(self, ctx):
+        return True
+
+    def execute(self, pipeline, ctx):
+        from nexus.engine.phase_plugin import PhaseResult
+        return PhaseResult(status="success", mutations={"tokens_used": 0}, events=[])
+
+
+class _DummyAudit:
+    """The composed A executor is a required fail-closed audit gate; it must approve explicitly."""
+
+    def __init__(self):
+        self.name = "A"
+        self.priority = 40
+
+    def should_run(self, ctx):
+        return True
+
+    def execute(self, pipeline, ctx):
+        from nexus.engine.phase_plugin import PhaseResult
+        return PhaseResult(status="success", mutations={"status": "APPROVED"}, events=[])
+
+
 class _DummyRepair:
     def __init__(self):
         self.name = "R"
@@ -124,6 +155,8 @@ class _DummyReviewStatusNormalizer:
 class _DummyEngine:
     def __init__(self, project_root: Path):
         self.project_root = project_root
+        self.run_dir = project_root / ".nexus" / "run"
+        self.run_dir.mkdir(parents=True, exist_ok=True)
         self.policy_manager = _DummyPolicyManager()
         self.state_io = _DummyStateIO()
         self.commander = _DummyCommander()
@@ -131,7 +164,13 @@ class _DummyEngine:
         self.accumulator = _DummyAccumulator()
         self.health_evaluator = _DummyHealthEvaluator()
         self.research_policy = _DummyResearchPolicy()
-        self.phases = {"P": _DummyPlanner(), "X": _DummyResearch(), "R": _DummyRepair()}
+        self.phases = {
+            "P": _DummyPlanner(),
+            "X": _DummyResearch(),
+            "D": _DummyDiagnose(),
+            "R": _DummyRepair(),
+            "A": _DummyAudit(),
+        }
         self.max_retries = 3
         self.ReviewStatusNormalizer = _DummyReviewStatusNormalizer
 
@@ -153,7 +192,14 @@ class _DummyEngine:
 
 def test_pipeline_writes_skill_outcome_events(tmp_path: Path):
     engine = _DummyEngine(tmp_path)
-    pipeline = NexusPipeline(engine)
+    # Core phases come only from composed phase executors (engine.phases is not consulted for
+    # P/X/D once any executor is registered), so hand the dummies in through that seam.
+    # C must be the real crystallize executor: success is withheld without its verified record.
+    from nexus.engine.phase_executors import build_crystallize_executor
+
+    executors = {**engine.phases, "C": build_crystallize_executor(tmp_path, engine.run_dir)}
+    with patch.object(NexusPipeline, "_build_default_phase_executors", return_value=executors):
+        pipeline = NexusPipeline(engine)
     ok = pipeline.run("pipeline outcome event test", "bug")
     assert ok is True
 
