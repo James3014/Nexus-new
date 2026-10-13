@@ -15,64 +15,72 @@ from nexus.core.drone_protocol import DroneProtocol
 
 logger = logging.getLogger("nexus.drone")
 
+DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
+# Admitted local model per docs/arch/MODEL_WORKFORCE_POLICY.md (local_qwen35_9b, L1 ceiling).
+DRONE_ADMITTED_MODEL = "qwen3.5:9b"
+
+_ACTION_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "action": {"type": "string", "enum": ["BASH", "EDIT", "DONE"]},
+        "command": {"type": "string"},
+        "target_file": {"type": "string"},
+        "content": {"type": "string"},
+        "reasoning": {"type": "string"},
+    },
+    "required": ["action"],
+}
+
+
 class LocalBonsaiBrain:
-    """[P0] Dedicated Brain for Bonsai-1.7B using Custom llama-server."""
-    def __init__(self, api_url: str = "http://localhost:11435"):
-        self.api_url = api_url
+    """Drone brain backed by the Ollama chat API (M5 tunnel on NEXUS_OLLAMA_URL).
+
+    Name kept for import compatibility; it no longer speaks the llama-server
+    /completion protocol.
+    """
+
+    def __init__(self, api_url: Optional[str] = None, model: str = DRONE_ADMITTED_MODEL):
+        self.api_url = (api_url or os.environ.get("NEXUS_OLLAMA_URL") or DEFAULT_OLLAMA_URL).rstrip("/")
+        self.model = model
+        self.last_unavailable_reason = ""
 
     def health_check(self) -> bool:
-        """[Task 8] Pre-flight health check for the local Bonsai brain API."""
+        """Pre-flight: Ollama reachable and the admitted model is installed."""
         try:
-            res = requests.get(f"{self.api_url}/health", timeout=5)
-            # fallback for standard llama.cpp server: maybe root
-            if res.status_code == 404:
-                res = requests.get(f"{self.api_url}/", timeout=5)
-            return res.status_code == 200
-        except Exception:
+            res = requests.get(f"{self.api_url}/api/tags", timeout=5)
+            if res.status_code != 200:
+                self.last_unavailable_reason = f"ollama /api/tags returned HTTP {res.status_code}"
+                return False
+            names = {str(m.get("name", "")) for m in res.json().get("models", [])}
+            if self.model not in names:
+                self.last_unavailable_reason = f"model {self.model} not installed at {self.api_url}"
+                return False
+            return True
+        except Exception as exc:
+            self.last_unavailable_reason = f"ollama unreachable at {self.api_url}: {exc}"
             return False
 
     def ask_structured(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
-        text = "" # 修正 UnboundLocalError: 預先定義變數
+        text = ""
         try:
-            prompt = ""
-            for m in messages:
-                role = m["role"]
-                content = m["content"]
-                prompt += f"<|im_start|>{role}\n{content}<|im_end|>\n"
-            prompt += "<|im_start|>assistant\n"
-
-            grammar = r'''
-                root   ::= "{" space "\"action\"" space ":" space action_val ( "," space pair )* "}" space
-                action_val ::= "\"BASH\"" | "\"EDIT\"" | "\"DONE\""
-                pair   ::= string ":" space value
-                string ::= "\"" [^"]* "\""
-                value  ::= string | number | object | array | "true" | "false" | "null"
-                number ::= [0-9]+
-                object ::= "{" space ( pair ( "," space pair )* )? "}" space
-                array  ::= "[" space ( value ( "," space value )* )? "]" space
-                space  ::= [ \t\n\r]*
-            '''
-
             res = requests.post(
-                f"{self.api_url}/completion",
+                f"{self.api_url}/api/chat",
                 json={
-                    "prompt": prompt,
-                    "stop": ["<|im_end|>"],
-                    "temperature": 0.0,
-                    "n_predict": 512,
-                    "grammar": grammar
+                    "model": self.model,
+                    "messages": messages,
+                    "stream": False,
+                    "think": False,
+                    "format": _ACTION_SCHEMA,
+                    "options": {"temperature": 0.0, "num_predict": 512},
                 },
-                timeout=60
+                timeout=120,
             )
             if res.status_code == 200:
-                text = res.json().get("content", "").strip()
+                text = str(res.json().get("message", {}).get("content", "")).strip()
                 try:
                     return json.loads(text)
                 except (json.JSONDecodeError, ValueError):
-                    # [Hardening] 更安全的 JSON Repair
-                    if not text.startswith("{"): return {"action": "FAIL", "reasoning": "Malformed output"}
-                    if not text.endswith("}"): text += '"}' if text.endswith('"') else '" }'
-                    return json.loads(text)
+                    return {"action": "FAIL", "reasoning": "Malformed output", "partial_text": text}
             return {"action": "FAIL", "error": f"Server status {res.status_code}"}
         except Exception as e:
             return {"action": "FAIL", "error": f"Inference crash: {str(e)}", "partial_text": text}

@@ -3,6 +3,7 @@ from click.testing import CliRunner
 from scripts.engine.nexus_cli import nexus
 from scripts.engine.nexus_cli_registry import deprecated_command_names
 import os
+import subprocess as _subprocess
 from unittest.mock import patch, MagicMock
 
 
@@ -20,6 +21,19 @@ def test_cli_invalid_command():
     assert result.exit_code != 0
 
 import json
+
+
+@pytest.fixture(autouse=True)
+def _scoped_pytest_verification_passes(monkeypatch):
+    """research:run now really executes scoped pytest; these fixtures have no tests, so stub only that call."""
+    real_run = _subprocess.run
+
+    def fake_run(cmd, *args, **kwargs):
+        if isinstance(cmd, (list, tuple)) and "pytest" in cmd:
+            return _subprocess.CompletedProcess(cmd, 0, stdout="stubbed pytest pass", stderr="")
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(_subprocess, "run", fake_run)
 
 
 def test_research_run_success(tmp_path, monkeypatch):
