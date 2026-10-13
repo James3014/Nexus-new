@@ -2,7 +2,7 @@
 
 ## Identity
 
-- task_id: `eia-open-swe-canary-20261013`
+- task_id: `eia-open-swe-canary-20261013b`
 - campaign_id: `external-intelligence-open-swe-canary-20261013`
 - artifact_authority: current
 - status: ACTIVE
@@ -51,6 +51,21 @@ daemon natural polling -> targeted remote-main refresh -> exact-main Task Card
 authority validation -> open-swe semantic compilation -> open-swe worker
 execution -> deterministic verification/closure -> exactly-once GitHub
 publication -> stop at independent acceptance.
+
+## Diagnosis scope
+
+The semantic diagnosis covers only this card's required change, not the
+end-to-end pipeline. The target test file is absent at the bound `main_sha`,
+and its required content is fully specified below, so the change is a
+fully specified additive change whose diagnosis is supported by the Task Card
+and the absent target path. End-to-end daemon, worker, verification, and
+publication behavior is what this canary run observes; the semantic stage
+does not have to prove it in advance.
+
+Identity note: `eia-open-swe-canary-20261013` (Issue #1828 r10/r11) is retired.
+r11 compiled a non-PROVEN diagnosis, so the worker ran diagnosis-only with no
+Core binding and stopped at `OUTCOME_UNKNOWN`. That state stays untouched, and
+this card uses the fresh task identity `eia-open-swe-canary-20261013b`.
 
 ## Allowed files
 
