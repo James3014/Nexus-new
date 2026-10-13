@@ -37,6 +37,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
 import dataclasses
 import hashlib
@@ -100,10 +101,6 @@ RETIRING_CAPABILITIES: dict[str, str] = {
 # archive batch (ARCHIVED_2026-10-13.md, #1906).  EXECUTOR_ONLY below keeps what each one did.
 RETIRED_EXECUTOR_ONLY_REASON = "archived_executor_only_no_planner_node_2026-10-13"
 RETIRED_EXECUTOR_ONLY_NOTES: dict[str, str] = {
-    "entropy_guard_v2": (
-        "registry key removed 2026-10-13; module nexus/services/entropy_v2.py kept, "
-        "planner node + fixture tracked in #1907"
-    ),
     "policy_capability_gate": (
         "executor removed 2026-10-13; nexus/services/policy_gate.py kept (legacy self_heal_selector)"
     ),
@@ -3686,6 +3683,60 @@ def build_file_lock(ws: Path, variant: str) -> Scenario:
     )
 
 
+def build_entropy_guard_v2(ws: Path, variant: str) -> Scenario:
+    # Positive: a real prose/code output (the fixture's release note) must PASS; negative: the
+    # same note with a credential-like key pasted in must be VETOED.  The audited text is the
+    # output under review (codeintel.entropy_audit_text), never the task statement.
+    note = (ws / "release_note.md").read_text(encoding="utf-8")
+    if variant != "positive":
+        # Credential-shaped value generated at run time (never stored, so no secret scanner
+        # sees a literal): base64 of a fixed digest, 44 mixed-class chars.
+        key = base64.b64encode(hashlib.sha256(b"wiring-audit-entropy-fixture").digest()).decode()
+        note += f"\nDeploy key: {key}\n"
+
+    def check(root: Path, obs: Obs) -> list[Check]:
+        result = _result(obs)
+        digest = hashlib.sha256(note.encode("utf-8")).hexdigest()
+        return [
+            Check(
+                "audited_the_output_not_the_task",
+                result.get("text_sha256") == digest,
+                f"text_sha256={str(result.get('text_sha256'))[:12]} expected={digest[:12]}",
+            ),
+            Check(
+                "real_output_passes",
+                result.get("status") == "PASSED" and result.get("high_entropy_segments") == 0,
+                f"status={result.get('status')} max_segment={result.get('max_segment_entropy')}",
+            ),
+        ]
+
+    return Scenario(
+        statement="Run an entropy audit on the changelog text",
+        task_type="research",
+        codeintel={"entropy_audit_text": note},
+        route_features={"output_entropy_audit": True},
+        # The planner demands an independent_review role for this validation node.
+        online_route="independent_review",
+        check=check,
+    )
+
+
+def neg_entropy_guard_v2(pos: Obs, neg: Obs) -> Check:
+    p, n = _result(pos), _result(neg)
+    ok = (
+        p.get("status") == "PASSED"
+        and n.get("status") == "VETOED"
+        and not neg.gate_passed
+        and int(n.get("high_entropy_segments") or 0) >= 1
+        and float(n.get("max_segment_entropy") or 0) > float(p.get("max_segment_entropy") or 0)
+    )
+    return Check(
+        "negative_control:leaked_key_vetoed",
+        ok,
+        f"pos={p.get('status')}/{p.get('max_segment_entropy')} neg={n.get('status')}/{n.get('max_segment_entropy')}",
+    )
+
+
 def neg_file_lock(pos: Obs, neg: Obs) -> Check:
     ok = (
         pos.gate_passed
@@ -4084,11 +4135,6 @@ EXECUTOR_ONLY: dict[str, dict[str, Any]] = {
         "kind": "STUB_CONSTRUCT_ONLY",
         "does": "constructs LearnRefreshService(repo_root=/tmp) and reports class_instantiated; no refresh runs; the registry's construct-only guard then rejects it (import_construct_not_execution)",
         "literals": ['cls(repo_root=Path("/tmp"))', '"class_instantiated": True'],
-    },
-    "entropy_guard_v2": {
-        "kind": "REAL_CALL",
-        "does": "EntropyGuardV2().audit_payload(task_desc); outcome keeps only entropy_ok (defaults True)",
-        "literals": ['result.get("passed", True)'],
     },
     "zero_trust_v2_behavior": {
         "kind": "STUB_CONSTRUCT_ONLY",
@@ -4588,6 +4634,15 @@ _SPEC_LIST += [
         probe=probe_learn_phase_slo,
         gaps=(
             "fixed 2026-10-13: reads the project phase ledger with the CLI window (300; was an empty per-task run_root with window=1); gate_passed means the report was built, phase_slo_pass is in the result",
+        ),
+    ),
+    CapSpec(
+        "entropy_guard_v2",
+        "entropy_guard_v2",
+        build_entropy_guard_v2,
+        negative_check=neg_entropy_guard_v2,
+        gaps=(
+            "planner node since nexus-runtime #198 (pin 68e86ed); enabled only on an explicit request (route_features.output_entropy_audit or 'entropy audit'); veto = a credential-like segment above 4.1 bits/char (calibrated on this repository, see nexus/services/entropy_v2.py); whole-text entropy is reported only",
         ),
     ),
     CapSpec(

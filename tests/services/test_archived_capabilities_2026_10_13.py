@@ -30,7 +30,8 @@ PLANNER_NODE_REASONS = {
     "llm_judge_panel": "archived_alias_llm_judge_panel_2026-10-13",
 }
 
-# Executor-registry keys with no planner node (entropy_guard_v2 included: key only, see #1907).
+# Executor-registry keys with no planner node.  entropy_guard_v2 left this list with the
+# runtime 68e86ed pin, which defines its planner node (nexus-runtime #198, #1907).
 RETIRED_EXECUTOR_KEYS = (
     "policy_capability_gate",
     "aos_oracle",
@@ -48,7 +49,6 @@ RETIRED_EXECUTOR_KEYS = (
     "battle_swarm",
     "nightshift_runner_service",
     "research_and_source_discipline",
-    "entropy_guard_v2",
 )
 
 ARCHIVED_MODULES = {
