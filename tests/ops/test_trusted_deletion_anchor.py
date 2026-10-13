@@ -3359,5 +3359,116 @@ def test_verifier_reports_controller_reason_before_bundle_download_and_fails_clo
     )
     # Steps after the report keep the implicit success() guard, so a controller
     # failure can never reach the PASS path.
-    for step in steps[names.index("Download controller bundle") :]:
-        assert step.get("if") in (None, "always()")
+    later = steps[names.index("Download controller bundle") :]
+    for step in later[:-1]:
+        assert "if" not in step, step.get("name")
+    assert later[-1]["name"] == "Cleanup trusted verifier source"
+    assert later[-1]["if"] == "always()"
+
+
+def test_oversized_but_otherwise_valid_lane_block_is_rejected(tmp_path: Path):
+    payload = json.dumps({
+        "status": "BLOCK",
+        "reason": "EXACTLY_ONE_MERGE_LANE_BINDING_REQUIRED",
+        "padding": "x" * trusted_anchor.CONTROLLER_FAILURE_FILE_LIMIT,
+    }).encode()
+    failure_dir = _controller_failure_dir(tmp_path, {"merge-lane-gate.json": payload})
+    result = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")
+    assert result["reason_code"] == "CONTROLLER_REASON_UNAVAILABLE"
+    # Control: the same content under the limit is accepted.
+    (tmp_path / "small").mkdir()
+    small = _controller_failure_dir(
+        tmp_path / "small",
+        {"merge-lane-gate.json": {"status": "BLOCK", "reason": "PR_BODY_REQUIRED"}},
+    )
+    assert (
+        trusted_anchor.resolve_controller_failure(small, controller_result="failure")["reason_code"]
+        == "MERGE_LANE_BINDING_MISSING"
+    )
+
+
+@pytest.mark.parametrize(
+    "forged_code",
+    [
+        "MERGE_LANE_BINDING_MISSING",
+        "MERGE_LANE_BINDING_BLOCKED",
+        "CONTROLLER_REASON_UNAVAILABLE",
+    ],
+)
+def test_controller_record_cannot_claim_non_recordable_code(tmp_path: Path, forged_code: str):
+    failure_dir = _controller_failure_dir(
+        tmp_path,
+        {
+            "controller-failure.json": {
+                "schema": trusted_anchor.CONTROLLER_FAILURE_SCHEMA,
+                "reason_code": forged_code,
+                "detail": "forged",
+            }
+        },
+    )
+    result = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")
+    assert result["reason_code"] == "CONTROLLER_REASON_UNAVAILABLE"
+    assert "forged" not in result["detail"]
+
+
+def test_token_like_strings_are_redacted_from_detail(tmp_path: Path):
+    ghs = "ghs" + "_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+    ghp = "ghp" + "_" + "Z9y8X7w6V5u4T3s2R1q0P9o8N7m6L5k4J3i2"
+    pat = "github" + "_pat_" + "11ABCDEFG0123456789_abcdefghijklmnop"
+    failure_dir = _controller_failure_dir(
+        tmp_path,
+        {
+            "controller-failure.json": {
+                "schema": trusted_anchor.CONTROLLER_FAILURE_SCHEMA,
+                "reason_code": "CONTROLLER_ERROR",
+                "detail": f"auth {ghs} then {ghp} and {pat} end",
+            }
+        },
+    )
+    detail = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")[
+        "detail"
+    ]
+    for secret in (ghs, ghp, pat):
+        assert secret not in detail
+    assert detail == "auth [REDACTED] then [REDACTED] and [REDACTED] end"
+    record = trusted_anchor._controller_failure_record(ValueError(f"leak {ghs}"))
+    assert ghs not in record["detail"]
+    assert "[REDACTED]" in record["detail"]
+
+
+def test_deeply_nested_reason_json_falls_back_to_unavailable(tmp_path: Path):
+    failure_dir = _controller_failure_dir(
+        tmp_path, {"controller-failure.json": b"[" * 30_000 + b"]" * 30_000}
+    )
+    result = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")
+    assert result["reason_code"] == "CONTROLLER_REASON_UNAVAILABLE"
+
+
+def test_explain_step_runs_isolated_default_branch_source():
+    run = _named_step("trusted-verifier", "Report controller failure reason (fail closed)")["run"]
+    commands = [line.strip() for line in run.splitlines() if "explain-controller-failure" in line]
+    assert commands == [
+        'python -I "$RUNNER_TEMP/trusted-verifier-source/trusted_deletion_anchor.py" '
+        "explain-controller-failure "
+        '--failure-dir "$RUNNER_TEMP/trusted-anchor-failure" '
+        '--controller-result "$CONTROLLER_RESULT"'
+    ]
+    assert "trusted-anchor-failure/" not in run.split("explain-controller-failure")[0]
+
+
+def test_collect_step_skips_symlink_to_existing_file(tmp_path: Path):
+    run = _named_step("trusted-controller", "Collect controller failure reason")["run"]
+    real = tmp_path / "real-lane.json"
+    real.write_text('{"status":"BLOCK","reason":"PR_BODY_REQUIRED"}\n')
+    (tmp_path / "trusted-anchor").mkdir()
+    (tmp_path / "trusted-anchor" / "merge-lane-gate.json").symlink_to(real)
+    completed = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", run],
+        env={**os.environ, "RUNNER_TEMP": str(tmp_path), "GITHUB_RUN_ID": "7"},
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    failure_dir = tmp_path / "trusted-anchor-failure"
+    assert not (failure_dir / "merge-lane-gate.json").exists()
+    assert (failure_dir / "controller-failed.marker").read_text() == "run_id=7\n"

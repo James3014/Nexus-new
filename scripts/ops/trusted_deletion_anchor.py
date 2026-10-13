@@ -1706,7 +1706,7 @@ def _read_untrusted_reason_json(path: Path) -> dict[str, Any] | None:
         if path.stat().st_size > CONTROLLER_FAILURE_FILE_LIMIT:
             return None
         payload = json.loads(path.read_bytes().decode("utf-8"))
-    except (OSError, UnicodeDecodeError, ValueError):
+    except (OSError, UnicodeDecodeError, ValueError, RecursionError):
         return None
     return payload if isinstance(payload, dict) else None
 
