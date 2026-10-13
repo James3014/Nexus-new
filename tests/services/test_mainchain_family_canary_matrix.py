@@ -22,6 +22,7 @@ from typing import Any, Mapping
 
 import pytest
 
+from nexus.engine.ultra_review_service import os_sandbox_available
 from nexus.evidence.receipt_base import audit_product_receipt_coverage
 from nexus.services.capability_registry import (
     ARCHIVED_CAPABILITY_REASONS,
@@ -419,7 +420,15 @@ def _run_family_canary(
 
         if not (canary_root / ".git").exists():
             _canary_git("init", "-q")
-        _canary_git("add", "target.py")
+        canary_test = canary_root / "tests" / "test_target.py"
+        canary_test.parent.mkdir(parents=True, exist_ok=True)
+        canary_test.write_text(
+            "from target import family_canary_target\n\n\n"
+            "def test_family_canary_target():\n"
+            "    assert family_canary_target() == 'verified'\n",
+            encoding="utf-8",
+        )
+        _canary_git("add", "target.py", "tests/test_target.py")
         if (
             subprocess.run(
                 ["git", "diff", "--cached", "--quiet"], cwd=canary_root, check=False
@@ -1738,6 +1747,11 @@ def test_promotable_family_canary_mainchain_entry(name: str) -> None:
     auth_ext = os.environ.get("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "").strip() == "1"
     if name in NOT_EXECUTABLE_CAPABILITY_REASONS:
         expected_positive_statuses = {"NOT_EXECUTABLE"}
+    elif name == "ultra_review" and not os_sandbox_available():
+        # The review re-runs PR tests only behind an OS sandbox; elsewhere it fails closed.
+        assert pos["final_status"] == "FAIL", pos
+        assert neg["final_status"] == "OK", (name, neg["first_broken_edge"], neg)
+        return
     elif name in {"claim_gate", "delivery_gate"}:
         # Offline: NOT_EXERCISED; with external auth: OK if postflight real, else honest FAIL
         if auth_ext:

@@ -53,6 +53,54 @@ REVIEW_MODE = "review"
 # Set in the ghost-regression pytest environment: a review started from inside a review's
 # test run (a test that reviews "."), would review the sandbox again; refuse instead.
 ULTRA_REVIEW_NESTED_ENV = "NEXUS_ULTRA_REVIEW_IN_PROGRESS"
+# Lane subprocesses (tools, repro scripts, the test re-run) see only these caller variables;
+# everything else (tokens, credentials, provider keys) is dropped.
+SANDBOX_ENV_ALLOWLIST = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "VIRTUAL_ENV", "SYSTEMROOT")
+# Read-denied even inside the OS sandbox (credential stores under $HOME).
+SANDBOX_DENIED_HOME_PATHS = (
+    ".ssh",
+    ".gnupg",
+    ".aws",
+    ".netrc",
+    ".git-credentials",
+    ".config/gh",
+    ".config/gcloud",
+    ".docker",
+    ".kube",
+    ".claude",
+    ".codex",
+    "Library/Keychains",
+)
+# Files whose change alters how the ghost-regression test run itself behaves.
+TEST_HARNESS_FILES = ("conftest.py", "pytest.ini", "tox.ini", "setup.cfg", "pyproject.toml", "sitecustomize.py", "usercustomize.py")
+_OS_SANDBOX_PROBE: dict[str, bool] = {}
+
+
+def os_sandbox_available() -> bool:
+    """True when an OS-level barrier (macOS sandbox-exec) can confine lane subprocesses.
+
+    ``NEXUS_ULTRA_REVIEW_DISABLE_OS_SANDBOX=1`` only removes the barrier (fail closed), it
+    can never grant one; it lets non-macOS behaviour be exercised anywhere.
+    """
+    if os.getenv("NEXUS_ULTRA_REVIEW_DISABLE_OS_SANDBOX", "").strip() == "1":
+        return False
+    if "sandbox-exec" not in _OS_SANDBOX_PROBE:
+        ok = False
+        if sys.platform == "darwin" and shutil.which("sandbox-exec"):
+            try:
+                ok = (
+                    subprocess.run(  # noqa: S603 - fixed argv probe
+                        ["sandbox-exec", "-p", "(version 1) (allow default)", "/usr/bin/true"],
+                        capture_output=True,
+                        timeout=5,
+                        check=False,
+                    ).returncode
+                    == 0
+                )
+            except (OSError, subprocess.SubprocessError):
+                ok = False
+        _OS_SANDBOX_PROBE["sandbox-exec"] = ok
+    return _OS_SANDBOX_PROBE["sandbox-exec"]
 DRY_RUN_MODE = "dry-run"
 
 
@@ -142,6 +190,7 @@ class UltraReviewService:
         regression_map = self._derive_regression_candidate_map(diff_text)
         test_candidates = self._existing_regression_candidates(regression_map)
         execution_root, mirror_metadata = self._prepare_execution_workspace(sandbox_path, diff_path=diff_path)
+        self._bind_sandbox(sandbox_path=sandbox_path, execution_root=execution_root)
         security_sentry = self._run_security_sentry(
             diff_text=diff_text,
             execution_root=execution_root,
@@ -184,6 +233,14 @@ class UltraReviewService:
             blocked_reason = "sandbox_mirror_diff_not_applied"
         elif lanes_blocked:
             blocked_reason = "check_tool_unavailable:" + ",".join(lanes_blocked)
+        elif ghost_regression.get("blocked"):
+            blocked_reason = f"ghost_regression_not_executed:{ghost_regression.get('blocked_reason')}"
+        elif ghost_regression.get("execution_mode") == "skipped_by_env":
+            blocked_reason = "ghost_regression_not_executed:skipped_by_env"
+        elif not ghost_regression.get("executed_tests"):
+            blocked_reason = "ghost_regression_not_executed:no_mapped_tests"
+        elif not security_sentry.get("executed_checks") or not logic_breaker.get("executed_checks"):
+            blocked_reason = "lane_not_executed"
         if dry_run:
             # Dry-run is advisory: checks execute but a clean dry-run is NOT_VERIFIED, never a pass.
             gate_passed = False
@@ -206,6 +263,7 @@ class UltraReviewService:
             "gate_passed": gate_passed,
             "mode": mode,
             "worktree_cleanup": worktree_cleanup,
+            "isolation": self.sandbox_isolation(),
             "task": task,
             "base_ref": base_ref,
             "project_root": str(self.project_root),
@@ -458,6 +516,92 @@ class UltraReviewService:
         )
         return {"strategy": "copytree", "diff_applied": True}
 
+    def _bind_sandbox(self, *, sandbox_path: Path, execution_root: Path) -> None:
+        home = sandbox_path / "home"
+        tmp = sandbox_path / "tmp"
+        home.mkdir(parents=True, exist_ok=True)
+        tmp.mkdir(parents=True, exist_ok=True)
+        self._sandbox_ctx = {
+            "sandbox_path": sandbox_path.resolve(),
+            "execution_root": execution_root.resolve(),
+            "home": home.resolve(),
+            "tmp": tmp.resolve(),
+        }
+
+    def _sandbox_env(self) -> dict[str, str]:
+        ctx = getattr(self, "_sandbox_ctx", None) or {}
+        env = {key: os.environ[key] for key in SANDBOX_ENV_ALLOWLIST if key in os.environ}
+        project = str(self.project_root)
+        python_path = [
+            part
+            for part in os.environ.get("PYTHONPATH", "").split(os.pathsep)
+            if part and not str(Path(part).resolve()).startswith(project)
+        ]
+        execution_root = str(ctx.get("execution_root") or "")
+        env["PYTHONPATH"] = os.pathsep.join([p for p in [execution_root, *python_path] if p])
+        env["HOME"] = str(ctx.get("home") or "")
+        env["TMPDIR"] = str(ctx.get("tmp") or "")
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        env["PYTHONNOUSERSITE"] = "1"
+        env["NEXUS_SANDBOX_NO_NETWORK"] = "1"
+        env[ULTRA_REVIEW_NESTED_ENV] = "1"
+        return env
+
+    def _sandbox_profile(self) -> str:
+        ctx = getattr(self, "_sandbox_ctx", None) or {}
+        writable = [str(ctx.get("execution_root") or ""), str(ctx.get("sandbox_path") or "")]
+        real_home = Path(os.path.expanduser("~")).resolve()
+        denied = " ".join(f'(subpath "{real_home / rel}")' for rel in SANDBOX_DENIED_HOME_PATHS)
+        writes = " ".join(f'(subpath "{path}")' for path in writable if path)
+        return "\n".join(
+            [
+                "(version 1)",
+                "(deny default)",
+                "(allow process-fork)",
+                "(allow process-exec*)",
+                "(allow file-read*)",
+                "(allow sysctl-read)",
+                "(allow mach-lookup)",
+                "(allow ipc-posix-shm)",
+                "(allow signal (target self))",
+                "(deny network*)",
+                f'(allow file-write* {writes} (literal "/dev/null") (literal "/dev/tty") (literal "/dev/dtracehelper"))',
+                f"(deny file-read* {denied})",
+            ]
+        )
+
+    def sandbox_isolation(self) -> dict[str, Any]:
+        contained = os_sandbox_available()
+        return {
+            "barrier": "macos_sandbox_exec" if contained else "none",
+            "network": "denied" if contained else "not_enforced",
+            "writes_confined_to": [
+                str((getattr(self, "_sandbox_ctx", None) or {}).get(key) or "")
+                for key in ("execution_root", "sandbox_path")
+            ]
+            if contained
+            else [],
+            "env": "allowlist:" + ",".join(SANDBOX_ENV_ALLOWLIST) + "+HOME/TMPDIR in sandbox",
+            "credential_paths_read_denied": list(SANDBOX_DENIED_HOME_PATHS) if contained else [],
+        }
+
+    def _sandboxed_run(self, cmd: list[str], *, cwd: Path, timeout: float) -> subprocess.CompletedProcess:
+        """Run a lane command on PR-controlled content: scrubbed env, sandbox cwd, timeout,
+        and (when available) an OS barrier denying network, credential reads and writes
+        outside the sandbox. Never a shell; raises subprocess.TimeoutExpired on timeout."""
+        argv = list(cmd)
+        if os_sandbox_available():
+            argv = ["sandbox-exec", "-p", self._sandbox_profile(), *argv]
+        return subprocess.run(  # noqa: S603 - argv list, no shell
+            argv,
+            cwd=cwd,
+            env=self._sandbox_env(),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+
     def _cleanup_execution_worktree(self, execution_root: Path, mirror_metadata: dict[str, Any]) -> dict[str, Any]:
         """Remove the per-run git worktree registration (review artifacts stay in the sandbox)."""
         strategy = str(mirror_metadata.get("strategy") or "")
@@ -515,14 +659,7 @@ class UltraReviewService:
 
     def _run_tool(self, cmd: list[str], *, cwd: Path) -> dict[str, Any]:
         try:
-            result = subprocess.run(
-                cmd,
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=TOOL_CHECK_TIMEOUT_SEC,
-            )
+            result = self._sandboxed_run(cmd, cwd=cwd, timeout=TOOL_CHECK_TIMEOUT_SEC)
         except FileNotFoundError as exc:
             return {"available": False, "error": str(exc)[:300], "command": " ".join(cmd)}
         except subprocess.TimeoutExpired:
@@ -554,8 +691,12 @@ class UltraReviewService:
     def _bandit_findings(
         self, py_files: list[str], *, execution_root: Path, added: dict[str, set[int]]
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        cmd = [sys.executable, "-m", "bandit", "-f", "json", "-q", *py_files]
-        run = self._run_tool(cmd, cwd=execution_root)
+        # Absolute paths from the sandbox dir: a PR-supplied .bandit config is not read, and
+        # --ignore-nosec stops the diff from silencing its own findings.
+        targets = [str((execution_root / rel).resolve()) for rel in py_files]
+        cmd = [sys.executable, "-m", "bandit", "-f", "json", "-q", "--ignore-nosec", *targets]
+        ctx = getattr(self, "_sandbox_ctx", None) or {}
+        run = self._run_tool(cmd, cwd=Path(ctx.get("sandbox_path") or execution_root))
         if not run.get("available") or run.get("timeout"):
             return run, []
         try:
@@ -609,6 +750,7 @@ class UltraReviewService:
             "check",
             "--no-cache",
             "--isolated",
+            "--ignore-noqa",
             "--select",
             select,
             "--output-format",
@@ -909,14 +1051,7 @@ class UltraReviewService:
             executed_checks.append(script_name)
             timeout = False
             try:
-                result = subprocess.run(
-                    cmd,
-                    cwd=execution_root,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=SECURITY_REPRO_TIMEOUT_SEC,
-                )
+                result = self._sandboxed_run(cmd, cwd=execution_root, timeout=SECURITY_REPRO_TIMEOUT_SEC)
                 reproduced = result.returncode == 0
                 stdout_tail = (result.stdout or "")[-2000:]
                 stderr_tail = (result.stderr or "")[-2000:]
@@ -1050,14 +1185,7 @@ class UltraReviewService:
         cmd = [sys.executable, str(repro_script)]
         timeout = False
         try:
-            result = subprocess.run(
-                cmd,
-                cwd=execution_root,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=LOGIC_BREAKER_TIMEOUT_SEC,
-            )
+            result = self._sandboxed_run(cmd, cwd=execution_root, timeout=LOGIC_BREAKER_TIMEOUT_SEC)
             passed = result.returncode == 0
             stdout_tail = (result.stdout or "")[-2000:]
             stderr_tail = (result.stderr or "")[-2000:]
@@ -1093,6 +1221,26 @@ class UltraReviewService:
             )
 
         diff_text = diff_path.read_text(encoding="utf-8") if diff_path.exists() else ""
+        harness = [rel for rel in self._changed_files(diff_text) if Path(rel).name in TEST_HARNESS_FILES]
+        executed_checks.append("test-harness-guard")
+        if harness:
+            # A diff that edits the test harness can make the ghost re-run report green
+            # without running the tests honestly; a human must review it.
+            findings.append(
+                {
+                    "id": f"logic-breaker-{len(findings) + 1}",
+                    "lane": "logic_breaker",
+                    "rule_id": "test_harness_modified",
+                    "tool": "test-harness-guard",
+                    "state": "VERIFIED_FINDING",
+                    "severity": "high",
+                    "file": harness[0],
+                    "line": 0,
+                    "repro_command": "",
+                    "summary": "Diff changes test-harness configuration: " + ", ".join(harness[:5]),
+                    "execution_cwd": str(execution_root),
+                }
+            )
         py_files = self._changed_python_files(diff_text, execution_root)
         if py_files:
             compile_cmd = [sys.executable, "-m", "py_compile", *py_files]
@@ -1194,24 +1342,31 @@ class UltraReviewService:
             str(execution_root),
             *test_candidates,
         ]
-        env = os.environ.copy()
-        env[ULTRA_REVIEW_NESTED_ENV] = "1"
-        sanitized_env = []
-        for key in BENCHMARK_ONLY_ENV_VARS:
-            if key in env:
-                env.pop(key, None)
-                sanitized_env.append(key)
+        sanitized_env = [key for key in BENCHMARK_ONLY_ENV_VARS if key in os.environ]
+        if not os_sandbox_available():
+            # The re-run imports and executes PR-controlled code: without an OS barrier it
+            # does not run at all, and the lane fails closed.
+            return {
+                "passed": False,
+                "blocked": True,
+                "blocked_reason": "os_sandbox_unavailable",
+                "executed_tests": [],
+                "failed_tests": [],
+                "skipped_tests": list(test_candidates),
+                "findings": [],
+                "execution_mode": "refused_uncontained",
+                "execution_cwd": str(execution_root),
+                "timeout": False,
+                "timeout_sec": GHOST_REGRESSION_TIMEOUT_SEC,
+                "dependency_mode": "active_venv",
+                "sanitized_env": sanitized_env,
+                "isolation": self.sandbox_isolation(),
+                "pytest_stdout_tail": "",
+                "pytest_stderr_tail": "",
+            }
         timeout = False
         try:
-            result = subprocess.run(
-                cmd,
-                cwd=execution_root,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=GHOST_REGRESSION_TIMEOUT_SEC,
-            )
+            result = self._sandboxed_run(cmd, cwd=execution_root, timeout=GHOST_REGRESSION_TIMEOUT_SEC)
             passed = result.returncode == 0
             stdout_tail = (result.stdout or "")[-2000:]
             stderr_tail = (result.stderr or "")[-2000:]
@@ -1255,6 +1410,7 @@ class UltraReviewService:
             "timeout_sec": GHOST_REGRESSION_TIMEOUT_SEC,
             "dependency_mode": "active_venv",
             "sanitized_env": sanitized_env,
+            "isolation": self.sandbox_isolation(),
             "pytest_stdout_tail": stdout_tail,
             "pytest_stderr_tail": stderr_tail,
         }

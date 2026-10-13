@@ -13,6 +13,7 @@ import pytest
 from nexus.core.belief_contracts import CapabilityExecutionPlan
 from nexus.core.capability_executor_registry import EXECUTOR_REGISTRY
 from nexus.engine import llm_judge_providers as providers
+from nexus.engine.ultra_review_service import os_sandbox_available
 from nexus.services.capability_registry import (
     NOT_EXECUTABLE_CAPABILITY_REASONS,
     build_default_mainchain_invokers,
@@ -216,6 +217,12 @@ def _git_repo(root: Path) -> None:
     git("commit", "-q", "-m", "base")
 
 
+requires_os_sandbox = pytest.mark.skipif(
+    not os_sandbox_available(), reason="ghost regression runs PR tests only behind sandbox-exec"
+)
+
+
+@requires_os_sandbox
 def test_ultra_review_executor_flags_planted_eval_and_failing_test(tmp_path) -> None:
     _git_repo(tmp_path)
     (tmp_path / "app.py").write_text(
@@ -233,6 +240,7 @@ def test_ultra_review_executor_flags_planted_eval_and_failing_test(tmp_path) -> 
     )
 
 
+@requires_os_sandbox
 def test_ultra_review_executor_passes_benign_diff(tmp_path) -> None:
     _git_repo(tmp_path)
     (tmp_path / "app.py").write_text(
@@ -272,3 +280,16 @@ def test_ollama_judge_retries_once_on_unusable_output(monkeypatch) -> None:
     out = provider.rank(task_desc="t", candidates=cands)
     assert out["winner"] == "a"
     assert len(out["discarded_response_sha256"]) == 1
+
+
+def test_ultra_review_executor_without_os_sandbox_fails_closed(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("NEXUS_ULTRA_REVIEW_DISABLE_OS_SANDBOX", "1")
+    _git_repo(tmp_path)
+    (tmp_path / "app.py").write_text(
+        "def handler(v):\n    return v.strip()\n\n\ndef shout(v):\n    return handler(v).upper()\n",
+        encoding="utf-8",
+    )
+    receipt = EXECUTOR_REGISTRY["ultra_review"](_plan(workspace_root=str(tmp_path)), "review")
+    assert receipt.gate_passed is False
+    assert receipt.outcome["semantic_status"] == "BLOCKED"
+    assert receipt.outcome["error"] == "ghost_regression_not_executed:os_sandbox_unavailable"

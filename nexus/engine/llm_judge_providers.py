@@ -7,6 +7,7 @@ import shlex
 import subprocess
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
@@ -216,13 +217,15 @@ class OllamaJudgeProvider:
         }
 
     def _chat(self, body: Mapping[str, Any]) -> tuple[dict[str, Any], str]:
+        if urllib.parse.urlsplit(self.base_url).scheme not in {"http", "https"}:
+            raise JudgeProviderUnavailable(f"ollama_url_scheme_not_http:{self.base_url}")
         request = urllib.request.Request(
             f"{self.base_url}/api/chat",
             data=json.dumps(body).encode("utf-8"),
             headers={"Content-Type": "application/json"},
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout_sec) as response:  # noqa: S310 - fixed local endpoint
+            with urllib.request.urlopen(request, timeout=self.timeout_sec) as response:  # noqa: S310  # nosec B310 - scheme checked http(s) above
                 raw = response.read().decode("utf-8")
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise JudgeProviderUnavailable(f"ollama_unreachable:{self.base_url}:{exc}") from exc

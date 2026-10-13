@@ -1,10 +1,17 @@
 import json
 import subprocess
+from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 import scripts.engine.nexus_cli as cli_mod
-from nexus.engine.ultra_review_service import UltraReviewService
+from nexus.engine.ultra_review_service import UltraReviewService, os_sandbox_available
+
+# The ghost-regression lane executes PR-controlled tests only behind an OS barrier
+# (macOS sandbox-exec); elsewhere it refuses and the lane fails closed.
+OS_SANDBOX = os_sandbox_available()
+requires_os_sandbox = pytest.mark.skipif(not OS_SANDBOX, reason="needs macOS sandbox-exec")
 
 
 def _init_repo(path):
@@ -33,7 +40,7 @@ def test_ultra_review_dry_run_writes_report_and_sandbox(tmp_path, monkeypatch):
     report_path = tmp_path / "reports" / "ultra.json"
     assert report_path.exists()
     assert payload["gate_passed"] is False  # dry-run never verifies
-    assert payload["status"] == "DRY_RUN_NOT_VERIFIED"
+    assert payload["status"] == ("DRY_RUN_NOT_VERIFIED" if OS_SANDBOX else "DRY_RUN_FAIL")
     assert payload["diff"]["has_worktree_delta"] is True
     assert "nexus/engine/sample.py" in payload["diff"]["changed_files"]
     assert (tmp_path / "reports" / "sandboxes" / payload["run_id"] / "changes.diff").exists()
@@ -43,7 +50,7 @@ def test_ultra_review_dry_run_writes_report_and_sandbox(tmp_path, monkeypatch):
     assert payload["sandbox_mirror"]["diff_applied"] is True
     assert payload["sandbox_mirror"]["untracked_overlay_count"] == 1
     assert payload["summary"]["logic_breaker_passed"] is True
-    assert payload["summary"]["ghost_regression_passed"] is True
+    assert payload["summary"]["ghost_regression_passed"] is OS_SANDBOX
     assert payload["summary"]["security_verified_findings"] == 0
     assert [event["stage"] for event in payload["progress"]] == [
         "sandbox_prepared",
@@ -55,11 +62,16 @@ def test_ultra_review_dry_run_writes_report_and_sandbox(tmp_path, monkeypatch):
     ]
     ghost = next(item for item in payload["fleet"] if item["lane"] == "ghost_regression")
     assert ghost["planned_checks"] == ["tests/engine/test_sample.py"]
-    assert ghost["executed_checks"] == ["tests/engine/test_sample.py"]
-    assert ghost["status"] == "PASS"
-    assert payload["ghost_regression"]["passed"] is True
-    assert payload["ghost_regression"]["executed_tests"] == ["tests/engine/test_sample.py"]
-    assert payload["ghost_regression"]["execution_mode"] == "sandbox_mirror"
+    if OS_SANDBOX:
+        assert ghost["executed_checks"] == ["tests/engine/test_sample.py"]
+        assert ghost["status"] == "PASS"
+        assert payload["ghost_regression"]["passed"] is True
+        assert payload["ghost_regression"]["executed_tests"] == ["tests/engine/test_sample.py"]
+        assert payload["ghost_regression"]["execution_mode"] == "sandbox_mirror"
+    else:
+        assert ghost["executed_checks"] == []
+        assert ghost["status"] == "FAIL"
+        assert payload["ghost_regression"]["blocked_reason"] == "os_sandbox_unavailable"
     assert payload["ghost_regression"]["timeout_sec"] == 30
     assert payload["ghost_regression"]["dependency_mode"] == "active_venv"
     assert payload["ghost_regression"]["sanitized_env"] == ["NEXUS_LLM_CANDIDATE_CAP"]
@@ -73,7 +85,12 @@ def test_ultra_review_dry_run_writes_report_and_sandbox(tmp_path, monkeypatch):
     assert (tmp_path / "reports" / "sandboxes" / payload["run_id"] / "ultra_logic_repro.py").exists()
     logic_lane = next(item for item in payload["fleet"] if item["lane"] == "logic_breaker")
     assert logic_lane["status"] == "PASS"
-    assert logic_lane["executed_checks"] == ["ultra_logic_repro.py", "py_compile", "ruff-correctness"]
+    assert logic_lane["executed_checks"] == [
+        "ultra_logic_repro.py",
+        "test-harness-guard",
+        "py_compile",
+        "ruff-correctness",
+    ]
     security_lane = next(item for item in payload["fleet"] if item["lane"] == "security_sentry")
     assert security_lane["executed_checks"] == ["diff-pattern-scan", "bandit", "ruff-security"]
     assert payload["regression_candidate_map"] == [
@@ -251,6 +268,10 @@ def test_ultra_review_ghost_regression_failure_becomes_verified_finding(tmp_path
     assert ghost["status"] == "FAIL"
     assert payload["gate_passed"] is False
     assert payload["ghost_regression"]["passed"] is False
+    if not OS_SANDBOX:
+        # Without an OS barrier the failing test is never executed: fail closed, no finding.
+        assert payload["ghost_regression"]["blocked_reason"] == "os_sandbox_unavailable"
+        return
     finding = payload["findings"][0]
     assert finding["state"] == "VERIFIED_FINDING"
     assert finding["lane"] == "ghost_regression"
@@ -269,9 +290,12 @@ def test_ultra_review_ghost_regression_timeout_becomes_verified_finding(tmp_path
     def fake_run(cmd, **kwargs):
         if "pytest" in cmd and "-q" in cmd:
             raise subprocess.TimeoutExpired(cmd=cmd, timeout=30, output="running", stderr="timeout")
+        if cmd[:1] == ["sandbox-exec"] and not OS_SANDBOX:
+            cmd = cmd[3:]
         return original_run(cmd, **kwargs)
 
     monkeypatch.setattr("nexus.engine.ultra_review_service.subprocess.run", fake_run)
+    monkeypatch.setattr("nexus.engine.ultra_review_service.os_sandbox_available", lambda: True)
 
     payload = UltraReviewService(tmp_path).run(
         report_path="reports/ultra.json",
@@ -453,6 +477,7 @@ def _init_app_repo(path):
     subprocess.run(["git", "commit", "-m", "init"], cwd=path, check=True, capture_output=True)
 
 
+@requires_os_sandbox
 def test_ultra_review_review_mode_flags_eval_and_failing_test(tmp_path):
     _init_app_repo(tmp_path)
     (tmp_path / "app.py").write_text(
@@ -483,6 +508,7 @@ def test_ultra_review_review_mode_flags_eval_and_failing_test(tmp_path):
     assert len(listed.strip().splitlines()) == 1
 
 
+@requires_os_sandbox
 def test_ultra_review_review_mode_passes_clean_change(tmp_path):
     _init_app_repo(tmp_path)
     (tmp_path / "app.py").write_text(
@@ -536,7 +562,7 @@ def test_ultra_review_review_mode_missing_tool_fails_closed(tmp_path, monkeypatc
     original_run = subprocess.run
 
     def fake_run(cmd, **kwargs):
-        if len(cmd) > 2 and cmd[1:3] == ["-m", "bandit"]:
+        if "bandit" in cmd and "-m" in cmd:
             return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="No module named bandit")
         return original_run(cmd, **kwargs)
 
@@ -572,3 +598,150 @@ def test_ultra_review_refuses_nested_review_from_its_own_test_run(tmp_path, monk
 
     assert payload["status"] == "BLOCKED"
     assert "nested_ultra_review_refused" in payload["blocked_reason"]
+
+
+def test_ultra_review_review_mode_without_os_sandbox_refuses_to_run_pr_tests(tmp_path, monkeypatch):
+    _init_app_repo(tmp_path)
+    marker = tmp_path.parent / f"{tmp_path.name}_escape_marker.txt"
+    (tmp_path / "tests" / "test_app.py").write_text(
+        "from pathlib import Path\n\n\ndef test_escape():\n"
+        f"    Path({str(marker)!r}).write_text('escaped')\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NEXUS_ULTRA_REVIEW_DISABLE_OS_SANDBOX", "1")
+
+    payload = UltraReviewService(tmp_path).run(
+        dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
+    )
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["blocked_reason"] == "ghost_regression_not_executed:os_sandbox_unavailable"
+    assert payload["gate_passed"] is False
+    assert payload["ghost_regression"]["executed_tests"] == []
+    assert payload["isolation"]["barrier"] == "none"
+    assert not marker.exists()
+
+
+@requires_os_sandbox
+def test_ultra_review_contains_a_diff_that_escapes_the_sandbox(tmp_path, monkeypatch):
+    """A PR test that writes outside the worktree, reads credentials and calls the network
+    is contained (no write, no token, no connection) and reported as a failing test."""
+    _init_app_repo(tmp_path)
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_super_secret_value")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret")
+    marker = tmp_path.parent / f"{tmp_path.name}_escape_marker.txt"
+    (tmp_path / "tests" / "test_app.py").write_text(
+        "import json, os, socket\n"
+        "from pathlib import Path\n\n\n"
+        "def test_env_is_scrubbed():\n"
+        "    seen = {k: v for k, v in os.environ.items() if 'TOKEN' in k or 'KEY' in k}\n"
+        "    Path('env_seen.json').write_text(json.dumps(seen))\n\n\n"
+        "def test_escape_write():\n"
+        f"    Path({str(marker)!r}).write_text('escaped')\n\n\n"
+        "def test_escape_ssh_read():\n"
+        "    list((Path(os.path.expanduser('~')).parent / Path.home().name / '.ssh').iterdir())\n\n\n"
+        "def test_escape_network():\n"
+        "    socket.create_connection(('1.1.1.1', 443), timeout=3)\n",
+        encoding="utf-8",
+    )
+    real_ssh = Path.home() / ".ssh"
+    payload = UltraReviewService(tmp_path).run(
+        dry_run=True, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
+    )
+
+    assert payload["isolation"]["barrier"] == "macos_sandbox_exec"
+    assert payload["gate_passed"] is False
+    assert not marker.exists()
+    ghost = payload["ghost_regression"]
+    assert ghost["passed"] is False
+    assert any(f["rule_id"] == "regression_test_failed" for f in payload["findings"])
+    tail = ghost["pytest_stdout_tail"]
+    assert "test_escape_write" in tail and "test_escape_network" in tail
+    if real_ssh.is_dir():
+        assert "test_escape_ssh_read" in tail
+    seen = json.loads((Path(payload["sandbox_path"]) / "worktree" / "env_seen.json").read_text())
+    assert seen == {}
+
+
+@requires_os_sandbox
+def test_ultra_review_ghost_lane_timeout_fails_the_gate_closed(tmp_path, monkeypatch):
+    _init_app_repo(tmp_path)
+    (tmp_path / "app.py").write_text(
+        "import time\n\n\ndef handler(value):\n    time.sleep(30)\n    return value.strip()\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("nexus.engine.ultra_review_service.GHOST_REGRESSION_TIMEOUT_SEC", 3)
+
+    payload = UltraReviewService(tmp_path).run(
+        dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
+    )
+
+    assert payload["ghost_regression"]["timeout"] is True
+    assert payload["gate_passed"] is False
+    assert payload["status"] == "FAIL"
+    assert any(f["rule_id"] == "regression_test_timeout" for f in payload["findings"])
+
+
+def test_ultra_review_tool_timeout_fails_the_gate_closed(tmp_path, monkeypatch):
+    _init_app_repo(tmp_path)
+    (tmp_path / "app.py").write_text("def handler(value):\n    return value.strip()  # x\n", encoding="utf-8")
+    original_run = subprocess.run
+
+    def fake_run(cmd, **kwargs):
+        if "bandit" in cmd:
+            raise subprocess.TimeoutExpired(cmd=cmd, timeout=60)
+        return original_run(cmd, **kwargs)
+
+    monkeypatch.setattr("nexus.engine.ultra_review_service.subprocess.run", fake_run)
+    payload = UltraReviewService(tmp_path).run(
+        dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
+    )
+
+    assert payload["gate_passed"] is False
+    assert payload["status"] == "BLOCKED"
+    assert payload["blocked_reason"] == "check_tool_unavailable:security_sentry"
+    assert payload["security_sentry"]["unavailable_checks"][0]["timeout"] is True
+
+
+def test_ultra_review_review_mode_ghost_skip_env_cannot_pass(tmp_path, monkeypatch):
+    _init_app_repo(tmp_path)
+    (tmp_path / "app.py").write_text("def handler(value):\n    return value.strip()  # x\n", encoding="utf-8")
+    monkeypatch.setenv("NEXUS_ULTRA_SKIP_GHOST_REGRESSION", "1")
+
+    payload = UltraReviewService(tmp_path).run(
+        dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
+    )
+
+    assert payload["gate_passed"] is False
+    assert payload["blocked_reason"] == "ghost_regression_not_executed:skipped_by_env"
+
+
+def test_ultra_review_review_mode_without_mapped_tests_cannot_pass(tmp_path):
+    _init_app_repo(tmp_path)
+    (tmp_path / "other.py").write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "other.py"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "other"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "other.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+    payload = UltraReviewService(tmp_path).run(
+        dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
+    )
+
+    assert payload["gate_passed"] is False
+    assert payload["blocked_reason"] == "ghost_regression_not_executed:no_mapped_tests"
+
+
+def test_ultra_review_flags_test_harness_changes(tmp_path):
+    _init_app_repo(tmp_path)
+    (tmp_path / "conftest.py").write_text(
+        "def pytest_runtest_makereport(item, call):\n    pass\n", encoding="utf-8"
+    )
+    subprocess.run(["git", "add", "conftest.py"], cwd=tmp_path, check=True)
+    (tmp_path / "app.py").write_text("def handler(value):\n    return value.strip()  # x\n", encoding="utf-8")
+
+    payload = UltraReviewService(tmp_path).run(
+        dry_run=False, report_path="reports/ultra.json", sandbox_root="reports/sandboxes"
+    )
+
+    assert payload["gate_passed"] is False
+    assert any(f["rule_id"] == "test_harness_modified" for f in payload["findings"])

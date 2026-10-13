@@ -70,8 +70,12 @@ def test_exec_ultra_review_runs(tmp_path) -> None:
         )
 
     (tmp_path / "target.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_target.py").write_text(
+        "from target import f\n\n\ndef test_f():\n    assert f() == 1\n", encoding="utf-8"
+    )
     git("init", "-q")
-    git("add", "target.py")
+    git("add", "target.py", "tests/test_target.py")
     git("commit", "-q", "-m", "base")
     (tmp_path / "target.py").write_text(
         "def f():\n    return 1\n\n\ndef g():\n    return f() + 1\n", encoding="utf-8"
@@ -85,9 +89,17 @@ def test_exec_ultra_review_runs(tmp_path) -> None:
     )
     r = fn(plan, "test task")
     assert r.invoked
-    assert r.gate_passed, r.outcome
     assert r.telemetries["wall_time_ms"] > 0
     assert {"bandit", "ruff-security", "py_compile"} <= set(r.outcome["executed_checks"])
+    from nexus.engine.ultra_review_service import os_sandbox_available
+
+    if os_sandbox_available():
+        assert r.gate_passed, r.outcome
+        assert "tests/test_target.py" in r.outcome["executed_checks"]
+    else:
+        # PR tests run only behind an OS barrier; elsewhere the review fails closed.
+        assert r.gate_passed is False
+        assert r.outcome["error"] == "ghost_regression_not_executed:os_sandbox_unavailable"
 
 
 def test_exec_learning_closure_runs() -> None:

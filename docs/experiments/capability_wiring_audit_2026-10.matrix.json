@@ -1058,7 +1058,7 @@
       "receipt_claims_simulated": false,
       "claim_boundary_simulated_source": "CapabilityReceipt.to_dict().receipt_base.claim_boundary (ClaimBoundary default)",
       "evidence_refs": [
-        "ev_cap_ultra_review_df725ae2"
+        "ev_cap_ultra_review_eef585d4"
       ],
       "physical_callable": "capability_executor_registry:ultra_review",
       "console_tail": [],
@@ -1079,7 +1079,7 @@
         {
           "name": "every_lane_executed_real_checks",
           "passed": true,
-          "detail": "executed_checks=['bandit', 'diff-pattern-scan', 'py_compile', 'ruff-correctness', 'ruff-security', 'tests/test_app.py', 'ultra_logic_repro.py']"
+          "detail": "executed_checks=['bandit', 'diff-pattern-scan', 'py_compile', 'ruff-correctness', 'ruff-security', 'test-harness-guard', 'tests/test_app.py', 'ultra_logic_repro.py']"
         },
         {
           "name": "benign_diff_passes",
@@ -1108,11 +1108,11 @@
         "semantic_status": "SUCCEEDED",
         "evidence_refs": [
           "ev_ultra_review_wiring-ultra_review-pos_production_default",
-          "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupD/wt/artifacts/runtime/wiring_audit/20261013T045059Z/workspaces/ultra_review__pos_production_default/.nexus/reports/ultra_review/wiring-ultra_review-pos_production_default_capability_report.json",
-          "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupD/wt/artifacts/runtime/wiring_audit/20261013T045059Z/workspaces/ultra_review__pos_production_default/.nexus/reports/ultra_review/capability_sandboxes/ultra-review-20261013045107202705/changes.diff"
+          "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupD/wt/artifacts/runtime/wiring_audit/20261013T051655Z/workspaces/ultra_review__pos_production_default/.nexus/reports/ultra_review/wiring-ultra_review-pos_production_default_capability_report.json",
+          "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupD/wt/artifacts/runtime/wiring_audit/20261013T051655Z/workspaces/ultra_review__pos_production_default/.nexus/reports/ultra_review/capability_sandboxes/ultra-review-20261013051655913061/changes.diff"
         ],
         "result": {
-          "run_id": "ultra-review-20261013045107202705",
+          "run_id": "ultra-review-20261013051655913061",
           "review_status": "PASS",
           "mode": "review",
           "diff_bytes": 230,
@@ -1133,6 +1133,7 @@
             "status": "PASS",
             "executed_checks": [
               "ultra_logic_repro.py",
+              "test-harness-guard",
               "py_compile",
               "ruff-correctness"
             ],
@@ -1152,16 +1153,17 @@
           "py_compile",
           "ruff-correctness",
           "ruff-security",
+          "test-harness-guard",
           "tests/test_app.py",
           "ultra_logic_repro.py"
         ],
         "findings": [],
         "blocked_reason": "",
-        "report_path": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupD/wt/artifacts/runtime/wiring_audit/20261013T045059Z/workspaces/ultra_review__pos_production_default/.nexus/reports/ultra_review/wiring-ultra_review-pos_production_default_capability_report.json",
+        "report_path": "/Users/jameschen/Workspace/.scratch/20261013-wiring-groupD/wt/artifacts/runtime/wiring_audit/20261013T051655Z/workspaces/ultra_review__pos_production_default/.nexus/reports/ultra_review/wiring-ultra_review-pos_production_default_capability_report.json",
         "physical_callable": "nexus.engine.ultra_review_service.UltraReviewService.run"
       },
       "receipt_path": "receipts/ultra_review.json",
-      "audit_seconds": 24.43
+      "audit_seconds": 2.46
     },
     {
       "capability": "autoreason",
@@ -7045,6 +7047,19 @@
         "judge_panel": "BLOCKED_EXTERNAL_AUTH:no_judge_provider_configured",
         "external_doc_scout": "NOT_EXECUTABLE:no_live_connector"
       }
+    },
+    {
+      "generated_at": "2026-10-13T05:16:57.721024+00:00",
+      "git_head": "9b40f7dc92b04d909204c58801a070634fd79a70",
+      "tree": "group D tree + sandboxed lanes (sandbox-exec barrier, scrubbed env)",
+      "only": [
+        "ultra_review"
+      ],
+      "model_probe": {
+        "available": false,
+        "reason": "--no-model"
+      },
+      "reason": "ultra_review row re-run after lane subprocesses moved behind the OS sandbox"
     }
   ]
 }
