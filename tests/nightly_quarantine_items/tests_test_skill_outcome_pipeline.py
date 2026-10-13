@@ -2,10 +2,5 @@
 
 from __future__ import annotations
 
-ENTRY: dict[str, object] = {
-    "file": "tests/test_skill_outcome_pipeline.py",
-    "disposition": "quarantine",
-    "issue": "#1924",
-    "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
-    "tests": ("test_pipeline_writes_skill_outcome_events",),
-}
+# Tombstone (#1924): all ids un-quarantined (dummy engine now supplies D, A and the real C executor through the composed phase-executor seam).
+ENTRY = None

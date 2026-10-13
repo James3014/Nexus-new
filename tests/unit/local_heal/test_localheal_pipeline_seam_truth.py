@@ -891,7 +891,11 @@ class TestPipelineResultProjectionB3:
                 )
                 result = LocalHealPipelineCapabilityExecutor().execute(ctx)
 
-                assert result.telemetries.get("pipeline_final_patch") == "def fixed():\n    return 42"
+                # Contract since 339551f88 (canonical World C projection): raw pipeline
+                # patch text is diagnostic only. Without a valid World C receipt (this
+                # mocked run has none) it is never promoted to the canonical candidate.
+                assert result.telemetries.get("raw_pipeline_final_patch") == "def fixed():\n    return 42"
+                assert result.telemetries.get("pipeline_final_patch") == ""
                 assert result.telemetries.get("pipeline_solve_eligible") is True
 
     def test_pipeline_result_empty_final_patch_remains_empty(self):
@@ -956,7 +960,11 @@ class TestPipelineResultProjectionB3:
                 )
                 result = LocalHealPipelineCapabilityExecutor().execute(ctx)
 
-                assert result.telemetries.get("pipeline_final_patch").startswith("--- a/a.py")
+                # Contract since 339551f88: the preserved pre-verification patch stays
+                # visible as raw diagnostics only; no canonical candidate without a
+                # valid World C receipt.
+                assert result.telemetries.get("raw_pipeline_final_patch").startswith("--- a/a.py")
+                assert result.telemetries.get("pipeline_final_patch") == ""
                 assert result.telemetries.get("pipeline_solve_eligible") is False
                 assert result.telemetries.get("pipeline_failure_reason") == "LOGIC_REGRESSION:VERIFICATION_FAILED"
 

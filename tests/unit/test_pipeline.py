@@ -3,6 +3,7 @@ from pathlib import Path
 import json
 import sys
 from nexus.services.local_heal.evaluation_gate import TestResult
+from nexus.services.local_heal.interface import RepairPlan
 from nexus.services.local_heal.pipeline import HealPipeline, HealContext
 
 def test_pipeline_successful_flow(tmp_path):
@@ -500,7 +501,10 @@ def test_pipeline_localize_query_includes_plan_symbols_and_evidence(tmp_path):
         repo_dir=tmp_path,
         problem_statement="Astropy TimeSeries column deletion bug",
         repro_evidence="ValueError when remove_column touches required columns",
-        plan={"search_symbols": ["TimeSeries", "remove_column", "_required_columns"]},
+        plan=RepairPlan(
+            search_symbols=["TimeSeries", "remove_column", "_required_columns"],
+            repair_strategy="remove required column safely",
+        ),
     )
     captured = {}
 
@@ -525,7 +529,7 @@ def test_pipeline_localize_query_includes_plan_symbols_and_evidence(tmp_path):
     # 修正：現在 rank_query 會包含 Evidence
     assert "ValueError" in captured["rank_query"]
     assert "ValueError" in captured["refine_query"]
-    assert ctx.localized_files[0][1] == captured["refine_query"]
+    assert ctx.localized_files[0].content == captured["refine_query"]
 
 
 def test_pipeline_routes_reproduction_generation_to_7b(tmp_path):
