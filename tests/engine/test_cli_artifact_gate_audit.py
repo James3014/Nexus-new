@@ -13,13 +13,15 @@ def _command_block(source: str, command_name: str) -> str:
     else:
         raise AssertionError(f"command not found: {command_name}")
 
-    def_pos = source.find("\ndef ", start)
+    # Commands are registered inside a registration function, so the command
+    # function and the next decorator are indented by one level (4 spaces).
+    def_pos = source.find("\n    def ", start)
     assert def_pos != -1, f"function def not found for {command_name}"
     block_start = def_pos + 1
     search_from = block_start
-    next_def = source.find("\ndef ", search_from + 1)
-    next_group = source.find("\n@nexus_group.command(", search_from)
-    next_top = source.find("\n@nexus.command(", search_from)
+    next_def = source.find("\n    def ", search_from + 1)
+    next_group = source.find("\n    @nexus_group.command(", search_from)
+    next_top = source.find("\n    @nexus.command(", search_from)
     candidates = [pos for pos in (next_def, next_group, next_top) if pos != -1]
     end = min(candidates) if candidates else len(source)
     return source[block_start:end]

@@ -56,7 +56,7 @@ def test_all_work_commands_do_not_reference_legacy_run_seam():
 def test_run_family_uses_canonical_seams():
     source = Path(f"{_REPO_ROOT}/scripts/engine/nexus_cli.py").read_text(encoding="utf-8")
     run_block = _command_block(source, "run")
-    assert "execute_single_task_via_service(" in run_block
+    assert "execute_canonical_product_task(" in run_block
     assert "class _CompatService" not in source
 
     async_runner = Path(f"{_REPO_ROOT}/nexus/engine/cli_runner_async.py").read_text(encoding="utf-8")

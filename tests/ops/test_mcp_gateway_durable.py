@@ -320,6 +320,9 @@ def _r1b1_fixture(
     gitlink_path="nested-repository", external_bootstrap=False,
 ):
     from nexus.contracts.gateway_deployment import (
+        PLIST as LEGACY_RECOVERY_PLIST,
+    )
+    from nexus.contracts.gateway_deployment import (
         RECOVERY_CARD_PATH,
         RECOVERY_CARD_SHA256,
         SOURCE_BASE_MERGE,
@@ -335,6 +338,10 @@ def _r1b1_fixture(
     )
 
     seed = identity_seed or hashlib.sha256(str(tmp_path).encode()).hexdigest()[:12]
+    # #1940: GATEWAY_PLIST now derives from the running user's home.  Pin the
+    # fixture to the legacy host binding that pairs with the default
+    # InterpreterIdentity() so it stays host-independent.
+    monkeypatch.setattr(g, "GATEWAY_PLIST", Path(LEGACY_RECOVERY_PLIST))
     monkeypatch.setattr(g, "_ACTUAL_INTERPRETER", sys.executable)
     monkeypatch.setattr(
         g,
@@ -7164,3 +7171,128 @@ def test_hostile_17_pre_effect_reserve_cannot_be_stolen_during_external_effect(
     assert scanned[-1]["state"] == "VERIFIED"
     assert len(effect_calls) == 1
     assert external_calls == ["fixed-effect"]
+
+
+# --- #1940: plist derivation and in-process self-replacement refusal ---------
+
+
+def test_1940_gateway_plist_defaults_to_current_user_launch_agents(tmp_path):
+    home = tmp_path / "home"
+    expected = home / "Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist"
+
+    assert g._derive_gateway_plist({}, home) == expected
+    assert g._derive_gateway_plist({"NEXUS_GATEWAY_PLIST": ""}, home) == expected
+    assert "jameschen" not in str(g._derive_gateway_plist({}, home))
+
+
+def test_1940_gateway_plist_env_override_wins(tmp_path):
+    override = tmp_path / "explicit.plist"
+
+    assert g._derive_gateway_plist({"NEXUS_GATEWAY_PLIST": str(override)}, tmp_path) == override
+
+
+def test_1940_gateway_plist_module_default_uses_path_home(monkeypatch, tmp_path):
+    import importlib.util
+
+    home = tmp_path / "m5-home"
+    monkeypatch.delenv("NEXUS_GATEWAY_PLIST", raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    spec = importlib.util.spec_from_file_location("_issue1940_manager_copy", g.__file__)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+
+    assert module.GATEWAY_PLIST == (
+        home / "Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist"
+    )
+
+
+def _1940_forbid_recovery_progress(monkeypatch):
+    for name in ("GatewayLedger", "_production_recovery_adapters"):
+        monkeypatch.setattr(
+            g,
+            name,
+            lambda *_a, _n=name, **_k: pytest.fail(f"{_n} reached after refusal"),
+        )
+    real_run = g.subprocess.run
+
+    def guarded_run(command, *args, **kwargs):
+        if command and Path(str(command[0])).name == "launchctl":
+            pytest.fail("launchctl reached after refusal")
+        return real_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(g.subprocess, "run", guarded_run)
+
+
+def test_1940_recover_live_plist_binding_mismatch_fails_before_any_effect(tmp_path, monkeypatch):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    assert fixture["receipt"].plist_path == str(g.GATEWAY_PLIST)
+    monkeypatch.delenv("XPC_SERVICE_NAME", raising=False)
+    monkeypatch.setattr(g, "GATEWAY_PLIST", tmp_path / "other-user.plist")
+    _1940_forbid_recovery_progress(monkeypatch)
+
+    with pytest.raises(g.GatewayContractError, match="plist binding mismatch"):
+        g._gateway_recover_live(fixture["request"])
+    assert not fixture["ledger_path"].exists()
+
+
+def test_1940_recover_live_interpreter_binding_mismatch_fails_before_any_effect(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    monkeypatch.delenv("XPC_SERVICE_NAME", raising=False)
+    monkeypatch.setattr(g, "_r1_interpreter_identity", lambda: object())
+    _1940_forbid_recovery_progress(monkeypatch)
+
+    with pytest.raises(g.GatewayContractError, match="interpreter binding mismatch"):
+        g._gateway_recover_live(fixture["request"])
+    assert not fixture["ledger_path"].exists()
+
+
+def test_1940_self_replacement_signals():
+    fake_main = SimpleNamespace(
+        __file__="/deployments/r1-" + "a" * 40 + "/scripts/ops/nexus_mcp_gateway_http.py"
+    )
+    other_main = SimpleNamespace(
+        __file__="/repo/scripts/ops/nexus_gateway_recovery_actuator_bootstrap.py"
+    )
+
+    assert g._r1_in_process_self_replacement_signals(
+        {"XPC_SERVICE_NAME": g.GATEWAY_LABEL}, other_main
+    ) == ("LAUNCHD_JOB_LABEL",)
+    assert g._r1_in_process_self_replacement_signals({}, fake_main) == (
+        "GATEWAY_ENTRYPOINT_PROCESS",
+    )
+    assert g._r1_in_process_self_replacement_signals({"XPC_SERVICE_NAME": "0"}, other_main) == ()
+    assert (
+        g._r1_in_process_self_replacement_signals(
+            {"XPC_SERVICE_NAME": "com.nexus.mcp.gateway"}, SimpleNamespace()
+        )
+        == ()
+    )
+
+
+@pytest.mark.parametrize("signal", ["launchd-label", "gateway-entrypoint"])
+def test_1940_recover_live_refuses_in_process_self_replacement_before_anything(monkeypatch, signal):
+    import types
+
+    if signal == "launchd-label":
+        monkeypatch.setenv("XPC_SERVICE_NAME", g.GATEWAY_LABEL)
+    else:
+        monkeypatch.delenv("XPC_SERVICE_NAME", raising=False)
+        fake_main = types.ModuleType("__main__")
+        fake_main.__file__ = "/x/scripts/ops/nexus_mcp_gateway_http.py"
+        monkeypatch.setitem(sys.modules, "__main__", fake_main)
+    monkeypatch.setattr(
+        g,
+        "_load_recovery_authority",
+        lambda *_a, **_k: pytest.fail("authority read after refusal"),
+    )
+    _1940_forbid_recovery_progress(monkeypatch)
+
+    with pytest.raises(
+        g.GatewayContractError, match="^R1_IN_PROCESS_SELF_REPLACEMENT_FORBIDDEN"
+    ) as excinfo:
+        g._gateway_recover_live({"request_id": "anything"})
+    assert "nexus_gateway_recovery_actuator_bootstrap.py" in str(excinfo.value)
