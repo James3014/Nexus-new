@@ -26,7 +26,7 @@ jobs:
     steps:
       - name: Collect Repository Intelligence
         id: ri
-        uses: James3014/repository-intelligence-engine@d52029f771f4bf375b4f4a1e044f2fcdcb5f4471  # v0.1.5 candidate (engine #99): superseded/self cancels ignored, STALE_BASE informational
+        uses: James3014/repository-intelligence-engine@23a872ff7b4df8e68213c716371929e356134bea  # v0.1.5 candidate (engine #99): superseded/self cancels ignored, STALE_BASE informational
 
       - name: Validate advisory envelope
         shell: bash

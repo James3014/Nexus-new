@@ -5,6 +5,10 @@ name: Repository Intelligence comment
 # default branch, so a PR cannot change the code that holds the write token.
 # The PR head is never checked out or executed; PR data is read only through
 # the GitHub API and rendered as sanitized, length-limited text.
+#
+# API budget per event: 2 GraphQL queries (about 3 points) plus at most one
+# REST write. Fork PRs are skipped, and rapid pushes to the same PR are
+# debounced: the per-PR group cancels a run still waiting in its debounce step.
 
 on:
   pull_request_target:
@@ -20,6 +24,8 @@ concurrency:
 jobs:
   sticky-comment:
     name: RIE sticky comment
+    # Same-repository PRs only: a fork cannot spend this job's token budget.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -27,6 +33,9 @@ jobs:
       checks: read
       pull-requests: write
     steps:
+      - name: Debounce rapid pushes (a newer event for this PR cancels this run)
+        run: sleep 30
+
       - name: Checkout default branch (never the PR head)
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -36,7 +45,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: James3014/repository-intelligence-engine
-          ref: d52029f771f4bf375b4f4a1e044f2fcdcb5f4471
+          ref: 23a872ff7b4df8e68213c716371929e356134bea
           path: .rie-engine
           persist-credentials: false
 
@@ -47,7 +56,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          RIE_PIN: d52029f771f4bf375b4f4a1e044f2fcdcb5f4471
+          RIE_PIN: 23a872ff7b4df8e68213c716371929e356134bea
         run: |
           set -euo pipefail
           [ "$EVENT_NAME" = pull_request_target ] || { echo "event is $EVENT_NAME, not pull_request_target" >&2; exit 1; }

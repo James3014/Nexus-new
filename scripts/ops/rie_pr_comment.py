@@ -7,8 +7,8 @@ surface Repository Intelligence as ONE concise, actionable comment per PR.
 Security model (runs under ``pull_request_target`` with a write token):
 
 * This file, and everything it executes, comes from the default branch. The PR
-  head is never checked out, imported, or executed.
-* PR data (paths, check names) is read only through the GitHub REST API and is
+  head is never checked out, imported, or executed. Fork PRs are skipped.
+* PR data (paths, check names) is read only through the GitHub API and is
   treated as untrusted text: control and bidi characters are stripped, the
   value is length-limited, and it is rendered only inside code spans.
 * The pinned Repository Intelligence engine decides overlap, impact, and
@@ -16,6 +16,11 @@ Security model (runs under ``pull_request_target`` with a write token):
   ``python -I``, and renders its results.
 * The impact graph is built by parsing default-branch Python with ``ast``
   (never importing it).
+
+API budget: one GraphQL query reads every open PR (files and check rollup), the
+recent main commits' check rollup, and the existing comments; a second small
+GraphQL query (only when some check is failing) reads when each failing
+workflow file last changed on main; at most one REST write updates the comment.
 
 Stdlib only, so ``python3 -I`` works on a bare runner.
 """
@@ -30,7 +35,6 @@ import subprocess
 import sys
 import unicodedata
 import urllib.error
-import urllib.parse
 import urllib.request
 import warnings
 from collections import Counter
@@ -41,31 +45,44 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 MARKER = "<!-- nexus-rie-sticky-comment:v1 -->"
-BOT_LOGIN = "github-actions[bot]"
+# GraphQL reports the Actions bot as login "github-actions" with type "Bot".
+BOT_LOGIN = "github-actions"
+BOT_TYPENAME = "Bot"
 NOTHING_TO_FLAG = "RIE: nothing to flag"
+ELLIPSIS = "..."
 
 API_URL = "https://api.github.com"
 MAX_OPEN_PRS = 60
-MAX_PAGES = 10
+MAX_FILES = 100
+MAX_CONTEXTS = 100
+MAX_MAIN_COMMITS = 20
+MAX_COMMENTS = 100
+MAX_WORKFLOW_PATHS = 20
 MAX_ITEM_CHARS = 100
 MAX_FILES_PER_OVERLAP = 4
 MAX_OVERLAP_LINES = 8
 MAX_IMPACT_AREAS = 5
 MAX_SYSTEMIC_LINES = 5
 MAX_PRS_PER_SYSTEMIC = 6
+MAX_NOTE_PRS = 8
 MAX_COMMENT_CHARS = 4000
 ENGINE_TIMEOUT_SECONDS = 120
 MAX_GRAPH_ERRORS = 20
 
-_BIDI_AND_INVISIBLE = {
-    "​",
-    "‌",
-    "‍",
-    "⁠",
-    "﻿",
-    *(chr(code) for code in range(0x202A, 0x202F)),
-    *(chr(code) for code in range(0x2066, 0x206A)),
-}
+# Zero-width and bidi controls, written as code points so the source itself
+# never contains invisible characters.
+_BIDI_AND_INVISIBLE = frozenset(
+    chr(code)
+    for code in (
+        0x200B,
+        0x200C,
+        0x200D,
+        0x2060,
+        0xFEFF,
+        *range(0x202A, 0x202F),
+        *range(0x2066, 0x206A),
+    )
+)
 
 
 class CommentError(RuntimeError):
@@ -82,8 +99,7 @@ def sanitize_text(value: Any, limit: int = MAX_ITEM_CHARS) -> str:
     for char in text:
         if char in _BIDI_AND_INVISIBLE:
             continue
-        category = unicodedata.category(char)
-        if category.startswith("C"):  # control, format, surrogate, private, unassigned
+        if unicodedata.category(char).startswith("C"):  # control/format/private/unassigned
             cleaned.append(" ")
             continue
         cleaned.append("'" if char == "`" else char)
@@ -91,7 +107,7 @@ def sanitize_text(value: Any, limit: int = MAX_ITEM_CHARS) -> str:
     if not collapsed:
         return "?"
     if len(collapsed) > limit:
-        return collapsed[: max(1, limit - 1)] + "…"
+        return collapsed[: max(1, limit - len(ELLIPSIS))] + ELLIPSIS
     return collapsed
 
 
@@ -118,11 +134,24 @@ def impact_areas(paths: Iterable[str], depth: int = 2) -> list[tuple[str, int]]:
 
 
 @dataclass(frozen=True)
+class SystemicLine:
+    check_name: str
+    workflow_path: str
+    pr_numbers: Sequence[int]
+
+
+@dataclass(frozen=True)
 class Findings:
     overlaps: Mapping[int, Sequence[str]] = field(default_factory=dict)
     direct_impacted: Sequence[str] = ()
     all_impacted: Sequence[str] = ()
-    systemic: Sequence[tuple[str, Sequence[int]]] = ()
+    systemic: Sequence[SystemicLine] = ()
+    notes: Sequence[str] = ()
+
+
+def _pr_refs(numbers: Sequence[int], limit: int) -> str:
+    refs = ", ".join(f"#{int(n)}" for n in list(numbers)[:limit])
+    return refs + (f", {ELLIPSIS}" if len(numbers) > limit else "")
 
 
 def render_comment(findings: Findings) -> str:
@@ -149,14 +178,14 @@ def render_comment(findings: Findings) -> str:
             f"({len(findings.direct_impacted)} directly{test_note}): {shown}{suffix}"
         )
 
-    for name, numbers in list(findings.systemic)[:MAX_SYSTEMIC_LINES]:
-        refs = ", ".join(f"#{int(n)}" for n in list(numbers)[:MAX_PRS_PER_SYSTEMIC])
-        more = ", …" if len(numbers) > MAX_PRS_PER_SYSTEMIC else ""
+    for item in list(findings.systemic)[:MAX_SYSTEMIC_LINES]:
+        where = f" in {code(item.workflow_path)}" if item.workflow_path else ""
         lines.append(
-            f"- Check {code(name)} is failing on {len(numbers)} open PRs ({refs}{more}), likely systemic"
+            f"- Check {code(item.check_name)}{where} is failing on {len(item.pr_numbers)} open PRs "
+            f"({_pr_refs(item.pr_numbers, MAX_PRS_PER_SYSTEMIC)}), likely systemic"
         )
 
-    body_lines = lines or [NOTHING_TO_FLAG]
+    body_lines = [*(lines or [NOTHING_TO_FLAG]), *(f"- Note: {note}" for note in findings.notes)]
     body = "\n".join([MARKER, *body_lines])
     if len(body) > MAX_COMMENT_CHARS:
         kept: list[str] = []
@@ -164,11 +193,12 @@ def render_comment(findings: Findings) -> str:
             if len("\n".join([MARKER, *kept, line])) > MAX_COMMENT_CHARS - 40:
                 break
             kept.append(line)
-        body = "\n".join([MARKER, *kept, f"- …{len(body_lines) - len(kept)} more lines omitted"])
+        omitted = len(body_lines) - len(kept)
+        body = "\n".join([MARKER, *kept, f"- {ELLIPSIS}{omitted} more lines omitted"])
     return body
 
 
-# ------------------------------------------------------------- GitHub REST
+# ---------------------------------------------------------------- GitHub API
 
 
 class GitHubClient:
@@ -180,17 +210,15 @@ class GitHubClient:
         self.token = token
         self.api_url = api_url.rstrip("/")
         self.timeout = timeout
+        self.calls: Counter[str] = Counter()
 
-    def request(
-        self, method: str, path: str, params: Mapping[str, Any] | None = None, body: Any = None
-    ) -> Any:
+    def request(self, method: str, path: str, body: Any = None) -> Any:
         if not path.startswith("/") or path.startswith("//"):
             raise CommentError("API path must be host-relative")
-        query = urllib.parse.urlencode(params or {})
-        url = f"{self.api_url}{path}{'?' + query if query else ''}"
+        self.calls["graphql" if path == "/graphql" else "rest"] += 1
         data = json.dumps(body).encode("utf-8") if body is not None else None
         request = urllib.request.Request(
-            url,
+            f"{self.api_url}{path}",
             data=data,
             method=method,
             headers={
@@ -203,13 +231,13 @@ class GitHubClient:
         )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:  # noqa: S310  # nosec B310 - https-only API host
-                raw = response.read(8 * 1024 * 1024 + 1)
+                raw = response.read(16 * 1024 * 1024 + 1)
         except urllib.error.HTTPError as exc:
             raise CommentError(f"GitHub HTTP {exc.code} for {method} {path}") from exc
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise CommentError(f"GitHub request failed for {method} {path}: {exc}") from exc
-        if len(raw) > 8 * 1024 * 1024:
-            raise CommentError("GitHub response exceeded 8 MiB")
+        if len(raw) > 16 * 1024 * 1024:
+            raise CommentError("GitHub response exceeded 16 MiB")
         if not raw:
             return None
         try:
@@ -217,22 +245,66 @@ class GitHubClient:
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise CommentError(f"GitHub returned invalid JSON for {path}") from exc
 
-    def get(self, path: str, params: Mapping[str, Any] | None = None) -> Any:
-        return self.request("GET", path, params)
+    def graphql(self, query: str, variables: Mapping[str, Any]) -> dict[str, Any]:
+        payload = self.request("POST", "/graphql", {"query": query, "variables": dict(variables)})
+        if (
+            not isinstance(payload, Mapping)
+            or payload.get("errors")
+            or not isinstance(payload.get("data"), Mapping)
+        ):
+            raise CommentError("GitHub GraphQL query failed")
+        return dict(payload["data"])
 
-    def paginate(
-        self, path: str, *, key: str | None = None, params: Mapping[str, Any] | None = None
-    ) -> list[Any]:
-        rows: list[Any] = []
-        for page in range(1, MAX_PAGES + 1):
-            value = self.get(path, {**(params or {}), "per_page": 100, "page": page})
-            batch = value.get(key) if key and isinstance(value, Mapping) else value
-            if not isinstance(batch, list):
-                raise CommentError(f"unexpected pagination shape for {path}")
-            rows.extend(batch)
-            if len(batch) < 100:
-                break
-        return rows
+
+_CONTEXTS = """
+  totalCount
+  nodes {
+    __typename
+    ... on CheckRun {
+      databaseId name conclusion status startedAt completedAt
+      checkSuite { databaseId app { slug } workflowRun { file { path } workflow { databaseId } } }
+    }
+    ... on StatusContext { context state createdAt }
+  }
+"""
+
+OVERVIEW_QUERY = f"""
+fragment Pr on PullRequest {{
+  number headRefOid baseRefOid isCrossRepository
+  files(first: {MAX_FILES}) {{ totalCount nodes {{ path }} }}
+  commits(last: 1) {{ nodes {{ commit {{ statusCheckRollup {{
+    contexts(first: {MAX_CONTEXTS}) {{ {_CONTEXTS} }} }} }} }} }}
+}}
+query($owner: String!, $name: String!, $number: Int!) {{
+  repository(owner: $owner, name: $name) {{
+    defaultBranchRef {{ target {{ ... on Commit {{
+      oid
+      history(first: {MAX_MAIN_COMMITS}) {{ nodes {{ statusCheckRollup {{
+        contexts(first: {MAX_CONTEXTS}) {{ {_CONTEXTS} }} }} }} }}
+    }} }} }}
+    pullRequests(states: OPEN, first: {MAX_OPEN_PRS}, orderBy: {{field: UPDATED_AT, direction: DESC}}) {{
+      totalCount nodes {{ ...Pr }}
+    }}
+    pullRequest(number: $number) {{
+      ...Pr
+      comments(last: {MAX_COMMENTS}) {{ nodes {{ databaseId body author {{ login __typename }} }} }}
+    }}
+  }}
+}}
+"""
+
+
+def workflow_changes_query(count: int) -> str:
+    """Aliased ``history(path:)`` lookups; paths travel only as variables."""
+    params = "".join(f", $p{i}: String!" for i in range(count))
+    fields = " ".join(
+        f"w{i}: history(first: 1, path: $p{i}) {{ nodes {{ committedDate }} }}"
+        for i in range(count)
+    )
+    return (
+        f"query($owner: String!, $name: String!{params}) {{ repository(owner: $owner, name: $name) {{ "
+        f"defaultBranchRef {{ target {{ ... on Commit {{ {fields} }} }} }} }} }}"
+    )
 
 
 # --------------------------------------------------------- data acquisition
@@ -244,78 +316,200 @@ class PullRequestData:
     head_sha: str
     base_sha: str
     changed_files: tuple[str, ...]
-    checks: tuple[dict[str, Any], ...]
+    checks: tuple[dict[str, Any], ...] = ()
+    files_truncated: bool = False
+    checks_truncated: bool = False
+    is_cross_repository: bool = False
 
 
-def _check_summary(row: Mapping[str, Any]) -> dict[str, Any] | None:
-    name, status = row.get("name"), row.get("conclusion") or row.get("status")
-    if not isinstance(name, str) or not isinstance(status, str):
+@dataclass(frozen=True)
+class Acquisition:
+    this_pr: PullRequestData
+    pulls: tuple[PullRequestData, ...]
+    open_total: int
+    main_sha: str
+    main_checks: tuple[dict[str, Any], ...]
+    comments: tuple[dict[str, Any], ...]
+
+
+def check_summary(node: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Normalize a GraphQL rollup context into the engine's check shape.
+
+    Check runs carry the identity the engine needs to tell runs of the same
+    check apart: check-run id, app, check suite, workflow id and path.
+    """
+    if node.get("__typename") == "CheckRun":
+        name = node.get("name")
+        status = node.get("conclusion") or node.get("status")
+        if not isinstance(name, str) or not isinstance(status, str):
+            return None
+        summary: dict[str, Any] = {"name": name, "status": status.lower()}
+        suite = node.get("checkSuite") if isinstance(node.get("checkSuite"), Mapping) else {}
+        run = suite.get("workflowRun") if isinstance(suite.get("workflowRun"), Mapping) else {}
+        app = suite.get("app") if isinstance(suite.get("app"), Mapping) else {}
+        workflow = run.get("workflow") if isinstance(run.get("workflow"), Mapping) else {}
+        file = run.get("file") if isinstance(run.get("file"), Mapping) else {}
+        optional = {
+            "check_run_id": node.get("databaseId"),
+            "completed_at": node.get("completedAt"),
+            "started_at": node.get("startedAt"),
+            "check_suite_id": suite.get("databaseId"),
+            "app_slug": app.get("slug"),
+            "workflow_id": workflow.get("databaseId"),
+            "workflow_path": file.get("path"),
+        }
+        summary.update({key: value for key, value in optional.items() if value is not None})
+        return summary
+    if node.get("__typename") == "StatusContext":
+        name, state = node.get("context"), node.get("state")
+        if not isinstance(name, str) or not isinstance(state, str):
+            return None
+        summary = {"name": name, "status": state.lower()}
+        if isinstance(node.get("createdAt"), str):
+            summary["completed_at"] = node["createdAt"]
+        return summary
+    return None
+
+
+def _contexts(rollup_owner: Any) -> tuple[list[dict[str, Any]], bool]:
+    rollup = rollup_owner.get("statusCheckRollup") if isinstance(rollup_owner, Mapping) else None
+    contexts = rollup.get("contexts") if isinstance(rollup, Mapping) else None
+    if not isinstance(contexts, Mapping):
+        return [], False
+    nodes = contexts.get("nodes") if isinstance(contexts.get("nodes"), list) else []
+    checks = [c for c in (check_summary(n) for n in nodes if isinstance(n, Mapping)) if c]
+    total = contexts.get("totalCount")
+    return checks, isinstance(total, int) and total > len(nodes)
+
+
+def _pull_request(node: Mapping[str, Any]) -> PullRequestData | None:
+    number, head, base = node.get("number"), node.get("headRefOid"), node.get("baseRefOid")
+    if not isinstance(number, int) or not isinstance(head, str) or not isinstance(base, str):
         return None
-    summary: dict[str, Any] = {"name": name, "status": status}
-    for key, source in (
-        ("check_run_id", "id"),
-        ("completed_at", "completed_at"),
-        ("started_at", "started_at"),
-    ):
-        value = row.get(source)
-        if value is not None:
-            summary[key] = value
-    return summary
+    files = node.get("files") if isinstance(node.get("files"), Mapping) else {}
+    paths = tuple(
+        sorted({
+            f["path"]
+            for f in files.get("nodes") or []
+            if isinstance(f, Mapping) and isinstance(f.get("path"), str)
+        })
+    )
+    total = files.get("totalCount")
+    commits = node.get("commits") if isinstance(node.get("commits"), Mapping) else {}
+    commit_nodes = commits.get("nodes") or []
+    commit = (
+        commit_nodes[-1].get("commit")
+        if commit_nodes and isinstance(commit_nodes[-1], Mapping)
+        else None
+    )
+    checks, checks_truncated = _contexts(commit)
+    return PullRequestData(
+        number=number,
+        head_sha=head,
+        base_sha=base,
+        changed_files=paths,
+        checks=tuple(checks),
+        files_truncated=isinstance(total, int) and total > len(paths),
+        checks_truncated=checks_truncated,
+        is_cross_repository=node.get("isCrossRepository") is True,
+    )
 
 
-def collect_pull_requests(
-    client: GitHubClient, repository: str, pr_number: int
-) -> tuple[PullRequestData, list[PullRequestData], str]:
-    """Return (this PR, all open PRs including this one, current main SHA)."""
-    prefix = f"/repos/{repository}"
-    repo = client.get(prefix)
-    default_branch = repo.get("default_branch") if isinstance(repo, Mapping) else None
-    if not isinstance(default_branch, str) or not default_branch:
-        raise CommentError("default branch unavailable")
-    ref = client.get(f"{prefix}/git/ref/heads/{urllib.parse.quote(default_branch, safe='')}")
-    main_sha = ref.get("object", {}).get("sha") if isinstance(ref, Mapping) else None
+def collect(client: GitHubClient, repository: str, pr_number: int) -> Acquisition:
+    owner, _, name = repository.partition("/")
+    data = client.graphql(OVERVIEW_QUERY, {"owner": owner, "name": name, "number": pr_number})
+    repo = data.get("repository")
+    if not isinstance(repo, Mapping):
+        raise CommentError("repository unavailable")
+    target = (repo.get("defaultBranchRef") or {}).get("target") or {}
+    main_sha = target.get("oid")
     if not isinstance(main_sha, str) or len(main_sha) != 40:
         raise CommentError("default branch SHA unavailable")
+    main_checks: list[dict[str, Any]] = []
+    for commit in (target.get("history") or {}).get("nodes") or []:
+        main_checks.extend(_contexts(commit)[0])
 
-    listed = client.paginate(
-        f"{prefix}/pulls", params={"state": "open", "sort": "updated", "direction": "desc"}
-    )
-    by_number: dict[int, Mapping[str, Any]] = {}
-    for row in listed:
-        number = row.get("number") if isinstance(row, Mapping) else None
-        if isinstance(number, int) and len(by_number) < MAX_OPEN_PRS:
-            by_number[number] = row
-    if pr_number not in by_number:
-        this = client.get(f"{prefix}/pulls/{pr_number}")
-        if not isinstance(this, Mapping):
-            raise CommentError("pull request unavailable")
-        by_number[pr_number] = this
-
-    pulls: list[PullRequestData] = []
-    for number, row in sorted(by_number.items()):
-        head_sha = row.get("head", {}).get("sha") if isinstance(row.get("head"), Mapping) else None
-        base_sha = row.get("base", {}).get("sha") if isinstance(row.get("base"), Mapping) else None
-        if not isinstance(head_sha, str) or not isinstance(base_sha, str):
-            continue
-        files = client.paginate(f"{prefix}/pulls/{number}/files")
-        changed = tuple(
-            sorted({
-                f["filename"]
-                for f in files
-                if isinstance(f, Mapping) and isinstance(f.get("filename"), str)
-            })
-        )
-        check_rows = client.paginate(
-            f"{prefix}/commits/{urllib.parse.quote(head_sha, safe='')}/check-runs", key="check_runs"
-        )
-        checks = tuple(
-            c for c in (_check_summary(r) for r in check_rows if isinstance(r, Mapping)) if c
-        )
-        pulls.append(PullRequestData(number, head_sha, base_sha, changed, checks))
-    this_pr = next((pr for pr in pulls if pr.number == pr_number), None)
+    listing = repo.get("pullRequests") or {}
+    by_number: dict[int, PullRequestData] = {}
+    for node in listing.get("nodes") or []:
+        pr = _pull_request(node) if isinstance(node, Mapping) else None
+        if pr is not None:
+            by_number[pr.number] = pr
+    this_node = repo.get("pullRequest")
+    this_pr = _pull_request(this_node) if isinstance(this_node, Mapping) else None
     if this_pr is None:
-        raise CommentError("pull request identity incomplete")
-    return this_pr, pulls, main_sha
+        raise CommentError("pull request unavailable")
+    by_number[this_pr.number] = this_pr
+    comments = tuple(
+        c for c in (this_node.get("comments") or {}).get("nodes") or [] if isinstance(c, Mapping)
+    )
+    open_total = listing.get("totalCount")
+    return Acquisition(
+        this_pr=this_pr,
+        pulls=tuple(by_number[n] for n in sorted(by_number)),
+        open_total=open_total if isinstance(open_total, int) else len(by_number),
+        main_sha=main_sha,
+        main_checks=tuple(main_checks),
+        comments=comments,
+    )
+
+
+_FAILING = {"failure", "failed", "error", "timed_out"}
+
+
+def collect_workflow_changes(
+    client: GitHubClient, repository: str, pulls: Sequence[PullRequestData]
+) -> dict[str, str]:
+    """When each failing check's workflow file last changed on main."""
+    paths = sorted({
+        check["workflow_path"]
+        for pr in pulls
+        for check in pr.checks
+        if isinstance(check.get("workflow_path"), str) and check.get("status") in _FAILING
+    })[:MAX_WORKFLOW_PATHS]
+    if not paths:
+        return {}
+    owner, _, name = repository.partition("/")
+    variables: dict[str, Any] = {"owner": owner, "name": name}
+    variables.update({f"p{i}": path for i, path in enumerate(paths)})
+    data = client.graphql(workflow_changes_query(len(paths)), variables)
+    target = ((data.get("repository") or {}).get("defaultBranchRef") or {}).get("target") or {}
+    changed: dict[str, str] = {}
+    for i, path in enumerate(paths):
+        nodes = (target.get(f"w{i}") or {}).get("nodes") or []
+        if (
+            nodes
+            and isinstance(nodes[0], Mapping)
+            and isinstance(nodes[0].get("committedDate"), str)
+        ):
+            changed[path] = nodes[0]["committedDate"]
+    return changed
+
+
+def truncation_notes(acq: Acquisition) -> list[str]:
+    """Say what was not compared instead of silently truncating."""
+    notes: list[str] = []
+    if acq.open_total > len(acq.pulls):
+        notes.append(
+            f"compared only the {len(acq.pulls)} most recently updated of {acq.open_total} open PRs"
+        )
+    if acq.this_pr.files_truncated:
+        notes.append(
+            f"this PR changes more than {MAX_FILES} files; overlap and impact use the first {MAX_FILES}"
+        )
+    others = [
+        pr.number for pr in acq.pulls if pr.files_truncated and pr.number != acq.this_pr.number
+    ]
+    if others:
+        notes.append(
+            f"file lists of open PRs {_pr_refs(others, MAX_NOTE_PRS)} were cut at {MAX_FILES}; overlaps with them may be incomplete"
+        )
+    checks = [pr.number for pr in acq.pulls if pr.checks_truncated]
+    if checks:
+        notes.append(
+            f"check lists of open PRs {_pr_refs(checks, MAX_NOTE_PRS)} were cut at {MAX_CONTEXTS}; systemic detection may be incomplete"
+        )
+    return notes
 
 
 # --------------------------------------------------- default-branch import graph
@@ -471,15 +665,15 @@ def _snapshot(repository: str, pr: PullRequestData, main_sha: str) -> dict[str, 
 
 def analyze(
     repository: str,
-    this_pr: PullRequestData,
-    pulls: Sequence[PullRequestData],
-    main_sha: str,
+    acq: Acquisition,
     graph: tuple[Sequence[str], Sequence[Mapping[str, str]], Sequence[str]],
+    workflow_changed_at: Mapping[str, str],
     run_engine: EngineRunner,
     observed_at: str,
 ) -> Findings:
+    this_pr = acq.this_pr
     overlap = run_engine(
-        "overlap", {"snapshots": [_snapshot(repository, pr, main_sha) for pr in pulls]}
+        "overlap", {"snapshots": [_snapshot(repository, pr, acq.main_sha) for pr in acq.pulls]}
     )
     overlaps: dict[int, list[str]] = {}
     for pair in overlap.get("overlap_pairs", []):
@@ -490,12 +684,11 @@ def analyze(
                 overlaps[other] = sorted(str(p) for p in paths)
 
     covered, edges, errors = graph
-    covered_set = set(covered)
     impact = run_engine(
         "impact",
         {
-            "snapshot": _snapshot(repository, this_pr, main_sha),
-            "covered_files": sorted(covered_set | set(this_pr.changed_files)),
+            "snapshot": _snapshot(repository, this_pr, acq.main_sha),
+            "covered_files": sorted(set(covered) | set(this_pr.changed_files)),
             "dependency_edges": list(edges),
             "graph_complete": not errors,
             "graph_errors": list(errors[:MAX_GRAPH_ERRORS]),
@@ -510,49 +703,68 @@ def analyze(
         {
             "repository": repository,
             "observed_at": observed_at,
-            "pull_requests": [{"pr_number": pr.number, "checks": list(pr.checks)} for pr in pulls],
+            "pull_requests": [
+                {"pr_number": pr.number, "checks": list(pr.checks)} for pr in acq.pulls
+            ],
+            "main_checks": list(acq.main_checks),
+            "workflow_changed_at": dict(workflow_changed_at),
         },
     )
     systemic = [
-        (
-            str(item.get("check_name")),
-            [int(n) for n in item.get("pr_numbers", []) if isinstance(n, int)],
+        SystemicLine(
+            check_name=str(item.get("check_name")),
+            workflow_path=str(item.get("workflow_path") or ""),
+            pr_numbers=[int(n) for n in item.get("pr_numbers", []) if isinstance(n, int)],
         )
         for item in systemic_report.get("systemic_failures", [])
         if isinstance(item, Mapping)
     ]
     return Findings(
-        overlaps=overlaps, direct_impacted=direct, all_impacted=every, systemic=systemic
+        overlaps=overlaps,
+        direct_impacted=direct,
+        all_impacted=every,
+        systemic=systemic,
+        notes=truncation_notes(acq),
     )
 
 
 # ----------------------------------------------------------- sticky upsert
 
 
-def upsert_sticky_comment(client: GitHubClient, repository: str, pr_number: int, body: str) -> str:
+def find_sticky_comment(comments: Iterable[Mapping[str, Any]]) -> Mapping[str, Any] | None:
+    """The bot-authored comment carrying MARKER; user comments are ignored."""
+    for comment in comments:
+        author = comment.get("author") if isinstance(comment.get("author"), Mapping) else {}
+        if (
+            isinstance(comment.get("body"), str)
+            and comment["body"].startswith(MARKER)
+            and author.get("login") == BOT_LOGIN
+            and author.get("__typename") == BOT_TYPENAME
+            and isinstance(comment.get("databaseId"), int)
+        ):
+            return comment
+    return None
+
+
+def upsert_sticky_comment(
+    client: GitHubClient,
+    repository: str,
+    pr_number: int,
+    comments: Iterable[Mapping[str, Any]],
+    body: str,
+) -> str:
     """Create or update the single bot-authored comment carrying MARKER."""
-    comments = client.paginate(f"/repos/{repository}/issues/{pr_number}/comments")
-    ours = [
-        c
-        for c in comments
-        if isinstance(c, Mapping)
-        and isinstance(c.get("body"), str)
-        and c["body"].startswith(MARKER)
-        and isinstance(c.get("user"), Mapping)
-        and c["user"].get("login") == BOT_LOGIN
-        and c["user"].get("type") == "Bot"
-    ]
-    if ours:
-        existing = ours[0]
+    existing = find_sticky_comment(comments)
+    if existing is not None:
         if existing.get("body") == body:
             return "UNCHANGED"
         client.request(
             "PATCH",
-            f"/repos/{repository}/issues/comments/{int(existing['id'])}",
-            body={"body": body},
+            f"/repos/{repository}/issues/comments/{int(existing['databaseId'])}",
+            {"body": body},
         )
         return "UPDATED"
-    client.request("POST", f"/repos/{repository}/issues/{pr_number}/comments", body={"body": body})
+    client.request("POST", f"/repos/{repository}/issues/{pr_number}/comments", {"body": body})
     return "CREATED"
 
 
@@ -561,6 +773,12 @@ def upsert_sticky_comment(client: GitHubClient, repository: str, pr_number: int,
 
 def _utc_now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _summary(path: str, text: str) -> None:
+    if path:
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(text + "\n")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -584,40 +802,45 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not owner or not name or "/" in name or args.pr_number <= 0:
         print("invalid repository or PR number", file=sys.stderr)
         return 2
+    client: GitHubClient | None = None
     try:
         client = GitHubClient(
             os.environ.get("GITHUB_TOKEN", ""), os.environ.get("GITHUB_API_URL", API_URL)
         )
-        this_pr, pulls, main_sha = collect_pull_requests(client, args.repository, args.pr_number)
-        graph = build_import_graph(args.repo_root)
+        acq = collect(client, args.repository, args.pr_number)
+        if acq.this_pr.is_cross_repository:
+            raise CommentError("fork pull request; not commented")
+        run_engine = engine_runner(args.engine_root, args.engine_pin)
+        workflow_changed = collect_workflow_changes(client, args.repository, acq.pulls)
         findings = analyze(
             args.repository,
-            this_pr,
-            pulls,
-            main_sha,
-            graph,
-            engine_runner(args.engine_root, args.engine_pin),
+            acq,
+            build_import_graph(args.repo_root),
+            workflow_changed,
+            run_engine,
             _utc_now(),
         )
         body = render_comment(findings)
-        outcome = (
-            upsert_sticky_comment(client, args.repository, args.pr_number, body)
-            if args.post
-            else "DRY_RUN"
-        )
+        if args.post:
+            outcome = upsert_sticky_comment(
+                client, args.repository, args.pr_number, acq.comments, body
+            )
+        else:
+            outcome = "DRY_RUN"
     except CommentError as exc:
         # Advisory surface: report and leave any existing comment untouched.
         message = f"RIE comment skipped: {sanitize_text(exc, 300)}"
         print(message, file=sys.stderr)
-        if args.step_summary:
-            with open(args.step_summary, "a", encoding="utf-8") as handle:
-                handle.write(message + "\n")
+        _summary(args.step_summary, message)
         return 0
+    assert client is not None
+    calls = f"api calls: graphql={client.calls['graphql']} rest={client.calls['rest']}"
     print(body)
-    print(f"sticky comment: {outcome}", file=sys.stderr)
-    if args.step_summary:
-        with open(args.step_summary, "a", encoding="utf-8") as handle:
-            handle.write(f"sticky comment: {outcome}\n\n{body.replace(MARKER, '').strip()}\n")
+    print(f"sticky comment: {outcome}; {calls}", file=sys.stderr)
+    _summary(
+        args.step_summary,
+        f"sticky comment: {outcome}; {calls}\n\n{body.replace(MARKER, '').strip()}",
+    )
     return 0
 
 
