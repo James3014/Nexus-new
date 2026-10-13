@@ -5,7 +5,7 @@
   },
   "companion_changes": [
     {
-      "after_oid": "1900205ffb6549de9f8ff5de2fba946430c57fa6",
+      "after_oid": "a43722d0a4cae13ad947138a92e62070ca79a2bb",
       "change_type": "MODIFY",
       "path": ".github/workflows/nexus-core-issue-completion.yml"
     },
