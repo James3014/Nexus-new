@@ -7,6 +7,7 @@ scripts, so the checks exercise the same validators CI runs.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -245,6 +246,48 @@ def test_lane_block_with_bad_hash_is_rejected_by_trusted_gate(repo, tmp_path, ca
     assert check["status"] == "FAIL"
     assert check["code"] == "BINDING_HASH_INVALID"
     assert check["data"] == {"present": True, "parses": True}
+
+
+def _inline_lane(contract_kind: str) -> str:
+    binding = {
+        "schema": "nexus.merge_lane_binding.v1",
+        "execution_lane": "DIRECT_CANONICAL",
+        "contract_kind": contract_kind,
+        "owner_id": "James3014",
+        "issue_number": None,
+        "task_id": None,
+        "attempt_id": None,
+        "task_card_path": None,
+        "task_card_sha256": None,
+        "owner_lane_rebind": None,
+    }
+    binding["binding_hash"] = hashlib.sha256(
+        json.dumps(binding, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return "<!-- NEXUS_MERGE_LANE_V1\n" + json.dumps(binding) + "\nNEXUS_MERGE_LANE_V1 -->\n"
+
+
+@pytest.mark.parametrize(
+    ("contract_kind", "author", "status", "code"),
+    [
+        ("OWNER_INLINE", None, "SKIP", "PULL_REQUEST_AUTHOR_REQUIRED"),
+        ("OWNER_INLINE", "James3014", "PASS", ""),
+        ("OWNER_INLINE", "app/james3014-nexus-agent", "FAIL", "OWNER_INLINE_AUTHOR_MISMATCH"),
+        ("AGENT_INLINE", "app/james3014-nexus-agent", "PASS", ""),
+        ("AGENT_INLINE", "James3014", "FAIL", "AGENT_INLINE_AUTHOR_NOT_ALLOWLISTED_APP"),
+    ],
+)
+def test_inline_lane_is_checked_against_pr_author(
+    repo, tmp_path, capsys, contract_kind, author, status, code
+):
+    extra = ["--author", author] if author else []
+    argv = _run(
+        repo, tmp_path, "--only", "merge_lane", *extra, body=_body(lane=_inline_lane(contract_kind))
+    )
+    _code, report = _report(capsys, argv)
+    check = _check(report, "merge_lane")
+    assert check["status"] == status
+    assert check["code"] == code
 
 
 # ------------------------------------------------------------------- issue

@@ -77,7 +77,12 @@ BINDING_SCHEMA = "nexus.merge_lane_binding.v1"
 REBIND_SCHEMA = "nexus.owner_execution_lane_rebind.v1"
 DIRECT_LANES = {"DIRECT_CANONICAL", "DIRECT_DELEGATED"}
 ALL_LANES = DIRECT_LANES | {"GOVERNED"}
-CONTRACT_KINDS = {"OWNER_INLINE", "TRACKED_TASK_CARD"}
+CONTRACT_KINDS = {"OWNER_INLINE", "AGENT_INLINE", "TRACKED_TASK_CARD"}
+INLINE_CONTRACT_KINDS = frozenset({"OWNER_INLINE", "AGENT_INLINE"})
+# GitHub App bot accounts allowed to author AGENT_INLINE direct PRs. An App
+# opens PRs as ``<slug>[bot]`` (``app/<slug>`` in the gh CLI). Since 2026-10-13
+# agents act as this App, so they can no longer claim the Owner's identity.
+AGENT_APP_LOGINS = frozenset({"james3014-nexus-agent[bot]"})
 START_MARKER = "<!-- NEXUS_MERGE_LANE_V1"
 END_MARKER = "NEXUS_MERGE_LANE_V1 -->"
 INTENT_START_MARKER = "<!-- NEXUS_ISSUE_INTENT_V1"
@@ -522,6 +527,40 @@ def _validate_owner(repository: str, owner_id: Any) -> str:
     return owner
 
 
+def _pull_request_author(pr: Mapping[str, Any]) -> tuple[str, bool]:
+    """Return ``(login, is_app)`` for the PR author from the trusted event."""
+    user = pr.get("user")
+    if not isinstance(user, Mapping):
+        raise LaneBindingError("PULL_REQUEST_AUTHOR_REQUIRED")
+    login = _exact_str(user.get("login"), "PULL_REQUEST_AUTHOR_LOGIN")
+    is_app = user.get("type") == "Bot" or login.endswith("[bot]") or login.startswith("app/")
+    return login, is_app
+
+
+def _author_identity(login: str, is_app: bool) -> str:
+    if not is_app:
+        return login
+    if login.startswith("app/"):
+        return login
+    return "app/" + login.removesuffix("[bot]")
+
+
+def _validate_inline_author(
+    contract_kind: str, *, owner_id: str, author_login: str, author_is_app: bool
+) -> None:
+    if contract_kind == "OWNER_INLINE":
+        # Only the Owner's own account may claim an Owner-inline binding; an
+        # App/agent (or any other account) must not borrow the Owner identity.
+        if author_is_app or author_login != owner_id:
+            raise LaneBindingError("OWNER_INLINE_AUTHOR_MISMATCH")
+        return
+    agent_login = author_login
+    if agent_login.startswith("app/"):
+        agent_login = agent_login.removeprefix("app/") + "[bot]"
+    if not author_is_app or agent_login not in AGENT_APP_LOGINS:
+        raise LaneBindingError("AGENT_INLINE_AUTHOR_NOT_ALLOWLISTED_APP")
+
+
 def _validate_rebind(
     rebind_value: Any,
     *,
@@ -665,9 +704,9 @@ def validate_event(
         raise LaneBindingError("CONTRACT_KIND_UNSUPPORTED")
     owner_id = _validate_owner(repository, binding.get("owner_id"))
 
-    if contract_kind == "OWNER_INLINE":
+    if contract_kind in INLINE_CONTRACT_KINDS:
         if lane not in DIRECT_LANES:
-            raise LaneBindingError("OWNER_INLINE_MUST_BE_DIRECT")
+            raise LaneBindingError(f"{contract_kind}_MUST_BE_DIRECT")
         for field in (
             "issue_number",
             "task_id",
@@ -677,23 +716,32 @@ def validate_event(
             "owner_lane_rebind",
         ):
             if binding[field] is not None:
-                raise LaneBindingError("OWNER_INLINE_TRACKED_FIELDS_FORBIDDEN")
+                raise LaneBindingError(f"{contract_kind}_TRACKED_FIELDS_FORBIDDEN")
+        author_login, author_is_app = _pull_request_author(pr)
+        _validate_inline_author(
+            contract_kind,
+            owner_id=owner_id,
+            author_login=author_login,
+            author_is_app=author_is_app,
+        )
         closing_issues = [
             item["issue_number"]
             for item in intent_result.get("intents", [])
             if item.get("on_merge") == ON_MERGE_CLOSE
         ]
-        # An Owner-inline DIRECT binding cannot silently replace a GOVERNED
-        # Task Card that already owns the Issue this PR closes.
+        # An inline DIRECT binding cannot silently replace a GOVERNED Task
+        # Card that already owns the Issue this PR closes.
         if _active_governed_cards_for_issues(repo_root, base_sha, closing_issues):
-            raise LaneBindingError("OWNER_INLINE_CANNOT_REPLACE_GOVERNED_TASK_CARD")
+            raise LaneBindingError(f"{contract_kind}_CANNOT_REPLACE_GOVERNED_TASK_CARD")
         return {
             "schema": "nexus.trusted_merge_lane_gate_result.v1",
             "status": "PASS",
-            "reason": "GENUINE_DIRECT_OWNER_INLINE",
+            "reason": f"GENUINE_DIRECT_{contract_kind}",
             "pull_request_number": pr_number,
             "head_sha": head_sha,
             "execution_lane": lane,
+            "contract_kind": contract_kind,
+            "author_identity": _author_identity(author_login, author_is_app),
             "binding_hash": binding["binding_hash"],
             "issue_closure_intent": intent_result,
             "merge_intent_binding": final_binding,
