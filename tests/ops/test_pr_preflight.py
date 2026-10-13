@@ -362,7 +362,7 @@ def test_certify_failure_is_fail_with_remedy(repo, tmp_path, capsys):
     assert "markers --issue 1916 --check" in check["fix"]
 
 
-PIN = "b245430bbad465be634ceef00b53c5582a0d4fd9"
+PIN = "3f3dc38de7120b66f25eb246d22ef29d5d5971d9"
 
 
 def _pin_workflow(repo: Path, *refs: str) -> None:
