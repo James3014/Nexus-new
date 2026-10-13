@@ -313,14 +313,12 @@ def fence_all(
             elif _protocol_loss_path(store, task_key).is_file():
                 excluded.append(_loss_entry(store, task_key, newly_recorded=True))
             else:
-                failures.append(
-                    {
-                        "task_key": task_key,
-                        "phase": "ADMITTED",
-                        "error_type": type(outcome).__name__,
-                        "error": str(outcome)[:500],
-                    }
-                )
+                failures.append({
+                    "task_key": task_key,
+                    "phase": "ADMITTED",
+                    "error_type": type(outcome).__name__,
+                    "error": str(outcome)[:500],
+                })
     return {
         "schema": "nexus.hybrid_replication.daemon_fence.v1",
         "fenced": fenced,
