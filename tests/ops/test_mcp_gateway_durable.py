@@ -14,6 +14,7 @@ import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -6321,6 +6322,44 @@ def _build_valid_v2_fill_rows(fixture, count):
     return rows
 
 
+def _build_terminal_v2_fill_rows(fixture, count):
+    """Like ``_build_valid_v2_fill_rows`` but every fill request is terminal.
+
+    #1958 refuses a new R1 request while any other R1 request is non-terminal,
+    so capacity witnesses that must reach the reserve check fill the ledger
+    with closed requests: REQUESTED->BLOCKED pairs, and one
+    REQUESTED->PREFLIGHTED->BLOCKED triple when ``count`` is odd.
+    """
+    from nexus.contracts.gateway_deployment import canonical_hash
+
+    assert count >= 2
+    chains = []
+    remaining = count
+    if remaining % 2:
+        chains.append(["REQUESTED", "PREFLIGHTED", "BLOCKED"])
+        remaining -= 3
+    chains.extend(["REQUESTED", "BLOCKED"] for _ in range(remaining // 2))
+    templates = _build_valid_v2_fill_rows(fixture, len(chains))
+    out = []
+    parent_hash = ""
+    for index, (template, chain) in enumerate(zip(templates, chains)):
+        for state in chain:
+            values = {key: value for key, value in template.items() if key != "record_hash"}
+            values.update({
+                "state": state,
+                "sequence": len(out) + 1,
+                "parent_hash": parent_hash,
+                "source_bundle_evidence_hash": (
+                    None if state == "REQUESTED" else f"{index % 10}" * 64
+                ),
+            })
+            values["record_hash"] = canonical_hash(values)
+            out.append(values)
+            parent_hash = values["record_hash"]
+    assert len(out) == count
+    return out
+
+
 def test_hostile_1_ledger_just_over_old_64k_reads_under_new_contract(tmp_path, monkeypatch):
     """A ledger slightly larger than the old 64 KiB generic bound (but below the
     new explicit Gateway-ledger total bound) must read successfully under the
@@ -6998,7 +7037,7 @@ def test_hostile_15_real_recovery_blocks_pre_effect_when_reserve_does_not_fit(
     )
     _write_v2_rows(
         fixture["ledger_path"],
-        _build_valid_v2_fill_rows(fixture, 3),
+        _build_terminal_v2_fill_rows(fixture, 3),
     )
     ledger = g.GatewayLedger(
         fixture["ledger_path"], lock_path=fixture["lock_path"]
@@ -7296,3 +7335,274 @@ def test_1940_recover_live_refuses_in_process_self_replacement_before_anything(m
     ) as excinfo:
         g._gateway_recover_live({"request_id": "anything"})
     assert "nexus_gateway_recovery_actuator_bootstrap.py" in str(excinfo.value)
+
+
+# --- #1958: no concurrent R1 request; atomic value-store CAS -----------------
+
+_R1958_UNCERTAIN_PATH = (
+    "REQUESTED",
+    "PREFLIGHTED",
+    "TARGET_READY",
+    "ROLLBACK_READY",
+    "EFFECT_STARTED",
+    "UNCERTAIN_EFFECT",
+)
+_R1958_VERIFIED_PATH = (
+    "REQUESTED",
+    "PREFLIGHTED",
+    "TARGET_READY",
+    "ROLLBACK_READY",
+    "EFFECT_STARTED",
+    "SERVICE_OBSERVED",
+    "IDENTITY_VERIFIED",
+    "CLIENT_BOUND",
+    "VERIFIED",
+)
+
+
+def _r1958_seed_other_request(fixture, ledger, request_id, states):
+    """Append another R1 generation through the real ledger write sink."""
+    other: Any = SimpleNamespace(
+        request_id=request_id,
+        request_hash=hashlib.sha256(request_id.encode()).hexdigest(),
+        operation=fixture["request"].operation,
+        effect_class=fixture["request"].effect_class,
+        idempotency_fence=f"{request_id}-fence",
+    )
+    evidence: Any = SimpleNamespace(evidence_hash="8" * 64)
+    with g.InterProcessLock(ledger.lock_path):
+        rows = ledger._scan_unlocked()
+        for state in states:
+            record = g._recovery_record(
+                rows, other, fixture["receipt"], evidence, g.DeploymentState(state)
+            )
+            ledger._append_recovery_unlocked(rows, record)
+            rows.append(record.model_dump())
+
+
+def _r1958_request_rows(ledger_path, request_id):
+    if not Path(ledger_path).exists():
+        return []
+    return [
+        row
+        for row in (json.loads(line) for line in Path(ledger_path).read_bytes().splitlines())
+        if row["request_id"] == request_id
+    ]
+
+
+def test_1958_terminal_states_are_derived_from_the_contract_state_machine():
+    from nexus.contracts.gateway_deployment import DeploymentState, transition
+
+    assert g.R1_TERMINAL_RECOVERY_STATES == {
+        DeploymentState.VERIFIED,
+        DeploymentState.ROLLED_BACK,
+        DeploymentState.BLOCKED,
+    }
+    for state in g.R1_TERMINAL_RECOVERY_STATES:
+        for successor in DeploymentState:
+            with pytest.raises(g.ContractError):
+                transition(state, successor)
+
+
+@pytest.mark.parametrize(
+    "other_states",
+    [
+        ("REQUESTED",),
+        ("REQUESTED", "PREFLIGHTED", "TARGET_READY", "ROLLBACK_UNAVAILABLE"),
+        _R1958_UNCERTAIN_PATH[:5],
+        _R1958_UNCERTAIN_PATH,
+    ],
+    ids=["requested", "rollback-unavailable", "effect-started", "uncertain-effect"],
+)
+def test_1958_manager_refuses_new_request_while_other_r1_is_non_terminal(
+    tmp_path, monkeypatch, other_states
+):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(fixture["ledger_path"], lock_path=fixture["lock_path"])
+    _r1958_seed_other_request(fixture, ledger, "gen1-request", other_states)
+    before = fixture["ledger_path"].read_bytes()
+    effect_calls = []
+    adapters = _r1b2_adapters(fixture, ledger, effect_calls=effect_calls)
+
+    with pytest.raises(
+        g.GatewayContractError, match="^R1_CONCURRENT_RECOVERY_FORBIDDEN: "
+    ) as excinfo:
+        g._gateway_recover_with_adapters(fixture["request"], adapters=adapters, ledger=ledger)
+
+    assert f"gen1-request={other_states[-1]}" in str(excinfo.value)
+    assert effect_calls == []
+    assert fixture["ledger_path"].read_bytes() == before
+    assert _r1958_request_rows(fixture["ledger_path"], fixture["request"].request_id) == []
+
+
+def test_1958_stdio_host_live_path_is_refused_by_the_manager_invariant(tmp_path, monkeypatch):
+    """F2: ``nexus_gateway_recover`` -> ``_gateway_recover_live`` skips the
+    bootstrap gates; the manager invariant must still refuse it."""
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(fixture["ledger_path"], lock_path=fixture["lock_path"])
+    _r1958_seed_other_request(fixture, ledger, "gen1-request", _R1958_UNCERTAIN_PATH)
+    before = fixture["ledger_path"].read_bytes()
+    effect_calls = []
+    adapters = _r1b2_adapters(fixture, ledger, effect_calls=effect_calls)
+    monkeypatch.setattr(g, "_production_recovery_adapters", lambda _receipt: adapters)
+    monkeypatch.setattr(g, "GatewayLedger", lambda: ledger)
+
+    with pytest.raises(g.GatewayContractError, match="^R1_CONCURRENT_RECOVERY_FORBIDDEN: "):
+        g._gateway_recover_live(fixture["request"])
+
+    assert effect_calls == []
+    assert fixture["ledger_path"].read_bytes() == before
+
+
+def test_1958_new_request_proceeds_when_every_prior_r1_is_terminal(tmp_path, monkeypatch):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(fixture["ledger_path"], lock_path=fixture["lock_path"])
+    _r1958_seed_other_request(fixture, ledger, "gen1-request", _R1958_VERIFIED_PATH)
+    _r1958_seed_other_request(fixture, ledger, "gen2-request", ("REQUESTED", "BLOCKED"))
+    _r1958_seed_other_request(
+        fixture,
+        ledger,
+        "gen3-request",
+        _R1958_UNCERTAIN_PATH + ("ROLLED_BACK",),
+    )
+    effect_calls = []
+    adapters = _r1b2_adapters(fixture, ledger, effect_calls=effect_calls)
+
+    outcome = g._gateway_recover_with_adapters(fixture["request"], adapters=adapters, ledger=ledger)
+
+    assert outcome.result == "VERIFIED"
+    assert len(effect_calls) == 1
+    assert (
+        _r1958_request_rows(fixture["ledger_path"], fixture["request"].request_id)[-1]["state"]
+        == "VERIFIED"
+    )
+
+
+def test_1958_same_request_reconcile_is_allowed_and_blocks_others_until_terminal(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(fixture["ledger_path"], lock_path=fixture["lock_path"])
+    _r1958_seed_other_request(fixture, ledger, "gen0-request", _R1958_VERIFIED_PATH)
+    effect_calls = []
+    lost = _r1b2_adapters(fixture, ledger, lost_ack=True, effect_calls=effect_calls)
+    first = g._gateway_recover_with_adapters(fixture["request"], adapters=lost, ledger=ledger)
+    assert first.result == "UNCERTAIN_EFFECT"
+
+    # While this request is UNCERTAIN_EFFECT no other generation may begin.
+    before = fixture["ledger_path"].read_bytes()
+    with pytest.raises(
+        g.GatewayContractError, match="^R1_CONCURRENT_RECOVERY_FORBIDDEN: "
+    ) as excinfo:
+        _r1958_seed_other_request(fixture, ledger, "gen2-request", ("REQUESTED",))
+    assert f"{fixture['request'].request_id}=UNCERTAIN_EFFECT" in str(excinfo.value)
+    assert fixture["ledger_path"].read_bytes() == before
+
+    # Reconciling the same request id is not a new request and is allowed.
+    recovered = _r1b2_adapters(fixture, ledger)
+    recovered = recovered.__class__(
+        observe=recovered.observe,
+        effect=lambda _plan: pytest.fail("reconcile must not re-apply the effect"),
+        postflight=recovered.postflight,
+        clock=recovered.clock,
+        crash_hook=recovered.crash_hook,
+    )
+    second = g._gateway_recover_with_adapters(fixture["request"], adapters=recovered, ledger=ledger)
+    assert second.result == "VERIFIED"
+    assert len(effect_calls) == 1
+
+    # Once terminal, the next generation may record REQUESTED.
+    _r1958_seed_other_request(fixture, ledger, "gen2-request", ("REQUESTED",))
+    assert [
+        row["state"] for row in _r1958_request_rows(fixture["ledger_path"], "gen2-request")
+    ] == ["REQUESTED"]
+
+
+def test_1958_requested_sink_rejects_stale_rows_snapshot(tmp_path, monkeypatch):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(fixture["ledger_path"], lock_path=fixture["lock_path"])
+    stale_rows: list = []
+    _r1958_seed_other_request(fixture, ledger, "gen1-request", _R1958_UNCERTAIN_PATH)
+    before = fixture["ledger_path"].read_bytes()
+    other: Any = SimpleNamespace(
+        request_id="gen2-request",
+        request_hash="c" * 64,
+        operation=fixture["request"].operation,
+        effect_class=fixture["request"].effect_class,
+        idempotency_fence="gen2-fence",
+    )
+    record = g._recovery_record(
+        stale_rows, other, fixture["receipt"], None, g.DeploymentState.REQUESTED
+    )
+    with pytest.raises(g.GatewayContractError, match="compare-and-swap conflict"):
+        ledger._append_recovery_unlocked(stale_rows, record)
+    assert fixture["ledger_path"].read_bytes() == before
+
+
+def _r1958_cas_worker(path, expected, target, replace_delay, barrier, results):
+    import tempfile as _tempfile
+
+    real_mkstemp = _tempfile.mkstemp
+    real_replace = os.replace
+
+    def slow_mkstemp(*args, **kwargs):
+        time.sleep(0.2)
+        return real_mkstemp(*args, **kwargs)
+
+    def slow_replace(src, dst):
+        time.sleep(replace_delay)
+        return real_replace(src, dst)
+
+    g.tempfile.mkstemp = slow_mkstemp
+    g.os.replace = slow_replace
+    barrier.wait(timeout=5)
+    try:
+        written = g._r1_replace_value_store_cas(Path(path), expected=expected, target=target)
+    except g.GatewayContractError as exc:
+        results.put(("error", type(exc).__name__, str(exc), target))
+    except BaseException as exc:  # pragma: no cover - reported to parent
+        results.put(("crash", type(exc).__name__, str(exc), target))
+    else:
+        results.put(("ok", "", written.decode(), target))
+
+
+@pytest.mark.filterwarnings("ignore:lance is not fork-safe")
+@pytest.mark.filterwarnings("ignore:This process .*multi-threaded.*:DeprecationWarning")
+def test_1958_two_process_marker_cas_race_has_exactly_one_winner(tmp_path, monkeypatch):
+    """F3: two real processes race the same CAS; one wins, one gets a typed
+    conflict, and the winner's history is never silently overwritten."""
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    marker = fixture["state"] / "recovery-actuator-bootstrap-consumed.json"
+    expected = json.dumps({"history": ["gen1"]}, sort_keys=True).encode()
+    marker.write_bytes(expected)
+    marker.chmod(0o600)
+    target_a = json.dumps({"history": ["gen1", "gen2-a"]}, sort_keys=True).encode()
+    target_b = json.dumps({"history": ["gen1", "gen2-b"]}, sort_keys=True).encode()
+
+    context = multiprocessing.get_context("fork")
+    barrier = context.Barrier(2)
+    results = context.Queue()
+    workers = [
+        context.Process(
+            target=_r1958_cas_worker,
+            args=(str(marker), expected, target, delay, barrier, results),
+        )
+        for target, delay in ((target_a, 0.0), (target_b, 0.4))
+    ]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=10)
+        assert worker.exitcode == 0
+    outcomes = [results.get(timeout=2) for _ in workers]
+
+    winners = [item for item in outcomes if item[0] == "ok"]
+    losers = [item for item in outcomes if item[0] != "ok"]
+    assert len(winners) == 1, outcomes
+    assert len(losers) == 1, outcomes
+    assert losers[0][:2] == ("error", "GatewayContractError")
+    assert "CAS conflict" in losers[0][2]
+    winner_target = winners[0][3]
+    assert marker.read_bytes() == winner_target
+    assert json.loads(marker.read_bytes())["history"][0] == "gen1"
+    assert sorted(p.name for p in marker.parent.glob(f".{marker.name}.*")) == []
