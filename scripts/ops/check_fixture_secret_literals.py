@@ -138,7 +138,7 @@ def scan_paths(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--all", action="store_true", help="scan the whole tests/ tree")
     parser.add_argument("--base", default="origin/main", help="base ref for the changed-file set")
     parser.add_argument("--repo", type=Path, default=Path.cwd())
