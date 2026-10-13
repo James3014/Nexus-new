@@ -3148,11 +3148,16 @@ def _exec_committee(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
                     physical_callable="nexus.committee.controller.CommitteeControllerV263.process_proposals",
                 ),
             )
-        verify_commands = [
-            str(item)
-            for item in (constraints.get("committee_verify_commands") or [])
-            if str(item).strip()
-        ]
+        # argv lists pass through unchanged (the verifier's allowlist matches real argv);
+        # only a plain string is left for the verifier to split without a shell.
+        verify_commands: list[Any] = []
+        for item in constraints.get("committee_verify_commands") or []:
+            if isinstance(item, (list, tuple)):
+                argv = [str(part) for part in item]
+                if argv and all(part.strip() for part in argv):
+                    verify_commands.append(argv)
+            elif str(item).strip():
+                verify_commands.append(str(item))
         execution_verifier = None
         verifiers = None
         if verify_commands:
@@ -3204,7 +3209,16 @@ def _exec_committee(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
             or failure_bucket.upper() in {"ABSTAIN", "NO_WINNER"}
         )
         winner = next((c for c in candidates if getattr(c, "candidate_id", "") == winner_id), None)
-        ok = len(candidates) >= 2 and bool(verdicts) and bool(winner_id or explicit_abstain)
+        # Fail closed: the committee passes only when a winner exists and that winner has at
+        # least one passing verdict.  No verified candidate (every verifier refused or failed,
+        # e.g. ``not_executed:no_os_barrier``, or an all-abstain round) is never a pass.
+        verified_ids = {
+            str(getattr(v, "candidate_id", "") or "")
+            for v in verdicts
+            if getattr(v, "passed", False)
+        }
+        winner_verified = bool(winner_id) and winner_id in verified_ids
+        ok = len(candidates) >= 2 and bool(verdicts) and winner_verified
         verdict_rows = [
             {
                 "verifier": str(getattr(v, "verifier_name", "") or getattr(v, "critic_name", "")),
@@ -3223,7 +3237,13 @@ def _exec_committee(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
                 action="process_proposals",
                 semantic_status="SUCCEEDED" if ok else "FAILED",
                 evidence_refs=[f"ev_committee_{plan.task_id}"],
-                error="" if (ok or verdicts) else "NO_COMMITTEE_VERIFIER_VERDICTS",
+                error=""
+                if ok
+                else (
+                    "COMMITTEE_NO_VERIFIED_CANDIDATE"
+                    if verdicts
+                    else "NO_COMMITTEE_VERIFIER_VERDICTS"
+                ),
                 result={
                     "task_id": getattr(result, "task_id", ""),
                     "winner_id": winner_id,
