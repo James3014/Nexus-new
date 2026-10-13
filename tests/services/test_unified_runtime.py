@@ -1293,7 +1293,7 @@ def test_gateway_selects_workforce_admitted_registered_provider_at_edge(
         }
     )
     receipt = gateway.ask_unified(
-        _admit_gateway_request(request, online_worker="codex_luna"),
+        _physical_edge_request(request),
         capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS,
         verifier=_verifier,
         learning=_learning,
@@ -1328,7 +1328,7 @@ def test_gateway_uses_registered_edge_when_gateway_is_configured_for_codex(tmp_p
     )
 
     receipt = gateway.ask_unified(
-        _admit_gateway_request(request, online_worker="codex_luna"),
+        _physical_edge_request(request),
         capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS,
         verifier=_verifier,
         learning=_learning,
@@ -5000,3 +5000,17 @@ def test_process_evidence_oserror_records_not_invoked(tmp_path):
     assert evidence["process_started"] is False
     assert evidence["returncode"] is None
     assert res["error"] == "provider_not_invoked"
+
+
+def _physical_edge_request(request: UnifiedRuntimeRequest) -> UnifiedRuntimeRequest:
+    """Admitted Gateway request whose fake executable runs as a real subprocess.
+
+    ``_admit_gateway_request`` asks for the fixture (injected_test_transport) path; a fixture
+    decision never starts a provider process (nexus-runtime#190), so the edge tests that
+    really execute a fake CLI drop that request and run under the physical authorization the
+    runtime resolves for the physical Workforce edge invoker.
+    """
+    admitted = _admit_gateway_request(request, online_worker="codex_luna")
+    route = dict(admitted.route)
+    route.pop("injected_transport", None)
+    return UnifiedRuntimeRequest(**{**admitted.__dict__, "route": route})
