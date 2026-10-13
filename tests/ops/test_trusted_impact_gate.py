@@ -736,3 +736,24 @@ def test_executor_rejects_bundle_not_bound_to_controller_output(pr_repo, tmp_pat
 def test_ls_tree_check_uses_tab_separator():
     text = WORKFLOW.read_text(encoding="utf-8")
     assert '"100644 blob $blob_id"$\'\\t\'"$path"' in text
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b'<?xml version="1.0"?><!DOCTYPE t [<!ENTITY p "pass">]><testsuites>&p;</testsuites>',
+        b'<!DOCTYPE t [<!ENTITY a "aaaa"><!ENTITY b "&a;&a;&a;">]><testsuites>&b;</testsuites>',
+        b'<!DOCTYPE t SYSTEM "http://example.invalid/x.dtd"><testsuites/>',
+    ],
+)
+def test_expat_pass_rejects_dtd_and_entities_without_the_byte_check(payload):
+    # Called directly: this is the second, parser-level line of defence that
+    # holds even if the textual DOCTYPE/ENTITY pre-check were bypassed.
+    with pytest.raises(tig.GateError, match="DTD or entity"):
+        tig.reject_dtd_and_entities(payload, "head")
+
+
+def test_expat_pass_accepts_plain_junit_and_rejects_malformed():
+    tig.reject_dtd_and_entities(_junit(HONEST), "head")
+    with pytest.raises(tig.GateError, match="not well-formed"):
+        tig.reject_dtd_and_entities(b"<testsuites><testsuite>", "head")

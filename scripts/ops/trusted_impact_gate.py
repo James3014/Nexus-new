@@ -35,6 +35,7 @@ from dataclasses import asdict
 from io import BytesIO
 from pathlib import Path
 from typing import Any
+from xml.parsers import expat
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -701,6 +702,22 @@ def _under(path: str, target: str) -> bool:
     return path == target or path.startswith(f"{target}/")
 
 
+def reject_dtd_and_entities(junit: bytes, side: str) -> None:
+    """Stdlib-only (no defusedxml) expat pass that refuses any DTD or entity declaration."""
+
+    def refuse(*_args: object) -> None:
+        raise GateError(f"{side} junit declares a DTD or entity")
+
+    parser = expat.ParserCreate()
+    parser.StartDoctypeDeclHandler = refuse
+    parser.EntityDeclHandler = refuse
+    parser.UnparsedEntityDeclHandler = refuse
+    try:
+        parser.Parse(junit, True)
+    except expat.ExpatError:
+        raise GateError(f"{side} junit is not well-formed XML") from None
+
+
 def validate_junit(junit: bytes, spec: dict[str, Any], files: set[str]) -> None:
     """Fail closed unless the JUnit node set matches exactly the executed targets."""
 
@@ -717,8 +734,11 @@ def validate_junit(junit: bytes, spec: dict[str, Any], files: set[str]) -> None:
         raise GateError(f"{spec['side']} junit declares a non-UTF-8 encoding")
     if "<!DOCTYPE" in text or "<!ENTITY" in text or b"<!DOCTYPE" in junit or b"<!ENTITY" in junit:
         raise GateError(f"{spec['side']} junit declares a DTD or entity")
+    reject_dtd_and_entities(junit, spec["side"])
     try:
-        root = ET.fromstring(junit)
+        # nosec B314: the input is size-capped, strict UTF-8, and was proven free of any
+        # DOCTYPE/entity declaration by reject_dtd_and_entities (expat) above.
+        root = ET.fromstring(junit)  # nosec B314
     except ET.ParseError:
         raise GateError(f"{spec['side']} junit is not well-formed XML") from None
     if root.tag not in {"testsuites", "testsuite"}:
@@ -829,6 +849,8 @@ def reconstruct_result(
     elif spec["mode"] == "exclusion_defect":
         exit_code, status = 2, "CI_BOOTSTRAP_DEFECT"
     else:
+        if not isinstance(exit_code, int):
+            raise GateError(f"{side} executor did not record a pytest exit code")
         if exit_code not in {0, 1} or junit is None:
             status = "CI_BOOTSTRAP_DEFECT"
         else:
