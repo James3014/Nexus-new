@@ -202,7 +202,7 @@ class GitHubClient:
             },
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:  # noqa: S310 - fixed https host
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:  # noqa: S310  # nosec B310 - https-only API host
                 raw = response.read(8 * 1024 * 1024 + 1)
         except urllib.error.HTTPError as exc:
             raise CommentError(f"GitHub HTTP {exc.code} for {method} {path}") from exc
@@ -564,7 +564,9 @@ def _utc_now() -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        description="Render and upsert the Repository Intelligence sticky PR comment."
+    )
     parser.add_argument("--repository", required=True)
     parser.add_argument("--pr-number", type=int, required=True)
     parser.add_argument(
