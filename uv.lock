@@ -1664,7 +1664,7 @@ requires-dist = [
     { name = "lancedb", marker = "extra == 'legacy'", specifier = ">=0.4.0" },
     { name = "networkx", marker = "extra == 'legacy'", specifier = ">=3.0,<4.0" },
     { name = "nexus-learning", git = "https://github.com/James3014/nexus-learning.git?rev=a48bd876b758069f4dd15c24d0d32f1f2486d319" },
-    { name = "nexus-runtime", git = "https://github.com/James3014/nexus-runtime.git?rev=68e86ed591de8c4a555d3588e97e5e9cf6ff9692" },
+    { name = "nexus-runtime", git = "https://github.com/James3014/nexus-runtime.git?rev=856bc838b0b6d421a8a9381c41114425d7fae92c" },
     { name = "opentelemetry-api", marker = "extra == 'legacy'", specifier = ">=1.15.0,<2.0.0" },
     { name = "opentelemetry-sdk", marker = "extra == 'legacy'", specifier = ">=1.15.0,<2.0.0" },
     { name = "pandas", marker = "extra == 'legacy'", specifier = ">=2.0.0,<3.0.0" },
@@ -1706,7 +1706,7 @@ trusted-anchor = [
 [[package]]
 name = "nexus-runtime"
 version = "0.1.0.dev0"
-source = { git = "https://github.com/James3014/nexus-runtime.git?rev=68e86ed591de8c4a555d3588e97e5e9cf6ff9692#68e86ed591de8c4a555d3588e97e5e9cf6ff9692" }
+source = { git = "https://github.com/James3014/nexus-runtime.git?rev=856bc838b0b6d421a8a9381c41114425d7fae92c#856bc838b0b6d421a8a9381c41114425d7fae92c" }
 dependencies = [
     { name = "nexus-learning" },
     { name = "pyyaml" },
