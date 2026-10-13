@@ -314,7 +314,7 @@ def main(
     pr_head_lookup: PrHeadLookup | None = None,
 ) -> int:
     gh = gh or _run_gh
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--health-url", default=GATEWAY_HEALTH_URL)
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument(

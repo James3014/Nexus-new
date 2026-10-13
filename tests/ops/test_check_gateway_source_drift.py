@@ -292,7 +292,7 @@ def test_report_issue_updates_existing_marker_comment(repo: Repo) -> None:
     report = {"verdict": "OK", "findings": []}
     assert drift.report_to_issue(report, 1900, "o/r", gh) == "updated"
     assert calls[-1][0][:4] == ["api", "-X", "PATCH", "repos/o/r/issues/comments/7"]
-    assert drift.REPORT_MARKER in json.loads(calls[-1][1])["body"]
+    assert drift.REPORT_MARKER in json.loads(calls[-1][1] or "{}")["body"]
 
 
 def test_report_issue_creates_when_no_marker(repo: Repo) -> None:
