@@ -43,9 +43,11 @@ class BattleSwarm:
 
     def _cleanup_worktrees(self, worktree_paths: List[Path], branches: List[str]):
         """Clean up generated worktrees and branches."""
+        # ``git worktree remove`` deregisters each worktree it created. No ``git worktree prune``:
+        # project_root can be a shared repository whose other worktrees (owned by other sessions)
+        # must not be pruned.
         for wp in worktree_paths:
             subprocess.run(["git", "worktree", "remove", "-f", str(wp)], cwd=str(self.project_root), capture_output=True)
-        subprocess.run(["git", "worktree", "prune"], cwd=str(self.project_root), capture_output=True)
         for b in branches:
             subprocess.run(["git", "branch", "-D", b], cwd=str(self.project_root), capture_output=True)
 
