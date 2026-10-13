@@ -6,7 +6,7 @@ from nexus.services.local_heal.interface import IPhase, PhaseResult
 from nexus.services.local_heal.governance_gate import GovernanceGate
 from nexus.services.local_heal.orchestrator import HealOrchestrator
 from nexus.services.local_heal.evaluation_gate import EvaluationGate
-from nexus.services.local_heal.parser import SearchReplaceParser
+from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
 from nexus.services.local_heal.patcher import Patcher
 from nexus.services.local_heal.phases.patch_synthesis import PatchSynthesisPhase
 from nexus.services.local_heal.phases.verification import VerificationPhase
@@ -102,7 +102,7 @@ def test_orchestrator_runs_patch_and_verification_phases(tmp_path):
 
     orch = HealOrchestrator(
         phases=[
-            PatchSynthesisPhase(SearchReplaceParser(), Patcher(), model_client),
+            PatchSynthesisPhase(SolidSearchReplaceProtocol(), Patcher(), model_client),
             VerificationPhase(EvaluationGate(tmp_path)),
         ],
         governance_gate=GovernanceGate(),

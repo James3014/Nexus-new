@@ -63,8 +63,10 @@ class SpyGitHubCompletionPort:
         post_merge_results: list[PostMergeReconciliationResult] | None = None,
         final_merge_fields: FinalMergeFields | list[FinalMergeFields] | Any = None,
         issue_states: Mapping[int, str] | None = None,
+        head_check_runs: dict[str, Sequence[Any]] | None = None,
     ):
         self.main_states = list(main_states)
+        self.head_check_runs = head_check_runs
         self.pr_heads = list(pr_heads) if pr_heads is not None else None
         self.current_pr_head = default_pr_head
         self.tree_shas = tree_shas or {}
@@ -102,6 +104,7 @@ class SpyGitHubCompletionPort:
         self.reconcile_calls: list[dict[str, Any]] = []
         self.read_final_merge_fields_calls: list[dict[str, Any]] = []
         self.read_issue_states_calls: list[dict[str, Any]] = []
+        self.head_check_runs_calls: list[str] = []
 
     def read_main_state(self) -> tuple[str, str]:
         state = self.main_states[0] if len(self.main_states) == 1 else self.main_states.pop(0)
@@ -359,6 +362,42 @@ class SpyGitHubCompletionPort:
             res = {num: "open" for num in issue_numbers}
         self.calls.append(("read_issue_states", {"input": call_info, "result": res}))
         return res
+
+    def read_head_check_runs(self, *, head_sha: str) -> Sequence[Any]:
+        """Live check-runs GitHub reports for exact ``head_sha`` (default: green impact gate)."""
+        self.head_check_runs_calls.append(head_sha)
+        if self.head_check_runs is not None and head_sha in self.head_check_runs:
+            spec = self.head_check_runs[head_sha]
+            res = tuple(spec() if callable(spec) else spec)
+        elif self.head_check_runs is not None and "*" in self.head_check_runs:
+            res = tuple(self.head_check_runs["*"])
+        else:
+            res = (_impact_gate_run(head_sha),)
+        self.calls.append(("read_head_check_runs", {"head_sha": head_sha, "result": res}))
+        return res
+
+
+def _impact_gate_run(
+    head_sha: str,
+    *,
+    conclusion: str | None = "success",
+    status="completed",
+    app_id: int = 15368,
+    workflow_path: str = ".github/workflows/trusted-impact-gate.yml",
+):
+    from nexus.orchestrator.github_completion_loop import (
+        TRUSTED_IMPACT_GATE_CHECK_NAME,
+        HeadCheckRunObservation,
+    )
+
+    return HeadCheckRunObservation(
+        name=TRUSTED_IMPACT_GATE_CHECK_NAME,
+        status=status,
+        conclusion=conclusion,
+        head_sha=head_sha,
+        app_id=app_id,
+        workflow_path=workflow_path,
+    )
 
 
 def _base_evidence(**overrides):
@@ -846,7 +885,7 @@ def test_a_unrelated_docs_drift_reuses_unaffected_and_merges_without_owner(monke
 
 
 def test_b_test_dependency_drift_calls_only_test_impact_hook(monkeypatch):
-    """B. test/dependency drift -> only TEST_IMPACT revalidation hook called with typed receipt."""
+    """B. test-only drift -> host hook NOT called; TEST_IMPACT deferred to I_n impact gate (#1384 AC4)."""
     initial_ev = _base_evidence(base_sha="d" * 40, current_main_sha="d" * 40)
     new_main_sha = "e" * 40
     new_main_tree = "2" * 40
@@ -891,7 +930,8 @@ def test_b_test_dependency_drift_calls_only_test_impact_hook(monkeypatch):
     )
 
     assert result.outcome is CompletionLoopOutcome.COMPLETED
-    assert port.revalidation_calls == ["TEST_IMPACT"]
+    assert port.revalidation_calls == []
+    assert port.head_check_runs_calls == ["01" * 20]
 
 
 def test_c_transport_drift_calls_only_transport_hook(monkeypatch):
@@ -2952,9 +2992,18 @@ def test_issue1384_criterion4_test_impact_revalidates_only_affected_tests(monkey
 
     assert result.outcome is CompletionLoopOutcome.COMPLETED
     assert result.generation == 2
-    # TEST_IMPACT was revalidated on each movement, NO fresh candidate acceptance was performed
-    assert port.revalidation_calls == ["TEST_IMPACT", "TEST_IMPACT"]
+    # TEST_IMPACT is satisfied by exact-head required CI on I_n, never by the host:
+    # zero host revalidations and zero fresh Candidate re-acceptances.
+    assert port.revalidation_calls == []
     assert result.evidence.candidate.independent_acceptance_hash == "5" * 64
+    assert result.evidence.independent_acceptance_hash == initial_ev.independent_acceptance_hash
+    # The impact gate was read live for the exact final head I_2 only.
+    assert port.head_check_runs_calls == ["02" * 20]
+    deferral = result.details["test_impact_deferral"]
+    assert deferral["disposition"] == "TEST_IMPACT deferred to exact-head required CI on I_n"
+    assert deferral["deferred_generations"] == [1, 2]
+    assert deferral["verified_head_sha"] == "02" * 20
+    assert deferral["check_name"] == "Trusted impact gate (default branch)"
     assert len(port.cas_merge_calls) == 1
     assert port.cas_merge_calls[0]["expected_base_sha"] == m2_sha
 
@@ -3875,3 +3924,828 @@ def test_issue1384_requalification_fetch_is_hardened_and_timeout_fails_closed(
     assert 0 < call["timeout"] <= 600
     assert len(port.materialize_calls) == 0
     assert len(port.cas_merge_calls) == 0
+
+
+# ==============================================================================
+# Issue 1384 AC4: TEST_IMPACT deferred to exact-head required CI on I_n
+# ==============================================================================
+
+
+def _ac4_patch_requalifier(monkeypatch, *, impact_class: str = "TEST_ONLY"):
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {"valid": True, "proven_paths": tuple(k["changed_main_paths"])},
+    )
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.build_impact_plan",
+        lambda paths, *a, **k: type(
+            "Plan",
+            (),
+            {"impact_class": impact_class, "unmatched_paths": [], "changed_paths": list(paths)},
+        )(),
+    )
+
+
+class _FakeClock:
+    """Deterministic monotonic clock + sleep for the AC4 verdict wait."""
+
+    def __init__(self):
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+def _ac4_run(
+    monkeypatch,
+    *,
+    changed_paths,
+    main_states,
+    impact_class="TEST_ONLY",
+    run_kw=None,
+    **port_kw,
+):
+    m0_sha = "00" * 20
+    initial_ev = _base_evidence(base_sha=m0_sha, current_main_sha=m0_sha)
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    port = SpyGitHubCompletionPort(
+        main_states=main_states,
+        default_pr_head="b" * 40,
+        tree_shas={sha: tree for sha, tree in main_states} | {m0_sha: m0_sha},
+        default_changed_paths=changed_paths,
+        **port_kw,
+    )
+    _ac4_patch_requalifier(monkeypatch, impact_class=impact_class)
+    monkeypatch.setattr(
+        "nexus.orchestrator.github_completion_loop.resolve_durable_merge_authorization",
+        lambda *a, **k: evaluate_action(ctx, req),
+    )
+    clock = _FakeClock()
+    port.fake_clock = clock
+    result = run_github_completion_loop(
+        initial_evidence=initial_ev,
+        request=req,
+        port=port,
+        monotonic_clock=clock,
+        sleep_fn=clock.sleep,
+        **(run_kw or {}),
+    )
+    return result, port, initial_ev
+
+
+_M1 = ("11" * 20, "11" * 20)
+_M2 = ("22" * 20, "22" * 20)
+_I1 = "01" * 20
+_I2 = "02" * 20
+
+
+def test_issue1384_ac4_test_impact_only_completes_with_zero_reacceptance_on_green_gate(
+    monkeypatch,
+):
+    """TEST_IMPACT-only drift + green exact-head impact gate on I_n -> merged, 0 re-acceptances."""
+    result, port, initial_ev = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        main_states=[_M1, _M1, _M1],
+    )
+
+    assert result.outcome is CompletionLoopOutcome.COMPLETED, result.reason
+    assert result.generation == 1
+    assert port.revalidation_calls == []  # host never runs pytest
+    assert port.head_check_runs_calls == [_I1]
+    assert result.evidence.independent_acceptance_hash == initial_ev.independent_acceptance_hash
+    assert result.evidence.candidate == initial_ev.candidate
+    assert len(port.cas_merge_calls) == 1
+    assert port.cas_merge_calls[0]["expected_head_sha"] == _I1
+    # The deferral is bound into the generation's integration requalification hash.
+    assert result.details["test_impact_deferral"]["deferred_generations"] == [1]
+
+
+@pytest.mark.parametrize(
+    ("run_specs", "reason_token"),
+    [
+        ([(_I1, "failure", "completed")], "IMPACT_GATE_NOT_GREEN"),
+        ([(_I1, None, "in_progress")], "IMPACT_GATE_NOT_GREEN"),
+        # status mutation: a not-completed run with a success conclusion still blocks.
+        ([(_I1, "success", "in_progress")], "IMPACT_GATE_NOT_GREEN"),
+        ([(_I1, "success", "queued")], "IMPACT_GATE_NOT_GREEN"),
+        ([(_I1, "success", "completed"), (_I1, "failure", "completed")], "IMPACT_GATE_NOT_GREEN"),
+        ([], "IMPACT_GATE_MISSING"),
+        # A green run reported for another (earlier) integration head never counts for I_1.
+        ([("0f" * 20, "success", "completed")], "IMPACT_GATE_STALE"),
+    ],
+    ids=[
+        "red",
+        "pending",
+        "not-completed-success",
+        "queued-success",
+        "red-among-green",
+        "missing",
+        "stale-other-head",
+    ],
+)
+def test_issue1384_ac4_red_missing_or_stale_impact_gate_blocks_merge(
+    monkeypatch, run_specs, reason_token
+):
+    runs = [_impact_gate_run(h, conclusion=c, status=st) for h, c, st in run_specs]
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        main_states=[_M1, _M1, _M1, _M1],
+        head_check_runs={_I1: runs},
+    )
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert reason_token in result.reason
+    assert "TEST_IMPACT_DEFERRED" in result.reason
+    assert port.revalidation_calls == []
+    assert port.cas_merge_calls == []
+
+
+def test_issue1384_ac4_stale_i_n_minus_1_gate_never_counts_for_i_n(monkeypatch):
+    """I_1 had a green gate; main moved; I_2's live check-runs only carry the I_1 run -> no merge."""
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        main_states=[_M1, _M2, _M2, _M2, _M2, _M2],
+        head_check_runs={_I1: [_impact_gate_run(_I1)], _I2: [_impact_gate_run(_I1)]},
+    )
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "IMPACT_GATE_STALE" in result.reason
+    assert set(port.head_check_runs_calls) == {_I2}  # polled while absent, never I_1
+    assert port.cas_merge_calls == []
+
+
+def test_issue1384_ac4_red_gate_follows_bounded_requalification_when_main_moves(monkeypatch):
+    """Red gate on I_1 while main moved -> re-enter loop (bounded); green gate on I_2 merges."""
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        # gen1 start, gen1 post-checks, gate re-read (moved), gen2 start, gen2 post-checks
+        main_states=[_M1, _M1, _M2, _M2, _M2, _M2],
+        head_check_runs={_I1: [_impact_gate_run(_I1, conclusion="failure")]},
+    )
+
+    assert result.outcome is CompletionLoopOutcome.COMPLETED, result.reason
+    assert result.generation == 2
+    assert port.head_check_runs_calls == [_I1, _I2]
+    assert len(port.cas_merge_calls) == 1
+    assert port.cas_merge_calls[0]["expected_head_sha"] == _I2
+    assert port.revalidation_calls == []
+
+
+@pytest.mark.parametrize(
+    "dep_path", ["pyproject.toml", "uv.lock", "pytest.ini", "pyrightconfig.json", "ruff.toml"]
+)
+def test_issue1384_ac4_dependency_file_movement_requires_fresh_acceptance(monkeypatch, dep_path):
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=tuple(sorted(("tests/unit/test_runner.py", dep_path))),
+        main_states=[_M1, _M1, _M1],
+    )
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "FRESH_CANDIDATE_ACCEPTANCE_REQUIRED:TEST_IMPACT" in result.reason
+    assert dep_path in result.reason
+    assert port.revalidation_calls == []
+    assert port.materialize_calls == []
+    assert port.head_check_runs_calls == []
+    assert port.cas_merge_calls == []
+
+
+def test_issue1384_ac4_authority_drift_with_test_change_still_blocks(monkeypatch):
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("AGENTS.md", "tests/unit/test_runner.py"),
+        main_states=[_M1, _M1, _M1],
+    )
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "REQUALIFICATION_BLOCKED" in result.reason
+    assert port.revalidation_calls == []
+    assert port.materialize_calls == []
+    assert port.cas_merge_calls == []
+
+
+def test_issue1384_ac4_transport_drift_with_test_change_keeps_host_fail_closed(monkeypatch):
+    """Mixed TEST_IMPACT + TRANSPORT keeps the pre-AC4 host path; a fail-closed host blocks."""
+    failing = {
+        dim: make_dimension_revalidation_receipt(
+            dimension=dim,
+            generation=1,
+            old_main_sha="00" * 20,
+            new_main_sha=_M1[0],
+            source_candidate_commit_sha="b" * 40,
+            source_candidate_tree_sha="c" * 40,
+            passed=False,
+        )
+        for dim in ("TEST_IMPACT", "TRANSPORT_DRIFT")
+    }
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("nexus/providers/transport_example.py", "tests/unit/test_runner.py"),
+        main_states=[_M1, _M1, _M1],
+        impact_class="CORE_RUNTIME",
+        revalidation_receipts=failing,
+    )
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "DIMENSION_REVALIDATION_FAILED:TEST_IMPACT" in result.reason
+    assert port.revalidation_calls == ["TEST_IMPACT"]
+    assert port.materialize_calls == []
+    assert port.cas_merge_calls == []
+
+
+def test_issue1384_ac4_semantic_overlap_with_test_change_keeps_host_path(monkeypatch):
+    """Candidate-owned path changed on main -> no deferral; host revalidation is still required."""
+    m0_sha = "00" * 20
+    initial_ev = _base_evidence(
+        base_sha=m0_sha, current_main_sha=m0_sha, changed_paths=("nexus/a.py",)
+    )
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    port = SpyGitHubCompletionPort(
+        main_states=[_M1, _M1, _M1],
+        default_pr_head="b" * 40,
+        default_changed_paths=("nexus/a.py", "tests/unit/test_runner.py"),
+        revalidation_receipts={
+            "SEMANTIC_OVERLAP": make_dimension_revalidation_receipt(
+                dimension="SEMANTIC_OVERLAP",
+                generation=1,
+                old_main_sha=m0_sha,
+                new_main_sha=_M1[0],
+                source_candidate_commit_sha="b" * 40,
+                source_candidate_tree_sha="c" * 40,
+                passed=False,
+            )
+        },
+    )
+    _ac4_patch_requalifier(monkeypatch, impact_class="CORE_RUNTIME")
+    result = run_github_completion_loop(initial_evidence=initial_ev, request=req, port=port)
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "DIMENSION_REVALIDATION_FAILED:SEMANTIC_OVERLAP" in result.reason
+    assert port.revalidation_calls == ["SEMANTIC_OVERLAP"]
+    assert port.cas_merge_calls == []
+
+
+def test_issue1384_ac4_port_without_live_check_run_reader_blocks(monkeypatch):
+    """A host port that cannot read live check-runs cannot satisfy the deferral -> no merge."""
+
+    class _NoCheckRunPort(SpyGitHubCompletionPort):
+        read_head_check_runs = None  # type: ignore[assignment]
+
+    m0_sha = "00" * 20
+    initial_ev = _base_evidence(base_sha=m0_sha, current_main_sha=m0_sha)
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    port = _NoCheckRunPort(
+        main_states=[_M1, _M1, _M1, _M1],
+        default_pr_head="b" * 40,
+        default_changed_paths=("tests/unit/test_runner.py",),
+    )
+    _ac4_patch_requalifier(monkeypatch)
+    monkeypatch.setattr(
+        "nexus.orchestrator.github_completion_loop.resolve_durable_merge_authorization",
+        lambda *a, **k: evaluate_action(ctx, req),
+    )
+    result = run_github_completion_loop(initial_evidence=initial_ev, request=req, port=port)
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "IMPACT_GATE_PORT_UNAVAILABLE" in result.reason
+    assert port.cas_merge_calls == []
+
+
+def test_issue1384_ac4_dependency_guard_reuses_pr_impact_gate_dependency_files(monkeypatch):
+    """The guard has one authority: pr_impact_gate.DEPENDENCY_FILES (not a private list)."""
+    import scripts.ops.pr_impact_gate as pig
+
+    monkeypatch.setattr(pig, "DEPENDENCY_FILES", pig.DEPENDENCY_FILES | {"tests/conftest.py"})
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/conftest.py",),
+        main_states=[_M1, _M1, _M1],
+    )
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "FRESH_CANDIDATE_ACCEPTANCE_REQUIRED:TEST_IMPACT" in result.reason
+    assert "tests/conftest.py" in result.reason
+    assert port.materialize_calls == []
+
+
+@pytest.mark.parametrize(
+    ("foreign_kw", "label"),
+    [
+        ({"app_id": 999999}, "other-app"),
+        ({"workflow_path": ".github/workflows/forged.yml"}, "other-workflow"),
+        ({"app_id": 999999, "workflow_path": ".github/workflows/forged.yml"}, "both"),
+    ],
+    ids=lambda v: v if isinstance(v, str) else None,
+)
+def test_issue1384_ac4_forged_same_name_gate_run_does_not_satisfy(monkeypatch, foreign_kw, label):
+    """A green same-named run from another app/workflow is ignored -> gate MISSING, no merge."""
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        main_states=[_M1, _M1, _M1, _M1],
+        head_check_runs={_I1: [_impact_gate_run(_I1, **foreign_kw)]},
+    )
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED, label
+    assert "TEST_IMPACT_DEFERRED_IMPACT_GATE_MISSING" in result.reason
+    assert port.cas_merge_calls == []
+
+
+def test_issue1384_ac4_foreign_red_run_is_ignored_when_genuine_run_is_green(monkeypatch):
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        main_states=[_M1, _M1, _M1],
+        head_check_runs={
+            _I1: [
+                _impact_gate_run(_I1, conclusion="failure", app_id=999999),
+                _impact_gate_run(
+                    _I1, conclusion="failure", workflow_path=".github/workflows/other.yml"
+                ),
+                _impact_gate_run(_I1),
+            ]
+        },
+    )
+
+    assert result.outcome is CompletionLoopOutcome.COMPLETED, result.reason
+    assert result.details["test_impact_deferral"]["app_id"] == 15368
+    assert (
+        result.details["test_impact_deferral"]["workflow_path"]
+        == ".github/workflows/trusted-impact-gate.yml"
+    )
+
+
+def test_issue1384_ac4_observation_requires_app_id_and_workflow_path():
+    from pydantic import ValidationError
+
+    from nexus.orchestrator.github_completion_loop import HeadCheckRunObservation
+
+    base = {
+        "name": "Trusted impact gate (default branch)",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": _I1,
+    }
+    for bad in (
+        {},
+        {"app_id": 15368},
+        {"workflow_path": ".github/workflows/pytest.yml"},
+        {"app_id": 0, "workflow_path": ".github/workflows/pytest.yml"},
+        {"app_id": "15368", "workflow_path": ".github/workflows/pytest.yml"},
+        {"app_id": 15368, "workflow_path": " .github/workflows/x.yml"},
+        {"app_id": 15368, "workflow_path": ".github/workflows/../x.yml"},
+        {"app_id": 15368, "workflow_path": "/.github/workflows/pytest.yml"},
+    ):
+        with pytest.raises(ValidationError):
+            HeadCheckRunObservation(**base, **bad)
+
+
+def _ac4_deferred_then_docs_only_port(head_check_runs):
+    """gen1: test-only movement (deferred); main moves during gen1 CI; gen2: docs-only."""
+    m0 = "00" * 20
+    return SpyGitHubCompletionPort(
+        # gen1 start, gen1 post-checks (moved), gen2 start, gen2 post-checks, gate re-read
+        main_states=[_M1, _M2, _M2, _M2, _M2, _M2],
+        default_pr_head="b" * 40,
+        tree_shas={m0: m0, _M1[0]: _M1[1], _M2[0]: _M2[1]},
+        changed_main_paths_map={
+            (m0, _M1[0]): ("tests/unit/test_runner.py",),
+            (_M1[0], _M2[0]): ("docs/unrelated.md",),
+        },
+        head_check_runs=head_check_runs,
+    )
+
+
+@pytest.mark.parametrize(
+    ("runs_for_i2", "expect_completed"),
+    [(None, True), ([], False), ("I1-only", False), ("red", False)],
+    ids=["green", "missing", "stale-i1", "red"],
+)
+def test_issue1384_ac4_deferral_persists_into_later_irrelevant_generation(
+    monkeypatch, runs_for_i2, expect_completed
+):
+    """gen n deferred TEST_IMPACT; gen n+1 is docs-only, yet I_(n+1) still needs its own gate."""
+    m0 = "00" * 20
+    initial_ev = _base_evidence(base_sha=m0, current_main_sha=m0)
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    runs_map = {_I1: [_impact_gate_run(_I1)]}
+    if runs_for_i2 == "I1-only":
+        runs_map[_I2] = [_impact_gate_run(_I1)]
+    elif runs_for_i2 == "red":
+        runs_map[_I2] = [_impact_gate_run(_I2, conclusion="failure")]
+    elif runs_for_i2 is not None:
+        runs_map[_I2] = runs_for_i2
+    port = _ac4_deferred_then_docs_only_port(runs_map)
+    _ac4_patch_requalifier(monkeypatch)
+    monkeypatch.setattr(
+        "nexus.orchestrator.github_completion_loop.resolve_durable_merge_authorization",
+        lambda *a, **k: evaluate_action(ctx, req),
+    )
+    clock = _FakeClock()
+    result = run_github_completion_loop(
+        initial_evidence=initial_ev,
+        request=req,
+        port=port,
+        monotonic_clock=clock,
+        sleep_fn=clock.sleep,
+    )
+
+    assert port.revalidation_calls == []
+    # gate is read for I_(n+1) (possibly polled), never skipped and never for I_n
+    assert set(port.head_check_runs_calls) == {_I2}
+    if expect_completed:
+        assert result.outcome is CompletionLoopOutcome.COMPLETED, result.reason
+        assert result.generation == 2
+        assert result.details["test_impact_deferral"]["deferred_generations"] == [1]
+        assert result.details["test_impact_deferral"]["verified_head_sha"] == _I2
+        assert port.cas_merge_calls[0]["expected_head_sha"] == _I2
+    else:
+        assert result.outcome is CompletionLoopOutcome.BLOCKED
+        assert "TEST_IMPACT_DEFERRED_IMPACT_GATE" in result.reason
+        assert port.cas_merge_calls == []
+
+
+def test_issue1384_ac4_main_state_read_failure_in_gate_branch_blocks_structured(monkeypatch):
+    """A failing main re-read after a red gate returns a structured BLOCKED, not an exception."""
+
+    class _MainReadFailsThirdCall(SpyGitHubCompletionPort):
+        main_reads = 0
+
+        def read_main_state(self):
+            self.main_reads += 1
+            if self.main_reads == 3:  # gen1 start, gen1 post-checks, gate-branch re-read
+                raise RuntimeError("github 502")
+            return super().read_main_state()
+
+    m0 = "00" * 20
+    initial_ev = _base_evidence(base_sha=m0, current_main_sha=m0)
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    port = _MainReadFailsThirdCall(
+        main_states=[_M1, _M1, _M1, _M1],
+        default_pr_head="b" * 40,
+        default_changed_paths=("tests/unit/test_runner.py",),
+        head_check_runs={_I1: [_impact_gate_run(_I1, conclusion="failure")]},
+    )
+    _ac4_patch_requalifier(monkeypatch)
+    monkeypatch.setattr(
+        "nexus.orchestrator.github_completion_loop.resolve_durable_merge_authorization",
+        lambda *a, **k: evaluate_action(ctx, req),
+    )
+    result = run_github_completion_loop(initial_evidence=initial_ev, request=req, port=port)
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "TEST_IMPACT_DEFERRED_IMPACT_GATE_NOT_GREEN:MAIN_STATE_READ_FAILED" in result.reason
+    assert "github 502" in result.reason
+    assert port.cas_merge_calls == []
+
+
+@pytest.mark.parametrize(
+    ("run_specs", "expect_completed"),
+    [
+        ([("success", "completed"), ("cancelled", "completed")], True),
+        ([("cancelled", "completed"), ("success", "completed")], True),
+        ([("skipped", "completed"), ("success", "completed")], True),
+        ([("cancelled", "completed")], False),
+        ([("skipped", "completed")], False),
+        ([("success", "completed"), ("timed_out", "completed")], False),
+        ([("success", "completed"), ("action_required", "completed")], False),
+        ([("success", "completed"), ("failure", "completed")], False),
+        ([("success", "completed"), ("neutral", "completed")], False),
+        ([("success", "completed"), (None, "in_progress")], False),
+        ([("success", "completed"), (None, "queued")], False),
+    ],
+    ids=[
+        "success+cancelled",
+        "cancelled+success",
+        "skipped+success",
+        "cancelled-only",
+        "skipped-only",
+        "success+timed_out",
+        "success+action_required",
+        "success+failure",
+        "success+neutral",
+        "success+pending",
+        "success+queued",
+    ],
+)
+def test_issue1384_ac4_gate_liveness_cancelled_is_ignored_beside_success(
+    monkeypatch, run_specs, expect_completed
+):
+    """F3: >=1 genuine success, no veto conclusion, nothing pending; cancelled/skipped ignored."""
+    runs = [_impact_gate_run(_I1, conclusion=c, status=st) for c, st in run_specs]
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        main_states=[_M1, _M1, _M1, _M1],
+        head_check_runs={_I1: runs},
+    )
+
+    if expect_completed:
+        assert result.outcome is CompletionLoopOutcome.COMPLETED, result.reason
+        assert len(port.cas_merge_calls) == 1
+    else:
+        assert result.outcome is CompletionLoopOutcome.BLOCKED
+        assert "TEST_IMPACT_DEFERRED_IMPACT_GATE_NOT_GREEN" in result.reason
+        assert port.cas_merge_calls == []
+
+
+def test_issue1384_ac4_pytest_yml_exact_base_gate_is_not_the_trust_anchor(monkeypatch):
+    """F2: a green pull_request "Exact-base impact gate" (head-defined YAML) does not satisfy AC4."""
+    from nexus.orchestrator.github_completion_loop import HeadCheckRunObservation
+
+    head_defined = HeadCheckRunObservation(
+        name="Exact-base impact gate",
+        status="completed",
+        conclusion="success",
+        head_sha=_I1,
+        app_id=15368,
+        workflow_path=".github/workflows/pytest.yml",
+    )
+    # Same trusted name but from the head-defined pytest workflow: ignored too.
+    renamed_in_head = _impact_gate_run(_I1, workflow_path=".github/workflows/pytest.yml")
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        main_states=[_M1, _M1, _M1, _M1],
+        head_check_runs={_I1: [head_defined, renamed_in_head]},
+    )
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "TEST_IMPACT_DEFERRED_IMPACT_GATE_MISSING" in result.reason
+    assert port.cas_merge_calls == []
+
+
+def test_issue1384_ac4_dependency_files_import_failure_blocks(monkeypatch):
+    """F4: if pr_impact_gate.DEPENDENCY_FILES cannot be imported, the deferral fails closed."""
+    import scripts.ops.pr_impact_gate as pig
+
+    monkeypatch.delattr(pig, "DEPENDENCY_FILES")
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        main_states=[_M1, _M1, _M1],
+    )
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert result.reason == "TEST_IMPACT_DEPENDENCY_FILES_UNAVAILABLE"
+    assert port.materialize_calls == []
+    assert port.cas_merge_calls == []
+
+
+# Real bridge wire format (devspace #513 github-completion-host.ts HeadCheckRunWire,
+# parsed by scripts/github_completion_bridge.py::parse_head_check_runs).  Runs from
+# trusted-impact-gate.yml share one pull_request_target check suite on the PR head.
+_BRIDGE_WIRE_CHECK_RUNS_JSON = """
+{"check_runs": [
+  {"name": "Trusted impact controller (default branch)", "status": "completed",
+   "conclusion": "success", "head_sha": "%(sha)s", "app_id": 15368,
+   "app_slug": "github-actions", "workflow_path": ".github/workflows/trusted-impact-gate.yml"},
+  {"name": "Trusted impact gate (default branch)", "status": "completed",
+   "conclusion": "success", "head_sha": "%(sha)s", "app_id": 15368,
+   "app_slug": "github-actions", "workflow_path": ".github/workflows/trusted-impact-gate.yml"},
+  {"name": "Exact-base impact gate", "status": "completed", "conclusion": "success",
+   "head_sha": "%(sha)s", "app_id": 15368, "app_slug": "github-actions",
+   "workflow_path": ".github/workflows/pytest.yml"},
+  {"name": "Trusted impact gate (default branch)", "status": "completed",
+   "conclusion": "failure", "head_sha": "%(sha)s", "app_id": 7,
+   "app_slug": "some-other-app", "workflow_path": ""},
+  {"name": "CodeQL", "status": "completed", "conclusion": "neutral",
+   "head_sha": "%(sha)s", "app_id": 57789, "app_slug": "github-advanced-security",
+   "workflow_path": ""}
+]}
+"""
+
+
+def _bridge_parse(payload_json: str, head_sha: str):
+    """Mirror of the bridge mapping: wire item -> real HeadCheckRunObservation."""
+    from nexus.orchestrator.github_completion_loop import HeadCheckRunObservation
+
+    payload = json.loads(payload_json)
+    return tuple(
+        HeadCheckRunObservation(
+            name=item.get("name"),
+            status=item.get("status"),
+            conclusion=item.get("conclusion"),
+            head_sha=item.get("head_sha"),
+            app_id=item["app_id"],
+            workflow_path=item["workflow_path"],
+        )
+        for item in payload["check_runs"]
+        if item.get("head_sha") == head_sha
+    )
+
+
+def test_issue1384_ac4_bridge_wire_non_actions_run_contract(monkeypatch):
+    """F1 end-to-end: bridge JSON with workflow_path "" (non-Actions app) parses through the
+    real model, cannot veto the gate, and the genuine trusted verdict satisfies it."""
+    observations = _bridge_parse(_BRIDGE_WIRE_CHECK_RUNS_JSON % {"sha": _I1}, _I1)
+    assert len(observations) == 5
+    assert [o.workflow_path for o in observations if o.app_id != 15368] == ["", ""]
+
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        main_states=[_M1, _M1, _M1],
+        head_check_runs={_I1: list(observations)},
+    )
+
+    assert result.outcome is CompletionLoopOutcome.COMPLETED, result.reason
+    deferral = result.details["test_impact_deferral"]
+    assert deferral["check_name"] == "Trusted impact gate (default branch)"
+    assert deferral["workflow_path"] == ".github/workflows/trusted-impact-gate.yml"
+    assert deferral["exact_head_run_count"] == 1
+
+
+# ==============================================================================
+# Issue 1384 AC4: bounded wait for the trusted verdict before CAS
+# ==============================================================================
+
+
+def _sequenced_runs(*responses):
+    """Return successive live check-run responses; the last one repeats."""
+    queue = list(responses)
+
+    def _next():
+        return queue.pop(0) if len(queue) > 1 else queue[0]
+
+    return _next
+
+
+def test_issue1384_ac4_wait_verdict_appears_after_polls_and_merges(monkeypatch):
+    runs = _sequenced_runs(
+        [],  # verdict check-run not created yet (needed jobs still running)
+        [],
+        [_impact_gate_run(_I1, conclusion=None, status="queued")],
+        [_impact_gate_run(_I1, conclusion=None, status="in_progress")],
+        [_impact_gate_run(_I1)],
+    )
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        main_states=[_M1],
+        head_check_runs={_I1: runs},
+    )
+
+    assert result.outcome is CompletionLoopOutcome.COMPLETED, result.reason
+    assert port.fake_clock.sleeps == [30.0] * 4
+    assert port.head_check_runs_calls == [_I1] * 5
+    assert result.details["test_impact_deferral"]["gate_polls"] == 4
+    assert len(port.cas_merge_calls) == 1
+    assert port.cas_merge_calls[0]["expected_head_sha"] == _I1
+
+
+@pytest.mark.parametrize(
+    ("spec", "reason_token"),
+    [
+        ([], "IMPACT_GATE_MISSING"),
+        ([("x", None, "in_progress")], "IMPACT_GATE_NOT_GREEN"),
+        ([("0f" * 20, "success", "completed")], "IMPACT_GATE_STALE"),
+    ],
+    ids=["absent", "pending", "stale-only"],
+)
+def test_issue1384_ac4_wait_timeout_blocks_and_never_merges(monkeypatch, spec, reason_token):
+    runs = [_impact_gate_run(_I1 if h == "x" else h, conclusion=c, status=st) for h, c, st in spec]
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        main_states=[_M1],
+        head_check_runs={_I1: runs},
+    )
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert f"TEST_IMPACT_DEFERRED_{reason_token}" in result.reason
+    # 30-minute cap at a fixed 30 s interval: exactly 60 polls, never past the cap.
+    assert port.fake_clock.sleeps == [30.0] * 60
+    assert sum(port.fake_clock.sleeps) <= 1800.0
+    assert result.details["gate_polls"] == 60
+    assert port.cas_merge_calls == []
+
+
+def test_issue1384_ac4_wait_is_capped_by_remaining_time_budget(monkeypatch):
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        main_states=[_M1],
+        head_check_runs={_I1: []},
+        run_kw={"max_elapsed_seconds": 200.0},
+    )
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "TEST_IMPACT_DEFERRED_IMPACT_GATE_MISSING" in result.reason
+    assert port.fake_clock.sleeps == [30.0] * 6  # 6 * 30 = 180 <= 200 < 210
+    assert port.cas_merge_calls == []
+
+
+def test_issue1384_ac4_main_moving_during_wait_reenters_requalification(monkeypatch):
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        # gen1 start, gen1 post-checks, poll 1 (same), poll 2 (moved), gen2 start, ...
+        main_states=[_M1, _M1, _M1, _M2, _M2],
+        head_check_runs={_I1: [], _I2: [_impact_gate_run(_I2)]},
+    )
+
+    assert result.outcome is CompletionLoopOutcome.COMPLETED, result.reason
+    assert result.generation == 2
+    assert port.fake_clock.sleeps == [30.0, 30.0]
+    assert port.head_check_runs_calls == [_I1, _I1, _I2]
+    assert len(port.materialize_calls) == 2
+    assert len(port.cas_merge_calls) == 1
+    assert port.cas_merge_calls[0]["expected_head_sha"] == _I2
+    assert port.revalidation_calls == []
+
+
+@pytest.mark.parametrize(
+    "red_conclusion", ["failure", "timed_out", "action_required"], ids=lambda c: c
+)
+def test_issue1384_ac4_red_verdict_during_wait_blocks_immediately(monkeypatch, red_conclusion):
+    runs = _sequenced_runs(
+        [_impact_gate_run(_I1, conclusion=None, status="in_progress")],
+        [_impact_gate_run(_I1, conclusion=red_conclusion)],
+        [_impact_gate_run(_I1)],  # would turn green later: must never be reached
+    )
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        main_states=[_M1],
+        head_check_runs={_I1: runs},
+    )
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "TEST_IMPACT_DEFERRED_IMPACT_GATE_NOT_GREEN" in result.reason
+    assert port.fake_clock.sleeps == [30.0]
+    assert port.head_check_runs_calls == [_I1, _I1]
+    assert port.cas_merge_calls == []
+
+
+def test_issue1384_ac4_veto_beside_pending_does_not_wait(monkeypatch):
+    result, port, _ = _ac4_run(
+        monkeypatch,
+        changed_paths=("tests/unit/test_runner.py",),
+        main_states=[_M1],
+        head_check_runs={
+            _I1: [
+                _impact_gate_run(_I1, conclusion="failure"),
+                _impact_gate_run(_I1, conclusion=None, status="in_progress"),
+            ]
+        },
+    )
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "TEST_IMPACT_DEFERRED_IMPACT_GATE_NOT_GREEN" in result.reason
+    assert port.fake_clock.sleeps == []
+    assert port.cas_merge_calls == []
+
+
+def test_issue1384_ac4_main_read_failure_during_wait_blocks_structured(monkeypatch):
+    class _FailOnPoll(SpyGitHubCompletionPort):
+        main_reads = 0
+
+        def read_main_state(self):
+            self.main_reads += 1
+            if self.main_reads == 3:  # gen1 start, gen1 post-checks, first poll
+                raise RuntimeError("github 503")
+            return super().read_main_state()
+
+    m0 = "00" * 20
+    initial_ev = _base_evidence(base_sha=m0, current_main_sha=m0)
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    port = _FailOnPoll(
+        main_states=[_M1],
+        default_pr_head="b" * 40,
+        default_changed_paths=("tests/unit/test_runner.py",),
+        head_check_runs={_I1: []},
+    )
+    _ac4_patch_requalifier(monkeypatch)
+    monkeypatch.setattr(
+        "nexus.orchestrator.github_completion_loop.resolve_durable_merge_authorization",
+        lambda *a, **k: evaluate_action(ctx, req),
+    )
+    clock = _FakeClock()
+    result = run_github_completion_loop(
+        initial_evidence=initial_ev,
+        request=req,
+        port=port,
+        monotonic_clock=clock,
+        sleep_fn=clock.sleep,
+    )
+
+    assert result.outcome is CompletionLoopOutcome.BLOCKED
+    assert "TEST_IMPACT_DEFERRED_IMPACT_GATE_MISSING:MAIN_STATE_READ_FAILED" in result.reason
+    assert "github 503" in result.reason
+    assert port.cas_merge_calls == []

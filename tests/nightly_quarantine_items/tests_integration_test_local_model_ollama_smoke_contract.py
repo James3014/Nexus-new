@@ -2,13 +2,5 @@
 
 from __future__ import annotations
 
-ENTRY: dict[str, object] = {
-    "file": "tests/integration/test_local_model_ollama_smoke_contract.py",
-    "disposition": "quarantine",
-    "issue": "#1924",
-    "cause": "legacy local_heal/capability routing expectations predate the ASSISTED_CANONICAL topology and current capability planner; stale expectations, needs owner fix-or-delete decision",
-    "tests": (
-        "test_ollama_smoke_advisory_contract",
-        "test_ollama_smoke_candidate_contract",
-    ),
-}
+# Tombstone (#1924): every listed id passes with a planner snapshot bound by build_execution_plan(plan, task_id=...) to the request task_id (#2032/#2050).
+ENTRY = None

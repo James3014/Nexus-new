@@ -3117,6 +3117,8 @@ def test_hyper_guard_fallback_preserves_gateway_token_source(tmp_path: Path, mon
 
 
 def test_run_auto_flow_populates_autoreason_from_candidate_summaries(tmp_path: Path, monkeypatch):
+    """Contract: autoreason is populated from candidate summaries; under #453 its receipt stays
+    fail-closed, so no capability completes the learning funnel and nothing is promoted."""
     target = tmp_path / "target.py"
     target.write_text("VALUE = 1\n", encoding="utf-8")
     test_file = tmp_path / "test_target.py"
@@ -3191,7 +3193,7 @@ def test_run_auto_flow_populates_autoreason_from_candidate_summaries(tmp_path: P
     assert ar["winner_role"] == "AB"
     assert isinstance(ar["borda_scores"], dict)
     receipts = {item["name"]: item for item in payload["nexus_usage_trace"]["capability_receipts"]}
-    assert receipts["autoreason"]["public_claim_safe"] is True
+    _assert_receipt_held_fail_closed(receipts["autoreason"])
     assert payload["research_preflight"]["present"] is True
     assert payload["research_preflight"]["requires_evidence"] is False
     assert payload["research_preflight"]["decision"] == "allow_with_research_receipt"
@@ -3237,10 +3239,13 @@ def test_run_auto_flow_populates_autoreason_from_candidate_summaries(tmp_path: P
     assert projection["model_training_export"]["preference_pair_count"] >= 1
     training_export = tmp_path / projection["model_training_export"]["path"]
     assert training_export.exists()
-    assert projection["promoted_policy"]["schema_version"] == "nexus_promoted_learning_policy.v1"
-    assert "promoted_policy_path" in projection
-    promoted_policy = tmp_path / projection["promoted_policy_path"]
-    assert promoted_policy.exists()
+    # Promotion needs a complete capability funnel (outcome_contributed), which #453 withholds.
+    decision = projection["dual_learning_decision"]
+    assert decision["nexus_action"] == "INGEST_SHADOW"
+    assert decision["promotion_ready"] is False
+    assert "no_complete_capability_funnel" in decision["reasons"]
+    assert projection["promoted_policy"] == {"status": "not_promoted"}
+    assert "promoted_policy_path" not in projection
     assert projection["outcome_memory"]["status"] == "PASS"
     outcome_history = tmp_path / projection["outcome_memory"]["storage_path"]
     outcome_policy = tmp_path / projection["outcome_memory"]["policy_path"]
@@ -3249,6 +3254,8 @@ def test_run_auto_flow_populates_autoreason_from_candidate_summaries(tmp_path: P
 
 
 def test_auto_flow_writes_semantic_research_runtime_receipts(tmp_path: Path, monkeypatch):
+    """Contract: the semantic research runtime writes evidenced, gate-passed receipts that stay
+    fail-closed under #453."""
     target = tmp_path / "target.py"
     target.write_text("VALUE = 1\n", encoding="utf-8")
     test_file = tmp_path / "test_target.py"
@@ -3362,11 +3369,11 @@ def test_auto_flow_writes_semantic_research_runtime_receipts(tmp_path: Path, mon
         "external_doc_scout",
         "formal_report",
     ):
-        assert receipts[name]["public_claim_safe"] is True, receipts[name]
+        _assert_receipt_held_fail_closed(receipts[name])
         assert receipts[name]["evidence_refs"]
     capabilities = payload["nexus_usage_trace"]["capabilities"]
-    assert receipts["semantic_searcher"]["public_claim_safe"] is True
-    assert receipts["belief"]["public_claim_safe"] is True
+    _assert_receipt_held_fail_closed(receipts["semantic_searcher"])
+    _assert_receipt_held_fail_closed(receipts["belief"])
     semantic_ref = capabilities["semantic_searcher_refs"][0]
     assert semantic_ref.startswith("semantic:")
     assert semantic_ref in receipts["semantic_searcher"]["evidence_refs"]
@@ -3704,3 +3711,17 @@ def test_cross_module_mutation_required_does_not_use_verification_only_rescue(tm
     assert summaries[0]["source"] == "llm"
     assert "pytest failed" in summaries[0]["stdout_tail"]
     assert summaries[0]["candidate_len"] > 0
+
+
+def _assert_receipt_held_fail_closed(receipt: dict) -> None:
+    """Contract (#453 ADVISORY_ONLY_FAIL_CLOSED): a generic adapter payload cannot mint verifier
+    authority. The receipt keeps its invocation, evidence and gate pass, but it never contributes
+    an outcome and is never public_claim_safe until an authenticated upstream verifier authority
+    is bound."""
+    assert receipt["selected"] is True
+    assert receipt["invoked"] is True
+    assert receipt["evidence_present"] is True
+    assert receipt["gate_passed"] is True
+    assert receipt["failure_reason"] == ""
+    assert receipt["outcome_contributed"] is False
+    assert receipt["public_claim_safe"] is False

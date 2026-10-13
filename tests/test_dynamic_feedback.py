@@ -84,7 +84,15 @@ def test_pipeline_injects_audit_failure_to_repairer():
     # Run the pipeline!
     # Because of the gate logic, the first APPROVED lacks a no_change_reason, so it flips to REJECTED 
     # and populates state.metadata["last_audit_failure"]. Then attempt 2 happens.
-    result = pipeline.run("Test task", task_type="bug", context={})
+    # The runtime phase contract (S->P->D->R) is fail-closed: R cannot start from S.
+    # direct_mode advances P and D virtually so only the R/A audit loop is exercised.
+    # The composed A executor is a required fail-closed pre-audit gate and this mock engine has
+    # none; return None so the audit falls through to evaluate_audit_result, the gate under test.
+    # The R phase is now built by the composition registry (HandlerPhaseExecutor ->
+    # RepairPhaseHandler), not read from engine.phases["R"], so the stub goes on the handler.
+    with patch.object(NexusPipeline, "_run_composition_audit_phase", return_value=None), \
+         patch.object(RepairPhaseHandler, "run", mock_repairer.run):
+        result = pipeline.run("Test task", task_type="bug", context={"direct_mode": True})
     
     assert result is True, "Pipeline should succeed on the second valid attempt"
     

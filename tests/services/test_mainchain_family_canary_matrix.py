@@ -608,6 +608,8 @@ def _run_family_canary(
                 "search_table": "policy",
                 "search_limit": 3,
                 "jit_all_tools": ["read_file", "run_test", "write_file"],
+                # entropy_guard_v2 audits an output under review, never the task text.
+                "entropy_audit_text": f"Canary note for {name}: target.py compiles and verifies.",
                 "jit_token_usage": 120,
                 "mempalace_tenant_id": "family-canary",
                 "mempalace_artifact_type": "capability_evidence",
@@ -1412,7 +1414,7 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
         and r["final_status"] not in {"OK", "ARCHIVED_FAIL_CLOSED"}
     ]
     structural = (
-        len(list_planner_capability_names()) == 57
+        len(list_planner_capability_names()) == 58
         and len(prom_missing) == 0
         and probe_only == 0
         and fixture_count == 0
@@ -1430,7 +1432,7 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
             ["git", "rev-parse", "HEAD"], cwd=root, text=True
         ).strip(),
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "planner_contract_count": 57,
+        "planner_contract_count": 58,
         "promotable_count": len(promotable),
         "default_real_count": ec_counts.get("DEFAULT_REAL", 0),
         "triggered_real_count": ec_counts.get("TRIGGERED_REAL", 0),
@@ -1454,7 +1456,7 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
         },
         "execution_class_counts": dict(ec_counts),
         "local_online_projection": {
-            "planner_contract_count": 57,
+            "planner_contract_count": 58,
             "independent_local_truth": False,
             "modes": {
                 n: {
@@ -1484,8 +1486,8 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
         wm = build_wiring_matrix()
     except Exception:
         wm = {
-            "node_count": 57,
-            "contract_count": 57,
+            "node_count": 58,
+            "contract_count": 58,
             "physical_runtime_eligible": 0,
             "execution_class_counts": dict(ec_counts),
             "routing_surface_changed": False,
@@ -1493,8 +1495,8 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
     if not isinstance(wm, dict):
         wm = {}
     wm = dict(wm)
-    wm.setdefault("node_count", 57)
-    wm.setdefault("contract_count", 57)
+    wm.setdefault("node_count", 58)
+    wm.setdefault("contract_count", 58)
     wm.setdefault("execution_class_counts", dict(ec_counts))
     wm["routing_surface_changed"] = False
     # Physical target = formal REAL execution classes (DEFAULT+STAGE+TRIGGERED = 34)
@@ -1575,17 +1577,17 @@ def test_generate_closure_receipt_required() -> None:
     receipt = build_and_write_closure_receipt()
     assert RECEIPT_PATH.is_file()
     assert RECEIPT_TMP.is_file()
-    assert receipt["planner_contract_count"] == 57
-    assert receipt["promotable_count"] == 50
+    assert receipt["planner_contract_count"] == 58
+    assert receipt["promotable_count"] == 51
     assert receipt["promotable_missing_engine_count"] == 0
     assert receipt["probe_only_success_count"] == 0
     assert receipt["fixture_callable_count"] == 0
     assert receipt["routing_surface_changed"] is False
     assert receipt["public_claim_allowed"] is False
     assert receipt["structural_closure"] is True, receipt.get("blockers", [])[:10]
-    assert int(receipt.get("physical_target_count") or 0) == 34
+    assert int(receipt.get("physical_target_count") or 0) == 35
     phys = receipt.get("physical_observed_execution_coverage") or {}
-    assert int(phys.get("physical_target") or 0) == 34
+    assert int(phys.get("physical_target") or 0) == 35
     assert receipt.get("all_closure_complete") is False
     # Offline structural closure must not hide missing implementations.
     real_structural_blockers = [

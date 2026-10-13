@@ -128,9 +128,9 @@ def _context(decision: Any) -> dict[str, Any]:
     return ctx
 
 
-# "injected_fixture" joins this list with the runtime pin that contains nexus-runtime #190
-# (68e86ed); on 6782e38 the registered CLI still starts under a fixture decision.
-FAIL_CLOSED_CASES = ["absent", "physical_false", "forged_mapping"]
+# "injected_fixture" needs nexus-runtime #190 (pinned 68e86ed): a fixture decision never
+# starts the registered CLI.
+FAIL_CLOSED_CASES = ["absent", "physical_false", "injected_fixture", "forged_mapping"]
 
 
 @pytest.mark.parametrize("case", FAIL_CLOSED_CASES)

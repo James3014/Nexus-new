@@ -193,6 +193,8 @@ def _run_canary_mainchain_cached(
             "search_limit": 3,
             "jit_all_tools": ["read_file", "run_test", "write_file"],
             "jit_token_usage": 120,
+            # entropy_guard_v2 audits an output under review (never the task text).
+            "entropy_audit_text": f"Canary note for {name}: target.py compiles and verifies.",
             "mempalace_tenant_id": "family-canary",
             "mempalace_artifact_type": "capability_evidence",
             "mempalace_artifact": {

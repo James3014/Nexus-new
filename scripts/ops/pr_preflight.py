@@ -70,6 +70,7 @@ BASE_REF_NOT_ANCESTOR = "BASE_REF_NOT_ANCESTOR"
 DEPENDENCY_CONTRACT_DRIFT = "DEPENDENCY_CONTRACT_DRIFT"
 EXECUTOR_GIT_IDENTITY_MISMATCH = "EXECUTOR_GIT_IDENTITY_MISMATCH"
 MAIN_MOVED_OVER_GATE_SURFACE = "MAIN_MOVED_OVER_GATE_SURFACE"
+GOLDEN_CORPUS_UNVERIFIABLE = "GOLDEN_CORPUS_UNVERIFIABLE"
 MERGE_LANE_BINDING_MISSING = "MERGE_LANE_BINDING_MISSING"
 STATIC_NEW_REGRESSION = "NEW_REGRESSION"
 STATIC_TOOL_MISSING = "STATIC_TOOL_MISSING"
@@ -726,12 +727,14 @@ def check_git_identity(ctx: Context) -> CheckResult:
         try:
             overlap = overlap_rule(ctx.repo, merge_base, ctx.base_sha, ctx.head_sha)
         except (ValueError, subprocess.CalledProcessError) as exc:
+            unverifiable = str(exc).startswith(f"{GOLDEN_CORPUS_UNVERIFIABLE}:")
+            remedies = getattr(anchor, "CONTROLLER_FAILURE_REMEDIES", {})
             return CheckResult(
                 name,
                 FAIL,
-                EXECUTOR_GIT_IDENTITY_MISMATCH,
+                GOLDEN_CORPUS_UNVERIFIABLE if unverifiable else EXECUTOR_GIT_IDENTITY_MISMATCH,
                 f"main-moved check failed: {exc}",
-                merge_fix,
+                remedies.get(GOLDEN_CORPUS_UNVERIFIABLE, merge_fix) if unverifiable else merge_fix,
                 {"merge_base": merge_base},
             )
         data = {"merge_base": merge_base, "overlap": overlap}

@@ -77,6 +77,8 @@ def _base_route_context(*, routing_tier: str = "L1_green_lane") -> dict:
             "candidate_count":     1,
             "reasoning_mode":      "FAST",
             "task_desc":           "fix greet",
+            # The World C receipt gate is fail-closed on a missing planner decision id.
+            "planner_decision_id": "plan-n30r-v31-slices",
         },
         "verifier_command": list(VERIFIER_CMD),
         "target_file":      "f.py",
@@ -89,12 +91,14 @@ def _base_route_context(*, routing_tier: str = "L1_green_lane") -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 # Slice A: LITE success
 # ─────────────────────────────────────────────────────────────────────────────
-def test_slice_a_lite_success():
+def test_slice_a_lite_success(monkeypatch):
     """
     Slice A: LITE profile — 1 patch call, verifier passes, solved=True.
     planning_llm_allowed=False and spec_gen_allowed=False are respected
     (provider is not called for planner/spec prompts in this context).
     """
+    # World C refuses OS-temp source roots unless explicitly allowed (fail-closed gate).
+    monkeypatch.setenv("NEXUS_ARMOR_ALLOW_EPHEMERAL", "1")
     from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
 
     ctr = {"calls": 0}
@@ -148,7 +152,7 @@ def test_slice_a_lite_success():
 # ─────────────────────────────────────────────────────────────────────────────
 # Slice B: LITE → STANDARD verifier-driven recovery
 # ─────────────────────────────────────────────────────────────────────────────
-def test_slice_b_lite_to_standard_recovery():
+def test_slice_b_lite_to_standard_recovery(monkeypatch):
     """
     Slice B: LITE patch syntactically valid but wrong return → verifier fails →
     profile escalates to STANDARD → STANDARD retry → verifier passes → solved=True.
@@ -161,6 +165,8 @@ def test_slice_b_lite_to_standard_recovery():
       solved = True
       patch_count = 2 (one LITE bad, one STANDARD good)
     """
+    # World C refuses OS-temp source roots unless explicitly allowed (fail-closed gate).
+    monkeypatch.setenv("NEXUS_ARMOR_ALLOW_EPHEMERAL", "1")
     from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
 
     ctr = {"calls": 0}
@@ -229,7 +235,7 @@ def test_slice_b_lite_to_standard_recovery():
 # ─────────────────────────────────────────────────────────────────────────────
 # Slice C: FULL multi-candidate truth
 # ─────────────────────────────────────────────────────────────────────────────
-def test_slice_c_full_profile_resolved():
+def test_slice_c_full_profile_resolved(monkeypatch):
     """
     Slice C: NEXUS_FORCE_FULL_ARMOR=1 resolves profile=FULL.
 
@@ -243,6 +249,8 @@ def test_slice_c_full_profile_resolved():
     committee path is not exercised here. This slice proves FULL profile wiring only.
     Full multi-candidate evidence is left for live benchmark runs.
     """
+    # World C refuses OS-temp source roots unless explicitly allowed (fail-closed gate).
+    monkeypatch.setenv("NEXUS_ARMOR_ALLOW_EPHEMERAL", "1")
     from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
     import os as _os
 

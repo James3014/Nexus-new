@@ -2,10 +2,5 @@
 
 from __future__ import annotations
 
-ENTRY: dict[str, object] = {
-    "file": "tests/research/test_research_stack_contract.py",
-    "disposition": "quarantine",
-    "issue": "#1924",
-    "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
-    "tests": ("test_hyper_runtime_usage_backfills_receipt_when_planner_omits_hyper",),
-}
+# Tombstone (#1924): every listed id was converted to a contract test of current behaviour: evidenced, gate-passed receipts stay fail-closed (outcome_contributed and public_claim_safe False) under #453 ADVISORY_ONLY_FAIL_CLOSED; claim/delivery report the #1757 reasons.
+ENTRY = None

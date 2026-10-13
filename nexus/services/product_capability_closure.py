@@ -1,4 +1,4 @@
-"""Fail-closed verification for the 34 PRODUCT capability closure matrix.
+"""Fail-closed verification for the 35 PRODUCT capability closure matrix.
 
 This module owns closure interpretation only.  It does not select capabilities,
 add routes, or execute providers.  A runtime or harness must supply an execution
@@ -154,7 +154,7 @@ _RESOLUTION_EQUIVALENCE = {
 
 
 def expected_resolution_type(origin: str, capability: str) -> str:
-    """Return the allowed resolution assigned to a 34×2 matrix cell derived from SSOT."""
+    """Return the allowed resolution assigned to a 35×2 matrix cell derived from SSOT."""
     normalized_origin = str(origin or "").lower()
     normalized_capability = str(capability or "")
     if normalized_origin not in {"online", "local"}:
@@ -822,7 +822,7 @@ def verify_product_capability_resolution(record: Mapping[str, Any]) -> dict[str,
 
 
 def summarize_origin_matrix(records: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
-    """Summarize exactly one record for each 34 × 2 expected matrix key."""
+    """Summarize exactly one record for each 35 × 2 expected matrix key."""
 
     rows = [dict(record) for record in records]
     keyed: dict[tuple[str, str], dict[str, Any]] = {}
@@ -874,8 +874,8 @@ def summarize_origin_matrix(records: Iterable[Mapping[str, Any]]) -> dict[str, A
     complete = bool(
         not missing_keys
         and not duplicates
-        and len(rows) == 68
-        and matrix_pass == 68
+        and len(rows) == 70
+        and matrix_pass == 70
         and not route_surface_changed
     )
     return {
@@ -884,7 +884,7 @@ def summarize_origin_matrix(records: Iterable[Mapping[str, Any]]) -> dict[str, A
         "online_origin_pass": online_pass,
         "local_origin_pass": local_pass,
         "matrix_pass": matrix_pass,
-        "matrix_total": 68,
+        "matrix_total": 70,
         "complete": complete,
         "status_counts": dict(sorted(counts.items())),
         "policy_skip_count": counts.get(POLICY_SKIP_VERIFIED, 0),
@@ -899,8 +899,8 @@ def summarize_origin_matrix(records: Iterable[Mapping[str, Any]]) -> dict[str, A
     }
 
 
-if len(PRODUCT_CAPABILITIES) != 34:  # pragma: no cover - import-time contract guard
+if len(PRODUCT_CAPABILITIES) != 35:  # pragma: no cover - import-time contract guard
     raise RuntimeError(
-        "PRODUCT denominator drift: expected 34 REAL execution contracts, "
+        "PRODUCT denominator drift: expected 35 REAL execution contracts (entropy_guard_v2 added with runtime 68e86ed, #1907), "
         f"got {len(PRODUCT_CAPABILITIES)}"
     )

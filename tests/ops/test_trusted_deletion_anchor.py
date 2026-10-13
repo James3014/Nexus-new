@@ -84,7 +84,7 @@ def test_trusted_external_runtime_package_pair_is_exact() -> None:
             "nexus-runtime",
             "nexus_runtime",
             "https://github.com/James3014/nexus-runtime.git",
-            "6782e38a57360893285227f4d2a68d7c649d4319",
+            "68e86ed591de8c4a555d3588e97e5e9cf6ff9692",
         ),
     )
 
@@ -3776,7 +3776,11 @@ def _mb_history(root: Path, scenario: str) -> dict[str, object]:
     main_files: dict[str, bytes | None] = {"docs/main-added.md": b"main added\n"}
     pr_files: dict[str, bytes | None] = {"docs/pr.md": b"pr work\n"}
     if scenario == "main_golden":
-        main_files["tests/golden_behavior/corpus.py"] = b"CASES = ()\n# main moved\n"
+        main_files["tests/golden_behavior/corpus.py"] = (
+            b'CASES = ("tests/contracts/test_witness.py::test_witness",)\n# main moved\n'
+        )
+    elif scenario.startswith("main_delete:"):
+        main_files[scenario.removeprefix("main_delete:")] = None
     elif scenario.startswith("main_touch:"):
         main_files[scenario.removeprefix("main_touch:")] = b"# main moved\n"
     elif scenario == "main_selected_test":
@@ -4161,8 +4165,7 @@ def test_golden_witness_paths_are_read_statically_from_corpus_source():
         "tests/a/test_one.py",
         "tests/b/test_two.py",
     }
-    assert trusted_anchor._golden_witness_paths(b"") == set()
-    with pytest.raises(ValueError, match="Golden corpus"):
+    with pytest.raises(ValueError, match="GOLDEN_CORPUS_UNVERIFIABLE"):
         trusted_anchor._golden_witness_paths(b"def (")
 
 
@@ -4202,10 +4205,217 @@ def test_unparseable_main_corpus_fails_closed(tmp_path: Path):
     source = Path(history["source"])
     (source / "tests/golden_behavior/corpus.py").write_text("def (\n")
     _run_git(source, "commit", "-q", "--no-verify", "-am", "broken corpus")
-    with pytest.raises(ValueError, match="Golden corpus is not parseable"):
+    with pytest.raises(ValueError, match="GOLDEN_CORPUS_UNVERIFIABLE"):
         trusted_anchor._main_moved_overlap(
             source,
             str(history["fork"]),
             _run_git(source, "rev-parse", "HEAD"),
             str(history["head"]),
         )
+
+
+# --- follow-up A: Golden witness extraction must fail closed, never open ---
+
+_GOOD_WITNESS = '"tests/contracts/test_witness.py::test_witness"'
+
+
+@pytest.mark.parametrize(
+    ("source", "why"),
+    [
+        (b"", "empty"),
+        (b"CASES = ()\n", "zero witnesses"),
+        (b'CASES = (f"tests/contracts/test_{1}.py::test_witness",)\n', "f-string"),
+        (b'CASES = ("tests/contracts/" + "test_witness.py::test_witness",)\n', "concatenation"),
+        (b'CASES = (b"tests/contracts/test_witness.py::test_witness",)\n', "bytes"),
+        (b'X = "tests/contracts/test_witness.py ::bad"\n', "malformed path string"),
+        (
+            b"W = ()\n_c('GB-1', 't', 'c', 's', 'e', (), W)\n",
+            "positional automated_tests is a name",
+        ),
+        (
+            b"_c('GB-1', 't', 'c', 's', 'e', (), automated_tests=tuple(['x']))\n",
+            "keyword automated_tests is a call",
+        ),
+        (
+            b"_c('GB-1', 't', 'c', 's', 'e', (), (" + _GOOD_WITNESS.encode() + b", W))\n",
+            "non-literal element",
+        ),
+    ],
+)
+def test_golden_witness_extraction_fails_closed(source: bytes, why: str):
+    with pytest.raises(ValueError, match="GOLDEN_CORPUS_UNVERIFIABLE"):
+        trusted_anchor._golden_witness_paths(source)
+
+
+def test_golden_witness_extraction_accepts_literal_case_calls_and_helper_body():
+    source = (
+        b"def _c(case_id, t, c, s, e, a, automated_tests=()):\n"
+        b"    return GoldenCase(case_id, t, c, s, e, a, automated_tests)\n"
+        b"CASES = (\n"
+        b"    _c('GB-1', 't', 'c', 's', 'e', (), (" + _GOOD_WITNESS.encode() + b",)),\n"
+        b"    _c('GB-2', 't', 'c', 's', 'e', (), automated_tests=['tests/a/test_b.py::t']),\n"
+        b"    _c('GB-3', 't', 'c', 's', 'e', ()),\n"
+        b")\n"
+    )
+    assert trusted_anchor._golden_witness_paths(source) == {
+        "tests/contracts/test_witness.py",
+        "tests/a/test_b.py",
+    }
+
+
+def test_real_golden_corpus_extracts_witnesses():
+    paths = trusted_anchor._golden_witness_paths(
+        (ROOT / "tests/golden_behavior/corpus.py").read_bytes()
+    )
+    assert len(paths) >= 30
+    assert "tests/ops/test_trusted_merge_lane_gate.py" in paths
+
+
+def _corpus_repo(root: Path, main_corpus: bytes | None) -> tuple[Path, str, str, str]:
+    repo = root / "corpus-repo"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    _run_git(repo, "config", "user.email", "test@example.invalid")
+    _run_git(repo, "config", "user.name", "corpus-test")
+    fork = _mb_commit(repo, "fork", _mb_root_files())
+    _run_git(repo, "checkout", "-q", "-b", "feature")
+    head = _mb_commit(repo, "pr", {"docs/pr.md": b"pr\n"})
+    _run_git(repo, "checkout", "-q", "main")
+    base = _mb_commit(
+        repo,
+        "main corpus",
+        {"tests/golden_behavior/corpus.py": main_corpus, "docs/main.md": b"m\n"},
+    )
+    return repo, fork, base, head
+
+
+@pytest.mark.parametrize(
+    "main_corpus",
+    [
+        None,
+        b"CASES = ()\n",
+        b'CASES = (f"tests/contracts/test_{1}.py::test_witness",)\n',
+        b'CASES = ("tests/contracts/" + "test_witness.py::test_witness",)\n',
+    ],
+    ids=["missing-at-base-tip", "zero-witnesses", "f-string", "concatenation"],
+)
+def test_main_moved_overlap_fails_closed_on_unverifiable_base_tip_corpus(
+    tmp_path: Path, main_corpus: bytes | None
+):
+    repo, fork, base, head = _corpus_repo(tmp_path, main_corpus)
+    with pytest.raises(ValueError, match="GOLDEN_CORPUS_UNVERIFIABLE"):
+        trusted_anchor._main_moved_overlap(repo, fork, base, head)
+
+
+def test_controller_records_unverifiable_corpus_reason(tmp_path: Path):
+    history = _mb_history(tmp_path, "main_delete:tests/golden_behavior/corpus.py")
+    with pytest.raises(ValueError, match="GOLDEN_CORPUS_UNVERIFIABLE") as caught:
+        _mb_run_controller(history)
+    record = trusted_anchor._controller_failure_record(caught.value)
+    assert record["reason_code"] == "GOLDEN_CORPUS_UNVERIFIABLE"
+    assert "GOLDEN_CORPUS_UNVERIFIABLE" in trusted_anchor.CONTROLLER_FAILURE_REMEDIES
+    assert "GOLDEN_CORPUS_UNVERIFIABLE" in trusted_anchor._CONTROLLER_RECORDED_CODES
+
+
+def test_corpus_absent_everywhere_contributes_no_witnesses(tmp_path: Path):
+    repo = tmp_path / "no-corpus"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    _run_git(repo, "config", "user.email", "test@example.invalid")
+    _run_git(repo, "config", "user.name", "corpus-test")
+    fork = _mb_commit(repo, "fork", {"docs/a.md": b"a\n"})
+    _run_git(repo, "checkout", "-q", "-b", "feature")
+    head = _mb_commit(repo, "pr", {"docs/pr.md": b"pr\n"})
+    _run_git(repo, "checkout", "-q", "main")
+    base = _mb_commit(repo, "main", {"docs/main.md": b"m\n"})
+    assert trusted_anchor._main_moved_overlap(repo, fork, base, head) == []
+
+
+@pytest.mark.parametrize(
+    ("path", "gated"),
+    [
+        # The quarantine package __init__ is loader code (exec_module, imported via
+        # tests/conftest.py under NEXUS_NIGHTLY_QUARANTINE=1) and can xfail witnesses.
+        ("tests/nightly_quarantine_items/__init__.py", True),
+        ("tests/nightly_quarantine_items/tests_unit_test_orchestrator.py", False),
+        ("scripts/ops/wiring_fixtures/codeintel/app/__init__.py", False),
+    ],
+)
+def test_fixture_data_packages_are_not_import_chain_surface(path: str, gated: bool):
+    assert trusted_anchor._is_gate_oracle_surface(path) is gated
+
+
+def test_main_moved_over_quarantine_loader_fails_closed(tmp_path: Path):
+    history = _mb_history(tmp_path, "main_touch:tests/nightly_quarantine_items/__init__.py")
+    with pytest.raises(ValueError, match="MAIN_MOVED_OVER_GATE_SURFACE: merge origin/main"):
+        _mb_run_controller(history)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        b"W = ()\n_c('GB-1', 't', 'c', 's', 'e', (), ('tests/a/test_b.py::t',) + W)\n",
+        b"W = ()\n_c('GB-1', 't', 'c', 's', 'e', (), automated_tests=W + ('tests/a/test_b.py::t',))\n",
+        b"_c('GB-1', 't', 'c', 's', 'e', (), list(('tests/a/test_b.py::t',)))\n",
+        b"_c('GB-1', 't', 'c', 's', 'e', (), automated_tests=tuple(('tests/a/test_b.py::t',)))\n",
+    ],
+    ids=["positional-binop", "keyword-binop", "positional-call", "keyword-call"],
+)
+def test_automated_tests_binop_or_call_fails_closed(source: bytes):
+    with pytest.raises(ValueError, match="automated_tests is not a literal"):
+        trusted_anchor._golden_witness_paths(source)
+
+
+def test_pr2071_dependency_snapshot_transition_is_exact_and_separate() -> None:
+    assert trusted_anchor.TRUSTED_PR2071_DEPENDENCY_SNAPSHOT_TRANSITION == (
+        2071,
+        (
+            "fa6c8ebbfac872fc59715a035158ab05c3141fcd2df5363f35ac623d57decef1",
+            "c00226cb36776992cb706c0b3d8727de67b3cdc28e1b9b92f95c89aac1c6d808",
+            "55364183a2047573e0f32a423768596c7219ace8304f42a542613419b206949b",
+            "12f4f793d1a0d5da8b337f879337fe8e4d2da0fe6876fd72339e416a8b9ebb20",
+        ),
+    )
+
+
+def test_pr2071_dependency_snapshot_transition_allows_only_exact_binding(monkeypatch) -> None:
+    values = [b"trusted pyproject\n", b"trusted lock\n", b"head pyproject\n", b"head lock\n"]
+    hashes = trusted_anchor.TRUSTED_PR2071_DEPENDENCY_SNAPSHOT_TRANSITION[1]
+    original_sha = trusted_anchor._sha
+    digest_by_value = dict(zip(values, hashes, strict=True))
+    monkeypatch.setattr(
+        trusted_anchor,
+        "_sha",
+        lambda value: digest_by_value.get(value, original_sha(value)),
+    )
+
+    trusted_anchor._validate_trusted_dependency_contract(
+        values[0],
+        values[2],
+        values[1],
+        values[3],
+        pull_request_number=2071,
+        head_product_init_is_regular=True,
+    )
+
+    for index in range(4):
+        tampered = list(values)
+        tampered[index] += b"tampered"
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                tampered[0],
+                tampered[2],
+                tampered[1],
+                tampered[3],
+                pull_request_number=2071,
+                head_product_init_is_regular=True,
+            )
+
+    for other_pr in (2070, 2072):
+        with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+            trusted_anchor._validate_trusted_dependency_contract(
+                values[0],
+                values[2],
+                values[1],
+                values[3],
+                pull_request_number=other_pr,
+                head_product_init_is_regular=True,
+            )

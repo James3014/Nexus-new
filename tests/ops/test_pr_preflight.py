@@ -551,7 +551,9 @@ def _make_behind_touching(repo: Path, rel: str, *, pr_too: bool) -> None:
         _write(repo, rel, "# pr edit\n")
         _commit(repo, "pr touches " + rel)
     _git(repo, "checkout", "-q", "main")
-    _write(repo, rel, "# main edit\n")
+    target = repo / rel
+    previous = target.read_text(encoding="utf-8") if target.is_file() else ""
+    _write(repo, rel, previous + "# main edit\n")
     moved = _commit(repo, "main touches " + rel)
     _git(repo, "update-ref", "refs/remotes/origin/main", moved)
     _git(repo, "checkout", "-q", "feature")
@@ -860,3 +862,27 @@ def test_issue_marker_universe_workflow_keeps_marker_comparison(
     _code, report = _report(capsys, argv)
     check = _check(report, "issue")
     assert (check["status"], check["code"]) == ("FAIL", pf.ISSUE_MISSING_EVIDENCE_UNIVERSE)
+
+
+def test_git_identity_fails_closed_on_unverifiable_main_corpus(repo, tmp_path, capsys):
+    _git(repo, "checkout", "-q", "main")
+    _write(repo, "tests/contracts/test_witness.py", "def test_witness():\n    pass\n")
+    _write(
+        repo,
+        "tests/golden_behavior/corpus.py",
+        'CASES = ("tests/contracts/test_witness.py::test_witness",)\n',
+    )
+    fork = _commit(repo, "witness corpus")
+    _git(repo, "update-ref", "refs/remotes/origin/main", fork)
+    _git(repo, "checkout", "-q", "feature")
+    _git(repo, "merge", "-q", "--no-edit", "--no-verify", "main")
+    _git(repo, "checkout", "-q", "main")
+    _write(repo, "tests/golden_behavior/corpus.py", 'CASES = (f"tests/{1}.py::t",)\n')
+    _write(repo, "docs/elsewhere.md", "x\n")
+    moved = _commit(repo, "f-string corpus")
+    _git(repo, "update-ref", "refs/remotes/origin/main", moved)
+    _git(repo, "checkout", "-q", "feature")
+    _code, report = _report(capsys, _run(repo, tmp_path, "--only", "git_identity"))
+    identity = _check(report, "git_identity")
+    assert (identity["status"], identity["code"]) == ("FAIL", pf.GOLDEN_CORPUS_UNVERIFIABLE)
+    assert "GOLDEN_CORPUS_UNVERIFIABLE" in identity["detail"]
