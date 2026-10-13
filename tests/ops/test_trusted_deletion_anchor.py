@@ -1201,6 +1201,8 @@ def _acquisition_environment(
     }
     binding["binding_hash"] = lane_gate.canonical_hash(binding)
     event["pull_request"]["body"] = lane_gate.render_binding(binding)  # type: ignore[index]
+    # OWNER_INLINE is honoured only for an Owner-authored PR.
+    event["pull_request"]["user"] = {"login": "James3014", "type": "User"}  # type: ignore[index]
     path, argv_log = _git_logging_path(run_root)
     _synthetic_runtime(
         run_root,

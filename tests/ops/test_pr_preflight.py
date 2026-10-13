@@ -7,6 +7,7 @@ scripts, so the checks exercise the same validators CI runs.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -247,6 +248,48 @@ def test_lane_block_with_bad_hash_is_rejected_by_trusted_gate(repo, tmp_path, ca
     assert check["data"] == {"present": True, "parses": True}
 
 
+def _inline_lane(contract_kind: str) -> str:
+    binding = {
+        "schema": "nexus.merge_lane_binding.v1",
+        "execution_lane": "DIRECT_CANONICAL",
+        "contract_kind": contract_kind,
+        "owner_id": "James3014",
+        "issue_number": None,
+        "task_id": None,
+        "attempt_id": None,
+        "task_card_path": None,
+        "task_card_sha256": None,
+        "owner_lane_rebind": None,
+    }
+    binding["binding_hash"] = hashlib.sha256(
+        json.dumps(binding, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return "<!-- NEXUS_MERGE_LANE_V1\n" + json.dumps(binding) + "\nNEXUS_MERGE_LANE_V1 -->\n"
+
+
+@pytest.mark.parametrize(
+    ("contract_kind", "author", "status", "code"),
+    [
+        ("OWNER_INLINE", None, "SKIP", "PULL_REQUEST_AUTHOR_REQUIRED"),
+        ("OWNER_INLINE", "James3014", "PASS", ""),
+        ("OWNER_INLINE", "app/james3014-nexus-agent", "FAIL", "OWNER_INLINE_AUTHOR_MISMATCH"),
+        ("AGENT_INLINE", "app/james3014-nexus-agent", "PASS", ""),
+        ("AGENT_INLINE", "James3014", "FAIL", "AGENT_INLINE_AUTHOR_NOT_ALLOWLISTED_APP"),
+    ],
+)
+def test_inline_lane_is_checked_against_pr_author(
+    repo, tmp_path, capsys, contract_kind, author, status, code
+):
+    extra = ["--author", author] if author else []
+    argv = _run(
+        repo, tmp_path, "--only", "merge_lane", *extra, body=_body(lane=_inline_lane(contract_kind))
+    )
+    _code, report = _report(capsys, argv)
+    check = _check(report, "merge_lane")
+    assert check["status"] == status
+    assert check["code"] == code
+
+
 # ------------------------------------------------------------------- issue
 
 
@@ -291,7 +334,7 @@ def test_certify_unresolved_is_fail_not_skip(repo, tmp_path, capsys, monkeypatch
     code, report = _report(capsys, argv)
     check = _check(report, "issue")
     assert code == 1
-    assert (check["status"], check["code"]) == ("FAIL", pf.CERTIFY_UNRESOLVED)
+    assert (check["status"], check["code"]) == ("FAIL", pf.NEXUS_CERTIFY_UNAVAILABLE)
     assert "uvx --from" in check["fix"]
 
 
@@ -314,7 +357,7 @@ def test_certify_failure_is_fail_with_remedy(repo, tmp_path, capsys):
     code, report = _report(capsys, argv)
     check = _check(report, "issue")
     assert code == 1
-    assert (check["status"], check["code"]) == ("FAIL", pf.CERTIFY_MARKERS_FAILED)
+    assert (check["status"], check["code"]) == ("FAIL", pf.NEXUS_CERTIFY_UNAVAILABLE)
     assert "INVALID_CONFIG" in check["detail"]
     assert "markers --issue 1916 --check" in check["fix"]
 
@@ -392,6 +435,82 @@ def _ctx(repo: Path):
         tools_venv=repo / ".venv",
         lane_owner_pending=False,
     )
+
+
+def _certify_script(tmp_path: Path, body: str) -> Path:
+    script = tmp_path / "nexus-certify-stub"
+    script.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+    return script
+
+
+_OPEN_ISSUE = {"state": "OPEN", "body": ""}
+
+
+def _assert_certify_unavailable(check: dict) -> None:
+    assert check["status"] == "FAIL"
+    assert check["code"] == pf.NEXUS_CERTIFY_UNAVAILABLE
+    assert "nexus-core-issue-completion.yml" in check["fix"]
+    assert "uvx --from git+https://github.com/James3014/nexus-core@" in check["fix"]
+    assert "sha256:" + "a" * 64 not in check["detail"]
+    assert "NEXUS_CORE_EVIDENCE_UNIVERSE: sha256" not in check["detail"]
+
+
+def test_certify_nonzero_exit_fails_unavailable(repo, tmp_path, capsys):
+    stub = _certify_script(tmp_path, 'echo "INVALID_CONFIG" >&2\nexit 2\n')
+    argv = _run(repo, tmp_path, "--only", "issue", body=_body(), issue=_OPEN_ISSUE, certify=stub)
+    _code, report = _report(capsys, argv)
+    check = _check(report, "issue")
+    _assert_certify_unavailable(check)
+    assert "INVALID_CONFIG" in check["detail"]
+
+
+def test_certify_empty_marker_fails_unavailable(repo, tmp_path, capsys):
+    stub = _certify_script(
+        tmp_path,
+        'if [ "$2" = "--help" ]; then exit 0; fi\n'
+        'echo \'{"issue_marker": "<!-- NEXUS_CORE_EVIDENCE_UNIVERSE:  -->"}\'\n',
+    )
+    argv = _run(repo, tmp_path, "--only", "issue", body=_body(), issue=_OPEN_ISSUE, certify=stub)
+    _code, report = _report(capsys, argv)
+    _assert_certify_unavailable(_check(report, "issue"))
+
+
+def test_certify_missing_issue_marker_fails_unavailable(repo, tmp_path, capsys):
+    stub = _certify_script(
+        tmp_path, 'if [ "$2" = "--help" ]; then exit 0; fi\necho \'{"issue_marker": ""}\'\n'
+    )
+    argv = _run(repo, tmp_path, "--only", "issue", body=_body(), issue=_OPEN_ISSUE, certify=stub)
+    _code, report = _report(capsys, argv)
+    _assert_certify_unavailable(_check(report, "issue"))
+
+
+def test_certify_live_check_stale_exit_one_is_stale_not_unavailable(
+    repo, tmp_path, capsys, monkeypatch
+):
+    payload = json.dumps({
+        "issue_marker": f"<!-- NEXUS_CORE_EVIDENCE_UNIVERSE: {MARKER} -->",
+        "issue_check": {"status": "STALE"},
+    })
+    stub = _certify_script(
+        tmp_path,
+        'if [ "$2" = "--help" ]; then echo "usage: markers [--json] [--check]"; exit 0; fi\n'
+        f"cat <<'EOF'\n{payload}\nEOF\nexit 1\n",
+    )
+    stale = {"state": "OPEN", "body": f"<!-- NEXUS_CORE_EVIDENCE_UNIVERSE: {OTHER_MARKER} -->"}
+    monkeypatch.setattr(pf, "_fetch_issue", lambda ctx, issue: stale)
+    argv = _run(repo, tmp_path, "--only", "issue", body=_body(), certify=stub)
+    _code, report = _report(capsys, argv)
+    check = _check(report, "issue")
+    assert (check["status"], check["code"]) == ("FAIL", pf.ISSUE_EVIDENCE_UNIVERSE_STALE)
+
+
+def test_certify_valid_marker_unchanged(repo, tmp_path, capsys, fake_certify):
+    issue = {"state": "OPEN", "body": f"<!-- NEXUS_CORE_EVIDENCE_UNIVERSE: {MARKER} -->\n"}
+    argv = _run(repo, tmp_path, "--only", "issue", body=_body(), issue=issue, certify=fake_certify)
+    _code, report = _report(capsys, argv)
+    check = _check(report, "issue")
+    assert (check["status"], check["code"]) == ("PASS", "")
 
 
 # --------------------------------------------- freshness and git identity

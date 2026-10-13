@@ -4,8 +4,10 @@ from dataclasses import dataclass, replace
 from typing import Any, Dict, List, Mapping
 
 from .learning_evidence import LearningEvidence
+from .layer_ports import resolve_port
 from .state_contracts import NexusState
-MIN_EVOLUTION_STEPS = __import__("nexus.engine.openseeker_alignment", fromlist=["MIN_EVOLUTION_STEPS"]).MIN_EVOLUTION_STEPS
+
+MIN_EVOLUTION_STEPS = resolve_port("openseeker.MIN_EVOLUTION_STEPS")
 
 
 @dataclass(frozen=True)

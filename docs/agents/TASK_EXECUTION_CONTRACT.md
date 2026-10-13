@@ -407,6 +407,45 @@ Card that already declares the same direct lane may bind its exact unchanged
 bytes/hash without a rebind. A normal `GOVERNED` attempt binds its exact
 unchanged Task Card and keeps the governed completion path.
 
+Inline (Task-Card-free) direct bindings are tied to the PR author recorded in
+the trusted `pull_request_target` event (`pull_request.user`):
+
+- `OWNER_INLINE` may be claimed only by a PR whose author login equals
+  `owner_id` (the repository Owner, `James3014`) and is not an App/bot account.
+  Any other author, including the agent App, fails with
+  `OWNER_INLINE_AUTHOR_MISMATCH`.
+- `AGENT_INLINE` is the honest lane for agent-authored work. Since 2026-10-13
+  agents open PRs as the GitHub App `james3014-nexus-agent[bot]`
+  (`app/james3014-nexus-agent` in the gh CLI); only an allowlisted App author
+  (`AGENT_APP_LOGINS` in `scripts/ops/trusted_merge_lane_gate.py`) may claim it,
+  otherwise `AGENT_INLINE_AUTHOR_NOT_ALLOWLISTED_APP`. It has the same merge
+  requirements as the Owner-inline direct lane (direct lane only, all tracked
+  fields null, valid intent/closing prose, cannot replace an active GOVERNED
+  Task Card, all required checks green) and needs no extra human approval. The
+  gate result records `contract_kind` and `author_identity`
+  (`app/james3014-nexus-agent`). Protected paths and deletions still require the
+  Core deletion exception.
+- A missing PR author fails closed with `PULL_REQUEST_AUTHOR_REQUIRED`.
+
+Inline binding template (`owner_id` is always the repository Owner, i.e. the
+principal the work is done for, not the author):
+
+```
+<!-- NEXUS_MERGE_LANE_V1
+{"schema":"nexus.merge_lane_binding.v1","execution_lane":"DIRECT_CANONICAL","contract_kind":"AGENT_INLINE","owner_id":"James3014","issue_number":null,"task_id":null,"attempt_id":null,"task_card_path":null,"task_card_sha256":null,"owner_lane_rebind":null,"binding_hash":"8c215d813aacbae084aacaf3b5c353b0c499b5aa8dcae35f65771bdabb972ee7"}
+NEXUS_MERGE_LANE_V1 -->
+```
+
+`binding_hash` is the SHA-256 of the canonical JSON (`sort_keys=True`,
+separators `(",", ":")`, UTF-8) of the binding without `binding_hash`:
+
+| execution_lane | contract_kind | binding_hash |
+| --- | --- | --- |
+| `DIRECT_CANONICAL` | `OWNER_INLINE` | `4574e58d3e14f275ecf68806e2a4312339d23479e3841e18fd6d2e096218e0f7` |
+| `DIRECT_DELEGATED` | `OWNER_INLINE` | `7be2aad393e6a5fe2fc36e5fed4ec7ef654165c32e374fd0ecfc82c8eb125bee` |
+| `DIRECT_CANONICAL` | `AGENT_INLINE` | `8c215d813aacbae084aacaf3b5c353b0c499b5aa8dcae35f65771bdabb972ee7` |
+| `DIRECT_DELEGATED` | `AGENT_INLINE` | `09fff5b93836cb322726390b8e1da21b8ffb0f917ff0691b4a6ae4dc3e9035a3` |
+
 To move an exact tracked attempt from `GOVERNED` to a direct lane, the PR
 binding must contain one `nexus.owner_execution_lane_rebind.v1` record. It binds
 repository, Issue, task, attempt, exact Task Card path/SHA-256, PR number, exact

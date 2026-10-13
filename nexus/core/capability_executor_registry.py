@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from nexus.core.belief_contracts import CapabilityExecutionPlan, CapabilityReceipt
+from nexus.core.layer_ports import registered_ports, resolve_port
 
 logger = logging.getLogger(__name__)
 
@@ -510,9 +511,9 @@ def _exec_nightshift_runner_service(plan: CapabilityExecutionPlan, task_desc: st
             reason="BLOCKED_EXTERNAL_AUTH:nightshift_model",
         )
     try:
-        from nexus.app.nightshift_runner_service import (
-            AutoResearchNightShift,
-            compute_time_budget,
+        AutoResearchNightShift, compute_time_budget = (
+            resolve_port("nightshift.AutoResearchNightShift"),
+            resolve_port("nightshift.compute_time_budget"),
         )
 
         constraints = dict(plan.constraints or {})
@@ -599,7 +600,7 @@ def _exec_nightshift_runner_service(plan: CapabilityExecutionPlan, task_desc: st
 def _exec_autonomic_router(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     """CONTROL_PLANE_REFERENCE — planner suggestion only, never production executor F."""
     start = time.monotonic()
-    cls = _try_import_class("nexus.engine.autonomic_router", "AutonomicRouter")
+    cls = _try_port("autonomic_router.AutonomicRouter")
     if cls is None:
         return _make_receipt(
             "autonomic_router",
@@ -609,7 +610,7 @@ def _exec_autonomic_router(plan: CapabilityExecutionPlan, task_desc: str) -> Cap
             outcome=_structured_outcome(
                 action="route_suggest",
                 semantic_status="FAILED",
-                error="AutonomicRouter not importable",
+                error=_port_error("autonomic_router.AutonomicRouter"),
                 control_plane=True,
             ),
         )
@@ -737,7 +738,6 @@ def _exec_codeintel(plan: CapabilityExecutionPlan, task_desc: str) -> Capability
 def _exec_lancedb(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
     try:
-        from pathlib import Path
         from nexus.services.lancedb_roots import KNOWLEDGE, resolve_lancedb_root
         from nexus.services.memory_repository import MemoryRepository
 
@@ -779,7 +779,7 @@ def _exec_lancedb(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRe
 
 def _exec_research(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
-    cls = _try_import_class("nexus.engine.phases.research", "ResearchPhaseHandler")
+    cls = _try_port("research.ResearchPhaseHandler")
     if cls is None:
         return _make_receipt(
             "research",
@@ -789,7 +789,7 @@ def _exec_research(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityR
             outcome=_structured_outcome(
                 action="run",
                 semantic_status="FAILED",
-                error="ResearchPhaseHandler not importable",
+                error=_port_error("research.ResearchPhaseHandler"),
             ),
         )
     try:
@@ -899,10 +899,10 @@ def _exec_research(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityR
 
 def _exec_learn_scheduler_service(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
-    cls = _try_import_class("nexus.app.learn_scheduler_service", "LearnSchedulerService")
+    cls = _try_port("learn_scheduler.LearnSchedulerService")
     if cls is None:
         return _make_receipt("learn_scheduler_service", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "LearnSchedulerService not importable"})
+                             outcome={"error": _port_error("learn_scheduler.LearnSchedulerService")})
     try:
         from pathlib import Path
         constraints = dict(plan.constraints or {})
@@ -1065,7 +1065,7 @@ def _exec_autoreason(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
     ):
         elapsed = int((time.monotonic() - start) * 1000)
         return _auth_blocked_receipt("autoreason", plan, wall_time_ms=elapsed)
-    cls = _try_import_class("nexus.engine.autoreason_service", "AutoreasonService")
+    cls = _try_port("autoreason.AutoreasonService")
     if cls is None:
         return _make_receipt(
             "autoreason",
@@ -1075,7 +1075,7 @@ def _exec_autoreason(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
             outcome=_structured_outcome(
                 action="run",
                 semantic_status="FAILED",
-                error="AutoreasonService not importable",
+                error=_port_error("autoreason.AutoreasonService"),
             ),
         )
     try:
@@ -1256,10 +1256,10 @@ def _exec_swarm_multi_agent(plan: CapabilityExecutionPlan, task_desc: str) -> Ca
             wall_time_ms=elapsed,
             reason="BLOCKED_EXTERNAL_AUTH:local_or_online_workers",
         )
-    cls = _try_import_class("nexus.engine.battle_swarm", "BattleSwarm")
+    cls = _try_port("battle_swarm.BattleSwarm")
     if cls is None:
         return _make_receipt("swarm_multi_agent", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "BattleSwarm not importable"})
+                             outcome={"error": _port_error("battle_swarm.BattleSwarm")})
     try:
         inst = cls(project_root=".")
         # Prefer non-spawn physical call when available.
@@ -1353,10 +1353,10 @@ def _exec_nightshift(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
 
 def _exec_sandbox_runner(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
-    cls = _try_import_class("nexus.engine.sandbox_runner", "SandboxRunner")
+    cls = _try_port("sandbox_runner.SandboxRunner")
     if cls is None:
         return _make_receipt("sandbox_runner", plan, invoked=False, gate_passed=False,
-                             outcome={"error": "SandboxRunner not importable"})
+                             outcome={"error": _port_error("sandbox_runner.SandboxRunner")})
     try:
         from pathlib import Path
         constraints = dict(plan.constraints or {})
@@ -1627,7 +1627,7 @@ def _exec_claim_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabilit
 
 def _exec_ultra_review(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
     start = time.monotonic()
-    cls = _try_import_class("nexus.engine.ultra_review_service", "UltraReviewService")
+    cls = _try_port("ultra_review.UltraReviewService")
     if cls is None:
         return _make_receipt(
             "ultra_review",
@@ -1637,7 +1637,7 @@ def _exec_ultra_review(plan: CapabilityExecutionPlan, task_desc: str) -> Capabil
             outcome=_structured_outcome(
                 action="capture_diff",
                 semantic_status="FAILED",
-                error="UltraReviewService not importable",
+                error=_port_error("ultra_review.UltraReviewService"),
             ),
         )
     try:
@@ -2008,10 +2008,8 @@ def _exec_pregate(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRe
     start = time.monotonic()
     try:
         from pathlib import Path
-        from nexus.engine.cli_pregate import (
-            detect_project_language,
-            run_cli_pregate,
-        )
+        detect_project_language = resolve_port("pregate.detect_project_language")
+        run_cli_pregate = resolve_port("pregate.run_cli_pregate")
 
         constraints = dict(plan.constraints or {})
         root = Path(str(constraints.get("workspace_root") or ".")).resolve()
@@ -2150,7 +2148,7 @@ def _exec_harness_preflight_sensor(
             ),
         )
     try:
-        from nexus.engine.harness_sensors import build_harness_preflight_sensor
+        build_harness_preflight_sensor = resolve_port("harness.build_harness_preflight_sensor")
 
         task_type = str(constraints.get("task_type") or "repair")
         features = route.get("route_features", {})
@@ -2247,7 +2245,7 @@ def _exec_ddtree(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
     ):
         elapsed = int((time.monotonic() - start) * 1000)
         return _auth_blocked_receipt("ddtree", plan, wall_time_ms=elapsed)
-    cls = _try_import_class("nexus.engine.ddtree_adapter", "DDTreeAdapter")
+    cls = _try_port("ddtree.DDTreeAdapter")
     if cls is None:
         return _make_receipt(
             "ddtree",
@@ -2257,7 +2255,7 @@ def _exec_ddtree(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRec
             outcome=_structured_outcome(
                 action="plan",
                 semantic_status="FAILED",
-                error="DDTreeAdapter not importable",
+                error=_port_error("ddtree.DDTreeAdapter"),
             ),
         )
     try:
@@ -2429,7 +2427,7 @@ def _exec_acceptance_check(plan: CapabilityExecutionPlan, task_desc: str) -> Cap
     """
     start = time.monotonic()
     try:
-        mod = importlib.import_module("nexus.engine.completion_enforcer")
+        mod = resolve_port("completion.enforcer_module")
         decide = getattr(mod, "decide_completion", None)
         constraints = dict(plan.constraints or {})
         semantic_in = str(
@@ -2688,11 +2686,9 @@ def _exec_judge_panel(plan: CapabilityExecutionPlan, task_desc: str) -> Capabili
         elapsed = int((time.monotonic() - start) * 1000)
         return _auth_blocked_receipt("judge_panel", plan, wall_time_ms=elapsed)
     try:
-        from nexus.engine.autoreason_service import AutoreasonCandidate  # type: ignore
-        from nexus.engine.llm_judge_providers import (
-            DeterministicFakeJudgeProvider,
-            build_judge_providers_from_env,
-        )
+        AutoreasonCandidate = resolve_port("autoreason.AutoreasonCandidate")
+        DeterministicFakeJudgeProvider = resolve_port("judge.DeterministicFakeJudgeProvider")
+        build_judge_providers_from_env = resolve_port("judge.build_judge_providers_from_env")
 
         providers = list(build_judge_providers_from_env() or [])
         if not providers:
@@ -2812,7 +2808,7 @@ def _exec_asi_constraint_extractor(
 ) -> CapabilityReceipt:
     start = time.monotonic()
     try:
-        from nexus.engine.asi_constraints import ASIConstraintExtractor
+        ASIConstraintExtractor = resolve_port("asi.ASIConstraintExtractor")
 
         constraints = dict(plan.constraints or {})
         records = [
@@ -3122,8 +3118,8 @@ def _exec_forecast_gate(plan: CapabilityExecutionPlan, task_desc: str) -> Capabi
         from nexus.core.gate_evaluator import GateEvaluator
         from nexus.core.state_contracts import NexusState
         from nexus.core.state_io import StateIO
-        from nexus.engine.forecast_gate_service import ForecastGateService
-        from nexus.engine.self_healing_selector import get_self_healing_selector
+        ForecastGateService = resolve_port("forecast.ForecastGateService")
+        get_self_healing_selector = resolve_port("forecast.get_self_healing_selector")
         from nexus.learning.latent_predictor_v20 import LatentPredictorV20
         from nexus.learning.predictor_toggle import LATENT_PREDICTOR, predictor_enabled
 
@@ -3783,6 +3779,21 @@ EXECUTOR_REGISTRY: dict[str, CapabilityExecutor] = {
     "ui_validator": _exec_ui_validator,
     "external_doc_scout": _exec_external_doc_scout,
 }
+
+
+def _try_port(port: str) -> Any:
+    """Upper-layer collaborator bound via ``nexus.core.layer_ports``; None when unavailable."""
+    try:
+        return resolve_port(port)
+    except Exception as exc:
+        logger.debug("executor_registry: cannot resolve port %s: %s", port, exc)
+        return None
+
+
+def _port_error(port: str) -> str:
+    """Receipt error for a ``_try_port`` miss: PORT_UNBOUND or PORT_LOAD_FAILED, with the port name."""
+    reason = "PORT_LOAD_FAILED" if port in registered_ports() else "PORT_UNBOUND"
+    return f"{reason}:{port}"
 
 
 def get_executor(cap_name: str) -> CapabilityExecutor | None:

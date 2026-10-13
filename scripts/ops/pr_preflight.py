@@ -61,12 +61,11 @@ INFO = "INFO"
 # update when that PR lands or renames a code.
 PR_MISSING_CORE_ISSUE_BINDING = "PR_MISSING_CORE_ISSUE_BINDING"
 ISSUE_NOT_OPEN = "ISSUE_NOT_OPEN"
+NEXUS_CERTIFY_UNAVAILABLE = "NEXUS_CERTIFY_UNAVAILABLE"
 ISSUE_MISSING_EVIDENCE_UNIVERSE = "ISSUE_MISSING_EVIDENCE_UNIVERSE"
 ISSUE_EVIDENCE_UNIVERSE_STALE = "ISSUE_EVIDENCE_UNIVERSE_STALE"
 ISSUE_EVIDENCE_UNIVERSE_BINDING_MALFORMED = "ISSUE_EVIDENCE_UNIVERSE_BINDING_MALFORMED"
 BASE_REF_NOT_ANCESTOR = "BASE_REF_NOT_ANCESTOR"
-CERTIFY_UNRESOLVED = "CERTIFY_UNRESOLVED"
-CERTIFY_MARKERS_FAILED = "CERTIFY_MARKERS_FAILED"
 # Local codes for gates whose CI message has no stable reason code.
 DEPENDENCY_CONTRACT_DRIFT = "DEPENDENCY_CONTRACT_DRIFT"
 EXECUTOR_GIT_IDENTITY_MISMATCH = "EXECUTOR_GIT_IDENTITY_MISMATCH"
@@ -157,6 +156,7 @@ class Context:
     tools_venv: Path
     lane_owner_pending: bool
     module_cache: dict[str, ModuleType] = field(default_factory=dict)
+    author: str | None = None
 
 
 # --------------------------------------------------------------------------
@@ -330,6 +330,7 @@ def check_merge_lane(ctx: Context) -> CheckResult:
             "head": {"sha": ctx.head_sha},
             "body": ctx.body,
             "title": ctx.title,
+            **_author_user(ctx.author),
         },
         # No sender: preflight cannot speak for the Owner, so a rebind that
         # needs the Owner as event sender is reported as unverifiable.
@@ -338,6 +339,15 @@ def check_merge_lane(ctx: Context) -> CheckResult:
         result = gate.validate_event(event, repo_root=ctx.repo)
     except gate.LaneBindingError as exc:
         code = str(exc).split(":", 1)[0]
+        if code == "PULL_REQUEST_AUTHOR_REQUIRED":
+            return CheckResult(
+                name,
+                SKIP,
+                code,
+                "inline lane bindings are checked against the PR author; author unknown",
+                "pass --author LOGIN (e.g. James3014 or app/james3014-nexus-agent) or --pr N",
+                {"present": True, "parses": True},
+            )
         if code == "OWNER_LANE_REBIND_SENDER_NOT_OWNER":
             return CheckResult(
                 name,
@@ -363,6 +373,15 @@ def check_merge_lane(ctx: Context) -> CheckResult:
     )
 
 
+def _author_user(author: str | None) -> dict[str, Any]:
+    """Project a gh-style author login into the event's ``pull_request.user``."""
+    if not author:
+        return {}
+    is_app = author.startswith("app/") or author.endswith("[bot]")
+    login = author.removeprefix("app/") + "[bot]" if author.startswith("app/") else author
+    return {"user": {"login": login, "type": "Bot" if is_app else "User"}}
+
+
 def _certify_pin(ctx: Context) -> tuple[str | None, str]:
     """The nexus-core commit Nexus-new pins as ``nexus-certify-ref`` (base ref copy)."""
     refs: set[str] = set()
@@ -384,6 +403,7 @@ def _resolve_nexus_certify(ctx: Context) -> tuple[list[str] | None, str, str]:
     An explicit --nexus-certify / NEXUS_CERTIFY path is an override. Otherwise
     certify is run at the pinned ref through ``uvx`` (uv caches the build), so
     version skew with whatever is installed locally cannot change the verdict.
+    There is deliberately no fallback to an unpinned local build.
     """
     explicit = ctx.nexus_certify or os.environ.get("NEXUS_CERTIFY")
     if explicit:
@@ -399,11 +419,25 @@ def _resolve_nexus_certify(ctx: Context) -> tuple[list[str] | None, str, str]:
     return [uvx, "--from", f"{CERTIFY_REPO_URL}@{ref}", "nexus-certify"], ref, ""
 
 
-def _expected_markers(ctx: Context, issue: int) -> tuple[dict[str, Any] | None, str, str, bool]:
-    """Run ``nexus-certify markers``; return (payload, error, pinned ref, resolution_failed)."""
+# Documented `markers --check` outcomes that exit 1 with a valid JSON payload.
+_CHECK_OUTCOME_STATUSES = frozenset({"MISSING", "STALE", "MALFORMED"})
+
+
+def _certify_hint(ctx: Context, ref: str, issue: int) -> str:
+    pin = ref if HEX40_RE.fullmatch(ref or "") else _certify_pin(ctx)[0]
+    return (
+        f"use the nexus-certify version pinned (nexus-certify-ref) in {CERTIFY_PIN_WORKFLOW}: "
+        f"`uvx --from {CERTIFY_REPO_URL}@{pin or '<nexus-certify-ref>'} nexus-certify "
+        f"markers --issue {issue} --check` (needs uv; or pass --nexus-certify PATH to an "
+        "executable built at that ref)"
+    )
+
+
+def _expected_markers(ctx: Context, issue: int) -> tuple[dict[str, Any] | None, str, str]:
+    """Run ``nexus-certify markers``; return (payload, error, pinned ref or 'override')."""
     tool, ref, error = _resolve_nexus_certify(ctx)
     if tool is None:
-        return None, error, ref, True
+        return None, f"cannot resolve nexus-certify: {error}", ref
     command = [*tool, "markers", "--repo", str(ctx.repo), "--issue", str(issue), "--json"]
     # `markers --check` exists at the pinned ref (nexus-core 9942db7); it reads the live
     # Issue itself, so it is skipped for offline --issue-json runs and, for an
@@ -419,16 +453,26 @@ def _expected_markers(ctx: Context, issue: int) -> tuple[dict[str, Any] | None, 
     try:
         proc = subprocess.run(command, capture_output=True, text=True, check=False, timeout=300)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return None, f"nexus-certify could not run: {exc}", ref, False
+        return None, f"nexus-certify could not run: {exc}", ref
     try:
         payload = json.loads(proc.stdout)
     except json.JSONDecodeError:
-        return None, (proc.stderr or proc.stdout).strip()[:300], ref, False
+        payload = None
     if not isinstance(payload, dict):
-        return None, "nexus-certify markers returned non-object JSON", ref, False
+        output = (proc.stderr or proc.stdout).strip()[:300]
+        return None, f"nexus-certify markers exited {proc.returncode}: {output}", ref
+    if proc.returncode != 0:
+        check = payload.get("issue_check")
+        status = check.get("status") if isinstance(check, dict) else None
+        documented = (
+            proc.returncode == 1 and "--check" in command and status in _CHECK_OUTCOME_STATUSES
+        )
+        if not documented:
+            output = (proc.stderr or proc.stdout).strip()[:300]
+            return None, f"nexus-certify markers exited {proc.returncode}: {output}", ref
     payload["_tool"] = " ".join(tool)
     payload["_ref"] = ref
-    return payload, "", ref, False
+    return payload, "", ref
 
 
 def _fetch_issue(ctx: Context, issue: int) -> dict[str, Any]:
@@ -470,35 +514,27 @@ def check_issue(ctx: Context) -> CheckResult:
             f"Issue #{issue} is {data.get('state')}",
             "reopen the Issue or bind the PR to an open Issue",
         )
-    expected, error, ref, unresolved = _expected_markers(ctx, issue)
+    expected, error, ref = _expected_markers(ctx, issue)
     if expected is None:
         pin_hint = f"@{ref[:12]}" if ref and ref != "override" else ""
-        if unresolved:
-            return CheckResult(
-                name,
-                FAIL,
-                CERTIFY_UNRESOLVED,
-                f"cannot resolve nexus-certify at the pinned ref: {error}",
-                f"install uv, then run `uvx --from {CERTIFY_REPO_URL}@<nexus-certify-ref> "
-                "nexus-certify --help` once to cache it (or pass --nexus-certify PATH to an "
-                "executable built at that ref)",
-            )
         return CheckResult(
             name,
             FAIL,
-            CERTIFY_MARKERS_FAILED,
-            f"Issue #{issue} is open; nexus-certify{pin_hint} markers failed: {error}",
-            f"run `uvx --from {CERTIFY_REPO_URL}@{ref or '<nexus-certify-ref>'} nexus-certify "
-            f"markers --issue {issue} --check` and fix what it reports",
+            NEXUS_CERTIFY_UNAVAILABLE,
+            f"Issue #{issue} is open; marker cannot be determined by nexus-certify{pin_hint}: "
+            f"{error}",
+            _certify_hint(ctx, ref, issue),
         )
     expected_line = str(expected.get("issue_marker") or "")
-    if not expected_line:
+    marker_value = parse_evidence_marker(expected_line)[0]
+    if marker_value is None:
         return CheckResult(
             name,
             FAIL,
-            CERTIFY_MARKERS_FAILED,
-            "nexus-certify markers returned no issue_marker",
-            f"run `nexus-certify markers --issue {issue} --json` at the pinned ref and inspect",
+            NEXUS_CERTIFY_UNAVAILABLE,
+            "nexus-certify markers returned an empty or invalid issue_marker "
+            "(expected sha256:<64 hex>)",
+            _certify_hint(ctx, ref, issue),
         )
     certify_check = expected.get("issue_check")
     if isinstance(certify_check, dict) and certify_check.get("status") != "MATCH":
@@ -511,7 +547,7 @@ def check_issue(ctx: Context) -> CheckResult:
         return CheckResult(
             name,
             FAIL,
-            codes.get(status, CERTIFY_MARKERS_FAILED),
+            codes.get(status, NEXUS_CERTIFY_UNAVAILABLE),
             f"Issue #{issue} evidence-universe marker is {status} (nexus-certify markers --check)",
             str(certify_check.get("remediation") or f"use exactly: {expected_line}"),
             {"expected_marker": expected_line, "nexus_certify": expected.get("_tool")},
@@ -946,7 +982,16 @@ def _repository_slug(repo: Path) -> str:
 
 def _load_pr(repository: str, number: int) -> dict[str, Any]:
     proc = subprocess.run(
-        ["gh", "pr", "view", str(number), "-R", repository, "--json", "body,title,headRefOid"],
+        [
+            "gh",
+            "pr",
+            "view",
+            str(number),
+            "-R",
+            repository,
+            "--json",
+            "body,title,headRefOid,author",
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -969,6 +1014,9 @@ def build_parser() -> argparse.ArgumentParser:
     body.add_argument("--pr", type=int, help="read body/title from this PR via gh")
     parser.add_argument("--pr-number", type=int, help="PR number for --body-file runs")
     parser.add_argument("--title", help="PR title (squash commit title)")
+    parser.add_argument(
+        "--author", help="PR author login (default: from --pr); inline lanes depend on it"
+    )
     parser.add_argument("--issue", type=int, help="Issue number (default: body marker)")
     parser.add_argument("--issue-json", type=Path, help="offline Issue JSON {state, body}")
     parser.add_argument("--nexus-certify", help="path to nexus-certify")
@@ -1023,9 +1071,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     body: str | None = None
     title = args.title
     pr_number = args.pr_number
+    author = args.author
     if args.pr is not None:
         pr = _load_pr(repository, args.pr)
         body, title, pr_number = pr.get("body") or "", title or pr.get("title"), args.pr
+        pr_author = pr.get("author") if isinstance(pr.get("author"), dict) else {}
+        author = author or pr_author.get("login")
     elif args.body_file is not None:
         body = (
             sys.stdin.read()
@@ -1051,6 +1102,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         nexus_certify=args.nexus_certify,
         tools_venv=args.tools_venv or repo / ".venv",
         lane_owner_pending=args.lane_owner_pending,
+        author=author,
     )
     selected = list(CHECK_ORDER)
     if args.only:
