@@ -23,10 +23,20 @@ import sys
 from pathlib import Path
 
 try:
-    from scripts.ops.git_history_secret_scan import _scan_bytes
+    from scripts.ops.git_history_secret_scan import (
+        KNOWN_HISTORICAL_FIXTURES,
+        SECRET_PATH_RE,
+        _fingerprint,
+        _scan_bytes,
+    )
 except ImportError:  # executed as a plain script
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from scripts.ops.git_history_secret_scan import _scan_bytes
+    from scripts.ops.git_history_secret_scan import (
+        KNOWN_HISTORICAL_FIXTURES,
+        SECRET_PATH_RE,
+        _fingerprint,
+        _scan_bytes,
+    )
 
 TESTS_PREFIX = "tests/"
 
@@ -61,8 +71,54 @@ def all_test_files(repo: Path) -> list[str]:
     return sorted(_git(repo, "ls-files", "--", "tests").splitlines())
 
 
-def scan_paths(repo: Path, paths: list[str]) -> list[tuple[str, str, str]]:
-    """Return (path, detector, fingerprint) for each blocking finding."""
+def _blob_id(repo: Path, data: bytes) -> str:
+    proc = subprocess.run(
+        ["git", "hash-object", "--stdin"], cwd=repo, input=data, capture_output=True, check=True
+    )
+    return proc.stdout.decode().strip()
+
+
+def history_blobs(repo: Path, base: str) -> list[tuple[str, str]]:
+    """(blob oid, path) for every tests/ blob introduced by commits base..HEAD."""
+    out = _git(
+        repo, "log", "-m", "--format=", "--raw", "--no-abbrev", "--diff-filter=ACMR",
+        f"{base}..HEAD", "--", "tests",
+    )  # fmt: skip
+    seen: set[tuple[str, str]] = set()
+    for line in out.splitlines():
+        meta, _, path = line.partition("\t")
+        fields = meta.split()
+        if len(fields) >= 5 and path.startswith(TESTS_PREFIX):
+            seen.add((fields[3], path))
+    return sorted(seen)
+
+
+def scan_blob(oid: str, rel: str, data: bytes) -> list[tuple[str, str, str]]:
+    """Apply the audit's content, secret-path and known-fixture rules to one blob."""
+    violations: list[tuple[str, str, str]] = []
+    for finding in _scan_bytes(data, subject_type="fixture", path=rel):
+        if not finding.blocking:
+            continue
+        if (oid, rel, finding.detector, finding.fingerprint) in KNOWN_HISTORICAL_FIXTURES:
+            continue
+        violations.append((rel, finding.detector, finding.fingerprint))
+    if (
+        SECRET_PATH_RE.search(rel)
+        and not rel.lower().endswith((".template", ".example", ".sample"))
+        and data.strip()
+    ):
+        violations.append((rel, "secret_bearing_path", _fingerprint((oid + "\0" + rel).encode())))
+    return violations
+
+
+def scan_paths(
+    repo: Path, paths: list[str], history_base: str | None = None
+) -> list[tuple[str, str, str]]:
+    """Return (path, detector, fingerprint) for each blocking finding.
+
+    Scans working-tree files and, when ``history_base`` is given, every tests/
+    blob introduced in ``history_base..HEAD`` (the audit reads history too).
+    """
     violations: list[tuple[str, str, str]] = []
     for rel in paths:
         if not rel.startswith(TESTS_PREFIX):
@@ -71,10 +127,14 @@ def scan_paths(repo: Path, paths: list[str]) -> list[tuple[str, str, str]]:
         if not file_path.is_file():
             continue
         data = file_path.read_bytes()
-        for finding in _scan_bytes(data, subject_type="fixture", path=rel):
-            if finding.blocking:
-                violations.append((rel, finding.detector, finding.fingerprint))
-    return violations
+        violations.extend(scan_blob(_blob_id(repo, data), rel, data))
+    if history_base is not None:
+        for oid, rel in history_blobs(repo, history_base):
+            data = subprocess.run(
+                ["git", "cat-file", "blob", oid], cwd=repo, capture_output=True, check=True
+            ).stdout
+            violations.extend(scan_blob(oid, rel, data))
+    return sorted(set(violations))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -86,10 +146,10 @@ def main(argv: list[str] | None = None) -> int:
     repo = args.repo.resolve()
     try:
         paths = all_test_files(repo) if args.all else changed_test_files(repo, args.base)
-    except RuntimeError as exc:
+    except (RuntimeError, subprocess.CalledProcessError) as exc:
         print(f"check_fixture_secret_literals: {exc}", file=sys.stderr)
         return 2
-    violations = scan_paths(repo, paths)
+    violations = scan_paths(repo, paths, None if args.all else args.base)
     if not violations:
         print(f"check_fixture_secret_literals: OK ({len(paths)} file(s) scanned)")
         return 0
