@@ -362,7 +362,7 @@ def test_certify_failure_is_fail_with_remedy(repo, tmp_path, capsys):
     assert "markers --issue 1916 --check" in check["fix"]
 
 
-PIN = "9942db770e96ab88e3e1700aaec2e911bcec241b"
+PIN = "b245430bbad465be634ceef00b53c5582a0d4fd9"
 
 
 def _pin_workflow(repo: Path, *refs: str) -> None:
@@ -716,3 +716,48 @@ def test_trusted_scripts_are_loaded_from_base_not_head(repo, tmp_path, capsys):
     _commit(repo, "tamper with gate")
     _code, report = _report(capsys, _run(repo, tmp_path, "--only", "bindings", body=_body()))
     assert _check(report, "bindings")["status"] == "PASS"
+
+
+# ------------------------------------------ trusted-config evidence universe
+
+
+def _universe_workflow(repo: Path, mode_line: str) -> None:
+    _write(
+        repo,
+        pf.CERTIFY_PIN_WORKFLOW,
+        f'steps:\n  with:\n    nexus-certify-ref: "{PIN}"\n{mode_line}',
+    )
+    _commit(repo, "universe mode")
+
+
+def test_trusted_config_universe_skips_marker_comparison(repo, tmp_path, capsys, monkeypatch):
+    _universe_workflow(repo, "    evidence-universe: trusted-config\n")
+    monkeypatch.delenv("NEXUS_CERTIFY", raising=False)
+    # Neither a certify tool nor an Issue marker is needed in this mode.
+    monkeypatch.setattr(pf.shutil, "which", lambda name: None)
+    argv = _run(repo, tmp_path, "--only", "issue", body=_body(), issue=_OPEN_ISSUE)
+    code, report = _report(capsys, argv)
+    check = _check(report, "issue")
+    assert code == 0
+    assert (check["status"], check["code"]) == ("PASS", "")
+    assert "derived from trusted base config" in check["detail"]
+
+
+def test_trusted_config_universe_still_requires_open_issue(repo, tmp_path, capsys):
+    _universe_workflow(repo, "    evidence-universe: trusted-config\n")
+    argv = _run(repo, tmp_path, "--only", "issue", body=_body(), issue={"state": "CLOSED"})
+    _code, report = _report(capsys, argv)
+    check = _check(report, "issue")
+    assert (check["status"], check["code"]) == ("FAIL", pf.ISSUE_NOT_OPEN)
+
+
+def test_issue_marker_universe_workflow_keeps_marker_comparison(
+    repo, tmp_path, capsys, fake_certify
+):
+    _universe_workflow(repo, "    evidence-universe: issue-marker\n")
+    argv = _run(
+        repo, tmp_path, "--only", "issue", body=_body(), issue=_OPEN_ISSUE, certify=fake_certify
+    )
+    _code, report = _report(capsys, argv)
+    check = _check(report, "issue")
+    assert (check["status"], check["code"]) == ("FAIL", pf.ISSUE_MISSING_EVIDENCE_UNIVERSE)
