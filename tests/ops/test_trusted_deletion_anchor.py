@@ -869,6 +869,7 @@ def _manifest() -> dict[str, object]:
         git_bundle=b"git bundle",
         runtime_metadata=runtime_metadata,
         runtime_identity=runtime_identity,
+        merge_base_sha="b" * 40,
     )
 
 
@@ -909,6 +910,7 @@ def _evidence(manifest: dict[str, object]) -> dict[str, object]:
         "run_id": manifest["run_id"],
         "base_sha": manifest["base_sha"],
         "head_sha": manifest["head_sha"],
+        "merge_base_sha": manifest["merge_base_sha"],
         "base_tree": manifest["base_tree"],
         "head_tree": manifest["head_tree"],
         "test_tree": manifest["test_tree"],
@@ -1360,7 +1362,9 @@ def test_fork_identity_must_be_bound_to_the_event():
     event = _event()
     event["pull_request"]["head"]["sha"] = "not-a-sha"  # type: ignore[index]
     with pytest.raises(ValueError, match="exact SHA"):
-        build_manifest(event, raw_diff=b"", test_inventory=[], source_archive=b"")
+        build_manifest(
+            event, raw_diff=b"", test_inventory=[], source_archive=b"", merge_base_sha="b" * 40
+        )
 
 
 def test_workflow_substitution_fails_closed():
@@ -1374,6 +1378,7 @@ def test_workflow_substitution_fails_closed():
             raw_diff=b"",
             test_inventory=["tests/ops/test_pr_impact_gate.py"],
             source_archive=b"",
+            merge_base_sha="b" * 40,
         )
 
 
@@ -2121,6 +2126,7 @@ def _executor_archive_bundle(
         base_tree=base_tree,
         head_tree=head_tree,
         test_tree=test_tree,
+        merge_base_sha=event["pull_request"]["base"]["sha"],  # type: ignore[index]
     )
     (bundle / "git-objects.bundle").write_bytes(git_bundle)
     for name in trusted_anchor.RUNTIME_FILENAMES:
@@ -3719,3 +3725,487 @@ def test_bootstrap_failure_preserves_distinct_exit_status(tmp_path: Path):
         )
     )
     assert "exit=7" in record["detail"]
+
+
+# ------------------------------------------------------------------------------
+# Merge-base rule (Owner-approved option (b), 2026-10-13).  The executor no
+# longer requires the base tip as an ancestor of the head.  It requires exactly
+# one merge-base, bound in the manifest, and the controller and verifier fail
+# closed when main moved over the gate-oracle surface or over the PR's own paths.
+
+_MB_PYPROJECT = b"[project]\nname='fixture'\nversion='0'\n"
+_MB_UV_LOCK = b"version = 1\nrevision = 3\n"
+
+
+def _mb_commit(repo: Path, message: str, files: dict[str, bytes | None]) -> str:
+    for relative, data in files.items():
+        target = repo / relative
+        if data is None:
+            target.unlink()
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+    _run_git(repo, "add", "-A")
+    _run_git(repo, "commit", "-q", "--no-verify", "-m", message)
+    return _run_git(repo, "rev-parse", "HEAD")
+
+
+def _mb_root_files() -> dict[str, bytes | None]:
+    return {
+        "pyproject.toml": _MB_PYPROJECT,
+        "uv.lock": _MB_UV_LOCK,
+        "tests/ops/test_pr_impact_gate.py": b"def test_gate():\n    assert True\n",
+        "tests/golden_behavior/corpus.py": (
+            b'CASES = ("tests/contracts/test_witness.py::test_witness",)\n'
+        ),
+        "tests/contracts/test_witness.py": b"def test_witness():\n    assert True\n",
+        "tests/golden_behavior/test_corpus.py": b"def test_corpus():\n    assert True\n",
+        trusted_anchor.GOLDEN_EVALUATOR_PATH: b"# trusted evaluator placeholder\n",
+        "docs/shared.md": b"shared\n",
+    }
+
+
+def _mb_history(root: Path, scenario: str) -> dict[str, object]:
+    """Build an origin with a PR head and a main tip for one history shape."""
+
+    source = root / "mb-source"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(source)], check=True)
+    _run_git(source, "config", "user.email", "test@example.invalid")
+    _run_git(source, "config", "user.name", "merge-base-test")
+    fork = _mb_commit(source, "fork point", _mb_root_files())
+    main_files: dict[str, bytes | None] = {"docs/main-added.md": b"main added\n"}
+    pr_files: dict[str, bytes | None] = {"docs/pr.md": b"pr work\n"}
+    if scenario == "main_golden":
+        main_files["tests/golden_behavior/corpus.py"] = b"CASES = ()\n# main moved\n"
+    elif scenario.startswith("main_touch:"):
+        main_files[scenario.removeprefix("main_touch:")] = b"# main moved\n"
+    elif scenario == "main_selected_test":
+        main_files["tests/ops/test_pr_impact_gate.py"] = b"def test_gate():\n    assert 1\n"
+    elif scenario == "main_uv_lock":
+        main_files["uv.lock"] = _MB_UV_LOCK + b"# main lock bump\n"
+    elif scenario == "same_path":
+        main_files["docs/shared.md"] = b"shared, main edit\n"
+        pr_files["docs/shared.md"] = b"shared, pr edit\n"
+    if scenario == "up_to_date":
+        base = fork
+        head = _mb_commit(source, "pr", pr_files)
+    elif scenario == "criss_cross":
+        x = _mb_commit(source, "x", {"docs/x.md": b"x\n"})
+        _run_git(source, "checkout", "-q", "-b", "y", fork)
+        y = _mb_commit(source, "y", {"docs/y.md": b"y\n"})
+        _run_git(source, "checkout", "-q", "-b", "tip", x)
+        _run_git(source, "merge", "-q", "--no-ff", "--no-verify", "-m", "tip", y)
+        base = _run_git(source, "rev-parse", "HEAD")
+        _run_git(source, "checkout", "-q", "-b", "head", y)
+        _run_git(source, "merge", "-q", "--no-ff", "--no-verify", "-m", "head", x)
+        head = _run_git(source, "rev-parse", "HEAD")
+    elif scenario == "unrelated":
+        base = _mb_commit(source, "main moved", main_files)
+        _run_git(source, "checkout", "-q", "--orphan", "orphan")
+        head = _mb_commit(source, "orphan", {})
+    else:
+        _run_git(source, "checkout", "-q", "-b", "feature")
+        head = _mb_commit(source, "pr", pr_files)
+        _run_git(source, "checkout", "-q", "main")
+        base = _mb_commit(source, "main moved", main_files)
+    origin = root / "mb-origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+    _run_git(
+        source, "push", "-q", str(origin), f"{base}:refs/heads/main", f"{head}:refs/pull/1/head"
+    )
+    controller_repo = root / "mb-controller.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(controller_repo)], check=True)
+    _run_git(controller_repo, "remote", "add", "origin", str(origin))
+    _run_git(controller_repo, "fetch", "-q", "--no-tags", "--depth=1", "origin", base)
+    event = _event()
+    event["workflow_sha"] = base
+    event["pull_request"]["base"]["sha"] = base  # type: ignore[index]
+    event["pull_request"]["head"]["sha"] = head  # type: ignore[index]
+    event_path = root / "mb-event.json"
+    event_path.write_bytes(_json(event))
+
+    def _at_base(path: str) -> bytes:
+        return subprocess.run(
+            ["git", "-C", str(source), "show", f"{base}:{path}"], check=True, capture_output=True
+        ).stdout
+
+    runtime_dir = _synthetic_runtime(
+        root, pyproject=_at_base("pyproject.toml"), uv_lock=_at_base("uv.lock")
+    )
+    return {
+        "source": source,
+        "controller_repo": controller_repo,
+        "event": event,
+        "event_path": event_path,
+        "runtime_dir": runtime_dir,
+        "bundle": root / "mb-bundle",
+        "fork": fork,
+        "base": base,
+        "head": head,
+    }
+
+
+def _mb_run_controller(history: dict[str, object]) -> dict[str, object]:
+    trusted_anchor._controller(
+        argparse.Namespace(
+            event_json=str(history["event_path"]),
+            repo_root=str(history["controller_repo"]),
+            output_dir=str(history["bundle"]),
+            runtime_dir=str(history["runtime_dir"]),
+        )
+    )
+    return json.loads((Path(history["bundle"]) / "manifest.json").read_text(encoding="utf-8"))
+
+
+def _mb_raw_entries(raw: bytes) -> list[tuple[str, str]]:
+    fields = raw.split(b"\0")
+    entries = []
+    for index in range(0, len(fields) - 1, 2):
+        status = fields[index].split()[-1].decode()
+        entries.append((status, fields[index + 1].decode()))
+    return entries
+
+
+def _mb_executor_git_context(bundle: Path, manifest: dict[str, object]) -> None:
+    source = bundle / "source"
+    if source.exists():
+        shutil.rmtree(source)
+    source.mkdir()
+    with tarfile.open(bundle / "source.tar") as archive:
+        archive.extractall(source, filter=trusted_anchor._executor_archive_filter)
+    trusted_anchor._prepare_executor_git_context(bundle, source, manifest)
+
+
+def _mb_verifier_args(history: dict[str, object]) -> argparse.Namespace:
+    bundle = Path(history["bundle"])
+    event = history["event"]
+    assert isinstance(event, dict)
+    return argparse.Namespace(
+        bundle_dir=str(bundle),
+        expected_workflow_ref=event["workflow_ref"],
+        expected_workflow_sha=event["workflow_sha"],
+        expected_run_id=event["run_id"],
+        verify_evidence=str(bundle / "raw-evidence.json"),
+        expected_manifest_sha256=trusted_anchor._sha((bundle / "manifest.json").read_bytes()),
+        expected_external_anchor_sha256=trusted_anchor._sha(
+            (bundle / "external-anchor.json").read_bytes()
+        ),
+        expected_event_name=event["event_name"],
+        expected_repository=event["repository"]["full_name"],
+        expected_default_branch=event["repository"]["default_branch"],
+        expected_pull_request_number=event["pull_request"]["number"],
+        expected_base_sha=event["pull_request"]["base"]["sha"],
+        expected_head_sha=event["pull_request"]["head"]["sha"],
+    )
+
+
+def _mb_write_evidence(bundle: Path, manifest: dict[str, object]) -> None:
+    (bundle / "raw-evidence.json").write_bytes(_json(_evidence(manifest)) + b"\n")
+
+
+def _mb_rebind_manifest(bundle: Path, manifest: dict[str, object]) -> None:
+    """Rewrite a manifest as a compromised controller would: every digest consistent."""
+
+    unsigned = dict(manifest)
+    unsigned.pop("bundle_sha256", None)
+    manifest["bundle_sha256"] = trusted_anchor._sha(
+        trusted_anchor._json(unsigned)
+        + (bundle / "source.tar").read_bytes()
+        + (bundle / "raw-diff.bin").read_bytes()
+        + trusted_anchor._json(sorted(manifest["test_inventory"]))  # type: ignore[arg-type]
+        + (bundle / "git-objects.bundle").read_bytes()
+        + (bundle / "requirements.txt").read_bytes()
+        + (bundle / "runtime.tar").read_bytes()
+        + (bundle / "runtime-metadata.json").read_bytes()
+        + (bundle / "run_golden_behavior_eval.py").read_bytes()
+    )
+    (bundle / "manifest.json").write_bytes(_json(manifest) + b"\n")
+    anchor = json.loads((bundle / "external-anchor.json").read_text(encoding="utf-8"))
+    anchor["manifest_sha256"] = trusted_anchor._sha((bundle / "manifest.json").read_bytes())
+    anchor["merge_base_sha"] = manifest["merge_base_sha"]
+    (bundle / "external-anchor.json").write_bytes(_json(anchor) + b"\n")
+
+
+def test_schema_version_is_bumped_for_merge_base_binding():
+    assert trusted_anchor.SCHEMA_VERSION == "trusted-deletion-anchor.v4"
+    assert trusted_anchor.RUNTIME_SCHEMA_VERSION == "trusted-deletion-runtime.v2"
+    assert "merge_base_sha" in trusted_anchor.REQUIRED_EVIDENCE_KEYS
+
+
+def test_up_to_date_pr_behaviour_is_unchanged(tmp_path: Path):
+    history = _mb_history(tmp_path, "up_to_date")
+    manifest = _mb_run_controller(history)
+    bundle = Path(history["bundle"])
+    assert manifest["merge_base_sha"] == history["base"]
+    expected_diff = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(history["source"]),
+            "diff",
+            "--raw",
+            "-z",
+            "--no-renames",
+            "--no-abbrev",
+            str(history["base"]),
+            str(history["head"]),
+        ],
+        check=True,
+        capture_output=True,
+    ).stdout
+    assert (bundle / "raw-diff.bin").read_bytes() == expected_diff
+    anchor = json.loads((bundle / "external-anchor.json").read_text(encoding="utf-8"))
+    assert anchor["merge_base_sha"] == history["base"]
+    _mb_executor_git_context(bundle, manifest)
+    _mb_write_evidence(bundle, manifest)
+    trusted_anchor._verifier(_mb_verifier_args(history))
+
+
+def test_behind_but_disjoint_pr_passes_controller_executor_and_verifier(tmp_path: Path):
+    history = _mb_history(tmp_path, "behind_disjoint")
+    manifest = _mb_run_controller(history)
+    bundle = Path(history["bundle"])
+    assert manifest["base_sha"] == history["base"]
+    assert manifest["merge_base_sha"] == history["fork"]
+    _mb_executor_git_context(bundle, manifest)
+    _mb_write_evidence(bundle, manifest)
+    trusted_anchor._verifier(_mb_verifier_args(history))
+
+
+def test_behind_pr_raw_diff_has_no_false_deletions_for_files_main_added(tmp_path: Path):
+    history = _mb_history(tmp_path, "behind_disjoint")
+    _mb_run_controller(history)
+    entries = _mb_raw_entries((Path(history["bundle"]) / "raw-diff.bin").read_bytes())
+    assert entries == [("A", "docs/pr.md")]
+    assert all(status != "D" for status, _path in entries)
+
+
+@pytest.mark.parametrize("scenario", ["criss_cross", "unrelated"])
+def test_controller_requires_exactly_one_merge_base(tmp_path: Path, scenario: str):
+    history = _mb_history(tmp_path, scenario)
+    with pytest.raises(ValueError, match="MERGE_BASE_NOT_UNIQUE"):
+        _mb_run_controller(history)
+    assert not (Path(history["bundle"]) / "manifest.json").exists()
+
+
+@pytest.mark.parametrize("scenario", ["criss_cross", "unrelated"])
+def test_executor_rejects_non_unique_merge_base(tmp_path: Path, scenario: str):
+    history = _mb_history(tmp_path, scenario)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(trusted_anchor, "_unique_merge_base", lambda *_args: history["base"])
+        manifest = _mb_run_controller(history)
+    with pytest.raises(ValueError, match="executor Git identity mismatch"):
+        _mb_executor_git_context(Path(history["bundle"]), manifest)
+
+
+def test_tampered_merge_base_sha_fails_executor_and_verifier(tmp_path: Path):
+    history = _mb_history(tmp_path, "behind_disjoint")
+    manifest = _mb_run_controller(history)
+    bundle = Path(history["bundle"])
+    manifest["merge_base_sha"] = history["base"]
+    _mb_rebind_manifest(bundle, manifest)
+    with pytest.raises(ValueError, match="executor Git identity mismatch"):
+        _mb_executor_git_context(bundle, manifest)
+    _mb_write_evidence(bundle, manifest)
+    with pytest.raises(SystemExit):
+        trusted_anchor._verifier(_mb_verifier_args(history))
+
+
+def test_evidence_merge_base_sha_must_match_manifest():
+    manifest = _manifest()
+    evidence = _evidence(manifest)
+    assert _verify(manifest, evidence) == "PASS"
+    evidence["merge_base_sha"] = "f" * 40
+    assert _verify(manifest, evidence) == "IMPACT_UNKNOWN"
+
+
+@pytest.mark.parametrize("scenario", ["main_golden", "main_selected_test", "same_path"])
+def test_main_moved_over_gate_surface_or_pr_paths_fails_closed(tmp_path: Path, scenario: str):
+    history = _mb_history(tmp_path, scenario)
+    with pytest.raises(ValueError, match="MAIN_MOVED_OVER_GATE_SURFACE: merge origin/main"):
+        _mb_run_controller(history)
+    record = trusted_anchor._controller_failure_record(
+        ValueError("MAIN_MOVED_OVER_GATE_SURFACE: merge origin/main; x")
+    )
+    assert record["reason_code"] == "MAIN_MOVED_OVER_GATE_SURFACE"
+
+
+@pytest.mark.parametrize("scenario", ["main_golden", "same_path"])
+def test_verifier_recomputes_main_moved_check(
+    tmp_path: Path, scenario: str, capsys: pytest.CaptureFixture[str]
+):
+    history = _mb_history(tmp_path, scenario)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(trusted_anchor, "_require_main_not_moved_over_gate", lambda *_a: None)
+        manifest = _mb_run_controller(history)
+    bundle = Path(history["bundle"])
+    _mb_write_evidence(bundle, manifest)
+    with pytest.raises(SystemExit):
+        trusted_anchor._verifier(_mb_verifier_args(history))
+    assert "MAIN_MOVED_OVER_GATE_SURFACE: merge origin/main" in capsys.readouterr().err
+
+
+def test_main_changed_uv_lock_fails_with_dependency_drift(tmp_path: Path):
+    history = _mb_history(tmp_path, "main_uv_lock")
+    with pytest.raises(ValueError) as caught:
+        _mb_run_controller(history)
+    record = trusted_anchor._controller_failure_record(caught.value)
+    assert record["reason_code"] == "DEPENDENCY_CONTRACT_DRIFT"
+    assert (
+        "merge origin/main"
+        in trusted_anchor.CONTROLLER_FAILURE_REMEDIES["DEPENDENCY_CONTRACT_DRIFT"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "gated"),
+    [
+        ("tests/ops/test_pr_impact_gate.py", True),
+        ("tests/ops/test_select_tests.py", True),
+        ("tests/golden_behavior/corpus.py", True),
+        ("tests/golden_behavior/nested/data.json", True),
+        ("scripts/ops/run_golden_behavior_eval.py", True),
+        ("scripts/ops/pr_impact_gate.py", True),
+        ("scripts/ops/select_tests.py", True),
+        ("scripts/ops/trusted_deletion_anchor.py", True),
+        ("scripts/ops/trusted_impact_gate.py", True),
+        (".github/workflows/lint.yml", True),
+        (".nexus-core/config.json", True),
+        ("docs/testing/test_impact_map.md", True),
+        (".nexus/test_impact_index.json", True),
+        ("pyproject.toml", True),
+        ("uv.lock", True),
+        ("product/__init__.py", True),
+        ("scripts/ops/nested/trusted_x.py", False),
+        ("scripts/ops/untrusted_x.py", False),
+        ("tests/ops/test_other.py", False),
+        ("product/other.py", False),
+        ("docs/main-added.md", False),
+    ],
+)
+def test_gate_oracle_surface_membership(path: str, gated: bool):
+    assert trusted_anchor._is_gate_oracle_surface(path) is gated
+    assert bool(trusted_anchor._gate_surface_overlap([path], [])) is gated
+
+
+def test_gate_surface_overlap_includes_pr_paths_and_empty_main_delta_passes():
+    assert trusted_anchor._gate_surface_overlap([], ["uv.lock"]) == []
+    assert trusted_anchor._gate_surface_overlap(["docs/a.md"], ["docs/b.md"]) == []
+    assert trusted_anchor._gate_surface_overlap(["docs/a.md", "uv.lock"], ["docs/a.md"]) == [
+        "docs/a.md",
+        "uv.lock",
+    ]
+
+
+def test_main_moved_reason_is_allowlisted_with_trusted_remedy(tmp_path: Path):
+    code = "MAIN_MOVED_OVER_GATE_SURFACE"
+    assert "merge origin/main" in trusted_anchor.CONTROLLER_FAILURE_REMEDIES[code]
+    failure_dir = _controller_failure_dir(
+        tmp_path,
+        {
+            "controller-failure.json": {
+                "schema": trusted_anchor.CONTROLLER_FAILURE_SCHEMA,
+                "reason_code": code,
+                "detail": "ValueError: MAIN_MOVED_OVER_GATE_SURFACE: merge origin/main; uv.lock",
+            }
+        },
+    )
+    result = trusted_anchor.resolve_controller_failure(failure_dir, controller_result="failure")
+    assert result["reason_code"] == code
+    assert result["remedy"] == trusted_anchor.CONTROLLER_FAILURE_REMEDIES[code]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "tests/contracts/test_witness.py",
+        "pytest.ini",
+        "tests/conftest.py",
+        "tests/ops/conftest.py",
+        "tests/contracts/conftest.py",
+        "tests/__init__.py",
+        "scripts/__init__.py",
+        "scripts/ops/__init__.py",
+    ],
+)
+def test_main_moved_over_witness_pytest_ini_or_import_chain_fails_closed(tmp_path: Path, path: str):
+    history = _mb_history(tmp_path, f"main_touch:{path}")
+    with pytest.raises(ValueError, match="MAIN_MOVED_OVER_GATE_SURFACE: merge origin/main"):
+        _mb_run_controller(history)
+
+
+def test_verifier_recomputes_witness_surface(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    history = _mb_history(tmp_path, "main_touch:tests/contracts/test_witness.py")
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(trusted_anchor, "_require_main_not_moved_over_gate", lambda *_a: None)
+        manifest = _mb_run_controller(history)
+    _mb_write_evidence(Path(history["bundle"]), manifest)
+    with pytest.raises(SystemExit):
+        trusted_anchor._verifier(_mb_verifier_args(history))
+    assert "tests/contracts/test_witness.py" in capsys.readouterr().err
+
+
+def test_unrelated_main_test_change_stays_admitted(tmp_path: Path):
+    history = _mb_history(tmp_path, "main_touch:tests/contracts/test_unrelated.py")
+    manifest = _mb_run_controller(history)
+    assert manifest["merge_base_sha"] == history["fork"]
+
+
+def test_golden_witness_paths_are_read_statically_from_corpus_source():
+    source = (
+        b'X = ("tests/a/test_one.py::test_x", "tests/a/test_one.py::C::test_y")\n'
+        b'Y = ("tests/b/test_two.py" "::test_z", "nexus/not_a_test.py", "docs/x.md")\n'
+        b"import os; os.system('never executed')\n"
+    )
+    assert trusted_anchor._golden_witness_paths(source) == {
+        "tests/a/test_one.py",
+        "tests/b/test_two.py",
+    }
+    assert trusted_anchor._golden_witness_paths(b"") == set()
+    with pytest.raises(ValueError, match="Golden corpus"):
+        trusted_anchor._golden_witness_paths(b"def (")
+
+
+def test_witness_named_only_at_base_tip_or_only_at_merge_base_is_surface():
+    overlap = trusted_anchor._gate_surface_overlap
+    assert overlap(["tests/x/test_w.py"], [], {"tests/x/test_w.py"}) == ["tests/x/test_w.py"]
+    assert overlap(["tests/x/test_w.py"], [], set()) == []
+
+
+def test_build_manifest_requires_merge_base_sha():
+    with pytest.raises(TypeError):
+        build_manifest(  # type: ignore[call-arg]
+            _event(),
+            raw_diff=b"",
+            test_inventory=["tests/ops/test_pr_impact_gate.py"],
+            source_archive=b"",
+        )
+
+
+def test_verifier_rejects_anchor_merge_base_that_differs_from_manifest(tmp_path: Path):
+    """The external anchor names the merge-base it vouches for; it must equal the manifest."""
+
+    history = _mb_history(tmp_path, "behind_disjoint")
+    manifest = _mb_run_controller(history)
+    bundle = Path(history["bundle"])
+    _mb_write_evidence(bundle, manifest)
+    trusted_anchor._verifier(_mb_verifier_args(history))
+    anchor = json.loads((bundle / "external-anchor.json").read_text(encoding="utf-8"))
+    anchor["merge_base_sha"] = history["base"]
+    (bundle / "external-anchor.json").write_bytes(_json(anchor) + b"\n")
+    with pytest.raises(SystemExit):
+        trusted_anchor._verifier(_mb_verifier_args(history))
+
+
+def test_unparseable_main_corpus_fails_closed(tmp_path: Path):
+    history = _mb_history(tmp_path, "main_touch:tests/golden_behavior/corpus.py")
+    source = Path(history["source"])
+    (source / "tests/golden_behavior/corpus.py").write_text("def (\n")
+    _run_git(source, "commit", "-q", "--no-verify", "-am", "broken corpus")
+    with pytest.raises(ValueError, match="Golden corpus is not parseable"):
+        trusted_anchor._main_moved_overlap(
+            source,
+            str(history["fork"]),
+            _run_git(source, "rev-parse", "HEAD"),
+            str(history["head"]),
+        )

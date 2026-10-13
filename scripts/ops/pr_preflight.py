@@ -13,11 +13,11 @@ Runs the ceremony checks that most often fail a PR in CI, before the push:
    whatever happens to be on PATH; a certify failure is a FAIL, not a SKIP.
 4. ``freshness``: Core's rule (nexus-core 9942db7 ``_resolve_base_and_head``):
    the head has exactly one merge-base with the base tip, else
-   ``BASE_REF_NOT_ANCESTOR``. A head merely behind the tip is INFO here; the
-   trusted executor's stricter tip-as-ancestor rule is reported by
-   ``git_identity``.
+   ``BASE_REF_NOT_ANCESTOR``. A head merely behind the tip is INFO here.
 5. ``dependency_contract``: the trusted controller's dependency-contract check.
-6. ``git_identity``: the unprivileged executor's Git identity check.
+6. ``git_identity``: the unprivileged executor's Git identity check: one
+   merge-base, and main must not have moved over the gate-oracle surface or
+   the PR's own paths since it (``MAIN_MOVED_OVER_GATE_SURFACE``).
 7. ``static_ruff`` / ``static_pyright`` / ``static_bandit``: the exact-base
    regression comparison on changed files, printing the new findings.
 
@@ -69,6 +69,7 @@ BASE_REF_NOT_ANCESTOR = "BASE_REF_NOT_ANCESTOR"
 # Local codes for gates whose CI message has no stable reason code.
 DEPENDENCY_CONTRACT_DRIFT = "DEPENDENCY_CONTRACT_DRIFT"
 EXECUTOR_GIT_IDENTITY_MISMATCH = "EXECUTOR_GIT_IDENTITY_MISMATCH"
+MAIN_MOVED_OVER_GATE_SURFACE = "MAIN_MOVED_OVER_GATE_SURFACE"
 MERGE_LANE_BINDING_MISSING = "MERGE_LANE_BINDING_MISSING"
 STATIC_NEW_REGRESSION = "NEW_REGRESSION"
 STATIC_TOOL_MISSING = "STATIC_TOOL_MISSING"
@@ -617,8 +618,8 @@ def check_freshness(ctx: Context) -> CheckResult:
 
     Source of truth: nexus-core 9942db7 product/clients/local_golden_path.py
     ``_resolve_base_and_head`` (``git merge-base --all``; none or several fail
-    ``BASE_REF_NOT_ANCESTOR``). Merely being behind the tip satisfies Core. The
-    trusted executor still requires the tip as ancestor; ``git_identity`` owns that.
+    ``BASE_REF_NOT_ANCESTOR``). Merely being behind the tip satisfies Core and is
+    INFO; whether main moved over gate-relevant paths is ``git_identity``'s job.
     """
     name = "freshness"
     behind = int(_git(ctx.repo, "rev-list", "--count", f"{ctx.head_sha}..{ctx.base_sha}").stdout)
@@ -642,7 +643,7 @@ def check_freshness(ctx: Context) -> CheckResult:
         INFO,
         detail=(
             f"behind {ctx.base_ref} by {behind} commit(s); Core accepts a single merge-base "
-            "(the trusted executor is stricter: see git_identity)"
+            "(see git_identity for whether main moved over gate or PR paths)"
         ),
         data=data,
     )
@@ -693,28 +694,71 @@ def check_dependency_contract(ctx: Context) -> CheckResult:
 def check_git_identity(ctx: Context) -> CheckResult:
     """Replay the executor's Git identity conditions without the CI bundle.
 
-    Source of truth: trusted_deletion_anchor._prepare_executor_git_context. The
-    executor fails when the base is not an ancestor of the head, or when the
-    ``tests`` tree rebuilt from the ``git archive`` extraction differs from the
-    committed ``tests`` tree.
+    Source of truth: the base ref's trusted_deletion_anchor (what CI runs). With
+    the merge-base rule (``_main_moved_overlap`` present) the executor needs
+    exactly one merge-base, and the controller fails closed when main changed the
+    gate-oracle surface or the PR's own paths since it. An older base copy still
+    requires the base tip as an ancestor; preflight follows whichever is there.
+    Both also fail when the ``tests`` tree rebuilt from the ``git archive``
+    extraction differs from the committed ``tests`` tree.
     """
     name = "git_identity"
     try:
         anchor = _load_trusted_module(ctx, TRUSTED_ANCHOR_PATH)
     except PreflightError as exc:
         return CheckResult(name, SKIP, detail=str(exc), fix="fetch the base ref and rerun")
-    ancestor = _git(
-        ctx.repo, "merge-base", "--is-ancestor", ctx.base_sha, ctx.head_sha, check=False
-    )
-    if ancestor.returncode != 0:
-        return CheckResult(
-            name,
-            FAIL,
-            EXECUTOR_GIT_IDENTITY_MISMATCH,
-            f"base {ctx.base_sha[:12]} is not an ancestor of head (executor ancestry check; "
-            "trusted_deletion_anchor requires the base tip as ancestor, unlike Core)",
-            f"git merge {ctx.base_ref} (no force-push), then push",
+    merge_fix = f"git merge {ctx.base_ref} (no force-push), then push"
+    data: dict[str, Any] = {}
+    overlap_rule = getattr(anchor, "_main_moved_overlap", None)
+    if overlap_rule is not None:
+        proc = _git(ctx.repo, "merge-base", "--all", ctx.base_sha, ctx.head_sha, check=False)
+        bases = proc.stdout.split() if proc.returncode == 0 else []
+        if len(bases) != 1:
+            return CheckResult(
+                name,
+                FAIL,
+                EXECUTOR_GIT_IDENTITY_MISMATCH,
+                f"base and head share {len(bases)} merge-bases (executor needs exactly one)",
+                merge_fix,
+                {"merge_bases": bases},
+            )
+        merge_base = bases[0]
+        try:
+            overlap = overlap_rule(ctx.repo, merge_base, ctx.base_sha, ctx.head_sha)
+        except (ValueError, subprocess.CalledProcessError) as exc:
+            return CheckResult(
+                name,
+                FAIL,
+                EXECUTOR_GIT_IDENTITY_MISMATCH,
+                f"main-moved check failed: {exc}",
+                merge_fix,
+                {"merge_base": merge_base},
+            )
+        data = {"merge_base": merge_base, "overlap": overlap}
+        if overlap:
+            shown = ", ".join(overlap[:5]) + (" ..." if len(overlap) > 5 else "")
+            return CheckResult(
+                name,
+                FAIL,
+                MAIN_MOVED_OVER_GATE_SURFACE,
+                f"main changed {len(overlap)} gate-oracle or PR path(s) since the "
+                f"merge-base: {shown}",
+                merge_fix,
+                data,
+            )
+    else:
+        ancestor = _git(
+            ctx.repo, "merge-base", "--is-ancestor", ctx.base_sha, ctx.head_sha, check=False
         )
+        if ancestor.returncode != 0:
+            return CheckResult(
+                name,
+                FAIL,
+                EXECUTOR_GIT_IDENTITY_MISMATCH,
+                f"base {ctx.base_sha[:12]} is not an ancestor of head (executor ancestry "
+                "check of the base ref's trusted_deletion_anchor)",
+                merge_fix,
+            )
     expected = _git(ctx.repo, "rev-parse", f"{ctx.head_sha}:tests", check=False).stdout.strip()
     if not expected:
         return CheckResult(name, SKIP, detail="head has no tests/ tree")
@@ -743,7 +787,8 @@ def check_git_identity(ctx: Context) -> CheckResult:
             f"tests/ tree from git archive ({rebuilt[:12]}) != committed ({expected[:12]})",
             "check tests/ for export-ignore attributes, external symlinks or filtered files",
         )
-    return CheckResult(name, PASS, detail="ancestry and tests/ tree reproduce")
+    rule = "single merge-base, no main overlap" if overlap_rule is not None else "ancestry"
+    return CheckResult(name, PASS, detail=f"{rule} and tests/ tree reproduce", data=data)
 
 
 def _changed_files(ctx: Context, spec: dict[str, Any]) -> list[str]:
