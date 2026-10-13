@@ -286,7 +286,7 @@ def test_tampered_ground_truth_is_refused(tmp_path, fx):
 def test_cli_refuses_tampered_seal_and_writes_nothing(tmp_path, fx):
     task = fx.task(fx.gold_diff)
     (task / "raw.json").write_bytes((task / "raw.json").read_bytes() + b" ")
-    script = Path(__file__).resolve().parents[2] / "scripts/research/score_real_outcome.py"
+    script = Path(__file__).resolve().parents[2] / "nexus/research/score_real_outcome_cli.py"
     out = tmp_path / "out"
     proc = subprocess.run(
         [

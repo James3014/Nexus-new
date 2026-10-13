@@ -7,9 +7,9 @@ outcome store. Scores one task at a time and waits while M5 free memory is
 below the threshold (Splash is resident on this host).
 
 Examples:
-  score_real_outcome.py --store <copy>/store --out <outcome> --work <scratch>
-  score_real_outcome.py --store ... --out ... --work ... --task KEY --candidate-override gold
-  score_real_outcome.py --out <outcome> --summarize
+  python -m nexus.research.score_real_outcome_cli --store <copy>/store --out <outcome> --work <scratch>
+  python -m nexus.research.score_real_outcome_cli --store ... --out ... --work ... --task KEY --candidate-override gold
+  python -m nexus.research.score_real_outcome_cli --out <outcome> --summarize
 """
 
 from __future__ import annotations
