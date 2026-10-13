@@ -3690,7 +3690,7 @@ def _exec_entropy_guard_v2(plan: CapabilityExecutionPlan, task_desc: str) -> Cap
         )
     from nexus.services.entropy_v2 import EntropyGuardV2
 
-    audit = EntropyGuardV2().audit_payload(text, tokens or None)
+    audit = EntropyGuardV2().audit_payload(text, tokens)
     passed = str(audit.get("status")) == "PASSED"
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
     return _make_receipt(

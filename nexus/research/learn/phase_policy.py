@@ -31,7 +31,8 @@ def phase_slo_pass_rate(phase_slo_summary: Dict[str, Any]) -> float:
         return float(summary.get("overall_pass_rate") or 0.0)
     if str(summary.get("status") or "").upper() != "SUCCESS":
         return 0.0
-    phases = summary.get("phases") if isinstance(summary.get("phases"), dict) else {}
+    raw_phases = summary.get("phases")
+    phases: Dict[str, Any] = raw_phases if isinstance(raw_phases, dict) else {}
     observed = [
         row for row in phases.values() if isinstance(row, dict) and int(row.get("total") or 0) > 0
     ]

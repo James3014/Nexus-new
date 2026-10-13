@@ -4,7 +4,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 from pydantic import BaseModel
 
 class LockEntry(BaseModel):
@@ -67,7 +67,7 @@ class FileLockRegistry:
             return False
         return now - self.acquired_at.get(path, 0.0) > float(self.ttl_sec)
 
-    def acquire_detailed(self, task_id: str, files: List[str]) -> Dict[str, object]:
+    def acquire_detailed(self, task_id: str, files: List[str]) -> Dict[str, Any]:
         """All-or-nothing acquire.  Returns conflicts with their holders and stale takeovers."""
         paths = [os.path.normpath(f) for f in files]
         now = time.time()
