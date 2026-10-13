@@ -32,7 +32,10 @@ ENDPOINT = "http://127.0.0.1:8766"
 CURRENT_ROOT = "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe"
 DESIRED_ROOT = "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-935a9dd3"
 ENV_FILE = "/Users/jameschen/Library/Application Support/Nexus/mcp-gateway.env"
-STATE_DIR = "/Users/jameschen/Workspace/Nexus-new-self-hosted-state"
+# Preserve the sealed historical rollback identity, but never reuse that
+# workspace-local root for a new Gateway deployment (#1539).
+LEGACY_ROLLBACK_STATE_DIR = "/Users/jameschen/Workspace/Nexus-new-self-hosted-state"
+STATE_DIR = "/Users/jameschen/.local/state/Nexus-new-self-hosted-state"
 CURRENT_WRAPPER_PLIST_SHA256 = "082c7786f9b7254949a6fdb38d905414a78c1b1979aabf7f434dd7019c09e100"
 # The exact loaded `.direct` plist uses a fixed `/bin/zsh -c` wrapper.  The
 # command literals are immutable; the desired form changes only the root and
@@ -79,10 +82,11 @@ def _gateway_wrapper_command(root: str, entrypoint: str) -> str:
     ):
         raise ContractError("wrapper path contains shell metacharacter")
     executable = entrypoint
+    state_dir = LEGACY_ROLLBACK_STATE_DIR if root == CURRENT_ROOT else STATE_DIR
     return (
         f'cd {root} ; source "{ENV_FILE}" ; export PYTHONDONTWRITEBYTECODE=1 ; '
         f"export NEXUS_CANONICAL_SOURCE_ROOT={root} ; "
-        f"export NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR={STATE_DIR} ; "
+        f"export NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR={state_dir} ; "
         f"exec {INTERPRETER} {executable}"
     )
 
