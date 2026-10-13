@@ -1,13 +1,14 @@
-// owner-signer: sign Nexus Owner grants with a Touch ID–gated Secure Enclave key (#1750 phase 2).
+// owner-signer: sign Nexus Owner grants with a user-presence–gated Secure Enclave key (#1750 phase 2).
 //
 // The private key is created inside the Secure Enclave and never leaves it; the
 // file on disk is an opaque handle that only this Mac's Secure Enclave can use.
-// Every signature requires a fresh biometric check, so a process running under
-// the Owner's account cannot sign without the Owner's finger.
+// Every signature requires fresh user presence (Touch ID, Apple Watch, or the
+// Mac login password in the system prompt), so a process running under the
+// Owner's account cannot sign without the Owner.
 //
 //   owner-signer init            create the key (once) and print the public key
 //   owner-signer pubkey          print the public key PEM
-//   owner-signer sign FILE       Touch ID prompt, then print the base64 DER signature
+//   owner-signer sign FILE       user-presence prompt, then print the base64 DER signature
 //
 // FILE must be the canonical payload written by
 // `scripts/ops/owner_attestation.py draft`; the prompt summary is parsed from the
@@ -55,7 +56,7 @@ func initKey() {
     guard let access = SecAccessControlCreateWithFlags(
         nil,
         kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
-        [.privateKeyUsage, .biometryCurrentSet],
+        [.privateKeyUsage, .userPresence],
         &error
     ) else {
         fail("cannot create access control: \(String(describing: error))")

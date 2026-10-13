@@ -5,7 +5,7 @@ Typical flow on the Owner's Mac:
 
     python scripts/ops/owner_attestation.py draft --agent nexus-agent-bot \\
         --issue 1750 --path 'nexus/orchestrator/**' --hours 24 --out grant.json
-    owner-signer sign grant.json > grant.sig          # Touch ID prompt
+    owner-signer sign grant.json > grant.sig          # Touch ID / login-password prompt
     python scripts/ops/owner_attestation.py assemble --payload grant.json \\
         --signature grant.sig --public-key owner.pem   # prints the PR marker
 

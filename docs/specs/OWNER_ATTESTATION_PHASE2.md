@@ -47,7 +47,10 @@ The decision looks only at content, never at who sent the event. It approves:
 ## How a grant works
 
 - **Signing.** `tools/owner-signer` keeps a P-256 key inside the Mac's Secure
-  Enclave. Every signature needs a fresh Touch ID check. The prompt shows:
+  Enclave. Every signature needs fresh user presence: Touch ID or an Apple Watch where
+  available, otherwise the Mac login password in the system prompt (the Owner's
+  Mac mini has no Touch ID sensor, so `.userPresence` is used rather than
+  `.biometryCurrentSet`). The prompt shows:
   - Owner, agent, actions, repository and Issue;
   - every path;
   - the validity window, parsed from the exact bytes being signed.
@@ -57,7 +60,7 @@ The decision looks only at content, never at who sent the event. It approves:
   - one Issue;
   - the allowed actions: 1–8 distinct upper-case names, which must include
     `GITHUB_MERGE`. The gate and the signer both refuse any other shape, so the
-    Touch ID prompt always shows exactly what is signed;
+    signing prompt always shows exactly what is signed;
   - 1–12 path globs, none starting with a wildcard;
   - issue and expiry time (at most 7 days);
   - a nonce.
@@ -154,7 +157,7 @@ The decision looks only at content, never at who sent the event. It approves:
    ```sh
    python scripts/ops/owner_attestation.py draft --agent <agent-login> --issue <N> \
        --path 'nexus/orchestrator/**' --hours 24 --out grant.json
-   owner-signer sign grant.json > grant.sig                     # Touch ID
+   owner-signer sign grant.json > grant.sig                     # Touch ID or login password
    python scripts/ops/owner_attestation.py assemble --payload grant.json \
        --signature grant.sig --public-key ~/owner.pem
    ```
@@ -167,8 +170,8 @@ The decision looks only at content, never at who sent the event. It approves:
   run in a separate OS account, a VM or a cloud session, with only its own
   identity's token. Otherwise it can use your token directly.
   - It can also replace the signer binary or `grant.json`.
-  - It can call the Secure Enclave key with its own prompt text. Touch ID then
-    proves only that a finger was presented, not what was approved.
+  - It can call the Secure Enclave key with its own prompt text. The user-presence
+    check then proves only that the Owner was present, not what was approved.
   - Run the signer only from the root-owned copy installed with
     `sudo install -o root`.
 - **The signer has not been built or run.** It needs macOS with a Secure Enclave
