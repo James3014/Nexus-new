@@ -2,15 +2,5 @@
 
 from __future__ import annotations
 
-ENTRY: dict[str, object] = {
-    "file": "tests/integration/test_n26_fallback_10_R_A_C.py",
-    "disposition": "quarantine",
-    "issue": "#1924",
-    "cause": "capability-phase e2e expectations (plan membership, invoked/gate_passed/wall_time) drifted from the current capability planner; stale expectations, needs owner fix-or-delete decision",
-    "tests": (
-        "test_exec_learning_closure_runs",
-        "test_exec_metabolism_resume_runs",
-        "test_exec_nightshift_runs",
-        "test_exec_sandbox_runner_runs",
-    ),
-}
+# Tombstone: every quarantined id was converted to a contract test of today's behaviour (#1924 bucket B, with #2030).
+ENTRY = None

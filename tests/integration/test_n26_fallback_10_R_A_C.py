@@ -16,6 +16,25 @@ def _test_executor(name: str) -> None:
     assert r.telemetries["wall_time_ms"] > 0, f"{name}: wall_time_ms=0"
 
 
+def _assert_fail_closed(
+    name: str,
+    error: str,
+    *,
+    status: str | None = "BLOCKED",
+    invoked: bool = True,
+) -> None:
+    # Stub success was removed on purpose (99c8295ba, 13df4578d, 7ae787b81; #1850 archive):
+    # the executor now fails closed and reports the specific reason below.
+    fn = EXECUTOR_REGISTRY.get(name)
+    assert fn is not None, f"{name} not in registry"
+    plan = _plan()
+    r = fn(plan, "test task")
+    assert r.invoked is invoked, f"{name}: invoked={r.invoked}"
+    assert r.gate_passed is False, f"{name}: gate_passed={r.gate_passed}"
+    assert r.outcome.get("semantic_status") == status, f"{name}: {r.outcome}"
+    assert r.outcome.get("error") == error, f"{name}: {r.outcome}"
+
+
 def _assert_retired(name: str) -> None:
     # Executor-only key with no planner node, archived 2026-10-13 (ARCHIVED_2026-10-13.md, #1906):
     # the historical node id is kept and now asserts the key is unreachable.
@@ -23,7 +42,7 @@ def _assert_retired(name: str) -> None:
 
 
 def test_exec_nightshift_runs() -> None:
-    _test_executor("nightshift")
+    _assert_fail_closed("nightshift", "BLOCKED_EXTERNAL_AUTH:nightshift_model")
 
 
 def test_exec_battle_swarm_runs() -> None:
@@ -31,7 +50,7 @@ def test_exec_battle_swarm_runs() -> None:
 
 
 def test_exec_sandbox_runner_runs() -> None:
-    _test_executor("sandbox_runner")
+    _assert_fail_closed("sandbox_runner", "SANDBOX_COMMAND_CONTEXT_REQUIRED")
 
 
 def test_exec_dual_loop_runs() -> None:
@@ -43,11 +62,13 @@ def test_exec_ultra_review_runs() -> None:
 
 
 def test_exec_learning_closure_runs() -> None:
-    _test_executor("learning_closure")
+    _assert_fail_closed(
+        "learning_closure", "archived_hollow_learning_closure_2026-10-12", invoked=False
+    )
 
 
 def test_exec_metabolism_resume_runs() -> None:
-    _test_executor("metabolism_resume")
+    _assert_fail_closed("metabolism_resume", "TOKEN_THRESHOLD_NOT_REACHED", status="SKIPPED")
 
 
 def test_exec_promotion_engine_runs() -> None:

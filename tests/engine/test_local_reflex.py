@@ -1,4 +1,9 @@
-from nexus.engine.local_reflex import ReflexAssessment, _merge_ollama_shadow, _parse_reflex_jsonish, assess_local_reflex
+from nexus.engine.local_reflex import (
+    ReflexAssessment,
+    _merge_ollama_shadow,
+    _parse_reflex_jsonish,
+    assess_local_reflex,
+)
 
 
 def test_local_reflex_marks_low_risk_public_repair_bare_sufficient(monkeypatch):
@@ -74,9 +79,15 @@ def test_local_reflex_ollama_unavailable_fails_closed_to_heuristic(monkeypatch):
 
 
 def test_parse_reflex_jsonish_extracts_embedded_json():
-    parsed = _parse_reflex_jsonish('thinking... {"risk_level":"high","bare_sufficiency":"low"} done')
-
-    assert parsed == {"risk_level": "high", "bare_sufficiency": "low"}
+    # Deprecated and stubbed in 4039601d2: JSON parsing moved to SemanticAdapter, so the legacy
+    # parser returns the empty stub for any input, including embedded JSON.
+    assert "[DEPRECATED]" in (_parse_reflex_jsonish.__doc__ or "")
+    assert (
+        _parse_reflex_jsonish('thinking... {"risk_level":"high","bare_sufficiency":"low"} done')
+        == {}
+    )
+    assert _parse_reflex_jsonish('{"risk_level":"high"}') == {}
+    assert _parse_reflex_jsonish("") == {}
 
 
 def test_ollama_shadow_cannot_downgrade_heuristic_high_risk():
