@@ -1127,6 +1127,8 @@ class LocalAssistService:
         candidate_patch: str,
         candidate_hash: str,
     ) -> dict[str, Any]:
+        from nexus.services.local_heal.pipeline_isolation import verifier_input_files
+
         apply_receipt = self._apply_runner(
             IsolatedApplyRequest(
                 task_id=request.task_id,
@@ -1136,6 +1138,7 @@ class LocalAssistService:
                 selected_candidate_hash=candidate_hash,
                 mutation_allowed=True,
                 search_text=request.locked_search,
+                verifier_files=verifier_input_files(request.workspace_root, request.verifier_command),
             )
         )
         # Trust IsolatedApplyReceipt hash match only — never re-project a mismatch into a match.
@@ -1254,7 +1257,6 @@ def load_request_file(path: str | Path) -> LocalAssistRequest:
     """
     from nexus.services.local_assist_live_smoke import (
         is_live_smoke_payload,
-        load_local_assist_payload,
         translate_live_smoke_to_request,
     )
 

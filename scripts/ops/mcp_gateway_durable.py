@@ -3320,11 +3320,9 @@ def _recovery_wrapper_command(root: str) -> str:
         for token in (";", "&&", "|", "$", "`", "\n", "\r", "\x00")
     ):
         raise _gateway_error("R1 recovery wrapper path contains shell metacharacter")
-    state_dir = (
-        Path.home() / "Workspace/Nexus-new-self-hosted-state"
-        if (Path.home() / "Workspace/Nexus-new-self-hosted-state").exists()
-        else (Path.home() / "workspace/Nexus-new-self-hosted-state")
-    )
+    # Durable lifecycle and research evidence belong to host state storage,
+    # never an incidental directory under the repository workspace (#1539).
+    state_dir = Path.home() / ".local/state/Nexus-new-self-hosted-state"
     return (
         f'cd "{root_path}" ; source "{ENV_PATH}" ; export PYTHONDONTWRITEBYTECODE=1 ; '
         f'export NEXUS_CANONICAL_SOURCE_ROOT="{root_path}" ; '

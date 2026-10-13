@@ -4379,6 +4379,24 @@ def test_r1_live_production_wrapper_and_plist_are_fixed_and_secret_free(
         g._recovery_expected_plist_bytes("/tmp/caller-selected")
 
 
+def test_r1_recovery_state_root_stays_outside_workspace_when_shadow_exists(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    home = tmp_path / "test-home"
+    (home / "Workspace/Nexus-new-self-hosted-state").mkdir(parents=True)
+    (home / "workspace/Nexus-new-self-hosted-state").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    plan = g._recovery_plan(fixture["request"], fixture["receipt"])
+    wrapper = g._recovery_wrapper_command(plan.desired_root)
+    expected_state_dir = home / ".local/state/Nexus-new-self-hosted-state"
+    assert f'NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR="{expected_state_dir}"' in wrapper
+    assert "Workspace/Nexus-new-self-hosted-state" not in wrapper
+    assert "workspace/Nexus-new-self-hosted-state" not in wrapper
+    plist = plistlib.loads(g._recovery_expected_plist_bytes(plan.desired_root))
+    assert plist["ProgramArguments"][2] == wrapper
+
+
 def test_r1_live_production_effect_blocks_before_launchctl_without_bound_github_cli(
     tmp_path, monkeypatch
 ):

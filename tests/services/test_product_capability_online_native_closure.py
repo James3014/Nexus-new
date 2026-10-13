@@ -6,7 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from nexus.services.capability_registry import LOCAL_STAGE_CAPABILITIES
+from nexus.services.capability_registry import (
+    ARCHIVED_CAPABILITY_REASONS,
+    LOCAL_STAGE_CAPABILITIES,
+)
 from nexus.services.product_capability_closure import (
     EVIDENCE_INCOMPLETE,
     PRODUCT_CAPABILITIES,
@@ -177,6 +180,19 @@ def test_online_native_canary_is_structurally_valid_but_not_live_claimable(
     capability: str,
     tmp_path: Path,
 ) -> None:
+    if capability in ARCHIVED_CAPABILITY_REASONS:
+        # Archived 2026-10-12 (benchmark, stress_test): they fail closed by design, so the
+        # structural canary must see an explicit skip. The pinned denominator of 28 above
+        # still counts them until the governance denominator is re-based.
+        from nexus.core.belief_contracts import CapabilityExecutionPlan
+        from nexus.core.capability_executor_registry import get_executor
+
+        receipt = get_executor(capability)(
+            CapabilityExecutionPlan(plan_id="p", task_id="t", constraints={}), "canary"
+        )
+        assert receipt.invoked is False and receipt.gate_passed is False
+        assert receipt.outcome["skip_reason"] == ARCHIVED_CAPABILITY_REASONS[capability]
+        return
     task = _online_task(capability, tmp_path / "workspace")
     row = run_closure_task(
         task,

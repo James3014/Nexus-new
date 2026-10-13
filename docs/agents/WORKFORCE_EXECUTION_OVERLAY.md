@@ -41,7 +41,19 @@ override stale cached lists.
 
 ## Direct external delegation boundary
 
-Nexus runtime model execution always requires fresh Nexus Workforce Admission.
+Tracked (Task Card) self-hosted model dispatch requires a fresh Nexus Workforce
+Admission binding; without it the runtime fails closed with
+`WORKFORCE_ADMISSION_BINDING_MISSING` before any provider-side work.
+`DIRECT_CANONICAL` Owner-authorized work that does not dispatch a model worker
+is exempt, per `AGENTS.md`. A tracked request that falls through to model
+dispatch (lane not eligible, or a non-primary worker) still requires a binding.
+
+Known gap: untracked `ISOLATED_TARGET` dispatch (for example
+`ManagedLocalAgentLauncher`) currently has no admission path, so it is not
+enforced yet. The Owner decision of 2026-10-12 is that it must be admitted; the
+mechanism is tracked in #1886. The same gap covers an untracked request that
+falls through from `DIRECT_CANONICAL` to model dispatch: it runs as
+`ISOLATED_TARGET` without a binding.
 
 `DIRECT_DELEGATED` execution through an Owner-authorized approved non-Nexus
 control plane such as DevSpace does NOT use Nexus Workforce Admission. For that

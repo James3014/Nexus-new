@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -37,6 +38,13 @@ from nexus.orchestrator.autonomy_policy import (
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 
 NOW = datetime.now(timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_now(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The evaluator rejects evaluated_at older than five minutes against the
+    # wall clock; an import-time NOW goes stale during a long full-suite run.
+    monkeypatch.setattr(sys.modules[__name__], "NOW", datetime.now(timezone.utc))
 
 
 def _standing_context(**overrides) -> StandingGrantContext:

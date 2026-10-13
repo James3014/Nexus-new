@@ -260,6 +260,75 @@ def test_armor_profile_requires_armor_on():
     assert runner.parse_args(["--armor", "on"]).armor_profile == "FULL"
 
 
+# nexus-runtime #177: EXPERIMENT_ONLY worker with the bounded_code_candidate role, calibration only.
+EXPERIMENT_ONLY_MODEL = "incoai/Qwen3.8-27B-Splash"
+
+
+def test_experiment_authorization_requires_armor_on():
+    with pytest.raises(SystemExit):
+        runner.parse_args(["--experiment-authorization"])
+    assert runner.parse_args(["--armor", "on"]).experiment_authorization is False
+    assert runner.parse_args([
+        "--armor",
+        "on",
+        "--experiment-authorization",
+    ]).experiment_authorization
+
+
+def test_experiment_only_worker_is_refused_without_explicit_authorization():
+    with pytest.raises(runner.ModelUnavailable, match="EXPERIMENT_ONLY"):
+        runner.resolve_armor_worker(EXPERIMENT_ONLY_MODEL)
+    with pytest.raises(runner.ModelUnavailable, match="EXPERIMENT_ONLY"):
+        runner.resolve_armor_worker(EXPERIMENT_ONLY_MODEL, experiment_authorization=False)
+
+
+def test_experiment_only_worker_is_bound_only_with_explicit_authorization():
+    binding = runner.resolve_armor_worker(EXPERIMENT_ONLY_MODEL, experiment_authorization=True)
+    assert binding["worker_id"] == "local_splash_qwen38_27b"
+    assert binding["explicit_experiment_authorization"] is True
+    identity = runner.armor_worker_identity(EXPERIMENT_ONLY_MODEL, experiment_authorization=True)
+    assert identity["state"] == "EXPERIMENT_ONLY"
+    assert identity["explicit_experiment_authorization"] is True
+
+
+def test_admitted_worker_binding_never_carries_experiment_authorization():
+    for flag in (False, True):
+        binding = runner.resolve_armor_worker(ADMITTED_MODEL, experiment_authorization=flag)
+        assert "explicit_experiment_authorization" not in binding
+    identity = runner.armor_worker_identity(ADMITTED_MODEL)
+    assert identity["explicit_experiment_authorization"] is False
+    assert identity["state"] != "EXPERIMENT_ONLY"
+
+
+def test_non_admissible_worker_state_is_never_bound(monkeypatch):
+    from nexus.services import model_workforce_policy as policy
+
+    real_load = policy.WorkforcePolicyLoader.load
+    admitted_worker_id = runner.resolve_armor_worker(ADMITTED_MODEL)["worker_id"]
+
+    def load_with_retired_admitted_worker(self):
+        loaded = real_load(self)
+        worker = loaded.workers[admitted_worker_id]
+        object.__setattr__(worker, "state", sorted(policy.NON_ADMISSIBLE_STATES)[0])
+        return loaded
+
+    monkeypatch.setattr(policy.WorkforcePolicyLoader, "load", load_with_retired_admitted_worker)
+    with pytest.raises(runner.ModelUnavailable, match="workforce-admitted"):
+        runner.resolve_armor_worker(ADMITTED_MODEL, experiment_authorization=True)
+
+
+def test_validation_records_workforce_worker_identity(harness):
+    use_fake_executor(harness)
+    run_main(harness, "wf-identity", ["--armor", "on"], arms="off")
+    validation = json.loads(
+        (harness["root"] / "art" / "wf-identity" / "validation.json").read_text()
+    )
+    worker = validation["workforce_worker"]
+    assert worker["worker_id"]
+    assert worker["state"] != "EXPERIMENT_ONLY"
+    assert worker["explicit_experiment_authorization"] is False
+
+
 def test_profile_mismatch_is_an_ineligibility_reason(harness):
     use_fake_executor(harness, profile="FULL")  # executor resolves FULL although STANDARD requested
     rows = run_main(
@@ -321,3 +390,17 @@ def test_heal_receipt_stage_that_ran_counts_even_when_it_did_not_solve(tmp_path)
     assert runner.extract_heal_receipt_evidence(str(tmp_path / "nope.json"))["evidence_source"] == (
         "missing"
     )
+
+
+def test_armor_on_attempt_declares_world_c_local_armor(harness):
+    """The armor lane is World C: its receipt must carry local_armor, not product_runtime."""
+    use_fake_executor(harness)
+    run_main(harness, "world-c", ["--armor", "on"], arms="off")
+    receipt = json.loads(
+        (harness["root"] / "art" / "world-c" / "armor_receipts" / "off__toy-0.json").read_text()
+    )
+    assert receipt["canonical_execution"]["execution_world"] == "local_armor"
+    assert runner.ARMOR_CANONICAL_CONTEXT == {
+        "execution_world": "local_armor",
+        "transport_ingress": "bench",
+    }

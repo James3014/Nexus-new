@@ -196,8 +196,8 @@ def test_default_flags_detect_stub_and_fixture_provider() -> None:
 def test_scan_hard_coded_finds_literal_in_executor_source() -> None:
     from nexus.core.capability_executor_registry import _exec_ddtree
 
-    found = audit.scan_hard_coded(_exec_ddtree, ['"candidate_id": "c0"', "pattern-that-is-absent"])
-    assert [item["pattern"] for item in found] == ['"candidate_id": "c0"']
+    found = audit.scan_hard_coded(_exec_ddtree, ["_candidate_pool(plan)", "pattern-that-is-absent"])
+    assert [item["pattern"] for item in found] == ["_candidate_pool(plan)"]
     assert found[0]["line"] > 0 and found[0]["file"].endswith("capability_executor_registry.py")
 
 
@@ -291,7 +291,7 @@ def e2e_matrix(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
 
 def test_end_to_end_mempalace_gate_blocks_the_blacklisted_tool(e2e_matrix: dict[str, Any]) -> None:
     row = e2e_matrix["rows"]["mempalace_gate"]
-    assert row["verdict"] == audit.REAL_UNATTESTED, row.get("checks")
+    assert row["verdict"] == audit.REAL, row.get("checks")
     assert row["path"] == "e2e" and row["product_path_reachable"] is True
     by_name = {check["name"]: check for check in row["checks"]}
     assert by_name["roundtrip_verified"]["passed"] and by_name["shard_written_to_disk"]["passed"]
@@ -307,7 +307,7 @@ def test_end_to_end_sandbox_returns_stdout_from_an_isolated_workspace(
     e2e_matrix: dict[str, Any],
 ) -> None:
     row = e2e_matrix["rows"]["sandbox"]
-    assert row["verdict"] == audit.REAL_UNATTESTED, row.get("checks")
+    assert row["verdict"] == audit.REAL, row.get("checks")
     by_name = {check["name"]: check for check in row["checks"]}
     assert (
         by_name["stdout_token_in_result_file"]["passed"]
@@ -320,9 +320,8 @@ def test_end_to_end_sandbox_returns_stdout_from_an_isolated_workspace(
 
 def test_end_to_end_records_flag_receipts_and_retiring_rows(e2e_matrix: dict[str, Any]) -> None:
     matrix, rows, out = e2e_matrix["matrix"], e2e_matrix["rows"], e2e_matrix["out"]
-    assert (
-        rows["mempalace_gate"]["receipt_claims_simulated"] is True
-    )  # fail-closed default, not a measurement
+    # the audit reads the Nexus-side attested receipt (invoked + evidence refs => simulated=false)
+    assert rows["mempalace_gate"]["receipt_claims_simulated"] is False
     assert rows["federation"]["verdict"] == audit.RETIRING
     saved = json.loads((out / "matrix.json").read_text(encoding="utf-8"))
     assert saved["schema"] == audit.SCHEMA and {r["capability"] for r in saved["rows"]} == {
@@ -331,7 +330,7 @@ def test_end_to_end_records_flag_receipts_and_retiring_rows(e2e_matrix: dict[str
         "federation",
     }
     assert (out / "receipts" / "sandbox.json").is_file() and (out / "matrix.md").is_file()
-    assert matrix["verdict_counts"].get("REAL_UNATTESTED") == 2
+    assert matrix["verdict_counts"].get("REAL") == 2
 
 
 def test_route_smoke_row_validator_ignores_the_simulated_flag(tmp_path: Path) -> None:
@@ -339,3 +338,141 @@ def test_route_smoke_row_validator_ignores_the_simulated_flag(tmp_path: Path) ->
     assert result["passes_on_simulated_receipts"] is True
     assert result["synthetic_row_failures"] == []
     assert all(count == 0 for count in result["mentions_of_simulated_in_validators"].values())
+
+
+# --------------------------------------------- 2026-10-13 extension: every planner node
+
+
+EXTENSION_NODES = {
+    "semantic_failure_sensor",
+    "bdd_acceptance_skill",
+    "jit_validation",
+    "semantic_searcher",
+    "prompt_compression",
+    "asi_constraint_extractor",
+    "architecture_scout",
+    "formal_report",
+    "learn_mode",
+    "learn_phase_slo",
+    "file_lock",
+    "direct_mode",
+    "msa_router",
+    "research_control_plane",
+    "swarm_quiet_moment",
+    "integration_manager",
+    "autonomic_router",
+    "judge_panel",
+    "llm_judge_panel",
+    "external_doc_scout",
+    "learn_scheduler",
+    "registry_sync",
+}
+
+
+def test_every_pinned_planner_node_has_a_spec_or_is_retiring() -> None:
+    from nexus.services.capability_registry import list_planner_capability_names
+
+    planner = set(list_planner_capability_names())
+    covered = set(audit.SPECS) | set(audit.RETIRING_CAPABILITIES)
+    assert planner - covered == set()
+    assert EXTENSION_NODES <= set(audit.SPECS)
+    assert EXTENSION_NODES <= set(audit.NATURAL_TRIGGERS)
+
+
+def test_not_executable_specs_are_exactly_the_nodes_without_a_runnable_callable() -> None:
+    from nexus.core.capability_executor_registry import EXECUTOR_REGISTRY
+    from nexus.services.capability_registry import PLANNER_EXECUTION_CONTRACTS
+
+    flagged = {cap for cap, spec in audit.SPECS.items() if spec.not_executable}
+    assert flagged == {"direct_mode", "msa_router", "research_control_plane", "external_doc_scout"}
+    for cap in flagged:
+        assert PLANNER_EXECUTION_CONTRACTS[cap]["physical_callable"] is None
+    for cap in {"direct_mode", "msa_router", "research_control_plane"}:
+        key = PLANNER_EXECUTION_CONTRACTS[cap]["executor_key"]
+        assert key not in EXECUTOR_REGISTRY
+
+
+def test_verdict_bucket_collapses_prefixed_verdicts() -> None:
+    assert audit.verdict_bucket("BLOCKED_EXTERNAL_AUTH") == "BLOCKED"
+    assert audit.verdict_bucket("NOT_EXECUTABLE:control_plane_reference") == audit.NOT_EXECUTABLE
+    assert audit.verdict_bucket(audit.REAL) == audit.REAL
+
+
+def test_executor_only_keys_are_the_seventeen_unreachable_executors() -> None:
+    keys = audit.executor_only_keys()
+    assert keys["unlisted"] == [] and keys["listed_but_reachable"] == []
+    assert set(keys["computed"]) - set(keys["retiring_excluded"]) == set(audit.EXECUTOR_ONLY)
+    assert len(audit.EXECUTOR_ONLY) == 17
+
+
+def test_executor_only_quotes_hard_coded_tmp_lines() -> None:
+    from nexus.core.capability_executor_registry import EXECUTOR_REGISTRY
+
+    for key in ("policy_capability_gate", "learn_refresh_service", "reflex_loop"):
+        literals = audit.EXECUTOR_ONLY[key]["literals"]
+        found = audit.scan_hard_coded(EXECUTOR_REGISTRY[key], literals)
+        assert {item["pattern"] for item in found} == set(literals), key
+        assert any("/tmp" in item["text"] for item in found), key
+
+
+def test_executor_only_direct_invocation_records_outcome(tmp_path: Path) -> None:
+    row = audit.audit_executor_only("entropy_guard_v2", tmp_path)
+    assert row["verdict"] == audit.UNREACHABLE_NO_PLANNER_NODE
+    assert row["invoked"] is True and row["gate_passed"] is True
+    assert row["outcome_excerpt"] == {"entropy_ok": True}
+    assert row["quoted_lines"] and not row["literals_missing"]
+
+
+def test_natural_selection_reports_rules_whose_input_the_seam_drops() -> None:
+    msa = audit.natural_selection("msa_router")
+    assert msa["selected_without_forcing"] is False
+    assert msa["trigger_route_keys_dropped_by_seam"] == ["msa_routing"]
+    jit = audit.natural_selection("jit_validation")
+    assert jit["selected_without_forcing"] is True and "jit_validation_signal" in jit["reasons"]
+    assert audit.natural_selection("learn_scheduler")["selected_without_forcing"] is False
+
+
+@pytest.fixture(scope="module")
+def extension_matrix(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+    out_root = tmp_path_factory.mktemp("wiring_audit_ext")
+    matrix = audit.run_audit(
+        ["file_lock", "learn_mode", "direct_mode", "asi_constraint_extractor"],
+        out_root,
+        allow_model=False,
+        smoke_summary=None,
+    )
+    return {row["capability"]: row for row in matrix["rows"]}
+
+
+def test_end_to_end_file_lock_writes_a_lock_and_blocks_without_targets(
+    extension_matrix: dict[str, Any],
+) -> None:
+    row = extension_matrix["file_lock"]
+    assert row["verdict"] == audit.REAL, row.get("checks")
+    assert row["negative_control"]["passed"] is True
+    # one lock file per task id: a second task is not refused
+    assert row["component_probe"]["second_task_refused"] is False
+    assert row["production_default_selection"]["selected_without_forcing"] is True
+
+
+def test_end_to_end_learn_mode_ignores_project_claims(extension_matrix: dict[str, Any]) -> None:
+    row = extension_matrix["learn_mode"]
+    assert row["verdict"] == audit.STUB
+    probe = row["component_probe"]
+    assert probe["project_root_report_claims_count"] >= 1
+    assert probe["per_task_run_root_claims_count"] == 0
+
+
+def test_end_to_end_control_plane_node_is_not_executable(extension_matrix: dict[str, Any]) -> None:
+    row = extension_matrix["direct_mode"]
+    assert row["verdict"] == "NOT_EXECUTABLE:control_plane_reference"
+    assert "BLOCKED_EXECUTOR_UNAVAILABLE" in row["observed_verdict"]
+    assert row["production_default_selection"]["trigger_route_keys_dropped_by_seam"] == [
+        "recommended_flow"
+    ]
+
+
+def test_end_to_end_asi_extractor_depends_on_its_records(extension_matrix: dict[str, Any]) -> None:
+    row = extension_matrix["asi_constraint_extractor"]
+    assert row["verdict"] == audit.REAL, row.get("checks")
+    assert row["negative_control"]["passed"] is True

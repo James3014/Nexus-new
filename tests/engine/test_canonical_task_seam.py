@@ -704,9 +704,9 @@ def test_external_intelligence_consumer_routes_to_chatgpt_web(tmp_path):
 
     demand = result["workforce_demands"]["demands"][0]
     assert demand["requested_role"] == "bounded_candidate_generation"
-    assert result["binding"]["worker_id"] == "opencli_chatgpt_balanced_web"
+    assert result["binding"]["worker_id"] == "opencli_chatgpt_advanced_web"
     assert result["binding"]["provider"] == "opencli_chatgpt"
-    assert result["binding"]["model"] == "opencli_chatgpt/balanced"
+    assert result["binding"]["model"] == "opencli_chatgpt/advanced"
 
 
 def test_default_consumer_keeps_global_route_for_integration_text(tmp_path):

@@ -148,6 +148,7 @@
 | governance/owner-signing-keys.json | tests/ops/test_owner_attestation_gate.py, tests/ops/test_trusted_merge_lane_gate.py | active | high | owner_grant_attestation_contract |
 | governance/agent-identities.json | tests/ops/test_owner_attestation_gate.py, tests/ops/test_trusted_merge_lane_gate.py | active | high | owner_grant_attestation_contract |
 | tools/owner-signer | tests/ops/test_owner_attestation_gate.py | active | high | owner_grant_attestation_contract |
+| scripts/ops/trusted_impact_gate.py | tests/ops/test_trusted_impact_gate.py, tests/ops/test_pr_impact_gate.py | active | high | trusted_impact_gate_verifier_contract |
 | tests/ops/test_trusted_deletion_anchor_tempdir_cleanup.py | tests/ops/test_trusted_deletion_anchor_tempdir_cleanup.py | active | high | test_contract |
 | nexus/config/governance_manifest.json | tests/governance/test_audit_gate_honesty.py, tests/test_iron_gate_governance.py | active | high | governance_seal_manifest |
 | nexus/delivery/replay_runner.py | tests/governance/test_audit_gate_honesty.py, tests/governance/test_replay_runner_allowlist.py, tests/test_iron_gate_governance.py | active | high | replay_runner_allowlist |
@@ -297,3 +298,9 @@
 | nexus_wiki_vault/07_Compliance/Current_Compliance_Status.md | tests/ops/test_nexus_status_honesty.py | active | medium | compliance_artifact |
 | nexus_wiki_vault/99_Schema/generated/ | tests/ops/test_build_wiki_agent_index.py, tests/ops/test_wiki_committed_reproducibility.py, tests/ops/test_classify_wiki_unresolved_links.py | active | medium | wiki_generated_artifacts |
 | tests/ops/test_stage_f_flow.py | tests/ops/test_stage_f_flow.py | active | medium | test_contract |
+| AGENTS.md | tests/ops/test_bootstrap_authority_files.py, tests/ops/test_bootstrap_context_budget.py, tests/ops/test_codex_task_context_index.py, tests/ops/test_fast_start_consumer_contract.py | active | medium | authority_text_context_budget_contract |
+| MUSE_PROTO.md | tests/ops/test_bootstrap_authority_files.py, tests/ops/test_bootstrap_context_budget.py, tests/ops/test_codex_task_context_index.py, tests/ops/test_fast_start_consumer_contract.py | active | medium | authority_text_context_budget_contract |
+| CLAUDE.md | tests/ops/test_bootstrap_authority_files.py, tests/ops/test_bootstrap_context_budget.py, tests/ops/test_codex_task_context_index.py, tests/ops/test_fast_start_consumer_contract.py | active | medium | authority_text_context_budget_contract |
+| GEMINI.md | tests/ops/test_bootstrap_authority_files.py, tests/ops/test_bootstrap_context_budget.py, tests/ops/test_codex_task_context_index.py, tests/ops/test_fast_start_consumer_contract.py | active | medium | authority_text_context_budget_contract |
+| SOUL.md | tests/ops/test_bootstrap_authority_files.py, tests/ops/test_bootstrap_context_budget.py, tests/ops/test_codex_task_context_index.py, tests/ops/test_fast_start_consumer_contract.py | active | medium | authority_text_context_budget_contract |
+| docs/agents | tests/ops/test_bootstrap_authority_files.py, tests/ops/test_bootstrap_context_budget.py, tests/ops/test_codex_task_context_index.py, tests/ops/test_fast_start_consumer_contract.py | active | medium | authority_text_context_budget_contract |
