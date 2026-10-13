@@ -291,6 +291,17 @@ TRUSTED_PR2108_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, s
         "cde189df08f2b389041432ad12b514b993b34421f5a6b4d2afb3f8214a980602",
     ),
 )
+# Exact one-use, four-way binding for Owner-authorized PR #2114 (Issue #2115, #1929: retire
+# product from the legacy wheel per #821; pyproject packages only, uv.lock unchanged).
+TRUSTED_PR2114_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    2114,
+    (
+        "922c9abcdd9cd9b47b72cb8346253c065dc655f41573e4dc1dac0bd7a54c21fa",
+        "cde189df08f2b389041432ad12b514b993b34421f5a6b4d2afb3f8214a980602",
+        "ee385dc73e3f1a522bb8492fbc951ee7a4bbb437e3b4eb4222b0c90df816c649",
+        "cde189df08f2b389041432ad12b514b993b34421f5a6b4d2afb3f8214a980602",
+    ),
+)
 
 REQUIRED_EVIDENCE_KEYS = {
     "schema_version",
@@ -525,6 +536,7 @@ def _validate_trusted_dependency_contract(
         TRUSTED_PR2016_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR2071_DEPENDENCY_SNAPSHOT_TRANSITION,
         TRUSTED_PR2108_DEPENDENCY_SNAPSHOT_TRANSITION,
+        TRUSTED_PR2114_DEPENDENCY_SNAPSHOT_TRANSITION,
     )
     for authorized_transition_record in authorized_transition_records:
         if authorized_transition_record is None:
