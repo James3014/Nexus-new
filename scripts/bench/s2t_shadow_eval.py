@@ -24,7 +24,22 @@ from scripts.train.smoke_test_adapter import validate_json_schema
 import urllib.request
 import urllib.error
 
-def query_ollama(prompt: str, system_prompt: str, model_name: str = "qwen2.5-s2t-advisor:3b", timeout: int = 30) -> str:
+def resolve_shadow_model(model_name: str = "") -> str:
+    """Return the explicit model or the Workforce-admitted one; fail closed.
+
+    The retired 3b advisor tag is never a default: without an explicit
+    ``--model-name`` the model is the worker nexus-runtime admits for
+    ``compact_diagnosis``, else ``ModelDefaultNotAdmittedError`` propagates.
+    """
+    if model_name.strip():
+        return model_name.strip()
+    from nexus_runtime.planning.services.model_default_resolution import resolve_default_model
+
+    return resolve_default_model("compact_diagnosis")
+
+
+def query_ollama(prompt: str, system_prompt: str, model_name: str = "", timeout: int = 30) -> str:
+    model_name = resolve_shadow_model(model_name)
     url = "http://localhost:11434/api/chat"
     data = {
         "model": model_name,
@@ -71,7 +86,7 @@ def get_git_commit_hash():
     except Exception:
         return "unknown"
 
-def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool, device: str, timeout_sec: int, offline: bool, emulator: bool, adapter_dir: str = "training/adapters/qwen3b_s2t_adapter", use_ollama: bool = False, model_name: str = "qwen2.5-s2t-advisor:3b"):
+def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool, device: str, timeout_sec: int, offline: bool, emulator: bool, adapter_dir: str = "training/adapters/qwen3b_s2t_adapter", use_ollama: bool = False, model_name: str = ""):
     print(f"🔎 Starting S2T Shadow Evaluation on {dataset_path}...")
     abstain_dataset_env = os.environ.get("NEXUS_ABSTAIN_DATASET_PATH")
     abstain_dataset_path = Path(abstain_dataset_env) if abstain_dataset_env else None
@@ -121,8 +136,8 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
             import torch
             torch.set_num_threads(1)
             torch.set_num_interop_threads(1)
-            from transformers import AutoModelForCausalLM, AutoTokenizer
             from peft import PeftModel
+            from transformers import AutoModelForCausalLM, AutoTokenizer
             
             base_model_id = "Qwen/Qwen2.5-3B-Instruct"
             
@@ -224,6 +239,7 @@ def run_shadow_eval(dataset_path: Path, output_report_path: Path, run_real: bool
                     "'required_verifier', 'abstain_reason'. The 'required_verifier' field MUST be null or one of the following "
                     "allowed verifiers: ['pytest', 'claim_gate', 'delivery_gate', 'hidden_verifier']."
                 )
+                model_name = resolve_shadow_model(model_name)
                 response = query_ollama(input_str, system_prompt, model_name=model_name, timeout=timeout_sec)
                 
                 # 剔除可能存在的 markdown
@@ -548,7 +564,7 @@ if __name__ == "__main__":
     parser.add_argument("--emulator", action="store_true")
     parser.add_argument("--adapter-dir", type=str, default="training/adapters/qwen3b_s2t_adapter")
     parser.add_argument("--use-ollama", action="store_true")
-    parser.add_argument("--model-name", type=str, default="qwen2.5-s2t-advisor:3b")
+    parser.add_argument("--model-name", type=str, default="")
     parser.add_argument("--abstain-dataset", type=Path, default=None)
     args = parser.parse_args()
     

@@ -910,7 +910,11 @@ def run_benchmark(
 
 
 DEFAULT_EXECUTOR_MODEL = "qwen2.5-coder:7b-instruct"
-DEFAULT_JUDGE_MODEL = "qwen2.5-s2t-advisor:3b"
+# No hard-coded judge: the default is the worker the Workforce policy admits for
+# a judge/committee role (nexus-runtime model_default_resolution).  An empty value
+# means "resolve at row build"; when nothing is admitted the row carries an empty
+# judge_model plus MODEL_DEFAULT_NOT_ADMITTED and the committee path fails closed.
+DEFAULT_JUDGE_MODEL = ""
 DEFAULT_PRIMARY_PROPOSER = "qwen2.5-coder:7b-instruct"
 DEFAULT_SECONDARY_PROPOSER = "deepseek-coder:6.7b-instruct"
 DEFAULT_PROVIDER_TIMEOUT = 300
@@ -942,6 +946,19 @@ def build_c15_benchmark_row(
 
     em = _resolve(executor_model, "NEXUS_C15_EXECUTOR_MODEL", DEFAULT_EXECUTOR_MODEL)
     jm = _resolve(judge_model, "NEXUS_C15_JUDGE_MODEL", DEFAULT_JUDGE_MODEL)
+    judge_model_resolution = "explicit" if jm else ""
+    if not jm:
+        from nexus_runtime.planning.services.model_default_resolution import (
+            ModelDefaultNotAdmittedError,
+            resolve_judge_model,
+        )
+
+        try:
+            jm = resolve_judge_model()
+            judge_model_resolution = "workforce_policy"
+        except ModelDefaultNotAdmittedError as exc:
+            jm = ""
+            judge_model_resolution = str(exc)
     pp = _resolve(primary_proposer_model, "NEXUS_C15_PRIMARY_PROPOSER_MODEL", DEFAULT_PRIMARY_PROPOSER)
     sp = _resolve(secondary_proposer_model, "NEXUS_C15_SECONDARY_PROPOSER_MODEL", DEFAULT_SECONDARY_PROPOSER)
     dr_candidates_raw = _resolve(delegated_retry_candidate_models, "NEXUS_C15_DELEGATED_RETRY_CANDIDATE_MODELS", "")
@@ -968,6 +985,7 @@ def build_c15_benchmark_row(
             "mutation_allowed": True,
             "verifier_allowed": True,
             "judge_model": jm,
+            "judge_model_resolution": judge_model_resolution,
             "proposer_specs": [
                 {"model": pp, "role": "primary"},
                 {"model": sp, "role": "secondary"},
@@ -1014,7 +1032,7 @@ def parse_args() -> argparse.Namespace:
         "--judge-model",
         dest="judge_model",
         default=None,
-        help=f"Override judge model (default: {DEFAULT_JUDGE_MODEL}).",
+        help="Override judge model (default: the Workforce-admitted judge, else fail closed).",
     )
     parser.add_argument(
         "--primary-proposer-model",
