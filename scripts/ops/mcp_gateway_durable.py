@@ -427,12 +427,30 @@ def main() -> int:
     except (GateError, subprocess.CalledProcessError) as exc: p.error(str(exc))
     return 0
 GATEWAY_LABEL = "com.nexus.mcp.gateway.direct"
-GATEWAY_PLIST = Path(
-    os.environ.get(
-        "NEXUS_GATEWAY_PLIST",
-        "/Users/jameschen/Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist",
-    )
-)
+GATEWAY_PLIST_ENV = "NEXUS_GATEWAY_PLIST"
+GATEWAY_PLIST_FILENAME = f"{GATEWAY_LABEL}.plist"
+
+
+def _derive_gateway_plist(
+    environ: Mapping[str, str] | None = None,
+    home: Path | None = None,
+) -> Path:
+    """Derive the direct-Gateway plist from the running user's home (#1940).
+
+    An explicit, non-empty ``NEXUS_GATEWAY_PLIST`` wins; otherwise the path is
+    ``~/Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist`` for the
+    current user.  This only chooses the candidate path: R1 still requires it
+    to equal the receipt-bound ``plist_path`` before any recovery effect.
+    """
+    env = os.environ if environ is None else environ
+    override = env.get(GATEWAY_PLIST_ENV)
+    if override:
+        return Path(override)
+    base = Path.home() if home is None else Path(home)
+    return base / "Library/LaunchAgents" / GATEWAY_PLIST_FILENAME
+
+
+GATEWAY_PLIST = _derive_gateway_plist()
 # R1 binds the interpreter that is physically running the fixed manager.
 # It must never fall back to a historical host path or accept a caller-selected
 # interpreter environment override.  The pure contract validates the observed
@@ -4060,10 +4078,56 @@ def _production_recovery_adapters(
     )
 
 
+R1_IN_PROCESS_SELF_REPLACEMENT_FORBIDDEN = "R1_IN_PROCESS_SELF_REPLACEMENT_FORBIDDEN"
+R1_OUT_OF_PROCESS_ACTUATOR = "scripts/ops/nexus_gateway_recovery_actuator_bootstrap.py"
+
+
+def _r1_in_process_self_replacement_signals(
+    environ: Mapping[str, str] | None = None,
+    main_module: Any = None,
+) -> tuple[str, ...]:
+    """Return why this process is (or belongs to) the Gateway R1 would boot out.
+
+    The R1 effect runs ``launchctl bootout`` on ``GATEWAY_LABEL`` before it
+    rewrites the plist and bootstraps the desired generation.  Running that
+    inside the Gateway service (or any child that inherited its launchd job)
+    would kill the actuator mid-effect, so either signal is disqualifying:
+
+    * launchd exports ``XPC_SERVICE_NAME=<label>`` to every process of a job;
+    * the process ``__main__`` is the fixed Gateway HTTP entrypoint.
+    """
+    env = os.environ if environ is None else environ
+    signals: list[str] = []
+    if env.get("XPC_SERVICE_NAME") == GATEWAY_LABEL:
+        signals.append("LAUNCHD_JOB_LABEL")
+    main = sys.modules.get("__main__") if main_module is None else main_module
+    main_file = getattr(main, "__file__", None)
+    if isinstance(main_file, str) and Path(main_file).as_posix().endswith("/" + GATEWAY_ENTRYPOINT):
+        signals.append("GATEWAY_ENTRYPOINT_PROCESS")
+    return tuple(signals)
+
+
+def _refuse_in_process_self_replacement() -> None:
+    signals = _r1_in_process_self_replacement_signals()
+    if signals:
+        raise _gateway_error(
+            f"{R1_IN_PROCESS_SELF_REPLACEMENT_FORBIDDEN}: the R1 effect would "
+            f"boot out {GATEWAY_LABEL} from inside its own process "
+            f"({','.join(signals)}); run the out-of-process actuator "
+            f"{R1_OUT_OF_PROCESS_ACTUATOR} instead"
+        )
+
+
 def _gateway_recover_live(
     request: GatewayRecoveryRequest | Mapping[str, Any],
 ) -> GatewayReconcileOutcome:
-    """Manager-local R1 host seam; deliberately absent from public CLI/MCP dispatch."""
+    """Manager-local R1 host seam; deliberately absent from public CLI/MCP dispatch.
+
+    It refuses before any ledger write or host effect when called inside the
+    Gateway service it would replace (#1940); the sole lawful caller of the
+    effect is the out-of-process bootstrap actuator.
+    """
+    _refuse_in_process_self_replacement()
     try:
         typed = GatewayRecoveryRequest.model_validate(request)
         validate_recovery_request(typed)

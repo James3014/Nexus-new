@@ -12,13 +12,13 @@ class TestRouteOptimization(unittest.TestCase):
     
     def test_medium_risk_admission_calibration(self):
         """驗證：Risk 55 且信心高時，不再進入 full hyper"""
-        res = RouteOracle.recommend_flow(risk_score=55, bare_sufficiency="high", task_type="refactor")
+        res = RouteOracle.decide_route({"risk_score": 55, "bare_sufficiency": "high", "task_type": "refactor"})
         self.assertEqual(res["flow"], "lite_supervised")
-        self.assertTrue(res["lite"])
+        self.assertTrue(res["lite_preferred"])
 
     def test_capability_pruning_logic(self):
         """驗證：能力鏈的兩段式拆分"""
-        chain = CapabilityAssembler.assemble(flow="hyper_sprint", risk_score=55)
+        chain = CapabilityAssembler.assemble_chains(flow="hyper_sprint")
         self.assertIn("delivery_gate", chain["core"])
         self.assertNotIn("codeintel", chain["core"])
         self.assertNotIn("mempalace_gate", chain["core"])
@@ -26,12 +26,16 @@ class TestRouteOptimization(unittest.TestCase):
     def test_cost_evidence_classification(self):
         """驗證：成本證據分類語義正確"""
         # 案例 1: 確定性救援
-        profile = CostEvidencePolicy.classify_evidence(model_calls=0, total_tokens=0, capability_count=3)
-        self.assertEqual(profile, "rescue_only_no_model_call")
+        profile = CostEvidencePolicy.classify_cost_evidence(
+            {"model_calls": 0, "total_tokens": 0, "capability_count": 3}
+        )
+        self.assertEqual(profile.profile, "rescue_only_no_model_call")
         
         # 案例 2: 全鏈交付
-        profile = CostEvidencePolicy.classify_evidence(model_calls=1, total_tokens=1000, capability_count=8)
-        self.assertEqual(profile, "full_chain_delivery")
+        profile = CostEvidencePolicy.classify_cost_evidence(
+            {"model_calls": 1, "total_tokens": 1000, "capability_count": 8}
+        )
+        self.assertEqual(profile.profile, "full_chain_delivery")
 
     def test_rule_driven_lazy_activation(self):
         """驗證：裝配器能根據 Rule 引擎正確追加能力"""
