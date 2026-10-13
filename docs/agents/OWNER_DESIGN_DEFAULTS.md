@@ -65,6 +65,18 @@ AGENTS.md and never relaxed here:
   sources: PR #1864 (B), PR #1883 (C), PR #1859
   ask_anyway_if: raising the AGENTS.md cap, a cap increase above about 10%, or removing a rule rather than moving it
 
+- id: DD-05
+  rule: When an instruction or overlay file is broken, restore the Owner's original text verbatim from the canonical source. Do not write new wording or point at a mixed or derived copy.
+  scope: bootstrap and overlay text files
+  sources: PR #1855 (A), PR #1859 ("restored original wording"); Owner confirmed in chat 2026-10-14
+  ask_anyway_if: the original cannot be obtained byte-for-byte, or the restored text would change what is authorized
+
+- id: DD-06
+  rule: For a hardening finding with no independent exploit, where the fix would need a new trust mechanism or a format migration, document the trust assumption and add a pinning test. Do not build the mechanism.
+  scope: nexus-core and Nexus-new audit findings
+  sources: nexus-core#163 (c), nexus-core#169 (a), nexus-core#168 (A); Owner confirmed in chat 2026-10-14
+  ask_anyway_if: the finding is exploitable, or the remedy removes or relaxes an existing check
+
 - id: DD-07
   rule: Any change to an execution or experiment identity (dispatcher hash, model, runtime pin) gets a new label or generation. Never relabel, reuse or substitute in place.
   scope: experiment generations, canaries, worker identities
@@ -89,6 +101,12 @@ AGENTS.md and never relaxed here:
   sources: #1196 comment 6119832474, #1196 comment 6124280776 ("do not revert to waiting")
   ask_anyway_if: the change alters the claim, the cohort, the budget or the run contract
 
+- id: DD-11
+  rule: For a model revision within an established lineage, do the minimum delta requalification. Do not restart calibration from scratch.
+  scope: Workforce capability evidence planning (not admission)
+  sources: #569 comment 5902919200 ("Do not restart calibration"); Owner confirmed in chat 2026-10-14
+  ask_anyway_if: there is evidence of a material change, or admission itself would change
+
 - id: DD-12
   rule: Ship a new drift or health control as read-only detection and alerting first. Run new and old checks side by side. Leave the remedy (rebind, reload, ruleset switch) to its owning path.
   scope: ops checks, CI gates, Gateway drift
@@ -107,6 +125,12 @@ AGENTS.md and never relaxed here:
   sources: nexus-core#233, #1761/PR #1888 with #1886, #1898
   ask_anyway_if: always ask about the deferred part
 
+- id: DD-15
+  rule: When an optional input is unavailable on a path that is not a security path, degrade visibly (a warning plus a typed reason such as constraints_source=unavailable). Do not hard-fail or return a silent empty value.
+  scope: memory, learning and advisory wiring
+  sources: #1733 decision #1 ("先不擋"), PR #1799, PR #1813, #1763 item 3; Owner confirmed in chat 2026-10-14
+  ask_anyway_if: the path is a security, admission or verification gate (those stay fail-closed)
+
 - id: DD-16
   rule: When two surfaces disagree, align the docs or the secondary surface to the higher-authority file or to the behaviour already in use.
   scope: docs vs code, CLI vs Action, overlay vs AGENTS.md
@@ -115,31 +139,5 @@ AGENTS.md and never relaxed here:
 
 ## Pending Owner confirmation — not active
 
-Agents must not apply anything in this section. These entries rest on thin or
-Owner-specific evidence. Treat the situations they cover as normal design
-choices: give the options and a recommendation. An entry moves to Active only
-through an Owner-confirmed PR.
-
-- id: DD-05
-  rule: When an instruction or overlay file is broken, restore the Owner's original text verbatim from the canonical source. Do not write new wording or point at a mixed or derived copy.
-  scope: bootstrap and overlay text files
-  sources: PR #1855 (A), PR #1859 ("restored original wording")
-  ask_anyway_if: the original cannot be obtained byte-for-byte, or the restored text would change what is authorized
-
-- id: DD-06
-  rule: For a hardening finding with no independent exploit, where the fix would need a new trust mechanism or a format migration, document the trust assumption and add a pinning test. Do not build the mechanism.
-  scope: nexus-core and Nexus-new audit findings
-  sources: nexus-core#163 (c), nexus-core#169 (a), nexus-core#168 (A)
-  ask_anyway_if: the finding is exploitable, or the remedy removes or relaxes an existing check
-
-- id: DD-11
-  rule: For a model revision within an established lineage, do the minimum delta requalification. Do not restart calibration from scratch.
-  scope: Workforce capability evidence planning (not admission)
-  sources: #569 comment 5902919200 ("Do not restart calibration")
-  ask_anyway_if: there is evidence of a material change, or admission itself would change
-
-- id: DD-15
-  rule: When an optional input is unavailable on a path that is not a security path, degrade visibly (a warning plus a typed reason such as constraints_source=unavailable). Do not hard-fail or return a silent empty value.
-  scope: memory, learning and advisory wiring
-  sources: #1733 decision #1 ("先不擋"), PR #1799, PR #1813, #1763 item 3
-  ask_anyway_if: the path is a security, admission or verification gate (those stay fail-closed)
+No pending entries. Agents must not apply anything added here. An entry moves
+to Active only through an Owner-confirmed PR.
