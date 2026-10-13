@@ -1,0 +1,1192 @@
+"""Post-hoc real-outcome scorer for #1216 hybrid replication tasks.
+
+Implements docs/research/REAL_OUTCOME_SCORER_SPEC.md (v1). The scorer is
+read-only with respect to the experiment store: it verifies the sealed raw,
+builds scorer-owned git trees (BASE, CAND, GOLD, BASE+T, CAND+T), derives a
+FAIL_TO_PASS / PASS_TO_PASS oracle from the merged human fix, runs the tests in
+a scrubbed environment and writes a create-only receipt to its own store.
+"""
+
+from __future__ import annotations
+
+import base64
+import gzip
+import hashlib
+import json
+import math
+import os
+import re
+import shutil
+import subprocess
+import time
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass, field
+from pathlib import Path, PurePosixPath
+from typing import Any, Callable, Iterable, Mapping, Protocol, Sequence
+
+SCORER_VERSION = "1.0.1"
+RECEIPT_SCHEMA = "nexus.research.real_outcome.v1"
+RECEIPT_SEAL_SCHEMA = "nexus.research.real_outcome_seal.v1"
+SPEC_RELATIVE_PATH = "docs/research/REAL_OUTCOME_SCORER_SPEC.md"
+
+PYTEST_TIMEOUT_SECONDS = 1800
+ORACLE_RUNS = 3
+SMALL_REPOS = frozenset({"nexus-runtime", "nexus-core", "nexus-learning"})
+IMPACT_GATE_REPOS = frozenset({"Nexus-new"})
+
+# Labels (spec §7), in evaluation order.
+PENDING_GROUND_TRUTH = "PENDING_GROUND_TRUTH"
+NOT_SCORABLE_NO_MERGED_PR = "NOT_SCORABLE_NO_MERGED_PR"
+NOT_SCORABLE_NO_ORACLE = "NOT_SCORABLE_NO_ORACLE"
+NOT_SCORABLE_ORACLE_INVALID = "NOT_SCORABLE_ORACLE_INVALID"
+NO_CANDIDATE = "NO_CANDIDATE"
+NOT_RUNNABLE = "NOT_RUNNABLE"
+BROKE_EXISTING = "BROKE_EXISTING"
+RESOLVED = "RESOLVED"
+PARTIAL = "PARTIAL"
+UNRESOLVED = "UNRESOLVED"
+
+VALID_ORACLE_LABELS = frozenset({
+    NO_CANDIDATE,
+    NOT_RUNNABLE,
+    BROKE_EXISTING,
+    RESOLVED,
+    PARTIAL,
+    UNRESOLVED,
+})
+
+PASS, FAIL, SKIP = "pass", "fail", "skip"
+
+
+class SealRefused(Exception):
+    """Raised when a sealed input does not verify (spec §3). No receipt is written."""
+
+
+class EnvBuildError(Exception):
+    pass
+
+
+class ReceiptExists(Exception):
+    pass
+
+
+# --------------------------------------------------------------------------- utils
+
+
+def sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def canonical_bytes(value: Any) -> bytes:
+    return (json.dumps(value, sort_keys=True, indent=1, ensure_ascii=False) + "\n").encode()
+
+
+def _digest_outcomes(outcomes: Mapping[str, str]) -> str:
+    return sha256_bytes(json.dumps(sorted(outcomes.items()), separators=(",", ":")).encode())
+
+
+def is_oracle_test_file(path: str) -> bool:
+    p = PurePosixPath(path)
+    parts = p.parts
+    name = p.name
+    if parts and parts[0] == "tests":
+        return True
+    if "tests" in parts[:-1]:
+        return True
+    if name == "conftest.py":
+        return True
+    return (name.startswith("test_") and name.endswith(".py")) or name.endswith("_test.py")
+
+
+def is_oracle_module_name(path: str) -> bool:
+    name = PurePosixPath(path).name
+    return name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py"))
+
+
+def parse_task_key(task_key: str) -> tuple[str, str, int]:
+    owner, rest = task_key.split("__", 1)
+    repo, number = rest.rsplit("--", 1)
+    return owner, repo, int(number)
+
+
+def _safe_relpath(path: str) -> bool:
+    p = PurePosixPath(path)
+    return bool(path) and not p.is_absolute() and ".." not in p.parts and p.parts[0] != ".git"
+
+
+# --------------------------------------------------------------- sealed inputs
+
+
+@dataclass
+class Candidate:
+    diff: bytes
+    untracked: list[dict[str, Any]]  # {path, sha256, data}
+    override: str | None = None
+
+    @property
+    def empty(self) -> bool:
+        return not self.diff.strip() and not self.untracked
+
+    @property
+    def digest(self) -> str:
+        payload = {
+            "diff_sha256": sha256_bytes(self.diff),
+            "untracked": sorted((u["path"], u["sha256"]) for u in self.untracked),
+        }
+        return sha256_bytes(json.dumps(payload, sort_keys=True).encode())
+
+
+@dataclass
+class TaskInputs:
+    task_key: str
+    owner: str
+    repo: str
+    issue: int
+    task_dir: Path
+    state: dict[str, Any]
+    raw: dict[str, Any]
+    base_sha: str
+    candidate: Candidate
+    so: dict[str, Any]
+    route: str
+    wall_time_seconds: float | None
+    cap_seconds: float | None
+
+
+def load_sealed_task(task_dir: Path) -> TaskInputs:
+    """Spec §3.1, §3.2, §3.4 and §2. Raises SealRefused on any mismatch."""
+    task_dir = Path(task_dir)
+    try:
+        raw_bytes = (task_dir / "raw.json").read_bytes()
+        seal = json.loads((task_dir / "raw_seal.json").read_text())
+        state = json.loads((task_dir / "state.json").read_text())
+    except FileNotFoundError as exc:
+        raise SealRefused(f"missing_sealed_file:{exc.filename}") from exc
+    if sha256_bytes(raw_bytes) != seal.get("raw_sha256"):
+        raise SealRefused("raw_sha256_mismatch")
+    if state.get("raw_seal") != seal:
+        raise SealRefused("state_raw_seal_mismatch")
+    try:
+        raw = json.loads(raw_bytes)
+        rr = raw["raw_response"]
+        so = rr["strong_online_raw_response"]
+        base_sha = rr["candidate_packet"]["source_revision"]
+    except (ValueError, KeyError, TypeError) as exc:
+        raise SealRefused(f"raw_shape_invalid:{exc}") from exc
+    if not re.fullmatch(r"[0-9a-f]{40}", str(base_sha)):
+        raise SealRefused("base_sha_invalid")
+    diff = b""
+    if so.get("diff_gzip_base64"):
+        diff = gzip.decompress(base64.b64decode(so["diff_gzip_base64"]))
+        if so.get("diff_sha256") and sha256_bytes(diff) != so["diff_sha256"]:
+            raise SealRefused("diff_sha256_mismatch")
+    untracked = []
+    for item in so.get("untracked_files") or []:
+        data = gzip.decompress(base64.b64decode(item["gzip_base64"]))
+        if sha256_bytes(data) != item.get("sha256"):
+            raise SealRefused(f"untracked_sha256_mismatch:{item.get('path')}")
+        if item.get("size") is not None and len(data) != int(item["size"]):
+            raise SealRefused(f"untracked_size_mismatch:{item.get('path')}")
+        untracked.append({"path": item["path"], "sha256": item["sha256"], "data": data})
+    owner, repo, issue = parse_task_key(task_dir.name)
+    wall = raw.get("wall_time_seconds")
+    cap = rr.get("strong_online_timeout_seconds")
+    return TaskInputs(
+        task_key=task_dir.name,
+        owner=owner,
+        repo=repo,
+        issue=issue,
+        task_dir=task_dir,
+        state=state,
+        raw=raw,
+        base_sha=base_sha,
+        candidate=Candidate(diff=diff, untracked=untracked),
+        so=so,
+        route=str(raw.get("route", "")),
+        wall_time_seconds=float(wall) if wall is not None else None,
+        cap_seconds=float(cap) if cap is not None else None,
+    )
+
+
+def load_ground_truth(inputs: TaskInputs) -> dict[str, Any] | None:
+    """Spec §3.3 / §4 step 2. Returns None when the task is not terminal."""
+    state_gt = inputs.state.get("ground_truth")
+    path = inputs.task_dir / "ground_truth.json"
+    if not state_gt or not path.exists():
+        return None
+    data = path.read_bytes()
+    if sha256_bytes(data) != state_gt.get("sha256"):
+        raise SealRefused("ground_truth_sha256_mismatch")
+    return json.loads(data)
+
+
+# --------------------------------------------------------------------------- git
+
+
+class GitRepo:
+    """Scorer-owned repository. Commits are addressed by SHA only."""
+
+    def __init__(self, path: Path, sources: Sequence[str]):
+        self.path = Path(path)
+        self.sources = list(sources)
+        if not (self.path / ".git").exists():
+            self.path.mkdir(parents=True, exist_ok=True)
+            self.git("init", "-q")
+            self.git("config", "gc.auto", "0")
+
+    def git(
+        self, *args: str, cwd: Path | None = None, input: bytes | None = None, check: bool = True
+    ) -> subprocess.CompletedProcess[bytes]:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env.update({
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_AUTHOR_NAME": "scorer",
+            "GIT_AUTHOR_EMAIL": "scorer@invalid",
+            "GIT_COMMITTER_NAME": "scorer",
+            "GIT_COMMITTER_EMAIL": "scorer@invalid",
+        })
+        proc = subprocess.run(
+            ["git", *args], cwd=str(cwd or self.path), input=input, capture_output=True, env=env
+        )
+        if check and proc.returncode != 0:
+            raise RuntimeError(f"git {' '.join(args[:3])} failed: {proc.stderr.decode()[-400:]}")
+        return proc
+
+    def has_commit(self, sha: str) -> bool:
+        return self.git("cat-file", "-e", f"{sha}^{{commit}}", check=False).returncode == 0
+
+    def ensure_commit(self, sha: str) -> bool:
+        if self.has_commit(sha):
+            return True
+        for source in self.sources:
+            self.git("fetch", "-q", "--no-tags", source, sha, check=False)
+            if self.has_commit(sha):
+                return True
+        return False
+
+    def worktree(self, dest: Path, sha: str) -> Path:
+        dest = Path(dest)
+        if dest.exists():
+            self.git("worktree", "remove", "--force", str(dest), check=False)
+            shutil.rmtree(dest, ignore_errors=True)
+        self.git("worktree", "prune")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        self.git("worktree", "add", "-q", "--detach", "--force", str(dest), sha)
+        return dest
+
+    def remove_worktree(self, dest: Path) -> None:
+        self.git("worktree", "remove", "--force", str(dest), check=False)
+        shutil.rmtree(dest, ignore_errors=True)
+
+    def tree_id(self, wt: Path, extra_paths: Iterable[str] = ()) -> str:
+        self.git("add", "-A", cwd=wt)
+        extra = [p for p in extra_paths if (wt / p).exists()]
+        if extra:
+            self.git("add", "-f", "--", *extra, cwd=wt)
+        return self.git("write-tree", cwd=wt).stdout.decode().strip()
+
+    def changed_paths(self, a: str, b: str) -> list[str]:
+        out = self.git("diff", "--no-renames", "--name-only", a, b).stdout.decode()
+        return sorted(p for p in out.splitlines() if p)
+
+    def pr_patch(self, merge_sha: str) -> bytes:
+        return self.git("diff", "--binary", "--no-renames", f"{merge_sha}^1", merge_sha).stdout
+
+
+def apply_candidate(repo: GitRepo, wt: Path, cand: Candidate) -> str | None:
+    """Apply a candidate onto a BASE worktree. Returns an error string or None."""
+    if cand.diff.strip():
+        proc = repo.git("apply", "--binary", "-", cwd=wt, input=cand.diff, check=False)
+        if proc.returncode != 0:
+            return "diff_apply_failed:" + proc.stderr.decode()[-300:]
+    for item in cand.untracked:
+        rel = item["path"]
+        if not _safe_relpath(rel):
+            return f"untracked_path_unsafe:{rel}"
+        target = wt / rel
+        if target.exists():
+            return f"untracked_path_exists:{rel}"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(item["data"])
+    return None
+
+
+def overwrite_oracle_files(wt: Path, gold_wt: Path, oracle_files: Iterable[str]) -> None:
+    for rel in oracle_files:
+        src, dst = gold_wt / rel, wt / rel
+        if src.exists():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+        elif dst.exists() or dst.is_symlink():
+            dst.unlink()
+
+
+# ---------------------------------------------------------------- environments
+
+
+@dataclass(frozen=True)
+class TestEnv:
+    key: str
+    python: str
+    recipe: str
+    description: Mapping[str, str] = field(default_factory=dict)
+    # Import roots appended after the scored tree, for an interpreter whose packages are not
+    # in its own site-packages (e.g. a CI executor that supplies them via PYTHONPATH).
+    extra_pythonpath: tuple[str, ...] = ()
+
+
+class EnvProvider(Protocol):
+    def get(self, repo: str, base_wt: Path) -> TestEnv: ...
+
+
+def _workflow_learning_pin(base_wt: Path) -> str:
+    wf = base_wt / ".github" / "workflows" / "tests.yml"
+    if not wf.exists():
+        return ""
+    text = wf.read_text(errors="replace")
+    m = re.search(r"repository:\s*James3014/nexus-learning\s*\n\s*ref:\s*([0-9a-f]{40})", text)
+    return m.group(1) if m else ""
+
+
+class UvEnvProvider:
+    """Spec §8 env build. Envs are cached by key under ``envs_dir``."""
+
+    PYTHON = "3.12"
+    RUNTIME_PINS = (
+        "pytest==9.0.2",
+        "pytest-asyncio==1.3.0",
+        "anyio==4.12.1",
+        "pydantic==2.13.5",
+        "PyYAML==6.0.3",
+    )
+
+    def __init__(self, envs_dir: Path, log: Callable[[str], None] = print):
+        self.envs_dir = Path(envs_dir)
+        self.log = log
+
+    def _recipe(self, repo: str, base_wt: Path) -> tuple[str, dict[str, str]]:
+        files = [
+            "pyproject.toml",
+            "uv.lock",
+            "requirements/canonical-learning.txt",
+            "requirements/canonical-runtime.txt",
+        ]
+        digests = {
+            f: sha256_bytes((base_wt / f).read_bytes()) for f in files if (base_wt / f).exists()
+        }
+        if repo in IMPACT_GATE_REPOS:
+            recipe = "uv-sync-all-extras+canonical"
+        elif (base_wt / "uv.lock").exists():
+            recipe = "uv-sync-all-groups"
+        else:
+            recipe = "uv-venv-runtime-pins"
+            digests["learning_pin"] = _workflow_learning_pin(base_wt)
+        return recipe, digests
+
+    def get(self, repo: str, base_wt: Path) -> TestEnv:
+        recipe, digests = self._recipe(repo, base_wt)
+        key = sha256_bytes(
+            json.dumps([repo, recipe, self.PYTHON, digests], sort_keys=True).encode()
+        )
+        env_dir = self.envs_dir / key[:16]
+        marker = env_dir / ".real_outcome_env.json"
+        if marker.exists():
+            desc = json.loads(marker.read_text())
+            return TestEnv(key, str(env_dir / "bin" / "python"), recipe, desc)
+        shutil.rmtree(env_dir, ignore_errors=True)
+        env = {k: v for k, v in os.environ.items() if k not in {"VIRTUAL_ENV", "PYTHONPATH"}}
+        env["UV_PROJECT_ENVIRONMENT"] = str(env_dir)
+
+        def run(cmd: list[str]) -> None:
+            self.log("env: " + " ".join(cmd[:6]))
+            proc = subprocess.run(
+                cmd, cwd=str(base_wt), env=env, capture_output=True, text=True, timeout=3600
+            )
+            if proc.returncode != 0:
+                raise EnvBuildError(f"{' '.join(cmd[:4])}: {proc.stderr[-600:]}")
+
+        py = str(env_dir / "bin" / "python")
+        try:
+            if recipe.startswith("uv-sync"):
+                cmd = [
+                    "uv",
+                    "sync",
+                    "--directory",
+                    str(base_wt),
+                    "--frozen",
+                    "--all-groups",
+                    "--no-install-project",
+                    "--python",
+                    self.PYTHON,
+                ]
+                if recipe == "uv-sync-all-extras+canonical":
+                    cmd.append("--all-extras")
+                run(cmd)
+                for req in (
+                    "requirements/canonical-learning.txt",
+                    "requirements/canonical-runtime.txt",
+                ):
+                    if recipe.endswith("canonical") and (base_wt / req).exists():
+                        run(["uv", "pip", "install", "--python", py, "-r", str(base_wt / req)])
+            else:
+                pin = digests.get("learning_pin", "")
+                if not pin:
+                    raise EnvBuildError("nexus-learning pin not found in tests.yml")
+                run(["uv", "venv", "-q", "--python", self.PYTHON, str(env_dir)])
+                run([
+                    "uv",
+                    "pip",
+                    "install",
+                    "--python",
+                    py,
+                    *self.RUNTIME_PINS,
+                    f"nexus-learning @ git+https://github.com/James3014/nexus-learning.git@{pin}",
+                ])
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            raise EnvBuildError(str(exc)) from exc
+        version = subprocess.run(
+            [py, "-c", "import sys;print(sys.version.split()[0])"], capture_output=True, text=True
+        ).stdout.strip()
+        uv_version = subprocess.run(
+            ["uv", "--version"], capture_output=True, text=True
+        ).stdout.strip()
+        desc = {
+            "python": version,
+            "uv": uv_version,
+            "recipe": recipe,
+            "inputs": json.dumps(digests, sort_keys=True),
+        }
+        marker.write_text(json.dumps(desc, sort_keys=True))
+        return TestEnv(key, py, recipe, desc)
+
+
+# ---------------------------------------------------------------------- pytest
+
+
+@dataclass
+class RunResult:
+    outcomes: dict[str, str]
+    exit_code: int
+    timed_out: bool
+    seconds: float = 0.0
+
+
+def parse_junit(path: Path) -> dict[str, str]:
+    outcomes: dict[str, str] = {}
+    if not path.exists():
+        return outcomes
+    data = path.read_bytes()
+    # The junit file is produced by candidate-controlled test code: refuse any
+    # DTD/entity declaration (entity expansion), which is the only XML feature
+    # that makes the stdlib parser unsafe here.
+    if b"<!DOCTYPE" in data or b"<!ENTITY" in data:
+        return outcomes
+    try:
+        root = ET.fromstring(data)  # nosec B314 - DTD/entities rejected above
+    except ET.ParseError:
+        return outcomes
+    for case in root.iter("testcase"):
+        classname = case.get("classname") or ""
+        name = case.get("name") or ""
+        node = f"{classname}::{name}" if classname else name
+        tags = {child.tag for child in case}
+        if tags & {"failure", "error"}:
+            outcome = FAIL
+        elif "skipped" in tags:
+            outcome = SKIP
+        else:
+            outcome = PASS
+        prev = outcomes.get(node)
+        if prev == FAIL or outcome == FAIL:
+            outcomes[node] = FAIL
+        elif prev is None or prev == SKIP:
+            outcomes[node] = outcome
+    return outcomes
+
+
+class PytestRunner:
+    """Spec §8 test run. Results are cached by (env, tree id, target, ignores, run index)."""
+
+    def __init__(
+        self,
+        scratch: Path,
+        timeout: int = PYTEST_TIMEOUT_SECONDS,
+        log: Callable[[str], None] = print,
+    ):
+        self.scratch = Path(scratch)
+        self.cache = self.scratch / "pytest-cache"
+        self.cache.mkdir(parents=True, exist_ok=True)
+        self.timeout = timeout
+        self.log = log
+        self.total_seconds = 0.0
+
+    def _env(self, env: TestEnv, tree: Path) -> dict[str, str]:
+        home = self.scratch / "home"
+        tmp = self.scratch / "tmp"
+        home.mkdir(parents=True, exist_ok=True)
+        tmp.mkdir(parents=True, exist_ok=True)
+        pythonpath = [str(tree)]
+        if (tree / "src").is_dir():
+            pythonpath.append(str(tree / "src"))
+        pythonpath.extend(env.extra_pythonpath)
+        return {
+            "PATH": f"{Path(env.python).parent}:/usr/bin:/bin",
+            "HOME": str(home),
+            "TMPDIR": str(tmp),
+            "PYTHONPATH": os.pathsep.join(pythonpath),
+            "PYTHONHASHSEED": "0",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "LANG": "en_US.UTF-8",
+            "TZ": "UTC",
+        }
+
+    def run(
+        self,
+        env: TestEnv,
+        tree: Path,
+        tree_id: str,
+        target: str,
+        ignores: Sequence[str],
+        run_idx: int,
+    ) -> RunResult:
+        ignores = sorted(set(ignores))
+        key = sha256_bytes(json.dumps([env.key, tree_id, target, ignores, run_idx]).encode())
+        cached = self.cache / f"{key}.json"
+        if cached.exists():
+            data = json.loads(cached.read_text())
+            return RunResult(data["outcomes"], data["exit_code"], data["timed_out"], 0.0)
+        junit = self.scratch / "tmp" / f"junit-{key}.xml"
+        junit.parent.mkdir(parents=True, exist_ok=True)
+        junit.unlink(missing_ok=True)
+        cmd = [
+            env.python,
+            "-m",
+            "pytest",
+            target,
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            f"--junitxml={junit}",
+            *[f"--ignore={p}" for p in ignores],
+        ]
+        start = time.monotonic()
+        timed_out = False
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=str(tree),
+                env=self._env(env, tree),
+                capture_output=True,
+                timeout=self.timeout,
+            )
+            exit_code = proc.returncode
+        except subprocess.TimeoutExpired:
+            timed_out, exit_code = True, -1
+        seconds = time.monotonic() - start
+        self.total_seconds += seconds
+        outcomes = {} if timed_out else parse_junit(junit)
+        junit.unlink(missing_ok=True)
+        self.log(
+            f"  pytest {target} run={run_idx} exit={exit_code} nodes={len(outcomes)} {seconds:.0f}s"
+        )
+        cached.write_text(
+            json.dumps(
+                {"outcomes": outcomes, "exit_code": exit_code, "timed_out": timed_out},
+                sort_keys=True,
+            )
+        )
+        return RunResult(outcomes, exit_code, timed_out, seconds)
+
+
+def _merge(results: Iterable[RunResult]) -> dict[str, str]:
+    """Merge per-invocation outcomes: fail dominates pass, pass dominates skip."""
+    rank = {SKIP: 0, PASS: 1, FAIL: 2}
+    merged: dict[str, str] = {}
+    for res in results:
+        for node, outcome in res.outcomes.items():
+            if node not in merged or rank[outcome] > rank[merged[node]]:
+                merged[node] = outcome
+    return merged
+
+
+def _get(outcomes: Mapping[str, str], node: str) -> str:
+    return outcomes.get(node, FAIL)
+
+
+# ------------------------------------------------------------------- impact plan
+
+_TRUSTED_PLAN_CODE = r"""
+import dataclasses, importlib.util, json, sys
+from pathlib import Path
+root = Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(root))
+spec = importlib.util.spec_from_file_location(
+    "trusted_pr_impact_gate", root / "scripts" / "ops" / "pr_impact_gate.py")
+mod = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = mod
+spec.loader.exec_module(mod)
+plan = mod.build_impact_plan(json.loads(sys.stdin.read()), root=root)
+print(json.dumps(dataclasses.asdict(plan), sort_keys=True))
+"""
+
+
+def trusted_impact_plan(
+    env: TestEnv, base_wt: Path, changed: Sequence[str], scratch: Path
+) -> dict[str, Any] | None:
+    """Spec §6.3 P2P(b): trusted BASE copy of the impact gate selects targets."""
+    if not (base_wt / "scripts" / "ops" / "pr_impact_gate.py").exists():
+        return None
+    home = scratch / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.run(
+        [env.python, "-c", _TRUSTED_PLAN_CODE, str(base_wt)],
+        cwd=str(base_wt),
+        input=json.dumps(sorted(changed)),
+        capture_output=True,
+        text=True,
+        env={
+            "PATH": f"{Path(env.python).parent}:/usr/bin:/bin",
+            "HOME": str(home),
+            "PYTHONPATH": os.pathsep.join([str(base_wt), *env.extra_pythonpath]),
+            "PYTHONDONTWRITEBYTECODE": "1",
+        },
+        timeout=600,
+    )
+    if proc.returncode != 0:
+        return None
+    try:
+        return json.loads(proc.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return None
+
+
+# ----------------------------------------------------------------------- scoring
+
+
+@dataclass
+class ScoreContext:
+    work: Path
+    env_provider: EnvProvider
+    runner: PytestRunner
+    repo_sources: Mapping[str, Sequence[str]]
+    spec_sha256: str
+    leakage_flags: Mapping[str, str] = field(default_factory=dict)
+    log: Callable[[str], None] = print
+    keep_trees: bool = False
+
+
+def _capped(inputs: TaskInputs) -> bool:
+    if inputs.wall_time_seconds is None or inputs.cap_seconds is None:
+        return False
+    return inputs.wall_time_seconds >= inputs.cap_seconds - 60
+
+
+def _base_receipt(inputs: TaskInputs, ctx: ScoreContext) -> dict[str, Any]:
+    return {
+        "schema": RECEIPT_SCHEMA,
+        "scorer_version": SCORER_VERSION,
+        "spec_sha256": ctx.spec_sha256,
+        "task_key": inputs.task_key,
+        "repo": f"{inputs.owner}/{inputs.repo}",
+        "issue": inputs.issue,
+        "route": inputs.route,
+        "base_sha": inputs.base_sha,
+        "candidate_digest": inputs.candidate.digest,
+        "candidate_empty": inputs.candidate.empty,
+        "candidate_override": inputs.candidate.override,
+        "candidate_raw_status": inputs.so.get("status"),
+        "failure_kind": inputs.so.get("failure_kind"),
+        "scope_valid": inputs.so.get("scope_valid"),
+        "capped": _capped(inputs),
+        "leakage_flags": sorted([ctx.leakage_flags[inputs.task_key]])
+        if inputs.task_key in ctx.leakage_flags
+        else [],
+        "label": None,
+        "sub_reason": None,
+        "shadow_label": None,
+    }
+
+
+def _repo_kind(repo: str) -> str:
+    return "impact_gate" if repo in IMPACT_GATE_REPOS else "full_suite"
+
+
+@dataclass
+class Oracle:
+    files: list[str]
+    modules: list[str]
+    f2p: list[str]
+    p2p_a: list[str]
+    flaky: list[str]
+    base_outcomes: list[dict[str, str]]
+    gold_outcomes: list[dict[str, str]]
+
+
+def _run_modules(
+    ctx: ScoreContext, env: TestEnv, tree: Path, tree_id: str, modules: Sequence[str], run_idx: int
+) -> list[RunResult]:
+    return [ctx.runner.run(env, tree, tree_id, m, (), run_idx) for m in modules]
+
+
+def score_task(
+    task_dir: Path, ctx: ScoreContext, candidate_override: str | None = None
+) -> dict[str, Any]:
+    """Score one task. Returns {"receipt", "timing"}. Raises SealRefused."""
+    t0 = time.monotonic()
+    inputs = load_sealed_task(task_dir)  # §4 step 1
+    if candidate_override == "empty":
+        inputs.candidate = Candidate(b"", [], override="empty")
+    receipt = _base_receipt(inputs, ctx)
+    timing: dict[str, Any] = {"task_key": inputs.task_key}
+    gt = load_ground_truth(inputs)  # §4 step 2
+    if gt is None:
+        receipt["label"] = PENDING_GROUND_TRUTH
+        return _finish(receipt, timing, t0, ctx)
+    if gt.get("terminal_state") != "CLOSED_WITH_MERGED_PR":
+        receipt["label"] = NOT_SCORABLE_NO_MERGED_PR
+        receipt["terminal_state"] = gt.get("terminal_state")
+        return _finish(receipt, timing, t0, ctx)
+    prs = sorted(
+        gt.get("details", {}).get("merged_prs") or [],
+        key=lambda p: (str(p.get("merged_at", "")), int(p.get("number", 0))),
+    )
+    receipt["merged_prs"] = [
+        {"number": p["number"], "merge_commit_sha": p["merge_commit_sha"]} for p in prs
+    ]
+    if not prs:
+        receipt["label"] = NOT_SCORABLE_NO_MERGED_PR
+        return _finish(receipt, timing, t0, ctx)
+
+    repo = GitRepo(ctx.work / "repos" / inputs.repo, ctx.repo_sources.get(inputs.repo, ()))
+    for sha in [inputs.base_sha, *[p["merge_commit_sha"] for p in prs]]:
+        if not repo.ensure_commit(sha):
+            receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
+            receipt["sub_reason"] = "GOLD_PORT_FAILED"
+            receipt["detail"] = f"commit_missing:{sha}"
+            return _finish(receipt, timing, t0, ctx)
+    oracle_files: set[str] = set()
+    for p in prs:
+        for path in repo.changed_paths(f"{p['merge_commit_sha']}^1", p["merge_commit_sha"]):
+            if is_oracle_test_file(path):
+                oracle_files.add(path)
+    receipt["oracle_test_files"] = sorted(oracle_files)
+    if not oracle_files:
+        receipt["label"] = NOT_SCORABLE_NO_ORACLE
+        return _finish(receipt, timing, t0, ctx)
+
+    trees_dir = ctx.work / "trees" / inputs.task_key
+    wts: dict[str, Path] = {}
+    try:
+        wts["base"] = repo.worktree(trees_dir / "base", inputs.base_sha)
+        base_tree = repo.tree_id(wts["base"])
+        # GOLD (§5)
+        wts["gold"] = repo.worktree(trees_dir / "gold", inputs.base_sha)
+        for p in prs:
+            patch = repo.pr_patch(p["merge_commit_sha"])
+            if not patch.strip():
+                continue
+            proc = repo.git(
+                "apply", "--3way", "--binary", "-", cwd=wts["gold"], input=patch, check=False
+            )
+            unmerged = repo.git("ls-files", "-u", cwd=wts["gold"]).stdout.strip()
+            if proc.returncode != 0 or unmerged:
+                receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
+                receipt["sub_reason"] = "GOLD_PORT_FAILED"
+                receipt["detail"] = f"pr:{p['number']}"
+                return _finish(receipt, timing, t0, ctx)
+        gold_tree = repo.tree_id(wts["gold"])
+        files = sorted(oracle_files)
+        modules = [f for f in files if is_oracle_module_name(f) and (wts["gold"] / f).exists()]
+        wts["baset"] = repo.worktree(trees_dir / "baset", inputs.base_sha)
+        overwrite_oracle_files(wts["baset"], wts["gold"], files)
+        baset_tree = repo.tree_id(wts["baset"])
+        receipt["trees"] = {"BASE": base_tree, "GOLD": gold_tree, "BASE+T": baset_tree}
+        receipt["oracle_modules"] = modules
+
+        try:
+            env = ctx.env_provider.get(inputs.repo, wts["base"])
+        except EnvBuildError as exc:
+            receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
+            receipt["sub_reason"] = "ENV_FAILED"
+            timing["env_error"] = str(exc)[-800:]
+            return _finish(receipt, timing, t0, ctx)
+        receipt["env_key"] = env.key
+        timing["env"] = dict(env.description)
+
+        if candidate_override and candidate_override.startswith("gold"):
+            diff = repo.git("diff", "--binary", "--no-renames", base_tree, gold_tree).stdout
+            inputs.candidate = Candidate(diff, [], override="gold")
+            inputs.so = {**inputs.so, "status": "VALID", "scope_valid": True}
+        elif candidate_override and candidate_override.startswith("broken"):
+            inputs.candidate = _broken_candidate(
+                repo, wts["base"], base_tree, gold_tree, candidate_override
+            )
+            inputs.so = {**inputs.so, "status": "VALID", "scope_valid": True}
+        if candidate_override:
+            receipt["candidate_override"] = inputs.candidate.override
+            receipt["candidate_digest"] = inputs.candidate.digest
+            receipt["candidate_empty"] = inputs.candidate.empty
+
+        # Oracle (§6.2): candidate-independent.
+        tq = time.monotonic()
+        base_runs, gold_runs = [], []
+        for i in range(ORACLE_RUNS):
+            gr = _run_modules(ctx, env, wts["gold"], gold_tree, modules, i)
+            if any(r.timed_out or r.exit_code not in (0, 1) for r in gr):
+                receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
+                receipt["sub_reason"] = "GOLD_COLLECTION_FAILED"
+                receipt["detail"] = ",".join(
+                    f"{m}:{r.exit_code}"
+                    for m, r in zip(modules, gr)
+                    if r.timed_out or r.exit_code not in (0, 1)
+                )
+                return _finish(receipt, timing, t0, ctx)
+            gold_runs.append(_merge(gr))
+            base_runs.append(_merge(_run_modules(ctx, env, wts["baset"], baset_tree, modules, i)))
+        nodes = sorted(set().union(*gold_runs, *base_runs))
+        flaky = sorted(
+            n
+            for n in nodes
+            if len({_get(r, n) for r in gold_runs}) > 1 or len({_get(r, n) for r in base_runs}) > 1
+        )
+        stable = [n for n in nodes if n not in set(flaky)]
+        f2p = [
+            n
+            for n in stable
+            if all(_get(r, n) == PASS for r in gold_runs)
+            and all(_get(r, n) == FAIL for r in base_runs)
+        ]
+        p2p_a = [n for n in stable if all(_get(r, n) == PASS for r in gold_runs + base_runs)]
+        timing["oracle_seconds"] = round(time.monotonic() - tq, 1)
+        receipt.update({
+            "f2p": f2p,
+            "p2p_a": p2p_a,
+            "f2p_total": len(f2p),
+            "oracle_flaky": flaky,
+            "outcome_digests": {
+                "GOLD": [_digest_outcomes(r) for r in gold_runs],
+                "BASE+T": [_digest_outcomes(r) for r in base_runs],
+            },
+        })
+        if not f2p:
+            receipt["label"] = NOT_SCORABLE_ORACLE_INVALID
+            receipt["sub_reason"] = "EMPTY_F2P"
+            receipt["flaky_dropped"] = len(flaky)
+            return _finish(receipt, timing, t0, ctx)
+
+        # Candidate labels (§7 rows 5-6).
+        cand = inputs.candidate
+        if cand.empty:
+            receipt["label"] = NO_CANDIDATE
+            receipt["flaky_dropped"] = len(flaky)
+            return _finish(receipt, timing, t0, ctx)
+        not_runnable = None
+        if inputs.so.get("scope_valid") is False:
+            not_runnable = "SCOPE_INVALID"
+        elif inputs.so.get("status") == "TIMEOUT":
+            not_runnable = "SEALED_WHILE_PROVIDER_RUNNING"
+        wts["candt"] = repo.worktree(trees_dir / "candt", inputs.base_sha)
+        err = apply_candidate(repo, wts["candt"], cand)
+        if err:
+            receipt["label"] = NOT_RUNNABLE
+            receipt["sub_reason"] = not_runnable or "APPLY_FAILED"
+            receipt["detail"] = err
+            receipt["flaky_dropped"] = len(flaky)
+            return _finish(receipt, timing, t0, ctx)
+        untracked_paths = [u["path"] for u in cand.untracked]
+        cand_tree = repo.tree_id(wts["candt"], untracked_paths)
+        overwrite_oracle_files(wts["candt"], wts["gold"], files)
+        candt_tree = repo.tree_id(wts["candt"], untracked_paths)
+        receipt["trees"].update({"CAND": cand_tree, "CAND+T": candt_tree})
+        if not_runnable == "SCOPE_INVALID":
+            receipt["label"] = NOT_RUNNABLE
+            receipt["sub_reason"] = not_runnable
+            receipt["flaky_dropped"] = len(flaky)
+            return _finish(receipt, timing, t0, ctx)
+
+        tc = time.monotonic()
+        evaluation = _evaluate_candidate(
+            ctx,
+            env,
+            repo,
+            inputs,
+            wts,
+            files,
+            modules,
+            base_tree,
+            cand_tree,
+            gold_tree,
+            baset_tree,
+            candt_tree,
+            f2p,
+            p2p_a,
+            flaky,
+        )
+        timing["candidate_seconds"] = round(time.monotonic() - tc, 1)
+        receipt.update(evaluation)
+        if not_runnable:
+            receipt["label"] = NOT_RUNNABLE
+            receipt["sub_reason"] = not_runnable
+            receipt["shadow_label"] = evaluation["evaluated_label"]
+        else:
+            receipt["label"] = evaluation["evaluated_label"]
+        return _finish(receipt, timing, t0, ctx)
+    finally:
+        if not ctx.keep_trees:
+            for wt in wts.values():
+                repo.remove_worktree(wt)
+            shutil.rmtree(trees_dir, ignore_errors=True)
+
+
+def _broken_candidate(
+    repo: GitRepo, base_wt: Path, base_tree: str, gold_tree: str, override: str
+) -> Candidate:
+    """Self-check (c): syntax error injected into a non-test module."""
+    if ":" in override:
+        module = override.split(":", 1)[1]
+    else:
+        candidates = [
+            p
+            for p in repo.changed_paths(base_tree, gold_tree)
+            if p.endswith(".py") and not is_oracle_test_file(p) and (base_wt / p).exists()
+        ]
+        if not candidates:
+            raise ValueError("no non-test python module changed by GOLD")
+        module = candidates[0]
+    original = (base_wt / module).read_bytes()
+    (base_wt / module).write_bytes(original + b"\ndef __real_outcome_broken(:\n")
+    diff = repo.git("diff", "--binary", "--", module, cwd=base_wt).stdout
+    (base_wt / module).write_bytes(original)
+    return Candidate(diff, [], override=f"broken:{module}")
+
+
+def _evaluate_candidate(
+    ctx: ScoreContext,
+    env: TestEnv,
+    repo: GitRepo,
+    inputs: TaskInputs,
+    wts: Mapping[str, Path],
+    files: Sequence[str],
+    modules: Sequence[str],
+    base_tree: str,
+    cand_tree: str,
+    gold_tree: str,
+    baset_tree: str,
+    candt_tree: str,
+    f2p: Sequence[str],
+    p2p_a: Sequence[str],
+    flaky: Sequence[str],
+) -> dict[str, Any]:
+    """Spec §6.3-§6.4."""
+    out: dict[str, Any] = {}
+    flaky_dropped = set(flaky)
+    # 1. oracle modules on CAND+T with majority rerun.
+    runs = [_merge(_run_modules(ctx, env, wts["candt"], candt_tree, modules, 0))]
+    watched = list(f2p) + list(p2p_a)
+    if any(_get(runs[0], n) != PASS for n in watched):
+        for i in (1, 2):
+            runs.append(_merge(_run_modules(ctx, env, wts["candt"], candt_tree, modules, i)))
+
+    def majority_pass(node: str) -> bool:
+        if len(runs) == 1:
+            return _get(runs[0], node) == PASS
+        return sum(_get(r, node) == PASS for r in runs) >= 2
+
+    f2p_pass = sorted(n for n in f2p if majority_pass(n))
+    p2p_a_fail = sorted(n for n in p2p_a if not majority_pass(n))
+
+    # 2. P2P(b/c).
+    changed = sorted(
+        set(repo.changed_paths(base_tree, cand_tree))
+        | set(repo.changed_paths(base_tree, gold_tree))
+    )
+    plan_sha = None
+    selector_failed = False
+    if _repo_kind(inputs.repo) == "impact_gate":
+        plan = trusted_impact_plan(env, wts["base"], changed, ctx.runner.scratch)
+        if plan is None:
+            targets, selector_failed = [], True
+        else:
+            plan_sha = sha256_bytes(json.dumps(plan, sort_keys=True).encode())
+            targets = [t for t in plan.get("pytest_targets", []) if t not in set(files)]
+    else:
+        targets = ["tests"] if (wts["base"] / "tests").is_dir() else []
+    targets = sorted(dict.fromkeys(targets))
+    ignores = list(files)
+    base_p2p: dict[str, dict[str, str]] = {}
+    cand_p2p: dict[str, dict[str, str]] = {}
+    for t in targets:
+        base_p2p[t] = ctx.runner.run(env, wts["baset"], baset_tree, t, ignores, 0).outcomes
+        cand_p2p[t] = ctx.runner.run(env, wts["candt"], candt_tree, t, ignores, 0).outcomes
+    oracle_nodes = set(f2p) | set(p2p_a) | set(flaky)
+    p2p_bc_total = 0
+    new_failures: set[str] = set(p2p_a_fail)
+    gold_also_fails: set[str] = set()
+    for t in targets:
+        base_pass = [n for n, o in base_p2p[t].items() if o == PASS and n not in oracle_nodes]
+        p2p_bc_total += len(base_pass)
+        suspects = [n for n in base_pass if _get(cand_p2p[t], n) != PASS]
+        if not suspects:
+            continue
+        c_runs = [cand_p2p[t]] + [
+            ctx.runner.run(env, wts["candt"], candt_tree, t, ignores, i).outcomes for i in (1, 2)
+        ]
+        b_runs = [base_p2p[t]] + [
+            ctx.runner.run(env, wts["baset"], baset_tree, t, ignores, i).outcomes for i in (1, 2)
+        ]
+        g_run = ctx.runner.run(env, wts["gold"], gold_tree, t, ignores, 0).outcomes
+        for n in suspects:
+            if not all(_get(r, n) != PASS for r in c_runs) or not all(
+                _get(r, n) == PASS for r in b_runs
+            ):
+                flaky_dropped.add(n)
+            elif _get(g_run, n) != PASS:
+                gold_also_fails.add(n)
+            else:
+                new_failures.add(n)
+
+    if new_failures:
+        label = BROKE_EXISTING
+    elif len(f2p_pass) == len(f2p):
+        label = RESOLVED
+    elif f2p_pass:
+        label = PARTIAL
+    else:
+        label = UNRESOLVED
+    out.update({
+        "evaluated_label": label,
+        "f2p_pass": len(f2p_pass),
+        "f2p_passed_nodes": f2p_pass,
+        "p2p_total": len(p2p_a) + p2p_bc_total,
+        "p2p_a_total": len(p2p_a),
+        "p2p_bc_total": p2p_bc_total,
+        "p2p_new_failures": sorted(new_failures),
+        "flaky_dropped": len(flaky_dropped),
+        "gold_also_fails": sorted(gold_also_fails),
+        "p2p_targets": targets,
+        "p2p_selector_failed": selector_failed,
+        "impact_plan_sha256": plan_sha,
+        "candidate_changed_paths_digest": sha256_bytes("\n".join(changed).encode()),
+    })
+    out.setdefault("outcome_digests_cand", [_digest_outcomes(r) for r in runs])
+    return out
+
+
+def _finish(
+    receipt: dict[str, Any], timing: dict[str, Any], t0: float, ctx: ScoreContext
+) -> dict[str, Any]:
+    receipt.setdefault("flaky_dropped", 0)
+    timing["wall_seconds"] = round(time.monotonic() - t0, 1)
+    ctx.log(
+        f"{receipt['task_key']}: {receipt['label']}"
+        f"{'/' + receipt['sub_reason'] if receipt.get('sub_reason') else ''}"
+        f" ({timing['wall_seconds']}s)"
+    )
+    return {"receipt": receipt, "timing": timing}
+
+
+# ---------------------------------------------------------------------- receipts
+
+
+def write_receipt(out_store: Path, result: Mapping[str, Any]) -> Path:
+    receipt = result["receipt"]
+    task_dir = Path(out_store) / "tasks" / receipt["task_key"]
+    task_dir.mkdir(parents=True, exist_ok=True)
+    body = canonical_bytes(receipt)
+    path = task_dir / "real_outcome.json"
+    try:
+        with open(path, "xb") as fh:
+            fh.write(body)
+    except FileExistsError as exc:
+        raise ReceiptExists(str(path)) from exc
+    seal = {
+        "schema": RECEIPT_SEAL_SCHEMA,
+        "path": "real_outcome.json",
+        "sha256": sha256_bytes(body),
+    }
+    with open(task_dir / "real_outcome_seal.json", "xb") as fh:
+        fh.write(canonical_bytes(seal))
+    with open(task_dir / "real_outcome_timing.json", "xb") as fh:
+        fh.write(canonical_bytes(result["timing"]))
+    return path
+
+
+# ---------------------------------------------------------------------- summary
+
+
+def _binom_cdf(k: int, n: int, p: float) -> float:
+    return sum(math.comb(n, i) * p**i * (1 - p) ** (n - i) for i in range(k + 1))
+
+
+def clopper_pearson(k: int, n: int, alpha: float = 0.05) -> tuple[float, float]:
+    """Exact two-sided binomial CI."""
+    if n == 0:
+        return (0.0, 1.0)
+
+    def solve(f: Callable[[float], float]) -> float:
+        lo, hi = 0.0, 1.0
+        for _ in range(200):
+            mid = (lo + hi) / 2
+            if f(mid) > 0:
+                lo = mid
+            else:
+                hi = mid
+        return (lo + hi) / 2
+
+    lower = 0.0 if k == 0 else solve(lambda p: alpha / 2 - (1 - _binom_cdf(k - 1, n, p)))
+    upper = 1.0 if k == n else solve(lambda p: _binom_cdf(k, n, p) - alpha / 2)
+    return (lower, upper)
+
+
+def summarize(receipts: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    counts: dict[str, int] = {}
+    for r in receipts:
+        counts[r["label"]] = counts.get(r["label"], 0) + 1
+    valid = [r for r in receipts if r["label"] in VALID_ORACLE_LABELS]
+    resolved = sum(r["label"] == RESOLVED for r in valid)
+    lo, hi = clopper_pearson(resolved, len(valid))
+
+    def rate(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+        k = sum(r["label"] == RESOLVED for r in rows)
+        a, b = clopper_pearson(k, len(rows))
+        return {"resolved": k, "n": len(rows), "ci95": [round(a, 4), round(b, 4)]}
+
+    by_route = {
+        route: rate([r for r in valid if r["route"] == route])
+        for route in sorted({r["route"] for r in valid})
+    }
+    by_status = {
+        s: rate([r for r in valid if r["candidate_raw_status"] == s])
+        for s in sorted({str(r["candidate_raw_status"]) for r in valid})
+    }
+    by_capped = {str(c): rate([r for r in valid if r["capped"] == c]) for c in (True, False)}
+    no_leak = rate([r for r in valid if not r.get("leakage_flags")])
+    partial_timeouts = [
+        {
+            "task_key": r["task_key"],
+            "label": r["label"],
+            "shadow_label": r.get("shadow_label"),
+            "status": r["candidate_raw_status"],
+            "capped": r["capped"],
+            "f2p": f"{r.get('f2p_pass', '-')}/{r.get('f2p_total', '-')}",
+        }
+        for r in valid
+        if not r["candidate_empty"]
+        and (
+            r["candidate_raw_status"] == "TIMEOUT"
+            or r.get("failure_kind") == "TIMEOUT"
+            or r["capped"]
+        )
+    ]
+    return {
+        "counts": dict(sorted(counts.items())),
+        "valid_oracle_n": len(valid),
+        "resolved": resolved,
+        "resolved_rate": (resolved / len(valid)) if valid else None,
+        "ci95": [round(lo, 4), round(hi, 4)],
+        "by_route": by_route,
+        "by_raw_status": by_status,
+        "by_capped": by_capped,
+        "excluding_leakage_flags": no_leak,
+        "partial_candidate_timeouts": partial_timeouts,
+    }
